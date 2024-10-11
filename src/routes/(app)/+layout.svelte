@@ -8,7 +8,6 @@
     } from "@radroots/models";
     import {
         app_nostr_key,
-        LayoutWindow,
         ndk,
         ndk_user,
         nostr_ndk_configured,
@@ -175,6 +174,4 @@
     };
 </script>
 
-<LayoutWindow>
-    <slot />
-</LayoutWindow>
+<slot />

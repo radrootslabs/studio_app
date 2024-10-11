@@ -8,11 +8,13 @@
     import { restart } from "$lib/utils";
     import { keystore_reset } from "$lib/utils/keystore";
     import {
+        app_layout,
         carousel_index,
         carousel_index_max,
         carousel_next,
         carousel_prev,
         Fill,
+        fmt_capitalize,
         fmt_id,
         Glyph,
         InputElement,
@@ -21,15 +23,72 @@
         sleep,
         t,
         view_effect,
+        type GlyphKey,
+        type GlyphWeight,
     } from "@radroots/svelte-lib";
     import { regex } from "@radroots/utils";
     import { onMount } from "svelte";
+
+    type KeypairNewButtonKey =
+        | `keypair-profile-personal`
+        | `keypair-profile-wallet`
+        | `keypair-profile-links`;
+    type KeypairNewButton = {
+        key: KeypairNewButtonKey;
+        icon: GlyphKey;
+        weight?: GlyphWeight;
+        heading: string;
+        subtitle: string;
+    };
+    const keypair_new_buttons: KeypairNewButton[] = [
+        {
+            key: `keypair-profile-personal`,
+            icon: `user`,
+            heading: `${$t(`common.personal`)}`,
+            subtitle: [
+                `${$t(`common.your_name`)}`,
+                `${$t(`common.business_name`)}`,
+            ].join(`, `),
+        },
+        {
+            key: `keypair-profile-wallet`,
+            icon: `cardholder`,
+            heading: `${$t(`common.wallet`)}`,
+            subtitle: [
+                `${$t(`common.bank_account`)}`,
+                fmt_capitalize(`lud06`),
+                fmt_capitalize(`lud16`),
+            ].join(`, `),
+        },
+        {
+            key: `keypair-profile-links`,
+            icon: `globe-simple`,
+            weight: `bold`,
+            heading: `Links`,
+            subtitle: [
+                `${$t(`common.website`)}`,
+                `${$t(`common.socials`)}`,
+                `${$t(`common.photos`)}`,
+            ].join(`, `),
+        },
+    ];
+
+    let keypair_new_buttons_selected: KeypairNewButtonKey[] = [];
 
     const carousel_param: Record<View, { max: number }> = {
         start: {
             max: 1,
         },
         setup: {
+            max: 1,
+        },
+        keypair_new: {
+            max: 1,
+        },
+        keypair_own: {
+            max: 1,
+        },
+        eula: {
             max: 1,
         },
     };
@@ -44,18 +103,13 @@
         }
     });
 
-    type View = `start` | `setup`;
+    type View = `start` | `setup` | `keypair_new` | `keypair_own` | `eula`;
     let view: View = `setup`;
-
-    // let init_profile_name = ``;
 
     $: {
         view_effect<View>(view);
     }
 
-    $: {
-        console.log(`carousel_index `, carousel_index);
-    }
     const handle_carousel_prev = async (): Promise<void> => {
         try {
             await carousel_prev(view);
@@ -86,7 +140,7 @@
                                 );
                                 if (!profile_name) {
                                     await lc.dialog.alert(
-                                        `${$t(`icu.enter_a_*`, { value: `${$t(`common.profile_name`)}` })}`,
+                                        `${$t(`icu.enter_a_*`, { value: `${$t(`common.profile_name`)}`.toLowerCase() })}`,
                                     );
                                     return;
                                 }
@@ -215,12 +269,25 @@
             console.log(`(error) configure_device `, e);
         }
     };
+
+    const handle_keypair_buttons_select = (key: KeypairNewButtonKey): void => {
+        if (keypair_new_buttons_selected.includes(key)) {
+            keypair_new_buttons_selected = keypair_new_buttons_selected.filter(
+                (i) => i !== key,
+            );
+        } else {
+            keypair_new_buttons_selected = [
+                ...keypair_new_buttons_selected,
+                key,
+            ];
+        }
+    };
 </script>
 
 <LayoutView>
     <div
         data-view={`start`}
-        class={`hidden flex flex-col h-full w-full py-12 px-6 justify-start items-center`}
+        class={`hidden flex flex-col h-full w-full py-12 justify-start items-center`}
     >
         <div
             class={`relative flex flex-col h-full w-full justify-start items-center`}
@@ -309,7 +376,7 @@
     </div>
     <div
         data-view={`setup`}
-        class={`flex flex-col h-full w-full pt-12 px-6 justify-start items-center`}
+        class={`flex flex-col h-full w-full max-mobile_base:pt-12 pt-16 justify-start items-center`}
     >
         <div
             class={`relative flex flex-col h-full w-full justify-start items-center`}
@@ -320,14 +387,19 @@
             >
                 <div
                     data-carousel-item={`setup`}
-                    class={`carousel-item flex flex-col w-full py-4 justify-between items-center`}
+                    class={`carousel-item flex flex-col w-full max-mobile_y:pt-28 pt-32 pb-4 justify-start items-center`}
                 >
                     <div
                         class={`flex flex-col gap-8 justify-start items-center`}
                     >
                         <div
-                            class={`flex flex-col gap-2 justify-start items-center`}
+                            class={`flex flex-col gap-1 justify-start items-center`}
                         >
+                            <p
+                                class={`font-mono font-[700] text-layer-0-glyph text-4xl`}
+                            >
+                                {`${`${$t(`app.name`)}`}`}
+                            </p>
                             <p
                                 class={`font-mono font-[700] text-layer-0-glyph text-4xl`}
                             >
@@ -353,7 +425,7 @@
                 </div>
                 <div
                     data-carousel-item={`setup`}
-                    class={`carousel-item flex flex-col w-full pt-32 pb-4 justify-start items-center`}
+                    class={`carousel-item flex flex-col w-full max-mobile_y:pt-32 pt-36 pb-4 justify-start items-center`}
                 >
                     <div
                         class={`flex flex-col w-full gap-8 justify-start items-center`}
@@ -362,7 +434,93 @@
                             class={`flex flex-row w-full justify-center items-center`}
                         >
                             <p
-                                class={`font-mono font-[600] text-layer-0-glyph text-2xl`}
+                                class={`font-mono font-[600] text-layer-0-glyph text-3xl`}
+                            >
+                                {`2. ${`${$t(`common.device`)}`}`}
+                            </p>
+                        </div>
+                        <div
+                            class={`flex flex-col w-full gap-4 justify-center items-center`}
+                        >
+                            <button
+                                class={`flex flex-col h-[4.25rem] w-${$app_layout} justify-center items-center bg-layer-1-surface rounded-3xl touch-layer-1 touch-layer-1-raise-less`}
+                                on:click={async () => {
+                                    view = `keypair_new`;
+                                }}
+                            >
+                                <p
+                                    class={`font-sans font-[600] text-layer-0-glyph text-xl`}
+                                >
+                                    {`Create secure keypair`}
+                                </p>
+                            </button>
+                            <button
+                                class={`flex flex-col h-[4.25rem] w-${$app_layout} justify-center items-center bg-layer-1-surface rounded-3xl touch-layer-1 touch-layer-1-raise-less`}
+                                on:click={async () => {
+                                    view = `keypair_own`;
+                                }}
+                            >
+                                <p
+                                    class={`font-sans font-[600] text-layer-0-glyph text-xl`}
+                                >
+                                    {`Use existing keypair`}
+                                </p>
+                            </button>
+                        </div>
+                    </div>
+                    <div
+                        class={`absolute bottom-0 left-0 flex flex-col w-full justify-center items-center ${$carousel_index > 0 ? `pb-2` : `pb-4`}`}
+                    >
+                        <button
+                            class={`group flex flex-row h-[3.25rem] w-${$app_layout} justify-center items-center bg-layer-1-surface rounded-touch touch-layer-1`}
+                            on:click={async () => {
+                                await handle_carousel_next();
+                            }}
+                        >
+                            <p
+                                class={`font-sans font-[600] tracking-wide text-layer-1-glyph/80 group-active:text-layer-1-glyph/40 transition-all`}
+                            >
+                                {`${$t(`common.continue`)}`}
+                            </p>
+                        </button>
+                        <div
+                            class={`flex flex-col justify-center items-center transition-all`}
+                        >
+                            {#if $carousel_index > 0}
+                                <button
+                                    class={`group flex flex-row h-12 w-${$app_layout} justify-center items-center fade-in`}
+                                    on:click={async () => {
+                                        await handle_carousel_prev();
+                                    }}
+                                >
+                                    <p
+                                        class={`font-sans font-[600] tracking-wide text-layer-1-glyph-shade group-active:text-layer-1-glyph/40 transition-all`}
+                                    >
+                                        {`${$t(`common.back`)}`}
+                                    </p>
+                                </button>
+                            {:else}
+                                <div
+                                    class={`flex flex-row h-1 w-full justify-start items-center`}
+                                >
+                                    <Fill />
+                                </div>
+                            {/if}
+                        </div>
+                    </div>
+                </div>
+                <div
+                    data-carousel-item={`setup`}
+                    class={`carousel-item flex flex-col w-full max-mobile_y:pt-32 pt-36 pb-4 justify-start items-center`}
+                >
+                    <div
+                        class={`flex flex-col w-full gap-8 justify-start items-center`}
+                    >
+                        <div
+                            class={`flex flex-row w-full justify-center items-center`}
+                        >
+                            <p
+                                class={`font-mono font-[600] text-layer-0-glyph text-3xl`}
                             >
                                 {`1. ${`${$t(`common.profile`)}`}`}
                             </p>
@@ -409,9 +567,23 @@
                         </div>
                     </div>
                 </div>
+            </div>
+        </div>
+    </div>
+    <div
+        data-view={`keypair_new`}
+        class={`hidden flex flex-col h-full w-full max-mobile_base:pt-12 pt-16 justify-start items-center fade-in`}
+    >
+        <div
+            class={`relative flex flex-col h-full w-full justify-start items-center`}
+        >
+            <div
+                data-carousel-container={`keypair_new`}
+                class={`carousel-container flex h-full w-full rounded-2xl scrollbar-hide`}
+            >
                 <div
-                    data-carousel-item={`setup`}
-                    class={`carousel-item flex flex-col w-full pt-32 pb-4 justify-start items-center`}
+                    data-carousel-item={`keypair_new`}
+                    class={`carousel-item flex flex-col w-full max-mobile_y:pt-12 pt-12 pb-4 gap-8 justify-start items-center`}
                 >
                     <div
                         class={`flex flex-col w-full gap-8 justify-start items-center`}
@@ -420,67 +592,104 @@
                             class={`flex flex-row w-full justify-center items-center`}
                         >
                             <p
-                                class={`font-mono font-[500] text-layer-0-glyph text-2xl`}
+                                class={`font-mono font-[600] text-layer-0-glyph text-3xl`}
                             >
-                                {`2. ${`${$t(`common.device`)}`}`}
+                                {`Keypair Profile`}
                             </p>
-                        </div>
-                        <div
-                            class={`flex flex-col h-36 w-full py-4 px-4 gap-5 justify-start items-center bg-layer-1-surface rounded-3xl`}
-                        >
-                            <div
-                                class={`flex flex-row w-full justify-center items-center`}
-                            >
-                                <p
-                                    class={`font-sans font-[700] text-layer-0-glyph text-xl`}
-                                >
-                                    {`Configure your device`}
-                                </p>
-                            </div>
                         </div>
                     </div>
                     <div
-                        class={`absolute bottom-0 left-0 flex flex-col w-full px-2 justify-start items-center ${$carousel_index > 0 ? `pb-2` : `pb-4`}`}
+                        class={`flex flex-col w-full gap-4 justify-start items-center`}
                     >
-                        <button
-                            class={`group flex flex-row h-12 w-full justify-center items-center bg-layer-1-surface active:bg-layer-1-surface_a/20 rounded-xl transition-all`}
-                            on:click={async () => {
-                                await handle_carousel_next();
-                            }}
-                        >
-                            <p
-                                class={`font-sans font-[600] tracking-wide text-layer-1-glyph/80 group-active:text-layer-1-glyph/40 transition-all`}
+                        {#each keypair_new_buttons as btn}
+                            <button
+                                class={`flex flex-row h-16 w-${$app_layout} py-2 px-4 gap-4 justify-center items-center bg-layer-1-surface rounded-touch touch-layer-1 touch-layer-1-raise-less`}
+                                on:click|preventDefault={async () => {
+                                    handle_keypair_buttons_select(btn.key);
+                                }}
                             >
-                                {`${$t(`common.continue`)}`}
-                            </p>
-                        </button>
-                        <div
-                            class={`flex flex-col justify-start items-center transition-all`}
-                        >
-                            {#if $carousel_index > 0}
-                                <button
-                                    class={`group flex flex-row h-12 w-full justify-center items-center fade-in`}
-                                    on:click={async () => {
-                                        await handle_carousel_prev();
-                                    }}
-                                >
-                                    <p
-                                        class={`font-sans font-[600] tracking-wide text-layer-1-glyph-shade group-active:text-layer-1-glyph/40 transition-all`}
-                                    >
-                                        {`${$t(`common.back`)}`}
-                                    </p>
-                                </button>
-                            {:else}
                                 <div
-                                    class={`flex flex-row h-1 w-full justify-start items-center`}
+                                    class={`flex flex-row h-full w-12 justify-center items-center bg-layer-1-surface rounded-xl`}
                                 >
-                                    <Fill />
+                                    <Glyph
+                                        basis={{
+                                            classes: `text-layer-1-glyph`,
+                                            key: btn.icon,
+                                            dim: `lg`,
+                                            weight: btn.weight || `fill`,
+                                        }}
+                                    />
                                 </div>
-                            {/if}
-                        </div>
+                                <div
+                                    class={`flex flex-col flex-grow h-full justify-between items-start`}
+                                >
+                                    <div class={`flex flex-row gap-[2px]`}>
+                                        <p
+                                            class={`font-sans text-[1.1rem] font-[500] text-layer-1-glyph/80`}
+                                        >
+                                            {btn.heading}
+                                        </p>
+                                    </div>
+                                    <p
+                                        class={`font-sans text-[0.9rem] text-layer-1-glyph-shade`}
+                                    >
+                                        {btn.subtitle}
+                                    </p>
+                                </div>
+                                <div
+                                    class={`flex flex-row h-full w-6 justify-end items-center`}
+                                >
+                                    <Glyph
+                                        basis={{
+                                            key: keypair_new_buttons_selected.includes(
+                                                btn.key,
+                                            )
+                                                ? `check-circle`
+                                                : `circle`,
+                                            classes:
+                                                keypair_new_buttons_selected.includes(
+                                                    btn.key,
+                                                )
+                                                    ? `text-layer-1-glyph-hl`
+                                                    : `text-layer-1-glyph-shade`,
+                                            dim: `md+`,
+                                            weight: keypair_new_buttons_selected.includes(
+                                                btn.key,
+                                            )
+                                                ? `fill`
+                                                : `bold`,
+                                        }}
+                                    />
+                                </div>
+                            </button>
+                        {/each}
                     </div>
                 </div>
             </div>
+            <div
+                class={`absolute bottom-0 left-0 flex flex-col w-full justify-center items-center`}
+            >
+                {#if keypair_new_buttons_selected.length}
+                    <button
+                        class={`group flex flex-row h-[3.25rem] w-${$app_layout} justify-center items-center bg-layer-1-surface rounded-touch touch-layer-1 fade-in`}
+                        on:click={async () => {
+                            alert(`@todo`);
+                        }}
+                    >
+                        <p
+                            class={`font-sans font-[600] tracking-wide text-layer-1-glyph/80 group-active:text-layer-1-glyph/40 transition-all`}
+                        >
+                            {`${$t(`common.continue`)}`}
+                        </p>
+                    </button>
+                {:else}
+                    <div
+                        class={`flex flex-row h-12 w-full justify-start items-center`}
+                    >
+                        <Fill />
+                    </div>
+                {/if}
+            </div>
         </div>
-    </div></LayoutView
->
+    </div>
+</LayoutView>

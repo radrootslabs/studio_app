@@ -27,4 +27,21 @@
         height: 400px;
         width: 100%;
     }
+
+    .touch-layer-1 {
+        @apply active:bg-layer-1-surface_a/20 group-active:bg-layer-1-surface_a/20;
+    }
+
+    .touch-layer-1-raise,
+    .touch-layer-1-raise-less {
+        @apply active:scale-[101%] group-active:scale-[101%] ease-in-out transition-all;
+    }
+
+    .touch-layer-1-raise {
+        @apply ring-layer-2-surface/60 active:ring-[0.3rem] group-active:ring-[0.3rem] delay-[75ms] duration-[350ms];
+    }
+
+    .touch-layer-1-raise-less {
+        @apply ring-layer-2-surface/60 active:ring-[0.25rem] group-active:ring-[0.25rem] delay-[50ms] duration-[350ms];
+    }
 }

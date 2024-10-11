@@ -7,12 +7,14 @@
         app_config,
         app_db,
         app_geoc,
+        app_layout,
         app_nostr_key,
         app_notify,
         app_pwa_polyfills,
         app_render,
         app_th,
         app_thc,
+        app_win,
         AppControls,
         CssStatic,
         CssStyles,
@@ -149,4 +151,6 @@
 <div
     class="hidden h-nav_base pt-h_nav_base pb-h_nav_base h-nav_lg pt-h_nav_lg pb-h_nav_lg h-tabs_base pt-h_tabs_base pb-h_tabs_base h-tabs_lg pt-h_tabs_lg pb-h_tabs_lg top-dim_map_offset_top_base top-dim_map_offset_top_lg"
 ></div>
-<div class="hidden border-layer-1-surface-edge/40 text-blue-400"></div>
+<div
+    class="hidden border-layer-1-surface-edge/40 text-blue-400 w-mobile_base w-mobile_y"
+></div>

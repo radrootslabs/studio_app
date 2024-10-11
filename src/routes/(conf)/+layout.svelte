@@ -1,4 +1,7 @@
 <script lang="ts">
+    import { LayoutWindow } from "@radroots/svelte-lib";
 </script>
 
-<slot />
+<LayoutWindow>
+    <slot />
+</LayoutWindow>
