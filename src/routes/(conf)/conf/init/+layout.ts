@@ -1,33 +1,27 @@
-import { lc } from '$lib/client';
-import { _conf } from '$lib/conf';
-import { default_locale, load_translations, locales, route, translations_loading } from '@radroots/svelte-lib';
+import { keystore } from '$lib/client';
+import { ks } from '$lib/conf';
+import { app_nostr_key, route } from '@radroots/svelte-lib';
 import type { LayoutLoad, LayoutLoadEvent } from './$types';
 
-export const load: LayoutLoad = async ({ url }: LayoutLoadEvent) => {
+export const load: LayoutLoad = async (_: LayoutLoadEvent) => {
     try {
-        console.log(`layout (conf) `, url.pathname);
-
-        const { language: nav_locale } = navigator;
-        let locale = default_locale.toString();
-        if (locales.get().some(i => i === nav_locale.toLowerCase())) locale = navigator.language;
-        else if (locales.get().some(i => i === nav_locale.slice(0, 2).toLowerCase())) locale = nav_locale.slice(0, 2);
-        await load_translations(locale.toLowerCase(), url.pathname);
-        await translations_loading.toPromise();
-        const key_active = await lc.preferences.get(_conf.kv.nostr_key_active);
-
-        console.log(`key_active `, key_active)
-        if (key_active) {
-            const ks_keys = await lc.keystore.keys();
-            const active_nostr_key = ks_keys?.find(
-                (i) => i === `nostr:key:${key_active}`,
+        const nostr_publickey = await keystore.get(
+            ks.nostr.nostr_key_active,
+        );
+        if (`result` in nostr_publickey) {
+            const nostr_secretkey = await keystore.get(
+                ks.nostr.nostr_key(nostr_publickey.result),
             );
-            if (active_nostr_key) {
+            if (`result` in nostr_secretkey) {
+                app_nostr_key.set(nostr_publickey.result);
                 await route(`/`);
-                return
+                return;
             }
         }
-    } catch (e) { } finally {
-        await lc.window.splash_hide();
+    } catch (e) {
+        console.log(`(load) (conf) init`, e)
+    } finally {
+        //await win.splash_hide();
         return {};
     };
 };

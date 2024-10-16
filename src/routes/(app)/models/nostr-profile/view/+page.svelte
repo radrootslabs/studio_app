@@ -1,6 +1,6 @@
 <script lang="ts">
-    import { lc } from "$lib/client";
-    import { _conf } from "$lib/conf";
+    import { db, keystore, nostr } from "$lib/client";
+    import { ks } from "$lib/conf";
     import type { NostrProfile, NostrRelay } from "@radroots/models";
     import {
         app_nostr_key,
@@ -36,7 +36,8 @@
 
     onMount(async () => {
         try {
-            if (!$qp_nostr_pk) app_notify.set(`Error loading page`);
+            if (!$qp_nostr_pk)
+                app_notify.set(`${$t(`error.client.page.load`)}`);
             ld = await load_data();
         } catch (e) {
         } finally {
@@ -45,39 +46,38 @@
 
     const load_data = async (): Promise<LoadData | undefined> => {
         try {
-            const nostr_profiles = await lc.db.nostr_profile_get({
+            const nostr_profiles = await db.nostr_profile_get({
                 public_key: $qp_nostr_pk,
             });
             if (`err` in nostr_profiles) {
-                app_notify.set(`Error loading page`);
+                app_notify.set(`${$t(`error.client.page.load`)}`);
                 return;
             } else if (nostr_profiles.results.length < 1) {
-                app_notify.set(`Error loading page`);
+                app_notify.set(`${$t(`error.client.page.load`)}`);
                 return;
             }
 
-            const secret_key = await lc.keystore.get(
-                _conf.kv.nostr_key($qp_nostr_pk),
+            const ks_secret_key = await keystore.get(
+                ks.nostr.nostr_key($qp_nostr_pk),
             );
-
-            if (!secret_key) {
+            if (`err` in ks_secret_key) {
                 app_notify.set(`Error loading profile`);
                 return;
             }
 
-            const nostr_relays = await lc.db.nostr_relay_get({
+            const nostr_relays = await db.nostr_relay_get({
                 list: [`on_profile`, { public_key: $qp_nostr_pk }],
                 sort: `oldest`,
             });
 
-            const nostr_relays_unconnected = await lc.db.nostr_relay_get({
+            const nostr_relays_unconnected = await db.nostr_relay_get({
                 list: [`off_profile`, { public_key: $qp_nostr_pk }],
                 sort: `oldest`,
             });
 
             const data: LoadData = {
                 nostr_profile: nostr_profiles.results[0],
-                secret_key,
+                secret_key: ks_secret_key.result,
                 nostr_relays:
                     `results` in nostr_relays ? nostr_relays.results : [],
                 nostr_relays_unconnected:
@@ -205,7 +205,7 @@
                                                 value: show_public_key_hex
                                                     ? ld.nostr_profile
                                                           .public_key
-                                                    : lc.nostr.lib.npub(
+                                                    : nostr.lib.npub(
                                                           ld.nostr_profile
                                                               .public_key,
                                                       ),
@@ -239,7 +239,7 @@
                                                     show_public_key_hex
                                                         ? ld?.nostr_profile
                                                               .public_key
-                                                        : lc.nostr.lib.npub(
+                                                        : nostr.lib.npub(
                                                               ld.nostr_profile
                                                                   .public_key,
                                                           ),
@@ -292,7 +292,7 @@
                                                 value: vl_secret_key_unlock
                                                     ? show_secret_key_hex
                                                         ? ld.secret_key
-                                                        : lc.nostr.lib.nsec(
+                                                        : nostr.lib.nsec(
                                                               ld.secret_key,
                                                           )
                                                     : `•`.repeat(40),
@@ -325,7 +325,7 @@
                                                 await clipboard_copy(
                                                     show_secret_key_hex
                                                         ? ld.secret_key
-                                                        : lc.nostr.lib.npub(
+                                                        : nostr.lib.npub(
                                                               ld.secret_key,
                                                           ),
                                                 );

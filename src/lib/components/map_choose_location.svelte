@@ -1,6 +1,6 @@
 <script lang="ts">
     import { geoc } from "$lib/client";
-    import { _conf } from "$lib/conf";
+    import { cfg } from "$lib/conf";
     import type { GeocoderReverseResult } from "@radroots/geocoder";
     import {
         app_thc,
@@ -51,7 +51,7 @@
         center={map_point_center}
         zoom={10}
         class={`${basis.classes_map} ${basis.loading ? `hidden` : ``}`}
-        style={_conf.map.styles.base[$app_thc]}
+        style={cfg.map.styles.base[$app_thc]}
         attributionControl={false}
     >
         <Marker
@@ -69,7 +69,7 @@
         >
             <MapMarkerDot />
             <Popup
-                offset={_conf.map.popup.dot.offset}
+                offset={cfg.map.popup.dot.offset}
                 open={true}
                 closeOnClickOutside={false}
                 closeButton={false}

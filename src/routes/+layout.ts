@@ -5,7 +5,7 @@ export const prerender = true;
 export const ssr = false;
 export const trailingSlash = 'always';
 
-export const load: LayoutLoad = async ({ url, }: LayoutLoadEvent) => {
+export const load: LayoutLoad = async ({ url }: LayoutLoadEvent) => {
     try {
         const { language: nav_locale } = navigator;
         let locale = default_locale.toString();

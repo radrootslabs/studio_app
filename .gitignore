@@ -47,5 +47,7 @@ _tmp
 notes*.txt
 justfile
 dist
-static/assets/sql-wasm.wasm
 git-diff.txt
+target
+tauri.conf.build*
+/crates/tauri/gen

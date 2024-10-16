@@ -1,5 +1,5 @@
 <script lang="ts">
-    import { lc } from "$lib/client";
+    import { db, dialog } from "$lib/client";
     import {
         nostr_profile_form_fields,
         parse_nostr_profile_form_keys,
@@ -9,7 +9,6 @@
     } from "@radroots/models";
     import {
         app_notify,
-        app_submit_route,
         Fill,
         fmt_id,
         kv,
@@ -36,8 +35,12 @@
 
     onMount(async () => {
         try {
-            if (!$qp_rkey || !$qp_nostr_pk)
-                app_notify.set(`Missing page params`);
+            if (!$qp_rkey || !$qp_nostr_pk) {
+                app_notify.set(
+                    `${$t(`icu.error_loading_*`, { value: `${$t(`common.page`)}` })}`,
+                );
+                return;
+            }
 
             ld = await load_page();
         } catch (e) {
@@ -56,25 +59,29 @@
 
     let val_field_valid = false;
     $: translated_field_key = ld?.field_key
-        ? `${$t(`model_fields.${ld?.field_key}`, { default: ld?.field_key?.replaceAll(`_`, ` `) })}`.toLowerCase()
+        ? `${$t(`model.nostr_profile.${ld?.field_key}`, { default: ld?.field_key?.replaceAll(`_`, ` `) })}`.toLowerCase()
         : ``;
 
     const load_page = async (): Promise<LoadData | undefined> => {
         try {
-            const nostr_profiles = await lc.db.nostr_profile_get({
+            const nostr_profiles = await db.nostr_profile_get({
                 public_key: $qp_nostr_pk,
             });
             if (`err` in nostr_profiles) {
-                app_notify.set(`Error loading profile`);
+                app_notify.set(
+                    `${$t(`icu.error_loading_*`, { value: `${$t(`common.profile`)}` })}`,
+                );
                 return;
             } else if (nostr_profiles.results.length < 1) {
-                app_notify.set(`Error loading profile`);
+                app_notify.set(
+                    `${$t(`icu.error_loading_*`, { value: `${$t(`common.page`)}` })}`,
+                );
                 return;
             }
 
             const field_key = parse_nostr_profile_form_keys($qp_rkey);
             if (!field_key) {
-                app_notify.set(`Error loading page`);
+                app_notify.set(`${$t(`error.client.page.load`)}`);
                 return;
             }
 
@@ -100,7 +107,7 @@
             const validated =
                 nostr_profile_form_fields[ld?.field_key].validation.test(val);
             if (!validated) {
-                lc.dialog.alert(
+                dialog.alert(
                     `${$t(`icu.invalid_*_entry`, { value: translated_field_key })}`,
                 );
                 return;
@@ -109,26 +116,25 @@
             const fields: Partial<NostrProfileFormFields> = {};
             fields[ld?.field_key] = val;
 
-            const update_db = await lc.db.nostr_profile_update({
+            const update_res = await db.nostr_profile_update({
                 on: {
                     public_key: $qp_nostr_pk,
                 },
                 fields,
             });
-            if (update_db === true) {
-                // @todo sync to nostr
-                if ($app_submit_route) {
-                    await route(
-                        $app_submit_route.route,
-                        $app_submit_route.params,
-                    );
-                } else {
-                    await route(`/nostr/keys`);
-                }
-                return;
-            } else {
-                await lc.dialog.alert(JSON.stringify(update_db)); //@todo
+            if (`err` in update_res) {
+                await dialog.alert(`${$t(`common.error.client.unhandled`)}`);
+                return; //@todo
             }
+
+            alert(`@todo sync to nostr`);
+            // @todo sync to nostr
+            //if ($app_submit_route) {
+            //    await route($app_submit_route.route, $app_submit_route.params);
+            //} else {
+            //  await route(`/nostr/keys`);
+            //}
+            return;
         } catch (e) {
             console.log(`(error) submit `, e);
         }

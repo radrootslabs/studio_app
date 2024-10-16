@@ -1,5 +1,5 @@
 <script lang="ts">
-    import { lc } from "$lib/client";
+    import { db, dialog } from "$lib/client";
     import type { NostrRelay } from "@radroots/models";
     import {
         app_nostr_key,
@@ -36,21 +36,21 @@
 
     const load_data = async (): Promise<LoadData | undefined> => {
         try {
-            const nostr_relays = await lc.db.nostr_relay_get({
+            const nostr_relays = await db.nostr_relay_get({
                 list: [`on_profile`, { public_key: $app_nostr_key }],
                 sort: `oldest`,
             });
             if (`err` in nostr_relays) {
-                app_notify.set(`Error loading page`);
+                app_notify.set(`${$t(`error.client.page.load`)}`);
                 return;
             }
 
-            const nostr_relays_other = await lc.db.nostr_relay_get({
+            const nostr_relays_other = await db.nostr_relay_get({
                 list: [`off_profile`, { public_key: $app_nostr_key }],
                 sort: `oldest`,
             });
             if (`err` in nostr_relays_other) {
-                app_notify.set(`Error loading page`);
+                app_notify.set(`${$t(`error.client.page.load`)}`);
                 return;
             }
 
@@ -145,7 +145,7 @@
     ): Promise<void> => {
         try {
             loading_edit_id = nostr_relay.id;
-            const confirm = await lc.dialog.confirm(
+            const confirm = await dialog.confirm(
                 `This action will disconnect relay ${nostr_relay.url}`,
             );
             if (confirm === false) return;

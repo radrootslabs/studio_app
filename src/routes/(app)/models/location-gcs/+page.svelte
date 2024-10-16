@@ -1,6 +1,5 @@
 <script lang="ts">
-    import { lc } from "$lib/client";
-    import { location_gcs_add_current } from "$lib/utils/location_gcs";
+    import { db } from "$lib/client";
     import { type LocationGcs } from "@radroots/models";
     import {
         app_notify,
@@ -31,14 +30,14 @@
 
     const load_data = async (): Promise<LoadData | undefined> => {
         try {
-            const location_gcss = await lc.db.location_gcs_get({
+            const location_gcss = await db.location_gcs_get({
                 list: [`all`],
             });
             if (`err` in location_gcss) {
-                app_notify.set(`Error loading page`);
+                app_notify.set(`${$t(`error.client.page.load`)}`);
                 return;
             } else if (location_gcss.results.length < 1) {
-                app_notify.set(`Error loading page`);
+                app_notify.set(`${$t(`error.client.page.load`)}`);
                 return;
             }
 
@@ -48,6 +47,16 @@
             return data;
         } catch (e) {
             console.log(`(error) load_data `, e);
+        }
+    };
+
+    const handle_add_location_gcs = async (): Promise<void> => {
+        try {
+            console.log(`@todo`);
+            //const res = await location_gcs_add_current();
+            //if (res) ld = await load_data();
+        } catch (e) {
+            console.log(`(error) handle_add_location_gcs `, e);
         }
     };
 </script>
@@ -118,8 +127,7 @@
                 <button
                     class={`flex flex-row justify-center items-center`}
                     on:click={async () => {
-                        const res = await location_gcs_add_current();
-                        if (res) ld = await load_data();
+                        await handle_add_location_gcs();
                     }}
                 >
                     <p
@@ -151,8 +159,7 @@
                           classes: `tap-color`,
                       },
                       callback: async () => {
-                          const res = await location_gcs_add_current();
-                          if (res) await load_data();
+                          await handle_add_location_gcs();
                       },
                   }
                 : undefined,

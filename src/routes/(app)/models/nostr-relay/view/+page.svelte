@@ -1,5 +1,5 @@
 <script lang="ts">
-    import { lc } from "$lib/client";
+    import { db, nostr } from "$lib/client";
     import type { NostrProfile, NostrRelay } from "@radroots/models";
     import {
         app_blur,
@@ -25,7 +25,7 @@
 
     onMount(async () => {
         try {
-            if (!$qp_id) app_notify.set(`Error loading page`);
+            if (!$qp_id) app_notify.set(`${$t(`error.client.page.load`)}`);
             ld = await load_data();
         } catch (e) {
         } finally {
@@ -34,24 +34,24 @@
 
     const load_data = async (): Promise<LoadData | undefined> => {
         try {
-            const nostr_relays = await lc.db.nostr_relay_get({
+            const nostr_relays = await db.nostr_relay_get({
                 id: $qp_id,
             });
             if (`err` in nostr_relays) {
-                app_notify.set(`Error loading page`);
+                app_notify.set(`${$t(`error.client.page.load`)}`);
                 return;
             } else if (nostr_relays.results.length < 1) {
-                app_notify.set(`Error loading page`);
+                app_notify.set(`${$t(`error.client.page.load`)}`);
                 return;
             }
 
             const nostr_relay = nostr_relays.results[0];
 
-            const nostr_profiles = await lc.db.nostr_profile_get({
+            const nostr_profiles = await db.nostr_profile_get({
                 list: [`on_relay`, { id: nostr_relay.id }],
             });
 
-            const nostr_profiles_unconnected = await lc.db.nostr_profile_get({
+            const nostr_profiles_unconnected = await db.nostr_profile_get({
                 list: [`off_relay`, { id: nostr_relay.id }],
             });
 
@@ -171,7 +171,7 @@
                     args: {
                         layer: 1,
                         title: {
-                            value: `${$t(`model_fields.pubkey`)}`,
+                            value: `${$t(`model.nostr_relay.pubkey`)}`,
                         },
                         list: [
                             {
@@ -182,11 +182,11 @@
                                             {
                                                 classes: `text-layer-1-glyph`,
                                                 value: ld.nostr_relay.pubkey
-                                                    ? lc.nostr.lib.npub(
+                                                    ? nostr.lib.npub(
                                                           ld.nostr_relay.pubkey,
                                                           true,
                                                       )
-                                                    : `${$t(`icu.no_*_published`, { value: `${$t(`model_fields.pubkey`)}`.toLowerCase() })}`,
+                                                    : `${$t(`icu.no_*_published`, { value: `${$t(`pubkey`)}`.toLowerCase() })}`,
                                             },
                                         ],
                                     },
@@ -201,7 +201,7 @@
                     args: {
                         layer: 1,
                         title: {
-                            value: `${$t(`model_fields.description`)}`,
+                            value: `${$t(`model.nostr_relay.description`)}`,
                         },
                         list: [
                             {
@@ -214,7 +214,7 @@
                                                 value:
                                                     ld.nostr_relay
                                                         .description ||
-                                                    `${$t(`icu.no_*_published`, { value: `${$t(`model_fields.description`)}`.toLowerCase() })}`,
+                                                    `${$t(`icu.no_*_published`, { value: `${$t(`model.nostr_relay.description`)}`.toLowerCase() })}`,
                                             },
                                         ],
                                     },
@@ -229,7 +229,7 @@
                     args: {
                         layer: 1,
                         title: {
-                            value: `${$t(`model_fields.software`)}`,
+                            value: `${$t(`model.nostr_relay.software`)}`,
                         },
                         list: [
                             {
@@ -241,7 +241,7 @@
                                                 classes: `text-layer-1-glyph`,
                                                 value:
                                                     ld.nostr_relay.software ||
-                                                    `${$t(`icu.no_*_published`, { value: `${$t(`model_fields.software`)}`.toLowerCase() })}`,
+                                                    `${$t(`icu.no_*_published`, { value: `${$t(`model.nostr_relay.software`)}`.toLowerCase() })}`,
                                             },
                                         ],
                                     },
@@ -256,7 +256,7 @@
                     args: {
                         layer: 1,
                         title: {
-                            value: `${$t(`model_fields.version`)}`,
+                            value: `${$t(`model.nostr_relay.version`)}`,
                         },
                         list: [
                             {
@@ -268,7 +268,7 @@
                                                 classes: `text-layer-1-glyph`,
                                                 value:
                                                     ld.nostr_relay.version ||
-                                                    `${$t(`icu.no_*_published`, { value: `${$t(`model_fields.version`)}`.toLowerCase() })}`,
+                                                    `${$t(`icu.no_*_published`, { value: `${$t(`model.nostr_relay.version`)}`.toLowerCase() })}`,
                                             },
                                         ],
                                     },
@@ -283,7 +283,7 @@
                     args: {
                         layer: 1,
                         title: {
-                            value: `${$t(`model_fields.supported_nips`)}`,
+                            value: `${$t(`model.nostr_relay.supported_nips`)}`,
                         },
                         list: [
                             {
@@ -296,7 +296,7 @@
                                                 value:
                                                     ld.nostr_relay
                                                         .supported_nips ||
-                                                    `${$t(`icu.no_*_published`, { value: `${$t(`model_fields.supported_nips`)}`.toLowerCase() })}`,
+                                                    `${$t(`icu.no_*_published`, { value: `${$t(`supported_nips`)}`.toLowerCase() })}`,
                                             },
                                         ],
                                     },

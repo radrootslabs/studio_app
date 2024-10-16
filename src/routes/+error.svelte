@@ -1,28 +1,29 @@
 <script lang="ts">
     import { page } from "$app/stores";
-    import { LayoutView } from "@radroots/svelte-lib";
+    import { Glyph, LayoutArea, Nav, t } from "@radroots/svelte-lib";
 </script>
 
-{#if $page}
-    <LayoutView>
-        <div class={`flex flex-col w-full justify-start items-start`}>
-            <div class={`flex flex-row w-full justify-center items-center`}>
-                <p class={`font-sans font-[400] text-layer-2-glyph`}>
-                    {`${$page.status}: ${$page.error ? $page.error.message : `(no message)`}`}
-                </p>
-            </div>
-            <div
-                class={`flex flex-row w-full gap-2 justify-center items-center`}
-            >
-                <p class={`font-sans font-[400] text-layer-2-glyph`}>
-                    {`There was an error.`}
-                </p>
-                <a href="/">
-                    <p class={`font-sans font-[400] text-layer-1-glyph-hl`}>
-                        {`Click to return.`}
-                    </p>
-                </a>
-            </div>
+<LayoutArea>
+    <div class={`flex flex-col h-full w-full justify-center items-center`}>
+        <div class={`flex flex-col justify-start items-center`}>
+            <Glyph
+                basis={{
+                    classes: `text-layer-1-glyph-shade`,
+                    key: `subtitles-slash`,
+                    dim: `xl`,
+                }}
+            />
+            <p class={`font-sans font-[400] text-layer-0-glyph`}>
+                {`${$t(`error.client.page.status.${$page.status}`, { default: `${$t(`error.client.unhandled`)}` })}`}
+            </p>
         </div>
-    </LayoutView>
-{/if}
+    </div>
+</LayoutArea>
+<Nav
+    basis={{
+        prev: {
+            label: `Home`,
+            route: `/`,
+        },
+    }}
+/>

@@ -1,8 +1,9 @@
 <script lang="ts">
-    import { lc } from "$lib/client";
+    import { db } from "$lib/client";
     import { type TradeProduct } from "@radroots/models";
     import {
         app_notify,
+        LayoutArea,
         LayoutTrellis,
         LayoutView,
         locale,
@@ -29,11 +30,14 @@
 
     const load_data = async (): Promise<LoadData | undefined> => {
         try {
-            const trade_products = await lc.db.trade_product_get({
+            const trade_products = await db.trade_product_get({
                 list: [`all`],
             });
+            console.log(`trade_products `, trade_products);
             if (`err` in trade_products) {
-                app_notify.set(`Error loading page`);
+                app_notify.set(
+                    `${$t(`icu.error_loading_*`, { value: `${$t(`common.page`)}` })}`,
+                );
                 return;
             }
 
@@ -47,9 +51,9 @@
     };
 </script>
 
-<LayoutView>
-    <LayoutTrellis>
-        {#if ld && ld.trade_products.length > 0}
+{#if ld && ld.trade_products.length > 0}
+    <LayoutView>
+        <LayoutTrellis>
             {#each ld.trade_products as li, li_i}
                 <Trellis
                     basis={{
@@ -148,24 +152,32 @@
                     }}
                 />
             {/each}
-        {:else}
-            <div
-                class={`flex flex-col w-full justify-center items-center px-4 gap-2`}
+        </LayoutTrellis>
+    </LayoutView>
+{:else}
+    <LayoutArea>
+        <div
+            class={`flex flex-col h-full w-full gap-2 justify-center items-center`}
+        >
+            <p
+                class={`font-sans font-[400] text-layer-1-glyph text-line_display`}
             >
-                <p class={`font-sans font-[400] text-layer-2-glyph`}>
-                    {`No items to display.`}
-                </p>
-                <a href={`/models/trade-product/add`}>
-                    <p
-                        class={`font-sans font-[400] text-layer-2-glyph-hl text-sm`}
-                    >
-                        {`Click to add a new product`}
+                {`${$t(`icu.no_*_to_display`, { value: `${$t(`common.items`)}`.toLowerCase() })}`}
+            </p>
+            <a href={`/models/trade-product/add`}>
+                <button
+                    class={`flex flex-row justify-center items-center active:opacity-80`}
+                    on:click={async () => {}}
+                >
+                    <p class={`font-sans font-[400] text-layer-2-glyph-hl`}>
+                        {`${$t(`icu.click_to_add_a_*`, { value: `${$t(`icu.new_*`, { value: `${$t(`common.product`)}` })}`.toLowerCase() })}`}
                     </p>
-                </a>
-            </div>
-        {/if}
-    </LayoutTrellis>
-</LayoutView>
+                </button>
+            </a>
+        </div>
+    </LayoutArea>
+{/if}
+
 <Nav
     basis={{
         prev: {

@@ -1,0 +1,21 @@
+CREATE TABLE IF NOT EXISTS trade_product (
+    id CHAR(36) PRIMARY KEY NOT NULL UNIQUE CHECK(length(id) = 36),
+    created_at DATETIME NOT NULL CHECK(length(created_at) = 24),
+    updated_at DATETIME NOT NULL CHECK(length(created_at) = 24),
+    key TEXT,
+    title TEXT,
+    summary TEXT,
+    process TEXT,
+    lot TEXT,
+    profile TEXT,
+    year INTEGER NOT NULL,
+    qty_amt REAL,
+    qty_unit CHAR(4) NOT NULL,
+    qty_label TEXT,
+    qty_avail INTEGER,
+    price_amt REAL NOT NULL,
+    price_currency CHAR(3) NOT NULL,
+    price_qty_amt REAL,
+    price_qty_unit CHAR(4) NOT NULL,
+    notes TEXT
+);

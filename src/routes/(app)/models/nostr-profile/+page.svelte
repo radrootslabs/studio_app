@@ -1,6 +1,5 @@
 <script lang="ts">
-    import { lc } from "$lib/client";
-    import { location_gcs_add_current } from "$lib/utils/location_gcs";
+    import { db, keystore } from "$lib/client";
     import {
         nostr_profile_form_vals,
         parse_nostr_profile_form_keys,
@@ -32,18 +31,37 @@
 
     const load_data = async (): Promise<LoadData | undefined> => {
         try {
-            const nostr_profiles = await lc.db.nostr_profile_get({
+            const nostr_profiles = await db.nostr_profile_get({
                 list: [`all`],
             });
             if (`err` in nostr_profiles) {
-                app_notify.set(`Error loading page`);
+                app_notify.set(`${$t(`error.client.page.load`)}`);
                 return;
             } else if (nostr_profiles.results.length < 1) {
-                app_notify.set(`Error loading page`);
+                app_notify.set(`${$t(`error.client.page.load`)}`);
                 return;
             }
         } catch (e) {
             console.log(`(error) load_data `, e);
+        }
+    };
+
+    const handle_add_location_gcs = async (): Promise<void> => {
+        try {
+            console.log(`@todo`);
+            //const res = await location_gcs_add_current();
+            //if (res) ld = await load_data();
+        } catch (e) {
+            console.log(`(error) handle_add_location_gcs `, e);
+        }
+    };
+
+    const handle_add_nostr_profile = async (): Promise<void> => {
+        try {
+            const ks_keys = await keystore.keys();
+            console.log(JSON.stringify(ks_keys, null, 4), `ks_keys`);
+        } catch (e) {
+            console.log(`(error) handle_add_nostr_profile `, e);
         }
     };
 </script>
@@ -68,7 +86,7 @@
                                                 left: [
                                                     {
                                                         classes: `capitalize`,
-                                                        value: `${$t(`model_fields.${k}`, { default: k.replaceAll(`_`, ` `) })}`,
+                                                        value: `${$t(`model.nostr_profile.${k}`, { default: k.replaceAll(`_`, ` `) })}`,
                                                     },
                                                 ],
                                                 right: [
@@ -110,8 +128,7 @@
                 <button
                     class={`flex flex-row justify-center items-center`}
                     on:click={async () => {
-                        const res = await location_gcs_add_current();
-                        if (res) ld = await load_data();
+                        await handle_add_location_gcs();
                     }}
                 >
                     <p
@@ -142,11 +159,7 @@
                       classes: `tap-color`,
                   },
                   callback: async () => {
-                      const ks_keys = await lc.keystore.keys();
-                      console.log(JSON.stringify(ks_keys, null, 4), `ks_keys`);
-                      for (const ks_key of ks_keys || []) {
-                          console.log(`ks_key `, ks_key);
-                      }
+                      await handle_add_nostr_profile();
                   },
               }
             : undefined,

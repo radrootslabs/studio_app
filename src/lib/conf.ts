@@ -1,23 +1,15 @@
-
-/*type Conf = {
-    app: Record<string, string>;
-    pref: Record<string, string>;
-    cmd: Record<string, string>;
-    map: {
-        styles: {
-            base: Record<ColorMode, string>;
-        },
-        popup: {
-            dot: {
-                offset: NumberTuple;
-            }
-        }
-    }
-}*/
-
 import type { NumberTuple } from "@radroots/utils";
 
-export const _conf = {
+export const ks = {
+    nostr: {
+        conf_init_key: `conf:init:nostr:key`,
+        conf_init_profile: `conf:init:nostr:profile`,
+        nostr_key: (public_key: string) => `nostr:key:${public_key}`,
+        nostr_key_active: `nostr:key:active`,
+    }
+};
+
+export const cfg = {
     app: {
         root_symbol: "»--`--,---",
         title: `Radroots`,
@@ -32,12 +24,7 @@ export const _conf = {
         mount_el: 500,
         nostr_relay_poll_document: 3000
     },
-    kv: {
-        nostr_key: (public_key: string) => `nostr:key:${public_key}`,
-        nostr_key_active: `nostr:key:active`,
-    },
     cmd: {
-        //root_alert: `*-alert`,
         layout_route: `*-route`
     },
     map: {

@@ -1,4 +1,5 @@
 <script lang="ts">
+    import { keyring, nostr } from "$lib/client";
     import {
         app_nostr_key,
         type CallbackPromise,
@@ -49,7 +50,7 @@
             weight: `fill`,
         },
         {
-            route: `/nostr/keys`,
+            route: `/`,
             label: `Keys`,
             key: `key`,
             weight: `fill`,
@@ -168,7 +169,11 @@
             {
                 icon: `compass`,
                 callback: async (tab_i) => {
-                    await route(`/map/choose-location`);
+                    // await route(`/map/choose-location`);
+                    const new_sk = await nostr.lib.generate_key();
+                    console.log(`new_sk `, new_sk);
+                    const res = keyring.set_nostr_key(new_sk);
+                    console.log(`res `, res);
                 },
             },
             {
@@ -179,9 +184,7 @@
             },
             {
                 icon: `bell-simple`,
-                callback: async (tab_i) => {
-                    await route(`/test`);
-                },
+                callback: async (tab_i) => {},
             },
         ],
     }}
