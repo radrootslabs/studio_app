@@ -23,7 +23,7 @@
         t,
         view_effect,
     } from "@radroots/svelte-lib";
-    import { regex } from "@radroots/utils";
+    import { err_msg, regex, type ErrorMessage } from "@radroots/utils";
     import { onDestroy, onMount } from "svelte";
 
     const carousel_param: Record<View, { max_index: number }> = {
@@ -48,15 +48,15 @@
     let profile_name_loading = false;
 
     type View = `setup` | `profile_name` | `eula`;
-    let view: View = `setup`;
-
+    let initial_view: View = `profile_name`;
+    let view: View = initial_view;
     $: {
         view_effect<View>(view);
     }
 
     onMount(async () => {
         try {
-            handle_view(`setup`);
+            handle_view(initial_view);
 
             await keystore.remove(ks.nostr.conf_init_key);
             await keystore.remove(ks.nostr.conf_init_profile);
@@ -229,49 +229,68 @@
                             case 0:
                                 {
                                     if (profile_name_loading) return;
-                                    const profile_name = await kv.get(
+
+                                    const ks_init_secretkey = {
+                                        result: nostr.lib.generate_key(),
+                                    };
+                                    /*const ks_init_secretkey =
+                                        await keystore.get(
+                                            ks.nostr.conf_init_key,
+                                        );
+                                    if (`err` in ks_init_secretkey) {
+                                        await dialog.alert(
+                                            `To create a profile a keypair must be assigned`,
+                                        );
+                                        return; //@todo
+                                    }*/
+
+                                    const kv_profile_name = await kv.get(
                                         fmt_id(`profile_name`),
                                     );
-                                    if (!profile_name) {
+                                    if (!kv_profile_name) {
                                         await dialog.alert(
                                             `${$t(`icu.enter_a_*`, { value: `${$t(`common.profile_name`)}`.toLowerCase() })}`,
                                         );
                                         return;
                                     }
-                                    const valid_profile_name =
-                                        await fetch_validate_profile_name(
-                                            profile_name,
-                                        );
-                                    if (
-                                        typeof valid_profile_name === `string`
-                                    ) {
-                                        await dialog.alert(valid_profile_name);
-                                        return;
-                                    } else if (!valid_profile_name) {
+                                    const profile_name_validate =
+                                        await fetch_profile_name_validate({
+                                            profile_name: kv_profile_name,
+                                        });
+                                    if (`err` in profile_name_validate) {
                                         await dialog.alert(
-                                            `${`${$t(`icu.the_*_is_registered`, { value: `${$t(`common.profile_name`)}` })}`}`,
+                                            profile_name_validate.err,
                                         );
                                         return;
                                     }
-
                                     const confirm = await dialog.confirm({
-                                        message: `${`${$t(`icu.the_*_is_available`, { value: `${$t(`common.profile_name`).toLowerCase()} "${profile_name}"` })}`}. Would you like to use it?`,
+                                        message: `${`${$t(`icu.the_*_is_available`, { value: `${$t(`common.profile_name`).toLowerCase()} "${profile_name_validate.profile_name}"` })}`}. Would you like to use it?`, //@todo
                                         cancel_label: `${$t(`common.no`)}`,
                                         ok_label: `${$t(`common.yes`)}`,
                                     });
-                                    if (confirm === true) {
-                                        const ks_set = await keystore.set(
-                                            ks.nostr.conf_init_profile,
-                                            profile_name,
+                                    if (!confirm) return;
+
+                                    const profile_name_create =
+                                        await fetch_profile_name_create({
+                                            profile_name:
+                                                profile_name_validate.profile_name,
+                                            secret_key:
+                                                ks_init_secretkey.result,
+                                        });
+                                    if (`err` in profile_name_create) {
+                                        await dialog.alert(
+                                            profile_name_create.err,
                                         );
-                                        if (`err` in ks_set) {
-                                            await dialog.alert(
-                                                `${$t(`error.client.unhandled`)}`,
-                                            );
-                                            return; //@todo
-                                        }
-                                        handle_view(`eula`);
+                                        return;
                                     }
+                                    console.log(
+                                        JSON.stringify(
+                                            profile_name_create,
+                                            null,
+                                            4,
+                                        ),
+                                        `profile_name_create`,
+                                    );
                                 }
                                 break;
                         }
@@ -283,29 +302,70 @@
         }
     };
 
-    const fetch_validate_profile_name = async (
-        profile_name: string,
-    ): Promise<boolean | string> => {
+    const fetch_profile_name_validate = async (opts: {
+        profile_name: string;
+    }): Promise<{ profile_name: string } | ErrorMessage<string>> => {
         try {
+            const profile_name = opts.profile_name.toLowerCase();
             profile_name_loading = true;
             const res = await http.fetch({
                 url: `${PUBLIC_RADROOTS_URL}/.well-known/nostr.json`,
             });
-            if (`err` in res) {
-                return res.err;
+            console.log(JSON.stringify(res, null, 4), `res`);
+            if (`err` in res)
+                return err_msg(`${$t(`error.client.network_failure`)}`);
+            else if (`names` in res.data) {
+                if (typeof res.data.names[profile_name] === `undefined`)
+                    return { profile_name };
+                return err_msg(
+                    `${`${$t(`icu.the_*_is_registered`, { value: `${$t(`common.profile_name`)}`.toLowerCase() })} `}`,
+                );
             }
-
-            const { data: res_data } = res;
-            if (`names` in res_data) {
-                if (typeof res_data.names[profile_name] === `undefined`)
-                    return true;
-                return false;
-            }
-
-            return `error`;
+            return err_msg(`${$t(`error.client.request_failure`)}`);
         } catch (e) {
-            console.log(`(error) fetch_validate_profile_name `, e);
-            return `catch`;
+            console.log(`(error) fetch_profile_name_validate `, e);
+            return err_msg(`${$t(`error.client.network_failure`)}`);
+        } finally {
+            profile_name_loading = false;
+        }
+    };
+
+    const fetch_profile_name_create = async (opts: {
+        profile_name: string;
+        secret_key: string;
+        nostr_relays?: string[];
+    }): Promise<{ id: string } | ErrorMessage<string>> => {
+        try {
+            profile_name_loading = true;
+            const res = await http.fetch({
+                url: `${PUBLIC_RADROOTS_URL}/models/account/add`,
+                method: `post`,
+                data: {
+                    active: true,
+                    nip_05: opts.profile_name,
+                    public_key: nostr.lib.public_key(opts.secret_key),
+                    nostr_relays: opts.nostr_relays?.length
+                        ? Array.from(
+                              new Set([
+                                  ...opts.nostr_relays,
+                                  `wss://radroots.org`,
+                              ]),
+                          ).join(`,`)
+                        : [`wss://radroots.org`].join(`,`),
+                },
+            });
+            if (`err` in res) return res;
+            else if (`id` in res.data) {
+                alert(`account created ${res.data.id}`);
+                //@todo
+            } else if (`message` in res.data)
+                return err_msg(
+                    `${$t(`radroots-org.error.${res.data.message}`, { default: `${$t(`error.client.request_failure`)}` })}`,
+                );
+            return err_msg(`${$t(`error.client.request_failure`)}`);
+        } catch (e) {
+            console.log(`(error) fetch_profile_name_create `, e);
+            return err_msg(`${$t(`error.client.network_failure`)}`);
         } finally {
             profile_name_loading = false;
         }
@@ -397,7 +457,7 @@
 <LayoutView>
     <div
         data-view={`setup`}
-        class={`flex flex-col h-full w-full max-mobile_base:pt-12 pt-16 justify-start items-center`}
+        class={`hidden flex flex-col h-full w-full max-mobile_base:pt-12 pt-16 justify-start items-center`}
     >
         <div
             data-carousel-container={`setup`}
@@ -549,7 +609,7 @@
     </div>
     <div
         data-view={`profile_name`}
-        class={`hidden flex flex-col h-full w-full max-mobile_base:pt-12 pt-16 justify-start items-center`}
+        class={` flex flex-col h-full w-full max-mobile_base:pt-12 pt-16 justify-start items-center`}
     >
         <div
             data-carousel-container={`profile_name`}
