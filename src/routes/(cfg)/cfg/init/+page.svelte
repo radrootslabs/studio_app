@@ -1,5 +1,8 @@
 <script lang="ts">
-    import { PUBLIC_RADROOTS_URL } from "$env/static/public";
+    import {
+        PUBLIC_NOSTR_RELAY_DEFAULTS,
+        PUBLIC_RADROOTS_URL,
+    } from "$env/static/public";
     import { db, dialog, http, keystore, nostr } from "$lib/client";
     import { cfg, ks } from "$lib/conf";
     import { restart } from "$lib/utils/client";
@@ -617,24 +620,45 @@
                         ? ks_nostr_profilename.result
                         : undefined,
             });
-            console.log(
-                JSON.stringify(nostr_profile_add, null, 4),
-                `nostr_profile_add`,
-            );
-            if (`id` in nostr_profile_add) {
-                await keystore.set(ks.keys.nostr_publickey, nostr_publickey);
-                await keystore.set(
-                    ks.keys.nostr_secretkey(nostr_publickey),
-                    ks_nostr_secretkey.result,
+
+            if (`err` in nostr_profile_add || `err_s` in nostr_profile_add) {
+                await dialog.alert(
+                    `${$t(`icu.failure_saving_*_to_the_database`, { value: `${$t(`common.profile`)}`.toLowerCase() })}`,
                 );
-                await reset_ks();
-                await restart({
-                    route: `/`,
-                    notify_message: `${$t(`app.page.cfg.init.notification.welcome`)}`,
-                });
-                return;
+                return; //@todo
             }
-            await dialog.alert(`There was an error saving to the database.`); //@todo
+            await keystore.set(ks.keys.nostr_publickey, nostr_publickey);
+            await keystore.set(
+                ks.keys.nostr_secretkey(nostr_publickey),
+                ks_nostr_secretkey.result,
+            );
+            for (const url of Array.from(
+                new Set([
+                    cfg.nostr.relay_url,
+                    ...PUBLIC_NOSTR_RELAY_DEFAULTS.split(","),
+                ]),
+            )) {
+                const nostr_relay_add = await db.nostr_relay_add({ url });
+                if (`err` in nostr_relay_add || `err_s` in nostr_relay_add) {
+                    await dialog.alert(
+                        `${$t(`icu.failure_saving_*_to_the_database`, { value: `${$t(`icu.default_*`, { value: `${$t(`common.relays`)}` })}`.toLowerCase() })}`,
+                    );
+                    return; // @todo
+                }
+                await db.set_nostr_profile_relay({
+                    nostr_profile: {
+                        id: nostr_profile_add.id,
+                    },
+                    nostr_relay: {
+                        id: nostr_relay_add.id,
+                    },
+                });
+            }
+            await reset_ks();
+            await restart({
+                route: `/`,
+                notify_message: `${$t(`app.page.cfg.init.notification.welcome`)}`,
+            });
         } catch (e) {
             console.log(`(error) submit `, e);
         }
