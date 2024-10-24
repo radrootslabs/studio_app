@@ -11,7 +11,10 @@
         <button
             class={`flex flex-row justify-center items-center`}
             on:click={async () => {
-                await restart(true);
+                await restart({
+                    route: `/`,
+                    notify_message: `Device restarted`,
+                });
             }}
         >
             <p class={`font-sans font-[400] text-layer-0-glyph-hl`}>

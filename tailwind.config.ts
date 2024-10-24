@@ -30,6 +30,7 @@ const heights = {
     envelope_top: "56px",
     toast_min: `56px`,
     envelope_button: `50px`,
+    line_label: `1.75rem`
 };
 
 
@@ -71,6 +72,8 @@ const config: Config = {
         extend: {
             colors: {
                 ...theme_colors,
+                'chart-green': 'var(--chart-color-green)',
+                'chart-red': 'var(--chart-color-red)',
             },
             fontFamily: {
                 sans: ['SF Pro Display', ...tw_font.sans],
@@ -79,8 +82,12 @@ const config: Config = {
                 apercu: ['Apercu Mono Pro'],
                 magda: [`Magda Text`],
                 lust: [`Lust`],
+                circ: [`Circular`],
+                arch: [`Archivo`],
+                spaceg: [`Space Grotesk`]
             },
             fontSize: {
+                line_label: [`1.3rem`, { lineHeight: `1.3rem` }],
                 trellisTitle: ["0.8rem", { lineHeight: "1rem", fontWeight: 200 }],
                 trellisTitleNote: ["0.76rem", { lineHeight: "1rem", fontWeight: 200 }],
                 line_display: ["1.05rem", { lineHeight: "1.33rem", fontWeight: 300 }],
@@ -140,6 +147,8 @@ const config: Config = {
     ],
     daisyui: {
         themes: [
+            themes.theme_garden_light,
+            themes.theme_garden_dark,
             themes.theme_earth_light,
             themes.theme_earth_dark,
             themes.theme_os_dark,

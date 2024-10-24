@@ -6,11 +6,10 @@
         LayoutArea,
         LayoutTrellis,
         LayoutView,
-        locale,
         Nav,
         route,
         t,
-        time_fmt_iso,
+        time_iso,
         Trellis,
     } from "@radroots/svelte-lib";
     import { onMount } from "svelte";
@@ -98,8 +97,7 @@
                                             ],
                                             right: [
                                                 {
-                                                    value: time_fmt_iso(
-                                                        $locale,
+                                                    value: time_iso(
                                                         li.created_at,
                                                     ),
                                                 },
@@ -177,7 +175,6 @@
         </div>
     </LayoutArea>
 {/if}
-
 <Nav
     basis={{
         prev: {

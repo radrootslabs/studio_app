@@ -27,6 +27,7 @@
       "deny": []
     },
     "notification:default",
+    "os:default",
     "store:default",
     "shell:allow-open",
     "map-display:default"

@@ -29,6 +29,10 @@
         }
     });
 
+    $: {
+        console.log(JSON.stringify(ld, null, 4), `ld`);
+    }
+
     const load_data = async (): Promise<LoadData | undefined> => {
         try {
             const nostr_profiles = await db.nostr_profile_get({
@@ -37,10 +41,11 @@
             if (`err` in nostr_profiles) {
                 app_notify.set(`${$t(`error.client.page.load`)}`);
                 return;
-            } else if (nostr_profiles.results.length < 1) {
-                app_notify.set(`${$t(`error.client.page.load`)}`);
-                return;
             }
+            const data: LoadData = {
+                nostr_profiles: nostr_profiles.results,
+            };
+            return data;
         } catch (e) {
             console.log(`(error) load_data `, e);
         }

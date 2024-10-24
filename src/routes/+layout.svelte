@@ -1,14 +1,14 @@
 <script lang="ts">
-    import { goto } from "$app/navigation";
-    import { dialog, keystore, notification } from "$lib/client";
-    import { cfg, ks } from "$lib/conf";
+    import { device, dialog, http, os } from "$lib/client";
+    import { cfg } from "$lib/conf";
+    import type { IClientDeviceMetadata } from "@radroots/client";
     import {
-        app_config,
+        app_cfg_type,
         app_db,
         app_geoc,
         app_loading,
-        app_nostr_key,
         app_notify,
+        app_splash,
         app_th,
         app_thc,
         AppControls,
@@ -16,20 +16,39 @@
         CssStyles,
         LayoutWindow,
         LoadingView,
+        locale,
         route,
         sleep,
+        SplashScreen,
         theme_set,
         type NavigationRoute,
     } from "@radroots/svelte-lib";
     import { parse_color_mode, parse_theme_key } from "@radroots/theme";
-    import { onMount } from "svelte";
+    import { onDestroy, onMount } from "svelte";
     import "../app.css";
 
+    //let unlisten_logger: IClientUnlisten;
     let route_render: NavigationRoute | undefined = undefined;
 
     onMount(async () => {
         try {
-            app_loading.set(true);
+            //unlisten_logger = await logger.init();
+            const metadata: IClientDeviceMetadata = {
+                version: os.version(),
+                platform: os.platform(),
+                locale: $locale,
+            };
+            await device.init(metadata);
+            await http.init(metadata);
+        } catch (e) {
+        } finally {
+        }
+    });
+
+    onDestroy(async () => {
+        try {
+            //unlisten_logger();
+            route_render = undefined;
         } catch (e) {
         } finally {
         }
@@ -57,47 +76,14 @@
         console.log(`(app_geoc) success`);
     });
 
-    app_config.subscribe(async (_app_config) => {
-        try {
-            if (!_app_config) {
-                console.log(`(app_config) done`);
-                return;
-            }
-            console.log(`(app_config) start`);
-
-            await keystore.init();
-            await notification.init();
-
-            const ks_public_key = await keystore.get(ks.nostr.nostr_key_active);
-            if (`result` in ks_public_key) {
-                const ks_secret_key = await keystore.get(
-                    ks.nostr.nostr_key(ks_public_key.result),
-                );
-                if (`result` in ks_secret_key) {
-                    app_nostr_key.set(ks_public_key.result);
-                }
-            } else {
-                route_render = "/conf/init";
-            }
-            await goto(`/`);
-            if (route_render) {
-                await sleep(cfg.delay.load);
-                await route(route_render);
-            }
-        } catch (e) {
-            console.log(`(app_config) error `, e);
-        } finally {
-            app_loading.set(false);
-            //await win.splash_hide();
-        }
+    app_cfg_type.subscribe(async (_app_cfg_type) => {
+        console.log(`_app_cfg_type `, _app_cfg_type);
     });
 
     app_notify.subscribe(async (_app_notify) => {
         if (!_app_notify) {
-            app_loading.set(false);
             return;
         }
-        app_loading.set(true);
         route(`/`);
         await sleep(cfg.delay.notify);
         dialog.alert(_app_notify);
@@ -112,11 +98,12 @@
 </svelte:head>
 
 <LayoutWindow>
-    {#if !$app_loading}
-        <slot />
-    {:else}
+    {#if $app_splash}
+        <SplashScreen />
+    {:else if $app_loading}
         <LoadingView />
     {/if}
+    <slot />
 </LayoutWindow>
 <AppControls />
 <CssStatic />

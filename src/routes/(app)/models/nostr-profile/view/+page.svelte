@@ -58,7 +58,7 @@
             }
 
             const ks_secret_key = await keystore.get(
-                ks.nostr.nostr_key($qp_nostr_pk),
+                ks.keys.nostr_secretkey($qp_nostr_pk),
             );
             if (`err` in ks_secret_key) {
                 app_notify.set(`Error loading profile`);

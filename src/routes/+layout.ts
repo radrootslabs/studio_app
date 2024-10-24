@@ -13,7 +13,9 @@ export const load: LayoutLoad = async ({ url }: LayoutLoadEvent) => {
         else if (locales.get().some(i => i === nav_locale.slice(0, 2).toLowerCase())) locale = nav_locale.slice(0, 2);
         await load_translations(locale.toLowerCase(), url.pathname);
         await translations_loading.toPromise();
-    } catch (e) { } finally {
+    } catch (e) {
+        console.log(`(load) ERROR`, e)
+    } finally {
         return {};
     };
 };

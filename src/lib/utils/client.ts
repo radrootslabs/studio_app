@@ -1,5 +1,5 @@
 import { keystore } from "$lib/client";
-import { app_notify, type NavigationRoute } from "@radroots/svelte-lib";
+import { app_notify, route, type NavigationRoute } from "@radroots/svelte-lib";
 
 export const keystore_reset = async (): Promise<void> => {
     try {
@@ -11,14 +11,14 @@ export const keystore_reset = async (): Promise<void> => {
     }
 };
 
-export const restart = async (route_to: true | NavigationRoute, notify_message?: string): Promise<void> => {
+export const restart = async (opts?: {
+    notify_message?: string;
+    route?: NavigationRoute;
+}): Promise<void> => {
     try {
-        //await window.splash_show();
-        if (notify_message) {
-            app_notify.set(notify_message);
-        }
-        //await route(typeof route_to === `string` ? route_to : `/`)
-        //location.reload();
+        if (opts?.notify_message) app_notify.set(opts.notify_message);
+        if (opts?.route) await route(opts.route);
+        else location.reload();
     } catch (e) {
         console.log(`(error) restart `, e);
     }

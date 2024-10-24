@@ -604,7 +604,7 @@
                             bind:this={el_trellis_wrap_price}
                             id={fmt_id(`price_wrap`)}
                             tabindex={-1}
-                            class={`relative el-responsive flex flex-row w-full pl-2 justify-between items-center h-form_line bg-layer-1-surface rounded-2xl`}
+                            class={`relative el-re flex flex-row w-full pl-2 justify-between items-center h-form_line bg-layer-1-surface rounded-2xl`}
                         >
                             <InputElement
                                 basis={{
@@ -706,7 +706,7 @@
                         <div
                             id={fmt_id(`qty_wrap`)}
                             tabindex={-1}
-                            class={`relative el-responsive flex flex-row w-full gap-3 justify-between items-center h-form_line bg-layer-1-surface text-layer-1-glyph rounded-2xl`}
+                            class={`relative el-re flex flex-row w-full gap-3 justify-between items-center h-form_line bg-layer-1-surface text-layer-1-glyph rounded-2xl`}
                         >
                             {#if show_sel_trade_product_qty_tup_other}
                                 <div

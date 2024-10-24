@@ -1,11 +1,19 @@
 import type { NumberTuple } from "@radroots/utils";
+//import tailwindConfig from '../..//tailwind.config';
+//export const tw = tailwindConfig;
 
 export const ks = {
-    nostr: {
-        conf_init_key: `conf:init:nostr:key`,
-        conf_init_profile: `conf:init:nostr:profile`,
-        nostr_key: (public_key: string) => `nostr:key:${public_key}`,
-        nostr_key_active: `nostr:key:active`,
+    cfg_init: {
+        nostr_secretkey: `cfg:init:nostr:secretkey`,
+        nostr_profilename: `cfg:init:nostr:profilename`,
+        radroots_tok: `cfg:init:radroots:tok`
+    },
+    pref: {
+        cfg_type: `pref:cfg_type`,
+    },
+    keys: {
+        nostr_secretkey: (public_key: string) => `nostr:key:${public_key}`,
+        nostr_publickey: `keys:nostr:`,
     }
 };
 
@@ -16,6 +24,7 @@ export const cfg = {
         description: `Creating networks between farmers, communities and small businesses that give customers greater access to natural foods and grow circular economies where profits are more fairly distributed. Radroots is built on the Nostr protocol and released under a copyleft open source license to provide transparency and give users the option to offer feedback and add or request new features.`
     },
     nostr: {
+        relay_url: `wss://radroots.org`,
         relay_polling_count_max: 10,
     },
     delay: {
@@ -47,3 +56,4 @@ export const cfg = {
         }
     }
 };
+

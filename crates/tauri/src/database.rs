@@ -10,7 +10,7 @@ pub async fn setup_db(data_dir: &PathBuf) -> sqlx::Pool<sqlx::Sqlite> {
             panic!("Error resolving databse directory {}", err);
         }
     };
-    path.push("radroots.sqlite");
+    path.push("radroots_db.sqlite");
     let result = OpenOptions::new().create_new(true).write(true).open(&path);
     match result {
         Ok(_) => println!("Database file created"),

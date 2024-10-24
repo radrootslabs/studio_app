@@ -43,13 +43,13 @@ pub fn run() {
                 Ok(())
             })
         })
-        .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_geolocation::init())
         .plugin(tauri_plugin_http::init())
         .plugin(tauri_plugin_notification::init())
+        .plugin(tauri_plugin_os::init())
+        .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_store::Builder::new().build())
-        .plugin(tauri_plugin_map_display::init())
         .invoke_handler(tauri::generate_handler![
             model_location_gcs_add,
             model_location_gcs_get,
