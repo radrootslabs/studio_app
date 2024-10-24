@@ -1,5 +1,5 @@
 <script lang="ts">
-    import { notification } from "$lib/client";
+    import { db, dialog, notification } from "$lib/client";
     import {
         app_cfg_type,
         app_layout,
@@ -68,6 +68,15 @@
     onMount(async () => {
         try {
             nav_prev.set([]);
+
+            const nostr_profile = await db.nostr_profile_get({
+                public_key: $app_nostr_key,
+            });
+            if (`err` in nostr_profile) {
+                await dialog.alert(`@todo Nostr profile configuration failure`);
+                return;
+            }
+            if (!nostr_profile.results[0].name) tmp_show_no_profile = true;
         } catch (e) {
         } finally {
         }
@@ -92,27 +101,29 @@
     <div class={`flex flex-col justify-center items-center`}>
         {#if tmp_show_no_profile}
             <button
-                class={`relative flex flex-col h-24 w-${$app_layout} p-4 justify-center items-center bg-layer-2-surface/60 rounded-touch touch-layer-1 touch-layer-1-raise-less el-re`}
+                class={`relative flex flex-row h-24 w-${$app_layout} p-4 gap-4 justify-center items-center bg-layer-2-surface/60 rounded-touch touch-layer-1 touch-layer-1-raise-less el-re`}
                 on:click={async () => {
                     await route(`/models/nostr-profile`);
                 }}
             >
-                <div class={`flex flex-row gap-2 justify-start items-center`}>
+                <div
+                    class={`absolute left-6 flex flex-row h-full justify-end items-center`}
+                >
                     <Glyph
                         basis={{
                             classes: `text-layer-2-glyph`,
                             key: `user-circle-plus`,
-                            dim: `lg`,
+                            dim: `xl`,
                             weight: `bold`,
                         }}
                     />
+                </div>
+                <div class={`flex flex-col justify-center items-center`}>
                     <p
                         class={`font-circ font-[500] text-lg text-layer-2-glyph/90`}
                     >
                         {`No farm profile added.`}
                     </p>
-                </div>
-                <div class={`flex flex-row justify-start items-center`}>
                     <p
                         class={`font-circ font-[500] text-sm text-layer-2-glyph/90`}
                     >
@@ -132,8 +143,8 @@
     </div>
     <div class={`flex flex-col w-full gap-2 justify-start items-center`}>
         <div class={`flex flex-row w-full px-8 justify-start items-center`}>
-            <p class={`font-circ font-[500] text-layer-0-glyph`}>
-                {`${$t(`common.options_list`)}`}
+            <p class={`font-sans font-[500] text-layer-0-glyph capitalize`}>
+                {`${$t(`common.options_list`)}:`}
             </p>
         </div>
         <div class={`flex flex-col w-full gap-4 justify-start items-center`}>
@@ -185,26 +196,26 @@
             {
                 icon: `house-line`,
                 label: `Home`,
-                callback: async (tab_i) => {
+                callback: async () => {
                     await route(`/`);
                 },
             },
             {
                 icon: `arrows-down-up`,
                 label: `Transactions`,
-                callback: async (tab_i) => {},
+                callback: async () => {},
             },
             {
                 icon: `cardholder`,
                 label: `Wallet`,
-                callback: async (tab_i) => {
+                callback: async () => {
                     await route(`/models/nostr-profile`);
                 },
             },
             {
                 icon: `squares-four`,
                 label: `Menu`,
-                callback: async (tab_i) => {
+                callback: async () => {
                     await route(`/settings`);
                 },
             },

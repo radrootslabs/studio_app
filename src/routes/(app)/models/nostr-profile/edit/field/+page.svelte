@@ -18,6 +18,7 @@
         qp_nostr_pk,
         qp_rkey,
         route,
+        route_prev,
         sleep,
         t,
         Trellis,
@@ -58,10 +59,14 @@
     });
 
     let val_field_valid = false;
+
     $: translated_field_key = ld?.field_key
         ? `${$t(`model.nostr_profile.${ld?.field_key}`, { default: ld?.field_key?.replaceAll(`_`, ` `) })}`.toLowerCase()
         : ``;
 
+    $: if (el_input_loaded && el_input) {
+        el_input.focus();
+    }
     const load_page = async (): Promise<LoadData | undefined> => {
         try {
             const nostr_profiles = await db.nostr_profile_get({
@@ -123,28 +128,21 @@
                 fields,
             });
             if (`err` in update_res) {
-                await dialog.alert(`${$t(`common.error.client.unhandled`)}`);
-                return; //@todo
+                await dialog.alert(`${$t(`error.client.unhandled`)}`);
+                return;
             }
 
-            alert(`@todo sync to nostr`);
             // @todo sync to nostr
-            //if ($app_submit_route) {
-            //    await route($app_submit_route.route, $app_submit_route.params);
-            //} else {
-            //  await route(`/nostr/keys`);
-            //}
+            if (ld)
+                await route_prev(`/models/nostr-profile/view`, [
+                    [`id`, ld.nostr_profile.id],
+                ]);
+            else await route_prev(`/models/nostr-profile`);
             return;
         } catch (e) {
             console.log(`(error) submit `, e);
         }
     };
-
-    $: {
-        if (el_input_loaded && el_input) {
-            el_input.focus();
-        }
-    }
 </script>
 
 <LayoutView>
@@ -197,7 +195,7 @@
                                         },
                                         on_mount: async (el) => {
                                             el_input = el;
-                                            await sleep(600);
+                                            await sleep(600); //@todo
                                             el_input_loaded = true;
                                         },
                                     },

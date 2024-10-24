@@ -9,11 +9,8 @@
             app_geoc.set(!!geoc_connected);
 
             /*
-            const nostr_publickey = await keystore.get(ks.keys.nostr_publickey);
-            if (`result` in nostr_publickey) {
-                await sleep(4000);
-                await notification.init();
-            }
+            await sleep(4000);
+            await notification.init();
             */
         } catch (e) {
             console.log(`e (app) onMount`, e);

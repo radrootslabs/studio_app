@@ -49,6 +49,10 @@
             const nostr_profiles = await db.nostr_profile_get({
                 public_key: $qp_nostr_pk,
             });
+            console.log(
+                JSON.stringify(nostr_profiles, null, 4),
+                `nostr_profiles`,
+            );
             if (`err` in nostr_profiles) {
                 app_notify.set(`${$t(`error.client.page.load`)}`);
                 return;
@@ -168,6 +172,72 @@
 <LayoutView>
     <LayoutTrellis>
         {#if ld}
+            <Trellis
+                basis={{
+                    args: {
+                        layer: 1,
+                        title: {
+                            value: `${$t(`common.profile_name`)}`,
+                        },
+                        list: [
+                            {
+                                hide_active: vl_secret_key_unlock,
+                                touch: {
+                                    label: {
+                                        left: [
+                                            {
+                                                classes: ld.nostr_profile.name
+                                                    ? ``
+                                                    : `text-layer-1-glyph-shade`,
+                                                value:
+                                                    ld.nostr_profile.name ||
+                                                    `${$t(`icu.no_*_published`, { value: `${$t(`common.profile`)}`.toLowerCase() })}`,
+                                            },
+                                        ],
+                                    },
+                                    end: {
+                                        icon: {
+                                            key: as_glyph_key(`caret-right`),
+                                        },
+                                    },
+                                    callback: async () => {
+                                        if (!ld) return;
+                                        app_submit_route.set({
+                                            route: `/models/nostr-profile/view`,
+                                            params: [
+                                                [
+                                                    `nostr_pk`,
+                                                    ld.nostr_profile.public_key,
+                                                ],
+                                            ],
+                                        });
+                                        $nav_prev.push({
+                                            route: `/models/nostr-profile/view`,
+                                            label: `Key`,
+                                            params: [
+                                                [
+                                                    `nostr_pk`,
+                                                    ld.nostr_profile.public_key,
+                                                ],
+                                            ],
+                                        });
+                                        await route(
+                                            `/models/nostr-profile/edit/field`,
+                                            [
+                                                [
+                                                    `nostr_pk`,
+                                                    ld.nostr_profile.public_key,
+                                                ],
+                                                [`rkey`, `name`],
+                                            ],
+                                        );
+                                    },
+                                },
+                            },
+                        ],
+                    },
+                }}
+            />
             <Trellis
                 basis={{
                     args: {
@@ -393,83 +463,13 @@
                                                           .name
                                                           ? ``
                                                           : `text-layer-1-glyph-shade`,
-                                                      value:
-                                                          ld.nostr_profile
-                                                              .name ||
-                                                          `${$t(`icu.no_*_published`, { value: `${$t(`common.relays`)}`.toLowerCase() })}`,
+                                                      value: `${$t(`icu.no_*_published`, { value: `${$t(`common.relays`)}`.toLowerCase() })}`,
                                                   },
                                               ],
                                           },
                                       },
                                   },
                               ],
-                    },
-                }}
-            />
-
-            <Trellis
-                basis={{
-                    args: {
-                        layer: 1,
-                        title: {
-                            value: `${$t(`common.profile_name`)}`,
-                        },
-                        list: [
-                            {
-                                hide_active: vl_secret_key_unlock,
-                                touch: {
-                                    label: {
-                                        left: [
-                                            {
-                                                classes: ld.nostr_profile.name
-                                                    ? ``
-                                                    : `text-layer-1-glyph-shade`,
-                                                value:
-                                                    ld.nostr_profile.name ||
-                                                    `${$t(`icu.no_*_published`, { value: `${$t(`common.profile`)}`.toLowerCase() })}`,
-                                            },
-                                        ],
-                                    },
-                                    end: {
-                                        icon: {
-                                            key: as_glyph_key(`caret-right`),
-                                        },
-                                    },
-                                    callback: async () => {
-                                        if (!ld) return;
-                                        app_submit_route.set({
-                                            route: `/models/nostr-profile/view`,
-                                            params: [
-                                                [
-                                                    `nostr_pk`,
-                                                    ld.nostr_profile.public_key,
-                                                ],
-                                            ],
-                                        });
-                                        $nav_prev.push({
-                                            route: `/models/nostr-profile/view`,
-                                            label: `Key`,
-                                            params: [
-                                                [
-                                                    `nostr_pk`,
-                                                    ld.nostr_profile.public_key,
-                                                ],
-                                            ],
-                                        });
-                                        await route(
-                                            `/models/nostr-profile/edit/field`,
-                                            [
-                                                [
-                                                    `nostr_pk`,
-                                                    ld.nostr_profile.public_key,
-                                                ],
-                                                [`rkey`, `name`],
-                                            ],
-                                        );
-                                    },
-                                },
-                            },
-                        ],
                     },
                 }}
             />
@@ -485,7 +485,7 @@
         title: {
             label: {
                 classes: `capitalize`,
-                value: `${$t(`common.key`)}`,
+                value: `${$t(`common.profile`)}`,
             },
         },
         option: {

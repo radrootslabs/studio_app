@@ -127,7 +127,6 @@
 
     const reset_page = async (alert_message?: string): Promise<void> => {
         try {
-            //@todo call reset_ks ?
             app_loading.set(true);
             handle_view(`cfg_init`);
             if (alert_message) await dialog.alert(alert_message);
@@ -628,6 +627,7 @@
                     ks.keys.nostr_secretkey(nostr_publickey),
                     ks_nostr_secretkey.result,
                 );
+                await reset_ks();
                 await restart({
                     route: `/`,
                     notify_message: `${$t(`app.page.cfg.init.notification.welcome`)}`,
