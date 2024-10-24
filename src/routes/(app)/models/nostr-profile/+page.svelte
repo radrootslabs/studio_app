@@ -156,131 +156,139 @@
                     }}
                 />
                 {#if ld.nostr_profiles.length}
-                    {#each ld.nostr_profiles as li (li.public_key)}
-                        <div
-                            class={`relative flex flex-col h-24 pt-5 px-3 bg-layer-1-surface rounded-touch overflow-hidden active:ring-4 active:ring-layer-2-surface/80 transition-all tap-rise-1 active:opacity-60`}
-                        >
-                            <button
-                                class={`flex flex-col h-full w-full pt-[2px] pl-1 gap-1 items-start`}
-                                on:click|preventDefault={async () => {
-                                    $nav_prev.push({
-                                        route: `/models/nostr-profile`,
-                                        label: `${$t(`common.profiles`)}`,
-                                    });
-                                    await route(`/models/nostr-profile/view`, [
-                                        [`nostr_pk`, li.public_key],
-                                    ]);
-                                }}
+                    <div
+                        class={`flex flex-col w-full gap-4 justify-center items-center`}
+                    >
+                        {#each ld.nostr_profiles as li (li.public_key)}
+                            <div
+                                class={`relative flex flex-col h-24 pt-5 px-3 bg-layer-1-surface rounded-touch overflow-hidden active:ring-4 active:ring-layer-2-surface/80 transition-all tap-rise-1 active:opacity-60`}
                             >
-                                <div
-                                    class={`flex flex-row w-full pl-1 gap-4 justify-start items-center`}
+                                <button
+                                    class={`flex flex-col h-full w-full pt-[2px] pl-1 gap-1 items-start`}
+                                    on:click|preventDefault={async () => {
+                                        $nav_prev.push({
+                                            route: `/models/nostr-profile`,
+                                            label: `${$t(`common.profiles`)}`,
+                                        });
+                                        await route(
+                                            `/models/nostr-profile/view`,
+                                            [[`nostr_pk`, li.public_key]],
+                                        );
+                                    }}
                                 >
-                                    <p
-                                        class={`font-mono text-[1.1rem] text-layer-1-glyph-shade text-ellipsis overflow-hidden`}
+                                    <div
+                                        class={`flex flex-row w-full pl-1 gap-4 justify-start items-center`}
                                     >
-                                        {li.name
-                                            ? li.name
-                                            : `(${`${$t(`icu.no_*`, { value: `${$t(`common.profile`)}` })}`})`}
-                                    </p>
-                                    {#if li.public_key === $app_nostr_key}
-                                        <div class={`flex flex-row`}>
+                                        <p
+                                            class={`font-mono text-[1.1rem] text-layer-1-glyph-shade text-ellipsis overflow-hidden`}
+                                        >
+                                            {li.name
+                                                ? li.name
+                                                : `(${`${$t(`icu.no_*`, { value: `${$t(`common.profile`)}` })}`})`}
+                                        </p>
+                                        {#if li.public_key === $app_nostr_key}
+                                            <div class={`flex flex-row`}>
+                                                <div
+                                                    class={`flex flex-row h-4 justify-center items-center px-[6px] bg-success/70 rounded-md -translate-y-[1px]`}
+                                                >
+                                                    <p
+                                                        class={`font-mono font-[900] text-[0.7rem] text-white text-ellipsis overflow-hidden`}
+                                                    >
+                                                        {`${$t(`common.active`)}`}
+                                                    </p>
+                                                </div>
+                                            </div>
+                                        {/if}
+                                    </div>
+                                    <div
+                                        class={`grid grid-cols-12 flex flex-row h-6 w-full pt-2 gap-2 items-center`}
+                                    >
+                                        <div
+                                            class={`col-span-2 flex flex-row h-full items-center `}
+                                        >
                                             <div
-                                                class={`flex flex-row h-4 justify-center items-center px-[6px] bg-success/70 rounded-md -translate-y-[1px]`}
+                                                class={`flex flex-row h-[1rem] px-[9px] justify-start items-center bg-zinc-800/90 rounded-[5px] translate-y-[1px]`}
                                             >
                                                 <p
-                                                    class={`font-mono font-[900] text-[0.7rem] text-white text-ellipsis overflow-hidden`}
+                                                    class={`font-mono font-[600] text-[0.9rem] text-layer-2-glyph lowercase line-clamp-1`}
                                                 >
-                                                    {`${$t(`common.active`)}`}
+                                                    {`${$t(`common.key`)}`}
                                                 </p>
                                             </div>
                                         </div>
-                                    {/if}
-                                </div>
-                                <div
-                                    class={`grid grid-cols-12 flex flex-row h-6 w-full pt-2 gap-2 items-center`}
-                                >
-                                    <div
-                                        class={`col-span-2 flex flex-row h-full items-center `}
-                                    >
                                         <div
-                                            class={`flex flex-row h-[1rem] px-[9px] justify-start items-center bg-zinc-800/90 rounded-[5px] translate-y-[1px]`}
+                                            class={`col-span-10 flex flex-row h-full pr-2 justify-end items-center overflow-x-hidden`}
                                         >
                                             <p
-                                                class={`font-mono font-[600] text-[0.9rem] text-layer-2-glyph lowercase line-clamp-1`}
+                                                class={`font-mono text-[0.9rem] text-layer-1-glyph line-clamp-1`}
                                             >
-                                                {`${$t(`common.key`)}`}
+                                                {`${`${nostr.lib.npub(li.public_key) || ""}`.slice(
+                                                    0,
+                                                    24,
+                                                )}...`}
                                             </p>
                                         </div>
                                     </div>
-                                    <div
-                                        class={`col-span-10 flex flex-row h-full pr-2 justify-end items-center overflow-x-hidden`}
-                                    >
-                                        <p
-                                            class={`font-mono text-[0.9rem] text-layer-1-glyph line-clamp-1`}
-                                        >
-                                            {`${`${nostr.lib.npub(li.public_key) || ""}`.slice(
-                                                0,
-                                                24,
-                                            )}...`}
-                                        </p>
-                                    </div>
-                                </div>
-                            </button>
-                            <div
-                                class={`z-10 absolute top-2 right-3 flex flex-row h-full justify-end pr-1`}
-                            >
-                                <SelectElement
-                                    basis={{
-                                        args: {
-                                            layer: 0,
-                                            mask: true,
-                                            callback: async ({ value }) => {
-                                                await handle_key_options_press({
-                                                    option: value,
-                                                    public_key: li.public_key,
-                                                });
-                                            },
-                                            options: [
-                                                {
-                                                    entries:
-                                                        page_param.options_list.filter(
-                                                            (i) =>
-                                                                !(
-                                                                    !li.name &&
-                                                                    i.value ===
-                                                                        `edit-profile-name`
-                                                                ) &&
-                                                                !(
-                                                                    li.name &&
-                                                                    i.value ===
-                                                                        `add-profile-name`
-                                                                ) &&
-                                                                !(
-                                                                    li.public_key ===
-                                                                        $app_nostr_key &&
-                                                                    i.value ===
-                                                                        `set-key-active`
-                                                                ),
-                                                        ),
-                                                },
-                                            ],
-                                        },
-                                    }}
+                                </button>
+                                <div
+                                    class={`z-10 absolute top-2 right-3 flex flex-row h-full justify-end pr-1`}
                                 >
-                                    <svelte:fragment slot="element">
-                                        <Glyph
-                                            basis={{
-                                                key: `dots-three`,
-                                                dim: `md`,
-                                                classes: `text-layer-1-glyph`,
-                                                weight: `bold`,
-                                            }}
-                                        />
-                                    </svelte:fragment>
-                                </SelectElement>
+                                    <SelectElement
+                                        basis={{
+                                            args: {
+                                                layer: 0,
+                                                mask: true,
+                                                callback: async ({ value }) => {
+                                                    await handle_key_options_press(
+                                                        {
+                                                            option: value,
+                                                            public_key:
+                                                                li.public_key,
+                                                        },
+                                                    );
+                                                },
+                                                options: [
+                                                    {
+                                                        entries:
+                                                            page_param.options_list.filter(
+                                                                (i) =>
+                                                                    !(
+                                                                        !li.name &&
+                                                                        i.value ===
+                                                                            `edit-profile-name`
+                                                                    ) &&
+                                                                    !(
+                                                                        li.name &&
+                                                                        i.value ===
+                                                                            `add-profile-name`
+                                                                    ) &&
+                                                                    !(
+                                                                        li.public_key ===
+                                                                            $app_nostr_key &&
+                                                                        i.value ===
+                                                                            `set-key-active`
+                                                                    ),
+                                                            ),
+                                                    },
+                                                ],
+                                            },
+                                        }}
+                                    >
+                                        <svelte:fragment slot="element">
+                                            <Glyph
+                                                basis={{
+                                                    key: `dots-three`,
+                                                    dim: `md`,
+                                                    classes: `text-layer-1-glyph`,
+                                                    weight: `bold`,
+                                                }}
+                                            />
+                                        </svelte:fragment>
+                                    </SelectElement>
+                                </div>
                             </div>
-                        </div>
-                    {/each}
+                        {/each}
+                    </div>
                 {/if}
             </div>
         </LayoutTrellis>

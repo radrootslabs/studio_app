@@ -645,14 +645,19 @@
                     );
                     return; // @todo
                 }
-                await db.set_nostr_profile_relay({
-                    nostr_profile: {
-                        id: nostr_profile_add.id,
-                    },
-                    nostr_relay: {
-                        id: nostr_relay_add.id,
-                    },
-                });
+                const nostr_profile_relay_add =
+                    await db.set_nostr_profile_relay({
+                        nostr_profile: {
+                            id: nostr_profile_add.id,
+                        },
+                        nostr_relay: {
+                            id: nostr_relay_add.id,
+                        },
+                    });
+                console.log(
+                    JSON.stringify(nostr_profile_relay_add, null, 4),
+                    `nostr_profile_relay_add`,
+                );
             }
             await reset_ks();
             await restart({

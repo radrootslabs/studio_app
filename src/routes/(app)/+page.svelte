@@ -11,6 +11,7 @@
         route,
         t,
         Tabs,
+        TrellisTitle,
         type AppConfigType,
         type CallbackPromise,
         type GlyphKey,
@@ -98,7 +99,7 @@
             </p>
         </button>
     </div>
-    <div class={`flex flex-col justify-center items-center`}>
+    <div class={`flex flex-col pt-2 justify-center items-center`}>
         {#if tmp_show_no_profile}
             <button
                 class={`relative flex flex-row h-24 w-${$app_layout} p-4 gap-4 justify-center items-center bg-layer-2-surface/60 rounded-touch touch-layer-1 touch-layer-1-raise-less el-re`}
@@ -141,13 +142,15 @@
             </button>
         {/if}
     </div>
-    <div class={`flex flex-col w-full gap-2 justify-start items-center`}>
-        <div class={`flex flex-row w-full px-8 justify-start items-center`}>
-            <p class={`font-sans font-[500] text-layer-0-glyph capitalize`}>
-                {`${$t(`common.options_list`)}:`}
-            </p>
+    <div class={`flex flex-col w-full gap-[2px] justify-start items-center`}>
+        <div class={`flex flex-row w-full px-6 justify-center items-center`}>
+            <TrellisTitle
+                basis={{
+                    value: `${$t(`common.options`)}`,
+                }}
+            />
         </div>
-        <div class={`flex flex-col w-full gap-4 justify-start items-center`}>
+        <div class={`flex flex-col w-full gap-5 justify-start items-center`}>
             {#each page_param.buttons[$app_cfg_type] as btn}
                 <button
                     class={`flex flex-row h-20 w-${$app_layout} py-2 px-6 justify-between items-center rounded-touch bg-layer-1-surface touch-layer-1 touch-layer-1-raise-less el-re`}
@@ -198,12 +201,19 @@
                 label: `Home`,
                 callback: async () => {
                     await route(`/`);
+                    const res = await db.nostr_relay_get({ list: [`all`] });
+                    console.log(JSON.stringify(res, null, 4), `res`);
                 },
             },
             {
                 icon: `arrows-down-up`,
                 label: `Transactions`,
-                callback: async () => {},
+                callback: async () => {
+                    const res = await db.nostr_relay_get({
+                        list: [`on_profile`, { public_key: $app_nostr_key }],
+                    });
+                    console.log(JSON.stringify(res, null, 4), `res`);
+                },
             },
             {
                 icon: `cardholder`,
