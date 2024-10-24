@@ -17,6 +17,7 @@
         carousel_next,
         carousel_prev,
         DisplayLine,
+        el_id,
         EntryLine,
         fmt_id,
         Glyph,
@@ -1011,9 +1012,17 @@
                                 : `${$t(`common.back`)}`,
                         callback: async () => {
                             if ($carousel_index === 0) {
-                                await dialog.alert(
-                                    `${$t(`app.page.cfg.init.notification.no_profile_name`)}`,
-                                );
+                                const confirm = await dialog.confirm({
+                                    message: `${$t(`app.page.cfg.init.notification.no_profile_name`)}`,
+                                    cancel_label: `${$t(`icu.add_*`, { value: `${$t(`common.profile`)}` })}`,
+                                    ok_label: `${$t(`common.continue`)}`,
+                                });
+                                if (confirm === false) {
+                                    el_id(
+                                        fmt_id(page_param.kv.nostr_profilename),
+                                    )?.focus();
+                                    return;
+                                }
                                 carousel_next(view);
                                 return;
                             }

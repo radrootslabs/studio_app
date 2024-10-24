@@ -3,7 +3,6 @@
     import { cfg } from "$lib/conf";
     import type { IClientDeviceMetadata } from "@radroots/client";
     import {
-        app_cfg_type,
         app_db,
         app_geoc,
         app_loading,
@@ -74,10 +73,6 @@
     app_geoc.subscribe((_app_geoc) => {
         if (!_app_geoc) return;
         console.log(`(app_geoc) success`);
-    });
-
-    app_cfg_type.subscribe(async (_app_cfg_type) => {
-        console.log(`_app_cfg_type `, _app_cfg_type);
     });
 
     app_notify.subscribe(async (_app_notify) => {

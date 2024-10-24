@@ -218,9 +218,7 @@
             {
                 icon: `cardholder`,
                 label: `Wallet`,
-                callback: async () => {
-                    await route(`/models/nostr-profile`);
-                },
+                callback: async () => {},
             },
             {
                 icon: `squares-four`,
