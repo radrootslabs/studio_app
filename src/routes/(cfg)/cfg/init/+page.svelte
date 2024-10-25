@@ -12,10 +12,10 @@
         app_loading,
         app_splash,
         ButtonCarouselPair,
+        carousel_dec,
+        carousel_inc,
         carousel_index,
         carousel_index_max,
-        carousel_next,
-        carousel_prev,
         DisplayLine,
         el_id,
         EntryLine,
@@ -256,12 +256,12 @@
                             case 1:
                                 {
                                     cgf_init_key_option = undefined;
-                                    await carousel_prev(view);
+                                    await carousel_dec(view);
                                 }
                                 break;
                             case 2:
                                 {
-                                    await carousel_prev(view);
+                                    await carousel_dec(view);
                                 }
                                 break;
                         }
@@ -276,7 +276,7 @@
                             break;
                         case 1:
                             {
-                                carousel_prev(view);
+                                carousel_dec(view);
                             }
                             break;
                     }
@@ -295,7 +295,7 @@
                         switch ($carousel_index) {
                             case 0:
                                 {
-                                    await carousel_next(view);
+                                    await carousel_inc(view);
                                 }
                                 break;
                             case 1:
@@ -304,7 +304,7 @@
                                         cgf_init_key_option ===
                                         `kv_nostr_secretkey`
                                     ) {
-                                        await carousel_next(view);
+                                        await carousel_inc(view);
                                         return;
                                     }
                                     const ks_nostr_secretkey =
@@ -430,7 +430,7 @@
                                         profilename_added.tok,
                                     );
 
-                                    carousel_next(view);
+                                    carousel_inc(view);
                                 }
                                 break;
                             case 1: {
@@ -1023,7 +1023,7 @@
                                     )?.focus();
                                     return;
                                 }
-                                carousel_next(view);
+                                carousel_inc(view);
                                 return;
                             }
                             await handle_back();

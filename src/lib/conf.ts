@@ -31,7 +31,8 @@ export const cfg = {
         load: 321,
         notify: 123,
         mount_el: 500,
-        nostr_relay_poll_document: 3000
+        nostr_relay_poll_document: 3000,
+        entry_focus: 2000,
     },
     cmd: {
         layout_route: `*-route`

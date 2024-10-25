@@ -6,7 +6,7 @@ import tailwind_default from "tailwindcss/defaultTheme";
 const { fontFamily: tw_font } = tailwind_default;
 
 const heights_form = {
-    line: "42px",
+    line: "44px",
 };
 
 const heights_responsive = {
@@ -84,7 +84,8 @@ const config: Config = {
                 lust: [`Lust`],
                 circ: [`Circular`],
                 arch: [`Archivo`],
-                spaceg: [`Space Grotesk`]
+                sg: [`Space Grotesk`],
+                sp: [`Spartan`]
             },
             fontSize: {
                 line_label: [`1.3rem`, { lineHeight: `1.3rem` }],

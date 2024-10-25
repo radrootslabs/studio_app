@@ -218,7 +218,9 @@
             {
                 icon: `cardholder`,
                 label: `Wallet`,
-                callback: async () => {},
+                callback: async () => {
+                    await route(`/test`);
+                },
             },
             {
                 icon: `squares-four`,

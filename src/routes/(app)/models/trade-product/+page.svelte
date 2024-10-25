@@ -3,10 +3,10 @@
     import { type TradeProduct } from "@radroots/models";
     import {
         app_notify,
-        LayoutArea,
         LayoutTrellis,
         LayoutView,
         Nav,
+        nav_prev,
         route,
         t,
         time_iso,
@@ -37,6 +37,14 @@
                 app_notify.set(
                     `${$t(`icu.error_loading_*`, { value: `${$t(`common.page`)}` })}`,
                 );
+                return;
+            }
+            if (trade_products.results.length === 0) {
+                $nav_prev.push({
+                    route: `/`,
+                    label: `Back`,
+                });
+                await route(`/models/trade-product/add`);
                 return;
             }
 
@@ -152,28 +160,6 @@
             {/each}
         </LayoutTrellis>
     </LayoutView>
-{:else}
-    <LayoutArea>
-        <div
-            class={`flex flex-col h-full w-full gap-2 justify-center items-center`}
-        >
-            <p
-                class={`font-sans font-[400] text-layer-1-glyph text-line_display`}
-            >
-                {`${$t(`icu.no_*_to_display`, { value: `${$t(`common.items`)}`.toLowerCase() })}`}
-            </p>
-            <a href={`/models/trade-product/add`}>
-                <button
-                    class={`flex flex-row justify-center items-center active:opacity-80`}
-                    on:click={async () => {}}
-                >
-                    <p class={`font-sans font-[400] text-layer-2-glyph-hl`}>
-                        {`${$t(`icu.click_to_add_a_*`, { value: `${$t(`icu.new_*`, { value: `${$t(`common.product`)}` })}`.toLowerCase() })}`}
-                    </p>
-                </button>
-            </a>
-        </div>
-    </LayoutArea>
 {/if}
 <Nav
     basis={{

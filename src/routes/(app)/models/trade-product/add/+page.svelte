@@ -7,10 +7,6 @@
         kv_init_trade_product_fields,
         kv_validate_trade_product_fields,
     } from "$lib/utils/kv";
-    import {
-        model_location_gcs_add_geocode,
-        model_location_gcs_add_position,
-    } from "$lib/utils/models";
     import type { GeocoderReverseResult } from "@radroots/geocoder";
     import {
         mass_units,
@@ -19,15 +15,19 @@
         type TradeProductFormFields,
     } from "@radroots/models";
     import {
+        ButtonGlyph,
+        carousel_dec,
+        carousel_inc,
         carousel_index,
         carousel_index_max,
-        carousel_next,
-        carousel_prev,
+        carousel_num,
         el_id,
         EntryLine,
         EntryMultiline,
         EntryOption,
         Fill,
+        fmt_geol_latitude,
+        fmt_geol_longitude,
         fmt_id,
         Glyph,
         InputElement,
@@ -38,6 +38,7 @@
         LayoutView,
         locale,
         Nav,
+        sleep,
         t,
         view_effect,
     } from "@radroots/svelte-lib";
@@ -65,44 +66,44 @@
         [
             0,
             {
-                label_next: `${$t(`common.preview`)}`,
+                label_next: `${$t(`icu.add_*`, { value: `${$t(`common.product`)}` })}`,
             },
         ],
         [
             1,
             {
-                label_next: `${$t(`common.details`)}`,
+                label_next: `${$t(`icu.add_*`, { value: `${$t(`common.location`)}` })}`,
             },
         ],
         [
             2,
             {
-                label_next: `${$t(`common.location`)}`,
+                label_next: `${$t(`icu.add_*`, { value: `${$t(`common.listing`)}` })}`,
             },
         ],
         [
             3,
             {
-                label_next: `${$t(`common.review`)}`,
+                label_next: `${$t(`common.preview`)}`,
             },
         ],
         [
             4,
             {
-                label_next: `${$t(`common.post`)}`,
+                label_next: `${$t(`common.publish`)}`,
             },
         ],
     ]);
 
-    type View = `load` | `form_1` | `map`;
+    type View = `load` | `form_1`;
     let view: View = `load`;
-
     $: {
         view_effect<View>(view);
     }
 
     onMount(async () => {
         try {
+            await kv.set(fmt_id(`price_amt`), `2`);
             await handle_view(`load`);
             carousel_index.set(0);
             carousel_index_max.set(carousel_param.size - 1);
@@ -116,11 +117,14 @@
         }
     });
 
+    $: {
+        console.log(`$carousel_index `, $carousel_index);
+        console.log(`$carousel_index_max `, $carousel_index_max);
+    }
+
     let el_trellis_wrap_price: HTMLElement | null;
 
     let loading_submit = false;
-    let loading_map = false;
-    let loading_location_gcs = false;
 
     let show_sel_trade_product_key_other = false;
     let sel_trade_product_key: string = trade_key_default;
@@ -131,17 +135,19 @@
 
     let sel_location_gcs_id = ``;
     let ls_models_location_gcs: LocationGcs[] = [];
-    let map_point_location_gcs: GeolocationCoordinatesPoint =
+
+    let map_choose_loc_loading = true;
+    let map_choose_loc_geoc_point: GeolocationCoordinatesPoint =
         cfg.map.coords.default;
-    let map_point_location_gcs_select: GeolocationCoordinatesPoint =
+    let map_choose_loc_geoc_point_select: GeolocationCoordinatesPoint =
         cfg.map.coords.default;
-    let map_point_location_gcs_select_geoc: GeocoderReverseResult | undefined =
-        undefined;
+    let map_choose_loc_geoc_point_select_geoc:
+        | GeocoderReverseResult
+        | undefined = undefined;
 
     let show_sel_trade_product_qty_tup_other = false;
     let sel_trade_product_qty_tup = ``;
 
-    // let show_sel_trade_product_price_currency = false;
     let sel_trade_product_price_currency = ``;
     let sel_trade_product_price_qty_unit = ``;
 
@@ -150,8 +156,8 @@
     let preview_trade_product: TradeProductFormFields | undefined = undefined;
     let preview_trade_product_qty_avail = 0;
 
-    let review_trade_product: TradeProductFormFields | undefined = undefined;
-    let review_location_gcs: LocationGcs | undefined = undefined;
+    //let review_trade_product: TradeProductFormFields | undefined = undefined;
+    //let review_location_gcs: LocationGcs | undefined = undefined;
 
     $: num_trade_product_qty_amt = preview_trade_product
         ? Number(preview_trade_product.qty_amt)
@@ -224,153 +230,128 @@
     }
 
     carousel_index.subscribe(async (_carousel_index) => {
-        if (_carousel_index === 1) {
-            const kv_qty_avail = await kv.get(fmt_id(`qty_avail`));
-            if (isNaN(kv_qty_avail)) preview_trade_product_qty_avail = 1;
-            else preview_trade_product_qty_avail = Number(kv_qty_avail);
+        switch (view) {
+            case `form_1`: {
+                switch (_carousel_index) {
+                    case 1:
+                        {
+                            await handle_render_map_initial();
+                        }
+                        break;
+                    case 2:
+                        {
+                            const kv_qty_avail = await kv.get(
+                                fmt_id(`qty_avail`),
+                            );
+                            if (isNaN(kv_qty_avail))
+                                preview_trade_product_qty_avail = 1;
+                            else
+                                preview_trade_product_qty_avail =
+                                    Number(kv_qty_avail);
+                        }
+                        break;
+                }
+            }
         }
     });
 
     const handle_view = async (new_view: View): Promise<void> => {
         try {
-            if (new_view === `map`) {
-                loading_map = true;
-                const geoloc = await geol.current();
-                if (`err` in geoloc) return;
-                else {
-                    map_point_location_gcs = geoloc;
-                    map_point_location_gcs_select = geoloc;
-                }
-                loading_map = false;
-            }
             view = new_view;
         } catch (e) {
             console.log(`(error) handle_view `, e);
         }
     };
 
-    const handle_back = async (): Promise<void> => {
+    const handle_back = async (num?: number): Promise<void> => {
         try {
             switch ($carousel_index) {
                 default:
                     {
-                        await carousel_prev(view);
+                        await carousel_dec(view);
                     }
                     break;
+            }
+            if (num) {
+                carousel_num.set(num);
+                carousel_index.set($carousel_index - (num - 1));
             }
         } catch (e) {
             console.log(`(error) handle_back `, e);
         }
     };
 
-    const handle_continue = async (): Promise<void> => {
+    const handle_continue = async (num?: number): Promise<void> => {
         try {
             switch ($carousel_index) {
                 case 0:
                     {
-                        const vals_init =
-                            await kv_validate_trade_product_fields({
-                                kv_pref: fmt_id(),
-                                no_validation: [
-                                    `year`,
-                                    `price_qty_amt`,
-                                    `qty_avail`,
-                                    `summary`,
-                                    `title`,
-                                ],
-                            });
-                        if (`err` in vals_init) {
+                        const vals_1 = await kv_validate_trade_product_fields({
+                            kv_pref: fmt_id(),
+                            no_validation: [
+                                `year`,
+                                `price_qty_amt`,
+                                `qty_avail`,
+                                `summary`,
+                                `title`,
+                            ],
+                        });
+                        if (`err` in vals_1) {
                             await dialog.alert(
-                                `${$t(`trade.product.fields.${vals_init.err}.err_invalid`, { default: `${$t(`icu.invalid_*`, { value: vals_init.err })}` })}`,
+                                `${$t(`trade.product.fields.${vals_1.err}.err_invalid`, { default: `${$t(`icu.invalid_*`, { value: vals_1.err })}` })}`,
                             );
                             return;
                         }
-
-                        if (!vals_init.year)
+                        if (!vals_1.year)
                             await kv.set(
                                 fmt_id(`year`),
                                 new Date().getFullYear().toString(),
                             );
-                        if (!vals_init.price_qty_amt)
+                        if (!vals_1.price_qty_amt)
                             await kv.set(fmt_id(`price_qty_amt`), `1`);
-                        if (!vals_init.qty_avail)
+                        if (!vals_1.qty_avail)
                             await kv.set(fmt_id(`qty_avail`), `1`);
 
-                        const vals = await kv_validate_trade_product_fields({
+                        const vals_2 = await kv_validate_trade_product_fields({
                             kv_pref: fmt_id(),
                             no_validation: [`summary`, `title`],
                         });
-                        if (`err` in vals) {
+                        if (`err` in vals_2) {
                             await dialog.alert(
-                                `${$t(`trade.product.fields.${vals.err}.err_invalid`, { default: `${$t(`icu.invalid_*`, { value: vals.err })}` })}`,
+                                `${$t(`trade.product.fields.${vals_2.err}.err_invalid`, { default: `${$t(`icu.invalid_*`, { value: vals_2.err })}` })}`,
                             );
                             return;
                         }
-                        preview_trade_product = vals;
-                        await carousel_next(view);
+                        preview_trade_product = vals_2;
+                        await carousel_inc(view);
                     }
                     break;
                 case 1:
                     {
-                        await carousel_next(`form_1`);
+                        await carousel_inc(view);
                     }
                     break;
                 case 2:
                     {
-                        const vals = await kv_validate_trade_product_fields({
-                            kv_pref: fmt_id(),
-                        });
-                        if (`err` in vals) {
-                            await dialog.alert(
-                                `${$t(`icu.enter_the_*`, { value: `${$t(`icu.*_title`, { value: `${$t(`common.listing`)}` })}`.toLowerCase() })}`,
-                            );
-                            el_id(fmt_id(`${vals.err}_wrap`))?.classList.add(
-                                `line-entry-highlight-1`,
-                            );
-                            return;
-                        }
-                        await carousel_next(`form_1`);
+                        await carousel_inc(view);
                     }
                     break;
                 case 3:
                     {
-                        const location_gcs_kv_id = await kv.get(
-                            fmt_id(`location_gcs_id`),
-                        );
-                        if (!location_gcs_kv_id) {
-                            await dialog.alert(
-                                `${$t(`icu.the_*_is_missing`, { value: `${$t(`common.product_location`)}`.toLowerCase() })}`,
-                            );
-                            return; //@todo
-                        }
-                        const location_gcs_get = await db.location_gcs_get({
-                            id: location_gcs_kv_id,
-                        });
-                        if (`err` in location_gcs_get) {
-                            await dialog.alert(
-                                `${$t(`error.client.unhandled`)}`,
-                            );
-                            preview_trade_product = undefined;
-                            return; //@todo
-                        } else if (location_gcs_get.results.length < 1) {
-                            await dialog.alert(
-                                `${$t(`error.client.unhandled`)}`,
-                            );
-                            preview_trade_product = undefined;
-                            return; //@todo
-                        }
-                        review_location_gcs = location_gcs_get.results[0];
                         const vals = await kv_validate_trade_product_fields({
                             kv_pref: fmt_id(),
                         });
                         if (`err` in vals) {
+                            const el = el_id(fmt_id(`${vals.err}_wrap`));
                             await dialog.alert(
-                                `${$t(`trade.product.fields.${vals.err}.err_invalid`, { default: `${$t(`icu.invalid_*`, { value: vals.err })}` })}`,
+                                `${$t(`icu.enter_the_*`, { value: `${$t(`common.${vals.err}`)}`.toLowerCase() })}`,
                             );
-                            return; //@todo
+                            el?.classList.add(`entry-layer-1-highlight`);
+                            await sleep(cfg.delay.entry_focus);
+                            el?.classList.remove(`entry-layer-1-highlight`);
+                            return;
                         }
-                        review_trade_product = vals;
-                        await carousel_next(`form_1`);
+                        await carousel_inc(view);
                     }
                     break;
                 case 4:
@@ -378,6 +359,9 @@
                         await submit();
                     }
                     break;
+            }
+            if (num) {
+                carousel_num.set(num);
             }
         } catch (e) {
             console.log(`(error) handle_continue `, e);
@@ -428,69 +412,31 @@
         }
     };
 
-    const handle_add_current_location = async (): Promise<void> => {
+    const handle_render_map_initial = async (): Promise<void> => {
         try {
-            loading_location_gcs = true;
-            const geo_loc = await geol.current();
-            if (`err` in geo_loc) {
-                await dialog.alert(
-                    `${$t(`error.geolocation.request.current`)}`,
-                );
-                return;
+            const geolc = await geol.current();
+            if (!(`err` in geolc)) {
+                map_choose_loc_geoc_point = {
+                    ...geolc,
+                };
+                map_choose_loc_geoc_point_select = map_choose_loc_geoc_point;
             }
-            const res = await model_location_gcs_add_position({ geo_loc });
-            if (`err` in res) {
-                await dialog.alert(
-                    `${$t(`icu.unable_to_save_*`, { value: `${$t(`common.location`)}. ${res.err}`.toLowerCase() })}`,
-                );
-                return; //@todo
-            } else if (`err_s` in res) {
-                await dialog.alert(
-                    `${$t(`icu.unable_to_save_*`, { value: `${$t(`common.location`)} ${res.err_s}`.toLowerCase() })}`,
-                );
-                return; //@todo
-            }
-            sel_location_gcs_id = res.id;
-            await fetch_models_models_location_gcs();
+            await sleep(600);
         } catch (e) {
-            console.log(`(error) handle_add_current_location `, e);
+            console.log(`(error) handle_render_map_initial `, e);
         } finally {
-            loading_location_gcs = false;
+            map_choose_loc_loading = false;
         }
     };
 
-    const handle_add_map_location = async (): Promise<void> => {
-        try {
-            if (!map_point_location_gcs_select_geoc) {
-                await dialog.alert(
-                    `${$t(`icu.no_*_selected`, { value: `${$t(`common.location`)}`.toLowerCase() })}`,
-                );
-                return;
-            }
-            const res = await model_location_gcs_add_geocode({
-                geo_code: map_point_location_gcs_select_geoc,
-            });
-            if (`err` in res) {
-                await dialog.alert(
-                    `${$t(`icu.unable_to_save_*`, { value: `${$t(`common.location`)}. ${res.err}`.toLowerCase() })}`,
-                );
-                return; //@todo
-            } else if (`err_s` in res) {
-                await dialog.alert(
-                    `${$t(`icu.unable_to_save_*`, { value: `${$t(`common.location`)} ${res.err_s}`.toLowerCase() })}`,
-                );
-                return; //@todo
-            }
-            sel_location_gcs_id = res.id;
-            await fetch_models_models_location_gcs();
-        } catch (e) {
-            console.log(`(error) handle_add_map_location `, e);
-        }
+    const handle_map_reset = (): void => {
+        map_choose_loc_geoc_point_select = map_choose_loc_geoc_point;
     };
 
     const submit = async (): Promise<void> => {
         try {
             loading_submit = true;
+            console.log(`@todo submit`);
         } catch (e) {
             console.log(`(error) submit `, e);
         } finally {
@@ -512,13 +458,13 @@
     >
         <div
             data-carousel-container={`form_1`}
-            class={`carousel-container flex h-full w-full`}
+            class={`carousel-container flex h-full w-full ${view === `form_1` ? `fade-in` : ``}`}
         >
             <div
                 data-carousel-item={`form_1`}
                 class={`carousel-item flex flex-col w-full justify-start items-center`}
             >
-                <LayoutTrellis>
+                <LayoutTrellis basis={{ classes: `gap-5` }}>
                     <LayoutTrellisLine
                         basis={{
                             label: {
@@ -850,28 +796,110 @@
             </div>
             <div
                 data-carousel-item={`form_1`}
+                class={`carousel-item flex flex-col w-full pt-4 gap-4 justify-start items-center`}
+            >
+                <MapChooseLocation
+                    basis={{
+                        classes_map: `h-[280px] w-full`,
+                        loading: map_choose_loc_loading,
+                    }}
+                    bind:map_point_center={map_choose_loc_geoc_point}
+                    bind:map_point_select={map_choose_loc_geoc_point_select}
+                    bind:map_point_select_geoc={map_choose_loc_geoc_point_select_geoc}
+                />
+                <div
+                    class={`grid grid-cols-12 flex flex-col w-full px-4 gap-1 justify-start items-center`}
+                >
+                    <div
+                        class={`col-span-9 flex flex-row w-full justify-start items-center`}
+                    >
+                        <p
+                            class={`w-[5.3rem] font-circ font-[500] text-layer-1-glyph-shade tracking-tight`}
+                        >
+                            {`${$t(`common.latitude`)}:`}
+                        </p>
+                        <p class={`font-circ font-[400] text-layer-1-glyph`}>
+                            {fmt_geol_latitude(
+                                map_choose_loc_geoc_point_select.lat,
+                                `dms`,
+                            )}
+                        </p>
+                    </div>
+                    <div
+                        class={`col-span-3 flex flex-row w-full justify-end items-center`}
+                    >
+                        <button
+                            class={`group flex flex-row gap-[6px] justify-center items-center`}
+                            on:click={async () => {
+                                handle_map_reset();
+                            }}
+                        >
+                            <p
+                                class={`font-sg font-[500] text-layer-1-glyph tracking-tight group-active:opacity-80 el-re`}
+                            >
+                                {`${$t(`common.reset`)}`}
+                            </p>
+                            <Glyph
+                                basis={{
+                                    classes: `text-layer-1-glyph/80 group-active:opacity-60 el-re`,
+                                    dim: `sm`,
+                                    weight: `bold`,
+                                    key: `arrow-counter-clockwise`,
+                                }}
+                            />
+                        </button>
+                    </div>
+                    <div
+                        class={`col-span-9 flex flex-row w-full justify-start items-center`}
+                    >
+                        <p
+                            class={`w-[5.3rem] font-circ font-[500] text-layer-1-glyph-shade tracking-tight`}
+                        >
+                            {`${$t(`common.longitude`)}:`}
+                        </p>
+                        <p class={`font-circ font-[400] text-layer-1-glyph`}>
+                            {fmt_geol_longitude(
+                                map_choose_loc_geoc_point_select.lng,
+                                `dms`,
+                            )}
+                        </p>
+                    </div>
+                    {#if map_choose_loc_geoc_point_select_geoc}
+                        <div
+                            class={`col-span-9 flex flex-row w-full justify-start items-center`}
+                        >
+                            <p
+                                class={`w-[5.3rem] font-circ font-[500] text-layer-1-glyph-shade tracking-tight`}
+                            >
+                                {`${$t(`common.location`)}:`}
+                            </p>
+                            <p
+                                class={`font-circ font-[400] text-layer-1-glyph`}
+                            >
+                                {`${map_choose_loc_geoc_point_select_geoc.admin1_name}, ${map_choose_loc_geoc_point_select_geoc.country_name}`}
+                            </p>
+                        </div>
+                    {/if}
+                </div>
+            </div>
+            <div
+                data-carousel-item={`form_1`}
                 class={`carousel-item flex flex-col w-full justify-start items-center`}
             >
                 <LayoutTrellis>
                     {#if preview_trade_product && preview_trade_product_price_currency}
-                        <LayoutTrellisLine
-                            basis={{
-                                label: {
-                                    value: `${$t(`icu.*_details`, { value: `${$t(`common.product`)}` })}`,
-                                },
-                            }}
-                        >
+                        <LayoutTrellisLine>
                             <div
-                                class={`relative flex flex-col h-[30rem] w-full px-4 py-2 gap-4 justify-around items-start bg-layer-1-surface rounded-3xl`}
+                                class={`relative flex flex-col h-[36rem] w-full px-6 pb-4 gap-8 justify-around items-start bg-layer-0-surface rounded-touch`}
                             >
                                 <div
-                                    class={`flex flex-col w-full gap-5 justify-around items-center`}
+                                    class={`flex flex-col flex-grow w-full justify-around items-center`}
                                 >
                                     <div
                                         class={`flex flex-col w-full gap-2 justify-start items-start`}
                                     >
                                         <p
-                                            class={`font-mono font-[400] text-layer-1-glyph`}
+                                            class={`font-mono font-[400] text-[1.25rem] text-layer-1-glyph`}
                                         >
                                             {`${$t(`common.product`)}:`}
                                         </p>
@@ -879,16 +907,15 @@
                                             class={`flex flex-row w-full justify-between items-center`}
                                         >
                                             <div
-                                                class={`flex flex-row flex-grow gap-2 justify-start items-center`}
+                                                class={`flex flex-row flex-grow gap-1 justify-start items-center`}
                                             >
                                                 <p
-                                                    class={`font-mono font-[400] text-layer-2-glyph pr-2`}
+                                                    class={`font-mono font-[600] text-layer-2-glyph/40 pr-2`}
                                                 >
                                                     {`-`}
                                                 </p>
-
                                                 <p
-                                                    class={`font-mono font-[400] text-layer-2-glyph`}
+                                                    class={`font-circ font-[400] text-[1.3rem] text-layer-1-glyph-shade capitalize`}
                                                 >
                                                     {`${preview_trade_product.key}`}
                                                 </p>
@@ -902,17 +929,19 @@
                                                         const el = el_id(
                                                             fmt_id(`key_wrap`),
                                                         );
-                                                        if (el) {
-                                                            el.classList.add(
-                                                                `entry-layer-1-highlight`,
-                                                            );
-                                                            el.focus();
-                                                        }
-                                                        await handle_back();
+                                                        el?.classList.add(
+                                                            `entry-layer-1-highlight`,
+                                                        );
+                                                        el?.focus();
+                                                        await handle_back(2);
+                                                        await sleep(1000);
+                                                        el?.classList.remove(
+                                                            `entry-layer-1-highlight`,
+                                                        );
                                                     }}
                                                 >
                                                     <p
-                                                        class={`font-mono font-[500] text-layer-2-glyph text-sm`}
+                                                        class={`label-sg font-[600] text-[1rem] text-layer-2-glyph`}
                                                     >
                                                         {`${$t(`common.edit`)}`}
                                                     </p>
@@ -924,7 +953,52 @@
                                         class={`flex flex-col w-full gap-2 justify-start items-start`}
                                     >
                                         <p
-                                            class={`font-mono font-[400] text-layer-1-glyph`}
+                                            class={`font-mono font-[400] text-[1.25rem] text-layer-1-glyph`}
+                                        >
+                                            {`${$t(`common.origin`)}:`}
+                                        </p>
+                                        <div
+                                            class={`flex flex-row w-full justify-between items-center`}
+                                        >
+                                            <div
+                                                class={`flex flex-row flex-grow gap-1 justify-start items-center`}
+                                            >
+                                                <p
+                                                    class={`font-mono font-[600] text-layer-2-glyph/40 pr-2`}
+                                                >
+                                                    {`-`}
+                                                </p>
+                                                {#if map_choose_loc_geoc_point_select_geoc}
+                                                    <p
+                                                        class={`font-circ font-[400] text-[1.3rem] text-layer-1-glyph-shade capitalize`}
+                                                    >
+                                                        {`${map_choose_loc_geoc_point_select_geoc.admin1_name}, ${map_choose_loc_geoc_point_select_geoc.country_id}`}
+                                                    </p>
+                                                {/if}
+                                            </div>
+                                            <div
+                                                class={`flex flex-row justify-end items-center`}
+                                            >
+                                                <button
+                                                    class={`flex flex-row justify-start items-center active:opacity-60 transition-all`}
+                                                    on:click={async () => {
+                                                        await handle_back();
+                                                    }}
+                                                >
+                                                    <p
+                                                        class={`label-sg font-[600] text-[1rem] text-layer-2-glyph`}
+                                                    >
+                                                        {`${$t(`common.edit`)}`}
+                                                    </p>
+                                                </button>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div
+                                        class={`flex flex-col w-full gap-2 justify-start items-start`}
+                                    >
+                                        <p
+                                            class={`font-mono font-[400] text-[1.25rem] text-layer-1-glyph`}
                                         >
                                             {`${$t(`common.price`)}:`}
                                         </p>
@@ -932,31 +1006,31 @@
                                             class={`flex flex-row w-full justify-between items-center`}
                                         >
                                             <div
-                                                class={`flex flex-row flex-grow gap-2 justify-start items-center`}
+                                                class={`flex flex-row flex-grow gap-1 justify-start items-center`}
                                             >
                                                 <p
-                                                    class={`font-mono font-[400] text-layer-2-glyph pr-2`}
+                                                    class={`font-mono font-[600] text-layer-2-glyph/40 pr-2`}
                                                 >
                                                     {`-`}
                                                 </p>
                                                 <p
-                                                    class={`font-mono font-[400] text-layer-2-glyph`}
+                                                    class={`font-circ font-[400] text-[1.3rem] text-layer-1-glyph-shade`}
                                                 >
                                                     {preview_trade_product_price_currency.symbol}
                                                 </p>
                                                 <p
-                                                    class={`font-mono font-[400] text-layer-2-glyph`}
+                                                    class={`font-circ font-[400] text-[1.3rem] text-layer-1-glyph-shade`}
                                                 >
                                                     {`${(preview_trade_product_price_currency.val_i + preview_trade_product_price_currency.val_f).toFixed(2)}`}
                                                 </p>
                                                 <p
-                                                    class={`font-mono font-[400] text-layer-2-glyph lowercase`}
+                                                    class={`font-circ font-[400] text-[1.3rem] text-layer-1-glyph-shade lowercase`}
                                                 >
                                                     {`${$t(`common.per`)}`}
                                                 </p>
                                                 {#if preview_trade_product.price_qty_amt === `1`}
                                                     <p
-                                                        class={`font-mono font-[400] text-layer-2-glyph`}
+                                                        class={`font-circ font-[400] text-[1.3rem] text-layer-1-glyph-shade`}
                                                     >
                                                         {`${$t(`measurement.mass.unit.${preview_trade_product.price_qty_unit}_ab`, { default: preview_trade_product.price_qty_unit })}`}
                                                     </p>
@@ -973,17 +1047,19 @@
                                                                 `price_wrap`,
                                                             ),
                                                         );
-                                                        if (el) {
-                                                            el.classList.add(
-                                                                `entry-layer-1-highlight`,
-                                                            );
-                                                            el.focus();
-                                                        }
-                                                        await handle_back();
+                                                        el?.classList.add(
+                                                            `entry-layer-1-highlight`,
+                                                        );
+                                                        el?.focus();
+                                                        await handle_back(2);
+                                                        await sleep(1000);
+                                                        el?.classList.remove(
+                                                            `entry-layer-1-highlight`,
+                                                        );
                                                     }}
                                                 >
                                                     <p
-                                                        class={`font-mono font-[500] text-layer-2-glyph text-sm`}
+                                                        class={`label-sg font-[600] text-[1rem] text-layer-2-glyph`}
                                                     >
                                                         {`${$t(`common.edit`)}`}
                                                     </p>
@@ -995,7 +1071,7 @@
                                         class={`flex flex-col w-full gap-2 justify-start items-start`}
                                     >
                                         <p
-                                            class={`font-mono font-[400] text-layer-1-glyph`}
+                                            class={`font-mono font-[400] text-[1.25rem] text-layer-1-glyph`}
                                         >
                                             {`${$t(`common.quantity`)}:`}
                                         </p>
@@ -1003,25 +1079,25 @@
                                             class={`flex flex-row w-full justify-between items-center`}
                                         >
                                             <div
-                                                class={`flex flex-row flex-grow gap-2 justify-start items-center`}
+                                                class={`flex flex-row flex-grow gap-1 justify-start items-center`}
                                             >
                                                 <p
-                                                    class={`font-mono font-[400] text-layer-2-glyph pr-2`}
+                                                    class={`font-mono font-[600] text-layer-2-glyph/40 pr-2`}
                                                 >
                                                     {`-`}
                                                 </p>
                                                 <p
-                                                    class={`font-mono font-[400] text-layer-2-glyph`}
+                                                    class={`font-circ font-[400] text-[1.3rem] text-layer-1-glyph-shade`}
                                                 >
                                                     {preview_trade_product.qty_amt}
                                                 </p>
                                                 <p
-                                                    class={`font-mono font-[400] text-layer-2-glyph`}
+                                                    class={`font-circ font-[400] text-[1.3rem] text-layer-1-glyph-shade`}
                                                 >
                                                     {`${$t(`measurement.mass.unit.${preview_trade_product.qty_unit}_ab`, { default: preview_trade_product.qty_unit })}`}
                                                 </p>
                                                 <p
-                                                    class={`font-mono font-[400] text-layer-2-glyph`}
+                                                    class={`font-circ font-[400] text-[1.3rem] text-layer-1-glyph-shade`}
                                                 >
                                                     {preview_trade_product.qty_label}
                                                 </p>
@@ -1035,17 +1111,19 @@
                                                         const el = el_id(
                                                             fmt_id(`qty_wrap`),
                                                         );
-                                                        if (el) {
-                                                            el.classList.add(
-                                                                `entry-layer-1-highlight`,
-                                                            );
-                                                            el.focus();
-                                                        }
-                                                        await handle_back();
+                                                        el?.classList.add(
+                                                            `entry-layer-1-highlight`,
+                                                        );
+                                                        el?.focus();
+                                                        await handle_back(2);
+                                                        await sleep(1000);
+                                                        el?.classList.remove(
+                                                            `entry-layer-1-highlight`,
+                                                        );
                                                     }}
                                                 >
                                                     <p
-                                                        class={`font-mono font-[500] text-layer-2-glyph text-sm`}
+                                                        class={`label-sg font-[600] text-[1rem] text-layer-2-glyph`}
                                                     >
                                                         {`${$t(`common.edit`)}`}
                                                     </p>
@@ -1057,7 +1135,7 @@
                                         class={`flex flex-col w-full gap-2 justify-start items-start`}
                                     >
                                         <p
-                                            class={`font-mono font-[400] text-layer-1-glyph`}
+                                            class={`font-mono font-[400] text-[1.25rem] text-layer-1-glyph`}
                                         >
                                             {`${$t(`icu.*_available`, { value: `${$t(`common.quantity`)}` })}:`}
                                         </p>
@@ -1065,20 +1143,20 @@
                                             class={`flex flex-row w-full justify-between items-center`}
                                         >
                                             <div
-                                                class={`flex flex-row flex-grow gap-2 justify-start items-center`}
+                                                class={`flex flex-row flex-grow gap-1 justify-start items-center`}
                                             >
                                                 <p
-                                                    class={`font-mono font-[400] text-layer-2-glyph pr-2`}
+                                                    class={`font-mono font-[600] text-layer-2-glyph/40 pr-2`}
                                                 >
                                                     {`-`}
                                                 </p>
                                                 <p
-                                                    class={`font-mono font-[400] text-layer-2-glyph`}
+                                                    class={`font-circ font-[400] text-[1.3rem] text-layer-1-glyph-shade`}
                                                 >
                                                     {`${preview_trade_product_qty_avail} ${preview_trade_product.qty_label}`}
                                                 </p>
                                                 <p
-                                                    class={`font-mono font-[400] text-layer-2-glyph`}
+                                                    class={`font-circ font-[400] text-[1.3rem] text-layer-1-glyph-shade`}
                                                 >
                                                     {`(${(preview_trade_product_qty_avail * num_trade_product_qty_amt).toFixed(2)} ${$t(`measurement.mass.unit.${preview_trade_product.qty_unit}_ab`, { default: preview_trade_product.qty_unit })})`}
                                                 </p>
@@ -1086,12 +1164,12 @@
                                             <div
                                                 class={`flex flex-row gap-[10px] justify-center items-center`}
                                             >
-                                                <Glyph
+                                                <ButtonGlyph
                                                     basis={{
                                                         key: `arrow-down`,
-                                                        dim: `xs`,
+                                                        dim: `xs+`,
                                                         weight: `bold`,
-                                                        classes: `h-6 w-6 text-layer-2-glyph bg-layer-2-surface active:opacity-60 rounded-full transition-all`,
+                                                        classes: `h-8 w-8 text-layer-2-glyph bg-layer-2-surface active:opacity-60 rounded-full transition-all`,
                                                         callback: async () => {
                                                             preview_trade_product_qty_avail =
                                                                 int_step(
@@ -1108,12 +1186,12 @@
                                                         },
                                                     }}
                                                 />
-                                                <Glyph
+                                                <ButtonGlyph
                                                     basis={{
                                                         key: `arrow-up`,
-                                                        dim: `xs`,
+                                                        dim: `xs+`,
                                                         weight: `bold`,
-                                                        classes: `h-6 w-6 text-layer-2-glyph bg-layer-2-surface active:opacity-60 rounded-full transition-all`,
+                                                        classes: `h-8 w-8 text-layer-2-glyph bg-layer-2-surface active:opacity-60 rounded-full transition-all`,
                                                         callback: async () => {
                                                             preview_trade_product_qty_avail =
                                                                 int_step(
@@ -1194,7 +1272,7 @@
                                                 <p
                                                     class={`font-mono font-[400] text-layer-1-glyph text-lg`}
                                                 >
-                                                    {`${$t(`icu.total_*`, { value: `${$t(`common.price`)}`.toLowerCase() })}:`}
+                                                    {`${$t(`icu.total_*`, { value: `${$t(`common.price`)}` })}:`}
                                                 </p>
                                             </div>
                                             <div
@@ -1295,19 +1373,9 @@
                 class={`carousel-item flex flex-col w-full justify-start items-center`}
             >
                 <LayoutTrellis>
-                    <MapChooseLocation
-                        basis={{
-                            classes_map: `map-trellis-1`,
-                            loading: loading_map,
-                            reset: async () => {
-                                map_point_location_gcs_select =
-                                    map_point_location_gcs;
-                            },
-                        }}
-                        bind:map_point_center={map_point_location_gcs}
-                        bind:map_point_select={map_point_location_gcs_select}
-                        bind:map_point_select_geoc={map_point_location_gcs_select_geoc}
-                    />
+                    <p class={`font-sans font-[400] text-layer-0-glyph`}>
+                        {`@todo add preview`}
+                    </p>
                 </LayoutTrellis>
             </div>
         </div>
@@ -1332,24 +1400,20 @@
         },
         title: {
             label: {
-                value: `${$t(`icu.add_*`, { value: `${$t(`common.product`)}` })}`,
+                value: `${$t(`common.product`)}`,
             },
-            callback: async () => {
-                if (view === `map`) await handle_view(`form_1`);
-                else await handle_view(`map`);
-            },
+            callback: async () => {},
         },
         option: {
             loading: loading_submit,
             label: {
                 value:
-                    view === `map`
-                        ? `Use Location`
+                    $carousel_num > 1
+                        ? `${$t(`common.return`)}`
                         : carousel_param.get($carousel_index)?.label_next || ``,
                 classes: `text-layer-1-glyph-hl`,
                 glyph:
-                    $carousel_index >= 1 &&
-                    $carousel_index + 1 !== $carousel_index_max
+                    $carousel_num > 1
                         ? {
                               key: `caret-right`,
                               classes: `text-layer-1-glyph-hl`,
@@ -1357,9 +1421,7 @@
                         : undefined,
             },
             callback: async () => {
-                if (view === `map`) await handle_add_map_location();
-                else if ($carousel_index === $carousel_index_max)
-                    await submit();
+                if ($carousel_index === $carousel_index_max) await submit();
                 else await handle_continue();
             },
         },

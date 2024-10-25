@@ -4,7 +4,6 @@
     import {
         app_nostr_key,
         app_notify,
-        Glyph,
         type ISelectOption,
         LayoutTrellis,
         LayoutView,
@@ -13,6 +12,7 @@
         route,
         SelectElement,
         t,
+        Glyph,
         TrellisTitle,
     } from "@radroots/svelte-lib";
     import { onMount } from "svelte";

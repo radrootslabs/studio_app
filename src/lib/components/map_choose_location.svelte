@@ -2,11 +2,7 @@
     import { geoc } from "$lib/client";
     import { cfg } from "$lib/conf";
     import type { GeocoderReverseResult } from "@radroots/geocoder";
-    import {
-        app_thc,
-        Loading,
-        type CallbackPromise,
-    } from "@radroots/svelte-lib";
+    import { app_thc, Loading } from "@radroots/svelte-lib";
     import { MapLibre, Marker, Popup } from "@radroots/svelte-maplibre";
     import type { GeolocationCoordinatesPoint } from "@radroots/utils";
     import MapMarkerDot from "./map_marker_dot.svelte";
@@ -15,7 +11,7 @@
     export let basis: {
         classes_map: string;
         loading?: boolean;
-        reset?: CallbackPromise;
+        //reset?: CallbackPromise;
     };
     $: basis = basis;
 
@@ -42,15 +38,31 @@
             })();
         }
     }
+    /*
+{#if !basis.loading}
+        <div class={`flex flex-col h-8 w-full justify-end items-center`}>
+            <button
+                class={`flex flex-row justify-center items-center`}
+                on:click={async () => {
+                    if (basis.reset) await basis.reset();
+                }}
+            >
+                <p class={`font-mono font-[400] text-layer-0-glyph text-sm`}>
+                    {`reset`}
+                </p>
+            </button>
+        </div>
+    {/if}
+    */
 </script>
 
 <div
-    class={`relative flex flex-col justify-center items-center ${basis.classes_map} bg-layer-1-surface rounded-3xl overflow-hidden`}
+    class={`relative flex flex-col justify-center items-center ${basis.classes_map} bg-layer-1-surface overflow-hidden`}
 >
     <MapLibre
         center={map_point_center}
         zoom={10}
-        class={`${basis.classes_map} ${basis.loading ? `hidden` : ``}`}
+        class={`${basis.classes_map} ${basis.loading ? `` : ``}`}
         style={cfg.map.styles.base[$app_thc]}
         attributionControl={false}
     >
@@ -85,21 +97,20 @@
     </MapLibre>
     {#if basis.loading}
         <div
-            class={`absolute top-0 left-0 flex flex-col flex-grow h-full w-full justify-center items-center`}
+            class={`z-10 absolute inset-0 flex flex-col justify-center items-center bg-layer-0-surface`}
         >
-            <Loading />
+            <div
+                class={`relative flex flex-col h-full w-full justify-center items-center`}
+            >
+                <Loading />
+                <!--
+                <p
+                    class={`absolute top-1/2 left-1/2 -translate-x-1/2 translate-y-3 font-circ font-[300] text-[0.6rem] text-layer-0-glyph`}
+                >
+                    {`Loading...`}
+                </p>
+                -->
+            </div>
         </div>
     {/if}
-</div>
-<div class={`flex flex-col h-8 w-full justify-end items-center`}>
-    <button
-        class={`flex flex-row justify-center items-center`}
-        on:click={async () => {
-            if (basis.reset) await basis.reset();
-        }}
-    >
-        <p class={`font-mono font-[400] text-layer-0-glyph text-sm`}>
-            {`reset`}
-        </p>
-    </button>
 </div>

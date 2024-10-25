@@ -11,6 +11,7 @@
 @import "/static/webfonts/circular/styles.css";
 @import "/static/webfonts/archivo/styles.css";
 @import "/static/webfonts/space-grotesk/styles.css";
+@import "/static/webfonts/spartan/styles.css";
 
 @tailwind base;
 @tailwind components;
@@ -24,11 +25,9 @@
 }
 
 @layer components {
-    .map-trellis-1 {
-        height: 400px;
-        width: 100%;
+    .label-sg {
+        @apply font-sg tracking-wide scale-y-[97%];
     }
-
     .tap-scale {
         @apply active:scale-[97%] group-active:scale-[97%] delay-75 duration-700 ease-in-out transition-all;
     }
