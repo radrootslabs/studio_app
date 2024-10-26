@@ -24,6 +24,7 @@ const heights = {
     ...heights_responsive,
     entry_bold: `3.75rem`,
     entry_guide: `3.6rem`,
+    entry_line: `46px`,
     touch_bold: `4.25rem`,
     touch_guide: `3.4rem`,
     line: `46px`,

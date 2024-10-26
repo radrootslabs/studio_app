@@ -760,7 +760,7 @@
                         class={`flex flex-col w-full gap-5 justify-center items-center`}
                     >
                         <button
-                            class={`flex flex-col h-touch_bold w-${$app_layout} justify-center items-center bg-layer-1-surface rounded-3xl touch-layer-1 touch-layer-1-raise-less ${cgf_init_key_option === `key_gen` ? `layer-1-ring` : ``}`}
+                            class={`flex flex-col h-touch_bold w-${$app_layout} justify-center items-center bg-layer-1-surface touch-layer-1-raise-less round-44 ${cgf_init_key_option === `key_gen` ? `bg-layer-1-surface_a/40` : ``}`}
                             on:click|stopPropagation={async () => {
                                 cgf_init_key_option = `key_gen`;
                             }}
@@ -772,7 +772,7 @@
                             </p>
                         </button>
                         <button
-                            class={`flex flex-col h-touch_bold w-${$app_layout} justify-center items-center bg-layer-1-surface rounded-3xl touch-layer-1 touch-layer-1-raise-less ${cgf_init_key_option === `kv_nostr_secretkey` ? `layer-1-ring` : ``}`}
+                            class={`flex flex-col h-touch_bold w-${$app_layout} justify-center items-center bg-layer-1-surface round-44 touch-layer-1-raise-less ${cgf_init_key_option === `kv_nostr_secretkey` ? `bg-layer-1-surface_a/40` : ``}`}
                             on:click|stopPropagation={async () => {
                                 cgf_init_key_option = `kv_nostr_secretkey`;
                             }}
@@ -890,8 +890,10 @@
                         <EntryLine
                             basis={{
                                 loading: cfg_main_profilename_loading,
-                                classes: `w-${$app_layout}`,
-                                style: `guide`,
+                                wrap: {
+                                    classes: `w-${$app_layout}`,
+                                    style: `guide`,
+                                },
                                 el: {
                                     classes: `font-mono text-lg text-center placeholder:opacity-60`,
                                     id: fmt_id(page_param.kv.nostr_profilename),
@@ -941,7 +943,7 @@
                         class={`flex flex-col w-full gap-5 justify-center items-center`}
                     >
                         <button
-                            class={`flex flex-col h-touch_bold w-${$app_layout} justify-center items-center bg-layer-1-surface rounded-3xl touch-layer-1 touch-layer-1-raise-less ${cfg_main_opt_idx1 === `farmer` ? `layer-1-ring` : ``}`}
+                            class={`flex flex-col h-touch_bold w-${$app_layout} justify-center items-center bg-layer-1-surface touch-layer-1-raise-less round-44 ${cfg_main_opt_idx1 === `farmer` ? `bg-layer-1-surface_a/40` : ``}`}
                             on:click|stopPropagation={async () => {
                                 cfg_main_opt_idx1 = `farmer`;
                             }}
@@ -953,7 +955,7 @@
                             </p>
                         </button>
                         <button
-                            class={`flex flex-col h-touch_bold w-${$app_layout} justify-center items-center bg-layer-1-surface rounded-3xl touch-layer-1 touch-layer-1-raise-less ${cfg_main_opt_idx1 === `personal` ? `layer-1-ring` : ``}`}
+                            class={`flex flex-col h-touch_bold w-${$app_layout} justify-center items-center bg-layer-1-surface touch-layer-1-raise-less round-44 ${cfg_main_opt_idx1 === `personal` ? `bg-layer-1-surface_a/40` : ``}`}
                             on:click|stopPropagation={async () => {
                                 cfg_main_opt_idx1 = `personal`;
                             }}

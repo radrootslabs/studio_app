@@ -103,3 +103,4 @@
 <AppControls />
 <CssStatic />
 <CssStyles />
+<div class="hidden h-entry_guide h-entry_line" />

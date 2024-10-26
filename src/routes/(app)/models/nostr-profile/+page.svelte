@@ -11,7 +11,7 @@
         Nav,
         nav_prev,
         route,
-        SelectEl,
+        SelectMenu,
         t,
         TrellisTitle,
     } from "@radroots/svelte-lib";
@@ -233,7 +233,7 @@
                                 <div
                                     class={`z-10 absolute top-2 right-3 flex flex-row h-full justify-end pr-1`}
                                 >
-                                    <SelectEl
+                                    <SelectMenu
                                         value={`~`}
                                         basis={{
                                             layer: 0,
@@ -280,7 +280,7 @@
                                                 }}
                                             />
                                         </svelte:fragment>
-                                    </SelectEl>
+                                    </SelectMenu>
                                 </div>
                             </div>
                         {/each}
