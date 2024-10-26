@@ -48,6 +48,7 @@
 		"@radroots/theme": "workspace:*",
 		"@radroots/utils": "workspace:*",
 		"chart.js": "^4.4.5",
+		"css-paint-polyfill": "^3.4.0",
 		"sql.js": "^1.11.0"
 	}
 }

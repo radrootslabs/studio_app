@@ -16,6 +16,9 @@ export const ks = {
         nostr_publickey: `keys:nostr:`,
     }
 };
+export const ascii = {
+    bullet: '•'
+}
 
 export const cfg = {
     app: {

@@ -3433,6 +3433,7 @@ dependencies = [
  "tauri",
  "tauri-build",
  "tauri-plugin-dialog",
+ "tauri-plugin-fs",
  "tauri-plugin-geolocation",
  "tauri-plugin-http",
  "tauri-plugin-map-display",

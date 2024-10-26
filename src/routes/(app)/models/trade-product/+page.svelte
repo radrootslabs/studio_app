@@ -6,7 +6,6 @@
         LayoutTrellis,
         LayoutView,
         Nav,
-        nav_prev,
         route,
         t,
         time_iso,
@@ -37,14 +36,6 @@
                 app_notify.set(
                     `${$t(`icu.error_loading_*`, { value: `${$t(`common.page`)}` })}`,
                 );
-                return;
-            }
-            if (trade_products.results.length === 0) {
-                $nav_prev.push({
-                    route: `/`,
-                    label: `Back`,
-                });
-                await route(`/models/trade-product/add`);
                 return;
             }
 

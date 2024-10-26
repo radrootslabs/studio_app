@@ -21,7 +21,7 @@
     import { onMount } from "svelte";
 
     type PageParamButtons = {
-        route: NavigationRoute;
+        route?: NavigationRoute;
         label: string;
         key: GlyphKey;
         weight?: GlyphWeight;
@@ -50,9 +50,24 @@
                     key: `note-blank`,
                 },
                 {
-                    route: `/models/trade-product`,
                     label: `Farm Products`,
                     key: `basket`,
+                    callback: async () => {
+                        const trade_products = await db.trade_product_get({
+                            list: [`all`],
+                        });
+                        if (`results` in trade_products) {
+                            if (trade_products.results.length === 0) {
+                                $nav_prev.push({
+                                    route: `/`,
+                                    label: `Back`,
+                                });
+                                await route(`/models/trade-product/add`);
+                                return;
+                            }
+                        }
+                        await route(`/models/trade-product`);
+                    },
                 },
                 {
                     route: `/`,
@@ -102,7 +117,7 @@
     <div class={`flex flex-col pt-2 justify-center items-center`}>
         {#if tmp_show_no_profile}
             <button
-                class={`relative flex flex-row h-24 w-${$app_layout} p-4 gap-4 justify-center items-center bg-layer-2-surface/60 rounded-touch touch-layer-1 touch-layer-1-raise-less el-re`}
+                class={`relative flex flex-row h-24 w-${$app_layout} p-4 gap-4 justify-center items-center bg-layer-2-surface/60 round-20 touch-layer-1 touch-layer-1-raise-less el-re`}
                 on:click={async () => {
                     await route(`/models/nostr-profile`);
                 }}
@@ -153,10 +168,10 @@
         <div class={`flex flex-col w-full gap-5 justify-start items-center`}>
             {#each page_param.buttons[$app_cfg_type] as btn}
                 <button
-                    class={`flex flex-row h-20 w-${$app_layout} py-2 px-6 justify-between items-center rounded-touch bg-layer-1-surface touch-layer-1 touch-layer-1-raise-less el-re`}
+                    class={`flex flex-row h-20 w-${$app_layout} py-2 px-6 justify-between items-center bg-layer-1-surface touch-layer-1 touch-layer-1-raise-less round-20 el-re`}
                     on:click={async () => {
                         if (btn.callback) await btn.callback();
-                        await route(btn.route);
+                        else if (btn.route) await route(btn.route);
                     }}
                 >
                     <div

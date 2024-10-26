@@ -6,7 +6,7 @@ import tailwind_default from "tailwindcss/defaultTheme";
 const { fontFamily: tw_font } = tailwind_default;
 
 const heights_form = {
-    line: "44px",
+    line: "46px",
 };
 
 const heights_responsive = {
@@ -101,6 +101,10 @@ const config: Config = {
                 envelopeButtonCancel: ["1.1rem", { lineHeight: "1.75rem", fontWeight: 600 }],
                 envelopeButtonLabel: ["1.1rem", { lineHeight: "1.75rem", fontWeight: 500 }],
             },
+            gridTemplateColumns: {
+                '16': 'repeat(16, minmax(0, 1fr))',
+                '24': 'repeat(24, minmax(0, 1fr))',
+            },
             height: {
                 ...heights,
                 ...dimensions,
@@ -139,6 +143,7 @@ const config: Config = {
             },
             borderRadius: {
                 input_form: "8px",
+                entry: "1.05rem",
                 touch: "1.25rem"
             },
         }

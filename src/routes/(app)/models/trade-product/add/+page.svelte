@@ -24,7 +24,8 @@
         el_id,
         EntryLine,
         EntryMultiline,
-        EntryOption,
+        EntrySelect,
+        EntryWrap,
         Fill,
         fmt_geol_latitude,
         fmt_geol_longitude,
@@ -38,6 +39,7 @@
         LayoutView,
         locale,
         Nav,
+        SelectEl,
         sleep,
         t,
         view_effect,
@@ -117,12 +119,7 @@
         }
     });
 
-    $: {
-        console.log(`$carousel_index `, $carousel_index);
-        console.log(`$carousel_index_max `, $carousel_index_max);
-    }
-
-    let el_trellis_wrap_price: HTMLElement | null;
+    // let el_trellis_wrap_price: HTMLElement | null;
 
     let loading_submit = false;
 
@@ -433,6 +430,19 @@
         map_choose_loc_geoc_point_select = map_choose_loc_geoc_point;
     };
 
+    const handle_entry_focus = async (id_key: string): Promise<void> => {
+        try {
+            const el = el_id(fmt_id(id_key));
+            el?.classList.add(`entry-layer-1-highlight`);
+            el?.focus();
+            await handle_back(2);
+            await sleep(1000);
+            el?.classList.remove(`entry-layer-1-highlight`);
+        } catch (e) {
+            console.log(`(error) handle_entry_focus `, e);
+        }
+    };
+
     const submit = async (): Promise<void> => {
         try {
             loading_submit = true;
@@ -477,63 +487,82 @@
                                           value: `${$t(`icu.show_*`, { value: `${$t(`common.options`)}` })}`,
                                       },
                                       callback: async () => {
+                                          const kv_other = await kv.get(
+                                              fmt_id(`key`),
+                                          );
+                                          if (kv_other) {
+                                              const confirm =
+                                                  await dialog.confirm({
+                                                      message: `${$t(`icu.the_current_entry_*_will_be_deleted`, { value: kv_other })}. ${$t(`common.do_you_want_to_continue_q`)}`,
+                                                  });
+                                              if (confirm === true)
+                                                  await kv.set(
+                                                      fmt_id(`key`),
+                                                      trade_key_default,
+                                                  );
+                                          }
                                           await toggle_show_key_other(false);
                                       },
                                   }
                                 : undefined,
                         }}
                     >
-                        {#if show_sel_trade_product_key_other}
-                            <div
-                                class={`relative flex flex-row w-full justify-center items-center rounded-2xl`}
-                            >
-                                <EntryLine
-                                    basis={{
-                                        el: {
-                                            id: fmt_id(`title`),
-                                            sync: true,
-                                            sync_init: true,
-                                            placeholder: `${$t(`icu.enter_the_*`, { value: `${$t(`icu.*_title`, { value: `${$t(`common.listing`)}` })}`.toLowerCase() })}`,
-                                            field: {
-                                                charset:
-                                                    trade_product_form_fields
-                                                        .title.charset,
-                                                validate:
-                                                    trade_product_form_fields
-                                                        .title.validation,
-                                                validate_keypress: true,
-                                            },
-                                        },
-                                    }}
-                                />
-                            </div>
-                        {:else}
-                            <EntryOption
+                        {#if !show_sel_trade_product_key_other}
+                            <EntrySelect
                                 bind:value={sel_trade_product_key}
                                 basis={{
-                                    id_wrap: fmt_id(`key_wrap`),
-                                    id: fmt_id(`key`),
-                                    classes: `font-mono-display`,
-                                    sync: true,
-                                    options: [
-                                        ...trade_keys.map((i) => ({
-                                            value: i,
-                                            label: `${$t(`trade.product.key.${i}`, { default: i })}`,
-                                        })),
-                                        {
-                                            value: `other`,
-                                            label: `${$t(`common.other`)}`,
+                                    wrap: {
+                                        id: fmt_id(`key_wrap`),
+                                    },
+                                    el: {
+                                        id: fmt_id(`key`),
+                                        sync: true,
+                                        options: [
+                                            ...trade_keys.map((i) => ({
+                                                value: i,
+                                                label: `${$t(`trade.product.key.${i}`, { default: i })}`,
+                                            })),
+                                            {
+                                                value: `other`,
+                                                label: `${$t(`common.other`)}`,
+                                            },
+                                        ],
+                                        callback: async (val) => {
+                                            const el = el_id(
+                                                fmt_id(`key_wrap`),
+                                            );
+                                            el?.classList.remove(
+                                                `entry-layer-1-highlight`,
+                                            );
+                                            if (val === `other`) {
+                                                await toggle_show_key_other(
+                                                    true,
+                                                );
+                                            }
                                         },
-                                    ],
-                                    callback: async (val) => {
-                                        el_id(
-                                            fmt_id(`key_wrap`),
-                                        )?.classList.remove(
-                                            `entry-layer-1-highlight`,
-                                        );
-                                        if (val === `other`) {
-                                            await toggle_show_key_other(true);
-                                        }
+                                    },
+                                }}
+                            />
+                        {:else}
+                            <EntryLine
+                                basis={{
+                                    wrap: {
+                                        id: fmt_id(`key_wrap`),
+                                    },
+                                    el: {
+                                        id: fmt_id(`key`),
+                                        sync: true,
+                                        sync_init: true,
+                                        placeholder: `${$t(`icu.enter_the_*`, { value: `${$t(`icu.*_name`, { value: `${$t(`common.product`)}` })}`.toLowerCase() })}`,
+                                        field: {
+                                            charset:
+                                                trade_product_form_fields.title
+                                                    .charset,
+                                            validate:
+                                                trade_product_form_fields.title
+                                                    .validation,
+                                            validate_keypress: true,
+                                        },
                                     },
                                 }}
                             />
@@ -546,11 +575,10 @@
                             },
                         }}
                     >
-                        <div
-                            bind:this={el_trellis_wrap_price}
-                            id={fmt_id(`price_wrap`)}
-                            tabindex={-1}
-                            class={`relative el-re flex flex-row w-full pl-2 justify-between items-center h-form_line bg-layer-1-surface rounded-2xl`}
+                        <EntryWrap
+                            basis={{
+                                id: fmt_id(`price_wrap`),
+                            }}
                         >
                             <InputElement
                                 basis={{
@@ -579,11 +607,17 @@
                                                 period_count < 2) ||
                                             value.length < 1
                                         ) {
-                                            el_trellis_wrap_price?.classList.remove(
+                                            const el = el_id(
+                                                fmt_id(`price_wrap`),
+                                            );
+                                            el?.classList.remove(
                                                 `entry-layer-1-highlight`,
                                             );
                                         } else {
-                                            el_trellis_wrap_price?.classList.add(
+                                            const el = el_id(
+                                                fmt_id(`price_wrap`),
+                                            );
+                                            el?.classList.add(
                                                 `entry-layer-1-highlight`,
                                             );
                                         }
@@ -591,43 +625,55 @@
                                 }}
                             />
                             <div
-                                class={`flex flex-row gap-2 pl-3 pr-4 justify-end items-center bg-layer-1-surface rounded-r-2xl text-layer-1-glyph/70`}
+                                class={`flex flex-row gap-2 justify-end items-center text-layer-1-glyph/70`}
                             >
-                                <EntryOption
+                                <SelectEl
                                     bind:value={sel_trade_product_price_currency}
                                     basis={{
                                         id: fmt_id(`price_currency`),
-                                        classes: `w-fit font-mono-display font-[500] text-lg`,
+                                        classes: `w-fit font-circ font-[500] text-[1rem]`,
                                         layer: false,
-                                        hide_arrows: true,
-                                        sync: true,
-                                        options: fiat_currencies.map((i) => ({
-                                            value: i,
-                                            label: `${$t(`currency.${i}.symbol`, { default: i })}`,
-                                        })),
+                                        //hide_arrows: true,
+                                        //sync: true,
+                                        options: [
+                                            {
+                                                entries: fiat_currencies.map(
+                                                    (i) => ({
+                                                        value: i,
+                                                        label: `${$t(`currency.${i}.symbol`, { default: i })}`,
+                                                    }),
+                                                ),
+                                            },
+                                        ],
                                     }}
                                 />
                                 <p
-                                    class={`font-sans font-[500] text-[1.1rem] -translate-y-[1px] scale-y-[110%]`}
+                                    class={`font-sans font-[500] text-[1.1rem] -translate-y-[1px] scale-y-[120%]`}
                                 >
                                     {`/`}
                                 </p>
-                                <EntryOption
+                                <SelectEl
                                     bind:value={sel_trade_product_price_qty_unit}
                                     basis={{
                                         id: fmt_id(`price_qty_unit`),
-                                        classes: `w-fit font-mono-display font-[600] text-[0.95rem] leading-[1rem]`,
+                                        classes: `w-fit font-circ font-[500] text-[1rem]`,
                                         layer: false,
-                                        hide_arrows: true,
-                                        sync: true,
-                                        options: mass_units.map((i) => ({
-                                            value: i,
-                                            label: `${$t(`measurement.mass.unit.${i}_ab`, { default: i })}`,
-                                        })),
+                                        // hide_arrows: true,
+                                        //  sync: true,
+                                        options: [
+                                            {
+                                                entries: mass_units.map(
+                                                    (i) => ({
+                                                        value: i,
+                                                        label: `${$t(`measurement.mass.unit.${i}_ab`, { default: i })}`,
+                                                    }),
+                                                ),
+                                            },
+                                        ],
                                     }}
                                 />
                             </div>
-                        </div>
+                        </EntryWrap>
                     </LayoutTrellisLine>
                     <LayoutTrellisLine
                         basis={{
@@ -654,87 +700,94 @@
                             tabindex={-1}
                             class={`relative el-re flex flex-row w-full gap-3 justify-between items-center h-form_line bg-layer-1-surface text-layer-1-glyph rounded-2xl`}
                         >
-                            {#if show_sel_trade_product_qty_tup_other}
+                            {#if !show_sel_trade_product_qty_tup_other}
+                                <EntrySelect
+                                    bind:value={sel_trade_product_qty_tup}
+                                    basis={{
+                                        wrap: {
+                                            id: `tmp`,
+                                        },
+                                        el: {
+                                            options: [
+                                                ...ls_trade_product_quantities.map(
+                                                    (i) => ({
+                                                        value: fmt_trade_quantity_val(
+                                                            i,
+                                                        ),
+                                                        label: `${i.mass} ${$t(`measurement.mass.unit.${i.mass_unit}_ab`, { default: i.mass_unit })} ${i.label}`,
+                                                    }),
+                                                ),
+                                                {
+                                                    value: `other`,
+                                                    label: `${$t(`common.other`)}`,
+                                                },
+                                            ],
+                                            callback: async (val) => {
+                                                el_id(
+                                                    fmt_id(`qty_wrap`),
+                                                )?.classList.remove(
+                                                    `entry-layer-1-highlight`,
+                                                );
+                                                if (val === `other`) {
+                                                    await toggle_show_qty_amt_other(
+                                                        true,
+                                                    );
+                                                } else {
+                                                    await kv.set(
+                                                        fmt_id(`qty_avail`),
+                                                        `1`,
+                                                    );
+                                                }
+                                            },
+                                        },
+                                    }}
+                                />
+                            {:else}
                                 <div
                                     class={`relative flex flex-row w-full justify-center items-center`}
                                 >
-                                    <EntryLine
+                                    <InputElement
                                         basis={{
-                                            el: {
-                                                id: fmt_id(`qty_amt`),
-                                                layer: false,
-                                                sync: true,
-                                                placeholder: `${$t(`icu.enter_number_of_*_per_order`, { value: `${$t(`measurement.mass.unit.${sel_trade_product_price_qty_unit}_ab`, { default: sel_trade_product_price_qty_unit })}` })}`,
-                                                field: {
-                                                    charset:
-                                                        trade_product_form_fields
-                                                            .qty_amt.charset,
-                                                    validate:
-                                                        trade_product_form_fields
-                                                            .qty_amt.validation,
-                                                    validate_keypress: true,
-                                                },
+                                            id: fmt_id(`qty_amt`),
+                                            layer: false,
+                                            sync: true,
+                                            placeholder: `${$t(`icu.enter_number_of_*_per_order`, { value: `${$t(`measurement.mass.unit.${sel_trade_product_price_qty_unit}_ab`, { default: sel_trade_product_price_qty_unit })}` })}`,
+                                            field: {
+                                                charset:
+                                                    trade_product_form_fields
+                                                        .qty_amt.charset,
+                                                validate:
+                                                    trade_product_form_fields
+                                                        .qty_amt.validation,
+                                                validate_keypress: true,
                                             },
                                         }}
                                     />
                                     <div
                                         class={`absolute top-0 right-0 flex flex-row h-full gap-2 justify-center items-center`}
                                     >
-                                        <EntryOption
+                                        <EntrySelect
                                             bind:value={sel_trade_product_qty_unit}
                                             basis={{
-                                                id: fmt_id(`qty_unit`),
-                                                classes: `w-[3.5rem] text-layer-1-glyph font-[500]`,
-                                                layer: false,
-                                                sync: true,
-                                                options: mass_units.map(
-                                                    (i) => ({
-                                                        value: i,
-                                                        label: `${$t(`measurement.mass.unit.${i}_ab`, { default: i })}`,
-                                                    }),
-                                                ),
+                                                wrap: {
+                                                    id: `tmp2`,
+                                                },
+                                                el: {
+                                                    id: fmt_id(`qty_unit`),
+                                                    classes: `w-[3.5rem] text-layer-1-glyph font-[500]`,
+                                                    //layer: false,
+                                                    //sync: true,
+                                                    options: mass_units.map(
+                                                        (i) => ({
+                                                            value: i,
+                                                            label: `${$t(`measurement.mass.unit.${i}_ab`, { default: i })}`,
+                                                        }),
+                                                    ),
+                                                },
                                             }}
                                         />
                                     </div>
                                 </div>
-                            {:else}
-                                <EntryOption
-                                    bind:value={sel_trade_product_qty_tup}
-                                    basis={{
-                                        classes: `font-mono-display`,
-                                        options: [
-                                            ...ls_trade_product_quantities.map(
-                                                (i) => ({
-                                                    value: fmt_trade_quantity_val(
-                                                        i,
-                                                    ),
-                                                    label: `${i.mass} ${$t(`measurement.mass.unit.${i.mass_unit}_ab`, { default: i.mass_unit })} ${i.label}`,
-                                                }),
-                                            ),
-                                            {
-                                                value: `other`,
-                                                label: `${$t(`common.other`)}`,
-                                            },
-                                        ],
-                                        callback: async (val) => {
-                                            el_id(
-                                                fmt_id(`qty_wrap`),
-                                            )?.classList.remove(
-                                                `entry-layer-1-highlight`,
-                                            );
-                                            if (val === `other`) {
-                                                await toggle_show_qty_amt_other(
-                                                    true,
-                                                );
-                                            } else {
-                                                await kv.set(
-                                                    fmt_id(`qty_avail`),
-                                                    `1`,
-                                                );
-                                            }
-                                        },
-                                    }}
-                                />
                             {/if}
                         </div>
                     </LayoutTrellisLine>
@@ -926,17 +979,8 @@
                                                 <button
                                                     class={`flex flex-row justify-start items-center active:opacity-60 transition-all`}
                                                     on:click={async () => {
-                                                        const el = el_id(
-                                                            fmt_id(`key_wrap`),
-                                                        );
-                                                        el?.classList.add(
-                                                            `entry-layer-1-highlight`,
-                                                        );
-                                                        el?.focus();
-                                                        await handle_back(2);
-                                                        await sleep(1000);
-                                                        el?.classList.remove(
-                                                            `entry-layer-1-highlight`,
+                                                        await handle_entry_focus(
+                                                            `key_wrap`,
                                                         );
                                                     }}
                                                 >
@@ -1042,20 +1086,27 @@
                                                 <button
                                                     class={`flex flex-row justify-start items-center active:opacity-60 transition-all`}
                                                     on:click={async () => {
-                                                        const el = el_id(
+                                                        await handle_entry_focus(
+                                                            `price_wrap`,
+                                                        );
+                                                        /*const el = el_id(
                                                             fmt_id(
                                                                 `price_wrap`,
                                                             ),
                                                         );
+                                                        console.log(`el `, el);
                                                         el?.classList.add(
                                                             `entry-layer-1-highlight`,
                                                         );
                                                         el?.focus();
                                                         await handle_back(2);
-                                                        await sleep(1000);
+                                                        await sleep(
+                                                            cfg.delay
+                                                                .entry_focus,
+                                                        );
                                                         el?.classList.remove(
                                                             `entry-layer-1-highlight`,
-                                                        );
+                                                        );*/
                                                     }}
                                                 >
                                                     <p
@@ -1116,7 +1167,10 @@
                                                         );
                                                         el?.focus();
                                                         await handle_back(2);
-                                                        await sleep(1000);
+                                                        await sleep(
+                                                            cfg.delay
+                                                                .entry_focus,
+                                                        );
                                                         el?.classList.remove(
                                                             `entry-layer-1-highlight`,
                                                         );
@@ -1318,7 +1372,9 @@
                     >
                         <EntryLine
                             basis={{
-                                id_wrap: fmt_id(`title_wrap`),
+                                wrap: {
+                                    id: fmt_id(`title_wrap`),
+                                },
                                 el: {
                                     id: fmt_id(`title`),
                                     sync: true,

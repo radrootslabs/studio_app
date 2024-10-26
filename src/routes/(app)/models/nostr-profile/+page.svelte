@@ -4,15 +4,15 @@
     import {
         app_nostr_key,
         app_notify,
+        Glyph,
         type ISelectOption,
         LayoutTrellis,
         LayoutView,
         Nav,
         nav_prev,
         route,
-        SelectElement,
+        SelectEl,
         t,
-        Glyph,
         TrellisTitle,
     } from "@radroots/svelte-lib";
     import { onMount } from "svelte";
@@ -233,45 +233,41 @@
                                 <div
                                     class={`z-10 absolute top-2 right-3 flex flex-row h-full justify-end pr-1`}
                                 >
-                                    <SelectElement
+                                    <SelectEl
+                                        value={`~`}
                                         basis={{
-                                            args: {
-                                                layer: 0,
-                                                mask: true,
-                                                callback: async ({ value }) => {
-                                                    await handle_key_options_press(
-                                                        {
-                                                            option: value,
-                                                            public_key:
-                                                                li.public_key,
-                                                        },
-                                                    );
-                                                },
-                                                options: [
-                                                    {
-                                                        entries:
-                                                            page_param.options_list.filter(
-                                                                (i) =>
-                                                                    !(
-                                                                        !li.name &&
-                                                                        i.value ===
-                                                                            `edit-profile-name`
-                                                                    ) &&
-                                                                    !(
-                                                                        li.name &&
-                                                                        i.value ===
-                                                                            `add-profile-name`
-                                                                    ) &&
-                                                                    !(
-                                                                        li.public_key ===
-                                                                            $app_nostr_key &&
-                                                                        i.value ===
-                                                                            `set-key-active`
-                                                                    ),
-                                                            ),
-                                                    },
-                                                ],
+                                            layer: 0,
+                                            //mask: true,
+                                            callback: async ({ value }) => {
+                                                await handle_key_options_press({
+                                                    option: value,
+                                                    public_key: li.public_key,
+                                                });
                                             },
+                                            options: [
+                                                {
+                                                    entries:
+                                                        page_param.options_list.filter(
+                                                            (i) =>
+                                                                !(
+                                                                    !li.name &&
+                                                                    i.value ===
+                                                                        `edit-profile-name`
+                                                                ) &&
+                                                                !(
+                                                                    li.name &&
+                                                                    i.value ===
+                                                                        `add-profile-name`
+                                                                ) &&
+                                                                !(
+                                                                    li.public_key ===
+                                                                        $app_nostr_key &&
+                                                                    i.value ===
+                                                                        `set-key-active`
+                                                                ),
+                                                        ),
+                                                },
+                                            ],
                                         }}
                                     >
                                         <svelte:fragment slot="element">
@@ -284,7 +280,7 @@
                                                 }}
                                             />
                                         </svelte:fragment>
-                                    </SelectElement>
+                                    </SelectEl>
                                 </div>
                             </div>
                         {/each}

@@ -23,15 +23,16 @@
         type NavigationRoute,
     } from "@radroots/svelte-lib";
     import { parse_color_mode, parse_theme_key } from "@radroots/theme";
+    import "css-paint-polyfill";
     import { onDestroy, onMount } from "svelte";
     import "../app.css";
 
-    //let unlisten_logger: IClientUnlisten;
     let route_render: NavigationRoute | undefined = undefined;
 
     onMount(async () => {
         try {
-            //unlisten_logger = await logger.init();
+            if (`paintWorklet` in CSS)
+                (CSS as any).paintWorklet.addModule(`/squircle.min.js`);
             const metadata: IClientDeviceMetadata = {
                 version: os.version(),
                 platform: os.platform(),
@@ -46,7 +47,6 @@
 
     onDestroy(async () => {
         try {
-            //unlisten_logger();
             route_render = undefined;
         } catch (e) {
         } finally {
