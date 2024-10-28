@@ -140,7 +140,8 @@ const config: Config = {
                 ...Object.fromEntries(Object.entries(dimensions).map(([k, v]) => [`dim_${k}`, v])),
             },
             borderWidth: {
-                "line": "1px"
+                "line": `1px`,
+                "edge": `2px`
             },
             borderRadius: {
                 input_form: "8px",
@@ -154,8 +155,6 @@ const config: Config = {
     ],
     daisyui: {
         themes: [
-            themes.theme_garden_light,
-            themes.theme_garden_dark,
             themes.theme_earth_light,
             themes.theme_earth_dark,
             themes.theme_os_dark,

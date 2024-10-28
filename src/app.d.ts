@@ -1,5 +1,6 @@
 declare global {
 	namespace App { }
+
 	declare class Keyva {
 		/**
 		 * An IDBKeyRange that has no upper or lower bounding.
@@ -135,4 +136,3 @@ declare global {
 }
 
 export { };
-

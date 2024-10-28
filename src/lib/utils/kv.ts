@@ -1,6 +1,6 @@
 import { parse_trade_product_form_keys, trade_product_form_fields, trade_product_form_vals, type TradeProductFormFields } from "@radroots/models";
 import { kv } from "@radroots/svelte-lib";
-import { err_msg, type ErrorMessage } from "@radroots/utils";
+import { err_msg, type ErrorMessage, type ResultPass } from "@radroots/utils";
 
 export const kv_init_trade_product_fields = async (kv_pref: string): Promise<void> => {
     try {
@@ -49,7 +49,27 @@ export const kv_validate_trade_product_fields = async (opts: {
         }
         return vals;
     } catch (e) {
-        console.log(`(error) trade_product_submit_preview `, e);
+        console.log(`(error) kv_validate_trade_product_fields `, e);
+        return err_msg(String(e))
+    }
+};
+
+export const validate_trade_product_fields = async (opts: {
+    kv_pref: string;
+    fields: string[];
+}): Promise<ResultPass | ErrorMessage<string>> => {
+    try {
+        for (const field of opts.fields) {
+            const field_k = parse_trade_product_form_keys(field);
+            if (!field_k) return err_msg(field);
+            const field_id = `${opts.kv_pref}-${field_k}`;
+            const field_val = await kv.get(field_id);
+            console.log(`${field_k}: '${field_val}'`)
+            if (!trade_product_form_fields[field_k].validation.test(field_val)) return err_msg(field_k);
+        }
+        return { pass: true };
+    } catch (e) {
+        console.log(`(error) validate_trade_product_fields `, e);
         return err_msg(String(e))
     }
 };
