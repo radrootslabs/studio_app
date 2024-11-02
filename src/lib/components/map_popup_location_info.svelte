@@ -9,18 +9,22 @@
 </script>
 
 <button
-    class={`flex flex-row justify-center items-center transition-all`}
+    class={`flex flex-row justify-center items-center el-re`}
     on:click={async () => {}}
 >
     <div
-        class={`flex flex-col w-fit px-3 py-[0.5rem] gap-2 justify-start items-start`}
+        class={`flex flex-col w-fit px-4 py-[0.6rem] gap-2 justify-start items-start bg-layer-1-surface round-40`}
     >
         {#if basis.geoc}
             <div class={`flex flex-col w-full gap-1 justify-start items-start`}>
-                <p class={`font-mono font-[400] text-layer-2-glyph`}>
+                <p
+                    class={`font-circ font-[400] text-[1.1rem] scale-y-[92%] tracking-tight text-layer-2-glyph`}
+                >
                     {basis.geoc.name}
                 </p>
-                <p class={`font-mono font-[400] text-layer-2-glyph`}>
+                <p
+                    class={`font-circ font-[400] text-[1.1rem] scale-y-[92%] tracking-tight text-layer-2-glyph`}
+                >
                     {`${basis.geoc.admin1_name}, ${basis.geoc.country_name}`}
                 </p>
             </div>

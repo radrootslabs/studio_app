@@ -12,6 +12,7 @@ use models::{
         model_nostr_profile_add, model_nostr_profile_delete, model_nostr_profile_get,
         model_nostr_profile_update,
     },
+    nostr_profile_relay::{model_nostr_profile_relay_set, model_nostr_profile_relay_unset},
     nostr_relay::{
         model_nostr_relay_add, model_nostr_relay_delete, model_nostr_relay_get,
         model_nostr_relay_update,
@@ -69,6 +70,8 @@ pub fn run() {
             model_nostr_relay_get,
             model_nostr_relay_delete,
             model_nostr_relay_update,
+            model_nostr_profile_relay_set,
+            model_nostr_profile_relay_unset
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

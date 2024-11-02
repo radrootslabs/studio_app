@@ -12,17 +12,13 @@
 @import "/static/webfonts/archivo/styles.css";
 @import "/static/webfonts/space-grotesk/styles.css";
 @import "/static/webfonts/spartan/styles.css";
+@import "/static/webfonts/outfit/styles.css";
 
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
-@layer base {
-    .cds--cc--chart-wrapper {
-        --cds-charts-font-family: Circular;
-        --cds-charts-font-family-condensed: 'Circular';
-      }
-}
+@layer base {}
 
 @layer components {
     .label-sg {

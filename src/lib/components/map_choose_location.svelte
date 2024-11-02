@@ -2,23 +2,39 @@
     import { geoc } from "$lib/client";
     import { cfg } from "$lib/conf";
     import type { GeocoderReverseResult } from "@radroots/geocoder";
-    import { app_thc, Loading } from "@radroots/svelte-lib";
-    import { MapLibre, Marker, Popup } from "@radroots/svelte-maplibre";
+    import { app_thc, fmt_cl, sleep } from "@radroots/svelte-lib";
+    import { MapLibre, Marker } from "@radroots/svelte-maplibre";
     import type { GeolocationCoordinatesPoint } from "@radroots/utils";
+    import { onMount } from "svelte";
     import MapMarkerDot from "./map_marker_dot.svelte";
     import MapPopupLocationInfo from "./map_popup_location_info.svelte";
 
     export let basis: {
-        classes_map: string;
-        loading?: boolean;
-        //reset?: CallbackPromise;
+        classes_wrap?: string;
+        classes?: string;
     };
     $: basis = basis;
 
-    export let map_point_center: GeolocationCoordinatesPoint;
+    let map_visible = false;
+
+    //export let map_point_center: GeolocationCoordinatesPoint;
     export let map_point_select: GeolocationCoordinatesPoint;
     export let map_point_select_geoc: GeocoderReverseResult | undefined =
         undefined;
+
+    let map_point_center: GeolocationCoordinatesPoint | undefined = undefined;
+
+    onMount(async () => {
+        try {
+            map_point_center = {
+                ...map_point_select,
+            };
+            await sleep(300);
+        } catch (e) {
+        } finally {
+            map_visible = true;
+        }
+    });
 
     $: {
         if (
@@ -34,83 +50,53 @@
                     if (`results` in geoc_res && geoc_res.results.length > 0)
                         map_point_select_geoc = geoc_res.results[0];
                     else map_point_select_geoc = undefined;
-                } catch (e) {}
+                } catch (e) {
+                    console.log(`(error) map choose location`, e);
+                }
             })();
         }
     }
-    /*
-{#if !basis.loading}
-        <div class={`flex flex-col h-8 w-full justify-end items-center`}>
-            <button
-                class={`flex flex-row justify-center items-center`}
-                on:click={async () => {
-                    if (basis.reset) await basis.reset();
-                }}
-            >
-                <p class={`font-mono font-[400] text-layer-0-glyph text-sm`}>
-                    {`reset`}
-                </p>
-            </button>
-        </div>
-    {/if}
-    */
 </script>
 
 <div
-    class={`relative flex flex-col justify-center items-center ${basis.classes_map} bg-layer-1-surface overflow-hidden`}
+    class={`${fmt_cl(basis.classes_wrap)} flex flex-col justify-start items-center`}
 >
-    <MapLibre
-        center={map_point_center}
-        zoom={10}
-        class={`${basis.classes_map} ${basis.loading ? `` : ``}`}
-        style={cfg.map.styles.base[$app_thc]}
-        attributionControl={false}
+    <div
+        class={`relative flex flex-col w-full justify-center items-center bg-layer-1-surface overflow-hidden`}
     >
-        <Marker
-            bind:lngLat={map_point_select}
-            draggable
-            on:dragend={async () => {
-                if (!map_point_select) return;
-                const geoc_res = await geoc.reverse({
-                    point: map_point_select,
-                    limit: 1,
-                });
-                if (`results` in geoc_res && geoc_res.results.length > 0)
-                    map_point_select_geoc = geoc_res.results[0];
-            }}
+        <MapLibre
+            center={map_point_center}
+            zoom={10}
+            class={`${fmt_cl(basis.classes || `h-full w-full`)} ${map_visible ? `fade-in` : `hidden`}`}
+            style={cfg.map.styles.base[$app_thc]}
+            attributionControl={false}
         >
-            <MapMarkerDot />
-            <Popup
-                offset={cfg.map.popup.dot.offset}
-                open={true}
-                closeOnClickOutside={false}
-                closeButton={false}
-            >
-                <MapPopupLocationInfo
-                    basis={{
+            <Marker
+                bind:lngLat={map_point_select}
+                draggable
+                on:dragend={async () => {
+                    if (!map_point_select) return;
+                    const geoc_res = await geoc.reverse({
                         point: map_point_select,
-                        geoc: map_point_select_geoc,
-                    }}
-                />
-            </Popup>
-        </Marker>
-    </MapLibre>
-    {#if basis.loading}
-        <div
-            class={`z-10 absolute inset-0 flex flex-col justify-center items-center bg-layer-0-surface`}
-        >
-            <div
-                class={`relative flex flex-col h-full w-full justify-center items-center`}
+                        limit: 1,
+                    });
+                    if (`results` in geoc_res && geoc_res.results.length > 0)
+                        map_point_select_geoc = geoc_res.results[0];
+                }}
             >
-                <Loading />
-                <!--
-                <p
-                    class={`absolute top-1/2 left-1/2 -translate-x-1/2 translate-y-3 font-circ font-[300] text-[0.6rem] text-layer-0-glyph`}
+                <button
+                    class={`flex flex-row justify-center items-center transform -translate-x-[42%]`}
+                    on:click={async () => {}}
                 >
-                    {`Loading...`}
-                </p>
-                -->
-            </div>
-        </div>
-    {/if}
+                    <MapPopupLocationInfo
+                        basis={{
+                            point: map_point_select,
+                            geoc: map_point_select_geoc,
+                        }}
+                    />
+                </button>
+                <MapMarkerDot />
+            </Marker>
+        </MapLibre>
+    </div>
 </div>

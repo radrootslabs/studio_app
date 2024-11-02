@@ -106,7 +106,7 @@ pub type INostrRelayDeleteResolve = ();
 pub type INostrRelayUpdate = INostrRelayQueryUpdate;
 pub type INostrRelayUpdateResolve = ();
 
-fn nostr_relay_query_bind_values(opts: NostrRelayQueryBindValues) -> IModelsQueryBindValueTuple {
+pub fn nostr_relay_query_bind_values(opts: NostrRelayQueryBindValues) -> IModelsQueryBindValueTuple {
     match opts {
         NostrRelayQueryBindValues::Id(id) => ("id".to_string(), id),
         NostrRelayQueryBindValues::Url(url) => ("url".to_string(), url),

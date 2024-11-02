@@ -4,6 +4,7 @@
         app_cfg_type,
         app_layout,
         app_nostr_key,
+        envelope_visible,
         EnvelopeLower,
         Glyph,
         LayoutView,
@@ -78,7 +79,6 @@
         },
     };
 
-    let tmp_show_envelope = false;
     let tmp_show_no_profile = false;
 
     onMount(async () => {
@@ -247,9 +247,8 @@
 />
 <EnvelopeLower
     basis={{
-        visible: tmp_show_envelope,
         close: async () => {
-            tmp_show_envelope = !tmp_show_envelope;
+            envelope_visible.set(false);
         },
     }}
 >

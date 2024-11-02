@@ -165,11 +165,14 @@
                                     basis: {
                                         id: fmt_id($qp_rkey),
                                         sync: true,
+                                        /*
+                                        @todo
                                         sync_init: ld?.nostr_profile[
                                             ld?.field_key
                                         ]
                                             ? ld.nostr_profile[ld.field_key]
                                             : true,
+                                        */
                                         classes: `placeholder:font-[300]`,
                                         placeholder: ld?.nostr_profile[
                                             ld?.field_key

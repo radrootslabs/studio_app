@@ -10,7 +10,7 @@
         app_splash,
         app_th,
         app_thc,
-        AppControls,
+        Controls,
         CssStatic,
         CssStyles,
         LayoutWindow,
@@ -100,7 +100,7 @@
     {/if}
     <slot />
 </LayoutWindow>
-<AppControls />
+<Controls />
 <CssStatic />
 <CssStyles />
 <div class="hidden h-entry_guide h-entry_line" />

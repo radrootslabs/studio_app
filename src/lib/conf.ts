@@ -37,6 +37,9 @@ export const cfg = {
         nostr_relay_poll_document: 3000,
         entry_focus: 2000,
     },
+    num: {
+        str: (num: number) => num.toString(),
+    },
     cmd: {
         layout_route: `*-route`
     },

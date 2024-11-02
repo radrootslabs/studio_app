@@ -106,7 +106,7 @@ pub type ILocationGcsDeleteResolve = ();
 pub type ILocationGcsUpdate = ILocationGcsQueryUpdate;
 pub type ILocationGcsUpdateResolve = ();
 
-fn location_gcs_query_bind_values(opts: LocationGcsQueryBindValues) -> IModelsQueryBindValueTuple {
+pub fn location_gcs_query_bind_values(opts: LocationGcsQueryBindValues) -> IModelsQueryBindValueTuple {
     match opts {
         LocationGcsQueryBindValues::Id(id) => ("id".to_string(), id),
         LocationGcsQueryBindValues::Geohash(geohash) => ("geohash".to_string(), geohash),

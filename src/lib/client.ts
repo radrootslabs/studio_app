@@ -1,8 +1,8 @@
-import { ClientNostr, TauriClientDb, TauriClientDevice, TauriClientDialog, TauriClientFs, TauriClientGeolocation, TauriClientHaptics, TauriClientHttp, TauriClientKeying, TauriClientKeystore, TauriClientLogger, TauriClientMap, TauriClientNotification, TauriClientOs, TauriClientWindow } from "@radroots/client";
+import { ClientNostr, TauriClientDatabase, TauriClientDevice, TauriClientDialog, TauriClientFs, TauriClientGeolocation, TauriClientHaptics, TauriClientHttp, TauriClientKeying, TauriClientKeystore, TauriClientLogger, TauriClientMap, TauriClientNotification, TauriClientOs, TauriClientWindow } from "@radroots/client";
 import { Geocoder } from "@radroots/geocoder";
 
 export const geoc = new Geocoder(`/geonames/geonames.db`);
-export const db = new TauriClientDb();
+export const db = new TauriClientDatabase();
 export const device = new TauriClientDevice();
 export const dialog = new TauriClientDialog();
 export const fs = new TauriClientFs();

@@ -9,6 +9,7 @@
     "core:default",
     "dialog:default",
     "fs:default",
+    "fs:allow-stat",
     "geolocation:allow-check-permissions",
     "geolocation:allow-get-current-position",
     "geolocation:allow-request-permissions",

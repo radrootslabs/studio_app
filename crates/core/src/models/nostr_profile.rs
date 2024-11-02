@@ -106,7 +106,7 @@ pub type INostrProfileDeleteResolve = ();
 pub type INostrProfileUpdate = INostrProfileQueryUpdate;
 pub type INostrProfileUpdateResolve = ();
 
-fn nostr_profile_query_bind_values(opts: NostrProfileQueryBindValues) -> IModelsQueryBindValueTuple {
+pub fn nostr_profile_query_bind_values(opts: NostrProfileQueryBindValues) -> IModelsQueryBindValueTuple {
     match opts {
         NostrProfileQueryBindValues::Id(id) => ("id".to_string(), id),
         NostrProfileQueryBindValues::PublicKey(public_key) => ("public_key".to_string(), public_key),

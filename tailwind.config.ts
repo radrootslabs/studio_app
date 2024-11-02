@@ -86,7 +86,8 @@ const config: Config = {
                 circ: [`Circular`],
                 arch: [`Archivo`],
                 sg: [`Space Grotesk`],
-                sp: [`Spartan`]
+                sp: [`Spartan`],
+                of: [`Outfit`]
             },
             fontSize: {
                 line_label: [`1.3rem`, { lineHeight: `1.3rem` }],
@@ -155,8 +156,6 @@ const config: Config = {
     ],
     daisyui: {
         themes: [
-            themes.theme_earth_light,
-            themes.theme_earth_dark,
             themes.theme_os_dark,
             themes.theme_os_light,
         ],

@@ -11,7 +11,7 @@
         app_layout,
         app_loading,
         app_splash,
-        ButtonCarouselPair,
+        ButtonLayoutPair,
         carousel_dec,
         carousel_inc,
         carousel_index,
@@ -647,7 +647,7 @@
                     return; // @todo
                 }
                 const nostr_profile_relay_add =
-                    await db.set_nostr_profile_relay({
+                    await db.nostr_profile_relay_set({
                         nostr_profile: {
                             id: nostr_profile_add.id,
                         },
@@ -703,14 +703,7 @@
                         <button
                             class={`flex flex-row justify-center items-center`}
                             on:click={async () => {
-                                const sk = nostr.lib.generate_key();
-                                const res1 = await db.nostr_profile_add({
-                                    public_key: nostr.lib.public_key(sk),
-                                });
-                                console.log(
-                                    JSON.stringify(res1, null, 4),
-                                    `res1`,
-                                );
+                                //@todo dev
                             }}
                         >
                             <p
@@ -850,7 +843,7 @@
         <div
             class={`absolute max-mobile_base:bottom-0 bottom-8 left-0 flex flex-col w-full justify-center items-center`}
         >
-            <ButtonCarouselPair
+            <ButtonLayoutPair
                 basis={{
                     continue: {
                         disabled: $carousel_index === 1 && !cgf_init_key_option,
@@ -997,7 +990,7 @@
         <div
             class={`absolute max-mobile_base:bottom-0 bottom-8 left-0 flex flex-col w-full justify-center items-center ${view === `cfg_main` ? `fade-in-long` : ``}`}
         >
-            <ButtonCarouselPair
+            <ButtonLayoutPair
                 basis={{
                     continue: {
                         disabled:

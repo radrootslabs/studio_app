@@ -6,7 +6,7 @@
         kv_init_trade_product_fields,
         validate_trade_product_fields,
     } from "$lib/utils/kv";
-    import { mass_units, trade_product_form_fields } from "@radroots/models";
+    import { trade_product_form_fields } from "@radroots/models";
     import {
         carousel_dec,
         carousel_inc,
@@ -19,20 +19,21 @@
         EntrySelect,
         EntryWrap,
         fmt_id,
+        fmt_price,
         InputElement,
         kv,
         LayoutTrellis,
         LayoutTrellisLine,
         LayoutView,
         Nav,
-        price_locale_fmt,
         SelectElement,
         t,
         view_effect,
     } from "@radroots/svelte-lib";
     import {
         fiat_currencies,
-        fmt_trade_quantity_sel_val,
+        fmt_trade_quantity_tup,
+        mass_units,
         parse_trade_key,
         trade,
         trade_keys,
@@ -140,7 +141,7 @@
 
     $: if (tradeproduct_key_parsed) {
         tradeproduct_qty_unit_tup_sel.set(
-            fmt_trade_quantity_sel_val(
+            fmt_trade_quantity_tup(
                 trade.key[tradeproduct_key_parsed].quantity[0],
             ),
         );
@@ -231,7 +232,7 @@
                 tradeproduct_qty_unit_tup_sel.set(mass_units[0]);
             } else {
                 $tradeproduct_qty_unit_tup_sel = tradeproduct_key_parsed
-                    ? fmt_trade_quantity_sel_val(
+                    ? fmt_trade_quantity_tup(
                           trade.key[tradeproduct_key_parsed].quantity[0],
                       )
                     : ``;
@@ -376,7 +377,9 @@
                 <ImageUploadRow
                     basis={{
                         loading: photo_add_loading,
-                        list: photo_add_list,
+                        file_paths: photo_add_list.map(
+                            ({ file_path }) => file_path,
+                        ),
                         callback_add: handle_photo_add,
                     }}
                 />
@@ -516,8 +519,11 @@
             <ImageUploadDisplay
                 basis={{
                     loading: photo_add_loading,
-                    list: photo_add_list,
+                    file_paths: photo_add_list.map(
+                        ({ file_path }) => file_path,
+                    ),
                     callback_add: handle_photo_add,
+                    callback_edit: async () => {},
                 }}
             />
             <LayoutTrellis>
@@ -595,7 +601,7 @@
                                 },
                                 callback_blur: async ({ el }) => {
                                     if (!el.value) return;
-                                    el.value = price_locale_fmt(
+                                    el.value = fmt_price(
                                         $tradeproduct_price_curr_sel,
                                         el.value,
                                     ).slice(1);
@@ -663,7 +669,7 @@
                                             entries: [
                                                 ...ls_trade_product_quantities.map(
                                                     (i) => ({
-                                                        value: fmt_trade_quantity_sel_val(
+                                                        value: fmt_trade_quantity_tup(
                                                             i,
                                                         ),
                                                         label: `${i.mass} ${$t(`measurement.mass.unit.${i.mass_unit}_ab`, { default: i.mass_unit })} ${i.label}`,

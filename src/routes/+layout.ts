@@ -9,8 +9,9 @@ export const load: LayoutLoad = async ({ url }: LayoutLoadEvent) => {
     try {
         const { language: nav_locale } = navigator;
         let locale = default_locale.toString();
-        if (locales.get().some(i => i === nav_locale.toLowerCase())) locale = navigator.language;
-        else if (locales.get().some(i => i === nav_locale.slice(0, 2).toLowerCase())) locale = nav_locale.slice(0, 2);
+        const locales_avail = locales.get();
+        if (locales_avail.some(i => i === nav_locale.toLowerCase())) locale = navigator.language;
+        else if (locales_avail.some(i => i === nav_locale.slice(0, 2).toLowerCase())) locale = nav_locale.slice(0, 2);
         await load_translations(locale.toLowerCase(), url.pathname);
         await translations_loading.toPromise();
     } catch (e) {

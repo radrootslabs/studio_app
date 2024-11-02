@@ -13,14 +13,14 @@ pub struct TradeProduct {
     key: String,
     title: String,
     summary: String,
-    process: Option<String>,
-    lot: Option<String>,
-    profile: Option<String>,
+    process: String,
+    lot: String,
+    profile: String,
     year: i32,
     qty_amt: i32,
     qty_unit: String,
     qty_label: String,
-    qty_avail: i32,
+    qty_avail: Option<i32>,
     price_amt: f64,
     price_currency: String,
     price_qty_amt: i32,
@@ -33,14 +33,14 @@ pub struct ITradeProductFields {
     pub key: String,
     pub title: String,
     pub summary: String,
-    pub process: Option<String>,
-    pub lot: Option<String>,
-    pub profile: Option<String>,
+    pub process: String,
+    pub lot: String,
+    pub profile: String,
     pub year: String,
     pub qty_amt: String,
     pub qty_unit: String,
     pub qty_label: String,
-    pub qty_avail: String,
+    pub qty_avail: Option<String>,
     pub price_amt: String,
     pub price_currency: String,
     pub price_qty_amt: String,
@@ -123,7 +123,7 @@ pub type ITradeProductDeleteResolve = ();
 pub type ITradeProductUpdate = ITradeProductQueryUpdate;
 pub type ITradeProductUpdateResolve = ();
 
-fn trade_product_query_bind_values(opts: TradeProductQueryBindValues) -> IModelsQueryBindValueTuple {
+pub fn trade_product_query_bind_values(opts: TradeProductQueryBindValues) -> IModelsQueryBindValueTuple {
     match opts {
         TradeProductQueryBindValues::Id(id) => ("id".to_string(), id),
     }
