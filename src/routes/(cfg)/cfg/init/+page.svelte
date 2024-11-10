@@ -820,7 +820,6 @@
                                     classes: `h-entry_guide w-${$app_layout} bg-layer-1-surface rounded-touch font-mono text-lg placeholder:opacity-60 items-end text-center`,
                                     id: fmt_id(page_param.kv.nostr_secretkey),
                                     sync: true,
-                                    sync_init: true,
                                     placeholder: `${$t(`icu.enter_*`, { value: `nostr nsec/hex` })}`,
                                     field: {
                                         charset: regex.profile_name_ch,
@@ -891,7 +890,6 @@
                                     classes: `font-mono text-lg text-center placeholder:opacity-60`,
                                     id: fmt_id(page_param.kv.nostr_profilename),
                                     sync: true,
-                                    sync_init: true,
                                     placeholder: `${$t(`icu.enter_*`, { value: `${$t(`common.profile_name`)}`.toLowerCase() })}`,
                                     field: {
                                         charset: regex.profile_name_ch,

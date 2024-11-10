@@ -1,5 +1,6 @@
 import { theme_colors, themes } from "@radroots/theme";
 import { wind } from "@radroots/utils";
+import aspect_ratio from "@tailwindcss/aspect-ratio";
 import daisyui from "daisyui";
 import type { Config } from "tailwindcss";
 import tailwind_default from "tailwindcss/defaultTheme";
@@ -70,6 +71,27 @@ const config: Config = {
             mobile_y: { raw: `(orientation: portrait) and (min-height: ${wind.app.layout.mobile_y}px)` },
             mobile_base: { raw: `(orientation: portrait) and (max-height: ${wind.app.layout.mobile_base}px)` },
         },
+        aspectRatio: {
+            auto: 'auto',
+            square: '1 / 1',
+            video: '16 / 9',
+            1: '1',
+            2: '2',
+            3: '3',
+            4: '4',
+            5: '5',
+            6: '6',
+            7: '7',
+            8: '8',
+            9: '9',
+            10: '10',
+            11: '11',
+            12: '12',
+            13: '13',
+            14: '14',
+            15: '15',
+            16: '16',
+        },
         extend: {
             colors: {
                 ...theme_colors,
@@ -77,7 +99,7 @@ const config: Config = {
                 'chart-red': 'var(--chart-color-red)',
             },
             fontFamily: {
-                sans: ['SF Pro Display', ...tw_font.sans],
+                sans: ['SF Pro Rounded', ...tw_font.sans],
                 serif: [...tw_font.serif],
                 mono: [...tw_font.mono],
                 apercu: ['Apercu Mono Pro'],
@@ -152,7 +174,8 @@ const config: Config = {
         }
     },
     plugins: [
-        daisyui
+        daisyui,
+        aspect_ratio
     ],
     daisyui: {
         themes: [

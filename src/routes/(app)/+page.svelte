@@ -240,7 +240,9 @@
             {
                 icon: `squares-four`,
                 label: `Menu`,
-                callback: async () => {},
+                callback: async () => {
+                    await route(`/settings`);
+                },
             },
         ],
     }}

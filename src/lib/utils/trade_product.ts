@@ -1,6 +1,6 @@
 import { parse_trade_product_form_keys, trade_product_form_fields, trade_product_form_vals, type IModelsForm, type TradeProductFormFields } from "@radroots/models";
 import { fmt_id, kv } from "@radroots/svelte-lib";
-import { err_msg, type ErrorMessage } from "@radroots/utils";
+import { err_msg, type ErrorMessage, type ResultPass } from "@radroots/utils";
 
 const trade_products_field_validate = (field: IModelsForm, field_val: string): boolean => {
     if (
@@ -72,7 +72,7 @@ export const trade_product_fields_validate = async (opts: {
     }
 };
 
-export const trade_product_fields_kv_validate = async (opts?: {
+export const tradeproduct_validate_kv = async (opts?: {
     kv_pref?: string;
     fields_pass?: string[] | true;
 }): Promise<TradeProductFormFields | ErrorMessage<string>> => {
@@ -96,7 +96,42 @@ export const trade_product_fields_kv_validate = async (opts?: {
         }
         return vals;
     } catch (e) {
-        console.log(`(error) trade_product_fields_kv_validate `, e);
+        console.log(`(error) tradeproduct_validate_kv `, e);
+        return err_msg(String(e))
+    }
+};
+
+
+export const tradeproduct_init_kv = async (kv_pref: string): Promise<void> => {
+    try {
+        for (const k of Object.keys(
+            trade_product_form_fields,
+        )) {
+            const field_k = parse_trade_product_form_keys(k);
+            if (!field_k) continue;
+            const field_id = `${kv_pref}-${field_k}`
+            await kv.delete(field_id);
+        }
+    } catch (e) {
+        console.log(`(error) tradeproduct_init_kv `, e);
+    }
+};
+
+export const tradeproduct_validate_fields = async (opts: {
+    kv_pref: string;
+    fields: string[];
+}): Promise<ResultPass | ErrorMessage<string>> => {
+    try {
+        for (const field of opts.fields) {
+            const field_k = parse_trade_product_form_keys(field);
+            if (!field_k) return err_msg(field);
+            const field_id = `${opts.kv_pref}-${field_k}`;
+            const field_val = await kv.get(field_id);
+            if (!trade_product_form_fields[field_k].validation.test(field_val)) return err_msg(field_k);
+        }
+        return { pass: true };
+    } catch (e) {
+        console.log(`(error) tradeproduct_validate_fields `, e);
         return err_msg(String(e))
     }
 };
