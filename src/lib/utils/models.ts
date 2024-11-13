@@ -2,24 +2,24 @@ import { db, geoc } from "$lib/client";
 import type { IClientGeolocationPosition } from "@radroots/client";
 import type { GeocoderReverseResult } from "@radroots/geocoder";
 import type { ILocationGcsAddResolve, LocationGcsFormFields } from "@radroots/models";
-import { err_msg, location_geohash } from "@radroots/utils";
+import { err_msg, location_geohash, type GeolocationCoordinatesPoint } from "@radroots/utils";
 
 export const model_location_gcs_add_position = async (opts: {
     label?: string;
-    geo_loc: IClientGeolocationPosition;
+    geo_pos: IClientGeolocationPosition;
 }): Promise<ILocationGcsAddResolve<string>> => {
     try {
-        const { label, geo_loc } = opts;
+        const { label, geo_pos } = opts;
         const fields: LocationGcsFormFields = {
-            lat: geo_loc.lat.toString(),
-            lng: geo_loc.lng.toString(),
-            geohash: location_geohash(geo_loc),
+            lat: geo_pos.lat.toString(),
+            lng: geo_pos.lng.toString(),
+            geohash: location_geohash(geo_pos),
         }
         if (label) fields.label = label;
         const geoc_rev = await geoc.reverse({
             point: {
-                lat: geo_loc.lat,
-                lng: geo_loc.lng
+                lat: geo_pos.lat,
+                lng: geo_pos.lng
             }
         });
         if (`results` in geoc_rev && geoc_rev.results.length > 0) {
@@ -42,13 +42,14 @@ export const model_location_gcs_add_position = async (opts: {
 export const model_location_gcs_add_geocode = async (opts: {
     label?: string;
     geo_code: GeocoderReverseResult;
+    point: GeolocationCoordinatesPoint;
 }): Promise<ILocationGcsAddResolve<string>> => {
     try {
-        const { label, geo_code } = opts;
+        const { label, geo_code, point } = opts;
         const fields: LocationGcsFormFields = {
-            lat: geo_code.latitude.toString(),
-            lng: geo_code.longitude.toString(),
-            geohash: location_geohash({ lat: geo_code.latitude, lng: geo_code.longitude }),
+            lat: point.lat.toString(),
+            lng: point.lng.toString(),
+            geohash: location_geohash(point),
             gc_id: geo_code.id.toString(),
             gc_name: geo_code.name,
             gc_admin1_id: geo_code.admin1_id.toString(),

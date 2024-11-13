@@ -103,4 +103,4 @@
 <Controls />
 <CssStatic />
 <CssStyles />
-<div class="hidden h-entry_guide h-entry_line" />
+<div class="hidden h-entry_guide h-entry_line h-[calc(100vh-12%)]" />

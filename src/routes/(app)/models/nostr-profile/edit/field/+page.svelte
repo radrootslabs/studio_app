@@ -61,7 +61,7 @@
     let val_field_valid = false;
 
     $: translated_field_key = ld?.field_key
-        ? `${$t(`model.nostr_profile.${ld?.field_key}`, { default: ld?.field_key?.replaceAll(`_`, ` `) })}`.toLowerCase()
+        ? `${$t(`models.nostr_profile.fields.${ld.field_key}.label`)}`.toLowerCase()
         : ``;
 
     $: if (el_input_loaded && el_input) {
@@ -77,7 +77,7 @@
                     `${$t(`icu.error_loading_*`, { value: `${$t(`common.profile`)}` })}`,
                 );
                 return;
-            } else if (nostr_profiles.results.length < 1) {
+            } else if (!nostr_profiles.results.length) {
                 app_notify.set(
                     `${$t(`icu.error_loading_*`, { value: `${$t(`common.page`)}` })}`,
                 );

@@ -4,15 +4,16 @@
     import type { GeocoderReverseResult } from "@radroots/geocoder";
     import {
         app_thc,
+        envelope_tilt,
         envelope_visible,
         EnvelopeLower,
-        fmt_geol_latitude,
-        fmt_geol_longitude,
+        Glyph,
         t,
         type CallbackPromise,
     } from "@radroots/svelte-lib";
     import { MapLibre, Marker } from "@radroots/svelte-maplibre";
     import type { GeolocationCoordinatesPoint } from "@radroots/utils";
+    import { onDestroy, onMount } from "svelte";
     import MapMarkerDot from "./map_marker_dot.svelte";
     import MapPopupPointGeolocation from "./map_popup_point_geolocation.svelte";
 
@@ -21,11 +22,28 @@
         undefined;
 
     export let basis: {
-        visible: Boolean;
+        visible: boolean;
         close: CallbackPromise;
     };
+    $: basis = basis;
 
     let map_point_center: GeolocationCoordinatesPoint = cfg.map.coords.default;
+
+    onMount(async () => {
+        try {
+            envelope_tilt.set(false);
+        } catch (e) {
+        } finally {
+        }
+    });
+
+    onDestroy(async () => {
+        try {
+            envelope_tilt.set(true);
+        } catch (e) {
+        } finally {
+        }
+    });
 
     $: envelope_visible.set(!!basis.visible);
 
@@ -107,17 +125,28 @@
             </Marker>
         </MapLibre>
         <div
-            class={`absolute top-6 left-4 flex flex-col min-w-[180px] px-4 py-1 justify-start items-start bg-layer-1-surface rounded-xl shadow-md`}
+            class={`absolute top-16 left-0 flex flex-col w-full pt-1 justify-center items-center`}
         >
-            <p class={`font-sans font-[400] text-layer-0-glyph capitalize`}>
-                {`${`${$t(`common.current_location`)}`}:`}
-            </p>
-            <p class={`font-sans font-[400] text-layer-0-glyph`}>
-                {`${fmt_geol_latitude(map_point_select.lat, `dms`)}`}
-            </p>
-            <p class={`font-sans font-[400] text-layer-0-glyph`}>
-                {`${fmt_geol_longitude(map_point_select.lng, `dms`)}`}
-            </p>
+            <button
+                class={`group flex flex-row h-8 px-4 gap-2 justify-center items-center bg-layer-1-surface active:bg-layer-1-surface_a rounded-2xl shadow-md el-re`}
+                on:click={async () => {
+                    await basis.close();
+                }}
+            >
+                <Glyph
+                    basis={{
+                        classes: `text-layer-0-glyph`,
+                        dim: `xs`,
+                        weight: `bold`,
+                        key: `arrow-up`,
+                    }}
+                />
+                <p
+                    class={`font-sans font-[400] text-layer-0-glyph text-[1rem] capitalize`}
+                >
+                    {`${$t(`common.back`)}`}
+                </p>
+            </button>
         </div>
     {/if}
 </EnvelopeLower>

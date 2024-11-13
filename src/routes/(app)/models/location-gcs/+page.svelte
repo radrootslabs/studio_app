@@ -36,7 +36,7 @@
             if (`err` in location_gcss) {
                 app_notify.set(`${$t(`error.client.page.load`)}`);
                 return;
-            } else if (location_gcss.results.length < 1) {
+            } else if (!location_gcss.results.length) {
                 app_notify.set(`${$t(`error.client.page.load`)}`);
                 return;
             }

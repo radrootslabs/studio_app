@@ -16,8 +16,10 @@ export const ks = {
         nostr_publickey: `keys:nostr:`,
     }
 };
+
 export const ascii = {
-    bullet: '•'
+    bullet: '•',
+    dash: `—`
 }
 
 export const cfg = {
@@ -36,9 +38,6 @@ export const cfg = {
         mount_el: 500,
         nostr_relay_poll_document: 3000,
         entry_focus: 2000,
-    },
-    num: {
-        str: (num: number) => num.toString(),
     },
     cmd: {
         layout_route: `*-route`

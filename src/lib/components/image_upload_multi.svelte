@@ -19,6 +19,10 @@
 
     export let photo_paths: string[];
 
+    export let basis: {
+        id: string;
+    };
+
     let photo_file_path_0: string;
     let photo_file_path_1: string;
     let photo_file_path_2: string;
@@ -44,6 +48,10 @@
         try {
             const photo_paths_select = await dialog.open_photos();
             if (!photo_paths_select) return;
+            console.log(
+                `photo_paths_select.results[0] `,
+                photo_paths_select.results[0],
+            );
             photo_paths = list_assign(photo_paths, photo_paths_select.results);
         } catch (e) {
             console.log(`(error) handle_photo_add `, e);
@@ -78,8 +86,9 @@
     };
 </script>
 
-<div class={`flex flex-col h-[13rem] w-full px-4 justify-center items-center`}>
-    <div
+<div class={`flex flex-col w-full px-4 justify-start items-center`}>
+    <button
+        id={basis.id}
         class={`flex flex-row h-[11rem] w-[22rem] justify-center items-center bg-layer-1-surface rounded-[2rem] overflow-hidden`}
     >
         <button
@@ -270,12 +279,14 @@
                 {/if}
             </button>
         </div>
-    </div>
+    </button>
     <div
         class={`flex flex-row h-8 w-${$app_layout} justify-start items-center`}
     >
         <div class={`flex flex-row w-[11rem] justify-center items-center`}>
-            <p class={`font-sans font-[500] text-sm text-layer-0-glyph`}>
+            <p
+                class={`font-sans font-[500] text-[0.9rem] text-layer-0-glyph/80 scale-y-[94%]`}
+            >
                 {`${$t(`icu.primary_*`, { value: `${$t(`common.photo`)}` })}`}
             </p>
         </div>

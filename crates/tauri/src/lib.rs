@@ -21,6 +21,9 @@ use models::{
         model_trade_product_add, model_trade_product_delete, model_trade_product_get,
         model_trade_product_update,
     },
+    trade_product_location::{
+        model_trade_product_location_set, model_trade_product_location_unset,
+    },
 };
 use radroots::Radroots;
 use tauri::Manager;
@@ -71,7 +74,9 @@ pub fn run() {
             model_nostr_relay_delete,
             model_nostr_relay_update,
             model_nostr_profile_relay_set,
-            model_nostr_profile_relay_unset
+            model_nostr_profile_relay_unset,
+            model_trade_product_location_set,
+            model_trade_product_location_unset
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

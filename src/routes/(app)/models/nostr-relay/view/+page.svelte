@@ -40,7 +40,7 @@
             if (`err` in nostr_relays) {
                 app_notify.set(`${$t(`error.client.page.load`)}`);
                 return;
-            } else if (nostr_relays.results.length < 1) {
+            } else if (!nostr_relays.results.length) {
                 app_notify.set(`${$t(`error.client.page.load`)}`);
                 return;
             }
@@ -171,7 +171,7 @@
                     args: {
                         layer: 1,
                         title: {
-                            value: `${$t(`model.nostr_relay.pubkey`)}`,
+                            value: `${$t(`models.nostr_relay.fields.pubkey.label`)}`,
                         },
                         list: [
                             {
@@ -201,7 +201,7 @@
                     args: {
                         layer: 1,
                         title: {
-                            value: `${$t(`model.nostr_relay.description`)}`,
+                            value: `${$t(`models.nostr_relay.fields.description.label`)}`,
                         },
                         list: [
                             {
@@ -214,7 +214,7 @@
                                                 value:
                                                     ld.nostr_relay
                                                         .description ||
-                                                    `${$t(`icu.no_*_published`, { value: `${$t(`model.nostr_relay.description`)}`.toLowerCase() })}`,
+                                                    `${$t(`icu.no_*_published`, { value: `${$t(`models.nostr_relay.fields.description.label`)}`.toLowerCase() })}`,
                                             },
                                         ],
                                     },
@@ -229,7 +229,7 @@
                     args: {
                         layer: 1,
                         title: {
-                            value: `${$t(`model.nostr_relay.software`)}`,
+                            value: `${$t(`models.nostr_relay.fields.software.label`)}`,
                         },
                         list: [
                             {
@@ -241,7 +241,7 @@
                                                 classes: `text-layer-1-glyph`,
                                                 value:
                                                     ld.nostr_relay.software ||
-                                                    `${$t(`icu.no_*_published`, { value: `${$t(`model.nostr_relay.software`)}`.toLowerCase() })}`,
+                                                    `${$t(`icu.no_*_published`, { value: `${$t(`models.fields.nostr_relay.software.label`)}`.toLowerCase() })}`,
                                             },
                                         ],
                                     },
@@ -256,7 +256,7 @@
                     args: {
                         layer: 1,
                         title: {
-                            value: `${$t(`model.nostr_relay.version`)}`,
+                            value: `${$t(`models.nostr_relay.fields.version.label`)}`,
                         },
                         list: [
                             {
@@ -268,7 +268,7 @@
                                                 classes: `text-layer-1-glyph`,
                                                 value:
                                                     ld.nostr_relay.version ||
-                                                    `${$t(`icu.no_*_published`, { value: `${$t(`model.nostr_relay.version`)}`.toLowerCase() })}`,
+                                                    `${$t(`icu.no_*_published`, { value: `${$t(`models.nostr_relay.fields.version.label`)}`.toLowerCase() })}`,
                                             },
                                         ],
                                     },
@@ -283,7 +283,7 @@
                     args: {
                         layer: 1,
                         title: {
-                            value: `${$t(`model.nostr_relay.supported_nips`)}`,
+                            value: `${$t(`models.nostr_relay.fields.supported_nips.label`)}`,
                         },
                         list: [
                             {
@@ -296,7 +296,7 @@
                                                 value:
                                                     ld.nostr_relay
                                                         .supported_nips ||
-                                                    `${$t(`icu.no_*_published`, { value: `${$t(`supported_nips`)}`.toLowerCase() })}`,
+                                                    `${$t(`icu.no_*_published`, { value: `${$t(`models.nostr_relay.fields.supported_nips.label`)}`.toLowerCase() })}`,
                                             },
                                         ],
                                     },

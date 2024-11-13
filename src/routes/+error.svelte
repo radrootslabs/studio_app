@@ -14,7 +14,7 @@
                 }}
             />
             <p class={`font-sans font-[400] text-layer-0-glyph`}>
-                {`${$t(`error.client.page.status.${$page.status}`, { default: `${$t(`error.client.unhandled`)}` })}`}
+                {`${$t(`error.client.page.status.${$page.status}`)}`}
             </p>
         </div>
     </div>

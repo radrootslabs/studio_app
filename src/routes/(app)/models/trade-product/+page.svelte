@@ -31,14 +31,12 @@
             const trade_products = await db.trade_product_get({
                 list: [`all`],
             });
-            console.log(`trade_products `, trade_products);
             if (`err` in trade_products) {
                 app_notify.set(
                     `${$t(`icu.error_loading_*`, { value: `${$t(`common.page`)}` })}`,
                 );
                 return;
             }
-
             const data: LoadData = {
                 trade_products: trade_products.results,
             };

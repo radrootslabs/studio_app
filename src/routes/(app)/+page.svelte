@@ -114,7 +114,7 @@
             </p>
         </button>
     </div>
-    <div class={`flex flex-col pt-2 justify-center items-center`}>
+    <!--<div class={`flex flex-col pt-2 justify-center items-center`}>
         {#if tmp_show_no_profile}
             <button
                 class={`relative flex flex-row h-24 w-${$app_layout} p-4 gap-4 justify-center items-center bg-layer-2-surface/60 round-20 touch-layer-1 touch-layer-1-raise-less el-re`}
@@ -156,7 +156,7 @@
                 />
             </button>
         {/if}
-    </div>
+    </div>-->
     <div class={`flex flex-col w-full gap-[2px] justify-start items-center`}>
         <div class={`flex flex-row w-full px-6 justify-center items-center`}>
             <TrellisTitle

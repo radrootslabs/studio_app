@@ -1,5 +1,6 @@
 import { db, keystore } from "$lib/client";
-import { app_notify, route, type NavigationRoute } from "@radroots/svelte-lib";
+import { app_notify, el_id, route, sleep, type NavigationRoute } from "@radroots/svelte-lib";
+import type { ThemeLayer } from "@radroots/theme";
 import type { ErrorMessage } from "@radroots/utils";
 
 export const keystore_reset = async (): Promise<ErrorMessage<string> | undefined> => {
@@ -47,5 +48,18 @@ export const reset_device = async (): Promise<ErrorMessage<string> | undefined> 
         await route(`/`);
     } catch (e) {
         console.log(`(error) reset_device `, e);
+    }
+};
+
+export const el_focus = async (id: string, callback: () => Promise<void>, layer: ThemeLayer = 1): Promise<void> => {
+    try {
+        const el = el_id(id);
+        el?.classList.add(`entry-layer-${layer}-highlight`);
+        el?.focus();
+        await sleep(1200);
+        await callback();
+        el?.classList.remove(`entry-layer-${layer}-highlight`);
+    } catch (e) {
+        console.log(`(error) el_focus `, e);
     }
 };

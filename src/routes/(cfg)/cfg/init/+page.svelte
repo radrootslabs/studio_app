@@ -511,7 +511,7 @@
                 return { tok: res.data.tok };
             } else if (res.data && `message` in res.data)
                 return err_msg(
-                    `${$t(`radroots-org.error.${res.data.message}`, { default: `${$t(`error.client.request_failure`)}` })}`,
+                    `${$t(`radroots-org.error.${res.data.message}`)}`,
                 );
             return err_msg(`${$t(`error.client.request_failure`)}`);
         } catch (e) {

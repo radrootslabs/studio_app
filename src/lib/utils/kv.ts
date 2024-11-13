@@ -13,10 +13,7 @@ export const kv_init_page = async (): Promise<void> => {
 
 export const kv_sync = async (list: [string, string][]): Promise<void> => {
     try {
-        for (const [key, val] of list) {
-            await kv.set(key, val);
-            //  await sleep(50);
-        }
+        for (const [key, val] of list) await kv.set(key, val);
     } catch (e) {
         console.log(`(error) kv_sync `, e);
     }

@@ -56,7 +56,7 @@
             if (`err` in nostr_profiles) {
                 app_notify.set(`${$t(`error.client.page.load`)}`);
                 return;
-            } else if (nostr_profiles.results.length < 1) {
+            } else if (nostr_profiles.results) {
                 app_notify.set(`${$t(`error.client.page.load`)}`);
                 return;
             }
