@@ -23,9 +23,8 @@
         | `edit-profile-name`
         | `add-profile-name`
         | `delete-key`;
-    type OptionsList = ISelectOption<OptionsListKey>;
     const page_param: {
-        options_list: OptionsList[];
+        options_list: ISelectOption<OptionsListKey>[];
     } = {
         options_list: [
             {

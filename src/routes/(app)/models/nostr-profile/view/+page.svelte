@@ -196,7 +196,7 @@
                                         ],
                                     },
                                     end: {
-                                        icon: {
+                                        glyph: {
                                             key: as_glyph_key(`caret-right`),
                                         },
                                     },

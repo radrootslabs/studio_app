@@ -7,10 +7,11 @@
         LayoutTrellis,
         LayoutView,
         Nav,
+        route,
         t,
-        toggle_color_mode,
         Trellis,
     } from "@radroots/svelte-lib";
+    import { parse_color_mode } from "@radroots/theme";
 </script>
 
 <LayoutView>
@@ -25,18 +26,53 @@
                     list: [
                         {
                             hide_active: true,
-                            touch: {
+                            select: {
                                 label: {
                                     left: [
                                         {
-                                            value: `Toggle Color Mode (${toggle_color_mode($app_thc)})`,
+                                            value: `${$t(`common.color_mode`)}`,
                                             classes: `capitalize`,
                                         },
                                     ],
                                 },
-                                callback: async () => {
-                                    await haptics.impact();
-                                    app_thc.set(toggle_color_mode($app_thc));
+                                display: {
+                                    label: {
+                                        value: `${$app_thc}`,
+                                        classes: `capitalize`,
+                                    },
+                                },
+                                el: {
+                                    value: $app_thc,
+                                    options: [
+                                        {
+                                            entries: [
+                                                {
+                                                    value: `~`,
+                                                    label: `${$t(`icu.choose_*`, { value: `${$t(`common.color_mode`)}` })}`,
+                                                    disabled: true,
+                                                },
+                                                {
+                                                    value: `light`,
+                                                    label: `${$t(`common.light`)}`,
+                                                },
+                                                {
+                                                    value: `dark`,
+                                                    label: `${$t(`common.dark`)}`,
+                                                },
+                                            ],
+                                        },
+                                    ],
+                                    callback: async ({ value }) => {
+                                        if (value)
+                                            app_thc.set(
+                                                parse_color_mode(value),
+                                            );
+                                    },
+                                },
+                                end: {
+                                    glyph: {
+                                        key: `caret-right`,
+                                    },
                                 },
                             },
                         },
@@ -63,7 +99,7 @@
                                     ],
                                 },
                                 end: {
-                                    icon: {
+                                    glyph: {
                                         key: `caret-right`,
                                     },
                                 },
@@ -89,7 +125,7 @@
                                     ],
                                 },
                                 end: {
-                                    icon: {
+                                    glyph: {
                                         key: `caret-right`,
                                     },
                                 },
@@ -127,13 +163,33 @@
                                 label: {
                                     left: [
                                         {
+                                            value: `Nostr Settings`,
+                                            classes: `capitalize`,
+                                        },
+                                    ],
+                                },
+                                end: {
+                                    glyph: {
+                                        key: `caret-right`,
+                                    },
+                                },
+                                callback: async () => {
+                                    await route(`/settings/nostr`);
+                                },
+                            },
+                        },
+                        {
+                            touch: {
+                                label: {
+                                    left: [
+                                        {
                                             value: `Reset Device`,
                                             classes: `capitalize`,
                                         },
                                     ],
                                 },
                                 end: {
-                                    icon: {
+                                    glyph: {
                                         key: `caret-right`,
                                     },
                                 },
@@ -303,7 +359,7 @@
                                     ],
                                 },
                                 end: {
-                                    icon: {
+                                    glyph: {
                                         key: `caret-right`,
                                     },
                                 },
@@ -323,7 +379,7 @@
                                     ],
                                 },
                                 end: {
-                                    icon: {
+                                    glyph: {
                                         key: `caret-right`,
                                     },
                                 },
@@ -343,7 +399,7 @@
                                     ],
                                 },
                                 end: {
-                                    icon: {
+                                    glyph: {
                                         key: `caret-right`,
                                     },
                                 },

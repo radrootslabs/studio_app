@@ -7,7 +7,7 @@ import tailwind_default from "tailwindcss/defaultTheme";
 const { fontFamily: tw_font } = tailwind_default;
 
 const heights_form = {
-    line: "46px",
+    line: `46px`,
 };
 
 const heights_responsive = {
@@ -29,7 +29,7 @@ const heights = {
     touch_bold: `4.25rem`,
     touch_guide: `3.4rem`,
     line: `46px`,
-    envelope_top: "56px",
+    envelope_top: `56px`,
     toast_min: `56px`,
     envelope_button: `50px`,
     line_label: `1.75rem`
@@ -46,7 +46,7 @@ const widths = {
     line: `320px`,
     trellis_line: `349px`,
     trellis_value: `180px`,
-    trellis_display: `290px`,
+    trellis_display: `286px`,
 };
 
 const dimensions_responsive = {
@@ -72,37 +72,37 @@ const config: Config = {
             mobile_base: { raw: `(orientation: portrait) and (max-height: ${wind.app.layout.mobile_base}px)` },
         },
         aspectRatio: {
-            auto: 'auto',
-            square: '1 / 1',
-            video: '16 / 9',
-            1: '1',
-            2: '2',
-            3: '3',
-            4: '4',
-            5: '5',
-            6: '6',
-            7: '7',
-            8: '8',
-            9: '9',
-            10: '10',
-            11: '11',
-            12: '12',
-            13: '13',
-            14: '14',
-            15: '15',
-            16: '16',
+            auto: `auto`,
+            square: `1 / 1`,
+            video: `16 / 9`,
+            1: `1`,
+            2: `2`,
+            3: `3`,
+            4: `4`,
+            5: `5`,
+            6: `6`,
+            7: `7`,
+            8: `8`,
+            9: `9`,
+            10: `10`,
+            11: `11`,
+            12: `12`,
+            13: `13`,
+            14: `14`,
+            15: `15`,
+            16: `16`,
         },
         extend: {
             colors: {
                 ...theme_colors,
-                'chart-green': 'var(--chart-color-green)',
-                'chart-red': 'var(--chart-color-red)',
+                'chart-green': `var(--chart-color-green)`,
+                'chart-red': `var(--chart-color-red)`,
             },
             fontFamily: {
-                sans: ['SF Pro Rounded', ...tw_font.sans],
+                sans: [`SF Pro Rounded`, ...tw_font.sans],
                 serif: [...tw_font.serif],
                 mono: [...tw_font.mono],
-                apercu: ['Apercu Mono Pro'],
+                apercu: [`Apercu Mono Pro`],
                 magda: [`Magda Text`],
                 lust: [`Lust`],
                 circ: [`Circular`],
@@ -113,21 +113,22 @@ const config: Config = {
             },
             fontSize: {
                 line_label: [`1.3rem`, { lineHeight: `1.3rem` }],
-                trellisTitle: ["0.8rem", { lineHeight: "1rem", fontWeight: 200 }],
-                trellisTitleNote: ["0.76rem", { lineHeight: "1rem", fontWeight: 200 }],
-                line_display: ["1.05rem", { lineHeight: "1.33rem", fontWeight: 300 }],
-                trellisLabel: ["0.8rem", { lineHeight: "1rem", fontWeight: 200 }],
-                navPrevious: ["1.09rem", { lineHeight: "1.33rem", fontWeight: 400 }],
-                navCurrent: ["1.09rem", { lineHeight: "1.33rem", fontWeight: 500 }],
-                envelopeTitle: ["1.05rem", { lineHeight: "1.75rem", fontWeight: 600 }],
-                envelopeTitlePrevious: ["1.02rem", { lineHeight: "1.75rem", fontWeight: 400 }],
-                envelopeTitleAction: ["1.02rem", { lineHeight: "1.75rem", fontWeight: 500 }],
-                envelopeButtonCancel: ["1.1rem", { lineHeight: "1.75rem", fontWeight: 600 }],
-                envelopeButtonLabel: ["1.1rem", { lineHeight: "1.75rem", fontWeight: 500 }],
+                trellisTitle: [`0.8rem`, { lineHeight: `1rem`, fontWeight: 300 }],
+                trellisTitleNote: [`0.76rem`, { lineHeight: `1rem`, fontWeight: 200 }],
+                line_display: [`1.05rem`, { lineHeight: `1.33rem`, fontWeight: 400 }],
+                line_display_e: [`1.05rem`, { lineHeight: `1.33rem`, fontWeight: 500 }],
+                trellisLabel: [`0.8rem`, { lineHeight: `1rem`, fontWeight: 200 }],
+                navPrevious: [`1.09rem`, { lineHeight: `1.33rem`, fontWeight: 400 }],
+                navCurrent: [`1.09rem`, { lineHeight: `1.33rem`, fontWeight: 500 }],
+                envelopeTitle: [`1.05rem`, { lineHeight: `1.75rem`, fontWeight: 600 }],
+                envelopeTitlePrevious: [`1.02rem`, { lineHeight: `1.75rem`, fontWeight: 400 }],
+                envelopeTitleAction: [`1.02rem`, { lineHeight: `1.75rem`, fontWeight: 500 }],
+                envelopeButtonCancel: [`1.1rem`, { lineHeight: `1.75rem`, fontWeight: 600 }],
+                envelopeButtonLabel: [`1.1rem`, { lineHeight: `1.75rem`, fontWeight: 500 }],
             },
             gridTemplateColumns: {
-                '16': 'repeat(16, minmax(0, 1fr))',
-                '24': 'repeat(24, minmax(0, 1fr))',
+                '16': `repeat(16, minmax(0, 1fr))`,
+                '24': `repeat(24, minmax(0, 1fr))`,
             },
             height: {
                 ...heights,
@@ -163,13 +164,13 @@ const config: Config = {
                 ...Object.fromEntries(Object.entries(dimensions).map(([k, v]) => [`dim_${k}`, v])),
             },
             borderWidth: {
-                "line": `1px`,
-                "edge": `2px`
+                line: `1px`,
+                edge: `2px`
             },
             borderRadius: {
-                input_form: "8px",
-                entry: "1.05rem",
-                touch: "1.25rem"
+                input_form: `8px`,
+                entry: `1.05rem`,
+                touch: `1.25rem`
             },
         }
     },

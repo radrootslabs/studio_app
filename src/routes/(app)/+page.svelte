@@ -71,7 +71,7 @@
                     },
                 },
                 {
-                    route: `/`,
+                    route: `/settings/nostr`,
                     label: `Cooperatives`,
                     key: `users-three`,
                 },
