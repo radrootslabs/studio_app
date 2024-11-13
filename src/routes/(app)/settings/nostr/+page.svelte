@@ -1,5 +1,6 @@
 <script lang="ts">
     import { dialog } from "$lib/client";
+    import { ascii } from "$lib/conf";
     import {
         LayoutTrellis,
         LayoutView,
@@ -15,7 +16,7 @@
     } = {
         select_options: [
             {
-                value: `~`,
+                value: ascii.bullet,
                 label: `Choose photo hosting`,
                 disabled: true,
             },

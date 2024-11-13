@@ -1,6 +1,7 @@
 <script lang="ts">
     import { db, dialog, geol } from "$lib/client";
-    import ImageUploadMulti from "$lib/components/image_upload_multi.svelte";
+    import ImageUploadControl from "$lib/components/image_upload_control.svelte";
+    import ImageUploadEditEnvelope from "$lib/components/image_upload_edit_envelope.svelte";
     import MapPointSelectEnvelope from "$lib/components/map_point_select_envelope.svelte";
     import TradeFieldDisplayEl from "$lib/components/trade_field_display_el.svelte";
     import TradeFieldDisplayKv from "$lib/components/trade_field_display_kv.svelte";
@@ -118,7 +119,8 @@
     let load_submit = false;
 
     let tradepr_photo_paths: string[] = [];
-
+    let tradepr_photo_edit: { index: number; file_path: string } | undefined =
+        undefined;
     let tradepr_key_sel_toggle = false;
     let tradepr_key_sel = ``;
     $: tradepr_key_parsed = parse_trade_key(tradepr_key_sel);
@@ -371,12 +373,6 @@
                                         );
                                         return;
                                     }
-                                    if (!tradepr_photo_paths.length) {
-                                        await dialog.alert(
-                                            `${$t(`icu.a_*_is_required`, { value: `${$t(`common.photo`)}`.toLowerCase() })}`,
-                                        );
-                                        return;
-                                    }
                                     await carousel_inc(view);
                                 }
                                 break;
@@ -413,12 +409,13 @@
         try {
             if (!tradepr_photo_paths.length) {
                 const confirm = await dialog.confirm({
-                    message: `${$t(`icu.a_*_is_required`, { value: `${$t(`common.photo`)}`.toLowerCase() })}`,
+                    message: `${`${$t(`icu.the_listing_will_be_created_without_a_*`, { value: `${$t(`common.photo`)}`.toLowerCase() })}`}. ${$t(`common.do_you_want_to_continue_q`)}`,
                     ok_label: `${$t(`icu.add_*`, { value: `${$t(`common.photo`)}` })}`,
+                    cancel_label: `${$t(`common.continue`)}`,
                 });
                 if (confirm) {
                     await el_focus(
-                        fmt_id(`image-upload-multi`),
+                        fmt_id(`image-upload-control`),
                         async () => await handle_back(2),
                     );
                 }
@@ -527,10 +524,11 @@
                 class={`carousel-item flex flex-col w-full justify-start items-center`}
             >
                 <LayoutTrellis>
-                    <ImageUploadMulti
+                    <ImageUploadControl
                         bind:photo_paths={tradepr_photo_paths}
+                        bind:photo_edit={tradepr_photo_edit}
                         basis={{
-                            id: fmt_id(`image-upload-multi`),
+                            id: fmt_id(`image-upload-control`),
                         }}
                     />
                     <LayoutTrellisLine
@@ -1374,7 +1372,7 @@
                                                     ? ``
                                                     : `pr-4`,
                                                 value: tradepr_parsed_quantity
-                                                    ? `~`
+                                                    ? ascii.bullet
                                                     : ``,
                                                 hide: !!tradepr_parsed_quantity,
                                                 undef: ascii.dash,
@@ -1542,4 +1540,8 @@
             tradepr_lgc_map_vis = false;
         },
     }}
+/>
+<ImageUploadEditEnvelope
+    bind:photo_paths={tradepr_photo_paths}
+    bind:photo_edit={tradepr_photo_edit}
 />

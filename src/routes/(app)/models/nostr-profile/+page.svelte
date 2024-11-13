@@ -1,5 +1,6 @@
 <script lang="ts">
     import { db, keystore, nostr } from "$lib/client";
+    import { ascii } from "$lib/conf";
     import { type NostrProfile } from "@radroots/models";
     import {
         app_nostr_key,
@@ -233,7 +234,7 @@
                                     class={`z-10 absolute top-2 right-3 flex flex-row h-full justify-end pr-1`}
                                 >
                                     <SelectMenu
-                                        value={`~`}
+                                        value={ascii.bullet}
                                         basis={{
                                             layer: 0,
                                             //mask: true,

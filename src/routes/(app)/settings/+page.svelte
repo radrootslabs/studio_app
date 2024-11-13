@@ -1,6 +1,6 @@
 <script lang="ts">
     import { dialog, geol, haptics, keystore } from "$lib/client";
-    import { ks } from "$lib/conf";
+    import { ascii, ks } from "$lib/conf";
     import { reset_device } from "$lib/utils/client";
     import {
         app_thc,
@@ -47,8 +47,8 @@
                                         {
                                             entries: [
                                                 {
-                                                    value: `~`,
-                                                    label: `${$t(`icu.choose_*`, { value: `${$t(`common.color_mode`)}` })}`,
+                                                    value: ascii.bullet,
+                                                    label: `${$t(`icu.choose_*`, { value: `${$t(`common.color_mode`)}`.toLowerCase() })}`,
                                                     disabled: true,
                                                 },
                                                 {
