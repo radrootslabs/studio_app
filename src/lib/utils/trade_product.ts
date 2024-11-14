@@ -1,13 +1,13 @@
 import { parse_trade_product_form_keys, trade_product_form_fields, trade_product_form_vals, type IModelsForm, type TradeProductFormFields } from "@radroots/models";
 import { fmt_id, kv } from "@radroots/svelte-lib";
-import { err_msg, type ErrorMessage, type ResultPass } from "@radroots/utils";
+import { err_msg, obj_en, type ErrorMessage, type ResultPass } from "@radroots/utils";
 
-const trade_products_field_validate = (field: IModelsForm, field_val: string): boolean => {
+const trade_products_field_validate = (field_basis: IModelsForm, field_val: string): boolean => {
     if (
-        (!field.optional && !field.validation.test(field_val)) ||
-        (field.optional &&
+        (!field_basis.optional && !field_basis.validation.test(field_val)) ||
+        (field_basis.optional &&
             field_val &&
-            !field.validation.test(field_val))
+            !field_basis.validation.test(field_val))
     ) return false;
     return true;
 };
@@ -21,10 +21,7 @@ export const trade_product_fields_assign = async (opts?: {
         const fields = {
             ...trade_product_form_vals
         };
-        for (const [field_ks, field] of Object.entries(
-            trade_product_form_fields,
-        )) {
-            const field_k = parse_trade_product_form_keys(field_ks);
+        for (const [field_k, _] of obj_en(trade_product_form_fields, parse_trade_product_form_keys)) {
             if (!field_k) continue;
             const field_val = await kv.get(`${opts?.kv_pref || fmt_id()}-${field_k}`);
             if (field_val) fields[field_k] = field_val;
@@ -46,21 +43,15 @@ export const trade_product_fields_validate = async (opts: {
         const fields = {
             ...trade_product_form_vals
         };
-        for (const [field_ks, field] of Object.entries(
-            trade_product_form_fields,
-        )) {
-            const field_k = parse_trade_product_form_keys(field_ks);
+        for (const [field_k, _] of obj_en(trade_product_form_fields, parse_trade_product_form_keys)) {
             if (!field_k) continue;
             const field_val = await kv.get(`${opts?.kv_pref || fmt_id()}-${field_k}`);
             if (field_val) fields[field_k] = field_val;
         }
         if (opts?.field_defaults && opts?.field_defaults?.length > 0) for (const [field_k, field_v] of opts?.field_defaults) if (!fields[field_k]) fields[field_k] = field_v;
-
-        for (const [field_ks, field_val] of Object.entries(fields)) {
-            const field_k = parse_trade_product_form_keys(field_ks);
+        for (const [field_k, field] of obj_en(fields, parse_trade_product_form_keys)) {
             if (!field_k) continue;
-            const field = trade_product_form_fields[field_k]
-            if (!trade_products_field_validate(field, field_val)) {
+            if (!trade_products_field_validate(trade_product_form_fields[field_k], field)) {
                 if (opts.fields_pass?.includes(field_k)) continue;
                 return err_msg(field_k);
             }
@@ -80,10 +71,7 @@ export const tradeproduct_validate_kv = async (opts?: {
         const vals = {
             ...trade_product_form_vals
         };
-        for (const [k, field] of Object.entries(
-            trade_product_form_fields,
-        )) {
-            const field_k = parse_trade_product_form_keys(k);
+        for (const [field_k, field] of obj_en(trade_product_form_fields, parse_trade_product_form_keys)) {
             if (!field_k) continue;
             const field_id = `${opts?.kv_pref || fmt_id()}-${field_k}`;
             const field_val = await kv.get(field_id);
@@ -104,10 +92,7 @@ export const tradeproduct_validate_kv = async (opts?: {
 
 export const tradeproduct_init_kv = async (kv_pref: string): Promise<void> => {
     try {
-        for (const k of Object.keys(
-            trade_product_form_fields,
-        )) {
-            const field_k = parse_trade_product_form_keys(k);
+        for (const [field_k, _] of obj_en(trade_product_form_fields, parse_trade_product_form_keys)) {
             if (!field_k) continue;
             const field_id = `${kv_pref}-${field_k}`
             await kv.delete(field_id);
@@ -122,9 +107,8 @@ export const tradeproduct_validate_fields = async (opts: {
     fields: string[];
 }): Promise<ResultPass | ErrorMessage<string>> => {
     try {
-        for (const field of opts.fields) {
-            const field_k = parse_trade_product_form_keys(field);
-            if (!field_k) return err_msg(field);
+        for (const field_k of opts.fields.map(parse_trade_product_form_keys)) {
+            if (!field_k) return err_msg(field_k);
             const field_id = `${opts.kv_pref}-${field_k}`;
             const field_val = await kv.get(field_id);
             if (!trade_product_form_fields[field_k].validation.test(field_val)) return err_msg(field_k);

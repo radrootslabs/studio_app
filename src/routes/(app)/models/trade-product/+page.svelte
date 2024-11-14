@@ -1,8 +1,8 @@
 <script lang="ts">
     import { db } from "$lib/client";
-    import { type LocationGcs, type TradeProduct } from "@radroots/models";
+    import TradeProductListCard from "$lib/components/trade_product_list_card.svelte";
+    import type { TradeProductBundle } from "$lib/types";
     import {
-        app_layout,
         app_notify,
         LayoutTrellis,
         LayoutView,
@@ -12,12 +12,8 @@
     } from "@radroots/svelte-lib";
     import { onMount } from "svelte";
 
-    type LoadDataResult = {
-        trade_product: TradeProduct;
-        location_gcs?: LocationGcs;
-    };
     type LoadData = {
-        results: LoadDataResult[];
+        results: TradeProductBundle[];
     };
     let ld: LoadData | undefined = undefined;
 
@@ -41,7 +37,7 @@
                 return;
             }
 
-            const results: LoadDataResult[] = [];
+            const results: TradeProductBundle[] = [];
             for (const trade_product of trade_products.results) {
                 const location_gcs = await db.location_gcs_get({
                     list: [`on_trade_product`, { id: trade_product.id }],
@@ -73,24 +69,11 @@
     <LayoutView>
         <LayoutTrellis>
             {#each ld.results as li, li_i}
-                <div
-                    class={`flex flex-col h-[22rem] w-${$app_layout} justify-start items-start bg-layer-1-surface round-44`}
-                >
-                    <div
-                        class={`flex flex-row h-[11rem] w-${$app_layout} justify-center items-center border-b-line border-b-layer-1-surface-edge`}
-                    >
-                        <p class={`font-sans font-[400] text-layer-0-glyph`}>
-                            photos
-                        </p>
-                    </div>
-                    <div
-                        class={`flex flex-row h-[11rem] w-full justify-center items-center`}
-                    >
-                        <p class={`font-sans font-[400] text-layer-0-glyph`}>
-                            body
-                        </p>
-                    </div>
-                </div>
+                <TradeProductListCard
+                    basis={{
+                        result: li,
+                    }}
+                />
             {/each}
         </LayoutTrellis>
     </LayoutView>

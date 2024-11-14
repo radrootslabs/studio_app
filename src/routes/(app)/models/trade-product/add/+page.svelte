@@ -189,17 +189,14 @@
         try {
             tradepr_key_sel = page_param.default.tradepr_key;
             tradepr_process_sel = `washed`;
-
-            tradepr_price_amt_val = `1200.07`;
-
+            tradepr_price_amt_val = `4.30`;
             tradepr_qty_tup_sel.set(`60-kg-bag`);
-
             await kv_sync([
                 [fmt_id(`title`), `Green Coffee Beans`],
-                [fmt_id(`lot`), `mountain #1`],
+                [fmt_id(`lot`), `Ancestor slope`],
                 [
                     fmt_id(`summary`),
-                    `Good coffee, an amazing batch from our secret hillside with world leading terroir and tasting notes of honey.`,
+                    `Good coffee, an amazing year, wonderful flavour, we love it!`,
                 ],
             ]);
         } catch (e) {
@@ -249,7 +246,6 @@
                 num_str(tradepr_parsed_quantity.mass),
             );
             await kv.set(fmt_id(`qty_unit`), tradepr_parsed_quantity.mass_unit);
-            await kv.set(fmt_id(`qty_label`), tradepr_parsed_quantity.label);
         }
     });
 
@@ -435,10 +431,10 @@
             if (!tradepr_photo_paths.length) {
                 const confirm = await dialog.confirm({
                     message: `${`${$t(`icu.the_listing_will_be_created_without_a_*`, { value: `${$t(`common.photo`)}`.toLowerCase() })}`}. ${$t(`common.do_you_want_to_continue_q`)}`,
-                    ok_label: `${$t(`icu.add_*`, { value: `${$t(`common.photo`)}` })}`,
-                    cancel_label: `${$t(`common.continue`)}`,
+                    cancel_label: `${$t(`icu.add_*`, { value: `${$t(`common.photo`)}` })}`,
+                    ok_label: `${$t(`common.continue`)}`,
                 });
-                if (confirm) {
+                if (!confirm) {
                     await el_focus(
                         fmt_id(`image-upload-control`),
                         async () => await handle_back(2),
@@ -497,6 +493,10 @@
                     [`year`, year_curr()],
                 ],
             });
+            console.log(
+                JSON.stringify(trade_product_fields, null, 4),
+                `trade_product_fields`,
+            );
             if (`err` in trade_product_fields) {
                 await dialog.alert(
                     `${$t(`icu.the_*_is_incomplete`, { value: `${$t(`models.trade_product.fields.${trade_product_fields.err}.label`)}`.toLowerCase() })}`,
@@ -523,7 +523,7 @@
                     },
                 });
             if (`pass` in trade_product_location_set) {
-                route(`/models/nostr-relay/view`);
+                route(`/models/trade-product`);
                 return;
             }
             await dialog.alert(
