@@ -8,7 +8,7 @@
     import { ascii } from "$lib/conf";
     import { el_focus } from "$lib/utils/client";
     import { location_gcs_to_geoc } from "$lib/utils/geocode";
-    import { kv_init_page } from "$lib/utils/kv";
+    import { kv_init_page, kv_sync } from "$lib/utils/kv";
     import { model_location_gcs_add_geocode } from "$lib/utils/models";
     import {
         trade_product_fields_validate,
@@ -116,6 +116,7 @@
         view_effect<View>(view);
     }
 
+    let load_page = false;
     let load_submit = false;
 
     let tradepr_photo_paths: string[] = [];
@@ -156,8 +157,10 @@
     onMount(async () => {
         try {
             await init_page();
+            await setup_tests();
         } catch (e) {
         } finally {
+            load_page = true;
         }
     });
 
@@ -179,6 +182,28 @@
                 tradepr_lgc_list = location_gcs_get_ls.results;
         } catch (e) {
             console.log(`(error) init_page `, e);
+        }
+    };
+
+    const setup_tests = async (): Promise<void> => {
+        try {
+            tradepr_key_sel = page_param.default.tradepr_key;
+            tradepr_process_sel = `washed`;
+
+            tradepr_price_amt_val = `1200.07`;
+
+            tradepr_qty_tup_sel.set(`60-kg-bag`);
+
+            await kv_sync([
+                [fmt_id(`title`), `Green Coffee Beans`],
+                [fmt_id(`lot`), `mountain #1`],
+                [
+                    fmt_id(`summary`),
+                    `Good coffee, an amazing batch from our secret hillside with world leading terroir and tasting notes of honey.`,
+                ],
+            ]);
+        } catch (e) {
+            console.log(`(error) setup_tests `, e);
         }
     };
 
@@ -418,8 +443,8 @@
                         fmt_id(`image-upload-control`),
                         async () => await handle_back(2),
                     );
+                    return;
                 }
-                return;
             }
             let location_gcs_id = ``;
             const location_gcs_get_i = await db.location_gcs_get_one({
@@ -510,205 +535,325 @@
     };
 </script>
 
-<LayoutView>
-    <div
-        data-view={`c_1`}
-        class={`flex flex-col h-full w-full justify-start items-center`}
-    >
+{#if load_page}
+    <LayoutView>
         <div
-            data-carousel-container={`c_1`}
-            class={`carousel-container flex h-full w-full`}
+            data-view={`c_1`}
+            class={`flex flex-col h-full w-full justify-start items-center`}
         >
             <div
-                data-carousel-item={`c_1`}
-                class={`carousel-item flex flex-col w-full justify-start items-center`}
+                data-carousel-container={`c_1`}
+                class={`carousel-container flex h-full w-full`}
             >
-                <LayoutTrellis>
-                    <ImageUploadControl
-                        bind:photo_paths={tradepr_photo_paths}
-                        bind:photo_edit={tradepr_photo_edit}
-                        basis={{
-                            id: fmt_id(`image-upload-control`),
-                        }}
-                    />
-                    <LayoutTrellisLine
-                        basis={{
-                            label: {
-                                value: `${$t(`icu.listing_*`, { value: `${$t(`common.title`)}` })}`,
-                            },
-                        }}
-                    >
-                        <EntryLine
+                <div
+                    data-carousel-item={`c_1`}
+                    class={`carousel-item flex flex-col w-full justify-start items-center`}
+                >
+                    <LayoutTrellis>
+                        <ImageUploadControl
+                            bind:photo_paths={tradepr_photo_paths}
+                            bind:photo_edit={tradepr_photo_edit}
                             basis={{
-                                wrap: {
-                                    id: fmt_id(`title_wrap`),
-                                    layer: 1,
-                                },
-                                el: {
-                                    id: fmt_id(`title`),
-                                    layer: 1,
-                                    sync: true,
-                                    classes: `fade-in-long`,
-                                    placeholder: `${$t(`icu.enter_*`, { value: `${$t(`common.title`)}`.toLowerCase() })}`,
-                                    field: {
-                                        charset:
-                                            trade_product_form_fields.title
-                                                .charset,
-                                        validate:
-                                            trade_product_form_fields.title
-                                                .validation,
-                                        validate_keypress: true,
-                                    },
-                                },
+                                id: fmt_id(`image-upload-control`),
                             }}
                         />
-                    </LayoutTrellisLine>
-                    <LayoutTrellisLine
-                        basis={{
-                            label: {
-                                value: `${$t(`common.product`)}`,
-                            },
-                            notify: tradepr_key_sel_toggle
-                                ? {
-                                      label: {
-                                          value: `${$t(`common.close`)}`,
-                                      },
-                                      callback: async () => {
-                                          await handle_tradepr_key_toggle(
-                                              false,
-                                          );
-                                      },
-                                  }
-                                : undefined,
-                        }}
-                    >
-                        {#if !tradepr_key_sel_toggle}
-                            <EntrySelect
-                                bind:value={tradepr_key_sel}
-                                basis={{
-                                    wrap: {
-                                        id: fmt_id(`key_wrap`),
-                                        layer: 1,
-                                    },
-                                    el: {
-                                        id: fmt_id(`key`),
-                                        sync: true,
-                                        layer: 1,
-                                        options: [
-                                            {
-                                                entries: [
-                                                    {
-                                                        value: ``,
-                                                        label: `${$t(`icu.choose_*`, { value: `${$t(`common.product`)}`.toLowerCase() })}`,
-                                                        disabled: true,
-                                                    },
-                                                    ...trade_keys.map((i) => ({
-                                                        value: i,
-                                                        label: `${$t(`trade.product.key.${i}.name`)}`,
-                                                    })),
-                                                    {
-                                                        value: ``,
-                                                        label: `${$t(`common.other`)}`,
-                                                    },
-                                                ],
-                                            },
-                                        ],
-                                        callback: async (opt) => {
-                                            el_id(
-                                                fmt_id(`key_wrap`),
-                                            )?.classList.remove(
-                                                `entry-layer-1-highlight`,
-                                            );
-                                            if (!opt.value) {
-                                                await handle_tradepr_key_toggle(
-                                                    true,
-                                                );
-                                                tradepr_key_sel = ``;
-                                                tradepr_process_sel = ``;
-                                            } else {
-                                                tradepr_process_sel = ``;
-                                            }
-                                        },
-                                    },
-                                }}
-                            />
-                        {:else}
+                        <LayoutTrellisLine
+                            basis={{
+                                label: {
+                                    value: `${$t(`icu.listing_*`, { value: `${$t(`common.title`)}` })}`,
+                                },
+                            }}
+                        >
                             <EntryLine
                                 basis={{
                                     wrap: {
-                                        id: fmt_id(`key_wrap`),
+                                        id: fmt_id(`title_wrap`),
                                         layer: 1,
                                     },
                                     el: {
-                                        id: fmt_id(`key`),
+                                        id: fmt_id(`title`),
                                         layer: 1,
                                         sync: true,
                                         classes: `fade-in-long`,
-                                        placeholder: `${$t(`icu.enter_the_*`, { value: `${$t(`icu.*_name`, { value: `${$t(`common.product`)}` })}`.toLowerCase() })}`,
+                                        placeholder: `${$t(`icu.enter_*`, { value: `${$t(`common.title`)}`.toLowerCase() })}`,
                                         field: {
                                             charset:
-                                                trade_product_form_fields.key
+                                                trade_product_form_fields.title
                                                     .charset,
                                             validate:
-                                                trade_product_form_fields.key
+                                                trade_product_form_fields.title
                                                     .validation,
                                             validate_keypress: true,
                                         },
                                     },
                                 }}
                             />
-                        {/if}
-                    </LayoutTrellisLine>
-                    <LayoutTrellisLine
-                        basis={{
-                            label: {
-                                value: `${$t(`common.process`)}`,
-                            },
-                            notify: tradepr_process_sel_toggle
-                                ? {
-                                      label: {
-                                          value: `${$t(`common.close`)}`,
-                                      },
-                                      callback: async () => {
-                                          await handle_tradepr_process_toggle(
-                                              false,
-                                          );
-                                      },
-                                  }
-                                : undefined,
-                        }}
-                    >
-                        {#if !tradepr_process_sel_toggle}
+                        </LayoutTrellisLine>
+                        <LayoutTrellisLine
+                            basis={{
+                                label: {
+                                    value: `${$t(`common.product`)}`,
+                                },
+                                notify: tradepr_key_sel_toggle
+                                    ? {
+                                          label: {
+                                              value: `${$t(`common.close`)}`,
+                                          },
+                                          callback: async () => {
+                                              await handle_tradepr_key_toggle(
+                                                  false,
+                                              );
+                                          },
+                                      }
+                                    : undefined,
+                            }}
+                        >
+                            {#if !tradepr_key_sel_toggle}
+                                <EntrySelect
+                                    bind:value={tradepr_key_sel}
+                                    basis={{
+                                        wrap: {
+                                            id: fmt_id(`key_wrap`),
+                                            layer: 1,
+                                        },
+                                        el: {
+                                            id: fmt_id(`key`),
+                                            sync: true,
+                                            layer: 1,
+                                            options: [
+                                                {
+                                                    entries: [
+                                                        {
+                                                            value: ``,
+                                                            label: `${$t(`icu.choose_*`, { value: `${$t(`common.product`)}`.toLowerCase() })}`,
+                                                            disabled: true,
+                                                        },
+                                                        ...trade_keys.map(
+                                                            (i) => ({
+                                                                value: i,
+                                                                label: `${$t(`trade.product.key.${i}.name`)}`,
+                                                            }),
+                                                        ),
+                                                        {
+                                                            value: ``,
+                                                            label: `${$t(`common.other`)}`,
+                                                        },
+                                                    ],
+                                                },
+                                            ],
+                                            callback: async (opt) => {
+                                                el_id(
+                                                    fmt_id(`key_wrap`),
+                                                )?.classList.remove(
+                                                    `entry-layer-1-highlight`,
+                                                );
+                                                if (!opt.value) {
+                                                    await handle_tradepr_key_toggle(
+                                                        true,
+                                                    );
+                                                    tradepr_key_sel = ``;
+                                                    tradepr_process_sel = ``;
+                                                } else {
+                                                    tradepr_process_sel = ``;
+                                                }
+                                            },
+                                        },
+                                    }}
+                                />
+                            {:else}
+                                <EntryLine
+                                    basis={{
+                                        wrap: {
+                                            id: fmt_id(`key_wrap`),
+                                            layer: 1,
+                                        },
+                                        el: {
+                                            id: fmt_id(`key`),
+                                            layer: 1,
+                                            sync: true,
+                                            classes: `fade-in-long`,
+                                            placeholder: `${$t(`icu.enter_the_*`, { value: `${$t(`icu.*_name`, { value: `${$t(`common.product`)}` })}`.toLowerCase() })}`,
+                                            field: {
+                                                charset:
+                                                    trade_product_form_fields
+                                                        .key.charset,
+                                                validate:
+                                                    trade_product_form_fields
+                                                        .key.validation,
+                                                validate_keypress: true,
+                                            },
+                                        },
+                                    }}
+                                />
+                            {/if}
+                        </LayoutTrellisLine>
+                        <LayoutTrellisLine
+                            basis={{
+                                label: {
+                                    value: `${$t(`common.process`)}`,
+                                },
+                                notify: tradepr_process_sel_toggle
+                                    ? {
+                                          label: {
+                                              value: `${$t(`common.close`)}`,
+                                          },
+                                          callback: async () => {
+                                              await handle_tradepr_process_toggle(
+                                                  false,
+                                              );
+                                          },
+                                      }
+                                    : undefined,
+                            }}
+                        >
+                            {#if !tradepr_process_sel_toggle}
+                                <EntrySelect
+                                    bind:value={tradepr_process_sel}
+                                    basis={{
+                                        wrap: {
+                                            id: fmt_id(`process_wrap`),
+                                            layer: 1,
+                                        },
+                                        el: {
+                                            id: fmt_id(`process`),
+                                            sync: true,
+                                            layer: 1,
+                                            options: [
+                                                {
+                                                    entries:
+                                                        tradepr_process_list.length
+                                                            ? [
+                                                                  {
+                                                                      value: ``,
+                                                                      label: `${$t(`icu.choose_*`, { value: `${$t(`common.process`)}`.toLowerCase() })}`,
+                                                                      disabled: true,
+                                                                  },
+                                                                  ...tradepr_process_list.map(
+                                                                      (i) => ({
+                                                                          value: i,
+                                                                          label: `${$t(`trade.product.key.${tradepr_key_parsed}.process.${i}`)}`,
+                                                                      }),
+                                                                  ),
+                                                                  {
+                                                                      value: ``,
+                                                                      label: `${$t(`common.other`)}`,
+                                                                  },
+                                                              ]
+                                                            : [
+                                                                  {
+                                                                      value: ``,
+                                                                      label: `${$t(`icu.choose_*`, { value: `${$t(`common.process`)}`.toLowerCase() })}`,
+                                                                      disabled: true,
+                                                                  },
+
+                                                                  {
+                                                                      value: `*choose-product`,
+                                                                      label: `${$t(`icu.choose_*`, { value: `${$t(`common.product`)}`.toLowerCase() })}`,
+                                                                  },
+                                                              ],
+                                                },
+                                            ],
+                                            callback: async ({ value }) => {
+                                                el_id(
+                                                    fmt_id(`process_wrap`),
+                                                )?.classList.remove(
+                                                    `entry-layer-1-highlight`,
+                                                );
+                                                if (!value) {
+                                                    await handle_tradepr_process_toggle(
+                                                        true,
+                                                    );
+                                                }
+                                            },
+                                        },
+                                    }}
+                                />
+                            {:else}
+                                <EntryLine
+                                    basis={{
+                                        wrap: {
+                                            id: fmt_id(`process_wrap`),
+                                            layer: 1,
+                                        },
+                                        el: {
+                                            id: fmt_id(`process`),
+                                            layer: 1,
+                                            sync: true,
+                                            classes: `fade-in-long`,
+                                            placeholder: `${$t(`icu.enter_the_*`, { value: `${$t(`common.process`)}`.toLowerCase() })}`,
+                                            field: {
+                                                charset:
+                                                    trade_product_form_fields
+                                                        .process.charset,
+                                                validate:
+                                                    trade_product_form_fields
+                                                        .process.validation,
+                                                validate_keypress: true,
+                                            },
+                                        },
+                                    }}
+                                />
+                            {/if}
+                        </LayoutTrellisLine>
+                        <LayoutTrellisLine
+                            basis={{
+                                label: {
+                                    value: `${$t(`common.location`)}`,
+                                },
+                            }}
+                        >
                             <EntrySelect
-                                bind:value={tradepr_process_sel}
+                                bind:value={$tradepr_lgc_sel}
                                 basis={{
                                     wrap: {
-                                        id: fmt_id(`process_wrap`),
+                                        id: fmt_id(`tradepr_location_wrap`),
                                         layer: 1,
                                     },
                                     el: {
-                                        id: fmt_id(`process`),
+                                        id: fmt_id(`tradepr_location`),
                                         sync: true,
                                         layer: 1,
                                         options: [
                                             {
-                                                entries: [
-                                                    {
-                                                        value: ``,
-                                                        label: `${$t(`icu.choose_*`, { value: `${$t(`common.process`)}`.toLowerCase() })}`,
-                                                        disabled: true,
-                                                    },
-                                                    ...tradepr_process_list.map(
-                                                        (i) => ({
-                                                            value: i,
-                                                            label: `${$t(`trade.product.key.${tradepr_key_parsed}.process.${i}`)}`,
-                                                        }),
-                                                    ),
-                                                    {
-                                                        value: ``,
-                                                        label: `${$t(`common.other`)}`,
-                                                    },
-                                                ],
+                                                entries: tradepr_lgc_map_geoc
+                                                    ? [
+                                                          {
+                                                              value: ``,
+                                                              label: `${$t(`icu.choose_*`, { value: `${$t(`common.location`)}`.toLowerCase() })}`,
+                                                              disabled: true,
+                                                          },
+                                                          {
+                                                              value: `*map`,
+                                                              label: `${$t(`icu.choose_on_*`, { value: `${$t(`common.map`)}`.toLowerCase() })}`,
+                                                          },
+                                                          {
+                                                              value: `*geoc`,
+                                                              label: `${tradepr_lgc_map_geoc.name}, ${tradepr_lgc_map_geoc.admin1_name}, ${tradepr_lgc_map_geoc.country_id}`,
+                                                          },
+                                                          ...tradepr_lgc_list.map(
+                                                              (i) => ({
+                                                                  value: i.id,
+                                                                  label: `${i.gc_name}, ${i.gc_admin1_name}, ${i.gc_country_id}`,
+                                                              }),
+                                                          ),
+                                                      ]
+                                                    : [
+                                                          {
+                                                              value: ``,
+                                                              label: `${$t(`icu.choose_*`, { value: `${$t(`common.location`)}`.toLowerCase() })}`,
+                                                              disabled: true,
+                                                          },
+                                                          {
+                                                              value: `*map`,
+                                                              label: `${$t(`icu.choose_on_*`, { value: `${$t(`common.map`)}`.toLowerCase() })}`,
+                                                          },
+                                                          ...tradepr_lgc_list.map(
+                                                              (i) => ({
+                                                                  value: i.id,
+                                                                  label: `${i.gc_name}, ${i.gc_admin1_name}, ${i.gc_country_id}`,
+                                                              }),
+                                                          ),
+                                                      ],
                                             },
                                         ],
                                         callback: async ({ value }) => {
@@ -717,462 +862,243 @@
                                             )?.classList.remove(
                                                 `entry-layer-1-highlight`,
                                             );
-                                            if (!value) {
-                                                await handle_tradepr_process_toggle(
-                                                    true,
-                                                );
+                                            if (value === `*map`) {
+                                                await handle_tradepr_lgc_sel_map();
                                             }
                                         },
                                     },
                                 }}
                             />
-                        {:else}
-                            <EntryLine
-                                basis={{
-                                    wrap: {
-                                        id: fmt_id(`process_wrap`),
-                                        layer: 1,
-                                    },
-                                    el: {
-                                        id: fmt_id(`process`),
-                                        layer: 1,
-                                        sync: true,
-                                        classes: `fade-in-long`,
-                                        placeholder: `${$t(`icu.enter_the_*`, { value: `${$t(`common.process`)}`.toLowerCase() })}`,
-                                        field: {
-                                            charset:
-                                                trade_product_form_fields
-                                                    .process.charset,
-                                            validate:
-                                                trade_product_form_fields
-                                                    .process.validation,
-                                            validate_keypress: true,
-                                        },
-                                    },
-                                }}
-                            />
-                        {/if}
-                    </LayoutTrellisLine>
-                    <LayoutTrellisLine
-                        basis={{
-                            label: {
-                                value: `${$t(`common.location`)}`,
-                            },
-                        }}
-                    >
-                        <EntrySelect
-                            bind:value={$tradepr_lgc_sel}
-                            basis={{
-                                wrap: {
-                                    id: fmt_id(`tradepr_location_wrap`),
-                                    layer: 1,
-                                },
-                                el: {
-                                    id: fmt_id(`tradepr_location`),
-                                    sync: true,
-                                    layer: 1,
-                                    options: [
-                                        {
-                                            entries: tradepr_lgc_map_geoc
-                                                ? [
-                                                      {
-                                                          value: ``,
-                                                          label: `${$t(`icu.choose_*`, { value: `${$t(`common.location`)}`.toLowerCase() })}`,
-                                                          disabled: true,
-                                                      },
-                                                      {
-                                                          value: `*map`,
-                                                          label: `${$t(`icu.choose_on_*`, { value: `${$t(`common.map`)}`.toLowerCase() })}`,
-                                                      },
-                                                      {
-                                                          value: `*geoc`,
-                                                          label: `${tradepr_lgc_map_geoc.name}, ${tradepr_lgc_map_geoc.admin1_name}, ${tradepr_lgc_map_geoc.country_id}`,
-                                                      },
-                                                      ...tradepr_lgc_list.map(
-                                                          (i) => ({
-                                                              value: i.id,
-                                                              label: `${i.gc_name}, ${i.gc_admin1_name}, ${i.gc_country_id}`,
-                                                          }),
-                                                      ),
-                                                  ]
-                                                : [
-                                                      {
-                                                          value: ``,
-                                                          label: `${$t(`icu.choose_*`, { value: `${$t(`common.location`)}`.toLowerCase() })}`,
-                                                          disabled: true,
-                                                      },
-                                                      {
-                                                          value: `*map`,
-                                                          label: `${$t(`icu.choose_on_*`, { value: `${$t(`common.map`)}`.toLowerCase() })}`,
-                                                      },
-                                                      ...tradepr_lgc_list.map(
-                                                          (i) => ({
-                                                              value: i.id,
-                                                              label: `${i.gc_name}, ${i.gc_admin1_name}, ${i.gc_country_id}`,
-                                                          }),
-                                                      ),
-                                                  ],
-                                        },
-                                    ],
-                                    callback: async ({ value }) => {
-                                        el_id(
-                                            fmt_id(`process_wrap`),
-                                        )?.classList.remove(
-                                            `entry-layer-1-highlight`,
-                                        );
-                                        if (value === `*map`) {
-                                            await handle_tradepr_lgc_sel_map();
-                                        }
-                                    },
-                                },
-                            }}
-                        />
-                    </LayoutTrellisLine>
-                </LayoutTrellis>
-            </div>
-            <div
-                data-carousel-item={`c_1`}
-                class={`carousel-item flex flex-col w-full justify-start items-center`}
-            >
-                <LayoutTrellis>
-                    <div
-                        class={`flex flex-col w-full justify-center items-center`}
-                    >
+                        </LayoutTrellisLine>
+                    </LayoutTrellis>
+                </div>
+                <div
+                    data-carousel-item={`c_1`}
+                    class={`carousel-item flex flex-col w-full justify-start items-center`}
+                >
+                    <LayoutTrellis>
                         <div
-                            class={`flex flex-col h-[11rem] w-${$app_layout} justify-start items-start bg-layer-1-surface rounded-[2rem] overflow-hidden`}
+                            class={`flex flex-col w-full justify-center items-center`}
                         >
                             <div
-                                class={`flex flex-row h-[2.5rem] w-full justify-center items-center`}
-                            >
-                                <p
-                                    class={`font-sans font-[400] text-[1.05rem] text-layer-1-glyph_d`}
-                                >
-                                    {`${$t(`common.listing`)}`}
-                                </p>
-                            </div>
-                            <div
-                                class={`flex flex-col h-[8.5rem] w-full px-4 justify-start items-start`}
+                                class={`flex flex-col h-[11rem] w-${$app_layout} justify-start items-start bg-layer-1-surface rounded-[2rem] overflow-hidden`}
                             >
                                 <div
-                                    class={`flex flex-col h-full w-full gap-[5px] justify-center items-center border-t-line border-layer-0-glyph_d`}
+                                    class={`flex flex-row h-[2.5rem] w-full justify-center items-center`}
                                 >
-                                    <TradeFieldDisplayKv
-                                        basis={{
-                                            visible: $carousel_index === 1,
-                                            label: `${$t(`common.title`)}`,
-                                            display: {
-                                                kv: `title`,
-                                                undef: `${$t(`icu.no_*`, { value: `${$t(`common.title`)}`.toLowerCase() })}`,
-                                            },
-                                            handle_back: async () => {
-                                                await handle_back(1);
-                                            },
-                                        }}
-                                    />
-                                    <TradeFieldDisplayKv
-                                        basis={{
-                                            visible: $carousel_index === 1,
-                                            label: `${$t(`common.product`)}`,
-                                            display: {
-                                                kv: `key`,
-                                                undef: `${$t(`icu.no_*`, { value: `${$t(`common.product`)}`.toLowerCase() })}`,
-                                            },
-                                            handle_back: async () => {
-                                                await handle_back(1);
-                                            },
-                                        }}
-                                    />
-                                    <TradeFieldDisplayKv
-                                        basis={{
-                                            visible: $carousel_index === 1,
-                                            label: `${$t(`common.process`)}`,
-                                            display: {
-                                                kv: `process`,
-                                                undef: `${$t(`icu.no_*`, { value: `${$t(`common.process`)}`.toLowerCase() })}`,
-                                            },
-                                            handle_back: async () => {
-                                                await handle_back(1);
-                                            },
-                                        }}
-                                    />
-                                    <TradeFieldDisplayKv
-                                        basis={{
-                                            visible: $carousel_index === 1,
-                                            kv_wrap: `tradepr_location_wrap`,
-                                            label: `${$t(`common.location`)}`,
-                                            display: {
-                                                value: tradepr_lgc_sel_geoc
-                                                    ? `${tradepr_lgc_sel_geoc.name}, ${tradepr_lgc_sel_geoc.admin1_name}, ${tradepr_lgc_sel_geoc.country_id}`
-                                                    : ``,
-                                                undef: `${$t(`icu.no_*`, { value: `${$t(`common.location`)}`.toLowerCase() })}`,
-                                            },
-                                            handle_back: async () => {
-                                                await handle_back(1);
-                                            },
-                                        }}
-                                    />
+                                    <p
+                                        class={`font-sans font-[400] text-[1.05rem] text-layer-1-glyph_d`}
+                                    >
+                                        {`${$t(`common.listing`)}`}
+                                    </p>
+                                </div>
+                                <div
+                                    class={`flex flex-col h-[8.5rem] w-full px-4 justify-start items-start`}
+                                >
+                                    <div
+                                        class={`flex flex-col h-full w-full gap-[5px] justify-center items-center border-t-line border-layer-0-glyph_d`}
+                                    >
+                                        <TradeFieldDisplayKv
+                                            basis={{
+                                                visible: $carousel_index === 1,
+                                                label: `${$t(`common.title`)}`,
+                                                display: {
+                                                    kv: `title`,
+                                                    undef: `${$t(`icu.no_*`, { value: `${$t(`common.title`)}`.toLowerCase() })}`,
+                                                },
+                                                handle_back: async () => {
+                                                    await handle_back(1);
+                                                },
+                                            }}
+                                        />
+                                        <TradeFieldDisplayKv
+                                            basis={{
+                                                visible: $carousel_index === 1,
+                                                label: `${$t(`common.product`)}`,
+                                                display: {
+                                                    kv: `key`,
+                                                    undef: `${$t(`icu.no_*`, { value: `${$t(`common.product`)}`.toLowerCase() })}`,
+                                                },
+                                                handle_back: async () => {
+                                                    await handle_back(1);
+                                                },
+                                            }}
+                                        />
+                                        <TradeFieldDisplayKv
+                                            basis={{
+                                                visible: $carousel_index === 1,
+                                                label: `${$t(`common.process`)}`,
+                                                display: {
+                                                    kv: `process`,
+                                                    undef: `${$t(`icu.no_*`, { value: `${$t(`common.process`)}`.toLowerCase() })}`,
+                                                },
+                                                handle_back: async () => {
+                                                    await handle_back(1);
+                                                },
+                                            }}
+                                        />
+                                        <TradeFieldDisplayKv
+                                            basis={{
+                                                visible: $carousel_index === 1,
+                                                kv_wrap: `tradepr_location_wrap`,
+                                                label: `${$t(`common.location`)}`,
+                                                display: {
+                                                    value: tradepr_lgc_sel_geoc
+                                                        ? `${tradepr_lgc_sel_geoc.name}, ${tradepr_lgc_sel_geoc.admin1_name}, ${tradepr_lgc_sel_geoc.country_id}`
+                                                        : ``,
+                                                    undef: `${$t(`icu.no_*`, { value: `${$t(`common.location`)}`.toLowerCase() })}`,
+                                                },
+                                                handle_back: async () => {
+                                                    await handle_back(1);
+                                                },
+                                            }}
+                                        />
+                                    </div>
                                 </div>
                             </div>
                         </div>
-                    </div>
-                    <LayoutTrellisLine
-                        basis={{
-                            label: {
-                                value: `${$t(`common.lot`)}`,
-                            },
-                        }}
-                    >
-                        <EntryLine
+                        <LayoutTrellisLine
                             basis={{
-                                wrap: {
-                                    id: fmt_id(`lot_wrap`),
-                                    layer: 1,
+                                label: {
+                                    value: `${$t(`common.lot`)}`,
                                 },
-                                el: {
-                                    id: fmt_id(`lot`),
-                                    layer: 1,
-                                    sync: true,
-                                    placeholder: `${$t(`icu.enter_the_*`, { value: `${$t(`icu.*_name`, { value: `${$t(`common.lot`)}` })}`.toLowerCase() })}`,
-                                    field: {
-                                        charset:
-                                            trade_product_form_fields.lot
-                                                .charset,
-                                        validate:
-                                            trade_product_form_fields.lot
-                                                .validation,
-                                        validate_keypress: true,
-                                    },
-                                },
-                            }}
-                        />
-                    </LayoutTrellisLine>
-                    <LayoutTrellisLine
-                        basis={{
-                            label: {
-                                value: `${$t(`icu.*_price`, { value: `${$t(`common.product`)}` })} (${tradepr_price_curr_sel}/${`${$t(`measurement.mass.unit.${tradepr_price_qty_unit_sel}_ab`)}`})`,
-                            },
-                        }}
-                    >
-                        <EntryWrap
-                            basis={{
-                                id: fmt_id(`price_wrap`),
-                                layer: 1,
                             }}
                         >
-                            <div
-                                class={`flex flex-row justify-start pr-1 items-center`}
-                            >
-                                <SelectElement
-                                    bind:value={tradepr_price_curr_sel}
-                                    basis={{
-                                        id: fmt_id(`price_currency`),
-                                        layer: 1,
-                                        sync: true,
-                                        classes: `w-fit font-sans font-[400] text-[1.1rem] ${tradepr_price_amt_val ? `text-layer-1-glyph_d` : `text-layer-1-glyph_pl`} el-re`,
-                                        options: [
-                                            {
-                                                entries: fiat_currencies.map(
-                                                    (i) => ({
-                                                        value: `${i}`,
-                                                        label: parse_currency_marker(
-                                                            $locale,
-                                                            i,
-                                                        ),
-                                                    }),
-                                                ),
-                                            },
-                                        ],
-                                    }}
-                                />
-                            </div>
-                            <InputElement
-                                bind:value={tradepr_price_amt_val}
-                                basis={{
-                                    id: fmt_id(`price_amt`),
-                                    layer: 1,
-                                    sync: true,
-                                    placeholder: `${$t(`icu.enter_the_*`, { value: `${$t(`common.price`)}`.toLowerCase() })}`,
-                                    field: {
-                                        charset:
-                                            trade_product_form_fields.price_amt
-                                                .charset,
-                                        validate:
-                                            trade_product_form_fields.price_amt
-                                                .validation,
-                                        validate_keypress: true,
-                                    },
-                                    callback: async ({ value, pass }) => {
-                                        const lastchar =
-                                            value[value.length - 1];
-                                        const period_count =
-                                            value.split(".").length - 1;
-                                        if (
-                                            (pass &&
-                                                lastchar !== `.` &&
-                                                period_count < 2) ||
-                                            value.length < 1
-                                        ) {
-                                            el_id(
-                                                fmt_id(`price_wrap`),
-                                            )?.classList.remove(
-                                                `entry-layer-1-highlight`,
-                                            );
-                                        } else {
-                                            el_id(
-                                                fmt_id(`price_wrap`),
-                                            )?.classList.add(
-                                                `entry-layer-1-highlight`,
-                                            );
-                                        }
-                                    },
-                                    callback_blur: async ({ el }) => {
-                                        if (!el.value) return;
-                                        el.value = fmt_price(
-                                            tradepr_price_curr_sel,
-                                            el.value,
-                                        ).slice(1); //@todo fmt handles 'en' only
-                                    },
-                                }}
-                            />
-                            <div
-                                class={`flex flex-row gap-2 justify-end items-center`}
-                            >
-                                <p
-                                    class={`font-sans font-[400] text-[1.05rem] text-layer-1-glyph_d lowercase`}
-                                >
-                                    {num_str(1)}
-                                </p>
-                                <SelectElement
-                                    bind:value={tradepr_price_qty_unit_sel}
-                                    basis={{
-                                        id: fmt_id(`price_qty_unit`),
-                                        sync: true,
-                                        layer: 1,
-                                        classes: `w-fit font-sans font-[400] text-[1.05rem]`,
-                                        show_arrows: `r`,
-                                        options: [
-                                            {
-                                                entries: mass_units.map(
-                                                    (i) => ({
-                                                        value: i,
-                                                        label: `${$t(`measurement.mass.unit.${i}_ab`)}`.toLowerCase(),
-                                                    }),
-                                                ),
-                                            },
-                                        ],
-                                    }}
-                                />
-                            </div>
-                        </EntryWrap>
-                    </LayoutTrellisLine>
-                    <LayoutTrellisLine
-                        basis={{
-                            label: {
-                                value: `${$t(`icu.*_quantity`, { value: `${$t(`common.order`)}` })}`,
-                            },
-                            notify: tradepr_qty_tup_sel_toggle
-                                ? {
-                                      label: {
-                                          value: `${$t(`common.close`)}`,
-                                      },
-                                      callback: async () => {
-                                          await handle_tradepr_qty_amt_toggle(
-                                              false,
-                                          );
-                                      },
-                                  }
-                                : undefined,
-                        }}
-                    >
-                        {#if !tradepr_qty_tup_sel_toggle}
-                            <EntrySelect
-                                bind:value={$tradepr_qty_tup_sel}
+                            <EntryLine
                                 basis={{
                                     wrap: {
-                                        id: fmt_id(`qty_wrap`),
+                                        id: fmt_id(`lot_wrap`),
                                         layer: 1,
                                     },
                                     el: {
+                                        id: fmt_id(`lot`),
                                         layer: 1,
-                                        options: [
-                                            {
-                                                entries: [
-                                                    {
-                                                        value: ``,
-                                                        label: `${$t(`icu.choose_*`, { value: `${$t(`common.quantity`)}`.toLowerCase() })}`,
-                                                        disabled: true,
-                                                    },
-                                                    ...tradepr_key_quantities_list.map(
-                                                        (i) => ({
-                                                            value: fmt_trade_quantity_tup(
-                                                                i,
-                                                            ),
-                                                            label: `${i.mass} ${$t(`measurement.mass.unit.${i.mass_unit}_ab`)} ${i.label}`,
-                                                        }),
-                                                    ),
-                                                    {
-                                                        value: ``,
-                                                        label: `${$t(`common.other`)}`,
-                                                    },
-                                                ],
-                                            },
-                                        ],
-                                        callback: async ({ value }) => {
-                                            el_id(
-                                                fmt_id(`qty_wrap`),
-                                            )?.classList.remove(
-                                                `entry-layer-1-highlight`,
-                                            );
-                                            if (value === ``) {
-                                                await handle_tradepr_qty_amt_toggle(
-                                                    true,
-                                                );
-                                            }
+                                        sync: true,
+                                        placeholder: `${$t(`icu.enter_the_*`, { value: `${$t(`icu.*_name`, { value: `${$t(`common.lot`)}` })}`.toLowerCase() })}`,
+                                        field: {
+                                            charset:
+                                                trade_product_form_fields.lot
+                                                    .charset,
+                                            validate:
+                                                trade_product_form_fields.lot
+                                                    .validation,
+                                            validate_keypress: true,
                                         },
                                     },
                                 }}
                             />
-                        {:else}
+                        </LayoutTrellisLine>
+                        <LayoutTrellisLine
+                            basis={{
+                                label: {
+                                    value: `${$t(`icu.*_price`, { value: `${$t(`common.product`)}` })} (${tradepr_price_curr_sel}/${`${$t(`measurement.mass.unit.${tradepr_price_qty_unit_sel}_ab`)}`})`,
+                                },
+                            }}
+                        >
                             <EntryWrap
                                 basis={{
-                                    id: fmt_id(`qty_wrap`),
+                                    id: fmt_id(`price_wrap`),
                                     layer: 1,
                                 }}
                             >
+                                <div
+                                    class={`flex flex-row justify-start pr-1 items-center`}
+                                >
+                                    <SelectElement
+                                        bind:value={tradepr_price_curr_sel}
+                                        basis={{
+                                            id: fmt_id(`price_currency`),
+                                            layer: 1,
+                                            sync: true,
+                                            classes: `w-fit font-sans font-[400] text-[1.1rem] ${tradepr_price_amt_val ? `text-layer-1-glyph_d` : `text-layer-1-glyph_pl`} el-re`,
+                                            options: [
+                                                {
+                                                    entries:
+                                                        fiat_currencies.map(
+                                                            (i) => ({
+                                                                value: `${i}`,
+                                                                label: parse_currency_marker(
+                                                                    $locale,
+                                                                    i,
+                                                                ),
+                                                            }),
+                                                        ),
+                                                },
+                                            ],
+                                        }}
+                                    />
+                                </div>
                                 <InputElement
+                                    bind:value={tradepr_price_amt_val}
                                     basis={{
-                                        id: fmt_id(`qty_amt`),
-                                        sync: true,
+                                        id: fmt_id(`price_amt`),
                                         layer: 1,
-                                        placeholder: `${$t(`icu.enter_*_per_order`, { value: `${$t(`measurement.mass.unit.${tradepr_qty_unit_sel}_ab`)}`.toLowerCase() })}`,
+                                        sync: true,
+                                        placeholder: `${$t(`icu.enter_the_*`, { value: `${$t(`common.price`)}`.toLowerCase() })}`,
                                         field: {
                                             charset:
                                                 trade_product_form_fields
-                                                    .qty_amt.charset,
+                                                    .price_amt.charset,
                                             validate:
                                                 trade_product_form_fields
-                                                    .qty_amt.validation,
+                                                    .price_amt.validation,
                                             validate_keypress: true,
+                                        },
+                                        callback: async ({ value, pass }) => {
+                                            const lastchar =
+                                                value[value.length - 1];
+                                            const period_count =
+                                                value.split(".").length - 1;
+                                            if (
+                                                (pass &&
+                                                    lastchar !== `.` &&
+                                                    period_count < 2) ||
+                                                value.length < 1
+                                            ) {
+                                                el_id(
+                                                    fmt_id(`price_wrap`),
+                                                )?.classList.remove(
+                                                    `entry-layer-1-highlight`,
+                                                );
+                                            } else {
+                                                el_id(
+                                                    fmt_id(`price_wrap`),
+                                                )?.classList.add(
+                                                    `entry-layer-1-highlight`,
+                                                );
+                                            }
+                                        },
+                                        callback_blur: async ({ el }) => {
+                                            if (!el.value) return;
+                                            el.value = fmt_price(
+                                                tradepr_price_curr_sel,
+                                                el.value,
+                                            ).slice(1); //@todo fmt handles 'en' only
                                         },
                                     }}
                                 />
                                 <div
                                     class={`flex flex-row gap-2 justify-end items-center`}
                                 >
+                                    <p
+                                        class={`font-sans font-[400] text-[1.05rem] text-layer-1-glyph_d lowercase`}
+                                    >
+                                        {num_str(1)}
+                                    </p>
                                     <SelectElement
-                                        bind:value={tradepr_qty_unit_sel}
+                                        bind:value={tradepr_price_qty_unit_sel}
                                         basis={{
-                                            id: fmt_id(`qty_unit`),
+                                            id: fmt_id(`price_qty_unit`),
                                             sync: true,
                                             layer: 1,
-                                            classes: `w-fit font-sans font-[400] text-[1.05rem] text-layer-1-glyph_d`,
+                                            classes: `w-fit font-sans font-[400] text-[1.05rem]`,
                                             show_arrows: `r`,
                                             options: [
                                                 {
                                                     entries: mass_units.map(
                                                         (i) => ({
                                                             value: i,
-                                                            label: `${$t(`measurement.mass.unit.${i}_ab`)}`,
+                                                            label: `${$t(`measurement.mass.unit.${i}_ab`)}`.toLowerCase(),
                                                         }),
                                                     ),
                                                 },
@@ -1181,310 +1107,429 @@
                                     />
                                 </div>
                             </EntryWrap>
-                        {/if}
-                    </LayoutTrellisLine>
-                    <LayoutTrellisLine
-                        basis={{
-                            label: {
-                                value: `${$t(`common.description`)}`,
-                            },
-                        }}
-                    >
-                        <EntryMultiline
+                        </LayoutTrellisLine>
+                        <LayoutTrellisLine
                             basis={{
-                                wrap: {
-                                    id: fmt_id(`summary_wrap`),
+                                label: {
+                                    value: `${$t(`icu.*_quantity`, { value: `${$t(`common.order`)}` })}`,
                                 },
-                                el: {
-                                    classes: `h-[7rem]`,
-                                    id: fmt_id(`summary`),
-                                    sync: true,
-                                    placeholder: `${$t(`icu.enter_the_*`, { value: `${$t(`icu.*_description`, { value: `${$t(`common.listing`)}` })}`.toLowerCase() })}`,
-                                    field: {
-                                        charset:
-                                            trade_product_form_fields.summary
-                                                .charset,
-                                        validate:
-                                            trade_product_form_fields.summary
-                                                .validation,
-                                        validate_keypress: true,
-                                    },
+                                notify: tradepr_qty_tup_sel_toggle
+                                    ? {
+                                          label: {
+                                              value: `${$t(`common.close`)}`,
+                                          },
+                                          callback: async () => {
+                                              await handle_tradepr_qty_amt_toggle(
+                                                  false,
+                                              );
+                                          },
+                                      }
+                                    : undefined,
+                            }}
+                        >
+                            {#if !tradepr_qty_tup_sel_toggle}
+                                <EntrySelect
+                                    bind:value={$tradepr_qty_tup_sel}
+                                    basis={{
+                                        wrap: {
+                                            id: fmt_id(`qty_wrap`),
+                                            layer: 1,
+                                        },
+                                        el: {
+                                            layer: 1,
+                                            options: [
+                                                {
+                                                    entries: [
+                                                        {
+                                                            value: ``,
+                                                            label: `${$t(`icu.choose_*`, { value: `${$t(`common.quantity`)}`.toLowerCase() })}`,
+                                                            disabled: true,
+                                                        },
+                                                        ...tradepr_key_quantities_list.map(
+                                                            (i) => ({
+                                                                value: fmt_trade_quantity_tup(
+                                                                    i,
+                                                                ),
+                                                                label: `${i.mass} ${$t(`measurement.mass.unit.${i.mass_unit}_ab`)} ${i.label}`,
+                                                            }),
+                                                        ),
+                                                        {
+                                                            value: ``,
+                                                            label: `${$t(`common.other`)}`,
+                                                        },
+                                                    ],
+                                                },
+                                            ],
+                                            callback: async ({ value }) => {
+                                                el_id(
+                                                    fmt_id(`qty_wrap`),
+                                                )?.classList.remove(
+                                                    `entry-layer-1-highlight`,
+                                                );
+                                                if (value === ``) {
+                                                    await handle_tradepr_qty_amt_toggle(
+                                                        true,
+                                                    );
+                                                }
+                                            },
+                                        },
+                                    }}
+                                />
+                            {:else}
+                                <EntryWrap
+                                    basis={{
+                                        id: fmt_id(`qty_wrap`),
+                                        layer: 1,
+                                    }}
+                                >
+                                    <InputElement
+                                        basis={{
+                                            id: fmt_id(`qty_amt`),
+                                            sync: true,
+                                            layer: 1,
+                                            placeholder: `${$t(`icu.enter_*_per_order`, { value: `${$t(`measurement.mass.unit.${tradepr_qty_unit_sel}_ab`)}`.toLowerCase() })}`,
+                                            field: {
+                                                charset:
+                                                    trade_product_form_fields
+                                                        .qty_amt.charset,
+                                                validate:
+                                                    trade_product_form_fields
+                                                        .qty_amt.validation,
+                                                validate_keypress: true,
+                                            },
+                                        }}
+                                    />
+                                    <div
+                                        class={`flex flex-row gap-2 justify-end items-center`}
+                                    >
+                                        <SelectElement
+                                            bind:value={tradepr_qty_unit_sel}
+                                            basis={{
+                                                id: fmt_id(`qty_unit`),
+                                                sync: true,
+                                                layer: 1,
+                                                classes: `w-fit font-sans font-[400] text-[1.05rem] text-layer-1-glyph_d`,
+                                                show_arrows: `r`,
+                                                options: [
+                                                    {
+                                                        entries: mass_units.map(
+                                                            (i) => ({
+                                                                value: i,
+                                                                label: `${$t(`measurement.mass.unit.${i}_ab`)}`,
+                                                            }),
+                                                        ),
+                                                    },
+                                                ],
+                                            }}
+                                        />
+                                    </div>
+                                </EntryWrap>
+                            {/if}
+                        </LayoutTrellisLine>
+                        <LayoutTrellisLine
+                            basis={{
+                                label: {
+                                    value: `${$t(`common.description`)}`,
                                 },
                             }}
-                        />
-                    </LayoutTrellisLine>
-                </LayoutTrellis>
-            </div>
-            <div
-                data-carousel-item={`c_1`}
-                class={`carousel-item flex flex-col w-full justify-start items-center`}
-            >
-                <LayoutTrellis>
-                    <div
-                        class={`flex flex-col w-full justify-center items-center`}
-                    >
+                        >
+                            <EntryMultiline
+                                basis={{
+                                    wrap: {
+                                        id: fmt_id(`summary_wrap`),
+                                    },
+                                    el: {
+                                        classes: `h-[7rem]`,
+                                        id: fmt_id(`summary`),
+                                        sync: true,
+                                        placeholder: `${$t(`icu.enter_the_*`, { value: `${$t(`icu.*_description`, { value: `${$t(`common.listing`)}` })}`.toLowerCase() })}`,
+                                        field: {
+                                            charset:
+                                                trade_product_form_fields
+                                                    .summary.charset,
+                                            validate:
+                                                trade_product_form_fields
+                                                    .summary.validation,
+                                            validate_keypress: true,
+                                        },
+                                    },
+                                }}
+                            />
+                        </LayoutTrellisLine>
+                    </LayoutTrellis>
+                </div>
+                <div
+                    data-carousel-item={`c_1`}
+                    class={`carousel-item flex flex-col w-full justify-start items-center`}
+                >
+                    <LayoutTrellis>
                         <div
-                            class={`flex flex-col h-auto w-${$app_layout} justify-start items-start bg-layer-1-surface rounded-[2rem] overflow-hidden`}
+                            class={`flex flex-col w-full justify-center items-center`}
                         >
                             <div
-                                class={`flex flex-row h-[3rem] w-full justify-center items-center`}
-                            >
-                                <p
-                                    class={`font-sans font-[400] text-[1.05rem] text-layer-1-glyph_d`}
-                                >
-                                    {`${$t(`common.listing`)}`}
-                                </p>
-                            </div>
-                            <div
-                                class={`flex flex-col w-full px-4 justify-start items-center`}
+                                class={`flex flex-col h-auto w-${$app_layout} justify-start items-start bg-layer-1-surface rounded-[2rem] overflow-hidden`}
                             >
                                 <div
-                                    class={`flex flex-col h-auto w-full py-6 gap-[5px] justify-center items-start border-t-line border-layer-0-glyph_d`}
+                                    class={`flex flex-row h-[3rem] w-full justify-center items-center`}
                                 >
-                                    <TradeFieldDisplayKv
-                                        basis={{
-                                            visible: $carousel_index === 2,
-                                            label: `${$t(`common.title`)}`,
-                                            display: {
-                                                kv: `title`,
-                                                undef: `${$t(`icu.no_*`, { value: `${$t(`common.title`)}`.toLowerCase() })}`,
-                                            },
-                                            handle_back: async () => {
-                                                await handle_back(2);
-                                            },
-                                        }}
-                                    />
-                                    <TradeFieldDisplayKv
-                                        basis={{
-                                            visible: $carousel_index === 2,
-                                            label: `${$t(`common.product`)}`,
-                                            display: {
-                                                kv: `key`,
-                                                undef: `${$t(`icu.no_*`, { value: `${$t(`common.product`)}`.toLowerCase() })}`,
-                                            },
-                                            handle_back: async () => {
-                                                await handle_back(2);
-                                            },
-                                        }}
-                                    />
-                                    <TradeFieldDisplayKv
-                                        basis={{
-                                            visible: $carousel_index === 2,
-                                            label: `${$t(`common.process`)}`,
-                                            display: {
-                                                kv: `process`,
-                                                undef: `${$t(`icu.no_*`, { value: `${$t(`common.process`)}`.toLowerCase() })}`,
-                                            },
-                                            handle_back: async () => {
-                                                await handle_back(2);
-                                            },
-                                        }}
-                                    />
-                                    <TradeFieldDisplayKv
-                                        basis={{
-                                            visible: $carousel_index === 2,
-                                            kv_wrap: `tradepr_location_wrap`,
-                                            label: `${$t(`common.location`)}`,
-                                            display: {
-                                                value: tradepr_lgc_sel_geoc
-                                                    ? `${tradepr_lgc_sel_geoc.name}, ${tradepr_lgc_sel_geoc.admin1_name}, ${tradepr_lgc_sel_geoc.country_id}`
-                                                    : ``,
-                                                undef: `${$t(`icu.no_*`, { value: `${$t(`common.location`)}`.toLowerCase() })}`,
-                                            },
-                                            handle_back: async () => {
-                                                await handle_back(2);
-                                            },
-                                        }}
-                                    />
-                                    <TradeFieldDisplayKv
-                                        basis={{
-                                            visible: $carousel_index === 2,
-                                            label: `${$t(`common.lot`)}`,
-                                            display: {
-                                                kv: `lot`,
-                                                undef: `${$t(`icu.no_*`, { value: `${$t(`common.lot`)}`.toLowerCase() })}`,
-                                            },
-                                            handle_back: async () => {
-                                                await handle_back(1);
-                                            },
-                                        }}
-                                    />
-                                    <TradeFieldDisplayKv
-                                        basis={{
-                                            visible: $carousel_index === 2,
-                                            label: `${$t(`common.description`)}`,
-                                            display: {
-                                                kv: `summary`,
-                                                undef: `${$t(`icu.no_*`, { value: `${$t(`common.description`)}`.toLowerCase() })}`,
-                                            },
-                                            handle_back: async () => {
-                                                await handle_back(1);
-                                            },
-                                        }}
-                                    />
-                                </div>
-                                <div
-                                    class={`flex flex-col h-auto w-full py-6 gap-[5px] justify-center items-start border-t-line border-layer-0-glyph_d`}
-                                >
-                                    <TradeFieldDisplayKv
-                                        basis={{
-                                            visible: $carousel_index === 2,
-                                            label: `${$t(`common.price`)}`,
-                                            kv_wrap: `price_wrap`,
-                                            display: {
-                                                value:
-                                                    tradepr_cprice_amt &&
-                                                    tradepr_price_qty_unit_sel
-                                                        ? `${fmt_currency_price(tradepr_cprice_amt)} / ${`${$t(`measurement.mass.unit.${tradepr_price_qty_unit_sel}_ab`)}`.toLowerCase()}`
-                                                        : ``,
-                                                undef: `${$t(`icu.no_*`, { value: `${$t(`common.price`)}`.toLowerCase() })}`,
-                                                nostyle: true,
-                                            },
-                                            handle_back: async () => {
-                                                await handle_back(1);
-                                            },
-                                        }}
-                                    />
-                                    <TradeFieldDisplayKv
-                                        basis={{
-                                            visible: $carousel_index === 2,
-                                            label: `${$t(`icu.*_quantity`, { value: `${$t(`common.order`)}` })}`,
-                                            display: {
-                                                value: tradepr_parsed_quantity
-                                                    ? `${tradepr_parsed_quantity.mass} ${`${$t(`measurement.mass.unit.${tradepr_parsed_quantity.mass_unit}_ab`)}`.toLowerCase()} ${tradepr_parsed_quantity.label || `${$t(`common.bag`)}`}`
-                                                    : ``,
-                                                undef: `${$t(`icu.no_*`, { value: `${$t(`icu.*_quantity`, { value: `${$t(`common.order`)}` })}` })}`,
-                                                nostyle:
-                                                    !!tradepr_parsed_quantity,
-                                            },
-                                            kv_wrap: `qty_wrap`,
-                                            handle_back: async () => {
-                                                await handle_back(1);
-                                            },
-                                        }}
-                                    />
-                                    <TradeFieldDisplayEl
-                                        basis={{
-                                            visible: $carousel_index === 2,
-                                            label: `${$t(`icu.*_available`, { value: `${$t(`common.quantity`)}` })}${tradepr_parsed_quantity ? ` (${$tradepr_qty_avail})` : ``}`,
-                                            display: {
-                                                classes: tradepr_parsed_quantity
-                                                    ? ``
-                                                    : `pr-4`,
-                                                value: tradepr_parsed_quantity
-                                                    ? ascii.bullet
-                                                    : ``,
-                                                hide: !!tradepr_parsed_quantity,
-                                                undef: ascii.dash,
-                                            },
-                                        }}
+                                    <p
+                                        class={`font-sans font-[400] text-[1.05rem] text-layer-1-glyph_d`}
                                     >
-                                        {#if tradepr_parsed_quantity}
-                                            <div
-                                                class={`flex flex-row gap-2 pl-2 pr-1 justify-center items-center`}
-                                            >
-                                                <button
-                                                    class={`group flex flex-row justify-center items-center`}
-                                                    on:click={async () => {
-                                                        tradepr_qty_avail.set(
-                                                            int_step(
-                                                                $tradepr_qty_avail,
-                                                                `-`,
-                                                                1,
-                                                            ),
-                                                        );
-                                                    }}
-                                                >
-                                                    <Glyph
-                                                        basis={{
-                                                            key: `arrow-down`,
-                                                            dim: `xs`,
-                                                            classes: `h-[1.3rem] w-[1.3rem] text-layer-1-glyph_d bg-layer-2-surface/60 rounded-full el-re`,
-                                                        }}
-                                                    />
-                                                </button>
-                                                <button
-                                                    class={`group flex flex-row justify-center items-center`}
-                                                    on:click={async () => {
-                                                        tradepr_qty_avail.set(
-                                                            int_step(
-                                                                $tradepr_qty_avail,
-                                                                `+`,
-                                                            ),
-                                                        );
-                                                    }}
-                                                >
-                                                    <Glyph
-                                                        basis={{
-                                                            key: `arrow-up`,
-                                                            dim: `xs`,
-                                                            classes: `h-[1.3rem] w-[1.3rem] text-layer-1-glyph_d bg-layer-2-surface/60 rounded-full el-re`,
-                                                        }}
-                                                    />
-                                                </button>
-                                            </div>
-                                        {/if}
-                                    </TradeFieldDisplayEl>
-                                    <TradeFieldDisplayEl
-                                        basis={{
-                                            visible: $carousel_index === 2,
-                                            label: `${$t(`icu.*_total`, { value: `${$t(`common.quantity`)}` })}`,
-                                            display: {
-                                                classes: tradepr_parsed_quantity
-                                                    ? `pr-2`
-                                                    : `pr-4`,
-                                                value: tradepr_parsed_quantity
-                                                    ? `${Number(
-                                                          $tradepr_qty_avail *
-                                                              tradepr_parsed_quantity.mass,
-                                                      ).toFixed(
-                                                          2,
-                                                      )} ${`${$t(`measurement.mass.unit.${tradepr_parsed_quantity.mass_unit}_ab`)}`.toLowerCase()}`
-                                                    : ``,
-                                                undef: ascii.dash,
-                                                nostyle: true,
-                                            },
-                                        }}
-                                    />
+                                        {`${$t(`common.listing`)}`}
+                                    </p>
                                 </div>
                                 <div
-                                    class={`flex flex-col h-auto w-full pb-6 gap-[5px] justify-center items-start`}
+                                    class={`flex flex-col w-full px-4 justify-start items-center`}
                                 >
-                                    <TradeFieldDisplayEl
-                                        basis={{
-                                            visible: $carousel_index === 2,
-                                            label: `${$t(`icu.*_total`, { value: `${$t(`common.order`)}` })}`,
-                                            display: {
-                                                classes:
-                                                    tradepr_parsed_quantity &&
-                                                    tradepr_cprice_amt
-                                                        ? `pr-2`
-                                                        : `pr-4`,
-                                                value: tradepr_cprice_total
-                                                    ? `${fmt_currency_price(tradepr_cprice_total)}`
-                                                    : ``,
-                                                undef: ascii.dash,
-                                            },
-                                        }}
-                                    />
+                                    <div
+                                        class={`flex flex-col h-auto w-full py-6 gap-[5px] justify-center items-start border-t-line border-layer-0-glyph_d`}
+                                    >
+                                        <TradeFieldDisplayKv
+                                            basis={{
+                                                visible: $carousel_index === 2,
+                                                label: `${$t(`common.title`)}`,
+                                                display: {
+                                                    kv: `title`,
+                                                    undef: `${$t(`icu.no_*`, { value: `${$t(`common.title`)}`.toLowerCase() })}`,
+                                                },
+                                                handle_back: async () => {
+                                                    await handle_back(2);
+                                                },
+                                            }}
+                                        />
+                                        <TradeFieldDisplayKv
+                                            basis={{
+                                                visible: $carousel_index === 2,
+                                                label: `${$t(`common.product`)}`,
+                                                display: {
+                                                    kv: `key`,
+                                                    undef: `${$t(`icu.no_*`, { value: `${$t(`common.product`)}`.toLowerCase() })}`,
+                                                },
+                                                handle_back: async () => {
+                                                    await handle_back(2);
+                                                },
+                                            }}
+                                        />
+                                        <TradeFieldDisplayKv
+                                            basis={{
+                                                visible: $carousel_index === 2,
+                                                label: `${$t(`common.process`)}`,
+                                                display: {
+                                                    kv: `process`,
+                                                    undef: `${$t(`icu.no_*`, { value: `${$t(`common.process`)}`.toLowerCase() })}`,
+                                                },
+                                                handle_back: async () => {
+                                                    await handle_back(2);
+                                                },
+                                            }}
+                                        />
+                                        <TradeFieldDisplayKv
+                                            basis={{
+                                                visible: $carousel_index === 2,
+                                                kv_wrap: `tradepr_location_wrap`,
+                                                label: `${$t(`common.location`)}`,
+                                                display: {
+                                                    value: tradepr_lgc_sel_geoc
+                                                        ? `${tradepr_lgc_sel_geoc.name}, ${tradepr_lgc_sel_geoc.admin1_name}, ${tradepr_lgc_sel_geoc.country_id}`
+                                                        : ``,
+                                                    undef: `${$t(`icu.no_*`, { value: `${$t(`common.location`)}`.toLowerCase() })}`,
+                                                },
+                                                handle_back: async () => {
+                                                    await handle_back(2);
+                                                },
+                                            }}
+                                        />
+                                        <TradeFieldDisplayKv
+                                            basis={{
+                                                visible: $carousel_index === 2,
+                                                label: `${$t(`common.lot`)}`,
+                                                display: {
+                                                    kv: `lot`,
+                                                    undef: `${$t(`icu.no_*`, { value: `${$t(`common.lot`)}`.toLowerCase() })}`,
+                                                },
+                                                handle_back: async () => {
+                                                    await handle_back(1);
+                                                },
+                                            }}
+                                        />
+                                        <TradeFieldDisplayKv
+                                            basis={{
+                                                visible: $carousel_index === 2,
+                                                label: `${$t(`common.description`)}`,
+                                                display: {
+                                                    kv: `summary`,
+                                                    undef: `${$t(`icu.no_*`, { value: `${$t(`common.description`)}`.toLowerCase() })}`,
+                                                },
+                                                handle_back: async () => {
+                                                    await handle_back(1);
+                                                },
+                                            }}
+                                        />
+                                    </div>
+                                    <div
+                                        class={`flex flex-col h-auto w-full py-6 gap-[5px] justify-center items-start border-t-line border-layer-0-glyph_d`}
+                                    >
+                                        <TradeFieldDisplayKv
+                                            basis={{
+                                                visible: $carousel_index === 2,
+                                                label: `${$t(`common.price`)}`,
+                                                kv_wrap: `price_wrap`,
+                                                display: {
+                                                    value:
+                                                        tradepr_cprice_amt &&
+                                                        tradepr_price_qty_unit_sel
+                                                            ? `${fmt_currency_price(tradepr_cprice_amt)} / ${`${$t(`measurement.mass.unit.${tradepr_price_qty_unit_sel}_ab`)}`.toLowerCase()}`
+                                                            : ``,
+                                                    undef: `${$t(`icu.no_*`, { value: `${$t(`common.price`)}`.toLowerCase() })}`,
+                                                    nostyle: true,
+                                                },
+                                                handle_back: async () => {
+                                                    await handle_back(1);
+                                                },
+                                            }}
+                                        />
+                                        <TradeFieldDisplayKv
+                                            basis={{
+                                                visible: $carousel_index === 2,
+                                                label: `${$t(`icu.*_quantity`, { value: `${$t(`common.order`)}` })}`,
+                                                display: {
+                                                    value: tradepr_parsed_quantity
+                                                        ? `${tradepr_parsed_quantity.mass} ${`${$t(`measurement.mass.unit.${tradepr_parsed_quantity.mass_unit}_ab`)}`.toLowerCase()} ${tradepr_parsed_quantity.label || `${$t(`common.bag`)}`}`
+                                                        : ``,
+                                                    undef: `${$t(`icu.no_*`, { value: `${$t(`icu.*_quantity`, { value: `${$t(`common.order`)}` })}` })}`,
+                                                    nostyle:
+                                                        !!tradepr_parsed_quantity,
+                                                },
+                                                kv_wrap: `qty_wrap`,
+                                                handle_back: async () => {
+                                                    await handle_back(1);
+                                                },
+                                            }}
+                                        />
+                                        <TradeFieldDisplayEl
+                                            basis={{
+                                                visible: $carousel_index === 2,
+                                                label: `${$t(`icu.*_available`, { value: `${$t(`common.quantity`)}` })}${tradepr_parsed_quantity ? ` (${$tradepr_qty_avail})` : ``}`,
+                                                display: {
+                                                    classes:
+                                                        tradepr_parsed_quantity
+                                                            ? ``
+                                                            : `pr-4`,
+                                                    value: tradepr_parsed_quantity
+                                                        ? ascii.bullet
+                                                        : ``,
+                                                    hide: !!tradepr_parsed_quantity,
+                                                    undef: ascii.dash,
+                                                },
+                                            }}
+                                        >
+                                            {#if tradepr_parsed_quantity}
+                                                <div
+                                                    class={`flex flex-row gap-2 pl-2 pr-1 justify-center items-center`}
+                                                >
+                                                    <button
+                                                        class={`group flex flex-row justify-center items-center`}
+                                                        on:click={async () => {
+                                                            tradepr_qty_avail.set(
+                                                                int_step(
+                                                                    $tradepr_qty_avail,
+                                                                    `-`,
+                                                                    1,
+                                                                ),
+                                                            );
+                                                        }}
+                                                    >
+                                                        <Glyph
+                                                            basis={{
+                                                                key: `arrow-down`,
+                                                                dim: `xs`,
+                                                                classes: `h-[1.3rem] w-[1.3rem] text-layer-1-glyph_d bg-layer-2-surface/60 rounded-full el-re`,
+                                                            }}
+                                                        />
+                                                    </button>
+                                                    <button
+                                                        class={`group flex flex-row justify-center items-center`}
+                                                        on:click={async () => {
+                                                            tradepr_qty_avail.set(
+                                                                int_step(
+                                                                    $tradepr_qty_avail,
+                                                                    `+`,
+                                                                ),
+                                                            );
+                                                        }}
+                                                    >
+                                                        <Glyph
+                                                            basis={{
+                                                                key: `arrow-up`,
+                                                                dim: `xs`,
+                                                                classes: `h-[1.3rem] w-[1.3rem] text-layer-1-glyph_d bg-layer-2-surface/60 rounded-full el-re`,
+                                                            }}
+                                                        />
+                                                    </button>
+                                                </div>
+                                            {/if}
+                                        </TradeFieldDisplayEl>
+                                        <TradeFieldDisplayEl
+                                            basis={{
+                                                visible: $carousel_index === 2,
+                                                label: `${$t(`icu.*_total`, { value: `${$t(`common.quantity`)}` })}`,
+                                                display: {
+                                                    classes:
+                                                        tradepr_parsed_quantity
+                                                            ? `pr-2`
+                                                            : `pr-4`,
+                                                    value: tradepr_parsed_quantity
+                                                        ? `${Number(
+                                                              $tradepr_qty_avail *
+                                                                  tradepr_parsed_quantity.mass,
+                                                          ).toFixed(
+                                                              2,
+                                                          )} ${`${$t(`measurement.mass.unit.${tradepr_parsed_quantity.mass_unit}_ab`)}`.toLowerCase()}`
+                                                        : ``,
+                                                    undef: ascii.dash,
+                                                    nostyle: true,
+                                                },
+                                            }}
+                                        />
+                                    </div>
+                                    <div
+                                        class={`flex flex-col h-auto w-full pb-6 gap-[5px] justify-center items-start`}
+                                    >
+                                        <TradeFieldDisplayEl
+                                            basis={{
+                                                visible: $carousel_index === 2,
+                                                label: `${$t(`icu.*_total`, { value: `${$t(`common.order`)}` })}`,
+                                                display: {
+                                                    classes:
+                                                        tradepr_parsed_quantity &&
+                                                        tradepr_cprice_amt
+                                                            ? `pr-2`
+                                                            : `pr-4`,
+                                                    value: tradepr_cprice_total
+                                                        ? `${fmt_currency_price(tradepr_cprice_total)}`
+                                                        : ``,
+                                                    undef: ascii.dash,
+                                                },
+                                            }}
+                                        />
+                                    </div>
                                 </div>
                             </div>
                         </div>
-                    </div>
-                    <button
-                        class={`flex flex-row h-12 w-${$app_layout} justify-center items-center bg-layer-1-glyph-hl active:bg-layer-1-glyph-hl_a round-40 font-sans font-[600] text-[1.1rem] text-white capitalize el-re`}
-                        on:click={async () => {
-                            await submit();
-                        }}
-                    >
-                        {`${$t(`common.post`)}`}
-                    </button>
-                </LayoutTrellis>
+                        <button
+                            class={`flex flex-row h-12 w-${$app_layout} justify-center items-center bg-layer-1-glyph-hl active:bg-layer-1-glyph-hl_a round-40 font-sans font-[600] text-[1.1rem] text-white capitalize el-re`}
+                            on:click={async () => {
+                                await submit();
+                            }}
+                        >
+                            {`${$t(`common.post`)}`}
+                        </button>
+                    </LayoutTrellis>
+                </div>
             </div>
         </div>
-    </div>
-</LayoutView>
-
+    </LayoutView>
+{/if}
 <Nav
     basis={{
         prev: {

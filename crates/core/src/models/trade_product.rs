@@ -82,8 +82,14 @@ pub enum TradeProductQueryBindValues {
 }
 
 #[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TradeProductQueryListOf {
+    All(IModelsQueryBindValue),
+}
+
+#[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
 pub struct ITradeProductQueryGetList {
-    pub of: Vec<String>,
+    pub of: TradeProductQueryListOf,
     pub sort: Option<TradeProductSort>,
 }
 
@@ -99,21 +105,6 @@ pub struct ITradeProductQueryUpdate {
     pub fields: ITradeProductFieldsUpdate,
 }
 
-impl ITradeProductQueryGet {
-    pub fn new_on(values: TradeProductQueryBindValues) -> Self {
-        ITradeProductQueryGet {
-            on: Some(values),
-            list: None,
-        }
-    }
-    pub fn new_list(list: ITradeProductQueryGetList) -> Self {
-        ITradeProductQueryGet {
-            on: None,
-            list: Some(list),
-        }
-    }
-}
-
 pub type ITradeProductAdd = ITradeProductFields;
 pub type ITradeProductAddResolve = IModelsId;
 pub type ITradeProductGet = ITradeProductQueryGet;
@@ -126,6 +117,17 @@ pub type ITradeProductUpdateResolve = ();
 pub fn trade_product_query_bind_values(opts: TradeProductQueryBindValues) -> IModelsQueryBindValueTuple {
     match opts {
         TradeProductQueryBindValues::Id(id) => ("id".to_string(), id),
+    }
+}
+
+pub fn trade_product_query_get_list(opts: ITradeProductQueryGetList) -> IModelsQueryBindValueTuple {
+    let query_sort = match opts.sort {
+        Some(TradeProductSort::Newest) => " ORDER BY tp.created_at DESC",
+        Some(TradeProductSort::Oldest) => " ORDER BY tp.created_at ASC",
+        None => "",
+    };
+    match opts.of {
+        TradeProductQueryListOf::All(_) => (format!("SELECT tp.* FROM trade_product tp{}", query_sort), "".to_string()),
     }
 }
 
@@ -200,13 +202,8 @@ fn trade_product_query_get(
             list: Some(opts_list),
             ..
         } => {
-            let sort = match opts_list.sort {
-                Some(TradeProductSort::Newest) => "created_at DESC",
-                Some(TradeProductSort::Oldest) => "created_at ASC",
-                None => "created_at DESC",
-            };
-            let query = format!("SELECT * FROM trade_product ORDER BY {};", sort);
-            Ok((query, vec![]))
+            let (query, bv) = trade_product_query_get_list(opts_list);
+            Ok((query, vec![bv]))
         }
         ITradeProductQueryGet {
             on: Some(opts_on), ..

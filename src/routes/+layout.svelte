@@ -1,7 +1,10 @@
 <script lang="ts">
-    import { device, dialog, http, os } from "$lib/client";
+    import { device, dialog, http, logger, os } from "$lib/client";
     import { cfg } from "$lib/conf";
-    import type { IClientDeviceMetadata } from "@radroots/client";
+    import type {
+        IClientDeviceMetadata,
+        IClientUnlisten,
+    } from "@radroots/client";
     import {
         app_db,
         app_geoc,
@@ -28,7 +31,7 @@
     import "../app.css";
 
     let route_render: NavigationRoute | undefined = undefined;
-
+    let log_unlisten: IClientUnlisten | undefined = undefined;
     onMount(async () => {
         try {
             if (`paintWorklet` in CSS)
@@ -40,6 +43,7 @@
             };
             await device.init(metadata);
             await http.init(metadata);
+            log_unlisten = await logger.init();
         } catch (e) {
         } finally {
         }
@@ -48,6 +52,7 @@
     onDestroy(async () => {
         try {
             route_render = undefined;
+            if (log_unlisten) log_unlisten();
         } catch (e) {
         } finally {
         }

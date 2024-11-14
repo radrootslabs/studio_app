@@ -58,14 +58,13 @@
 <EnvelopeLower
     basis={{
         close: async () => {
-            //await basis.close();
             photo_edit = undefined;
         },
     }}
 >
     {#if photo_edit}
         <div
-            class={`z-50 flex flex-col w-full px-4 gap-4 justify-start items-center`}
+            class={`flex flex-col w-full px-4 gap-4 justify-start items-center`}
         >
             <div
                 class={`flex flex-row w-full justify-center items-center round-44 overflow-hidden`}

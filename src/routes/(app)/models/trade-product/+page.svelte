@@ -1,20 +1,23 @@
 <script lang="ts">
     import { db } from "$lib/client";
-    import { type TradeProduct } from "@radroots/models";
+    import { type LocationGcs, type TradeProduct } from "@radroots/models";
     import {
+        app_layout,
         app_notify,
         LayoutTrellis,
         LayoutView,
         Nav,
         route,
         t,
-        time_iso,
-        Trellis,
     } from "@radroots/svelte-lib";
     import { onMount } from "svelte";
 
+    type LoadDataResult = {
+        trade_product: TradeProduct;
+        location_gcs?: LocationGcs;
+    };
     type LoadData = {
-        trade_products: TradeProduct[];
+        results: LoadDataResult[];
     };
     let ld: LoadData | undefined = undefined;
 
@@ -37,115 +40,57 @@
                 );
                 return;
             }
+
+            const results: LoadDataResult[] = [];
+            for (const trade_product of trade_products.results) {
+                const location_gcs = await db.location_gcs_get({
+                    list: [`on_trade_product`, { id: trade_product.id }],
+                });
+                results.push({
+                    trade_product,
+                    location_gcs:
+                        `results` in location_gcs
+                            ? location_gcs.results[0]
+                            : undefined,
+                });
+            }
+
             const data: LoadData = {
-                trade_products: trade_products.results,
+                results,
             };
             return data;
         } catch (e) {
             console.log(`(error) load_data `, e);
         }
     };
+
+    $: {
+        console.log(JSON.stringify(ld, null, 4), `ld`);
+    }
 </script>
 
-{#if ld && ld.trade_products.length > 0}
+{#if ld && ld.results.length > 0}
     <LayoutView>
         <LayoutTrellis>
-            {#each ld.trade_products as li, li_i}
-                <Trellis
-                    basis={{
-                        args: {
-                            layer: 1,
-                            title:
-                                li_i === 0
-                                    ? {
-                                          value: `Trade Products`,
-                                      }
-                                    : undefined,
-                            list: [
-                                {
-                                    hide_active: true,
-                                    touch: {
-                                        label: {
-                                            left: [
-                                                {
-                                                    value: `Product:`,
-                                                    classes: `capitalize`,
-                                                },
-                                            ],
-                                            right: [
-                                                {
-                                                    value: li.key,
-                                                    classes: `capitalize`,
-                                                },
-                                            ],
-                                        },
-                                        callback: async () => {},
-                                    },
-                                },
-                                {
-                                    hide_active: true,
-                                    touch: {
-                                        label: {
-                                            left: [
-                                                {
-                                                    value: `Date Created:`,
-                                                    classes: `capitalize`,
-                                                },
-                                            ],
-                                            right: [
-                                                {
-                                                    value: time_iso(
-                                                        li.created_at,
-                                                    ),
-                                                },
-                                            ],
-                                        },
-                                        callback: async () => {},
-                                    },
-                                },
-                                {
-                                    hide_active: true,
-                                    touch: {
-                                        label: {
-                                            left: [
-                                                {
-                                                    value: `Lot:`,
-                                                    classes: `capitalize`,
-                                                },
-                                            ],
-                                            right: [
-                                                {
-                                                    value: li.lot || `@todo`,
-                                                },
-                                            ],
-                                        },
-                                        callback: async () => {},
-                                    },
-                                },
-                                {
-                                    hide_active: true,
-                                    touch: {
-                                        label: {
-                                            left: [
-                                                {
-                                                    value: `Process:`,
-                                                    classes: `capitalize`,
-                                                },
-                                            ],
-                                            right: [
-                                                {
-                                                    value:
-                                                        li.process || `(@todo)`,
-                                                },
-                                            ],
-                                        },
-                                        callback: async () => {},
-                                    },
-                                },
-                            ],
-                        },
-                    }}
-                />
+            {#each ld.results as li, li_i}
+                <div
+                    class={`flex flex-col h-[22rem] w-${$app_layout} justify-start items-start bg-layer-1-surface round-44`}
+                >
+                    <div
+                        class={`flex flex-row h-[11rem] w-${$app_layout} justify-center items-center border-b-line border-b-layer-1-surface-edge`}
+                    >
+                        <p class={`font-sans font-[400] text-layer-0-glyph`}>
+                            photos
+                        </p>
+                    </div>
+                    <div
+                        class={`flex flex-row h-[11rem] w-full justify-center items-center`}
+                    >
+                        <p class={`font-sans font-[400] text-layer-0-glyph`}>
+                            body
+                        </p>
+                    </div>
+                </div>
             {/each}
         </LayoutTrellis>
     </LayoutView>
@@ -162,7 +107,7 @@
             },
         },
         option:
-            ld && ld?.trade_products?.length > 0
+            ld && ld?.results?.length > 0
                 ? {
                       label: {
                           value: `${$t(`common.add`)}`,

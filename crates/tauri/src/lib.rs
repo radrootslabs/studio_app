@@ -12,7 +12,10 @@ use models::{
         model_nostr_profile_add, model_nostr_profile_delete, model_nostr_profile_get,
         model_nostr_profile_update,
     },
-    nostr_profile_relay::{model_nostr_profile_relay_set, model_nostr_profile_relay_unset},
+    nostr_profile_relay::{
+        model_nostr_profile_relay_get_all, model_nostr_profile_relay_set,
+        model_nostr_profile_relay_unset,
+    },
     nostr_relay::{
         model_nostr_relay_add, model_nostr_relay_delete, model_nostr_relay_get,
         model_nostr_relay_update,
@@ -22,7 +25,8 @@ use models::{
         model_trade_product_update,
     },
     trade_product_location::{
-        model_trade_product_location_set, model_trade_product_location_unset,
+        model_trade_product_location_get_all, model_trade_product_location_set,
+        model_trade_product_location_unset,
     },
 };
 use radroots::Radroots;
@@ -75,8 +79,10 @@ pub fn run() {
             model_nostr_relay_update,
             model_nostr_profile_relay_set,
             model_nostr_profile_relay_unset,
+            model_nostr_profile_relay_get_all,
             model_trade_product_location_set,
-            model_trade_product_location_unset
+            model_trade_product_location_unset,
+            model_trade_product_location_get_all
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

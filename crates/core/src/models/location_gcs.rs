@@ -65,8 +65,16 @@ pub enum LocationGcsQueryBindValues {
 }
 
 #[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum LocationGcsQueryListOf {
+    All(IModelsQueryBindValue),
+    OnTradeProduct(IModelsQueryBindValue),
+    OffTradeProduct(IModelsQueryBindValue),
+}
+
+#[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
 pub struct ILocationGcsQueryGetList {
-    pub of: Vec<String>,
+    pub of: LocationGcsQueryListOf,
     pub sort: Option<LocationGcsSort>,
 }
 
@@ -82,21 +90,6 @@ pub struct ILocationGcsQueryUpdate {
     pub fields: ILocationGcsFieldsUpdate,
 }
 
-impl ILocationGcsQueryGet {
-    pub fn new_on(values: LocationGcsQueryBindValues) -> Self {
-        ILocationGcsQueryGet {
-            on: Some(values),
-            list: None,
-        }
-    }
-    pub fn new_list(list: ILocationGcsQueryGetList) -> Self {
-        ILocationGcsQueryGet {
-            on: None,
-            list: Some(list),
-        }
-    }
-}
-
 pub type ILocationGcsAdd = ILocationGcsFields;
 pub type ILocationGcsAddResolve = IModelsId;
 pub type ILocationGcsGet = ILocationGcsQueryGet;
@@ -110,6 +103,19 @@ pub fn location_gcs_query_bind_values(opts: LocationGcsQueryBindValues) -> IMode
     match opts {
         LocationGcsQueryBindValues::Id(id) => ("id".to_string(), id),
         LocationGcsQueryBindValues::Geohash(geohash) => ("geohash".to_string(), geohash),
+    }
+}
+
+pub fn location_gcs_query_get_list(opts: ILocationGcsQueryGetList) -> IModelsQueryBindValueTuple {
+    let query_sort = match opts.sort {
+        Some(LocationGcsSort::Newest) => " ORDER BY lg.created_at DESC",
+        Some(LocationGcsSort::Oldest) => " ORDER BY lg.created_at ASC",
+        None => "",
+    };
+    match opts.of {
+        LocationGcsQueryListOf::All(_) => (format!("SELECT lg.* FROM location_gcs lg{}", query_sort), "".to_string()),
+        LocationGcsQueryListOf::OnTradeProduct(id) => (format!("SELECT lg.* FROM location_gcs lg JOIN trade_product_location tp_lg ON lg.id = tp_lg.tb_lg WHERE tp_lg.tb_tp = ?1{}", query_sort), id),
+        LocationGcsQueryListOf::OffTradeProduct(id) => (format!("SELECT lg.* FROM location_gcs lg WHERE NOT EXISTS (SELECT 1 FROM trade_product_location tp_lg WHERE tp_lg.tb_lg = lg.id AND tp_lg.tb_tp = ?1){}", query_sort), id),
     }
 }
 
@@ -184,13 +190,8 @@ fn location_gcs_query_get(
             list: Some(opts_list),
             ..
         } => {
-            let sort = match opts_list.sort {
-                Some(LocationGcsSort::Newest) => "created_at DESC",
-                Some(LocationGcsSort::Oldest) => "created_at ASC",
-                None => "created_at DESC",
-            };
-            let query = format!("SELECT * FROM location_gcs ORDER BY {};", sort);
-            Ok((query, vec![]))
+            let (query, bv) = location_gcs_query_get_list(opts_list);
+            Ok((query, vec![bv]))
         }
         ILocationGcsQueryGet {
             on: Some(opts_on), ..

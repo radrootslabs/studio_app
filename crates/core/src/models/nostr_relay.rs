@@ -65,8 +65,16 @@ pub enum NostrRelayQueryBindValues {
 }
 
 #[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum NostrRelayQueryListOf {
+    All(IModelsQueryBindValue),
+    OnProfile(IModelsQueryBindValue),
+    OffProfile(IModelsQueryBindValue),
+}
+
+#[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
 pub struct INostrRelayQueryGetList {
-    pub of: Vec<String>,
+    pub of: NostrRelayQueryListOf,
     pub sort: Option<NostrRelaySort>,
 }
 
@@ -82,21 +90,6 @@ pub struct INostrRelayQueryUpdate {
     pub fields: INostrRelayFieldsUpdate,
 }
 
-impl INostrRelayQueryGet {
-    pub fn new_on(values: NostrRelayQueryBindValues) -> Self {
-        INostrRelayQueryGet {
-            on: Some(values),
-            list: None,
-        }
-    }
-    pub fn new_list(list: INostrRelayQueryGetList) -> Self {
-        INostrRelayQueryGet {
-            on: None,
-            list: Some(list),
-        }
-    }
-}
-
 pub type INostrRelayAdd = INostrRelayFields;
 pub type INostrRelayAddResolve = IModelsId;
 pub type INostrRelayGet = INostrRelayQueryGet;
@@ -110,6 +103,19 @@ pub fn nostr_relay_query_bind_values(opts: NostrRelayQueryBindValues) -> IModels
     match opts {
         NostrRelayQueryBindValues::Id(id) => ("id".to_string(), id),
         NostrRelayQueryBindValues::Url(url) => ("url".to_string(), url),
+    }
+}
+
+pub fn nostr_relay_query_get_list(opts: INostrRelayQueryGetList) -> IModelsQueryBindValueTuple {
+    let query_sort = match opts.sort {
+        Some(NostrRelaySort::Newest) => " ORDER BY rl.created_at DESC",
+        Some(NostrRelaySort::Oldest) => " ORDER BY rl.created_at ASC",
+        None => "",
+    };
+    match opts.of {
+        NostrRelayQueryListOf::All(_) => (format!("SELECT rl.* FROM nostr_relay rl{}", query_sort), "".to_string()),
+        NostrRelayQueryListOf::OnProfile(public_key) => (format!("SELECT rl.* FROM nostr_relay rl JOIN nostr_profile_relay pr_rl ON rl.id = pr_rl.tb_rl JOIN nostr_profile pr ON pr.id = pr_rl.tb_pr WHERE pr.public_key = ?1{}", query_sort), public_key),
+        NostrRelayQueryListOf::OffProfile(public_key) => (format!("SELECT rl.* FROM nostr_relay rl LEFT JOIN nostr_profile_relay pr_rl ON rl.id = pr_rl.tb_rl LEFT JOIN nostr_profile pr ON pr.id = pr_rl.tb_pr WHERE pr.public_key <> ?1{}", query_sort), public_key),
     }
 }
 
@@ -184,13 +190,8 @@ fn nostr_relay_query_get(
             list: Some(opts_list),
             ..
         } => {
-            let sort = match opts_list.sort {
-                Some(NostrRelaySort::Newest) => "created_at DESC",
-                Some(NostrRelaySort::Oldest) => "created_at ASC",
-                None => "created_at DESC",
-            };
-            let query = format!("SELECT * FROM nostr_relay ORDER BY {};", sort);
-            Ok((query, vec![]))
+            let (query, bv) = nostr_relay_query_get_list(opts_list);
+            Ok((query, vec![bv]))
         }
         INostrRelayQueryGet {
             on: Some(opts_on), ..

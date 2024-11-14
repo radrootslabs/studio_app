@@ -89,10 +89,6 @@
             const unlisten_1 = await keystore.on_key_change(
                 ks.cfg_init.nostr_secretkey,
                 async (_cfg_init_nostr_secretkey) => {
-                    console.log(
-                        `_cfg_init_nostr_secretkey `,
-                        _cfg_init_nostr_secretkey,
-                    );
                     if (_cfg_init_nostr_secretkey) {
                         cfg_main_nostr_publickey =
                             nostr.lib.secretkey_to_publickey(
@@ -577,10 +573,6 @@
         try {
             const ks_nostr_secretkey = await keystore.get(
                 ks.cfg_init.nostr_secretkey,
-            );
-            console.log(
-                JSON.stringify(ks_nostr_secretkey, null, 4),
-                `ks_nostr_secretkey`,
             );
             if (`err` in ks_nostr_secretkey) {
                 await dialog.alert(

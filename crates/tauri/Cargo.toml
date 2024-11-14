@@ -26,6 +26,7 @@ tauri-plugin-dialog = "2.0.0"
 tauri-plugin-fs = "2.0.0"
 tauri-plugin-geolocation = "2.0.0"
 tauri-plugin-http = "2.0.0"
+tauri-plugin-log = "2.0.0"
 tauri-plugin-map-display = { git = "https://github.com/inkibra/tauri-plugins", tag = "@inkibra/tauri-plugin-map-display@0.2.0", package="tauri-plugin-map-display" }
 tauri-plugin-notification = "2.0.0"
 tauri-plugin-os = "2.0.0"
