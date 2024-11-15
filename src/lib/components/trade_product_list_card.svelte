@@ -4,7 +4,6 @@
     import {
         app_layout,
         el_id,
-        els_id_pref,
         els_id_pref_index,
         fmt_geol_latitude,
         fmt_geol_longitude,
@@ -39,24 +38,20 @@
     $: tradeproduct_qty_sold = 0;
     $: tradeproduct_qty_avail =
         num_min(trade_product.qty_avail, 1) - tradeproduct_qty_sold;
-
-    const handle_scroll = (): void => {
-        console.log(`el_c.scrollTop `, el_c.scrollTop);
-    };
 </script>
 
 <div
     bind:this={el_c}
-    on:scroll={handle_scroll}
     class={`relative flex flex-col w-full justify-center items-center`}
 >
     <div
-        id={`${id_pref}-control-${trade_product.id}`}
+        id={`${id_pref}-control-${basis.index}-${trade_product.id}`}
         class={`hidden absolute top-0 left-0 flex flex-row h-12 w-full justify-center items-start el-re`}
     >
         <button
             class={`flex flex-row px-5 py-1 justify-center items-center bg-layer-1-surface active-layer-1 rounded-full`}
-            on:click={async () => {
+            on:click|stopPropagation={async () => {
+                console.log(`hi`);
                 await route(`/models/trade-product/view`, [
                     [`id`, trade_product.id],
                 ]);
@@ -70,19 +65,30 @@
     <button
         id={`${id_pref}-display-${basis.index}-${trade_product.id}`}
         class={`flex flex-col min-h-[22rem] w-${$app_layout} justify-start items-start bg-layer-1-surface focus-layer-1 focus-layer-1-raise-less round-44 focus:translate-y-12`}
-        on:click={async ({ currentTarget: el }) => {
+        on:click|stopPropagation={async ({ currentTarget: el }) => {
             el.focus();
             el_c.scrollTo();
-            const el_ctr = el_id(`${id_pref}-control-${trade_product.id}`);
-            if (el_ctr) el_ctr.classList.remove(`hidden`);
-            const els = els_id_pref_index(`${id_pref}-display`, basis.index);
-            if (els) els.forEach((el) => el.classList.add(`translate-y-12`));
+            el_id(
+                `${id_pref}-control-${basis.index}-${trade_product.id}`,
+            )?.classList.remove(`hidden`);
+            els_id_pref_index(
+                `${id_pref}-control`,
+                basis.index,
+                `not`,
+            )?.forEach((el) => el.classList.add(`hidden`));
+            els_id_pref_index(`${id_pref}-display`, basis.index)?.forEach(
+                (el) => el.classList.add(`translate-y-12`),
+            );
         }}
         on:blur={async () => {
-            const els_ctr = els_id_pref(`${id_pref}-control`);
-            if (els_ctr) els_ctr.forEach((el) => el.classList.add(`hidden`));
-            const els = els_id_pref_index(`${id_pref}-display`, basis.index);
-            if (els) els.forEach((el) => el.classList.remove(`translate-y-12`));
+            els_id_pref_index(
+                `${id_pref}-control`,
+                basis.index,
+                `not`,
+            )?.forEach((el) => el.classList.add(`hidden`));
+            els_id_pref_index(`${id_pref}-display`, basis.index)?.forEach(
+                (el) => el.classList.remove(`translate-y-12`),
+            );
         }}
     >
         <div
