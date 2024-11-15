@@ -745,7 +745,7 @@
                         class={`flex flex-col w-full gap-5 justify-center items-center`}
                     >
                         <button
-                            class={`flex flex-col h-touch_bold w-${$app_layout} justify-center items-center bg-layer-1-surface touch-layer-1-raise-less round-44 ${cgf_init_key_option === `key_gen` ? `bg-layer-1-surface_a/40` : ``}`}
+                            class={`flex flex-col h-touch_bold w-${$app_layout} justify-center items-center bg-layer-1-surface active-layer-1-raise-less round-44 ${cgf_init_key_option === `key_gen` ? `bg-layer-1-surface_a/40` : ``}`}
                             on:click|stopPropagation={async () => {
                                 cgf_init_key_option = `key_gen`;
                             }}
@@ -757,7 +757,7 @@
                             </p>
                         </button>
                         <button
-                            class={`flex flex-col h-touch_bold w-${$app_layout} justify-center items-center bg-layer-1-surface round-44 touch-layer-1-raise-less ${cgf_init_key_option === `kv_nostr_secretkey` ? `bg-layer-1-surface_a/40` : ``}`}
+                            class={`flex flex-col h-touch_bold w-${$app_layout} justify-center items-center bg-layer-1-surface round-44 active-layer-1-raise-less ${cgf_init_key_option === `kv_nostr_secretkey` ? `bg-layer-1-surface_a/40` : ``}`}
                             on:click|stopPropagation={async () => {
                                 cgf_init_key_option = `kv_nostr_secretkey`;
                             }}
@@ -926,7 +926,7 @@
                         class={`flex flex-col w-full gap-5 justify-center items-center`}
                     >
                         <button
-                            class={`flex flex-col h-touch_bold w-${$app_layout} justify-center items-center bg-layer-1-surface touch-layer-1-raise-less round-44 ${cfg_main_opt_idx1 === `farmer` ? `bg-layer-1-surface_a/40` : ``}`}
+                            class={`flex flex-col h-touch_bold w-${$app_layout} justify-center items-center bg-layer-1-surface active-layer-1-raise-less round-44 ${cfg_main_opt_idx1 === `farmer` ? `bg-layer-1-surface_a/40` : ``}`}
                             on:click|stopPropagation={async () => {
                                 cfg_main_opt_idx1 = `farmer`;
                             }}
@@ -938,7 +938,7 @@
                             </p>
                         </button>
                         <button
-                            class={`flex flex-col h-touch_bold w-${$app_layout} justify-center items-center bg-layer-1-surface touch-layer-1-raise-less round-44 ${cfg_main_opt_idx1 === `personal` ? `bg-layer-1-surface_a/40` : ``}`}
+                            class={`flex flex-col h-touch_bold w-${$app_layout} justify-center items-center bg-layer-1-surface active-layer-1-raise-less round-44 ${cfg_main_opt_idx1 === `personal` ? `bg-layer-1-surface_a/40` : ``}`}
                             on:click|stopPropagation={async () => {
                                 cfg_main_opt_idx1 = `personal`;
                             }}

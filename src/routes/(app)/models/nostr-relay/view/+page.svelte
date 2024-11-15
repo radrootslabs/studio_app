@@ -70,9 +70,7 @@
         }
     };
 
-    $: {
-        app_blur.set(show_edit);
-    }
+    $: app_blur.set(show_edit);
 
     $: {
         console.log(JSON.stringify(ld, null, 4), `ld`);

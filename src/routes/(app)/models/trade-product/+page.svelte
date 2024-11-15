@@ -59,10 +59,6 @@
             console.log(`(error) load_data `, e);
         }
     };
-
-    $: {
-        console.log(JSON.stringify(ld, null, 4), `ld`);
-    }
 </script>
 
 {#if ld && ld.results.length > 0}
@@ -71,6 +67,7 @@
             {#each ld.results as li, li_i}
                 <TradeProductListCard
                     basis={{
+                        index: li_i,
                         result: li,
                     }}
                 />
@@ -81,7 +78,7 @@
 <Nav
     basis={{
         prev: {
-            label: `Home`,
+            label: `${$t(`common.home`)}`,
             route: `/`,
         },
         title: {

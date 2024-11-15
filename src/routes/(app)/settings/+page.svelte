@@ -417,7 +417,7 @@
 <Nav
     basis={{
         prev: {
-            label: `Home`,
+            label: `${$t(`common.home`)}`,
             route: `/`,
         },
         title: {
