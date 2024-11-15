@@ -63,7 +63,7 @@
 
 {#if ld && ld.results.length > 0}
     <LayoutView>
-        <LayoutTrellis>
+        <LayoutTrellis basis={{ classes: `pt-8` }}>
             {#each ld.results as li, li_i}
                 <TradeProductListCard
                     basis={{
@@ -90,8 +90,8 @@
             ld && ld?.results?.length > 0
                 ? {
                       label: {
-                          value: `${$t(`common.add`)}`,
-                          classes: `tap-color`,
+                          value: `${$t(`common.add_new`)}`,
+                          classes: `tap-color capitalize`,
                       },
                       callback: async () => {
                           await route(`/models/trade-product/add`);

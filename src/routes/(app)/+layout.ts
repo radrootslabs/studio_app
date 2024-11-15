@@ -5,7 +5,6 @@ import type { LayoutLoad, LayoutLoadEvent } from './$types';
 
 export const load: LayoutLoad = async ({ url }: LayoutLoadEvent) => {
     try {
-        console.log(`(load) (app) `, url.pathname)
         const ks_nostr_publickey = await keystore.get(
             ks.keys.nostr_publickey,
         );

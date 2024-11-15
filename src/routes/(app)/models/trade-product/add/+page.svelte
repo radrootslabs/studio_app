@@ -1,5 +1,5 @@
 <script lang="ts">
-    import { db, dialog, geol } from "$lib/client";
+    import { db, dialog, fs, geol } from "$lib/client";
     import ImageUploadControl from "$lib/components/image_upload_control.svelte";
     import ImageUploadEditEnvelope from "$lib/components/image_upload_edit_envelope.svelte";
     import MapPointSelectEnvelope from "$lib/components/map_point_select_envelope.svelte";
@@ -7,6 +7,10 @@
     import TradeFieldDisplayKv from "$lib/components/trade_field_display_kv.svelte";
     import { ascii } from "$lib/conf";
     import { el_focus } from "$lib/utils/client";
+    import {
+        fetch_put_upload,
+        fetch_uploads_presigned_url,
+    } from "$lib/utils/fetch";
     import { location_gcs_to_geoc } from "$lib/utils/geocode";
     import { kv_init_page, kv_sync } from "$lib/utils/kv";
     import { model_location_gcs_add_geocode } from "$lib/utils/models";
@@ -58,6 +62,7 @@
         num_str,
         parse_currency_marker,
         parse_currency_price,
+        parse_file_path,
         parse_trade_key,
         parse_trade_quantity_tup,
         sum_currency_price,
@@ -65,6 +70,7 @@
         trade_keys,
         year_curr,
         type CurrencyPrice,
+        type FilePath,
         type GeolocationCoordinatesPoint,
         type TradeKey,
         type TradeQuantity,
@@ -522,13 +528,74 @@
                         id: location_gcs_get_c.result.id,
                     },
                 });
-            if (`pass` in trade_product_location_set) {
-                route(`/models/trade-product`);
+            if (!(`pass` in trade_product_location_set)) {
+                await dialog.alert(
+                    `${$t(`common.failure_to_process_the_request`)}`,
+                );
                 return;
             }
-            await dialog.alert(
-                `${$t(`common.failure_to_process_the_request`)}`,
-            );
+            const photo_path_uploads: {
+                file_name: string;
+                storage_key: string;
+            }[] = [];
+            const photo_path_uploads_err: {
+                file_path: FilePath;
+                err_trace: `url` | `put`;
+                err_msg: string;
+            }[] = [];
+            if (tradepr_photo_paths.length) {
+                for (const photo_path of tradepr_photo_paths) {
+                    const file_path = parse_file_path(photo_path);
+                    if (!file_path) continue;
+                    const file_data = await fs.read_bin(photo_path);
+                    if (!file_data) continue;
+                    const uploads_presigned_url =
+                        await fetch_uploads_presigned_url(file_path);
+                    if (`err` in uploads_presigned_url) {
+                        photo_path_uploads_err.push({
+                            file_path,
+                            err_trace: `url`,
+                            err_msg: uploads_presigned_url.err,
+                        });
+                        continue;
+                    }
+                    const put_upload = await fetch_put_upload({
+                        url: uploads_presigned_url.url,
+                        file_data,
+                        mime_type: file_path.mime_type,
+                    });
+                    if (`err` in put_upload) {
+                        photo_path_uploads_err.push({
+                            file_path,
+                            err_trace: `put`,
+                            err_msg: put_upload.err,
+                        });
+                        continue;
+                    }
+                    photo_path_uploads.push({
+                        file_name: uploads_presigned_url.file_name,
+                        storage_key: uploads_presigned_url.storage_key,
+                    });
+                }
+            }
+            if (photo_path_uploads_err.length) {
+                await dialog.alert(
+                    `${$t(`icu.there_was_a_failure_while_*`, {
+                        value: `${$t(`icu.uploading_*_photos`, {
+                            value:
+                                photo_path_uploads_err.length ===
+                                tradepr_photo_paths.length
+                                    ? `${$t(`common.all`)}`
+                                    : `${photo_path_uploads_err.length}`,
+                        })}`.toLowerCase(),
+                    })}`,
+                );
+            }
+            if (photo_path_uploads.length) {
+                console.log(`@todo add photo models`);
+            }
+
+            await route(`/models/trade-product`);
         } catch (e) {
             console.log(`(error) submit `, e);
         }

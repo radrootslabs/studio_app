@@ -17,16 +17,20 @@
         select_options: [
             {
                 value: ascii.bullet,
-                label: `Choose photo hosting`,
+                label: `${$t(`icu.choose_*`, { value: `${$t(`common.photo_hosting`)}`.toLowerCase() })}`,
                 disabled: true,
-            },
-            {
-                value: `*add`,
-                label: `${$t(`icu.add_*`, { value: `${$t(`common.endpoint`)}`.toLowerCase() })}`,
             },
             {
                 value: `^radroots`,
                 label: `https://radroots.org`,
+            },
+            {
+                value: `*add`,
+                label: `${$t(`icu.add_*`, { value: `${$t(`common.upload_url`)}`.toLowerCase() })}`,
+            },
+            {
+                value: `*disable`,
+                label: `Disable uploads`,
             },
         ],
     };
