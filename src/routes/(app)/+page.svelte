@@ -46,7 +46,7 @@
             ],
             farmer: [
                 {
-                    route: `/`,
+                    route: `/test`,
                     label: `Post New`,
                     key: `note-blank`,
                 },
@@ -67,7 +67,7 @@
                                 return;
                             }
                         }
-                        await route(`/models/trade-product`);
+                        await route(`/models/trade-product/add`);
                     },
                 },
                 {
@@ -224,10 +224,7 @@
                 icon: `arrows-down-up`,
                 label: `Transactions`,
                 callback: async () => {
-                    const res = await db.nostr_relay_get({
-                        list: [`on_profile`, { public_key: $app_nostr_key }],
-                    });
-                    console.log(JSON.stringify(res, null, 4), `res`);
+                    await route(`/models/trade-product`);
                 },
             },
             {

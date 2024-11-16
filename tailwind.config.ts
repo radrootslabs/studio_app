@@ -18,7 +18,9 @@ const heights_responsive = {
     view_mobile_base: `31rem`,
     view_mobile_y: `42rem`,
     view_offset_mobile_base: `1rem`,
-    view_offset_mobile_y: `2rem`
+    view_offset_mobile_y: `2rem`,
+    trellis_centered_mobile_base: `32rem`,
+    trellis_centered_mobile_y: `35rem`
 };
 
 const heights = {
@@ -32,7 +34,7 @@ const heights = {
     envelope_top: `56px`,
     toast_min: `56px`,
     envelope_button: `50px`,
-    line_label: `1.75rem`
+    line_label: `1.75rem`,
 };
 
 

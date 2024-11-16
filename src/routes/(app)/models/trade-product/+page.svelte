@@ -39,14 +39,24 @@
 
             const results: TradeProductBundle[] = [];
             for (const trade_product of trade_products.results) {
-                const location_gcs = await db.location_gcs_get({
+                const location_gcs_res = await db.location_gcs_get({
                     list: [`on_trade_product`, { id: trade_product.id }],
                 });
+                if (`err` in location_gcs_res) {
+                    //@todo
+                    return;
+                }
+                const location_gcs = location_gcs_res.results[0];
+                const media_uploads_res = await db.media_upload_get({
+                    list: [`on_trade_product`, { id: trade_product.id }],
+                });
+
                 results.push({
                     trade_product,
-                    location_gcs:
-                        `results` in location_gcs
-                            ? location_gcs.results[0]
+                    location_gcs,
+                    media_uploads:
+                        `results` in media_uploads_res
+                            ? media_uploads_res.results
                             : undefined,
                 });
             }
@@ -54,11 +64,14 @@
             const data: LoadData = {
                 results,
             };
+            console.log(JSON.stringify(data, null, 4), `data`);
             return data;
         } catch (e) {
             console.log(`(error) load_data `, e);
         }
     };
+
+    console.log(JSON.stringify(ld, null, 4), `ld`);
 </script>
 
 {#if ld && ld.results.length > 0}

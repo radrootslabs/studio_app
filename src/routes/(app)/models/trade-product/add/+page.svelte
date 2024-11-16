@@ -1,5 +1,6 @@
 <script lang="ts">
-    import { db, dialog, fs, geol } from "$lib/client";
+    import { PUBLIC_RADROOTS_URL } from "$env/static/public";
+    import { db, dialog, geol } from "$lib/client";
     import ImageUploadControl from "$lib/components/image_upload_control.svelte";
     import ImageUploadEditEnvelope from "$lib/components/image_upload_edit_envelope.svelte";
     import MapPointSelectEnvelope from "$lib/components/map_point_select_envelope.svelte";
@@ -7,10 +8,7 @@
     import TradeFieldDisplayKv from "$lib/components/trade_field_display_kv.svelte";
     import { ascii } from "$lib/conf";
     import { el_focus } from "$lib/utils/client";
-    import {
-        fetch_put_upload,
-        fetch_uploads_presigned_url,
-    } from "$lib/utils/fetch";
+    import { fetch_put_upload } from "$lib/utils/fetch";
     import { location_gcs_to_geoc } from "$lib/utils/geocode";
     import { kv_init_page, kv_sync } from "$lib/utils/kv";
     import { model_location_gcs_add_geocode } from "$lib/utils/models";
@@ -19,6 +17,7 @@
         tradeproduct_init_kv,
         tradeproduct_validate_fields,
     } from "$lib/utils/trade_product";
+    import type { IClientHttpResponseError } from "@radroots/client";
     import type { GeocoderReverseResult } from "@radroots/geocoder";
     import {
         trade_product_form_fields,
@@ -46,14 +45,17 @@
         LayoutTrellis,
         LayoutTrellisLine,
         LayoutView,
+        Loading,
         locale,
         Nav,
         route,
         SelectElement,
+        sleep,
         t,
         view_effect,
     } from "@radroots/svelte-lib";
     import {
+        err_system,
         fiat_currencies,
         fmt_currency_price,
         fmt_trade_quantity_tup,
@@ -109,6 +111,14 @@
                     },
                 ],
             ]),
+            success: new Map<number, CarouselParam>([
+                [
+                    0,
+                    {
+                        label_next: ``,
+                    },
+                ],
+            ]),
         },
         default: {
             tradepr_key: `coffee`,
@@ -116,7 +126,7 @@
     };
 
     let view_init: View = `c_1`;
-    type View = `c_1`;
+    type View = `c_1` | `success`;
     let view: View = view_init;
     $: {
         view_effect<View>(view);
@@ -125,6 +135,7 @@
     let load_page = false;
     let load_submit = false;
 
+    let tradepr_success_id = ``;
     let tradepr_photo_paths: string[] = [];
     let tradepr_photo_edit: { index: number; file_path: string } | undefined =
         undefined;
@@ -434,6 +445,8 @@
 
     const submit = async (): Promise<void> => {
         try {
+            if (load_submit) return;
+            load_submit = true;
             if (!tradepr_photo_paths.length) {
                 const confirm = await dialog.confirm({
                     message: `${`${$t(`icu.the_listing_will_be_created_without_a_*`, { value: `${$t(`common.photo`)}`.toLowerCase() })}`}. ${$t(`common.do_you_want_to_continue_q`)}`,
@@ -455,6 +468,7 @@
             if (`result` in location_gcs_get_i) {
                 location_gcs_id = location_gcs_get_i.result.id;
             } else {
+                //@todo add check for existing geohash
                 if (tradepr_lgc_map_point && tradepr_lgc_map_geoc) {
                     const location_gcs_add_geocode =
                         await model_location_gcs_add_geocode({
@@ -467,7 +481,9 @@
                     ) {
                         await dialog.alert(
                             `err` in location_gcs_add_geocode
-                                ? `${$t(`icu.the_*_is_incomplete`, { value: `${$t(`models.location_gcs.fields.${location_gcs_add_geocode.err}.label`)}`.toLowerCase() })}`
+                                ? err_system(location_gcs_add_geocode.err)
+                                    ? `${$t(`error.client.database_read_failure`)}`
+                                    : `${$t(`icu.the_*_is_incomplete`, { value: `${$t(`models.location_gcs.fields.${location_gcs_add_geocode.err}.label`)}`.toLowerCase() })}`
                                 : `${$t(`${location_gcs_add_geocode.err_s[0]}`)}`,
                         );
                         return;
@@ -491,18 +507,101 @@
                 }
                 return;
             }
+            // photos
+            const photo_path_uploads: {
+                file_path: FilePath;
+                res_base: string;
+                res_path: string;
+            }[] = [];
+            const photo_path_uploads_err: {
+                file_path: FilePath;
+                err_msg: string;
+            }[] = [];
+            const photo_path_uploads_error: IClientHttpResponseError[] = [];
+            if (tradepr_photo_paths.length) {
+                for (const photo_path of tradepr_photo_paths) {
+                    const file_path = parse_file_path(photo_path);
+                    if (!file_path) continue;
+                    const url = `${PUBLIC_RADROOTS_URL}/public/upload/image`; //@todo
+                    const put_upload = await fetch_put_upload({
+                        url,
+                        file_path,
+                    });
+                    if (`err` in put_upload) {
+                        photo_path_uploads_err.push({
+                            file_path,
+                            err_msg: put_upload.err,
+                        });
+                        continue;
+                    } else if (`error` in put_upload) {
+                        photo_path_uploads_error.push(put_upload.error);
+                        continue;
+                    }
+                    photo_path_uploads.push({
+                        file_path,
+                        res_base: put_upload.res_base,
+                        res_path: put_upload.res_path,
+                    });
+                }
+            }
+            if (photo_path_uploads_error.length) {
+                const confirm = await dialog.confirm({
+                    message: `${$t(photo_path_uploads_error[0].message)}`, //@todo
+                    ok_label: photo_path_uploads_error[0].label_ok
+                        ? `${$t(photo_path_uploads_error[0].label_ok)}` ||
+                          undefined
+                        : undefined,
+                    cancel_label: photo_path_uploads_error[0].label_cancel
+                        ? `${$t(photo_path_uploads_error[0].label_cancel)}` ||
+                          undefined
+                        : undefined,
+                });
+                if (confirm) {
+                    console.log(`@todo add profile name`);
+                    return;
+                }
+            }
+            if (photo_path_uploads_err.length) {
+                await dialog.alert(
+                    `${$t(`icu.there_was_a_failure_while_*`, {
+                        value: `${$t(`icu.uploading_*_photos`, {
+                            value:
+                                photo_path_uploads_err.length ===
+                                tradepr_photo_paths.length
+                                    ? `${$t(`common.all`)}`
+                                    : `${photo_path_uploads_err.length}`,
+                        })}`.toLowerCase(),
+                    })}`,
+                );
+                return;
+            }
+            const media_upload_added: string[] = [];
+            if (photo_path_uploads.length) {
+                for (const photo_path_upload of photo_path_uploads) {
+                    const media_upload_add = await db.media_upload_add({
+                        file_path: photo_path_upload.file_path.file_path,
+                        mime_type: photo_path_upload.file_path.mime_type,
+                        res_base: photo_path_upload.res_base,
+                        res_path: photo_path_upload.res_path,
+                    });
+                    if (
+                        `err` in media_upload_add ||
+                        `err_s` in media_upload_add
+                    )
+                        continue; //@todo
+                    media_upload_added.push(media_upload_add.id);
+                }
+            }
+
+            // trade product
             const trade_product_fields = await trade_product_fields_validate({
                 field_defaults: [
                     [`price_qty_amt`, num_str(1)],
                     [`profile`, `natural`],
-                    [`qty_avail`, num_str($tradepr_qty_avail)],
+                    [`qty_avail`, num_str(Math.max($tradepr_qty_avail, 1))],
                     [`year`, year_curr()],
                 ],
             });
-            console.log(
-                JSON.stringify(trade_product_fields, null, 4),
-                `trade_product_fields`,
-            );
             if (`err` in trade_product_fields) {
                 await dialog.alert(
                     `${$t(`icu.the_*_is_incomplete`, { value: `${$t(`models.trade_product.fields.${trade_product_fields.err}.label`)}`.toLowerCase() })}`,
@@ -519,6 +618,7 @@
                 );
                 return;
             }
+            let trade_product_location_set_err: string = ``;
             const trade_product_location_set =
                 await db.trade_product_location_set({
                     trade_product: {
@@ -528,76 +628,42 @@
                         id: location_gcs_get_c.result.id,
                     },
                 });
-            if (!(`pass` in trade_product_location_set)) {
-                await dialog.alert(
-                    `${$t(`common.failure_to_process_the_request`)}`,
-                );
-                return;
+            if (`err` in trade_product_location_set) {
+                trade_product_location_set_err = trade_product_location_set.err;
             }
-            const photo_path_uploads: {
-                file_name: string;
-                storage_key: string;
-            }[] = [];
-            const photo_path_uploads_err: {
-                file_path: FilePath;
-                err_trace: `url` | `put`;
-                err_msg: string;
-            }[] = [];
-            if (tradepr_photo_paths.length) {
-                for (const photo_path of tradepr_photo_paths) {
-                    const file_path = parse_file_path(photo_path);
-                    if (!file_path) continue;
-                    const file_data = await fs.read_bin(photo_path);
-                    if (!file_data) continue;
-                    const uploads_presigned_url =
-                        await fetch_uploads_presigned_url(file_path);
-                    if (`err` in uploads_presigned_url) {
-                        photo_path_uploads_err.push({
-                            file_path,
-                            err_trace: `url`,
-                            err_msg: uploads_presigned_url.err,
-                        });
-                        continue;
-                    }
-                    const put_upload = await fetch_put_upload({
-                        url: uploads_presigned_url.url,
-                        file_data,
-                        mime_type: file_path.mime_type,
+            const trade_product_media_set_err: string[] = [];
+            for (const media_upload of media_upload_added) {
+                const trade_product_media_set =
+                    await db.trade_product_media_set({
+                        trade_product: {
+                            id: trade_product_add.id,
+                        },
+                        media_upload: {
+                            id: media_upload,
+                        },
                     });
-                    if (`err` in put_upload) {
-                        photo_path_uploads_err.push({
-                            file_path,
-                            err_trace: `put`,
-                            err_msg: put_upload.err,
-                        });
-                        continue;
-                    }
-                    photo_path_uploads.push({
-                        file_name: uploads_presigned_url.file_name,
-                        storage_key: uploads_presigned_url.storage_key,
-                    });
+                if (`err` in trade_product_media_set) {
+                    trade_product_media_set_err.push(
+                        trade_product_media_set.err,
+                    );
                 }
             }
-            if (photo_path_uploads_err.length) {
-                await dialog.alert(
-                    `${$t(`icu.there_was_a_failure_while_*`, {
-                        value: `${$t(`icu.uploading_*_photos`, {
-                            value:
-                                photo_path_uploads_err.length ===
-                                tradepr_photo_paths.length
-                                    ? `${$t(`common.all`)}`
-                                    : `${photo_path_uploads_err.length}`,
-                        })}`.toLowerCase(),
-                    })}`,
-                );
-            }
-            if (photo_path_uploads.length) {
-                console.log(`@todo add photo models`);
+
+            if (trade_product_location_set_err) {
+                //@todo
             }
 
-            await route(`/models/trade-product`);
+            if (trade_product_media_set_err.length) {
+                //@todo
+            }
+
+            handle_view(`success`);
+            await sleep(2000);
+            await route(`/`);
         } catch (e) {
             console.log(`(error) submit `, e);
+        } finally {
+            load_submit = false;
         }
     };
 </script>
@@ -1589,8 +1655,78 @@
                                 await submit();
                             }}
                         >
-                            {`${$t(`common.post`)}`}
+                            {#if load_submit}
+                                <Loading />
+                            {:else}
+                                {`${$t(`common.post`)}`}
+                            {/if}
                         </button>
+                    </LayoutTrellis>
+                </div>
+            </div>
+        </div>
+        <div
+            data-view={`success`}
+            class={`hidden flex flex-col h-full w-full justify-start items-center`}
+        >
+            <div
+                data-carousel-container={`success`}
+                class={`carousel-container flex h-full w-full`}
+            >
+                <div
+                    data-carousel-item={`success`}
+                    class={`carousel-item flex flex-col w-full justify-start items-center ${view === `success` ? `fade-in-long` : ``}`}
+                >
+                    <LayoutTrellis>
+                        <div
+                            class={`flex flex-col h-trellis_centered_${$app_layout} w-full justify-center items-center`}
+                        >
+                            <Glyph
+                                basis={{
+                                    classes: `text-success text-[72px]`,
+                                    weight: `bold`,
+                                    key: `seal-check`,
+                                }}
+                            />
+                            <div
+                                class={`flex flex-col pt-1 justify-start items-center`}
+                            >
+                                <div
+                                    class={`flex flex-row w-full justify-center items-center`}
+                                >
+                                    <p
+                                        class={`font-sans font-[400] text-[1.3rem] text-layer-0-glyph`}
+                                    >
+                                        {`${$t(`common.complete`)}`}
+                                    </p>
+                                </div>
+                                <div
+                                    class={`flex flex-row w-full justify-center items-center`}
+                                >
+                                    <button
+                                        class={`flex flex-row justify-center items-center`}
+                                        on:click={async () => {
+                                            if (tradepr_success_id)
+                                                await route(
+                                                    `/models/trade-product/view`,
+                                                    [
+                                                        [
+                                                            `id`,
+                                                            tradepr_success_id,
+                                                        ],
+                                                    ],
+                                                );
+                                        }}
+                                    >
+                                        <p
+                                            class={`font-sans font-[400] text-[1.1rem] text-layer-0-glyph`}
+                                        >
+                                            {`${$t(`icu.click_to_*`, { value: `${$t(`icu.view_the_*`, { value: `${$t(`common.product`)}` })}`.toLowerCase() })}`}
+                                        </p>
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
                     </LayoutTrellis>
                 </div>
             </div>
@@ -1600,10 +1736,13 @@
 <Nav
     basis={{
         prev: {
-            label: `${$t(`common.back`)}`,
-            route: `/models/trade-product`,
+            label:
+                view === `success`
+                    ? `${$t(`common.home`)}`
+                    : `${$t(`common.back`)}`,
+            route: view === `success` ? `/` : `/models/trade-product`,
             prevent_route:
-                view === `c_1` && $carousel_index === 0
+                (view === `c_1` && $carousel_index === 0) || view === `success`
                     ? undefined
                     : {
                           callback: async () => {
@@ -1616,12 +1755,14 @@
         },
         title: {
             label: {
-                value: `${$t(`icu.new_*`, { value: `${$t(`common.product`)}` })}`,
+                value:
+                    view === `success`
+                        ? ``
+                        : `${$t(`icu.new_*`, { value: `${$t(`common.product`)}` })}`,
             },
             callback: async () => {},
         },
         option: {
-            loading: load_submit,
             label: {
                 value:
                     $carousel_num > 1
@@ -1629,7 +1770,8 @@
                         : page_param.carousel[view].get($carousel_index)
                               ?.label_next || ``,
                 glyph:
-                    $carousel_index === $carousel_index_max
+                    $carousel_index === $carousel_index_max ||
+                    view === `success`
                         ? undefined
                         : {
                               key: `caret-right`,

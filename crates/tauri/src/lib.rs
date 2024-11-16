@@ -8,6 +8,10 @@ use models::{
         model_location_gcs_add, model_location_gcs_delete, model_location_gcs_get,
         model_location_gcs_update,
     },
+    media_upload::{
+        model_media_upload_add, model_media_upload_delete, model_media_upload_get,
+        model_media_upload_update,
+    },
     nostr_profile::{
         model_nostr_profile_add, model_nostr_profile_delete, model_nostr_profile_get,
         model_nostr_profile_update,
@@ -27,6 +31,10 @@ use models::{
     trade_product_location::{
         model_trade_product_location_get_all, model_trade_product_location_set,
         model_trade_product_location_unset,
+    },
+    trade_product_media::{
+        model_trade_product_media_get_all, model_trade_product_media_set,
+        model_trade_product_media_unset,
     },
 };
 use radroots::Radroots;
@@ -82,7 +90,14 @@ pub fn run() {
             model_nostr_profile_relay_get_all,
             model_trade_product_location_set,
             model_trade_product_location_unset,
-            model_trade_product_location_get_all
+            model_trade_product_location_get_all,
+            model_media_upload_add,
+            model_media_upload_get,
+            model_media_upload_delete,
+            model_media_upload_update,
+            model_trade_product_media_set,
+            model_trade_product_media_unset,
+            model_trade_product_media_get_all,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

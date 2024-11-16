@@ -34,16 +34,18 @@
             }
             const { result: trade_product } = _trade_product;
 
-            const location_gcs = await db.location_gcs_get({
+            const location_gcs_res = await db.location_gcs_get({
                 list: [`on_trade_product`, { id: trade_product.id }],
             });
+            if (`err` in location_gcs_res) {
+                //@todo
+                return;
+            }
+            const location_gcs = location_gcs_res.results[0];
 
             const data: LoadData = {
                 trade_product,
-                location_gcs:
-                    `results` in location_gcs
-                        ? location_gcs.results[0]
-                        : undefined,
+                location_gcs,
             };
             return data;
         } catch (e) {

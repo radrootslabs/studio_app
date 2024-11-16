@@ -8,6 +8,7 @@
         fmt_geol_latitude,
         fmt_geol_longitude,
         Glyph,
+        ImagePath,
         locale,
         route,
         t,
@@ -32,7 +33,7 @@
         result: TradeProductBundle;
     };
     $: ({
-        result: { trade_product, location_gcs },
+        result: { trade_product, location_gcs, media_uploads },
     } = basis);
 
     $: tradeproduct_qty_sold = 0;
@@ -51,7 +52,6 @@
         <button
             class={`flex flex-row px-5 py-1 justify-center items-center bg-layer-1-surface active-layer-1 rounded-full`}
             on:click|stopPropagation={async () => {
-                console.log(`hi`);
                 await route(`/models/trade-product/view`, [
                     [`id`, trade_product.id],
                 ]);
@@ -94,48 +94,62 @@
         <div
             class={`flex flex-row h-[10rem] w-full justify-center items-center border-b-line border-b-layer-1-surface-edge`}
         >
-            <button
-                class={`group flex flex-row w-20 justify-center items-center`}
-                on:click|stopPropagation={async () => {}}
-            >
+            {#if media_uploads && media_uploads.length}
                 <div
-                    class={`relative flex flex-col w-full justify-start items-center`}
+                    class={`flex flex-row h-full w-full justify-center items-center`}
                 >
-                    <div
-                        class={`relative flex flex-row py-2 px-[0.8rem] justify-center items-center`}
-                    >
-                        <Glyph
+                    {#each media_uploads as media_upload}
+                        <ImagePath
                             basis={{
-                                classes: `text-layer-0-glyph group-active:text-layer-0-glyph_a el-re`,
-                                dim: `xl`,
-                                weight: `bold`,
-                                key: `camera`,
+                                path: `${media_upload.res_base}/${media_upload.res_path}.${media_upload.mime_type}`,
                             }}
                         />
+                    {/each}
+                </div>
+            {:else}
+                <button
+                    class={`group flex flex-row w-20 justify-center items-center`}
+                    on:click|stopPropagation={async () => {}}
+                >
+                    <div
+                        class={`relative flex flex-col w-full justify-start items-center`}
+                    >
                         <div
-                            class={`absolute top-0 right-0 flex flex-row justify-center items-center`}
+                            class={`relative flex flex-row py-2 px-[0.8rem] justify-center items-center`}
                         >
                             <Glyph
                                 basis={{
                                     classes: `text-layer-0-glyph group-active:text-layer-0-glyph_a el-re`,
-                                    dim: `xs`,
+                                    dim: `xl`,
                                     weight: `bold`,
-                                    key: `plus`,
+                                    key: `camera`,
                                 }}
                             />
+                            <div
+                                class={`absolute top-0 right-0 flex flex-row justify-center items-center`}
+                            >
+                                <Glyph
+                                    basis={{
+                                        classes: `text-layer-0-glyph group-active:text-layer-0-glyph_a el-re`,
+                                        dim: `xs`,
+                                        weight: `bold`,
+                                        key: `plus`,
+                                    }}
+                                />
+                            </div>
+                        </div>
+                        <div
+                            class={`absolute -bottom-4 left-0 flex flex-row w-full justify-center items-center`}
+                        >
+                            <p
+                                class={`font-sans font-[500] text-[1rem] text-layer-0-glyph group-active:text-layer-0-glyph_a el-re`}
+                            >
+                                {`${$t(`icu.no_*`, { value: `${$t(`common.photos`)}`.toLowerCase() })}`}
+                            </p>
                         </div>
                     </div>
-                    <div
-                        class={`absolute -bottom-4 left-0 flex flex-row w-full justify-center items-center`}
-                    >
-                        <p
-                            class={`font-sans font-[500] text-[1rem] text-layer-0-glyph group-active:text-layer-0-glyph_a el-re`}
-                        >
-                            {`${$t(`icu.no_*`, { value: `${$t(`common.photos`)}`.toLowerCase() })}`}
-                        </p>
-                    </div>
-                </div>
-            </button>
+                </button>
+            {/if}
         </div>
         {#if location_gcs}
             <div

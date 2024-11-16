@@ -33,10 +33,6 @@
         try {
             const photo_paths_select = await dialog.open_photos();
             if (!photo_paths_select) return;
-            console.log(
-                `photo_paths_select.results[0] `,
-                photo_paths_select.results[0],
-            );
             photo_paths = list_assign(photo_paths, photo_paths_select.results);
         } catch (e) {
             console.log(`(error) handle_photo_add `, e);

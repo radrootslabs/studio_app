@@ -108,4 +108,6 @@
 <Controls />
 <CssStatic />
 <CssStyles />
-<div class="hidden h-entry_guide h-entry_line h-[calc(100vh-12%)]" />
+<div
+    class="hidden h-entry_guide h-entry_line h-[calc(100vh-12%)] h-trellis_centered_mobile_base h-trellis_centered_mobile_y"
+/>
