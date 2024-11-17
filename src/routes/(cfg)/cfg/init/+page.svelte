@@ -455,7 +455,6 @@
                 url: `${PUBLIC_RADROOTS_URL}/public/accounts/list`,
                 method: `post`,
             });
-            console.log(JSON.stringify(res, null, 4), `res`);
             if (`err` in res)
                 return err_msg(`${$t(`error.client.network_failure`)}`);
             else if (Array.isArray(res.data.results)) {
@@ -501,7 +500,6 @@
                         : [cfg.nostr.relay_url].join(`,`),
                 },
             });
-            console.log(JSON.stringify(res, null, 4), `res`);
             if (`err` in res) return res;
             else if (res.data && `tok` in res.data) {
                 return { tok: res.data.tok };
@@ -525,7 +523,6 @@
                 method: `post`,
                 authorization,
             });
-            console.log(JSON.stringify(res, null, 4), `res`);
             if (`err` in res) return res;
             return { pass: true };
         } catch (e) {
@@ -546,7 +543,6 @@
                 method: `post`,
                 authorization,
             });
-            console.log(JSON.stringify(res, null, 4), `res`);
             if (`err` in res) return res;
             else if (
                 `public_key` in res.data &&
@@ -627,7 +623,7 @@
             );
             for (const url of Array.from(
                 new Set([
-                    cfg.nostr.relay_url,
+                    //cfg.nostr.relay_url,
                     ...PUBLIC_NOSTR_RELAY_DEFAULTS.split(","),
                 ]),
             )) {

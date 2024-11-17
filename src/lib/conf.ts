@@ -1,3 +1,4 @@
+import { PUBLIC_RADROOTS_NOSTR_PUBKEY } from "$env/static/public";
 import type { NumberTuple } from "@radroots/utils";
 //import tailwindConfig from '../..//tailwind.config';
 //export const tw = tailwindConfig;
@@ -17,6 +18,8 @@ export const ks = {
     }
 };
 
+export const root_symbol = "»--`--,---";
+
 export const ascii = {
     bullet: '•',
     dash: `—`
@@ -24,12 +27,12 @@ export const ascii = {
 
 export const cfg = {
     app: {
-        root_symbol: "»--`--,---",
         title: `Radroots`,
         description: `Creating networks between farmers, communities and small businesses that give customers greater access to natural foods and grow circular economies where profits are more fairly distributed. Radroots is built on the Nostr protocol and released under a copyleft open source license to provide transparency and give users the option to offer feedback and add or request new features.`
     },
     nostr: {
         relay_url: `wss://radroots.org`,
+        relay_pubkey: PUBLIC_RADROOTS_NOSTR_PUBKEY,
         relay_polling_count_max: 10,
     },
     delay: {

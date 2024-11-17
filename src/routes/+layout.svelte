@@ -32,6 +32,7 @@
 
     let route_render: NavigationRoute | undefined = undefined;
     let log_unlisten: IClientUnlisten | undefined = undefined;
+
     onMount(async () => {
         try {
             if (`paintWorklet` in CSS)

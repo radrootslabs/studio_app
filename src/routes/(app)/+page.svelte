@@ -207,8 +207,6 @@
                 label: `${$t(`common.home`)}`,
                 callback: async () => {
                     await route(`/`);
-                    const res = await db.nostr_relay_get({ list: [`all`] });
-                    console.log(JSON.stringify(res, null, 4), `res`);
                 },
             },
             {

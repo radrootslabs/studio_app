@@ -64,14 +64,15 @@
             const data: LoadData = {
                 results,
             };
-            console.log(JSON.stringify(data, null, 4), `data`);
             return data;
         } catch (e) {
             console.log(`(error) load_data `, e);
         }
     };
 
-    console.log(JSON.stringify(ld, null, 4), `ld`);
+    $: {
+        console.log(JSON.stringify(ld, null, 4), `ld`);
+    }
 </script>
 
 {#if ld && ld.results.length > 0}
