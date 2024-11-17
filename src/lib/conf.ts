@@ -63,3 +63,12 @@ export const cfg = {
     }
 };
 
+export const scroll_args: {
+    into_view: ScrollIntoViewOptions
+} = {
+    into_view: {
+        behavior: `smooth`,
+        block: `nearest`,
+        inline: `start`,
+    }
+}

@@ -54,19 +54,10 @@
                     label: `Farm Products`,
                     key: `basket`,
                     callback: async () => {
-                        const trade_products = await db.trade_product_get({
-                            list: [`all`],
+                        $nav_prev.push({
+                            route: `/`,
+                            label: `Home`,
                         });
-                        if (`results` in trade_products) {
-                            if (trade_products.results.length === 0) {
-                                $nav_prev.push({
-                                    route: `/`,
-                                    label: `Back`,
-                                });
-                                await route(`/models/trade-product/add`);
-                                return;
-                            }
-                        }
                         await route(`/models/trade-product/add`);
                     },
                 },
@@ -222,21 +213,21 @@
             },
             {
                 icon: `arrows-down-up`,
-                label: `Transactions`,
+                label: `Products`,
                 callback: async () => {
                     await route(`/models/trade-product`);
                 },
             },
             {
                 icon: `cardholder`,
-                label: `Wallet`,
+                label: `Test`,
                 callback: async () => {
                     await route(`/test`);
                 },
             },
             {
                 icon: `squares-four`,
-                label: `Menu`,
+                label: `Settings`,
                 callback: async () => {
                     await route(`/settings`);
                 },

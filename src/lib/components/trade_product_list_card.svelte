@@ -1,4 +1,5 @@
 <script lang="ts">
+    import { scroll_args } from "$lib/conf";
     import type { TradeProductBundle } from "$lib/types";
     import { fmt_location_gcs } from "@radroots/models";
     import {
@@ -39,6 +40,44 @@
     $: tradeproduct_qty_sold = 0;
     $: tradeproduct_qty_avail =
         num_min(trade_product.qty_avail, 1) - tradeproduct_qty_sold;
+
+    const handle_display_focus = async (
+        el: EventTarget & HTMLButtonElement,
+    ): Promise<void> => {
+        try {
+            //   if (media_uploads?.length) return;
+            el.focus();
+            el_c.scrollTo();
+            el_id(
+                `${id_pref}-control-${basis.index}-${trade_product.id}`,
+            )?.classList.remove(`hidden`);
+            els_id_pref_index(
+                `${id_pref}-control`,
+                basis.index,
+                `not`,
+            )?.forEach((el) => el.classList.add(`hidden`));
+            els_id_pref_index(`${id_pref}-display`, basis.index)?.forEach(
+                (el) => el.classList.add(`translate-y-12`),
+            );
+        } catch (e) {
+            console.log(`(error) handle_display_focus `, e);
+        }
+    };
+
+    const handle_display_blur = async (): Promise<void> => {
+        try {
+            els_id_pref_index(
+                `${id_pref}-control`,
+                basis.index,
+                `not`,
+            )?.forEach((el) => el.classList.add(`hidden`));
+            els_id_pref_index(`${id_pref}-display`, basis.index)?.forEach(
+                (el) => el.classList.remove(`translate-y-12`),
+            );
+        } catch (e) {
+            console.log(`(error) handle_display_blur `, e);
+        }
+    };
 </script>
 
 <div
@@ -66,45 +105,40 @@
         id={`${id_pref}-display-${basis.index}-${trade_product.id}`}
         class={`flex flex-col min-h-[22rem] w-${$app_layout} justify-start items-start bg-layer-1-surface focus-layer-1 focus-layer-1-raise-less round-44 focus:translate-y-12`}
         on:click|stopPropagation={async ({ currentTarget: el }) => {
-            el.focus();
-            el_c.scrollTo();
-            el_id(
-                `${id_pref}-control-${basis.index}-${trade_product.id}`,
-            )?.classList.remove(`hidden`);
-            els_id_pref_index(
-                `${id_pref}-control`,
-                basis.index,
-                `not`,
-            )?.forEach((el) => el.classList.add(`hidden`));
-            els_id_pref_index(`${id_pref}-display`, basis.index)?.forEach(
-                (el) => el.classList.add(`translate-y-12`),
-            );
+            handle_display_focus(el);
         }}
         on:blur={async () => {
-            els_id_pref_index(
-                `${id_pref}-control`,
-                basis.index,
-                `not`,
-            )?.forEach((el) => el.classList.add(`hidden`));
-            els_id_pref_index(`${id_pref}-display`, basis.index)?.forEach(
-                (el) => el.classList.remove(`translate-y-12`),
-            );
+            await handle_display_blur();
         }}
     >
         <div
-            class={`flex flex-row h-[10rem] w-full justify-center items-center border-b-line border-b-layer-1-surface-edge`}
+            class={`flex flex-row min-h-[10rem] w-full justify-center items-center border-b-line border-b-layer-1-surface-edge`}
         >
             {#if media_uploads && media_uploads.length}
                 <div
-                    class={`flex flex-row h-full w-full justify-center items-center`}
+                    class={`relative flex flex-row h-full w-full justify-center items-center`}
                 >
-                    {#each media_uploads as media_upload}
-                        <ImagePath
-                            basis={{
-                                path: `${media_upload.res_base}/${media_upload.res_path}.${media_upload.mime_type}`,
-                            }}
-                        />
-                    {/each}
+                    <div
+                        class={`flex flex-row justify-start items-center overflow-x-auto scroll-hide`}
+                    >
+                        {#each media_uploads as li, li_i (li.id)}
+                            <ImagePath
+                                basis={{
+                                    id: `${li.id}-index${li_i}`,
+                                    path: `${li.res_base}/${li.res_path}.${li.mime_type}`,
+                                    callback: async ({ currentTarget: el }) => {
+                                        const el_id_next = el.id.replace(
+                                            `-index${li_i}`,
+                                            `-index${li_i + 1}`,
+                                        );
+                                        el_id(el_id_next)?.scrollIntoView(
+                                            scroll_args.into_view,
+                                        );
+                                    },
+                                }}
+                            />
+                        {/each}
+                    </div>
                 </div>
             {:else}
                 <button
