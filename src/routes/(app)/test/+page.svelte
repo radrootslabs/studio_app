@@ -1,57 +1,40 @@
 <script lang="ts">
-    import type { NostrEventPageStore } from "$lib/types";
-    import { type NDKFilter, NDKKind } from "@nostr-dev-kit/ndk";
-    import {
-        app_nostr_key,
-        LayoutView,
-        Nav,
-        ndk,
-        t,
-    } from "@radroots/svelte-lib";
-    import { onDestroy } from "svelte";
+    import { nostr_tags_basis } from "$lib/utils/nostr";
+    import { NDKKind } from "@nostr-dev-kit/ndk";
+    import { LayoutView, Nav, ndk, ndk_user, t } from "@radroots/svelte-lib";
+    import { ndk_event } from "@radroots/utils";
 
-    let events_store: NostrEventPageStore;
-
-    $: {
-        let authors = [$app_nostr_key];
-        let ndk_filter: NDKFilter = {
-            kinds: [NDKKind.Classified],
-            ...{ authors },
-        };
-
-        fetch_events(ndk_filter).then(() => {
-            events_store?.startSubscription();
-        });
-    }
-
-    const fetch_events = async (filter: NDKFilter): Promise<void> => {
+    const post = async (): Promise<void> => {
         try {
-            events_store = $ndk.storeSubscribe(filter, {
-                closeOnEose: true,
-                groupable: false,
-                autoStart: false,
+            const tags = nostr_tags_basis();
+
+            const ev = await ndk_event({
+                $ndk,
+                $ndk_user,
+                basis: {
+                    kind: NDKKind.Text,
+                    content: `testing radroots at ${new Date().toISOString()}`,
+                    tags,
+                },
             });
-            if (events_store) events_store.onEose(() => {});
+            if (ev) await ev.publish();
+            console.log(JSON.stringify(ev, null, 4), `ev`);
         } catch (e) {
-            console.log(`(error) fetch_events `, e);
+            console.log(`(error) post `, e);
         }
     };
-
-    onDestroy(() => events_store?.unsubscribe());
 </script>
 
 <LayoutView>
-    <div class={`flex flex-col w-full px-4 gap-4 justify-start items-center`}>
-        {#if $events_store?.length}
-            {#each $events_store as ev, ev_i (ev.id)}
-                <p class={`font-sans font-[400] text-layer-0-glyph break-all`}>
-                    {JSON.stringify(ev.content)}
-                </p>
-                <p class={`font-sans font-[400] text-layer-0-glyph break-all`}>
-                    {JSON.stringify(ev.tags)}
-                </p>
-            {/each}
-        {/if}
+    <div class={`flex flex-col w-full px-4 gap-4 justify-center items-center`}>
+        <button
+            class={`flex flex-row justify-center items-center`}
+            on:click={async () => {
+                await post();
+            }}
+        >
+            post
+        </button>
     </div>
 </LayoutView>
 

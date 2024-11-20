@@ -1,5 +1,5 @@
 import { db, dialog } from "$lib/client";
-import { cfg, root_symbol } from "$lib/conf";
+import { nostr_client, root_symbol } from "$lib/conf";
 import { NDKKind } from "@nostr-dev-kit/ndk";
 import { app_nostr_key, ndk, ndk_user, nostr_sync_prevent, t } from "@radroots/svelte-lib";
 import { fmt_tags_basis_nip99, ndk_event, nevent_encode, num_str } from "@radroots/utils";
@@ -56,11 +56,7 @@ export const nostr_sync = async (): Promise<void> => {
                     content: ``,
                     tags: await fmt_tags_basis_nip99({
                         d_tag: trade_product.id,
-                        client: {
-                            name: root_symbol,
-                            pubkey: cfg.nostr.relay_pubkey,
-                            relay: cfg.nostr.relay_url
-                        },
+                        client: nostr_client,
                         listing: {
                             title: trade_product.title,
                             summary: trade_product.summary,
@@ -107,4 +103,10 @@ export const nostr_sync = async (): Promise<void> => {
     } catch (e) {
         console.log(`(error) nostr_sync `, e);
     }
+};
+
+export const nostr_tags_basis = (): string[][] => {
+    const tags: string[][] = [];
+    for (const tag of [`app/0.0.0`]) tags.push([root_symbol, tag])
+    return tags;
 };

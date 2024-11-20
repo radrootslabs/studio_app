@@ -1,7 +1,5 @@
 import { PUBLIC_RADROOTS_NOSTR_PUBKEY } from "$env/static/public";
-import type { NumberTuple } from "@radroots/utils";
-//import tailwindConfig from '../..//tailwind.config';
-//export const tw = tailwindConfig;
+import type { NostrTagClient, NumberTuple } from "@radroots/utils";
 
 export const ks = {
     cfg_init: {
@@ -19,6 +17,7 @@ export const ks = {
 };
 
 export const root_symbol = "»--`--,---";
+
 
 export const ascii = {
     bullet: '•',
@@ -64,6 +63,12 @@ export const cfg = {
             }
         }
     }
+};
+
+export const nostr_client: NostrTagClient = {
+    name: root_symbol,
+    pubkey: cfg.nostr.relay_pubkey,
+    relay: cfg.nostr.relay_url
 };
 
 export const scroll_args: {
