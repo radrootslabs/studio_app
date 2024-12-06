@@ -1,4 +1,5 @@
 pub(crate) mod location_gcs;
+pub(crate) mod log_error;
 pub(crate) mod media_upload;
 pub(crate) mod nostr_profile;
 pub(crate) mod nostr_profile_relay;

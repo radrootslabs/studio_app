@@ -1,7 +1,7 @@
 CREATE TABLE IF NOT EXISTS location_gcs (
     id CHAR(36) PRIMARY KEY NOT NULL UNIQUE CHECK(length(id) = 36),
     created_at DATETIME NOT NULL CHECK(length(created_at) = 24),
-    updated_at DATETIME NOT NULL CHECK(length(created_at) = 24),
+    updated_at DATETIME NOT NULL CHECK(length(updated_at) = 24),
     lat REAL NOT NULL,
     lng REAL NOT NULL,
     geohash CHAR(12) UNIQUE CHECK(length(geohash) = 9),

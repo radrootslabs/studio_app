@@ -1,8 +1,8 @@
 <script lang="ts">
     import { db, geoc, keystore, notification } from "$lib/client";
     import { ks } from "$lib/conf";
-    import { fetch_relay_documents } from "$lib/utils/fetch";
-    import { nostr_sync } from "$lib/utils/nostr";
+    import { fetch_relay_documents } from "$lib/util/fetch";
+    import { nostr_sync } from "$lib/util/nostr";
     import {
         app_cfg_type,
         app_geoc,
@@ -49,35 +49,36 @@
     });
 
     app_nostr_key.subscribe(async (_app_nostr_key) => {
-        console.log(`_app_nostr_key `, _app_nostr_key);
-        if (!_app_nostr_key) return;
-
-        const ks_nostr_secretkey = await keystore.get(
-            ks.keys.nostr_secretkey($app_nostr_key),
-        );
-
-        if (`err` in ks_nostr_secretkey) {
-            //@todo;
-            return;
+        try {
+            console.log(`_app_nostr_key `, _app_nostr_key);
+            if (!_app_nostr_key) return;
+            const ks_nostr_secretkey = await keystore.get(
+                ks.keys.nostr_secretkey($app_nostr_key),
+            );
+            if (`err` in ks_nostr_secretkey) {
+                return; //@todo;
+            }
+            const nostr_relays = await db.nostr_relay_get({
+                list: [`on_profile`, { public_key: $app_nostr_key }],
+            });
+            if (`err` in nostr_relays) throw new Error(nostr_relays.err);
+            for (const { url } of nostr_relays.results)
+                $ndk.addExplicitRelay(url);
+            await $ndk.connect();
+            const ndk_user = await ndk_init({
+                $ndk,
+                secret_key: ks_nostr_secretkey.result,
+            });
+            if (!ndk_user) {
+                nostr_ndk_configured.set(false);
+                return;
+            }
+            $ndk_user = ndk_user;
+            $ndk_user.ndk = $ndk;
+            nostr_ndk_configured.set(true);
+        } catch (e) {
+            console.log(`(error) app_nostr_key`, e);
         }
-
-        const nostr_relays = await db.nostr_relay_get({
-            list: [`on_profile`, { public_key: $app_nostr_key }],
-        });
-        if (`err` in nostr_relays) throw new Error(nostr_relays.err);
-        for (const { url } of nostr_relays.results) $ndk.addExplicitRelay(url);
-        await $ndk.connect();
-        const ndk_user = await ndk_init({
-            $ndk,
-            secret_key: ks_nostr_secretkey.result,
-        });
-        if (!ndk_user) {
-            nostr_ndk_configured.set(false);
-            return;
-        }
-        $ndk_user = ndk_user;
-        $ndk_user.ndk = $ndk;
-        nostr_ndk_configured.set(true);
     });
 
     nostr_ndk_configured.subscribe(async (_nostr_ndk_configured) => {

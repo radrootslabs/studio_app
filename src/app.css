@@ -4,6 +4,8 @@
 @import "/static/stylesheets/tailwindcss-app.css";
 @import "/static/stylesheets/tailwindcss-spinner.css";
 
+@import "/static/stylesheets/tailwindcss-app-layer-1.css";
+
 @import "/static/webfonts/apercu-mono-pro/styles.css";
 @import "/static/webfonts/lust/styles.css";
 @import "/static/webfonts/magda-text/styles.css";
@@ -21,53 +23,4 @@
 
 @layer base {}
 
-@layer components {
-    .label-sg {
-        @apply font-sg tracking-wide scale-y-[97%];
-    }
-    .tap-scale {
-        @apply active:scale-[97%] group-active:scale-[97%] delay-75 duration-700 ease-in-out transition-all;
-    }
-
-    .focus-layer-1 {
-        @apply focus:bg-layer-1-surface-focus group-focus:bg-layer-1-surface-focus transition-all;
-    }
-
-    .focus-layer-1-raise,
-    .focus-layer-1-raise-less {
-        @apply focus:scale-[101%] group-focus:scale-[101%] ease-in-out transition-all;
-    }
-
-    .focus-layer-1-raise {
-        @apply ring-layer-2-surface/60 focus:ring-[0.3rem] group-focus:ring-[0.3rem] delay-[75ms] duration-[350ms];
-    }
-
-    .focus-layer-1-raise-less {
-        @apply ring-layer-2-surface/60 focus:ring-[0.25rem] group-focus:ring-[0.25rem] delay-[50ms] duration-[350ms];
-    }
-
-    .active-layer-1 {
-        @apply active:bg-layer-1-surface-focus group-active:bg-layer-1-surface-focus transition-all;
-    }
-
-    .active-layer-1-raise,
-    .active-layer-1-raise-less {
-        @apply active:scale-[101%] group-active:scale-[101%] ease-in-out transition-all;
-    }
-
-    .active-layer-1-raise {
-        @apply ring-layer-2-surface/60 active:ring-[0.3rem] group-active:ring-[0.3rem] delay-[75ms] duration-[350ms];
-    }
-
-    .active-layer-1-raise-less {
-        @apply ring-layer-2-surface/60 active:ring-[0.25rem] group-active:ring-[0.25rem] delay-[50ms] duration-[350ms];
-    }
-
-    .layer-1-ring {
-        @apply ring-layer-2-surface/60 ring-[0.3rem]
-    }
-
-    .layer-1-ring-less {
-        @apply ring-layer-2-surface/60 ring-[0.25rem]
-    }
-}
+@layer components {}

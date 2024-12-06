@@ -49,6 +49,7 @@ pub enum MediaUploadSort {
 #[serde(rename_all = "snake_case")]
 pub enum MediaUploadQueryBindValues {
     Id(IModelsQueryBindValue),
+    FilePath(IModelsQueryBindValue),
 }
 
 #[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
@@ -89,6 +90,7 @@ pub type IMediaUploadUpdateResolve = ();
 pub fn media_upload_query_bind_values(opts: MediaUploadQueryBindValues) -> IModelsQueryBindValueTuple {
     match opts {
         MediaUploadQueryBindValues::Id(id) => ("id".to_string(), id),
+        MediaUploadQueryBindValues::FilePath(file_path) => ("file_path".to_string(), file_path),
     }
 }
 

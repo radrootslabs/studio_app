@@ -1,5 +1,4 @@
 <script lang="ts">
-    import { PUBLIC_RADROOTS_URL } from "$env/static/public";
     import { db, dialog, geol } from "$lib/client";
     import ImageUploadControl from "$lib/components/image_upload_control.svelte";
     import ImageUploadEditEnvelope from "$lib/components/image_upload_edit_envelope.svelte";
@@ -7,17 +6,16 @@
     import TradeFieldDisplayEl from "$lib/components/trade_field_display_el.svelte";
     import TradeFieldDisplayKv from "$lib/components/trade_field_display_kv.svelte";
     import { ascii } from "$lib/conf";
-    import { el_focus } from "$lib/utils/client";
-    import { fetch_put_upload } from "$lib/utils/fetch";
-    import { location_gcs_to_geoc } from "$lib/utils/geocode";
-    import { kv_init_page, kv_sync } from "$lib/utils/kv";
-    import { model_location_gcs_add_geocode } from "$lib/utils/models";
+    import { el_focus } from "$lib/util/client";
+    import { location_gcs_to_geoc } from "$lib/util/geocode";
+    import { kv_init_page, kv_sync } from "$lib/util/kv";
+    import { model_location_gcs_add_geocode } from "$lib/util/models";
+    import { model_media_upload_add_list } from "$lib/util/models-media-upload";
     import {
         trade_product_fields_validate,
         tradeproduct_init_kv,
         tradeproduct_validate_fields,
-    } from "$lib/utils/trade_product";
-    import type { IClientHttpResponseError } from "@radroots/client";
+    } from "$lib/util/models-trade-product";
     import type { GeocoderReverseResult } from "@radroots/geocoder";
     import {
         trade_product_form_fields,
@@ -64,7 +62,6 @@
         num_str,
         parse_currency_marker,
         parse_currency_price,
-        parse_file_path,
         parse_trade_key,
         parse_trade_quantity_tup,
         sum_currency_price,
@@ -72,7 +69,6 @@
         trade_keys,
         year_curr,
         type CurrencyPrice,
-        type FilePath,
         type GeolocationCoordinatesPoint,
         type TradeKey,
         type TradeQuantity,
@@ -507,8 +503,9 @@
                 }
                 return;
             }
+            //@todo edit here
             // photos
-            const photo_path_uploads: {
+            /*const photo_path_uploads: {
                 file_path: FilePath;
                 res_base: string;
                 res_path: string;
@@ -574,23 +571,18 @@
                     })}`,
                 );
                 return;
-            }
-            const media_upload_added: string[] = [];
-            if (photo_path_uploads.length) {
-                for (const photo_path_upload of photo_path_uploads) {
-                    const media_upload_add = await db.media_upload_add({
-                        file_path: photo_path_upload.file_path.file_path,
-                        mime_type: photo_path_upload.file_path.mime_type,
-                        res_base: photo_path_upload.res_base,
-                        res_path: photo_path_upload.res_path,
-                    });
-                    if (
-                        `err` in media_upload_add ||
-                        `err_s` in media_upload_add
-                    )
-                        continue; //@todo
-                    media_upload_added.push(media_upload_add.id);
-                }
+            }*/
+
+            const media_uploads = await model_media_upload_add_list({
+                photo_paths: tradepr_photo_paths,
+            });
+
+            if (`alert` in media_uploads) {
+                await dialog.alert(media_uploads.alert);
+                return;
+            } else if (`confirm` in media_uploads) {
+                await dialog.confirm(media_uploads.confirm);
+                return;
             }
 
             // trade product
@@ -632,7 +624,7 @@
                 trade_product_location_set_err = trade_product_location_set.err;
             }
             const trade_product_media_set_err: string[] = [];
-            for (const media_upload of media_upload_added) {
+            for (const media_upload of media_uploads.results) {
                 const trade_product_media_set =
                     await db.trade_product_media_set({
                         trade_product: {
@@ -778,7 +770,7 @@
                                                 el_id(
                                                     fmt_id(`key_wrap`),
                                                 )?.classList.remove(
-                                                    `entry-layer-1-highlight`,
+                                                    `layer-1-ring-apply`,
                                                 );
                                                 if (!opt.value) {
                                                     await handle_tradepr_key_toggle(
@@ -890,7 +882,7 @@
                                                 el_id(
                                                     fmt_id(`process_wrap`),
                                                 )?.classList.remove(
-                                                    `entry-layer-1-highlight`,
+                                                    `layer-1-ring-apply`,
                                                 );
                                                 if (!value) {
                                                     await handle_tradepr_process_toggle(
@@ -993,7 +985,7 @@
                                             el_id(
                                                 fmt_id(`process_wrap`),
                                             )?.classList.remove(
-                                                `entry-layer-1-highlight`,
+                                                `layer-1-ring-apply`,
                                             );
                                             if (value === `*map`) {
                                                 await handle_tradepr_lgc_sel_map();
@@ -1191,13 +1183,13 @@
                                                 el_id(
                                                     fmt_id(`price_wrap`),
                                                 )?.classList.remove(
-                                                    `entry-layer-1-highlight`,
+                                                    `layer-1-ring-apply`,
                                                 );
                                             } else {
                                                 el_id(
                                                     fmt_id(`price_wrap`),
                                                 )?.classList.add(
-                                                    `entry-layer-1-highlight`,
+                                                    `layer-1-ring-apply`,
                                                 );
                                             }
                                         },
@@ -1297,7 +1289,7 @@
                                                 el_id(
                                                     fmt_id(`qty_wrap`),
                                                 )?.classList.remove(
-                                                    `entry-layer-1-highlight`,
+                                                    `layer-1-ring-apply`,
                                                 );
                                                 if (value === ``) {
                                                     await handle_tradepr_qty_amt_toggle(

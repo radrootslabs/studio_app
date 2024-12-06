@@ -89,7 +89,7 @@
         class={`hidden absolute top-0 left-0 flex flex-row h-12 w-full justify-center items-start el-re`}
     >
         <button
-            class={`flex flex-row px-5 py-1 justify-center items-center bg-layer-1-surface active-layer-1 rounded-full`}
+            class={`flex flex-row px-5 py-1 justify-center items-center bg-layer-1-surface layer-1-active-surface rounded-full`}
             on:click|stopPropagation={async () => {
                 await route(`/models/trade-product/view`, [
                     [`id`, trade_product.id],
@@ -103,7 +103,7 @@
     </div>
     <button
         id={`${id_pref}-display-${basis.index}-${trade_product.id}`}
-        class={`flex flex-col min-h-[22rem] w-${$app_layout} justify-start items-start bg-layer-1-surface focus-layer-1 focus-layer-1-raise-less round-44 focus:translate-y-12`}
+        class={`flex flex-col min-h-[22rem] w-${$app_layout} justify-start items-start bg-layer-1-surface layer-1-focus-surface layer-1-focus-raise-less round-44 focus:translate-y-12`}
         on:click|stopPropagation={async ({ currentTarget: el }) => {
             handle_display_focus(el);
         }}

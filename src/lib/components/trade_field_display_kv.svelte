@@ -1,5 +1,5 @@
 <script lang="ts">
-    import { el_focus } from "$lib/utils/client";
+    import { el_focus } from "$lib/util/client";
     import {
         fmt_cl,
         fmt_id,

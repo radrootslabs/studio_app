@@ -33,14 +33,15 @@
 		"svelte": "^4.2.19",
 		"svelte-check": "^3.8.6",
 		"tailwindcss": "^3.4.3",
+		"tailwindcss-hero-patterns": "^0.1.2",
 		"tslib": "^2.4.1",
 		"typescript": "^5.3.3",
 		"vite": "^5.0.11"
 	},
 	"type": "module",
 	"dependencies": {
-		"@nostr-dev-kit/ndk": "^2.10.0",
-		"@nostr-dev-kit/ndk-svelte": "^2.2.18",
+		"@nostr-dev-kit/ndk": "^2.10.6",
+		"@nostr-dev-kit/ndk-svelte": "^2.3.1",
 		"@radroots/client": "workspace:*",
 		"@radroots/geocoder": "workspace:*",
 		"@radroots/models": "workspace:*",

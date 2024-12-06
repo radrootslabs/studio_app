@@ -8,6 +8,7 @@ use models::{
         model_location_gcs_add, model_location_gcs_delete, model_location_gcs_get,
         model_location_gcs_update,
     },
+    log_error::{model_log_error_add, model_log_error_delete, model_log_error_get},
     media_upload::{
         model_media_upload_add, model_media_upload_delete, model_media_upload_get,
         model_media_upload_update,
@@ -98,6 +99,9 @@ pub fn run() {
             model_trade_product_media_set,
             model_trade_product_media_unset,
             model_trade_product_media_get_all,
+            model_log_error_add,
+            model_log_error_get,
+            model_log_error_delete,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -3,6 +3,7 @@ import { wind } from "@radroots/utils";
 import aspect_ratio from "@tailwindcss/aspect-ratio";
 import daisyui from "daisyui";
 import type { Config } from "tailwindcss";
+import heropatterns from "tailwindcss-hero-patterns";
 import tailwind_default from "tailwindcss/defaultTheme";
 const { fontFamily: tw_font } = tailwind_default;
 
@@ -178,7 +179,8 @@ const config: Config = {
     },
     plugins: [
         daisyui,
-        aspect_ratio
+        aspect_ratio,
+        heropatterns
     ],
     daisyui: {
         themes: [

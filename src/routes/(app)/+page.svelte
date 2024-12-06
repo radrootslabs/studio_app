@@ -1,8 +1,6 @@
 <script lang="ts">
-    import { db, dialog, notification } from "$lib/client";
+    import { db, device, dialog } from "$lib/client";
     import {
-        app_cfg_type,
-        app_layout,
         app_nostr_key,
         envelope_visible,
         EnvelopeLower,
@@ -10,67 +8,8 @@
         LayoutView,
         nav_prev,
         route,
-        t,
-        Tabs,
-        TrellisTitle,
-        type AppConfigType,
-        type CallbackPromise,
-        type GlyphKey,
-        type GlyphWeight,
-        type NavigationRoute,
     } from "@radroots/svelte-lib";
     import { onMount } from "svelte";
-
-    type PageParamButtons = {
-        route?: NavigationRoute;
-        label: string;
-        key: GlyphKey;
-        weight?: GlyphWeight;
-        callback?: CallbackPromise;
-    };
-    const page_param: {
-        buttons: Record<AppConfigType, PageParamButtons[]>;
-    } = {
-        buttons: {
-            personal: [
-                {
-                    route: `/`,
-                    label: `Marketplace`,
-                    key: `basket`,
-                },
-                {
-                    route: `/`,
-                    label: `Forum`,
-                    key: `basket`,
-                },
-            ],
-            farmer: [
-                {
-                    route: `/test`,
-                    label: `Post New`,
-                    key: `note-blank`,
-                },
-                {
-                    label: `Farm Products`,
-                    key: `basket`,
-                    callback: async () => {
-                        $nav_prev.push({
-                            route: `/`,
-                            label: `Home`,
-                        });
-                        await route(`/models/trade-product/add`);
-                    },
-                },
-                {
-                    route: `/settings/nostr`,
-                    label: `Cooperatives`,
-                    key: `users-three`,
-                },
-            ],
-        },
-    };
-
-    let tmp_show_no_profile = false;
 
     onMount(async () => {
         try {
@@ -83,156 +22,43 @@
                 await dialog.alert(`@todo Nostr profile configuration failure`);
                 return;
             }
-            if (!nostr_profile.results[0].name) tmp_show_no_profile = true;
         } catch (e) {
         } finally {
         }
     });
 </script>
 
-<LayoutView basis={{ classes: `gap-4` }}>
-    <div class={`flex flex-row w-full justify-start items-center`}>
+<LayoutView>
+    <div class={`flex flex-row h-12 w-full px-6 justify-between items-center`}>
+        <div class={`flex flex-row gap-2 justify-start items-center`}>
+            <p class={`font-mono font-[600] text-[1.3rem] text-layer-0-glyph`}>
+                {`radRoots`}
+            </p>
+            {#if device.metadata?.version}
+                <p
+                    class={`font-mono font-[400] text-[1.3rem] text-layer-0-glyph`}
+                >
+                    {`/${device.metadata.version}`}
+                </p>
+            {/if}
+        </div>
         <button
-            class={`flex flex-row pt-4 px-6 gap-2 justify-center items-center`}
+            class={`flex flex-row justify-center items-center`}
             on:click={async () => {
-                await notification.send(`hi`);
+                await route(`/settings`);
             }}
         >
-            <p
-                class={`font-mono font-[600] text-layer-2-glyph max-sm:text-lg text-xl tracking-wide`}
-            >
-                {`radroots (alpha-1.0.0)`}
-            </p>
-        </button>
-    </div>
-    <!--<div class={`flex flex-col pt-2 justify-center items-center`}>
-        {#if tmp_show_no_profile}
-            <button
-                class={`relative flex flex-row h-24 w-${$app_layout} p-4 gap-4 justify-center items-center bg-layer-2-surface/60 round-20 active-layer-1 active-layer-1-raise-less el-re`}
-                on:click={async () => {
-                    await route(`/models/nostr-profile`);
-                }}
-            >
-                <div
-                    class={`absolute left-6 flex flex-row h-full justify-end items-center`}
-                >
-                    <Glyph
-                        basis={{
-                            classes: `text-layer-2-glyph`,
-                            key: `user-circle-plus`,
-                            dim: `xl`,
-                            weight: `bold`,
-                        }}
-                    />
-                </div>
-                <div class={`flex flex-col justify-center items-center`}>
-                    <p
-                        class={`font-circ font-[500] text-lg text-layer-2-glyph/90`}
-                    >
-                        {`No farm profile added.`}
-                    </p>
-                    <p
-                        class={`font-circ font-[500] text-sm text-layer-2-glyph/90`}
-                    >
-                        {`Click to add your details`}
-                    </p>
-                </div>
-                <Glyph
-                    basis={{
-                        classes: `absolute top-2 right-3 text-layer-2-glyph/40`,
-                        key: `x`,
-                        dim: `sm`,
-                        weight: `bold`,
-                    }}
-                />
-            </button>
-        {/if}
-    </div>-->
-    <div class={`flex flex-col w-full gap-[2px] justify-start items-center`}>
-        <div class={`flex flex-row w-full px-6 justify-center items-center`}>
-            <TrellisTitle
+            <Glyph
                 basis={{
-                    value: `${$t(`common.options`)}`,
+                    classes: `text-layer-0-glyph`,
+                    dim: `md`,
+                    weight: `bold`,
+                    key: `gear`,
                 }}
             />
-        </div>
-        <div class={`flex flex-col w-full gap-5 justify-start items-center`}>
-            {#each page_param.buttons[$app_cfg_type] as btn}
-                <button
-                    class={`flex flex-row h-20 w-${$app_layout} py-2 px-6 justify-between items-center bg-layer-1-surface active-layer-1 active-layer-1-raise-less round-20 el-re`}
-                    on:click={async () => {
-                        if (btn.callback) await btn.callback();
-                        else if (btn.route) await route(btn.route);
-                    }}
-                >
-                    <div
-                        class={`flex flex-row gap-4 justify-start items-center`}
-                    >
-                        <Glyph
-                            basis={{
-                                classes: `text-layer-2-glyph`,
-                                key: btn.key,
-                                dim: `md`,
-                                weight: btn.weight || `bold`,
-                            }}
-                        />
-                        <div class={`flex flex-row justify-start items-center`}>
-                            <p
-                                class={`font-mono font-[500] text-lg text-layer-2-glyph`}
-                            >
-                                {btn.label}
-                            </p>
-                        </div>
-                    </div>
-                    <div class={`flex flex-row justify-start items-center`}>
-                        <Glyph
-                            basis={{
-                                key: `caret-right`,
-                                dim: `sm-`,
-                                weight: `bold`,
-                                classes: `text-layer-2-glyph`,
-                            }}
-                        />
-                    </div>
-                </button>
-            {/each}
-        </div>
+        </button>
     </div>
 </LayoutView>
-<Tabs
-    basis={{
-        list: [
-            {
-                icon: `house-line`,
-                label: `${$t(`common.home`)}`,
-                callback: async () => {
-                    await route(`/`);
-                },
-            },
-            {
-                icon: `arrows-down-up`,
-                label: `Products`,
-                callback: async () => {
-                    await route(`/models/trade-product`);
-                },
-            },
-            {
-                icon: `cardholder`,
-                label: `Test`,
-                callback: async () => {
-                    await route(`/test`);
-                },
-            },
-            {
-                icon: `squares-four`,
-                label: `Settings`,
-                callback: async () => {
-                    await route(`/settings`);
-                },
-            },
-        ],
-    }}
-/>
 <EnvelopeLower
     basis={{
         close: async () => {

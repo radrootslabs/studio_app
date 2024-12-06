@@ -11,6 +11,7 @@ pub struct TradeProduct {
     created_at: String,
     updated_at: String,
     key: String,
+    category: String,
     title: String,
     summary: String,
     process: String,
@@ -31,6 +32,7 @@ pub struct TradeProduct {
 #[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
 pub struct ITradeProductFields {
     pub key: String,
+    pub category: String,
     pub title: String,
     pub summary: String,
     pub process: String,
@@ -51,6 +53,7 @@ pub struct ITradeProductFields {
 #[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
 pub struct ITradeProductFieldsUpdate {
     pub key: Option<String>,
+    pub category: Option<String>,
     pub title: Option<String>,
     pub summary: Option<String>,
     pub process: Option<String>,

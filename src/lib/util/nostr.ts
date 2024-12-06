@@ -7,6 +7,7 @@ import { get as get_store } from "svelte/store";
 
 export const nostr_sync = async (): Promise<void> => {
     try {
+        console.log(`run nostr sync!`)
         const $t = get_store(t);
         const $nostr_sync_prevent = get_store(nostr_sync_prevent);
         const $app_nostr_key = get_store(app_nostr_key);
@@ -37,6 +38,7 @@ export const nostr_sync = async (): Promise<void> => {
         });
         if (`err` in trade_products_all) return; //@todo
         for (const trade_product of trade_products_all.results) {
+            console.log(`SYNC trade_product.id `, trade_product.id)
             const trade_product_location_res = await db.location_gcs_get({
                 list: [`on_trade_product`, { id: trade_product.id }],
             });
@@ -54,10 +56,12 @@ export const nostr_sync = async (): Promise<void> => {
                 basis: {
                     kind: NDKKind.Classified,
                     content: ``,
-                    tags: await fmt_tags_basis_nip99({
+                    tags: fmt_tags_basis_nip99({
                         d_tag: trade_product.id,
                         client: nostr_client,
                         listing: {
+                            key: trade_product.key,
+                            category: trade_product.category,
                             title: trade_product.title,
                             summary: trade_product.summary,
                             process: trade_product.process,

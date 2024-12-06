@@ -1,5 +1,5 @@
 <script lang="ts">
-    import { restart } from "$lib/utils/client";
+    import { restart } from "$lib/util/client";
     import { LayoutView } from "@radroots/svelte-lib";
 </script>
 

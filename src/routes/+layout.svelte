@@ -1,6 +1,7 @@
 <script lang="ts">
     import { device, dialog, http, logger, os } from "$lib/client";
     import { cfg } from "$lib/conf";
+    import { kv_init_app } from "$lib/util/kv";
     import type {
         IClientDeviceMetadata,
         IClientUnlisten,
@@ -35,16 +36,7 @@
 
     onMount(async () => {
         try {
-            if (`paintWorklet` in CSS)
-                (CSS as any).paintWorklet.addModule(`/squircle.min.js`);
-            const metadata: IClientDeviceMetadata = {
-                version: os.version(),
-                platform: os.platform(),
-                locale: $locale,
-            };
-            await device.init(metadata);
-            await http.init(metadata);
-            log_unlisten = await logger.init();
+            await init_app();
         } catch (e) {
         } finally {
         }
@@ -62,13 +54,11 @@
     app_thc.subscribe((app_thc) => {
         const color_mode = parse_color_mode(app_thc);
         theme_set(parse_theme_key($app_th), color_mode);
-        //window.status_style(color_mode);
     });
 
     app_th.subscribe((app_th) => {
         const color_mode = parse_color_mode($app_thc);
         theme_set(parse_theme_key(app_th), color_mode);
-        //window.status_style(color_mode);
     });
 
     app_db.subscribe((_app_db) => {
@@ -90,6 +80,24 @@
         dialog.alert(_app_notify);
         app_notify.set(``);
     });
+
+    const init_app = async (): Promise<void> => {
+        try {
+            if (`paintWorklet` in CSS)
+                (CSS as any).paintWorklet.addModule(`/squircle.min.js`);
+            const metadata: IClientDeviceMetadata = {
+                version: cfg.app.version,
+                platform: os.platform(),
+                locale: $locale,
+            };
+            await device.init(metadata);
+            await http.init(metadata);
+            log_unlisten = await logger.init();
+            await kv_init_app();
+        } catch (e) {
+            console.log(`(error) init_app `, e);
+        }
+    };
 </script>
 
 <svelte:head>
@@ -110,5 +118,5 @@
 <CssStatic />
 <CssStyles />
 <div
-    class="hidden h-entry_guide h-entry_line h-[calc(100vh-12%)] h-trellis_centered_mobile_base h-trellis_centered_mobile_y"
+    class="hidden h-entry_guide h-entry_line h-[calc(100vh-12%)] h-trellis_centered_mobile_base h-trellis_centered_mobile_y bg-white/40 backdrop-blur-lg backdrop-blur-sm"
 />

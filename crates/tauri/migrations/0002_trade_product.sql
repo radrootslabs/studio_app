@@ -1,8 +1,9 @@
 CREATE TABLE IF NOT EXISTS trade_product (
     id CHAR(36) PRIMARY KEY NOT NULL UNIQUE CHECK(length(id) = 36),
     created_at DATETIME NOT NULL CHECK(length(created_at) = 24),
-    updated_at DATETIME NOT NULL CHECK(length(created_at) = 24),
+    updated_at DATETIME NOT NULL CHECK(length(updated_at) = 24),
     key TEXT NOT NULL,
+    category TEXT NOT NULL,
     title TEXT NOT NULL,
     summary TEXT NOT NULL,
     process TEXT NOT NULL,

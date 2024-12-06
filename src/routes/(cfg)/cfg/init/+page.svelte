@@ -1,11 +1,15 @@
 <script lang="ts">
-    import {
-        PUBLIC_NOSTR_RELAY_DEFAULTS,
-        PUBLIC_RADROOTS_URL,
-    } from "$env/static/public";
-    import { db, dialog, http, keystore, nostr } from "$lib/client";
+    import { PUBLIC_NOSTR_RELAY_DEFAULTS } from "$env/static/public";
+    import { db, dialog, keystore, nostr } from "$lib/client";
     import { cfg, ks } from "$lib/conf";
-    import { restart } from "$lib/utils/client";
+    import { restart } from "$lib/util/client";
+    import {
+        fetch_radroots_profile_confirm,
+        fetch_radroots_profile_init,
+        fetch_radroots_profile_status,
+        fetch_radroots_profile_validate,
+    } from "$lib/util/fetch-radroots-profile";
+    import { kv_init_page } from "$lib/util/kv";
     import type { IClientUnlisten } from "@radroots/client";
     import {
         app_layout,
@@ -24,40 +28,31 @@
         InputElement,
         kv,
         LayoutView,
+        Loading,
         route,
         sleep,
         t,
         view_effect,
     } from "@radroots/svelte-lib";
-    import { err_msg, regex, type ErrorMessage } from "@radroots/utils";
+    import { regex } from "@radroots/utils";
     import { onDestroy, onMount } from "svelte";
 
-    const page_param: {
-        kv: {
-            nostr_secretkey: string;
-            nostr_profilename: string;
-        };
-        carousel: Record<View, { max_index: number }>;
-    } = {
-        kv: {
-            nostr_secretkey: `kv_secretkey`,
-            nostr_profilename: `kv_profilename`,
+    const page_carousel: Record<View, { max_index: number }> = {
+        cfg_init: {
+            max_index: 2,
         },
-        carousel: {
-            cfg_init: {
-                max_index: 2,
-            },
-            cfg_main: {
-                max_index: 2,
-            },
-            eula: {
-                max_index: 1,
-            },
+        cfg_main: {
+            max_index: 2,
+        },
+        eula: {
+            max_index: 1,
         },
     };
 
     let el_eula: HTMLDivElement;
     let el_eula_scrolled = false;
+
+    let loading_submit = false;
 
     type CfgInitKeyOption = `key_gen` | `kv_nostr_secretkey`;
     let cgf_init_key_option: CfgInitKeyOption | undefined = undefined;
@@ -84,8 +79,29 @@
 
     onMount(async () => {
         try {
-            handle_view(initial_view);
+            await init_page();
+        } catch (e) {
+            console.log(`e mount`, e);
+        } finally {
+            app_splash.set(false);
+        }
+    });
 
+    onDestroy(async () => {
+        try {
+            await kv_init_page();
+            if (unlisten_cfg_init_nostr_secretkey)
+                unlisten_cfg_init_nostr_secretkey();
+            el_eula?.removeEventListener(`scroll`, () => null);
+        } catch (e) {
+            console.log(`e destroy`, e);
+        } finally {
+        }
+    });
+
+    const init_page = async (): Promise<void> => {
+        try {
+            handle_view(initial_view);
             const unlisten_1 = await keystore.on_key_change(
                 ks.cfg_init.nostr_secretkey,
                 async (_cfg_init_nostr_secretkey) => {
@@ -106,35 +122,9 @@
                 if (scroll_top + client_h >= scroll_h) el_eula_scrolled = true;
             });
             await lookup_ks();
+            await kv_init_page();
         } catch (e) {
-            console.log(`e mount`, e);
-        } finally {
-            app_splash.set(false);
-        }
-    });
-
-    onDestroy(async () => {
-        try {
-            await reset_kv();
-            if (unlisten_cfg_init_nostr_secretkey)
-                unlisten_cfg_init_nostr_secretkey();
-            el_eula?.removeEventListener(`scroll`, () => null);
-        } catch (e) {
-            console.log(`e destroy`, e);
-        } finally {
-        }
-    });
-
-    const reset_page = async (alert_message?: string): Promise<void> => {
-        try {
-            app_loading.set(true);
-            handle_view(`cfg_init`);
-            if (alert_message) await dialog.alert(alert_message);
-            await sleep(cfg.delay.load);
-        } catch (e) {
-            console.log(`(error) reset `, e);
-        } finally {
-            app_loading.set(false);
+            console.log(`(error) init_page `, e);
         }
     };
 
@@ -185,12 +175,12 @@
                         } else {
                             if (`nip_05` in profile_status.active) {
                                 await kv.set(
-                                    page_param.kv.nostr_profilename,
+                                    fmt_id(`nostr_profilename`),
                                     profile_status.active.nip_05,
                                 );
                             }
                             await kv.set(
-                                page_param.kv.nostr_profilename,
+                                fmt_id(`nostr_profilename`),
                                 profile_status.active.nip_05,
                             );
                             handle_view(`eula`);
@@ -202,6 +192,19 @@
             }
         } catch (e) {
             console.log(`(error) lookup_ks `, e);
+        } finally {
+            app_loading.set(false);
+        }
+    };
+
+    const reset_page = async (alert_message?: string): Promise<void> => {
+        try {
+            app_loading.set(true);
+            handle_view(`cfg_init`);
+            if (alert_message) await dialog.alert(alert_message);
+            await sleep(cfg.delay.load);
+        } catch (e) {
+            console.log(`(error) reset `, e);
         } finally {
             app_loading.set(false);
         }
@@ -221,24 +224,13 @@
         }
     };
 
-    const reset_kv = async (): Promise<void> => {
-        try {
-            for (const kv_key of Object.values(page_param.kv))
-                await kv.delete(kv_key);
-        } catch (e) {
-            console.log(`(error) reset_ks `, e);
-        }
-    };
-
     const handle_view = (new_view: View): void => {
         if (new_view === `cfg_init` && view === `cfg_main`) {
             const offset = cgf_init_key_option === `key_gen` ? 1 : 0;
-            carousel_index.set(
-                page_param.carousel[new_view].max_index - offset,
-            );
+            carousel_index.set(page_carousel[new_view].max_index - offset);
         } else {
             carousel_index.set(0);
-            carousel_index_max.set(page_param.carousel[new_view].max_index);
+            carousel_index_max.set(page_carousel[new_view].max_index);
         }
         view = new_view;
     };
@@ -321,7 +313,7 @@
                             case 2:
                                 {
                                     const kv_nostr_secretkey = await kv.get(
-                                        fmt_id(page_param.kv.nostr_secretkey),
+                                        fmt_id(`nostr_secretkey`),
                                     );
                                     if (!kv_nostr_secretkey) {
                                         await dialog.alert(
@@ -373,7 +365,7 @@
                                         return;
                                     }
                                     const kv_profile_name = await kv.get(
-                                        fmt_id(page_param.kv.nostr_profilename),
+                                        fmt_id(`nostr_profilename`),
                                     );
                                     if (!kv_profile_name) {
                                         await dialog.alert(
@@ -447,126 +439,10 @@
         }
     };
 
-    const fetch_radroots_profile_validate = async (opts: {
-        profile_name: string;
-    }): Promise<{ profile_name: string } | ErrorMessage<string>> => {
-        try {
-            const res = await http.fetch({
-                url: `${PUBLIC_RADROOTS_URL}/public/accounts/list`,
-                method: `post`,
-            });
-            if (`err` in res)
-                return err_msg(`${$t(`error.client.network_failure`)}`);
-            else if (Array.isArray(res.data.results)) {
-                const existing_profile = res.data.results.find(
-                    (i: any) =>
-                        `nip_05` in i &&
-                        String(i.nip_05).toLowerCase() ===
-                            opts.profile_name.toLowerCase(),
-                );
-                if (existing_profile)
-                    return err_msg(
-                        `${`${$t(`icu.the_*_is_registered`, { value: `${$t(`common.profile_name`)}`.toLowerCase() })} `}`,
-                    );
-                return { profile_name: opts.profile_name };
-            }
-
-            return err_msg(`${$t(`error.client.request_failure`)}`);
-        } catch (e) {
-            console.log(`(error) fetch_radroots_profile_validate `, e);
-            return err_msg(`${$t(`error.client.network_failure`)}`);
-        }
-    };
-
-    const fetch_radroots_profile_init = async (opts: {
-        profile_name: string;
-        secret_key: string;
-        nostr_relays?: string[];
-    }): Promise<{ tok: string } | ErrorMessage<string>> => {
-        try {
-            const res = await http.fetch({
-                url: `${PUBLIC_RADROOTS_URL}/public/accounts/add/init`,
-                method: `post`,
-                data: {
-                    nip_05: opts.profile_name,
-                    public_key: nostr.lib.public_key(opts.secret_key),
-                    nostr_relays: opts.nostr_relays?.length
-                        ? Array.from(
-                              new Set([
-                                  ...opts.nostr_relays,
-                                  cfg.nostr.relay_url,
-                              ]),
-                          ).join(`,`)
-                        : [cfg.nostr.relay_url].join(`,`),
-                },
-            });
-            if (`err` in res) return res;
-            else if (res.data && `tok` in res.data) {
-                return { tok: res.data.tok };
-            } else if (res.data && `message` in res.data)
-                return err_msg(
-                    `${$t(`radroots-org.error.${res.data.message}`)}`,
-                );
-            return err_msg(`${$t(`error.client.request_failure`)}`);
-        } catch (e) {
-            console.log(`(error) fetch_radroots_profile_init `, e);
-            return err_msg(`${$t(`error.client.network_failure`)}`);
-        }
-    };
-
-    const fetch_radroots_profile_confirm = async (
-        authorization: string,
-    ): Promise<{ pass: true } | ErrorMessage<string>> => {
-        try {
-            const res = await http.fetch({
-                url: `${PUBLIC_RADROOTS_URL}/public/accounts/add/conf`,
-                method: `post`,
-                authorization,
-            });
-            if (`err` in res) return res;
-            return { pass: true };
-        } catch (e) {
-            console.log(`(error) fetch_radroots_profile_confirm `, e);
-            return err_msg(`${$t(`error.client.network_failure`)}`);
-        }
-    };
-
-    const fetch_radroots_profile_status = async (
-        authorization: string,
-    ): Promise<
-        | { active: { public_key: string; nip_05?: string } }
-        | ErrorMessage<string>
-    > => {
-        try {
-            const res = await http.fetch({
-                url: `${PUBLIC_RADROOTS_URL}/public/accounts/add/status`,
-                method: `post`,
-                authorization,
-            });
-            if (`err` in res) return res;
-            else if (
-                `public_key` in res.data &&
-                typeof res.data.public_key === `string`
-            )
-                return {
-                    active: {
-                        public_key: res.data.public_key,
-                        nip_05:
-                            `nip_05` in res.data &&
-                            typeof res.data.nip_05 === `string`
-                                ? res.data.nip_05
-                                : undefined,
-                    },
-                };
-            return err_msg(`${$t(`error.client.network_failure`)}`);
-        } catch (e) {
-            console.log(`(error) fetch_radroots_profile_confirm `, e);
-            return err_msg(`${$t(`error.client.network_failure`)}`);
-        }
-    };
-
     const submit = async (): Promise<void> => {
         try {
+            loading_submit = true;
+
             const ks_nostr_secretkey = await keystore.get(
                 ks.cfg_init.nostr_secretkey,
             );
@@ -602,6 +478,7 @@
                 );
                 return; //@todo
             }
+
             const nostr_profile_add = await db.nostr_profile_add({
                 public_key: nostr_publickey,
                 name:
@@ -622,10 +499,7 @@
                 ks_nostr_secretkey.result,
             );
             for (const url of Array.from(
-                new Set([
-                    //cfg.nostr.relay_url,
-                    ...PUBLIC_NOSTR_RELAY_DEFAULTS.split(","),
-                ]),
+                new Set([...PUBLIC_NOSTR_RELAY_DEFAULTS.split(",")]),
             )) {
                 const nostr_relay_add = await db.nostr_relay_add({ url });
                 if (`err` in nostr_relay_add || `err_s` in nostr_relay_add) {
@@ -634,19 +508,14 @@
                     );
                     return; // @todo
                 }
-                const nostr_profile_relay_add =
-                    await db.nostr_profile_relay_set({
-                        nostr_profile: {
-                            id: nostr_profile_add.id,
-                        },
-                        nostr_relay: {
-                            id: nostr_relay_add.id,
-                        },
-                    });
-                console.log(
-                    JSON.stringify(nostr_profile_relay_add, null, 4),
-                    `nostr_profile_relay_add`,
-                );
+                await db.nostr_profile_relay_set({
+                    nostr_profile: {
+                        id: nostr_profile_add.id,
+                    },
+                    nostr_relay: {
+                        id: nostr_relay_add.id,
+                    },
+                });
             }
             await reset_ks();
             await restart({
@@ -655,6 +524,8 @@
             });
         } catch (e) {
             console.log(`(error) submit `, e);
+        } finally {
+            loading_submit = false;
         }
     };
 </script>
@@ -741,7 +612,7 @@
                         class={`flex flex-col w-full gap-5 justify-center items-center`}
                     >
                         <button
-                            class={`flex flex-col h-touch_bold w-${$app_layout} justify-center items-center bg-layer-1-surface active-layer-1-raise-less round-44 ${cgf_init_key_option === `key_gen` ? `bg-layer-1-surface_a/40` : ``}`}
+                            class={`flex flex-col h-touch_bold w-${$app_layout} justify-center items-center rounded-touch ${cgf_init_key_option === `key_gen` ? `layer-1-surface-apply-active layer-1-raise-apply layer-1-ring-apply` : `bg-layer-1-surface`} el-re`}
                             on:click|stopPropagation={async () => {
                                 cgf_init_key_option = `key_gen`;
                             }}
@@ -753,7 +624,7 @@
                             </p>
                         </button>
                         <button
-                            class={`flex flex-col h-touch_bold w-${$app_layout} justify-center items-center bg-layer-1-surface round-44 active-layer-1-raise-less ${cgf_init_key_option === `kv_nostr_secretkey` ? `bg-layer-1-surface_a/40` : ``}`}
+                            class={`flex flex-col h-touch_bold w-${$app_layout} justify-center items-center rounded-touch ${cgf_init_key_option === `kv_nostr_secretkey` ? `layer-1-surface-apply-active layer-1-raise-apply layer-1-ring-apply` : `bg-layer-1-surface`} el-re`}
                             on:click|stopPropagation={async () => {
                                 cgf_init_key_option = `kv_nostr_secretkey`;
                             }}
@@ -806,7 +677,7 @@
                             <InputElement
                                 basis={{
                                     classes: `h-entry_guide w-${$app_layout} bg-layer-1-surface rounded-touch font-mono text-lg placeholder:opacity-60 items-end text-center`,
-                                    id: fmt_id(page_param.kv.nostr_secretkey),
+                                    id: fmt_id(`nostr_secretkey`),
                                     sync: true,
                                     placeholder: `${$t(`icu.enter_*`, { value: `nostr nsec/hex` })}`,
                                     field: {
@@ -871,12 +742,13 @@
                             basis={{
                                 loading: cfg_main_profilename_loading,
                                 wrap: {
+                                    layer: 1,
                                     classes: `w-${$app_layout}`,
                                     style: `guide`,
                                 },
                                 el: {
-                                    classes: `font-mono text-lg text-center placeholder:opacity-60`,
-                                    id: fmt_id(page_param.kv.nostr_profilename),
+                                    classes: `font-sans text-[1.25rem] text-center placeholder:opacity-60`,
+                                    id: fmt_id(`nostr_profilename`),
                                     sync: true,
                                     placeholder: `${$t(`icu.enter_*`, { value: `${$t(`common.profile_name`)}`.toLowerCase() })}`,
                                     field: {
@@ -922,7 +794,7 @@
                         class={`flex flex-col w-full gap-5 justify-center items-center`}
                     >
                         <button
-                            class={`flex flex-col h-touch_bold w-${$app_layout} justify-center items-center bg-layer-1-surface active-layer-1-raise-less round-44 ${cfg_main_opt_idx1 === `farmer` ? `bg-layer-1-surface_a/40` : ``}`}
+                            class={`flex flex-col h-touch_bold w-${$app_layout} justify-center items-center rounded-touch ${cfg_main_opt_idx1 === `farmer` ? `layer-1-surface-apply-active layer-1-raise-apply layer-1-ring-apply` : `bg-layer-1-surface`} el-re`}
                             on:click|stopPropagation={async () => {
                                 cfg_main_opt_idx1 = `farmer`;
                             }}
@@ -934,7 +806,7 @@
                             </p>
                         </button>
                         <button
-                            class={`flex flex-col h-touch_bold w-${$app_layout} justify-center items-center bg-layer-1-surface active-layer-1-raise-less round-44 ${cfg_main_opt_idx1 === `personal` ? `bg-layer-1-surface_a/40` : ``}`}
+                            class={`flex flex-col h-touch_bold w-${$app_layout} justify-center items-center rounded-touch ${cfg_main_opt_idx1 === `personal` ? `layer-1-surface-apply-active layer-1-raise-apply layer-1-ring-apply` : `bg-layer-1-surface`} el-re`}
                             on:click|stopPropagation={async () => {
                                 cfg_main_opt_idx1 = `personal`;
                             }}
@@ -999,9 +871,7 @@
                                     ok_label: `${$t(`common.continue`)}`,
                                 });
                                 if (confirm === false) {
-                                    el_id(
-                                        fmt_id(page_param.kv.nostr_profilename),
-                                    )?.focus();
+                                    el_id(fmt_id(`nostr_profilename`))?.focus();
                                     return;
                                 }
                                 carousel_inc(view);
@@ -1240,7 +1110,7 @@
                             </p>
                         </button>
                         <button
-                            class={`group flex flex-row basis-1/2 gap-4 justify-center items-center ${el_eula_scrolled ? `` : `opacity-40`}`}
+                            class={`relative group flex flex-row basis-1/2 gap-4 justify-center items-center ${el_eula_scrolled ? `` : `opacity-40`}`}
                             on:click={async () => {
                                 if (el_eula_scrolled) await submit();
                             }}
@@ -1260,6 +1130,13 @@
                             >
                                 {`- `}
                             </p>
+                            {#if loading_submit}
+                                <div
+                                    class={`absolute right-0 flex flex-row justify-start items-center`}
+                                >
+                                    <Loading basis={{ dim: `xs` }} />
+                                </div>
+                            {/if}
                         </button>
                     </div>
                 </div>
