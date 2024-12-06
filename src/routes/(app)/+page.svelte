@@ -8,8 +8,11 @@
         LayoutView,
         nav_prev,
         route,
+        t,
     } from "@radroots/svelte-lib";
     import { onMount } from "svelte";
+
+    $: device_metadata = device.metadata ? device.metadata.version : ``;
 
     onMount(async () => {
         try {
@@ -34,11 +37,11 @@
             <p class={`font-mono font-[600] text-[1.3rem] text-layer-0-glyph`}>
                 {`radRoots`}
             </p>
-            {#if device.metadata?.version}
+            {#if device_metadata}
                 <p
                     class={`font-mono font-[400] text-[1.3rem] text-layer-0-glyph`}
                 >
-                    {`/${device.metadata.version}`}
+                    {`/${device_metadata}`}
                 </p>
             {/if}
         </div>
@@ -57,6 +60,29 @@
                 }}
             />
         </button>
+    </div>
+    <div
+        class={`flex flex-col w-full pt-2 px-6 gap-2 justify-center items-center`}
+    >
+        <div class={`flex flex-row w-full justify-start items-center`}>
+            <p class={`font-sans font-[600] text-2xl text-layer-0-glyph`}>
+                {`${$t(`common.general`)}`}
+            </p>
+        </div>
+        <div class={`flex flex-col w-full gap-5 justify-center items-center`}>
+            <button
+                class={`group flex flex-row h-[3.5rem] w-full justify-center items-center rounded-touch bg-layer-1-surface layer-1-active-surface layer-1-active-ring`}
+                on:click={async () => {
+                    await route(`/settings/profile`);
+                }}
+            >
+                <p
+                    class={`font-sans font-[600] text-xl text-layer-0-glyph capitalize tracking-wider opacity-active`}
+                >
+                    {`${$t(`common.profile`)}`}
+                </p>
+            </button>
+        </div>
     </div>
 </LayoutView>
 <EnvelopeLower

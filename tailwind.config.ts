@@ -103,6 +103,7 @@ const config: Config = {
             },
             fontFamily: {
                 sans: [`SF Pro Rounded`, ...tw_font.sans],
+                sansd: [`SF Pro Display`],
                 serif: [...tw_font.serif],
                 mono: [...tw_font.mono],
                 apercu: [`Apercu Mono Pro`],

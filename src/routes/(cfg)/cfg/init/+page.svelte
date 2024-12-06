@@ -1132,7 +1132,7 @@
                             </p>
                             {#if loading_submit}
                                 <div
-                                    class={`absolute right-0 flex flex-row justify-start items-center`}
+                                    class={`absolute right-2 flex flex-row justify-start items-center`}
                                 >
                                     <Loading basis={{ dim: `xs` }} />
                                 </div>

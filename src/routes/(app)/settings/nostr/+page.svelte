@@ -129,7 +129,7 @@
 <Nav
     basis={{
         prev: {
-            label: `Settings`,
+            label: `${$t(`common.settings`)}`,
             route: `/settings`,
         },
         title: {
