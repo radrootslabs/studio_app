@@ -1,55 +1,52 @@
-import { db, dialog } from "$lib/client";
-import { nostr_client, root_symbol } from "$lib/conf";
+import { db, device, dialog } from "$lib/client";
+import { err, nostr_client, root_symbol } from "$lib/conf";
 import { NDKKind } from "@nostr-dev-kit/ndk";
+import type { NostrRelay } from "@radroots/models";
 import { app_nostr_key, ndk, ndk_user, nostr_sync_prevent, t } from "@radroots/svelte-lib";
-import { fmt_tags_basis_nip99, ndk_event, nevent_encode, num_str } from "@radroots/utils";
+import { fmt_tags_basis_nip99, ndk_event, ndk_event_metadata, nevent_encode, num_str } from "@radroots/utils";
 import { get as get_store } from "svelte/store";
+import { throw_err } from "./error";
 
-export const nostr_sync = async (): Promise<void> => {
+export const nostr_sync_metadata = async (): Promise<void> => {
     try {
-        console.log(`run nostr sync!`)
-        const $t = get_store(t);
-        const $nostr_sync_prevent = get_store(nostr_sync_prevent);
-        const $app_nostr_key = get_store(app_nostr_key);
-
-        if ($nostr_sync_prevent) {
-            const confirm = await dialog.confirm({
-                message: `${$t(`error.client.nostr_sync_disabled`)}`,
-                cancel_label: `${$t(`common.cancel`)}`,
-                ok_label: `${$t(`common.ok`)}`
-            });
-            if (confirm) {
-                nostr_sync_prevent.set(false);
-                await nostr_sync();
-            }
-            return;
-        }
-
         const $ndk = get_store(ndk);
         const $ndk_user = get_store(ndk_user);
-
-        const nostr_relays_active = await db.nostr_relay_get({
-            list: [`on_profile`, { public_key: $app_nostr_key }],
+        const $app_nostr_key = get_store(app_nostr_key);
+        const nostr_profile = await db.nostr_profile_get_one({
+            public_key: $app_nostr_key
         });
-        if (`err` in nostr_relays_active) return; //@todo
-        if (!nostr_relays_active.results.length) return; //@todo
+        if (`err` in nostr_profile) return throw_err(nostr_profile);
+        const ev_metadata = await ndk_event_metadata({
+            $ndk,
+            $ndk_user,
+            metadata: nostr_profile.result
+        });
+        if (ev_metadata) await ev_metadata.publish();
+    } catch (e) {
+        console.log(`(error) nostr_sync_metadata `, e);
+    }
+};
+
+export const nostr_sync_classified = async (nostr_relays: NostrRelay[]): Promise<void> => {
+    const $ndk = get_store(ndk);
+    const $ndk_user = get_store(ndk_user);
+    try {
         const trade_products_all = await db.trade_product_get({
             list: [`all`],
         });
-        if (`err` in trade_products_all) return; //@todo
+        if (`err` in trade_products_all) return throw_err(trade_products_all);
         for (const trade_product of trade_products_all.results) {
-            console.log(`SYNC trade_product.id `, trade_product.id)
+            console.log(`sync trade_product.id `, trade_product.id)
             const trade_product_location_res = await db.location_gcs_get({
                 list: [`on_trade_product`, { id: trade_product.id }],
             });
-            if (`err` in trade_product_location_res) continue; //@todo
+            if (`err` in trade_product_location_res) return throw_err(trade_product_location_res);
             const trade_product_location = trade_product_location_res.results[0];
 
             const media_upload_res = await db.media_upload_get({
                 list: [`on_trade_product`, { id: trade_product.id }],
             });
-            if (`err` in media_upload_res) continue; //@todo
-
+            if (`err` in media_upload_res) return throw_err(media_upload_res);
             const ev = await ndk_event({
                 $ndk,
                 $ndk_user,
@@ -98,12 +95,43 @@ export const nostr_sync = async (): Promise<void> => {
                 ev.content = `radroots:[nostr:${nevent_encode({
                     id: ev.id,
                     author: ev.pubkey,
-                    relays: nostr_relays_active.results.map(i => i.url),
+                    relays: nostr_relays.map(i => i.url),
                     kind: NDKKind.Classified,
                 })}]`
                 await ev.publish();
             }
         }
+    } catch (e) {
+        console.log(`(error) nostr_sync_classified `, e);
+    }
+};
+
+export const nostr_sync = async (): Promise<void> => {
+    const $nostr_sync_prevent = get_store(nostr_sync_prevent);
+    const $t = get_store(t);
+    const $app_nostr_key = get_store(app_nostr_key);
+    try {
+        if ($nostr_sync_prevent) {
+            const confirm = await dialog.confirm({
+                message: `${$t(`error.client.nostr_sync_disabled`)}`,
+            });
+            if (confirm) {
+                nostr_sync_prevent.set(false);
+                await nostr_sync();
+            }
+            return;
+        }
+        console.log(`nostr_sync start`)
+        const nostr_relays = await db.nostr_relay_get({
+            list: [`on_profile`, { public_key: $app_nostr_key }],
+        });
+        if (`err` in nostr_relays) return throw_err(nostr_relays);
+        if (!nostr_relays.results.length) return throw_err(err.nostr.no_relays);
+        //
+        // sync
+        await nostr_sync_metadata();
+        await nostr_sync_classified(nostr_relays.results);
+        console.log(`nostr_sync done`)
     } catch (e) {
         console.log(`(error) nostr_sync `, e);
     }
@@ -111,6 +139,6 @@ export const nostr_sync = async (): Promise<void> => {
 
 export const nostr_tags_basis = (): string[][] => {
     const tags: string[][] = [];
-    for (const tag of [`app/0.0.0`]) tags.push([root_symbol, tag])
+    for (const tag of [`app${device.metadata?.version ? `/${device.metadata.version}` : ``}`]) tags.push([root_symbol, tag])
     return tags;
 };

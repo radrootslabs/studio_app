@@ -23,6 +23,12 @@ export const ascii = {
     dash: `—`
 }
 
+export const err = {
+    nostr: {
+        no_relays: `error.nostr.no_relays_connected`
+    }
+}
+
 export const cfg = {
     app: {
         title: `Radroots`,
@@ -40,6 +46,7 @@ export const cfg = {
         mount_el: 500,
         nostr_relay_poll_document: 3000,
         entry_focus: 2000,
+        load_notify: 3000,
     },
     cmd: {
         layout_route: `*-route`

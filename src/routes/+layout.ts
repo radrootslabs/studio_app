@@ -7,6 +7,7 @@ export const trailingSlash = 'always';
 
 export const load: LayoutLoad = async ({ url }: LayoutLoadEvent) => {
     try {
+        console.log(`(root) `, url.pathname)
         const { language: nav_locale } = navigator;
         let locale = default_locale.toString();
         const locales_avail = locales.get();

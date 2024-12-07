@@ -4,7 +4,7 @@
 </script>
 
 <LayoutView>
-    <div class={`flex flex-col gap-2 justify-start items-center`}>
+    <div class={`flex flex-col w-full gap-2 justify-start items-center`}>
         <p class={`font-sans font-[400] text-layer-0-glyph`}>
             The device is improperly configured.
         </p>
@@ -13,7 +13,7 @@
             on:click={async () => {
                 await restart({
                     route: `/`,
-                    notify_message: `Device restarted`,
+                    notify_message: `The device was restarted`,
                 });
             }}
         >

@@ -1,18 +1,17 @@
 <script lang="ts">
-    import { db, device, dialog } from "$lib/client";
+    import { db, dialog } from "$lib/client";
     import {
         app_nostr_key,
         envelope_visible,
         EnvelopeLower,
         Glyph,
         LayoutView,
+        LogoCircleSm,
         nav_prev,
         route,
         t,
     } from "@radroots/svelte-lib";
     import { onMount } from "svelte";
-
-    $: device_metadata = device.metadata ? device.metadata.version : ``;
 
     onMount(async () => {
         try {
@@ -34,16 +33,12 @@
 <LayoutView>
     <div class={`flex flex-row h-12 w-full px-6 justify-between items-center`}>
         <div class={`flex flex-row gap-2 justify-start items-center`}>
-            <p class={`font-mono font-[600] text-[1.3rem] text-layer-0-glyph`}>
-                {`radRoots`}
+            <LogoCircleSm />
+            <p
+                class={`font-sansd italic font-[700] text-[1.7rem] text-layer-0-glyph`}
+            >
+                {`radroots`}
             </p>
-            {#if device_metadata}
-                <p
-                    class={`font-mono font-[400] text-[1.3rem] text-layer-0-glyph`}
-                >
-                    {`/${device_metadata}`}
-                </p>
-            {/if}
         </div>
         <button
             class={`flex flex-row justify-center items-center`}
@@ -62,10 +57,10 @@
         </button>
     </div>
     <div
-        class={`flex flex-col w-full pt-2 px-6 gap-2 justify-center items-center`}
+        class={`flex flex-col w-full pt-4 px-6 gap-4 justify-center items-center`}
     >
         <div class={`flex flex-row w-full justify-start items-center`}>
-            <p class={`font-sans font-[600] text-2xl text-layer-0-glyph`}>
+            <p class={`font-sansd font-[600] text-2xl text-layer-0-glyph`}>
                 {`${$t(`common.general`)}`}
             </p>
         </div>
@@ -77,7 +72,7 @@
                 }}
             >
                 <p
-                    class={`font-sans font-[600] text-xl text-layer-0-glyph capitalize tracking-wider opacity-active`}
+                    class={`font-sans font-[700] text-xl text-layer-0-glyph capitalize tracking-wider opacity-active`}
                 >
                     {`${$t(`common.profile`)}`}
                 </p>

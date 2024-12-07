@@ -1,8 +1,8 @@
 <script lang="ts">
     import { db, geoc, keystore, notification } from "$lib/client";
-    import { ks } from "$lib/conf";
+    import { cfg, ks } from "$lib/conf";
     import { fetch_relay_documents } from "$lib/util/fetch";
-    import { nostr_sync } from "$lib/util/nostr";
+    import { nostr_sync } from "$lib/util/nostr-sync";
     import {
         app_cfg_type,
         app_geoc,
@@ -41,7 +41,7 @@
     app_init.subscribe(async (_app_init) => {
         try {
             if (!app_init) return;
-            await sleep(4000);
+            await sleep(cfg.delay.load_notify);
             await notification.init();
         } catch (e) {
             console.log(`(app_init) error `, e);

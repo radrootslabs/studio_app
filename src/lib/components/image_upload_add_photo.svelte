@@ -17,7 +17,7 @@
 
 <div class={`relative flex flex-row w-full justify-center items-center`}>
     <button
-        class={`flex flex-row h-[5rem] w-[5rem] justify-center items-center bg-layer-0-surface/80 rounded-full`}
+        class={`flex flex-row h-[5rem] w-[5rem] justify-center items-center bg-layer-1-surface/60 rounded-full`}
         on:click={async () => {
             await handle_photo_add();
         }}

@@ -51,3 +51,4 @@ git-diff.txt
 target
 tauri.conf.build*
 /crates/tauri/gen
+.dev

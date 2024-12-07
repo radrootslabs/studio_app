@@ -29,7 +29,7 @@
         kv,
         LayoutView,
         Loading,
-        route,
+        LogoCircle,
         sleep,
         t,
         view_effect,
@@ -541,51 +541,41 @@
         >
             <div
                 data-carousel-item={`cfg_init`}
-                class={`carousel-item flex flex-col w-full max-mobile_y:pt-28 pt-32 pb-4 justify-start items-center`}
+                class={`carousel-item flex flex-col w-full max-mobile_y:pt-28 pt-36 pb-4 justify-start items-center`}
             >
-                <div class={`flex flex-col gap-8 justify-start items-center`}>
+                <div class={`flex flex-col gap-1 justify-start items-center`}>
                     <div
-                        class={`flex flex-col gap-1 justify-start items-center`}
+                        class={`flex flex-row w-full justify-center items-center`}
                     >
-                        <button
-                            class={`flex flex-row justify-center items-center`}
-                            on:click={async () => {
-                                await route(`/`);
-                            }}
-                        >
-                            <p
-                                class={`font-mono font-[700] text-layer-0-glyph text-4xl`}
-                            >
-                                {`${`${$t(`app.name`)}`}`}
-                            </p>
-                        </button>
-                        <button
-                            class={`flex flex-row justify-center items-center`}
-                            on:click={async () => {
-                                //@todo dev
-                            }}
-                        >
-                            <p
-                                class={`font-mono font-[700] text-layer-0-glyph text-4xl`}
-                            >
-                                {`${`${$t(`common.setup`)}`}`}
-                            </p>
-                        </button>
+                        <LogoCircle />
                     </div>
                     <div
-                        class={`grid grid-cols-12 flex flex-col gap-4 w-full justify-start items-center`}
+                        class={`flex flex-col w-full gap-2 justify-start items-center`}
                     >
-                        {#each [`Configure your device`, `Choose a profile name`, `Terms of Use agreement`] as li, li_i}
-                            <div
-                                class={`col-span-12 flex flex-row justify-start items-center`}
+                        <div
+                            class={`flex flex-row w-full justify-start items-center`}
+                        >
+                            <p
+                                class={`font-sans font-[400] text-sm text-layer-0-glyph-label uppercase`}
                             >
-                                <p
-                                    class={`font-mono font-[400] text-layer-0-glyph text-xl`}
+                                {`${$t(`common.setup`)}`}
+                            </p>
+                        </div>
+                        <div
+                            class={`grid grid-cols-12 flex flex-col gap-4 w-full justify-start items-center`}
+                        >
+                            {#each [`${$t(`common.configure_your_device`)}`, `${$t(`common.choose_a_profile_name`)}`, `${$t(`common.terms_of_use_agreement`)}`] as li, li_i}
+                                <div
+                                    class={`col-span-12 flex flex-row justify-start items-center`}
                                 >
-                                    {`${li_i + 1}. ${li}`}
-                                </p>
-                            </div>
-                        {/each}
+                                    <p
+                                        class={`font-mono font-[400] text-[1.1rem] text-layer-0-glyph`}
+                                    >
+                                        {`${li_i + 1}. ${li}`}
+                                    </p>
+                                </div>
+                            {/each}
+                        </div>
                     </div>
                 </div>
             </div>
