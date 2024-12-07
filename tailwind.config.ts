@@ -116,6 +116,7 @@ const config: Config = {
                 of: [`Outfit`]
             },
             fontSize: {
+                guide: [`1.2rem`, { lineHeight: `1.2rem` }],
                 line_label: [`1.3rem`, { lineHeight: `1.3rem` }],
                 trellisTitle: [`0.8rem`, { lineHeight: `1rem`, fontWeight: 300 }],
                 trellisTitleNote: [`0.76rem`, { lineHeight: `1rem`, fontWeight: 200 }],

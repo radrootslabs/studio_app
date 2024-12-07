@@ -7,7 +7,8 @@
         LayoutTrellis,
         LayoutView,
         ls,
-        Nav,
+        NavToolbar,
+        PageHeader,
         route,
         Trellis,
     } from "@radroots/svelte-lib";
@@ -15,6 +16,12 @@
 </script>
 
 <LayoutView>
+    <NavToolbar />
+    <PageHeader
+        basis={{
+            label: `${$ls(`common.settings`)}`,
+        }}
+    />
     <LayoutTrellis>
         <Trellis
             basis={{
@@ -414,16 +421,3 @@
         />
     </LayoutTrellis>
 </LayoutView>
-<Nav
-    basis={{
-        prev: {
-            label: `${$ls(`common.home`)}`,
-            route: `/`,
-        },
-        title: {
-            label: {
-                value: `${$ls(`common.settings`)}`,
-            },
-        },
-    }}
-/>
