@@ -15,6 +15,7 @@
         Nav,
         route,
         t,
+        TabsFloat,
     } from "@radroots/svelte-lib";
     import { onDestroy, onMount } from "svelte";
 
@@ -334,6 +335,7 @@
         {/if}
     </div>
 </LayoutView>
+<TabsFloat />
 <Nav
     basis={{
         prev: {

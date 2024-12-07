@@ -36,15 +36,10 @@
             if (`err` in location_gcss) {
                 app_notify.set(`${$t(`error.client.page.load`)}`);
                 return;
-            } else if (!location_gcss.results.length) {
-                app_notify.set(`${$t(`error.client.page.load`)}`);
-                return;
             }
-
-            const data: LoadData = {
+            return {
                 location_gcss: location_gcss.results,
-            };
-            return data;
+            } satisfies LoadData;
         } catch (e) {
             console.log(`(error) load_data `, e);
         }

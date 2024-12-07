@@ -10,6 +10,7 @@
         nav_prev,
         route,
         t,
+        TabsFloat,
     } from "@radroots/svelte-lib";
     import { onMount } from "svelte";
 
@@ -49,7 +50,7 @@
             <Glyph
                 basis={{
                     classes: `text-layer-0-glyph`,
-                    dim: `md`,
+                    dim: `lg`,
                     weight: `bold`,
                     key: `gear`,
                 }}
@@ -80,6 +81,7 @@
         </div>
     </div>
 </LayoutView>
+<TabsFloat />
 <EnvelopeLower
     basis={{
         close: async () => {
