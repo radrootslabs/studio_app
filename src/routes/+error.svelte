@@ -1,6 +1,6 @@
 <script lang="ts">
     import { page } from "$app/stores";
-    import { Glyph, LayoutArea, Nav, t } from "@radroots/svelte-lib";
+    import { Glyph, LayoutArea, Nav, ls } from "@radroots/svelte-lib";
 </script>
 
 <LayoutArea>
@@ -14,7 +14,7 @@
                 }}
             />
             <p class={`font-sans font-[400] text-layer-0-glyph`}>
-                {`${$t(`error.client.page.status.${$page.status}`)}`}
+                {`${$ls(`error.client.page.status.${$page.status}`)}`}
             </p>
         </div>
     </div>
@@ -22,7 +22,7 @@
 <Nav
     basis={{
         prev: {
-            label: `${$t(`common.home`)}`,
+            label: `${$ls(`common.home`)}`,
             route: `/`,
         },
     }}

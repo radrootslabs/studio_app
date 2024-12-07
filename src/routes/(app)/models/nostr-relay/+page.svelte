@@ -7,11 +7,11 @@
         GlyphCircle,
         LayoutTrellis,
         LayoutView,
+        ls,
         Nav,
         nav_prev,
         nostr_relays_connected,
         route,
-        t,
         Trellis,
         type ITrellisKindTouch,
     } from "@radroots/svelte-lib";
@@ -41,7 +41,7 @@
                 sort: `oldest`,
             });
             if (`err` in nostr_relays) {
-                app_notify.set(`${$t(`error.client.page.load`)}`);
+                app_notify.set(`${$ls(`error.client.page.load`)}`);
                 return;
             }
 
@@ -50,7 +50,7 @@
                 sort: `oldest`,
             });
             if (`err` in nostr_relays_other) {
-                app_notify.set(`${$t(`error.client.page.load`)}`);
+                app_notify.set(`${$ls(`error.client.page.load`)}`);
                 return;
             }
 
@@ -178,7 +178,7 @@
                     args: {
                         layer: 1,
                         title: {
-                            value: `${$t(`icu.nostr_*`, { value: `${$t(`common.relays`)}` })}`,
+                            value: `${$ls(`icu.nostr_*`, { value: `${$ls(`common.relays`)}` })}`,
                         },
                         list: tr_list_relays,
                     },
@@ -190,23 +190,23 @@
 <Nav
     basis={{
         prev: {
-            label: `${$t(`common.back`)}`,
+            label: `${$ls(`common.back`)}`,
             route: `/models/nostr-profile`,
         },
         title: {
             label: {
                 classes: `capitalize`,
-                value: `${$t(`common.relays`)}`,
+                value: `${$ls(`common.relays`)}`,
             },
         },
         option: {
             label: {
                 swap: {
                     on: {
-                        value: `${$t(`common.done`)}`,
+                        value: `${$ls(`common.done`)}`,
                     },
                     off: {
-                        value: `${$t(`common.edit`)}`,
+                        value: `${$ls(`common.edit`)}`,
                     },
                     toggle: show_edit,
                 },

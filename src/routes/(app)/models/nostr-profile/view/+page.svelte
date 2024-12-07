@@ -10,13 +10,13 @@
         clipboard_copy,
         LayoutTrellis,
         LayoutView,
+        ls,
         Nav,
         nav_prev,
         nostr_relays_connected,
         qp_nostr_pk,
         route,
         show_toast,
-        t,
         Trellis,
         type ITrellisKindTouch,
     } from "@radroots/svelte-lib";
@@ -37,7 +37,7 @@
     onMount(async () => {
         try {
             if (!$qp_nostr_pk)
-                app_notify.set(`${$t(`error.client.page.load`)}`);
+                app_notify.set(`${$ls(`error.client.page.load`)}`);
             ld = await load_data();
         } catch (e) {
         } finally {
@@ -54,10 +54,10 @@
                 `nostr_profiles`,
             );
             if (`err` in nostr_profiles) {
-                app_notify.set(`${$t(`error.client.page.load`)}`);
+                app_notify.set(`${$ls(`error.client.page.load`)}`);
                 return;
             } else if (nostr_profiles.results) {
-                app_notify.set(`${$t(`error.client.page.load`)}`);
+                app_notify.set(`${$ls(`error.client.page.load`)}`);
                 return;
             }
 
@@ -177,7 +177,7 @@
                     args: {
                         layer: 1,
                         title: {
-                            value: `${$t(`common.profile_name`)}`,
+                            value: `${$ls(`common.profile_name`)}`,
                         },
                         list: [
                             {
@@ -191,7 +191,7 @@
                                                     : `text-layer-1-glyph-shade`,
                                                 value:
                                                     ld.nostr_profile.name ||
-                                                    `${$t(`icu.no_*_published`, { value: `${$t(`common.profile`)}`.toLowerCase() })}`,
+                                                    `${$ls(`icu.no_*_published`, { value: `${$ls(`common.profile`)}`.toLowerCase() })}`,
                                             },
                                         ],
                                     },
@@ -243,17 +243,17 @@
                     args: {
                         layer: 1,
                         title: {
-                            value: `${$t(`common.public_key`)}`,
+                            value: `${$ls(`common.public_key`)}`,
                             link: {
                                 label: {
                                     swap: {
                                         on: {
                                             classes: `pl-1 text-trellisTitleNote uppercase -translate-y-[1px] -translate-x-[2px] text-layer-0-glyph-shade`,
-                                            value: `${$t(`common.npub`)}`,
+                                            value: `${$ls(`common.npub`)}`,
                                         },
                                         off: {
                                             classes: `pl-1 text-trellisTitleNote uppercase -translate-y-[1px] -translate-x-[6px] text-layer-0-glyph-shade`,
-                                            value: `${$t(`common.hex`)}`,
+                                            value: `${$ls(`common.hex`)}`,
                                         },
                                         toggle: show_public_key_hex,
                                     },
@@ -288,19 +288,19 @@
                                             args: {
                                                 position: `bottom-center`,
                                                 label: {
-                                                    value: `${`${$t(
+                                                    value: `${`${$ls(
                                                         `icu.*_as`,
                                                         {
-                                                            value: `${$t(
+                                                            value: `${$ls(
                                                                 `icu.*_copied`,
                                                                 {
-                                                                    value: `${$t(
+                                                                    value: `${$ls(
                                                                         `common.public_key`,
                                                                     )}`,
                                                                 },
                                                             )}`,
                                                         },
-                                                    )}`} ${show_public_key_hex ? `${$t(`common.hex`)}`.toLowerCase() : `${$t(`common.npub`)}`.toLowerCase()}.`,
+                                                    )}`} ${show_public_key_hex ? `${$ls(`common.hex`)}`.toLowerCase() : `${$ls(`common.npub`)}`.toLowerCase()}.`,
                                                 },
                                             },
                                             callback: async () => {
@@ -328,17 +328,17 @@
                     args: {
                         layer: 1,
                         title: {
-                            value: `${$t(`common.secret_key`)}`,
+                            value: `${$ls(`common.secret_key`)}`,
                             link: {
                                 label: {
                                     swap: {
                                         on: {
                                             classes: `pl-1 text-trellisTitleNote uppercase -translate-y-[1px] -translate-x-[2px] text-layer-0-glyph-shade`,
-                                            value: `${$t(`common.nsec`)}`,
+                                            value: `${$ls(`common.nsec`)}`,
                                         },
                                         off: {
                                             classes: `pl-1 text-trellisTitleNote uppercase -translate-y-[1px] -translate-x-[6px] text-layer-0-glyph-shade`,
-                                            value: `${$t(`common.hex`)}`,
+                                            value: `${$ls(`common.hex`)}`,
                                         },
                                         toggle: vl_secret_key_unlock
                                             ? show_secret_key_hex
@@ -375,19 +375,19 @@
                                             args: {
                                                 position: `bottom-center`,
                                                 label: {
-                                                    value: `${`${$t(
+                                                    value: `${`${$ls(
                                                         `icu.*_as`,
                                                         {
-                                                            value: `${$t(
+                                                            value: `${$ls(
                                                                 `icu.*_copied`,
                                                                 {
-                                                                    value: `${$t(
+                                                                    value: `${$ls(
                                                                         `common.secret_key`,
                                                                     )}`,
                                                                 },
                                                             )}`,
                                                         },
-                                                    )}`} ${show_secret_key_hex ? `${$t(`common.hex`)}`.toLowerCase() : `${$t(`common.nsec`)}`.toLowerCase()}.`,
+                                                    )}`} ${show_secret_key_hex ? `${$ls(`common.hex`)}`.toLowerCase() : `${$ls(`common.nsec`)}`.toLowerCase()}.`,
                                                 },
                                             },
                                             callback: async () => {
@@ -413,7 +413,7 @@
                     args: {
                         layer: 1,
                         title: {
-                            value: `${$t(`common.status`)}`,
+                            value: `${$ls(`common.status`)}`,
                         },
                         list: [
                             {
@@ -430,8 +430,8 @@
                                                 value:
                                                     $app_nostr_key ===
                                                     ld.nostr_profile.public_key
-                                                        ? `${$t(`common.active`)}`
-                                                        : `${$t(
+                                                        ? `${$ls(`common.active`)}`
+                                                        : `${$ls(
                                                               `common.public_key`,
                                                           )}`,
                                             },
@@ -448,7 +448,7 @@
                     args: {
                         layer: 1,
                         title: {
-                            value: `${$t(`icu.connected_*`, { value: `${$t(`common.relays`)}` })}`,
+                            value: `${$ls(`icu.connected_*`, { value: `${$ls(`common.relays`)}` })}`,
                         },
                         list: tr_nostr_relays.length
                             ? tr_nostr_relays
@@ -463,7 +463,7 @@
                                                           .name
                                                           ? ``
                                                           : `text-layer-1-glyph-shade`,
-                                                      value: `${$t(`icu.no_*_published`, { value: `${$t(`common.relays`)}`.toLowerCase() })}`,
+                                                      value: `${$ls(`icu.no_*_published`, { value: `${$ls(`common.relays`)}`.toLowerCase() })}`,
                                                   },
                                               ],
                                           },
@@ -479,23 +479,23 @@
 <Nav
     basis={{
         prev: {
-            label: `${$t(`common.back`)}`,
+            label: `${$ls(`common.back`)}`,
             route: `/models/nostr-profile`,
         },
         title: {
             label: {
                 classes: `capitalize`,
-                value: `${$t(`common.profile`)}`,
+                value: `${$ls(`common.profile`)}`,
             },
         },
         option: {
             label: {
                 swap: {
                     on: {
-                        value: `${$t(`common.done`)}`,
+                        value: `${$ls(`common.done`)}`,
                     },
                     off: {
-                        value: `${$t(`common.unlock`)}`,
+                        value: `${$ls(`common.unlock`)}`,
                     },
                     toggle: vl_secret_key_unlock,
                 },

@@ -7,10 +7,10 @@
         EnvelopeButtons,
         LayoutTrellis,
         LayoutView,
+        ls,
         Nav,
         nostr_relays_connected,
         qp_id,
-        t,
         Trellis,
     } from "@radroots/svelte-lib";
     import { onMount } from "svelte";
@@ -25,7 +25,7 @@
 
     onMount(async () => {
         try {
-            if (!$qp_id) app_notify.set(`${$t(`error.client.page.load`)}`);
+            if (!$qp_id) app_notify.set(`${$ls(`error.client.page.load`)}`);
             ld = await load_data();
         } catch (e) {
         } finally {
@@ -38,10 +38,10 @@
                 id: $qp_id,
             });
             if (`err` in nostr_relays) {
-                app_notify.set(`${$t(`error.client.page.load`)}`);
+                app_notify.set(`${$ls(`error.client.page.load`)}`);
                 return;
             } else if (!nostr_relays.results.length) {
-                app_notify.set(`${$t(`error.client.page.load`)}`);
+                app_notify.set(`${$ls(`error.client.page.load`)}`);
                 return;
             }
 
@@ -98,7 +98,7 @@
                     args: {
                         layer: 1,
                         title: {
-                            value: `${$t(`common.url`)}`,
+                            value: `${$ls(`common.url`)}`,
                         },
                         list: [
                             {
@@ -123,7 +123,7 @@
                     args: {
                         layer: 1,
                         title: {
-                            value: `${$t(`common.status`)}`,
+                            value: `${$ls(`common.status`)}`,
                         },
                         list: [
                             {
@@ -142,7 +142,7 @@
                                                   },
                                                   {
                                                       classes: `text-success font-[500]`,
-                                                      value: `${$t(`common.connected`)}`,
+                                                      value: `${$ls(`common.connected`)}`,
                                                   },
                                               ]
                                             : [
@@ -154,7 +154,7 @@
                                                   },
                                                   {
                                                       classes: `text-yellow-700/80 font-[500] capitalize`,
-                                                      value: `${$t(`common.not_connected`)}`,
+                                                      value: `${$ls(`common.not_connected`)}`,
                                                   },
                                               ],
                                     },
@@ -169,7 +169,7 @@
                     args: {
                         layer: 1,
                         title: {
-                            value: `${$t(`models.nostr_relay.fields.pubkey.label`)}`,
+                            value: `${$ls(`models.nostr_relay.fields.pubkey.label`)}`,
                         },
                         list: [
                             {
@@ -184,7 +184,7 @@
                                                           ld.nostr_relay.pubkey,
                                                           true,
                                                       )
-                                                    : `${$t(`icu.no_*_published`, { value: `${$t(`pubkey`)}`.toLowerCase() })}`,
+                                                    : `${$ls(`icu.no_*_published`, { value: `${$ls(`pubkey`)}`.toLowerCase() })}`,
                                             },
                                         ],
                                     },
@@ -199,7 +199,7 @@
                     args: {
                         layer: 1,
                         title: {
-                            value: `${$t(`models.nostr_relay.fields.description.label`)}`,
+                            value: `${$ls(`models.nostr_relay.fields.description.label`)}`,
                         },
                         list: [
                             {
@@ -212,7 +212,7 @@
                                                 value:
                                                     ld.nostr_relay
                                                         .description ||
-                                                    `${$t(`icu.no_*_published`, { value: `${$t(`models.nostr_relay.fields.description.label`)}`.toLowerCase() })}`,
+                                                    `${$ls(`icu.no_*_published`, { value: `${$ls(`models.nostr_relay.fields.description.label`)}`.toLowerCase() })}`,
                                             },
                                         ],
                                     },
@@ -227,7 +227,7 @@
                     args: {
                         layer: 1,
                         title: {
-                            value: `${$t(`models.nostr_relay.fields.software.label`)}`,
+                            value: `${$ls(`models.nostr_relay.fields.software.label`)}`,
                         },
                         list: [
                             {
@@ -239,7 +239,7 @@
                                                 classes: `text-layer-1-glyph`,
                                                 value:
                                                     ld.nostr_relay.software ||
-                                                    `${$t(`icu.no_*_published`, { value: `${$t(`models.fields.nostr_relay.software.label`)}`.toLowerCase() })}`,
+                                                    `${$ls(`icu.no_*_published`, { value: `${$ls(`models.fields.nostr_relay.software.label`)}`.toLowerCase() })}`,
                                             },
                                         ],
                                     },
@@ -254,7 +254,7 @@
                     args: {
                         layer: 1,
                         title: {
-                            value: `${$t(`models.nostr_relay.fields.version.label`)}`,
+                            value: `${$ls(`models.nostr_relay.fields.version.label`)}`,
                         },
                         list: [
                             {
@@ -266,7 +266,7 @@
                                                 classes: `text-layer-1-glyph`,
                                                 value:
                                                     ld.nostr_relay.version ||
-                                                    `${$t(`icu.no_*_published`, { value: `${$t(`models.nostr_relay.fields.version.label`)}`.toLowerCase() })}`,
+                                                    `${$ls(`icu.no_*_published`, { value: `${$ls(`models.nostr_relay.fields.version.label`)}`.toLowerCase() })}`,
                                             },
                                         ],
                                     },
@@ -281,7 +281,7 @@
                     args: {
                         layer: 1,
                         title: {
-                            value: `${$t(`models.nostr_relay.fields.supported_nips.label`)}`,
+                            value: `${$ls(`models.nostr_relay.fields.supported_nips.label`)}`,
                         },
                         list: [
                             {
@@ -294,7 +294,7 @@
                                                 value:
                                                     ld.nostr_relay
                                                         .supported_nips ||
-                                                    `${$t(`icu.no_*_published`, { value: `${$t(`models.nostr_relay.fields.supported_nips.label`)}`.toLowerCase() })}`,
+                                                    `${$ls(`icu.no_*_published`, { value: `${$ls(`models.nostr_relay.fields.supported_nips.label`)}`.toLowerCase() })}`,
                                             },
                                         ],
                                     },
@@ -310,23 +310,23 @@
 <Nav
     basis={{
         prev: {
-            label: `${$t(`common.back`)}`,
+            label: `${$ls(`common.back`)}`,
             route: `/models/nostr-relay`,
         },
         title: {
             label: {
                 classes: `capitalize`,
-                value: `${$t(`common.relay`)}`,
+                value: `${$ls(`common.relay`)}`,
             },
         },
         option: {
             label: {
                 swap: {
                     on: {
-                        value: `${$t(`common.done`)}`,
+                        value: `${$ls(`common.done`)}`,
                     },
                     off: {
-                        value: `${$t(`common.edit`)}`,
+                        value: `${$ls(`common.edit`)}`,
                     },
                     toggle: show_edit,
                 },
@@ -344,7 +344,7 @@
             buttons: [
                 {
                     classes: `text-envelopeButtonCancel text-layer-1-glyph-hl`,
-                    label: `${$t(`common.cancel`)}`,
+                    label: `${$ls(`common.cancel`)}`,
                     callback: async () => {
                         show_edit = false;
                     },
@@ -354,8 +354,8 @@
                         ? `text-envelopeButtonLabel text-red-400`
                         : `text-envelopeButtonLabel text-success`,
                     label: $nostr_relays_connected.includes(ld.nostr_relay.id)
-                        ? `${$t(`icu.disconnect_*`, { value: `${$t(`common.relay`)}` })}`
-                        : `${$t(`icu.connect_*`, { value: `${$t(`common.relay`)}` })}`,
+                        ? `${$ls(`icu.disconnect_*`, { value: `${$ls(`common.relay`)}` })}`
+                        : `${$ls(`icu.connect_*`, { value: `${$ls(`common.relay`)}` })}`,
                     callback: async () => {
                         if (!ld) return;
                         if ($nostr_relays_connected.includes(ld.nostr_relay.id))

@@ -6,9 +6,9 @@
         app_notify,
         LayoutTrellis,
         LayoutView,
+        ls,
         Nav,
         route,
-        t,
     } from "@radroots/svelte-lib";
     import { onMount } from "svelte";
 
@@ -32,7 +32,7 @@
             });
             if (`err` in trade_products) {
                 app_notify.set(
-                    `${$t(`icu.error_loading_*`, { value: `${$t(`common.page`)}` })}`,
+                    `${$ls(`icu.error_loading_*`, { value: `${$ls(`common.page`)}` })}`,
                 );
                 return;
             }
@@ -92,19 +92,19 @@
 <Nav
     basis={{
         prev: {
-            label: `${$t(`common.home`)}`,
+            label: `${$ls(`common.home`)}`,
             route: `/`,
         },
         title: {
             label: {
-                value: `${$t(`common.products`)}`,
+                value: `${$ls(`common.products`)}`,
             },
         },
         option:
             ld && ld?.results?.length > 0
                 ? {
                       label: {
-                          value: `${$t(`common.add_new`)}`,
+                          value: `${$ls(`common.add_new`)}`,
                           classes: `tap-color capitalize`,
                       },
                       callback: async () => {

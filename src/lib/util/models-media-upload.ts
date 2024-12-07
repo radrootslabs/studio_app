@@ -2,16 +2,17 @@ import { PUBLIC_RADROOTS_URL } from "$env/static/public";
 import { db } from "$lib/client";
 import type { IDialogAlert, IDialogConfirm } from "$lib/types";
 import type { IClientHttpResponseError } from "@radroots/client";
-import { t } from "@radroots/svelte-lib";
+import { ls } from "@radroots/svelte-lib";
 import { parse_file_path, type FilePath, type ResultsList } from "@radroots/utils";
 import { get } from "svelte/store";
 import { fetch_put_upload } from "./fetch";
 
-const $t = get(t);
 
 export const model_media_upload_add_list = async (opts: {
     photo_paths: string[];
 }): Promise<IDialogAlert | IDialogConfirm | ResultsList<string>> => {
+    const $ls = get(ls);
+
     try {
         if (!opts.photo_paths.length) {
             return {
@@ -59,13 +60,13 @@ export const model_media_upload_add_list = async (opts: {
         if (photo_path_uploads_error.length) {
             return {
                 confirm: {
-                    message: `${$t(photo_path_uploads_error[0].message)}`, //@todo
+                    message: `${$ls(photo_path_uploads_error[0].message)}`, //@todo
                     ok_label: photo_path_uploads_error[0].label_ok
-                        ? `${$t(photo_path_uploads_error[0].label_ok)}` ||
+                        ? `${$ls(photo_path_uploads_error[0].label_ok)}` ||
                         undefined
                         : undefined,
                     cancel_label: photo_path_uploads_error[0].label_cancel
-                        ? `${$t(photo_path_uploads_error[0].label_cancel)}` ||
+                        ? `${$ls(photo_path_uploads_error[0].label_cancel)}` ||
                         undefined
                         : undefined,
                 }
@@ -74,12 +75,12 @@ export const model_media_upload_add_list = async (opts: {
         }
         if (photo_path_uploads_err.length) {
             return {
-                alert: `${$t(`icu.there_was_a_failure_while_*`, {
-                    value: `${$t(`icu.uploading_*_photos`, {
+                alert: `${$ls(`icu.there_was_a_failure_while_*`, {
+                    value: `${$ls(`icu.uploading_*_photos`, {
                         value:
                             photo_path_uploads_err.length ===
                                 opts.photo_paths.length
-                                ? `${$t(`common.all`)}`
+                                ? `${$ls(`common.all`)}`
                                 : `${photo_path_uploads_err.length}`,
                     })}`.toLowerCase(),
                 })}`

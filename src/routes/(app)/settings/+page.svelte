@@ -6,9 +6,9 @@
         app_thc,
         LayoutTrellis,
         LayoutView,
+        ls,
         Nav,
         route,
-        t,
         Trellis,
     } from "@radroots/svelte-lib";
     import { parse_color_mode } from "@radroots/theme";
@@ -30,7 +30,7 @@
                                 label: {
                                     left: [
                                         {
-                                            value: `${$t(`common.color_mode`)}`,
+                                            value: `${$ls(`common.color_mode`)}`,
                                             classes: `capitalize`,
                                         },
                                     ],
@@ -48,16 +48,16 @@
                                             entries: [
                                                 {
                                                     value: ascii.bullet,
-                                                    label: `${$t(`icu.choose_*`, { value: `${$t(`common.color_mode`)}`.toLowerCase() })}`,
+                                                    label: `${$ls(`icu.choose_*`, { value: `${$ls(`common.color_mode`)}`.toLowerCase() })}`,
                                                     disabled: true,
                                                 },
                                                 {
                                                     value: `light`,
-                                                    label: `${$t(`common.light`)}`,
+                                                    label: `${$ls(`common.light`)}`,
                                                 },
                                                 {
                                                     value: `dark`,
-                                                    label: `${$t(`common.dark`)}`,
+                                                    label: `${$ls(`common.dark`)}`,
                                                 },
                                             ],
                                         },
@@ -417,12 +417,12 @@
 <Nav
     basis={{
         prev: {
-            label: `${$t(`common.home`)}`,
+            label: `${$ls(`common.home`)}`,
             route: `/`,
         },
         title: {
             label: {
-                value: `${$t(`common.settings`)}`,
+                value: `${$ls(`common.settings`)}`,
             },
         },
     }}

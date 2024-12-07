@@ -7,9 +7,9 @@
         Glyph,
         LayoutView,
         LogoCircleSm,
+        ls,
         nav_prev,
         route,
-        t,
         TabsFloat,
     } from "@radroots/svelte-lib";
     import { onMount } from "svelte";
@@ -62,7 +62,7 @@
     >
         <div class={`flex flex-row w-full justify-start items-center`}>
             <p class={`font-sansd font-[600] text-2xl text-layer-0-glyph`}>
-                {`${$t(`common.general`)}`}
+                {`${$ls(`common.general`)}`}
             </p>
         </div>
         <div class={`flex flex-col w-full gap-5 justify-center items-center`}>
@@ -75,7 +75,7 @@
                 <p
                     class={`font-sans font-[700] text-xl text-layer-0-glyph capitalize tracking-wider opacity-active`}
                 >
-                    {`${$t(`common.profile`)}`}
+                    {`${$ls(`common.profile`)}`}
                 </p>
             </button>
         </div>

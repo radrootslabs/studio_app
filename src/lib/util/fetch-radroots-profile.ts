@@ -1,15 +1,14 @@
 import { PUBLIC_RADROOTS_URL } from "$env/static/public";
 import { http, nostr } from "$lib/client";
 import { cfg } from "$lib/conf";
-import { get_store, t } from "@radroots/svelte-lib";
+import { get_store, ls, } from "@radroots/svelte-lib";
 import { err_msg, type ErrorMessage } from "@radroots/utils";
 import { catch_err, throw_err } from "./error";
-
-const $t = get_store(t);
 
 export const fetch_radroots_profile_validate = async (opts: {
     profile_name: string;
 }): Promise<{ profile_name: string } | ErrorMessage<string>> => {
+    const $ls = get_store(ls);
     try {
         const res = await http.fetch({
             url: `${PUBLIC_RADROOTS_URL}/public/accounts/list`,
@@ -27,14 +26,14 @@ export const fetch_radroots_profile_validate = async (opts: {
             );
             if (existing_profile)
                 return err_msg(
-                    `${`${$t(`icu.the_*_is_registered`, { value: `${$t(`common.profile_name`)}`.toLowerCase() })} `}`,
+                    `${`${$ls(`icu.the_*_is_registered`, { value: `${$ls(`common.profile_name`)}`.toLowerCase() })} `}`,
                 );
             return { profile_name: opts.profile_name };
         }
-        return err_msg(`${$t(`error.client.request_failure`)}`);
+        return err_msg(`${$ls(`error.client.request_failure`)}`);
     } catch (e) {
         await catch_err(e, "fetch_radroots_profile_validate");
-        return err_msg(`${$t(`error.client.network_failure`)}`);
+        return err_msg(`${$ls(`error.client.network_failure`)}`);
     }
 };
 
@@ -43,6 +42,7 @@ export const fetch_radroots_profile_init = async (opts: {
     secret_key: string;
     nostr_relays?: string[];
 }): Promise<{ tok: string } | ErrorMessage<string>> => {
+    const $ls = get_store(ls);
     try {
         const res = await http.fetch({
             url: `${PUBLIC_RADROOTS_URL}/public/accounts/add/init`,
@@ -65,18 +65,19 @@ export const fetch_radroots_profile_init = async (opts: {
             return { tok: res.data.tok };
         } else if (res.data && `message` in res.data)
             return err_msg(
-                `${$t(`radroots-org.error.${res.data.message}`)}`,
+                `${$ls(`radroots-org.error.${res.data.message}`)}`,
             );
-        return err_msg(`${$t(`error.client.request_failure`)}`);
+        return err_msg(`${$ls(`error.client.request_failure`)}`);
     } catch (e) {
         await catch_err(e, "fetch_radroots_profile_init");
-        return err_msg(`${$t(`error.client.network_failure`)}`);
+        return err_msg(`${$ls(`error.client.network_failure`)}`);
     }
 };
 
 export const fetch_radroots_profile_confirm = async (
     authorization: string,
 ): Promise<{ pass: true } | ErrorMessage<string>> => {
+    const $ls = get_store(ls);
     try {
         const res = await http.fetch({
             url: `${PUBLIC_RADROOTS_URL}/public/accounts/add/conf`,
@@ -87,7 +88,7 @@ export const fetch_radroots_profile_confirm = async (
         return { pass: true };
     } catch (e) {
         await catch_err(e, "fetch_radroots_profile_confirm");
-        return err_msg(`${$t(`error.client.network_failure`)}`);
+        return err_msg(`${$ls(`error.client.network_failure`)}`);
     }
 };
 
@@ -97,6 +98,7 @@ export const fetch_radroots_profile_status = async (
     | { active: { public_key: string; nip_05?: string } }
     | ErrorMessage<string>
 > => {
+    const $ls = get_store(ls);
     try {
         const res = await http.fetch({
             url: `${PUBLIC_RADROOTS_URL}/public/accounts/add/status`,
@@ -118,9 +120,9 @@ export const fetch_radroots_profile_status = async (
                             : undefined,
                 },
             };
-        return err_msg(`${$t(`error.client.network_failure`)}`);
+        return err_msg(`${$ls(`error.client.network_failure`)}`);
     } catch (e) {
         await catch_err(e, "fetch_radroots_profile_status");
-        return err_msg(`${$t(`error.client.network_failure`)}`);
+        return err_msg(`${$ls(`error.client.network_failure`)}`);
     }
 };

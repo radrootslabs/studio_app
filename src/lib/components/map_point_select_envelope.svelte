@@ -8,7 +8,7 @@
         envelope_visible,
         EnvelopeLower,
         Glyph,
-        t,
+        ls,
         type CallbackPromise,
     } from "@radroots/svelte-lib";
     import { MapLibre, Marker } from "@radroots/svelte-maplibre";
@@ -144,7 +144,7 @@
                 <p
                     class={`font-sans font-[400] text-layer-0-glyph text-[1rem] capitalize`}
                 >
-                    {`${$t(`common.back`)}`}
+                    {`${$ls(`common.back`)}`}
                 </p>
             </button>
         </div>

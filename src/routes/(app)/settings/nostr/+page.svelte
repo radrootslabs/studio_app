@@ -5,8 +5,8 @@
         LayoutTrellis,
         LayoutView,
         Nav,
-        t,
         Trellis,
+        ls,
         type ISelectOption,
     } from "@radroots/svelte-lib";
     import { onMount } from "svelte";
@@ -17,7 +17,7 @@
         select_options: [
             {
                 value: ascii.bullet,
-                label: `${$t(`icu.choose_*`, { value: `${$t(`common.photo_hosting`)}`.toLowerCase() })}`,
+                label: `${$ls(`icu.choose_*`, { value: `${$ls(`common.photo_hosting`)}`.toLowerCase() })}`,
                 disabled: true,
             },
             {
@@ -26,7 +26,7 @@
             },
             {
                 value: `*add`,
-                label: `${$t(`icu.add_*`, { value: `${$t(`common.upload_url`)}`.toLowerCase() })}`,
+                label: `${$ls(`icu.add_*`, { value: `${$ls(`common.upload_url`)}`.toLowerCase() })}`,
             },
             {
                 value: `*disable`,
@@ -129,12 +129,12 @@
 <Nav
     basis={{
         prev: {
-            label: `${$t(`common.settings`)}`,
+            label: `${$ls(`common.settings`)}`,
             route: `/settings`,
         },
         title: {
             label: {
-                value: `${$t(`common.nostr`)}`,
+                value: `${$ls(`common.nostr`)}`,
             },
         },
     }}

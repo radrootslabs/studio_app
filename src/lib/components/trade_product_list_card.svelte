@@ -11,8 +11,8 @@
         Glyph,
         ImagePath,
         locale,
+        ls,
         route,
-        t,
     } from "@radroots/svelte-lib";
     import {
         fmt_currency_price,
@@ -97,7 +97,7 @@
             }}
         >
             <p class={`font-sans font-[500] text-layer-0-glyph`}>
-                {`${$t(`common.view`)}`}
+                {`${$ls(`common.view`)}`}
             </p>
         </button>
     </div>
@@ -178,7 +178,7 @@
                             <p
                                 class={`font-sans font-[500] text-[1rem] text-layer-0-glyph group-active:text-layer-0-glyph_a el-re`}
                             >
-                                {`${$t(`icu.no_*`, { value: `${$t(`common.photos`)}`.toLowerCase() })}`}
+                                {`${$ls(`icu.no_*`, { value: `${$ls(`common.photos`)}`.toLowerCase() })}`}
                             </p>
                         </div>
                     </div>
@@ -211,7 +211,7 @@
                             basis={{
                                 classes: `col-span-12`,
                                 label: {
-                                    value: `${$t(`common.origin`)}`,
+                                    value: `${$ls(`common.origin`)}`,
                                 },
                                 data: {
                                     value: `${fmt_geol_latitude(
@@ -239,10 +239,10 @@
                                 basis={{
                                     classes: `col-span-12`,
                                     label: {
-                                        value: `${$t(`common.price`)}`,
+                                        value: `${$ls(`common.price`)}`,
                                     },
                                     data: {
-                                        value: `${price ? fmt_currency_price(price) : ``} / ${`${$t(`measurement.mass.unit.${trade_product.price_qty_unit}_ab`)}`}`,
+                                        value: `${price ? fmt_currency_price(price) : ``} / ${`${$ls(`measurement.mass.unit.${trade_product.price_qty_unit}_ab`)}`}`,
                                     },
                                 }}
                             />
@@ -251,10 +251,10 @@
                             basis={{
                                 classes: `col-span-12`,
                                 label: {
-                                    value: `${$t(`icu.*_order`, { value: `${$t(`common.quantity`)}` })}`,
+                                    value: `${$ls(`icu.*_order`, { value: `${$ls(`common.quantity`)}` })}`,
                                 },
                                 data: {
-                                    value: `${trade_product.qty_amt} / ${`${$t(`measurement.mass.unit.${trade_product.qty_unit}_ab`)}`}`,
+                                    value: `${trade_product.qty_amt} / ${`${$ls(`measurement.mass.unit.${trade_product.qty_unit}_ab`)}`}`,
                                 },
                             }}
                         />
@@ -262,10 +262,10 @@
                             basis={{
                                 classes: `col-span-12`,
                                 label: {
-                                    value: `${$t(`icu.*_available`, { value: `${$t(`common.quantity`)}` })}`,
+                                    value: `${$ls(`icu.*_available`, { value: `${$ls(`common.quantity`)}` })}`,
                                 },
                                 data: {
-                                    value: `${tradeproduct_qty_avail} ${trade_product.qty_label || fmt_plural_agreement(tradeproduct_qty_avail, `${$t(`common.bag`)}`, `${$t(`common.bags`)}`)}`,
+                                    value: `${tradeproduct_qty_avail} ${trade_product.qty_label || fmt_plural_agreement(tradeproduct_qty_avail, `${$ls(`common.bag`)}`, `${$ls(`common.bags`)}`)}`,
                                 },
                             }}
                         />
@@ -273,10 +273,10 @@
                             basis={{
                                 classes: `col-span-12`,
                                 label: {
-                                    value: `${$t(`icu.*_sold`, { value: `${$t(`common.quantity`)}` })}`,
+                                    value: `${$ls(`icu.*_sold`, { value: `${$ls(`common.quantity`)}` })}`,
                                 },
                                 data: {
-                                    value: `${tradeproduct_qty_sold} ${trade_product.qty_label || fmt_plural_agreement(tradeproduct_qty_sold, `${$t(`common.bag`)}`, `${$t(`common.bags`)}`)}`,
+                                    value: `${tradeproduct_qty_sold} ${trade_product.qty_label || fmt_plural_agreement(tradeproduct_qty_sold, `${$ls(`common.bag`)}`, `${$ls(`common.bags`)}`)}`,
                                 },
                             }}
                         />
@@ -284,7 +284,7 @@
                             basis={{
                                 classes: `col-span-12`,
                                 label: {
-                                    value: `${$t(`common.lot`)}`,
+                                    value: `${$ls(`common.lot`)}`,
                                 },
                                 data: {
                                     classes: `capitalize`,
@@ -296,7 +296,7 @@
                             basis={{
                                 classes: `col-span-12`,
                                 label: {
-                                    value: `${$t(`common.process`)}`,
+                                    value: `${$ls(`common.process`)}`,
                                 },
                                 data: {
                                     classes: `capitalize`,
@@ -308,7 +308,7 @@
                             basis={{
                                 classes: `col-span-12`,
                                 label: {
-                                    value: `${$t(`common.profile`)}`,
+                                    value: `${$ls(`common.profile`)}`,
                                 },
                                 data: {
                                     classes: `capitalize`,
@@ -320,7 +320,7 @@
                             basis={{
                                 classes: `col-span-12`,
                                 label: {
-                                    value: `${$t(`common.year`)}`,
+                                    value: `${$ls(`common.year`)}`,
                                 },
                                 data: {
                                     value: `${trade_product.year}`,
@@ -334,10 +334,10 @@
                                 basis={{
                                     classes: `col-span-12`,
                                     label: {
-                                        value: `${$t(`icu.total_*`, { value: `${$t(`common.value`)}` })}`,
+                                        value: `${$ls(`icu.total_*`, { value: `${$ls(`common.value`)}` })}`,
                                     },
                                     data: {
-                                        value: `${price ? fmt_currency_price(price) : ``} / ${`${$t(`measurement.mass.unit.${trade_product.price_qty_unit}_ab`)}`}`,
+                                        value: `${price ? fmt_currency_price(price) : ``} / ${`${$ls(`measurement.mass.unit.${trade_product.price_qty_unit}_ab`)}`}`,
                                     },
                                 }}
                             />

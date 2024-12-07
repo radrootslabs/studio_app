@@ -2,7 +2,9 @@ import { db, device, dialog } from "$lib/client";
 import { err, nostr_client, root_symbol } from "$lib/conf";
 import { NDKKind } from "@nostr-dev-kit/ndk";
 import type { NostrRelay } from "@radroots/models";
-import { app_nostr_key, ndk, ndk_user, nostr_sync_prevent, t } from "@radroots/svelte-lib";
+import {
+    app_nostr_key, ls, ndk, ndk_user, nostr_sync_prevent
+} from "@radroots/svelte-lib";
 import { fmt_tags_basis_nip99, ndk_event, ndk_event_metadata, nevent_encode, num_str } from "@radroots/utils";
 import { get as get_store } from "svelte/store";
 import { throw_err } from "./error";
@@ -108,12 +110,12 @@ export const nostr_sync_classified = async (nostr_relays: NostrRelay[]): Promise
 
 export const nostr_sync = async (): Promise<void> => {
     const $nostr_sync_prevent = get_store(nostr_sync_prevent);
-    const $t = get_store(t);
+    const $ls = get_store(ls);
     const $app_nostr_key = get_store(app_nostr_key);
     try {
         if ($nostr_sync_prevent) {
             const confirm = await dialog.confirm({
-                message: `${$t(`error.client.nostr_sync_disabled`)}`,
+                message: `${$ls(`error.client.nostr_sync_disabled`)}`,
             });
             if (confirm) {
                 nostr_sync_prevent.set(false);

@@ -5,8 +5,8 @@
         app_notify,
         LayoutTrellis,
         LayoutView,
+        ls,
         Nav,
-        t,
         Trellis,
     } from "@radroots/svelte-lib";
     import { onMount } from "svelte";
@@ -34,7 +34,7 @@
                 list: [`all`],
             });
             if (`err` in location_gcss) {
-                app_notify.set(`${$t(`error.client.page.load`)}`);
+                app_notify.set(`${$ls(`error.client.page.load`)}`);
                 return;
             }
             return {
@@ -65,7 +65,7 @@
                         args: {
                             layer: 1,
                             title: {
-                                value: `${$t(`icu.your_*`, { value: `${$t(`common.locations`)}` })}`,
+                                value: `${$ls(`icu.your_*`, { value: `${$ls(`common.locations`)}` })}`,
                             },
                             list: [
                                 {
@@ -138,19 +138,19 @@
 <Nav
     basis={{
         prev: {
-            label: `${$t(`common.home`)}`,
+            label: `${$ls(`common.home`)}`,
             route: `/`,
         },
         title: {
             label: {
-                value: `${$t(`common.locations`)}`,
+                value: `${$ls(`common.locations`)}`,
             },
         },
         option:
             ld && ld?.location_gcss?.length > 0
                 ? {
                       label: {
-                          value: `${$t(`common.add`)}`,
+                          value: `${$ls(`common.add`)}`,
                           classes: `tap-color`,
                       },
                       callback: async () => {

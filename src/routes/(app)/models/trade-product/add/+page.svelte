@@ -45,11 +45,11 @@
         LayoutView,
         Loading,
         locale,
+        ls,
         Nav,
         route,
         SelectElement,
         sleep,
-        t,
         view_effect,
     } from "@radroots/svelte-lib";
     import {
@@ -91,13 +91,13 @@
                 [
                     0,
                     {
-                        label_next: `${$t(`common.add`)}`,
+                        label_next: `${$ls(`common.add`)}`,
                     },
                 ],
                 [
                     1,
                     {
-                        label_next: `${$t(`common.add`)}`,
+                        label_next: `${$ls(`common.add`)}`,
                     },
                 ],
                 [
@@ -293,7 +293,7 @@
             const kv_curr = await kv.get(fmt_id(`key`));
             if (kv_curr) {
                 const confirm = await dialog.confirm({
-                    message: `${$t(`icu.the_current_entry_*_will_be_deleted`, { value: kv_curr })}. ${$t(`common.do_you_want_to_continue_q`)}`,
+                    message: `${$ls(`icu.the_current_entry_*_will_be_deleted`, { value: kv_curr })}. ${$ls(`common.do_you_want_to_continue_q`)}`,
                 });
                 if (!confirm) return;
             }
@@ -311,7 +311,7 @@
             const kv_curr = await kv.get(fmt_id(`process`));
             if (kv_curr) {
                 const confirm = await dialog.confirm({
-                    message: `${$t(`icu.the_current_entry_*_will_be_deleted`, { value: kv_curr })}. ${$t(`common.do_you_want_to_continue_q`)}`,
+                    message: `${$ls(`icu.the_current_entry_*_will_be_deleted`, { value: kv_curr })}. ${$ls(`common.do_you_want_to_continue_q`)}`,
                 });
                 if (!confirm) return;
             }
@@ -333,7 +333,7 @@
                 if (kv_curr) {
                     const kv_curr_unit = await kv.get(fmt_id(`qty_unit`));
                     const confirm = await dialog.confirm({
-                        message: `${$t(`icu.the_current_entry_*_will_be_deleted`, { value: `${kv_curr}${kv_curr_unit ? ` ${kv_curr_unit}` : `${$t(`measurement.mass.unit.${kv_curr_unit}_ab`)}`}` })}. ${$t(`common.do_you_want_to_continue_q`)}`,
+                        message: `${$ls(`icu.the_current_entry_*_will_be_deleted`, { value: `${kv_curr}${kv_curr_unit ? ` ${kv_curr_unit}` : `${$ls(`measurement.mass.unit.${kv_curr_unit}_ab`)}`}` })}. ${$ls(`common.do_you_want_to_continue_q`)}`,
                     });
                     if (!confirm) return;
                     await kv.delete(fmt_id(`qty_amt`));
@@ -350,7 +350,7 @@
             const geolc = await geol.current();
             if (`err` in geolc) {
                 await dialog.alert(
-                    `${$t(`icu.failure_*`, { value: `${$t(`icu.reading_*`, { value: `${$t(`common.geocode`)}`.toLowerCase() })}` })}`,
+                    `${$ls(`icu.failure_*`, { value: `${$ls(`icu.reading_*`, { value: `${$ls(`common.geocode`)}`.toLowerCase() })}` })}`,
                 );
                 return;
             }
@@ -403,7 +403,7 @@
                                         });
                                     if (`err` in validate_fields) {
                                         await dialog.alert(
-                                            `${$t(`icu.enter_the_*`, { value: `${$t(`models.trade_product.fields.${validate_fields.err}.label`)}`.toLowerCase() })}`,
+                                            `${$ls(`icu.enter_the_*`, { value: `${$ls(`models.trade_product.fields.${validate_fields.err}.label`)}`.toLowerCase() })}`,
                                         );
                                         return;
                                     }
@@ -423,7 +423,7 @@
                                         });
                                     if (`err` in validate_fields) {
                                         await dialog.alert(
-                                            `${$t(`icu.enter_the_*`, { value: `${$t(`models.trade_product.fields.${validate_fields.err}.label`)}`.toLowerCase() })}`,
+                                            `${$ls(`icu.enter_the_*`, { value: `${$ls(`models.trade_product.fields.${validate_fields.err}.label`)}`.toLowerCase() })}`,
                                         );
                                         return;
                                     }
@@ -445,9 +445,9 @@
             load_submit = true;
             if (!tradepr_photo_paths.length) {
                 const confirm = await dialog.confirm({
-                    message: `${`${$t(`icu.the_listing_will_be_created_without_a_*`, { value: `${$t(`common.photo`)}`.toLowerCase() })}`}. ${$t(`common.do_you_want_to_continue_q`)}`,
-                    cancel_label: `${$t(`icu.add_*`, { value: `${$t(`common.photo`)}` })}`,
-                    ok_label: `${$t(`common.continue`)}`,
+                    message: `${`${$ls(`icu.the_listing_will_be_created_without_a_*`, { value: `${$ls(`common.photo`)}`.toLowerCase() })}`}. ${$ls(`common.do_you_want_to_continue_q`)}`,
+                    cancel_label: `${$ls(`icu.add_*`, { value: `${$ls(`common.photo`)}` })}`,
+                    ok_label: `${$ls(`common.continue`)}`,
                 });
                 if (!confirm) {
                     await el_focus(
@@ -478,9 +478,9 @@
                         await dialog.alert(
                             `err` in location_gcs_add_geocode
                                 ? err_system(location_gcs_add_geocode.err)
-                                    ? `${$t(`error.client.database_read_failure`)}`
-                                    : `${$t(`icu.the_*_is_incomplete`, { value: `${$t(`models.location_gcs.fields.${location_gcs_add_geocode.err}.label`)}`.toLowerCase() })}`
-                                : `${$t(`${location_gcs_add_geocode.err_s[0]}`)}`,
+                                    ? `${$ls(`error.client.database_read_failure`)}`
+                                    : `${$ls(`icu.the_*_is_incomplete`, { value: `${$ls(`models.location_gcs.fields.${location_gcs_add_geocode.err}.label`)}`.toLowerCase() })}`
+                                : `${$ls(`${location_gcs_add_geocode.err_s[0]}`)}`,
                         );
                         return;
                     }
@@ -492,8 +492,8 @@
             });
             if (`err` in location_gcs_get_c) {
                 const confirm = await dialog.confirm({
-                    message: `${$t(`icu.a_*_is_required`, { value: `${$t(`common.location`)}`.toLowerCase() })}`,
-                    ok_label: `${$t(`icu.add_*`, { value: `${$t(`common.location`)}` })}`,
+                    message: `${$ls(`icu.a_*_is_required`, { value: `${$ls(`common.location`)}`.toLowerCase() })}`,
+                    ok_label: `${$ls(`icu.add_*`, { value: `${$ls(`common.location`)}` })}`,
                 });
                 if (confirm) {
                     await el_focus(
@@ -543,13 +543,13 @@
             }
             if (photo_path_uploads_error.length) {
                 const confirm = await dialog.confirm({
-                    message: `${$t(photo_path_uploads_error[0].message)}`, //@todo
+                    message: `${$ls(photo_path_uploads_error[0].message)}`, //@todo
                     ok_label: photo_path_uploads_error[0].label_ok
-                        ? `${$t(photo_path_uploads_error[0].label_ok)}` ||
+                        ? `${$ls(photo_path_uploads_error[0].label_ok)}` ||
                           undefined
                         : undefined,
                     cancel_label: photo_path_uploads_error[0].label_cancel
-                        ? `${$t(photo_path_uploads_error[0].label_cancel)}` ||
+                        ? `${$ls(photo_path_uploads_error[0].label_cancel)}` ||
                           undefined
                         : undefined,
                 });
@@ -560,12 +560,12 @@
             }
             if (photo_path_uploads_err.length) {
                 await dialog.alert(
-                    `${$t(`icu.there_was_a_failure_while_*`, {
-                        value: `${$t(`icu.uploading_*_photos`, {
+                    `${$ls(`icu.there_was_a_failure_while_*`, {
+                        value: `${$ls(`icu.uploading_*_photos`, {
                             value:
                                 photo_path_uploads_err.length ===
                                 tradepr_photo_paths.length
-                                    ? `${$t(`common.all`)}`
+                                    ? `${$ls(`common.all`)}`
                                     : `${photo_path_uploads_err.length}`,
                         })}`.toLowerCase(),
                     })}`,
@@ -596,7 +596,7 @@
             });
             if (`err` in trade_product_fields) {
                 await dialog.alert(
-                    `${$t(`icu.the_*_is_incomplete`, { value: `${$t(`models.trade_product.fields.${trade_product_fields.err}.label`)}`.toLowerCase() })}`,
+                    `${$ls(`icu.the_*_is_incomplete`, { value: `${$ls(`models.trade_product.fields.${trade_product_fields.err}.label`)}`.toLowerCase() })}`,
                 );
                 return;
             }
@@ -605,8 +605,8 @@
             if (`err` in trade_product_add || `err_s` in trade_product_add) {
                 await dialog.alert(
                     `err` in trade_product_add
-                        ? `${$t(`icu.the_*_is_incomplete`, { value: `${$t(`models.trade_product.fields.${trade_product_add.err}.label`)}`.toLowerCase() })}`
-                        : `${$t(`${trade_product_add.err_s[0]}`)}`,
+                        ? `${$ls(`icu.the_*_is_incomplete`, { value: `${$ls(`models.trade_product.fields.${trade_product_add.err}.label`)}`.toLowerCase() })}`
+                        : `${$ls(`${trade_product_add.err_s[0]}`)}`,
                 );
                 return;
             }
@@ -685,7 +685,7 @@
                         <LayoutTrellisLine
                             basis={{
                                 label: {
-                                    value: `${$t(`icu.listing_*`, { value: `${$t(`common.title`)}` })}`,
+                                    value: `${$ls(`icu.listing_*`, { value: `${$ls(`common.title`)}` })}`,
                                 },
                             }}
                         >
@@ -700,7 +700,7 @@
                                         layer: 1,
                                         sync: true,
                                         classes: `fade-in-long`,
-                                        placeholder: `${$t(`icu.enter_*`, { value: `${$t(`common.title`)}`.toLowerCase() })}`,
+                                        placeholder: `${$ls(`icu.enter_*`, { value: `${$ls(`common.title`)}`.toLowerCase() })}`,
                                         field: {
                                             charset:
                                                 trade_product_form_fields.title
@@ -717,12 +717,12 @@
                         <LayoutTrellisLine
                             basis={{
                                 label: {
-                                    value: `${$t(`common.product`)}`,
+                                    value: `${$ls(`common.product`)}`,
                                 },
                                 notify: tradepr_key_sel_toggle
                                     ? {
                                           label: {
-                                              value: `${$t(`common.close`)}`,
+                                              value: `${$ls(`common.close`)}`,
                                           },
                                           callback: async () => {
                                               await handle_tradepr_key_toggle(
@@ -750,18 +750,18 @@
                                                     entries: [
                                                         {
                                                             value: ``,
-                                                            label: `${$t(`icu.choose_*`, { value: `${$t(`common.product`)}`.toLowerCase() })}`,
+                                                            label: `${$ls(`icu.choose_*`, { value: `${$ls(`common.product`)}`.toLowerCase() })}`,
                                                             disabled: true,
                                                         },
                                                         ...trade_keys.map(
                                                             (i) => ({
                                                                 value: i,
-                                                                label: `${$t(`trade.product.key.${i}.name`)}`,
+                                                                label: `${$ls(`trade.product.key.${i}.name`)}`,
                                                             }),
                                                         ),
                                                         {
                                                             value: ``,
-                                                            label: `${$t(`common.other`)}`,
+                                                            label: `${$ls(`common.other`)}`,
                                                         },
                                                     ],
                                                 },
@@ -797,7 +797,7 @@
                                             layer: 1,
                                             sync: true,
                                             classes: `fade-in-long`,
-                                            placeholder: `${$t(`icu.enter_the_*`, { value: `${$t(`icu.*_name`, { value: `${$t(`common.product`)}` })}`.toLowerCase() })}`,
+                                            placeholder: `${$ls(`icu.enter_the_*`, { value: `${$ls(`icu.*_name`, { value: `${$ls(`common.product`)}` })}`.toLowerCase() })}`,
                                             field: {
                                                 charset:
                                                     trade_product_form_fields
@@ -815,12 +815,12 @@
                         <LayoutTrellisLine
                             basis={{
                                 label: {
-                                    value: `${$t(`common.process`)}`,
+                                    value: `${$ls(`common.process`)}`,
                                 },
                                 notify: tradepr_process_sel_toggle
                                     ? {
                                           label: {
-                                              value: `${$t(`common.close`)}`,
+                                              value: `${$ls(`common.close`)}`,
                                           },
                                           callback: async () => {
                                               await handle_tradepr_process_toggle(
@@ -850,30 +850,30 @@
                                                             ? [
                                                                   {
                                                                       value: ``,
-                                                                      label: `${$t(`icu.choose_*`, { value: `${$t(`common.process`)}`.toLowerCase() })}`,
+                                                                      label: `${$ls(`icu.choose_*`, { value: `${$ls(`common.process`)}`.toLowerCase() })}`,
                                                                       disabled: true,
                                                                   },
                                                                   ...tradepr_process_list.map(
                                                                       (i) => ({
                                                                           value: i,
-                                                                          label: `${$t(`trade.product.key.${tradepr_key_parsed}.process.${i}`)}`,
+                                                                          label: `${$ls(`trade.product.key.${tradepr_key_parsed}.process.${i}`)}`,
                                                                       }),
                                                                   ),
                                                                   {
                                                                       value: ``,
-                                                                      label: `${$t(`common.other`)}`,
+                                                                      label: `${$ls(`common.other`)}`,
                                                                   },
                                                               ]
                                                             : [
                                                                   {
                                                                       value: ``,
-                                                                      label: `${$t(`icu.choose_*`, { value: `${$t(`common.process`)}`.toLowerCase() })}`,
+                                                                      label: `${$ls(`icu.choose_*`, { value: `${$ls(`common.process`)}`.toLowerCase() })}`,
                                                                       disabled: true,
                                                                   },
 
                                                                   {
                                                                       value: `*choose-product`,
-                                                                      label: `${$t(`icu.choose_*`, { value: `${$t(`common.product`)}`.toLowerCase() })}`,
+                                                                      label: `${$ls(`icu.choose_*`, { value: `${$ls(`common.product`)}`.toLowerCase() })}`,
                                                                   },
                                                               ],
                                                 },
@@ -905,7 +905,7 @@
                                             layer: 1,
                                             sync: true,
                                             classes: `fade-in-long`,
-                                            placeholder: `${$t(`icu.enter_the_*`, { value: `${$t(`common.process`)}`.toLowerCase() })}`,
+                                            placeholder: `${$ls(`icu.enter_the_*`, { value: `${$ls(`common.process`)}`.toLowerCase() })}`,
                                             field: {
                                                 charset:
                                                     trade_product_form_fields
@@ -923,7 +923,7 @@
                         <LayoutTrellisLine
                             basis={{
                                 label: {
-                                    value: `${$t(`common.location`)}`,
+                                    value: `${$ls(`common.location`)}`,
                                 },
                             }}
                         >
@@ -944,12 +944,12 @@
                                                     ? [
                                                           {
                                                               value: ``,
-                                                              label: `${$t(`icu.choose_*`, { value: `${$t(`common.location`)}`.toLowerCase() })}`,
+                                                              label: `${$ls(`icu.choose_*`, { value: `${$ls(`common.location`)}`.toLowerCase() })}`,
                                                               disabled: true,
                                                           },
                                                           {
                                                               value: `*map`,
-                                                              label: `${$t(`icu.choose_on_*`, { value: `${$t(`common.map`)}`.toLowerCase() })}`,
+                                                              label: `${$ls(`icu.choose_on_*`, { value: `${$ls(`common.map`)}`.toLowerCase() })}`,
                                                           },
                                                           {
                                                               value: `*geoc`,
@@ -965,12 +965,12 @@
                                                     : [
                                                           {
                                                               value: ``,
-                                                              label: `${$t(`icu.choose_*`, { value: `${$t(`common.location`)}`.toLowerCase() })}`,
+                                                              label: `${$ls(`icu.choose_*`, { value: `${$ls(`common.location`)}`.toLowerCase() })}`,
                                                               disabled: true,
                                                           },
                                                           {
                                                               value: `*map`,
-                                                              label: `${$t(`icu.choose_on_*`, { value: `${$t(`common.map`)}`.toLowerCase() })}`,
+                                                              label: `${$ls(`icu.choose_on_*`, { value: `${$ls(`common.map`)}`.toLowerCase() })}`,
                                                           },
                                                           ...tradepr_lgc_list.map(
                                                               (i) => ({
@@ -1014,7 +1014,7 @@
                                     <p
                                         class={`font-sans font-[400] text-[1.05rem] text-layer-1-glyph_d`}
                                     >
-                                        {`${$t(`common.listing`)}`}
+                                        {`${$ls(`common.listing`)}`}
                                     </p>
                                 </div>
                                 <div
@@ -1026,10 +1026,10 @@
                                         <TradeFieldDisplayKv
                                             basis={{
                                                 visible: $carousel_index === 1,
-                                                label: `${$t(`common.title`)}`,
+                                                label: `${$ls(`common.title`)}`,
                                                 display: {
                                                     kv: `title`,
-                                                    undef: `${$t(`icu.no_*`, { value: `${$t(`common.title`)}`.toLowerCase() })}`,
+                                                    undef: `${$ls(`icu.no_*`, { value: `${$ls(`common.title`)}`.toLowerCase() })}`,
                                                 },
                                                 handle_back: async () => {
                                                     await handle_back(1);
@@ -1039,10 +1039,10 @@
                                         <TradeFieldDisplayKv
                                             basis={{
                                                 visible: $carousel_index === 1,
-                                                label: `${$t(`common.product`)}`,
+                                                label: `${$ls(`common.product`)}`,
                                                 display: {
                                                     kv: `key`,
-                                                    undef: `${$t(`icu.no_*`, { value: `${$t(`common.product`)}`.toLowerCase() })}`,
+                                                    undef: `${$ls(`icu.no_*`, { value: `${$ls(`common.product`)}`.toLowerCase() })}`,
                                                 },
                                                 handle_back: async () => {
                                                     await handle_back(1);
@@ -1052,10 +1052,10 @@
                                         <TradeFieldDisplayKv
                                             basis={{
                                                 visible: $carousel_index === 1,
-                                                label: `${$t(`common.process`)}`,
+                                                label: `${$ls(`common.process`)}`,
                                                 display: {
                                                     kv: `process`,
-                                                    undef: `${$t(`icu.no_*`, { value: `${$t(`common.process`)}`.toLowerCase() })}`,
+                                                    undef: `${$ls(`icu.no_*`, { value: `${$ls(`common.process`)}`.toLowerCase() })}`,
                                                 },
                                                 handle_back: async () => {
                                                     await handle_back(1);
@@ -1066,12 +1066,12 @@
                                             basis={{
                                                 visible: $carousel_index === 1,
                                                 kv_wrap: `tradepr_location_wrap`,
-                                                label: `${$t(`common.location`)}`,
+                                                label: `${$ls(`common.location`)}`,
                                                 display: {
                                                     value: tradepr_lgc_sel_geoc
                                                         ? `${tradepr_lgc_sel_geoc.name}, ${tradepr_lgc_sel_geoc.admin1_name}, ${tradepr_lgc_sel_geoc.country_id}`
                                                         : ``,
-                                                    undef: `${$t(`icu.no_*`, { value: `${$t(`common.location`)}`.toLowerCase() })}`,
+                                                    undef: `${$ls(`icu.no_*`, { value: `${$ls(`common.location`)}`.toLowerCase() })}`,
                                                 },
                                                 handle_back: async () => {
                                                     await handle_back(1);
@@ -1085,7 +1085,7 @@
                         <LayoutTrellisLine
                             basis={{
                                 label: {
-                                    value: `${$t(`common.lot`)}`,
+                                    value: `${$ls(`common.lot`)}`,
                                 },
                             }}
                         >
@@ -1099,7 +1099,7 @@
                                         id: fmt_id(`lot`),
                                         layer: 1,
                                         sync: true,
-                                        placeholder: `${$t(`icu.enter_the_*`, { value: `${$t(`icu.*_name`, { value: `${$t(`common.lot`)}` })}`.toLowerCase() })}`,
+                                        placeholder: `${$ls(`icu.enter_the_*`, { value: `${$ls(`icu.*_name`, { value: `${$ls(`common.lot`)}` })}`.toLowerCase() })}`,
                                         field: {
                                             charset:
                                                 trade_product_form_fields.lot
@@ -1116,7 +1116,7 @@
                         <LayoutTrellisLine
                             basis={{
                                 label: {
-                                    value: `${$t(`icu.*_price`, { value: `${$t(`common.product`)}` })} (${tradepr_price_curr_sel}/${`${$t(`measurement.mass.unit.${tradepr_price_qty_unit_sel}_ab`)}`})`,
+                                    value: `${$ls(`icu.*_price`, { value: `${$ls(`common.product`)}` })} (${tradepr_price_curr_sel}/${`${$ls(`measurement.mass.unit.${tradepr_price_qty_unit_sel}_ab`)}`})`,
                                 },
                             }}
                         >
@@ -1159,7 +1159,7 @@
                                         id: fmt_id(`price_amt`),
                                         layer: 1,
                                         sync: true,
-                                        placeholder: `${$t(`icu.enter_the_*`, { value: `${$t(`common.price`)}`.toLowerCase() })}`,
+                                        placeholder: `${$ls(`icu.enter_the_*`, { value: `${$ls(`common.price`)}`.toLowerCase() })}`,
                                         field: {
                                             charset:
                                                 trade_product_form_fields
@@ -1223,7 +1223,7 @@
                                                     entries: mass_units.map(
                                                         (i) => ({
                                                             value: i,
-                                                            label: `${$t(`measurement.mass.unit.${i}_ab`)}`.toLowerCase(),
+                                                            label: `${$ls(`measurement.mass.unit.${i}_ab`)}`.toLowerCase(),
                                                         }),
                                                     ),
                                                 },
@@ -1236,12 +1236,12 @@
                         <LayoutTrellisLine
                             basis={{
                                 label: {
-                                    value: `${$t(`icu.*_quantity`, { value: `${$t(`common.order`)}` })}`,
+                                    value: `${$ls(`icu.*_quantity`, { value: `${$ls(`common.order`)}` })}`,
                                 },
                                 notify: tradepr_qty_tup_sel_toggle
                                     ? {
                                           label: {
-                                              value: `${$t(`common.close`)}`,
+                                              value: `${$ls(`common.close`)}`,
                                           },
                                           callback: async () => {
                                               await handle_tradepr_qty_amt_toggle(
@@ -1267,7 +1267,7 @@
                                                     entries: [
                                                         {
                                                             value: ``,
-                                                            label: `${$t(`icu.choose_*`, { value: `${$t(`common.quantity`)}`.toLowerCase() })}`,
+                                                            label: `${$ls(`icu.choose_*`, { value: `${$ls(`common.quantity`)}`.toLowerCase() })}`,
                                                             disabled: true,
                                                         },
                                                         ...tradepr_key_quantities_list.map(
@@ -1275,12 +1275,12 @@
                                                                 value: fmt_trade_quantity_tup(
                                                                     i,
                                                                 ),
-                                                                label: `${i.mass} ${$t(`measurement.mass.unit.${i.mass_unit}_ab`)} ${i.label}`,
+                                                                label: `${i.mass} ${$ls(`measurement.mass.unit.${i.mass_unit}_ab`)} ${i.label}`,
                                                             }),
                                                         ),
                                                         {
                                                             value: ``,
-                                                            label: `${$t(`common.other`)}`,
+                                                            label: `${$ls(`common.other`)}`,
                                                         },
                                                     ],
                                                 },
@@ -1312,7 +1312,7 @@
                                             id: fmt_id(`qty_amt`),
                                             sync: true,
                                             layer: 1,
-                                            placeholder: `${$t(`icu.enter_*_per_order`, { value: `${$t(`measurement.mass.unit.${tradepr_qty_unit_sel}_ab`)}`.toLowerCase() })}`,
+                                            placeholder: `${$ls(`icu.enter_*_per_order`, { value: `${$ls(`measurement.mass.unit.${tradepr_qty_unit_sel}_ab`)}`.toLowerCase() })}`,
                                             field: {
                                                 charset:
                                                     trade_product_form_fields
@@ -1340,7 +1340,7 @@
                                                         entries: mass_units.map(
                                                             (i) => ({
                                                                 value: i,
-                                                                label: `${$t(`measurement.mass.unit.${i}_ab`)}`,
+                                                                label: `${$ls(`measurement.mass.unit.${i}_ab`)}`,
                                                             }),
                                                         ),
                                                     },
@@ -1354,7 +1354,7 @@
                         <LayoutTrellisLine
                             basis={{
                                 label: {
-                                    value: `${$t(`common.description`)}`,
+                                    value: `${$ls(`common.description`)}`,
                                 },
                             }}
                         >
@@ -1367,7 +1367,7 @@
                                         classes: `h-[7rem]`,
                                         id: fmt_id(`summary`),
                                         sync: true,
-                                        placeholder: `${$t(`icu.enter_the_*`, { value: `${$t(`icu.*_description`, { value: `${$t(`common.listing`)}` })}`.toLowerCase() })}`,
+                                        placeholder: `${$ls(`icu.enter_the_*`, { value: `${$ls(`icu.*_description`, { value: `${$ls(`common.listing`)}` })}`.toLowerCase() })}`,
                                         field: {
                                             charset:
                                                 trade_product_form_fields
@@ -1400,7 +1400,7 @@
                                     <p
                                         class={`font-sans font-[400] text-[1.05rem] text-layer-1-glyph_d`}
                                     >
-                                        {`${$t(`common.listing`)}`}
+                                        {`${$ls(`common.listing`)}`}
                                     </p>
                                 </div>
                                 <div
@@ -1412,10 +1412,10 @@
                                         <TradeFieldDisplayKv
                                             basis={{
                                                 visible: $carousel_index === 2,
-                                                label: `${$t(`common.title`)}`,
+                                                label: `${$ls(`common.title`)}`,
                                                 display: {
                                                     kv: `title`,
-                                                    undef: `${$t(`icu.no_*`, { value: `${$t(`common.title`)}`.toLowerCase() })}`,
+                                                    undef: `${$ls(`icu.no_*`, { value: `${$ls(`common.title`)}`.toLowerCase() })}`,
                                                 },
                                                 handle_back: async () => {
                                                     await handle_back(2);
@@ -1425,10 +1425,10 @@
                                         <TradeFieldDisplayKv
                                             basis={{
                                                 visible: $carousel_index === 2,
-                                                label: `${$t(`common.product`)}`,
+                                                label: `${$ls(`common.product`)}`,
                                                 display: {
                                                     kv: `key`,
-                                                    undef: `${$t(`icu.no_*`, { value: `${$t(`common.product`)}`.toLowerCase() })}`,
+                                                    undef: `${$ls(`icu.no_*`, { value: `${$ls(`common.product`)}`.toLowerCase() })}`,
                                                 },
                                                 handle_back: async () => {
                                                     await handle_back(2);
@@ -1438,10 +1438,10 @@
                                         <TradeFieldDisplayKv
                                             basis={{
                                                 visible: $carousel_index === 2,
-                                                label: `${$t(`common.process`)}`,
+                                                label: `${$ls(`common.process`)}`,
                                                 display: {
                                                     kv: `process`,
-                                                    undef: `${$t(`icu.no_*`, { value: `${$t(`common.process`)}`.toLowerCase() })}`,
+                                                    undef: `${$ls(`icu.no_*`, { value: `${$ls(`common.process`)}`.toLowerCase() })}`,
                                                 },
                                                 handle_back: async () => {
                                                     await handle_back(2);
@@ -1452,12 +1452,12 @@
                                             basis={{
                                                 visible: $carousel_index === 2,
                                                 kv_wrap: `tradepr_location_wrap`,
-                                                label: `${$t(`common.location`)}`,
+                                                label: `${$ls(`common.location`)}`,
                                                 display: {
                                                     value: tradepr_lgc_sel_geoc
                                                         ? `${tradepr_lgc_sel_geoc.name}, ${tradepr_lgc_sel_geoc.admin1_name}, ${tradepr_lgc_sel_geoc.country_id}`
                                                         : ``,
-                                                    undef: `${$t(`icu.no_*`, { value: `${$t(`common.location`)}`.toLowerCase() })}`,
+                                                    undef: `${$ls(`icu.no_*`, { value: `${$ls(`common.location`)}`.toLowerCase() })}`,
                                                 },
                                                 handle_back: async () => {
                                                     await handle_back(2);
@@ -1467,10 +1467,10 @@
                                         <TradeFieldDisplayKv
                                             basis={{
                                                 visible: $carousel_index === 2,
-                                                label: `${$t(`common.lot`)}`,
+                                                label: `${$ls(`common.lot`)}`,
                                                 display: {
                                                     kv: `lot`,
-                                                    undef: `${$t(`icu.no_*`, { value: `${$t(`common.lot`)}`.toLowerCase() })}`,
+                                                    undef: `${$ls(`icu.no_*`, { value: `${$ls(`common.lot`)}`.toLowerCase() })}`,
                                                 },
                                                 handle_back: async () => {
                                                     await handle_back(1);
@@ -1480,10 +1480,10 @@
                                         <TradeFieldDisplayKv
                                             basis={{
                                                 visible: $carousel_index === 2,
-                                                label: `${$t(`common.description`)}`,
+                                                label: `${$ls(`common.description`)}`,
                                                 display: {
                                                     kv: `summary`,
-                                                    undef: `${$t(`icu.no_*`, { value: `${$t(`common.description`)}`.toLowerCase() })}`,
+                                                    undef: `${$ls(`icu.no_*`, { value: `${$ls(`common.description`)}`.toLowerCase() })}`,
                                                 },
                                                 handle_back: async () => {
                                                     await handle_back(1);
@@ -1497,15 +1497,15 @@
                                         <TradeFieldDisplayKv
                                             basis={{
                                                 visible: $carousel_index === 2,
-                                                label: `${$t(`common.price`)}`,
+                                                label: `${$ls(`common.price`)}`,
                                                 kv_wrap: `price_wrap`,
                                                 display: {
                                                     value:
                                                         tradepr_cprice_amt &&
                                                         tradepr_price_qty_unit_sel
-                                                            ? `${fmt_currency_price(tradepr_cprice_amt)} / ${`${$t(`measurement.mass.unit.${tradepr_price_qty_unit_sel}_ab`)}`.toLowerCase()}`
+                                                            ? `${fmt_currency_price(tradepr_cprice_amt)} / ${`${$ls(`measurement.mass.unit.${tradepr_price_qty_unit_sel}_ab`)}`.toLowerCase()}`
                                                             : ``,
-                                                    undef: `${$t(`icu.no_*`, { value: `${$t(`common.price`)}`.toLowerCase() })}`,
+                                                    undef: `${$ls(`icu.no_*`, { value: `${$ls(`common.price`)}`.toLowerCase() })}`,
                                                     nostyle: true,
                                                 },
                                                 handle_back: async () => {
@@ -1516,12 +1516,12 @@
                                         <TradeFieldDisplayKv
                                             basis={{
                                                 visible: $carousel_index === 2,
-                                                label: `${$t(`icu.*_quantity`, { value: `${$t(`common.order`)}` })}`,
+                                                label: `${$ls(`icu.*_quantity`, { value: `${$ls(`common.order`)}` })}`,
                                                 display: {
                                                     value: tradepr_parsed_quantity
-                                                        ? `${tradepr_parsed_quantity.mass} ${`${$t(`measurement.mass.unit.${tradepr_parsed_quantity.mass_unit}_ab`)}`.toLowerCase()} ${tradepr_parsed_quantity.label || `${$t(`common.bag`)}`}`
+                                                        ? `${tradepr_parsed_quantity.mass} ${`${$ls(`measurement.mass.unit.${tradepr_parsed_quantity.mass_unit}_ab`)}`.toLowerCase()} ${tradepr_parsed_quantity.label || `${$ls(`common.bag`)}`}`
                                                         : ``,
-                                                    undef: `${$t(`icu.no_*`, { value: `${$t(`icu.*_quantity`, { value: `${$t(`common.order`)}` })}` })}`,
+                                                    undef: `${$ls(`icu.no_*`, { value: `${$ls(`icu.*_quantity`, { value: `${$ls(`common.order`)}` })}` })}`,
                                                     nostyle:
                                                         !!tradepr_parsed_quantity,
                                                 },
@@ -1534,7 +1534,7 @@
                                         <TradeFieldDisplayEl
                                             basis={{
                                                 visible: $carousel_index === 2,
-                                                label: `${$t(`icu.*_available`, { value: `${$t(`common.quantity`)}` })}${tradepr_parsed_quantity ? ` (${$tradepr_qty_avail})` : ``}`,
+                                                label: `${$ls(`icu.*_available`, { value: `${$ls(`common.quantity`)}` })}${tradepr_parsed_quantity ? ` (${$tradepr_qty_avail})` : ``}`,
                                                 display: {
                                                     classes:
                                                         tradepr_parsed_quantity
@@ -1597,7 +1597,7 @@
                                         <TradeFieldDisplayEl
                                             basis={{
                                                 visible: $carousel_index === 2,
-                                                label: `${$t(`icu.*_total`, { value: `${$t(`common.quantity`)}` })}`,
+                                                label: `${$ls(`icu.*_total`, { value: `${$ls(`common.quantity`)}` })}`,
                                                 display: {
                                                     classes:
                                                         tradepr_parsed_quantity
@@ -1609,7 +1609,7 @@
                                                                   tradepr_parsed_quantity.mass,
                                                           ).toFixed(
                                                               2,
-                                                          )} ${`${$t(`measurement.mass.unit.${tradepr_parsed_quantity.mass_unit}_ab`)}`.toLowerCase()}`
+                                                          )} ${`${$ls(`measurement.mass.unit.${tradepr_parsed_quantity.mass_unit}_ab`)}`.toLowerCase()}`
                                                         : ``,
                                                     undef: ascii.dash,
                                                     nostyle: true,
@@ -1623,7 +1623,7 @@
                                         <TradeFieldDisplayEl
                                             basis={{
                                                 visible: $carousel_index === 2,
-                                                label: `${$t(`icu.*_total`, { value: `${$t(`common.order`)}` })}`,
+                                                label: `${$ls(`icu.*_total`, { value: `${$ls(`common.order`)}` })}`,
                                                 display: {
                                                     classes:
                                                         tradepr_parsed_quantity &&
@@ -1650,7 +1650,7 @@
                             {#if load_submit}
                                 <Loading />
                             {:else}
-                                {`${$t(`common.post`)}`}
+                                {`${$ls(`common.post`)}`}
                             {/if}
                         </button>
                     </LayoutTrellis>
@@ -1689,7 +1689,7 @@
                                     <p
                                         class={`font-sans font-[400] text-[1.3rem] text-layer-0-glyph`}
                                     >
-                                        {`${$t(`common.complete`)}`}
+                                        {`${$ls(`common.complete`)}`}
                                     </p>
                                 </div>
                                 <div
@@ -1713,7 +1713,7 @@
                                         <p
                                             class={`font-sans font-[400] text-[1.1rem] text-layer-0-glyph`}
                                         >
-                                            {`${$t(`icu.click_to_*`, { value: `${$t(`icu.view_the_*`, { value: `${$t(`common.product`)}` })}`.toLowerCase() })}`}
+                                            {`${$ls(`icu.click_to_*`, { value: `${$ls(`icu.view_the_*`, { value: `${$ls(`common.product`)}` })}`.toLowerCase() })}`}
                                         </p>
                                     </button>
                                 </div>
@@ -1730,8 +1730,8 @@
         prev: {
             label:
                 view === `success`
-                    ? `${$t(`common.home`)}`
-                    : `${$t(`common.back`)}`,
+                    ? `${$ls(`common.home`)}`
+                    : `${$ls(`common.back`)}`,
             route: view === `success` ? `/` : `/models/trade-product`,
             prevent_route:
                 (view === `c_1` && $carousel_index === 0) || view === `success`
@@ -1750,7 +1750,7 @@
                 value:
                     view === `success`
                         ? ``
-                        : `${$t(`icu.new_*`, { value: `${$t(`common.product`)}` })}`,
+                        : `${$ls(`icu.new_*`, { value: `${$ls(`common.product`)}` })}`,
             },
             callback: async () => {},
         },
@@ -1758,7 +1758,7 @@
             label: {
                 value:
                     $carousel_num > 1
-                        ? `${$t(`common.back`)}`
+                        ? `${$ls(`common.back`)}`
                         : page_param.carousel[view].get($carousel_index)
                               ?.label_next || ``,
                 glyph:

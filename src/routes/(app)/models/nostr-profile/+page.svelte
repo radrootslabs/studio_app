@@ -9,11 +9,11 @@
         type ISelectOption,
         LayoutTrellis,
         LayoutView,
+        ls,
         Nav,
         nav_prev,
         route,
         SelectMenu,
-        t,
         TrellisTitle,
     } from "@radroots/svelte-lib";
     import { onMount } from "svelte";
@@ -30,23 +30,23 @@
         options_list: [
             {
                 value: `view-key`,
-                label: `${$t(`icu.view_*`, { value: `${$t(`common.details`)}`.toLowerCase() })}`,
+                label: `${$ls(`icu.view_*`, { value: `${$ls(`common.details`)}`.toLowerCase() })}`,
             },
             {
                 value: `edit-profile-name`,
-                label: `${$t(`icu.edit_*`, { value: `${$t(`common.profile_name`)}`.toLowerCase() })}`,
+                label: `${$ls(`icu.edit_*`, { value: `${$ls(`common.profile_name`)}`.toLowerCase() })}`,
             },
             {
                 value: `add-profile-name`,
-                label: `${$t(`icu.add_*`, { value: `${$t(`common.profile_name`)}`.toLowerCase() })}`,
+                label: `${$ls(`icu.add_*`, { value: `${$ls(`common.profile_name`)}`.toLowerCase() })}`,
             },
             {
                 value: `set-key-active`,
-                label: `${$t(`icu.set_as_*`, { value: `${$t(`common.active`)}`.toLowerCase() })}`,
+                label: `${$ls(`icu.set_as_*`, { value: `${$ls(`common.active`)}`.toLowerCase() })}`,
             },
             {
                 value: `delete-key`,
-                label: `${$t(`icu.delete_*`, { value: `${$t(`common.key`)}`.toLowerCase() })}`,
+                label: `${$ls(`icu.delete_*`, { value: `${$ls(`common.key`)}`.toLowerCase() })}`,
             },
         ],
     };
@@ -78,7 +78,7 @@
                 `nostr_profiles`,
             );
             if (`err` in nostr_profiles) {
-                app_notify.set(`${$t(`error.client.page.load`)}`);
+                app_notify.set(`${$ls(`error.client.page.load`)}`);
                 return;
             }
             const data: LoadData = {
@@ -152,7 +152,7 @@
                 <TrellisTitle
                     layer={0}
                     basis={{
-                        value: `${$t(`icu.*_list`, { value: `${$t(`common.profile`)}`.toLowerCase() })}`,
+                        value: `${$ls(`icu.*_list`, { value: `${$ls(`common.profile`)}`.toLowerCase() })}`,
                     }}
                 />
                 {#if ld.nostr_profiles.length}
@@ -168,7 +168,7 @@
                                     on:click|preventDefault={async () => {
                                         $nav_prev.push({
                                             route: `/models/nostr-profile`,
-                                            label: `${$t(`common.profiles`)}`,
+                                            label: `${$ls(`common.profiles`)}`,
                                         });
                                         await route(
                                             `/models/nostr-profile/view`,
@@ -184,7 +184,7 @@
                                         >
                                             {li.name
                                                 ? li.name
-                                                : `(${`${$t(`icu.no_*`, { value: `${$t(`common.profile`)}` })}`})`}
+                                                : `(${`${$ls(`icu.no_*`, { value: `${$ls(`common.profile`)}` })}`})`}
                                         </p>
                                         {#if li.public_key === $app_nostr_key}
                                             <div class={`flex flex-row`}>
@@ -194,7 +194,7 @@
                                                     <p
                                                         class={`font-mono font-[900] text-[0.7rem] text-white text-ellipsis overflow-hidden`}
                                                     >
-                                                        {`${$t(`common.active`)}`}
+                                                        {`${$ls(`common.active`)}`}
                                                     </p>
                                                 </div>
                                             </div>
@@ -212,7 +212,7 @@
                                                 <p
                                                     class={`font-mono font-[600] text-[0.9rem] text-layer-2-glyph lowercase line-clamp-1`}
                                                 >
-                                                    {`${$t(`common.key`)}`}
+                                                    {`${$ls(`common.key`)}`}
                                                 </p>
                                             </div>
                                         </div>
@@ -312,18 +312,18 @@
 <Nav
     basis={{
         prev: {
-            label: `${$t(`common.back`)}`,
+            label: `${$ls(`common.back`)}`,
             route: `/`,
         },
         title: {
             label: {
-                value: `${$t(`common.profiles`)}`,
+                value: `${$ls(`common.profiles`)}`,
             },
         },
         option: ld?.nostr_profiles?.length
             ? {
                   label: {
-                      value: `${$t(`common.add`)}`,
+                      value: `${$ls(`common.add`)}`,
                       classes: `tap-color`,
                   },
                   callback: async () => {

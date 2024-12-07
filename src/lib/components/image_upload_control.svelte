@@ -1,6 +1,6 @@
 <script lang="ts">
     import { dialog, fs } from "$lib/client";
-    import { app_layout, Glyph, ImageBlob, t } from "@radroots/svelte-lib";
+    import { app_layout, Glyph, ImageBlob, ls } from "@radroots/svelte-lib";
     import { list_assign } from "@radroots/utils";
     import { fade } from "svelte/transition";
 
@@ -256,7 +256,7 @@
             <p
                 class={`font-sans font-[500] text-[0.9rem] text-layer-0-glyph/80 scale-y-[94%]`}
             >
-                {`${$t(`icu.primary_*`, { value: `${$t(`common.photo`)}` })}`}
+                {`${$ls(`icu.primary_*`, { value: `${$ls(`common.photo`)}` })}`}
             </p>
         </div>
     </div>

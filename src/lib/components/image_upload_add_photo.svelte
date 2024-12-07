@@ -1,6 +1,6 @@
 <script lang="ts">
     import { dialog } from "$lib/client";
-    import { Glyph, t } from "@radroots/svelte-lib";
+    import { Glyph, ls } from "@radroots/svelte-lib";
 
     export let photo_path: string;
 
@@ -35,7 +35,7 @@
             <p
                 class={`font-arch font-[600] text-sm text-layer-0-glyph capitalize`}
             >
-                {`${$t(`icu.add_*`, { value: `${$t(`common.photo`)}` })}`}
+                {`${$ls(`icu.add_*`, { value: `${$ls(`common.photo`)}` })}`}
             </p>
         </div>
     </button>

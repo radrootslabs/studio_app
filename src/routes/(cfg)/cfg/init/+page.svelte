@@ -30,8 +30,8 @@
         LayoutView,
         Loading,
         LogoCircle,
+        ls,
         sleep,
-        t,
         view_effect,
     } from "@radroots/svelte-lib";
     import { regex } from "@radroots/utils";
@@ -160,9 +160,9 @@
                             return;
                         }
                         const confirm = await dialog.confirm({
-                            message: `There is an existing configuration in progress${`nip_05` in profile_status.active ? ` for "${profile_status.active.nip_05}".` : `.`} ${`${$t(`common.do_you_want_to_continue_q`)}`}`, //@todo
-                            cancel_label: `${$t(`common.reset`)}`,
-                            ok_label: `${$t(`common.yes`)}`,
+                            message: `There is an existing configuration in progress${`nip_05` in profile_status.active ? ` for "${profile_status.active.nip_05}".` : `.`} ${`${$ls(`common.do_you_want_to_continue_q`)}`}`, //@todo
+                            cancel_label: `${$ls(`common.reset`)}`,
+                            ok_label: `${$ls(`common.yes`)}`,
                         });
 
                         if (confirm === false) {
@@ -317,7 +317,7 @@
                                     );
                                     if (!kv_nostr_secretkey) {
                                         await dialog.alert(
-                                            `${$t(`icu.enter_a_*`, { value: `${$t(`icu.valid_*`, { value: `${$t(`common.key`)}` })}`.toLowerCase() })}`,
+                                            `${$ls(`icu.enter_a_*`, { value: `${$ls(`icu.valid_*`, { value: `${$ls(`common.key`)}` })}`.toLowerCase() })}`,
                                         );
                                         return;
                                     }
@@ -341,7 +341,7 @@
                                         return;
                                     }
                                     await dialog.alert(
-                                        `${$t(`icu.invalid_*`, { value: `${$t(`common.key`)}`.toLowerCase() })}`,
+                                        `${$ls(`icu.invalid_*`, { value: `${$ls(`common.key`)}`.toLowerCase() })}`,
                                     );
                                 }
                                 break;
@@ -360,7 +360,7 @@
                                         );
                                     if (`err` in ks_nostr_secretkey) {
                                         await reset_page(
-                                            `${$t(`error.device.configuration_failure`)}`,
+                                            `${$ls(`error.device.configuration_failure`)}`,
                                         );
                                         return;
                                     }
@@ -369,7 +369,7 @@
                                     );
                                     if (!kv_profile_name) {
                                         await dialog.alert(
-                                            `${$t(`icu.enter_a_*`, { value: `${$t(`common.profile_name`)}`.toLowerCase() })}`,
+                                            `${$ls(`icu.enter_a_*`, { value: `${$ls(`common.profile_name`)}`.toLowerCase() })}`,
                                         );
                                         return;
                                     }
@@ -387,9 +387,9 @@
                                         return;
                                     }
                                     const confirm = await dialog.confirm({
-                                        message: `${`${$t(`icu.the_*_is_available`, { value: `${$t(`common.profile_name`).toLowerCase()} "${profilename_validated.profile_name}"` })}`}. Would you like to use it?`, //@todo
-                                        cancel_label: `${$t(`common.no`)}`,
-                                        ok_label: `${$t(`common.yes`)}`,
+                                        message: `${`${$ls(`icu.the_*_is_available`, { value: `${$ls(`common.profile_name`).toLowerCase()} "${profilename_validated.profile_name}"` })}`}. Would you like to use it?`, //@todo
+                                        cancel_label: `${$ls(`common.no`)}`,
+                                        ok_label: `${$ls(`common.yes`)}`,
                                     });
                                     if (!confirm) {
                                         cfg_main_profilename_loading = false;
@@ -448,7 +448,7 @@
             );
             if (`err` in ks_nostr_secretkey) {
                 await dialog.alert(
-                    `${$t(`error.device.configuration_failure`)}`,
+                    `${$ls(`error.device.configuration_failure`)}`,
                 );
                 return; //@todo
             }
@@ -461,7 +461,7 @@
                 );
                 if (`err` in profile_activated) {
                     await dialog.alert(
-                        `${$t(`icu.*_failure`, { value: `${$t(`common.activation`)}` })}`,
+                        `${$ls(`icu.*_failure`, { value: `${$ls(`common.activation`)}` })}`,
                     );
                     return; //@todo
                 }
@@ -474,7 +474,7 @@
             );
             if (!nostr_publickey) {
                 await dialog.alert(
-                    `${$t(`error.device.public_key_not_derived`)}`,
+                    `${$ls(`error.device.public_key_not_derived`)}`,
                 );
                 return; //@todo
             }
@@ -489,7 +489,7 @@
 
             if (`err` in nostr_profile_add || `err_s` in nostr_profile_add) {
                 await dialog.alert(
-                    `${$t(`icu.failure_saving_*_to_the_database`, { value: `${$t(`common.profile`)}`.toLowerCase() })}`,
+                    `${$ls(`icu.failure_saving_*_to_the_database`, { value: `${$ls(`common.profile`)}`.toLowerCase() })}`,
                 );
                 return; //@todo
             }
@@ -504,7 +504,7 @@
                 const nostr_relay_add = await db.nostr_relay_add({ url });
                 if (`err` in nostr_relay_add || `err_s` in nostr_relay_add) {
                     await dialog.alert(
-                        `${$t(`icu.failure_saving_*_to_the_database`, { value: `${$t(`icu.default_*`, { value: `${$t(`common.relays`)}` })}`.toLowerCase() })}`,
+                        `${$ls(`icu.failure_saving_*_to_the_database`, { value: `${$ls(`icu.default_*`, { value: `${$ls(`common.relays`)}` })}`.toLowerCase() })}`,
                     );
                     return; // @todo
                 }
@@ -520,7 +520,7 @@
             await reset_ks();
             await restart({
                 route: `/`,
-                notify_message: `${$t(`app.page.cfg.init.notification.welcome`)}`,
+                notify_message: `${$ls(`app.page.cfg.init.notification.welcome`)}`,
             });
         } catch (e) {
             console.log(`(error) submit `, e);
@@ -558,13 +558,13 @@
                             <p
                                 class={`font-sans font-[400] text-sm text-layer-0-glyph-label uppercase`}
                             >
-                                {`${$t(`common.setup`)}`}
+                                {`${$ls(`common.setup`)}`}
                             </p>
                         </div>
                         <div
                             class={`grid grid-cols-12 flex flex-col gap-4 w-full justify-start items-center`}
                         >
-                            {#each [`${$t(`common.configure_your_device`)}`, `${$t(`common.choose_a_profile_name`)}`, `${$t(`common.terms_of_use_agreement`)}`] as li, li_i}
+                            {#each [`${$ls(`common.configure_your_device`)}`, `${$ls(`common.choose_a_profile_name`)}`, `${$ls(`common.terms_of_use_agreement`)}`] as li, li_i}
                                 <div
                                     class={`col-span-12 flex flex-row justify-start items-center`}
                                 >
@@ -595,7 +595,7 @@
                         <p
                             class={`font-mono font-[600] text-layer-0-glyph text-3xl`}
                         >
-                            {`${$t(`icu.configure_*`, { value: `${$t(`common.device`)}` })}`}
+                            {`${$ls(`icu.configure_*`, { value: `${$ls(`common.device`)}` })}`}
                         </p>
                     </div>
                     <div
@@ -610,7 +610,7 @@
                             <p
                                 class={`font-sans font-[600] text-layer-0-glyph text-xl`}
                             >
-                                {`${$t(`icu.create_new_*`, { value: `${$t(`common.keypair`)}`.toLowerCase() })}`}
+                                {`${$ls(`icu.create_new_*`, { value: `${$ls(`common.keypair`)}`.toLowerCase() })}`}
                             </p>
                         </button>
                         <button
@@ -622,8 +622,8 @@
                             <p
                                 class={`font-sans font-[600] text-layer-0-glyph text-xl`}
                             >
-                                {`${$t(`icu.use_existing_*`, {
-                                    value: `${$t(`common.keypair`)}`.toLowerCase(),
+                                {`${$ls(`icu.use_existing_*`, {
+                                    value: `${$ls(`common.keypair`)}`.toLowerCase(),
                                 })}`}
                             </p>
                         </button>
@@ -662,14 +662,14 @@
                             <p
                                 class={`font-mono font-[600] text-layer-0-glyph text-3xl`}
                             >
-                                {`${$t(`icu.add_existing_*`, { value: `${$t(`common.key`)}`.toLowerCase() })}`}
+                                {`${$ls(`icu.add_existing_*`, { value: `${$ls(`common.key`)}`.toLowerCase() })}`}
                             </p>
                             <InputElement
                                 basis={{
                                     classes: `h-entry_guide w-${$app_layout} bg-layer-1-surface rounded-touch font-mono text-lg placeholder:opacity-60 items-end text-center`,
                                     id: fmt_id(`nostr_secretkey`),
                                     sync: true,
-                                    placeholder: `${$t(`icu.enter_*`, { value: `nostr nsec/hex` })}`,
+                                    placeholder: `${$ls(`icu.enter_*`, { value: `nostr nsec/hex` })}`,
                                     field: {
                                         charset: regex.profile_name_ch,
                                         validate: regex.profile_name,
@@ -726,7 +726,7 @@
                         <p
                             class={`font-mono font-[600] text-layer-0-glyph text-3xl`}
                         >
-                            {`${$t(`icu.add_*`, { value: `${$t(`common.profile`)}` })}`}
+                            {`${$ls(`icu.add_*`, { value: `${$ls(`common.profile`)}` })}`}
                         </p>
                         <EntryLine
                             basis={{
@@ -740,7 +740,7 @@
                                     classes: `font-sans text-[1.25rem] text-center placeholder:opacity-60`,
                                     id: fmt_id(`nostr_profilename`),
                                     sync: true,
-                                    placeholder: `${$t(`icu.enter_*`, { value: `${$t(`common.profile_name`)}`.toLowerCase() })}`,
+                                    placeholder: `${$ls(`icu.enter_*`, { value: `${$ls(`common.profile_name`)}`.toLowerCase() })}`,
                                     field: {
                                         charset: regex.profile_name_ch,
                                         validate: regex.profile_name,
@@ -777,7 +777,7 @@
                         <p
                             class={`font-mono font-[600] text-layer-0-glyph text-3xl`}
                         >
-                            {`${$t(`common.setup_for_farmer`)}`}
+                            {`${$ls(`common.setup_for_farmer`)}`}
                         </p>
                     </div>
                     <div
@@ -792,7 +792,7 @@
                             <p
                                 class={`font-sans font-[600] text-layer-0-glyph text-xl`}
                             >
-                                {`${$t(`common.yes`)}`}
+                                {`${$ls(`common.yes`)}`}
                             </p>
                         </button>
                         <button
@@ -804,7 +804,7 @@
                             <p
                                 class={`font-sans font-[600] text-layer-0-glyph text-xl`}
                             >
-                                {`${$t(`common.no`)}`}
+                                {`${$ls(`common.no`)}`}
                             </p>
                         </button>
                     </div>
@@ -831,7 +831,7 @@
                 <p
                     class={`font-sans font-[400] text-layer-0-glyph text-lg capitalize group-active:opacity-60 transition-all`}
                 >
-                    {`${$t(`icu.go_*`, { value: `${$t(`common.back`)}` })}`}
+                    {`${$ls(`icu.go_*`, { value: `${$ls(`common.back`)}` })}`}
                 </p>
             </button>
         </div>
@@ -851,14 +851,14 @@
                         visible: true,
                         label:
                             $carousel_index === 0
-                                ? `${$t(`common.skip`)}`
-                                : `${$t(`common.back`)}`,
+                                ? `${$ls(`common.skip`)}`
+                                : `${$ls(`common.back`)}`,
                         callback: async () => {
                             if ($carousel_index === 0) {
                                 const confirm = await dialog.confirm({
-                                    message: `${$t(`app.page.cfg.init.notification.no_profile_name`)}`,
-                                    cancel_label: `${$t(`icu.add_*`, { value: `${$t(`common.profile`)}` })}`,
-                                    ok_label: `${$t(`common.continue`)}`,
+                                    message: `${$ls(`app.page.cfg.init.notification.no_profile_name`)}`,
+                                    cancel_label: `${$ls(`icu.add_*`, { value: `${$ls(`common.profile`)}` })}`,
+                                    ok_label: `${$ls(`common.continue`)}`,
                                 });
                                 if (confirm === false) {
                                     el_id(fmt_id(`nostr_profilename`))?.focus();
@@ -898,7 +898,7 @@
                             <p
                                 class={`font-mono font-[600] text-layer-0-glyph text-2xl`}
                             >
-                                {`${$t(`eula.title`)}`}
+                                {`${$ls(`eula.title`)}`}
                             </p>
                         </div>
                         <div
@@ -911,12 +911,12 @@
                                 <p
                                     class={`font-mono font-[600] text-layer-0-glyph`}
                                 >
-                                    {`**${$t(`eula.introduction.title`)}**`}
+                                    {`**${$ls(`eula.introduction.title`)}**`}
                                 </p>
                                 <p
                                     class={`font-mono font-[500] text-layer-0-glyph text-sm text-justify break-word`}
                                 >
-                                    {`${$t(`eula.introduction.body`)}`}
+                                    {`${$ls(`eula.introduction.body`)}`}
                                 </p>
                             </div>
                             <div
@@ -925,12 +925,12 @@
                                 <p
                                     class={`font-mono font-[600] text-layer-0-glyph`}
                                 >
-                                    {`**${$t(`eula.prohibited_content.title`)}**`}
+                                    {`**${$ls(`eula.prohibited_content.title`)}**`}
                                 </p>
                                 <p
                                     class={`font-mono font-[500] text-sm text-layer-0-glyph text-justify break-word`}
                                 >
-                                    {`${$t(`eula.prohibited_content.body_0_title`)}`}
+                                    {`${$ls(`eula.prohibited_content.body_0_title`)}`}
                                 </p>
                                 <div
                                     class={`flex flex-col w-full justify-start items-start`}
@@ -954,7 +954,7 @@
                                                 <p
                                                     class={`col-span-10 font-mono font-[500] text-sm text-layer-0-glyph text-justify break-word`}
                                                 >
-                                                    {`${$t(`eula.prohibited_content.body_li_0_${li}`)}`}
+                                                    {`${$ls(`eula.prohibited_content.body_li_0_${li}`)}`}
                                                 </p>
                                             </div>
                                         </div>
@@ -967,7 +967,7 @@
                                 <p
                                     class={`font-mono font-[600] text-layer-0-glyph`}
                                 >
-                                    {`**${$t(`eula.prohibited_conduct.title`)}**`}
+                                    {`**${$ls(`eula.prohibited_conduct.title`)}**`}
                                 </p>
                                 <div
                                     class={`flex flex-col w-full justify-start items-start`}
@@ -991,7 +991,7 @@
                                                 <p
                                                     class={`col-span-10 font-mono font-[500] text-sm text-layer-0-glyph text-justify break-word`}
                                                 >
-                                                    {`${$t(`eula.prohibited_conduct.body_li_0_${li}`)}`}
+                                                    {`${$ls(`eula.prohibited_conduct.body_li_0_${li}`)}`}
                                                 </p>
                                             </div>
                                         </div>
@@ -1004,12 +1004,12 @@
                                 <p
                                     class={`font-mono font-[600] text-layer-0-glyph`}
                                 >
-                                    {`**${$t(`eula.consequences_of_violation.title`)}**`}
+                                    {`**${$ls(`eula.consequences_of_violation.title`)}**`}
                                 </p>
                                 <p
                                     class={`font-mono font-[500] text-layer-0-glyph text-sm text-justify break-word`}
                                 >
-                                    {`${$t(`eula.consequences_of_violation.body`)}`}
+                                    {`${$ls(`eula.consequences_of_violation.body`)}`}
                                 </p>
                             </div>
                             <div
@@ -1018,12 +1018,12 @@
                                 <p
                                     class={`font-mono font-[600] text-layer-0-glyph`}
                                 >
-                                    {`**${$t(`eula.disclaimer.title`)}**`}
+                                    {`**${$ls(`eula.disclaimer.title`)}**`}
                                 </p>
                                 <p
                                     class={`font-mono font-[500] text-layer-0-glyph text-sm text-justify break-word`}
                                 >
-                                    {`${$t(`eula.disclaimer.body`)}`}
+                                    {`${$ls(`eula.disclaimer.body`)}`}
                                 </p>
                             </div>
                             <div
@@ -1032,12 +1032,12 @@
                                 <p
                                     class={`font-mono font-[600] text-layer-0-glyph`}
                                 >
-                                    {`**${$t(`eula.changes.title`)}**`}
+                                    {`**${$ls(`eula.changes.title`)}**`}
                                 </p>
                                 <p
                                     class={`font-mono font-[500] text-layer-0-glyph text-sm text-justify break-word`}
                                 >
-                                    {`${$t(`eula.changes.body`)}`}
+                                    {`${$ls(`eula.changes.body`)}`}
                                 </p>
                             </div>
                             <div
@@ -1046,12 +1046,12 @@
                                 <p
                                     class={`font-mono font-[600] text-layer-0-glyph`}
                                 >
-                                    {`**${$t(`eula.contact.title`)}**`}
+                                    {`**${$ls(`eula.contact.title`)}**`}
                                 </p>
                                 <p
                                     class={`font-mono font-[500] text-layer-0-glyph text-sm text-justify break-word`}
                                 >
-                                    {`${$t(`eula.contact.body`)}`}
+                                    {`${$ls(`eula.contact.body`)}`}
                                 </p>
                             </div>
                             <div
@@ -1060,12 +1060,12 @@
                                 <p
                                     class={`font-mono font-[600] text-layer-0-glyph`}
                                 >
-                                    {`**${$t(`eula.acceptance_of_terms.title`)}**`}
+                                    {`**${$ls(`eula.acceptance_of_terms.title`)}**`}
                                 </p>
                                 <p
                                     class={`font-mono font-[500] text-layer-0-glyph text-sm text-justify break-word`}
                                 >
-                                    {`${$t(`eula.acceptance_of_terms.body`)}`}
+                                    {`${$ls(`eula.acceptance_of_terms.body`)}`}
                                 </p>
                             </div>
                         </div>
@@ -1077,8 +1077,8 @@
                             class={`group flex flex-row basis-1/2 gap-4 justify-center items-center`}
                             on:click={async () => {
                                 const confirm = await dialog.confirm({
-                                    message: `${$t(`eula.error.required`)}`,
-                                    cancel_label: `${$t(`common.quit`)}`,
+                                    message: `${$ls(`eula.error.required`)}`,
+                                    cancel_label: `${$ls(`common.quit`)}`,
                                 });
                                 if (confirm === false) location.reload(); //@todo
                             }}
@@ -1091,7 +1091,7 @@
                             <p
                                 class={`font-mono font-[400] text-sm text-layer-0-glyph/60 group-active:text-layer-0-glyph transition-all`}
                             >
-                                {`${`${$t(`common.disagree`)}`}`}
+                                {`${`${$ls(`common.disagree`)}`}`}
                             </p>
                             <p
                                 class={`font-mono font-[400] text-sm text-layer-0-glyph/60 group-active:text-layer-0-glyph transition-all`}
@@ -1113,7 +1113,7 @@
                             <p
                                 class={`font-mono font-[400] text-sm text-layer-0-glyph-hl group-active:text-layer-0-glyph-hl/80 transition-all`}
                             >
-                                {`${`${$t(`common.agree`)}`}`}
+                                {`${`${$ls(`common.agree`)}`}`}
                             </p>
                             <p
                                 class={`font-mono font-[400] text-sm text-layer-0-glyph-hl group-active:text-layer-0-glyph-hl/80 transition-all`}

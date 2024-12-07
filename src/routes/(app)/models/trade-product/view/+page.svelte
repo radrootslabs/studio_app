@@ -5,9 +5,9 @@
         app_notify,
         LayoutTrellis,
         LayoutView,
+        ls,
         Nav,
         qp_id,
-        t,
     } from "@radroots/svelte-lib";
     import { onMount } from "svelte";
 
@@ -16,7 +16,7 @@
 
     onMount(async () => {
         try {
-            if (!$qp_id) app_notify.set(`${$t(`error.client.page.load`)}`);
+            if (!$qp_id) app_notify.set(`${$ls(`error.client.page.load`)}`);
             ld = await load_data();
         } catch (e) {
         } finally {
@@ -29,7 +29,7 @@
                 id: $qp_id,
             });
             if (`err` in _trade_product) {
-                app_notify.set(`${$t(`error.client.page.load`)}`); //@todo
+                app_notify.set(`${$ls(`error.client.page.load`)}`); //@todo
                 return;
             }
             const { result: trade_product } = _trade_product;
@@ -66,12 +66,12 @@
 <Nav
     basis={{
         prev: {
-            label: `${$t(`common.back`)}`,
+            label: `${$ls(`common.back`)}`,
             route: `/models/trade-product`,
         },
         title: {
             label: {
-                value: `${$t(`common.product`)}`,
+                value: `${$ls(`common.product`)}`,
             },
         },
     }}

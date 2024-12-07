@@ -5,7 +5,7 @@
         envelope_visible,
         EnvelopeLower,
         ImageBlob,
-        t,
+        ls,
         time_iso,
     } from "@radroots/svelte-lib";
     import {
@@ -17,14 +17,6 @@
 
     export let photo_paths: string[];
     export let photo_edit: { index: number; file_path: string } | undefined;
-
-    /*export let basis: {
-        close: CallbackPromise;
-        callback_move: CallbackPromiseGeneric<number>;
-        photo_edit: { index: number; file_path: string } | undefined;
-    };
-    $: basis = basis;
-    */
 
     $: envelope_visible.set(!!photo_edit);
 
@@ -91,9 +83,9 @@
                 >
                     <p class={`font-sans font-[600] text-lg text-white`}>
                         {#if photo_edit.index === 0}
-                            {`${$t(`icu.primary_*`, { value: `${$t(`common.photo`)}`.toLowerCase() })}`}
+                            {`${$ls(`icu.primary_*`, { value: `${$ls(`common.photo`)}`.toLowerCase() })}`}
                         {:else}
-                            {`${$t(`common.make_primary`)}`}
+                            {`${$ls(`common.make_primary`)}`}
                         {/if}
                     </p>
                 </button>
@@ -108,7 +100,7 @@
                                 <p
                                     class={`col-span-8 font-sans font-[400] text-[1.05rem] text-layer-0-glyph`}
                                 >
-                                    {`${$t(`common.file_name`)}:`}
+                                    {`${$ls(`common.file_name`)}:`}
                                 </p>
                                 <p
                                     class={`col-span-8 font-sans font-[400] text-[1.05rem] text-layer-0-glyph`}
@@ -122,7 +114,7 @@
                                 <p
                                     class={`col-span-8 font-sans font-[400] text-[1.05rem] text-layer-0-glyph`}
                                 >
-                                    {`${$t(`common.file_size`)}:`}
+                                    {`${$ls(`common.file_size`)}:`}
                                 </p>
                                 <p
                                     class={`col-span-8 font-sans font-[400] text-[1.05rem] text-layer-0-glyph`}
@@ -136,12 +128,12 @@
                                 <p
                                     class={`col-span-8 font-sans font-[400] text-[1.05rem] text-layer-0-glyph`}
                                 >
-                                    {`${$t(`common.date_created`)}:`}
+                                    {`${$ls(`common.date_created`)}:`}
                                 </p>
                                 <p
                                     class={`col-span-8 font-sans font-[400] text-[1.05rem] text-layer-0-glyph`}
                                 >
-                                    {`${time_iso(fs_info.birthtime?.toISOString(), `file_info`).replaceAll(`,`, ` ${`${$t(`common.at`)}`.toLowerCase()}`)}`}
+                                    {`${time_iso(fs_info.birthtime?.toISOString(), `file_info`).replaceAll(`,`, ` ${`${$ls(`common.at`)}`.toLowerCase()}`)}`}
                                 </p>
                             </div>
                             <div
@@ -150,12 +142,12 @@
                                 <p
                                     class={`col-span-8 font-sans font-[400] text-[1.05rem] text-layer-0-glyph`}
                                 >
-                                    {`${$t(`common.date_modified`)}:`}
+                                    {`${$ls(`common.date_modified`)}:`}
                                 </p>
                                 <p
                                     class={`col-span-8 font-sans font-[400] text-[1.05rem] text-layer-0-glyph`}
                                 >
-                                    {`${time_iso(fs_info.mtime?.toISOString(), `file_info`).replaceAll(`,`, ` ${`${$t(`common.at`)}`.toLowerCase()}`)}`}
+                                    {`${time_iso(fs_info.mtime?.toISOString(), `file_info`).replaceAll(`,`, ` ${`${$ls(`common.at`)}`.toLowerCase()}`)}`}
                                 </p>
                             </div>
                         </div>

@@ -2,10 +2,8 @@ import { db, fs, http, keystore } from "$lib/client";
 import { cfg, ks } from "$lib/conf";
 import type { IClientHttpResponseError } from "@radroots/client";
 import { parse_nostr_relay_form_keys, type NostrRelayFormFields } from "@radroots/models";
-import { app_nostr_key, get_store, nostr_relays_connected, nostr_relays_poll_documents, nostr_relays_poll_documents_count, t } from "@radroots/svelte-lib";
+import { app_nostr_key, get_store, nostr_relays_connected, nostr_relays_poll_documents, nostr_relays_poll_documents_count } from "@radroots/svelte-lib";
 import { err_msg, err_res, nostr_event_sign_attest, parse_nostr_relay_information_document_fields, type ErrorMessage, type ErrorResponse, type FilePath } from "@radroots/utils";
-
-const $t = get_store(t);
 
 export const fetch_put_upload = async (opts: {
     url: string;

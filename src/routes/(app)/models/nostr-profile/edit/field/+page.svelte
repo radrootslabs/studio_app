@@ -14,13 +14,13 @@
         kv,
         LayoutTrellis,
         LayoutView,
+        ls,
         Nav,
         qp_nostr_pk,
         qp_rkey,
         route,
         route_prev,
         sleep,
-        t,
         Trellis,
     } from "@radroots/svelte-lib";
     import { onDestroy, onMount } from "svelte";
@@ -38,7 +38,7 @@
         try {
             if (!$qp_rkey || !$qp_nostr_pk) {
                 app_notify.set(
-                    `${$t(`icu.error_loading_*`, { value: `${$t(`common.page`)}` })}`,
+                    `${$ls(`icu.error_loading_*`, { value: `${$ls(`common.page`)}` })}`,
                 );
                 return;
             }
@@ -61,7 +61,7 @@
     let val_field_valid = false;
 
     $: translated_field_key = ld?.field_key
-        ? `${$t(`models.nostr_profile.fields.${ld.field_key}.label`)}`.toLowerCase()
+        ? `${$ls(`models.nostr_profile.fields.${ld.field_key}.label`)}`.toLowerCase()
         : ``;
 
     $: if (el_input_loaded && el_input) {
@@ -74,19 +74,19 @@
             });
             if (`err` in nostr_profiles) {
                 app_notify.set(
-                    `${$t(`icu.error_loading_*`, { value: `${$t(`common.profile`)}` })}`,
+                    `${$ls(`icu.error_loading_*`, { value: `${$ls(`common.profile`)}` })}`,
                 );
                 return;
             } else if (!nostr_profiles.results.length) {
                 app_notify.set(
-                    `${$t(`icu.error_loading_*`, { value: `${$t(`common.page`)}` })}`,
+                    `${$ls(`icu.error_loading_*`, { value: `${$ls(`common.page`)}` })}`,
                 );
                 return;
             }
 
             const field_key = parse_nostr_profile_form_keys($qp_rkey);
             if (!field_key) {
-                app_notify.set(`${$t(`error.client.page.load`)}`);
+                app_notify.set(`${$ls(`error.client.page.load`)}`);
                 return;
             }
 
@@ -113,7 +113,7 @@
                 nostr_profile_form_fields[ld?.field_key].validation.test(val);
             if (!validated) {
                 dialog.alert(
-                    `${$t(`icu.invalid_*_entry`, { value: translated_field_key })}`,
+                    `${$ls(`icu.invalid_*_entry`, { value: translated_field_key })}`,
                 );
                 return;
             }
@@ -128,7 +128,7 @@
                 fields,
             });
             if (`err` in update_res) {
-                await dialog.alert(`${$t(`error.client.unhandled`)}`);
+                await dialog.alert(`${$ls(`error.client.unhandled`)}`);
                 return;
             }
 
@@ -155,8 +155,8 @@
                         layer: 1,
                         title: {
                             value: ld?.nostr_profile[ld?.field_key]
-                                ? `${$t(`icu.edit_*`, { value: translated_field_key })}`
-                                : `${$t(`icu.add_a_*`, { value: translated_field_key.toLowerCase() })}`,
+                                ? `${$ls(`icu.edit_*`, { value: translated_field_key })}`
+                                : `${$ls(`icu.add_a_*`, { value: translated_field_key.toLowerCase() })}`,
                         },
                         list: [
                             {
@@ -177,8 +177,8 @@
                                         placeholder: ld?.nostr_profile[
                                             ld?.field_key
                                         ]
-                                            ? `${$t(`icu.enter_new_*`, { value: translated_field_key.toLowerCase() })}`
-                                            : `${$t(`icu.add_a_*`, { value: translated_field_key.toLowerCase() })}`,
+                                            ? `${$ls(`icu.enter_new_*`, { value: translated_field_key.toLowerCase() })}`
+                                            : `${$ls(`icu.add_a_*`, { value: translated_field_key.toLowerCase() })}`,
                                         field: {
                                             charset:
                                                 nostr_profile_form_fields[
@@ -221,7 +221,7 @@
 <Nav
     basis={{
         prev: {
-            label: `${$t(`common.back`)}`,
+            label: `${$ls(`common.back`)}`,
             route: `/models/nostr-profile`,
         },
         title: {
@@ -234,8 +234,8 @@
             label: {
                 classes: val_field_valid ? `` : `opacity-60`,
                 value: ld?.nostr_profile[ld?.field_key]
-                    ? `${$t(`common.update`)}`
-                    : `${$t(`common.add`)}`,
+                    ? `${$ls(`common.update`)}`
+                    : `${$ls(`common.add`)}`,
             },
             callback: async () => {
                 if (val_field_valid) await submit();

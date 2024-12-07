@@ -14,11 +14,11 @@
         InputElement,
         kv,
         LayoutView,
+        ls,
         Nav,
         qp_nostr_pk,
         qp_rkey,
         route,
-        t,
         TextareaElement,
     } from "@radroots/svelte-lib";
     import { onDestroy, onMount } from "svelte";
@@ -36,7 +36,7 @@
         try {
             if (!$qp_rkey || !$qp_nostr_pk) {
                 app_notify.set(
-                    `${$t(`icu.error_loading_*`, { value: `${$t(`common.page`)}` })}`,
+                    `${$ls(`icu.error_loading_*`, { value: `${$ls(`common.page`)}` })}`,
                 );
                 return;
             }
@@ -55,7 +55,7 @@
     });
 
     $: translated_field_key = ld?.field_key
-        ? `${$t(`models.nostr_profile.fields.${ld.field_key}.label`)}`
+        ? `${$ls(`models.nostr_profile.fields.${ld.field_key}.label`)}`
         : ``;
     $: input_value_del = page_initial_value !== page_input_value;
     const load_page = async (): Promise<LoadData | undefined> => {
@@ -65,14 +65,14 @@
             });
             if (`err` in nostr_profile) {
                 app_notify.set(
-                    `${$t(`icu.error_loading_*`, { value: `${$t(`common.profile`)}` })}`,
+                    `${$ls(`icu.error_loading_*`, { value: `${$ls(`common.profile`)}` })}`,
                 );
                 return;
             }
 
             const field_key = parse_nostr_profile_form_keys($qp_rkey);
             if (!field_key) {
-                app_notify.set(`${$t(`error.client.page.load`)}`);
+                app_notify.set(`${$ls(`error.client.page.load`)}`);
                 return;
             }
 
@@ -104,7 +104,7 @@
                 nostr_profile_form_fields[ld.field_key].validation.test(val);
             if (!validated) {
                 dialog.alert(
-                    `${$t(`icu.invalid_*_entry`, { value: translated_field_key })}`,
+                    `${$ls(`icu.invalid_*_entry`, { value: translated_field_key })}`,
                 );
                 return;
             }
@@ -117,7 +117,7 @@
                 fields,
             });
             if (`err` in update_res) {
-                await dialog.alert(`${$t(`error.client.unhandled`)}`);
+                await dialog.alert(`${$ls(`error.client.unhandled`)}`);
                 return;
             }
             await route(`/settings/profile`);
@@ -190,7 +190,7 @@
 <Nav
     basis={{
         prev: {
-            label: `${$t(`common.back`)}`,
+            label: `${$ls(`common.back`)}`,
             route: `/settings/profile`,
             prevent_route: input_value_del
                 ? {
@@ -203,15 +203,15 @@
         title: {
             label: {
                 classes: `capitalize`,
-                value: `${$t(`icu.edit_*`, { value: `${$t(`common.profile`)}` })}`,
+                value: `${$ls(`icu.edit_*`, { value: `${$ls(`common.profile`)}` })}`,
             },
         },
         /*option: {
             label: {
                 classes: input_value_del ? `` : `opacity-60`,
                 value: ld?.nostr_profile[ld?.field_key]
-                    ? `${$t(`common.update`)}`
-                    : `${$t(`common.add`)}`,
+                    ? `${$ls(`common.update`)}`
+                    : `${$ls(`common.add`)}`,
             },
             callback: async () => {
                 if (input_value_del) await submit();

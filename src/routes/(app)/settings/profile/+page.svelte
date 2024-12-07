@@ -11,10 +11,9 @@
         Glyph,
         ImageBlob,
         ImagePath,
-        LayoutView,
-        Nav,
+        Loading,
+        ls,
         route,
-        t,
         TabsFloat,
     } from "@radroots/svelte-lib";
     import { onDestroy, onMount } from "svelte";
@@ -83,6 +82,15 @@
         }
     };
 
+    const handle_back = async (): Promise<void> => {
+        try {
+            if (opt_photo_path) await handle_profile_photo_add(opt_photo_path);
+            await route(`/`);
+        } catch (e) {
+            console.log(`(error) handle_back `, e);
+        }
+    };
+
     const handle_profile_photo_add = async (
         file_path: string,
     ): Promise<void> => {
@@ -130,7 +138,7 @@
                     },
                 });
                 if (`err` in nostr_profile_update) {
-                    await dialog.alert(`${$t(`error.client.unhandled`)}`);
+                    await dialog.alert(`${$ls(`error.client.unhandled`)}`);
                     return;
                 }
             }
@@ -143,204 +151,219 @@
     };
 </script>
 
-<LayoutView>
-    <div
-        class={`relative flex flex-col min-h-[440px] h-[440px] w-full justify-center items-center bg-layer-2-surface fade-in`}
-    >
-        {#if ld?.nostr_profile?.picture}
-            <ImagePath
+<div
+    class={`relative flex flex-col min-h-[525px] h-[525px] w-full justify-center items-center bg-layer-2-surface fade-in`}
+>
+    {#if ld?.nostr_profile?.picture}
+        <ImagePath
+            basis={{
+                path: ld.nostr_profile.picture,
+            }}
+        />
+        <div class={`absolute top-16 left-6 flex flex-row`}>
+            <button
+                class={`flex flex-row h-12 w-12 justify-center items-center bg-layer-2-surface rounded-full el-re`}
+                on:click={async () => {
+                    await handle_back();
+                }}
+            >
+                {#if loading_photo_upload}
+                    <Loading />
+                {:else}
+                    <Glyph
+                        basis={{
+                            classes: `text-layer-0-glyph`,
+                            dim: `sm+`,
+                            weight: `bold`,
+                            key: `arrow-left`,
+                        }}
+                    />
+                {/if}
+            </button>
+        </div>
+        <div class={`absolute top-16 right-6 flex flex-row`}>
+            <button
+                class={`flex flex-row h-12 w-12 justify-center items-center bg-layer-2-surface rounded-full el-re`}
+                on:click={async () => {
+                    alert(`@todo!`);
+                }}
+            >
+                <Glyph
+                    basis={{
+                        classes: `text-layer-0-glyph`,
+                        dim: `md-`,
+                        weight: `bold`,
+                        key: `images-square`,
+                    }}
+                />
+            </button>
+        </div>
+    {:else if opt_photo_path}
+        {#await fs.read_bin(opt_photo_path) then file_data}
+            <ImageBlob
                 basis={{
-                    path: ld.nostr_profile.picture,
+                    data: file_data,
                 }}
             />
-            <div class={`absolute top-4 right-4 flex flex-row`}>
+        {/await}
+    {:else}
+        <div class={`flex flex-row justify-start items-center -translate-y-8`}>
+            <ImageUploadAddPhoto bind:photo_path={opt_photo_path} />
+        </div>
+    {/if}
+    <div
+        class={`absolute bottom-0 left-0 flex flex-col h-[calc(100%-100%/1.618)] w-full px-6 gap-2 justify-end items-center`}
+    >
+        <div
+            class={`flex flex-col w-full gap-[2px] justify-center items-center`}
+        >
+            <div class={`flex flex-row h-10 w-full justify-start items-center`}>
                 <button
-                    class={`flex flex-row h-12 w-12 justify-center items-center bg-layer-0-surface rounded-full layer-1-active-surface el-re`}
+                    class={`group flex flex-row justify-center items-center`}
+                    on:click={async () => {
+                        await route(`/settings/profile/edit`, [
+                            [`nostr_pk`, $app_nostr_key],
+                            [`rkey`, `display_name`],
+                        ]);
+                    }}
+                >
+                    <p
+                        class={`font-sansd font-[600] text-[2rem] ${classes_photo_overlay_glyph} ${ld?.nostr_profile.display_name ? `` : `capitalize opacity-active`} el-re`}
+                    >
+                        {ld?.nostr_profile.display_name
+                            ? ld.nostr_profile.display_name
+                            : `+ ${`${$ls(`icu.add_*`, { value: `${$ls(`common.profile_name`)}` })}`}`}
+                    </p>
+                </button>
+            </div>
+            <div
+                class={`flex flex-row w-full gap-[6px] justify-start items-center`}
+            >
+                <button
+                    class={`group flex flex-row justify-center items-center`}
+                    on:click={async () => {
+                        const confirm = await dialog.confirm({
+                            message: `Updating your username will result in public links on your profile being updated. Do you want to continue?`,
+                        });
+                        if (confirm)
+                            await route(`/settings/profile/edit`, [
+                                [`nostr_pk`, $app_nostr_key],
+                                [`rkey`, `name`],
+                            ]);
+                    }}
+                >
+                    <p
+                        class={`font-sansd font-[600] text-[1.1rem] ${classes_photo_overlay_glyph} ${ld?.nostr_profile.name ? `` : `capitalize opacity-active`} el-re`}
+                    >
+                        {ld?.nostr_profile.name
+                            ? `@${ld.nostr_profile.name}`
+                            : `+ ${`${$ls(`icu.add_*`, { value: `${$ls(`common.username`)}` })}`}`}
+                    </p>
+                </button>
+                <p
+                    class={`font-sans font-[400] ${classes_photo_overlay_glyph}`}
+                >
+                    {ascii.bullet}
+                </p>
+                <button
+                    class={`flex flex-row justify-center items-center`}
                     on:click={async () => {
                         alert(`@todo!`);
                     }}
                 >
                     <Glyph
                         basis={{
-                            classes: ``,
-                            dim: `sm`,
+                            classes: `${classes_photo_overlay_glyph}`,
+                            dim: `xs`,
                             weight: `bold`,
-                            key: `images-square`,
+                            key: `link-simple`,
                         }}
                     />
                 </button>
             </div>
-        {:else if opt_photo_path}
-            {#await fs.read_bin(opt_photo_path) then file_data}
-                <ImageBlob
-                    basis={{
-                        data: file_data,
-                    }}
-                />
-            {/await}
-        {:else}
-            <div
-                class={`flex flex-row justify-start items-center -translate-y-8`}
-            >
-                <ImageUploadAddPhoto bind:photo_path={opt_photo_path} />
-            </div>
-        {/if}
-        <div
-            class={`absolute bottom-0 left-0 flex flex-col h-[calc(100%-100%/1.618)] w-full px-6 gap-2 justify-end items-center`}
-        >
-            <div
-                class={`flex flex-col w-full gap-[2px] justify-center items-center`}
-            >
-                <div
-                    class={`flex flex-row h-10 w-full justify-start items-center`}
-                >
-                    <button
-                        class={`group flex flex-row justify-center items-center`}
-                        on:click={async () => {
-                            await route(`/settings/profile/edit`, [
-                                [`nostr_pk`, $app_nostr_key],
-                                [`rkey`, `display_name`],
-                            ]);
-                        }}
-                    >
-                        <p
-                            class={`font-sansd font-[600] text-[2rem] ${classes_photo_overlay_glyph} ${ld?.nostr_profile.display_name ? `` : `capitalize opacity-active`} el-re`}
-                        >
-                            {ld?.nostr_profile.display_name
-                                ? ld.nostr_profile.display_name
-                                : `+ ${`${$t(`icu.add_*`, { value: `${$t(`common.profile_name`)}` })}`}`}
-                        </p>
-                    </button>
-                </div>
-                <div
-                    class={`flex flex-row w-full gap-[6px] justify-start items-center`}
-                >
-                    <button
-                        class={`group flex flex-row justify-center items-center`}
-                        on:click={async () => {
-                            const confirm = await dialog.confirm({
-                                message: `Updating your username will result in public links on your profile being updated. Do you want to continue?`,
-                            });
-                            if (confirm)
-                                await route(`/settings/profile/edit`, [
-                                    [`nostr_pk`, $app_nostr_key],
-                                    [`rkey`, `name`],
-                                ]);
-                        }}
-                    >
-                        <p
-                            class={`font-sansd font-[600] text-[1.1rem] ${classes_photo_overlay_glyph} ${ld?.nostr_profile.name ? `` : `capitalize opacity-active`} el-re`}
-                        >
-                            {ld?.nostr_profile.name
-                                ? `@${ld.nostr_profile.name}`
-                                : `+ ${`${$t(`icu.add_*`, { value: `${$t(`common.username`)}` })}`}`}
-                        </p>
-                    </button>
-                    <p
-                        class={`font-sans font-[400] ${classes_photo_overlay_glyph}`}
-                    >
-                        {ascii.bullet}
-                    </p>
-                    <button
-                        class={`flex flex-row justify-center items-center`}
-                        on:click={async () => {
-                            alert(`@todo!`);
-                        }}
-                    >
-                        <Glyph
-                            basis={{
-                                classes: `${classes_photo_overlay_glyph}`,
-                                dim: `xs`,
-                                weight: `bold`,
-                                key: `link-simple`,
-                            }}
-                        />
-                    </button>
-                </div>
-                <div class={`flex flex-row w-full justify-start items-center`}>
-                    <button
-                        class={`group flex flex-row justify-center items-center`}
-                        on:click={async () => {
-                            await route(`/settings/profile/edit`, [
-                                [`nostr_pk`, $app_nostr_key],
-                                [`rkey`, `about`],
-                            ]);
-                        }}
-                    >
-                        <p
-                            class={`font-sansd font-[400] text-[1.1rem] ${classes_photo_overlay_glyph} ${ld?.nostr_profile.about ? `` : `capitalize opacity-active`}`}
-                        >
-                            {ld?.nostr_profile.about
-                                ? `@${ld.nostr_profile.about}`
-                                : `+ ${`${$t(`icu.add_*`, { value: `${$t(`common.bio`)}` })}`}`}
-                        </p>
-                    </button>
-                </div>
-            </div>
-            <div
-                class={`flex flex-row w-full pt-2 pb-6 gap-2 justify-start items-center`}
-            >
+            <div class={`flex flex-row w-full justify-start items-center`}>
                 <button
-                    class={`flex flex-row justify-center items-center`}
+                    class={`group flex flex-row justify-center items-center`}
                     on:click={async () => {
-                        view_display = `photos`;
+                        await route(`/settings/profile/edit`, [
+                            [`nostr_pk`, $app_nostr_key],
+                            [`rkey`, `about`],
+                        ]);
                     }}
                 >
                     <p
-                        class={`font-sans text-[1.1rem] font-[600] capitalize ${view_display === `photos` ? classes_photo_overlay_glyph_opt_selected : classes_photo_overlay_glyph_opt} el-re`}
+                        class={`font-sansd font-[400] text-[1.1rem] ${classes_photo_overlay_glyph} ${ld?.nostr_profile.about ? `` : `capitalize opacity-active`}`}
                     >
-                        {`photos`}
-                    </p>
-                </button>
-                <button
-                    class={`flex flex-row justify-center items-center`}
-                    on:click={async () => {
-                        view_display = `following`;
-                    }}
-                >
-                    <p
-                        class={`font-sans text-[1.1rem] font-[600] capitalize ${view_display === `following` ? classes_photo_overlay_glyph_opt_selected : classes_photo_overlay_glyph_opt} el-re`}
-                    >
-                        {`following`}
-                    </p>
-                </button>
-                <button
-                    class={`flex flex-row justify-center items-center`}
-                    on:click={async () => {
-                        view_display = `followers`;
-                    }}
-                >
-                    <p
-                        class={`font-sans text-[1.1rem] font-[600] capitalize ${view_display === `followers` ? classes_photo_overlay_glyph_opt_selected : classes_photo_overlay_glyph_opt} el-re`}
-                    >
-                        {`followers`}
+                        {ld?.nostr_profile.about
+                            ? `@${ld.nostr_profile.about}`
+                            : `+ ${`${$ls(`icu.add_*`, { value: `${$ls(`common.bio`)}` })}`}`}
                     </p>
                 </button>
             </div>
         </div>
+        <div
+            class={`flex flex-row w-full pt-2 pb-6 gap-2 justify-start items-center`}
+        >
+            <button
+                class={`flex flex-row justify-center items-center`}
+                on:click={async () => {
+                    view_display = `photos`;
+                }}
+            >
+                <p
+                    class={`font-sans text-[1.1rem] font-[600] capitalize ${view_display === `photos` ? classes_photo_overlay_glyph_opt_selected : classes_photo_overlay_glyph_opt} el-re`}
+                >
+                    {`photos`}
+                </p>
+            </button>
+            <button
+                class={`flex flex-row justify-center items-center`}
+                on:click={async () => {
+                    view_display = `following`;
+                }}
+            >
+                <p
+                    class={`font-sans text-[1.1rem] font-[600] capitalize ${view_display === `following` ? classes_photo_overlay_glyph_opt_selected : classes_photo_overlay_glyph_opt} el-re`}
+                >
+                    {`following`}
+                </p>
+            </button>
+            <button
+                class={`flex flex-row justify-center items-center`}
+                on:click={async () => {
+                    view_display = `followers`;
+                }}
+            >
+                <p
+                    class={`font-sans text-[1.1rem] font-[600] capitalize ${view_display === `followers` ? classes_photo_overlay_glyph_opt_selected : classes_photo_overlay_glyph_opt} el-re`}
+                >
+                    {`followers`}
+                </p>
+            </button>
+        </div>
     </div>
-    <div class={`flex flex-col w-full justify-start items-center`}>
-        {#if view_display === `photos`}
-            <p class={`font-sans font-[400] text-layer-0-glyph`}>
-                {view_display}
-            </p>
-        {:else if view_display === `following`}
-            <p class={`font-sans font-[400] text-layer-0-glyph`}>
-                {view_display}
-            </p>
-        {:else if view_display === `followers`}
-            <p class={`font-sans font-[400] text-layer-0-glyph`}>
-                {view_display}
-            </p>
-        {/if}
-    </div>
-</LayoutView>
+</div>
+<div class={`flex flex-col w-full justify-start items-center`}>
+    {#if view_display === `photos`}
+        <p class={`font-sans font-[400] text-layer-0-glyph`}>
+            {view_display}
+        </p>
+    {:else if view_display === `following`}
+        <p class={`font-sans font-[400] text-layer-0-glyph`}>
+            {view_display}
+        </p>
+    {:else if view_display === `followers`}
+        <p class={`font-sans font-[400] text-layer-0-glyph`}>
+            {view_display}
+        </p>
+    {/if}
+</div>
 <TabsFloat />
-<Nav
+<!--<Nav
     basis={{
         prev: {
             loading: loading_photo_upload,
-            label: `${$t(`common.home`)}`,
+            label: `${$ls(`common.home`)}`,
             route: `/`,
             prevent_route: opt_photo_path
                 ? {
@@ -352,8 +375,8 @@
         },
         title: {
             label: {
-                value: `${$t(`common.profile`)}`,
+                value: `${$ls(`common.profile`)}`,
             },
         },
     }}
-/>
+/>-->
