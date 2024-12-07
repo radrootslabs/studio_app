@@ -5,7 +5,6 @@
     import MapPointSelectEnvelope from "$lib/components/map_point_select_envelope.svelte";
     import TradeFieldDisplayEl from "$lib/components/trade_field_display_el.svelte";
     import TradeFieldDisplayKv from "$lib/components/trade_field_display_kv.svelte";
-    import { ascii } from "$lib/conf";
     import { el_focus } from "$lib/util/client";
     import { location_gcs_to_geoc } from "$lib/util/geocode";
     import { kv_init_page, kv_sync } from "$lib/util/kv";
@@ -23,6 +22,7 @@
     } from "@radroots/models";
     import {
         app_layout,
+        ascii,
         carousel_dec,
         carousel_inc,
         carousel_index,

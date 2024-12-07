@@ -1,10 +1,10 @@
 <script lang="ts">
     import { db, keystore, nostr } from "$lib/client";
-    import { ascii } from "$lib/conf";
     import { type NostrProfile } from "@radroots/models";
     import {
         app_nostr_key,
         app_notify,
+        ascii,
         Glyph,
         type ISelectOption,
         LayoutTrellis,

@@ -1,32 +1,48 @@
 <script lang="ts">
     import { dialog, geol } from "$lib/client";
     import MapPointSelect from "$lib/components/map_point_select.svelte";
+    import type { IClientGeolocationPosition } from "@radroots/client";
     import type { GeocoderReverseResult } from "@radroots/geocoder";
     import {
         ButtonGlyphPrimary,
-        Fade,
-        InputElement,
-        LayoutView,
-        NavToolbar,
-        PageHeader,
         carousel_dec,
         carousel_inc,
         carousel_index,
         carousel_init,
+        Fade,
         fmt_geol_latitude,
         fmt_geol_longitude,
         fmt_id,
+        Glyph,
+        GlyphTitleSelect,
+        InputElement,
+        LayoutView,
         ls,
+        NavToolbar,
+        PageHeader,
+        SelectMenu,
     } from "@radroots/svelte-lib";
-    import { type GeolocationCoordinatesPoint, regex } from "@radroots/utils";
+    import { num_str, regex } from "@radroots/utils";
     import { onMount } from "svelte";
 
     let view_init: View = `c_1`;
     type View = `c_1`;
     let view: View = view_init;
 
-    let _map_point: GeolocationCoordinatesPoint | undefined = undefined;
-    let _map_geoc: GeocoderReverseResult | undefined = undefined;
+    let geol_pos: IClientGeolocationPosition | undefined = undefined;
+    let geol_c: GeocoderReverseResult | undefined = undefined;
+
+    let lgcs_label = ``;
+    let lgcs_area = ``;
+    let lgcs_area_unit = `ac`;
+    let lgcs_elevation = ``;
+    let lgcs_elevation_unit = `m`;
+    let lgcs_climate = ``;
+
+    $: lgcs_elevation =
+        typeof geol_pos?.altitude === `number`
+            ? num_str(geol_pos.altitude)
+            : lgcs_elevation;
 
     onMount(async () => {
         try {
@@ -46,10 +62,7 @@
                 );
                 return;
             }
-            _map_point = {
-                lat: geolc.lat,
-                lng: geolc.lng,
-            };
+            geol_pos = geolc;
         } catch (e) {
             console.log(`(error) init_page `, e);
         }
@@ -76,7 +89,12 @@
     <NavToolbar />
     <PageHeader
         basis={{
-            label: `${$ls(`icu.add_*`, { value: `${$ls(`common.farm_land`)}` })}`,
+            label: [
+                `${$ls(`icu.add_*`, { value: `${$ls(`common.farm_land`)}` })}`,
+                {
+                    route: `/farm/land`,
+                },
+            ],
         }}
     >
         <div slot="option" class={`flex flex-row justify-start items-center`}>
@@ -109,13 +127,13 @@
                 <div
                     class={`flex flex-col w-full px-4 gap-4 justify-start items-center`}
                 >
-                    {#if _map_point}
+                    {#if geol_pos}
                         <div
-                            class={`flex flex-row h-[24rem] w-full justify-center items-center round-44 overflow-hidden`}
+                            class={`flex flex-row h-[24rem] w-full justify-center items-center bg-layer-2-surface round-44 overflow-hidden`}
                         >
                             <MapPointSelect
-                                bind:map_point={_map_point}
-                                bind:map_geoc={_map_geoc}
+                                bind:map_point={geol_pos}
+                                bind:map_geoc={geol_c}
                             />
                         </div>
                         <div
@@ -125,8 +143,21 @@
                                 basis={{
                                     label: `${$ls(`icu.add_*`, { value: `${$ls(`common.location`)}` })}`,
                                     callback: async () => {
-                                        if (_map_geoc) await handle_inc();
+                                        if (geol_c) await handle_inc();
                                     },
+                                }}
+                            />
+                        </div>
+                    {:else}
+                        <div
+                            class={`flex flex-row h-[24rem] w-full justify-center items-center bg-layer-2-surface round-44`}
+                        >
+                            <Glyph
+                                basis={{
+                                    classes: `text-layer-0-glyph`,
+                                    dim: `md`,
+                                    weight: `bold`,
+                                    key: `compass`,
                                 }}
                             />
                         </div>
@@ -143,7 +174,7 @@
                     <div
                         class={`flex flex-col h-[24rem] w-full px-2 gap-4 justify-start items-center`}
                     >
-                        {#if _map_geoc && _map_point}
+                        {#if geol_c && geol_pos}
                             <div
                                 class={`flex flex-col w-full gap-1 justify-start items-start`}
                             >
@@ -162,7 +193,7 @@
                                     <p
                                         class={`font-sans font-[400] text-[1.1rem] text-layer-0-glyph`}
                                     >
-                                        {`${_map_geoc.name}, ${_map_geoc.admin1_id}, ${_map_geoc.country_name}`}
+                                        {`${geol_c.name}, ${geol_c.admin1_id}, ${geol_c.country_name}`}
                                     </p>
                                 </div>
                             </div>
@@ -181,11 +212,11 @@
                                         class={`font-sans font-[400] text-[1.1rem] text-layer-0-glyph`}
                                     >
                                         {`${fmt_geol_latitude(
-                                            _map_point.lat,
+                                            geol_pos.lat,
                                             `d`,
                                             4,
                                         )}, ${fmt_geol_longitude(
-                                            _map_point.lng,
+                                            geol_pos.lng,
                                             `d`,
                                             4,
                                         )}`}
@@ -208,8 +239,9 @@
                                     class={`flex flex-row h-12 w-full justify-start items-center border-y-line border-layer-0-surface-edge`}
                                 >
                                     <InputElement
+                                        bind:value={lgcs_label}
                                         basis={{
-                                            id: fmt_id(`farm_estate`),
+                                            id: fmt_id(`label`),
                                             sync: true,
                                             layer: 0,
                                             classes: `h-10 placeholder:text-[1.1rem]`,
@@ -227,18 +259,51 @@
                                 class={`flex flex-col w-full gap-1 justify-start items-start`}
                             >
                                 <div
-                                    class={`flex flex-row w-full justify-start items-center`}
+                                    class={`flex flex-row w-full gap-1 justify-start items-center`}
                                 >
                                     <p
                                         class={`font-sansd text-trellisTitle text-layer-0-glyph-label uppercase`}
                                     >
-                                        {`${$ls(`common.area`)} (ac.)`}
+                                        {`${$ls(`common.area`)}`}
                                     </p>
+                                    <SelectMenu
+                                        bind:value={lgcs_area_unit}
+                                        basis={{
+                                            layer: 0,
+                                            options: [
+                                                {
+                                                    entries: [
+                                                        {
+                                                            label: `${$ls(`measurement.area.ac`)}`,
+                                                            value: `ac`,
+                                                        },
+                                                        {
+                                                            label: `${$ls(`measurement.area.ha`)}`,
+                                                            value: `ha`,
+                                                        },
+                                                        {
+                                                            label: `${$ls(`measurement.area.m2`)}`,
+                                                            value: `m2`,
+                                                        },
+                                                    ],
+                                                },
+                                            ],
+                                        }}
+                                    >
+                                        <svelte:fragment slot="element">
+                                            <GlyphTitleSelect
+                                                basis={{
+                                                    label: `${$ls(`measurement.area.${lgcs_area_unit}_ab`)}`,
+                                                }}
+                                            />
+                                        </svelte:fragment>
+                                    </SelectMenu>
                                 </div>
                                 <div
-                                    class={`flex flex-row h-12 w-full justify-start items-center border-y-line border-layer-0-surface-edge`}
+                                    class={`relative flex flex-row h-12 w-full justify-between items-center border-y-line border-layer-0-surface-edge`}
                                 >
                                     <InputElement
+                                        bind:value={lgcs_area}
                                         basis={{
                                             id: fmt_id(`area`),
                                             sync: true,
@@ -258,18 +323,47 @@
                                 class={`flex flex-col w-full gap-1 justify-start items-start`}
                             >
                                 <div
-                                    class={`flex flex-row w-full justify-start items-center`}
+                                    class={`flex flex-row w-full gap-1 justify-start items-center`}
                                 >
                                     <p
                                         class={`font-sansd text-trellisTitle text-layer-0-glyph-label uppercase`}
                                     >
                                         {`${$ls(`common.elevation`)}`}
                                     </p>
+                                    <SelectMenu
+                                        bind:value={lgcs_elevation_unit}
+                                        basis={{
+                                            layer: 0,
+                                            options: [
+                                                {
+                                                    entries: [
+                                                        {
+                                                            label: `${$ls(`measurement.length.m`)}`,
+                                                            value: `m`,
+                                                        },
+                                                        {
+                                                            label: `${$ls(`measurement.length.ft`)}`,
+                                                            value: `ft`,
+                                                        },
+                                                    ],
+                                                },
+                                            ],
+                                        }}
+                                    >
+                                        <svelte:fragment slot="element">
+                                            <GlyphTitleSelect
+                                                basis={{
+                                                    label: `${$ls(`measurement.length.${lgcs_elevation_unit}_ab`)}`,
+                                                }}
+                                            />
+                                        </svelte:fragment>
+                                    </SelectMenu>
                                 </div>
                                 <div
                                     class={`flex flex-row h-12 w-full justify-start items-center border-y-line border-layer-0-surface-edge`}
                                 >
                                     <InputElement
+                                        bind:value={lgcs_elevation}
                                         basis={{
                                             id: fmt_id(`elevation`),
                                             sync: true,
@@ -301,6 +395,7 @@
                                     class={`flex flex-row h-12 w-full justify-start items-center border-y-line border-layer-0-surface-edge`}
                                 >
                                     <InputElement
+                                        bind:value={lgcs_climate}
                                         basis={{
                                             id: fmt_id(`climate`),
                                             sync: true,
@@ -323,7 +418,7 @@
                                     basis={{
                                         label: `${$ls(`icu.add_*`, { value: `${$ls(`common.location`)}` })}`,
                                         callback: async () => {
-                                            if (_map_geoc) await handle_inc();
+                                            if (geol_c) await handle_inc();
                                         },
                                     }}
                                 />

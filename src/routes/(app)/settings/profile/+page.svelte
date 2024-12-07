@@ -1,13 +1,13 @@
 <script lang="ts">
     import { db, dialog, fs } from "$lib/client";
     import ImageUploadAddPhoto from "$lib/components/image_upload_add_photo.svelte";
-    import { ascii } from "$lib/conf";
     import { kv_init_page } from "$lib/util/kv";
     import { model_media_upload_add_list } from "$lib/util/models-media-upload";
     import { nostr_sync_metadata } from "$lib/util/nostr-sync";
     import { fmt_media_upload_url, type NostrProfile } from "@radroots/models";
     import {
         app_nostr_key,
+        ascii,
         Glyph,
         ImageBlob,
         ImagePath,

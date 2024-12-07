@@ -1,13 +1,47 @@
 <script lang="ts">
+    import { db } from "$lib/client";
+    import type { LocationGcs } from "@radroots/models";
     import {
         Fill,
         LayoutView,
         NavToolbar,
         PageHeader,
         TabsFloat,
+        app_notify,
         ls,
         route,
     } from "@radroots/svelte-lib";
+    import { onMount } from "svelte";
+
+    type LoadData = {
+        location_gcss: LocationGcs[];
+    };
+    let ld: LoadData | undefined = undefined;
+
+    onMount(async () => {
+        try {
+            ld = await load_data();
+        } catch (e) {
+        } finally {
+        }
+    });
+
+    const load_data = async (): Promise<LoadData | undefined> => {
+        try {
+            const location_gcss = await db.location_gcs_get({
+                list: [`all`],
+            });
+            if (`err` in location_gcss) {
+                app_notify.set(`${$ls(`error.client.page.load`)}`);
+                return;
+            }
+            return {
+                location_gcss: location_gcss.results,
+            } satisfies LoadData;
+        } catch (e) {
+            console.log(`(error) load_data `, e);
+        }
+    };
 </script>
 
 <LayoutView>

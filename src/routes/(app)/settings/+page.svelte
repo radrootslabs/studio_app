@@ -1,9 +1,10 @@
 <script lang="ts">
     import { dialog, geol, haptics, keystore } from "$lib/client";
-    import { ascii, ks } from "$lib/conf";
+    import { ks } from "$lib/conf";
     import { reset_device } from "$lib/util/client";
     import {
         app_thc,
+        ascii,
         LayoutTrellis,
         LayoutView,
         ls,

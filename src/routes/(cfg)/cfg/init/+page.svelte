@@ -747,6 +747,7 @@
                                     classes: `font-sans text-[1.25rem] text-center placeholder:opacity-60`,
                                     id: fmt_id(`nostr_profilename`),
                                     sync: true,
+                                    layer: 1,
                                     placeholder: `${$ls(`icu.enter_*`, { value: `${$ls(`common.profile_name`)}`.toLowerCase() })}`,
                                     field: {
                                         charset: regex.profile_name_ch,

@@ -1,11 +1,11 @@
 <script lang="ts">
     import { dialog } from "$lib/client";
-    import { ascii } from "$lib/conf";
     import {
         LayoutTrellis,
         LayoutView,
         Nav,
         Trellis,
+        ascii,
         ls,
         type ISelectOption,
     } from "@radroots/svelte-lib";

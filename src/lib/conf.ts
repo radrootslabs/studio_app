@@ -18,11 +18,6 @@ export const ks = {
 
 export const root_symbol = "»--`--,---";
 
-export const ascii = {
-    bullet: '•',
-    dash: `—`
-}
-
 export const err = {
     nostr: {
         no_relays: `error.nostr.no_relays_connected`
