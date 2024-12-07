@@ -520,7 +520,7 @@
             await reset_ks();
             await restart({
                 route: `/`,
-                notify_message: `${$ls(`app.page.cfg.init.notification.welcome`)}`,
+                notify_message: `${$ls(`app.cfg.init.notification.welcome`)}`,
             });
         } catch (e) {
             console.log(`(error) submit `, e);
@@ -550,7 +550,7 @@
                         <LogoCircle />
                     </div>
                     <div
-                        class={`flex flex-col w-full gap-2 justify-start items-center`}
+                        class={`flex flex-col w-full pt-4 px-12 gap-2 justify-start items-center`}
                     >
                         <div
                             class={`flex flex-row w-full justify-start items-center`}
@@ -558,23 +558,30 @@
                             <p
                                 class={`font-sans font-[400] text-sm text-layer-0-glyph-label uppercase`}
                             >
-                                {`${$ls(`common.setup`)}`}
+                                {`${$ls(`common.configure`)}`}
                             </p>
                         </div>
                         <div
-                            class={`grid grid-cols-12 flex flex-col gap-4 w-full justify-start items-center`}
+                            class={`flex flex-col w-full gap-2 justify-start items-center`}
                         >
-                            {#each [`${$ls(`common.configure_your_device`)}`, `${$ls(`common.choose_a_profile_name`)}`, `${$ls(`common.terms_of_use_agreement`)}`] as li, li_i}
-                                <div
-                                    class={`col-span-12 flex flex-row justify-start items-center`}
+                            <div
+                                class={`flex flex-row w-full justify-start items-center`}
+                            >
+                                <p
+                                    class={`font-mono font-[400] text-[1.1rem] text-layer-0-glyph`}
                                 >
-                                    <p
-                                        class={`font-mono font-[400] text-[1.1rem] text-layer-0-glyph`}
-                                    >
-                                        {`${li_i + 1}. ${li}`}
-                                    </p>
-                                </div>
-                            {/each}
+                                    {`${$ls(`app.cfg.init.greeting`)}`}
+                                </p>
+                            </div>
+                            <div
+                                class={`flex flex-row w-full justify-start items-center`}
+                            >
+                                <p
+                                    class={`font-mono font-[400] text-[1.1rem] text-layer-0-glyph`}
+                                >
+                                    {`${$ls(`app.cfg.init.message`)}`}
+                                </p>
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -644,7 +651,7 @@
                             <p
                                 class={`font-mono font-[600] text-layer-0-glyph text-3xl`}
                             >
-                                {`Using Public Key`}
+                                {`${$ls(`common.using_public_key`)}`}
                             </p>
                             <DisplayLine
                                 basis={{
@@ -856,7 +863,7 @@
                         callback: async () => {
                             if ($carousel_index === 0) {
                                 const confirm = await dialog.confirm({
-                                    message: `${$ls(`app.page.cfg.init.notification.no_profile_name`)}`,
+                                    message: `${$ls(`app.cfg.init.notification.no_profile_name`)}`,
                                     cancel_label: `${$ls(`icu.add_*`, { value: `${$ls(`common.profile`)}` })}`,
                                     ok_label: `${$ls(`common.continue`)}`,
                                 });
