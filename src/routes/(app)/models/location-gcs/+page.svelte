@@ -3,6 +3,7 @@
     import { type LocationGcs } from "@radroots/models";
     import {
         app_notify,
+        catch_err,
         LayoutTrellis,
         LayoutView,
         ls,
@@ -24,10 +25,6 @@
         }
     });
 
-    $: {
-        console.log(JSON.stringify(ld, null, 4), `ld`);
-    }
-
     const load_data = async (): Promise<LoadData | undefined> => {
         try {
             const location_gcss = await db.location_gcs_get({
@@ -41,17 +38,15 @@
                 location_gcss: location_gcss.results,
             } satisfies LoadData;
         } catch (e) {
-            console.log(`(error) load_data `, e);
+            await catch_err(e, `load_data`);
         }
     };
 
     const handle_add_location_gcs = async (): Promise<void> => {
         try {
             console.log(`@todo`);
-            //const res = await location_gcs_add_current();
-            //if (res) ld = await load_data();
         } catch (e) {
-            console.log(`(error) handle_add_location_gcs `, e);
+            await catch_err(e, `handle_add_location_gcs`);
         }
     };
 </script>

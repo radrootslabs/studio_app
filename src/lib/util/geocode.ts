@@ -1,6 +1,7 @@
 import { geoc } from "$lib/client";
 import type { GeocoderReverseResult } from "@radroots/geocoder";
 import type { LocationGcs } from "@radroots/models";
+import { catch_err } from "@radroots/svelte-lib";
 import type { GeolocationCoordinatesPoint } from "@radroots/utils";
 
 export const geoc_rev = async (point: GeolocationCoordinatesPoint): Promise<GeocoderReverseResult | undefined> => {
@@ -9,9 +10,10 @@ export const geoc_rev = async (point: GeolocationCoordinatesPoint): Promise<Geoc
         if (`results` in geoc_res && geoc_res.results.length > 0)
             return geoc_res.results[0];
     } catch (e) {
-        console.log(`(error) geoc_rev `, e);
+        await catch_err(e, `geoc_rev`);
     }
 };
+
 
 export const location_gcs_to_geoc = (opts: LocationGcs): GeocoderReverseResult | undefined => {
     const {

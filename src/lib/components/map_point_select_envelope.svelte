@@ -4,6 +4,7 @@
     import type { GeocoderReverseResult } from "@radroots/geocoder";
     import {
         app_thc,
+        catch_err,
         envelope_tilt,
         envelope_visible,
         EnvelopeLower,
@@ -74,7 +75,7 @@
                         map_point_select_geoc = geoc_res.results[0];
                     else map_point_select_geoc = undefined;
                 } catch (e) {
-                    console.log(`(error) map choose location`, e);
+                    await catch_err(e, ``);
                 }
             })();
         }

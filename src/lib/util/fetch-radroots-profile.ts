@@ -1,9 +1,9 @@
 import { PUBLIC_RADROOTS_URL } from "$env/static/public";
 import { http, nostr } from "$lib/client";
 import { cfg } from "$lib/conf";
-import { get_store, ls, } from "@radroots/svelte-lib";
+import { catch_err, get_store, ls, } from "@radroots/svelte-lib";
 import { err_msg, type ErrorMessage } from "@radroots/utils";
-import { catch_err, throw_err } from "./error";
+import { throw_err } from "./error";
 
 export const fetch_radroots_profile_validate = async (opts: {
     profile_name: string;

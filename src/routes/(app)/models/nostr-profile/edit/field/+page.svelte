@@ -9,6 +9,7 @@
     } from "@radroots/models";
     import {
         app_notify,
+        catch_err,
         Fill,
         fmt_id,
         kv,
@@ -67,6 +68,7 @@
     $: if (el_input_loaded && el_input) {
         el_input.focus();
     }
+
     const load_page = async (): Promise<LoadData | undefined> => {
         try {
             const nostr_profiles = await db.nostr_profile_get({
@@ -83,20 +85,17 @@
                 );
                 return;
             }
-
             const field_key = parse_nostr_profile_form_keys($qp_rkey);
             if (!field_key) {
                 app_notify.set(`${$ls(`error.client.page.load`)}`);
                 return;
             }
-
-            const data: LoadData = {
+            return {
                 nostr_profile: nostr_profiles.results[0],
                 field_key,
-            };
-            return data;
+            } satisfies LoadData;
         } catch (e) {
-            console.log(`(error) load_page `, e);
+            await catch_err(e, `load_page`);
         }
     };
 
@@ -138,9 +137,8 @@
                     [`id`, ld.nostr_profile.id],
                 ]);
             else await route_prev(`/models/nostr-profile`);
-            return;
         } catch (e) {
-            console.log(`(error) submit `, e);
+            await catch_err(e, `submit`);
         }
     };
 </script>

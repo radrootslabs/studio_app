@@ -1,5 +1,5 @@
 import { db, keystore } from "$lib/client";
-import { app_notify, el_id, route, sleep, type NavigationRoute } from "@radroots/svelte-lib";
+import { app_notify, catch_err, el_id, route, sleep, type NavigationRoute } from "@radroots/svelte-lib";
 import type { ThemeLayer } from "@radroots/theme";
 import type { ErrorMessage } from "@radroots/utils";
 
@@ -9,7 +9,7 @@ export const keystore_reset = async (): Promise<ErrorMessage<string> | undefined
         if (`err` in ks_keys) return ks_keys;
         for (const ks_key of ks_keys.results) await keystore.remove(ks_key);
     } catch (e) {
-        console.log(`(error) keystore_reset `, e);
+        await catch_err(e, `keystore_reset`);
     }
 };
 
@@ -22,7 +22,7 @@ export const restart = async (opts?: {
         if (opts?.route) await route(opts.route);
         else location.reload();
     } catch (e) {
-        console.log(`(error) restart `, e);
+        await catch_err(e, `restart`);
     }
 };
 
@@ -47,7 +47,7 @@ export const reset_device = async (): Promise<ErrorMessage<string> | undefined> 
         for (const { id } of nostr_relays.results) await db.nostr_relay_delete({ id });
         await route(`/`);
     } catch (e) {
-        console.log(`(error) reset_device `, e);
+        await catch_err(e, `reset_device`);
     }
 };
 
@@ -60,6 +60,6 @@ export const el_focus = async (id: string, callback: () => Promise<void>, layer:
         await callback();
         el?.classList.remove(`entry-layer-${layer}-highlight`);
     } catch (e) {
-        console.log(`(error) el_focus `, e);
+        await catch_err(e, `el_focus`);
     }
 };

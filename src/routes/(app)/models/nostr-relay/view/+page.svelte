@@ -4,6 +4,7 @@
     import {
         app_blur,
         app_notify,
+        catch_err,
         EnvelopeButtons,
         LayoutTrellis,
         LayoutView,
@@ -44,18 +45,14 @@
                 app_notify.set(`${$ls(`error.client.page.load`)}`);
                 return;
             }
-
             const nostr_relay = nostr_relays.results[0];
-
             const nostr_profiles = await db.nostr_profile_get({
                 list: [`on_relay`, { id: nostr_relay.id }],
             });
-
             const nostr_profiles_unconnected = await db.nostr_profile_get({
                 list: [`off_relay`, { id: nostr_relay.id }],
             });
-
-            const data: LoadData = {
+            return {
                 nostr_relay,
                 nostr_profiles:
                     `results` in nostr_profiles ? nostr_profiles.results : [],
@@ -63,29 +60,25 @@
                     `results` in nostr_profiles_unconnected
                         ? nostr_profiles_unconnected.results
                         : [],
-            };
-            return data;
+            } satisfies LoadData;
         } catch (e) {
-            console.log(`(error) load_data `, e);
+            await catch_err(e, `load_data`);
         }
     };
 
     $: app_blur.set(show_edit);
 
-    $: {
-        console.log(JSON.stringify(ld, null, 4), `ld`);
-    }
     const relay_connect = async (): Promise<void> => {
         try {
         } catch (e) {
-            console.log(`(error) relay_connect `, e);
+            await catch_err(e, `relay_connect`);
         }
     };
 
     const relay_disconnect = async (): Promise<void> => {
         try {
         } catch (e) {
-            console.log(`(error) relay_disconnect `, e);
+            await catch_err(e, `relay_disconnect`);
         }
     };
 </script>

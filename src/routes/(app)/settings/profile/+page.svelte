@@ -1,6 +1,7 @@
 <script lang="ts">
     import { db, dialog, fs } from "$lib/client";
     import ImageUploadAddPhoto from "$lib/components/image_upload_add_photo.svelte";
+    import { throw_err } from "$lib/util/error";
     import { kv_init_page } from "$lib/util/kv";
     import { model_media_upload_add_list } from "$lib/util/models-media-upload";
     import { nostr_sync_metadata } from "$lib/util/nostr-sync";
@@ -8,6 +9,7 @@
     import {
         app_nostr_key,
         ascii,
+        catch_err,
         Glyph,
         ImageBlob,
         ImagePath,
@@ -36,6 +38,7 @@
         try {
             await init_page();
         } catch (e) {
+            await catch_err(e, `mount`);
         } finally {
         }
     });
@@ -44,6 +47,7 @@
         try {
             await nostr_sync_metadata();
         } catch (e) {
+            await catch_err(e, `destroy`);
         } finally {
         }
     });
@@ -64,21 +68,22 @@
             await kv_init_page();
             ld = await load_data();
         } catch (e) {
-            console.log(`(error) init_page `, e);
+            await catch_err(e, `init_page`);
         }
     };
 
     const load_data = async (): Promise<LoadData | undefined> => {
         try {
             let nostr_profile_get_one = await db.nostr_profile_get_one({
-                public_key: $app_nostr_key,
+                public_key: $app_nostr_key + `ye`,
             });
-            if (`err` in nostr_profile_get_one) return;
+            if (`err` in nostr_profile_get_one)
+                return throw_err(nostr_profile_get_one);
             return {
                 nostr_profile: nostr_profile_get_one.result,
             } satisfies LoadData;
         } catch (e) {
-            console.log(`(error) load_data `, e);
+            await catch_err(e, `load_data`);
         }
     };
 
@@ -87,7 +92,7 @@
             if (opt_photo_path) await handle_profile_photo_add(opt_photo_path);
             await route(`/`);
         } catch (e) {
-            console.log(`(error) handle_back `, e);
+            await catch_err(e, `handle_back`);
         }
     };
 
@@ -144,9 +149,48 @@
             }
             location.reload();
         } catch (e) {
-            console.log(`(error) handle_profile_photo_add `, e);
+            await catch_err(e, `handle_profile_photo_add`);
         } finally {
             loading_photo_upload = false;
+        }
+    };
+
+    const handle_edit_display_name = async (): Promise<void> => {
+        try {
+            await route(`/settings/profile/edit`, [
+                [`nostr_pk`, $app_nostr_key],
+                [`rkey`, `display_name`],
+            ]);
+        } catch (e) {
+            await catch_err(e, `handle_edit_display_name`);
+        }
+    };
+
+    const handle_edit_name = async (): Promise<void> => {
+        try {
+            if (ld?.nostr_profile.name) {
+                const confirm = await dialog.confirm({
+                    message: `Updating your username will result in public links on your profile being updated. Do you want to continue?`,
+                });
+                if (!confirm) return;
+            }
+            await route(`/settings/profile/edit`, [
+                [`nostr_pk`, $app_nostr_key],
+                [`rkey`, `name`],
+            ]);
+        } catch (e) {
+            await catch_err(e, `handle_edit_name`);
+        }
+    };
+
+    const handle_edit_about = async (): Promise<void> => {
+        try {
+            await route(`/settings/profile/edit`, [
+                [`nostr_pk`, $app_nostr_key],
+                [`rkey`, `about`],
+            ]);
+        } catch (e) {
+            await catch_err(e, `handle_edit_about`);
         }
     };
 </script>
@@ -221,10 +265,7 @@
                 <button
                     class={`group flex flex-row justify-center items-center`}
                     on:click={async () => {
-                        await route(`/settings/profile/edit`, [
-                            [`nostr_pk`, $app_nostr_key],
-                            [`rkey`, `display_name`],
-                        ]);
+                        await handle_edit_display_name();
                     }}
                 >
                     <p
@@ -242,14 +283,7 @@
                 <button
                     class={`group flex flex-row justify-center items-center`}
                     on:click={async () => {
-                        const confirm = await dialog.confirm({
-                            message: `Updating your username will result in public links on your profile being updated. Do you want to continue?`,
-                        });
-                        if (confirm)
-                            await route(`/settings/profile/edit`, [
-                                [`nostr_pk`, $app_nostr_key],
-                                [`rkey`, `name`],
-                            ]);
+                        await handle_edit_name();
                     }}
                 >
                     <p
@@ -285,10 +319,7 @@
                 <button
                     class={`group flex flex-row justify-center items-center`}
                     on:click={async () => {
-                        await route(`/settings/profile/edit`, [
-                            [`nostr_pk`, $app_nostr_key],
-                            [`rkey`, `about`],
-                        ]);
+                        await handle_edit_about();
                     }}
                 >
                     <p

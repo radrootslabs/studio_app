@@ -4,6 +4,7 @@
     import {
         app_nostr_key,
         app_notify,
+        catch_err,
         GlyphCircle,
         LayoutTrellis,
         LayoutView,
@@ -44,7 +45,6 @@
                 app_notify.set(`${$ls(`error.client.page.load`)}`);
                 return;
             }
-
             const nostr_relays_other = await db.nostr_relay_get({
                 list: [`off_profile`, { public_key: $app_nostr_key }],
                 sort: `oldest`,
@@ -53,14 +53,12 @@
                 app_notify.set(`${$ls(`error.client.page.load`)}`);
                 return;
             }
-
-            const data: LoadData = {
+            return {
                 nostr_relays: nostr_relays.results,
                 nostr_relays_other: nostr_relays_other.results,
-            };
-            return data;
+            } satisfies LoadData;
         } catch (e) {
-            console.log(`(error) load_data `, e);
+            await catch_err(e, `load_data`);
         }
     };
 
@@ -152,7 +150,7 @@
 
             alert(`@todo`);
         } catch (e) {
-            console.log(`(error) handle_disconnect_relay `, e);
+            await catch_err(e, `handle_disconnect_relay`);
         } finally {
             loading_edit_id = ``;
             show_edit = false;

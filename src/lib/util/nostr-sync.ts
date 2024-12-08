@@ -3,7 +3,7 @@ import { err, nostr_client, root_symbol } from "$lib/conf";
 import { NDKKind } from "@nostr-dev-kit/ndk";
 import type { NostrRelay } from "@radroots/models";
 import {
-    app_nostr_key, ls, ndk, ndk_user, nostr_sync_prevent
+    app_nostr_key, catch_err, ls, ndk, ndk_user, nostr_sync_prevent
 } from "@radroots/svelte-lib";
 import { fmt_tags_basis_nip99, ndk_event, ndk_event_metadata, nevent_encode, num_str } from "@radroots/utils";
 import { get as get_store } from "svelte/store";
@@ -25,14 +25,14 @@ export const nostr_sync_metadata = async (): Promise<void> => {
         });
         if (ev_metadata) await ev_metadata.publish();
     } catch (e) {
-        console.log(`(error) nostr_sync_metadata `, e);
+        await catch_err(e, `nostr_sync_metadata`);
     }
 };
 
 export const nostr_sync_classified = async (nostr_relays: NostrRelay[]): Promise<void> => {
-    const $ndk = get_store(ndk);
-    const $ndk_user = get_store(ndk_user);
     try {
+        const $ndk = get_store(ndk);
+        const $ndk_user = get_store(ndk_user);
         const trade_products_all = await db.trade_product_get({
             list: [`all`],
         });
@@ -104,15 +104,15 @@ export const nostr_sync_classified = async (nostr_relays: NostrRelay[]): Promise
             }
         }
     } catch (e) {
-        console.log(`(error) nostr_sync_classified `, e);
+        await catch_err(e, `nostr_sync_classified`);
     }
 };
 
 export const nostr_sync = async (): Promise<void> => {
-    const $nostr_sync_prevent = get_store(nostr_sync_prevent);
-    const $ls = get_store(ls);
-    const $app_nostr_key = get_store(app_nostr_key);
     try {
+        const $nostr_sync_prevent = get_store(nostr_sync_prevent);
+        const $ls = get_store(ls);
+        const $app_nostr_key = get_store(app_nostr_key);
         if ($nostr_sync_prevent) {
             const confirm = await dialog.confirm({
                 message: `${$ls(`error.client.nostr_sync_disabled`)}`,
@@ -135,9 +135,10 @@ export const nostr_sync = async (): Promise<void> => {
         await nostr_sync_classified(nostr_relays.results);
         console.log(`nostr_sync done`)
     } catch (e) {
-        console.log(`(error) nostr_sync `, e);
+        await catch_err(e, `nostr_sync`);
     }
 };
+
 
 export const nostr_tags_basis = (): string[][] => {
     const tags: string[][] = [];

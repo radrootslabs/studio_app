@@ -1,6 +1,6 @@
 <script lang="ts">
     import { dialog } from "$lib/client";
-    import { Glyph, ls } from "@radroots/svelte-lib";
+    import { catch_err, Glyph, ls } from "@radroots/svelte-lib";
 
     export let photo_path: string;
 
@@ -10,7 +10,7 @@
             if (!photo_paths_open) return;
             photo_path = photo_paths_open.results[0];
         } catch (e) {
-            console.log(`(error) handle_photo_add `, e);
+            await catch_err(e, `handle_photo_add`);
         }
     };
 </script>

@@ -7,6 +7,7 @@
         app_notify,
         app_submit_route,
         as_glyph_key,
+        catch_err,
         clipboard_copy,
         LayoutTrellis,
         LayoutView,
@@ -49,10 +50,6 @@
             const nostr_profiles = await db.nostr_profile_get({
                 public_key: $qp_nostr_pk,
             });
-            console.log(
-                JSON.stringify(nostr_profiles, null, 4),
-                `nostr_profiles`,
-            );
             if (`err` in nostr_profiles) {
                 app_notify.set(`${$ls(`error.client.page.load`)}`);
                 return;
@@ -60,7 +57,6 @@
                 app_notify.set(`${$ls(`error.client.page.load`)}`);
                 return;
             }
-
             const ks_secret_key = await keystore.get(
                 ks.keys.nostr_secretkey($qp_nostr_pk),
             );
@@ -68,18 +64,15 @@
                 app_notify.set(`Error loading profile`);
                 return;
             }
-
             const nostr_relays = await db.nostr_relay_get({
                 list: [`on_profile`, { public_key: $qp_nostr_pk }],
                 sort: `oldest`,
             });
-
             const nostr_relays_unconnected = await db.nostr_relay_get({
                 list: [`off_profile`, { public_key: $qp_nostr_pk }],
                 sort: `oldest`,
             });
-
-            const data: LoadData = {
+            return {
                 nostr_profile: nostr_profiles.results[0],
                 secret_key: ks_secret_key.result,
                 nostr_relays:
@@ -88,16 +81,11 @@
                     `results` in nostr_relays_unconnected
                         ? nostr_relays_unconnected.results
                         : [],
-            };
-            return data;
+            } satisfies LoadData;
         } catch (e) {
-            console.log(`(error) load_data `, e);
+            await catch_err(e, `load_data`);
         }
     };
-
-    $: {
-        console.log(JSON.stringify(ld, null, 4), `ld`);
-    }
 
     let tr_nostr_relays: ITrellisKindTouch[] = [];
     $: tr_nostr_relays =

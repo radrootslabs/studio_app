@@ -6,12 +6,9 @@
 	"scripts": {
 		"build:dev": "vite build --mode development",
 		"build": "vite build --mode production",
-		"prepare:native": "npm run gen",
-		"prepare:web": "npm run gen",
 		"dev:serve": "vite dev --mode development --debug hmr",
 		"prod:serve": "vite dev --mode production",
 		"dev": "",
-		"gen": "",
 		"sql:wasm": "rsync -u node_modules/sql.js/dist/sql-wasm.wasm static",
 		"preview": "vite preview",
 		"check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",

@@ -1,6 +1,7 @@
 <script lang="ts">
     import { dialog, geol } from "$lib/client";
     import MapPointSelect from "$lib/components/map_point_select.svelte";
+    import { kv_init_page } from "$lib/util/kv";
     import type { IClientGeolocationPosition } from "@radroots/client";
     import type { GeocoderReverseResult } from "@radroots/geocoder";
     import {
@@ -9,12 +10,13 @@
         carousel_inc,
         carousel_index,
         carousel_init,
+        catch_err,
         Fade,
         fmt_geol_latitude,
         fmt_geol_longitude,
         fmt_id,
         Glyph,
-        GlyphTitleSelect,
+        GlyphTitleSelectLabel,
         InputElement,
         LayoutView,
         ls,
@@ -34,7 +36,7 @@
 
     let lgcs_label = ``;
     let lgcs_area = ``;
-    let lgcs_area_unit = `ac`;
+    let lgcs_area_unit = `ha`;
     let lgcs_elevation = ``;
     let lgcs_elevation_unit = `m`;
     let lgcs_climate = ``;
@@ -54,6 +56,7 @@
 
     const init_page = async (): Promise<void> => {
         try {
+            await kv_init_page();
             carousel_init(1);
             const geolc = await geol.current();
             if (`err` in geolc) {
@@ -64,7 +67,7 @@
             }
             geol_pos = geolc;
         } catch (e) {
-            console.log(`(error) init_page `, e);
+            await catch_err(e, `init_page`);
         }
     };
 
@@ -72,7 +75,7 @@
         try {
             await carousel_inc(view);
         } catch (e) {
-            console.log(`(error) handle_inc `, e);
+            await catch_err(e, `handle_inc`);
         }
     };
 
@@ -80,7 +83,7 @@
         try {
             await carousel_dec(view);
         } catch (e) {
-            console.log(`(error) handle_dec `, e);
+            await catch_err(e, `handle_dec`);
         }
     };
 </script>
@@ -291,7 +294,7 @@
                                         }}
                                     >
                                         <svelte:fragment slot="element">
-                                            <GlyphTitleSelect
+                                            <GlyphTitleSelectLabel
                                                 basis={{
                                                     label: `${$ls(`measurement.area.${lgcs_area_unit}_ab`)}`,
                                                 }}
@@ -351,7 +354,7 @@
                                         }}
                                     >
                                         <svelte:fragment slot="element">
-                                            <GlyphTitleSelect
+                                            <GlyphTitleSelectLabel
                                                 basis={{
                                                     label: `${$ls(`measurement.length.${lgcs_elevation_unit}_ab`)}`,
                                                 }}
@@ -369,7 +372,7 @@
                                             sync: true,
                                             layer: 0,
                                             classes: `h-10 placeholder:text-[1.1rem]`,
-                                            placeholder: `Approx. elevation`,
+                                            placeholder: `Elevation`,
                                             field: {
                                                 charset: regex.num,
                                                 validate: regex.num,

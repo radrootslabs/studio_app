@@ -1,4 +1,4 @@
-import { default_locale, load_translations, locales, translations_loading } from '@radroots/svelte-lib';
+import { catch_err, default_locale, load_translations, locales, translations_loading } from '@radroots/svelte-lib';
 import type { LayoutLoad, LayoutLoadEvent } from './$types';
 
 export const prerender = true;
@@ -7,7 +7,6 @@ export const trailingSlash = 'always';
 
 export const load: LayoutLoad = async ({ url }: LayoutLoadEvent) => {
     try {
-        console.log(`(root) `, url.pathname)
         const { language: nav_locale } = navigator;
         let locale = default_locale.toString();
         const locales_avail = locales.get();
@@ -16,7 +15,7 @@ export const load: LayoutLoad = async ({ url }: LayoutLoadEvent) => {
         await load_translations(locale.toLowerCase(), url.pathname);
         await translations_loading.toPromise();
     } catch (e) {
-        console.log(`(load) ERROR`, e)
+        await catch_err(e, `(root)load`)
     } finally {
         return {};
     };

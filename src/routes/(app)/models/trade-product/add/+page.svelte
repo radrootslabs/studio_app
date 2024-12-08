@@ -28,6 +28,7 @@
         carousel_index,
         carousel_index_max,
         carousel_num,
+        catch_err,
         el_id,
         EntryLine,
         EntryMultiline,
@@ -194,7 +195,7 @@
             if (`results` in location_gcs_get_ls)
                 tradepr_lgc_list = location_gcs_get_ls.results;
         } catch (e) {
-            console.log(`(error) init_page `, e);
+            await catch_err(e, `init_page`);
         }
     };
 
@@ -213,7 +214,7 @@
                 ],
             ]);
         } catch (e) {
-            console.log(`(error) setup_tests `, e);
+            await catch_err(e, `setup_tests`);
         }
     };
 
@@ -282,7 +283,7 @@
             carousel_index.set(0);
             view = view_new;
         } catch (e) {
-            console.log(`(error) handle_view `, e);
+            await catch_err(e, `handle_view`);
         }
     };
 
@@ -300,7 +301,7 @@
             tradepr_key_sel_toggle = vis_input;
             if (vis_input) tradepr_key_sel = ``;
         } catch (e) {
-            console.log(`(error) handle_tradepr_key_toggle `, e);
+            await catch_err(e, `handle_tradepr_key_toggle`);
         }
     };
 
@@ -318,7 +319,7 @@
             tradepr_process_sel_toggle = vis_input;
             if (vis_input) tradepr_process_sel = ``;
         } catch (e) {
-            console.log(`(error) handle_tradepr_process_toggle `, e);
+            await catch_err(e, `handle_tradepr_process_toggle`);
         }
     };
 
@@ -341,7 +342,7 @@
             }
             tradepr_qty_tup_sel_toggle = vis_input;
         } catch (e) {
-            console.log(`(error) handle_tradepr_qty_amt_toggle `, e);
+            await catch_err(e, `handle_tradepr_qty_amt_toggle`);
         }
     };
 
@@ -360,7 +361,7 @@
                 lng: geolc.lng,
             };
         } catch (e) {
-            console.log(`(error) handle_tradepr_lgc_sel_map `, e);
+            await catch_err(e, `handle_tradepr_lgc_sel_map`);
         }
     };
 
@@ -384,7 +385,7 @@
                 carousel_index.set(Math.max($carousel_index - (num - 1), 0));
             }
         } catch (e) {
-            console.log(`(error) handle_back `, e);
+            await catch_err(e, `handle_back`);
         }
     };
 
@@ -435,7 +436,7 @@
                     break;
             }
         } catch (e) {
-            console.log(`(error) handle_continue `, e);
+            await catch_err(e, `handle_continue`);
         }
     };
 
@@ -470,6 +471,7 @@
                         await model_location_gcs_add_geocode({
                             geo_code: tradepr_lgc_map_geoc,
                             point: tradepr_lgc_map_point,
+                            kind: `trade_product`,
                         });
                     if (
                         `err` in location_gcs_add_geocode ||
@@ -653,7 +655,7 @@
             await sleep(2000);
             await route(`/`);
         } catch (e) {
-            console.log(`(error) submit `, e);
+            await catch_err(e, `submit`);
         } finally {
             load_submit = false;
         }

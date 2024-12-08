@@ -10,6 +10,7 @@
     } from "@radroots/models";
     import {
         app_notify,
+        catch_err,
         fmt_id,
         InputElement,
         kv,
@@ -34,6 +35,8 @@
 
     onMount(async () => {
         try {
+            console.log(`$qp_rkey `, $qp_rkey);
+            console.log(`$qp_nostr_pk `, $qp_nostr_pk);
             if (!$qp_rkey || !$qp_nostr_pk) {
                 app_notify.set(
                     `${$ls(`icu.error_loading_*`, { value: `${$ls(`common.page`)}` })}`,
@@ -58,6 +61,7 @@
         ? `${$ls(`models.nostr_profile.fields.${ld.field_key}.label`)}`
         : ``;
     $: input_value_del = page_initial_value !== page_input_value;
+
     const load_page = async (): Promise<LoadData | undefined> => {
         try {
             const nostr_profile = await db.nostr_profile_get_one({
@@ -69,26 +73,22 @@
                 );
                 return;
             }
-
             const field_key = parse_nostr_profile_form_keys($qp_rkey);
             if (!field_key) {
                 app_notify.set(`${$ls(`error.client.page.load`)}`);
                 return;
             }
-
             const field_val = nostr_profile.result[field_key];
             if (field_val) {
                 page_input_value = field_val;
                 page_initial_value = field_val;
             }
-
-            const data: LoadData = {
+            return {
                 nostr_profile: nostr_profile.result,
                 field_key,
-            };
-            return data;
+            } satisfies LoadData;
         } catch (e) {
-            console.log(`(error) load_page `, e);
+            await catch_err(e, `load_page`);
         }
     };
 
@@ -122,7 +122,7 @@
             }
             await route(`/settings/profile`);
         } catch (e) {
-            console.log(`(error) submit `, e);
+            await catch_err(e, `submit`);
         }
     };
 </script>

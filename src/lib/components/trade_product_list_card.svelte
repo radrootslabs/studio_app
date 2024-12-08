@@ -4,6 +4,7 @@
     import { fmt_location_gcs } from "@radroots/models";
     import {
         app_layout,
+        catch_err,
         el_id,
         els_id_pref_index,
         fmt_geol_latitude,
@@ -45,7 +46,6 @@
         el: EventTarget & HTMLButtonElement,
     ): Promise<void> => {
         try {
-            //   if (media_uploads?.length) return;
             el.focus();
             el_c.scrollTo();
             el_id(
@@ -60,7 +60,7 @@
                 (el) => el.classList.add(`translate-y-12`),
             );
         } catch (e) {
-            console.log(`(error) handle_display_focus `, e);
+            await catch_err(e, `handle_display_focus`);
         }
     };
 
@@ -75,7 +75,7 @@
                 (el) => el.classList.remove(`translate-y-12`),
             );
         } catch (e) {
-            console.log(`(error) handle_display_blur `, e);
+            await catch_err(e, `handle_display_blur`);
         }
     };
 </script>

@@ -1,5 +1,5 @@
 import { parse_trade_product_form_keys, trade_product_form_fields, trade_product_form_vals, type IModelsForm, type TradeProductFormFields } from "@radroots/models";
-import { fmt_id, kv } from "@radroots/svelte-lib";
+import { catch_err, fmt_id, kv } from "@radroots/svelte-lib";
 import { err_msg, obj_en, type ErrorMessage, type ResultPass } from "@radroots/utils";
 
 const trade_products_field_validate = (field_basis: IModelsForm, field_val: string): boolean => {
@@ -29,7 +29,7 @@ export const trade_product_fields_assign = async (opts?: {
         if (opts?.field_defaults && opts?.field_defaults?.length > 0) for (const [field_k, field_v] of opts?.field_defaults) if (!fields[field_k]) fields[field_k] = field_v;
         return fields;
     } catch (e) {
-        console.log(`(error) trade_product_fields_assign `, e);
+        await catch_err(e, `trade_product_fields_assign`);
         return err_msg(String(e))
     }
 };
@@ -58,10 +58,11 @@ export const trade_product_fields_validate = async (opts: {
         }
         return fields;
     } catch (e) {
-        console.log(`(error) trade_product_fields_validate `, e);
+        await catch_err(e, `trade_product_fields_validate`);
         return err_msg(String(e))
     }
 };
+
 
 export const tradeproduct_validate_kv = async (opts?: {
     kv_pref?: string;
@@ -84,11 +85,11 @@ export const tradeproduct_validate_kv = async (opts?: {
         }
         return vals;
     } catch (e) {
-        console.log(`(error) tradeproduct_validate_kv `, e);
+        await catch_err(e, `tradeproduct_validate_kv`);
         return err_msg(String(e))
+
     }
 };
-
 
 export const tradeproduct_init_kv = async (kv_pref: string): Promise<void> => {
     try {
@@ -98,9 +99,10 @@ export const tradeproduct_init_kv = async (kv_pref: string): Promise<void> => {
             await kv.delete(field_id);
         }
     } catch (e) {
-        console.log(`(error) tradeproduct_init_kv `, e);
+        await catch_err(e, `tradeproduct_init_kv`);
     }
 };
+
 
 export const tradeproduct_validate_fields = async (opts: {
     kv_pref: string;
@@ -115,7 +117,7 @@ export const tradeproduct_validate_fields = async (opts: {
         }
         return { pass: true };
     } catch (e) {
-        console.log(`(error) tradeproduct_validate_fields `, e);
+        await catch_err(e, `tradeproduct_validate_fields`);
         return err_msg(String(e))
     }
 };

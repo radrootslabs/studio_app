@@ -2,7 +2,7 @@ import { db, fs, http, keystore } from "$lib/client";
 import { cfg, ks } from "$lib/conf";
 import type { IClientHttpResponseError } from "@radroots/client";
 import { parse_nostr_relay_form_keys, type NostrRelayFormFields } from "@radroots/models";
-import { app_nostr_key, get_store, nostr_relays_connected, nostr_relays_poll_documents, nostr_relays_poll_documents_count } from "@radroots/svelte-lib";
+import { app_nostr_key, catch_err, get_store, nostr_relays_connected, nostr_relays_poll_documents, nostr_relays_poll_documents_count } from "@radroots/svelte-lib";
 import { err_msg, err_res, nostr_event_sign_attest, parse_nostr_relay_information_document_fields, type ErrorMessage, type ErrorResponse, type FilePath } from "@radroots/utils";
 
 export const fetch_put_upload = async (opts: {
@@ -51,7 +51,7 @@ export const fetch_put_upload = async (opts: {
         }
         return err_msg(`error.client.request_unhandled`);
     } catch (e) {
-        console.log(`(error) fetch_put_upload `, e);
+        await catch_err(e, `fetch_put_upload`);
         return err_msg(`error.client.network_failure`);
     }
 };
@@ -75,7 +75,6 @@ export const fetch_relay_documents = async (): Promise<void> => {
             list: [`on_profile`, { public_key: $app_nostr_key }],
         });
         if (`err` in nostr_relays) throw new Error(nostr_relays.err);
-
         const unconnected_relays = nostr_relays.results.filter(
             (i) => !$nostr_relays_connected.includes(i.id),
         );
@@ -83,7 +82,6 @@ export const fetch_relay_documents = async (): Promise<void> => {
             nostr_relays_poll_documents.set(false);
             return;
         }
-
         for (const nostr_relay of unconnected_relays) {
             const res = await http.fetch({
                 url: nostr_relay.url.replace(`ws://`, `http://`),
@@ -119,12 +117,11 @@ export const fetch_relay_documents = async (): Promise<void> => {
                 );
             }
         }
-
         setTimeout(
             fetch_relay_documents,
             cfg.delay.nostr_relay_poll_document,
         );
     } catch (e) {
-        console.log(`(error) fetch_relay_documents `, e);
+        await catch_err(e, `fetch_relay_documents`);
     }
 };

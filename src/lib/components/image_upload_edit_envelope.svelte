@@ -1,6 +1,7 @@
 <script lang="ts">
     import { fs } from "$lib/client";
     import {
+        catch_err,
         envelope_tilt,
         envelope_visible,
         EnvelopeLower,
@@ -42,7 +43,7 @@
         try {
             photo_paths = list_move_index(photo_paths, opts_photo_index, 0);
         } catch (e) {
-            console.log(`(error) handle_photo_edit_move `, e);
+            await catch_err(e, `handle_photo_edit_move`);
         }
     };
 </script>

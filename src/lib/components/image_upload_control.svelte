@@ -1,6 +1,12 @@
 <script lang="ts">
     import { dialog, fs } from "$lib/client";
-    import { app_layout, Glyph, ImageBlob, ls } from "@radroots/svelte-lib";
+    import {
+        app_layout,
+        catch_err,
+        Glyph,
+        ImageBlob,
+        ls,
+    } from "@radroots/svelte-lib";
     import { list_assign } from "@radroots/utils";
     import { fade } from "svelte/transition";
 
@@ -35,7 +41,7 @@
             if (!photo_paths_select) return;
             photo_paths = list_assign(photo_paths, photo_paths_select.results);
         } catch (e) {
-            console.log(`(error) handle_photo_add `, e);
+            await catch_err(e, `handle_photo_add`);
         }
     };
 
@@ -50,7 +56,7 @@
                     file_path: photo_paths[opts_photo_index],
                 };
         } catch (e) {
-            console.log(`(error) handle_photo_envelope_edit `, e);
+            await catch_err(e, `handle_photo_envelope_edit`);
         }
     };
 </script>

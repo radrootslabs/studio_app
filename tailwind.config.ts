@@ -188,6 +188,8 @@ const config: Config = {
         themes: [
             themes.theme_os_dark,
             themes.theme_os_light,
+            themes.theme_garden_light,
+            themes.theme_garden_dark
         ],
     },
 };

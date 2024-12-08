@@ -1,4 +1,4 @@
-import { fmt_id, kv } from "@radroots/svelte-lib";
+import { catch_err, fmt_id, kv } from "@radroots/svelte-lib";
 
 export const kv_init_app = async (): Promise<void> => {
     try {
@@ -6,7 +6,7 @@ export const kv_init_app = async (): Promise<void> => {
         const kv_list = await kv.each({ range }, `keys`);
         await Promise.all(kv_list.map((i) => kv.delete(i)));
     } catch (e) {
-        console.log(`(error) kv_init_page `, e);
+        await catch_err(e, `kv_init_app`);
     }
 };
 
@@ -17,14 +17,16 @@ export const kv_init_page = async (): Promise<void> => {
         const kv_list = await kv.each({ range }, `keys`);
         await Promise.all(kv_list.map((i) => kv.delete(i)));
     } catch (e) {
-        console.log(`(error) kv_init_page `, e);
+        await catch_err(e, `kv_init_page`);
     }
 };
 
 export const kv_sync = async (list: [string, string][]): Promise<void> => {
     try {
         for (const [key, val] of list) await kv.set(key, val);
+
     } catch (e) {
-        console.log(`(error) kv_sync `, e);
+        await catch_err(e, `kv_sync`);
     }
 };
+

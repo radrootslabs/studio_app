@@ -2,7 +2,7 @@
     import { geoc } from "$lib/client";
     import { cfg } from "$lib/conf";
     import type { GeocoderReverseResult } from "@radroots/geocoder";
-    import { app_thc } from "@radroots/svelte-lib";
+    import { app_thc, catch_err } from "@radroots/svelte-lib";
     import { MapLibre, Marker } from "@radroots/svelte-maplibre";
     import type { GeolocationCoordinatesPoint } from "@radroots/utils";
     import MapMarkerDot from "./map_marker_dot.svelte";
@@ -35,7 +35,7 @@
                         map_geoc = geoc_res.results[0];
                     else map_geoc = undefined;
                 } catch (e) {
-                    console.log(`(error) map choose location`, e);
+                    await catch_err(e, ``);
                 }
             })();
         }

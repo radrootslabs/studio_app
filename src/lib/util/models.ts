@@ -2,10 +2,12 @@ import { db, geoc } from "$lib/client";
 import type { IClientGeolocationPosition } from "@radroots/client";
 import type { GeocoderReverseResult } from "@radroots/geocoder";
 import type { ILocationGcsAddResolve, LocationGcsFormFields } from "@radroots/models";
+import { catch_err } from "@radroots/svelte-lib";
 import { err_msg, location_geohash, type GeolocationCoordinatesPoint } from "@radroots/utils";
 
 export const model_location_gcs_add_position = async (opts: {
     label?: string;
+    kind: string;
     geo_pos: IClientGeolocationPosition;
 }): Promise<ILocationGcsAddResolve<string>> => {
     try {
@@ -14,6 +16,7 @@ export const model_location_gcs_add_position = async (opts: {
             lat: geo_pos.lat.toString(),
             lng: geo_pos.lng.toString(),
             geohash: location_geohash(geo_pos),
+            kind: opts.kind,
         }
         if (label) fields.label = label;
         const geoc_rev = await geoc.reverse({
@@ -34,13 +37,14 @@ export const model_location_gcs_add_position = async (opts: {
         const res = await db.location_gcs_add(fields);
         return res;
     } catch (e) {
-        console.log(`(error) model_location_gcs_add_position `, e);
+        await catch_err(e, `model_location_gcs_add_position`);
         return err_msg(`*`)
     }
 };
 
 export const model_location_gcs_add_geocode = async (opts: {
     label?: string;
+    kind: string;
     geo_code: GeocoderReverseResult;
     point: GeolocationCoordinatesPoint;
 }): Promise<ILocationGcsAddResolve<string>> => {
@@ -50,6 +54,7 @@ export const model_location_gcs_add_geocode = async (opts: {
             lat: point.lat.toString(),
             lng: point.lng.toString(),
             geohash: location_geohash(point),
+            kind: opts.kind,
             gc_id: geo_code.id.toString(),
             gc_name: geo_code.name,
             gc_admin1_id: geo_code.admin1_id.toString(),
@@ -61,7 +66,7 @@ export const model_location_gcs_add_geocode = async (opts: {
         const res = await db.location_gcs_add(fields);
         return res;
     } catch (e) {
-        console.log(`(error) model_location_gcs_add_geocode `, e);
+        await catch_err(e, `model_location_gcs_add_geocode`);
         return err_msg(`*`)
     }
 };

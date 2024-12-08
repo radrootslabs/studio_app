@@ -6,6 +6,7 @@
         Nav,
         Trellis,
         ascii,
+        catch_err,
         ls,
         type ISelectOption,
     } from "@radroots/svelte-lib";
@@ -50,7 +51,7 @@
         try {
             nostr_photohosting_sel_val = `^radroots`; //@todo
         } catch (e) {
-            console.log(`(error) init_page `, e);
+            await catch_err(e, `init_page`);
         }
     };
 
@@ -73,7 +74,7 @@
             await dialog.alert(`@todo`); //@todo
             nostr_photohosting_sel_val = `^radroots`;
         } catch (e) {
-            console.log(`(error) handle_select_option `, e);
+            await catch_err(e, `handle_select_option`);
         }
     };
 </script>

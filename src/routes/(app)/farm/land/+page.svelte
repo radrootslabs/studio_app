@@ -8,6 +8,7 @@
         PageHeader,
         TabsFloat,
         app_notify,
+        catch_err,
         ls,
         route,
     } from "@radroots/svelte-lib";
@@ -39,7 +40,7 @@
                 location_gcss: location_gcss.results,
             } satisfies LoadData;
         } catch (e) {
-            console.log(`(error) load_data `, e);
+            await catch_err(e, `load_data`);
         }
     };
 </script>

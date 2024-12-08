@@ -1,13 +1,11 @@
 import { keystore } from '$lib/client';
 import { ks } from '$lib/conf';
-import { app_splash, route } from '@radroots/svelte-lib';
+import { app_splash, catch_err, route } from '@radroots/svelte-lib';
 import type { LayoutLoad, LayoutLoadEvent } from './$types';
 
-export const load: LayoutLoad = async ({ url }: LayoutLoadEvent) => {
+export const load: LayoutLoad = async (_: LayoutLoadEvent) => {
     try {
         await keystore.init();
-
-        console.log(`(cfg) `, url.pathname)
         const ks_nostr_publickey = await keystore.get(
             ks.keys.nostr_publickey,
         );
@@ -22,9 +20,8 @@ export const load: LayoutLoad = async ({ url }: LayoutLoadEvent) => {
         }
         app_splash.set(false);
     } catch (e) {
-        console.log(`(cfg) ERROR`, e)
+        await catch_err(e, `(cfg)load`)
     } finally {
-        //await win.splash_hide();
         return {};
     };
 };

@@ -5,6 +5,7 @@
         app_nostr_key,
         app_notify,
         ascii,
+        catch_err,
         Glyph,
         type ISelectOption,
         LayoutTrellis,
@@ -64,10 +65,6 @@
         }
     });
 
-    $: {
-        console.log(JSON.stringify(ld, null, 4), `ld`);
-    }
-
     const load_data = async (): Promise<LoadData | undefined> => {
         try {
             const nostr_profiles = await db.nostr_profile_get({
@@ -81,22 +78,19 @@
                 app_notify.set(`${$ls(`error.client.page.load`)}`);
                 return;
             }
-            const data: LoadData = {
+            return {
                 nostr_profiles: nostr_profiles.results,
-            };
-            return data;
+            } satisfies LoadData;
         } catch (e) {
-            console.log(`(error) load_data `, e);
+            await catch_err(e, `load_data`);
         }
     };
 
     const handle_add_location_gcs = async (): Promise<void> => {
         try {
             console.log(`@todo`);
-            //const res = await location_gcs_add_current();
-            //if (res) ld = await load_data();
         } catch (e) {
-            console.log(`(error) handle_add_location_gcs `, e);
+            await catch_err(e, `handle_add_location_gcs`);
         }
     };
 
@@ -105,7 +99,7 @@
             const ks_keys = await keystore.entries();
             console.log(JSON.stringify(ks_keys, null, 4), `ks_keys`);
         } catch (e) {
-            console.log(`(error) handle_add_nostr_profile `, e);
+            await catch_err(e, `handle_add_nostr_profile`);
         }
     };
 
@@ -113,32 +107,36 @@
         option: string;
         public_key: string;
     }): Promise<void> => {
-        switch (opts.option) {
-            case `view-key`:
-            case `add-profile-name`:
-            case `edit-profile-name`: {
-                $nav_prev.push({
-                    route: `/models/nostr-profile/view`,
-                    label: `Keys`,
-                });
-            }
+        try {
+            switch (opts.option) {
+                case `view-key`:
+                case `add-profile-name`:
+                case `edit-profile-name`: {
+                    $nav_prev.push({
+                        route: `/models/nostr-profile/view`,
+                        label: `Keys`,
+                    });
+                }
 
-            case `view-key`:
-                {
-                    await route(`/models/nostr-profile/view`, [
-                        [`nostr_pk`, opts.public_key],
-                    ]);
-                }
-                break;
-            case `add-profile-name`:
-            case `edit-profile-name`:
-                {
-                    await route(`/models/nostr-profile/edit/field`, [
-                        [`nostr_pk`, opts.public_key],
-                        [`rkey`, `name`],
-                    ]);
-                }
-                break;
+                case `view-key`:
+                    {
+                        await route(`/models/nostr-profile/view`, [
+                            [`nostr_pk`, opts.public_key],
+                        ]);
+                    }
+                    break;
+                case `add-profile-name`:
+                case `edit-profile-name`:
+                    {
+                        await route(`/models/nostr-profile/edit/field`, [
+                            [`nostr_pk`, opts.public_key],
+                            [`rkey`, `name`],
+                        ]);
+                    }
+                    break;
+            }
+        } catch (e) {
+            await catch_err(e, `handle_key_options_press`);
         }
     };
 </script>

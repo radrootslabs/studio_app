@@ -4,6 +4,7 @@
     import type { TradeProductBundle } from "$lib/types";
     import {
         app_notify,
+        catch_err,
         LayoutTrellis,
         LayoutView,
         ls,
@@ -36,7 +37,6 @@
                 );
                 return;
             }
-
             const results: TradeProductBundle[] = [];
             for (const trade_product of trade_products.results) {
                 const location_gcs_res = await db.location_gcs_get({
@@ -50,7 +50,6 @@
                 const media_uploads_res = await db.media_upload_get({
                     list: [`on_trade_product`, { id: trade_product.id }],
                 });
-
                 results.push({
                     trade_product,
                     location_gcs,
@@ -60,19 +59,13 @@
                             : undefined,
                 });
             }
-
-            const data: LoadData = {
+            return {
                 results,
-            };
-            return data;
+            } satisfies LoadData;
         } catch (e) {
-            console.log(`(error) load_data `, e);
+            await catch_err(e, `load_data`);
         }
     };
-
-    $: {
-        console.log(JSON.stringify(ld, null, 4), `ld`);
-    }
 </script>
 
 {#if ld && ld.results.length > 0}

@@ -14,6 +14,7 @@
         app_splash,
         app_th,
         app_thc,
+        catch_err,
         Controls,
         CssStatic,
         CssStyles,
@@ -51,14 +52,14 @@
         }
     });
 
-    app_thc.subscribe((app_thc) => {
-        const color_mode = parse_color_mode(app_thc);
+    app_thc.subscribe((_app_thc) => {
+        const color_mode = parse_color_mode(_app_thc);
         theme_set(parse_theme_key($app_th), color_mode);
     });
 
-    app_th.subscribe((app_th) => {
+    app_th.subscribe((_app_th) => {
         const color_mode = parse_color_mode($app_thc);
-        theme_set(parse_theme_key(app_th), color_mode);
+        theme_set(parse_theme_key(_app_th), color_mode);
     });
 
     app_db.subscribe((_app_db) => {
@@ -95,7 +96,7 @@
             log_unlisten = await logger.init();
             await kv_init_app();
         } catch (e) {
-            console.log(`(error) init_app `, e);
+            await catch_err(e, `init_app`);
         }
     };
 </script>

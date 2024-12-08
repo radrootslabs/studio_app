@@ -20,6 +20,7 @@
         carousel_inc,
         carousel_index,
         carousel_index_max,
+        catch_err,
         DisplayLine,
         el_id,
         EntryLine,
@@ -124,7 +125,7 @@
             await lookup_ks();
             await kv_init_page();
         } catch (e) {
-            console.log(`(error) init_page `, e);
+            await catch_err(e, `init_page`);
         }
     };
 
@@ -164,7 +165,6 @@
                             cancel_label: `${$ls(`common.reset`)}`,
                             ok_label: `${$ls(`common.yes`)}`,
                         });
-
                         if (confirm === false) {
                             await keystore.remove(ks.cfg_init.nostr_secretkey);
                             await keystore.remove(ks.cfg_init.radroots_tok);
@@ -191,7 +191,7 @@
                 }
             }
         } catch (e) {
-            console.log(`(error) lookup_ks `, e);
+            await catch_err(e, `lookup_ks`);
         } finally {
             app_loading.set(false);
         }
@@ -204,7 +204,7 @@
             if (alert_message) await dialog.alert(alert_message);
             await sleep(cfg.delay.load);
         } catch (e) {
-            console.log(`(error) reset `, e);
+            await catch_err(e, `reset_page`);
         } finally {
             app_loading.set(false);
         }
@@ -220,7 +220,7 @@
                     await keystore.remove(ks_key);
             }
         } catch (e) {
-            console.log(`(error) reset_ks `, e);
+            await catch_err(e, `reset_ks`);
         }
     };
 
@@ -271,7 +271,7 @@
                 }
             }
         } catch (e) {
-            console.log(`(error) handle_back `, e);
+            await catch_err(e, `handle_back`);
         }
     };
 
@@ -435,14 +435,13 @@
                     break;
             }
         } catch (e) {
-            console.log(`(error) handle_continue `, e);
+            await catch_err(e, `handle_continue`);
         }
     };
 
     const submit = async (): Promise<void> => {
         try {
             loading_submit = true;
-
             const ks_nostr_secretkey = await keystore.get(
                 ks.cfg_init.nostr_secretkey,
             );
@@ -478,7 +477,6 @@
                 );
                 return; //@todo
             }
-
             const nostr_profile_add = await db.nostr_profile_add({
                 public_key: nostr_publickey,
                 name:
@@ -486,7 +484,6 @@
                         ? ks_nostr_profilename.result
                         : undefined,
             });
-
             if (`err` in nostr_profile_add || `err_s` in nostr_profile_add) {
                 await dialog.alert(
                     `${$ls(`icu.failure_saving_*_to_the_database`, { value: `${$ls(`common.profile`)}`.toLowerCase() })}`,
@@ -523,7 +520,7 @@
                 notify_message: `${$ls(`app.cfg.init.notification.welcome`)}`,
             });
         } catch (e) {
-            console.log(`(error) submit `, e);
+            await catch_err(e, `submit`);
         } finally {
             loading_submit = false;
         }

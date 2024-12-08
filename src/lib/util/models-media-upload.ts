@@ -2,18 +2,16 @@ import { PUBLIC_RADROOTS_URL } from "$env/static/public";
 import { db } from "$lib/client";
 import type { IDialogAlert, IDialogConfirm } from "$lib/types";
 import type { IClientHttpResponseError } from "@radroots/client";
-import { ls } from "@radroots/svelte-lib";
+import { catch_err, ls } from "@radroots/svelte-lib";
 import { parse_file_path, type FilePath, type ResultsList } from "@radroots/utils";
 import { get } from "svelte/store";
 import { fetch_put_upload } from "./fetch";
 
-
 export const model_media_upload_add_list = async (opts: {
     photo_paths: string[];
 }): Promise<IDialogAlert | IDialogConfirm | ResultsList<string>> => {
-    const $ls = get(ls);
-
     try {
+        const $ls = get(ls);
         if (!opts.photo_paths.length) {
             return {
                 alert: `No photos provided`
@@ -109,9 +107,10 @@ export const model_media_upload_add_list = async (opts: {
             results
         };
     } catch (e) {
-        console.log(`(error) model_media_upload_add_list `, e);
+        await catch_err(e, `model_media_upload_add_list`);
         return {
             alert: `Failed to upload photos` //@todo
         }
     }
 };
+

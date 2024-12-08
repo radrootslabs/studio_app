@@ -9,6 +9,7 @@
         app_init,
         app_nostr_key,
         app_splash,
+        catch_err,
         ndk,
         ndk_user,
         nostr_ndk_configured,
@@ -44,7 +45,7 @@
             await sleep(cfg.delay.load_notify);
             await notification.init();
         } catch (e) {
-            console.log(`(app_init) error `, e);
+            await catch_err(e, `app_init-subscribe`);
         }
     });
 
@@ -77,7 +78,7 @@
             $ndk_user.ndk = $ndk;
             nostr_ndk_configured.set(true);
         } catch (e) {
-            console.log(`(error) app_nostr_key`, e);
+            await catch_err(e, `app_nostr_key-subscribe`);
         }
     });
 
@@ -88,7 +89,7 @@
             nostr_relays_poll_documents.set(true);
             await nostr_sync();
         } catch (e) {
-            console.log(`(nostr_ndk_configured) error `, e);
+            await catch_err(e, `nostr_ndk_configured-subscribe`);
         }
     });
 
@@ -98,7 +99,7 @@
                 if (!_nostr_relays_poll_documents) return;
                 await fetch_relay_documents();
             } catch (e) {
-                console.log(`(error) nostr_relays_poll_documents`, e);
+                await catch_err(e, `nostr_relays_poll_documents-subscribe`);
             }
         },
     );
