@@ -1,60 +1,9 @@
-import { db, fs, http, keystore } from "$lib/client";
-import { cfg, ks } from "$lib/conf";
-import type { IClientHttpResponseError } from "@radroots/client";
+import { db, http } from "$lib/client";
+import { cfg } from "$lib/conf";
 import { parse_nostr_relay_form_keys, type NostrRelayFormFields } from "@radroots/models";
 import { app_nostr_key, catch_err, get_store, nostr_relays_connected, nostr_relays_poll_documents, nostr_relays_poll_documents_count } from "@radroots/svelte-lib";
-import { err_msg, err_res, nostr_event_sign_attest, parse_nostr_relay_information_document_fields, type ErrorMessage, type ErrorResponse, type FilePath } from "@radroots/utils";
-
-export const fetch_put_upload = async (opts: {
-    url: string;
-    file_path: FilePath;
-}): Promise<{
-    res_base: string;
-    res_path: string;
-} | ErrorResponse<IClientHttpResponseError> | ErrorMessage<string>> => {
-    try {
-        const nostr_public_key = get_store(app_nostr_key);
-        const secret_key = await keystore.get(
-            ks.keys.nostr_secretkey(nostr_public_key),
-        );
-        if (`err` in secret_key) return err_msg(`error.client.keystore_nostr_secretkey`);
-        const { url, file_path } = opts;
-        const file_data = await fs.read_bin(file_path.file_path);
-        if (!file_data) return err_msg(`error.client.file_path_read_bin_undefined`);;
-        const res = await http.fetch({
-            url,
-            method: `put`,
-            headers: {
-                "Content-Type": file_path.mime_type,
-                "X-Nostr-Event": JSON.stringify(nostr_event_sign_attest(secret_key.result)),
-            },
-            authorization: nostr_public_key,
-            data_bin: file_data,
-        });
-        if (`err` in res) err_msg(`error.client.request_failure`);
-        else if (res.error) {
-            return err_res(res.error);
-        }
-        else if (
-            res.status === 200 &&
-            res.data &&
-            `pass` in res.data &&
-            `res_base` in res.data &&
-            typeof res.data.res_base === `string` &&
-            `res_path` in res.data &&
-            typeof res.data.res_path === `string`
-        ) {
-            return {
-                res_base: res.data.res_base,
-                res_path: res.data.res_path,
-            };
-        }
-        return err_msg(`error.client.request_unhandled`);
-    } catch (e) {
-        await catch_err(e, `fetch_put_upload`);
-        return err_msg(`error.client.network_failure`);
-    }
-};
+import { parse_nostr_relay_information_document_fields } from "@radroots/utils";
+import { throw_err } from "./client";
 
 export const fetch_relay_documents = async (): Promise<void> => {
     try {
@@ -74,14 +23,11 @@ export const fetch_relay_documents = async (): Promise<void> => {
         const nostr_relays = await db.nostr_relay_get({
             list: [`on_profile`, { public_key: $app_nostr_key }],
         });
-        if (`err` in nostr_relays) throw new Error(nostr_relays.err);
+        if (`err` in nostr_relays) return throw_err(nostr_relays.err);
         const unconnected_relays = nostr_relays.results.filter(
             (i) => !$nostr_relays_connected.includes(i.id),
         );
-        if (unconnected_relays.length === 0) {
-            nostr_relays_poll_documents.set(false);
-            return;
-        }
+        if (unconnected_relays.length === 0) return void nostr_relays_poll_documents.set(false);
         for (const nostr_relay of unconnected_relays) {
             const res = await http.fetch({
                 url: nostr_relay.url.replace(`ws://`, `http://`),

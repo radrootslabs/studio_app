@@ -1,9 +1,9 @@
 <script lang="ts">
-    import type { ClientSearchResult } from "$lib/util/client-search";
     import { ascii, Glyph, ls, route } from "@radroots/svelte-lib";
+    import type { SearchServiceResult } from "@radroots/utils";
     import SearchResultContainer from "./search_result_container.svelte";
 
-    export let basis: ClientSearchResult;
+    export let basis: SearchServiceResult;
 </script>
 
 {#if `location_gcs` in basis && basis.location_gcs.id}

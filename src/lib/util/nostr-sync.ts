@@ -7,7 +7,7 @@ import {
 } from "@radroots/svelte-lib";
 import { fmt_tags_basis_nip99, ndk_event, ndk_event_metadata, nevent_encode, num_str } from "@radroots/utils";
 import { get as get_store } from "svelte/store";
-import { throw_err } from "./error";
+import { throw_err } from "./client";
 
 export const nostr_sync_metadata = async (): Promise<void> => {
     try {

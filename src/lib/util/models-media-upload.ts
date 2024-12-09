@@ -5,7 +5,7 @@ import type { IClientHttpResponseError } from "@radroots/client";
 import { catch_err, ls } from "@radroots/svelte-lib";
 import { parse_file_path, type FilePath, type ResultsList } from "@radroots/utils";
 import { get } from "svelte/store";
-import { fetch_put_upload } from "./fetch";
+import { fetch_radroots_upload } from "./fetch-radroots-upload";
 
 export const model_media_upload_add_list = async (opts: {
     photo_paths: string[];
@@ -33,25 +33,25 @@ export const model_media_upload_add_list = async (opts: {
             console.log(JSON.stringify(file_path, null, 4), `file_path`)
             if (!file_path) continue;
             const url = `${PUBLIC_RADROOTS_URL}/public/upload/image`; //@todo
-            const put_upload = await fetch_put_upload({
+            const radroots_upload = await fetch_radroots_upload({
                 url,
                 file_path,
             });
-            console.log(JSON.stringify(put_upload, null, 4), `put_upload`)
-            if (`err` in put_upload) {
+            console.log(JSON.stringify(radroots_upload, null, 4), `radroots_upload`)
+            if (`err` in radroots_upload) {
                 photo_path_uploads_err.push({
                     file_path,
-                    err_msg: put_upload.err,
+                    err_msg: radroots_upload.err,
                 });
                 continue;
-            } else if (`error` in put_upload) {
-                photo_path_uploads_error.push(put_upload.error);
+            } else if (`error` in radroots_upload) {
+                photo_path_uploads_error.push(radroots_upload.error);
                 continue;
             }
             photo_path_uploads.push({
                 file_path,
-                res_base: put_upload.res_base,
-                res_path: put_upload.res_path,
+                res_base: radroots_upload.res_base,
+                res_path: radroots_upload.res_path,
             });
         }
 

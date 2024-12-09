@@ -81,3 +81,8 @@ export const el_focus = async (id: string, callback: () => Promise<void>, layer:
         await catch_err(e, `el_focus`);
     }
 };
+
+export const throw_err = (param: string | ErrorMessage<string>): undefined => {
+    if (typeof param === `string`) throw new Error(param);
+    else throw new Error(param.err);
+};

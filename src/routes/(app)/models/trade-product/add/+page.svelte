@@ -522,7 +522,7 @@
                     const file_path = parse_file_path(photo_path);
                     if (!file_path) continue;
                     const url = `${PUBLIC_RADROOTS_URL}/public/upload/image`; //@todo
-                    const put_upload = await fetch_put_upload({
+                    const put_upload = await fetch_radroots_upload({
                         url,
                         file_path,
                     });
