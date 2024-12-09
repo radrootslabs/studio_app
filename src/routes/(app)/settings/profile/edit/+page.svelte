@@ -132,11 +132,11 @@
         <div
             class={`flex flex-col w-full pt-4 px-4 gap-1 justify-start items-center fade-in`}
         >
-            <div class={`flex flex-row w-full justify-start items-center`}>
+            <div class={`flex flex-row w-full pl-2 justify-start items-center`}>
                 <p
-                    class={`font-sans font-[400] text-[0.8rem] text-layer-0-glyph-label uppercase`}
+                    class={`font-sans text-trellisTitle text-layer-0-glyph-label uppercase`}
                 >
-                    {translated_field_key.replace(`Profile `, ``)}
+                    {translated_field_key.replace(/profile /i, ``)}
                 </p>
             </div>
             {#if ld.field_key === `about`}
@@ -144,7 +144,7 @@
                     bind:value={page_input_value}
                     basis={{
                         id: fmt_id(ld.field_key),
-                        classes: `min-h-[8rem] pl-4`,
+                        classes: `min-h-[12rem] pl-4`,
                         sync: true,
                         layer: 1,
                         placeholder: `${$ls(`icu.enter_*`, { value: `${translated_field_key}`.toLowerCase() })}`,
