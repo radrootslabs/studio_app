@@ -75,7 +75,7 @@
     const load_data = async (): Promise<LoadData | undefined> => {
         try {
             let nostr_profile_get_one = await db.nostr_profile_get_one({
-                public_key: $app_nostr_key + `ye`,
+                public_key: $app_nostr_key,
             });
             if (`err` in nostr_profile_get_one)
                 return throw_err(nostr_profile_get_one);
@@ -390,24 +390,3 @@
     {/if}
 </div>
 <TabsFloat />
-<!--<Nav
-    basis={{
-        prev: {
-            loading: loading_photo_upload,
-            label: `${$ls(`common.home`)}`,
-            route: `/`,
-            prevent_route: opt_photo_path
-                ? {
-                      callback: async () => {
-                          await handle_profile_photo_add(opt_photo_path);
-                      },
-                  }
-                : undefined,
-        },
-        title: {
-            label: {
-                value: `${$ls(`common.profile`)}`,
-            },
-        },
-    }}
-/>-->

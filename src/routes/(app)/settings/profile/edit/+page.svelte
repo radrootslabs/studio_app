@@ -147,7 +147,7 @@
                         classes: `min-h-[8rem] pl-4`,
                         sync: true,
                         layer: 1,
-                        placeholder: `Enter ${translated_field_key.toLowerCase()}`,
+                        placeholder: `${$ls(`icu.enter_*`, { value: `${translated_field_key}`.toLowerCase() })}`,
                         field: {
                             charset:
                                 nostr_profile_form_fields[ld.field_key].charset,
@@ -156,8 +156,8 @@
                                     .validation,
                             validate_keypress: true,
                         },
-                        callback_focus: async () => {
-                            console.log(`hi`);
+                        callback_keydown: async ({ key_s }) => {
+                            if (key_s && input_value_del) await submit();
                         },
                     }}
                 />
@@ -169,7 +169,7 @@
                         classes: `rounded-touch pl-4`,
                         sync: true,
                         layer: 1,
-                        placeholder: `Enter ${translated_field_key.toLowerCase()}`,
+                        placeholder: `${$ls(`icu.enter_*`, { value: `${translated_field_key}`.toLowerCase() })}`,
                         field: {
                             charset:
                                 nostr_profile_form_fields[ld.field_key].charset,
@@ -178,8 +178,8 @@
                                     .validation,
                             validate_keypress: true,
                         },
-                        callback_focus: async () => {
-                            console.log(`hi`);
+                        callback_keydown: async ({ key_s }) => {
+                            if (key_s && input_value_del) await submit();
                         },
                     }}
                 />
@@ -190,7 +190,7 @@
 <Nav
     basis={{
         prev: {
-            label: `${$ls(`common.back`)}`,
+            label: `${$ls(`common.profile`)}`,
             route: `/settings/profile`,
             prevent_route: input_value_del
                 ? {
@@ -206,16 +206,5 @@
                 value: `${$ls(`icu.edit_*`, { value: `${$ls(`common.profile`)}` })}`,
             },
         },
-        /*option: {
-            label: {
-                classes: input_value_del ? `` : `opacity-60`,
-                value: ld?.nostr_profile[ld?.field_key]
-                    ? `${$ls(`common.update`)}`
-                    : `${$ls(`common.add`)}`,
-            },
-            callback: async () => {
-                if (input_value_del) await submit();
-            },
-        },*/
     }}
 />

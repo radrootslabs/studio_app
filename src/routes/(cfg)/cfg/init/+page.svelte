@@ -540,7 +540,9 @@
                 data-carousel-item={`cfg_init`}
                 class={`carousel-item flex flex-col w-full max-mobile_y:pt-28 pt-36 pb-4 justify-start items-center`}
             >
-                <div class={`flex flex-col gap-1 justify-start items-center`}>
+                <div
+                    class={`flex flex-col flex-grow justify-between pt-4 pb-24 items-center`}
+                >
                     <div
                         class={`flex flex-row w-full justify-center items-center`}
                     >
