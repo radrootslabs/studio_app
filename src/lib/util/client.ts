@@ -1,5 +1,5 @@
-import { db, keystore } from "$lib/client";
-import { app_notify, catch_err, el_id, route, sleep, type NavigationRoute } from "@radroots/svelte-lib";
+import { db, dialog, keystore } from "$lib/client";
+import { app_notify, catch_err, el_id, route, sleep, type CallbackPromise, type NavigationRoute } from "@radroots/svelte-lib";
 import type { ThemeLayer } from "@radroots/theme";
 import type { ErrorMessage } from "@radroots/utils";
 
@@ -10,6 +10,24 @@ export const keystore_reset = async (): Promise<ErrorMessage<string> | undefined
         for (const ks_key of ks_keys.results) await keystore.remove(ks_key);
     } catch (e) {
         await catch_err(e, `keystore_reset`);
+    }
+};
+
+export const callback_alert = async (message: string, callback: CallbackPromise): Promise<void> => {
+    try {
+        dialog.alert(message);
+        await callback();
+    } catch (e) {
+        await catch_err(e, `cb_alert`);
+    }
+};
+
+export const page_reload = async (message?: string): Promise<void> => {
+    try {
+        if (message) dialog.alert(message);
+        location.reload();
+    } catch (e) {
+        await catch_err(e, `page_reload`);
     }
 };
 

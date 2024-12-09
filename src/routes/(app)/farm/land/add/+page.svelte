@@ -1,11 +1,13 @@
 <script lang="ts">
     import { dialog, geol } from "$lib/client";
     import MapPointSelect from "$lib/components/map_point_select.svelte";
+    import { callback_alert } from "$lib/util/client";
     import { kv_init_page } from "$lib/util/kv";
+    import { model_location_gcs_add_geocode } from "$lib/util/models-location-gcs";
     import type { IClientGeolocationPosition } from "@radroots/client";
     import type { GeocoderReverseResult } from "@radroots/geocoder";
     import {
-        ButtonGlyphPrimary,
+        ButtonGlyphSimple,
         carousel_dec,
         carousel_inc,
         carousel_index,
@@ -24,7 +26,7 @@
         PageHeader,
         SelectMenu,
     } from "@radroots/svelte-lib";
-    import { num_str, regex } from "@radroots/utils";
+    import { regex } from "@radroots/utils";
     import { onMount } from "svelte";
 
     let view_init: View = `c_1`;
@@ -41,11 +43,6 @@
     let lgcs_elevation_unit = `m`;
     let lgcs_climate = ``;
 
-    $: lgcs_elevation =
-        typeof geol_pos?.altitude === `number`
-            ? num_str(geol_pos.altitude)
-            : lgcs_elevation;
-
     onMount(async () => {
         try {
             await init_page();
@@ -57,7 +54,7 @@
     const init_page = async (): Promise<void> => {
         try {
             await kv_init_page();
-            carousel_init(1);
+            await carousel_init(view, 1);
             const geolc = await geol.current();
             if (`err` in geolc) {
                 await dialog.alert(
@@ -86,6 +83,25 @@
             await catch_err(e, `handle_dec`);
         }
     };
+
+    const submit = async (): Promise<void> => {
+        try {
+            if (!geol_pos || !geol_c)
+                return await callback_alert(
+                    `${$ls(`error.geolocation.result_missing`)}`,
+                    async () => await init_page(),
+                );
+
+            const location_gcs = await model_location_gcs_add_geocode({
+                geo_code: geol_c,
+                point: geol_pos,
+                kind: `farm_land`,
+            });
+            console.log(JSON.stringify(location_gcs, null, 4), `location_gcs`);
+        } catch (e) {
+            await catch_err(e, `submit`);
+        }
+    };
 </script>
 
 <LayoutView>
@@ -103,7 +119,7 @@
         <div slot="option" class={`flex flex-row justify-start items-center`}>
             {#if $carousel_index > 0}
                 <Fade>
-                    <ButtonGlyphPrimary
+                    <ButtonGlyphSimple
                         basis={{
                             label: `${$ls(`common.back`)}`,
                             callback: async () => {
@@ -142,7 +158,7 @@
                         <div
                             class={`flex flex-col w-full pt-2 justify-center items-center`}
                         >
-                            <ButtonGlyphPrimary
+                            <ButtonGlyphSimple
                                 basis={{
                                     label: `${$ls(`icu.add_*`, { value: `${$ls(`common.location`)}` })}`,
                                     callback: async () => {
@@ -248,7 +264,7 @@
                                             sync: true,
                                             layer: 0,
                                             classes: `h-10 placeholder:text-[1.1rem]`,
-                                            placeholder: `Name of farm or estate`,
+                                            placeholder: `${$ls(`common.name_of_farm_or_estate`)}`,
                                             field: {
                                                 charset: regex.description,
                                                 validate: regex.description_ch,
@@ -312,7 +328,7 @@
                                             sync: true,
                                             layer: 0,
                                             classes: `h-10 placeholder:text-[1.1rem]`,
-                                            placeholder: `Land area`,
+                                            placeholder: `${$ls(`common.land_area`)}`,
                                             field: {
                                                 charset: regex.num,
                                                 validate: regex.num,
@@ -372,7 +388,7 @@
                                             sync: true,
                                             layer: 0,
                                             classes: `h-10 placeholder:text-[1.1rem]`,
-                                            placeholder: `Elevation`,
+                                            placeholder: `${$ls(`common.elevation`)}`,
                                             field: {
                                                 charset: regex.num,
                                                 validate: regex.num,
@@ -404,7 +420,7 @@
                                             sync: true,
                                             layer: 0,
                                             classes: `h-10 placeholder:text-[1.1rem]`,
-                                            placeholder: `Local climate`,
+                                            placeholder: `${$ls(`common.climate`)}`,
                                             field: {
                                                 charset: regex.description,
                                                 validate: regex.description_ch,
@@ -417,11 +433,11 @@
                             <div
                                 class={`flex flex-row w-full pt-2 justify-center items-center`}
                             >
-                                <ButtonGlyphPrimary
+                                <ButtonGlyphSimple
                                     basis={{
                                         label: `${$ls(`icu.add_*`, { value: `${$ls(`common.location`)}` })}`,
                                         callback: async () => {
-                                            if (geol_c) await handle_inc();
+                                            await submit();
                                         },
                                     }}
                                 />

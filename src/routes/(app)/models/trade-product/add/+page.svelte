@@ -8,7 +8,7 @@
     import { el_focus } from "$lib/util/client";
     import { location_gcs_to_geoc } from "$lib/util/geocode";
     import { kv_init_page, kv_sync } from "$lib/util/kv";
-    import { model_location_gcs_add_geocode } from "$lib/util/models";
+    import { model_location_gcs_add_geocode } from "$lib/util/models-location-gcs";
     import { model_media_upload_add_list } from "$lib/util/models-media-upload";
     import {
         trade_product_fields_validate,
@@ -471,7 +471,7 @@
                         await model_location_gcs_add_geocode({
                             geo_code: tradepr_lgc_map_geoc,
                             point: tradepr_lgc_map_point,
-                            kind: `trade_product`,
+                            kind: `trade_product`, //@todo
                         });
                     if (
                         `err` in location_gcs_add_geocode ||
