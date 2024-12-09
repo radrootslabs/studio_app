@@ -43,6 +43,9 @@ export const cfg = {
         entry_focus: 2000,
         load_notify: 3000,
     },
+    debounce: {
+        search: 200
+    },
     cmd: {
         layout_route: `*-route`
     },
