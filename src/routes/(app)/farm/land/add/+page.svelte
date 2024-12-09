@@ -208,7 +208,7 @@
                                     class={`flex flex-row w-full justify-start items-center`}
                                 >
                                     <p
-                                        class={`font-sansd text-trellisTitle text-layer-0-glyph-label uppercase`}
+                                        class={`font-sansd text-trellis_ti text-layer-0-glyph-label uppercase`}
                                     >
                                         {`${$ls(`common.location`)}`}
                                     </p>
@@ -227,7 +227,7 @@
                                 class={`flex flex-col w-full gap-1 justify-start items-start`}
                             >
                                 <p
-                                    class={`font-sansd text-trellisTitle text-layer-0-glyph-label uppercase`}
+                                    class={`font-sansd text-trellis_ti text-layer-0-glyph-label uppercase`}
                                 >
                                     {`${$ls(`common.coordinates`)}`}
                                 </p>
@@ -256,7 +256,7 @@
                                     class={`flex flex-row w-full justify-start items-center`}
                                 >
                                     <p
-                                        class={`font-sansd text-trellisTitle text-layer-0-glyph-label uppercase`}
+                                        class={`font-sansd text-trellis_ti text-layer-0-glyph-label uppercase`}
                                     >
                                         {`${$ls(`common.farm`)}/${`${$ls(`common.estate`)}`}`}
                                     </p>
@@ -292,7 +292,7 @@
                                     class={`flex flex-row w-full gap-1 justify-start items-center`}
                                 >
                                     <p
-                                        class={`font-sansd text-trellisTitle text-layer-0-glyph-label uppercase`}
+                                        class={`font-sansd text-trellis_ti text-layer-0-glyph-label uppercase`}
                                     >
                                         {`${$ls(`common.area`)}`}
                                     </p>
@@ -356,7 +356,7 @@
                                     class={`flex flex-row w-full gap-1 justify-start items-center`}
                                 >
                                     <p
-                                        class={`font-sansd text-trellisTitle text-layer-0-glyph-label uppercase`}
+                                        class={`font-sansd text-trellis_ti text-layer-0-glyph-label uppercase`}
                                     >
                                         {`${$ls(`common.elevation`)}`}
                                     </p>
@@ -416,7 +416,7 @@
                                     class={`flex flex-row w-full justify-start items-center`}
                                 >
                                     <p
-                                        class={`font-sansd text-trellisTitle text-layer-0-glyph-label uppercase`}
+                                        class={`font-sansd text-trellis_ti text-layer-0-glyph-label uppercase`}
                                     >
                                         {`${$ls(`common.climate`)}`}
                                     </p>

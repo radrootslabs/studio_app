@@ -336,7 +336,7 @@
             visible: show_edit,
             buttons: [
                 {
-                    classes: `text-envelopeButtonCancel text-layer-1-glyph-hl`,
+                    classes: `text-env_btnc text-layer-1-glyph-hl`,
                     label: `${$ls(`common.cancel`)}`,
                     callback: async () => {
                         show_edit = false;
@@ -344,8 +344,8 @@
                 },
                 {
                     classes: $nostr_relays_connected.includes(ld.nostr_relay.id)
-                        ? `text-envelopeButtonLabel text-red-400`
-                        : `text-envelopeButtonLabel text-success`,
+                        ? `text-env_btnl text-red-400`
+                        : `text-env_btnl text-success`,
                     label: $nostr_relays_connected.includes(ld.nostr_relay.id)
                         ? `${$ls(`icu.disconnect_*`, { value: `${$ls(`common.relay`)}` })}`
                         : `${$ls(`icu.connect_*`, { value: `${$ls(`common.relay`)}` })}`,

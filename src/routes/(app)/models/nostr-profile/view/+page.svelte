@@ -236,11 +236,11 @@
                                 label: {
                                     swap: {
                                         on: {
-                                            classes: `pl-1 text-trellisTitleNote uppercase -translate-y-[1px] -translate-x-[2px] text-layer-0-glyph-shade`,
+                                            classes: `pl-1 text-trellis_tiNote uppercase -translate-y-[1px] -translate-x-[2px] text-layer-0-glyph-shade`,
                                             value: `${$ls(`common.npub`)}`,
                                         },
                                         off: {
-                                            classes: `pl-1 text-trellisTitleNote uppercase -translate-y-[1px] -translate-x-[6px] text-layer-0-glyph-shade`,
+                                            classes: `pl-1 text-trellis_tiNote uppercase -translate-y-[1px] -translate-x-[6px] text-layer-0-glyph-shade`,
                                             value: `${$ls(`common.hex`)}`,
                                         },
                                         toggle: show_public_key_hex,
@@ -321,11 +321,11 @@
                                 label: {
                                     swap: {
                                         on: {
-                                            classes: `pl-1 text-trellisTitleNote uppercase -translate-y-[1px] -translate-x-[2px] text-layer-0-glyph-shade`,
+                                            classes: `pl-1 text-trellis_tiNote uppercase -translate-y-[1px] -translate-x-[2px] text-layer-0-glyph-shade`,
                                             value: `${$ls(`common.nsec`)}`,
                                         },
                                         off: {
-                                            classes: `pl-1 text-trellisTitleNote uppercase -translate-y-[1px] -translate-x-[6px] text-layer-0-glyph-shade`,
+                                            classes: `pl-1 text-trellis_tiNote uppercase -translate-y-[1px] -translate-x-[6px] text-layer-0-glyph-shade`,
                                             value: `${$ls(`common.hex`)}`,
                                         },
                                         toggle: vl_secret_key_unlock

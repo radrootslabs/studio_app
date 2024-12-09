@@ -134,7 +134,7 @@
         >
             <div class={`flex flex-row w-full pl-2 justify-start items-center`}>
                 <p
-                    class={`font-sans text-trellisTitle text-layer-0-glyph-label uppercase`}
+                    class={`font-sans text-trellis_ti text-layer-0-glyph-label uppercase`}
                 >
                     {translated_field_key.replace(/profile /i, ``)}
                 </p>
