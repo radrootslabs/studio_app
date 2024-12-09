@@ -6,6 +6,7 @@
     import { model_location_gcs_add_geocode } from "$lib/util/models-location-gcs";
     import type { IClientGeolocationPosition } from "@radroots/client";
     import type { GeocoderReverseResult } from "@radroots/geocoder";
+    import { location_gcs_form_fields } from "@radroots/models";
     import {
         ButtonGlyphSimple,
         carousel_dec,
@@ -24,6 +25,7 @@
         ls,
         NavToolbar,
         PageHeader,
+        route,
         SelectMenu,
     } from "@radroots/svelte-lib";
     import { regex } from "@radroots/utils";
@@ -97,7 +99,12 @@
                 point: geol_pos,
                 kind: `farm_land`,
             });
-            console.log(JSON.stringify(location_gcs, null, 4), `location_gcs`);
+            if (`err` in location_gcs) {
+                return void (await dialog.alert(
+                    `${$ls(`error.client.operation_failure`)}`,
+                ));
+            }
+            await route(`/farm/land`);
         } catch (e) {
             await catch_err(e, `submit`);
         }
@@ -266,8 +273,12 @@
                                             classes: `h-10 placeholder:text-[1.1rem]`,
                                             placeholder: `${$ls(`common.name_of_farm_or_estate`)}`,
                                             field: {
-                                                charset: regex.description,
-                                                validate: regex.description_ch,
+                                                charset:
+                                                    location_gcs_form_fields
+                                                        .label.charset,
+                                                validate:
+                                                    location_gcs_form_fields
+                                                        .label.validation,
                                                 validate_keypress: true,
                                             },
                                         }}

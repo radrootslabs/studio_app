@@ -71,13 +71,13 @@
             {/if}
         </div>
     </PageHeader>
-    <div class={`flex flex-col w-full px-4 justify-start items-center`}>
+    <div class={`flex flex-col w-full px-4 gap-4 justify-start items-center`}>
         {#if ld && ld.location_gcss.length}
             {#each ld.location_gcss.filter((i) => i.kind === `farm_land`) as li}
                 <button
                     class={`group flex flex-row h-[5rem] w-full px-8 gap-8 justify-start items-center bg-layer-1-surface layer-1-active-surface round-36 el-re`}
                     on:click={async () => {
-                        await route(`/farm/land/add`);
+                        await route(`/farm/land/view`, [[`id`, li.id]]);
                     }}
                 >
                     <div
