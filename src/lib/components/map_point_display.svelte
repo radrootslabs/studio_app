@@ -7,12 +7,13 @@
 
     export let basis: {
         point: GeolocationCoordinatesPoint;
+        zoom?: number;
     };
 </script>
 
 <MapLibre
     center={basis.point}
-    zoom={4}
+    zoom={basis.zoom || 4}
     class={`h-full w-full`}
     style={cfg.map.styles.base[$app_thc]}
     attributionControl={false}

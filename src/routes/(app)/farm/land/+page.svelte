@@ -36,10 +36,8 @@
             const location_gcss = await db.location_gcs_get({
                 list: [`all`],
             });
-            if (`err` in location_gcss) {
-                app_notify.set(`${$ls(`error.client.page.load`)}`);
-                return;
-            }
+            if (`err` in location_gcss)
+                return void app_notify.set(`${$ls(`error.client.page.load`)}`);
             return {
                 location_gcss: location_gcss.results,
             } satisfies LoadData;
@@ -47,10 +45,6 @@
             await catch_err(e, `load_data`);
         }
     };
-
-    $: {
-        console.log(JSON.stringify(ld, null, 4), `ld`);
-    }
 </script>
 
 <LayoutView>
@@ -71,7 +65,9 @@
             {/if}
         </div>
     </PageHeader>
-    <div class={`flex flex-col w-full px-4 gap-4 justify-start items-center`}>
+    <div
+        class={`flex flex-col w-full pt-2 px-4 gap-5 justify-start items-center`}
+    >
         {#if ld && ld.location_gcss.length}
             {#each ld.location_gcss.filter((i) => i.kind === `farm_land`) as li}
                 <button
