@@ -147,7 +147,6 @@
                     return;
                 }
             }
-            location.reload();
         } catch (e) {
             await catch_err(e, `handle_profile_photo_add`);
         } finally {
@@ -204,44 +203,6 @@
                 path: ld.nostr_profile.picture,
             }}
         />
-        <div class={`absolute top-16 left-6 flex flex-row`}>
-            <button
-                class={`flex flex-row h-12 w-12 justify-center items-center bg-layer-2-surface rounded-full el-re`}
-                on:click={async () => {
-                    await handle_back();
-                }}
-            >
-                {#if loading_photo_upload}
-                    <Loading />
-                {:else}
-                    <Glyph
-                        basis={{
-                            classes: `text-layer-0-glyph`,
-                            dim: `sm+`,
-                            weight: `bold`,
-                            key: `arrow-left`,
-                        }}
-                    />
-                {/if}
-            </button>
-        </div>
-        <div class={`absolute top-16 right-6 flex flex-row`}>
-            <button
-                class={`flex flex-row h-12 w-12 justify-center items-center bg-layer-2-surface rounded-full el-re`}
-                on:click={async () => {
-                    alert(`@todo!`);
-                }}
-            >
-                <Glyph
-                    basis={{
-                        classes: `text-layer-0-glyph`,
-                        dim: `md-`,
-                        weight: `bold`,
-                        key: `images-square`,
-                    }}
-                />
-            </button>
-        </div>
     {:else if opt_photo_path}
         {#await fs.read_bin(opt_photo_path) then file_data}
             <ImageBlob
@@ -255,6 +216,44 @@
             <ImageUploadAddPhoto bind:photo_path={opt_photo_path} />
         </div>
     {/if}
+    <div class={`absolute top-[3.8rem] left-6 flex flex-row`}>
+        <button
+            class={`flex flex-row h-12 w-12 justify-center items-center ${photo_overlay_visible ? `bg-layer-2-surface` : `bg-layer-1-surface`} layer-1-active-surface rounded-full el-re`}
+            on:click={async () => {
+                await handle_back();
+            }}
+        >
+            {#if loading_photo_upload}
+                <Loading />
+            {:else}
+                <Glyph
+                    basis={{
+                        classes: `text-layer-0-glyph`,
+                        dim: `sm+`,
+                        weight: `bold`,
+                        key: `arrow-left`,
+                    }}
+                />
+            {/if}
+        </button>
+    </div>
+    <div class={`absolute top-[3.8rem] right-6 flex flex-row`}>
+        <button
+            class={`flex flex-row h-12 w-12 justify-center items-center ${photo_overlay_visible ? `bg-layer-2-surface` : `bg-layer-1-surface`} layer-1-active-surface rounded-full el-re`}
+            on:click={async () => {
+                alert(`@todo!`);
+            }}
+        >
+            <Glyph
+                basis={{
+                    classes: `text-layer-0-glyph`,
+                    dim: `md-`,
+                    weight: `bold`,
+                    key: `images-square`,
+                }}
+            />
+        </button>
+    </div>
     <div
         class={`absolute bottom-0 left-0 flex flex-col h-[calc(100%-100%/1.618)] w-full px-6 gap-2 justify-end items-center`}
     >
@@ -271,9 +270,11 @@
                     <p
                         class={`font-sansd font-[600] text-[2rem] ${classes_photo_overlay_glyph} ${ld?.nostr_profile.display_name ? `` : `capitalize opacity-active`} el-re`}
                     >
-                        {ld?.nostr_profile.display_name
-                            ? ld.nostr_profile.display_name
-                            : `+ ${`${$ls(`icu.add_*`, { value: `${$ls(`common.profile_name`)}` })}`}`}
+                        {#if ld?.nostr_profile.display_name}
+                            {ld.nostr_profile.display_name}
+                        {:else}
+                            {`+ ${`${$ls(`icu.add_*`, { value: `${$ls(`common.profile_name`)}` })}`}`}
+                        {/if}
                     </p>
                 </button>
             </div>
@@ -287,11 +288,14 @@
                     }}
                 >
                     <p
-                        class={`font-sansd font-[600] text-[1.1rem] ${classes_photo_overlay_glyph} ${ld?.nostr_profile.name ? `` : `capitalize opacity-active`} el-re`}
+                        class={`font-sans font-[600] text-[1.1rem] ${classes_photo_overlay_glyph} ${ld?.nostr_profile.name ? `` : `capitalize opacity-active`} el-re`}
                     >
-                        {ld?.nostr_profile.name
-                            ? `@${ld.nostr_profile.name}`
-                            : `+ ${`${$ls(`icu.add_*`, { value: `${$ls(`common.username`)}` })}`}`}
+                        {#if ld?.nostr_profile.name}
+                            <span class={`font-[900] -mr-[3px]`}>{`@`}</span>
+                            {ld.nostr_profile.name}
+                        {:else}
+                            {`+ ${`${$ls(`icu.add_*`, { value: `${$ls(`common.username`)}` })}`}`}
+                        {/if}
                     </p>
                 </button>
                 <p
@@ -325,9 +329,11 @@
                     <p
                         class={`font-sansd font-[400] text-[1.1rem] ${classes_photo_overlay_glyph} ${ld?.nostr_profile.about ? `` : `capitalize opacity-active`}`}
                     >
-                        {ld?.nostr_profile.about
-                            ? `@${ld.nostr_profile.about}`
-                            : `+ ${`${$ls(`icu.add_*`, { value: `${$ls(`common.bio`)}` })}`}`}
+                        {#if ld?.nostr_profile.about}
+                            {ld.nostr_profile.about}
+                        {:else}
+                            {`+ ${`${$ls(`icu.add_*`, { value: `${$ls(`common.bio`)}` })}`}`}
+                        {/if}
                     </p>
                 </button>
             </div>
