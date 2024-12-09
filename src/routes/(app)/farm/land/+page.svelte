@@ -134,25 +134,3 @@
     </div>
 </LayoutView>
 <TabsFloat />
-
-<!--
-<button
-            class={`group flex flex-row h-[7rem] w-full px-8 justify-start items-center bg-layer-1-surface layer-1-active-surface round-36 el-re`}
-            on:click={async () => {
-                await route(`/farm/land/add`);
-            }}
-        >
-            <div
-                class={`flex flex-col h-[5rem] w-[5rem] justify-start items-center bg-layer-2-surface round-24 bg-repeat heropattern-topography-white`}
-            >
-                <Fill />
-            </div>
-            <div class={`flex flex-row flex-grow justify-center items-center`}>
-                <p
-                    class={`font-sans font-[500] text-[1.4rem] text-layer-0-glyph capitalize opacity-active el-re`}
-                >
-                    {`${$ls(`icu.add_*`, { value: `${$ls(`common.land_plot`)}` })}`}
-                </p>
-            </div>
-        </button>
-        -->

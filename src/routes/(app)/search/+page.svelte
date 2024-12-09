@@ -18,6 +18,7 @@
         ls,
         NavToolbar,
         PageHeader,
+        TabsFloat,
     } from "@radroots/svelte-lib";
     import { SearchService, type SearchServiceResult } from "@radroots/utils";
     import { onMount } from "svelte";
@@ -114,3 +115,4 @@
         </div>
     </div>
 </LayoutView>
+<TabsFloat />
