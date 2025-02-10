@@ -1,13 +1,47 @@
-[submodule "static/webfonts"]
-	path = static/webfonts
-	url = git@github.com:72-61-64-72-6f-6f-74-73/webfonts.git
-[submodule "static/phosphor-icons"]
-	path = static/phosphor-icons
-	url = git@github.com:72-61-64-72-6f-6f-74-73/phosphor-icons.git
-[submodule "static/stylesheets"]
-	path = static/stylesheets
-	url = git@github.com:72-61-64-72-6f-6f-74-73/stylesheets.git
-[submodule "static/geonames"]
-	path = static/geonames
+[submodule "packages/eslint"]
+	path = packages/eslint
+	url = git@github.com:72-61-64-72-6f-6f-74-73/packages-eslint.git
+[submodule "packages/tsconfig"]
+	path = packages/tsconfig
+	url = git@github.com:72-61-64-72-6f-6f-74-73/packages-tsconfig.git
+[submodule "packages/geocoder"]
+	path = packages/geocoder
+	url = git@github.com:72-61-64-72-6f-6f-74-73/packages-geocoder.git
+[submodule "packages/client"]
+	path = packages/client
+	url = git@github.com:72-61-64-72-6f-6f-74-73/packages-client.git
+[submodule "packages/models"]
+	path = packages/models
+	url = git@github.com:72-61-64-72-6f-6f-74-73/packages-models.git
+[submodule "packages/theme"]
+	path = packages/theme
+	url = git@github.com:72-61-64-72-6f-6f-74-73/packages-theme.git
+[submodule "packages/util"]
+	path = packages/util
+	url = git@github.com:72-61-64-72-6f-6f-74-73/packages-util.git
+[submodule "packages/svelte-maplibre"]
+	path = packages/svelte-maplibre
+	url = git@github.com:72-61-64-72-6f-6f-74-73/svelte-maplibre.git
+[submodule "packages/lib-app"]
+	path = packages/lib-app
+	url = git@github.com:72-61-64-72-6f-6f-74-73/packages-lib-app.git
+[submodule "app/static/geonames"]
+	path = app/static/geonames
 	url = git@github.com:72-61-64-72-6f-6f-74-73/geonames.git
 	branch = database
+[submodule "app/static/phosphor-icons"]
+	path = app/static/phosphor-icons
+	url = git@github.com:72-61-64-72-6f-6f-74-73/phosphor-icons.git
+	branch = app
+[submodule "app/static/stylesheets"]
+	path = app/static/stylesheets
+	url = git@github.com:72-61-64-72-6f-6f-74-73/stylesheets.git
+	branch = master
+[submodule "app/static/webfonts"]
+	path = app/static/webfonts
+	url = git@github.com:72-61-64-72-6f-6f-74-73/webfonts.git
+	branch = app
+[submodule "app/static/assets"]
+	path = app/static/assets
+	url = git@github.com:72-61-64-72-6f-6f-74-73/assets.git
+	branch = app

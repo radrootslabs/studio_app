@@ -1,0 +1,9 @@
+{
+    "device": {
+        "configuration_failure": "There was an error configuring the device",
+        "public_key_not_derived": "Error deriving public key"
+    },
+    "radroots": {
+        "profile_registered": "The profile has been registered"
+    }
+}

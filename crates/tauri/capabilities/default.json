@@ -1,7 +1,6 @@
 {
-  "$schema": "../gen/schemas/desktop-schema.json",
+  "$schema": "../gen/schemas/capabilities.json",
   "identifier": "default",
-  "description": "enables the default permissions",
   "windows": [
     "main"
   ],
@@ -10,20 +9,17 @@
     "dialog:default",
     "fs:default",
     "fs:allow-stat",
-    "geolocation:allow-check-permissions",
-    "geolocation:allow-get-current-position",
-    "geolocation:allow-request-permissions",
-    "geolocation:allow-watch-position",
-    "geolocation:allow-clear-permissions",
-    "geolocation:allow-clear-watch",
     {
       "identifier": "http:default",
       "allow": [
         {
-          "url": "https://radroots.org"
+          "url": "https://radroots.market"
         },
         {
-          "url": "https://*.radroots.org"
+          "url": "https://*.radroots.market"
+        },
+        {
+          "url": "http://127.0.0.1:*"
         }
       ],
       "deny": []
@@ -31,7 +27,6 @@
     "notification:default",
     "os:default",
     "store:default",
-    "shell:allow-open",
-    "map-display:default"
+    "shell:allow-open"
   ]
 }

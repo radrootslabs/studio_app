@@ -1,4 +1,4 @@
-pub mod error;
-pub mod models;
+pub mod keystore;
+pub mod nostr;
 pub mod types;
-pub mod utils;
+pub mod util;

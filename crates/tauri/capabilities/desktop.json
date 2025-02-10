@@ -1,0 +1,13 @@
+{
+    "$schema": "../gen/schemas/capabilities.json",
+    "identifier": "desktop",
+    "windows": [
+        "main"
+    ],
+    "platforms": [
+        "linux",
+        "macOS",
+        "windows"
+    ],
+    "permissions": []
+}

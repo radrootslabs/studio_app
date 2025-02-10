@@ -1,0 +1,17 @@
+@import "/static/stylesheets/tailwindcss-app-carousel.css";
+@import "/static/stylesheets/tailwindcss-app-form.css";
+@import "/static/stylesheets/tailwindcss-app-styles.css";
+@import "/static/stylesheets/tailwindcss-app.css";
+@import "/static/stylesheets/tailwindcss-spinner.css";
+@import "/static/stylesheets/tailwindcss-app-layer-1.css";
+
+@import "/static/webfonts/sf-pro-rounded/styles.css";
+@import "/static/webfonts/sf-pro-display/styles.css";
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {}
+
+@layer components {}

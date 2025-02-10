@@ -1,39 +1,26 @@
 {
     "$schema": "../../node_modules/@tauri-apps/cli/config.schema.json",
-    "productName": "Radroots",
-    "version": "0.0.1",
     "identifier": "mobile.radroots.app",
+    "productName": "radroots",
+    "mainBinaryName": "radroots",
     "build": {
-        "frontendDist": "../../build",
+        "frontendDist": "../../app/build",
         "devUrl": "http://localhost:21640",
-        "beforeDevCommand": "pnpm run dev:serve",
-        "beforeBuildCommand": "pnpm run build"
+        "beforeDevCommand": "cd app && pnpm run dev:hmr",
+        "beforeBuildCommand": "cd app && pnpm run build"
     },
     "app": {
         "windows": [
             {
-                "title": "Radroots",
-                "width": 800,
-                "height": 600,
-                "resizable": true,
-                "fullscreen": false,
+                "title": "radroots",
+                "resizable": false,
+                "fullscreen": true,
                 "visible": true
             }
-        ],
-        "security": {
-            "csp": null,
-            "assetProtocol": {
-                "enable": true,
-                "scope": {
-                    "allow": [
-                        "**"
-                    ]
-                }
-            }
-        }
+        ]
     },
     "bundle": {
-        "active": true,
+        "active": false,
         "targets": "all",
         "icon": [
             "icons/32x32.png",
