@@ -88,6 +88,7 @@
     };
 
     const handle_view = (new_view: View): void => {
+        console.log(`new_view `, new_view);
         if (new_view === `cfg_key` && view === `cfg_profile`) {
             const offset = cgf_keyopt === `cfg_keygen` ? 1 : 0;
             carousel_index.set(page_carousel[new_view].max_index - offset);
@@ -264,7 +265,7 @@
                 kv_keynostrp,
                 profile_create.result,
             );
-            handle_view(`eula`);
+            await carousel_inc(view);
         } catch (e) {
             await handle_err(e, `handle_profile_add`);
         } finally {
@@ -289,7 +290,6 @@
                     case 2:
                         return await handle_submit_key_add();
                 }
-                break;
             case `cfg_profile`:
                 switch ($carousel_index) {
                     case 0:
@@ -297,7 +297,6 @@
                     case 1:
                         return await handle_set_role();
                 }
-                break;
         }
     };
 
@@ -312,7 +311,6 @@
                     case 2:
                         return await carousel_dec(view);
                 }
-                break;
             case `cfg_profile`:
                 switch ($carousel_index) {
                     case 0:
@@ -320,7 +318,6 @@
                     case 1:
                         return carousel_dec(view);
                 }
-                break;
         }
     };
 
