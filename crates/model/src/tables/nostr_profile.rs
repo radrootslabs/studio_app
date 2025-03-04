@@ -203,15 +203,30 @@ pub async fn lib_model_nostr_profile_read_list(
     Ok(IResultList { results })
 }
 
-pub type INostrProfileUpdate = NostrProfileQueryBindValues;
+#[derive(serde::Serialize, serde::Deserialize)]
+pub struct INostrProfileQueryUpdate {
+    pub query: String,
+    pub bind_values: Vec<serde_json::Value>,
+}
+
+pub type INostrProfileUpdate = INostrProfileQueryUpdate;
 pub type INostrProfileUpdateResolve = ();
 
 pub async fn lib_model_nostr_profile_update(
-    _db: &sqlx::Pool<sqlx::Sqlite>,
-    _opts: INostrProfileUpdate,
+    db: &sqlx::Pool<sqlx::Sqlite>,
+    opts: INostrProfileUpdate,
 ) -> Result<INostrProfileUpdateResolve, ModelError> {
+    let mut query_builder = sqlx::query(&opts.query);
+    for value in opts.bind_values.iter() {
+        query_builder = query_builder.bind(parse_query_value(value)?);
+    }
+    query_builder
+        .execute(db)
+        .await
+        .map_err(|e| ModelError::InvalidQuery(e.to_string()))?;
     Ok(())
 }
+
 pub type INostrProfileDelete = NostrProfileQueryBindValues;
 pub type INostrProfileDeleteResolve = IResultPass;
 

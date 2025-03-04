@@ -229,15 +229,30 @@ pub async fn lib_model_trade_product_read_list(
     Ok(IResultList { results })
 }
 
-pub type ITradeProductUpdate = TradeProductQueryBindValues;
+#[derive(serde::Serialize, serde::Deserialize)]
+pub struct ITradeProductQueryUpdate {
+    pub query: String,
+    pub bind_values: Vec<serde_json::Value>,
+}
+
+pub type ITradeProductUpdate = ITradeProductQueryUpdate;
 pub type ITradeProductUpdateResolve = ();
 
 pub async fn lib_model_trade_product_update(
-    _db: &sqlx::Pool<sqlx::Sqlite>,
-    _opts: ITradeProductUpdate,
+    db: &sqlx::Pool<sqlx::Sqlite>,
+    opts: ITradeProductUpdate,
 ) -> Result<ITradeProductUpdateResolve, ModelError> {
+    let mut query_builder = sqlx::query(&opts.query);
+    for value in opts.bind_values.iter() {
+        query_builder = query_builder.bind(parse_query_value(value)?);
+    }
+    query_builder
+        .execute(db)
+        .await
+        .map_err(|e| ModelError::InvalidQuery(e.to_string()))?;
     Ok(())
 }
+
 pub type ITradeProductDelete = TradeProductQueryBindValues;
 pub type ITradeProductDeleteResolve = IResultPass;
 

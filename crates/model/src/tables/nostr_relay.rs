@@ -203,15 +203,30 @@ pub async fn lib_model_nostr_relay_read_list(
     Ok(IResultList { results })
 }
 
-pub type INostrRelayUpdate = NostrRelayQueryBindValues;
+#[derive(serde::Serialize, serde::Deserialize)]
+pub struct INostrRelayQueryUpdate {
+    pub query: String,
+    pub bind_values: Vec<serde_json::Value>,
+}
+
+pub type INostrRelayUpdate = INostrRelayQueryUpdate;
 pub type INostrRelayUpdateResolve = ();
 
 pub async fn lib_model_nostr_relay_update(
-    _db: &sqlx::Pool<sqlx::Sqlite>,
-    _opts: INostrRelayUpdate,
+    db: &sqlx::Pool<sqlx::Sqlite>,
+    opts: INostrRelayUpdate,
 ) -> Result<INostrRelayUpdateResolve, ModelError> {
+    let mut query_builder = sqlx::query(&opts.query);
+    for value in opts.bind_values.iter() {
+        query_builder = query_builder.bind(parse_query_value(value)?);
+    }
+    query_builder
+        .execute(db)
+        .await
+        .map_err(|e| ModelError::InvalidQuery(e.to_string()))?;
     Ok(())
 }
+
 pub type INostrRelayDelete = NostrRelayQueryBindValues;
 pub type INostrRelayDeleteResolve = IResultPass;
 

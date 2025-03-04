@@ -195,15 +195,30 @@ pub async fn lib_model_log_error_read_list(
     Ok(IResultList { results })
 }
 
-pub type ILogErrorUpdate = LogErrorQueryBindValues;
+#[derive(serde::Serialize, serde::Deserialize)]
+pub struct ILogErrorQueryUpdate {
+    pub query: String,
+    pub bind_values: Vec<serde_json::Value>,
+}
+
+pub type ILogErrorUpdate = ILogErrorQueryUpdate;
 pub type ILogErrorUpdateResolve = ();
 
 pub async fn lib_model_log_error_update(
-    _db: &sqlx::Pool<sqlx::Sqlite>,
-    _opts: ILogErrorUpdate,
+    db: &sqlx::Pool<sqlx::Sqlite>,
+    opts: ILogErrorUpdate,
 ) -> Result<ILogErrorUpdateResolve, ModelError> {
+    let mut query_builder = sqlx::query(&opts.query);
+    for value in opts.bind_values.iter() {
+        query_builder = query_builder.bind(parse_query_value(value)?);
+    }
+    query_builder
+        .execute(db)
+        .await
+        .map_err(|e| ModelError::InvalidQuery(e.to_string()))?;
     Ok(())
 }
+
 pub type ILogErrorDelete = LogErrorQueryBindValues;
 pub type ILogErrorDeleteResolve = IResultPass;
 

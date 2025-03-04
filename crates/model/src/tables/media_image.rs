@@ -187,15 +187,30 @@ pub async fn lib_model_media_image_read_list(
     Ok(IResultList { results })
 }
 
-pub type IMediaImageUpdate = MediaImageQueryBindValues;
+#[derive(serde::Serialize, serde::Deserialize)]
+pub struct IMediaImageQueryUpdate {
+    pub query: String,
+    pub bind_values: Vec<serde_json::Value>,
+}
+
+pub type IMediaImageUpdate = IMediaImageQueryUpdate;
 pub type IMediaImageUpdateResolve = ();
 
 pub async fn lib_model_media_image_update(
-    _db: &sqlx::Pool<sqlx::Sqlite>,
-    _opts: IMediaImageUpdate,
+    db: &sqlx::Pool<sqlx::Sqlite>,
+    opts: IMediaImageUpdate,
 ) -> Result<IMediaImageUpdateResolve, ModelError> {
+    let mut query_builder = sqlx::query(&opts.query);
+    for value in opts.bind_values.iter() {
+        query_builder = query_builder.bind(parse_query_value(value)?);
+    }
+    query_builder
+        .execute(db)
+        .await
+        .map_err(|e| ModelError::InvalidQuery(e.to_string()))?;
     Ok(())
 }
+
 pub type IMediaImageDelete = MediaImageQueryBindValues;
 pub type IMediaImageDeleteResolve = IResultPass;
 
