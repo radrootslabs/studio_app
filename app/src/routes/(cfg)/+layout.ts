@@ -1,6 +1,6 @@
 
 import { datastore, keys, route } from '$lib/util';
-import { handle_err, key_nostr } from '@radroots/lib-app';
+import { handle_err } from '@radroots/lib-app';
 import type { LayoutLoad, LayoutLoadEvent } from './$types';
 
 export const load: LayoutLoad = async (_: LayoutLoadEvent) => {
@@ -12,7 +12,6 @@ export const load: LayoutLoad = async (_: LayoutLoadEvent) => {
             if (`result` in nostrkey) return void await route(`/`);
             await datastore.remove(`key_nostr`);
         }
-        key_nostr.set(``);
     } catch (e) {
         await handle_err(e, `(cfg)load`)
     } finally {
