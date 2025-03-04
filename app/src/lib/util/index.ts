@@ -4,8 +4,9 @@ import { ls } from "$lib/locale/i18n";
 import { TauriClientDatabase, TauriClientDatastore, TauriClientFs, TauriClientGeolocation, TauriClientGui, TauriClientHttp, TauriClientKeys, TauriClientRadroots } from "@radroots/client";
 import { Geocoder } from "@radroots/geocoder";
 import { app_notify, get_store, handle_err } from "@radroots/lib-app";
-import { encode_qp_route, NostrEventUtil, NostrKeyUtil, type CallbackPromise, type NavigationParamTuple } from "@radroots/util";
+import { encode_qp_route, type CallbackPromise, type NavigationParamTuple } from "@radroots/util";
 import type { NavigationRoute } from "./routes";
+import { NostrKeyService, NostrEventService } from "@radroots/nostr-util";
 
 export const db = new TauriClientDatabase();
 export const datastore = new TauriClientDatastore();
@@ -17,8 +18,8 @@ export const keys = new TauriClientKeys();
 export const radroots = new TauriClientRadroots(PUBLIC_RADROOTS_URL);
 
 export const geoc = new Geocoder();
-export const nostrkey = new NostrKeyUtil();
-export const nostre = new NostrEventUtil();
+export const nostrkey = new NostrKeyService();
+export const nostre = new NostrEventService();
 
 export const route = async (nav_route: NavigationRoute, params: NavigationParamTuple[] = []): Promise<void> => {
     try {

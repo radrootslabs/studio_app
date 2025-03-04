@@ -1,5 +1,6 @@
 import { PUBLIC_RADROOTS_NOSTR_PUBKEY, PUBLIC_RADROOTS_RELAY_URL } from "$env/static/public";
-import { root_symbol, type NostrEventTagClient } from "@radroots/util";
+import type { NostrEventTagClient } from "@radroots/nostr-util";
+import { root_symbol } from "@radroots/util";
 
 export const cfg_delay = {
     load: 321,

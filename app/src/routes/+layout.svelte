@@ -7,9 +7,9 @@
         app_notify,
         app_th,
         app_thc,
-        app_win,
         LayoutWindow,
         theme_set,
+        win_h,
     } from "@radroots/lib-app";
     import { parse_color_mode, parse_theme_key } from "@radroots/theme";
     import { cfg_app, sleep } from "@radroots/util";
@@ -27,9 +27,8 @@
         theme_set(parse_theme_key(_app_th), parse_color_mode($app_thc)),
     );
 
-    app_win.subscribe((_app_win) => {
-        // @todo android layout
-        if (_app_win.h > cfg_app.layout.ios1.h) app_lo.set(`ios1`);
+    win_h.subscribe((_win_h) => {
+        if (_win_h > cfg_app.layout.ios1.h) app_lo.set(`ios1`);
         else app_lo.set(`ios0`);
     });
 

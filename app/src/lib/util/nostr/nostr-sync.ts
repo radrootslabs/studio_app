@@ -4,8 +4,9 @@ import { cfg_nostr_client } from "$lib/util/conf";
 import { NDKKind } from "@nostr-dev-kit/ndk";
 import { get_store, handle_err, key_nostr, ndk, ndk_user, nostr_sync_prevent } from "@radroots/lib-app";
 import type { NostrRelay } from "@radroots/models";
-import { ndk_event, ndk_event_metadata, num_str, throw_err } from "@radroots/util";
+import {  num_str, throw_err } from "@radroots/util";
 import { err } from "../err";
+import { ndk_event_metadata, ndk_event } from "@radroots/nostr-util";
 
 export const nostr_sync_metadata = async (): Promise<void> => {
     try {

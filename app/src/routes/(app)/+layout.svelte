@@ -9,7 +9,9 @@
         ndk_user,
         nostr_ndk_configured,
     } from "@radroots/lib-app";
-    import { ndk_init, throw_err } from "@radroots/util";
+    import { ndk_init } from "@radroots/nostr-util";
+    import { throw_err } from "@radroots/util";
+
     import { onMount } from "svelte";
     import type { LayoutProps } from "./$types";
 

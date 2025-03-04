@@ -45,3 +45,6 @@
 	path = app/static/assets
 	url = git@github.com:72-61-64-72-6f-6f-74-73/assets.git
 	branch = app
+[submodule "packages/nostr-util"]
+	path = packages/nostr-util
+	url = git@github.com:72-61-64-72-6f-6f-74-73/nostr-util.git
