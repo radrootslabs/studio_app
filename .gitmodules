@@ -48,3 +48,6 @@
 [submodule "packages/nostr-util"]
 	path = packages/nostr-util
 	url = git@github.com:72-61-64-72-6f-6f-74-73/nostr-util.git
+[submodule "packages/locales"]
+	path = packages/locales
+	url = git@github.com:72-61-64-72-6f-6f-74-73/packages-locales.git
