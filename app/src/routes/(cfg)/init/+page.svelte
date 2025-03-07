@@ -24,7 +24,7 @@
         LogoCircle,
         view_effect,
     } from "@radroots/lib-app";
-    import { el_id, form_fields, sleep } from "@radroots/util";
+    import { el_id, form_fields, sleep, type ResultPass } from "@radroots/util";
     import { onMount } from "svelte";
 
     type IdbKey = `nostr:key:add` | `nostr:profile` | `#key_nostrp`;
@@ -156,7 +156,7 @@
     const configure_device = async (
         public_key: string,
         profile_name?: string,
-    ): Promise<void> => {
+    ): Promise<ResultPass | void> => {
         const nostr_profile_add = await db.nostr_profile_create({
             public_key,
             name: profile_name ? profile_name : undefined,
@@ -183,6 +183,7 @@
             });
         }
         await key_add_keystore(public_key);
+        return { pass: true };
     };
 
     const handle_choose_key_gen_or_add = async (): Promise<void> => {
@@ -341,11 +342,12 @@
                     secret_key: key_nostr_read.secret_key,
                 }); //@todo
             }
-            await configure_device(
+            const configuration_result = await configure_device(
                 kv_keynostrp,
                 await kv.read(`nostr:profile`),
             );
-            app_notify.set(`${$ls(`notification.init.on_complete`)}`);
+            if (configuration_result && `pass` in configuration_result)
+                app_notify.set(`${$ls(`notification.init.on_complete`)}`);
         } catch (e) {
             await handle_err(e, `submit`);
         } finally {

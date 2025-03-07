@@ -9,7 +9,7 @@ const heights_responsive: Record<AppHeightsResponsiveIOS, string> = {
     nav_tabs_ios0: `80px`,
     nav_tabs_ios1: `120px`,
     nav_page_toolbar_ios0: `72px`,
-    nav_page_toolbar_ios1: `54px`,
+    nav_page_toolbar_ios1: `160px`,
     nav_page_header_ios0: `62px`,
     nav_page_header_ios1: `54px`,
     lo_bottom_button_ios0: `90px`,

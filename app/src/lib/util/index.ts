@@ -1,11 +1,12 @@
+import { browser } from "$app/environment";
 import { goto } from "$app/navigation";
 import { PUBLIC_RADROOTS_URL } from "$env/static/public";
 import { ls } from "$lib/locale/i18n";
 import { TauriClientDatabase, TauriClientDatastore, TauriClientFs, TauriClientGeolocation, TauriClientGui, TauriClientHttp, TauriClientKeys, TauriClientRadroots } from "@radroots/client";
 import { Geocoder } from "@radroots/geocoder";
-import { app_notify, get_store, handle_err } from "@radroots/lib-app";
+import { app_notify, get_store, handle_err, NostrSyncService } from "@radroots/lib-app";
 import { NostrEventService, NostrKeyService } from "@radroots/nostr-util";
-import { encode_qp_route, type CallbackPromise, type NavigationParamTuple } from "@radroots/util";
+import { encode_route, type CallbackPromise, type NavigationParamTuple } from "@radroots/util";
 import type { NavigationRoute } from "./routes";
 
 export const db = new TauriClientDatabase();
@@ -20,10 +21,12 @@ export const radroots = new TauriClientRadroots(PUBLIC_RADROOTS_URL);
 export const geoc = new Geocoder();
 export const nostrkey = new NostrKeyService();
 export const nostre = new NostrEventService();
+export let nostrsync: NostrSyncService
+if (browser) nostrsync = new NostrSyncService();
 
 export const route = async (nav_route: NavigationRoute, params: NavigationParamTuple[] = []): Promise<void> => {
     try {
-        if (params.length) await goto(encode_qp_route<NavigationRoute>(nav_route, params));
+        if (params.length) await goto(encode_route<NavigationRoute>(nav_route, params));
         else await goto(nav_route);
     } catch (e) {
         await handle_err(e, `route`);

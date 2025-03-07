@@ -206,6 +206,9 @@ importers:
       '@radroots/locales':
         specifier: workspace:*
         version: link:../locales
+      '@radroots/nostr-util':
+        specifier: workspace:*
+        version: link:../nostr-util
       '@radroots/theme':
         specifier: workspace:*
         version: link:../theme
