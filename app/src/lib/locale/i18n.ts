@@ -1,20 +1,19 @@
+import { iso639_1, locales_default } from '@radroots/locales';
 import { i18n_conf } from '@radroots/util';
-import locales_keys from './locales.json';
 
-export type Locale = keyof typeof locales_keys;
+export type Locale = (typeof locales_default)[number];
 
-const translations: Record<Locale, any> = {
-    en: { locales_keys },
-};
+const translations: Record<Locale, typeof iso639_1> = locales_default.reduce((acc, locale) => ({ ...acc, [locale as Locale]: iso639_1, }), {} as Record<Locale, typeof iso639_1>);
+const locale_keys = Object.keys(translations);
 
 const i18n = i18n_conf<Locale>({
     default_locale: `en`,
     translations,
     loaders: [
-        ...Object.keys(translations).map((locale) => [`common`, `error`, `eula`, `icu`, `notify`].map(key => ({
+        ...locale_keys.map((locale) => [`common`, `countries`, `error`, `eula`, `icu`, `notification`, `units`].map(key => ({
             locale,
             key,
-            loader: async () => (await import(`./${locale}/${key}.json`)).default
+            loader: async () => (await import(`../../../../packages/locales/src/messages/${locale}/${key}.json`)).default
         }))),
     ].flat()
 });
@@ -27,4 +26,7 @@ const {
     loadTranslations: load_translations
 } = i18n;
 
+translations_loading.subscribe(async (_loading) => {
+    if (_loading) await translations_loading.toPromise();
+});
 export { load_translations, locale, locales, ls, translations, translations_loading };

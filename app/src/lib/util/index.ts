@@ -4,9 +4,9 @@ import { ls } from "$lib/locale/i18n";
 import { TauriClientDatabase, TauriClientDatastore, TauriClientFs, TauriClientGeolocation, TauriClientGui, TauriClientHttp, TauriClientKeys, TauriClientRadroots } from "@radroots/client";
 import { Geocoder } from "@radroots/geocoder";
 import { app_notify, get_store, handle_err } from "@radroots/lib-app";
+import { NostrEventService, NostrKeyService } from "@radroots/nostr-util";
 import { encode_qp_route, type CallbackPromise, type NavigationParamTuple } from "@radroots/util";
 import type { NavigationRoute } from "./routes";
-import { NostrKeyService, NostrEventService } from "@radroots/nostr-util";
 
 export const db = new TauriClientDatabase();
 export const datastore = new TauriClientDatastore();
@@ -47,13 +47,13 @@ export const reset = async (): Promise<void> => {
     try {
         const $ls = get_store(ls);
         const confirm = await gui.confirm({
-            message: `${$ls(`notify.device.reset`)}. ${$ls(`common.this_action_is_irreversible`)}. ${$ls(`common.do_you_want_to_continue_q`)}`
+            message: `${$ls(`notification.device.reset`)}. ${$ls(`common.this_action_is_irreversible`)}. ${$ls(`common.do_you_want_to_continue_q`)}`
         });
         if (!confirm) return;
         await keys.nostr_keystore_reset();
         await db.reset();
         goto(`/`)
-        app_notify.set(`Device reset complete.`);
+        app_notify.set(`${$ls(`notification.device.reset_complete`)}`);
     } catch (e) {
         await handle_err(e, `reset`);
     }

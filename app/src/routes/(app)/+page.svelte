@@ -1,4 +1,5 @@
 <script lang="ts">
+    import { ls } from "$lib/locale/i18n";
     import { gui, route } from "$lib/util";
     import { handle_err, Home } from "@radroots/lib-app";
     import type { ResolveAccountInfo } from "@radroots/util";
@@ -7,6 +8,7 @@
 </script>
 
 <Home
+    {ls}
     basis={{
         data: data,
         lc_handle_farms: async () => {

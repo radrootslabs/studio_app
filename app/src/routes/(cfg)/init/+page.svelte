@@ -17,8 +17,8 @@
         fmt_id,
         handle_err,
         idb,
+        IdbLib,
         Input,
-        KvLib,
         LabelDisplay,
         LoadSymbol,
         LogoCircle,
@@ -27,8 +27,8 @@
     import { el_id, form_fields, sleep } from "@radroots/util";
     import { onMount } from "svelte";
 
-    type KvKey = `nostr:key:add` | `nostr:profile` | `#key_nostrp`;
-    const kv = new KvLib<KvKey>(idb);
+    type IdbKey = `nostr:key:add` | `nostr:profile` | `#key_nostrp`;
+    const kv = new IdbLib<IdbKey>(idb);
 
     const page_carousel: Record<View, { max_index: number }> = {
         cfg_key: {
@@ -80,6 +80,7 @@
     const init = async (): Promise<void> => {
         const nostrkey_all = await keys.nostr_read_all();
         if (`results` in nostrkey_all && nostrkey_all.results.length) {
+            console.log(`init EXISTING!`, nostrkey_all.results);
             handle_view(`eula`);
         } else {
             handle_view(view);
@@ -132,7 +133,7 @@
         const ks_key_nostr_add = await datastore.set(`key_nostr`, public_key);
         if (`err` in ks_key_nostr_add)
             return void (await reset(
-                `${$ls(`error.device.configuration_failure`)}`,
+                `${$ls(`error.init.configuration_failure`)}`,
             ));
     };
 
@@ -140,7 +141,7 @@
         const keys_nostr_create = await keys.nostr_gen();
         if (`err` in keys_nostr_create)
             return void (await reset(
-                `${$ls(`error.device.configuration_failure`)}`,
+                `${$ls(`error.init.configuration_failure`)}`,
             ));
         await kv.save(`#key_nostrp`, keys_nostr_create.public_key);
     };
@@ -148,9 +149,7 @@
     const key_add = async (secret_key: string): Promise<void> => {
         const keys_nostr_add = await keys.nostr_add(secret_key);
         if (`err` in keys_nostr_add)
-            return void (await gui.alert(
-                `${$ls(`icu.invalid_*`, { value: `${$ls(`common.key`)}`.toLowerCase() })}`,
-            ));
+            return void (await gui.alert(`${$ls(`common.invalid_key`)}`));
         await kv.save(`#key_nostrp`, keys_nostr_add.public_key);
     };
 
@@ -164,7 +163,7 @@
         });
         if (`err` in nostr_profile_add || `err_s` in nostr_profile_add)
             return void (await gui.alert(
-                `${$ls(`icu.failure_saving_*_to_the_database`, { value: `${$ls(`common.profile`)}`.toLowerCase() })}`,
+                `${$ls(`error.init.device_configuration_nostr_profile`)}`,
             ));
         for (const url of Array.from(
             new Set([...PUBLIC_NOSTR_RELAY_DEFAULTS.split(",")]),
@@ -172,7 +171,7 @@
             const nostr_relay_add = await db.nostr_relay_create({ url });
             if (`err` in nostr_relay_add || `err_s` in nostr_relay_add)
                 return void (await gui.alert(
-                    `${$ls(`icu.failure_saving_*_to_the_database`, { value: `${$ls(`icu.default_*`, { value: `${$ls(`common.relays`)}` })}`.toLowerCase() })}`,
+                    `${$ls(`error.init.device_configuration_nostr_relay`)}`,
                 ));
             await db.nostr_profile_relay_set({
                 nostr_profile: {
@@ -202,12 +201,12 @@
             const nostrkey_add = await kv.read(`nostr:key:add`);
             if (!nostrkey_add)
                 return void (await gui.alert(
-                    `${$ls(`icu.enter_a_*`, { value: `${$ls(`icu.valid_*`, { value: `${$ls(`common.key`)}` })}`.toLowerCase() })}`,
+                    `${$ls(`icu.enter_a_valid_*`, { value: `${$ls(`common.key`)}` })}`,
                 ));
             const key_nostr_read = await keys.nostr_read(nostrkey_add);
             if (`err` in key_nostr_read)
                 return void (await reset(
-                    `${$ls(`error.device.configuration_failure`)}`,
+                    `${$ls(`error.init.configuration_failure`)}`,
                 ));
             await key_add(key_nostr_read.secret_key);
             kv.del(`nostr:key:add`);
@@ -223,12 +222,12 @@
             const kv_keynostrp = await kv.read(`#key_nostrp`);
             if (!kv_keynostrp)
                 return void (await reset(
-                    `${$ls(`error.device.configuration_failure`)}`,
+                    `${$ls(`error.init.configuration_failure`)}`,
                 )); //@todo
             const key_nostr_read = await keys.nostr_read(kv_keynostrp);
             if (`err` in key_nostr_read)
                 return void (await reset(
-                    `${$ls(`error.device.configuration_failure`)}`,
+                    `${$ls(`error.init.configuration_failure`)}`,
                 )); //@todo
             const kv_profilename = await kv.read(`nostr:profile`);
             if (!kv_profilename)
@@ -240,26 +239,24 @@
                 profile_name: kv_profilename,
                 secret_key: key_nostr_read.secret_key,
             });
-            if (`err` in profile_req) {
-                cfg_profile_profilename_loading = false;
-                return void (await gui.alert(profile_req.err));
-            }
+            if (`err` in profile_req)
+                return void (await gui.alert(
+                    `${$ls(profile_req.err, { default: `${$ls(`error.client.http.request_failure`)}` })}`,
+                ));
             const confirm = await gui.confirm({
-                message: `${`${$ls(`icu.the_*_is_available`, { value: `${$ls(`common.profile_name`).toLowerCase()} "${kv_profilename}"` })}`}. Would you like to use it?`, //@todo
+                message: `${`${$ls(`icu.the_*_is_available`, { value: `${$ls(`common.profile_name`).toLowerCase()} "${kv_profilename}"` })}`}. ${`${$ls(`common.would_you_like_to_use_it_q`)}`}`,
                 cancel: `${$ls(`common.no`)}`,
                 ok: `${$ls(`common.yes`)}`,
             });
-            if (!confirm) {
-                cfg_profile_profilename_loading = false;
-                return;
-            }
+            if (!confirm) return;
             const profile_create = await radroots.fetch_profile_create({
                 tok: profile_req.result,
                 secret_key: key_nostr_read.secret_key,
             });
-            cfg_profile_profilename_loading = false;
             if (`err` in profile_create)
-                return void (await gui.alert(profile_create.err));
+                return void (await gui.alert(
+                    `${$ls(profile_create.err, { default: `${$ls(`error.client.http.request_failure`)}` })}`,
+                ));
             await datastore.setp(
                 `radroots_profile`,
                 kv_keynostrp,
@@ -327,12 +324,12 @@
             const kv_keynostrp = await kv.read(`#key_nostrp`);
             if (!kv_keynostrp)
                 return void (await reset(
-                    `${$ls(`error.device.configuration_failure`)}`,
+                    `${$ls(`error.init.configuration_failure`)}`,
                 )); //@todo
             const key_nostr_read = await keys.nostr_read(kv_keynostrp);
             if (`err` in key_nostr_read)
                 return void (await reset(
-                    `${$ls(`error.device.configuration_failure`)}`,
+                    `${$ls(`error.init.configuration_failure`)}`,
                 )); //@todo
             const radroots_profile = await datastore.getp(
                 `radroots_profile`,
@@ -348,7 +345,7 @@
                 kv_keynostrp,
                 await kv.read(`nostr:profile`),
             );
-            app_notify.set(`${$ls(`notify.message.init_welcome`)}`);
+            app_notify.set(`${$ls(`notification.init.on_complete`)}`);
         } catch (e) {
             await handle_err(e, `submit`);
         } finally {
@@ -423,7 +420,7 @@
                             <p
                                 class={`font-mono font-[400] text-[1.1rem] text-layer-0-glyph`}
                             >
-                                {`${$ls(`notify.message.init_greeting`)}`}
+                                {`${$ls(`notification.init.greeting_header`)}`}
                             </p>
                         </div>
                         <div
@@ -432,7 +429,7 @@
                             <p
                                 class={`font-mono font-[400] text-[1.1rem] text-layer-0-glyph`}
                             >
-                                {`${$ls(`notify.message.init_details`)}.`}
+                                {`${$ls(`notification.init.greeting_subheader`)}.`}
                             </p>
                         </div>
                     </div>
@@ -671,7 +668,7 @@
                     callback: async () => {
                         if ($carousel_index === 0) {
                             const confirm = await gui.confirm({
-                                message: `${$ls(`notify.message.no_profile_config`)}`,
+                                message: `${$ls(`notification.init.no_profile_option`)}`,
                                 cancel: `${$ls(`icu.add_*`, { value: `${$ls(`common.profile`)}` })}`,
                                 ok: `${$ls(`common.continue`)}`,
                             });

@@ -3,7 +3,7 @@
     import {
         app_splash,
         handle_err,
-        kv_init,
+        idb_init,
         ndk,
         ndk_user,
         nostr_ndk_configured,
@@ -32,7 +32,7 @@
                 (CSS as any).paintWorklet.addModule(`/assets/squircle.min.js`);
             await http.init();
             await datastore.init();
-            await kv_init();
+            await idb_init();
             await nostr_init();
         } catch (e) {
             await handle_err(e, `init`);

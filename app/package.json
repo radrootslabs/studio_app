@@ -34,6 +34,7 @@
 		"@radroots/client": "workspace:*",
 		"@radroots/geocoder": "workspace:*",
 		"@radroots/lib-app": "workspace:*",
+		"@radroots/locales": "workspace:*",
 		"@radroots/models": "workspace:*",
 		"@radroots/nostr-util": "workspace:*",
 		"svelte-maplibre": "workspace:*",
