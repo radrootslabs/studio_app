@@ -202,7 +202,7 @@ pub struct ILogErrorQueryUpdate {
 }
 
 pub type ILogErrorUpdate = ILogErrorQueryUpdate;
-pub type ILogErrorUpdateResolve = ();
+pub type ILogErrorUpdateResolve = IResultPass;
 
 pub async fn lib_model_log_error_update(
     db: &sqlx::Pool<sqlx::Sqlite>,
@@ -216,7 +216,7 @@ pub async fn lib_model_log_error_update(
         .execute(db)
         .await
         .map_err(|e| ModelError::InvalidQuery(e.to_string()))?;
-    Ok(())
+    Ok(IResultPass { pass: true })
 }
 
 pub type ILogErrorDelete = LogErrorQueryBindValues;

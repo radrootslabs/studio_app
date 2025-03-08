@@ -236,7 +236,7 @@ pub struct ITradeProductQueryUpdate {
 }
 
 pub type ITradeProductUpdate = ITradeProductQueryUpdate;
-pub type ITradeProductUpdateResolve = ();
+pub type ITradeProductUpdateResolve = IResultPass;
 
 pub async fn lib_model_trade_product_update(
     db: &sqlx::Pool<sqlx::Sqlite>,
@@ -250,7 +250,7 @@ pub async fn lib_model_trade_product_update(
         .execute(db)
         .await
         .map_err(|e| ModelError::InvalidQuery(e.to_string()))?;
-    Ok(())
+    Ok(IResultPass { pass: true })
 }
 
 pub type ITradeProductDelete = TradeProductQueryBindValues;

@@ -194,7 +194,7 @@ pub struct IMediaImageQueryUpdate {
 }
 
 pub type IMediaImageUpdate = IMediaImageQueryUpdate;
-pub type IMediaImageUpdateResolve = ();
+pub type IMediaImageUpdateResolve = IResultPass;
 
 pub async fn lib_model_media_image_update(
     db: &sqlx::Pool<sqlx::Sqlite>,
@@ -208,7 +208,7 @@ pub async fn lib_model_media_image_update(
         .execute(db)
         .await
         .map_err(|e| ModelError::InvalidQuery(e.to_string()))?;
-    Ok(())
+    Ok(IResultPass { pass: true })
 }
 
 pub type IMediaImageDelete = MediaImageQueryBindValues;

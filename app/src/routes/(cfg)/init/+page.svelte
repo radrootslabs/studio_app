@@ -2,7 +2,15 @@
     import { goto } from "$app/navigation";
     import { PUBLIC_NOSTR_RELAY_DEFAULTS } from "$env/static/public";
     import { ls } from "$lib/locale/i18n";
-    import { datastore, db, gui, keys, nostrkey, radroots } from "$lib/util";
+    import {
+        datastore,
+        db,
+        gui,
+        keys,
+        nostrkey,
+        radroots,
+        route,
+    } from "$lib/util";
     import { cfg_delay } from "$lib/util/conf";
     import {
         app_lo,
@@ -24,7 +32,13 @@
         LogoCircle,
         view_effect,
     } from "@radroots/lib-app";
-    import { el_id, form_fields, sleep, type ResultPass } from "@radroots/util";
+    import {
+        el_id,
+        form_fields,
+        sleep,
+        str_capitalize_words,
+        type ResultPass,
+    } from "@radroots/util";
     import { onMount } from "svelte";
 
     type IdbKey = `nostr:key:add` | `nostr:profile` | `#key_nostrp`;
@@ -346,8 +360,20 @@
                 kv_keynostrp,
                 await kv.read(`nostr:profile`),
             );
-            if (configuration_result && `pass` in configuration_result)
-                app_notify.set(`${$ls(`notification.init.on_complete`)}`);
+            if (configuration_result && `pass` in configuration_result) {
+                const confirm = await gui.confirm({
+                    message: `${$ls(`notification.init.on_complete`)}`,
+                    ok: `${$ls(`common.continue`)}`,
+                    cancel: str_capitalize_words(
+                        `${$ls(`common.hide_alerts`)}`,
+                    ),
+                });
+                if (confirm) {
+                    await gui.notify_init();
+                    app_notify.set(`${$ls(`notification.init.on_first_load`)}`);
+                }
+                await route(`/`);
+            }
         } catch (e) {
             await handle_err(e, `submit`);
         } finally {

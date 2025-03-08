@@ -210,7 +210,7 @@ pub struct INostrRelayQueryUpdate {
 }
 
 pub type INostrRelayUpdate = INostrRelayQueryUpdate;
-pub type INostrRelayUpdateResolve = ();
+pub type INostrRelayUpdateResolve = IResultPass;
 
 pub async fn lib_model_nostr_relay_update(
     db: &sqlx::Pool<sqlx::Sqlite>,
@@ -224,7 +224,7 @@ pub async fn lib_model_nostr_relay_update(
         .execute(db)
         .await
         .map_err(|e| ModelError::InvalidQuery(e.to_string()))?;
-    Ok(())
+    Ok(IResultPass { pass: true })
 }
 
 pub type INostrRelayDelete = NostrRelayQueryBindValues;

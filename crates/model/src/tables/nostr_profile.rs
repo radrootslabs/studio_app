@@ -210,7 +210,7 @@ pub struct INostrProfileQueryUpdate {
 }
 
 pub type INostrProfileUpdate = INostrProfileQueryUpdate;
-pub type INostrProfileUpdateResolve = ();
+pub type INostrProfileUpdateResolve = IResultPass;
 
 pub async fn lib_model_nostr_profile_update(
     db: &sqlx::Pool<sqlx::Sqlite>,
@@ -224,7 +224,7 @@ pub async fn lib_model_nostr_profile_update(
         .execute(db)
         .await
         .map_err(|e| ModelError::InvalidQuery(e.to_string()))?;
-    Ok(())
+    Ok(IResultPass { pass: true })
 }
 
 pub type INostrProfileDelete = NostrProfileQueryBindValues;

@@ -230,7 +230,7 @@ pub struct ILocationGcsQueryUpdate {
 }
 
 pub type ILocationGcsUpdate = ILocationGcsQueryUpdate;
-pub type ILocationGcsUpdateResolve = ();
+pub type ILocationGcsUpdateResolve = IResultPass;
 
 pub async fn lib_model_location_gcs_update(
     db: &sqlx::Pool<sqlx::Sqlite>,
@@ -244,7 +244,7 @@ pub async fn lib_model_location_gcs_update(
         .execute(db)
         .await
         .map_err(|e| ModelError::InvalidQuery(e.to_string()))?;
-    Ok(())
+    Ok(IResultPass { pass: true })
 }
 
 pub type ILocationGcsDelete = LocationGcsQueryBindValues;

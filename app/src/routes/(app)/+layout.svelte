@@ -1,6 +1,7 @@
 <script lang="ts">
-    import { datastore, db, http, keys } from "$lib/util";
+    import { datastore, db, gui, http, keys } from "$lib/util";
     import {
+        app_notify,
         app_splash,
         handle_err,
         idb_init,
@@ -11,6 +12,7 @@
     import { ndk_init } from "@radroots/nostr-util";
     import { throw_err } from "@radroots/util";
 
+    import { nostr_sync_metadata } from "$lib/util/nostr/sync";
     import { onMount } from "svelte";
     import type { LayoutProps } from "./$types";
 
@@ -41,15 +43,13 @@
 
     const nostr_init = async (): Promise<void> => {
         try {
-            if (!data.public_key) return void throw_err(`*-key_nostr`);
+            if (!data.public_key) throw_err(`*-key_nostr`);
             const keys_nostr_read = await keys.nostr_read(data.public_key);
-            if (`err` in keys_nostr_read)
-                return void throw_err(keys_nostr_read.err);
+            if (`err` in keys_nostr_read) throw_err(keys_nostr_read.err);
             const tb_nostr_relays = await db.nostr_relay_read_list({
                 table: [`on_profile`, { public_key: data.public_key }],
             });
-            if (`err` in tb_nostr_relays)
-                return void throw_err(tb_nostr_relays.err);
+            if (`err` in tb_nostr_relays) throw_err(tb_nostr_relays.err);
             for (const { url } of tb_nostr_relays.results)
                 $ndk.addExplicitRelay(url);
             await $ndk.connect();
@@ -58,13 +58,21 @@
                 secret_key: keys_nostr_read.secret_key,
             });
             nostr_ndk_configured.set(!!ndk_user_init);
-            if (!ndk_user_init) return; //@todo
+            if (!ndk_user_init) throw_err(`error.nostr.ndk_user_undefined`);
             $ndk_user = ndk_user_init;
             $ndk_user.ndk = $ndk;
+            await nostr_sync_metadata();
         } catch (e) {
             await handle_err(e, `nostr_init`);
         }
     };
+
+    app_notify.subscribe(async (_app_notify) => {
+        console.log(`_app_notify `, _app_notify);
+        if (!_app_notify) return;
+        await gui.notify_send($app_notify);
+        app_notify.set(``);
+    });
 </script>
 
 {@render children()}
