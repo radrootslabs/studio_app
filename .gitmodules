@@ -1,30 +1,39 @@
 [submodule "packages/eslint"]
 	path = packages/eslint
 	url = git@github.com:72-61-64-72-6f-6f-74-73/packages-eslint.git
+	branch = master
 [submodule "packages/tsconfig"]
 	path = packages/tsconfig
 	url = git@github.com:72-61-64-72-6f-6f-74-73/packages-tsconfig.git
+	branch = master
 [submodule "packages/geocoder"]
 	path = packages/geocoder
 	url = git@github.com:72-61-64-72-6f-6f-74-73/packages-geocoder.git
+	branch = master
 [submodule "packages/client"]
 	path = packages/client
 	url = git@github.com:72-61-64-72-6f-6f-74-73/packages-client.git
+	branch = master
 [submodule "packages/models"]
 	path = packages/models
 	url = git@github.com:72-61-64-72-6f-6f-74-73/packages-models.git
+	branch = master
 [submodule "packages/theme"]
 	path = packages/theme
 	url = git@github.com:72-61-64-72-6f-6f-74-73/packages-theme.git
+	branch = master
 [submodule "packages/util"]
 	path = packages/util
 	url = git@github.com:72-61-64-72-6f-6f-74-73/packages-util.git
+	branch = master
 [submodule "packages/svelte-maplibre"]
 	path = packages/svelte-maplibre
 	url = git@github.com:72-61-64-72-6f-6f-74-73/svelte-maplibre.git
+	branch = master
 [submodule "packages/lib-app"]
 	path = packages/lib-app
 	url = git@github.com:72-61-64-72-6f-6f-74-73/packages-lib-app.git
+	branch = master
 [submodule "app/static/geonames"]
 	path = app/static/geonames
 	url = git@github.com:72-61-64-72-6f-6f-74-73/geonames.git
@@ -48,6 +57,12 @@
 [submodule "packages/nostr-util"]
 	path = packages/nostr-util
 	url = git@github.com:72-61-64-72-6f-6f-74-73/nostr-util.git
+	branch = master
 [submodule "packages/locales"]
 	path = packages/locales
 	url = git@github.com:72-61-64-72-6f-6f-74-73/packages-locales.git
+	branch = master
+[submodule "packages/nostr-geotags"]
+	path = packages/nostr-geotags
+	url = git@github.com:72-61-64-72-6f-6f-74-73/nostr-geotags.git
+	branch = main
