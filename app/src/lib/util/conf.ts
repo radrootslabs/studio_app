@@ -1,6 +1,8 @@
-import { PUBLIC_RADROOTS_NOSTR_PUBKEY, PUBLIC_RADROOTS_RELAY_URL } from "$env/static/public";
+import {  PUBLIC_RADROOTS_RELAY_URL } from "$env/static/public";
 import type { NostrEventTagClient } from "@radroots/nostr-util";
 import { root_symbol } from "@radroots/util";
+
+export const radroots_nostr_pubkey = `1f5a37bd7050cffe4dd9c35e029fa1da5c84f429de0818c9e22ecf122815e184`
 
 export const cfg_delay = {
     load: 321,
@@ -13,7 +15,7 @@ export const cfg_delay = {
 
 export const cfg_nostr = {
     relay_url: PUBLIC_RADROOTS_RELAY_URL,
-    relay_pubkey: PUBLIC_RADROOTS_NOSTR_PUBKEY,
+    relay_pubkey: radroots_nostr_pubkey,
     relay_polling_count_max: 10,
 };
 
