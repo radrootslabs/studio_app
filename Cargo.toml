@@ -3,5 +3,5 @@ resolver = "2"
 members = [ 
     "crates/core",
     "crates/model",
-    "crates/tauri",
+    "crates/tangle",
 ]

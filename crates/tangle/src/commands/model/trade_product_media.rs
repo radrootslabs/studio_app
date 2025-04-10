@@ -1,4 +1,4 @@
-use crate::radroots::Radroots;
+use crate::app::Tangle;
 use radroots_core::types::IError;
 use radroots_model::tables::trade_product_media::{
     lib_model_trade_product_media_set, lib_model_trade_product_media_unset,
@@ -7,7 +7,7 @@ use radroots_model::tables::trade_product_media::{
 
 #[tauri::command(rename_all = "snake_case")]
 pub async fn model_trade_product_media_set(
-    state: tauri::State<'_, Radroots>,
+    state: tauri::State<'_, Tangle>,
     args: ITradeProductMediaRelation,
 ) -> Result<ITradeProductMediaResolve, IError> {
     match lib_model_trade_product_media_set(&state.db, args).await {
@@ -18,7 +18,7 @@ pub async fn model_trade_product_media_set(
 
 #[tauri::command(rename_all = "snake_case")]
 pub async fn model_trade_product_media_unset(
-    state: tauri::State<'_, Radroots>,
+    state: tauri::State<'_, Tangle>,
     args: ITradeProductMediaRelation,
 ) -> Result<ITradeProductMediaResolve, IError> {
     match lib_model_trade_product_media_unset(&state.db, args).await {

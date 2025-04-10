@@ -1,7 +1,8 @@
+pub mod app;
 pub mod commands;
-pub mod radroots;
 pub mod util;
 
+use app::Tangle;
 use commands::keys::{
     keys_nostr_add, keys_nostr_delete, keys_nostr_gen, keys_nostr_keystore_reset, keys_nostr_read,
     keys_nostr_read_all,
@@ -40,7 +41,6 @@ use commands::model::trade_product_location::{
 use commands::model::trade_product_media::{
         model_trade_product_media_set, model_trade_product_media_unset,
     };
-use radroots::Radroots;
 use std::path::PathBuf;
 use tauri::Manager;
 
@@ -77,8 +77,8 @@ pub fn run() {
             };
 
             tauri::async_runtime::block_on(async move {
-                let radroots = Radroots::new(fmt_data_dir, fmt_logs_dir).await;
-                app.manage(radroots);
+                let tangle = Tangle::new(fmt_data_dir, fmt_logs_dir).await;
+                app.manage(tangle);
             });
             Ok(())
         })

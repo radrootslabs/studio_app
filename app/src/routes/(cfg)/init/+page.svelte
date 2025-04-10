@@ -2,47 +2,26 @@
     import { goto } from "$app/navigation";
     import { PUBLIC_NOSTR_RELAY_DEFAULTS } from "$env/static/public";
     import { ls } from "$lib/locale/i18n";
-    import {
-        datastore,
-        db,
-        gui,
-        keys,
-        nostrkey,
-        radroots,
-        route,
-    } from "$lib/util";
+    import { datastore, db, gui, keys, radroots, route } from "$lib/util";
     import { cfg_delay } from "$lib/util/conf";
+    import { NDKPrivateKeySigner } from "@nostr-dev-kit/ndk";
     import {
         app_lo,
         app_loading,
-        app_notify,
         ButtonLayoutPair,
         carousel_dec,
         carousel_inc,
         carousel_index,
         carousel_index_max,
-        EntryLineIdb,
+        EntryLine,
         fmt_id,
         handle_err,
-        idb,
-        IdbLib,
-        Input,
-        LabelDisplay,
         LoadSymbol,
         LogoCircle,
         view_effect,
     } from "@radroots/lib-app";
-    import {
-        el_id,
-        form_fields,
-        sleep,
-        str_capitalize_words,
-        type ResultPass,
-    } from "@radroots/util";
+    import { el_id, form_fields, sleep, type ResultPass } from "@radroots/util";
     import { onMount } from "svelte";
-
-    type IdbKey = `nostr:key:add` | `nostr:profile` | `#key_nostrp`;
-    const kv = new IdbLib<IdbKey>(idb);
 
     const page_carousel: Record<View, { max_index: number }> = {
         cfg_key: {
@@ -65,23 +44,25 @@
         view_effect<View>(view);
     });
 
-    type CfgKeyOpt = `cfg_keygen` | `cfg_keyadd`;
-    let cgf_keyopt: CfgKeyOpt | undefined = $state(undefined);
+    let loading_submit = $state(false);
 
     type CfgRole = `farmer` | `personal`;
     let cfg_role: CfgRole | undefined = $state(undefined);
 
-    let cfg_profile_nostr_publickey = $state(``);
-    const cfg_profile_nostr_publickey_npub = $derived(
-        cfg_profile_nostr_publickey
-            ? nostrkey.npub(cfg_profile_nostr_publickey) || ``
-            : ``,
+    type CfgKeyOpt = `nostr_keygen` | `nostr_keyadd`;
+    let cgf_key_opt: CfgKeyOpt | undefined = $state(undefined);
+    let cfg_key_add_existing_val = $state(``);
+
+    let cfg_profile_nip05_opt = $state(false);
+    let cfg_profile_name_val = $state(``);
+    let cfg_profile_name_valid = $state(false);
+    let cfg_profile_name_loading = $state(false);
+
+    const cfg_profile_name_skip = $derived(
+        view.toString() === `cfg_profile` &&
+            $carousel_index === 0 &&
+            !cfg_profile_nip05_opt,
     );
-
-    let cfg_profile_profilename_valid = $state(false);
-    let cfg_profile_profilename_loading = $state(false);
-
-    let loading_submit = $state(false);
 
     onMount(async () => {
         try {
@@ -92,20 +73,13 @@
     });
 
     const init = async (): Promise<void> => {
-        const nostrkey_all = await keys.nostr_read_all();
-        if (`results` in nostrkey_all && nostrkey_all.results.length) {
-            console.log(`init EXISTING!`, nostrkey_all.results);
-            handle_view(`eula`);
-        } else {
-            handle_view(view);
-        }
-        await kv.init();
+        const nostrkey_all = await keys.nostr_read_all(); //@todo
+        handle_view(view);
     };
 
     const handle_view = (new_view: View): void => {
-        console.log(`new_view `, new_view);
         if (new_view === `cfg_key` && view === `cfg_profile`) {
-            const offset = cgf_keyopt === `cfg_keygen` ? 1 : 0;
+            const offset = cgf_key_opt === `nostr_keygen` ? 1 : 0;
             carousel_index.set(page_carousel[new_view].max_index - offset);
         } else {
             carousel_index.set(0);
@@ -157,14 +131,15 @@
             return void (await reset(
                 `${$ls(`error.init.configuration_failure`)}`,
             ));
-        await kv.save(`#key_nostrp`, keys_nostr_create.public_key);
+        await datastore.set(`init_nostr`, keys_nostr_create.public_key);
     };
 
     const key_add = async (secret_key: string): Promise<void> => {
         const keys_nostr_add = await keys.nostr_add(secret_key);
+        console.log(`keys_nostr_add `, keys_nostr_add);
         if (`err` in keys_nostr_add)
             return void (await gui.alert(`${$ls(`common.invalid_key`)}`));
-        await kv.save(`#key_nostrp`, keys_nostr_add.public_key);
+        await datastore.set(`init_nostr`, keys_nostr_add.public_key);
     };
 
     const configure_device = async (
@@ -174,6 +149,7 @@
         const nostr_profile_add = await db.nostr_profile_create({
             public_key,
             name: profile_name ? profile_name : undefined,
+            display_name: profile_name ? profile_name : undefined,
         });
         if (`err` in nostr_profile_add || `err_s` in nostr_profile_add)
             return void (await gui.alert(
@@ -200,9 +176,18 @@
         return { pass: true };
     };
 
+    const confirm_profile_add_without_name = async (): Promise<boolean> => {
+        const confirm = await gui.confirm({
+            message: `${$ls(`notification.init.no_profile_option`)}`,
+            cancel: `${$ls(`icu.add_*`, { value: `${$ls(`common.profile`)}` })}`,
+            ok: `${$ls(`common.continue`)}`,
+        });
+        return confirm;
+    };
+
     const handle_choose_key_gen_or_add = async (): Promise<void> => {
         try {
-            if (cgf_keyopt === `cfg_keyadd`)
+            if (cgf_key_opt === `nostr_keyadd`)
                 return void (await carousel_inc(view));
             await key_gen();
             handle_view(`cfg_profile`);
@@ -211,83 +196,106 @@
         }
     };
 
-    const handle_submit_key_add = async (): Promise<void> => {
+    const handle_key_add_existing = async (): Promise<void> => {
         try {
-            const nostrkey_add = await kv.read(`nostr:key:add`);
-            if (!nostrkey_add)
+            if (!cfg_key_add_existing_val)
                 return void (await gui.alert(
-                    `${$ls(`icu.enter_a_valid_*`, { value: `${$ls(`common.key`)}` })}`,
+                    `${$ls(`icu.enter_a_*`, { value: `${$ls(`common.nostr_key`)}`.toLowerCase() })}`,
                 ));
-            const key_nostr_read = await keys.nostr_read(nostrkey_add);
-            if (`err` in key_nostr_read)
-                return void (await reset(
-                    `${$ls(`error.init.configuration_failure`)}`,
+            const key_add_signer = new NDKPrivateKeySigner(
+                cfg_key_add_existing_val,
+            );
+            const key_add_user = await key_add_signer.user();
+            const key_add_hex_secret_key = key_add_signer.privateKey;
+            const key_add_hex_public_key = key_add_user.pubkey;
+            const key_nostr_read = await keys.nostr_read(
+                cfg_key_add_existing_val,
+            );
+            if (
+                (`err` in key_nostr_read &&
+                    key_nostr_read.err !== `error.keystore.key_not_found`) ||
+                !key_add_hex_secret_key ||
+                !key_add_hex_public_key
+            )
+                return void (await gui.alert(
+                    `${$ls(`icu.enter_a_valid_*`, { value: `${$ls(`common.nostr_key`)}`.toLowerCase() })}`,
                 ));
-            await key_add(key_nostr_read.secret_key);
-            kv.del(`nostr:key:add`);
+            await key_add(key_add_hex_secret_key);
+            cfg_key_add_existing_val = ``;
             return void handle_view(`cfg_profile`);
         } catch (e) {
-            await handle_err(e, `handle_submit_key_add`);
+            await handle_err(e, `handle_key_add_existing`);
+            return void (await gui.alert(
+                `${$ls(`icu.not_a_valid_*`, { value: `${$ls(`common.nostr_key`)}`.toLowerCase() })}`,
+            ));
         }
     };
 
     const handle_profile_add = async (): Promise<void> => {
         try {
-            if (cfg_profile_profilename_loading) return;
-            const kv_keynostrp = await kv.read(`#key_nostrp`);
-            if (!kv_keynostrp)
+            if (cfg_profile_name_loading) return;
+            const ds_nostr_key_init = await datastore.get(`init_nostr`);
+            if (`err` in ds_nostr_key_init)
                 return void (await reset(
                     `${$ls(`error.init.configuration_failure`)}`,
                 )); //@todo
-            const key_nostr_read = await keys.nostr_read(kv_keynostrp);
+            const key_nostr_read = await keys.nostr_read(
+                ds_nostr_key_init.result,
+            );
             if (`err` in key_nostr_read)
                 return void (await reset(
                     `${$ls(`error.init.configuration_failure`)}`,
                 )); //@todo
-            const kv_profilename = await kv.read(`nostr:profile`);
-            if (!kv_profilename)
-                return void (await gui.alert(
-                    `${$ls(`icu.enter_a_*`, { value: `${$ls(`common.profile_name`)}`.toLowerCase() })}`,
-                ));
-            cfg_profile_profilename_loading = true;
-            const profile_req = await radroots.fetch_profile_request({
-                profile_name: kv_profilename,
-                secret_key: key_nostr_read.secret_key,
-            });
-            if (`err` in profile_req)
-                return void (await gui.alert(
-                    `${$ls(profile_req.err, { default: `${$ls(`error.client.http.request_failure`)}` })}`,
-                ));
-            const confirm = await gui.confirm({
-                message: `${`${$ls(`icu.the_*_is_available`, { value: `${$ls(`common.profile_name`).toLowerCase()} "${kv_profilename}"` })}`}. ${`${$ls(`common.would_you_like_to_use_it_q`)}`}`,
-                cancel: `${$ls(`common.no`)}`,
-                ok: `${$ls(`common.yes`)}`,
-            });
-            if (!confirm) return;
-            const profile_create = await radroots.fetch_profile_create({
-                tok: profile_req.result,
-                secret_key: key_nostr_read.secret_key,
-            });
-            if (`err` in profile_create)
-                return void (await gui.alert(
-                    `${$ls(profile_create.err, { default: `${$ls(`error.client.http.request_failure`)}` })}`,
-                ));
-            await datastore.setp(
-                `radroots_profile`,
-                kv_keynostrp,
-                profile_create.result,
-            );
+            if (cfg_profile_nip05_opt) {
+                if (!cfg_profile_name_val)
+                    return void (await gui.alert(
+                        `${$ls(`icu.enter_a_*`, { value: `${$ls(`common.profile_name`)}`.toLowerCase() })}`,
+                    ));
+                cfg_profile_name_loading = true;
+                const profile_req = await radroots.fetch_profile_request({
+                    profile_name: cfg_profile_name_val,
+                    secret_key: key_nostr_read.secret_key,
+                });
+                if (`err` in profile_req)
+                    return void (await gui.alert(
+                        `${$ls(profile_req.err, { default: `${$ls(`error.client.http.request_failure`)}` })}`,
+                    ));
+                const confirm = await gui.confirm({
+                    message: `${`${$ls(`icu.the_*_is_available`, { value: `${$ls(`common.profile_name`).toLowerCase()} "${cfg_profile_name_val}"` })}`}. ${`${$ls(`common.would_you_like_to_use_it_q`)}`}`,
+                    cancel: `${$ls(`common.no`)}`,
+                    ok: `${$ls(`common.yes`)}`,
+                });
+                if (!confirm) return;
+                const profile_create = await radroots.fetch_profile_create({
+                    tok: profile_req.result,
+                    secret_key: key_nostr_read.secret_key,
+                });
+                if (`err` in profile_create)
+                    return void (await gui.alert(
+                        `${$ls(profile_create.err, { default: `${$ls(`error.client.http.request_failure`)}` })}`,
+                    ));
+                await datastore.setp(
+                    `radroots_profile`,
+                    ds_nostr_key_init.result,
+                    profile_create.result,
+                );
+            } else if (!cfg_profile_name_val) {
+                const confirm = await confirm_profile_add_without_name();
+                if (!confirm)
+                    return void el_id(fmt_id(`nostr:profile`))?.focus();
+            }
             await carousel_inc(view);
         } catch (e) {
             await handle_err(e, `handle_profile_add`);
         } finally {
-            cfg_profile_profilename_loading = false;
+            cfg_profile_name_loading = false;
         }
     };
 
     const handle_set_role = async (): Promise<void> => {
         if (!cfg_role) cfg_role = `personal`;
         await datastore.set(`role`, cfg_role);
+        await datastore.set(`is_setup`, new Date().toISOString());
         handle_view(`eula`);
     };
 
@@ -300,7 +308,7 @@
                     case 1:
                         return await handle_choose_key_gen_or_add();
                     case 2:
-                        return await handle_submit_key_add();
+                        return await handle_key_add_existing();
                 }
             case `cfg_profile`:
                 switch ($carousel_index) {
@@ -317,16 +325,28 @@
             case `cfg_key`:
                 switch ($carousel_index) {
                     case 1: {
-                        cgf_keyopt = undefined;
+                        cgf_key_opt = undefined;
                         return await carousel_dec(view);
                     }
-                    case 2:
+                    case 2: {
+                        cfg_key_add_existing_val = ``;
                         return await carousel_dec(view);
+                    }
                 }
             case `cfg_profile`:
                 switch ($carousel_index) {
-                    case 0:
+                    case 0: {
+                        if (cfg_profile_name_skip) {
+                            const confirm =
+                                await confirm_profile_add_without_name();
+                            if (!confirm)
+                                return void el_id(
+                                    fmt_id(`nostr:profile`),
+                                )?.focus();
+                            return void carousel_inc(view);
+                        }
                         return handle_view(`cfg_key`);
+                    }
                     case 1:
                         return carousel_dec(view);
                 }
@@ -336,19 +356,21 @@
     const submit = async (): Promise<void> => {
         try {
             loading_submit = true;
-            const kv_keynostrp = await kv.read(`#key_nostrp`);
-            if (!kv_keynostrp)
+            const ds_nostr_key_init = await datastore.get(`init_nostr`);
+            if (`err` in ds_nostr_key_init)
                 return void (await reset(
                     `${$ls(`error.init.configuration_failure`)}`,
                 )); //@todo
-            const key_nostr_read = await keys.nostr_read(kv_keynostrp);
+            const key_nostr_read = await keys.nostr_read(
+                ds_nostr_key_init.result,
+            );
             if (`err` in key_nostr_read)
                 return void (await reset(
                     `${$ls(`error.init.configuration_failure`)}`,
                 )); //@todo
             const radroots_profile = await datastore.getp(
                 `radroots_profile`,
-                kv_keynostrp,
+                ds_nostr_key_init.result,
             );
             if (`result` in radroots_profile) {
                 await radroots.fetch_profile_activate({
@@ -357,23 +379,15 @@
                 }); //@todo
             }
             const configuration_result = await configure_device(
-                kv_keynostrp,
-                await kv.read(`nostr:profile`),
+                ds_nostr_key_init.result,
+                cfg_profile_name_val,
             );
-            if (configuration_result && `pass` in configuration_result) {
-                const confirm = await gui.confirm({
-                    message: `${$ls(`notification.init.on_complete`)}`,
-                    ok: `${$ls(`common.continue`)}`,
-                    cancel: str_capitalize_words(
-                        `${$ls(`common.hide_alerts`)}`,
-                    ),
-                });
-                if (confirm) {
-                    await gui.notify_init();
-                    app_notify.set(`${$ls(`notification.init.on_first_load`)}`);
-                }
-                await route(`/`);
-            }
+            if (!configuration_result)
+                return void (await reset(
+                    `${$ls(`error.init.configuration_failure`)}`,
+                )); //@todo
+            route(`/`);
+            await gui.notify_init();
         } catch (e) {
             await handle_err(e, `submit`);
         } finally {
@@ -386,24 +400,6 @@
     data-view={`cfg_key`}
     class={`flex flex-col h-full w-full justify-start items-center`}
 >
-    <div
-        class={`z-10 absolute max-m_0:bottom-0 bottom-10 left-0 flex flex-col w-full justify-center items-center`}
-    >
-        <ButtonLayoutPair
-            basis={{
-                continue: {
-                    label: `${$ls(`common.continue`)}`,
-                    disabled: $carousel_index === 1 && !cgf_keyopt,
-                    callback: async () => await handle_continue(),
-                },
-                back: {
-                    label: `${$ls(`common.back`)}`,
-                    visible: $carousel_index > 0,
-                    callback: async () => await handle_back(),
-                },
-            }}
-        />
-    </div>
     <div
         data-carousel-container={`cfg_key`}
         class={`carousel-container flex h-full w-full`}
@@ -470,7 +466,7 @@
             role="button"
             tabindex="0"
             onclick={async () => {
-                cgf_keyopt = undefined;
+                cgf_key_opt = undefined;
             }}
             onkeydown={null}
         >
@@ -488,10 +484,10 @@
                     class={`flex flex-col w-full gap-6 justify-center items-center`}
                 >
                     <button
-                        class={`flex flex-col h-bold_button w-lo_${$app_lo} justify-center items-center rounded-touch ${cgf_keyopt === `cfg_keygen` ? `layer-1-surface-apply-active layer-1-raise-apply layer-1-ring-apply` : `bg-layer-1-surface`} el-re`}
+                        class={`flex flex-col h-bold_button w-lo_${$app_lo} justify-center items-center rounded-touch ${cgf_key_opt === `nostr_keygen` ? `layer-1-surface-apply-active layer-1-raise-apply layer-1-ring-apply` : `bg-layer-1-surface`} el-re`}
                         onclick={async (ev) => {
                             ev.stopPropagation();
-                            cgf_keyopt = `cfg_keygen`;
+                            cgf_key_opt = `nostr_keygen`;
                         }}
                     >
                         <p
@@ -501,10 +497,10 @@
                         </p>
                     </button>
                     <button
-                        class={`flex flex-col h-bold_button w-lo_${$app_lo} justify-center items-center rounded-touch ${cgf_keyopt === `cfg_keyadd` ? `layer-1-surface-apply-active layer-1-raise-apply layer-1-ring-apply` : `bg-layer-1-surface`} el-re`}
+                        class={`flex flex-col h-bold_button w-lo_${$app_lo} justify-center items-center rounded-touch ${cgf_key_opt === `nostr_keyadd` ? `layer-1-surface-apply-active layer-1-raise-apply layer-1-ring-apply` : `bg-layer-1-surface`} el-re`}
                         onclick={async (ev) => {
                             ev.stopPropagation();
-                            cgf_keyopt = `cfg_keyadd`;
+                            cgf_key_opt = `nostr_keyadd`;
                         }}
                     >
                         <p
@@ -528,48 +524,52 @@
                 <div
                     class={`flex flex-col w-full gap-6 justify-center items-center`}
                 >
-                    {#if cfg_profile_nostr_publickey}
-                        <p
-                            class={`font-sans font-[600] text-layer-0-glyph text-3xl`}
-                        >
-                            {`${$ls(`common.using_public_key`)}`}
-                        </p>
-                        <LabelDisplay
-                            basis={{
+                    <p
+                        class={`font-sans font-[600] text-layer-0-glyph text-3xl capitalize`}
+                    >
+                        {`${$ls(`icu.add_existing_*`, { value: `${$ls(`common.key`)}`.toLowerCase() })}`}
+                    </p>
+                    <EntryLine
+                        bind:value={cfg_key_add_existing_val}
+                        basis={{
+                            wrap: {
+                                layer: 1,
                                 classes: `w-lo_${$app_lo}`,
-                                label: {
-                                    classes: `pl-4 font-mono text-lg text-start truncate`,
-                                    value:
-                                        cfg_profile_nostr_publickey_npub ||
-                                        cfg_profile_nostr_publickey,
-                                },
                                 style: `guide`,
-                            }}
-                        />
-                    {:else}
-                        <p
-                            class={`font-sans font-[600] text-layer-0-glyph text-3xl capitalize`}
-                        >
-                            {`${$ls(`icu.add_existing_*`, { value: `${$ls(`common.key`)}`.toLowerCase() })}`}
-                        </p>
-                        <Input
-                            basis={{
-                                classes: `h-entry_guide w-lo_${$app_lo} bg-layer-1-surface layer-1-focus-surface rounded-touch font-mono text-lg placeholder:opacity-60 items-end text-center`,
-                                id: fmt_id(`nostr:key:add`),
-                                sync: true,
+                            },
+                            el: {
+                                classes: `font-sans text-[1.25rem] text-center placeholder:opacity-60`,
+                                layer: 1,
                                 placeholder: `${$ls(`icu.enter_*`, { value: `nostr nsec/hex` })}`,
-                                field: form_fields.profile_name,
                                 callback_keydown: async ({ key_s, el }) => {
                                     if (key_s) {
                                         el.blur();
                                         await handle_continue();
                                     }
                                 },
-                            }}
-                        />
-                    {/if}
+                            },
+                        }}
+                    />
                 </div>
             </div>
+        </div>
+        <div
+            class={`z-10 absolute max-m_0:bottom-0 bottom-10 left-0 flex flex-col w-full justify-center items-center`}
+        >
+            <ButtonLayoutPair
+                basis={{
+                    continue: {
+                        label: `${$ls(`common.continue`)}`,
+                        disabled: $carousel_index === 1 && !cgf_key_opt,
+                        callback: async () => await handle_continue(),
+                    },
+                    back: {
+                        label: `${$ls(`common.back`)}`,
+                        visible: $carousel_index > 0,
+                        callback: async () => await handle_back(),
+                    },
+                }}
+            />
         </div>
     </div>
 </div>
@@ -591,33 +591,63 @@
                 <p class={`font-sans font-[600] text-layer-0-glyph text-3xl`}>
                     {`${$ls(`icu.add_*`, { value: `${$ls(`common.profile`)}` })}`}
                 </p>
-                <EntryLineIdb
-                    basis={{
-                        loading: cfg_profile_profilename_loading,
-                        wrap: {
-                            layer: 1,
-                            classes: `w-lo_${$app_lo}`,
-                            style: `guide`,
-                        },
-                        el: {
-                            classes: `font-sans text-[1.25rem] text-center placeholder:opacity-60`,
-                            id: fmt_id(`nostr:profile`),
-                            sync: true,
-                            layer: 1,
-                            placeholder: `${$ls(`icu.enter_*`, { value: `${$ls(`common.profile_name`)}`.toLowerCase() })}`,
-                            field: form_fields.profile_name,
-                            callback: async ({ pass }) => {
-                                cfg_profile_profilename_valid = pass;
+                <div
+                    class={`flex flex-col w-full gap-4 justify-center items-center`}
+                >
+                    <EntryLine
+                        bind:value={cfg_profile_name_val}
+                        basis={{
+                            loading: cfg_profile_name_loading,
+                            wrap: {
+                                layer: 1,
+                                classes: `w-lo_${$app_lo}`,
+                                style: `guide`,
                             },
-                            callback_keydown: async ({ key_s, el }) => {
-                                if (key_s) {
-                                    el.blur();
-                                    await handle_continue();
-                                }
+                            el: {
+                                classes: `font-sans text-[1.25rem] text-center placeholder:opacity-60`,
+                                id: fmt_id(`nostr:profile`),
+                                layer: 1,
+                                placeholder: `${$ls(`icu.enter_*`, { value: `${$ls(`common.profile_name`)}`.toLowerCase() })}`,
+                                field: form_fields.profile_name,
+                                callback: async ({ pass }) => {
+                                    cfg_profile_name_valid = pass;
+                                },
+                                callback_keydown: async ({ key_s, el }) => {
+                                    if (key_s) {
+                                        el.blur();
+                                        await handle_continue();
+                                    }
+                                },
                             },
-                        },
-                    }}
-                />
+                        }}
+                    />
+                    <div
+                        class={`flex flex-row w-full gap-2 justify-center items-center`}
+                    >
+                        <input
+                            type="checkbox"
+                            bind:checked={cfg_profile_nip05_opt}
+                        />
+                        <button
+                            class={`flex flex-row justify-center items-center`}
+                            onclick={async () => {
+                                cfg_profile_nip05_opt = !cfg_profile_nip05_opt;
+                            }}
+                        >
+                            <p
+                                class={`font-sans font-[500] text-layer-0-glyph text-[14px] tracking-wide`}
+                            >
+                                {`${$ls(`common.create`)}`}
+                                <span
+                                    class={`font-mono font-[600] tracking-tight px-[2px]`}
+                                >
+                                    {`@radroots`}
+                                </span>
+                                {`${$ls(`common.nip05_address`)}`}
+                            </p>
+                        </button>
+                    </div>
+                </div>
             </div>
         </div>
         <div
@@ -673,7 +703,6 @@
             </div>
         </div>
     </div>
-
     <div
         class={`absolute max-m_0:bottom-0 bottom-10 left-0 flex flex-col w-full justify-center items-center`}
     >
@@ -682,32 +711,17 @@
                 continue: {
                     label: `${$ls(`common.continue`)}`,
                     disabled:
-                        ($carousel_index === 0 &&
-                            !cfg_profile_profilename_valid) ||
-                        ($carousel_index === 1 && !cfg_role),
+                        //  ($carousel_index === 0 &&
+                        //    !cfg_profile_name_valid) ||
+                        $carousel_index === 1 && !cfg_role,
                     callback: async () => await handle_continue(),
                 },
                 back: {
                     visible: true,
-                    label:
-                        $carousel_index === 0
-                            ? `${$ls(`common.skip`)}`
-                            : `${$ls(`common.back`)}`,
-                    callback: async () => {
-                        if ($carousel_index === 0) {
-                            const confirm = await gui.confirm({
-                                message: `${$ls(`notification.init.no_profile_option`)}`,
-                                cancel: `${$ls(`icu.add_*`, { value: `${$ls(`common.profile`)}` })}`,
-                                ok: `${$ls(`common.continue`)}`,
-                            });
-                            if (confirm === false)
-                                return void el_id(
-                                    fmt_id(`nostr:profile`),
-                                )?.focus();
-                            return void carousel_inc(view);
-                        }
-                        await handle_back();
-                    },
+                    label: cfg_profile_name_skip
+                        ? `${$ls(`common.skip`)}`
+                        : `${$ls(`common.back`)}`,
+                    callback: handle_back,
                 },
             }}
         />

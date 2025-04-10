@@ -76,7 +76,7 @@
                         },
                     });
                     if (`err` in nostr_profile_update)
-                        throw_err(nostr_profile_update.err);
+                        throw_err(nostr_profile_update);
                     const tb_nostr_profile = await db.nostr_profile_read({
                         public_key,
                     });
@@ -84,9 +84,8 @@
                         JSON.stringify(tb_nostr_profile, null, 4),
                         `tb_nostr_profile`,
                     );
-                    if (`err` in tb_nostr_profile)
-                        throw_err(tb_nostr_profile.err);
-                    nostr_sync_metadata(); // no await
+                    if (`err` in tb_nostr_profile) throw_err(tb_nostr_profile);
+                    nostr_sync_metadata(); // leave off await
                     await route(`/profile`);
                 } catch (e) {
                     await handle_err(e, `lc_handle_back`);

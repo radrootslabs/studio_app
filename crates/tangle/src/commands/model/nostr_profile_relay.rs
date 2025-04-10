@@ -1,4 +1,4 @@
-use crate::radroots::Radroots;
+use crate::app::Tangle;
 use radroots_core::types::IError;
 use radroots_model::tables::nostr_profile_relay::{
     lib_model_nostr_profile_relay_set, lib_model_nostr_profile_relay_unset,
@@ -7,7 +7,7 @@ use radroots_model::tables::nostr_profile_relay::{
 
 #[tauri::command(rename_all = "snake_case")]
 pub async fn model_nostr_profile_relay_set(
-    state: tauri::State<'_, Radroots>,
+    state: tauri::State<'_, Tangle>,
     args: INostrProfileRelayRelation,
 ) -> Result<INostrProfileRelayResolve, IError> {
     match lib_model_nostr_profile_relay_set(&state.db, args).await {
@@ -18,7 +18,7 @@ pub async fn model_nostr_profile_relay_set(
 
 #[tauri::command(rename_all = "snake_case")]
 pub async fn model_nostr_profile_relay_unset(
-    state: tauri::State<'_, Radroots>,
+    state: tauri::State<'_, Tangle>,
     args: INostrProfileRelayRelation,
 ) -> Result<INostrProfileRelayResolve, IError> {
     match lib_model_nostr_profile_relay_unset(&state.db, args).await {

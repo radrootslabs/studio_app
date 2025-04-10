@@ -1,18 +1,18 @@
 {
     "$schema": "../../node_modules/@tauri-apps/cli/config.schema.json",
-    "identifier": "mobile.radroots.app",
-    "productName": "radroots",
-    "mainBinaryName": "radroots",
+    "identifier": "tangle.radroots.app",
+    "productName": "Tangle",
+    "mainBinaryName": "tangle",
     "build": {
         "frontendDist": "../../app/build",
-        "devUrl": "http://localhost:21640",
+        "devUrl": "http://localhost:3000",
         "beforeDevCommand": "cd app && pnpm run dev:hmr",
         "beforeBuildCommand": "cd app && pnpm run build"
     },
     "app": {
         "windows": [
             {
-                "title": "radroots",
+                "title": "tangle | rad roots",
                 "resizable": false,
                 "fullscreen": true,
                 "visible": true

@@ -4,13 +4,13 @@ use radroots_model::types::DatabaseConnection;
 
 use crate::util;
 
-pub struct Radroots {
+pub struct Tangle {
     pub db: DatabaseConnection,
     pub data_dir: PathBuf,
     pub logs_dir: PathBuf,
 }
 
-impl Radroots {
+impl Tangle {
     pub async fn new(data_dir: PathBuf, logs_dir: PathBuf) -> Self {
         util::init_keyring(&data_dir).await;
         let db = util::init_db(&data_dir).await;

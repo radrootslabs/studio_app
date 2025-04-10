@@ -19,18 +19,18 @@ pub enum KeystoreError {
     Utf8Error(#[from] std::string::FromUtf8Error),
     #[error("Key error: {0}")]
     KeyError(#[from] nostr_sdk::key::Error),
-    #[error("Key not found")]
+    #[error("error.keystore.key_not_found")]
     KeyNotFound,
 }
 
 pub type KeystoreResult<T> = std::result::Result<T, KeystoreError>;
 
 fn get_keystore_path(data_dir: &std::path::Path) -> std::path::PathBuf {
-    data_dir.join("radroots.json")
+    data_dir.join("keystore.json")
 }
 
 fn get_keystore_key(data_dir: &std::path::Path) -> Vec<u8> {
-    let keystore_file = data_dir.join("radroots_keystore");
+    let keystore_file = data_dir.join("keystore.key");
     let keystore_key = if keystore_file.exists() {
         std::fs::read_to_string(&keystore_file)
             .map_err(KeystoreError::FileError)

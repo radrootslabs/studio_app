@@ -332,6 +332,9 @@ importers:
       '@nostr-dev-kit/ndk':
         specifier: ^2.11.0
         version: 2.11.0(typescript@5.7.3)
+      '@radroots/util':
+        specifier: workspace:*
+        version: link:../util
       nostr-geotags:
         specifier: workspace:*
         version: link:../nostr-geotags

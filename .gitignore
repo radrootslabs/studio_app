@@ -45,9 +45,9 @@ justfile
 setup.py
 
 target
-/crates/tauri/gen
-/crates/tauri/tauri*.conf.json
-/crates/tauri/conf
-/crates/tauri/Entitlements*.plist
-!/crates/tauri/tauri.conf.json
+/crates/tangle/gen
+/crates/tangle/tauri*.conf.json
+/crates/tangle/conf
+/crates/tangle/Entitlements*.plist
+!/crates/tangle/tauri.conf.json
 app*.png

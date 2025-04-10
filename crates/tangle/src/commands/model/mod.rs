@@ -1,4 +1,4 @@
-use crate::radroots::Radroots;
+use crate::app::Tangle;
 use radroots_core::types::{IError, IResultPass};
 use radroots_model::tables::lib_model_tables_reset;
 
@@ -13,7 +13,7 @@ pub(crate) mod trade_product_location;
 pub(crate) mod trade_product_media;
     
 #[tauri::command(rename_all = "snake_case")]
-pub async fn model_tables_reset(state: tauri::State<'_, Radroots>) -> Result<IResultPass, IError> {
+pub async fn model_tables_reset(state: tauri::State<'_, Tangle>) -> Result<IResultPass, IError> {
     match lib_model_tables_reset(&state.db).await {
         Ok(result) => Ok(result),
         Err(e) => Err(IError { err: e.to_string() }),

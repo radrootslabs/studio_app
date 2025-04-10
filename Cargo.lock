@@ -3825,27 +3825,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "radroots"
-version = "0.0.1"
-dependencies = [
- "radroots_core",
- "radroots_model",
- "serde",
- "serde_json",
- "sqlx",
- "tauri",
- "tauri-build",
- "tauri-plugin-dialog",
- "tauri-plugin-fs",
- "tauri-plugin-geolocation",
- "tauri-plugin-http",
- "tauri-plugin-notification",
- "tauri-plugin-os",
- "tauri-plugin-shell",
- "tauri-plugin-store",
-]
-
-[[package]]
 name = "radroots_core"
 version = "0.0.1"
 dependencies = [
@@ -5009,6 +4988,27 @@ dependencies = [
  "pkg-config",
  "toml 0.8.19",
  "version-compare",
+]
+
+[[package]]
+name = "tangle"
+version = "0.0.1"
+dependencies = [
+ "radroots_core",
+ "radroots_model",
+ "serde",
+ "serde_json",
+ "sqlx",
+ "tauri",
+ "tauri-build",
+ "tauri-plugin-dialog",
+ "tauri-plugin-fs",
+ "tauri-plugin-geolocation",
+ "tauri-plugin-http",
+ "tauri-plugin-notification",
+ "tauri-plugin-os",
+ "tauri-plugin-shell",
+ "tauri-plugin-store",
 ]
 
 [[package]]

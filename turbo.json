@@ -4,7 +4,9 @@
   "globalEnv": [],
   "tasks": {
     "build": {
-      "env": [],
+      "env": [
+        "RADROOTS_APP_PORT"
+      ],
       "dependsOn": [
         "^build"
       ],

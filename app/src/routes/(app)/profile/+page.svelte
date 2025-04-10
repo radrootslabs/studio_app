@@ -45,13 +45,12 @@
             data,
             loading_photo_upload,
             loading_photo_upload_open,
-            lc_on_destroy: async ({ public_key }) => {
+            lc_on_destroy: async () => {
                 try {
                     const tb_nostrprofile = await db.nostr_profile_read({
-                        public_key,
+                        public_key: $ndk_user?.pubkey,
                     });
-                    if (`err` in tb_nostrprofile)
-                        throw_err(tb_nostrprofile.err); //@todo
+                    if (`err` in tb_nostrprofile) throw_err(tb_nostrprofile); //@todo
                     await nostr_sync_metadata();
                 } catch (e) {
                     await handle_err(e, `lc_on_destroy`);
@@ -63,8 +62,7 @@
                     if (!photo_path || !public_key)
                         return void (await route(`/`));
                     const keys_nostr_read = await keys.nostr_read(public_key);
-                    if (`err` in keys_nostr_read)
-                        throw_err(keys_nostr_read.err);
+                    if (`err` in keys_nostr_read) throw_err(keys_nostr_read);
                     if (photo_path) {
                         const confirm = await gui.confirm({
                             message: is_photo_existing
@@ -100,7 +98,7 @@
                             secret_key: keys_nostr_read.secret_key,
                         });
                     if (`err` in res_fetch_media_image_upload)
-                        throw_err(res_fetch_media_image_upload.err);
+                        throw_err(res_fetch_media_image_upload);
                     const {
                         res_base: upload_res_base,
                         res_path: upload_res_path,
@@ -112,7 +110,7 @@
                         mime_type: upload_file_path.mime_type,
                     });
                     if (`err` in tb_media_image_create)
-                        throw_err(tb_media_image_create.err);
+                        throw_err(tb_media_image_create);
                     const tb_nostr_profile_update =
                         await db.nostr_profile_update({
                             filter: { public_key },
@@ -121,7 +119,7 @@
                             },
                         });
                     if (`err` in tb_nostr_profile_update)
-                        throw_err(tb_nostr_profile_update.err);
+                        throw_err(tb_nostr_profile_update);
                     await route(`/`);
                 } catch (e) {
                     await handle_err(e, `lc_handle_back`);
