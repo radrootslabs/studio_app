@@ -59,9 +59,7 @@
     let cfg_profile_name_loading = $state(false);
 
     const cfg_profile_name_skip = $derived(
-        view.toString() === `cfg_profile` &&
-            $carousel_index === 0 &&
-            !cfg_profile_nip05_opt,
+        view.toString() === `cfg_profile` && $carousel_index === 0,
     );
 
     onMount(async () => {
@@ -586,7 +584,7 @@
             class={`carousel-item flex flex-col h-full w-full justify-center items-center`}
         >
             <div
-                class={`flex flex-col h-[16rem] w-full px-4 gap-10 justify-start items-center`}
+                class={`flex flex-col h-[16rem] w-full px-4 gap-6 justify-start items-center`}
             >
                 <p class={`font-sans font-[600] text-layer-0-glyph text-3xl`}>
                     {`${$ls(`icu.add_*`, { value: `${$ls(`common.profile`)}` })}`}
@@ -635,11 +633,11 @@
                             }}
                         >
                             <p
-                                class={`font-sans font-[500] text-layer-0-glyph text-[14px] tracking-wide`}
+                                class={`font-sans font-[400] text-layer-0-glyph text-[14px] tracking-wide`}
                             >
                                 {`${$ls(`common.create`)}`}
                                 <span
-                                    class={`font-mono font-[600] tracking-tight px-[2px]`}
+                                    class={`font-mono font-[600] tracking-tight px-[3px]`}
                                 >
                                     {`@radroots`}
                                 </span>
@@ -711,9 +709,10 @@
                 continue: {
                     label: `${$ls(`common.continue`)}`,
                     disabled:
-                        //  ($carousel_index === 0 &&
-                        //    !cfg_profile_name_valid) ||
-                        $carousel_index === 1 && !cfg_role,
+                        (cfg_profile_name_skip &&
+                            cfg_profile_nip05_opt &&
+                            !cfg_profile_name_valid) ||
+                        ($carousel_index === 1 && !cfg_role),
                     callback: async () => await handle_continue(),
                 },
                 back: {

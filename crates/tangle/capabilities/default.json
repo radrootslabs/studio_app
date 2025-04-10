@@ -13,10 +13,10 @@
       "identifier": "http:default",
       "allow": [
         {
-          "url": "https://radroots.market"
+          "url": "https://*"
         },
         {
-          "url": "https://*.radroots.market"
+          "url": "http://*"
         },
         {
           "url": "http://127.0.0.1:*"

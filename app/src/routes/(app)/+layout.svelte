@@ -8,6 +8,7 @@
         ndk,
         ndk_user,
         nostr_ndk_configured,
+        nostr_poll_relays_retry_handler,
         nostr_sync_retry_handler,
     } from "@radroots/lib-app";
     import { ndk_init } from "@radroots/nostr-util";
@@ -15,7 +16,8 @@
 
     import { _cfg } from "$lib/config";
     import { cfg_role, cfg_setup } from "$lib/store";
-    import { nostr_sync_metadata } from "$lib/util/nostr/sync";
+    import { nostr_poll_relays } from "$lib/util/nostr/poll";
+    import { nostr_sync } from "$lib/util/nostr/sync";
     import { onMount } from "svelte";
     import type { LayoutProps } from "./$types";
 
@@ -74,27 +76,30 @@
             $ndk,
             secret_key: keys_nostr_read.secret_key,
         });
-        nostr_ndk_configured.set(!!ndk_user_init);
         if (!ndk_user_init) throw_err(`error.nostr.ndk_user_undefined`);
         $ndk_user = ndk_user_init;
         $ndk_user.ndk = $ndk;
-        await nostr_sync_retry_handler(nostr_sync_metadata);
+        nostr_ndk_configured.set(true);
     };
 
-    app_notify.subscribe(async (_app_notify) => {
-        console.log(`_app_notify `, _app_notify);
-        if (!_app_notify) return;
-        await gui.notify_send($app_notify);
+    nostr_ndk_configured.subscribe(async (_sub) => {
+        if (!_sub) return;
+        await nostr_sync_retry_handler(nostr_sync);
+        await nostr_poll_relays_retry_handler(nostr_poll_relays);
+    });
+
+    app_notify.subscribe(async (_sub) => {
+        if (!_sub) return;
+        await gui.notify_send(_sub);
         app_notify.set(``);
     });
 
-    cfg_role.subscribe(async (_cfg_role) => {
-        if (!_cfg_role) return;
+    cfg_role.subscribe(async (_sub) => {
+        if (!_sub) return;
     });
 
-    cfg_setup.subscribe(async (_cfg_setup) => {
-        console.log(`_cfg_setup `, _cfg_setup);
-        if (!_cfg_setup) return;
+    cfg_setup.subscribe(async (_sub) => {
+        if (!_sub) return;
     });
 </script>
 

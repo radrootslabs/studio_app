@@ -6,9 +6,11 @@ import { err } from "../err";
 
 export const nostr_sync = async (): Promise<void> => {
     try {
+        console.log(`[nostr_sync] start`);
         const $ls = get_store(ls);
         const $ndk_user = get_store(ndk_user);
-        if (!$ndk_user.pubkey) return void await gui.alert(
+        const public_key = $ndk_user.pubkey;
+        if (!public_key) return void await gui.alert(
             `${$ls(`error.client.nostr_sync_failure`)}`
         );
         const $nostr_sync_prevent = get_store(nostr_sync_prevent);
@@ -22,13 +24,13 @@ export const nostr_sync = async (): Promise<void> => {
             }
             return;
         }
-        console.log(`[nostr_sync] start`);
         const nostr_relays = await db.nostr_relay_read_list({
-            table: [`on_profile`, { public_key: $ndk_user.pubkey }]
+            table: [`on_profile`, { public_key }]
         }); //@todo
-
+        console.log(JSON.stringify(nostr_relays, null, 4), `nostr_relays`)
         if (`err` in nostr_relays) return throw_err(nostr_relays);
         if (!nostr_relays.results.length) return throw_err(err.nostr.no_relays);
+
         await nostr_sync_metadata();
         console.log(`[nostr_sync] done`);
     } catch (e) {
