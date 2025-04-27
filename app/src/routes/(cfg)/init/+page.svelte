@@ -65,6 +65,7 @@
     onMount(async () => {
         try {
             await init();
+            view = `eula`;
         } catch (e) {
             handle_err(e, `on_mount`);
         }
@@ -552,7 +553,7 @@
             </div>
         </div>
         <div
-            class={`z-10 absolute max-m_0:bottom-0 bottom-10 left-0 flex flex-col w-full justify-center items-center`}
+            class={`z-10 absolute max-ios0:bottom-0 bottom-10 left-0 flex flex-col w-full justify-center items-center`}
         >
             <ButtonLayoutPair
                 basis={{
@@ -637,7 +638,7 @@
                             >
                                 {`${$ls(`common.create`)}`}
                                 <span
-                                    class={`font-mono font-[600] tracking-tight px-[3px]`}
+                                    class={`font-mono font-[500] tracking-tight px-[3px]`}
                                 >
                                     {`@radroots`}
                                 </span>
@@ -702,7 +703,7 @@
         </div>
     </div>
     <div
-        class={`absolute max-m_0:bottom-0 bottom-10 left-0 flex flex-col w-full justify-center items-center`}
+        class={`absolute max-ios0:bottom-0 bottom-10 left-0 flex flex-col w-full justify-center items-center`}
     >
         <ButtonLayoutPair
             basis={{
@@ -728,7 +729,7 @@
 </div>
 <div
     data-view={`eula`}
-    class={`hidden flex flex-col h-full w-full max-m_0:pt-12 pt-24 justify-start items-center`}
+    class={`hidden flex flex-col h-full w-full max-ios0:pt-12 pt-24 justify-start items-center`}
 >
     <div
         data-carousel-container={`eula`}
@@ -736,10 +737,10 @@
     >
         <div
             data-carousel-item={`eula`}
-            class={`carousel-item flex flex-col w-full max-m_0:pt-16 justify-start items-center`}
+            class={`carousel-item flex flex-col h-full w-full max-ios0:pt-16 justify-start items-center`}
         >
             <div
-                class={`flex flex-col w-full px-4 pb-2 justify-start items-center ${view === `eula` ? `fade-in-long` : ``} overflow-hidden`}
+                class={`flex flex-col h-full w-full px-4 pb-2 justify-start items-center ${view === `eula` ? `fade-in-long` : ``} overflow-hidden`}
             >
                 <div
                     class={`flex flex-col w-full px-4 gap-4 justify-start items-center`}
@@ -755,7 +756,7 @@
                     </div>
                     <div
                         onscroll={on_scroll_eula}
-                        class={`flex flex-col h-[34rem] w-full gap-6 justify-start items-center overflow-y-scroll scroll-hide`}
+                        class={`flex flex-col max-ios0:h-[34rem] ios1:h-[38rem] w-full gap-6 justify-start items-center overflow-y-scroll scroll-hide`}
                     >
                         <div
                             class={`flex flex-col w-full gap-2 justify-start items-start`}

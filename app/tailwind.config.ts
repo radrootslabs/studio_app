@@ -11,9 +11,11 @@ const heights_responsive: Record<AppHeightsResponsiveIOS, string> = {
     nav_page_toolbar_ios0: `72px`,
     nav_page_toolbar_ios1: `120px`,
     nav_page_header_ios0: `62px`,
-    nav_page_header_ios1: `54px`,
+    nav_page_header_ios1: `62px`,
     lo_bottom_button_ios0: `90px`,
-    lo_bottom_button_ios1: `90px`,
+    lo_bottom_button_ios1: `112px`,
+    lo_view_main_ios0: `22rem`,
+    lo_view_main_ios1: `28rem`,
 };
 
 const heights: Record<string, string> = {

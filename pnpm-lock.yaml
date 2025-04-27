@@ -18,6 +18,168 @@ importers:
         specifier: ^5.7.3
         version: 5.7.3
 
+  ../lib/plugins-workspace/plugins/autostart:
+    dependencies:
+      '@tauri-apps/api':
+        specifier: ^2.0.0
+        version: 2.0.3
+
+  ../lib/plugins-workspace/plugins/barcode-scanner:
+    dependencies:
+      '@tauri-apps/api':
+        specifier: ^2.0.0
+        version: 2.0.3
+
+  ../lib/plugins-workspace/plugins/biometric:
+    dependencies:
+      '@tauri-apps/api':
+        specifier: ^2.0.0
+        version: 2.0.3
+
+  ../lib/plugins-workspace/plugins/cli:
+    dependencies:
+      '@tauri-apps/api':
+        specifier: ^2.0.0
+        version: 2.0.3
+
+  ../lib/plugins-workspace/plugins/clipboard-manager:
+    dependencies:
+      '@tauri-apps/api':
+        specifier: ^2.0.0
+        version: 2.0.3
+
+  ../lib/plugins-workspace/plugins/deep-link:
+    dependencies:
+      '@tauri-apps/api':
+        specifier: ^2.0.0
+        version: 2.0.3
+
+  ../lib/plugins-workspace/plugins/dialog:
+    dependencies:
+      '@tauri-apps/api':
+        specifier: ^2.0.0
+        version: 2.0.3
+
+  ../lib/plugins-workspace/plugins/fs:
+    dependencies:
+      '@tauri-apps/api':
+        specifier: ^2.0.0
+        version: 2.0.3
+
+  ../lib/plugins-workspace/plugins/geolocation:
+    dependencies:
+      '@tauri-apps/api':
+        specifier: ^2.0.0
+        version: 2.0.3
+
+  ../lib/plugins-workspace/plugins/global-shortcut:
+    dependencies:
+      '@tauri-apps/api':
+        specifier: ^2.0.0
+        version: 2.0.3
+
+  ../lib/plugins-workspace/plugins/haptics:
+    dependencies:
+      '@tauri-apps/api':
+        specifier: ^2.0.0
+        version: 2.0.3
+
+  ../lib/plugins-workspace/plugins/http:
+    dependencies:
+      '@tauri-apps/api':
+        specifier: ^2.0.0
+        version: 2.0.3
+
+  ../lib/plugins-workspace/plugins/log:
+    dependencies:
+      '@tauri-apps/api':
+        specifier: ^2.0.0
+        version: 2.0.3
+
+  ../lib/plugins-workspace/plugins/nfc:
+    dependencies:
+      '@tauri-apps/api':
+        specifier: ^2.0.0
+        version: 2.0.3
+
+  ../lib/plugins-workspace/plugins/notification:
+    dependencies:
+      '@tauri-apps/api':
+        specifier: ^2.0.0
+        version: 2.0.3
+
+  ../lib/plugins-workspace/plugins/opener:
+    dependencies:
+      '@tauri-apps/api':
+        specifier: ^2.0.0
+        version: 2.0.3
+
+  ../lib/plugins-workspace/plugins/os:
+    dependencies:
+      '@tauri-apps/api':
+        specifier: ^2.0.0
+        version: 2.0.3
+
+  ../lib/plugins-workspace/plugins/positioner:
+    dependencies:
+      '@tauri-apps/api':
+        specifier: ^2.0.0
+        version: 2.0.3
+
+  ../lib/plugins-workspace/plugins/process:
+    dependencies:
+      '@tauri-apps/api':
+        specifier: ^2.0.0
+        version: 2.0.3
+
+  ../lib/plugins-workspace/plugins/shell:
+    dependencies:
+      '@tauri-apps/api':
+        specifier: ^2.0.0
+        version: 2.0.3
+
+  ../lib/plugins-workspace/plugins/sql:
+    dependencies:
+      '@tauri-apps/api':
+        specifier: ^2.0.0
+        version: 2.0.3
+
+  ../lib/plugins-workspace/plugins/store:
+    dependencies:
+      '@tauri-apps/api':
+        specifier: ^2.0.0
+        version: 2.0.3
+
+  ../lib/plugins-workspace/plugins/stronghold:
+    dependencies:
+      '@tauri-apps/api':
+        specifier: ^2.0.0
+        version: 2.0.3
+
+  ../lib/plugins-workspace/plugins/updater:
+    dependencies:
+      '@tauri-apps/api':
+        specifier: ^2.0.0
+        version: 2.0.3
+
+  ../lib/plugins-workspace/plugins/upload:
+    dependencies:
+      '@tauri-apps/api':
+        specifier: ^2.0.0
+        version: 2.0.3
+
+  ../lib/plugins-workspace/plugins/websocket:
+    dependencies:
+      '@tauri-apps/api':
+        specifier: ^2.0.0
+        version: 2.0.3
+
+  ../lib/plugins-workspace/plugins/window-state:
+    dependencies:
+      '@tauri-apps/api':
+        specifier: ^2.0.0
+        version: 2.0.3
+
   app:
     dependencies:
       '@nostr-dev-kit/ndk':
@@ -121,35 +283,35 @@ importers:
         specifier: workspace:*
         version: link:../util
       '@tauri-apps/api':
-        specifier: 2.0.3
-        version: 2.0.3
+        specifier: ^2.5.0
+        version: 2.5.0
       '@tauri-apps/plugin-dialog':
-        specifier: ^2.0.1
-        version: 2.2.0
+        specifier: workspace:*
+        version: link:../../../lib/plugins-workspace/plugins/dialog
       '@tauri-apps/plugin-fs':
-        specifier: ^2.0.1
-        version: 2.2.0
+        specifier: workspace:*
+        version: link:../../../lib/plugins-workspace/plugins/fs
       '@tauri-apps/plugin-geolocation':
-        specifier: ^2.0.0
-        version: 2.2.3
+        specifier: workspace:*
+        version: link:../../../lib/plugins-workspace/plugins/geolocation
       '@tauri-apps/plugin-haptics':
-        specifier: ^2.0.0
-        version: 2.2.3
+        specifier: workspace:*
+        version: link:../../../lib/plugins-workspace/plugins/haptics
       '@tauri-apps/plugin-http':
-        specifier: ^2.0.1
-        version: 2.3.0
+        specifier: workspace:*
+        version: link:../../../lib/plugins-workspace/plugins/http
       '@tauri-apps/plugin-log':
-        specifier: ^2.0.0
-        version: 2.2.1
+        specifier: workspace:*
+        version: link:../../../lib/plugins-workspace/plugins/log
       '@tauri-apps/plugin-notification':
-        specifier: ^2.0.0
-        version: 2.2.1
+        specifier: workspace:*
+        version: link:../../../lib/plugins-workspace/plugins/notification
       '@tauri-apps/plugin-os':
-        specifier: ^2.0.0
-        version: 2.2.0
+        specifier: workspace:*
+        version: link:../../../lib/plugins-workspace/plugins/os
       '@tauri-apps/plugin-store':
-        specifier: ^2.1.0
-        version: 2.2.0
+        specifier: workspace:*
+        version: link:../../../lib/plugins-workspace/plugins/store
     devDependencies:
       '@types/debug':
         specifier: ^4.1.12
@@ -239,6 +401,9 @@ importers:
       sveltekit-search-params:
         specifier: ^3.0.0
         version: 3.0.0(@sveltejs/kit@2.17.1(@sveltejs/vite-plugin-svelte@5.0.3(svelte@5.19.9)(vite@6.1.0(@types/node@22.13.1)(jiti@1.21.7)(yaml@2.7.0)))(svelte@5.19.9)(vite@6.1.0(@types/node@22.13.1)(jiti@1.21.7)(yaml@2.7.0)))(svelte@5.19.9)(vite@6.1.0(@types/node@22.13.1)(jiti@1.21.7)(yaml@2.7.0))
+      zod:
+        specifier: ^3.23.8
+        version: 3.24.1
     devDependencies:
       '@sveltejs/adapter-auto':
         specifier: ^4.0.0
@@ -1661,6 +1826,9 @@ packages:
   '@tauri-apps/api@2.0.3':
     resolution: {integrity: sha512-840qk6n8rbXBXMA5/aAgTYsg5JAubKO0nXw5wf7IzGnUuYKGbB4oFBIZtXOIWy+E0kNTDI3qhq5iqsoMJfwp8g==}
 
+  '@tauri-apps/api@2.5.0':
+    resolution: {integrity: sha512-Ldux4ip+HGAcPUmuLT8EIkk6yafl5vK0P0c0byzAKzxJh7vxelVtdPONjfgTm96PbN24yjZNESY8CKo8qniluA==}
+
   '@tauri-apps/cli-darwin-arm64@2.0.4':
     resolution: {integrity: sha512-siH7rOHobb16rPbc11k64p1mxIpiRCkWmzs2qmL5IX21Gx9K5onI3Tk67Oqpf2uNupbYzItrOttaDT4NHFC7tw==}
     engines: {node: '>= 10'}
@@ -1725,33 +1893,6 @@ packages:
     resolution: {integrity: sha512-Hl9eFXz+O366+6su9PfaSzu2EJdFe1p8K8ghkWmi40dz8VmSE7vsMTaOStD0I71ckSOkh2ICDX7FQTBgjlpjWw==}
     engines: {node: '>= 10'}
     hasBin: true
-
-  '@tauri-apps/plugin-dialog@2.2.0':
-    resolution: {integrity: sha512-6bLkYK68zyK31418AK5fNccCdVuRnNpbxquCl8IqgFByOgWFivbiIlvb79wpSXi0O+8k8RCSsIpOquebusRVSg==}
-
-  '@tauri-apps/plugin-fs@2.2.0':
-    resolution: {integrity: sha512-+08mApuONKI8/sCNEZ6AR8vf5vI9DXD4YfrQ9NQmhRxYKMLVhRW164vdW5BSLmMpuevftpQ2FVoL9EFkfG9Z+g==}
-
-  '@tauri-apps/plugin-geolocation@2.2.3':
-    resolution: {integrity: sha512-UpeYb7wSGjbxGqTwlb+98pF07AivzrbRQ4y8mBMhDxaJxsUQBeZAPvGAx9ie0eGiTxMNOO4dMHfPfLDgGAX0wA==}
-
-  '@tauri-apps/plugin-haptics@2.2.3':
-    resolution: {integrity: sha512-tHWAOR0TSOuWIdJ4Fh/4z+L8CvSfHdg5i7XfCqjErPu63PMf+2n856VIGcC6fjF29hf/vq+BiGApWt38n66Gvg==}
-
-  '@tauri-apps/plugin-http@2.3.0':
-    resolution: {integrity: sha512-pigTvz+zzAqbIhCzRiR1GE98Jw7A03j2V+Eiexr9thBI8VfMiwFQMcbgON51xlwnVaI72LdbYKNajU84im8tlg==}
-
-  '@tauri-apps/plugin-log@2.2.1':
-    resolution: {integrity: sha512-bOz9w0hhlXLGLc1ZR37GqkXvTqkykl4A3GEKLjRIs0dq3n0BzLyoRDMPcpt7PdUHqaq6WISME+zEX2bqjSbJ2A==}
-
-  '@tauri-apps/plugin-notification@2.2.1':
-    resolution: {integrity: sha512-QF8Zod6XDhxD6xkD5nU/BjbOpJ6+3gxGCrVULOdLpvMuMSN2Z2IdObV/qgnrEJk1UamUCF1ClQUqNCbk4zTJNQ==}
-
-  '@tauri-apps/plugin-os@2.2.0':
-    resolution: {integrity: sha512-HszbCdbisMlu5QhCNAN8YIWyz2v33abAWha6+uvV2CKX8P5VSct/y+kEe22JeyqrxCnWlQ3DRx7s49Byg7/0EA==}
-
-  '@tauri-apps/plugin-store@2.2.0':
-    resolution: {integrity: sha512-hJTRtuJis4w5fW1dkcgftsYxKXK0+DbAqurZ3CURHG5WkAyyZgbxpeYctw12bbzF9ZbZREXZklPq8mocCC3Sgg==}
 
   '@tsconfig/node10@1.0.11':
     resolution: {integrity: sha512-DcRjDCujK/kCk/cUe8Xz8ZSpm8mS3mNNpta+jGCA6USEDfktlNvm1+IuZ9eTcDbNk41BHwpHHeW+N1lKCz4zOw==}
@@ -5772,6 +5913,8 @@ snapshots:
 
   '@tauri-apps/api@2.0.3': {}
 
+  '@tauri-apps/api@2.5.0': {}
+
   '@tauri-apps/cli-darwin-arm64@2.0.4':
     optional: true
 
@@ -5814,42 +5957,6 @@ snapshots:
       '@tauri-apps/cli-win32-arm64-msvc': 2.0.4
       '@tauri-apps/cli-win32-ia32-msvc': 2.0.4
       '@tauri-apps/cli-win32-x64-msvc': 2.0.4
-
-  '@tauri-apps/plugin-dialog@2.2.0':
-    dependencies:
-      '@tauri-apps/api': 2.0.3
-
-  '@tauri-apps/plugin-fs@2.2.0':
-    dependencies:
-      '@tauri-apps/api': 2.0.3
-
-  '@tauri-apps/plugin-geolocation@2.2.3':
-    dependencies:
-      '@tauri-apps/api': 2.0.3
-
-  '@tauri-apps/plugin-haptics@2.2.3':
-    dependencies:
-      '@tauri-apps/api': 2.0.3
-
-  '@tauri-apps/plugin-http@2.3.0':
-    dependencies:
-      '@tauri-apps/api': 2.0.3
-
-  '@tauri-apps/plugin-log@2.2.1':
-    dependencies:
-      '@tauri-apps/api': 2.0.3
-
-  '@tauri-apps/plugin-notification@2.2.1':
-    dependencies:
-      '@tauri-apps/api': 2.0.3
-
-  '@tauri-apps/plugin-os@2.2.0':
-    dependencies:
-      '@tauri-apps/api': 2.0.3
-
-  '@tauri-apps/plugin-store@2.2.0':
-    dependencies:
-      '@tauri-apps/api': 2.0.3
 
   '@tsconfig/node10@1.0.11':
     optional: true

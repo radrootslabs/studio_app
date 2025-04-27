@@ -2,3 +2,4 @@ packages:
   - 'app'
   - 'packages/*'
   - 'crates/radroots-common/bindings/ts'
+  - '../lib/plugins-workspace/plugins/*'

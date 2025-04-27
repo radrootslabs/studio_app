@@ -45,9 +45,11 @@ justfile
 dev*.py
 
 target
+target*/
 /crates/tangle/gen
 /crates/tangle/tauri*.conf.json
 /crates/tangle/conf
 /crates/tangle/Entitlements*.plist
+/crates/tangle/Info*.plist
 !/crates/tangle/tauri.conf.json
 app*.png

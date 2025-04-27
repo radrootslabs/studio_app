@@ -1,6 +1,7 @@
 export type NavigationRoute =
     | "/"
-    | "/farm"
+    | "/farms"
+    | "/farms/add"
     | "/profile"
     | "/profile/edit"
     | "/init";
@@ -8,7 +9,8 @@ export type NavigationRoute =
 export function parse_route(route: string): NavigationRoute {
     switch (route) {
         case "/":
-        case "/farm":
+        case "/farms":
+        case "/farms/add":
         case "/profile":
         case "/profile/edit":
         case "/init":

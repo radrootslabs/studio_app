@@ -12,7 +12,7 @@
         data,
         lc_handle_farms: async () => {
             try {
-                await route(`/farm`);
+                await route(`/farms`);
             } catch (e) {
                 await handle_err(e, `lc_handle_farms`);
             }

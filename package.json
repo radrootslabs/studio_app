@@ -4,7 +4,7 @@
   "license": "GPL-3.0-or-later",
   "scripts": {
     "build": "turbo build --filter=app",
-    "dev": "turbo dev --concurrency 11",
+    "dev": "turbo dev --concurrency 11 --filter=@radroots/*",
     "dev:ios": "pnpm run tauri ios dev 'iPhone 16'",
     "tauri": "tauri"
   },
