@@ -1,6 +1,6 @@
 use crate::app::Tangle;
-use radroots_core::types::IError;
-use radroots_model::tables::trade_product_media::{
+use tangle_core::types::IError;
+use tangle_model::tables::trade_product_media::{
     lib_model_trade_product_media_set, lib_model_trade_product_media_unset,
     ITradeProductMediaRelation, ITradeProductMediaResolve,
 };

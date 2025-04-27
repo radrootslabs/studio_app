@@ -37,10 +37,12 @@
 		"@radroots/locales": "workspace:*",
 		"@radroots/models": "workspace:*",
 		"@radroots/nostr-util": "workspace:*",
-		"svelte-maplibre": "workspace:*",
+		"@radroots/radroots-common-bindings": "workspace:*",
 		"@radroots/theme": "workspace:*",
 		"@radroots/util": "workspace:*",
 		"chart.js": "^4.4.5",
-		"css-paint-polyfill": "^3.4.0"
+		"css-paint-polyfill": "^3.4.0",
+		"svelte-maplibre": "workspace:*",
+		"zod": "^3.23.8"
 	}
 }

@@ -1,6 +1,5 @@
 [package]
-name = "radroots_core"
-description = "Core value model for Radroots"
+name = "tangle_core"
 version = "0.0.1"
 license = "GPL-3.0-or-later"
 edition = "2021"

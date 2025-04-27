@@ -1,6 +1,6 @@
 use crate::app::Tangle;
-use radroots_core::types::IError;
-use radroots_model::{
+use tangle_core::types::IError;
+use tangle_model::{
     tables::log_error::{lib_model_log_error_create, ILogErrorCreate, ILogErrorCreateResolve, lib_model_log_error_read, ILogErrorRead, ILogErrorReadResolve, lib_model_log_error_read_list, ILogErrorReadList, ILogErrorReadListResolve, lib_model_log_error_delete, ILogErrorDelete, ILogErrorDeleteResolve, lib_model_log_error_update, ILogErrorUpdate, ILogErrorUpdateResolve},
 };
 

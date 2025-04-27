@@ -1,6 +1,6 @@
 use crate::app::Tangle;
-use radroots_core::types::{IError, IResultPass};
-use radroots_model::tables::lib_model_tables_reset;
+use tangle_core::types::{IError, IResultPass};
+use tangle_model::tables::lib_model_tables_reset;
 
 pub(crate) mod location_gcs;
 pub(crate) mod log_error;

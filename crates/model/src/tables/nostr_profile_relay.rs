@@ -3,7 +3,7 @@ use super::{
     nostr_relay::{nostr_relay_query_bind_values, NostrRelayQueryBindValues},
 };
 use crate::{error::ModelError, types::DatabaseConnection};
-use radroots_core::types::IResultPass;
+use tangle_core::types::IResultPass;
 
 #[derive(serde::Serialize, serde::Deserialize, sqlx::FromRow)]
 pub struct NostrProfileRelay {

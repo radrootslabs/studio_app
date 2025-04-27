@@ -3,7 +3,7 @@ use super::{
     trade_product::{trade_product_query_bind_values, TradeProductQueryBindValues},
 };
 use crate::{error::ModelError, types::DatabaseConnection};
-use radroots_core::types::IResultPass;
+use tangle_core::types::IResultPass;
 
 #[derive(serde::Serialize, serde::Deserialize, sqlx::FromRow)]
 pub struct TradeProductLocation {

@@ -9,15 +9,13 @@
         ndk_user,
         nostr_ndk_configured,
         nostr_poll_relays_retry_handler,
-        nostr_sync_retry_handler,
     } from "@radroots/lib-app";
     import { ndk_init } from "@radroots/nostr-util";
     import { throw_err } from "@radroots/util";
 
     import { _cfg } from "$lib/config";
     import { cfg_role, cfg_setup } from "$lib/store";
-    import { nostr_poll_relays } from "$lib/util/nostr/poll";
-    import { nostr_sync } from "$lib/util/nostr/sync";
+    import { nostr_poll_relays } from "$lib/util/nostr/lib";
     import { onMount } from "svelte";
     import type { LayoutProps } from "./$types";
 
@@ -42,12 +40,12 @@
             await idb_init();
             await nostr_init();
             //
-            // initial setup
+            // is setup
             const ds_setup = await datastore.get(`is_setup`);
             if (`err` in ds_setup) cfg_setup.set(false);
             else cfg_setup.set(true);
             //
-            // get role
+            // role
             const ds_role = await datastore.get(`role`);
             if (`err` in ds_role) {
                 await datastore.set(`role`, _cfg.role_default);
@@ -84,7 +82,7 @@
 
     nostr_ndk_configured.subscribe(async (_sub) => {
         if (!_sub) return;
-        await nostr_sync_retry_handler(nostr_sync);
+        // @todo await nostr_sync_retry_handler(nostr_sync);
         await nostr_poll_relays_retry_handler(nostr_poll_relays);
     });
 

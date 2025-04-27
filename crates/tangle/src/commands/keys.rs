@@ -1,4 +1,4 @@
-use radroots_core::{
+use tangle_core::{
     keystore,
     nostr::keys::{
         lib_nostr_keys_gen, lib_nostr_keys_parse, lib_nostr_public_key_hex,

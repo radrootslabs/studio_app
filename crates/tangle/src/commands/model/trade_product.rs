@@ -1,6 +1,6 @@
 use crate::app::Tangle;
-use radroots_core::types::IError;
-use radroots_model::{
+use tangle_core::types::IError;
+use tangle_model::{
     tables::trade_product::{lib_model_trade_product_create, ITradeProductCreate, ITradeProductCreateResolve, lib_model_trade_product_read, ITradeProductRead, ITradeProductReadResolve, lib_model_trade_product_read_list, ITradeProductReadList, ITradeProductReadListResolve, lib_model_trade_product_delete, ITradeProductDelete, ITradeProductDeleteResolve, lib_model_trade_product_update, ITradeProductUpdate, ITradeProductUpdateResolve},
 };
 

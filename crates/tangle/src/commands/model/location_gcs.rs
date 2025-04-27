@@ -1,6 +1,6 @@
 use crate::app::Tangle;
-use radroots_core::types::IError;
-use radroots_model::{
+use tangle_core::types::IError;
+use tangle_model::{
     tables::location_gcs::{lib_model_location_gcs_create, ILocationGcsCreate, ILocationGcsCreateResolve, lib_model_location_gcs_read, ILocationGcsRead, ILocationGcsReadResolve, lib_model_location_gcs_read_list, ILocationGcsReadList, ILocationGcsReadListResolve, lib_model_location_gcs_delete, ILocationGcsDelete, ILocationGcsDeleteResolve, lib_model_location_gcs_update, ILocationGcsUpdate, ILocationGcsUpdateResolve},
 };
 

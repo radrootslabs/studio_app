@@ -25,8 +25,8 @@ tauri-plugin-os = { version = "2.2.0" }
 tauri-plugin-store = { version = "2.2.0" }
 tauri-plugin-shell = { version = "2.2.0" }
 
-radroots_core = { path = "../core" }
-radroots_model = { path = "../model" }
+tangle_core = { path = "../core" }
+tangle_model = { path = "../model" }
 
 serde = "1.0"
 serde_json = "1.0"

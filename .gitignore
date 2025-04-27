@@ -42,7 +42,7 @@ notes*.txt
 notes*.md
 git-diff.txt
 justfile 
-setup.py
+dev*.py
 
 target
 /crates/tangle/gen

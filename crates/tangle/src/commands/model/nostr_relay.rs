@@ -1,6 +1,6 @@
 use crate::app::Tangle;
-use radroots_core::types::IError;
-use radroots_model::{
+use tangle_core::types::IError;
+use tangle_model::{
     tables::nostr_relay::{lib_model_nostr_relay_create, INostrRelayCreate, INostrRelayCreateResolve, lib_model_nostr_relay_read, INostrRelayRead, INostrRelayReadResolve, lib_model_nostr_relay_read_list, INostrRelayReadList, INostrRelayReadListResolve, lib_model_nostr_relay_delete, INostrRelayDelete, INostrRelayDeleteResolve, lib_model_nostr_relay_update, INostrRelayUpdate, INostrRelayUpdateResolve},
 };
 

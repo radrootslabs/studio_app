@@ -1,5 +1,5 @@
 use crate::{error::ModelError, types::DatabaseConnection};
-use radroots_core::types::IResultPass;
+use tangle_core::types::IResultPass;
 
 pub mod location_gcs;
 pub mod log_error;

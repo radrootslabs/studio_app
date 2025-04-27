@@ -1,3 +1,4 @@
 packages:
   - 'app'
   - 'packages/*'
+  - 'crates/radroots-common/bindings/ts'

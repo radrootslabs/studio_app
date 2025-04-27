@@ -1,6 +1,6 @@
 use crate::app::Tangle;
-use radroots_core::types::IError;
-use radroots_model::tables::trade_product_location::{
+use tangle_core::types::IError;
+use tangle_model::tables::trade_product_location::{
     lib_model_trade_product_location_set, lib_model_trade_product_location_unset,
     ITradeProductLocationRelation, ITradeProductLocationResolve,
 };

@@ -1,10 +1,10 @@
 <script lang="ts">
     import { ls } from "$lib/locale/i18n";
     import { db, fs, gui, keys, radroots, route } from "$lib/util";
-    import { nostr_sync_metadata } from "$lib/util/nostr/sync";
     import {
         handle_err,
         ndk_user,
+        nostr_sync,
         Profile,
         type IViewProfileData,
     } from "@radroots/lib-app";
@@ -27,7 +27,9 @@
             );
             if (`result` in tb_nostr_profile) {
                 data = { ...tb_nostr_profile.result };
-                nostr_sync_metadata(); // no await
+                await nostr_sync.metadata({
+                    metadata: tb_nostr_profile.result,
+                }); // leave off await
                 return;
             }
             return void (await route(`/`));
@@ -51,7 +53,9 @@
                         public_key: $ndk_user?.pubkey,
                     });
                     if (`err` in tb_nostrprofile) throw_err(tb_nostrprofile); //@todo
-                    await nostr_sync_metadata();
+                    await nostr_sync.metadata({
+                        metadata: tb_nostrprofile.result,
+                    }); // leave off await
                 } catch (e) {
                     await handle_err(e, `lc_on_destroy`);
                 }

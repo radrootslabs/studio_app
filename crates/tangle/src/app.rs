@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-use radroots_model::types::DatabaseConnection;
+use tangle_model::types::DatabaseConnection;
 
 use crate::util;
 

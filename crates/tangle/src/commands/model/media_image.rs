@@ -1,6 +1,6 @@
 use crate::app::Tangle;
-use radroots_core::types::IError;
-use radroots_model::{
+use tangle_core::types::IError;
+use tangle_model::{
     tables::media_image::{lib_model_media_image_create, IMediaImageCreate, IMediaImageCreateResolve, lib_model_media_image_read, IMediaImageRead, IMediaImageReadResolve, lib_model_media_image_read_list, IMediaImageReadList, IMediaImageReadListResolve, lib_model_media_image_delete, IMediaImageDelete, IMediaImageDeleteResolve, lib_model_media_image_update, IMediaImageUpdate, IMediaImageUpdateResolve},
 };
 

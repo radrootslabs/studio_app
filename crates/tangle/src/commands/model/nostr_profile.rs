@@ -1,6 +1,6 @@
 use crate::app::Tangle;
-use radroots_core::types::IError;
-use radroots_model::{
+use tangle_core::types::IError;
+use tangle_model::{
     tables::nostr_profile::{lib_model_nostr_profile_create, INostrProfileCreate, INostrProfileCreateResolve, lib_model_nostr_profile_read, INostrProfileRead, INostrProfileReadResolve, lib_model_nostr_profile_read_list, INostrProfileReadList, INostrProfileReadListResolve, lib_model_nostr_profile_delete, INostrProfileDelete, INostrProfileDeleteResolve, lib_model_nostr_profile_update, INostrProfileUpdate, INostrProfileUpdateResolve},
 };
 

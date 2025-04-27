@@ -1,6 +1,6 @@
 use crate::app::Tangle;
-use radroots_core::types::IError;
-use radroots_model::tables::nostr_profile_relay::{
+use tangle_core::types::IError;
+use tangle_model::tables::nostr_profile_relay::{
     lib_model_nostr_profile_relay_set, lib_model_nostr_profile_relay_unset,
     INostrProfileRelayRelation, INostrProfileRelayResolve,
 };

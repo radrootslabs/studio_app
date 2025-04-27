@@ -1,5 +1,5 @@
 [package]
-name = "radroots_model"
+name = "tangle_model"
 version = "0.0.1"
 license = "GPL-3.0-or-later"
 edition = "2021"
@@ -11,4 +11,4 @@ sqlx = { version = "0.8.2", features = ["sqlite", "runtime-tokio"] }
 thiserror = "1.0.64"
 futures = "0.3.31"
 
-radroots_core = { path = "../core" }
+tangle_core = { path = "../core" }

@@ -1,10 +1,10 @@
 <script lang="ts">
     import { ls } from "$lib/locale/i18n";
     import { db, gui, route } from "$lib/util";
-    import { nostr_sync_metadata } from "$lib/util/nostr/sync";
     import {
         handle_err,
         type IViewProfileEditData,
+        nostr_sync,
         parse_view_profile_field_key,
         ProfileEdit,
         qp_field,
@@ -85,7 +85,9 @@
                         `tb_nostr_profile`,
                     );
                     if (`err` in tb_nostr_profile) throw_err(tb_nostr_profile);
-                    nostr_sync_metadata(); // leave off await
+                    nostr_sync.metadata({
+                        metadata: tb_nostr_profile.result,
+                    }); // leave off await
                     await route(`/profile`);
                 } catch (e) {
                     await handle_err(e, `lc_handle_back`);

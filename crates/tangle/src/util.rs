@@ -1,8 +1,8 @@
 use std::fs::OpenOptions;
 use std::path::PathBuf;
 
-use radroots_model::types::DatabaseConnection;
-use radroots_model::util::db_conn;
+use tangle_model::types::DatabaseConnection;
+use tangle_model::util::db_conn;
 
 pub async fn init_db(data_dir: &PathBuf) -> DatabaseConnection {
     let mut path = data_dir.clone();
