@@ -3,7 +3,7 @@
     import { PUBLIC_NOSTR_RELAY_DEFAULTS } from "$env/static/public";
     import { ls } from "$lib/locale/i18n";
     import { datastore, db, gui, keys, radroots, route } from "$lib/util";
-    import { cfg_delay } from "$lib/util/conf";
+    import { cfg_delay } from "$lib/util/lib";
     import { NDKPrivateKeySigner } from "@nostr-dev-kit/ndk";
     import {
         app_lo,

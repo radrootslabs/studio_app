@@ -1,8 +1,14 @@
-import {  PUBLIC_RADROOTS_RELAY_URL } from "$env/static/public";
+import { PUBLIC_RADROOTS_RELAY_URL } from "$env/static/public";
 import type { NostrEventTagClient } from "@radroots/nostr-util";
 import { root_symbol } from "@radroots/util";
 
 export const radroots_nostr_pubkey = `1f5a37bd7050cffe4dd9c35e029fa1da5c84f429de0818c9e22ecf122815e184`
+
+export const err = {
+    nostr: {
+        no_relays: `error.nostr.no_relays_connected`
+    }
+};
 
 export const cfg_delay = {
     load: 321,

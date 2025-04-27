@@ -46,59 +46,57 @@
             return {
                 public_key: tb_nostr_profile.result.public_key,
                 field,
-            } satisfies IViewProfileEditData;
+            } satisfies LoadData;
         } catch (e) {
             await handle_err(e, `load`);
         }
     };
 </script>
 
-{#if data}
-    <ProfileEdit
-        bind:val_field
-        {ls}
-        basis={{
-            data,
-            lc_handle_back: async ({ field, public_key }) => {
-                try {
-                    if (val_field_init === val_field)
-                        return void (await route(`/profile`));
-                    const confirm = await gui.confirm({
-                        message: `${$ls(`notify.profile.name_update`)}. ${$ls(`common.do_you_want_to_continue_q`)}`,
-                    });
-                    if (!confirm) return;
-                    const nostr_profile_update = await db.nostr_profile_update({
-                        filter: {
-                            public_key,
-                        },
-                        fields: {
-                            [field]: val_field,
-                        },
-                    });
-                    if (`err` in nostr_profile_update)
-                        throw_err(nostr_profile_update);
-                    const tb_nostr_profile = await db.nostr_profile_read({
+<ProfileEdit
+    bind:val_field
+    {ls}
+    basis={{
+        data,
+        lc_handle_back: async ({ field, public_key }) => {
+            try {
+                if (val_field_init === val_field)
+                    return void (await route(`/profile`));
+                const confirm = await gui.confirm({
+                    message: `${$ls(`notify.profile.name_update`)}. ${$ls(`common.do_you_want_to_continue_q`)}`,
+                });
+                if (!confirm) return;
+                const nostr_profile_update = await db.nostr_profile_update({
+                    filter: {
                         public_key,
-                    });
-                    console.log(
-                        JSON.stringify(tb_nostr_profile, null, 4),
-                        `tb_nostr_profile`,
-                    );
-                    if (`err` in tb_nostr_profile) throw_err(tb_nostr_profile);
-                    nostr_sync.metadata({
-                        metadata: tb_nostr_profile.result,
-                    }); // leave off await
-                    await route(`/profile`);
-                } catch (e) {
-                    await handle_err(e, `lc_handle_back`);
-                }
-            },
-            lc_handle_input: async () => {
-                try {
-                } catch (e) {
-                    await handle_err(e, `lc_handle_input`);
-                }
-            },
-        }}
-    />
-{/if}
+                    },
+                    fields: {
+                        [field]: val_field,
+                    },
+                });
+                if (`err` in nostr_profile_update)
+                    throw_err(nostr_profile_update);
+                const tb_nostr_profile = await db.nostr_profile_read({
+                    public_key,
+                });
+                console.log(
+                    JSON.stringify(tb_nostr_profile, null, 4),
+                    `tb_nostr_profile`,
+                );
+                if (`err` in tb_nostr_profile) throw_err(tb_nostr_profile);
+                nostr_sync.metadata({
+                    metadata: tb_nostr_profile.result,
+                }); // leave off await
+                await route(`/profile`);
+            } catch (e) {
+                await handle_err(e, `lc_handle_back`);
+            }
+        },
+        lc_handle_input: async () => {
+            try {
+            } catch (e) {
+                await handle_err(e, `lc_handle_input`);
+            }
+        },
+    }}
+/>
