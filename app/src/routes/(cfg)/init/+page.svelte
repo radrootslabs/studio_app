@@ -65,7 +65,6 @@
     onMount(async () => {
         try {
             await init();
-            view = `eula`;
         } catch (e) {
             handle_err(e, `on_mount`);
         }

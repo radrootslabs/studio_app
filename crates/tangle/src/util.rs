@@ -12,7 +12,7 @@ pub async fn init_db(data_dir: &PathBuf) -> DatabaseConnection {
             panic!("Error resolving databse directory {}", e);
         }
     };
-    path.push("radroots_db2.sqlite");
+    path.push("tangle.db");
     let result = OpenOptions::new().create_new(true).write(true).open(&path);
     match result {
         Ok(_) => println!("Database file created"),

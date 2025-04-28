@@ -3,9 +3,9 @@ import type { ILocationGcsCreateResolve, LocationGcsFormFields } from "@radroots
 import { err_msg, location_geohash, type GeocoderReverseResult, type GeolocationCoordinatesPoint, type GeolocationPoint } from "@radroots/util";
 import { db, geoc } from "..";
 
-export const model_location_gcs_create_geol_p = async (opts: {
+export const model_location_gcs_create_geol_point = async (opts: {
     label?: string;
-    kind: string;
+    tag_0?: string;
     geol_p: GeolocationPoint;
 }): Promise<ILocationGcsCreateResolve<string>> => {
     try {
@@ -14,7 +14,7 @@ export const model_location_gcs_create_geol_p = async (opts: {
             lat: geol_p.lat.toString(),
             lng: geol_p.lng.toString(),
             geohash: location_geohash(geol_p),
-            kind: opts.kind,
+            tag_0: opts.tag_0,
         }
         if (label) fields.label = label;
         const geoc_rev = await geoc.reverse({
@@ -38,9 +38,9 @@ export const model_location_gcs_create_geol_p = async (opts: {
     }
 };
 
-export const model_location_gcs_create_geoc_r = async (opts: {
+export const model_location_gcs_create = async (opts: {
     label?: string;
-    kind: string;
+    tag_0?: string;
     geoc_r: GeocoderReverseResult;
     geol_p: GeolocationCoordinatesPoint;
 }): Promise<ILocationGcsCreateResolve<string>> => {
@@ -50,7 +50,7 @@ export const model_location_gcs_create_geoc_r = async (opts: {
             lat: geol_p.lat.toString(),
             lng: geol_p.lng.toString(),
             geohash: location_geohash(geol_p),
-            kind: opts.kind,
+            tag_0: opts.tag_0 || undefined,
             gc_id: geoc_r.id.toString(),
             gc_name: geoc_r.name,
             gc_admin1_id: geoc_r.admin1_id.toString(),

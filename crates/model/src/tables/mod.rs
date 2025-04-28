@@ -1,6 +1,8 @@
 use crate::{error::ModelError, types::DatabaseConnection};
 use tangle_core::types::IResultPass;
 
+pub mod farm;
+pub mod farm_location;
 pub mod location_gcs;
 pub mod log_error;
 pub mod media_image;
@@ -12,7 +14,7 @@ pub mod trade_product_location;
 pub mod trade_product_media;
 
 pub async fn lib_model_tables_reset(db: &DatabaseConnection) -> Result<IResultPass, ModelError> {
-    let query = format!("DELETE FROM location_gcs; DELETE FROM trade_product; DELETE FROM nostr_profile; DELETE FROM nostr_relay; DELETE FROM media_image; DELETE FROM log_error;DELETE FROM nostr_profile_relay; DELETE FROM trade_product_location; DELETE FROM trade_product_media;");
+    let query = format!("DELETE FROM location_gcs; DELETE FROM trade_product; DELETE FROM nostr_profile; DELETE FROM nostr_relay; DELETE FROM media_image; DELETE FROM log_error; DELETE FROM farm;DELETE FROM nostr_profile_relay; DELETE FROM farm_location; DELETE FROM trade_product_location; DELETE FROM trade_product_media;");
     sqlx::query(&query)
         .execute(db)
         .await

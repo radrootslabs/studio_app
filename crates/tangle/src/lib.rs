@@ -7,6 +7,13 @@ use commands::keys::{
     keys_nostr_add, keys_nostr_delete, keys_nostr_gen, keys_nostr_keystore_reset, keys_nostr_read,
     keys_nostr_read_all,
 };
+use commands::model::farm::{
+        model_farm_create, model_farm_delete, model_farm_read,
+        model_farm_read_list, model_farm_update,
+    };
+use commands::model::farm_location::{
+        model_farm_location_set, model_farm_location_unset,
+    };
 use commands::model::location_gcs::{
         model_location_gcs_create, model_location_gcs_delete, model_location_gcs_read,
         model_location_gcs_read_list, model_location_gcs_update,
@@ -84,6 +91,13 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             // %model%
+            model_farm_create,
+            model_farm_delete,
+            model_farm_location_set,
+            model_farm_location_unset,
+            model_farm_read,
+            model_farm_read_list,
+            model_farm_update,
             model_location_gcs_create,
             model_location_gcs_delete,
             model_location_gcs_read,

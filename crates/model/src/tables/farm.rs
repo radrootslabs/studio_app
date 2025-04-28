@@ -7,102 +7,60 @@ use tangle_core::{
 use crate::{error::ModelError, types::DatabaseConnection, util::parse_query_value};
 
 #[derive(Debug, serde::Serialize, serde::Deserialize, sqlx::FromRow)]
-pub struct LocationGcs {
+pub struct Farm {
     id: String,
     created_at: String,
     updated_at: String,
-    lat: f64,
-    lng: f64,
-    geohash: String,
-    tag_0: Option<String>,
-    label: Option<String>,
-    area: Option<f64>,
-    elevation: Option<u32>,
-    soil: Option<String>,
-    climate: Option<String>,
-    gc_id: Option<String>,
-    gc_name: Option<String>,
-    gc_admin1_id: Option<String>,
-    gc_admin1_name: Option<String>,
-    gc_country_id: Option<String>,
-    gc_country_name: Option<String>,
+    name: String,
+    area: Option<String>,
+    area_unit: Option<String>,
+    title: Option<String>,
+    description: Option<String>,
 }
 
 #[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
-pub struct ILocationGcsFields {
-    pub lat: f64,
-    pub lng: f64,
-    pub geohash: String,
-    pub tag_0: Option<String>,
-    pub label: Option<String>,
-    pub area: Option<f64>,
-    pub elevation: Option<u32>,
-    pub soil: Option<String>,
-    pub climate: Option<String>,
-    pub gc_id: Option<String>,
-    pub gc_name: Option<String>,
-    pub gc_admin1_id: Option<String>,
-    pub gc_admin1_name: Option<String>,
-    pub gc_country_id: Option<String>,
-    pub gc_country_name: Option<String>,
+pub struct IFarmFields {
+    pub name: String,
+    pub area: Option<String>,
+    pub area_unit: Option<String>,
+    pub title: Option<String>,
+    pub description: Option<String>,
 }
 
 #[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
-pub struct ILocationGcsFieldsPartial {
-    pub lat: Option<f64>,
-    pub lng: Option<f64>,
-    pub geohash: Option<String>,
-    pub tag_0: Option<String>,
-    pub label: Option<String>,
-    pub area: Option<f64>,
-    pub elevation: Option<u32>,
-    pub soil: Option<String>,
-    pub climate: Option<String>,
-    pub gc_id: Option<String>,
-    pub gc_name: Option<String>,
-    pub gc_admin1_id: Option<String>,
-    pub gc_admin1_name: Option<String>,
-    pub gc_country_id: Option<String>,
-    pub gc_country_name: Option<String>,
+pub struct IFarmFieldsPartial {
+    pub name: Option<String>,
+    pub area: Option<String>,
+    pub area_unit: Option<String>,
+    pub title: Option<String>,
+    pub description: Option<String>,
 }
 
 #[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
-pub struct ILocationGcsFieldsFilter {
+pub struct IFarmFieldsFilter {
     pub created_at: Option<String>,
     pub updated_at: Option<String>,
-    pub lat: Option<String>,
-    pub lng: Option<String>,
-    pub geohash: Option<String>,
-    pub tag_0: Option<String>,
-    pub label: Option<String>,
+    pub name: Option<String>,
     pub area: Option<String>,
-    pub elevation: Option<String>,
-    pub soil: Option<String>,
-    pub climate: Option<String>,
-    pub gc_id: Option<String>,
-    pub gc_name: Option<String>,
-    pub gc_admin1_id: Option<String>,
-    pub gc_admin1_name: Option<String>,
-    pub gc_country_id: Option<String>,
-    pub gc_country_name: Option<String>,
+    pub area_unit: Option<String>,
+    pub title: Option<String>,
+    pub description: Option<String>,
 }
 
 #[derive(Clone, serde::Serialize, serde::Deserialize)]
 #[serde(untagged)]
-pub enum LocationGcsQueryBindValues {
+pub enum FarmQueryBindValues {
     Id { id: String },
-    Geohash { geohash: String },
 }
 
-pub fn location_gcs_query_bind_values(opts: LocationGcsQueryBindValues) -> IModelsQueryBindValueTuple {
+pub fn farm_query_bind_values(opts: FarmQueryBindValues) -> IModelsQueryBindValueTuple {
     match opts {
-        LocationGcsQueryBindValues::Id { id } => ("id".to_string(), id),
-        LocationGcsQueryBindValues::Geohash { geohash } => ("geohash".to_string(), geohash),
+        FarmQueryBindValues::Id { id } => ("id".to_string(), id),
     }
 }
 
-fn lib_table_location_gcs_parse_fields(
-    opts: ILocationGcsFields,
+fn lib_table_farm_parse_fields(
+    opts: IFarmFields,
 ) -> Result<serde_json::Map<String, serde_json::Value>, ModelError> {
     let fields = serde_json::to_value(opts)
         .map_err(|err| ModelError::SerializationError(err.to_string()))?
@@ -112,20 +70,20 @@ fn lib_table_location_gcs_parse_fields(
     Ok(fields)
 }
 
-pub type ILocationGcsCreate = ILocationGcsFields;
-pub type ILocationGcsCreateResolve = IResult<String>;
+pub type IFarmCreate = IFarmFields;
+pub type IFarmCreateResolve = IResult<String>;
 
-pub async fn lib_model_location_gcs_create(
+pub async fn lib_model_farm_create(
     db: &DatabaseConnection,
-    opts: ILocationGcsCreate,
-) -> Result<ILocationGcsCreateResolve, ModelError> {
+    opts: IFarmCreate,
+) -> Result<IFarmCreateResolve, ModelError> {
     let id: String = uuidv4();
     let created_at: String = time_created_on();
     let updated_at: String = created_at.clone();
-    let fields = lib_table_location_gcs_parse_fields(opts)?;
+    let fields = lib_table_farm_parse_fields(opts)?;
 
     let query = format!(
-        "INSERT INTO location_gcs (id, created_at, updated_at, {}) VALUES (?, ?, ?, {});",
+        "INSERT INTO farm (id, created_at, updated_at, {}) VALUES (?, ?, ?, {});",
         fields
             .keys()
             .map(|k| k.to_string())
@@ -174,19 +132,19 @@ pub async fn lib_model_location_gcs_create(
 }
 
 #[derive(serde::Serialize, serde::Deserialize)]
-pub struct ILocationGcsQueryRead {
+pub struct IFarmQueryRead {
     pub query: String,
     pub bind_values: Vec<serde_json::Value>,
 }
 
-pub type ILocationGcsRead = ILocationGcsQueryRead;
-pub type ILocationGcsReadResolve = IResultList<LocationGcs>;
+pub type IFarmRead = IFarmQueryRead;
+pub type IFarmReadResolve = IResultList<Farm>;
 
-pub async fn lib_model_location_gcs_read(
+pub async fn lib_model_farm_read(
     db: &DatabaseConnection,
-    opts: ILocationGcsRead,
-) -> Result<ILocationGcsReadResolve, ModelError> {
-    let mut query_builder = sqlx::query_as::<_, LocationGcs>(&opts.query);
+    opts: IFarmRead,
+) -> Result<IFarmReadResolve, ModelError> {
+    let mut query_builder = sqlx::query_as::<_, Farm>(&opts.query);
     for value in opts.bind_values.iter() {
         query_builder = query_builder.bind(parse_query_value(value)?);
     }
@@ -199,19 +157,19 @@ pub async fn lib_model_location_gcs_read(
 }
 
 #[derive(serde::Serialize, serde::Deserialize)]
-pub struct ILocationGcsQueryReadList {
+pub struct IFarmQueryReadList {
     pub query: String,
     pub bind_values: Vec<serde_json::Value>,
 }
 
-pub type ILocationGcsReadList = ILocationGcsQueryReadList;
-pub type ILocationGcsReadListResolve = IResultList<LocationGcs>;
+pub type IFarmReadList = IFarmQueryReadList;
+pub type IFarmReadListResolve = IResultList<Farm>;
 
-pub async fn lib_model_location_gcs_read_list(
+pub async fn lib_model_farm_read_list(
     db: &DatabaseConnection,
-    opts: ILocationGcsReadList,
-) -> Result<ILocationGcsReadListResolve, ModelError> {
-    let mut query_builder = sqlx::query_as::<_, LocationGcs>(&opts.query);
+    opts: IFarmReadList,
+) -> Result<IFarmReadListResolve, ModelError> {
+    let mut query_builder = sqlx::query_as::<_, Farm>(&opts.query);
     for value in opts.bind_values.iter() {
         query_builder = query_builder.bind(parse_query_value(value)?);
     }
@@ -224,18 +182,18 @@ pub async fn lib_model_location_gcs_read_list(
 }
 
 #[derive(serde::Serialize, serde::Deserialize)]
-pub struct ILocationGcsQueryUpdate {
+pub struct IFarmQueryUpdate {
     pub query: String,
     pub bind_values: Vec<serde_json::Value>,
 }
 
-pub type ILocationGcsUpdate = ILocationGcsQueryUpdate;
-pub type ILocationGcsUpdateResolve = IResultPass;
+pub type IFarmUpdate = IFarmQueryUpdate;
+pub type IFarmUpdateResolve = IResultPass;
 
-pub async fn lib_model_location_gcs_update(
+pub async fn lib_model_farm_update(
     db: &sqlx::Pool<sqlx::Sqlite>,
-    opts: ILocationGcsUpdate,
-) -> Result<ILocationGcsUpdateResolve, ModelError> {
+    opts: IFarmUpdate,
+) -> Result<IFarmUpdateResolve, ModelError> {
     let mut query_builder = sqlx::query(&opts.query);
     for value in opts.bind_values.iter() {
         query_builder = query_builder.bind(parse_query_value(value)?);
@@ -247,15 +205,15 @@ pub async fn lib_model_location_gcs_update(
     Ok(IResultPass { pass: true })
 }
 
-pub type ILocationGcsDelete = LocationGcsQueryBindValues;
-pub type ILocationGcsDeleteResolve = IResultPass;
+pub type IFarmDelete = FarmQueryBindValues;
+pub type IFarmDeleteResolve = IResultPass;
 
-pub async fn lib_model_location_gcs_delete(
+pub async fn lib_model_farm_delete(
     db: &DatabaseConnection,
-    opts: ILocationGcsDelete,
-) -> Result<ILocationGcsDeleteResolve, ModelError> {
-    let (bv_k, bv) = location_gcs_query_bind_values(opts);
-    let query = format!("DELETE FROM location_gcs WHERE {} = ?1;", bv_k);
+    opts: IFarmDelete,
+) -> Result<IFarmDeleteResolve, ModelError> {
+    let (bv_k, bv) = farm_query_bind_values(opts);
+    let query = format!("DELETE FROM farm WHERE {} = ?1;", bv_k);
     let result = sqlx::query(&query)
         .bind(bv)
         .execute(db)
@@ -264,6 +222,6 @@ pub async fn lib_model_location_gcs_delete(
     if result.rows_affected() > 0 {
         Ok(IResultPass { pass: true })
     } else {
-        Err(ModelError::NotFound("model.location_gcs.name".to_string()))
+        Err(ModelError::NotFound("model.farm.name".to_string()))
     }
 }

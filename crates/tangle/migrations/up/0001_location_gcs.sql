@@ -5,7 +5,7 @@ CREATE TABLE IF NOT EXISTS location_gcs (
     lat REAL NOT NULL,
     lng REAL NOT NULL,
     geohash TEXT,
-    kind TEXT NOT NULL,
+    tag_0 TEXT,
     label TEXT,
     area REAL,
     elevation INTEGER,
