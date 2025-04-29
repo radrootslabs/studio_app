@@ -62,7 +62,7 @@
                 if (val_field_init === val_field)
                     return void (await route(`/profile`));
                 const confirm = await gui.confirm({
-                    message: `${$ls(`notify.profile.name_update`)}. ${$ls(`common.do_you_want_to_continue_q`)}`,
+                    message: `${$ls(`notification.profile.update_name_confirmation`)}. ${$ls(`common.do_you_want_to_continue_q`)}`,
                 });
                 if (!confirm) return;
                 const nostr_profile_update = await db.nostr_profile_update({
