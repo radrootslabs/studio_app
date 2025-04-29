@@ -1,15 +1,15 @@
 <script lang="ts">
     import { db, route } from "$lib/util";
     import {
-        FarmsDetails,
+        FarmsProductsAdd,
         handle_err,
         qp_id,
-        type IViewFarmsDetailsData,
+        type IViewFarmsProductsAddData,
     } from "@radroots/lib-app";
     import { location_gcs_to_location_basis } from "@radroots/util";
     import { onMount } from "svelte";
 
-    type LoadData = IViewFarmsDetailsData | undefined;
+    type LoadData = IViewFarmsProductsAddData | undefined;
     let data: LoadData = $state(undefined);
 
     onMount(async () => {
@@ -20,6 +20,7 @@
         try {
             const tb_farm = await db.farm_read({ id: $qp_id || `` });
             if (`err` in tb_farm) return void route(`/farms`);
+            console.log(JSON.stringify(tb_farm, null, 4), `tb_farm`);
             const tb_farm_location = await db.location_gcs_read_list({
                 table: [`on_farm`, { id: tb_farm.result.id }],
             });
@@ -41,29 +42,34 @@
 </script>
 
 {#if data}
-    <FarmsDetails
+    <FarmsProductsAdd
         basis={{
             data,
-            callback_route: { route: `/farms` },
-            on_handle_farm_lot_add: async (farm_id) => {
+            on_handle_farm_lot_add: async () => {
                 try {
-                    // await route(`/farms/lots/add`, [[`id`, farm_id]]);
                 } catch (e) {
                     await handle_err(e, `on_handle_farm_lot_add`);
                 }
             },
-            on_handle_farm_products_view: async (farm_id) => {
+            on_handle_photo_envelope_edit: async () => {
                 try {
-                    // @todo
-                    await route(`/farms/products/add`, [[`id`, farm_id]]);
                 } catch (e) {
-                    await handle_err(e, `on_handle_farm_products_view`);
+                    await handle_err(e, `on_handle_photo_envelope_edit`);
                 }
             },
-            on_handle_farm_orders_view: async (farm_id) => {
+            on_handle_tradepr_key_toggle: async () => {
                 try {
+                    return ``;
                 } catch (e) {
-                    await handle_err(e, `on_handle_farm_orders_view`);
+                    await handle_err(e, `on_handle_tradepr_key_toggle`);
+                    return ``;
+                }
+            },
+            on_submit: async ({ payload, farm_id, geolocation_id }) => {
+                try {
+                    console.log(JSON.stringify(payload, null, 4), `payload`);
+                } catch (e) {
+                    await handle_err(e, `on_submit`);
                 }
             },
         }}

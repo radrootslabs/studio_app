@@ -1,14 +1,10 @@
 <script lang="ts">
-    import { locale, ls } from "$lib/locale/i18n";
     import { db, route } from "$lib/util";
-    import { lc_geocode } from "$lib/util/callback";
+    import { Farms, handle_err, type IViewFarmsData } from "@radroots/lib-app";
     import {
-        Farms,
-        handle_err,
-        type FarmBasis,
-        type IViewFarmsData,
-    } from "@radroots/lib-app";
-    import { location_gcs_to_location_basis } from "@radroots/util";
+        location_gcs_to_location_basis,
+        type FarmExtended,
+    } from "@radroots/util";
     import { onMount } from "svelte";
 
     type LoadData = IViewFarmsData | undefined;
@@ -44,7 +40,7 @@
                                                     tb_loc_gcs.results[0],
                                                 )
                                               : undefined,
-                                  } satisfies FarmBasis;
+                                  } satisfies FarmExtended;
                               }),
                           )) || []
                         : [],
@@ -56,24 +52,21 @@
 </script>
 
 <Farms
-    {ls}
-    {locale}
     basis={{
         data,
         callback_route: { route: `/` },
-        lc_geocode,
-        lc_handle_farm_add: async () => {
+        on_handle_farm_add: async () => {
             try {
                 await route(`/farms/add`);
             } catch (e) {
-                await handle_err(e, `lc_handle_farm_add`);
+                await handle_err(e, `on_handle_farm_add`);
             }
         },
-        lc_handle_farm_view: async (farm_id) => {
+        on_handle_farm_view: async (farm_id) => {
             try {
                 await route(`/farms/details`, [[`id`, farm_id]]);
             } catch (e) {
-                await handle_err(e, `lc_handle_farm_view`);
+                await handle_err(e, `on_handle_farm_view`);
             }
         },
     }}

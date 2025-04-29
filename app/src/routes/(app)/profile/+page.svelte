@@ -29,7 +29,7 @@
                 data = { ...tb_nostr_profile.result };
                 await nostr_sync.metadata({
                     metadata: tb_nostr_profile.result,
-                }); // leave off await
+                }); // no await
                 return;
             }
             return void (await route(`/`));
@@ -41,12 +41,11 @@
 
 <Profile
     bind:photo_path
-    {ls}
     basis={{
         data,
         loading_photo_upload,
         loading_photo_upload_open,
-        lc_on_destroy: async () => {
+        on_destroy: async () => {
             try {
                 const tb_nostrprofile = await db.nostr_profile_read({
                     public_key: $ndk_user?.pubkey,
@@ -54,12 +53,12 @@
                 if (`err` in tb_nostrprofile) throw_err(tb_nostrprofile); //@todo
                 await nostr_sync.metadata({
                     metadata: tb_nostrprofile.result,
-                }); // leave off await
+                }); // no await
             } catch (e) {
-                await handle_err(e, `lc_on_destroy`);
+                await handle_err(e, `on_destroy`);
             }
         },
-        lc_handle_back: async ({ is_photo_existing }) => {
+        on_handle_back: async ({ is_photo_existing }) => {
             try {
                 const public_key = $ndk_user?.pubkey;
                 if (!photo_path || !public_key) return void (await route(`/`));
@@ -118,12 +117,12 @@
                     throw_err(tb_nostr_profile_update);
                 await route(`/`);
             } catch (e) {
-                await handle_err(e, `lc_handle_back`);
+                await handle_err(e, `on_handle_back`);
             } finally {
                 loading_photo_upload = false;
             }
         },
-        lc_handle_edit_profile_field: async ({ field }) => {
+        on_handle_edit_profile_field: async ({ field }) => {
             try {
                 if (field === `name`) {
                     const confirm = await gui.confirm({
@@ -138,33 +137,13 @@
                     [`field`, field],
                 ]);
             } catch (e) {
-                await handle_err(e, `lc_handle_edit_profile_field`);
+                await handle_err(e, `on_handle_edit_profile_field`);
             }
         },
-        lc_handle_photo_add: async () => {
-            try {
-                loading_photo_upload_open = true;
-                const photo_paths_open = await gui.open_photos();
-                if (!photo_paths_open) return;
-                const photo_path_add = photo_paths_open.results[0];
-                if (photo_path_add) return photo_path_add;
-            } catch (e) {
-                await handle_err(e, `lc_handle_photo_add`);
-            } finally {
-                loading_photo_upload_open = false;
-            }
-        },
-        lc_handle_photo_options: async () => {
+        on_handle_photo_options: async () => {
             try {
             } catch (e) {
-                await handle_err(e, `lc_handle_photo_options`);
-            }
-        },
-        lc_fs_read_bin: async (file_path) => {
-            try {
-                return await fs.read_bin(file_path);
-            } catch (e) {
-                await handle_err(e, `lc_fs_read_bin`);
+                await handle_err(e, `on_handle_photo_options`);
             }
         },
     }}

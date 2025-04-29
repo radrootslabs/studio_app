@@ -32,11 +32,12 @@ const widths_responsive: Record<AppWidthsResponsiveIOS, string> = {
     lo_ios1: `345px`,
     lo_textdesc_ios0: `312px`,
     lo_textdesc_ios1: `312px`,
+    lo_line_entry_ios0: `349px`,
+    lo_line_entry_ios1: `378px`,
 };
 
 const widths: Record<string, string> = {
     ...widths_responsive,
-    trellis_line: `349px`,
     trellis_value: `180px`,
     trellis_display: `286px`,
 };

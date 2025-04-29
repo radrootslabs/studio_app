@@ -10,7 +10,7 @@ const i18n = i18n_conf<Locale>({
     default_locale: `en`,
     translations,
     loaders: [
-        ...locale_keys.map((locale) => [`common`, `countries`, `error`, `eula`, `icu`, `notification`, `units`].map(key => ({
+        ...locale_keys.map((locale) => [`common`, `countries`, `error`, `eula`, `icu`, `notification`, `products`, `units`].map(key => ({
             locale,
             key,
             loader: async () => (await import(`../../../../packages/locales/src/messages/${locale}/${key}.json`)).default

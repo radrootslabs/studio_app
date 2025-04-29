@@ -55,10 +55,9 @@
 
 <ProfileEdit
     bind:val_field
-    {ls}
     basis={{
         data,
-        lc_handle_back: async ({ field, public_key }) => {
+        on_handle_back: async ({ field, public_key }) => {
             try {
                 if (val_field_init === val_field)
                     return void (await route(`/profile`));
@@ -86,16 +85,16 @@
                 if (`err` in tb_nostr_profile) throw_err(tb_nostr_profile);
                 nostr_sync.metadata({
                     metadata: tb_nostr_profile.result,
-                }); // leave off await
+                }); // no await
                 await route(`/profile`);
             } catch (e) {
-                await handle_err(e, `lc_handle_back`);
+                await handle_err(e, `on_handle_back`);
             }
         },
-        lc_handle_input: async () => {
+        on_handle_input: async () => {
             try {
             } catch (e) {
-                await handle_err(e, `lc_handle_input`);
+                await handle_err(e, `on_handle_input`);
             }
         },
     }}

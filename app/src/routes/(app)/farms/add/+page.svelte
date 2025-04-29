@@ -1,25 +1,14 @@
 <script>
-    import { locale, ls } from "$lib/locale/i18n";
     import { db, route } from "$lib/util";
-    import {
-        lc_geocode,
-        lc_geop_current,
-        lc_gui_alert,
-    } from "$lib/util/callback";
     import { model_location_gcs_create } from "$lib/util/model/location-gcs";
     import { FarmsAdd, handle_err } from "@radroots/lib-app";
     import { throw_err } from "@radroots/util";
 </script>
 
 <FarmsAdd
-    {ls}
-    {locale}
     basis={{
         callback_route: { route: `/farms` },
-        lc_gui_alert,
-        lc_geocode,
-        lc_geop_current,
-        lc_submit: async ({ data_s }) => {
+        on_submit: async ({ data_s }) => {
             try {
                 console.log(JSON.stringify(data_s, null, 4), `data_s`);
 
@@ -53,7 +42,7 @@
                 if (`err` in farm_location_set) throw_err(farm_location_set);
                 await route(`/farms`);
             } catch (e) {
-                await handle_err(e, `lc_submit`);
+                await handle_err(e, `on_submit`);
             }
         },
     }}
