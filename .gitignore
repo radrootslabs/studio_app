@@ -34,12 +34,9 @@ yarn-debug.log*
 yarn-error.log*
 
 # local
-.tmp*
-.backup*
-.dev*
+.local*
 .vscode
 notes*.txt
-notes*.md
 git-diff.txt
 justfile 
 dev*.py

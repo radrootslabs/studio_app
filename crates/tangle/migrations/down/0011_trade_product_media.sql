@@ -1,1 +1,0 @@
-DROP TABLE IF EXISTS trade_product_media;

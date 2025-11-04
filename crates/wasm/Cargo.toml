@@ -1,5 +1,5 @@
 [package]
-name = "tangle_core"
+name = "tangle_wasm"
 version.workspace = true
 edition.workspace = true
 authors = ["Radroots Authors"]
@@ -7,26 +7,23 @@ rust-version.workspace = true
 license.workspace = true
 
 [lib]
-name = "tangle_core"
-path = "src/lib.rs"
-crate-type = ["rlib"]
+crate-type = ["cdylib"]
 
 [dependencies]
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
-uuid = { version = "1", features = ["v4"] }
-chrono = "0.4"
-regex = "1.11.0"
-base64 = "0.22"
-nostr-sdk = { version = "0.43" }
-wasm-bindgen = { version = "0.2", optional = true }
+wasm-bindgen = "0.2"
+wasm-bindgen-futures = "0.4"
+console_error_panic_hook = "0.1"
+serde-wasm-bindgen = "0.6"
 
-[features]
-default = []
-wasm = ["wasm-bindgen"]
+tangle_core = { path = "../core", features = ["wasm"] }
+tangle_model = { path = "../model" }
+
+[package.metadata.wasm-pack.profile.release]
+wasm-opt = ["-Os"]
 
 [target.wasm32-unknown-unknown.dependencies]
 getrandom = { version = "0.2", features = ["js"] }
 uuid = { version = "1", features = ["v4", "js"], package = "uuid" }
-web-sys = { version = "0.3", features = ["Window", "Storage"] }

@@ -1,5 +1,4 @@
 use nostr_sdk::prelude::*;
-
 use thiserror::Error;
 
 #[derive(Error, Debug)]

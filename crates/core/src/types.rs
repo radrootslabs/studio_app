@@ -1,5 +1,3 @@
-pub type IModelsQueryBindValueTuple = (String, String);
-
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct IResult<T> {
     pub result: T,
