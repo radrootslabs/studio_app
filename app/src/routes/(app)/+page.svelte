@@ -1,5 +1,6 @@
 <script lang="ts">
     import { notif } from "$lib/utils/app";
+    import { route } from "$lib/utils/app/app";
     import { handle_err, sleep } from "@radroots/apps-lib";
     import { Home } from "@radroots/apps-lib-pwa";
     import { qp_ref } from "@radroots/apps-lib-pwa/stores/app";
@@ -23,7 +24,7 @@
         data,
         on_handle_farms: async () => {
             try {
-                alert("route to /farms"); //await route("/farms");
+                await route("/farms");
             } catch (e) {
                 await handle_err(e, `on_handle_farms`);
             }
