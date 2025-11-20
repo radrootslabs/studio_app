@@ -1,4 +1,4 @@
-import { PUBLIC_RADROOTS_RELAY_URL } from "$env/static/public";
+import { _envLib } from "@radroots/apps-lib";
 import type { AppConfigRole } from "@radroots/apps-lib-pwa/types/app";
 import { root_symbol } from "@radroots/utils";
 import type { NostrEventTagClient } from "@radroots/utils-nostr";
@@ -32,7 +32,7 @@ export const cfg_delay = {
 };
 
 export const cfg_nostr = {
-    relay_url: PUBLIC_RADROOTS_RELAY_URL,
+    relay_url: _envLib.RADROOTS_RELAY,
     relay_pubkey: radroots_nostr_pubkey,
     relay_polling_count_max: 10,
 };
@@ -61,6 +61,7 @@ export type ConfigData = {
     nostr_profile?: string;
     role?: AppConfigRole;
     nip05_request?: boolean;
+    nip05_result?: string;
 };
 
 export type AppData = {

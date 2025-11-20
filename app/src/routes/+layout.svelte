@@ -1,6 +1,6 @@
 <script lang="ts">
     import { dev, version as kit_version } from "$app/environment";
-    import { db } from "$lib/utils/app";
+    import { db, geoc } from "$lib/utils/app";
     import { app_cfg } from "$lib/utils/app/config";
     import {
         lc_color_mode,
@@ -86,6 +86,7 @@
 
     onMount(async () => {
         await db.init();
+        await geoc.connect();
     });
 </script>
 

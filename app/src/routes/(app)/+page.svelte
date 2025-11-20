@@ -1,6 +1,6 @@
 <script lang="ts">
-    import { notif } from "$lib/utils/app";
-    import { route } from "$lib/utils/app/app";
+    import { notif, route } from "$lib/utils/app";
+    import { ls } from "$lib/utils/i18n";
     import { handle_err, sleep } from "@radroots/apps-lib";
     import { Home } from "@radroots/apps-lib-pwa";
     import { qp_ref } from "@radroots/apps-lib-pwa/stores/app";
@@ -10,7 +10,7 @@
         if (_qp_ref?.toString() === "backup_imported") {
             await sleep(100);
             await notif.alert(
-                "The application backup has been succesfully imported.",
+                `${$ls(`notification.backup.import_success`)}`,
             );
             qp_ref.set(null);
         }

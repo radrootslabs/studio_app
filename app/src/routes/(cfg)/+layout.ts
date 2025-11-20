@@ -1,6 +1,5 @@
 
-import { datastore, nostr_keys } from '$lib/utils/app';
-import { route } from '$lib/utils/app/app';
+import { datastore, nostr_keys, route } from '$lib/utils/app';
 import { handle_err } from '@radroots/apps-lib';
 import type { LayoutLoad, LayoutLoadEvent } from './$types';
 

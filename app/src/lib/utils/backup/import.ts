@@ -1,5 +1,6 @@
 import { datastore, db, nostr_keys } from "$lib/utils/app";
-import { handle_err, parse_file_json } from "@radroots/apps-lib";
+import { ls } from "$lib/utils/i18n";
+import { get_store, handle_err, parse_file_json } from "@radroots/apps-lib";
 import type { ImportableAppState } from "@radroots/apps-lib-pwa/types/app";
 import type { IError } from "@radroots/types-bindings";
 import type { IdbClientConfig } from "@radroots/utils";
@@ -7,6 +8,8 @@ import { err_msg, throw_err } from "@radroots/utils";
 import { createStore, set as idb_set } from "idb-keyval";
 import { reset_sql_cipher } from "../app/cipher";
 import { app_cfg } from "../app/config";
+
+const $ls = get_store(ls);
 
 export type AppImportStateResult = {
     pass: boolean;
@@ -20,38 +23,47 @@ const assert_config_match = (
 ): void => {
     if (current.database !== incoming.database || current.store !== incoming.store) {
         throw_err(
-            `Import failed: ${label} storage mismatch (app=${current.database}/${current.store}, backup=${incoming.database}/${incoming.store})`
+            $ls(`error.configuration.import.storage_mismatch`, {
+                label,
+                app_database: current.database,
+                app_store: current.store,
+                backup_database: incoming.database,
+                backup_store: incoming.store,
+            })
         );
     }
 };
 
 export const validate_import_file = async (file: File | null): Promise<ImportableAppState> => {
     const parsed: any = await parse_file_json(file)
-    if (!parsed) throw_err("error.app.import.invalid_file_contents")
+    if (!parsed) throw_err($ls(`error.configuration.import.invalid_file_contents`))
     return await validate_import_state(parsed);
 };
 
 export const validate_import_state = async (state: any): Promise<ImportableAppState> => {
-    if (!state || typeof state !== "object") throw_err("Import file is empty.");
+    if (!state || typeof state !== "object") throw_err($ls(`error.configuration.import.empty_file`));
     if (state.backup_version !== app_cfg.backup.version) {
         throw_err(
-            `Unsupported backup version (${state.backup_version}); expected ${app_cfg.backup.version}.`
+            $ls(`error.configuration.import.unsupported_backup_version`, {
+                backup_version: state.backup_version,
+                expected_version: app_cfg.backup.version,
+            })
         );
     }
     const backup_format = state?.versions?.backup_format ?? state?.versions?.dump_format;
     if (!state.versions || !state.versions.app || !state.versions.tangle_sql || !backup_format) {
-        throw_err("Import file is missing version metadata.");
+        throw_err($ls(`error.configuration.import.missing_version_metadata`));
     }
     const database = state.database ?? state.tangle_db;
     const backup = database?.backup ?? database?.dump;
     if (!state.datastore || !state.nostr_keystore || !database) {
-        throw_err("Import file is missing required sections.");
+        throw_err($ls(`error.configuration.import.missing_required_sections`));
     }
     if (!backup || backup.format_version !== backup_format) {
-        throw_err("Import file database backup format does not match metadata.");
+        throw_err($ls(`error.configuration.import.database_format_mismatch`));
     }
     if (backup.tangle_sql_version !== state.versions.tangle_sql) {
-        throw_err("Import file tangle-sql version does not match metadata.");
+        throw_err($ls(`error.configuration.import.tangle_sql_version_mismatch`));
     }
     return {
         ...state,
@@ -63,7 +75,7 @@ export const validate_import_state = async (state: any): Promise<ImportableAppSt
 
 const restore_datastore_state = async (state: ImportableAppState["datastore"]): Promise<void> => {
     const ds_cfg = datastore.get_config();
-    assert_config_match(ds_cfg, state.config, "datastore");
+    assert_config_match(ds_cfg, state.config, $ls(`common.datastore`));
     const reset_res = await datastore.reset();
     if (reset_res && "err" in reset_res) throw_err(reset_res.err);
     const store = createStore(ds_cfg.database, ds_cfg.store);
@@ -77,7 +89,7 @@ const restore_nostr_keystore_state = async (
     state: ImportableAppState["nostr_keystore"]
 ): Promise<void> => {
     const nostr_cfg = nostr_keys.get_config();
-    assert_config_match(nostr_cfg, state.config, "nostr keystore");
+    assert_config_match(nostr_cfg, state.config, $ls(`common.nostr_keystore`));
     const reset_res = await nostr_keys.reset();
     if (reset_res && "err" in reset_res) throw_err(reset_res.err);
     for (const key of state.keys) {
@@ -90,7 +102,10 @@ const restore_tangle_db_state = async (state: ImportableAppState["database"]): P
     const current_store_key = db.get_store_key();
     if (current_store_key !== state.store_key) {
         throw_err(
-            `Import failed: tangle DB store key mismatch (app=${current_store_key}, backup=${state.store_key}).`
+            $ls(`error.configuration.import.tangle_store_key_mismatch`, {
+                app_store_key: current_store_key,
+                backup_store_key: state.store_key,
+            })
         );
     }
     await reset_sql_cipher(current_store_key);
@@ -100,14 +115,18 @@ const restore_tangle_db_state = async (state: ImportableAppState["database"]): P
 
 export const import_app_state = async (payload: ImportableAppState): Promise<AppImportStateResult | IError<string>> => {
     try {
-        if (typeof window === "undefined") return err_msg("error.client.undefined_window");
+        if (typeof window === "undefined") return err_msg($ls(`error.client.undefined_window`));
         const import_state = await validate_import_state(payload);
-        assert_config_match(datastore.get_config(), import_state.datastore.config, "datastore");
-        assert_config_match(nostr_keys.get_config(), import_state.nostr_keystore.config, "nostr keystore");
+        assert_config_match(datastore.get_config(), import_state.datastore.config, $ls(`common.datastore`));
+        assert_config_match(nostr_keys.get_config(), import_state.nostr_keystore.config, $ls(`common.nostr_keystore`));
         const current_store_key = db.get_store_key();
         if (current_store_key !== import_state.database.store_key) {
-            console.error(`Import failed: tangle DB store key mismatch (app=${current_store_key}, backup=${import_state.database.store_key}).`);
-            return err_msg("error.database.store_key_mismatch");
+            const message = $ls(`error.configuration.import.tangle_store_key_mismatch`, {
+                app_store_key: current_store_key,
+                backup_store_key: import_state.database.store_key,
+            });
+            console.error(message);
+            return err_msg(message);
         }
         await restore_datastore_state(import_state.datastore);
         await restore_nostr_keystore_state(import_state.nostr_keystore);
@@ -116,7 +135,7 @@ export const import_app_state = async (payload: ImportableAppState): Promise<App
         return { pass: true }
     } catch (e) {
         handle_err(e, `import_app_state`);
-        return { pass: false, message: "Unable to import app state. Please verify the file and try again." }
+        return { pass: false, message: $ls(`error.configuration.import.failure`) }
     }
 };
 

@@ -1,7 +1,13 @@
 <script lang="ts">
     import { goto } from "$app/navigation";
-    import { datastore, db, nostr_keys, notif } from "$lib/utils/app";
-    import { route } from "$lib/utils/app/app";
+    import {
+        datastore,
+        db,
+        nostr_keys,
+        notif,
+        radroots,
+        route,
+    } from "$lib/utils/app";
     import { reset_sql_cipher } from "$lib/utils/app/cipher";
     import {
         cfg_delay,
@@ -25,6 +31,8 @@
     } from "@radroots/apps-lib";
     import {
         ButtonLayoutPair,
+        CarouselContainer,
+        CarouselItem,
         EntryLine,
         LoadSymbol,
         LogoCircle,
@@ -85,10 +93,16 @@
         const nostr_keys_all = await nostr_keys.keys();
         if ("results" in nostr_keys_all) {
             const confirm = await notif.confirm({
-                message: `Clear the prior session?`,
+                message: `${$ls(
+                    `notification.configuration.clear_prior_session`,
+                )}`,
             });
             if (!confirm) {
-                alert("@todo add the prior session");
+                await notif.alert(
+                    `${$ls(
+                        `notification.configuration.prior_session_pending`,
+                    )}`,
+                );
                 return;
             }
             await page_reset();
@@ -243,12 +257,48 @@
                     ));
                 if (!profile_name_valid)
                     return void (await notif.alert(
-                        `Profile name must be at least 3 characters`, //@todo
+                        `${$ls(`error.configuration.profile.name_min_length`)}`,
+                    ));
+                // nip-05 request
+                profile_name_loading = true;
+                const profile_req = await radroots.accounts_request({
+                    profile_name: profile_name_val,
+                    secret_key: ks_nostr_key.secret_key,
+                });
+                if ("err" in profile_req)
+                    return void (await notif.alert(
+                        `${$ls(profile_req.err, {
+                            default: `${$ls(
+                                `error.client.http.request_failure`,
+                            )}`,
+                        })}`,
+                    ));
+                const confirm = await notif.confirm({
+                    message: `${`${$ls(`icu.the_*_is_available`, {
+                        value: `${$ls(
+                            `common.profile_name`,
+                        ).toLowerCase()} "${profile_name_val}"`,
+                    })}`}. ${`${$ls(`common.would_you_like_to_use_it_q`)}`}`,
+                    cancel: `${$ls(`common.no`)}`,
+                    ok: `${$ls(`common.yes`)}`,
+                });
+                if (!confirm) return;
+                const profile_create = await radroots.accounts_create({
+                    tok: profile_req.result,
+                    secret_key: ks_nostr_key.secret_key,
+                });
+                if (`err` in profile_create)
+                    return void (await notif.alert(
+                        `${$ls(profile_create.err, {
+                            default: `${$ls(
+                                `error.client.http.request_failure`,
+                            )}`,
+                        })}`,
                     ));
                 await datastore.update_obj<ConfigData>("cfg_data", {
                     nip05_request: true,
+                    nip05_result: profile_create.result,
                 });
-                // @todo add nip-05 request
             }
 
             if (!profile_name_val) {
@@ -361,7 +411,7 @@
     ): Promise<ResultPass | IError<string>> => {
         const nostr_profile_add = await db.nostr_profile_create({
             public_key,
-            name: profile_name ? profile_name : "default",
+            name: profile_name ? profile_name : `${$ls(`common.default`)}`,
             display_name: profile_name ? profile_name : undefined,
         });
         if ("err" in nostr_profile_add)
@@ -409,12 +459,12 @@
                         entries: [
                             {
                                 value: "",
-                                label: "Choose Options",
+                                label: `${$ls(`common.choose_options`)}`,
                                 disabled: true,
                             },
                             {
                                 value: "import",
-                                label: "Import Backup",
+                                label: `${$ls(`common.import_backup`)}`,
                             },
                         ],
                     },
@@ -439,13 +489,16 @@
     data-view={`cfg_key`}
     class={`flex flex-col h-full w-full justify-start items-center`}
 >
-    <div
-        data-carousel-container={`cfg_key`}
-        class={`carousel-container flex h-full w-full`}
+    <CarouselContainer
+        basis={{
+            view: `cfg_key`,
+        }}
     >
-        <div
-            data-carousel-item={`cfg_key`}
-            class={`carousel-item flex flex-col h-full w-full justify-center items-center`}
+        <CarouselItem
+            basis={{
+                view: `cfg_key`,
+                classes: `justify-center items-center`,
+            }}
         >
             <div
                 class={`relative flex flex-col h-full w-full justify-center items-center`}
@@ -500,16 +553,17 @@
                     </div>
                 </div>
             </div>
-        </div>
-        <div
-            data-carousel-item={`cfg_key`}
-            class={`carousel-item flex flex-col h-full w-full justify-center items-center`}
-            role="button"
-            tabindex="0"
-            onclick={async () => {
-                cgf_key_opt = undefined;
+        </CarouselItem>
+        <CarouselItem
+            basis={{
+                view: `cfg_key`,
+                classes: `justify-center items-center`,
+                role: `button`,
+                tabindex: 0,
+                callback_click: async () => {
+                    cgf_key_opt = undefined;
+                },
             }}
-            onkeydown={null}
         >
             <div
                 class={`flex flex-col h-[16rem] gap-8 w-full justify-start items-center`}
@@ -560,10 +614,12 @@
                     </button>
                 </div>
             </div>
-        </div>
-        <div
-            data-carousel-item={`cfg_key`}
-            class={`carousel-item flex flex-col h-full w-full justify-center items-center`}
+        </CarouselItem>
+        <CarouselItem
+            basis={{
+                view: `cfg_key`,
+                classes: `justify-center items-center`,
+            }}
         >
             <div
                 class={`flex flex-col w-full gap-8 justify-start items-center`}
@@ -590,7 +646,7 @@
                                 classes: `font-sans text-[1.25rem] text-center placeholder:opacity-60`,
                                 layer: 1,
                                 placeholder: `${$ls(`icu.enter_*`, {
-                                    value: `nostr nsec/hex`,
+                                    value: `${$ls(`common.nostr_nsec_hex`)}`,
                                 })}`,
                                 callback_keydown: async ({ key_s, el }) => {
                                     if (key_s) {
@@ -603,7 +659,7 @@
                     />
                 </div>
             </div>
-        </div>
+        </CarouselItem>
         <div
             class={`z-10 absolute ios0:bottom-2 bottom-10 left-0 flex flex-col w-full justify-center items-center`}
         >
@@ -622,20 +678,23 @@
                 }}
             />
         </div>
-    </div>
+    </CarouselContainer>
 </div>
 
 <div
     data-view={`cfg_profile`}
     class={`hidden flex flex-col h-full w-full justify-start items-center`}
 >
-    <div
-        data-carousel-container={`cfg_profile`}
-        class={`carousel-container flex h-full w-full`}
+    <CarouselContainer
+        basis={{
+            view: `cfg_profile`,
+        }}
     >
-        <div
-            data-carousel-item={`cfg_profile`}
-            class={`carousel-item flex flex-col h-full w-full justify-center items-center`}
+        <CarouselItem
+            basis={{
+                view: `cfg_profile`,
+                classes: `justify-center items-center`,
+            }}
         >
             <div
                 class={`flex flex-col h-[16rem] w-full px-4 gap-6 justify-start items-center`}
@@ -707,16 +766,17 @@
                     </div>
                 </div>
             </div>
-        </div>
-        <div
-            data-carousel-item={`cfg_profile`}
-            class={`carousel-item flex flex-col h-full w-full justify-center items-center`}
-            role="button"
-            tabindex="0"
-            onclick={async () => {
-                cfg_role = undefined;
+        </CarouselItem>
+        <CarouselItem
+            basis={{
+                view: `cfg_profile`,
+                classes: `justify-center items-center`,
+                role: `button`,
+                tabindex: 0,
+                callback_click: async () => {
+                    cfg_role = undefined;
+                },
             }}
-            onkeydown={null}
         >
             <div
                 class={`flex flex-col h-[16rem] w-full gap-10 justify-start items-center`}
@@ -761,8 +821,8 @@
                     </button>
                 </div>
             </div>
-        </div>
-    </div>
+        </CarouselItem>
+    </CarouselContainer>
     <div
         class={`absolute ios0:bottom-2 bottom-10 left-0 flex flex-col w-full justify-center items-center`}
     >
@@ -792,13 +852,17 @@
     data-view={`eula`}
     class={`hidden flex flex-col h-full w-full ios0:pt-12 pt-24 justify-start items-center`}
 >
-    <div
-        data-carousel-container={`eula`}
-        class={`carousel-container flex h-full w-full rounded-2xl scroll-hide`}
+    <CarouselContainer
+        basis={{
+            view: `eula`,
+            classes: `rounded-2xl scroll-hide`,
+        }}
     >
-        <div
-            data-carousel-item={`eula`}
-            class={`carousel-item flex flex-col h-full w-full justify-start items-center`}
+        <CarouselItem
+            basis={{
+                view: `eula`,
+                classes: `justify-start items-center`,
+            }}
         >
             <div
                 class={`flex flex-col h-full w-full px-4 justify-start items-center ${
@@ -1044,6 +1108,6 @@
                     </button>
                 </div>
             </div>
-        </div>
-    </div>
+        </CarouselItem>
+    </CarouselContainer>
 </div>

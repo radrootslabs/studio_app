@@ -1,6 +1,5 @@
 <script lang="ts">
-    import { db } from "$lib/utils/app";
-    import { route } from "$lib/utils/app/app";
+    import { db, route } from "$lib/utils/app";
     import { handle_err } from "@radroots/apps-lib";
     import { Farms } from "@radroots/apps-lib-pwa";
     import type {

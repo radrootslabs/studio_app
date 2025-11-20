@@ -1,9 +1,12 @@
 import { datastore, db, nostr_keys, notif } from "$lib/utils/app";
-import { download_json, handle_err } from "@radroots/apps-lib";
+import { ls } from "$lib/utils/i18n";
+import { download_json, get_store, handle_err } from "@radroots/apps-lib";
 import type { ExportedAppState } from "@radroots/apps-lib-pwa/types/app";
 import { throw_err } from "@radroots/utils";
 import { createStore, get as idb_get, keys as idb_keys, type UseStore } from "idb-keyval";
 import { app_cfg } from "../app/config";
+
+const $ls = get_store(ls);
 
 const parse_idb_entry = async (key: IDBValidKey, store: UseStore): Promise<[string, string] | undefined> => {
     if (typeof key !== "string") return undefined;
@@ -15,7 +18,7 @@ const parse_idb_entry = async (key: IDBValidKey, store: UseStore): Promise<[stri
 const export_datastore_state = async (): Promise<ExportedAppState["datastore"]> => {
     await datastore.init();
     const ds_cfg = datastore.get_config();
-    if (!ds_cfg) throw_err("error.app.export.missing_datastore_config");
+    if (!ds_cfg) throw_err($ls(`error.app.export.missing_datastore_config`));
     const ds_store = createStore(ds_cfg.database, ds_cfg.store);
     const ds_keys = await idb_keys(ds_store);
     const entries: Record<string, unknown> = {};
@@ -28,7 +31,7 @@ const export_datastore_state = async (): Promise<ExportedAppState["datastore"]> 
 
 const export_nostr_keystore_state = async (): Promise<ExportedAppState["nostr_keystore"]> => {
     const nostr_cfg = nostr_keys.get_config();
-    if (!nostr_cfg) throw_err("error.app.export.missing_nostr_keystore_config");
+    if (!nostr_cfg) throw_err($ls(`error.app.export.missing_nostr_keystore_config`));
 
     const keys: ExportedAppState["nostr_keystore"]["keys"] = [];
     try {
@@ -81,9 +84,10 @@ export const export_app_state = async (): Promise<void> => {
             database: tangle_db_state
         };
         const ts = payload.exported_at.replace(/[:.]/g, "-");
-        download_json(payload, `radroots-app-state-${ts}.json`);
+        const filename_prefix = $ls(`common.radroots_studio_app_state_filename_prefix`);
+        download_json(payload, `${filename_prefix}-${ts}.json`);
     } catch (e) {
         handle_err(e, `export_app_state`);
-        await notif.alert(`Unable to export app state. Please try again.`);
+        await notif.alert(`${$ls(`error.backup.export_failure`)}`);
     }
 };

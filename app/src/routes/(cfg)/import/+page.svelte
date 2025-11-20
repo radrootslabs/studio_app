@@ -1,7 +1,6 @@
 <script lang="ts">
     import { goto } from "$app/navigation";
-    import { notif } from "$lib/utils/app";
-    import { route } from "$lib/utils/app/app";
+    import { notif, route } from "$lib/utils/app";
     import {
         import_app_state_from_file,
         validate_import_file,
@@ -9,6 +8,7 @@
     import { Fade, Glyph } from "@radroots/apps-lib";
     import { LogoCircle, SelectMenu } from "@radroots/apps-lib-pwa";
     import type { ExportedAppState } from "@radroots/apps-lib-pwa/types/app";
+    import { ls } from "$lib/utils/i18n";
     import { handle_err } from "@radroots/utils";
 
     let loading = $state(false);
@@ -43,7 +43,7 @@
         try {
             if (!current_file)
                 return void notif.alert(
-                    "error.configuration.import.no_file_chosen",
+                    `${$ls(`error.configuration.import.no_file_chosen`)}`,
                 );
             loading = true;
             const import_result =
@@ -54,7 +54,8 @@
             else if (import_result.pass === true)
                 return void (await goto(`/?ref=backup_imported`));
             await notif.alert(
-                import_result.message || "error.configuration.import.failure",
+                import_result.message ||
+                    `${$ls(`error.configuration.import.failure`)}`,
             );
         } catch (e) {
             handle_err(e, `submit`);
@@ -75,12 +76,12 @@
                     entries: [
                         {
                             value: "",
-                            label: "Choose Options",
+                            label: `${$ls(`common.choose_options`)}`,
                             disabled: true,
                         },
                         {
                             value: "back",
-                            label: "Go Back",
+                            label: `${$ls(`common.go_back`)}`,
                         },
                     ],
                 },
@@ -106,10 +107,10 @@
             class={`flex flex-col w-full px-1 gap-1 justify-start items-start`}
         >
             <p class={`font-sans font-[600] text-lg text-ly0-gl`}>
-                {`Import app state`}
+                {`${$ls(`common.import_app_state`)}`}
             </p>
             <p class={`font-sans font-[400] text-sm text-ly0-gl/80 max-w-xl`}>
-                {`Choose a JSON export created by this app to restore configuration, nostr keys, and database information.`}
+                {`${$ls(`notification.configuration.import_description`)}`}
             </p>
         </div>
         <div class={`flex flex-row w-full justify-center items-center`}>
@@ -136,7 +137,10 @@
                             }}
                         />
                         <p class={`font-sans font-[500] text-sm text-lime-600`}>
-                            {`The backup file is valid (version: ${current_file_validated.backup_version})`}
+                            {`${$ls(
+                                `notification.configuration.backup_file_valid`,
+                                { backup_version: current_file_validated.backup_version },
+                            )}`}
                         </p>
                     {:else}
                         <Glyph
@@ -147,7 +151,7 @@
                             }}
                         />
                         <p class={`font-sans font-[500] text-sm text-red-400`}>
-                            {`Not a valid backup file`}
+                            {`${$ls(`notification.configuration.backup_file_invalid`)}`}
                         </p>
                     {/if}
                 </Fade>
@@ -161,7 +165,7 @@
                         disabled={loading}
                         onclick={submit}
                     >
-                        {`Import`}
+                        {`${$ls(`common.import`)}`}
                         {#if loading}
                             <Glyph
                                 basis={{

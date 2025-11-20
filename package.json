@@ -6,8 +6,8 @@
     "build": "turbo build",
     "build:app": "turbo build --filter=app --filter=@radroots/*",
     "build:pkg": "turbo run build --filter=./packages/*",
-    "dev:lib": "turbo dev --filter=@radroots/* --concurrency 20",
-    "dev:app": "cd app && yarn dev"
+    "dev:app": "cd app && yarn dev",
+    "dev:pkg": "turbo dev --filter=@radroots/* --concurrency 20"
   },
   "devDependencies": {
     "turbo": "2.5.3",

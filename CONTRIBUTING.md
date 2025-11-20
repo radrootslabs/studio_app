@@ -72,8 +72,8 @@ yarn
 Configure local environment variables:
 ```bash
 echo 'PUBLIC_NOSTR_RELAY_DEFAULTS=ws://localhost:8080,ws://localhost:8081
-PUBLIC_RADROOTS_RELAY_URL=ws://localhost:8082
-PUBLIC_RADROOTS_URL=https://radroots.org
+VITE_PUBLIC_RADROOTS_RELAY=ws://localhost:8082
+VITE_PUBLIC_RADROOTS_API=https://radroots.org
 VITE_PUBLIC_KEYVAL_NAME=rad-roots-pwa-dev-v1
 VITE_PUBLIC_NDK_CACHE_NAME=rad-roots-pwa-dev-v1
 VITE_PUBLIC_NDK_CLIENT_NAME=rad roots' > app/.env.development
