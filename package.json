@@ -1,17 +1,29 @@
 {
-  "name": "tangle",
+  "name": "pwa",
   "private": true,
   "license": "GPL-3.0-or-later",
   "scripts": {
-    "build": "turbo build --filter=app",
-    "dev": "turbo dev --concurrency 11 --filter=@radroots/*",
-    "dev:ios": "pnpm run tauri ios dev 'iPhone 16'",
-    "tauri": "tauri"
+    "build": "turbo build",
+    "build:app": "turbo build --filter=app --filter=@radroots/*",
+    "build:pkg": "turbo run build --filter=./packages/*",
+    "dev:lib": "turbo dev --filter=@radroots/* --concurrency 20",
+    "dev:app": "cd app && yarn dev"
   },
   "devDependencies": {
-    "@tauri-apps/cli": "2.0.4",
-    "turbo": "^2.3.3",
-    "typescript": "^5.7.3"
+    "turbo": "2.5.3",
+    "typescript": "^5.8.3"
   },
-  "packageManager": "pnpm@9.12.1"
+  "engines": {
+    "node": ">=18"
+  },
+  "workspaces": {
+    "packages": [
+      "app",
+      "packages/*",
+      "../crates/*/bindings/ts",
+      "../crates/*/pkg"
+    ],
+    "nohoist": []
+  },
+  "packageManager": "yarn@1.22.22"
 }

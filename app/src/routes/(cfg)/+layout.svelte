@@ -1,5 +1,5 @@
 <script lang="ts">
-    import { app_splash, handle_err } from "@radroots/lib-app";
+    import { handle_err } from "@radroots/apps-lib";
     import { onMount } from "svelte";
     import type { LayoutProps } from "./$types";
 
@@ -9,8 +9,6 @@
         try {
         } catch (e) {
             handle_err(e, `on_mount`);
-        } finally {
-            app_splash.set(false);
         }
     });
 </script>

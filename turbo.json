@@ -1,12 +1,8 @@
 {
-  "$schema": "./node_modules/turbo/schema.json",
+  "$schema": "https://turborepo.com/schema.json",
   "ui": "tui",
-  "globalEnv": [],
   "tasks": {
     "build": {
-      "env": [
-        "RADROOTS_APP_PORT"
-      ],
       "dependsOn": [
         "^build"
       ],
@@ -15,9 +11,8 @@
         ".env*"
       ],
       "outputs": [
-        ".svelte-kit/**",
-        "dist",
-        "dist-js"
+        "dist/**",
+        ".svelte-kit/**"
       ]
     },
     "lint": {
@@ -33,6 +28,18 @@
     "dev": {
       "cache": false,
       "persistent": true
+    },
+    "app#build": {
+      "dependsOn": [
+        "@radroots/apps-lib#build",
+        "@radroots/apps-lib-pwa#build",
+        "@radroots/client#build",
+        "@radroots/geocoder#build",
+        "@radroots/locales#build",
+        "@radroots/themes#build",
+        "@radroots/utils#build",
+        "@radroots/utils-nostr#build"
+      ]
     }
   }
 }

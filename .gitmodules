@@ -1,72 +1,50 @@
-[submodule "packages/eslint"]
-	path = packages/eslint
-	url = git@github.com:72-61-64-72-6f-6f-74-73/packages-eslint.git
+[submodule "app/static/assets"]
+	path = app/static/assets
+	url = git@github.com:radrootslabs/static-assets.git
+	branch = app
+[submodule "app/static/phosphor-icons"]
+	path = app/static/phosphor-icons
+	url = git@github.com:radrootslabs/phosphor-icons.git
 	branch = master
-[submodule "packages/tsconfig"]
-	path = packages/tsconfig
-	url = git@github.com:72-61-64-72-6f-6f-74-73/packages-tsconfig.git
-	branch = master
-[submodule "packages/geocoder"]
-	path = packages/geocoder
-	url = git@github.com:72-61-64-72-6f-6f-74-73/packages-geocoder.git
-	branch = master
-[submodule "packages/client"]
-	path = packages/client
-	url = git@github.com:72-61-64-72-6f-6f-74-73/packages-client.git
-	branch = master
-[submodule "packages/models"]
-	path = packages/models
-	url = git@github.com:72-61-64-72-6f-6f-74-73/packages-models.git
-	branch = master
-[submodule "packages/theme"]
-	path = packages/theme
-	url = git@github.com:72-61-64-72-6f-6f-74-73/packages-theme.git
-	branch = master
-[submodule "packages/util"]
-	path = packages/util
-	url = git@github.com:72-61-64-72-6f-6f-74-73/packages-util.git
-	branch = master
-[submodule "packages/svelte-maplibre"]
-	path = packages/svelte-maplibre
-	url = git@github.com:72-61-64-72-6f-6f-74-73/svelte-maplibre.git
-	branch = master
-[submodule "packages/lib-app"]
-	path = packages/lib-app
-	url = git@github.com:72-61-64-72-6f-6f-74-73/packages-lib-app.git
+[submodule "app/static/stylesheets"]
+	path = app/static/stylesheets
+	url = git@github.com:radrootslabs/stylesheets.git
 	branch = master
 [submodule "app/static/geonames"]
 	path = app/static/geonames
-	url = git@github.com:72-61-64-72-6f-6f-74-73/geonames.git
+	url = git@github.com:radrootslabs/geonames.git
 	branch = database
-[submodule "app/static/phosphor-icons"]
-	path = app/static/phosphor-icons
-	url = git@github.com:72-61-64-72-6f-6f-74-73/phosphor-icons.git
-	branch = app
-[submodule "app/static/stylesheets"]
-	path = app/static/stylesheets
-	url = git@github.com:72-61-64-72-6f-6f-74-73/stylesheets.git
-	branch = master
 [submodule "app/static/webfonts"]
 	path = app/static/webfonts
-	url = git@github.com:72-61-64-72-6f-6f-74-73/webfonts.git
+	url = git@github.com:radrootslabs/webfonts.git
 	branch = app
-[submodule "app/static/assets"]
-	path = app/static/assets
-	url = git@github.com:72-61-64-72-6f-6f-74-73/assets.git
-	branch = app
-[submodule "packages/nostr-util"]
-	path = packages/nostr-util
-	url = git@github.com:72-61-64-72-6f-6f-74-73/nostr-util.git
-	branch = master
+[submodule "packages/client"]
+	path = packages/client
+	url = git@github.com:radrootslabs/packages-client.git
+[submodule "packages/geocoder"]
+	path = packages/geocoder
+	url = git@github.com:radrootslabs/packages-geocoder.git
 [submodule "packages/locales"]
 	path = packages/locales
-	url = git@github.com:72-61-64-72-6f-6f-74-73/packages-locales.git
-	branch = master
-[submodule "packages/nostr-geotags"]
-	path = packages/nostr-geotags
-	url = git@github.com:72-61-64-72-6f-6f-74-73/nostr-geotags.git
-	branch = main
-[submodule "crates/radroots-common"]
-	path = crates/radroots-common
-	url = git@github.com:72-61-64-72-6f-6f-74-73/crates-radroots-common.git
-	branch = master
+	url = git@github.com:radrootslabs/packages-locales.git
+[submodule "packages/utils-nostr"]
+	path = packages/utils-nostr
+	url = git@github.com:radrootslabs/packages-utils-nostr.git
+[submodule "packages/utils"]
+	path = packages/utils
+	url = git@github.com:radrootslabs/packages-utils.git
+[submodule "packages/themes"]
+	path = packages/themes
+	url = git@github.com:radrootslabs/packages-themes.git
+[submodule "packages/apps-lib-pwa"]
+	path = packages/apps-lib-pwa
+	url = git@github.com:radrootslabs/packages-apps-lib-pwa.git
+[submodule "packages/apps-lib"]
+	path = packages/apps-lib
+	url = git@github.com:radrootslabs/packages-apps-lib.git
+[submodule "packages/tsconfig"]
+	path = packages/tsconfig
+	url = git@github.com:radrootslabs/packages-tsconfig.git
+[submodule "packages/dev"]
+	path = packages/dev
+	url = git@github.com:radrootslabs/packages-dev.git
