@@ -6,6 +6,7 @@ export type NavigationRoute =
     | "/import"
     | "/profile"
     | "/profile/edit"
+    | "/settings"
     | "/setup"
 
 export function parse_route(route: string): NavigationRoute {
@@ -17,6 +18,7 @@ export function parse_route(route: string): NavigationRoute {
         case "/import":
         case "/profile":
         case "/profile/edit":
+        case "/settings":
         case "/setup":
             return route;
         default:
