@@ -259,15 +259,14 @@
                     return void (await notif.alert(
                         `${$ls(`error.configuration.profile.name_min_length`)}`,
                     ));
-                // nip-05 request
                 profile_name_loading = true;
-                const profile_req = await radroots.accounts_request({
+                const accounts_req = await radroots.accounts_request({
                     profile_name: profile_name_val,
                     secret_key: ks_nostr_key.secret_key,
                 });
-                if ("err" in profile_req)
+                if ("err" in accounts_req)
                     return void (await notif.alert(
-                        `${$ls(profile_req.err, {
+                        `${$ls(accounts_req.err, {
                             default: `${$ls(
                                 `error.client.http.request_failure`,
                             )}`,
@@ -283,13 +282,13 @@
                     ok: `${$ls(`common.yes`)}`,
                 });
                 if (!confirm) return;
-                const profile_create = await radroots.accounts_create({
-                    tok: profile_req.result,
+                const accounts_create = await radroots.accounts_create({
+                    tok: accounts_req.result,
                     secret_key: ks_nostr_key.secret_key,
                 });
-                if (`err` in profile_create)
+                if (`err` in accounts_create)
                     return void (await notif.alert(
-                        `${$ls(profile_create.err, {
+                        `${$ls(accounts_create.err, {
                             default: `${$ls(
                                 `error.client.http.request_failure`,
                             )}`,
@@ -297,7 +296,7 @@
                     ));
                 await datastore.update_obj<ConfigData>("cfg_data", {
                     nip05_request: true,
-                    nip05_result: profile_create.result,
+                    nip05_key: accounts_create.result,
                 });
             }
 
@@ -383,8 +382,9 @@
             if ("err" in ks_nostr_key) return handle_config_err(ks_nostr_key);
             const configure_result = await configure_device(
                 active_key,
-                ds_cfg_data.result.role || "personal",
-                ds_cfg_data.result.nostr_profile,
+                ds_cfg_data.result,
+                //ds_cfg_data.result.role || "personal",
+                //ds_cfg_data.result.nostr_profile,
             );
             if ("err" in configure_result) {
                 return void (await notif.alert(configure_result.err));
@@ -406,13 +406,16 @@
 
     const configure_device = async (
         public_key: string,
-        role: AppConfigRole,
-        profile_name?: string,
+        config_data: ConfigData,
     ): Promise<ResultPass | IError<string>> => {
         const nostr_profile_add = await db.nostr_profile_create({
             public_key,
-            name: profile_name ? profile_name : `${$ls(`common.default`)}`,
-            display_name: profile_name ? profile_name : undefined,
+            name: config_data.nostr_profile
+                ? config_data.nostr_profile
+                : `${$ls(`common.default`)}`,
+            display_name: config_data.nostr_profile
+                ? config_data.nostr_profile
+                : undefined,
         });
         if ("err" in nostr_profile_add)
             return err_msg(
@@ -439,12 +442,14 @@
                     )}`,
                 );
         }
-        await datastore.del_obj("cfg_data");
-        await datastore.set_obj<AppData>("app_data", {
+        const set_app_data = await datastore.set_obj<AppData>("app_data", {
             active_key: public_key,
-            role,
+            role: config_data.role || "personal",
             eula_date: new Date().toISOString(),
+            nip05_key: config_data.nip05_key,
         });
+        if ("err" in set_app_data) return err_msg(set_app_data);
+        await datastore.del_obj("cfg_data");
         return { pass: true };
     };
 </script>

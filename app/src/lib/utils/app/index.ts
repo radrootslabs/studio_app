@@ -1,4 +1,5 @@
 import { goto } from "$app/navigation";
+import { _env } from "$lib/_env";
 import { cfg_data, cfg_datastore_key_map, cfg_datastore_key_obj_map, cfg_datastore_key_param_map } from "$lib/utils/config";
 import { ls } from "$lib/utils/i18n";
 import { create_router, get_store, handle_err } from "@radroots/apps-lib";
@@ -29,7 +30,7 @@ export const geol = new WebGeolocation();
 export const geoc = new Geocoder();
 export const http = new WebHttp();
 export const notif = new WebNotifications();
-export const radroots = new WebClientRadroots();
+export const radroots = new WebClientRadroots(_env.RADROOTS_API);
 export const nostr_keys = new WebKeystoreNostr({
     database: "radroots-pwa-v1-keystore-nostr"
 });
@@ -88,4 +89,3 @@ export const message_callback = async (message: string, callback: CallbackPromis
     notif.alert(message);
     await callback();
 };
-

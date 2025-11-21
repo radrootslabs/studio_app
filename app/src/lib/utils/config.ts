@@ -61,13 +61,14 @@ export type ConfigData = {
     nostr_profile?: string;
     role?: AppConfigRole;
     nip05_request?: boolean;
-    nip05_result?: string;
+    nip05_key?: string;
 };
 
 export type AppData = {
     active_key: string;
     role: AppConfigRole;
     eula_date: string;
+    nip05_key?: string;
 };
 
 export type cfg_datastore_key_obj_map_types = {
