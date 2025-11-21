@@ -4,6 +4,8 @@ export type NavigationRoute =
     | "/farms/add"
     | "/farms/info"
     | "/import"
+    | "/profile"
+    | "/profile/edit"
     | "/setup"
 
 export function parse_route(route: string): NavigationRoute {
@@ -13,6 +15,8 @@ export function parse_route(route: string): NavigationRoute {
         case "/farms/add":
         case "/farms/info":
         case "/import":
+        case "/profile":
+        case "/profile/edit":
         case "/setup":
             return route;
         default:

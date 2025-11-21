@@ -18,13 +18,13 @@ export const lc_gui_confirm: LocalCallbackGuiConfirm = async (opts) => {
 export const lc_geocode: LocalCallbackGeocode = async (geoc_p) => {
     await geoc.connect();
     const geoc_res = await geoc.reverse(geoc_p);
-    if (`err` in geoc_res) throw_err(geoc_res);
+    if ("err" in geoc_res) throw_err(geoc_res);
     return geoc_res.results[0] || undefined;
 };
 
 export const lc_geop_current: LocalCallbackGeocodeCurrent = async () => {
     const resolve = await geol.current();
-    if (`err` in resolve) throw_err(resolve);
+    if ("err" in resolve) throw_err(resolve);
     return resolve;
 };
 
@@ -55,7 +55,7 @@ export const lc_photos_upload: LocalCallbackPhotosUpload = async ({ url, path })
         },
         data_bin,
     });
-    if (`err` in res) throw_err(res);
+    if ("err" in res) throw_err(res);
     else if (res.data && res.data.res_base && res.data.res_path && res.data.file_ext) {
         return {
             base_url: res.data.res_base,

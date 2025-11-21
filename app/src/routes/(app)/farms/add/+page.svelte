@@ -50,7 +50,7 @@
                     JSON.stringify(farm_location_set, null, 4),
                     `farm_location_set`,
                 );
-                if (`err` in farm_location_set) throw_err(farm_location_set);
+                if ("err" in farm_location_set) throw_err(farm_location_set);
                 await route(`/farms`);
             } catch (e) {
                 handle_err(e, `on_submit`);

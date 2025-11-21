@@ -5,7 +5,7 @@
     import type {
         FarmExtended,
         IViewFarmsData,
-    } from "@radroots/apps-lib-pwa/types/views/farm";
+    } from "@radroots/apps-lib-pwa/types/views/farms";
     import { onMount } from "svelte";
 
     type LoadData = IViewFarmsData | undefined;

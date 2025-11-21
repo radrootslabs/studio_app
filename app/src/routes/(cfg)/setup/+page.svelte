@@ -197,7 +197,7 @@
 
     const create_nostr_key = async (): Promise<void> => {
         const keys_nostr_gen = await nostr_keys.generate();
-        if (`err` in keys_nostr_gen) return handle_config_err();
+        if ("err" in keys_nostr_gen) return handle_config_err();
         await datastore.update_obj<ConfigData>("cfg_data", {
             nostr_public_key: keys_nostr_gen.public_key,
         });
@@ -286,7 +286,7 @@
                     tok: accounts_req.result,
                     secret_key: ks_nostr_key.secret_key,
                 });
-                if (`err` in accounts_create)
+                if ("err" in accounts_create)
                     return void (await notif.alert(
                         `${$ls(accounts_create.err, {
                             default: `${$ls(
