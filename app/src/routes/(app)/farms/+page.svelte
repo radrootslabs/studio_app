@@ -6,6 +6,7 @@
         FarmExtended,
         IViewFarmsData,
     } from "@radroots/apps-lib-pwa/types/views/farms";
+    import { gcs_to_location_basis } from "@radroots/utils";
     import { onMount } from "svelte";
 
     type LoadData = IViewFarmsData | undefined;
@@ -19,11 +20,9 @@
     const load_data = async (): Promise<LoadData> => {
         try {
             const farms = await db.farm_find_many();
-            console.log(JSON.stringify(farms, null, 4), `farms`);
             if ("err" in farms) return undefined;
 
             const list: FarmExtended[] = [];
-
             for (const farm of farms.results) {
                 const farm_location = await db.location_gcs_find_many({
                     rel: {
@@ -32,16 +31,10 @@
                         },
                     },
                 });
-                console.log(
-                    JSON.stringify(farm_location, null, 4),
-                    `farm_location`,
-                );
                 if ("err" in farm_location) continue;
                 list.push({
                     farm,
-                    //location: location_gcs_to_location_basis(
-                    //    farm_location.results[0],
-                    //),
+                    location: gcs_to_location_basis(farm_location.results[0]),
                 });
             }
 

@@ -17,6 +17,7 @@
 3. Source Code
 - Keep code deterministic and reproducible.
 - Do not add source code comments.
+- Single-line if statements must not use braces.
 - Anchor comments are allowed only when they start with @ (e.g. // @todo).
 - /* */ blocks are allowed only to disable features during development and must not include descriptive text.
 - <!-- --> HTML blocks are allowed only to disable features during development or compiler/lint suppression (e.g. <!-- svelte-ignore ... -->).
@@ -26,6 +27,7 @@
 - Put shared or generalizable code in packages/.
 - Apps should rely on packages/ for shared utilities.
 - Treat @radroots/*-bindings as generated from .rs crates; do not edit or format their .ts outputs. If issues arise, change upstream .rs or report the error instead.
+- Every class must implement a same-name interface prefixed with I; all public methods must be declared on the interface, and method return types are required for all class methods.
 
 1. Architecture
 - Prefer pure functions.

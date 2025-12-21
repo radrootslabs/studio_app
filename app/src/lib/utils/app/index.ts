@@ -19,6 +19,10 @@ import type { NavigationRoute } from "./routes";
 
 const ls_val = get_store(ls);
 
+declare const __APP_GIT_HASH__: string;
+declare const __APP_NAME__: string;
+declare const __APP_VERSION__: string;
+
 export const datastore = new WebDatastore(
     cfg_datastore_key_map,
     cfg_datastore_key_param_map,
@@ -30,7 +34,11 @@ export const datastore = new WebDatastore(
 export const fs = new WebFs();
 export const geol = new WebGeolocation();
 export const geoc = new Geocoder();
-export const http = new WebHttp();
+export const http = new WebHttp({
+    app_name: __APP_NAME__,
+    app_version: __APP_VERSION__,
+    app_hash: __APP_GIT_HASH__
+});
 export const notif = new WebNotifications();
 export const radroots = new WebClientRadroots(_env.RADROOTS_API);
 export const nostr_keys = new WebKeystoreNostr({
