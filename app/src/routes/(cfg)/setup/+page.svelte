@@ -75,7 +75,7 @@
 
     let profile_name_val = $state(``);
     let profile_name_valid = $state(false);
-    let profile_name_nip05 = $state(false);
+    let profile_name_nip05 = $state(true);
     let profile_name_loading = $state(false);
 
     let is_eula_scrolled = $state(false);

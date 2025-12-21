@@ -1,5 +1,6 @@
 <script lang="ts">
     import { dev, version as kit_version } from "$app/environment";
+    import { page } from "$app/state";
     import { db, geoc } from "$lib/utils/app";
     import { app_cfg } from "$lib/utils/app/config";
     import {
@@ -24,6 +25,7 @@
     import { app_lo } from "@radroots/apps-lib-pwa/stores/app";
     import { cfg_app } from "@radroots/apps-lib-pwa/utils/app";
     import { parse_theme_key, parse_theme_mode } from "@radroots/themes";
+    import { str_cap_words } from "@radroots/utils";
     import "css-paint-polyfill";
     import { onMount } from "svelte";
     import "../app.css";
@@ -88,9 +90,16 @@
         await db.init();
         await geoc.connect();
     });
+
+    const format_title = (title: string): string => {
+        return str_cap_words(title.replaceAll(`/`, ` `));
+    };
+
+    const head_title = $derived(format_title(page.url.pathname));
 </script>
 
 <svelte:head>
+    <title>{`${head_title || "Home"} | Rad Roots`}</title>
     {#each head_meta_tags as meta_tag (meta_tag.name)}
         <meta name={meta_tag.name} content={meta_tag.content} />
     {/each}

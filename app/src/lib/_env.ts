@@ -4,6 +4,9 @@ if (!DEFAULT_RELAYS || typeof DEFAULT_RELAYS !== 'string') throw new Error('Miss
 const RADROOTS_API = import.meta.env.VITE_PUBLIC_RADROOTS_API;
 if (!RADROOTS_API || typeof RADROOTS_API !== 'string') throw new Error('Missing env var: VITE_PUBLIC_RADROOTS_API');
 
+const RADROOTS_MEDIA = import.meta.env.VITE_PUBLIC_RADROOTS_MEDIA;
+if (!RADROOTS_MEDIA || typeof RADROOTS_MEDIA !== 'string') throw new Error('Missing env var: VITE_PUBLIC_RADROOTS_MEDIA');
+
 const KEYVAL_NAME = import.meta.env.VITE_PUBLIC_KEYVAL_NAME;
 if (!KEYVAL_NAME || typeof KEYVAL_NAME !== 'string') throw new Error('Missing env var: VITE_PUBLIC_KEYVAL_NAME');
 
@@ -37,5 +40,6 @@ export const _env = {
   PLATFORM_DESCRIPTION,
   PLATFORM_NAME,
   RADROOTS_API,
+  RADROOTS_MEDIA,
   RADROOTS_RELAY,
 } as const;

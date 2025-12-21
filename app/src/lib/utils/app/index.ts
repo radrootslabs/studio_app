@@ -17,6 +17,8 @@ import type { CallbackPromise } from "@radroots/utils";
 import { reset_sql_cipher } from "./cipher";
 import type { NavigationRoute } from "./routes";
 
+const ls_val = get_store(ls);
+
 export const datastore = new WebDatastore(
     cfg_datastore_key_map,
     cfg_datastore_key_param_map,
@@ -69,9 +71,8 @@ export const restart = async (opts?: {
 
 export const reset = async (): Promise<void> => {
     try {
-        const $ls = get_store(ls);
         const confirm = await notif.confirm({
-            message: `${$ls(`notification.device.reset`)}. ${$ls(`common.this_action_is_irreversible`)}. ${$ls(`common.do_you_want_to_continue_q`)}`
+            message: `${ls_val(`notification.device.reset`)}. ${ls_val(`common.this_action_is_irreversible`)}. ${ls_val(`common.do_you_want_to_continue_q`)}`
         });
         if (!confirm) return;
         await nostr_keys.reset();
@@ -79,7 +80,7 @@ export const reset = async (): Promise<void> => {
         await reset_sql_cipher(db.get_store_key());
         await db.reinit();
         goto(`/`);
-        app_notify.set(`${$ls(`notification.device.reset_complete`)}`);
+        app_notify.set(`${ls_val(`notification.device.reset_complete`)}`);
     } catch (e) {
         handle_err(e, `reset`);
     }
