@@ -30,7 +30,7 @@ export const lc_geop_current: LocalCallbackGeocodeCurrent = async () => {
 
 export const lc_photos_add: LocalCallbackPhotosAddMultiple = async () => {
     const photo_paths_open = await notif.open_photos();
-    if (!photo_paths_open) return;
+    if (!photo_paths_open || "err" in photo_paths_open) return;
     if (photo_paths_open.results) return photo_paths_open.results;
 };
 

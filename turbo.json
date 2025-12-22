@@ -34,12 +34,114 @@
         "@radroots/apps-lib#build",
         "@radroots/apps-lib-pwa#build",
         "@radroots/client#build",
+        "@radroots/events-bindings#build",
+        "@radroots/geo#build",
         "@radroots/geocoder#build",
+        "@radroots/http#build",
+        "@radroots/locales#build",
+        "@radroots/tangle-schema-bindings#build",
+        "@radroots/themes#build",
+        "@radroots/types-bindings#build",
+        "@radroots/utils#build",
+        "@radroots/utils-nostr#build"
+      ]
+    },
+    "@radroots/apps-lib#build": {
+      "dependsOn": [
+        "@radroots/geo#build",
         "@radroots/locales#build",
         "@radroots/themes#build",
         "@radroots/utils#build",
         "@radroots/utils-nostr#build"
       ]
+    },
+    "@radroots/apps-lib-pwa#build": {
+      "dependsOn": [
+        "@radroots/apps-lib#build",
+        "@radroots/client#build",
+        "@radroots/events-bindings#build",
+        "@radroots/geo#build",
+        "@radroots/locales#build",
+        "@radroots/tangle-schema-bindings#build",
+        "@radroots/themes#build",
+        "@radroots/utils#build",
+        "@radroots/utils-nostr#build"
+      ]
+    },
+    "@radroots/client#build": {
+      "dependsOn": [
+        "@radroots/geo#build",
+        "@radroots/http#build",
+        "@radroots/tangle-schema-bindings#build",
+        "@radroots/tangle-sql-wasm#build",
+        "@radroots/utils#build",
+        "@radroots/utils-nostr#build"
+      ]
+    },
+    "@radroots/geo#build": {
+      "dependsOn": [
+        "@radroots/tangle-schema-bindings#build",
+        "@radroots/utils#build"
+      ]
+    },
+    "@radroots/geocoder#build": {
+      "dependsOn": [
+        "@radroots/geo#build",
+        "@radroots/types-bindings#build",
+        "@radroots/utils#build"
+      ]
+    },
+    "@radroots/http#build": {
+      "dependsOn": [
+        "@radroots/types-bindings#build",
+        "@radroots/utils#build"
+      ]
+    },
+    "@radroots/locales#build": {
+      "dependsOn": []
+    },
+    "@radroots/themes#build": {
+      "dependsOn": []
+    },
+    "@radroots/utils#build": {
+      "dependsOn": [
+        "@radroots/types-bindings#build"
+      ]
+    },
+    "@radroots/utils-nostr#build": {
+      "dependsOn": [
+        "@radroots/events-bindings#build",
+        "@radroots/trade-bindings#build",
+        "@radroots/utils#build"
+      ]
+    },
+    "@radroots/core-bindings#build": {
+      "dependsOn": []
+    },
+    "@radroots/events-bindings#build": {
+      "dependsOn": [
+        "@radroots/core-bindings#build"
+      ]
+    },
+    "@radroots/events-indexed-bindings#build": {
+      "dependsOn": []
+    },
+    "@radroots/tangle-schema-bindings#build": {
+      "dependsOn": [
+        "@radroots/types-bindings#build"
+      ]
+    },
+    "@radroots/tangle-sql-wasm#build": {
+      "dependsOn": []
+    },
+    "@radroots/trade-bindings#build": {
+      "dependsOn": [
+        "@radroots/core-bindings#build",
+        "@radroots/events-bindings#build"
+      ]
+    },
+    "@radroots/types-bindings#build": {
+      "dependsOn": []
     }
   }
 }

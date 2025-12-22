@@ -7,7 +7,7 @@ import { app_notify } from "@radroots/apps-lib-pwa/stores/app";
 import { WebDatastore } from "@radroots/client/datastore";
 import { WebFs } from "@radroots/client/fs";
 import { WebGeolocation } from "@radroots/client/geolocation";
-import { WebHttp } from "@radroots/client/http";
+import { WebHttp } from "@radroots/http";
 import { WebKeystoreNostr } from "@radroots/client/keystore";
 import { WebNotifications } from "@radroots/client/notifications";
 import { WebClientRadroots } from "@radroots/client/radroots";
@@ -28,7 +28,8 @@ export const datastore = new WebDatastore(
     cfg_datastore_key_param_map,
     cfg_datastore_key_obj_map,
     {
-        database: "radroots-pwa-v1-datastore"
+        database: "radroots-pwa-v1",
+        store: "radroots.app.datastore"
     }
 );
 export const fs = new WebFs();
@@ -42,11 +43,12 @@ export const http = new WebHttp({
 export const notif = new WebNotifications();
 export const radroots = new WebClientRadroots(_env.RADROOTS_API);
 export const nostr_keys = new WebKeystoreNostr({
-    database: "radroots-pwa-v1-keystore-nostr"
+    database: "radroots-pwa-v1",
+    store: "radroots.security.keystore.nostr"
 });
 
 export const db = new WebTangleDatabase({
-    cipher: cfg_data.sql_cipher
+    cipher_config: cfg_data.sql_cipher
 });
 
 let db_i: Promise<WebTangleDatabase> | null = null;

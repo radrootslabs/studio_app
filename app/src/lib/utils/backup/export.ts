@@ -56,6 +56,7 @@ const export_tangle_db_state = async (): Promise<ExportedAppState["database"]> =
     await db.init();
     const store_key = db.get_store_key();
     const backup = await db.export_backup();
+    if ("err" in backup) throw_err(backup);
     return { store_key, backup };
 };
 

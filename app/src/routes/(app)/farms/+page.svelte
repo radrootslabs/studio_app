@@ -6,7 +6,7 @@
         FarmExtended,
         IViewFarmsData,
     } from "@radroots/apps-lib-pwa/types/views/farms";
-    import { gcs_to_location_basis } from "@radroots/utils";
+    import { gcs_to_location_basis } from "@radroots/geo";
     import { onMount } from "svelte";
 
     type LoadData = IViewFarmsData | undefined;

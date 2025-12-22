@@ -1,7 +1,8 @@
 import { handle_err, } from "@radroots/apps-lib";
 import type { ILocationGcsFields } from "@radroots/tangle-schema-bindings";
 import type { IError } from "@radroots/types-bindings";
-import { err_msg, location_geohash, type GeocoderReverseResult, type GeolocationPoint } from "@radroots/utils";
+import { location_geohash, type GeocoderReverseResult, type GeolocationPoint } from "@radroots/geo";
+import { err_msg } from "@radroots/utils";
 import { geoc } from "../app";
 
 export const geolocation_fields_from_point = async (opts: {

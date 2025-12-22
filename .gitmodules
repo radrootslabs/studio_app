@@ -18,33 +18,6 @@
 	path = app/static/webfonts
 	url = git@github.com:radrootslabs/webfonts.git
 	branch = app
-[submodule "packages/client"]
-	path = packages/client
-	url = git@github.com:radrootslabs/packages-client.git
-[submodule "packages/geocoder"]
-	path = packages/geocoder
-	url = git@github.com:radrootslabs/packages-geocoder.git
-[submodule "packages/locales"]
-	path = packages/locales
-	url = git@github.com:radrootslabs/packages-locales.git
-[submodule "packages/utils-nostr"]
-	path = packages/utils-nostr
-	url = git@github.com:radrootslabs/packages-utils-nostr.git
-[submodule "packages/utils"]
-	path = packages/utils
-	url = git@github.com:radrootslabs/packages-utils.git
-[submodule "packages/themes"]
-	path = packages/themes
-	url = git@github.com:radrootslabs/packages-themes.git
-[submodule "packages/apps-lib-pwa"]
-	path = packages/apps-lib-pwa
-	url = git@github.com:radrootslabs/packages-apps-lib-pwa.git
-[submodule "packages/apps-lib"]
-	path = packages/apps-lib
-	url = git@github.com:radrootslabs/packages-apps-lib.git
-[submodule "packages/tsconfig"]
-	path = packages/tsconfig
-	url = git@github.com:radrootslabs/packages-tsconfig.git
-[submodule "packages/dev"]
-	path = packages/dev
-	url = git@github.com:radrootslabs/packages-dev.git
+[submodule "packages"]
+	path = packages
+	url = git@github.com:radrootslabs/packages.git
