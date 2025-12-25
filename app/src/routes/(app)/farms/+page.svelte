@@ -24,17 +24,17 @@
 
             const list: FarmExtended[] = [];
             for (const farm of farms.results) {
-                const farm_location = await db.location_gcs_find_many({
+                const farm_locations = await db.location_gcs_find_many({
                     rel: {
                         on_farm: {
                             id: farm.id,
                         },
                     },
                 });
-                if ("err" in farm_location) continue;
+                if ("err" in farm_locations) continue;
                 list.push({
                     farm,
-                    location: gcs_to_location_basis(farm_location.results[0]),
+                    location: gcs_to_location_basis(farm_locations.results[0]),
                 });
             }
 

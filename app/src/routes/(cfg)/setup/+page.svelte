@@ -16,7 +16,6 @@
     } from "$lib/utils/config";
     import { ls } from "$lib/utils/i18n";
     import { get_default_nostr_relays } from "$lib/utils/nostr/lib";
-    import { NDKPrivateKeySigner } from "@nostr-dev-kit/ndk";
     import {
         carousel_dec,
         carousel_inc,
@@ -40,6 +39,7 @@
     } from "@radroots/apps-lib-pwa";
     import { app_lo, app_loading } from "@radroots/apps-lib-pwa/stores/app";
     import type { AppConfigRole } from "@radroots/apps-lib-pwa/types/app";
+    import { nostr_secret_key_validate } from "@radroots/nostr";
     import type { IError } from "@radroots/types-bindings";
     import {
         err_msg,
@@ -220,8 +220,14 @@
                         value: `${$ls(`common.nostr_key`)}`.toLowerCase(),
                     })}`,
                 ));
-            const key_add_signer = new NDKPrivateKeySigner(nostr_key_add_val);
-            await add_nostr_key(key_add_signer.privateKey);
+            const secret_key = nostr_secret_key_validate(nostr_key_add_val);
+            if (!secret_key)
+                return void (await notif.alert(
+                    `${$ls(`icu.not_a_valid_*`, {
+                        value: `${$ls(`common.nostr_key`)}`.toLowerCase(),
+                    })}`,
+                ));
+            await add_nostr_key(secret_key);
             nostr_key_add_val = ``;
             handle_view(`cfg_profile`);
         } catch (e) {
@@ -454,7 +460,7 @@
     };
 </script>
 
-{#if view === "cfg_key" && $casl_i === 1}
+{#if view === "cfg_key" && $casl_i > 0}
     <Fade basis={{ classes: `z-10 absolute top-8 right-6` }}>
         <SelectMenu
             basis={{

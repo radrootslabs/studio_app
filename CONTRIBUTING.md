@@ -75,8 +75,7 @@ echo 'VITE_PUBLIC_DEFAULT_RELAYS=ws://localhost:8080,ws://localhost:8081
 VITE_PUBLIC_RADROOTS_RELAY=ws://localhost:8082
 VITE_PUBLIC_RADROOTS_API=https://radroots.org
 VITE_PUBLIC_KEYVAL_NAME=rad-roots-pwa-dev-v1
-VITE_PUBLIC_NDK_CACHE=rad-roots-pwa-dev-v1
-VITE_PUBLIC_NDK_CLIENT=rad roots' > app/.env.development
+VITE_PUBLIC_NOSTR_CLIENT=»-`-,- rad roots' > app/.env.development
 ```
 
 Build the application:

@@ -1,11 +1,13 @@
 <script lang="ts">
     import { db, nostr_keys } from "$lib/utils/app";
-    import { ndk, ndk_init, ndk_user } from "@radroots/apps-lib";
+    import { nostr_login_nip01 } from "@radroots/apps-nostr";
+    import { nostr_context_default, nostr_relays_clear, nostr_relays_open } from "@radroots/nostr";
     import { handle_err, throw_err } from "@radroots/utils";
     import { onMount } from "svelte";
     import type { LayoutProps } from "./$types";
 
     let { data, children }: LayoutProps = $props();
+    const nostr_context = nostr_context_default();
 
     onMount(async () => {
         try {
@@ -34,14 +36,11 @@
             },
         });
         if ("err" in nostr_relays) throw_err(nostr_relays);
-        $ndk.explicitRelayUrls = [];
-        for (const { url } of nostr_relays.results) $ndk.addExplicitRelay(url);
-        await $ndk.connect().then(() => {
-            console.log(`[tangle] ndk connected`);
-        });
-        const ndk_user_init = await ndk_init($ndk, nostr_key.secret_key);
-        $ndk_user = ndk_user_init;
-        $ndk_user.ndk = $ndk;
+        const relay_urls = nostr_relays.results.map(({ url }) => url);
+        nostr_relays_clear(nostr_context);
+        if (relay_urls.length) nostr_relays_open(nostr_context, relay_urls);
+        if (relay_urls.length) console.log(`[tangle] nostr relays opened`);
+        nostr_login_nip01(nostr_key.secret_key);
         //nostr_ndk_configured.set(true);
     };
 </script>

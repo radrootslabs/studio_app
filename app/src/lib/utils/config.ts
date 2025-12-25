@@ -1,7 +1,7 @@
 import { _env } from "$lib/_env";
 import type { AppConfigRole } from "@radroots/apps-lib-pwa/types/app";
 import { root_symbol } from "@radroots/utils";
-import type { NostrEventTagClient } from "@radroots/utils-nostr";
+import type { NostrEventTagClient } from "@radroots/nostr";
 
 export const cfg_data = {
     sql_cipher: {

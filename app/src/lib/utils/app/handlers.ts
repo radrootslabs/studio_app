@@ -3,6 +3,20 @@ import { parse_theme_mode } from "@radroots/themes";
 import { throw_err } from "@radroots/utils";
 import { fs, geoc, geol, http, notif } from ".";
 
+type PhotoUploadResponse = {
+    res_base: string;
+    res_path: string;
+    file_ext: string;
+};
+
+const is_photo_upload_response = (value: unknown): value is PhotoUploadResponse => {
+    if (!value || typeof value !== "object") return false;
+    const record = value as Record<string, unknown>;
+    return typeof record.res_base === "string"
+        && typeof record.res_path === "string"
+        && typeof record.file_ext === "string";
+};
+
 export const lc_gui_alert: LocalCallbackGuiAlert = async (message) => {
     return await notif.alert(message);
 };
@@ -56,7 +70,7 @@ export const lc_photos_upload: LocalCallbackPhotosUpload = async ({ url, path })
         data_bin,
     });
     if ("err" in res) throw_err(res);
-    else if (res.data && res.data.res_base && res.data.res_path && res.data.file_ext) {
+    else if (is_photo_upload_response(res.data)) {
         return {
             base_url: res.data.res_base,
             file_hash: res.data.res_path,

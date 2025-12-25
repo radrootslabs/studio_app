@@ -4,10 +4,10 @@
   "license": "GPL-3.0-or-later",
   "scripts": {
     "build": "turbo build",
-    "build:app": "turbo build --filter=app --filter=@radroots/*",
-    "build:pkg": "turbo run build --filter=./packages/*",
-    "dev:app": "cd app && yarn dev",
-    "dev:pkg": "turbo dev --filter=@radroots/* --concurrency 20"
+    "build:app": "turbo build --filter=app",
+    "build:packages": "turbo run build --filter=./packages/*",
+    "dev:app": "turbo dev --filter=app",
+    "dev:packages": "turbo dev --filter=./packages/* --concurrency 20"
   },
   "devDependencies": {
     "turbo": "2.5.3",

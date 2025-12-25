@@ -1,7 +1,8 @@
 <script lang="ts">
     import { db, fs, nostr_keys, notif, radroots, route } from "$lib/utils/app";
     import { ls } from "$lib/utils/i18n";
-    import { ndk_user, parse_file_path } from "@radroots/apps-lib";
+    import { parse_file_path } from "@radroots/apps-lib";
+    import { nostr_pubkey } from "@radroots/apps-nostr";
     import { Profile } from "@radroots/apps-lib-pwa";
     import type { IViewProfileData } from "@radroots/apps-lib-pwa/types/views/profile";
     import { handle_err, throw_err } from "@radroots/utils";
@@ -28,9 +29,11 @@
     };
 
     const load_data = async (): Promise<IViewProfileData | undefined> => {
+        const pubkey_val = $nostr_pubkey;
+        if (!pubkey_val) return undefined;
         const nostr_profile = await db.nostr_profile_find_one({
             on: {
-                public_key: $ndk_user?.pubkey,
+                public_key: pubkey_val,
             },
         });
         if ("err" in nostr_profile) throw_err(nostr_profile);
@@ -47,9 +50,11 @@
         loading_photo_upload_open,
         on_destroy: async () => {
             try {
+                const pubkey_val = $nostr_pubkey;
+                if (!pubkey_val) return;
                 const tb_nostrprofile = await db.nostr_profile_find_one({
                     on: {
-                        public_key: $ndk_user?.pubkey,
+                        public_key: pubkey_val,
                     },
                 });
                 if ("err" in tb_nostrprofile) throw_err(tb_nostrprofile); // @todo
@@ -62,9 +67,10 @@
         },
         on_handle_back: async ({ is_photo_existing }) => {
             try {
-                if (!photo_path || !$ndk_user?.pubkey)
+                const pubkey_val = $nostr_pubkey;
+                if (!photo_path || !pubkey_val)
                     return void (await route(`/`));
-                const nostr_key = await nostr_keys.read($ndk_user.pubkey);
+                const nostr_key = await nostr_keys.read(pubkey_val);
                 if ("err" in nostr_key) throw_err(nostr_key);
                 /*if (photo_path) {
                     const confirm = await notif.confirm({
@@ -140,7 +146,7 @@
                 if ("err" in media_image) throw_err(media_image);
 
                 const tb_nostr_profile_update = await db.nostr_profile_update({
-                    on: { public_key: $ndk_user.pubkey },
+                    on: { public_key: pubkey_val },
                     fields: {
                         picture: `${media_upload.base_url}/${media_upload.hash}.${media_upload.ext}`,
                     },
@@ -199,8 +205,10 @@
                     });
                     if (!confirm) return;
                 }
+                const pubkey_val = $nostr_pubkey;
+                if (!pubkey_val) return;
                 await route(`/profile/edit`, [
-                    [`key_nostr`, $ndk_user?.pubkey],
+                    [`key_nostr`, pubkey_val],
                     [`field`, field],
                 ]);
             } catch (e) {

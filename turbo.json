@@ -33,17 +33,18 @@
       "dependsOn": [
         "@radroots/apps-lib#build",
         "@radroots/apps-lib-pwa#build",
+        "@radroots/apps-nostr#build",
         "@radroots/client#build",
         "@radroots/events-bindings#build",
         "@radroots/geo#build",
         "@radroots/geocoder#build",
         "@radroots/http#build",
         "@radroots/locales#build",
+        "@radroots/nostr#build",
         "@radroots/tangle-schema-bindings#build",
         "@radroots/themes#build",
         "@radroots/types-bindings#build",
-        "@radroots/utils#build",
-        "@radroots/utils-nostr#build"
+        "@radroots/utils#build"
       ]
     },
     "@radroots/apps-lib#build": {
@@ -51,8 +52,7 @@
         "@radroots/geo#build",
         "@radroots/locales#build",
         "@radroots/themes#build",
-        "@radroots/utils#build",
-        "@radroots/utils-nostr#build"
+        "@radroots/utils#build"
       ]
     },
     "@radroots/apps-lib-pwa#build": {
@@ -64,18 +64,18 @@
         "@radroots/locales#build",
         "@radroots/tangle-schema-bindings#build",
         "@radroots/themes#build",
-        "@radroots/utils#build",
-        "@radroots/utils-nostr#build"
+        "@radroots/utils#build"
       ]
     },
     "@radroots/client#build": {
       "dependsOn": [
         "@radroots/geo#build",
         "@radroots/http#build",
+        "@radroots/nostr#build",
         "@radroots/tangle-schema-bindings#build",
         "@radroots/tangle-sql-wasm#build",
-        "@radroots/utils#build",
-        "@radroots/utils-nostr#build"
+        "@radroots/types-bindings#build",
+        "@radroots/utils#build"
       ]
     },
     "@radroots/geo#build": {
@@ -108,9 +108,33 @@
         "@radroots/types-bindings#build"
       ]
     },
-    "@radroots/utils-nostr#build": {
+    "@radroots/nostr#build": {
       "dependsOn": [
+        "@radroots/core-bindings#build",
+        "@radroots/events-codec-wasm#build",
         "@radroots/events-bindings#build",
+        "@radroots/trade-bindings#build",
+        "@radroots/utils#build",
+        "@welshman/net#build",
+        "@welshman/signer#build",
+        "@welshman/util#build"
+      ]
+    },
+    "@radroots/apps-nostr#build": {
+      "dependsOn": [
+        "@radroots/nostr#build",
+        "@welshman/app#build",
+        "@welshman/net#build",
+        "@welshman/signer#build",
+        "@welshman/store#build"
+      ]
+    },
+    "@radroots/apps-lib-market#build": {
+      "dependsOn": [
+        "@radroots/apps-lib#build",
+        "@radroots/core-bindings#build",
+        "@radroots/events-bindings#build",
+        "@radroots/events-indexed-bindings#build",
         "@radroots/trade-bindings#build",
         "@radroots/utils#build"
       ]
@@ -122,6 +146,9 @@
       "dependsOn": [
         "@radroots/core-bindings#build"
       ]
+    },
+    "@radroots/events-codec-wasm#build": {
+      "dependsOn": []
     },
     "@radroots/events-indexed-bindings#build": {
       "dependsOn": []
