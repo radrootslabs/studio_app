@@ -1,7 +1,11 @@
 <script lang="ts">
-    import { db_init, nostr_keys } from "$lib/utils/app";
+    import { app_init, db, nostr_keys } from "$lib/utils/app";
     import { nostr_login_nip01 } from "@radroots/apps-nostr";
-    import { nostr_context_default, nostr_relays_clear, nostr_relays_open } from "@radroots/nostr";
+    import {
+        nostr_context_default,
+        nostr_relays_clear,
+        nostr_relays_open,
+    } from "@radroots/nostr";
     import { handle_err, throw_err } from "@radroots/utils";
     import { onMount } from "svelte";
     import type { LayoutProps } from "./$types";
@@ -11,7 +15,7 @@
 
     onMount(async () => {
         try {
-            await init();
+            await app_init();
             await nostr_init();
         } catch (e) {
             handle_err(e, `on_mount`);
@@ -19,10 +23,6 @@
             //app_splash.set(false);
         }
     });
-
-    const init = async (): Promise<void> => {
-        await db_init();
-    };
 
     const nostr_init = async (): Promise<void> => {
         if (!data.public_key) throw_err(`*-key_nostr`);

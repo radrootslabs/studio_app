@@ -1,13 +1,11 @@
 import { _env } from "$lib/_env";
 import type { AppConfigRole } from "@radroots/apps-lib-pwa/types/app";
+import { IDB_CONFIG_CIPHER_SQL } from "@radroots/client/idb";
 import { root_symbol } from "@radroots/utils";
 import type { NostrEventTagClient } from "@radroots/nostr";
 
 export const cfg_data = {
-    sql_cipher: {
-        database: "radroots-pwa-v1",
-        store: "radroots.security.cipher.sql",
-    }
+    sql_cipher: IDB_CONFIG_CIPHER_SQL
 } as const;
 
 export const _cfg = {

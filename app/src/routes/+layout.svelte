@@ -1,7 +1,8 @@
 <script lang="ts">
     import { dev, version as kit_version } from "$app/environment";
+    import { resolve } from "$app/paths";
     import { page } from "$app/state";
-    import { db_init, geoc_init } from "$lib/utils/app";
+    import { app_init } from "$lib/utils/app";
     import { app_cfg } from "$lib/utils/app/config";
     import {
         lc_color_mode,
@@ -36,6 +37,7 @@
         name: string;
         content: string;
     };
+
 
     const HEAD_META_TAGS: MetaTag[] = [
         {
@@ -92,17 +94,30 @@
     const register_service_worker = async (): Promise<void> => {
         if (dev) return;
         if (!("serviceWorker" in navigator)) return;
+        const service_worker_root = resolve("/");
+        const service_worker_path = service_worker_root.endsWith("/")
+            ? `${service_worker_root}service-worker.js`
+            : `${service_worker_root}/service-worker.js`;
         try {
-            await navigator.serviceWorker.register("/service-worker.js");
+            await navigator.serviceWorker.register(service_worker_path);
             await navigator.serviceWorker.ready;
         } catch {
             return;
         }
     };
 
+    const unregister_service_workers = async (): Promise<void> => {
+        if (!("serviceWorker" in navigator)) return;
+        const registrations = await navigator.serviceWorker.getRegistrations();
+        await Promise.all(registrations.map((registration) => registration.unregister()));
+        if (!("caches" in globalThis)) return;
+        const cache_names = await caches.keys();
+        await Promise.all(cache_names.map((name) => caches.delete(name)));
+    };
+
     onMount(async () => {
-        await db_init();
-        await geoc_init();
+        if (dev) await unregister_service_workers();
+        await app_init();
         await register_service_worker();
     });
 

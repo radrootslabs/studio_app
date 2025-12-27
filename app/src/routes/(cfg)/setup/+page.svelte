@@ -95,6 +95,7 @@
 
     type CfgKeyStep = "intro" | "choice" | "add_existing";
     let cfg_key_step: CfgKeyStep = $state("intro");
+    let cfg_key_loading = $state(false);
 
     const cfg_key_step_index = (step: CfgKeyStep): number => {
         switch (step) {
@@ -132,6 +133,7 @@
         cfg_role = undefined;
         cgf_key_opt = undefined;
         cfg_key_step = "intro";
+        cfg_key_loading = false;
         nostr_key_add_val = ``;
         profile_name_val = ``;
         profile_name_valid = false;
@@ -271,50 +273,77 @@
     };
 
     const handle_new_key_or_add = async (): Promise<void> => {
+        console.log(`RUNNING NOSTR KEY SETUP `, cgf_key_opt);
+        if (cgf_key_opt === `nostr_key_add`)
+            return set_cfg_key_step("add_existing");
+        if (cfg_key_loading) return;
+        cfg_key_loading = true;
         try {
-            if (cgf_key_opt === `nostr_key_add`)
-                return set_cfg_key_step("add_existing");
+            console.log(`cfg_key_gen start`, {
+                view,
+                cfg_key_step,
+                cgf_key_opt,
+            });
             const key_created = await create_nostr_key();
+            console.log(`cfg_key_gen result`, { key_created });
             if (!key_created) return;
             handle_view(`cfg_profile`);
+            console.log(`cfg_key_gen view`, { view });
         } catch (e) {
+            console.log(`ERR `, e);
             handle_err(e, `handle_new_key_or_add`);
+        } finally {
+            cfg_key_loading = false;
         }
     };
 
     const create_nostr_key = async (): Promise<boolean> => {
+        console.log(`cfg_key_gen keystore generate start`);
         const keys_nostr_gen = await nostr_keys.generate();
+        console.log(`keys_nostr_gen `, keys_nostr_gen);
         if ("err" in keys_nostr_gen) {
+            console.log(`cfg_key_gen keystore generate err`, keys_nostr_gen);
             await handle_config_err(keys_nostr_gen);
             return false;
         }
+        console.log(`cfg_key_gen keystore generate ok`);
         const cfg_update = await datastore.update_obj<ConfigData>("cfg_data", {
             nostr_public_key: keys_nostr_gen.public_key,
         });
+        console.log(`cfg_update `, cfg_update);
         if ("err" in cfg_update) {
+            console.log(`cfg_key_gen datastore update err`, cfg_update);
             await handle_config_err(cfg_update);
             return false;
         }
+        console.log(`cfg_key_gen datastore update ok`);
         return true;
     };
 
     const add_nostr_key = async (secret_key: string): Promise<boolean> => {
+        console.log(`cfg_key_add keystore add start`);
         const keys_nostr_add = await nostr_keys.add(secret_key);
         if ("err" in keys_nostr_add) {
+            console.log(`cfg_key_add keystore add err`, keys_nostr_add);
             await notif.alert(`${$ls(`common.invalid_key`)}`);
             return false;
         }
+        console.log(`cfg_key_add keystore add ok`);
         const cfg_update = await datastore.update_obj<ConfigData>("cfg_data", {
             nostr_public_key: keys_nostr_add.public_key,
         });
         if ("err" in cfg_update) {
+            console.log(`cfg_key_add datastore update err`, cfg_update);
             await handle_config_err(cfg_update);
             return false;
         }
+        console.log(`cfg_key_add datastore update ok`);
         return true;
     };
 
     const handle_key_add_existing = async (): Promise<void> => {
+        if (cfg_key_loading) return;
+        let loading_set = false;
         try {
             if (!nostr_key_add_val)
                 return void (await notif.alert(
@@ -329,10 +358,18 @@
                         value: `${$ls(`common.nostr_key`)}`.toLowerCase(),
                     })}`,
                 ));
+            cfg_key_loading = true;
+            loading_set = true;
+            console.log(`cfg_key_add start`, {
+                view,
+                cfg_key_step,
+            });
             const key_added = await add_nostr_key(secret_key);
+            console.log(`cfg_key_add result`, { key_added });
             if (!key_added) return;
             nostr_key_add_val = ``;
             handle_view(`cfg_profile`);
+            console.log(`cfg_key_add view`, { view });
         } catch (e) {
             handle_err(e, `handle_key_add_existing`);
             return void (await notif.alert(
@@ -340,6 +377,8 @@
                     value: `${$ls(`common.nostr_key`)}`.toLowerCase(),
                 })}`,
             ));
+        } finally {
+            if (loading_set) cfg_key_loading = false;
         }
     };
 
@@ -450,6 +489,7 @@
     };
 
     const handle_back = async (): Promise<void> => {
+        if (cfg_key_loading) return;
         switch (view) {
             case `cfg_key`:
                 switch (cfg_key_step) {
@@ -801,12 +841,15 @@
                             continue: {
                                 label: `${$ls(`common.continue`)}`,
                                 disabled:
-                                    cfg_key_step === "choice" && !cgf_key_opt,
+                                    cfg_key_loading ||
+                                    (cfg_key_step === "choice" && !cgf_key_opt),
+                                loading: cfg_key_loading,
                                 callback: async () => handle_continue(),
                             },
                             back: {
                                 label: `${$ls(`common.back`)}`,
                                 visible: cfg_key_step !== "intro",
+                                disabled: cfg_key_loading,
                                 callback: async () => handle_back(),
                             },
                         }}

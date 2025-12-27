@@ -10,6 +10,15 @@ if (!RADROOTS_MEDIA || typeof RADROOTS_MEDIA !== 'string') throw new Error('Miss
 const KEYVAL_NAME = import.meta.env.VITE_PUBLIC_KEYVAL_NAME;
 if (!KEYVAL_NAME || typeof KEYVAL_NAME !== 'string') throw new Error('Missing env var: VITE_PUBLIC_KEYVAL_NAME');
 
+const SQL_WASM_URL = import.meta.env.VITE_PUBLIC_SQL_WASM_URL;
+if (!SQL_WASM_URL || typeof SQL_WASM_URL !== 'string') throw new Error('Missing env var: VITE_PUBLIC_SQL_WASM_URL');
+
+const GEOCODER_DB_URL = import.meta.env.VITE_PUBLIC_GEOCODER_DB_URL;
+if (!GEOCODER_DB_URL || typeof GEOCODER_DB_URL !== 'string') throw new Error('Missing env var: VITE_PUBLIC_GEOCODER_DB_URL');
+
+const NOSTR_CLIENT = import.meta.env.VITE_PUBLIC_NOSTR_CLIENT;
+if (!NOSTR_CLIENT || typeof NOSTR_CLIENT !== 'string') throw new Error('Missing env var: VITE_PUBLIC_NOSTR_CLIENT');
+
 const RADROOTS_RELAY = import.meta.env.VITE_PUBLIC_RADROOTS_RELAY;
 if (!RADROOTS_RELAY || typeof RADROOTS_RELAY !== 'string') throw new Error('Missing env var: VITE_PUBLIC_RADROOTS_RELAY');
 
@@ -27,11 +36,14 @@ const PROD = import.meta.env.MODE === 'production';
 export const _env = {
   PROD,
   DEFAULT_RELAYS,
+  GEOCODER_DB_URL,
   KEYVAL_NAME,
+  NOSTR_CLIENT,
   PLATFORM_ACCENT,
   PLATFORM_DESCRIPTION,
   PLATFORM_NAME,
   RADROOTS_API,
   RADROOTS_MEDIA,
   RADROOTS_RELAY,
+  SQL_WASM_URL,
 } as const;

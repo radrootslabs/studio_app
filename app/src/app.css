@@ -8,9 +8,6 @@
 @import "../static/stylesheets/apps-base.css";
 @import "../static/stylesheets/apps-ui.css";
 
-@import "../static/webfonts/sf-pro-rounded/styles.css";
-@import "../static/webfonts/sf-pro-display/styles.css";
-
 @plugin "daisyui" {
   themes: os_light, os_dark;
 }
