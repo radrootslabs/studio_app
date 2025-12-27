@@ -5,12 +5,8 @@
 @import "@radroots/themes/css/screens.css";
 @import "@radroots/themes/css/theme_os.css";
 
-@import "../static/stylesheets/tailwindcss-app-carousel.css";
-@import "../static/stylesheets/tailwindcss-app-form.css";
-@import "../static/stylesheets/tailwindcss-app-styles.css";
-@import "../static/stylesheets/tailwindcss-app.css";
-@import "../static/stylesheets/tailwindcss-spinner.css";
-@import "../static/stylesheets/tailwindcss-app-ly1.css";
+@import "../static/stylesheets/apps-base.css";
+@import "../static/stylesheets/apps-ui.css";
 
 @import "../static/webfonts/sf-pro-rounded/styles.css";
 @import "../static/webfonts/sf-pro-display/styles.css";
@@ -49,4 +45,3 @@
 
   --animate-spin-slow: spin 3s linear infinite;
 }
-
