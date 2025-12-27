@@ -41,6 +41,7 @@
 		"@radroots/http": "workspace:*",
 		"@radroots/geocoder": "workspace:*",
 		"@radroots/locales": "workspace:*",
+		"@radroots/nfc": "workspace:*",
 		"@radroots/nostr": "workspace:*",
 		"@radroots/tangle-schema-bindings": "workspace:*",
 		"@radroots/themes": "workspace:*",

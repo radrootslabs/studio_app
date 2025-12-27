@@ -1,5 +1,5 @@
 <script lang="ts">
-    import { db, route } from "$lib/utils/app";
+    import { db, db_init, route } from "$lib/utils/app";
     import { handle_err } from "@radroots/apps-lib";
     import { Farms } from "@radroots/apps-lib-pwa";
     import type {
@@ -13,7 +13,7 @@
     let data: LoadData = $state(undefined);
 
     onMount(async () => {
-        await db.init();
+        await db_init();
         data = await load_data();
     });
 

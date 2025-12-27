@@ -1,5 +1,5 @@
 <script lang="ts">
-    import { db, nostr_keys } from "$lib/utils/app";
+    import { db_init, nostr_keys } from "$lib/utils/app";
     import { nostr_login_nip01 } from "@radroots/apps-nostr";
     import { nostr_context_default, nostr_relays_clear, nostr_relays_open } from "@radroots/nostr";
     import { handle_err, throw_err } from "@radroots/utils";
@@ -21,7 +21,7 @@
     });
 
     const init = async (): Promise<void> => {
-        await db.init();
+        await db_init();
     };
 
     const nostr_init = async (): Promise<void> => {

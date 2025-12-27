@@ -35,9 +35,9 @@ const assert_config_match = (
 };
 
 export const validate_import_file = async (file: File | null): Promise<ImportableAppState> => {
-    const parsed: any = await parse_file_json(file)
-    if (!parsed) throw_err(ls_val(`error.configuration.import.invalid_file_contents`))
-    return await validate_import_state(parsed);
+    const parsed_res = await parse_file_json(file);
+    if (!parsed_res.ok) throw_err(ls_val(`error.configuration.import.invalid_file_contents`));
+    return await validate_import_state(parsed_res.value);
 };
 
 export const validate_import_state = async (state: any): Promise<ImportableAppState> => {

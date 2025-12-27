@@ -17,16 +17,17 @@
     import { ls } from "$lib/utils/i18n";
     import { get_default_nostr_relays } from "$lib/utils/nostr/lib";
     import {
+        carousel_create,
         carousel_dec,
         carousel_inc,
-        casl_i,
-        casl_imax,
+        carousel_init,
         el_id,
         Fade,
         fmt_id,
         Glyph,
         sleep,
-        view_effect,
+        ViewPane,
+        ViewStack,
     } from "@radroots/apps-lib";
     import {
         ButtonLayoutPair,
@@ -49,6 +50,8 @@
     } from "@radroots/utils";
     import { onMount } from "svelte";
 
+    type View = "cfg_key" | "cfg_profile" | "eula";
+
     const page_carousel: Record<View, { max_index: number }> = {
         cfg_key: {
             max_index: 2,
@@ -61,15 +64,59 @@
         },
     };
 
-    type View = "cfg_key" | "cfg_profile" | "eula";
-    let view: View = $state("cfg_key");
-    $effect(() => {
-        view_effect<View>(view);
+    const carousel_cfg_key = carousel_create({
+        view: "cfg_key",
+        max_index: page_carousel.cfg_key.max_index,
     });
+
+    const carousel_cfg_profile = carousel_create({
+        view: "cfg_profile",
+        max_index: page_carousel.cfg_profile.max_index,
+    });
+
+    const carousel_eula = carousel_create({
+        view: "eula",
+        max_index: page_carousel.eula.max_index,
+    });
+
+    const view_carousel = {
+        cfg_key: carousel_cfg_key,
+        cfg_profile: carousel_cfg_profile,
+        eula: carousel_eula,
+    };
+
+    const carousel_cfg_profile_index = carousel_cfg_profile.index;
+
+    let view: View = $state("cfg_key");
 
     let cfg_role: AppConfigRole | undefined = $state(undefined);
     type CfgKeyOpt = "nostr_key_gen" | "nostr_key_add";
     let cgf_key_opt: CfgKeyOpt | undefined = $state(undefined);
+
+    type CfgKeyStep = "intro" | "choice" | "add_existing";
+    let cfg_key_step: CfgKeyStep = $state("intro");
+
+    const cfg_key_step_index = (step: CfgKeyStep): number => {
+        switch (step) {
+            case "intro":
+                return 0;
+            case "choice":
+                return 1;
+            case "add_existing":
+                return 2;
+        }
+    };
+
+    $effect(() => {
+        console.log(`view `, view);
+        console.log(`cfg_key_step `, cfg_key_step);
+    });
+
+    const cfg_key_step_for_index = (index: number): CfgKeyStep => {
+        if (index <= 0) return "intro";
+        if (index === 1) return "choice";
+        return "add_existing";
+    };
 
     let nostr_key_add_val = $state(``);
 
@@ -81,6 +128,33 @@
     let is_eula_scrolled = $state(false);
     let is_loading_s = $state(false);
 
+    const reset_local_state = (): void => {
+        cfg_role = undefined;
+        cgf_key_opt = undefined;
+        cfg_key_step = "intro";
+        nostr_key_add_val = ``;
+        profile_name_val = ``;
+        profile_name_valid = false;
+        profile_name_nip05 = true;
+        profile_name_loading = false;
+        is_eula_scrolled = false;
+        is_loading_s = false;
+    };
+
+    const sync_carousel = (new_view: View, index: number): void => {
+        const carousel = view_carousel[new_view];
+        carousel_init(carousel, {
+            index,
+            max_index: page_carousel[new_view].max_index,
+        });
+    };
+
+    const set_cfg_key_step = (step: CfgKeyStep): void => {
+        cfg_key_step = step;
+        // @todo confirm why this was breaking the correct... if (step === "choice" && !cgf_key_opt) cgf_key_opt = "nostr_key_gen";
+        sync_carousel("cfg_key", cfg_key_step_index(step));
+    };
+
     onMount(async () => {
         try {
             await page_init();
@@ -90,6 +164,7 @@
     });
 
     const page_init = async (): Promise<void> => {
+        reset_local_state();
         const nostr_keys_all = await nostr_keys.keys();
         if ("results" in nostr_keys_all) {
             const confirm = await notif.confirm({
@@ -106,8 +181,9 @@
                 return;
             }
             await page_reset();
+            return;
         }
-        handle_view(view);
+        handle_view(`cfg_key`, { index: 0 });
     };
 
     const page_reset = async (
@@ -117,7 +193,8 @@
         try {
             console.log(`[config] page reset`);
             app_loading.set(!prevent_loading);
-            handle_view(`cfg_key`);
+            reset_local_state();
+            handle_view(`cfg_key`, { index: 0 });
             if (alert_message) await notif.alert(alert_message);
             await sleep(cfg_delay.load);
             await nostr_keys.reset();
@@ -142,16 +219,25 @@
         if (scroll_top + client_h >= scroll_h) is_eula_scrolled = true;
     };
 
-    const handle_view = (new_view: View): void => {
-        if (new_view === "cfg_key" && view === "cfg_profile") {
-            const offset = cgf_key_opt === "nostr_key_gen" ? 1 : 0;
-            casl_i.set(page_carousel[new_view].max_index - offset);
-        } else {
-            casl_i.set(0);
-            casl_imax.set(page_carousel[new_view].max_index);
+    const handle_view = (new_view: View, opts?: { index?: number }): void => {
+        let next_index = opts?.index ?? 0;
+        if (new_view === "cfg_key") {
+            if (opts?.index !== undefined)
+                cfg_key_step = cfg_key_step_for_index(opts.index);
+            else if (view === "cfg_profile")
+                cfg_key_step =
+                    cgf_key_opt === "nostr_key_add" ? "add_existing" : "choice";
+            if (cfg_key_step === "choice" && !cgf_key_opt)
+                cgf_key_opt = "nostr_key_gen";
+            next_index = cfg_key_step_index(cfg_key_step);
         }
         view = new_view;
+        sync_carousel(new_view, next_index);
     };
+
+    $effect(() => {
+        console.log(`cgf_key_opt `, cgf_key_opt);
+    });
 
     const handle_config_err = async (
         err?: IError<string> | string,
@@ -166,16 +252,16 @@
     const handle_continue = async (): Promise<void> => {
         switch (view) {
             case `cfg_key`:
-                switch ($casl_i) {
-                    case 0:
-                        return await carousel_inc(view);
-                    case 1:
+                switch (cfg_key_step) {
+                    case "intro":
+                        return set_cfg_key_step("choice");
+                    case "choice":
                         return handle_new_key_or_add();
-                    case 2:
+                    case "add_existing":
                         return handle_key_add_existing();
                 }
             case `cfg_profile`:
-                switch ($casl_i) {
+                switch ($carousel_cfg_profile_index) {
                     case 0:
                         return handle_setup_profile();
                     case 1:
@@ -187,29 +273,45 @@
     const handle_new_key_or_add = async (): Promise<void> => {
         try {
             if (cgf_key_opt === `nostr_key_add`)
-                return void (await carousel_inc(view));
-            await create_nostr_key();
+                return set_cfg_key_step("add_existing");
+            const key_created = await create_nostr_key();
+            if (!key_created) return;
             handle_view(`cfg_profile`);
         } catch (e) {
             handle_err(e, `handle_new_key_or_add`);
         }
     };
 
-    const create_nostr_key = async (): Promise<void> => {
+    const create_nostr_key = async (): Promise<boolean> => {
         const keys_nostr_gen = await nostr_keys.generate();
-        if ("err" in keys_nostr_gen) return handle_config_err();
-        await datastore.update_obj<ConfigData>("cfg_data", {
+        if ("err" in keys_nostr_gen) {
+            await handle_config_err(keys_nostr_gen);
+            return false;
+        }
+        const cfg_update = await datastore.update_obj<ConfigData>("cfg_data", {
             nostr_public_key: keys_nostr_gen.public_key,
         });
+        if ("err" in cfg_update) {
+            await handle_config_err(cfg_update);
+            return false;
+        }
+        return true;
     };
 
-    const add_nostr_key = async (secret_key: string): Promise<void> => {
+    const add_nostr_key = async (secret_key: string): Promise<boolean> => {
         const keys_nostr_add = await nostr_keys.add(secret_key);
-        if ("err" in keys_nostr_add)
-            return void (await notif.alert(`${$ls(`common.invalid_key`)}`));
-        await datastore.update_obj<ConfigData>("cfg_data", {
+        if ("err" in keys_nostr_add) {
+            await notif.alert(`${$ls(`common.invalid_key`)}`);
+            return false;
+        }
+        const cfg_update = await datastore.update_obj<ConfigData>("cfg_data", {
             nostr_public_key: keys_nostr_add.public_key,
         });
+        if ("err" in cfg_update) {
+            await handle_config_err(cfg_update);
+            return false;
+        }
+        return true;
     };
 
     const handle_key_add_existing = async (): Promise<void> => {
@@ -227,7 +329,8 @@
                         value: `${$ls(`common.nostr_key`)}`.toLowerCase(),
                     })}`,
                 ));
-            await add_nostr_key(secret_key);
+            const key_added = await add_nostr_key(secret_key);
+            if (!key_added) return;
             nostr_key_add_val = ``;
             handle_view(`cfg_profile`);
         } catch (e) {
@@ -243,13 +346,15 @@
     const handle_setup_profile = async (): Promise<void> => {
         try {
             if (profile_name_loading) return;
-
+            //@
             const ds_cfg_data = await datastore.get_obj<ConfigData>("cfg_data");
+            console.log(`ds_cfg_data `, ds_cfg_data);
             if ("err" in ds_cfg_data) return handle_config_err();
 
             const ks_nostr_key = await nostr_keys.read(
                 ds_cfg_data.result.nostr_public_key,
             );
+            console.log(`ks_nostr_key `, ks_nostr_key);
             if ("err" in ks_nostr_key) return handle_config_err();
 
             if (profile_name_nip05) {
@@ -307,7 +412,8 @@
             }
 
             if (!profile_name_val) {
-                const confirm = handle_add_profile_without_name_confirmation();
+                const confirm =
+                    await handle_add_profile_without_name_confirmation();
                 if (!confirm)
                     return void el_id(fmt_id(`nostr:profile`))?.focus();
             }
@@ -318,7 +424,7 @@
                 });
             }
 
-            await carousel_inc(view);
+            await carousel_inc(view_carousel[view]);
         } catch (e) {
             handle_err(e, `handle_setup_profile`);
         } finally {
@@ -346,18 +452,18 @@
     const handle_back = async (): Promise<void> => {
         switch (view) {
             case `cfg_key`:
-                switch ($casl_i) {
-                    case 1: {
+                switch (cfg_key_step) {
+                    case "choice": {
                         cgf_key_opt = undefined;
-                        return await carousel_dec(view);
+                        return set_cfg_key_step("intro");
                     }
-                    case 2: {
+                    case "add_existing": {
                         nostr_key_add_val = ``;
-                        return await carousel_dec(view);
+                        return set_cfg_key_step("choice");
                     }
                 }
             case `cfg_profile`:
-                switch ($casl_i) {
+                switch ($carousel_cfg_profile_index) {
                     case 0: {
                         if (!profile_name_val) {
                             const confirm =
@@ -366,12 +472,12 @@
                                 return void el_id(
                                     fmt_id(`nostr:profile`),
                                 )?.focus();
-                            return void carousel_inc(view);
+                            return void carousel_inc(view_carousel[view]);
                         }
                         return handle_view(`cfg_key`);
                     }
                     case 1:
-                        return carousel_dec(view);
+                        return carousel_dec(view_carousel[view]);
                 }
         }
     };
@@ -458,9 +564,13 @@
         await datastore.del_obj("cfg_data");
         return { pass: true };
     };
+
+    $effect(() => {
+        console.log(`view `, view);
+    });
 </script>
 
-{#if view === "cfg_key" && $casl_i > 0}
+{#if view === "cfg_key" && cfg_key_step !== "intro"}
     <Fade basis={{ classes: `z-10 absolute top-8 right-6` }}>
         <SelectMenu
             basis={{
@@ -496,629 +606,674 @@
     </Fade>
 {/if}
 
-<div
-    data-view={`cfg_key`}
-    class={`flex flex-col h-full w-full justify-start items-center`}
+<ViewStack
+    basis={{
+        active_view: view,
+    }}
 >
-    <CarouselContainer
-        basis={{
-            view: `cfg_key`,
-        }}
-    >
-        <CarouselItem
-            basis={{
-                view: `cfg_key`,
-                classes: `justify-center items-center`,
-            }}
-        >
-            <div
-                class={`relative flex flex-col h-full w-full justify-center items-center`}
-            >
-                <div
-                    class={`flex flex-row w-full justify-start items-center -translate-y-16`}
-                >
-                    <button
-                        class={`flex flex-row w-full justify-center items-center`}
-                        onclick={async () => {
-                            await goto(`/`);
-                        }}
-                    >
-                        <LogoCircle />
-                    </button>
-                </div>
-                <div
-                    class={`absolute bottom-0 left-0 flex flex-col h-[20rem] w-full px-10 gap-2 justify-start items-center`}
-                >
-                    <div
-                        class={`flex flex-row w-full justify-start items-center`}
-                    >
-                        <p
-                            class={`font-sans font-[400] text-sm text-ly0-gl-label uppercase`}
-                        >
-                            {`${$ls(`common.configure`)}`}
-                        </p>
-                    </div>
-                    <div
-                        class={`flex flex-col w-full gap-2 justify-start items-center`}
-                    >
-                        <div
-                            class={`flex flex-row w-full justify-start items-center`}
-                        >
-                            <p
-                                class={`font-mono font-[400] text-[1.1rem] text-ly0-gl`}
-                            >
-                                {`${$ls(`notification.init.greeting_header`)}`}
-                            </p>
-                        </div>
-                        <div
-                            class={`flex flex-row w-full justify-start items-center`}
-                        >
-                            <p
-                                class={`font-mono font-[400] text-[1.1rem] text-ly0-gl`}
-                            >
-                                {`${$ls(
-                                    `notification.init.greeting_subheader`,
-                                )}.`}
-                            </p>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </CarouselItem>
-        <CarouselItem
-            basis={{
-                view: `cfg_key`,
-                classes: `justify-center items-center`,
-                role: `button`,
-                tabindex: 0,
-                callback_click: async () => {
-                    cgf_key_opt = undefined;
-                },
-            }}
-        >
-            <div
-                class={`flex flex-col h-[16rem] gap-8 w-full justify-start items-center`}
-            >
-                <div class={`flex flex-row w-full justify-center items-center`}>
-                    <p class={`font-sans font-[600] text-ly0-gl text-3xl`}>
-                        {`${$ls(`icu.configure_*`, {
-                            value: `${$ls(`common.device`)}`,
-                        })}`}
-                    </p>
-                </div>
-                <div
-                    class={`flex flex-col w-full gap-6 justify-center items-center`}
-                >
-                    <button
-                        class={`flex flex-col h-bold_button w-lo_${$app_lo} justify-center items-center rounded-touch ${
-                            cgf_key_opt === `nostr_key_gen`
-                                ? `ly1-apply-active ly1-raise-apply ly1-ring-apply`
-                                : `bg-ly1`
-                        } el-re`}
-                        onclick={async (ev) => {
-                            ev.stopPropagation();
-                            cgf_key_opt = `nostr_key_gen`;
-                        }}
-                    >
-                        <p class={`font-sans font-[600] text-ly0-gl text-xl`}>
-                            {`${$ls(`icu.create_new_*`, {
-                                value: `${$ls(`common.keypair`)}`.toLowerCase(),
-                            })}`}
-                        </p>
-                    </button>
-                    <button
-                        class={`flex flex-col h-bold_button w-lo_${$app_lo} justify-center items-center rounded-touch ${
-                            cgf_key_opt === `nostr_key_add`
-                                ? `ly1-apply-active ly1-raise-apply ly1-ring-apply`
-                                : `bg-ly1`
-                        } el-re`}
-                        onclick={async (ev) => {
-                            ev.stopPropagation();
-                            cgf_key_opt = `nostr_key_add`;
-                        }}
-                    >
-                        <p class={`font-sans font-[600] text-ly0-gl text-xl`}>
-                            {`${$ls(`icu.use_existing_*`, {
-                                value: `${$ls(`common.keypair`)}`.toLowerCase(),
-                            })}`}
-                        </p>
-                    </button>
-                </div>
-            </div>
-        </CarouselItem>
-        <CarouselItem
-            basis={{
-                view: `cfg_key`,
-                classes: `justify-center items-center`,
-            }}
-        >
-            <div
-                class={`flex flex-col w-full gap-8 justify-start items-center`}
-            >
-                <div
-                    class={`flex flex-col w-full gap-6 justify-center items-center`}
-                >
-                    <p
-                        class={`font-sans font-[600] text-ly0-gl text-3xl capitalize`}
-                    >
-                        {`${$ls(`icu.add_existing_*`, {
-                            value: `${$ls(`common.key`)}`.toLowerCase(),
-                        })}`}
-                    </p>
-                    <EntryLine
-                        bind:value={nostr_key_add_val}
-                        basis={{
-                            wrap: {
-                                layer: 1,
-                                classes: `w-lo_${$app_lo}`,
-                                style: `guide`,
-                            },
-                            el: {
-                                classes: `font-sans text-[1.25rem] text-center placeholder:opacity-60`,
-                                layer: 1,
-                                placeholder: `${$ls(`icu.enter_*`, {
-                                    value: `${$ls(`common.nostr_nsec_hex`)}`,
-                                })}`,
-                                callback_keydown: async ({ key_s, el }) => {
-                                    if (key_s) {
-                                        el.blur();
-                                        handle_continue();
-                                    }
-                                },
-                            },
-                        }}
-                    />
-                </div>
-            </div>
-        </CarouselItem>
-        <div
-            class={`z-10 absolute ios0:bottom-2 bottom-10 left-0 flex flex-col w-full justify-center items-center`}
-        >
-            <ButtonLayoutPair
+    <ViewPane basis={{ view: "cfg_key" }}>
+        <div class={`flex flex-col h-full w-full justify-start items-center`}>
+            <CarouselContainer
                 basis={{
-                    continue: {
-                        label: `${$ls(`common.continue`)}`,
-                        disabled: $casl_i === 1 && !cgf_key_opt,
-                        callback: async () => handle_continue(),
-                    },
-                    back: {
-                        label: `${$ls(`common.back`)}`,
-                        visible: $casl_i > 0,
-                        callback: async () => handle_back(),
-                    },
+                    carousel: carousel_cfg_key,
                 }}
-            />
-        </div>
-    </CarouselContainer>
-</div>
-
-<div
-    data-view={`cfg_profile`}
-    class={`hidden flex flex-col h-full w-full justify-start items-center`}
->
-    <CarouselContainer
-        basis={{
-            view: `cfg_profile`,
-        }}
-    >
-        <CarouselItem
-            basis={{
-                view: `cfg_profile`,
-                classes: `justify-center items-center`,
-            }}
-        >
-            <div
-                class={`flex flex-col h-[16rem] w-full px-4 gap-6 justify-start items-center`}
             >
-                <p class={`font-sans font-[600] text-ly0-gl text-3xl`}>
-                    {`${$ls(`icu.add_*`, {
-                        value: `${$ls(`common.profile`)}`,
-                    })}`}
-                </p>
-                <div
-                    class={`flex flex-col w-full gap-4 justify-center items-center`}
+                <CarouselItem
+                    basis={{
+                        classes: `justify-center items-center`,
+                    }}
                 >
-                    <EntryLine
-                        bind:value={profile_name_val}
+                    <div
+                        class={`relative flex flex-col h-full w-full justify-center items-center`}
+                    >
+                        <div
+                            class={`flex flex-row w-full justify-start items-center -translate-y-16`}
+                        >
+                            <button
+                                class={`flex flex-row w-full justify-center items-center`}
+                                onclick={async () => {
+                                    await goto(`/`);
+                                }}
+                            >
+                                <LogoCircle />
+                            </button>
+                        </div>
+                        <div
+                            class={`absolute bottom-0 left-0 flex flex-col h-[20rem] w-full px-10 gap-2 justify-start items-center`}
+                        >
+                            <div
+                                class={`flex flex-row w-full justify-start items-center`}
+                            >
+                                <p
+                                    class={`font-sans font-[400] text-sm text-ly0-gl-label uppercase`}
+                                >
+                                    {`${$ls(`common.configure`)}`}
+                                </p>
+                            </div>
+                            <div
+                                class={`flex flex-col w-full gap-2 justify-start items-center`}
+                            >
+                                <div
+                                    class={`flex flex-row w-full justify-start items-center`}
+                                >
+                                    <p
+                                        class={`font-mono font-[400] text-[1.1rem] text-ly0-gl`}
+                                    >
+                                        {`${$ls(`notification.init.greeting_header`)}`}
+                                    </p>
+                                </div>
+                                <div
+                                    class={`flex flex-row w-full justify-start items-center`}
+                                >
+                                    <p
+                                        class={`font-mono font-[400] text-[1.1rem] text-ly0-gl`}
+                                    >
+                                        {`${$ls(
+                                            `notification.init.greeting_subheader`,
+                                        )}.`}
+                                    </p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </CarouselItem>
+                <CarouselItem
+                    basis={{
+                        classes: `justify-center items-center`,
+                    }}
+                >
+                    <div
+                        class={`flex flex-col h-[16rem] gap-8 w-full justify-start items-center`}
+                    >
+                        <div
+                            class={`flex flex-row w-full justify-center items-center`}
+                        >
+                            <p
+                                class={`font-sans font-[600] text-ly0-gl text-3xl`}
+                            >
+                                {`${$ls(`icu.configure_*`, {
+                                    value: `${$ls(`common.device`)}`,
+                                })}`}
+                            </p>
+                        </div>
+                        <div
+                            class={`flex flex-col w-full gap-6 justify-center items-center`}
+                        >
+                            <button
+                                class={`flex flex-col h-bold_button w-lo_${$app_lo} justify-center items-center rounded-touch ${
+                                    cgf_key_opt === `nostr_key_gen`
+                                        ? `ly1-apply-active ly1-raise-apply ly1-ring-apply`
+                                        : `bg-ly1`
+                                } el-re`}
+                                onclick={async (ev) => {
+                                    ev.stopPropagation();
+                                    cgf_key_opt = `nostr_key_gen`;
+                                }}
+                            >
+                                <p
+                                    class={`font-sans font-[600] text-ly0-gl text-xl`}
+                                >
+                                    {`${$ls(`icu.create_new_*`, {
+                                        value: `${$ls(
+                                            `common.keypair`,
+                                        )}`.toLowerCase(),
+                                    })}`}
+                                </p>
+                            </button>
+                            <button
+                                class={`flex flex-col h-bold_button w-lo_${$app_lo} justify-center items-center rounded-touch ${
+                                    cgf_key_opt === `nostr_key_add`
+                                        ? `ly1-apply-active ly1-raise-apply ly1-ring-apply`
+                                        : `bg-ly1`
+                                } el-re`}
+                                onclick={async (ev) => {
+                                    ev.stopPropagation();
+                                    cgf_key_opt = `nostr_key_add`;
+                                }}
+                            >
+                                <p
+                                    class={`font-sans font-[600] text-ly0-gl text-xl`}
+                                >
+                                    {`${$ls(`icu.use_existing_*`, {
+                                        value: `${$ls(
+                                            `common.keypair`,
+                                        )}`.toLowerCase(),
+                                    })}`}
+                                </p>
+                            </button>
+                        </div>
+                    </div>
+                </CarouselItem>
+                <CarouselItem
+                    basis={{
+                        classes: `justify-center items-center`,
+                    }}
+                >
+                    <div
+                        class={`flex flex-col w-full gap-8 justify-start items-center`}
+                    >
+                        <div
+                            class={`flex flex-col w-full gap-6 justify-center items-center`}
+                        >
+                            <p
+                                class={`font-sans font-[600] text-ly0-gl text-3xl capitalize`}
+                            >
+                                {`${$ls(`icu.add_existing_*`, {
+                                    value: `${$ls(`common.key`)}`.toLowerCase(),
+                                })}`}
+                            </p>
+                            <EntryLine
+                                bind:value={nostr_key_add_val}
+                                basis={{
+                                    wrap: {
+                                        layer: 1,
+                                        classes: `w-lo_${$app_lo}`,
+                                        style: `guide`,
+                                    },
+                                    el: {
+                                        classes: `font-sans text-[1.25rem] text-center placeholder:opacity-60`,
+                                        layer: 1,
+                                        placeholder: `${$ls(`icu.enter_*`, {
+                                            value: `${$ls(
+                                                `common.nostr_nsec_hex`,
+                                            )}`,
+                                        })}`,
+                                        callback_keydown: async ({
+                                            key_s,
+                                            el,
+                                        }) => {
+                                            if (key_s) {
+                                                el.blur();
+                                                handle_continue();
+                                            }
+                                        },
+                                    },
+                                }}
+                            />
+                        </div>
+                    </div>
+                </CarouselItem>
+                <div
+                    class={`z-10 absolute ios0:bottom-2 bottom-10 left-0 flex flex-col w-full justify-center items-center`}
+                >
+                    <ButtonLayoutPair
                         basis={{
-                            loading: profile_name_loading,
-                            wrap: {
-                                layer: 1,
-                                classes: `w-lo_${$app_lo}`,
-                                style: `guide`,
+                            continue: {
+                                label: `${$ls(`common.continue`)}`,
+                                disabled:
+                                    cfg_key_step === "choice" && !cgf_key_opt,
+                                callback: async () => handle_continue(),
                             },
-                            el: {
-                                classes: `font-sans text-[1.25rem] text-center placeholder:opacity-60`,
-                                id: fmt_id(`nostr:profile`),
-                                layer: 1,
-                                placeholder: `${$ls(`icu.enter_*`, {
-                                    value: `${$ls(
-                                        `common.profile_name`,
-                                    )}`.toLowerCase(),
-                                })}`,
-                                field: form_fields.profile_name,
-                                callback: async ({ pass }) => {
-                                    profile_name_valid = pass;
-                                },
-                                callback_keydown: async ({ key_s, el }) => {
-                                    if (key_s) {
-                                        el.blur();
-                                        handle_continue();
-                                    }
-                                },
+                            back: {
+                                label: `${$ls(`common.back`)}`,
+                                visible: cfg_key_step !== "intro",
+                                callback: async () => handle_back(),
                             },
                         }}
                     />
+                </div>
+            </CarouselContainer>
+        </div>
+    </ViewPane>
+
+    <ViewPane basis={{ view: "cfg_profile" }}>
+        <div class={`flex flex-col h-full w-full justify-start items-center`}>
+            <CarouselContainer
+                basis={{
+                    carousel: carousel_cfg_profile,
+                }}
+            >
+                <CarouselItem
+                    basis={{
+                        classes: `justify-center items-center`,
+                    }}
+                >
                     <div
-                        class={`flex flex-row w-full gap-2 justify-center items-center`}
+                        class={`flex flex-col h-[16rem] w-full px-4 gap-6 justify-start items-center`}
                     >
-                        <input
-                            type="checkbox"
-                            bind:checked={profile_name_nip05}
-                        />
-                        <button
-                            class={`flex flex-row justify-center items-center`}
-                            onclick={async () => {
-                                profile_name_nip05 = !profile_name_nip05;
-                            }}
+                        <p class={`font-sans font-[600] text-ly0-gl text-3xl`}>
+                            {`${$ls(`icu.add_*`, {
+                                value: `${$ls(`common.profile`)}`,
+                            })}`}
+                        </p>
+                        <div
+                            class={`flex flex-col w-full gap-4 justify-center items-center`}
                         >
-                            <p
-                                class={`font-sans font-[400] text-ly0-gl text-[14px] tracking-wide`}
+                            <EntryLine
+                                bind:value={profile_name_val}
+                                basis={{
+                                    loading: profile_name_loading,
+                                    wrap: {
+                                        layer: 1,
+                                        classes: `w-lo_${$app_lo}`,
+                                        style: `guide`,
+                                    },
+                                    el: {
+                                        classes: `font-sans text-[1.25rem] text-center placeholder:opacity-60`,
+                                        id: fmt_id(`nostr:profile`),
+                                        layer: 1,
+                                        placeholder: `${$ls(`icu.enter_*`, {
+                                            value: `${$ls(
+                                                `common.profile_name`,
+                                            )}`.toLowerCase(),
+                                        })}`,
+                                        field: form_fields.profile_name,
+                                        callback: async ({ pass }) => {
+                                            profile_name_valid = pass;
+                                        },
+                                        callback_keydown: async ({
+                                            key_s,
+                                            el,
+                                        }) => {
+                                            if (key_s) {
+                                                el.blur();
+                                                handle_continue();
+                                            }
+                                        },
+                                    },
+                                }}
+                            />
+                            <div
+                                class={`flex flex-row w-full gap-2 justify-center items-center`}
                             >
-                                {`${$ls(`common.create`)}`}
-                                <span
-                                    class={`font-mono font-[500] tracking-tight px-[3px]`}
+                                <input
+                                    type="checkbox"
+                                    bind:checked={profile_name_nip05}
+                                />
+                                <button
+                                    class={`flex flex-row justify-center items-center`}
+                                    onclick={async () => {
+                                        profile_name_nip05 =
+                                            !profile_name_nip05;
+                                    }}
                                 >
-                                    {`@radroots`}
-                                </span>
-                                {`${$ls(`common.nip05_address`)}`}
-                            </p>
-                        </button>
+                                    <p
+                                        class={`font-sans font-[400] text-ly0-gl text-[14px] tracking-wide`}
+                                    >
+                                        {`${$ls(`common.create`)}`}
+                                        <span
+                                            class={`font-mono font-[500] tracking-tight px-[3px]`}
+                                        >
+                                            {`@radroots`}
+                                        </span>
+                                        {`${$ls(`common.nip05_address`)}`}
+                                    </p>
+                                </button>
+                            </div>
+                        </div>
                     </div>
-                </div>
-            </div>
-        </CarouselItem>
-        <CarouselItem
-            basis={{
-                view: `cfg_profile`,
-                classes: `justify-center items-center`,
-                role: `button`,
-                tabindex: 0,
-                callback_click: async () => {
-                    cfg_role = undefined;
-                },
-            }}
-        >
-            <div
-                class={`flex flex-col h-[16rem] w-full gap-10 justify-start items-center`}
-            >
-                <div class={`flex flex-row w-full justify-center items-center`}>
-                    <p class={`font-sans font-[600] text-ly0-gl text-3xl`}>
-                        {`${$ls(`common.setup_for_farmer`)}`}
-                    </p>
-                </div>
-                <div
-                    class={`flex flex-col w-full gap-5 justify-center items-center`}
-                >
-                    <button
-                        class={`flex flex-col h-bold_button w-lo_${$app_lo} justify-center items-center rounded-touch ${
-                            cfg_role === `farmer`
-                                ? `ly1-apply-active ly1-raise-apply ly1-ring-apply`
-                                : `bg-ly1`
-                        } el-re`}
-                        onclick={async (ev) => {
-                            ev.stopPropagation();
-                            cfg_role = `farmer`;
-                        }}
-                    >
-                        <p class={`font-sans font-[600] text-ly0-gl text-xl`}>
-                            {`${$ls(`common.yes`)}`}
-                        </p>
-                    </button>
-                    <button
-                        class={`flex flex-col h-bold_button w-lo_${$app_lo} justify-center items-center rounded-touch ${
-                            cfg_role === `personal`
-                                ? `ly1-apply-active ly1-raise-apply ly1-ring-apply`
-                                : `bg-ly1`
-                        } el-re`}
-                        onclick={async (ev) => {
-                            ev.stopPropagation();
-                            cfg_role = `personal`;
-                        }}
-                    >
-                        <p class={`font-sans font-[600] text-ly0-gl text-xl`}>
-                            {`${$ls(`common.no`)}`}
-                        </p>
-                    </button>
-                </div>
-            </div>
-        </CarouselItem>
-    </CarouselContainer>
-    <div
-        class={`absolute ios0:bottom-2 bottom-10 left-0 flex flex-col w-full justify-center items-center`}
-    >
-        <ButtonLayoutPair
-            basis={{
-                continue: {
-                    label: `${$ls(`common.continue`)}`,
-                    disabled: $casl_i === 1 && !cfg_role,
-                    callback: async () => handle_continue(),
-                },
-                back: {
-                    visible: true,
-                    label:
-                        view === "cfg_profile" &&
-                        $casl_i === 0 &&
-                        !profile_name_val
-                            ? `${$ls(`common.skip`)}`
-                            : `${$ls(`common.back`)}`,
-                    callback: handle_back,
-                },
-            }}
-        />
-    </div>
-</div>
-
-<div
-    data-view={`eula`}
-    class={`hidden flex flex-col h-full w-full ios0:pt-12 pt-24 justify-start items-center`}
->
-    <CarouselContainer
-        basis={{
-            view: `eula`,
-            classes: `rounded-2xl scroll-hide`,
-        }}
-    >
-        <CarouselItem
-            basis={{
-                view: `eula`,
-                classes: `justify-start items-center`,
-            }}
-        >
-            <div
-                class={`flex flex-col h-full w-full px-4 justify-start items-center ${
-                    view === `eula` ? `fade-in-long` : ``
-                }`}
-            >
-                <div
-                    class={`flex flex-col w-full px-4 gap-4 justify-start items-center`}
+                </CarouselItem>
+                <CarouselItem
+                    basis={{
+                        classes: `justify-center items-center`,
+                        role: `button`,
+                        tabindex: 0,
+                        callback_click: async () => {
+                            cfg_role = undefined;
+                        },
+                    }}
                 >
                     <div
-                        class={`flex flex-row w-full ios0:pt-8 justify-center items-center`}
-                    >
-                        <p class={`font-mono font-[600] text-ly0-gl text-2xl`}>
-                            {`${$ls(`eula.title`)}`}
-                        </p>
-                    </div>
-                    <div
-                        class={`flex flex-col ios0:h-[26rem] ios1:h-[38rem] w-full gap-6 justify-start items-center overflow-y-scroll scroll-hide`}
-                        onscroll={on_scroll_eula}
+                        class={`flex flex-col h-[16rem] w-full gap-10 justify-start items-center`}
                     >
                         <div
-                            class={`flex flex-col w-full gap-2 justify-start items-start`}
+                            class={`flex flex-row w-full justify-center items-center`}
                         >
-                            <p class={`font-mono font-[600] text-ly0-gl`}>
-                                {`**${$ls(`eula.introduction.title`)}**`}
-                            </p>
                             <p
-                                class={`font-mono font-[500] text-ly0-gl text-sm text-justify break-word`}
+                                class={`font-sans font-[600] text-ly0-gl text-3xl`}
                             >
-                                {`${$ls(`eula.introduction.body`)}`}
+                                {`${$ls(`common.setup_for_farmer`)}`}
                             </p>
                         </div>
                         <div
-                            class={`flex flex-col w-full gap-2 justify-start items-start`}
+                            class={`flex flex-col w-full gap-5 justify-center items-center`}
                         >
-                            <p class={`font-mono font-[600] text-ly0-gl`}>
-                                {`**${$ls(`eula.prohibited_content.title`)}**`}
-                            </p>
-                            <p
-                                class={`font-mono font-[500] text-sm text-ly0-gl text-justify break-word`}
+                            <button
+                                class={`flex flex-col h-bold_button w-lo_${$app_lo} justify-center items-center rounded-touch ${
+                                    cfg_role === `farmer`
+                                        ? `ly1-apply-active ly1-raise-apply ly1-ring-apply`
+                                        : `bg-ly1`
+                                } el-re`}
+                                onclick={async (ev) => {
+                                    ev.stopPropagation();
+                                    cfg_role = `farmer`;
+                                }}
                             >
-                                {`${$ls(
-                                    `eula.prohibited_content.body_0_title`,
-                                )}`}
-                            </p>
-                            <div
-                                class={`flex flex-col w-full justify-start items-start`}
+                                <p
+                                    class={`font-sans font-[600] text-ly0-gl text-xl`}
+                                >
+                                    {`${$ls(`common.yes`)}`}
+                                </p>
+                            </button>
+                            <button
+                                class={`flex flex-col h-bold_button w-lo_${$app_lo} justify-center items-center rounded-touch ${
+                                    cfg_role === `personal`
+                                        ? `ly1-apply-active ly1-raise-apply ly1-ring-apply`
+                                        : `bg-ly1`
+                                } el-re`}
+                                onclick={async (ev) => {
+                                    ev.stopPropagation();
+                                    cfg_role = `personal`;
+                                }}
                             >
-                                {#each [0, 1, 2, 3, 4, 5] as li}
-                                    <div
-                                        class={`flex flex-row w-full justify-start items-center`}
-                                    >
-                                        <div
-                                            class={`flex flex-row h-full w-8 justify-start items-start`}
-                                        >
-                                            <p
-                                                class={` font-mono font-[500] text-sm text-ly0-gl text-justify break-word`}
-                                            >
-                                                {`*`}
-                                            </p>
-                                        </div>
-                                        <div
-                                            class={`flex flex-row h-full w-full justify-start items-start`}
-                                        >
-                                            <p
-                                                class={`col-span-10 font-mono font-[500] text-sm text-ly0-gl text-justify break-word`}
-                                            >
-                                                {`${$ls(
-                                                    `eula.prohibited_content.body_li_0_${li}`,
-                                                )}`}
-                                            </p>
-                                        </div>
-                                    </div>
-                                {/each}
-                            </div>
-                        </div>
-                        <div
-                            class={`flex flex-col w-full gap-2 justify-start items-start`}
-                        >
-                            <p class={`font-mono font-[600] text-ly0-gl`}>
-                                {`**${$ls(`eula.prohibited_conduct.title`)}**`}
-                            </p>
-                            <div
-                                class={`flex flex-col w-full justify-start items-start`}
-                            >
-                                {#each [0, 1, 2, 3] as li}
-                                    <div
-                                        class={`flex flex-row w-full justify-start items-center`}
-                                    >
-                                        <div
-                                            class={`flex flex-row h-full w-8 justify-start items-start`}
-                                        >
-                                            <p
-                                                class={` font-mono font-[500] text-sm text-ly0-gl text-justify break-word`}
-                                            >
-                                                {`*`}
-                                            </p>
-                                        </div>
-                                        <div
-                                            class={`flex flex-row h-full w-full justify-start items-start`}
-                                        >
-                                            <p
-                                                class={`col-span-10 font-mono font-[500] text-sm text-ly0-gl text-justify break-word`}
-                                            >
-                                                {`${$ls(
-                                                    `eula.prohibited_conduct.body_li_0_${li}`,
-                                                )}`}
-                                            </p>
-                                        </div>
-                                    </div>
-                                {/each}
-                            </div>
-                        </div>
-                        <div
-                            class={`flex flex-col w-full gap-2 justify-start items-start`}
-                        >
-                            <p class={`font-mono font-[600] text-ly0-gl`}>
-                                {`**${$ls(
-                                    `eula.consequences_of_violation.title`,
-                                )}**`}
-                            </p>
-                            <p
-                                class={`font-mono font-[500] text-ly0-gl text-sm text-justify break-word`}
-                            >
-                                {`${$ls(
-                                    `eula.consequences_of_violation.body`,
-                                )}`}
-                            </p>
-                        </div>
-                        <div
-                            class={`flex flex-col w-full gap-2 justify-start items-start`}
-                        >
-                            <p class={`font-mono font-[600] text-ly0-gl`}>
-                                {`**${$ls(`eula.disclaimer.title`)}**`}
-                            </p>
-                            <p
-                                class={`font-mono font-[500] text-ly0-gl text-sm text-justify break-word`}
-                            >
-                                {`${$ls(`eula.disclaimer.body`)}`}
-                            </p>
-                        </div>
-                        <div
-                            class={`flex flex-col w-full gap-2 justify-start items-start`}
-                        >
-                            <p class={`font-mono font-[600] text-ly0-gl`}>
-                                {`**${$ls(`eula.changes.title`)}**`}
-                            </p>
-                            <p
-                                class={`font-mono font-[500] text-ly0-gl text-sm text-justify break-word`}
-                            >
-                                {`${$ls(`eula.changes.body`)}`}
-                            </p>
-                        </div>
-                        <div
-                            class={`flex flex-col w-full gap-2 justify-start items-start`}
-                        >
-                            <p class={`font-mono font-[600] text-ly0-gl`}>
-                                {`**${$ls(`eula.contact.title`)}**`}
-                            </p>
-                            <p
-                                class={`font-mono font-[500] text-ly0-gl text-sm text-justify break-word`}
-                            >
-                                {`${$ls(`eula.contact.body`)}`}
-                            </p>
-                        </div>
-                        <div
-                            class={`flex flex-col w-full gap-2 justify-start items-start`}
-                        >
-                            <p class={`font-mono font-[600] text-ly0-gl`}>
-                                {`**${$ls(`eula.acceptance_of_terms.title`)}**`}
-                            </p>
-                            <p
-                                class={`font-mono font-[500] text-ly0-gl text-sm text-justify break-word`}
-                            >
-                                {`${$ls(`eula.acceptance_of_terms.body`)}`}
-                            </p>
+                                <p
+                                    class={`font-sans font-[600] text-ly0-gl text-xl`}
+                                >
+                                    {`${$ls(`common.no`)}`}
+                                </p>
+                            </button>
                         </div>
                     </div>
-                </div>
-                <div
-                    class={`flex flex-row w-full ios0:pt-8 pt-6 justify-center items-center`}
-                >
-                    <button
-                        class={`group flex flex-row basis-1/2 gap-4 justify-center items-center ${
-                            is_eula_scrolled ? `` : `opacity-80`
-                        }`}
-                        onclick={async () => {
-                            const confirm = await notif.confirm({
-                                message: `${$ls(`eula.error.required`)}`,
-                                cancel: `${$ls(`common.quit`)}`,
-                            });
-
-                            if (confirm === false)
-                                await page_reset(undefined, true);
-                        }}
-                    >
-                        <p
-                            class={`font-mono font-[400] text-sm text-ly0-gl group-active:text-ly0-gl el-re`}
-                        >
-                            {`-`}
-                        </p>
-                        <p
-                            class={`font-mono font-[400] text-sm text-ly0-gl group-active:text-ly0-gl el-re`}
-                        >
-                            {`${`${$ls(`common.disagree`)}`}`}
-                        </p>
-                        <p
-                            class={`font-mono font-[400] text-sm text-ly0-gl group-active:text-ly0-gl el-re`}
-                        >
-                            {`-`}
-                        </p>
-                    </button>
-                    <button
-                        class={`relative group flex flex-row basis-1/2 gap-4 justify-center items-center el-re ${
-                            is_eula_scrolled ? `` : `opacity-40`
-                        }`}
-                        onclick={async () => {
-                            if (is_eula_scrolled) await submit();
-                        }}
-                    >
-                        <p
-                            class={`font-mono font-[400] text-sm text-ly0-gl-hl group-active:text-ly0-gl-hl/80 el-re`}
-                        >
-                            {`-`}
-                        </p>
-                        <p
-                            class={`font-mono font-[400] text-sm text-ly0-gl-hl group-active:text-ly0-gl-hl/80 el-re`}
-                        >
-                            {`${`${$ls(`common.agree`)}`}`}
-                        </p>
-                        <p
-                            class={`font-mono font-[400] text-sm text-ly0-gl-hl group-active:text-ly0-gl-hl/80 el-re`}
-                        >
-                            {`- `}
-                        </p>
-                        {#if is_loading_s}
-                            <div
-                                class={`absolute right-3 flex flex-row justify-start items-center`}
-                            >
-                                <LoadSymbol basis={{ dim: `xs` }} />
-                            </div>
-                        {/if}
-                    </button>
-                </div>
+                </CarouselItem>
+            </CarouselContainer>
+            <div
+                class={`absolute ios0:bottom-2 bottom-10 left-0 flex flex-col w-full justify-center items-center`}
+            >
+                <ButtonLayoutPair
+                    basis={{
+                        continue: {
+                            label: `${$ls(`common.continue`)}`,
+                            disabled:
+                                $carousel_cfg_profile_index === 1 && !cfg_role,
+                            callback: async () => handle_continue(),
+                        },
+                        back: {
+                            visible: true,
+                            label:
+                                view === "cfg_profile" &&
+                                $carousel_cfg_profile_index === 0 &&
+                                !profile_name_val
+                                    ? `${$ls(`common.skip`)}`
+                                    : `${$ls(`common.back`)}`,
+                            callback: handle_back,
+                        },
+                    }}
+                />
             </div>
-        </CarouselItem>
-    </CarouselContainer>
-</div>
+        </div>
+    </ViewPane>
+
+    <ViewPane basis={{ view: "eula" }}>
+        <div
+            class={`flex flex-col h-full w-full ios0:pt-12 pt-24 justify-start items-center`}
+        >
+            <CarouselContainer
+                basis={{
+                    carousel: carousel_eula,
+                    classes: `rounded-2xl scroll-hide`,
+                }}
+            >
+                <CarouselItem
+                    basis={{
+                        classes: `justify-start items-center`,
+                    }}
+                >
+                    <div
+                        class={`flex flex-col h-full w-full px-4 justify-start items-center ${
+                            view === `eula` ? `fade-in-long` : ``
+                        }`}
+                    >
+                        <div
+                            class={`flex flex-col w-full px-4 gap-4 justify-start items-center`}
+                        >
+                            <div
+                                class={`flex flex-row w-full ios0:pt-8 justify-center items-center`}
+                            >
+                                <p
+                                    class={`font-mono font-[600] text-ly0-gl text-2xl`}
+                                >
+                                    {`${$ls(`eula.title`)}`}
+                                </p>
+                            </div>
+                            <div
+                                class={`flex flex-col ios0:h-[26rem] ios1:h-[38rem] w-full gap-6 justify-start items-center overflow-y-scroll scroll-hide`}
+                                onscroll={on_scroll_eula}
+                            >
+                                <div
+                                    class={`flex flex-col w-full gap-2 justify-start items-start`}
+                                >
+                                    <p
+                                        class={`font-mono font-[600] text-ly0-gl`}
+                                    >
+                                        {`**${$ls(`eula.introduction.title`)}**`}
+                                    </p>
+                                    <p
+                                        class={`font-mono font-[500] text-ly0-gl text-sm text-justify break-word`}
+                                    >
+                                        {`${$ls(`eula.introduction.body`)}`}
+                                    </p>
+                                </div>
+                                <div
+                                    class={`flex flex-col w-full gap-2 justify-start items-start`}
+                                >
+                                    <p
+                                        class={`font-mono font-[600] text-ly0-gl`}
+                                    >
+                                        {`**${$ls(`eula.prohibited_content.title`)}**`}
+                                    </p>
+                                    <p
+                                        class={`font-mono font-[500] text-sm text-ly0-gl text-justify break-word`}
+                                    >
+                                        {`${$ls(
+                                            `eula.prohibited_content.body_0_title`,
+                                        )}`}
+                                    </p>
+                                    <div
+                                        class={`flex flex-col w-full justify-start items-start`}
+                                    >
+                                        {#each [0, 1, 2, 3, 4, 5] as li}
+                                            <div
+                                                class={`flex flex-row w-full justify-start items-center`}
+                                            >
+                                                <div
+                                                    class={`flex flex-row h-full w-8 justify-start items-start`}
+                                                >
+                                                    <p
+                                                        class={` font-mono font-[500] text-sm text-ly0-gl text-justify break-word`}
+                                                    >
+                                                        {`*`}
+                                                    </p>
+                                                </div>
+                                                <div
+                                                    class={`flex flex-row h-full w-full justify-start items-start`}
+                                                >
+                                                    <p
+                                                        class={`col-span-10 font-mono font-[500] text-sm text-ly0-gl text-justify break-word`}
+                                                    >
+                                                        {`${$ls(
+                                                            `eula.prohibited_content.body_li_0_${li}`,
+                                                        )}`}
+                                                    </p>
+                                                </div>
+                                            </div>
+                                        {/each}
+                                    </div>
+                                </div>
+                                <div
+                                    class={`flex flex-col w-full gap-2 justify-start items-start`}
+                                >
+                                    <p
+                                        class={`font-mono font-[600] text-ly0-gl`}
+                                    >
+                                        {`**${$ls(`eula.prohibited_conduct.title`)}**`}
+                                    </p>
+                                    <div
+                                        class={`flex flex-col w-full justify-start items-start`}
+                                    >
+                                        {#each [0, 1, 2, 3] as li}
+                                            <div
+                                                class={`flex flex-row w-full justify-start items-center`}
+                                            >
+                                                <div
+                                                    class={`flex flex-row h-full w-8 justify-start items-start`}
+                                                >
+                                                    <p
+                                                        class={` font-mono font-[500] text-sm text-ly0-gl text-justify break-word`}
+                                                    >
+                                                        {`*`}
+                                                    </p>
+                                                </div>
+                                                <div
+                                                    class={`flex flex-row h-full w-full justify-start items-start`}
+                                                >
+                                                    <p
+                                                        class={`col-span-10 font-mono font-[500] text-sm text-ly0-gl text-justify break-word`}
+                                                    >
+                                                        {`${$ls(
+                                                            `eula.prohibited_conduct.body_li_0_${li}`,
+                                                        )}`}
+                                                    </p>
+                                                </div>
+                                            </div>
+                                        {/each}
+                                    </div>
+                                </div>
+                                <div
+                                    class={`flex flex-col w-full gap-2 justify-start items-start`}
+                                >
+                                    <p
+                                        class={`font-mono font-[600] text-ly0-gl`}
+                                    >
+                                        {`**${$ls(
+                                            `eula.consequences_of_violation.title`,
+                                        )}**`}
+                                    </p>
+                                    <p
+                                        class={`font-mono font-[500] text-ly0-gl text-sm text-justify break-word`}
+                                    >
+                                        {`${$ls(
+                                            `eula.consequences_of_violation.body`,
+                                        )}`}
+                                    </p>
+                                </div>
+                                <div
+                                    class={`flex flex-col w-full gap-2 justify-start items-start`}
+                                >
+                                    <p
+                                        class={`font-mono font-[600] text-ly0-gl`}
+                                    >
+                                        {`**${$ls(`eula.disclaimer.title`)}**`}
+                                    </p>
+                                    <p
+                                        class={`font-mono font-[500] text-ly0-gl text-sm text-justify break-word`}
+                                    >
+                                        {`${$ls(`eula.disclaimer.body`)}`}
+                                    </p>
+                                </div>
+                                <div
+                                    class={`flex flex-col w-full gap-2 justify-start items-start`}
+                                >
+                                    <p
+                                        class={`font-mono font-[600] text-ly0-gl`}
+                                    >
+                                        {`**${$ls(`eula.changes.title`)}**`}
+                                    </p>
+                                    <p
+                                        class={`font-mono font-[500] text-ly0-gl text-sm text-justify break-word`}
+                                    >
+                                        {`${$ls(`eula.changes.body`)}`}
+                                    </p>
+                                </div>
+                                <div
+                                    class={`flex flex-col w-full gap-2 justify-start items-start`}
+                                >
+                                    <p
+                                        class={`font-mono font-[600] text-ly0-gl`}
+                                    >
+                                        {`**${$ls(`eula.contact.title`)}**`}
+                                    </p>
+                                    <p
+                                        class={`font-mono font-[500] text-ly0-gl text-sm text-justify break-word`}
+                                    >
+                                        {`${$ls(`eula.contact.body`)}`}
+                                    </p>
+                                </div>
+                                <div
+                                    class={`flex flex-col w-full gap-2 justify-start items-start`}
+                                >
+                                    <p
+                                        class={`font-mono font-[600] text-ly0-gl`}
+                                    >
+                                        {`**${$ls(`eula.acceptance_of_terms.title`)}**`}
+                                    </p>
+                                    <p
+                                        class={`font-mono font-[500] text-ly0-gl text-sm text-justify break-word`}
+                                    >
+                                        {`${$ls(`eula.acceptance_of_terms.body`)}`}
+                                    </p>
+                                </div>
+                            </div>
+                        </div>
+                        <div
+                            class={`flex flex-row w-full ios0:pt-8 pt-6 justify-center items-center`}
+                        >
+                            <button
+                                class={`group flex flex-row basis-1/2 gap-4 justify-center items-center ${
+                                    is_eula_scrolled ? `` : `opacity-80`
+                                }`}
+                                onclick={async () => {
+                                    const confirm = await notif.confirm({
+                                        message: `${$ls(
+                                            `eula.error.required`,
+                                        )}`,
+                                        cancel: `${$ls(`common.quit`)}`,
+                                    });
+
+                                    if (confirm === false)
+                                        await page_reset(undefined, true);
+                                }}
+                            >
+                                <p
+                                    class={`font-mono font-[400] text-sm text-ly0-gl group-active:text-ly0-gl el-re`}
+                                >
+                                    {`-`}
+                                </p>
+                                <p
+                                    class={`font-mono font-[400] text-sm text-ly0-gl group-active:text-ly0-gl el-re`}
+                                >
+                                    {`${`${$ls(`common.disagree`)}`}`}
+                                </p>
+                                <p
+                                    class={`font-mono font-[400] text-sm text-ly0-gl group-active:text-ly0-gl el-re`}
+                                >
+                                    {`-`}
+                                </p>
+                            </button>
+                            <button
+                                class={`relative group flex flex-row basis-1/2 gap-4 justify-center items-center el-re ${
+                                    is_eula_scrolled ? `` : `opacity-40`
+                                }`}
+                                onclick={async () => {
+                                    if (is_eula_scrolled) await submit();
+                                }}
+                            >
+                                <p
+                                    class={`font-mono font-[400] text-sm text-ly0-gl-hl group-active:text-ly0-gl-hl/80 el-re`}
+                                >
+                                    {`-`}
+                                </p>
+                                <p
+                                    class={`font-mono font-[400] text-sm text-ly0-gl-hl group-active:text-ly0-gl-hl/80 el-re`}
+                                >
+                                    {`${`${$ls(`common.agree`)}`}`}
+                                </p>
+                                <p
+                                    class={`font-mono font-[400] text-sm text-ly0-gl-hl group-active:text-ly0-gl-hl/80 el-re`}
+                                >
+                                    {`- `}
+                                </p>
+                                {#if is_loading_s}
+                                    <div
+                                        class={`absolute right-3 flex flex-row justify-start items-center`}
+                                    >
+                                        <LoadSymbol basis={{ dim: `xs` }} />
+                                    </div>
+                                {/if}
+                            </button>
+                        </div>
+                    </div>
+                </CarouselItem>
+            </CarouselContainer>
+        </div>
+    </ViewPane>
+</ViewStack>

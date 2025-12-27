@@ -52,6 +52,36 @@ export const db = new WebTangleDatabase({
 });
 
 let db_i: Promise<WebTangleDatabase> | null = null;
+let db_init_promise: Promise<void> | null = null;
+let geoc_init_promise: Promise<void> | null = null;
+
+export const db_init = async (): Promise<void> => {
+    if (!db_init_promise) {
+        db_init_promise = (async () => {
+            await db.init();
+        })();
+    }
+    try {
+        await db_init_promise;
+    } catch (e) {
+        db_init_promise = null;
+        throw e;
+    }
+};
+
+export const geoc_init = async (): Promise<void> => {
+    if (!geoc_init_promise) {
+        geoc_init_promise = (async () => {
+            await geoc.connect();
+        })();
+    }
+    try {
+        await geoc_init_promise;
+    } catch (e) {
+        geoc_init_promise = null;
+        throw e;
+    }
+};
 
 export const create_db = async (): Promise<WebTangleDatabase> => {
     if (!db_i) {

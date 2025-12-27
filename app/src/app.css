@@ -20,7 +20,7 @@
 }
 
 @source "./**/*.{svelte,ts}";
-@source "../../packages/lib-app/src/**/*.{svelte,ts}";
+@source "../../packages/apps-lib/src/**/*.{svelte,ts}";
 @source "../../packages/apps-lib-pwa/src/**/*.{svelte,ts}";
 
 @theme {

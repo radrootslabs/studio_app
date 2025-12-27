@@ -4,7 +4,7 @@
     import { ProfileEdit } from "@radroots/apps-lib-pwa";
     import { qp_field, qp_keynostr } from "@radroots/apps-lib-pwa/stores/app";
     import type { IViewProfileEditData } from "@radroots/apps-lib-pwa/types/views/profile";
-    import { parse_view_profile_field_key } from "@radroots/apps-lib-pwa/utils/profile/lib";
+    import { parse_view_profile_field_key } from "@radroots/apps-lib-pwa/utils/profile";
     import { handle_err, throw_err } from "@radroots/utils";
     import { onMount } from "svelte";
 

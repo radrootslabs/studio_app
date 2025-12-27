@@ -1,7 +1,7 @@
 <script lang="ts">
     import { dev, version as kit_version } from "$app/environment";
     import { page } from "$app/state";
-    import { db, geoc } from "$lib/utils/app";
+    import { db_init, geoc_init } from "$lib/utils/app";
     import { app_cfg } from "$lib/utils/app/config";
     import {
         lc_color_mode,
@@ -23,7 +23,8 @@
     } from "@radroots/apps-lib";
     import { Css, LayoutWindow } from "@radroots/apps-lib-pwa";
     import { app_lo } from "@radroots/apps-lib-pwa/stores/app";
-    import { cfg_app } from "@radroots/apps-lib-pwa/utils/app";
+    import type { LibContext } from "@radroots/apps-lib-pwa/types/context";
+    import { CFG_APP } from "@radroots/apps-lib-pwa/utils/app";
     import { parse_theme_key, parse_theme_mode } from "@radroots/themes";
     import { str_cap_words } from "@radroots/utils";
     import "css-paint-polyfill";
@@ -36,7 +37,7 @@
         content: string;
     };
 
-    const head_meta_tags: MetaTag[] = [
+    const HEAD_META_TAGS: MetaTag[] = [
         {
             name: "app_version",
             content: app_cfg.version,
@@ -57,7 +58,7 @@
 
     let { children }: LayoutProps = $props();
 
-    set_context("lib", {
+    const LIB_CONTEXT: LibContext = {
         ls,
         locale,
         lc_color_mode,
@@ -68,7 +69,9 @@
         lc_img_bin,
         lc_photos_add,
         lc_photos_upload,
-    });
+    };
+
+    set_context("lib", LIB_CONTEXT);
 
     theme_mode.subscribe((_theme_mode) =>
         theme_set(parse_theme_key($theme_key), parse_theme_mode(_theme_mode)),
@@ -79,16 +82,28 @@
     );
 
     win_h.subscribe((_win_h) => {
-        if (_win_h > cfg_app.layout.ios1.h) {
+        if (_win_h > CFG_APP.layout.ios1.h) {
             app_lo.set("ios1");
         } else {
             app_lo.set("ios0");
         }
     });
 
+    const register_service_worker = async (): Promise<void> => {
+        if (dev) return;
+        if (!("serviceWorker" in navigator)) return;
+        try {
+            await navigator.serviceWorker.register("/service-worker.js");
+            await navigator.serviceWorker.ready;
+        } catch {
+            return;
+        }
+    };
+
     onMount(async () => {
-        await db.init();
-        await geoc.connect();
+        await db_init();
+        await geoc_init();
+        await register_service_worker();
     });
 
     const format_title = (title: string): string => {
@@ -100,7 +115,7 @@
 
 <svelte:head>
     <title>{`${head_title || "Home"} | Rad Roots`}</title>
-    {#each head_meta_tags as meta_tag (meta_tag.name)}
+    {#each HEAD_META_TAGS as meta_tag (meta_tag.name)}
         <meta name={meta_tag.name} content={meta_tag.content} />
     {/each}
 </svelte:head>

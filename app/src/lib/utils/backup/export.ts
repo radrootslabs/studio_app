@@ -1,4 +1,4 @@
-import { datastore, db, nostr_keys, notif } from "$lib/utils/app";
+import { datastore, db, db_init, nostr_keys, notif } from "$lib/utils/app";
 import { ls } from "$lib/utils/i18n";
 import { download_json, get_store, handle_err } from "@radroots/apps-lib";
 import type { ExportedAppState } from "@radroots/apps-lib-pwa/types/app";
@@ -53,7 +53,7 @@ const export_nostr_keystore_state = async (): Promise<ExportedAppState["nostr_ke
 };
 
 const export_tangle_db_state = async (): Promise<ExportedAppState["database"]> => {
-    await db.init();
+    await db_init();
     const store_key = db.get_store_key();
     const backup = await db.export_backup();
     if ("err" in backup) throw_err(backup);

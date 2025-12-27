@@ -1,7 +1,7 @@
 import { theme_mode, type LocalCallbackColorMode, type LocalCallbackGeocode, type LocalCallbackGeocodeCurrent, type LocalCallbackGuiAlert, type LocalCallbackGuiConfirm, type LocalCallbackImgBin, type LocalCallbackPhotosAddMultiple, type LocalCallbackPhotosUpload } from "@radroots/apps-lib";
 import { parse_theme_mode } from "@radroots/themes";
 import { throw_err } from "@radroots/utils";
-import { fs, geoc, geol, http, notif } from ".";
+import { fs, geoc, geoc_init, geol, http, notif } from ".";
 
 type PhotoUploadResponse = {
     res_base: string;
@@ -30,7 +30,7 @@ export const lc_gui_confirm: LocalCallbackGuiConfirm = async (opts) => {
 };
 
 export const lc_geocode: LocalCallbackGeocode = async (geoc_p) => {
-    await geoc.connect();
+    await geoc_init();
     const geoc_res = await geoc.reverse(geoc_p);
     if ("err" in geoc_res) throw_err(geoc_res);
     return geoc_res.results[0] || undefined;

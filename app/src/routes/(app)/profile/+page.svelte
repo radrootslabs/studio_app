@@ -1,5 +1,5 @@
 <script lang="ts">
-    import { db, fs, nostr_keys, notif, radroots, route } from "$lib/utils/app";
+    import { db, db_init, fs, nostr_keys, notif, radroots, route } from "$lib/utils/app";
     import { ls } from "$lib/utils/i18n";
     import { parse_file_path } from "@radroots/apps-lib";
     import { nostr_pubkey } from "@radroots/apps-nostr";
@@ -16,7 +16,7 @@
     onMount(async () => {
         try {
             //    await init();
-            await db.init();
+            await db_init();
             data = await load_data();
         } catch (e) {
             handle_err(e, `on_mount`);
@@ -25,7 +25,7 @@
     });
 
     const init = async (): Promise<void> => {
-        await db.init();
+        await db_init();
     };
 
     const load_data = async (): Promise<IViewProfileData | undefined> => {

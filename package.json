@@ -6,8 +6,8 @@
     "build": "turbo build",
     "build:app": "turbo build --filter=app",
     "build:packages": "turbo run build --filter=./packages/*",
-    "dev:app": "turbo dev --filter=app",
-    "dev:packages": "turbo dev --filter=./packages/* --concurrency 20"
+    "dev:app": "turbo dev --filter=app --filter=./packages/* --concurrency 25",
+    "dev:packages": "turbo dev --filter=./packages/* --concurrency 25"
   },
   "devDependencies": {
     "turbo": "2.5.3",
