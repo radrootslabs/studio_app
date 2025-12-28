@@ -110,7 +110,7 @@ const restore_tangle_db_state = async (state: ImportableAppState["database"]): P
     }
     await reset_sql_cipher(current_store_key);
     await db.reinit();
-    await db.import_backup(state.backup);
+    await db.import_json(state.backup);
 };
 
 export const import_app_state = async (payload: ImportableAppState): Promise<AppImportStateResult | IError<string>> => {
