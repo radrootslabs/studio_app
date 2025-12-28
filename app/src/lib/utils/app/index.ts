@@ -15,9 +15,9 @@ import { WebTangleDatabase } from "@radroots/client/tangle";
 import { Geocoder } from "@radroots/geocoder";
 import { WebHttp } from "@radroots/http";
 import type { CallbackPromise } from "@radroots/utils";
+import { writable } from "svelte/store";
 import { reset_sql_cipher } from "./cipher";
 import type { NavigationRoute } from "./routes";
-import { writable } from "svelte/store";
 
 const { GEOCODER_DB_URL, RADROOTS_API, SQL_WASM_URL } = _env;
 
@@ -26,6 +26,12 @@ const ls_val = get_store(ls);
 declare const __APP_GIT_HASH__: string;
 declare const __APP_NAME__: string;
 declare const __APP_VERSION__: string;
+
+export const __APP_INFO__ = {
+    git_hash: __APP_GIT_HASH__,
+    name: __APP_NAME__,
+    version: __APP_VERSION__
+}
 
 export const datastore = new WebDatastore(
     cfg_datastore_key_map,
@@ -87,6 +93,14 @@ const app_init_state_update = (patch: Partial<AppInitState>): void => {
 export const app_init_has_completed = (): boolean => {
     if (typeof localStorage === "undefined") return false;
     return localStorage.getItem(app_init_storage_key) === "1";
+};
+
+export const app_init_reset = (): void => {
+    if (typeof localStorage !== "undefined") localStorage.removeItem(app_init_storage_key);
+    app_init_state.set({ ...app_init_state_default });
+    app_init_promise = null;
+    db_init_promise = null;
+    geoc_init_promise = null;
 };
 
 const app_init_mark_completed = (): void => {
@@ -237,6 +251,7 @@ export const reset = async (): Promise<void> => {
         await datastore.reset();
         await reset_sql_cipher(db.get_store_key());
         await db.reinit();
+        app_init_reset();
         goto(`/`);
         app_notify.set(`${ls_val(`notification.device.reset_complete`)}`);
     } catch (e) {

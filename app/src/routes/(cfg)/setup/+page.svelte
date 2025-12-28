@@ -560,9 +560,13 @@
         public_key: string,
         config_data: ConfigData,
     ): Promise<ResultPass | IError<string>> => {
+        const profile_type =
+            config_data.role === `farmer`
+                ? `individual`
+                : config_data.role ?? `individual`;
         const nostr_profile_add = await db.nostr_profile_create({
             public_key,
-            profile_type: config_data.role ?? "individual",
+            profile_type,
             name: config_data.nostr_profile
                 ? config_data.nostr_profile
                 : `${$ls(`common.default`)}`,

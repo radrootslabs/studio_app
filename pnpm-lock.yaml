@@ -83,6 +83,8 @@ importers:
 
   ../crates/tangle-db-wasm/pkg: {}
 
+  ../crates/tangle-events-wasm/pkg: {}
+
   ../crates/trade/bindings/ts:
     dependencies:
       '@radroots/core-bindings':
@@ -798,6 +800,9 @@ importers:
       '@radroots/tangle-db-wasm':
         specifier: workspace:*
         version: link:../../../crates/tangle-db-wasm/pkg
+      '@radroots/tangle-events-wasm':
+        specifier: workspace:*
+        version: link:../../../crates/tangle-events-wasm/pkg
       '@radroots/types-bindings':
         specifier: workspace:*
         version: link:../../../crates/types/bindings/ts
