@@ -28,8 +28,7 @@
 		"svelte-check": "^4.0.0",
 		"tailwindcss": "^4.1.11",
 		"typescript": "5.8.3",
-		"vite": "7.0.6",
-		"wrangler": "^4.42.2"
+		"vite": "7.0.6"
 	},
 	"dependencies": {
 		"@radroots/apps-lib": "workspace:*",
@@ -43,7 +42,7 @@
 		"@radroots/locales": "workspace:*",
 		"@radroots/nfc": "workspace:*",
 		"@radroots/nostr": "workspace:*",
-		"@radroots/tangle-schema-bindings": "workspace:*",
+		"@radroots/tangle-db-schema-bindings": "workspace:*",
 		"@radroots/themes": "workspace:*",
 		"@radroots/types-bindings": "workspace:*",
 		"@radroots/utils": "workspace:*",

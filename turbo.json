@@ -41,7 +41,7 @@
         "@radroots/http#build",
         "@radroots/locales#build",
         "@radroots/nostr#build",
-        "@radroots/tangle-schema-bindings#build",
+        "@radroots/tangle-db-schema-bindings#build",
         "@radroots/themes#build",
         "@radroots/types-bindings#build",
         "@radroots/utils#build"
@@ -62,7 +62,7 @@
         "@radroots/events-bindings#build",
         "@radroots/geo#build",
         "@radroots/locales#build",
-        "@radroots/tangle-schema-bindings#build",
+        "@radroots/tangle-db-schema-bindings#build",
         "@radroots/themes#build",
         "@radroots/utils#build"
       ]
@@ -72,15 +72,15 @@
         "@radroots/geo#build",
         "@radroots/http#build",
         "@radroots/nostr#build",
-        "@radroots/tangle-schema-bindings#build",
-        "@radroots/tangle-sql-wasm#build",
+        "@radroots/tangle-db-schema-bindings#build",
+        "@radroots/tangle-db-wasm#build",
         "@radroots/types-bindings#build",
         "@radroots/utils#build"
       ]
     },
     "@radroots/geo#build": {
       "dependsOn": [
-        "@radroots/tangle-schema-bindings#build",
+        "@radroots/tangle-db-schema-bindings#build",
         "@radroots/utils#build"
       ]
     },
@@ -153,12 +153,12 @@
     "@radroots/events-indexed-bindings#build": {
       "dependsOn": []
     },
-    "@radroots/tangle-schema-bindings#build": {
+    "@radroots/tangle-db-schema-bindings#build": {
       "dependsOn": [
         "@radroots/types-bindings#build"
       ]
     },
-    "@radroots/tangle-sql-wasm#build": {
+    "@radroots/tangle-db-wasm#build": {
       "dependsOn": []
     },
     "@radroots/trade-bindings#build": {

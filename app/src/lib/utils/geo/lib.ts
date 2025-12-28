@@ -1,24 +1,38 @@
 import { handle_err, } from "@radroots/apps-lib";
-import type { ILocationGcsFields } from "@radroots/tangle-schema-bindings";
+import type { IGcsLocationFields } from "@radroots/tangle-db-schema-bindings";
 import type { IError } from "@radroots/types-bindings";
-import { location_geohash, type GeocoderReverseResult, type GeolocationPoint } from "@radroots/geo";
-import { err_msg } from "@radroots/utils";
+import {
+    geojson_point_from_geopoint,
+    geojson_polygon_circle_wgs84,
+    location_geohash,
+    type GeocoderReverseResult,
+    type IClientGeolocationPosition
+} from "@radroots/geo";
+import { d_tag_create, err_msg } from "@radroots/utils";
 import { geoc } from "../app";
 
 export const geolocation_fields_from_point = async (opts: {
     label?: string;
     tag_0?: string;
-    geol_p: GeolocationPoint;
-}): Promise<ILocationGcsFields | IError<string>> => {
+    d_tag?: string;
+    geol_p: IClientGeolocationPosition;
+}): Promise<IGcsLocationFields | IError<string>> => {
     const { label, geol_p } = opts;
     try {
-        const fields: ILocationGcsFields = {
+        const point = geojson_point_from_geopoint(geol_p);
+        const polygon = geojson_polygon_circle_wgs84({ geol_p });
+        const fields: IGcsLocationFields = {
+            d_tag: opts.d_tag || d_tag_create(),
             lat: geol_p.lat,
             lng: geol_p.lng,
             geohash: location_geohash(geol_p),
+            point: JSON.stringify(point),
+            polygon: JSON.stringify(polygon),
             tag_0: opts.tag_0,
         }
         if (label) fields.label = label;
+        if (geol_p.accuracy !== undefined) fields.accuracy = geol_p.accuracy;
+        if (geol_p.altitude !== undefined) fields.altitude = geol_p.altitude;
         const geoc_rev = await geoc.reverse({ lat: geol_p.lat, lng: geol_p.lng });
         if ("err" in geoc_rev) return err_msg(geoc_rev);
         else if ("results" in geoc_rev && geoc_rev.results.length > 0) {
@@ -41,14 +55,20 @@ export const geolocation_fields_from_point_with_geocode = async (opts: {
     label?: string;
     tag_0?: string;
     geoc_r: GeocoderReverseResult;
-    geol_p: GeolocationPoint;
-}): Promise<ILocationGcsFields | IError<string>> => {
+    d_tag?: string;
+    geol_p: IClientGeolocationPosition;
+}): Promise<IGcsLocationFields | IError<string>> => {
     const { label, geoc_r, geol_p } = opts;
     try {
-        const fields: ILocationGcsFields = {
+        const point = geojson_point_from_geopoint(geol_p);
+        const polygon = geojson_polygon_circle_wgs84({ geol_p });
+        const fields: IGcsLocationFields = {
+            d_tag: opts.d_tag || d_tag_create(),
             lat: geol_p.lat,
             lng: geol_p.lng,
             geohash: location_geohash(geol_p),
+            point: JSON.stringify(point),
+            polygon: JSON.stringify(polygon),
             tag_0: opts.tag_0 || undefined,
             gc_id: geoc_r.id.toString(),
             gc_name: geoc_r.name,
@@ -58,6 +78,8 @@ export const geolocation_fields_from_point_with_geocode = async (opts: {
             gc_country_name: geoc_r.country_name,
         };
         if (label) fields.label = label;
+        if (geol_p.accuracy !== undefined) fields.accuracy = geol_p.accuracy;
+        if (geol_p.altitude !== undefined) fields.altitude = geol_p.altitude;
         return fields;
     } catch (e) {
         handle_err(e, `geolocation_fields_from_point_with_geocode`);

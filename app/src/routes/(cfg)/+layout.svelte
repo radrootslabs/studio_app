@@ -1,4 +1,5 @@
 <script lang="ts">
+    import AppInit from "$lib/components/app-init.svelte";
     import { app_init } from "$lib/utils/app";
     import { handle_err } from "@radroots/apps-lib";
     import { onMount } from "svelte";
@@ -18,9 +19,7 @@
 </script>
 
 {#if !app_ready}
-    <div class={`flex min-h-screen w-full items-center justify-center`}>
-        <p class={`text-sm`}>Loading...</p>
-    </div>
+    <AppInit />
 {:else}
     {@render children()}
 {/if}

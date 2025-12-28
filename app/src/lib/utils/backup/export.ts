@@ -77,7 +77,7 @@ export const export_app_state = async (): Promise<void> => {
             exported_at: new Date().toISOString(),
             versions: {
                 app: app_cfg.version,
-                tangle_sql: tangle_db_state.backup.tangle_sql_version,
+                tangle_db: tangle_db_state.backup.tangle_db_version,
                 backup_format: tangle_db_state.backup.format_version
             },
             datastore: datastore_state,

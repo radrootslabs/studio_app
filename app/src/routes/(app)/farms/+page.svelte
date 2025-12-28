@@ -24,7 +24,7 @@
 
             const list: FarmExtended[] = [];
             for (const farm of farms.results) {
-                const farm_locations = await db.location_gcs_find_many({
+                const farm_locations = await db.gcs_location_find_many({
                     rel: {
                         on_farm: {
                             id: farm.id,

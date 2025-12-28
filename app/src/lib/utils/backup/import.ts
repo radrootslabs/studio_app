@@ -51,7 +51,7 @@ export const validate_import_state = async (state: any): Promise<ImportableAppSt
         );
     }
     const backup_format = state?.versions?.backup_format ?? state?.versions?.dump_format;
-    if (!state.versions || !state.versions.app || !state.versions.tangle_sql || !backup_format) {
+    if (!state.versions || !state.versions.app || !state.versions.tangle_db || !backup_format) {
         throw_err(ls_val(`error.configuration.import.missing_version_metadata`));
     }
     const database = state.database ?? state.tangle_db;
@@ -62,8 +62,8 @@ export const validate_import_state = async (state: any): Promise<ImportableAppSt
     if (!backup || backup.format_version !== backup_format) {
         throw_err(ls_val(`error.configuration.import.database_format_mismatch`));
     }
-    if (backup.tangle_sql_version !== state.versions.tangle_sql) {
-        throw_err(ls_val(`error.configuration.import.tangle_sql_version_mismatch`));
+    if (backup.tangle_db_version !== state.versions.tangle_db) {
+        throw_err(ls_val(`error.configuration.import.tangle_db_version_mismatch`));
     }
     return {
         ...state,

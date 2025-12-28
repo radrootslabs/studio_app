@@ -17,6 +17,7 @@ import { WebHttp } from "@radroots/http";
 import type { CallbackPromise } from "@radroots/utils";
 import { reset_sql_cipher } from "./cipher";
 import type { NavigationRoute } from "./routes";
+import { writable } from "svelte/store";
 
 const { GEOCODER_DB_URL, RADROOTS_API, SQL_WASM_URL } = _env;
 
@@ -54,6 +55,94 @@ let db_init_promise: Promise<void> | null = null;
 let geoc_init_promise: Promise<void> | null = null;
 let app_init_promise: Promise<void> | null = null;
 
+export type AppInitStage =
+    | "idle"
+    | "storage"
+    | "download_sql"
+    | "download_geo"
+    | "database"
+    | "geocoder"
+    | "ready"
+    | "error";
+
+export type AppInitState = {
+    stage: AppInitStage;
+    loaded_bytes: number;
+    total_bytes: number | null;
+};
+
+export const app_init_storage_key = "radroots.app.init.ready";
+const app_init_state_default: AppInitState = {
+    stage: "idle",
+    loaded_bytes: 0,
+    total_bytes: 0
+};
+
+export const app_init_state = writable<AppInitState>(app_init_state_default);
+
+const app_init_state_update = (patch: Partial<AppInitState>): void => {
+    app_init_state.update((prev) => ({ ...prev, ...patch }));
+};
+
+export const app_init_has_completed = (): boolean => {
+    if (typeof localStorage === "undefined") return false;
+    return localStorage.getItem(app_init_storage_key) === "1";
+};
+
+const app_init_mark_completed = (): void => {
+    if (typeof localStorage === "undefined") return;
+    localStorage.setItem(app_init_storage_key, "1");
+};
+
+const app_init_progress_add = (bytes: number): void => {
+    if (!Number.isFinite(bytes) || bytes <= 0) return;
+    app_init_state.update((prev) => ({
+        ...prev,
+        loaded_bytes: prev.loaded_bytes + bytes
+    }));
+};
+
+const app_init_total_add = (bytes: number): void => {
+    if (!Number.isFinite(bytes) || bytes <= 0) return;
+    app_init_state.update((prev) => ({
+        ...prev,
+        total_bytes: prev.total_bytes === null ? null : prev.total_bytes + bytes
+    }));
+};
+
+const app_init_total_unknown = (): void => {
+    app_init_state_update({ total_bytes: null });
+};
+
+const app_init_fetch_asset = async (url: string, stage: AppInitStage): Promise<void> => {
+    app_init_state_update({ stage });
+    const response = await fetch(url, { cache: "force-cache" });
+    if (!response.ok && response.type !== "opaque") throw new Error(`asset_fetch_failed:${url}`);
+    const content_length = response.headers.get("content-length");
+    if (content_length) app_init_total_add(Number(content_length));
+    else app_init_total_unknown();
+    if (!response.body) {
+        const buffer = await response.arrayBuffer();
+        app_init_progress_add(buffer.byteLength);
+        return;
+    }
+    const reader = response.body.getReader();
+    while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        if (value) app_init_progress_add(value.byteLength);
+    }
+};
+
+const app_init_assets = async (): Promise<void> => {
+    app_init_state_update({
+        loaded_bytes: 0,
+        total_bytes: 0
+    });
+    await app_init_fetch_asset(SQL_WASM_URL, "download_sql");
+    await app_init_fetch_asset(GEOCODER_DB_URL, "download_geo");
+};
+
 export const db_init = async (): Promise<void> => {
     if (!db_init_promise) {
         db_init_promise = (async () => {
@@ -90,14 +179,21 @@ export const geoc_init = async (): Promise<void> => {
 export const app_init = async (): Promise<void> => {
     if (!app_init_promise) {
         app_init_promise = (async () => {
+            app_init_state_update({ stage: "storage" });
             await idb_store_bootstrap(RADROOTS_IDB_DATABASE);
+            if (!app_init_has_completed()) await app_init_assets();
+            app_init_state_update({ stage: "database" });
             await db_init();
+            app_init_state_update({ stage: "geocoder" });
             await geoc_init();
+            app_init_state_update({ stage: "ready" });
+            app_init_mark_completed();
         })();
     }
     try {
         await app_init_promise;
     } catch (e) {
+        app_init_state_update({ stage: "error" });
         app_init_promise = null;
         throw e;
     }

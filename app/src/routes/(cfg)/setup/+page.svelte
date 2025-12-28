@@ -483,7 +483,7 @@
         };
 
     const handle_setup_role = async (): Promise<void> => {
-        if (!cfg_role) cfg_role = `personal`;
+        if (!cfg_role) cfg_role = `individual`;
         await datastore.update_obj<ConfigData>("cfg_data", { role: cfg_role });
         handle_view(`eula`);
     };
@@ -562,6 +562,7 @@
     ): Promise<ResultPass | IError<string>> => {
         const nostr_profile_add = await db.nostr_profile_create({
             public_key,
+            profile_type: config_data.role ?? "individual",
             name: config_data.nostr_profile
                 ? config_data.nostr_profile
                 : `${$ls(`common.default`)}`,
@@ -596,7 +597,7 @@
         }
         const set_app_data = await datastore.set_obj<AppData>("app_data", {
             active_key: public_key,
-            role: config_data.role || "personal",
+            role: config_data.role || "individual",
             eula_date: new Date().toISOString(),
             nip05_key: config_data.nip05_key,
         });
@@ -990,13 +991,13 @@
                             </button>
                             <button
                                 class={`flex flex-col h-bold_button w-lo_${$app_lo} justify-center items-center rounded-touch ${
-                                    cfg_role === `personal`
+                                    cfg_role === `individual`
                                         ? `ly1-apply-active ly1-raise-apply ly1-ring-apply`
                                         : `bg-ly1`
                                 } el-re`}
                                 onclick={async (ev) => {
                                     ev.stopPropagation();
-                                    cfg_role = `personal`;
+                                    cfg_role = `individual`;
                                 }}
                             >
                                 <p
