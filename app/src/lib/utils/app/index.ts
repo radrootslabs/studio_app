@@ -14,7 +14,7 @@ import { WebClientRadroots } from "@radroots/client/radroots";
 import { WebTangleDatabase } from "@radroots/client/tangle";
 import { Geocoder } from "@radroots/geocoder";
 import { WebHttp } from "@radroots/http";
-import type { CallbackPromise } from "@radroots/utils";
+import { asset_cache_fetch, type CallbackPromise } from "@radroots/utils";
 import { writable } from "svelte/store";
 import { reset_sql_cipher } from "./cipher";
 import type { NavigationRoute } from "./routes";
@@ -130,7 +130,7 @@ const app_init_total_unknown = (): void => {
 
 const app_init_fetch_asset = async (url: string, stage: AppInitStage): Promise<void> => {
     app_init_state_update({ stage });
-    const response = await fetch(url, { cache: "force-cache" });
+    const response = await asset_cache_fetch(url, { request_init: { cache: "force-cache" } });
     if (!response.ok && response.type !== "opaque") throw new Error(`asset_fetch_failed:${url}`);
     const content_length = response.headers.get("content-length");
     if (content_length) app_init_total_add(Number(content_length));

@@ -2,6 +2,7 @@ import { build, files, prerendered, version } from "$service-worker";
 import { _env } from "$lib/_env";
 import { DEFAULT_SQL_WASM_PATH } from "@radroots/client/sql/constants";
 import { DEFAULT_GEOCODER_DATABASE_PATH } from "@radroots/geocoder/constants";
+import { RADROOTS_ASSET_CACHE_NAME, RADROOTS_ASSET_CACHE_PREFIX } from "@radroots/utils";
 
 const APP_SHELL_URL = new URL(self.registration.scope).pathname;
 const normalize_env_path = (value) =>
@@ -46,8 +47,8 @@ const PRECACHE_LIST = PRECACHE_URLS.map((url) => ({
 }));
 const APP_CACHE = `cache-app-shell-v${version}`;
 const APP_CACHE_PREFIX = "cache-app-shell-v";
-const ASSET_CACHE = "cache-app-assets-v1";
-const ASSET_CACHE_PREFIX = "cache-app-assets-v";
+const ASSET_CACHE = RADROOTS_ASSET_CACHE_NAME;
+const ASSET_CACHE_PREFIX = RADROOTS_ASSET_CACHE_PREFIX;
 
 const normalize_asset_url = (url) => {
     const resolved = new URL(url, self.location.origin);

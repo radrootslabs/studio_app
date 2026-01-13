@@ -27,7 +27,7 @@
     import type { LibContext } from "@radroots/apps-lib-pwa/types/context";
     import { CFG_APP } from "@radroots/apps-lib-pwa/utils/app";
     import { parse_theme_key, parse_theme_mode } from "@radroots/themes";
-    import { str_cap_words } from "@radroots/utils";
+    import { RADROOTS_ASSET_CACHE_NAME, str_cap_words } from "@radroots/utils";
     import "css-paint-polyfill";
     import { onMount } from "svelte";
     import "../app.css";
@@ -112,7 +112,8 @@
         await Promise.all(registrations.map((registration) => registration.unregister()));
         if (!("caches" in globalThis)) return;
         const cache_names = await caches.keys();
-        await Promise.all(cache_names.map((name) => caches.delete(name)));
+        const stale_cache_names = cache_names.filter((name) => name !== RADROOTS_ASSET_CACHE_NAME);
+        await Promise.all(stale_cache_names.map((name) => caches.delete(name)));
     };
 
     onMount(async () => {

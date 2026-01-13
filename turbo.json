@@ -40,6 +40,7 @@
         "@radroots/geocoder#build",
         "@radroots/http#build",
         "@radroots/locales#build",
+        "@radroots/nfc#build",
         "@radroots/nostr#build",
         "@radroots/tangle-db-schema-bindings#build",
         "@radroots/themes#build",
@@ -74,38 +75,48 @@
         "@radroots/nostr#build",
         "@radroots/tangle-db-schema-bindings#build",
         "@radroots/tangle-db-wasm#build",
+        "@radroots/tangle-events-wasm#build",
         "@radroots/types-bindings#build",
-        "@radroots/utils#build"
+        "@radroots/utils#build",
+        "@radroots/tsconfig#build"
       ]
     },
     "@radroots/geo#build": {
       "dependsOn": [
         "@radroots/tangle-db-schema-bindings#build",
-        "@radroots/utils#build"
+        "@radroots/utils#build",
+        "@radroots/tsconfig#build"
       ]
     },
     "@radroots/geocoder#build": {
       "dependsOn": [
         "@radroots/geo#build",
         "@radroots/types-bindings#build",
-        "@radroots/utils#build"
+        "@radroots/utils#build",
+        "@radroots/tsconfig#build"
       ]
     },
     "@radroots/http#build": {
       "dependsOn": [
         "@radroots/types-bindings#build",
-        "@radroots/utils#build"
+        "@radroots/utils#build",
+        "@radroots/tsconfig#build"
       ]
     },
     "@radroots/locales#build": {
-      "dependsOn": []
+      "dependsOn": [
+        "@radroots/tsconfig#build"
+      ]
     },
     "@radroots/themes#build": {
-      "dependsOn": []
+      "dependsOn": [
+        "@radroots/tsconfig#build"
+      ]
     },
     "@radroots/utils#build": {
       "dependsOn": [
-        "@radroots/types-bindings#build"
+        "@radroots/types-bindings#build",
+        "@radroots/tsconfig#build"
       ]
     },
     "@radroots/nostr#build": {
@@ -117,7 +128,8 @@
         "@radroots/utils#build",
         "@welshman/net#build",
         "@welshman/signer#build",
-        "@welshman/util#build"
+        "@welshman/util#build",
+        "@radroots/tsconfig#build"
       ]
     },
     "@radroots/apps-nostr#build": {
@@ -126,7 +138,8 @@
         "@welshman/app#build",
         "@welshman/net#build",
         "@welshman/signer#build",
-        "@welshman/store#build"
+        "@welshman/store#build",
+        "@radroots/tsconfig#build"
       ]
     },
     "@radroots/apps-lib-market#build": {
@@ -140,22 +153,28 @@
       ]
     },
     "@radroots/core-bindings#build": {
-      "dependsOn": []
+      "dependsOn": [
+        "@radroots/tsconfig#build"
+      ]
     },
     "@radroots/events-bindings#build": {
       "dependsOn": [
-        "@radroots/core-bindings#build"
+        "@radroots/core-bindings#build",
+        "@radroots/tsconfig#build"
       ]
     },
     "@radroots/events-codec-wasm#build": {
       "dependsOn": []
     },
     "@radroots/events-indexed-bindings#build": {
-      "dependsOn": []
+      "dependsOn": [
+        "@radroots/tsconfig#build"
+      ]
     },
     "@radroots/tangle-db-schema-bindings#build": {
       "dependsOn": [
-        "@radroots/types-bindings#build"
+        "@radroots/types-bindings#build",
+        "@radroots/tsconfig#build"
       ]
     },
     "@radroots/tangle-db-wasm#build": {
@@ -164,10 +183,25 @@
     "@radroots/trade-bindings#build": {
       "dependsOn": [
         "@radroots/core-bindings#build",
-        "@radroots/events-bindings#build"
+        "@radroots/events-bindings#build",
+        "@radroots/tsconfig#build"
       ]
     },
     "@radroots/types-bindings#build": {
+      "dependsOn": [
+        "@radroots/tsconfig#build"
+      ]
+    },
+    "@radroots/nfc#build": {
+      "dependsOn": [
+        "@radroots/utils#build",
+        "@radroots/tsconfig#build"
+      ]
+    },
+    "@radroots/tsconfig#build": {
+      "dependsOn": []
+    },
+    "@radroots/tangle-events-wasm#build": {
       "dependsOn": []
     }
   }
