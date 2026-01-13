@@ -89,7 +89,11 @@
 
     let view: View = $state("cfg_key");
 
-    let cfg_role: AppConfigRole | undefined = $state(undefined);
+    type CfgFarmOpt = "yes" | "no";
+    type CfgBusinessOpt = "yes" | "no";
+
+    let cfg_farm_opt: CfgFarmOpt | undefined = $state(undefined);
+    let cfg_business_opt: CfgBusinessOpt | undefined = $state(undefined);
     type CfgKeyOpt = "nostr_key_gen" | "nostr_key_add";
     let cgf_key_opt: CfgKeyOpt | undefined = $state(undefined);
 
@@ -130,7 +134,8 @@
     let is_loading_s = $state(false);
 
     const reset_local_state = (): void => {
-        cfg_role = undefined;
+        cfg_farm_opt = undefined;
+        cfg_business_opt = undefined;
         cgf_key_opt = undefined;
         cfg_key_step = "intro";
         cfg_key_loading = false;
@@ -267,6 +272,13 @@
                     case 0:
                         return handle_setup_profile();
                     case 1:
+                        if (cfg_farm_opt === "no")
+                            return carousel_inc(view_carousel[view]);
+                        if (cfg_farm_opt === "yes") return handle_setup_role();
+                        return;
+                    case 2:
+                        if (cfg_farm_opt !== "no") return;
+                        if (!cfg_business_opt) return;
                         return handle_setup_role();
                 }
         }
@@ -482,9 +494,15 @@
             });
         };
 
+    const cfg_role_resolve = (): AppConfigRole => {
+        if (cfg_farm_opt === "yes") return "farm";
+        if (cfg_business_opt === "yes") return "business";
+        return "individual";
+    };
+
     const handle_setup_role = async (): Promise<void> => {
-        if (!cfg_role) cfg_role = `individual`;
-        await datastore.update_obj<ConfigData>("cfg_data", { role: cfg_role });
+        const role = cfg_role_resolve();
+        await datastore.update_obj<ConfigData>("cfg_data", { role });
         handle_view(`eula`);
     };
 
@@ -517,6 +535,7 @@
                         return handle_view(`cfg_key`);
                     }
                     case 1:
+                    case 2:
                         return carousel_dec(view_carousel[view]);
                 }
         }
@@ -561,9 +580,7 @@
         config_data: ConfigData,
     ): Promise<ResultPass | IError<string>> => {
         const profile_type =
-            config_data.role === `farmer`
-                ? `individual`
-                : config_data.role ?? `individual`;
+            config_data.role === `farm` ? `farm` : `individual`;
         const nostr_profile_add = await db.nostr_profile_create({
             public_key,
             profile_type,
@@ -957,7 +974,8 @@
                         role: `button`,
                         tabindex: 0,
                         callback_click: async () => {
-                            cfg_role = undefined;
+                            cfg_farm_opt = undefined;
+                            cfg_business_opt = undefined;
                         },
                     }}
                 >
@@ -978,13 +996,13 @@
                         >
                             <button
                                 class={`flex flex-col h-bold_button w-lo_${$app_lo} justify-center items-center rounded-touch ${
-                                    cfg_role === `farmer`
+                                    cfg_farm_opt === `yes`
                                         ? `ly1-apply-active ly1-raise-apply ly1-ring-apply`
                                         : `bg-ly1`
                                 } el-re`}
                                 onclick={async (ev) => {
                                     ev.stopPropagation();
-                                    cfg_role = `farmer`;
+                                    cfg_farm_opt = `yes`;
                                 }}
                             >
                                 <p
@@ -995,13 +1013,75 @@
                             </button>
                             <button
                                 class={`flex flex-col h-bold_button w-lo_${$app_lo} justify-center items-center rounded-touch ${
-                                    cfg_role === `individual`
+                                    cfg_farm_opt === `no`
                                         ? `ly1-apply-active ly1-raise-apply ly1-ring-apply`
                                         : `bg-ly1`
                                 } el-re`}
                                 onclick={async (ev) => {
                                     ev.stopPropagation();
-                                    cfg_role = `individual`;
+                                    cfg_farm_opt = `no`;
+                                }}
+                            >
+                                <p
+                                    class={`font-sans font-[600] text-ly0-gl text-xl`}
+                                >
+                                    {`${$ls(`common.no`)}`}
+                                </p>
+                            </button>
+                        </div>
+                    </div>
+                </CarouselItem>
+                <CarouselItem
+                    basis={{
+                        classes: `justify-center items-center`,
+                        role: `button`,
+                        tabindex: 0,
+                        callback_click: async () => {
+                            cfg_business_opt = undefined;
+                        },
+                    }}
+                >
+                    <div
+                        class={`flex flex-col h-[16rem] w-full gap-10 justify-start items-center`}
+                    >
+                        <div
+                            class={`flex flex-row w-full justify-center items-center`}
+                        >
+                            <p
+                                class={`font-sans font-[600] text-ly0-gl text-3xl`}
+                            >
+                                {`${$ls(`common.setup_for_business`)}`}
+                            </p>
+                        </div>
+                        <div
+                            class={`flex flex-col w-full gap-5 justify-center items-center`}
+                        >
+                            <button
+                                class={`flex flex-col h-bold_button w-lo_${$app_lo} justify-center items-center rounded-touch ${
+                                    cfg_business_opt === `yes`
+                                        ? `ly1-apply-active ly1-raise-apply ly1-ring-apply`
+                                        : `bg-ly1`
+                                } el-re`}
+                                onclick={async (ev) => {
+                                    ev.stopPropagation();
+                                    cfg_business_opt = `yes`;
+                                }}
+                            >
+                                <p
+                                    class={`font-sans font-[600] text-ly0-gl text-xl`}
+                                >
+                                    {`${$ls(`common.yes`)}`}
+                                </p>
+                            </button>
+                            <button
+                                class={`flex flex-col h-bold_button w-lo_${$app_lo} justify-center items-center rounded-touch ${
+                                    cfg_business_opt === `no`
+                                        ? `ly1-apply-active ly1-raise-apply ly1-ring-apply`
+                                        : `bg-ly1`
+                                } el-re`}
+                                onclick={async (ev) => {
+                                    ev.stopPropagation();
+                                    cfg_business_opt = `no`;
                                 }}
                             >
                                 <p
@@ -1022,7 +1102,11 @@
                         continue: {
                             label: `${$ls(`common.continue`)}`,
                             disabled:
-                                $carousel_cfg_profile_index === 1 && !cfg_role,
+                                ($carousel_cfg_profile_index === 1 &&
+                                    !cfg_farm_opt) ||
+                                ($carousel_cfg_profile_index === 2 &&
+                                    (cfg_farm_opt !== "no" ||
+                                        !cfg_business_opt)),
                             callback: async () => handle_continue(),
                         },
                         back: {
