@@ -1,6 +1,0 @@
-packages:
-  - 'app'
-  - 'packages/*'
-  - '../crates/*/bindings/ts'
-  - '../crates/*/pkg'
-  - '../welshman/packages/*'

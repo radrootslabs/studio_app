@@ -1,7 +1,0 @@
-[submodule "packages"]
-	path = packages
-	url = git@github.com:radrootslabs/packages.git
-[submodule "app/static/stylesheets"]
-	path = app/static/stylesheets
-	url = git@github.com:radrootslabs/stylesheets.git
-	branch = prod
