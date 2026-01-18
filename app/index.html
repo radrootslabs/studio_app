@@ -5,7 +5,13 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Rad Roots</title>
     <link data-trunk rel="icon" href="assets/favicon.ico" />
-    <link data-trunk rel="rust" data-wasm-opt="z" />
+    <link
+      data-trunk
+      rel="rust"
+      data-cargo-profile-release="wasm-release"
+      data-wasm-opt="z"
+      data-wasm-opt-params="--enable-bulk-memory-opt"
+    />
   </head>
   <body></body>
 </html>
