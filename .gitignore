@@ -1,52 +1,30 @@
-node_modules
-dist
-build
-.turbo
+/target
 
-.svelte-kit
-.wrangler
-vite.config.js.timestamp-*
-vite.config.ts.timestamp-*
-
-# Logs
+# Debug
 logs/
-*.log
 
-# Env
+# Local env files
 .env
 .env.*
 !.env.example
-!.env.development.example
-!.env.production.example
 !.env.test
-.local*
-justfile
 
 # OS
 .DS_Store
 Thumbs.db
 
-# Secrets
+# secrets
 *.pem
 *.crt
 *.key
+*.pem
 
-# Testing
-test*.json
-
-# Deploy
-app/svelte.config.prod.js
-app/wrangler*.jsonc
-
-# Editors
-.vscode/
-.idea/
-*.iml
-
-# Notes
+# local
+.local*
+.vscode
 notes*.txt
-notes*.md
-notes*.json
-tree*.txt
-diff*.txt
-prompt*.txt
+justfile
+
+# dev
+*dev*.toml
+*dev*.json

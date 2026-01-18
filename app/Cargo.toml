@@ -1,0 +1,15 @@
+[package]
+name = "radroots-app"
+description = "GPUI desktop client for Radroots"
+authors = ["Radroots Authors"]
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+leptos = { workspace = true, features = ["csr"] }
+wasm-bindgen.workspace = true
