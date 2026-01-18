@@ -7,3 +7,4 @@ pub mod datastore;
 pub mod fs;
 pub mod geolocation;
 pub mod keystore;
+pub mod notifications;
