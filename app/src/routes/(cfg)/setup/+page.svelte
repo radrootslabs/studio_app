@@ -14,7 +14,7 @@
         type AppData,
         type ConfigData,
     } from "$lib/utils/config";
-    import { ls } from "$lib/utils/i18n";
+    import { locale, ls } from "$lib/utils/i18n";
     import { get_default_nostr_relays } from "$lib/utils/nostr/lib";
     import {
         carousel_create,
@@ -24,6 +24,7 @@
         el_id,
         Fade,
         fmt_id,
+        geop_is_valid,
         Glyph,
         sleep,
         ViewPane,
@@ -34,12 +35,20 @@
         CarouselContainer,
         CarouselItem,
         EntryLine,
+        EntryWrap,
+        FarmsAddMap,
         LoadSymbol,
         LogoCircle,
         SelectMenu,
     } from "@radroots/apps-lib-pwa";
     import { app_lo, app_loading } from "@radroots/apps-lib-pwa/stores/app";
     import type { AppConfigRole } from "@radroots/apps-lib-pwa/types/app";
+    import {
+        geol_lat_fmt,
+        geol_lng_fmt,
+        type GeocoderReverseResult,
+        type GeolocationPoint,
+    } from "@radroots/geo";
     import { nostr_secret_key_validate } from "@radroots/nostr";
     import type { IError } from "@radroots/types-bindings";
     import {
@@ -50,13 +59,16 @@
     } from "@radroots/utils";
     import { onMount } from "svelte";
 
-    type View = "cfg_key" | "cfg_profile" | "eula";
+    type View = "cfg_key" | "cfg_profile" | "cfg_bootstrap" | "eula";
 
     const page_carousel: Record<View, { max_index: number }> = {
         cfg_key: {
             max_index: 2,
         },
         cfg_profile: {
+            max_index: 2,
+        },
+        cfg_bootstrap: {
             max_index: 2,
         },
         eula: {
@@ -74,6 +86,11 @@
         max_index: page_carousel.cfg_profile.max_index,
     });
 
+    const carousel_cfg_bootstrap = carousel_create({
+        view: "cfg_bootstrap",
+        max_index: page_carousel.cfg_bootstrap.max_index,
+    });
+
     const carousel_eula = carousel_create({
         view: "eula",
         max_index: page_carousel.eula.max_index,
@@ -82,10 +99,12 @@
     const view_carousel = {
         cfg_key: carousel_cfg_key,
         cfg_profile: carousel_cfg_profile,
+        cfg_bootstrap: carousel_cfg_bootstrap,
         eula: carousel_eula,
     };
 
     const carousel_cfg_profile_index = carousel_cfg_profile.index;
+    const carousel_cfg_bootstrap_index = carousel_cfg_bootstrap.index;
 
     let view: View = $state("cfg_key");
 
@@ -130,6 +149,23 @@
     let profile_name_nip05 = $state(true);
     let profile_name_loading = $state(false);
 
+    let farm_name_val = $state(``);
+    let farm_products_val = $state(``);
+    let farm_map_geop: GeolocationPoint | undefined = $state(undefined);
+    let farm_map_geoc: GeocoderReverseResult | undefined = $state(undefined);
+
+    const farm_geop_lat = $derived(
+        geop_is_valid(farm_map_geop)
+            ? geol_lat_fmt(farm_map_geop.lat, `dms`, $locale, 3)
+            : ``,
+    );
+
+    const farm_geop_lng = $derived(
+        geop_is_valid(farm_map_geop)
+            ? geol_lng_fmt(farm_map_geop.lng, `dms`, $locale, 3)
+            : ``,
+    );
+
     let is_eula_scrolled = $state(false);
     let is_loading_s = $state(false);
 
@@ -144,15 +180,25 @@
         profile_name_valid = false;
         profile_name_nip05 = true;
         profile_name_loading = false;
+        farm_name_val = ``;
+        farm_products_val = ``;
+        farm_map_geop = undefined;
+        farm_map_geoc = undefined;
         is_eula_scrolled = false;
         is_loading_s = false;
     };
+
+    const cfg_bootstrap_max_index = (): number =>
+        cfg_farm_opt === "yes" ? page_carousel.cfg_bootstrap.max_index : 0;
 
     const sync_carousel = (new_view: View, index: number): void => {
         const carousel = view_carousel[new_view];
         carousel_init(carousel, {
             index,
-            max_index: page_carousel[new_view].max_index,
+            max_index:
+                new_view === "cfg_bootstrap"
+                    ? cfg_bootstrap_max_index()
+                    : page_carousel[new_view].max_index,
         });
     };
 
@@ -281,6 +327,13 @@
                         if (!cfg_business_opt) return;
                         return handle_setup_role();
                 }
+            case `cfg_bootstrap`:
+                if (cfg_farm_opt === "yes") {
+                    if ($carousel_cfg_bootstrap_index < 2)
+                        return carousel_inc(view_carousel[view]);
+                    return handle_view(`eula`);
+                }
+                return handle_view(`eula`);
         }
     };
 
@@ -503,7 +556,7 @@
     const handle_setup_role = async (): Promise<void> => {
         const role = cfg_role_resolve();
         await datastore.update_obj<ConfigData>("cfg_data", { role });
-        handle_view(`eula`);
+        handle_view(`cfg_bootstrap`);
     };
 
     const handle_back = async (): Promise<void> => {
@@ -538,6 +591,12 @@
                     case 2:
                         return carousel_dec(view_carousel[view]);
                 }
+            case `cfg_bootstrap`:
+                if (cfg_farm_opt === "yes" && $carousel_cfg_bootstrap_index > 0)
+                    return carousel_dec(view_carousel[view]);
+                return handle_view(`cfg_profile`, {
+                    index: cfg_farm_opt === "no" ? 2 : 1,
+                });
         }
     };
 
@@ -1117,6 +1176,121 @@
                                 !profile_name_val
                                     ? `${$ls(`common.skip`)}`
                                     : `${$ls(`common.back`)}`,
+                            callback: handle_back,
+                        },
+                    }}
+                />
+            </div>
+        </div>
+    </ViewPane>
+
+    <ViewPane basis={{ view: "cfg_bootstrap" }}>
+        <div class={`flex flex-col h-full w-full justify-start items-center`}>
+            <CarouselContainer
+                basis={{
+                    carousel: carousel_cfg_bootstrap,
+                }}
+            >
+                {#if cfg_farm_opt === "yes"}
+                    <CarouselItem
+                        basis={{
+                            classes: `justify-center items-center`,
+                        }}
+                    >
+                        <div
+                            class={`flex flex-col h-[16rem] w-full px-4 gap-6 justify-start items-center`}
+                        >
+                            <p
+                                class={`font-sans font-[600] text-ly0-gl text-3xl`}
+                            >
+                                {`${$ls(`common.farm_name`)}`}
+                            </p>
+                            <EntryWrap
+                                basis={{
+                                    layer: 1,
+                                    classes: `w-lo_${$app_lo}`,
+                                    style: `guide`,
+                                }}
+                            >
+                                <input
+                                    bind:value={farm_name_val}
+                                    class={`h-entry_line w-full font-sans text-[1.25rem] text-center placeholder:opacity-60 el-input bg-ly1 text-ly1-gl placeholder:text-ly1-gl_pl caret-ly1-gl el-re`}
+                                    placeholder={`${$ls(`common.farm_name`)}`}
+                                />
+                            </EntryWrap>
+                        </div>
+                    </CarouselItem>
+                    <CarouselItem
+                        basis={{
+                            classes: `justify-start items-center`,
+                        }}
+                    >
+                        <FarmsAddMap
+                            bind:map_geop={farm_map_geop}
+                            bind:map_geoc={farm_map_geoc}
+                            {farm_geop_lat}
+                            {farm_geop_lng}
+                        />
+                    </CarouselItem>
+                    <CarouselItem
+                        basis={{
+                            classes: `justify-center items-center`,
+                        }}
+                    >
+                        <div
+                            class={`flex flex-col h-[16rem] w-full px-4 gap-6 justify-start items-center`}
+                        >
+                            <p
+                                class={`font-sans font-[600] text-ly0-gl text-3xl`}
+                            >
+                                {`${$ls(`common.products`)}`}
+                            </p>
+                            <EntryWrap
+                                basis={{
+                                    layer: 1,
+                                    classes: `w-lo_${$app_lo}`,
+                                    style: `guide`,
+                                    no_pad: true,
+                                }}
+                            >
+                                <textarea
+                                    bind:value={farm_products_val}
+                                    class={`h-full w-full min-h-[8rem] px-6 py-4 font-sans text-[1.05rem] text-center placeholder:opacity-60 el-input bg-ly1 text-ly1-gl placeholder:text-ly1-gl_pl caret-ly1-gl el-re resize-none`}
+                                    placeholder={`${$ls(`common.products`)}`}
+                                ></textarea>
+                            </EntryWrap>
+                        </div>
+                    </CarouselItem>
+                {:else}
+                    <CarouselItem
+                        basis={{
+                            classes: `justify-center items-center`,
+                        }}
+                    >
+                        <div
+                            class={`flex flex-col h-[16rem] w-full px-4 gap-6 justify-center items-center`}
+                        >
+                            <p
+                                class={`font-sans font-[600] text-ly0-gl text-3xl capitalize`}
+                            >
+                                {cfg_role_resolve()}
+                            </p>
+                        </div>
+                    </CarouselItem>
+                {/if}
+            </CarouselContainer>
+            <div
+                class={`absolute ios0:bottom-2 bottom-10 left-0 flex flex-col w-full justify-center items-center`}
+            >
+                <ButtonLayoutPair
+                    basis={{
+                        continue: {
+                            label: `${$ls(`common.continue`)}`,
+                            callback: async () => handle_continue(),
+                        },
+                        back: {
+                            visible: true,
+                            label: `${$ls(`common.back`)}`,
                             callback: handle_back,
                         },
                     }}
