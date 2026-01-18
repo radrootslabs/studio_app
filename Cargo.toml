@@ -1,6 +1,7 @@
 [workspace]
 members = [
-  "app"
+  "app",
+  "crates/core"
 ]
 
 resolver = "2"
