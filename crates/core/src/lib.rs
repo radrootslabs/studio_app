@@ -6,3 +6,4 @@ pub mod backup;
 pub mod datastore;
 pub mod fs;
 pub mod geolocation;
+pub mod keystore;
