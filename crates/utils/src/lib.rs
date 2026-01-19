@@ -6,6 +6,7 @@ pub mod r#async;
 pub mod binary;
 pub mod currency;
 pub mod id;
+pub mod media;
 pub mod numbers;
 pub mod object;
 pub mod path;
@@ -22,6 +23,7 @@ pub use currency::{
     FIAT_CURRENCIES,
 };
 pub use id::{d_tag_create, uuidv4, uuidv4_b64url, uuidv7, uuidv7_b64url};
+pub use media::{fmt_media_image_upload_result_url, MediaImageUploadResult, MediaResource};
 pub use errors::{err_msg, handle_err, throw_err, ERR_PREFIX_APP, ERR_PREFIX_UTILS};
 pub use numbers::{num_interval_range, num_str, parse_float, parse_int};
 pub use object::{obj_en, obj_result, obj_results_str, obj_truthy_fields};
