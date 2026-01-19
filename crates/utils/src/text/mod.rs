@@ -10,9 +10,22 @@ pub fn text_dec(data: &[u8]) -> String {
     String::from_utf8_lossy(data).to_string()
 }
 
+pub fn str_cap(value: Option<&str>) -> String {
+    let Some(value) = value else {
+        return String::new();
+    };
+    let mut chars = value.chars();
+    let Some(first) = chars.next() else {
+        return String::new();
+    };
+    let mut output = first.to_uppercase().collect::<String>();
+    output.push_str(chars.as_str());
+    output
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{text_dec, text_enc, ROOT_SYMBOL};
+    use super::{str_cap, text_dec, text_enc, ROOT_SYMBOL};
 
     #[test]
     fn root_symbol_matches_spec() {
@@ -25,5 +38,15 @@ mod tests {
         assert_eq!(encoded, b"radroots");
         let decoded = text_dec(&encoded);
         assert_eq!(decoded, "radroots");
+    }
+
+    #[test]
+    fn str_cap_handles_none() {
+        assert_eq!(str_cap(None), "");
+    }
+
+    #[test]
+    fn str_cap_uppercases_first_letter() {
+        assert_eq!(str_cap(Some("radroots")), "Radroots");
     }
 }
