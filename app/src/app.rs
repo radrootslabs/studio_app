@@ -7,10 +7,29 @@ use crate::{
     app_init_mark_completed,
     app_init_reset,
     app_config_default,
+    app_health_check_all,
     AppBackends,
+    AppHealthCheckResult,
+    AppHealthCheckStatus,
+    AppHealthReport,
     AppInitError,
     AppInitStage,
 };
+
+fn health_status_color(status: AppHealthCheckStatus) -> &'static str {
+    match status {
+        AppHealthCheckStatus::Ok => "green",
+        AppHealthCheckStatus::Error => "red",
+        AppHealthCheckStatus::Skipped => "gray",
+    }
+}
+
+fn health_result_label(result: &AppHealthCheckResult) -> String {
+    match result.message.as_deref() {
+        Some(message) => format!("{}: {}", result.status.as_str(), message),
+        None => result.status.as_str().to_string(),
+    }
+}
 
 #[component]
 pub fn App() -> impl IntoView {
@@ -18,6 +37,8 @@ pub fn App() -> impl IntoView {
     let init_error = RwSignal::new_local(None::<AppInitError>);
     let init_state = RwSignal::new_local(app_init_state_default());
     let reset_status = RwSignal::new_local(None::<String>);
+    let health_report = RwSignal::new_local(AppHealthReport::empty());
+    let health_running = RwSignal::new_local(false);
     provide_context(backends);
     provide_context(init_error);
     provide_context(init_state);
@@ -52,6 +73,9 @@ pub fn App() -> impl IntoView {
         reset_status
             .get()
             .unwrap_or_else(|| "reset_idle".to_string())
+    };
+    let health_disabled = move || {
+        backends.with(|value| value.is_none()) || health_running.get()
     };
     view! {
         <main>
@@ -89,6 +113,87 @@ pub fn App() -> impl IntoView {
                     "reset"
                 </button>
                 <span>{reset_label}</span>
+            </div>
+            <div style="margin-top: 16px;">
+                <div style="font-weight: 600;">"health checks"</div>
+                <div style="margin-top: 8px; display: flex; align-items: center; gap: 8px;">
+                    <button
+                        on:click=move |_| {
+                            let config = backends.with_untracked(|value| value.as_ref().map(|backends| backends.config.clone()));
+                            health_running.set(true);
+                            spawn_local(async move {
+                                let Some(config) = config else {
+                                    health_running.set(false);
+                                    return;
+                                };
+                                let datastore = radroots_studio_app_core::datastore::RadrootsClientWebDatastore::new(
+                                    Some(config.datastore.idb_config),
+                                );
+                                let keystore = radroots_studio_app_core::keystore::RadrootsClientWebKeystoreNostr::new(
+                                    Some(config.keystore.nostr_store),
+                                );
+                                let report = app_health_check_all(&datastore, &keystore, &config.datastore.key_maps).await;
+                                health_report.set(report);
+                                health_running.set(false);
+                            });
+                        }
+                        disabled=health_disabled
+                    >
+                        {move || if health_running.get() { "checking" } else { "run checks" }}
+                    </button>
+                </div>
+                <div style="margin-top: 8px; display: grid; gap: 6px;">
+                    <div style="display: flex; align-items: center; gap: 8px;">
+                        <span
+                            style=move || format!(
+                                "display:inline-block;width:10px;height:10px;border-radius:50%;background:{};",
+                                health_status_color(health_report.get().key_maps.status)
+                            )
+                        ></span>
+                        <span>"key_maps"</span>
+                        <span>{move || health_result_label(&health_report.get().key_maps)}</span>
+                    </div>
+                    <div style="display: flex; align-items: center; gap: 8px;">
+                        <span
+                            style=move || format!(
+                                "display:inline-block;width:10px;height:10px;border-radius:50%;background:{};",
+                                health_status_color(health_report.get().bootstrap_config.status)
+                            )
+                        ></span>
+                        <span>"bootstrap_config"</span>
+                        <span>{move || health_result_label(&health_report.get().bootstrap_config)}</span>
+                    </div>
+                    <div style="display: flex; align-items: center; gap: 8px;">
+                        <span
+                            style=move || format!(
+                                "display:inline-block;width:10px;height:10px;border-radius:50%;background:{};",
+                                health_status_color(health_report.get().bootstrap_app_data.status)
+                            )
+                        ></span>
+                        <span>"bootstrap_app_data"</span>
+                        <span>{move || health_result_label(&health_report.get().bootstrap_app_data)}</span>
+                    </div>
+                    <div style="display: flex; align-items: center; gap: 8px;">
+                        <span
+                            style=move || format!(
+                                "display:inline-block;width:10px;height:10px;border-radius:50%;background:{};",
+                                health_status_color(health_report.get().datastore_roundtrip.status)
+                            )
+                        ></span>
+                        <span>"datastore_roundtrip"</span>
+                        <span>{move || health_result_label(&health_report.get().datastore_roundtrip)}</span>
+                    </div>
+                    <div style="display: flex; align-items: center; gap: 8px;">
+                        <span
+                            style=move || format!(
+                                "display:inline-block;width:10px;height:10px;border-radius:50%;background:{};",
+                                health_status_color(health_report.get().keystore.status)
+                            )
+                        ></span>
+                        <span>"keystore"</span>
+                        <span>{move || health_result_label(&health_report.get().keystore)}</span>
+                    </div>
+                </div>
             </div>
         </main>
     }
