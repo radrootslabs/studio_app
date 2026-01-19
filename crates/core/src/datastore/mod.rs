@@ -1,5 +1,6 @@
 pub mod error;
 pub mod types;
+pub mod web;
 
 pub use error::{RadrootsClientDatastoreError, RadrootsClientDatastoreErrorMessage};
 pub use types::{
@@ -9,3 +10,4 @@ pub use types::{
     RadrootsClientDatastoreResult,
     RadrootsClientDatastoreValue,
 };
+pub use web::RadrootsClientWebDatastore;
