@@ -105,10 +105,17 @@ impl AppConfig {
             keystore: AppKeystoreConfig::default_config(),
         }
     }
+
+    pub fn from_key_maps(key_maps: AppKeyMapConfig) -> Self {
+        Self {
+            datastore: AppDatastoreConfig::default_config(key_maps),
+            keystore: AppKeystoreConfig::default_config(),
+        }
+    }
 }
 
 pub fn app_config_default() -> AppConfig {
-    AppConfig::empty()
+    AppConfig::from_key_maps(app_key_maps_default())
 }
 
 pub fn app_config_from_env() -> AppConfig {
@@ -151,6 +158,10 @@ mod tests {
         let config = app_config_default();
         let from_env = app_config_from_env();
         assert_eq!(config, from_env);
+        assert_eq!(
+            config.datastore.key_maps.key_map.get("nostr_key"),
+            Some(&APP_DATASTORE_KEY_NOSTR_KEY)
+        );
     }
 
     #[test]
