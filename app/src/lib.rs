@@ -23,6 +23,7 @@ pub use health::{
     app_health_check_bootstrap_app_data,
     app_health_check_bootstrap_config,
     app_health_check_datastore_roundtrip,
+    app_health_check_keystore_access,
     app_health_check_key_maps,
     AppHealthCheckResult,
     AppHealthCheckStatus,

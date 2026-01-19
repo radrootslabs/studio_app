@@ -80,6 +80,7 @@ use crate::{
     AppKeyMapConfig,
 };
 use radroots_studio_app_core::datastore::RadrootsClientDatastore;
+use radroots_studio_app_core::keystore::{RadrootsClientKeystoreError, RadrootsClientKeystoreNostr};
 
 pub fn app_health_check_key_maps(key_maps: &AppKeyMapConfig) -> AppHealthCheckResult {
     match app_key_maps_validate(key_maps) {
@@ -133,6 +134,16 @@ pub async fn app_health_check_datastore_roundtrip<T: RadrootsClientDatastore>(
     AppHealthCheckResult::ok()
 }
 
+pub async fn app_health_check_keystore_access<T: RadrootsClientKeystoreNostr>(
+    keystore: &T,
+) -> AppHealthCheckResult {
+    match keystore.keys().await {
+        Ok(_) => AppHealthCheckResult::ok(),
+        Err(RadrootsClientKeystoreError::NostrNoResults) => AppHealthCheckResult::ok(),
+        Err(err) => AppHealthCheckResult::error(err.to_string()),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
@@ -140,12 +151,20 @@ mod tests {
         app_health_check_bootstrap_app_data,
         app_health_check_bootstrap_config,
         app_health_check_datastore_roundtrip,
+        app_health_check_keystore_access,
         AppHealthCheckResult,
         AppHealthCheckStatus,
         AppHealthReport,
     };
     use crate::AppKeyMapConfig;
+    use async_trait::async_trait;
     use radroots_studio_app_core::datastore::RadrootsClientWebDatastore;
+    use radroots_studio_app_core::keystore::{
+        RadrootsClientKeystoreError,
+        RadrootsClientKeystoreNostr,
+        RadrootsClientKeystoreResult,
+        RadrootsClientWebKeystoreNostr,
+    };
 
     #[test]
     fn health_status_as_str() {
@@ -207,6 +226,55 @@ mod tests {
         let datastore = RadrootsClientWebDatastore::new(None);
         let result =
             futures::executor::block_on(app_health_check_datastore_roundtrip(&datastore));
+        assert_eq!(result.status, AppHealthCheckStatus::Error);
+    }
+
+    struct TestKeystore {
+        result: RadrootsClientKeystoreResult<Vec<String>>,
+    }
+
+    #[async_trait(?Send)]
+    impl RadrootsClientKeystoreNostr for TestKeystore {
+        async fn generate(&self) -> RadrootsClientKeystoreResult<String> {
+            Err(RadrootsClientKeystoreError::IdbUndefined)
+        }
+
+        async fn add(&self, _secret_key: &str) -> RadrootsClientKeystoreResult<String> {
+            Err(RadrootsClientKeystoreError::IdbUndefined)
+        }
+
+        async fn read(&self, _public_key: &str) -> RadrootsClientKeystoreResult<String> {
+            Err(RadrootsClientKeystoreError::IdbUndefined)
+        }
+
+        async fn keys(&self) -> RadrootsClientKeystoreResult<Vec<String>> {
+            self.result.clone()
+        }
+
+        async fn remove(&self, _public_key: &str) -> RadrootsClientKeystoreResult<String> {
+            Err(RadrootsClientKeystoreError::IdbUndefined)
+        }
+
+        async fn reset(&self) -> RadrootsClientKeystoreResult<()> {
+            Err(RadrootsClientKeystoreError::IdbUndefined)
+        }
+    }
+
+    #[test]
+    fn health_check_keystore_maps_empty_ok() {
+        let keystore = TestKeystore {
+            result: Err(RadrootsClientKeystoreError::NostrNoResults),
+        };
+        let result =
+            futures::executor::block_on(app_health_check_keystore_access(&keystore));
+        assert_eq!(result.status, AppHealthCheckStatus::Ok);
+    }
+
+    #[test]
+    fn health_check_keystore_maps_idb_errors() {
+        let keystore = RadrootsClientWebKeystoreNostr::new(None);
+        let result =
+            futures::executor::block_on(app_health_check_keystore_access(&keystore));
         assert_eq!(result.status, AppHealthCheckStatus::Error);
     }
 }
