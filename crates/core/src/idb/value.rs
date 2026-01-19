@@ -4,6 +4,9 @@ pub type RadrootsClientIdbValue = wasm_bindgen::JsValue;
 pub type RadrootsClientIdbValue = ();
 
 #[cfg(target_arch = "wasm32")]
+use wasm_bindgen::JsCast;
+
+#[cfg(target_arch = "wasm32")]
 pub fn idb_value_as_bytes(value: &RadrootsClientIdbValue) -> Option<Vec<u8>> {
     if value.is_instance_of::<js_sys::Uint8Array>()
         || value.is_instance_of::<js_sys::ArrayBuffer>()

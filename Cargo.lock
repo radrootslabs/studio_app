@@ -1541,6 +1541,7 @@ name = "radroots-app"
 version = "0.1.0"
 dependencies = [
  "leptos",
+ "radroots-app-core",
  "wasm-bindgen",
 ]
 

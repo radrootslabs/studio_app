@@ -4,7 +4,7 @@ use crate::idb::{RADROOTS_IDB_DATABASE, RADROOTS_IDB_STORES};
 use super::RadrootsClientIdbStoreError;
 
 #[cfg(target_arch = "wasm32")]
-use js_sys::{Array, Promise, Reflect};
+use js_sys::{Array, Function, Promise, Reflect};
 #[cfg(target_arch = "wasm32")]
 use wasm_bindgen::closure::Closure;
 #[cfg(target_arch = "wasm32")]
@@ -28,10 +28,18 @@ async fn idb_database_exists(
     factory: &IdbFactory,
     database: &str,
 ) -> Result<bool, RadrootsClientIdbStoreError> {
-    let promise = match factory.databases() {
-        Ok(promise) => promise,
-        Err(_) => return Ok(true),
+    let databases = Reflect::get(factory.as_ref(), &JsValue::from_str("databases"))
+        .ok()
+        .and_then(|value| value.dyn_into::<Function>().ok());
+    let Some(databases) = databases else {
+        return Ok(true);
     };
+    let promise = databases
+        .call0(factory.as_ref())
+        .map_err(|_| RadrootsClientIdbStoreError::OperationFailure)?;
+    let promise: Promise = promise
+        .dyn_into()
+        .map_err(|_| RadrootsClientIdbStoreError::OperationFailure)?;
     let value = JsFuture::from(promise)
         .await
         .map_err(|_| RadrootsClientIdbStoreError::OperationFailure)?;
@@ -108,7 +116,7 @@ pub(crate) async fn idb_open(
             let err = request_error
                 .error()
                 .map(JsValue::from)
-                .unwrap_or_else(|| JsValue::from_str("idb_open_failed"));
+                .unwrap_or_else(|_| JsValue::from_str("idb_open_failed"));
             let _ = reject_error.call1(&JsValue::UNDEFINED, &err);
         }) as Box<dyn FnMut(_)>);
         request.set_onerror(Some(on_error.as_ref().unchecked_ref()));

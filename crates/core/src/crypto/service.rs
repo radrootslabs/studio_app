@@ -27,6 +27,8 @@ use crate::crypto::{
 use crate::crypto::random::fill_random;
 #[cfg(target_arch = "wasm32")]
 use crate::idb::{idb_get, idb_store_ensure, idb_store_exists, idb_value_as_bytes};
+#[cfg(target_arch = "wasm32")]
+use wasm_bindgen::JsCast;
 
 use super::{
     RadrootsClientCryptoDecryptOutcome,

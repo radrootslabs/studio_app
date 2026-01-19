@@ -83,16 +83,21 @@ impl RadrootsClientWebNotifications {
         let reader_load = reader.clone();
         let reader_error = reader.clone();
         let promise = js_sys::Promise::new(&mut |resolve, reject| {
+            let reader_load = reader_load.clone();
+            let resolve_load = resolve.clone();
+            let reject_load = reject.clone();
             let onload = wasm_bindgen::closure::Closure::once(move |_event: web_sys::Event| {
                 match reader_load.result() {
                     Ok(value) => {
-                        let _ = resolve.call1(&JsValue::NULL, &value);
+                        let _ = resolve_load.call1(&JsValue::NULL, &value);
                     }
                     Err(err) => {
-                        let _ = reject.call1(&JsValue::NULL, &err);
+                        let _ = reject_load.call1(&JsValue::NULL, &err);
                     }
                 }
             });
+            let reader_error = reader_error.clone();
+            let reject_error = reject.clone();
             let onerror = wasm_bindgen::closure::Closure::once(move |_event: web_sys::Event| {
                 let err = reader_error
                     .error()
@@ -100,7 +105,7 @@ impl RadrootsClientWebNotifications {
                     .unwrap_or_else(|| {
                         JsValue::from_str(RadrootsClientNotificationsError::ReadFailure.message())
                     });
-                let _ = reject.call1(&JsValue::NULL, &err);
+                let _ = reject_error.call1(&JsValue::NULL, &err);
             });
             reader.set_onload(Some(onload.as_ref().unchecked_ref()));
             reader.set_onerror(Some(onerror.as_ref().unchecked_ref()));
@@ -137,13 +142,16 @@ impl RadrootsClientWebNotifications {
         input.set_accept("image/png,image/jpg");
         let input_handle = input.clone();
         let promise = js_sys::Promise::new(&mut |resolve, _reject| {
+            let input_handle = input_handle.clone();
+            let input_set = input_handle.clone();
+            let resolve_change = resolve.clone();
             let onchange = wasm_bindgen::closure::Closure::once(move |_event: web_sys::Event| {
                 let files = input_handle.files();
                 let value = files.map(JsValue::from).unwrap_or(JsValue::NULL);
-                let _ = resolve.call1(&JsValue::NULL, &value);
+                let _ = resolve_change.call1(&JsValue::NULL, &value);
             });
-            input_handle.set_onchange(Some(onchange.as_ref().unchecked_ref()));
-            input_handle.click();
+            input_set.set_onchange(Some(onchange.as_ref().unchecked_ref()));
+            input_set.click();
             onchange.forget();
         });
         let value = JsFuture::from(promise)
@@ -259,7 +267,7 @@ impl RadrootsClientNotifications for RadrootsClientWebNotifications {
                 .as_deref()
                 .unwrap_or(&self.config.app_name);
             if let Some(body) = opts.body.as_deref() {
-                let mut options = web_sys::NotificationOptions::new();
+                let options = web_sys::NotificationOptions::new();
                 options.set_body(body);
                 web_sys::Notification::new_with_options(title, &options)
                     .map_err(|_| RadrootsClientNotificationsError::Unavailable)?;

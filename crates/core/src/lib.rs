@@ -10,5 +10,7 @@ pub mod idb;
 pub mod keystore;
 pub mod notifications;
 pub mod radroots;
+#[cfg(not(target_arch = "wasm32"))]
 pub mod sql;
+#[cfg(not(target_arch = "wasm32"))]
 pub mod tangle;

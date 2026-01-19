@@ -56,15 +56,16 @@ impl RadrootsClientWebGeolocation {
                     let _ = resolve.call1(&JsValue::NULL, &position);
                 },
             );
+            let reject_failure = reject.clone();
             let failure = wasm_bindgen::closure::Closure::once(
                 move |error: web_sys::PositionError| {
-                    let _ = reject.call1(&JsValue::NULL, &error);
+                    let _ = reject_failure.call1(&JsValue::NULL, &error);
                 },
             );
-            let mut options = web_sys::PositionOptions::new();
-            options.enable_high_accuracy(true);
-            options.timeout(10000.0);
-            options.maximum_age(30000.0);
+            let options = web_sys::PositionOptions::new();
+            options.set_enable_high_accuracy(true);
+            options.set_timeout(10_000);
+            options.set_maximum_age(30_000);
             if geolocation
                 .get_current_position_with_error_callback_and_options(
                     success.as_ref().unchecked_ref(),
@@ -78,7 +79,8 @@ impl RadrootsClientWebGeolocation {
             success.forget();
             failure.forget();
         });
-        JsFuture::from(promise).await
+        let value = JsFuture::from(promise).await?;
+        value.dyn_into::<web_sys::Position>()
     }
 
     #[cfg(target_arch = "wasm32")]

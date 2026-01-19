@@ -89,8 +89,8 @@ impl RadrootsClientWebRadroots {
         body: Option<Value>,
     ) -> RadrootsClientRadrootsResult<Option<Value>> {
         let window = web_sys::window().ok_or(RadrootsClientRadrootsError::RequestFailure)?;
-        let mut init = web_sys::RequestInit::new();
-        init.method(method);
+        let init = web_sys::RequestInit::new();
+        init.set_method(method);
         let header_map = web_sys::Headers::new()
             .map_err(|_| RadrootsClientRadrootsError::RequestFailure)?;
         for (key, value) in headers {
@@ -101,9 +101,9 @@ impl RadrootsClientWebRadroots {
         if let Some(body) = body {
             let body = serde_json::to_string(&body)
                 .map_err(|_| RadrootsClientRadrootsError::RequestFailure)?;
-            init.body(Some(&JsValue::from_str(&body)));
+            init.set_body(&JsValue::from_str(&body));
         }
-        init.headers(&header_map);
+        init.set_headers(&header_map);
         let request = web_sys::Request::new_with_str_and_init(url, &init)
             .map_err(|_| RadrootsClientRadrootsError::RequestFailure)?;
         let response = JsFuture::from(window.fetch_with_request(&request))
@@ -127,8 +127,8 @@ impl RadrootsClientWebRadroots {
         body: &[u8],
     ) -> RadrootsClientRadrootsResult<Option<Value>> {
         let window = web_sys::window().ok_or(RadrootsClientRadrootsError::RequestFailure)?;
-        let mut init = web_sys::RequestInit::new();
-        init.method(method);
+        let init = web_sys::RequestInit::new();
+        init.set_method(method);
         let header_map = web_sys::Headers::new()
             .map_err(|_| RadrootsClientRadrootsError::RequestFailure)?;
         for (key, value) in headers {
@@ -137,8 +137,8 @@ impl RadrootsClientWebRadroots {
                 .map_err(|_| RadrootsClientRadrootsError::RequestFailure)?;
         }
         let bytes = js_sys::Uint8Array::from(body);
-        init.body(Some(&bytes.into()));
-        init.headers(&header_map);
+        init.set_body(&bytes.into());
+        init.set_headers(&header_map);
         let request = web_sys::Request::new_with_str_and_init(url, &init)
             .map_err(|_| RadrootsClientRadrootsError::RequestFailure)?;
         let response = JsFuture::from(window.fetch_with_request(&request))
@@ -335,7 +335,7 @@ fn encode_bearer_token(value: &str) -> String {
 async fn parse_response(
     response: web_sys::Response,
 ) -> RadrootsClientRadrootsResult<Option<Value>> {
-    let json_response = response.clone().json();
+    let json_response = response.json();
     if let Ok(json_response) = json_response {
         if let Ok(value) = JsFuture::from(json_response).await {
             if let Ok(value) = serde_wasm_bindgen::from_value::<Value>(value) {

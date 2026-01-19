@@ -11,11 +11,9 @@ pub fn fill_random(bytes: &mut [u8]) -> Result<(), RadrootsClientCryptoError> {
 fn fill_random_inner(bytes: &mut [u8]) -> Result<(), RadrootsClientCryptoError> {
     let window = web_sys::window().ok_or(RadrootsClientCryptoError::CryptoUndefined)?;
     let crypto = window.crypto().map_err(|_| RadrootsClientCryptoError::CryptoUndefined)?;
-    let array = js_sys::Uint8Array::from(bytes);
     crypto
-        .get_random_values_with_u8_array(&array)
+        .get_random_values_with_u8_array(bytes)
         .map_err(|_| RadrootsClientCryptoError::CryptoUndefined)?;
-    array.copy_to(bytes);
     Ok(())
 }
 

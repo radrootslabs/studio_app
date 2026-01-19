@@ -39,7 +39,7 @@ async fn idb_request(request: IdbRequest) -> Result<JsValue, RadrootsClientIdbSt
             let err = request_error
                 .error()
                 .map(JsValue::from)
-                .unwrap_or_else(|| JsValue::from_str("idb_request_failed"));
+                .unwrap_or_else(|_| JsValue::from_str("idb_request_failed"));
             let _ = reject_error.call1(&JsValue::UNDEFINED, &err);
         }) as Box<dyn FnMut(_)>);
         request.set_onerror(Some(on_error.as_ref().unchecked_ref()));
