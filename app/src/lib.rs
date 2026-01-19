@@ -11,6 +11,9 @@ pub use context::{app_context, AppContext};
 pub use config::{
     app_config_default,
     app_config_from_env,
+    app_datastore_param_nostr_profile,
+    app_datastore_param_radroots_profile,
+    app_key_maps_default,
     AppConfig,
     AppDatastoreConfig,
     AppDatastoreKeyMap,
@@ -19,6 +22,10 @@ pub use config::{
     AppDatastoreKeyParamMap,
     AppKeystoreConfig,
     AppKeyMapConfig,
+    APP_DATASTORE_KEY_EULA_DATE,
+    APP_DATASTORE_KEY_NOSTR_KEY,
+    APP_DATASTORE_KEY_OBJ_APP_DATA,
+    APP_DATASTORE_KEY_OBJ_CFG_DATA,
 };
 pub use init::{
     app_init_backends,

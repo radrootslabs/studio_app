@@ -13,6 +13,19 @@ pub type AppDatastoreKeyMap = BTreeMap<&'static str, &'static str>;
 pub type AppDatastoreKeyParamMap = BTreeMap<&'static str, AppDatastoreKeyParam>;
 pub type AppDatastoreKeyObjMap = BTreeMap<&'static str, &'static str>;
 
+pub const APP_DATASTORE_KEY_NOSTR_KEY: &str = "nostr:key";
+pub const APP_DATASTORE_KEY_EULA_DATE: &str = "app:eula:date";
+pub const APP_DATASTORE_KEY_OBJ_CFG_DATA: &str = "cfg:data";
+pub const APP_DATASTORE_KEY_OBJ_APP_DATA: &str = "app:data";
+
+pub fn app_datastore_param_nostr_profile(public_key: &str) -> String {
+    format!("nostr:{public_key}:profile")
+}
+
+pub fn app_datastore_param_radroots_profile(public_key: &str) -> String {
+    format!("radroots:{public_key}:profile")
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AppKeyMapConfig {
     pub key_map: AppDatastoreKeyMap,
@@ -27,6 +40,26 @@ impl AppKeyMapConfig {
             param_map: BTreeMap::new(),
             obj_map: BTreeMap::new(),
         }
+    }
+}
+
+pub fn app_key_maps_default() -> AppKeyMapConfig {
+    let mut key_map = BTreeMap::new();
+    key_map.insert("nostr_key", APP_DATASTORE_KEY_NOSTR_KEY);
+    key_map.insert("eula_date", APP_DATASTORE_KEY_EULA_DATE);
+    let mut param_map = BTreeMap::new();
+    param_map.insert("nostr_profile", app_datastore_param_nostr_profile as AppDatastoreKeyParam);
+    param_map.insert(
+        "radroots_profile",
+        app_datastore_param_radroots_profile as AppDatastoreKeyParam,
+    );
+    let mut obj_map = BTreeMap::new();
+    obj_map.insert("cfg_data", APP_DATASTORE_KEY_OBJ_CFG_DATA);
+    obj_map.insert("app_data", APP_DATASTORE_KEY_OBJ_APP_DATA);
+    AppKeyMapConfig {
+        key_map,
+        param_map,
+        obj_map,
     }
 }
 
@@ -87,10 +120,15 @@ mod tests {
     use super::{
         app_config_default,
         app_config_from_env,
+        app_datastore_param_nostr_profile,
         AppConfig,
         AppDatastoreConfig,
         AppKeyMapConfig,
         AppKeystoreConfig,
+        APP_DATASTORE_KEY_EULA_DATE,
+        APP_DATASTORE_KEY_NOSTR_KEY,
+        APP_DATASTORE_KEY_OBJ_APP_DATA,
+        APP_DATASTORE_KEY_OBJ_CFG_DATA,
     };
     use radroots_studio_app_core::idb::{IDB_CONFIG_DATASTORE, IDB_CONFIG_KEYSTORE_NOSTR};
 
@@ -127,5 +165,27 @@ mod tests {
         let config = AppDatastoreConfig::default_config(key_maps);
         assert_eq!(config.idb_config, IDB_CONFIG_DATASTORE);
         assert!(config.key_maps.key_map.is_empty());
+    }
+
+    #[test]
+    fn key_map_defaults_include_fixture_keys() {
+        let config = super::app_key_maps_default();
+        assert_eq!(
+            config.key_map.get("nostr_key"),
+            Some(&APP_DATASTORE_KEY_NOSTR_KEY)
+        );
+        assert_eq!(
+            config.key_map.get("eula_date"),
+            Some(&APP_DATASTORE_KEY_EULA_DATE)
+        );
+        assert_eq!(
+            config.obj_map.get("cfg_data"),
+            Some(&APP_DATASTORE_KEY_OBJ_CFG_DATA)
+        );
+        assert_eq!(
+            config.obj_map.get("app_data"),
+            Some(&APP_DATASTORE_KEY_OBJ_APP_DATA)
+        );
+        assert_eq!(app_datastore_param_nostr_profile("abc"), "nostr:abc:profile");
     }
 }
