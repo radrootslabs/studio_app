@@ -3,11 +3,13 @@
 mod app;
 mod context;
 mod config;
+mod data;
 mod init;
 mod entry;
 
 pub use app::App;
 pub use context::{app_context, AppContext};
+pub use data::{AppAppData, AppConfigData, AppConfigRole};
 pub use config::{
     app_config_default,
     app_config_from_env,
