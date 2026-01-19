@@ -14,6 +14,11 @@ use radroots_studio_app_core::idb::{
 };
 use radroots_studio_app_core::keystore::{RadrootsClientKeystoreError, RadrootsClientWebKeystoreNostr};
 
+#[cfg(target_arch = "wasm32")]
+use leptos::prelude::window;
+
+pub const APP_INIT_STORAGE_KEY: &str = "radroots.app.init.ready";
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AppInitError {
     Idb(RadrootsClientIdbStoreError),
@@ -47,6 +52,44 @@ pub struct AppBackends {
 }
 
 pub type AppInitResult<T> = Result<T, AppInitError>;
+
+pub fn app_init_has_completed() -> bool {
+    #[cfg(target_arch = "wasm32")]
+    {
+        let window = window();
+        match window.local_storage() {
+            Ok(Some(storage)) => match storage.get_item(APP_INIT_STORAGE_KEY) {
+                Ok(Some(value)) => value == "1",
+                _ => false,
+            },
+            _ => false,
+        }
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        false
+    }
+}
+
+pub fn app_init_mark_completed() {
+    #[cfg(target_arch = "wasm32")]
+    {
+        let window = window();
+        if let Ok(Some(storage)) = window.local_storage() {
+            let _ = storage.set_item(APP_INIT_STORAGE_KEY, "1");
+        }
+    }
+}
+
+pub fn app_init_reset() {
+    #[cfg(target_arch = "wasm32")]
+    {
+        let window = window();
+        if let Ok(Some(storage)) = window.local_storage() {
+            let _ = storage.remove_item(APP_INIT_STORAGE_KEY);
+        }
+    }
+}
 
 pub async fn app_init_backends() -> AppInitResult<AppBackends> {
     idb_store_bootstrap(RADROOTS_IDB_DATABASE, None)
@@ -103,5 +146,16 @@ mod tests {
             err,
             AppInitError::Idb(RadrootsClientIdbStoreError::IdbUndefined)
         );
+    }
+
+    #[test]
+    fn app_init_has_completed_is_false_on_native() {
+        assert!(!super::app_init_has_completed());
+    }
+
+    #[test]
+    fn app_init_reset_is_noop_on_native() {
+        super::app_init_mark_completed();
+        super::app_init_reset();
     }
 }
