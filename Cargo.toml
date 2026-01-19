@@ -27,9 +27,16 @@ web-sys = { version = "0.3.77", features = [
   "CryptoKey",
   "SubtleCrypto",
   "Window",
+  "Document",
+  "Element",
   "DomException",
   "DomStringList",
   "Event",
+  "EventTarget",
+  "File",
+  "FileList",
+  "FileReader",
+  "HtmlInputElement",
   "IdbDatabase",
   "IdbFactory",
   "IdbObjectStore",
@@ -37,6 +44,10 @@ web-sys = { version = "0.3.77", features = [
   "IdbRequest",
   "IdbTransaction",
   "IdbTransactionMode",
+  "Navigator",
+  "Notification",
+  "NotificationOptions",
+  "NotificationPermission",
 ] }
 wasm-bindgen-futures = "0.4"
 base64 = "0.22"

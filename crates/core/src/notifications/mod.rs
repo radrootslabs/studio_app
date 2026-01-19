@@ -1,5 +1,6 @@
 pub mod error;
 pub mod types;
+pub mod web;
 
 pub use error::{RadrootsClientNotificationsError, RadrootsClientNotificationsErrorMessage};
 pub use types::{
@@ -11,3 +12,4 @@ pub use types::{
     RadrootsClientNotificationsSendOptions,
     RadrootsClientResolveStatus,
 };
+pub use web::RadrootsClientWebNotifications;
