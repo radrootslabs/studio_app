@@ -129,6 +129,7 @@ pub fn App() -> impl IntoView {
                     on:click=move |_| {
                         let config = backends.with_untracked(|value| value.as_ref().map(|backends| backends.config.clone()));
                         reset_status.set(Some("resetting".to_string()));
+                        health_report.set(AppHealthReport::empty());
                         spawn_local(async move {
                             let Some(config) = config else {
                                 reset_status.set(Some("reset_missing_backends".to_string()));
@@ -147,7 +148,10 @@ pub fn App() -> impl IntoView {
                             )
                             .await
                             {
-                                Ok(()) => reset_status.set(Some("reset_done".to_string())),
+                                Ok(()) => {
+                                    reset_status.set(Some("reset_done".to_string()));
+                                    spawn_health_checks(config, health_report, health_running);
+                                }
                                 Err(err) => reset_status.set(Some(err.to_string())),
                             }
                         });
