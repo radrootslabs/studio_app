@@ -1148,6 +1148,9 @@ dependencies = [
 [[package]]
 name = "radroots-app-core"
 version = "0.1.0"
+dependencies = [
+ "async-trait",
+]
 
 [[package]]
 name = "reactive_graph"
