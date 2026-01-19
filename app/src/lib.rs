@@ -12,6 +12,7 @@ pub use config::{
     app_config_default,
     app_config_from_env,
     AppConfig,
+    AppDatastoreConfig,
     AppDatastoreKeyMap,
     AppDatastoreKeyObjMap,
     AppDatastoreKeyParam,

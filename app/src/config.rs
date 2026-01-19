@@ -2,7 +2,11 @@
 
 use std::collections::BTreeMap;
 
-use radroots_studio_app_core::idb::{RadrootsClientIdbConfig, IDB_CONFIG_KEYSTORE_NOSTR};
+use radroots_studio_app_core::idb::{
+    RadrootsClientIdbConfig,
+    IDB_CONFIG_DATASTORE,
+    IDB_CONFIG_KEYSTORE_NOSTR,
+};
 
 pub type AppDatastoreKeyParam = fn(&str) -> String;
 pub type AppDatastoreKeyMap = BTreeMap<&'static str, &'static str>;
@@ -40,15 +44,31 @@ impl AppKeystoreConfig {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct AppConfig {
+pub struct AppDatastoreConfig {
+    pub idb_config: RadrootsClientIdbConfig,
     pub key_maps: AppKeyMapConfig,
+}
+
+impl AppDatastoreConfig {
+    pub fn default_config(key_maps: AppKeyMapConfig) -> Self {
+        Self {
+            idb_config: IDB_CONFIG_DATASTORE,
+            key_maps,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AppConfig {
+    pub datastore: AppDatastoreConfig,
     pub keystore: AppKeystoreConfig,
 }
 
 impl AppConfig {
     pub fn empty() -> Self {
+        let key_maps = AppKeyMapConfig::empty();
         Self {
-            key_maps: AppKeyMapConfig::empty(),
+            datastore: AppDatastoreConfig::default_config(key_maps),
             keystore: AppKeystoreConfig::default_config(),
         }
     }
@@ -68,10 +88,11 @@ mod tests {
         app_config_default,
         app_config_from_env,
         AppConfig,
+        AppDatastoreConfig,
         AppKeyMapConfig,
         AppKeystoreConfig,
     };
-    use radroots_studio_app_core::idb::IDB_CONFIG_KEYSTORE_NOSTR;
+    use radroots_studio_app_core::idb::{IDB_CONFIG_DATASTORE, IDB_CONFIG_KEYSTORE_NOSTR};
 
     #[test]
     fn key_map_config_defaults_empty() {
@@ -84,7 +105,7 @@ mod tests {
     #[test]
     fn app_config_defaults_empty() {
         let config = AppConfig::empty();
-        assert!(config.key_maps.key_map.is_empty());
+        assert!(config.datastore.key_maps.key_map.is_empty());
     }
 
     #[test]
@@ -98,5 +119,13 @@ mod tests {
     fn keystore_config_defaults_to_nostr_store() {
         let config = AppKeystoreConfig::default_config();
         assert_eq!(config.nostr_store, IDB_CONFIG_KEYSTORE_NOSTR);
+    }
+
+    #[test]
+    fn datastore_config_defaults_to_idb_store() {
+        let key_maps = AppKeyMapConfig::empty();
+        let config = AppDatastoreConfig::default_config(key_maps);
+        assert_eq!(config.idb_config, IDB_CONFIG_DATASTORE);
+        assert!(config.key_maps.key_map.is_empty());
     }
 }
