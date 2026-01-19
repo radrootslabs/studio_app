@@ -80,11 +80,18 @@ pub use config::{
 };
 pub use init::{
     app_init_backends,
+    app_init_fetch_asset,
     app_init_has_completed,
     app_init_mark_completed,
+    app_init_progress_add,
     app_init_reset,
     app_init_state_default,
+    app_init_stage_set,
+    app_init_total_add,
+    app_init_total_unknown,
     AppBackends,
+    AppInitAssetError,
+    AppInitAssetProgress,
     AppInitError,
     AppInitErrorMessage,
     AppInitResult,

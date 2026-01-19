@@ -37,6 +37,14 @@ use crate::{
 
 #[cfg(target_arch = "wasm32")]
 use leptos::prelude::window;
+#[cfg(target_arch = "wasm32")]
+use wasm_bindgen::JsCast;
+#[cfg(target_arch = "wasm32")]
+use wasm_bindgen_futures::JsFuture;
+#[cfg(target_arch = "wasm32")]
+use js_sys::Uint8Array;
+#[cfg(target_arch = "wasm32")]
+use web_sys::Response;
 
 pub const APP_INIT_STORAGE_KEY: &str = "radroots.app.init.ready";
 
@@ -94,6 +102,120 @@ pub const fn app_init_state_default() -> AppInitState {
         loaded_bytes: 0,
         total_bytes: Some(0),
     }
+}
+
+pub fn app_init_stage_set(state: &mut AppInitState, stage: AppInitStage) {
+    state.stage = stage;
+}
+
+pub fn app_init_progress_add(state: &mut AppInitState, bytes: u64) {
+    if bytes == 0 {
+        return;
+    }
+    state.loaded_bytes = state.loaded_bytes.saturating_add(bytes);
+}
+
+pub fn app_init_total_add(state: &mut AppInitState, bytes: u64) {
+    if bytes == 0 {
+        return;
+    }
+    let Some(total) = state.total_bytes else {
+        return;
+    };
+    state.total_bytes = Some(total.saturating_add(bytes));
+}
+
+pub fn app_init_total_unknown(state: &mut AppInitState) {
+    state.total_bytes = None;
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct AppInitAssetProgress {
+    pub loaded_bytes: u64,
+    pub total_bytes: Option<u64>,
+}
+
+impl AppInitAssetProgress {
+    pub const fn empty() -> Self {
+        Self {
+            loaded_bytes: 0,
+            total_bytes: Some(0),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AppInitAssetError {
+    MissingUrl,
+    FetchUnavailable,
+    FetchFailed,
+}
+
+impl AppInitAssetError {
+    pub const fn message(self) -> &'static str {
+        match self {
+            AppInitAssetError::MissingUrl => "error.app.init.asset_missing_url",
+            AppInitAssetError::FetchUnavailable => "error.app.init.asset_unavailable",
+            AppInitAssetError::FetchFailed => "error.app.init.asset_fetch_failed",
+        }
+    }
+}
+
+impl fmt::Display for AppInitAssetError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.message())
+    }
+}
+
+impl std::error::Error for AppInitAssetError {}
+
+#[cfg(target_arch = "wasm32")]
+pub async fn app_init_fetch_asset<F>(
+    url: &str,
+    mut on_progress: F,
+) -> Result<AppInitAssetProgress, AppInitAssetError>
+where
+    F: FnMut(u64, Option<u64>),
+{
+    if url.is_empty() {
+        return Err(AppInitAssetError::MissingUrl);
+    }
+    let response_value = JsFuture::from(window().fetch_with_str(url))
+        .await
+        .map_err(|_| AppInitAssetError::FetchFailed)?;
+    let response: Response = response_value
+        .dyn_into()
+        .map_err(|_| AppInitAssetError::FetchFailed)?;
+    let total_bytes = response
+        .headers()
+        .get("content-length")
+        .ok()
+        .flatten()
+        .and_then(|value| value.parse::<u64>().ok());
+    let buffer_value = JsFuture::from(response.array_buffer().map_err(|_| AppInitAssetError::FetchFailed)?)
+        .await
+        .map_err(|_| AppInitAssetError::FetchFailed)?;
+    let buffer = Uint8Array::new(&buffer_value);
+    let loaded_bytes = buffer.length() as u64;
+    on_progress(loaded_bytes, total_bytes);
+    Ok(AppInitAssetProgress {
+        loaded_bytes,
+        total_bytes,
+    })
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub async fn app_init_fetch_asset<F>(
+    url: &str,
+    _on_progress: F,
+) -> Result<AppInitAssetProgress, AppInitAssetError>
+where
+    F: FnMut(u64, Option<u64>),
+{
+    if url.is_empty() {
+        return Err(AppInitAssetError::MissingUrl);
+    }
+    Err(AppInitAssetError::FetchUnavailable)
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -248,7 +370,11 @@ pub async fn app_init_backends(config: AppConfig) -> AppInitResult<AppBackends> 
 mod tests {
     use super::{
         app_init_backends,
+        app_init_progress_add,
         app_init_state_default,
+        app_init_stage_set,
+        app_init_total_add,
+        app_init_total_unknown,
         AppInitError,
         AppInitErrorMessage,
         AppInitStage,
@@ -374,5 +500,22 @@ mod tests {
         assert_eq!(state.stage, AppInitStage::Idle);
         assert_eq!(state.loaded_bytes, 0);
         assert_eq!(state.total_bytes, Some(0));
+    }
+
+    #[test]
+    fn app_init_progress_helpers_update_state() {
+        let mut state = app_init_state_default();
+        app_init_stage_set(&mut state, AppInitStage::Storage);
+        assert_eq!(state.stage, AppInitStage::Storage);
+        app_init_progress_add(&mut state, 0);
+        assert_eq!(state.loaded_bytes, 0);
+        app_init_progress_add(&mut state, 5);
+        assert_eq!(state.loaded_bytes, 5);
+        app_init_total_add(&mut state, 10);
+        assert_eq!(state.total_bytes, Some(10));
+        app_init_total_unknown(&mut state);
+        assert_eq!(state.total_bytes, None);
+        app_init_total_add(&mut state, 5);
+        assert_eq!(state.total_bytes, None);
     }
 }

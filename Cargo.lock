@@ -1542,11 +1542,14 @@ version = "0.1.0"
 dependencies = [
  "async-trait",
  "futures",
+ "js-sys",
  "leptos",
  "radroots-app-core",
  "serde",
  "serde_json",
  "wasm-bindgen",
+ "wasm-bindgen-futures",
+ "web-sys",
 ]
 
 [[package]]
