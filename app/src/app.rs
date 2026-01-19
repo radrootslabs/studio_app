@@ -137,10 +137,13 @@ pub fn App() -> impl IntoView {
                             let datastore = radroots_studio_app_core::datastore::RadrootsClientWebDatastore::new(
                                 Some(config.datastore.idb_config),
                             );
+                            let keystore = radroots_studio_app_core::keystore::RadrootsClientWebKeystoreNostr::new(
+                                Some(config.keystore.nostr_store),
+                            );
                             match app_init_reset(
                                 Some(&datastore),
                                 Some(&config.datastore.key_maps),
-                                None::<&radroots_studio_app_core::keystore::RadrootsClientWebKeystoreNostr>,
+                                Some(&keystore),
                             )
                             .await
                             {
