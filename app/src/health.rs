@@ -73,7 +73,13 @@ impl AppHealthReport {
     }
 }
 
-use crate::{app_key_maps_validate, AppKeyMapConfig};
+use crate::{
+    app_datastore_has_app_data,
+    app_datastore_has_config,
+    app_key_maps_validate,
+    AppKeyMapConfig,
+};
+use radroots_studio_app_core::datastore::RadrootsClientDatastore;
 
 pub fn app_health_check_key_maps(key_maps: &AppKeyMapConfig) -> AppHealthCheckResult {
     match app_key_maps_validate(key_maps) {
@@ -82,15 +88,40 @@ pub fn app_health_check_key_maps(key_maps: &AppKeyMapConfig) -> AppHealthCheckRe
     }
 }
 
+pub async fn app_health_check_bootstrap_config<T: RadrootsClientDatastore>(
+    datastore: &T,
+    key_maps: &AppKeyMapConfig,
+) -> AppHealthCheckResult {
+    match app_datastore_has_config(datastore, key_maps).await {
+        Ok(true) => AppHealthCheckResult::ok(),
+        Ok(false) => AppHealthCheckResult::error("missing"),
+        Err(err) => AppHealthCheckResult::error(err.to_string()),
+    }
+}
+
+pub async fn app_health_check_bootstrap_app_data<T: RadrootsClientDatastore>(
+    datastore: &T,
+    key_maps: &AppKeyMapConfig,
+) -> AppHealthCheckResult {
+    match app_datastore_has_app_data(datastore, key_maps).await {
+        Ok(true) => AppHealthCheckResult::ok(),
+        Ok(false) => AppHealthCheckResult::error("missing"),
+        Err(err) => AppHealthCheckResult::error(err.to_string()),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
         app_health_check_key_maps,
+        app_health_check_bootstrap_app_data,
+        app_health_check_bootstrap_config,
         AppHealthCheckResult,
         AppHealthCheckStatus,
         AppHealthReport,
     };
     use crate::AppKeyMapConfig;
+    use radroots_studio_app_core::datastore::RadrootsClientWebDatastore;
 
     #[test]
     fn health_status_as_str() {
@@ -129,5 +160,21 @@ mod tests {
             result.message.as_deref(),
             Some("error.app.config.key_map_missing")
         );
+    }
+
+    #[test]
+    fn health_check_bootstrap_reports_idb_errors() {
+        let datastore = RadrootsClientWebDatastore::new(None);
+        let key_maps = crate::app_key_maps_default();
+        let result = futures::executor::block_on(app_health_check_bootstrap_config(
+            &datastore,
+            &key_maps,
+        ));
+        assert_eq!(result.status, AppHealthCheckStatus::Error);
+        let result = futures::executor::block_on(app_health_check_bootstrap_app_data(
+            &datastore,
+            &key_maps,
+        ));
+        assert_eq!(result.status, AppHealthCheckStatus::Error);
     }
 }
