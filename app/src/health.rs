@@ -76,10 +76,11 @@ impl AppHealthReport {
 use crate::{
     app_datastore_has_app_data,
     app_datastore_has_config,
+    app_datastore_key_nostr_key,
     app_key_maps_validate,
     AppKeyMapConfig,
 };
-use radroots_studio_app_core::datastore::RadrootsClientDatastore;
+use radroots_studio_app_core::datastore::{RadrootsClientDatastore, RadrootsClientDatastoreError};
 use radroots_studio_app_core::keystore::{RadrootsClientKeystoreError, RadrootsClientKeystoreNostr};
 
 pub fn app_health_check_key_maps(key_maps: &AppKeyMapConfig) -> AppHealthCheckResult {
@@ -134,12 +135,25 @@ pub async fn app_health_check_datastore_roundtrip<T: RadrootsClientDatastore>(
     AppHealthCheckResult::ok()
 }
 
-pub async fn app_health_check_keystore_access<T: RadrootsClientKeystoreNostr>(
-    keystore: &T,
+pub async fn app_health_check_keystore_access<T: RadrootsClientDatastore, K: RadrootsClientKeystoreNostr>(
+    datastore: &T,
+    keystore: &K,
+    key_maps: &AppKeyMapConfig,
 ) -> AppHealthCheckResult {
-    match keystore.keys().await {
+    let key_name = match app_datastore_key_nostr_key(key_maps) {
+        Ok(value) => value,
+        Err(err) => return AppHealthCheckResult::error(err.to_string()),
+    };
+    let public_key = match datastore.get(key_name).await {
+        Ok(value) if !value.is_empty() => value,
+        Ok(_) => return AppHealthCheckResult::error("missing"),
+        Err(RadrootsClientDatastoreError::NoResult) => return AppHealthCheckResult::error("missing"),
+        Err(err) => return AppHealthCheckResult::error(err.to_string()),
+    };
+    match keystore.read(&public_key).await {
         Ok(_) => AppHealthCheckResult::ok(),
-        Err(RadrootsClientKeystoreError::NostrNoResults) => AppHealthCheckResult::ok(),
+        Err(RadrootsClientKeystoreError::MissingKey) => AppHealthCheckResult::error("missing"),
+        Err(RadrootsClientKeystoreError::NostrNoResults) => AppHealthCheckResult::error("missing"),
         Err(err) => AppHealthCheckResult::error(err.to_string()),
     }
 }
@@ -154,7 +168,7 @@ pub async fn app_health_check_all<T: RadrootsClientDatastore, K: RadrootsClientK
         bootstrap_config: app_health_check_bootstrap_config(datastore, key_maps).await,
         bootstrap_app_data: app_health_check_bootstrap_app_data(datastore, key_maps).await,
         datastore_roundtrip: app_health_check_datastore_roundtrip(datastore).await,
-        keystore: app_health_check_keystore_access(keystore).await,
+        keystore: app_health_check_keystore_access(datastore, keystore, key_maps).await,
     }
 }
 
@@ -173,13 +187,22 @@ mod tests {
     };
     use crate::AppKeyMapConfig;
     use async_trait::async_trait;
-    use radroots_studio_app_core::datastore::RadrootsClientWebDatastore;
+    use radroots_studio_app_core::datastore::{
+        RadrootsClientDatastore,
+        RadrootsClientDatastoreEntries,
+        RadrootsClientDatastoreError,
+        RadrootsClientDatastoreResult,
+        RadrootsClientWebDatastore,
+    };
     use radroots_studio_app_core::keystore::{
         RadrootsClientKeystoreError,
         RadrootsClientKeystoreNostr,
         RadrootsClientKeystoreResult,
         RadrootsClientWebKeystoreNostr,
     };
+    use radroots_studio_app_core::idb::IDB_CONFIG_DATASTORE;
+    use radroots_studio_app_core::backup::RadrootsClientBackupDatastorePayload;
+    use radroots_studio_app_core::idb::RadrootsClientIdbConfig;
 
     #[test]
     fn health_status_as_str() {
@@ -244,8 +267,114 @@ mod tests {
         assert_eq!(result.status, AppHealthCheckStatus::Error);
     }
 
+    struct TestDatastore {
+        get_result: RadrootsClientDatastoreResult<String>,
+    }
+
+    fn datastore_err<T>() -> RadrootsClientDatastoreResult<T> {
+        Err(RadrootsClientDatastoreError::IdbUndefined)
+    }
+
+    #[async_trait(?Send)]
+    impl RadrootsClientDatastore for TestDatastore {
+        fn get_config(&self) -> RadrootsClientIdbConfig {
+            IDB_CONFIG_DATASTORE
+        }
+
+        fn get_store_id(&self) -> &str {
+            "test"
+        }
+
+        async fn init(&self) -> RadrootsClientDatastoreResult<()> {
+            datastore_err()
+        }
+
+        async fn set(&self, _key: &str, _value: &str) -> RadrootsClientDatastoreResult<String> {
+            datastore_err()
+        }
+
+        async fn get(&self, _key: &str) -> RadrootsClientDatastoreResult<String> {
+            self.get_result.clone()
+        }
+
+        async fn set_obj<T>(&self, _key: &str, _value: &T) -> RadrootsClientDatastoreResult<T>
+        where
+            T: serde::Serialize + serde::de::DeserializeOwned + Clone,
+        {
+            datastore_err()
+        }
+
+        async fn update_obj<T>(&self, _key: &str, _value: &T) -> RadrootsClientDatastoreResult<T>
+        where
+            T: serde::Serialize + serde::de::DeserializeOwned + Clone,
+        {
+            datastore_err()
+        }
+
+        async fn get_obj<T>(&self, _key: &str) -> RadrootsClientDatastoreResult<T>
+        where
+            T: serde::de::DeserializeOwned,
+        {
+            datastore_err()
+        }
+
+        async fn del_obj(&self, _key: &str) -> RadrootsClientDatastoreResult<String> {
+            datastore_err()
+        }
+
+        async fn del(&self, _key: &str) -> RadrootsClientDatastoreResult<String> {
+            datastore_err()
+        }
+
+        async fn del_pref(&self, _key_prefix: &str) -> RadrootsClientDatastoreResult<Vec<String>> {
+            datastore_err()
+        }
+
+        async fn set_param(
+            &self,
+            _key: &str,
+            _key_param: &str,
+            _value: &str,
+        ) -> RadrootsClientDatastoreResult<String> {
+            datastore_err()
+        }
+
+        async fn get_param(
+            &self,
+            _key: &str,
+            _key_param: &str,
+        ) -> RadrootsClientDatastoreResult<String> {
+            datastore_err()
+        }
+
+        async fn keys(&self) -> RadrootsClientDatastoreResult<Vec<String>> {
+            datastore_err()
+        }
+
+        async fn entries(&self) -> RadrootsClientDatastoreResult<RadrootsClientDatastoreEntries> {
+            datastore_err()
+        }
+
+        async fn reset(&self) -> RadrootsClientDatastoreResult<()> {
+            datastore_err()
+        }
+
+        async fn export_backup(
+            &self,
+        ) -> RadrootsClientDatastoreResult<RadrootsClientBackupDatastorePayload> {
+            datastore_err()
+        }
+
+        async fn import_backup(
+            &self,
+            _payload: RadrootsClientBackupDatastorePayload,
+        ) -> RadrootsClientDatastoreResult<()> {
+            datastore_err()
+        }
+    }
+
     struct TestKeystore {
-        result: RadrootsClientKeystoreResult<Vec<String>>,
+        read_result: RadrootsClientKeystoreResult<String>,
     }
 
     #[async_trait(?Send)]
@@ -259,11 +388,11 @@ mod tests {
         }
 
         async fn read(&self, _public_key: &str) -> RadrootsClientKeystoreResult<String> {
-            Err(RadrootsClientKeystoreError::IdbUndefined)
+            self.read_result.clone()
         }
 
         async fn keys(&self) -> RadrootsClientKeystoreResult<Vec<String>> {
-            self.result.clone()
+            Err(RadrootsClientKeystoreError::IdbUndefined)
         }
 
         async fn remove(&self, _public_key: &str) -> RadrootsClientKeystoreResult<String> {
@@ -276,21 +405,69 @@ mod tests {
     }
 
     #[test]
-    fn health_check_keystore_maps_empty_ok() {
-        let keystore = TestKeystore {
-            result: Err(RadrootsClientKeystoreError::NostrNoResults),
-        };
-        let result =
-            futures::executor::block_on(app_health_check_keystore_access(&keystore));
-        assert_eq!(result.status, AppHealthCheckStatus::Ok);
+    fn health_check_keystore_maps_idb_errors() {
+        let datastore = RadrootsClientWebDatastore::new(None);
+        let keystore = RadrootsClientWebKeystoreNostr::new(None);
+        let key_maps = crate::app_key_maps_default();
+        let result = futures::executor::block_on(app_health_check_keystore_access(
+            &datastore,
+            &keystore,
+            &key_maps,
+        ));
+        assert_eq!(result.status, AppHealthCheckStatus::Error);
     }
 
     #[test]
-    fn health_check_keystore_maps_idb_errors() {
-        let keystore = RadrootsClientWebKeystoreNostr::new(None);
-        let result =
-            futures::executor::block_on(app_health_check_keystore_access(&keystore));
+    fn health_check_keystore_reports_missing_datastore_key() {
+        let datastore = TestDatastore {
+            get_result: Err(RadrootsClientDatastoreError::NoResult),
+        };
+        let keystore = TestKeystore {
+            read_result: Err(RadrootsClientKeystoreError::MissingKey),
+        };
+        let key_maps = crate::app_key_maps_default();
+        let result = futures::executor::block_on(app_health_check_keystore_access(
+            &datastore,
+            &keystore,
+            &key_maps,
+        ));
         assert_eq!(result.status, AppHealthCheckStatus::Error);
+        assert_eq!(result.message.as_deref(), Some("missing"));
+    }
+
+    #[test]
+    fn health_check_keystore_reports_missing_keystore_key() {
+        let datastore = TestDatastore {
+            get_result: Ok("pub".to_string()),
+        };
+        let keystore = TestKeystore {
+            read_result: Err(RadrootsClientKeystoreError::MissingKey),
+        };
+        let key_maps = crate::app_key_maps_default();
+        let result = futures::executor::block_on(app_health_check_keystore_access(
+            &datastore,
+            &keystore,
+            &key_maps,
+        ));
+        assert_eq!(result.status, AppHealthCheckStatus::Error);
+        assert_eq!(result.message.as_deref(), Some("missing"));
+    }
+
+    #[test]
+    fn health_check_keystore_accepts_matching_key() {
+        let datastore = TestDatastore {
+            get_result: Ok("pub".to_string()),
+        };
+        let keystore = TestKeystore {
+            read_result: Ok("secret".to_string()),
+        };
+        let key_maps = crate::app_key_maps_default();
+        let result = futures::executor::block_on(app_health_check_keystore_access(
+            &datastore,
+            &keystore,
+            &key_maps,
+        ));
+        assert_eq!(result.status, AppHealthCheckStatus::Ok);
     }
 
     #[test]
