@@ -1562,6 +1562,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "radroots-app-utils"
+version = "0.1.0"
+dependencies = [
+ "radroots-types",
+]
+
+[[package]]
 name = "radroots-core"
 version = "0.1.0"
 dependencies = [
