@@ -1,6 +1,7 @@
 pub mod error;
 pub mod types;
 pub mod codec;
+pub mod bundle;
 
 pub use error::{RadrootsClientBackupError, RadrootsClientBackupErrorMessage};
 pub use types::{
@@ -20,6 +21,15 @@ pub use types::{
     RadrootsClientBackupSqlStore,
     RadrootsClientBackupStoreRef,
     RADROOTS_CLIENT_BACKUP_BUNDLE_VERSION,
+};
+pub use bundle::{
+    backup_bundle_build,
+    backup_bundle_export,
+    backup_bundle_import,
+    RadrootsClientBackupBundleBuildOpts,
+    RadrootsClientBackupBundleError,
+    RadrootsClientBackupBundleImportOpts,
+    RadrootsClientBackupBundleResult,
 };
 pub use codec::{
     backup_b64_to_bytes,
