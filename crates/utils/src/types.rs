@@ -9,6 +9,33 @@ pub struct ResultPass {
     pub pass: bool,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ResultId {
+    pub id: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ResultObj<T> {
+    pub result: T,
+}
+
+pub type ResultBool = ResultObj<bool>;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ResultsList<T> {
+    pub results: Vec<T>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ResultPublicKey {
+    pub public_key: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ResultSecretKey {
+    pub secret_key: String,
+}
+
 impl ResultPass {
     pub const fn ok() -> Self {
         Self { pass: true }
@@ -25,7 +52,10 @@ pub fn resolve_err<T>(err: RadrootsAppUtilsError) -> ResolveError<T> {
 
 #[cfg(test)]
 mod tests {
-    use super::{resolve_err, resolve_ok, ResultPass};
+    use super::{
+        resolve_err, resolve_ok, ResultBool, ResultId, ResultObj, ResultPass, ResultPublicKey,
+        ResultSecretKey, ResultsList,
+    };
     use crate::error::RadrootsAppUtilsError;
 
     #[test]
@@ -45,5 +75,29 @@ mod tests {
         let err = resolve_err::<()>(RadrootsAppUtilsError::Unavailable)
             .expect_err("err");
         assert_eq!(err, RadrootsAppUtilsError::Unavailable);
+    }
+
+    #[test]
+    fn result_types_store_values() {
+        let id = ResultId {
+            id: "id".to_string(),
+        };
+        assert_eq!(id.id, "id");
+        let obj = ResultObj { result: 5 };
+        assert_eq!(obj.result, 5);
+        let bool_obj: ResultBool = ResultObj { result: true };
+        assert!(bool_obj.result);
+        let list = ResultsList {
+            results: vec![1, 2],
+        };
+        assert_eq!(list.results, vec![1, 2]);
+        let public_key = ResultPublicKey {
+            public_key: "pub".to_string(),
+        };
+        assert_eq!(public_key.public_key, "pub");
+        let secret_key = ResultSecretKey {
+            secret_key: "sec".to_string(),
+        };
+        assert_eq!(secret_key.secret_key, "sec");
     }
 }
