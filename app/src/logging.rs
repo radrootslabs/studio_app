@@ -232,11 +232,11 @@ pub fn app_log_error_emit<E: AppLoggableError>(err: &E) -> AppLogEntry {
     entry
 }
 
-pub fn app_log_error_key(
+pub fn app_log_entry_key(
     key_maps: &AppKeyMapConfig,
     entry_id: &str,
 ) -> AppLogResult<String> {
-    let param = app_datastore_param_key(key_maps, "log_error")?;
+    let param = app_datastore_param_key(key_maps, "log_entry")?;
     Ok(param(entry_id))
 }
 
@@ -245,7 +245,7 @@ pub async fn app_log_entry_store<T: RadrootsClientDatastore>(
     key_maps: &AppKeyMapConfig,
     entry: &AppLogEntry,
 ) -> AppLogResult<AppLogEntry> {
-    let key = app_log_error_key(key_maps, &entry.id)?;
+    let key = app_log_entry_key(key_maps, &entry.id)?;
     datastore
         .set_obj(&key, entry)
         .await
@@ -315,7 +315,7 @@ pub fn app_logging_init(meta: Option<AppLogMetadata>) -> AppLoggingResult<()> {
 mod tests {
     use super::{
         app_log_entry_error,
-        app_log_error_key,
+        app_log_entry_key,
         app_log_metadata,
         app_log_timestamp_ms,
         AppLogLevel,
@@ -324,7 +324,7 @@ mod tests {
     use crate::{
         app_key_maps_default,
         AppConfigError,
-        APP_DATASTORE_KEY_LOG_ERROR,
+        APP_DATASTORE_KEY_LOG_ENTRY,
     };
 
     #[test]
@@ -356,7 +356,7 @@ mod tests {
     #[test]
     fn log_error_key_uses_param_map() {
         let key_maps = app_key_maps_default();
-        let key = app_log_error_key(&key_maps, "entry").expect("key");
-        assert_eq!(key, format!("{APP_DATASTORE_KEY_LOG_ERROR}:entry"));
+        let key = app_log_entry_key(&key_maps, "entry").expect("key");
+        assert_eq!(key, format!("{APP_DATASTORE_KEY_LOG_ENTRY}:entry"));
     }
 }

@@ -18,7 +18,7 @@ pub const APP_DATASTORE_KEY_NOSTR_KEY: &str = "nostr:key";
 pub const APP_DATASTORE_KEY_EULA_DATE: &str = "app:eula:date";
 pub const APP_DATASTORE_KEY_OBJ_CFG_DATA: &str = "cfg:data";
 pub const APP_DATASTORE_KEY_OBJ_APP_DATA: &str = "app:data";
-pub const APP_DATASTORE_KEY_LOG_ERROR: &str = "log:error";
+pub const APP_DATASTORE_KEY_LOG_ENTRY: &str = "log:entry";
 pub const APP_KEYSTORE_KEY_NOSTR_DEFAULT: &str = "nostr:default";
 
 pub fn app_datastore_param_nostr_profile(public_key: &str) -> String {
@@ -29,8 +29,8 @@ pub fn app_datastore_param_radroots_profile(public_key: &str) -> String {
     format!("radroots:{public_key}:profile")
 }
 
-pub fn app_datastore_param_log_error(entry_id: &str) -> String {
-    format!("{APP_DATASTORE_KEY_LOG_ERROR}:{entry_id}")
+pub fn app_datastore_param_log_entry(entry_id: &str) -> String {
+    format!("{APP_DATASTORE_KEY_LOG_ENTRY}:{entry_id}")
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -60,7 +60,7 @@ pub fn app_key_maps_default() -> AppKeyMapConfig {
         "radroots_profile",
         app_datastore_param_radroots_profile as AppDatastoreKeyParam,
     );
-    param_map.insert("log_error", app_datastore_param_log_error as AppDatastoreKeyParam);
+    param_map.insert("log_entry", app_datastore_param_log_entry as AppDatastoreKeyParam);
     let mut obj_map = BTreeMap::new();
     obj_map.insert("cfg_data", APP_DATASTORE_KEY_OBJ_CFG_DATA);
     obj_map.insert("app_data", APP_DATASTORE_KEY_OBJ_APP_DATA);
@@ -113,8 +113,8 @@ pub fn app_key_maps_validate(config: &AppKeyMapConfig) -> AppConfigResult<()> {
     if !config.param_map.contains_key("radroots_profile") {
         return Err(AppConfigError::MissingParamMap("radroots_profile"));
     }
-    if !config.param_map.contains_key("log_error") {
-        return Err(AppConfigError::MissingParamMap("log_error"));
+    if !config.param_map.contains_key("log_entry") {
+        return Err(AppConfigError::MissingParamMap("log_entry"));
     }
     if !config.obj_map.contains_key("cfg_data") {
         return Err(AppConfigError::MissingObjMap("cfg_data"));
@@ -288,7 +288,7 @@ mod tests {
         app_config_default,
         app_config_from_env,
         app_datastore_param_nostr_profile,
-        app_datastore_param_log_error,
+        app_datastore_param_log_entry,
         app_datastore_key_eula_date,
         app_datastore_key_nostr_key,
         app_datastore_obj_key_app_data,
@@ -312,7 +312,7 @@ mod tests {
         APP_DATASTORE_KEY_NOSTR_KEY,
         APP_DATASTORE_KEY_OBJ_APP_DATA,
         APP_DATASTORE_KEY_OBJ_CFG_DATA,
-        APP_DATASTORE_KEY_LOG_ERROR,
+        APP_DATASTORE_KEY_LOG_ENTRY,
         APP_KEYSTORE_KEY_NOSTR_DEFAULT,
     };
     use radroots_studio_app_core::idb::{IDB_CONFIG_DATASTORE, IDB_CONFIG_KEYSTORE_NOSTR};
@@ -402,8 +402,8 @@ mod tests {
         );
         assert_eq!(app_datastore_param_nostr_profile("abc"), "nostr:abc:profile");
         assert_eq!(
-            app_datastore_param_log_error("entry"),
-            format!("{APP_DATASTORE_KEY_LOG_ERROR}:entry")
+            app_datastore_param_log_entry("entry"),
+            format!("{APP_DATASTORE_KEY_LOG_ENTRY}:entry")
         );
     }
 
@@ -448,8 +448,8 @@ mod tests {
         );
         let nostr_param = app_datastore_param_key(&config, "nostr_profile").expect("param");
         assert_eq!(nostr_param("abc"), "nostr:abc:profile");
-        let log_param = app_datastore_param_key(&config, "log_error").expect("param");
-        assert_eq!(log_param("entry"), format!("{APP_DATASTORE_KEY_LOG_ERROR}:entry"));
+        let log_param = app_datastore_param_key(&config, "log_entry").expect("param");
+        assert_eq!(log_param("entry"), format!("{APP_DATASTORE_KEY_LOG_ENTRY}:entry"));
     }
 
     #[test]
