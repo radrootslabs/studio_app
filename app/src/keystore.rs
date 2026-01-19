@@ -2,6 +2,8 @@
 
 use radroots_studio_app_core::keystore::{RadrootsClientKeystoreError, RadrootsClientKeystoreNostr};
 
+use crate::app_log_debug_emit;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AppKeystoreError {
     Keystore(RadrootsClientKeystoreError),
@@ -34,14 +36,26 @@ impl From<RadrootsClientKeystoreError> for AppKeystoreError {
 pub async fn app_keystore_nostr_keys<T: RadrootsClientKeystoreNostr>(
     keystore: &T,
 ) -> AppKeystoreResult<Vec<String>> {
-    keystore.keys().await.map_err(AppKeystoreError::from)
+    let result = keystore.keys().await.map_err(AppKeystoreError::from);
+    let context = match &result {
+        Ok(keys) => Some(format!("count={}", keys.len())),
+        Err(err) => Some(err.to_string()),
+    };
+    let _ = app_log_debug_emit("log.app.keystore.keys", "fetch", context);
+    result
 }
 
 pub async fn app_keystore_nostr_public_key<T: RadrootsClientKeystoreNostr>(
     keystore: &T,
 ) -> AppKeystoreResult<Option<String>> {
+    let _ = app_log_debug_emit("log.app.keystore.public_key", "start", None);
     match keystore.keys().await {
-        Ok(mut keys) => Ok(keys.pop()),
+        Ok(mut keys) => {
+            let key = keys.pop();
+            let context = key.as_ref().map(|value| format!("key={value}"));
+            let _ = app_log_debug_emit("log.app.keystore.public_key", "resolved", context);
+            Ok(key)
+        }
         Err(RadrootsClientKeystoreError::NostrNoResults) => Ok(None),
         Err(err) => Err(AppKeystoreError::from(err)),
     }
@@ -51,8 +65,15 @@ pub async fn app_keystore_nostr_ensure_key<T: RadrootsClientKeystoreNostr>(
     keystore: &T,
 ) -> AppKeystoreResult<String> {
     match app_keystore_nostr_public_key(keystore).await? {
-        Some(key) => Ok(key),
-        None => keystore.generate().await.map_err(AppKeystoreError::from),
+        Some(key) => {
+            let _ = app_log_debug_emit("log.app.keystore.ensure", "existing", None);
+            Ok(key)
+        }
+        None => {
+            let generated = keystore.generate().await.map_err(AppKeystoreError::from)?;
+            let _ = app_log_debug_emit("log.app.keystore.ensure", "generated", None);
+            Ok(generated)
+        }
     }
 }
 

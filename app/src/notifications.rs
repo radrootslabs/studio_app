@@ -8,6 +8,8 @@ use radroots_studio_app_core::notifications::{
     RadrootsClientWebNotifications,
 };
 
+use crate::app_log_debug_emit;
+
 #[cfg(target_arch = "wasm32")]
 use wasm_bindgen::JsValue;
 
@@ -80,6 +82,7 @@ impl AppNotifications {
     pub async fn permission(
         &self,
     ) -> AppNotificationsResult<RadrootsClientNotificationsPermission> {
+        let _ = app_log_debug_emit("log.app.notifications.permission", "start", None);
         #[cfg(not(target_arch = "wasm32"))]
         {
             return Ok(RadrootsClientNotificationsPermission::Unavailable);
@@ -91,17 +94,32 @@ impl AppNotifications {
             if !Self::notification_available(&window) {
                 return Ok(RadrootsClientNotificationsPermission::Unavailable);
             }
-            Ok(Self::permission_from_web(web_sys::Notification::permission()))
+            let permission = Self::permission_from_web(web_sys::Notification::permission());
+            let _ = app_log_debug_emit(
+                "log.app.notifications.permission",
+                "resolved",
+                Some(permission.as_str().to_string()),
+            );
+            Ok(permission)
         }
     }
 
     pub async fn request_permission(
         &self,
     ) -> AppNotificationsResult<RadrootsClientNotificationsPermission> {
-        self.client
+        let _ = app_log_debug_emit("log.app.notifications.request", "start", None);
+        let result = self.client
             .notify_init()
             .await
-            .map_err(AppNotificationsError::from)
+            .map_err(AppNotificationsError::from);
+        if let Ok(permission) = &result {
+            let _ = app_log_debug_emit(
+                "log.app.notifications.request",
+                "resolved",
+                Some(permission.as_str().to_string()),
+            );
+        }
+        result
     }
 }
 

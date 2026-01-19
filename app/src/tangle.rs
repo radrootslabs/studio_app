@@ -1,5 +1,7 @@
 #![forbid(unsafe_code)]
 
+use crate::app_log_debug_emit;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AppTangleError {
     NotImplemented,
@@ -37,6 +39,7 @@ impl AppTangleClientStub {
 
 impl AppTangleClient for AppTangleClientStub {
     fn init(&self) -> AppTangleResult<()> {
+        let _ = app_log_debug_emit("log.app.tangle.init", "stub", None);
         Err(AppTangleError::NotImplemented)
     }
 }
