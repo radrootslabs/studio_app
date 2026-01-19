@@ -219,10 +219,25 @@ impl AppDatastoreConfig {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct AppAssetConfig {
+    pub sql_wasm_url: Option<String>,
+    pub geocoder_db_url: Option<String>,
+}
+
+pub fn app_assets_sql_wasm_url(config: &AppConfig) -> Option<&str> {
+    config.assets.sql_wasm_url.as_deref()
+}
+
+pub fn app_assets_geocoder_db_url(config: &AppConfig) -> Option<&str> {
+    config.assets.geocoder_db_url.as_deref()
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AppConfig {
     pub datastore: AppDatastoreConfig,
     pub keystore: AppKeystoreConfig,
+    pub assets: AppAssetConfig,
 }
 
 impl AppConfig {
@@ -231,6 +246,7 @@ impl AppConfig {
         Self {
             datastore: AppDatastoreConfig::default_config(key_maps),
             keystore: AppKeystoreConfig::default_config(),
+            assets: AppAssetConfig::default(),
         }
     }
 
@@ -238,6 +254,7 @@ impl AppConfig {
         Self {
             datastore: AppDatastoreConfig::default_config(key_maps),
             keystore: AppKeystoreConfig::default_config(),
+            assets: AppAssetConfig::default(),
         }
     }
 
@@ -272,6 +289,9 @@ mod tests {
         app_keystore_key_nostr_default,
         app_keystore_key,
         app_datastore_param_key,
+        app_assets_geocoder_db_url,
+        app_assets_sql_wasm_url,
+        AppAssetConfig,
         AppConfig,
         AppConfigError,
         AppDatastoreConfig,
@@ -333,6 +353,13 @@ mod tests {
             map.get("nostr_default"),
             Some(&APP_KEYSTORE_KEY_NOSTR_DEFAULT)
         );
+    }
+
+    #[test]
+    fn asset_config_defaults_empty() {
+        let config = AppAssetConfig::default();
+        assert!(config.sql_wasm_url.is_none());
+        assert!(config.geocoder_db_url.is_none());
     }
 
     #[test]
@@ -419,5 +446,12 @@ mod tests {
             app_keystore_key(&map, "nostr_default").expect("nostr default"),
             APP_KEYSTORE_KEY_NOSTR_DEFAULT
         );
+    }
+
+    #[test]
+    fn asset_accessors_read_defaults() {
+        let config = app_config_default();
+        assert_eq!(app_assets_sql_wasm_url(&config), None);
+        assert_eq!(app_assets_geocoder_db_url(&config), None);
     }
 }
