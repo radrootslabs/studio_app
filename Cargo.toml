@@ -41,6 +41,9 @@ web-sys = { version = "0.3.77", features = [
   "File",
   "FileList",
   "FileReader",
+  "Blob",
+  "HtmlAnchorElement",
+  "HtmlElement",
   "HtmlInputElement",
   "IdbDatabase",
   "IdbFactory",
@@ -73,6 +76,7 @@ web-sys = { version = "0.3.77", features = [
   "RequestInit",
   "Response",
   "ResponseType",
+  "Url",
 ] }
 wasm-bindgen-futures = "0.4"
 base64 = "0.22"

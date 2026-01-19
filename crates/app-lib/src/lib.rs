@@ -2,6 +2,7 @@
 
 pub mod browser;
 pub mod dom;
+pub mod file;
 pub mod fetch;
 pub mod geo;
 pub mod locale;
@@ -14,6 +15,7 @@ pub mod theme;
 
 pub use browser::{browser_platform, BrowserPlatformInfo};
 pub use dom::{el_id, view_effect, DomError};
+pub use file::{download_json, get_file_text, parse_file_json, parse_file_path, select_file, FileError};
 pub use fetch::{fetch_json, FetchJsonError, FetchJsonErrorKind, FetchJsonResult};
 pub use geo::{geop_init, geop_is_valid, AppGeolocationPoint};
 pub use locale::{get_locale, resolve_locale};

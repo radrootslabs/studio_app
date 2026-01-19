@@ -11,17 +11,17 @@ crate-type = ["rlib"]
 
 [dependencies]
 serde = { workspace = true }
+serde_json = { workspace = true }
 serde-wasm-bindgen = { workspace = true }
 js-sys = { workspace = true }
 wasm-bindgen = { workspace = true }
 wasm-bindgen-futures = { workspace = true }
 url = { workspace = true }
+futures = { workspace = true }
+radroots-app-utils = { path = "../utils" }
 once_cell = { workspace = true }
 regex = { workspace = true }
 web-sys = { workspace = true }
-
-[dev-dependencies]
-futures = { workspace = true }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 gloo-timers = { workspace = true }
