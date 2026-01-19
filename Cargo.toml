@@ -53,6 +53,7 @@ web-sys = { version = "0.3.77", features = [
   "CacheStorage",
   "Headers",
   "Geolocation",
+  "MediaQueryList",
   "Navigator",
   "Notification",
   "NotificationOptions",
