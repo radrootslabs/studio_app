@@ -18,12 +18,15 @@ use crate::{
     app_datastore_clear_bootstrap,
     app_datastore_has_app_data,
     app_datastore_has_config,
+    app_datastore_key_nostr_key,
     app_datastore_write_app_data,
     app_datastore_write_config,
+    app_keystore_nostr_ensure_key,
     AppAppData,
     AppConfig,
     AppConfigData,
     AppConfigError,
+    AppKeystoreError,
     AppKeyMapConfig,
 };
 
@@ -194,6 +197,30 @@ pub async fn app_init_backends(config: AppConfig) -> AppInitResult<AppBackends> 
             .await?;
     }
     let nostr_keystore = RadrootsClientWebKeystoreNostr::new(Some(config.keystore.nostr_store));
+    let nostr_public_key = app_keystore_nostr_ensure_key(&nostr_keystore)
+        .await
+        .map_err(|err| match err {
+            AppKeystoreError::Keystore(inner) => AppInitError::Keystore(inner),
+        })?;
+    let nostr_key =
+        app_datastore_key_nostr_key(&config.datastore.key_maps).map_err(AppInitError::Config)?;
+    match datastore.get(nostr_key).await {
+        Ok(existing) => {
+            if existing != nostr_public_key {
+                let _ = datastore
+                    .set(nostr_key, &nostr_public_key)
+                    .await
+                    .map_err(AppInitError::Datastore)?;
+            }
+        }
+        Err(RadrootsClientDatastoreError::NoResult) => {
+            let _ = datastore
+                .set(nostr_key, &nostr_public_key)
+                .await
+                .map_err(AppInitError::Datastore)?;
+        }
+        Err(err) => return Err(AppInitError::Datastore(err)),
+    }
     Ok(AppBackends {
         config,
         datastore,
