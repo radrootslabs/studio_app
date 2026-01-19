@@ -23,9 +23,26 @@ pub fn str_cap(value: Option<&str>) -> String {
     output
 }
 
+pub fn str_cap_words(value: Option<&str>) -> String {
+    let Some(value) = value else {
+        return String::new();
+    };
+    let mut words = Vec::new();
+    for word in value.split(' ') {
+        if word.is_empty() {
+            continue;
+        }
+        let capped = str_cap(Some(word));
+        if !capped.is_empty() {
+            words.push(capped);
+        }
+    }
+    words.join(" ")
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{str_cap, text_dec, text_enc, ROOT_SYMBOL};
+    use super::{str_cap, str_cap_words, text_dec, text_enc, ROOT_SYMBOL};
 
     #[test]
     fn root_symbol_matches_spec() {
@@ -48,5 +65,20 @@ mod tests {
     #[test]
     fn str_cap_uppercases_first_letter() {
         assert_eq!(str_cap(Some("radroots")), "Radroots");
+    }
+
+    #[test]
+    fn str_cap_words_handles_none() {
+        assert_eq!(str_cap_words(None), "");
+    }
+
+    #[test]
+    fn str_cap_words_caps_each_word() {
+        assert_eq!(str_cap_words(Some("rad roots")), "Rad Roots");
+    }
+
+    #[test]
+    fn str_cap_words_skips_empty_words() {
+        assert_eq!(str_cap_words(Some("rad   roots")), "Rad Roots");
     }
 }
