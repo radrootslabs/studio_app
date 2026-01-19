@@ -14,3 +14,6 @@ crate-type = ["cdylib", "rlib"]
 leptos = { workspace = true, features = ["csr"] }
 wasm-bindgen.workspace = true
 radroots-app-core = { path = "../crates/core" }
+
+[dev-dependencies]
+futures.workspace = true

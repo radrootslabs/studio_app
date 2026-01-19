@@ -2,8 +2,16 @@
 
 use std::fmt;
 
-use radroots_studio_app_core::datastore::{RadrootsClientDatastoreError, RadrootsClientWebDatastore};
-use radroots_studio_app_core::idb::RadrootsClientIdbStoreError;
+use radroots_studio_app_core::datastore::{
+    RadrootsClientDatastore,
+    RadrootsClientDatastoreError,
+    RadrootsClientWebDatastore,
+};
+use radroots_studio_app_core::idb::{
+    idb_store_bootstrap,
+    RadrootsClientIdbStoreError,
+    RADROOTS_IDB_DATABASE,
+};
 use radroots_studio_app_core::keystore::{RadrootsClientKeystoreError, RadrootsClientWebKeystoreNostr};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -40,9 +48,25 @@ pub struct AppBackends {
 
 pub type AppInitResult<T> = Result<T, AppInitError>;
 
+pub async fn app_init_backends() -> AppInitResult<AppBackends> {
+    idb_store_bootstrap(RADROOTS_IDB_DATABASE, None)
+        .await
+        .map_err(AppInitError::Idb)?;
+    let datastore = RadrootsClientWebDatastore::new(None);
+    datastore
+        .init()
+        .await
+        .map_err(AppInitError::Datastore)?;
+    let nostr_keystore = RadrootsClientWebKeystoreNostr::new(None);
+    Ok(AppBackends {
+        datastore,
+        nostr_keystore,
+    })
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{AppInitError, AppInitErrorMessage};
+    use super::{app_init_backends, AppInitError, AppInitErrorMessage};
     use radroots_studio_app_core::datastore::RadrootsClientDatastoreError;
     use radroots_studio_app_core::idb::RadrootsClientIdbStoreError;
     use radroots_studio_app_core::keystore::RadrootsClientKeystoreError;
@@ -67,5 +91,15 @@ mod tests {
             assert_eq!(err.message(), *expected);
             assert_eq!(err.to_string(), *expected);
         }
+    }
+
+    #[test]
+    fn app_init_backends_maps_idb_errors() {
+        let err = futures::executor::block_on(app_init_backends())
+            .expect_err("idb bootstrap should error on non-wasm");
+        assert_eq!(
+            err,
+            AppInitError::Idb(RadrootsClientIdbStoreError::IdbUndefined)
+        );
     }
 }

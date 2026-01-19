@@ -5,4 +5,10 @@ mod init;
 mod entry;
 
 pub use app::App;
-pub use init::{AppBackends, AppInitError, AppInitErrorMessage, AppInitResult};
+pub use init::{
+    app_init_backends,
+    AppBackends,
+    AppInitError,
+    AppInitErrorMessage,
+    AppInitResult,
+};
