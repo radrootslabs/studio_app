@@ -79,6 +79,7 @@ pub use config::{
     APP_KEYSTORE_KEY_NOSTR_DEFAULT,
 };
 pub use init::{
+    app_init_assets,
     app_init_backends,
     app_init_fetch_asset,
     app_init_has_completed,

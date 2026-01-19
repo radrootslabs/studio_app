@@ -26,6 +26,8 @@ use crate::{
     app_datastore_read_app_data,
     app_datastore_write_app_data,
     app_datastore_write_config,
+    app_assets_geocoder_db_url,
+    app_assets_sql_wasm_url,
     app_keystore_nostr_ensure_key,
     AppAppData,
     AppConfig,
@@ -224,6 +226,7 @@ pub enum AppInitError {
     Datastore(RadrootsClientDatastoreError),
     Keystore(RadrootsClientKeystoreError),
     Config(AppConfigError),
+    Assets(AppInitAssetError),
 }
 
 pub type AppInitErrorMessage = &'static str;
@@ -235,6 +238,7 @@ impl AppInitError {
             AppInitError::Datastore(_) => "error.app.init.datastore",
             AppInitError::Keystore(_) => "error.app.init.keystore",
             AppInitError::Config(_) => "error.app.init.config",
+            AppInitError::Assets(_) => "error.app.init.assets",
         }
     }
 }
@@ -254,6 +258,32 @@ pub struct AppBackends {
 }
 
 pub type AppInitResult<T> = Result<T, AppInitError>;
+
+pub async fn app_init_assets<F, G>(
+    config: &AppConfig,
+    mut on_stage: F,
+    mut on_progress: G,
+) -> Result<(), AppInitAssetError>
+where
+    F: FnMut(AppInitStage),
+    G: FnMut(u64, Option<u64>),
+{
+    if let Some(url) = app_assets_sql_wasm_url(config).filter(|value| !value.is_empty()) {
+        on_stage(AppInitStage::DownloadSql);
+        app_init_fetch_asset(url, |loaded, total| {
+            on_progress(loaded, total);
+        })
+        .await?;
+    }
+    if let Some(url) = app_assets_geocoder_db_url(config).filter(|value| !value.is_empty()) {
+        on_stage(AppInitStage::DownloadGeo);
+        app_init_fetch_asset(url, |loaded, total| {
+            on_progress(loaded, total);
+        })
+        .await?;
+    }
+    Ok(())
+}
 
 pub fn app_init_has_completed() -> bool {
     #[cfg(target_arch = "wasm32")]
@@ -370,6 +400,7 @@ pub async fn app_init_backends(config: AppConfig) -> AppInitResult<AppBackends> 
 mod tests {
     use super::{
         app_init_backends,
+        app_init_assets,
         app_init_progress_add,
         app_init_state_default,
         app_init_stage_set,
@@ -378,8 +409,9 @@ mod tests {
         AppInitError,
         AppInitErrorMessage,
         AppInitStage,
+        AppInitAssetError,
     };
-    use crate::app_config_default;
+    use crate::{app_config_default, AppConfig};
     use radroots_studio_app_core::datastore::RadrootsClientDatastoreError;
     use radroots_studio_app_core::idb::RadrootsClientIdbStoreError;
     use radroots_studio_app_core::keystore::{
@@ -408,6 +440,10 @@ mod tests {
             (
                 AppInitError::Config(AppConfigError::MissingKeyMap("nostr_key")),
                 "error.app.init.config",
+            ),
+            (
+                AppInitError::Assets(AppInitAssetError::FetchUnavailable),
+                "error.app.init.assets",
             ),
         ];
         for (err, expected) in cases {
@@ -517,5 +553,33 @@ mod tests {
         assert_eq!(state.total_bytes, None);
         app_init_total_add(&mut state, 5);
         assert_eq!(state.total_bytes, None);
+    }
+
+    #[test]
+    fn app_init_assets_skips_when_empty() {
+        let config = app_config_default();
+        let mut stages = Vec::new();
+        let mut progress = Vec::new();
+        let result = futures::executor::block_on(app_init_assets(
+            &config,
+            |stage| stages.push(stage),
+            |loaded, total| progress.push((loaded, total)),
+        ));
+        assert!(result.is_ok());
+        assert!(stages.is_empty());
+        assert!(progress.is_empty());
+    }
+
+    #[test]
+    fn app_init_assets_reports_unavailable_on_native() {
+        let mut config = AppConfig::empty();
+        config.assets.sql_wasm_url = Some("http://example.com/sql.wasm".to_string());
+        let result = futures::executor::block_on(app_init_assets(
+            &config,
+            |_stage| {},
+            |_loaded, _total| {},
+        ))
+        .expect_err("asset fetch should error on native");
+        assert_eq!(result, AppInitAssetError::FetchUnavailable);
     }
 }

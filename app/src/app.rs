@@ -2,10 +2,16 @@ use leptos::prelude::*;
 use leptos::task::spawn_local;
 
 use crate::{
+    app_init_assets,
     app_init_backends,
+    app_init_has_completed,
     app_init_state_default,
     app_init_mark_completed,
     app_init_reset,
+    app_init_progress_add,
+    app_init_stage_set,
+    app_init_total_add,
+    app_init_total_unknown,
     app_config_default,
     app_datastore_read_app_data,
     app_health_check_all,
@@ -86,16 +92,43 @@ pub fn App() -> impl IntoView {
     provide_context(init_state);
     Effect::new(move || {
         spawn_local(async move {
-            init_state.update(|state| state.stage = AppInitStage::Storage);
-            match app_init_backends(app_config_default()).await {
+            init_state.update(|state| app_init_stage_set(state, AppInitStage::Storage));
+            let config = app_config_default();
+            if !app_init_has_completed() {
+                init_state.update(|state| {
+                    state.loaded_bytes = 0;
+                    state.total_bytes = Some(0);
+                });
+                let assets_result = app_init_assets(
+                    &config,
+                    |stage| init_state.update(|state| app_init_stage_set(state, stage)),
+                    |loaded, total| {
+                        init_state.update(|state| {
+                            app_init_progress_add(state, loaded);
+                            match total {
+                                Some(value) => app_init_total_add(state, value),
+                                None => app_init_total_unknown(state),
+                            }
+                        });
+                    },
+                )
+                .await;
+                if let Err(err) = assets_result {
+                    init_error.set(Some(AppInitError::Assets(err)));
+                    init_state.update(|state| app_init_stage_set(state, AppInitStage::Error));
+                    return;
+                }
+                init_state.update(|state| app_init_stage_set(state, AppInitStage::Storage));
+            }
+            match app_init_backends(config).await {
                 Ok(value) => {
                     backends.set(Some(value));
                     app_init_mark_completed();
-                    init_state.update(|state| state.stage = AppInitStage::Ready);
+                    init_state.update(|state| app_init_stage_set(state, AppInitStage::Ready));
                 }
                 Err(err) => {
                     init_error.set(Some(err));
-                    init_state.update(|state| state.stage = AppInitStage::Error);
+                    init_state.update(|state| app_init_stage_set(state, AppInitStage::Error));
                 }
             }
         })
