@@ -1,5 +1,6 @@
 pub mod error;
 pub mod types;
+pub mod envelope;
 
 pub use error::{RadrootsClientCryptoError, RadrootsClientCryptoErrorMessage};
 pub use types::{
@@ -15,3 +16,4 @@ pub use types::{
     RadrootsClientLegacyKeyConfig,
     RadrootsClientWebCryptoService,
 };
+pub use envelope::{crypto_envelope_decode, crypto_envelope_encode};
