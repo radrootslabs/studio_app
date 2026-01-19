@@ -56,6 +56,7 @@ static LOG_META: OnceLock<AppLogMetadata> = OnceLock::new();
 static LOG_BUFFER: OnceLock<Mutex<Vec<AppLogEntry>>> = OnceLock::new();
 
 pub const APP_LOG_BUFFER_MAX_ENTRIES: usize = 512;
+pub const APP_LOG_MAX_ENTRIES: usize = 2000;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum AppLogLevel {
@@ -328,6 +329,66 @@ pub fn app_log_buffer_drain() -> Vec<AppLogEntry> {
     entries.drain(..).collect()
 }
 
+pub fn app_log_entry_prefix(key_maps: &AppKeyMapConfig) -> AppLogResult<String> {
+    let param = app_datastore_param_key(key_maps, "log_entry")?;
+    Ok(param(""))
+}
+
+pub async fn app_log_entries_load<T: RadrootsClientDatastore>(
+    datastore: &T,
+    key_maps: &AppKeyMapConfig,
+) -> AppLogResult<Vec<AppLogEntry>> {
+    let entries = datastore.entries().await.map_err(AppLogError::Datastore)?;
+    let prefix = app_log_entry_prefix(key_maps)?;
+    let mut out = Vec::new();
+    for entry in entries {
+        if !entry.key.starts_with(&prefix) {
+            continue;
+        }
+        let Some(value) = entry.value else {
+            continue;
+        };
+        if let Ok(parsed) = serde_json::from_str::<AppLogEntry>(&value) {
+            out.push(parsed);
+        }
+    }
+    Ok(out)
+}
+
+pub fn app_log_entries_dump(entries: &[AppLogEntry]) -> String {
+    let mut out = String::new();
+    for (idx, entry) in entries.iter().enumerate() {
+        if idx > 0 {
+            out.push('\n');
+        }
+        match serde_json::to_string(entry) {
+            Ok(line) => out.push_str(&line),
+            Err(_) => out.push_str("{\"error\":\"log_entry_encode_failed\"}"),
+        }
+    }
+    out
+}
+
+pub async fn app_log_entries_prune<T: RadrootsClientDatastore>(
+    datastore: &T,
+    key_maps: &AppKeyMapConfig,
+    max_entries: usize,
+) -> AppLogResult<usize> {
+    let mut entries = app_log_entries_load(datastore, key_maps).await?;
+    if entries.len() <= max_entries {
+        return Ok(0);
+    }
+    entries.sort_by_key(|entry| entry.timestamp_ms);
+    let prune_count = entries.len().saturating_sub(max_entries);
+    let mut removed = 0;
+    for entry in entries.into_iter().take(prune_count) {
+        let key = app_log_entry_key(key_maps, &entry.id)?;
+        let _ = datastore.del(&key).await.map_err(AppLogError::Datastore)?;
+        removed += 1;
+    }
+    Ok(removed)
+}
+
 #[derive(Debug)]
 pub enum AppLoggingError {
     Logging(radroots_log::Error),
@@ -381,14 +442,19 @@ pub fn app_logging_init(meta: Option<AppLogMetadata>) -> AppLoggingResult<()> {
 #[cfg(test)]
 mod tests {
     use super::{
+        app_log_entries_dump,
+        app_log_entries_load,
+        app_log_entries_prune,
         app_log_entry_error,
         app_log_entry_new,
         app_log_entry_key,
+        app_log_entry_prefix,
         app_log_buffer_drain,
         app_log_buffer_push,
         app_log_metadata,
         app_log_timestamp_ms,
         AppLogLevel,
+        AppLogEntry,
         AppLogMetadata,
     };
     use crate::{
@@ -396,6 +462,146 @@ mod tests {
         AppConfigError,
         APP_DATASTORE_KEY_LOG_ENTRY,
     };
+    use async_trait::async_trait;
+    use radroots_studio_app_core::backup::RadrootsClientBackupDatastorePayload;
+    use radroots_studio_app_core::datastore::{
+        RadrootsClientDatastore,
+        RadrootsClientDatastoreEntries,
+        RadrootsClientDatastoreEntry,
+        RadrootsClientDatastoreError,
+        RadrootsClientDatastoreResult,
+    };
+    use radroots_studio_app_core::idb::{RadrootsClientIdbConfig, IDB_CONFIG_DATASTORE};
+    use serde::{de::DeserializeOwned, Serialize};
+    use std::sync::Mutex;
+
+    struct TestDatastore {
+        entries: Mutex<Vec<RadrootsClientDatastoreEntry>>,
+    }
+
+    impl TestDatastore {
+        fn new(entries: Vec<RadrootsClientDatastoreEntry>) -> Self {
+            Self {
+                entries: Mutex::new(entries),
+            }
+        }
+
+        fn len(&self) -> usize {
+            self.entries.lock().unwrap_or_else(|err| err.into_inner()).len()
+        }
+    }
+
+    #[async_trait(?Send)]
+    impl RadrootsClientDatastore for TestDatastore {
+        fn get_config(&self) -> RadrootsClientIdbConfig {
+            IDB_CONFIG_DATASTORE
+        }
+
+        fn get_store_id(&self) -> &str {
+            "test"
+        }
+
+        async fn init(&self) -> RadrootsClientDatastoreResult<()> {
+            Ok(())
+        }
+
+        async fn set(&self, _key: &str, _value: &str) -> RadrootsClientDatastoreResult<String> {
+            Err(RadrootsClientDatastoreError::IdbUndefined)
+        }
+
+        async fn get(&self, _key: &str) -> RadrootsClientDatastoreResult<String> {
+            Err(RadrootsClientDatastoreError::IdbUndefined)
+        }
+
+        async fn set_obj<T>(
+            &self,
+            _key: &str,
+            _value: &T,
+        ) -> RadrootsClientDatastoreResult<T>
+        where
+            T: Serialize + DeserializeOwned + Clone,
+        {
+            Err(RadrootsClientDatastoreError::IdbUndefined)
+        }
+
+        async fn update_obj<T>(
+            &self,
+            _key: &str,
+            _value: &T,
+        ) -> RadrootsClientDatastoreResult<T>
+        where
+            T: Serialize + DeserializeOwned + Clone,
+        {
+            Err(RadrootsClientDatastoreError::IdbUndefined)
+        }
+
+        async fn get_obj<T>(&self, _key: &str) -> RadrootsClientDatastoreResult<T>
+        where
+            T: DeserializeOwned,
+        {
+            Err(RadrootsClientDatastoreError::IdbUndefined)
+        }
+
+        async fn del_obj(&self, _key: &str) -> RadrootsClientDatastoreResult<String> {
+            Err(RadrootsClientDatastoreError::IdbUndefined)
+        }
+
+        async fn del(&self, key: &str) -> RadrootsClientDatastoreResult<String> {
+            let mut entries = self.entries.lock().unwrap_or_else(|err| err.into_inner());
+            entries.retain(|entry| entry.key != key);
+            Ok(key.to_string())
+        }
+
+        async fn del_pref(&self, _key_prefix: &str) -> RadrootsClientDatastoreResult<Vec<String>> {
+            Err(RadrootsClientDatastoreError::IdbUndefined)
+        }
+
+        async fn set_param(
+            &self,
+            _key: &str,
+            _key_param: &str,
+            _value: &str,
+        ) -> RadrootsClientDatastoreResult<String> {
+            Err(RadrootsClientDatastoreError::IdbUndefined)
+        }
+
+        async fn get_param(
+            &self,
+            _key: &str,
+            _key_param: &str,
+        ) -> RadrootsClientDatastoreResult<String> {
+            Err(RadrootsClientDatastoreError::IdbUndefined)
+        }
+
+        async fn keys(&self) -> RadrootsClientDatastoreResult<Vec<String>> {
+            Err(RadrootsClientDatastoreError::IdbUndefined)
+        }
+
+        async fn entries(&self) -> RadrootsClientDatastoreResult<RadrootsClientDatastoreEntries> {
+            Ok(self
+                .entries
+                .lock()
+                .unwrap_or_else(|err| err.into_inner())
+                .clone())
+        }
+
+        async fn reset(&self) -> RadrootsClientDatastoreResult<()> {
+            Err(RadrootsClientDatastoreError::IdbUndefined)
+        }
+
+        async fn export_backup(
+            &self,
+        ) -> RadrootsClientDatastoreResult<RadrootsClientBackupDatastorePayload> {
+            Err(RadrootsClientDatastoreError::IdbUndefined)
+        }
+
+        async fn import_backup(
+            &self,
+            _payload: RadrootsClientBackupDatastorePayload,
+        ) -> RadrootsClientDatastoreResult<()> {
+            Err(RadrootsClientDatastoreError::IdbUndefined)
+        }
+    }
 
     #[test]
     fn log_metadata_defaults_populated() {
@@ -454,5 +660,85 @@ mod tests {
         assert_eq!(drained.len(), 1);
         assert_eq!(drained[0].id, entry.id);
         assert!(app_log_buffer_drain().is_empty());
+    }
+
+    #[test]
+    fn log_entry_prefix_uses_log_key() {
+        let key_maps = app_key_maps_default();
+        let prefix = app_log_entry_prefix(&key_maps).expect("prefix");
+        assert_eq!(prefix, format!("{APP_DATASTORE_KEY_LOG_ENTRY}:"));
+    }
+
+    #[test]
+    fn log_entries_dump_serializes_jsonl() {
+        let entries = vec![AppLogEntry {
+            id: String::from("a"),
+            timestamp_ms: 1,
+            level: AppLogLevel::Info,
+            code: String::from("code"),
+            message: String::from("hello"),
+            context: None,
+            metadata: AppLogMetadata::default(),
+        }];
+        let dump = app_log_entries_dump(&entries);
+        assert!(dump.contains("\"code\":\"code\""));
+        assert_eq!(dump.lines().count(), 1);
+    }
+
+    #[test]
+    fn log_entries_load_filters_by_prefix() {
+        let key_maps = app_key_maps_default();
+        let entry = AppLogEntry {
+            id: String::from("a"),
+            timestamp_ms: 1,
+            level: AppLogLevel::Info,
+            code: String::from("code"),
+            message: String::from("hello"),
+            context: None,
+            metadata: AppLogMetadata::default(),
+        };
+        let key = app_log_entry_key(&key_maps, &entry.id).expect("key");
+        let entries = vec![
+            RadrootsClientDatastoreEntry::new(
+                key,
+                Some(serde_json::to_string(&entry).expect("json")),
+            ),
+            RadrootsClientDatastoreEntry::new(String::from("other"), Some(String::from("{}"))),
+        ];
+        let datastore = TestDatastore::new(entries);
+        let loaded = futures::executor::block_on(app_log_entries_load(&datastore, &key_maps))
+            .expect("load");
+        assert_eq!(loaded.len(), 1);
+        assert_eq!(loaded[0].id, "a");
+    }
+
+    #[test]
+    fn log_entries_prune_enforces_limit() {
+        let key_maps = app_key_maps_default();
+        let entries = (0..3)
+            .map(|idx| AppLogEntry {
+                id: format!("id-{idx}"),
+                timestamp_ms: idx,
+                level: AppLogLevel::Info,
+                code: String::from("code"),
+                message: String::from("hello"),
+                context: None,
+                metadata: AppLogMetadata::default(),
+            })
+            .collect::<Vec<_>>();
+        let mut stored = Vec::new();
+        for entry in entries {
+            let key = app_log_entry_key(&key_maps, &entry.id).expect("key");
+            stored.push(RadrootsClientDatastoreEntry::new(
+                key,
+                Some(serde_json::to_string(&entry).expect("json")),
+            ));
+        }
+        let datastore = TestDatastore::new(stored);
+        let removed =
+            futures::executor::block_on(app_log_entries_prune(&datastore, &key_maps, 2))
+                .expect("prune");
+        assert_eq!(removed, 1);
+        assert_eq!(datastore.len(), 2);
     }
 }

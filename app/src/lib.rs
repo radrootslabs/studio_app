@@ -53,9 +53,13 @@ pub use logging::{
     app_log_entry_store,
     app_log_buffer_drain,
     app_log_buffer_push,
+    app_log_entries_dump,
+    app_log_entries_load,
+    app_log_entries_prune,
     app_log_error_emit,
     app_log_error_store,
     app_log_entry_key,
+    app_log_entry_prefix,
     app_log_debug_emit,
     app_log_info_emit,
     app_log_metadata,
@@ -71,6 +75,7 @@ pub use logging::{
     AppLoggingError,
     AppLoggingResult,
     APP_LOG_BUFFER_MAX_ENTRIES,
+    APP_LOG_MAX_ENTRIES,
 };
 pub use notifications::{AppNotifications, AppNotificationsError, AppNotificationsResult};
 pub use tangle::{AppTangleClient, AppTangleClientStub, AppTangleError, AppTangleResult};
