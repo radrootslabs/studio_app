@@ -38,3 +38,7 @@ pub use unit::{
     AreaUnit, MassUnit, AREA_UNITS, MASS_UNITS,
 };
 pub use validation::regex::{form_fields, FormField, FormFieldsKey, UtilRegex};
+pub use validation::schema::{
+    zf_area_unit, zf_email, zf_mass_unit, zf_numf_pos, zf_numi_pos, zf_price, zf_price_amount,
+    zf_quantity_amount, zf_username,
+};
