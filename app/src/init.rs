@@ -12,7 +12,11 @@ use radroots_studio_app_core::idb::{
     RadrootsClientIdbStoreError,
     RADROOTS_IDB_DATABASE,
 };
-use radroots_studio_app_core::keystore::{RadrootsClientKeystoreError, RadrootsClientWebKeystoreNostr};
+use radroots_studio_app_core::keystore::{
+    RadrootsClientKeystoreError,
+    RadrootsClientKeystoreNostr,
+    RadrootsClientWebKeystoreNostr,
+};
 
 use crate::{
     app_datastore_clear_bootstrap,
@@ -156,12 +160,16 @@ pub fn app_init_mark_completed() {
     }
 }
 
-pub async fn app_init_reset<T: RadrootsClientDatastore>(
+pub async fn app_init_reset<T: RadrootsClientDatastore, K: RadrootsClientKeystoreNostr>(
     datastore: Option<&T>,
     key_maps: Option<&AppKeyMapConfig>,
+    keystore: Option<&K>,
 ) -> AppInitResult<()> {
     if let (Some(datastore), Some(key_maps)) = (datastore, key_maps) {
         app_datastore_clear_bootstrap(datastore, key_maps).await?;
+    }
+    if let Some(keystore) = keystore {
+        keystore.reset().await.map_err(AppInitError::Keystore)?;
     }
     #[cfg(target_arch = "wasm32")]
     {
@@ -240,7 +248,12 @@ mod tests {
     use crate::app_config_default;
     use radroots_studio_app_core::datastore::RadrootsClientDatastoreError;
     use radroots_studio_app_core::idb::RadrootsClientIdbStoreError;
-    use radroots_studio_app_core::keystore::RadrootsClientKeystoreError;
+    use radroots_studio_app_core::keystore::{
+        RadrootsClientKeystoreError,
+        RadrootsClientKeystoreNostr,
+        RadrootsClientKeystoreResult,
+    };
+    use async_trait::async_trait;
     use crate::AppConfigError;
 
     #[test]
@@ -291,8 +304,52 @@ mod tests {
         super::app_init_mark_completed();
         let result = futures::executor::block_on(super::app_init_reset::<
             radroots_studio_app_core::datastore::RadrootsClientWebDatastore,
-        >(None, None));
+            TestKeystore,
+        >(None, None, None));
         assert!(result.is_ok());
+    }
+
+    struct TestKeystore;
+
+    #[async_trait(?Send)]
+    impl RadrootsClientKeystoreNostr for TestKeystore {
+        async fn generate(&self) -> RadrootsClientKeystoreResult<String> {
+            Err(RadrootsClientKeystoreError::IdbUndefined)
+        }
+
+        async fn add(&self, _secret_key: &str) -> RadrootsClientKeystoreResult<String> {
+            Err(RadrootsClientKeystoreError::IdbUndefined)
+        }
+
+        async fn read(&self, _public_key: &str) -> RadrootsClientKeystoreResult<String> {
+            Err(RadrootsClientKeystoreError::IdbUndefined)
+        }
+
+        async fn keys(&self) -> RadrootsClientKeystoreResult<Vec<String>> {
+            Err(RadrootsClientKeystoreError::IdbUndefined)
+        }
+
+        async fn remove(&self, _public_key: &str) -> RadrootsClientKeystoreResult<String> {
+            Err(RadrootsClientKeystoreError::IdbUndefined)
+        }
+
+        async fn reset(&self) -> RadrootsClientKeystoreResult<()> {
+            Err(RadrootsClientKeystoreError::IdbUndefined)
+        }
+    }
+
+    #[test]
+    fn app_init_reset_maps_keystore_errors() {
+        let keystore = TestKeystore;
+        let err = futures::executor::block_on(super::app_init_reset::<
+            radroots_studio_app_core::datastore::RadrootsClientWebDatastore,
+            TestKeystore,
+        >(None, None, Some(&keystore)))
+        .expect_err("keystore reset should error on native");
+        assert_eq!(
+            err,
+            AppInitError::Keystore(RadrootsClientKeystoreError::IdbUndefined)
+        );
     }
 
     #[test]

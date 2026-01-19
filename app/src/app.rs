@@ -137,7 +137,13 @@ pub fn App() -> impl IntoView {
                             let datastore = radroots_studio_app_core::datastore::RadrootsClientWebDatastore::new(
                                 Some(config.datastore.idb_config),
                             );
-                            match app_init_reset(Some(&datastore), Some(&config.datastore.key_maps)).await {
+                            match app_init_reset(
+                                Some(&datastore),
+                                Some(&config.datastore.key_maps),
+                                None::<&radroots_studio_app_core::keystore::RadrootsClientWebKeystoreNostr>,
+                            )
+                            .await
+                            {
                                 Ok(()) => reset_status.set(Some("reset_done".to_string())),
                                 Err(err) => reset_status.set(Some(err.to_string())),
                             }
