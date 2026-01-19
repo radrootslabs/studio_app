@@ -16,6 +16,7 @@ license = "GPL-3.0-or-later"
 leptos = { version = "0.8.5", default-features = false }
 wasm-bindgen = "=0.2.100"
 serde = { version = "1", features = ["derive"] }
+serde_json = "1"
 
 [profile.release]
 codegen-units = 1
