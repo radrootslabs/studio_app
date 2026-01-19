@@ -1,10 +1,12 @@
 use async_trait::async_trait;
+use serde::{Deserialize, Serialize};
 
 use crate::idb::RadrootsClientIdbConfig;
 
 use super::RadrootsClientCryptoError;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
 pub enum RadrootsClientCryptoKeyStatus {
     Active,
     Rotated,
@@ -27,8 +29,9 @@ impl RadrootsClientCryptoKeyStatus {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum RadrootsClientCryptoAlgorithm {
+    #[serde(rename = "AES-GCM")]
     AesGcm,
 }
 
@@ -47,7 +50,7 @@ impl RadrootsClientCryptoAlgorithm {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RadrootsClientCryptoEnvelope {
     pub version: u8,
     pub key_id: String,
@@ -56,7 +59,7 @@ pub struct RadrootsClientCryptoEnvelope {
     pub ciphertext: Vec<u8>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RadrootsClientCryptoKeyEntry {
     pub key_id: String,
     pub store_id: String,
@@ -71,7 +74,7 @@ pub struct RadrootsClientCryptoKeyEntry {
     pub provider_id: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RadrootsClientCryptoStoreIndex {
     pub store_id: String,
     pub active_key_id: String,
@@ -79,13 +82,13 @@ pub struct RadrootsClientCryptoStoreIndex {
     pub created_at: u64,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RadrootsClientCryptoRegistryExport {
     pub stores: Vec<RadrootsClientCryptoStoreIndex>,
     pub keys: Vec<RadrootsClientCryptoKeyEntry>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RadrootsClientCryptoDecryptOutcome {
     pub plaintext: Vec<u8>,
     pub needs_reencrypt: bool,

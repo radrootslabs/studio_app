@@ -1,4 +1,5 @@
 use async_trait::async_trait;
+use serde::{Deserialize, Serialize};
 
 use crate::crypto::RadrootsClientCryptoRegistryExport;
 
@@ -6,7 +7,8 @@ pub type RadrootsClientBackupBundleVersion = u8;
 
 pub const RADROOTS_CLIENT_BACKUP_BUNDLE_VERSION: RadrootsClientBackupBundleVersion = 1;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
 pub enum RadrootsClientBackupBundleStoreType {
     Sql,
     Keystore,
@@ -32,34 +34,35 @@ impl RadrootsClientBackupBundleStoreType {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RadrootsClientBackupSqlPayload {
     pub bytes_b64: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RadrootsClientBackupKeystoreEntry {
     pub key: String,
     pub value: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RadrootsClientBackupKeystorePayload {
     pub entries: Vec<RadrootsClientBackupKeystoreEntry>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RadrootsClientBackupDatastoreEntry {
     pub key: String,
     pub value: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RadrootsClientBackupDatastorePayload {
     pub entries: Vec<RadrootsClientBackupDatastoreEntry>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "store_type", rename_all = "lowercase")]
 pub enum RadrootsClientBackupBundlePayload {
     Sql {
         store_id: String,
@@ -99,13 +102,13 @@ impl RadrootsClientBackupBundlePayload {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RadrootsClientBackupStoreRef {
     pub store_id: String,
     pub store_type: RadrootsClientBackupBundleStoreType,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RadrootsClientBackupBundleManifest {
     pub version: RadrootsClientBackupBundleVersion,
     pub created_at: u64,
@@ -114,13 +117,13 @@ pub struct RadrootsClientBackupBundleManifest {
     pub crypto_registry: RadrootsClientCryptoRegistryExport,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RadrootsClientBackupBundle {
     pub manifest: RadrootsClientBackupBundleManifest,
     pub payloads: Vec<RadrootsClientBackupBundlePayload>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RadrootsClientBackupBundleEnvelope {
     pub version: u8,
     pub created_at: u64,
