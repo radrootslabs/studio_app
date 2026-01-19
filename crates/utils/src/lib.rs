@@ -4,6 +4,7 @@ pub mod error;
 pub mod errors;
 pub mod r#async;
 pub mod binary;
+pub mod cache;
 pub mod currency;
 pub mod id;
 pub mod media;
@@ -18,6 +19,10 @@ pub mod validation;
 
 pub use r#async::exe_iter;
 pub use binary::{as_array_buffer, RadrootsAppArrayBuffer};
+pub use cache::{
+    asset_cache_fetch, asset_cache_fetch_bytes, AssetBytes, AssetCacheFetchConfig, AssetCacheMode,
+    AssetCacheRequestInit, AssetResponse, RADROOTS_ASSET_CACHE_NAME, RADROOTS_ASSET_CACHE_PREFIX,
+};
 pub use currency::{
     fmt_price, parse_currency, parse_currency_marker, price_to_formatted, FiatCurrency,
     FIAT_CURRENCIES,

@@ -48,6 +48,9 @@ web-sys = { version = "0.3.77", features = [
   "IdbTransaction",
   "IdbTransactionMode",
   "Coordinates",
+  "Cache",
+  "CacheStorage",
+  "Headers",
   "Geolocation",
   "Navigator",
   "Notification",
@@ -61,6 +64,11 @@ web-sys = { version = "0.3.77", features = [
   "Position",
   "PositionError",
   "PositionOptions",
+  "Request",
+  "RequestCache",
+  "RequestInit",
+  "Response",
+  "ResponseType",
 ] }
 wasm-bindgen-futures = "0.4"
 base64 = "0.22"
