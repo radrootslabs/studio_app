@@ -23,6 +23,7 @@ use crate::{
     AppInitError,
     AppInitStage,
     AppNotifications,
+    AppTangleClientStub,
 };
 
 fn health_status_color(status: AppHealthCheckStatus) -> &'static str {
@@ -67,10 +68,12 @@ fn spawn_health_checks(
             Some(config.keystore.nostr_store),
         );
         let notifications = AppNotifications::new(None);
+        let tangle = AppTangleClientStub::new();
         let report = app_health_check_all(
             &datastore,
             &keystore,
             &notifications,
+            &tangle,
             &config.datastore.key_maps,
         )
         .await;
@@ -291,6 +294,16 @@ pub fn App() -> impl IntoView {
                         ></span>
                         <span>"notifications"</span>
                         <span>{move || health_result_label(&health_report.get().notifications)}</span>
+                    </div>
+                    <div style="display: flex; align-items: center; gap: 8px;">
+                        <span
+                            style=move || format!(
+                                "display:inline-block;width:10px;height:10px;border-radius:50%;background:{};",
+                                health_status_color(health_report.get().tangle.status)
+                            )
+                        ></span>
+                        <span>"tangle"</span>
+                        <span>{move || health_result_label(&health_report.get().tangle)}</span>
                     </div>
                     <div style="display: flex; align-items: center; gap: 8px;">
                         <span

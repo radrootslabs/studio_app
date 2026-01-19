@@ -31,6 +31,7 @@ pub use health::{
     app_health_check_datastore_roundtrip,
     app_health_check_keystore_access,
     app_health_check_notifications,
+    app_health_check_tangle,
     app_health_check_key_maps,
     AppHealthCheckResult,
     AppHealthCheckStatus,
