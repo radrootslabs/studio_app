@@ -4,6 +4,7 @@ pub mod error;
 pub mod errors;
 pub mod binary;
 pub mod numbers;
+pub mod object;
 pub mod path;
 pub mod text;
 pub mod time;
@@ -12,6 +13,7 @@ pub mod types;
 pub use binary::{as_array_buffer, RadrootsAppArrayBuffer};
 pub use errors::{err_msg, handle_err, throw_err, ERR_PREFIX_APP, ERR_PREFIX_UTILS};
 pub use numbers::{num_interval_range, num_str, parse_float, parse_int};
+pub use object::{obj_en, obj_result, obj_results_str, obj_truthy_fields};
 pub use path::{
     parse_route_path,
     resolve_route_path,

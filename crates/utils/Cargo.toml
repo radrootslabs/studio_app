@@ -14,3 +14,4 @@ radroots-types = { workspace = true }
 getrandom = { workspace = true }
 js-sys = { workspace = true }
 web-sys = { workspace = true }
+serde_json = { workspace = true }
