@@ -159,7 +159,7 @@ pub async fn app_init_backends(config: AppConfig) -> AppInitResult<AppBackends> 
         .init()
         .await
         .map_err(AppInitError::Datastore)?;
-    let nostr_keystore = RadrootsClientWebKeystoreNostr::new(None);
+    let nostr_keystore = RadrootsClientWebKeystoreNostr::new(Some(config.keystore.nostr_store));
     Ok(AppBackends {
         config,
         datastore,

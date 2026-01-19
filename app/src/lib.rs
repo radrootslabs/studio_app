@@ -16,6 +16,7 @@ pub use config::{
     AppDatastoreKeyObjMap,
     AppDatastoreKeyParam,
     AppDatastoreKeyParamMap,
+    AppKeystoreConfig,
     AppKeyMapConfig,
 };
 pub use init::{

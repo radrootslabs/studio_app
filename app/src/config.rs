@@ -2,6 +2,8 @@
 
 use std::collections::BTreeMap;
 
+use radroots_studio_app_core::idb::{RadrootsClientIdbConfig, IDB_CONFIG_KEYSTORE_NOSTR};
+
 pub type AppDatastoreKeyParam = fn(&str) -> String;
 pub type AppDatastoreKeyMap = BTreeMap<&'static str, &'static str>;
 pub type AppDatastoreKeyParamMap = BTreeMap<&'static str, AppDatastoreKeyParam>;
@@ -24,15 +26,30 @@ impl AppKeyMapConfig {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct AppKeystoreConfig {
+    pub nostr_store: RadrootsClientIdbConfig,
+}
+
+impl AppKeystoreConfig {
+    pub const fn default_config() -> Self {
+        Self {
+            nostr_store: IDB_CONFIG_KEYSTORE_NOSTR,
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AppConfig {
     pub key_maps: AppKeyMapConfig,
+    pub keystore: AppKeystoreConfig,
 }
 
 impl AppConfig {
     pub fn empty() -> Self {
         Self {
             key_maps: AppKeyMapConfig::empty(),
+            keystore: AppKeystoreConfig::default_config(),
         }
     }
 }
@@ -47,7 +64,14 @@ pub fn app_config_from_env() -> AppConfig {
 
 #[cfg(test)]
 mod tests {
-    use super::{app_config_default, app_config_from_env, AppConfig, AppKeyMapConfig};
+    use super::{
+        app_config_default,
+        app_config_from_env,
+        AppConfig,
+        AppKeyMapConfig,
+        AppKeystoreConfig,
+    };
+    use radroots_studio_app_core::idb::IDB_CONFIG_KEYSTORE_NOSTR;
 
     #[test]
     fn key_map_config_defaults_empty() {
@@ -68,5 +92,11 @@ mod tests {
         let config = app_config_default();
         let from_env = app_config_from_env();
         assert_eq!(config, from_env);
+    }
+
+    #[test]
+    fn keystore_config_defaults_to_nostr_store() {
+        let config = AppKeystoreConfig::default_config();
+        assert_eq!(config.nostr_store, IDB_CONFIG_KEYSTORE_NOSTR);
     }
 }
