@@ -84,6 +84,7 @@ use crate::{
     app_datastore_has_config,
     app_datastore_key_nostr_key,
     app_datastore_read_app_data,
+    app_log_debug_emit,
     app_key_maps_validate,
     AppNotifications,
     AppTangleClient,
@@ -91,6 +92,18 @@ use crate::{
 };
 use radroots_studio_app_core::datastore::{RadrootsClientDatastore, RadrootsClientDatastoreError};
 use radroots_studio_app_core::keystore::{RadrootsClientKeystoreError, RadrootsClientKeystoreNostr};
+
+fn log_health_start(name: &str) {
+    let _ = app_log_debug_emit("log.app.health.start", name, None);
+}
+
+fn log_health_end(name: &str, result: &AppHealthCheckResult) {
+    let context = match result.message.as_deref() {
+        Some(message) => Some(format!("status={},detail={message}", result.status.as_str())),
+        None => Some(format!("status={}", result.status.as_str())),
+    };
+    let _ = app_log_debug_emit("log.app.health.end", name, context);
+}
 
 pub fn app_health_check_key_maps(key_maps: &AppKeyMapConfig) -> AppHealthCheckResult {
     match app_key_maps_validate(key_maps) {
@@ -222,15 +235,39 @@ pub async fn app_health_check_all<T: RadrootsClientDatastore, K: RadrootsClientK
     tangle: &G,
     key_maps: &AppKeyMapConfig,
 ) -> AppHealthReport {
+    log_health_start("key_maps");
+    let key_maps_result = app_health_check_key_maps(key_maps);
+    log_health_end("key_maps", &key_maps_result);
+    log_health_start("bootstrap_config");
+    let bootstrap_config = app_health_check_bootstrap_config(datastore, key_maps).await;
+    log_health_end("bootstrap_config", &bootstrap_config);
+    log_health_start("bootstrap_app_data");
+    let bootstrap_app_data = app_health_check_bootstrap_app_data(datastore, key_maps).await;
+    log_health_end("bootstrap_app_data", &bootstrap_app_data);
+    log_health_start("app_data_active_key");
+    let app_data_active_key = app_health_check_app_data_active_key(datastore, key_maps).await;
+    log_health_end("app_data_active_key", &app_data_active_key);
+    log_health_start("notifications");
+    let notifications_result = app_health_check_notifications(notifications).await;
+    log_health_end("notifications", &notifications_result);
+    log_health_start("tangle");
+    let tangle_result = app_health_check_tangle(tangle);
+    log_health_end("tangle", &tangle_result);
+    log_health_start("datastore_roundtrip");
+    let datastore_roundtrip = app_health_check_datastore_roundtrip(datastore).await;
+    log_health_end("datastore_roundtrip", &datastore_roundtrip);
+    log_health_start("keystore");
+    let keystore_result = app_health_check_keystore_access(datastore, keystore, key_maps).await;
+    log_health_end("keystore", &keystore_result);
     AppHealthReport {
-        key_maps: app_health_check_key_maps(key_maps),
-        bootstrap_config: app_health_check_bootstrap_config(datastore, key_maps).await,
-        bootstrap_app_data: app_health_check_bootstrap_app_data(datastore, key_maps).await,
-        app_data_active_key: app_health_check_app_data_active_key(datastore, key_maps).await,
-        notifications: app_health_check_notifications(notifications).await,
-        tangle: app_health_check_tangle(tangle),
-        datastore_roundtrip: app_health_check_datastore_roundtrip(datastore).await,
-        keystore: app_health_check_keystore_access(datastore, keystore, key_maps).await,
+        key_maps: key_maps_result,
+        bootstrap_config,
+        bootstrap_app_data,
+        app_data_active_key,
+        notifications: notifications_result,
+        tangle: tangle_result,
+        datastore_roundtrip,
+        keystore: keystore_result,
     }
 }
 
