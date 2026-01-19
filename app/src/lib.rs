@@ -9,6 +9,7 @@ mod health;
 mod init;
 mod keystore;
 mod notifications;
+mod tangle;
 mod entry;
 
 pub use app::App;
@@ -43,6 +44,7 @@ pub use keystore::{
     AppKeystoreResult,
 };
 pub use notifications::{AppNotifications, AppNotificationsError, AppNotificationsResult};
+pub use tangle::{AppTangleClient, AppTangleClientStub, AppTangleError, AppTangleResult};
 pub use config::{
     app_config_default,
     app_config_from_env,
