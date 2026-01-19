@@ -22,6 +22,7 @@ use crate::{
     AppHealthReport,
     AppInitError,
     AppInitStage,
+    AppNotifications,
 };
 
 fn health_status_color(status: AppHealthCheckStatus) -> &'static str {
@@ -65,7 +66,14 @@ fn spawn_health_checks(
         let keystore = radroots_studio_app_core::keystore::RadrootsClientWebKeystoreNostr::new(
             Some(config.keystore.nostr_store),
         );
-        let report = app_health_check_all(&datastore, &keystore, &config.datastore.key_maps).await;
+        let notifications = AppNotifications::new(None);
+        let report = app_health_check_all(
+            &datastore,
+            &keystore,
+            &notifications,
+            &config.datastore.key_maps,
+        )
+        .await;
         let active_key_value = match app_datastore_read_app_data(&datastore, &config.datastore.key_maps).await {
             Ok(data) if data.active_key.is_empty() => None,
             Ok(data) => Some(data.active_key),
@@ -273,6 +281,16 @@ pub fn App() -> impl IntoView {
                         ></span>
                         <span>"app_data_active_key"</span>
                         <span>{move || health_result_label(&health_report.get().app_data_active_key)}</span>
+                    </div>
+                    <div style="display: flex; align-items: center; gap: 8px;">
+                        <span
+                            style=move || format!(
+                                "display:inline-block;width:10px;height:10px;border-radius:50%;background:{};",
+                                health_status_color(health_report.get().notifications.status)
+                            )
+                        ></span>
+                        <span>"notifications"</span>
+                        <span>{move || health_result_label(&health_report.get().notifications)}</span>
                     </div>
                     <div style="display: flex; align-items: center; gap: 8px;">
                         <span
