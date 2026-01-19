@@ -5,6 +5,7 @@ use radroots_studio_app_core::datastore::{RadrootsClientDatastore, RadrootsClien
 use crate::{
     app_datastore_obj_key_cfg_data,
     app_datastore_obj_key_app_data,
+    app_log_debug_emit,
     AppAppData,
     AppConfigData,
     AppInitError,
@@ -18,10 +19,12 @@ pub async fn app_datastore_write_config<T: RadrootsClientDatastore>(
     data: &AppConfigData,
 ) -> AppInitResult<AppConfigData> {
     let key = app_datastore_obj_key_cfg_data(key_maps).map_err(AppInitError::Config)?;
-    datastore
+    let value = datastore
         .set_obj(key, data)
         .await
-        .map_err(AppInitError::Datastore)
+        .map_err(AppInitError::Datastore)?;
+    let _ = app_log_debug_emit("log.app.bootstrap.config", "write", Some(key.to_string()));
+    Ok(value)
 }
 
 pub async fn app_datastore_has_config<T: RadrootsClientDatastore>(
@@ -42,10 +45,12 @@ pub async fn app_datastore_write_app_data<T: RadrootsClientDatastore>(
     data: &AppAppData,
 ) -> AppInitResult<AppAppData> {
     let key = app_datastore_obj_key_app_data(key_maps).map_err(AppInitError::Config)?;
-    datastore
+    let value = datastore
         .set_obj(key, data)
         .await
-        .map_err(AppInitError::Datastore)
+        .map_err(AppInitError::Datastore)?;
+    let _ = app_log_debug_emit("log.app.bootstrap.app_data", "write", Some(key.to_string()));
+    Ok(value)
 }
 
 pub async fn app_datastore_read_app_data<T: RadrootsClientDatastore>(
@@ -53,10 +58,12 @@ pub async fn app_datastore_read_app_data<T: RadrootsClientDatastore>(
     key_maps: &AppKeyMapConfig,
 ) -> AppInitResult<AppAppData> {
     let key = app_datastore_obj_key_app_data(key_maps).map_err(AppInitError::Config)?;
-    datastore
+    let value = datastore
         .get_obj::<AppAppData>(key)
         .await
-        .map_err(AppInitError::Datastore)
+        .map_err(AppInitError::Datastore)?;
+    let _ = app_log_debug_emit("log.app.bootstrap.app_data", "read", Some(key.to_string()));
+    Ok(value)
 }
 
 pub async fn app_datastore_has_app_data<T: RadrootsClientDatastore>(
@@ -85,6 +92,7 @@ pub async fn app_datastore_clear_bootstrap<T: RadrootsClientDatastore>(
         .del_obj(app_key)
         .await
         .map_err(AppInitError::Datastore)?;
+    let _ = app_log_debug_emit("log.app.bootstrap.reset", "clear", None);
     Ok(())
 }
 

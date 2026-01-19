@@ -29,6 +29,7 @@ use crate::{
     app_assets_geocoder_db_url,
     app_assets_sql_wasm_url,
     app_keystore_nostr_ensure_key,
+    app_log_debug_emit,
     AppAppData,
     AppConfig,
     AppConfigData,
@@ -268,20 +269,26 @@ where
     F: FnMut(AppInitStage),
     G: FnMut(u64, Option<u64>),
 {
+    let _ = app_log_debug_emit("log.app.init.assets", "start", None);
     if let Some(url) = app_assets_sql_wasm_url(config).filter(|value| !value.is_empty()) {
+        let _ = app_log_debug_emit("log.app.init.assets.sql", "download_start", Some(url.to_string()));
         on_stage(AppInitStage::DownloadSql);
         app_init_fetch_asset(url, |loaded, total| {
             on_progress(loaded, total);
         })
         .await?;
+        let _ = app_log_debug_emit("log.app.init.assets.sql", "download_done", None);
     }
     if let Some(url) = app_assets_geocoder_db_url(config).filter(|value| !value.is_empty()) {
+        let _ = app_log_debug_emit("log.app.init.assets.geo", "download_start", Some(url.to_string()));
         on_stage(AppInitStage::DownloadGeo);
         app_init_fetch_asset(url, |loaded, total| {
             on_progress(loaded, total);
         })
         .await?;
+        let _ = app_log_debug_emit("log.app.init.assets.geo", "download_done", None);
     }
+    let _ = app_log_debug_emit("log.app.init.assets", "done", None);
     Ok(())
 }
 
@@ -318,6 +325,7 @@ pub async fn app_init_reset<T: RadrootsClientDatastore, K: RadrootsClientKeystor
     key_maps: Option<&AppKeyMapConfig>,
     keystore: Option<&K>,
 ) -> AppInitResult<()> {
+    let _ = app_log_debug_emit("log.app.init.reset", "start", None);
     if let (Some(datastore), Some(key_maps)) = (datastore, key_maps) {
         app_datastore_clear_bootstrap(datastore, key_maps).await?;
     }
@@ -331,19 +339,23 @@ pub async fn app_init_reset<T: RadrootsClientDatastore, K: RadrootsClientKeystor
             let _ = storage.remove_item(APP_INIT_STORAGE_KEY);
         }
     }
+    let _ = app_log_debug_emit("log.app.init.reset", "done", None);
     Ok(())
 }
 
 pub async fn app_init_backends(config: AppConfig) -> AppInitResult<AppBackends> {
+    let _ = app_log_debug_emit("log.app.init.backends", "start", None);
     config.validate().map_err(AppInitError::Config)?;
     idb_store_bootstrap(RADROOTS_IDB_DATABASE, None)
         .await
         .map_err(AppInitError::Idb)?;
+    let _ = app_log_debug_emit("log.app.init.backends", "idb_bootstrap", None);
     let datastore = RadrootsClientWebDatastore::new(Some(config.datastore.idb_config));
     datastore
         .init()
         .await
         .map_err(AppInitError::Datastore)?;
+    let _ = app_log_debug_emit("log.app.init.backends", "datastore_ready", None);
     let has_config = app_datastore_has_config(&datastore, &config.datastore.key_maps).await?;
     if !has_config {
         let config_data = AppConfigData::default();
@@ -351,12 +363,14 @@ pub async fn app_init_backends(config: AppConfig) -> AppInitResult<AppBackends> 
             app_datastore_write_config(&datastore, &config.datastore.key_maps, &config_data)
                 .await?;
     }
+    let _ = app_log_debug_emit("log.app.init.backends", "config_ready", None);
     let nostr_keystore = RadrootsClientWebKeystoreNostr::new(Some(config.keystore.nostr_store));
     let nostr_public_key = app_keystore_nostr_ensure_key(&nostr_keystore)
         .await
         .map_err(|err| match err {
             AppKeystoreError::Keystore(inner) => AppInitError::Keystore(inner),
         })?;
+    let _ = app_log_debug_emit("log.app.init.backends", "nostr_key_ready", None);
     let nostr_key =
         app_datastore_key_nostr_key(&config.datastore.key_maps).map_err(AppInitError::Config)?;
     match datastore.get(nostr_key).await {
@@ -376,6 +390,7 @@ pub async fn app_init_backends(config: AppConfig) -> AppInitResult<AppBackends> 
         }
         Err(err) => return Err(AppInitError::Datastore(err)),
     }
+    let _ = app_log_debug_emit("log.app.init.backends", "nostr_key_synced", None);
     let has_app_data = app_datastore_has_app_data(&datastore, &config.datastore.key_maps).await?;
     let mut app_data = if has_app_data {
         app_datastore_read_app_data(&datastore, &config.datastore.key_maps).await?
@@ -389,6 +404,7 @@ pub async fn app_init_backends(config: AppConfig) -> AppInitResult<AppBackends> 
             app_datastore_write_app_data(&datastore, &config.datastore.key_maps, &app_data)
                 .await?;
     }
+    let _ = app_log_debug_emit("log.app.init.backends", "app_data_ready", None);
     Ok(AppBackends {
         config,
         datastore,
