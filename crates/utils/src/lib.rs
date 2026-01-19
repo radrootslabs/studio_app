@@ -11,6 +11,7 @@ pub mod path;
 pub mod text;
 pub mod time;
 pub mod types;
+pub mod unit;
 
 pub use r#async::exe_iter;
 pub use binary::{as_array_buffer, RadrootsAppArrayBuffer};
@@ -30,4 +31,8 @@ pub use types::{
     resolve_err, resolve_ok, FileBytesFormat, FilePath, FilePathBlob, FileMimeType, IdbClientConfig,
     ResolveError, ResultBool, ResultId, ResultObj, ResultPass, ResultPublicKey, ResultSecretKey,
     ResultsList, ValStr, WebFilePath,
+};
+pub use unit::{
+    mass_to_g, parse_area_unit, parse_area_unit_default, parse_mass_unit, parse_mass_unit_default,
+    AreaUnit, MassUnit, AREA_UNITS, MASS_UNITS,
 };
