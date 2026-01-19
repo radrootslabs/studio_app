@@ -14,7 +14,14 @@ use radroots_studio_app_core::idb::{
 };
 use radroots_studio_app_core::keystore::{RadrootsClientKeystoreError, RadrootsClientWebKeystoreNostr};
 
-use crate::{AppConfig, AppConfigError};
+use crate::{
+    app_datastore_write_app_data,
+    app_datastore_write_config,
+    AppAppData,
+    AppConfig,
+    AppConfigData,
+    AppConfigError,
+};
 
 #[cfg(target_arch = "wasm32")]
 use leptos::prelude::window;
@@ -162,6 +169,10 @@ pub async fn app_init_backends(config: AppConfig) -> AppInitResult<AppBackends> 
         .init()
         .await
         .map_err(AppInitError::Datastore)?;
+    let config_data = AppConfigData::default();
+    let _ = app_datastore_write_config(&datastore, &config.datastore.key_maps, &config_data).await?;
+    let app_data = AppAppData::default();
+    let _ = app_datastore_write_app_data(&datastore, &config.datastore.key_maps, &app_data).await?;
     let nostr_keystore = RadrootsClientWebKeystoreNostr::new(Some(config.keystore.nostr_store));
     Ok(AppBackends {
         config,
