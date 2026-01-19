@@ -32,10 +32,11 @@ pub use id::{d_tag_create, uuidv4, uuidv4_b64url, uuidv7, uuidv7_b64url};
 pub use media::{fmt_media_image_upload_result_url, MediaImageUploadResult, MediaResource};
 pub use model::{
     is_model_query_filter_option, is_model_query_filter_option_list, is_model_query_values,
-    list_model_query_values_assert, parse_model_query_value, ModelForm, ModelFormErrorTuple,
-    ModelFormValidationTuple, ModelQueryBindValue, ModelQueryBindValueOpt, ModelQueryBindValueTuple,
-    ModelQueryFilterCondition, ModelQueryFilterOption, ModelQueryFilterOptionList,
-    ModelQueryParam, ModelQueryValue, ModelSchemaErrors, ModelSortCreatedAt,
+    list_model_query_values_assert, parse_model_filter_map, parse_model_query_value, ModelForm,
+    ModelFormErrorTuple, ModelFormValidationTuple, ModelQueryBindValue, ModelQueryBindValueOpt,
+    ModelQueryBindValueTuple, ModelQueryFilter, ModelQueryFilterCondition, ModelQueryFilterMap,
+    ModelQueryFilterMapParsed, ModelQueryFilterOption, ModelQueryFilterOptionList, ModelQueryParam,
+    ModelQueryValue, ModelSchemaErrors, ModelSortCreatedAt,
 };
 pub use errors::{err_msg, handle_err, throw_err, ERR_PREFIX_APP, ERR_PREFIX_UTILS};
 pub use numbers::{num_interval_range, num_str, parse_float, parse_int};
