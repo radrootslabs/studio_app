@@ -7,6 +7,7 @@ use crate::{
     app_init_mark_completed,
     app_init_reset,
     app_config_default,
+    app_datastore_read_app_data,
     app_health_check_all,
     AppBackends,
     AppConfig,
@@ -32,10 +33,23 @@ fn health_result_label(result: &AppHealthCheckResult) -> String {
     }
 }
 
+fn active_key_label(value: Option<String>) -> String {
+    let Some(value) = value else {
+        return "missing".to_string();
+    };
+    if value.len() <= 12 {
+        return value;
+    }
+    let head = &value[..8];
+    let tail = &value[value.len() - 4..];
+    format!("{head}...{tail}")
+}
+
 fn spawn_health_checks(
     config: AppConfig,
     health_report: RwSignal<AppHealthReport, LocalStorage>,
     health_running: RwSignal<bool, LocalStorage>,
+    active_key: RwSignal<Option<String>, LocalStorage>,
 ) {
     health_running.set(true);
     spawn_local(async move {
@@ -46,7 +60,13 @@ fn spawn_health_checks(
             Some(config.keystore.nostr_store),
         );
         let report = app_health_check_all(&datastore, &keystore, &config.datastore.key_maps).await;
+        let active_key_value = match app_datastore_read_app_data(&datastore, &config.datastore.key_maps).await {
+            Ok(data) if data.active_key.is_empty() => None,
+            Ok(data) => Some(data.active_key),
+            Err(_) => None,
+        };
         health_report.set(report);
+        active_key.set(active_key_value);
         health_running.set(false);
     });
 }
@@ -60,6 +80,7 @@ pub fn App() -> impl IntoView {
     let health_report = RwSignal::new_local(AppHealthReport::empty());
     let health_running = RwSignal::new_local(false);
     let health_autorun = RwSignal::new_local(false);
+    let active_key = RwSignal::new_local(None::<String>);
     provide_context(backends);
     provide_context(init_error);
     provide_context(init_state);
@@ -91,7 +112,7 @@ pub fn App() -> impl IntoView {
             return;
         };
         health_autorun.set(true);
-        spawn_health_checks(config, health_report, health_running);
+        spawn_health_checks(config, health_report, health_running, active_key);
     });
     let status_color = move || match init_state.get().stage {
         AppInitStage::Ready => "green",
@@ -130,6 +151,7 @@ pub fn App() -> impl IntoView {
                         let config = backends.with_untracked(|value| value.as_ref().map(|backends| backends.config.clone()));
                         reset_status.set(Some("resetting".to_string()));
                         health_report.set(AppHealthReport::empty());
+                        active_key.set(None);
                         spawn_local(async move {
                             let Some(config) = config else {
                                 reset_status.set(Some("reset_missing_backends".to_string()));
@@ -150,7 +172,7 @@ pub fn App() -> impl IntoView {
                             {
                                 Ok(()) => {
                                     reset_status.set(Some("reset_done".to_string()));
-                                    spawn_health_checks(config, health_report, health_running);
+                                    spawn_health_checks(config, health_report, health_running, active_key);
                                 }
                                 Err(err) => reset_status.set(Some(err.to_string())),
                             }
@@ -171,7 +193,7 @@ pub fn App() -> impl IntoView {
                             let Some(config) = config else {
                                 return;
                             };
-                            spawn_health_checks(config, health_report, health_running);
+                            spawn_health_checks(config, health_report, health_running, active_key);
                         }
                         disabled=health_disabled
                     >
@@ -213,6 +235,16 @@ pub fn App() -> impl IntoView {
                         <span
                             style=move || format!(
                                 "display:inline-block;width:10px;height:10px;border-radius:50%;background:{};",
+                                health_status_color(health_report.get().app_data_active_key.status)
+                            )
+                        ></span>
+                        <span>"app_data_active_key"</span>
+                        <span>{move || health_result_label(&health_report.get().app_data_active_key)}</span>
+                    </div>
+                    <div style="display: flex; align-items: center; gap: 8px;">
+                        <span
+                            style=move || format!(
+                                "display:inline-block;width:10px;height:10px;border-radius:50%;background:{};",
                                 health_status_color(health_report.get().datastore_roundtrip.status)
                             )
                         ></span>
@@ -228,6 +260,10 @@ pub fn App() -> impl IntoView {
                         ></span>
                         <span>"keystore"</span>
                         <span>{move || health_result_label(&health_report.get().keystore)}</span>
+                    </div>
+                    <div style="display: flex; align-items: center; gap: 8px;">
+                        <span>"active_key"</span>
+                        <span>{move || active_key_label(active_key.get())}</span>
                     </div>
                 </div>
             </div>
