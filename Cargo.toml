@@ -19,7 +19,8 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 getrandom = "0.2"
 js-sys = "0.3.77"
-web-sys = { version = "0.3.77", features = ["Window", "Crypto"] }
+web-sys = { version = "0.3.77", features = ["Crypto", "CryptoKey", "SubtleCrypto", "Window"] }
+wasm-bindgen-futures = "0.4"
 
 [profile.release]
 codegen-units = 1
