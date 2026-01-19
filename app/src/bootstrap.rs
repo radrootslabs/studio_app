@@ -48,6 +48,17 @@ pub async fn app_datastore_write_app_data<T: RadrootsClientDatastore>(
         .map_err(AppInitError::Datastore)
 }
 
+pub async fn app_datastore_read_app_data<T: RadrootsClientDatastore>(
+    datastore: &T,
+    key_maps: &AppKeyMapConfig,
+) -> AppInitResult<AppAppData> {
+    let key = app_datastore_obj_key_app_data(key_maps).map_err(AppInitError::Config)?;
+    datastore
+        .get_obj::<AppAppData>(key)
+        .await
+        .map_err(AppInitError::Datastore)
+}
+
 pub async fn app_datastore_has_app_data<T: RadrootsClientDatastore>(
     datastore: &T,
     key_maps: &AppKeyMapConfig,
@@ -81,11 +92,12 @@ pub async fn app_datastore_clear_bootstrap<T: RadrootsClientDatastore>(
 mod tests {
     use super::{
         app_datastore_clear_bootstrap,
-        app_datastore_has_app_data,
-        app_datastore_has_config,
-        app_datastore_write_app_data,
-        app_datastore_write_config,
-    };
+    app_datastore_has_app_data,
+    app_datastore_has_config,
+    app_datastore_read_app_data,
+    app_datastore_write_app_data,
+    app_datastore_write_config,
+};
     use crate::{app_key_maps_default, AppAppData, AppConfigData, AppInitError};
     use radroots_studio_app_core::datastore::{RadrootsClientDatastoreError, RadrootsClientWebDatastore};
 
@@ -112,6 +124,18 @@ mod tests {
             &datastore,
             &key_maps,
             &data,
+        ))
+        .expect_err("idb undefined");
+        assert_eq!(err, AppInitError::Datastore(RadrootsClientDatastoreError::IdbUndefined));
+    }
+
+    #[test]
+    fn app_data_read_maps_idb_errors() {
+        let datastore = RadrootsClientWebDatastore::new(None);
+        let key_maps = app_key_maps_default();
+        let err = futures::executor::block_on(app_datastore_read_app_data(
+            &datastore,
+            &key_maps,
         ))
         .expect_err("idb undefined");
         assert_eq!(err, AppInitError::Datastore(RadrootsClientDatastoreError::IdbUndefined));
