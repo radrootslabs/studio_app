@@ -47,7 +47,7 @@ pub fn App() -> impl IntoView {
         AppInitStage::Geocoder => "orange",
         AppInitStage::Idle => "gray",
     };
-    let reset_disabled = move || backends.with_untracked(|value| value.is_none());
+    let reset_disabled = move || backends.with(|value| value.is_none());
     let reset_label = move || {
         reset_status
             .get()

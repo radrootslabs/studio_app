@@ -5,6 +5,7 @@ mod bootstrap;
 mod context;
 mod config;
 mod data;
+mod health;
 mod init;
 mod entry;
 
@@ -18,6 +19,11 @@ pub use bootstrap::{
 };
 pub use context::{app_context, AppContext};
 pub use data::{AppAppData, AppConfigData, AppConfigRole};
+pub use health::{
+    AppHealthCheckResult,
+    AppHealthCheckStatus,
+    AppHealthReport,
+};
 pub use config::{
     app_config_default,
     app_config_from_env,
