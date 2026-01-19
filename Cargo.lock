@@ -1576,6 +1576,7 @@ name = "radroots-app-lib"
 version = "0.1.0"
 dependencies = [
  "futures",
+ "gloo-timers",
  "js-sys",
  "once_cell",
  "regex",
