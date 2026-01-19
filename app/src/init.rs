@@ -14,6 +14,8 @@ use radroots_studio_app_core::idb::{
 };
 use radroots_studio_app_core::keystore::{RadrootsClientKeystoreError, RadrootsClientWebKeystoreNostr};
 
+use crate::AppConfig;
+
 #[cfg(target_arch = "wasm32")]
 use leptos::prelude::window;
 
@@ -103,6 +105,7 @@ impl fmt::Display for AppInitError {
 impl std::error::Error for AppInitError {}
 
 pub struct AppBackends {
+    pub config: AppConfig,
     pub datastore: RadrootsClientWebDatastore,
     pub nostr_keystore: RadrootsClientWebKeystoreNostr,
 }
@@ -147,7 +150,7 @@ pub fn app_init_reset() {
     }
 }
 
-pub async fn app_init_backends() -> AppInitResult<AppBackends> {
+pub async fn app_init_backends(config: AppConfig) -> AppInitResult<AppBackends> {
     idb_store_bootstrap(RADROOTS_IDB_DATABASE, None)
         .await
         .map_err(AppInitError::Idb)?;
@@ -158,6 +161,7 @@ pub async fn app_init_backends() -> AppInitResult<AppBackends> {
         .map_err(AppInitError::Datastore)?;
     let nostr_keystore = RadrootsClientWebKeystoreNostr::new(None);
     Ok(AppBackends {
+        config,
         datastore,
         nostr_keystore,
     })
@@ -172,6 +176,7 @@ mod tests {
         AppInitErrorMessage,
         AppInitStage,
     };
+    use crate::app_config_default;
     use radroots_studio_app_core::datastore::RadrootsClientDatastoreError;
     use radroots_studio_app_core::idb::RadrootsClientIdbStoreError;
     use radroots_studio_app_core::keystore::RadrootsClientKeystoreError;
@@ -200,7 +205,7 @@ mod tests {
 
     #[test]
     fn app_init_backends_maps_idb_errors() {
-        let err = match futures::executor::block_on(app_init_backends()) {
+        let err = match futures::executor::block_on(app_init_backends(app_config_default())) {
             Ok(_) => panic!("idb bootstrap should error on non-wasm"),
             Err(err) => err,
         };

@@ -5,6 +5,7 @@ use crate::{
     app_init_backends,
     app_init_state_default,
     app_init_mark_completed,
+    app_config_default,
     AppBackends,
     AppInitError,
     AppInitStage,
@@ -21,7 +22,7 @@ pub fn App() -> impl IntoView {
     Effect::new(move || {
         spawn_local(async move {
             init_state.update(|state| state.stage = AppInitStage::Storage);
-            match app_init_backends().await {
+            match app_init_backends(app_config_default()).await {
                 Ok(value) => {
                     backends.set(Some(value));
                     app_init_mark_completed();
