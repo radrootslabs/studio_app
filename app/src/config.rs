@@ -24,9 +24,30 @@ impl AppKeyMapConfig {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AppConfig {
+    pub key_maps: AppKeyMapConfig,
+}
+
+impl AppConfig {
+    pub fn empty() -> Self {
+        Self {
+            key_maps: AppKeyMapConfig::empty(),
+        }
+    }
+}
+
+pub fn app_config_default() -> AppConfig {
+    AppConfig::empty()
+}
+
+pub fn app_config_from_env() -> AppConfig {
+    app_config_default()
+}
+
 #[cfg(test)]
 mod tests {
-    use super::AppKeyMapConfig;
+    use super::{app_config_default, app_config_from_env, AppConfig, AppKeyMapConfig};
 
     #[test]
     fn key_map_config_defaults_empty() {
@@ -34,5 +55,18 @@ mod tests {
         assert!(config.key_map.is_empty());
         assert!(config.param_map.is_empty());
         assert!(config.obj_map.is_empty());
+    }
+
+    #[test]
+    fn app_config_defaults_empty() {
+        let config = AppConfig::empty();
+        assert!(config.key_maps.key_map.is_empty());
+    }
+
+    #[test]
+    fn app_config_helpers_return_defaults() {
+        let config = app_config_default();
+        let from_env = app_config_from_env();
+        assert_eq!(config, from_env);
     }
 }

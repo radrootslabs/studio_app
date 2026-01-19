@@ -9,6 +9,9 @@ mod entry;
 pub use app::App;
 pub use context::{app_context, AppContext};
 pub use config::{
+    app_config_default,
+    app_config_from_env,
+    AppConfig,
     AppDatastoreKeyMap,
     AppDatastoreKeyObjMap,
     AppDatastoreKeyParam,
