@@ -95,8 +95,10 @@ mod tests {
 
     #[test]
     fn app_init_backends_maps_idb_errors() {
-        let err = futures::executor::block_on(app_init_backends())
-            .expect_err("idb bootstrap should error on non-wasm");
+        let err = match futures::executor::block_on(app_init_backends()) {
+            Ok(_) => panic!("idb bootstrap should error on non-wasm"),
+            Err(err) => err,
+        };
         assert_eq!(
             err,
             AppInitError::Idb(RadrootsClientIdbStoreError::IdbUndefined)
