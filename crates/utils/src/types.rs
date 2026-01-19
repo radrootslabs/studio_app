@@ -33,6 +33,14 @@ pub enum WebFilePath {
     Blob(FilePathBlob),
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct IdbClientConfig {
+    pub database: String,
+    pub store: String,
+}
+
+pub type ValStr = Option<String>;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ResultPass {
     pub pass: bool,
@@ -82,8 +90,9 @@ pub fn resolve_err<T>(err: RadrootsAppUtilsError) -> ResolveError<T> {
 #[cfg(test)]
 mod tests {
     use super::{
-        resolve_err, resolve_ok, FileBytesFormat, FilePath, FilePathBlob, ResultBool, ResultId,
-        ResultObj, ResultPass, ResultPublicKey, ResultSecretKey, ResultsList, WebFilePath,
+        resolve_err, resolve_ok, FileBytesFormat, FilePath, FilePathBlob, IdbClientConfig,
+        ResultBool, ResultId, ResultObj, ResultPass, ResultPublicKey, ResultSecretKey, ResultsList,
+        ValStr, WebFilePath,
     };
     use crate::error::RadrootsAppUtilsError;
 
@@ -147,5 +156,17 @@ mod tests {
         assert_eq!(file_path, WebFilePath::File(path));
         assert_eq!(blob_path, WebFilePath::Blob(blob));
         assert_eq!(FileBytesFormat::Kb, FileBytesFormat::Kb);
+    }
+
+    #[test]
+    fn idb_config_stores_values() {
+        let config = IdbClientConfig {
+            database: "db".to_string(),
+            store: "store".to_string(),
+        };
+        assert_eq!(config.database, "db");
+        assert_eq!(config.store, "store");
+        let value: ValStr = None;
+        assert!(value.is_none());
     }
 }
