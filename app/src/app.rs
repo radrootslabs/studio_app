@@ -1,5 +1,7 @@
 use leptos::prelude::*;
 use leptos::task::spawn_local;
+use leptos_router::components::{A, Route, Router, Routes};
+use leptos_router::path;
 
 use crate::{
     app_init_assets,
@@ -26,6 +28,7 @@ use crate::{
     AppInitStage,
     AppNotifications,
     AppTangleClientStub,
+    LogsPage,
 };
 
 fn health_status_color(status: AppHealthCheckStatus) -> &'static str {
@@ -91,7 +94,7 @@ fn spawn_health_checks(
 }
 
 #[component]
-pub fn App() -> impl IntoView {
+fn HomePage() -> impl IntoView {
     let backends = RwSignal::new_local(None::<AppBackends>);
     let init_error = RwSignal::new_local(None::<AppInitError>);
     let init_state = RwSignal::new_local(app_init_state_default());
@@ -340,5 +343,21 @@ pub fn App() -> impl IntoView {
                 </div>
             </div>
         </main>
+    }
+}
+
+#[component]
+pub fn App() -> impl IntoView {
+    view! {
+        <Router>
+            <nav style="display:flex;gap:12px;margin-bottom:12px;">
+                <A href="/" exact=true>"home"</A>
+                <A href="/logs">"logs"</A>
+            </nav>
+            <Routes fallback=|| view! { <div>"not_found"</div> }>
+                <Route path=path!("") view=HomePage />
+                <Route path=path!("logs") view=LogsPage />
+            </Routes>
+        </Router>
     }
 }

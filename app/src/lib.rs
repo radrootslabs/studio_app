@@ -9,6 +9,7 @@ mod health;
 mod init;
 mod keystore;
 mod logging;
+mod logs;
 mod notifications;
 mod tangle;
 mod entry;
@@ -45,6 +46,7 @@ pub use keystore::{
     AppKeystoreError,
     AppKeystoreResult,
 };
+pub use logs::LogsPage;
 pub use logging::{
     app_log_entry_error,
     app_log_entry_emit,
