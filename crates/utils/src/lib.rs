@@ -4,6 +4,7 @@ pub mod error;
 pub mod errors;
 pub mod r#async;
 pub mod binary;
+pub mod currency;
 pub mod id;
 pub mod numbers;
 pub mod object;
@@ -16,6 +17,10 @@ pub mod validation;
 
 pub use r#async::exe_iter;
 pub use binary::{as_array_buffer, RadrootsAppArrayBuffer};
+pub use currency::{
+    fmt_price, parse_currency, parse_currency_marker, price_to_formatted, FiatCurrency,
+    FIAT_CURRENCIES,
+};
 pub use id::{d_tag_create, uuidv4, uuidv4_b64url, uuidv7, uuidv7_b64url};
 pub use errors::{err_msg, handle_err, throw_err, ERR_PREFIX_APP, ERR_PREFIX_UTILS};
 pub use numbers::{num_interval_range, num_str, parse_float, parse_int};
