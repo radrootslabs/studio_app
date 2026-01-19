@@ -2,11 +2,19 @@
 
 mod app;
 mod context;
+mod config;
 mod init;
 mod entry;
 
 pub use app::App;
 pub use context::{app_context, AppContext};
+pub use config::{
+    AppDatastoreKeyMap,
+    AppDatastoreKeyObjMap,
+    AppDatastoreKeyParam,
+    AppDatastoreKeyParamMap,
+    AppKeyMapConfig,
+};
 pub use init::{
     app_init_backends,
     app_init_has_completed,
