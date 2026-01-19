@@ -1,6 +1,6 @@
 #![forbid(unsafe_code)]
 
-use std::sync::OnceLock;
+use std::sync::{Mutex, OnceLock};
 
 #[cfg(not(target_arch = "wasm32"))]
 use std::path::PathBuf;
@@ -53,6 +53,9 @@ impl Default for AppLogMetadata {
 }
 
 static LOG_META: OnceLock<AppLogMetadata> = OnceLock::new();
+static LOG_BUFFER: OnceLock<Mutex<Vec<AppLogEntry>>> = OnceLock::new();
+
+pub const APP_LOG_BUFFER_MAX_ENTRIES: usize = 512;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum AppLogLevel {
@@ -215,6 +218,23 @@ pub fn app_log_entry_error<E: AppLoggableError>(err: &E) -> AppLogEntry {
     }
 }
 
+pub fn app_log_entry_new(
+    level: AppLogLevel,
+    code: &str,
+    message: &str,
+    context: Option<String>,
+) -> AppLogEntry {
+    AppLogEntry {
+        id: Uuid::new_v4().to_string(),
+        timestamp_ms: app_log_timestamp_ms(),
+        level,
+        code: code.to_string(),
+        message: message.to_string(),
+        context,
+        metadata: app_log_metadata().clone(),
+    }
+}
+
 pub fn app_log_entry_emit(entry: &AppLogEntry) {
     let payload = serde_json::to_string(entry)
         .unwrap_or_else(|_| format!("{}: {}", entry.code, entry.message));
@@ -226,10 +246,41 @@ pub fn app_log_entry_emit(entry: &AppLogEntry) {
     }
 }
 
-pub fn app_log_error_emit<E: AppLoggableError>(err: &E) -> AppLogEntry {
-    let entry = app_log_entry_error(err);
+pub fn app_log_entry_record(entry: AppLogEntry) -> AppLogEntry {
     app_log_entry_emit(&entry);
+    app_log_buffer_push(entry.clone());
     entry
+}
+
+pub fn app_log_error_emit<E: AppLoggableError>(err: &E) -> AppLogEntry {
+    app_log_entry_record(app_log_entry_error(err))
+}
+
+pub fn app_log_debug_emit(code: &str, message: &str, context: Option<String>) -> AppLogEntry {
+    app_log_entry_record(app_log_entry_new(
+        AppLogLevel::Debug,
+        code,
+        message,
+        context,
+    ))
+}
+
+pub fn app_log_info_emit(code: &str, message: &str, context: Option<String>) -> AppLogEntry {
+    app_log_entry_record(app_log_entry_new(
+        AppLogLevel::Info,
+        code,
+        message,
+        context,
+    ))
+}
+
+pub fn app_log_warn_emit(code: &str, message: &str, context: Option<String>) -> AppLogEntry {
+    app_log_entry_record(app_log_entry_new(
+        AppLogLevel::Warn,
+        code,
+        message,
+        context,
+    ))
 }
 
 pub fn app_log_entry_key(
@@ -259,6 +310,22 @@ pub async fn app_log_error_store<T: RadrootsClientDatastore, E: AppLoggableError
 ) -> AppLogResult<AppLogEntry> {
     let entry = app_log_error_emit(err);
     app_log_entry_store(datastore, key_maps, &entry).await
+}
+
+pub fn app_log_buffer_push(entry: AppLogEntry) {
+    let buffer = LOG_BUFFER.get_or_init(|| Mutex::new(Vec::new()));
+    let mut entries = buffer.lock().unwrap_or_else(|err| err.into_inner());
+    entries.push(entry);
+    if entries.len() > APP_LOG_BUFFER_MAX_ENTRIES {
+        let drop = entries.len() - APP_LOG_BUFFER_MAX_ENTRIES;
+        entries.drain(0..drop);
+    }
+}
+
+pub fn app_log_buffer_drain() -> Vec<AppLogEntry> {
+    let buffer = LOG_BUFFER.get_or_init(|| Mutex::new(Vec::new()));
+    let mut entries = buffer.lock().unwrap_or_else(|err| err.into_inner());
+    entries.drain(..).collect()
 }
 
 #[derive(Debug)]
@@ -315,7 +382,10 @@ pub fn app_logging_init(meta: Option<AppLogMetadata>) -> AppLoggingResult<()> {
 mod tests {
     use super::{
         app_log_entry_error,
+        app_log_entry_new,
         app_log_entry_key,
+        app_log_buffer_drain,
+        app_log_buffer_push,
         app_log_metadata,
         app_log_timestamp_ms,
         AppLogLevel,
@@ -358,5 +428,31 @@ mod tests {
         let key_maps = app_key_maps_default();
         let key = app_log_entry_key(&key_maps, "entry").expect("key");
         assert_eq!(key, format!("{APP_DATASTORE_KEY_LOG_ENTRY}:entry"));
+    }
+
+    #[test]
+    fn log_entry_new_populates_fields() {
+        let entry = app_log_entry_new(
+            AppLogLevel::Info,
+            "log.code.test",
+            "hello",
+            Some(String::from("ctx")),
+        );
+        assert_eq!(entry.level, AppLogLevel::Info);
+        assert_eq!(entry.code, "log.code.test");
+        assert_eq!(entry.message, "hello");
+        assert_eq!(entry.context.as_deref(), Some("ctx"));
+        assert!(!entry.id.is_empty());
+    }
+
+    #[test]
+    fn log_buffer_drains_entries() {
+        let _ = app_log_buffer_drain();
+        let entry = app_log_entry_new(AppLogLevel::Debug, "log.code.test", "buf", None);
+        app_log_buffer_push(entry.clone());
+        let drained = app_log_buffer_drain();
+        assert_eq!(drained.len(), 1);
+        assert_eq!(drained[0].id, entry.id);
+        assert!(app_log_buffer_drain().is_empty());
     }
 }
