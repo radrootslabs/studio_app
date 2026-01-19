@@ -50,9 +50,9 @@ pub use path::{
 pub use text::{str_cap, str_cap_words, text_dec, text_enc, ROOT_SYMBOL};
 pub use time::{time_now_ms, time_now_s};
 pub use types::{
-    resolve_err, resolve_ok, FileBytesFormat, FilePath, FilePathBlob, FileMimeType, IdbClientConfig,
-    ResolveError, ResultBool, ResultId, ResultObj, ResultPass, ResultPublicKey, ResultSecretKey,
-    ResultsList, ValidationRegex, ValStr, WebFilePath,
+    is_error, resolve_err, resolve_ok, FileBytesFormat, FilePath, FilePathBlob, FileMimeType,
+    IdbClientConfig, ResolveError, ResultBool, ResultId, ResultObj, ResultPass, ResultPublicKey,
+    ResultSecretKey, ResultsList, ValidationRegex, ValStr, WebFilePath,
 };
 pub use unit::{
     mass_to_g, parse_area_unit, parse_area_unit_default, parse_mass_unit, parse_mass_unit_default,

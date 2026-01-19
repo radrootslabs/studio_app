@@ -94,12 +94,16 @@ pub fn resolve_err<T>(err: RadrootsAppUtilsError) -> ResolveError<T> {
     Err(err)
 }
 
+pub fn is_error<T>(value: &ResolveError<T>) -> bool {
+    value.is_err()
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
         resolve_err, resolve_ok, FileBytesFormat, FilePath, FilePathBlob, IdbClientConfig,
-        ResultBool, ResultId, ResultObj, ResultPass, ResultPublicKey, ResultSecretKey, ResultsList,
-        ValidationRegex, ValStr, WebFilePath,
+        is_error, ResultBool, ResultId, ResultObj, ResultPass, ResultPublicKey, ResultSecretKey,
+        ResultsList, ValidationRegex, ValStr, WebFilePath,
     };
     use crate::error::RadrootsAppUtilsError;
     use regex::Regex;
@@ -176,6 +180,14 @@ mod tests {
         assert_eq!(config.store, "store");
         let value: ValStr = None;
         assert!(value.is_none());
+    }
+
+    #[test]
+    fn is_error_returns_true_for_err() {
+        let ok = resolve_ok(1);
+        assert!(!is_error(&ok));
+        let err = resolve_err::<()>(RadrootsAppUtilsError::InvalidInput);
+        assert!(is_error(&err));
     }
 
     #[test]
