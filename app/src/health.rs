@@ -73,9 +73,24 @@ impl AppHealthReport {
     }
 }
 
+use crate::{app_key_maps_validate, AppKeyMapConfig};
+
+pub fn app_health_check_key_maps(key_maps: &AppKeyMapConfig) -> AppHealthCheckResult {
+    match app_key_maps_validate(key_maps) {
+        Ok(()) => AppHealthCheckResult::ok(),
+        Err(err) => AppHealthCheckResult::error(err.to_string()),
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{AppHealthCheckResult, AppHealthCheckStatus, AppHealthReport};
+    use super::{
+        app_health_check_key_maps,
+        AppHealthCheckResult,
+        AppHealthCheckStatus,
+        AppHealthReport,
+    };
+    use crate::AppKeyMapConfig;
 
     #[test]
     fn health_status_as_str() {
@@ -103,5 +118,16 @@ mod tests {
         assert_eq!(report.bootstrap_app_data.status, AppHealthCheckStatus::Skipped);
         assert_eq!(report.datastore_roundtrip.status, AppHealthCheckStatus::Skipped);
         assert_eq!(report.keystore.status, AppHealthCheckStatus::Skipped);
+    }
+
+    #[test]
+    fn health_check_key_maps_reports_errors() {
+        let empty = AppKeyMapConfig::empty();
+        let result = app_health_check_key_maps(&empty);
+        assert_eq!(result.status, AppHealthCheckStatus::Error);
+        assert_eq!(
+            result.message.as_deref(),
+            Some("error.app.config.key_map_missing")
+        );
     }
 }

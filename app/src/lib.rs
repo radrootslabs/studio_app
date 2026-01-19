@@ -20,6 +20,7 @@ pub use bootstrap::{
 pub use context::{app_context, AppContext};
 pub use data::{AppAppData, AppConfigData, AppConfigRole};
 pub use health::{
+    app_health_check_key_maps,
     AppHealthCheckResult,
     AppHealthCheckStatus,
     AppHealthReport,
