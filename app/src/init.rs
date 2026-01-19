@@ -20,6 +20,62 @@ use leptos::prelude::window;
 pub const APP_INIT_STORAGE_KEY: &str = "radroots.app.init.ready";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AppInitStage {
+    Idle,
+    Storage,
+    DownloadSql,
+    DownloadGeo,
+    Database,
+    Geocoder,
+    Ready,
+    Error,
+}
+
+impl AppInitStage {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            AppInitStage::Idle => "idle",
+            AppInitStage::Storage => "storage",
+            AppInitStage::DownloadSql => "download_sql",
+            AppInitStage::DownloadGeo => "download_geo",
+            AppInitStage::Database => "database",
+            AppInitStage::Geocoder => "geocoder",
+            AppInitStage::Ready => "ready",
+            AppInitStage::Error => "error",
+        }
+    }
+
+    pub fn parse(value: &str) -> Option<Self> {
+        match value {
+            "idle" => Some(AppInitStage::Idle),
+            "storage" => Some(AppInitStage::Storage),
+            "download_sql" => Some(AppInitStage::DownloadSql),
+            "download_geo" => Some(AppInitStage::DownloadGeo),
+            "database" => Some(AppInitStage::Database),
+            "geocoder" => Some(AppInitStage::Geocoder),
+            "ready" => Some(AppInitStage::Ready),
+            "error" => Some(AppInitStage::Error),
+            _ => None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AppInitState {
+    pub stage: AppInitStage,
+    pub loaded_bytes: u64,
+    pub total_bytes: Option<u64>,
+}
+
+pub const fn app_init_state_default() -> AppInitState {
+    AppInitState {
+        stage: AppInitStage::Idle,
+        loaded_bytes: 0,
+        total_bytes: Some(0),
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AppInitError {
     Idb(RadrootsClientIdbStoreError),
     Datastore(RadrootsClientDatastoreError),
@@ -109,7 +165,13 @@ pub async fn app_init_backends() -> AppInitResult<AppBackends> {
 
 #[cfg(test)]
 mod tests {
-    use super::{app_init_backends, AppInitError, AppInitErrorMessage};
+    use super::{
+        app_init_backends,
+        app_init_state_default,
+        AppInitError,
+        AppInitErrorMessage,
+        AppInitStage,
+    };
     use radroots_studio_app_core::datastore::RadrootsClientDatastoreError;
     use radroots_studio_app_core::idb::RadrootsClientIdbStoreError;
     use radroots_studio_app_core::keystore::RadrootsClientKeystoreError;
@@ -157,5 +219,21 @@ mod tests {
     fn app_init_reset_is_noop_on_native() {
         super::app_init_mark_completed();
         super::app_init_reset();
+    }
+
+    #[test]
+    fn app_init_stage_roundtrip() {
+        let stage = AppInitStage::Ready;
+        assert_eq!(stage.as_str(), "ready");
+        assert_eq!(AppInitStage::parse("ready"), Some(stage));
+        assert_eq!(AppInitStage::parse("unknown"), None);
+    }
+
+    #[test]
+    fn app_init_state_defaults_match_spec() {
+        let state = app_init_state_default();
+        assert_eq!(state.stage, AppInitStage::Idle);
+        assert_eq!(state.loaded_bytes, 0);
+        assert_eq!(state.total_bytes, Some(0));
     }
 }
