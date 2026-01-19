@@ -15,12 +15,14 @@ use radroots_studio_app_core::idb::{
 use radroots_studio_app_core::keystore::{RadrootsClientKeystoreError, RadrootsClientWebKeystoreNostr};
 
 use crate::{
+    app_datastore_clear_bootstrap,
     app_datastore_write_app_data,
     app_datastore_write_config,
     AppAppData,
     AppConfig,
     AppConfigData,
     AppConfigError,
+    AppKeyMapConfig,
 };
 
 #[cfg(target_arch = "wasm32")]
@@ -149,7 +151,13 @@ pub fn app_init_mark_completed() {
     }
 }
 
-pub fn app_init_reset() {
+pub async fn app_init_reset<T: RadrootsClientDatastore>(
+    datastore: Option<&T>,
+    key_maps: Option<&AppKeyMapConfig>,
+) -> AppInitResult<()> {
+    if let (Some(datastore), Some(key_maps)) = (datastore, key_maps) {
+        app_datastore_clear_bootstrap(datastore, key_maps).await?;
+    }
     #[cfg(target_arch = "wasm32")]
     {
         let window = window();
@@ -157,6 +165,7 @@ pub fn app_init_reset() {
             let _ = storage.remove_item(APP_INIT_STORAGE_KEY);
         }
     }
+    Ok(())
 }
 
 pub async fn app_init_backends(config: AppConfig) -> AppInitResult<AppBackends> {
@@ -242,7 +251,10 @@ mod tests {
     #[test]
     fn app_init_reset_is_noop_on_native() {
         super::app_init_mark_completed();
-        super::app_init_reset();
+        let result = futures::executor::block_on(super::app_init_reset::<
+            radroots_studio_app_core::datastore::RadrootsClientWebDatastore,
+        >(None, None));
+        assert!(result.is_ok());
     }
 
     #[test]
