@@ -27,6 +27,7 @@ pub use path::{
 pub use text::{str_cap, str_cap_words, text_dec, text_enc, ROOT_SYMBOL};
 pub use time::{time_now_ms, time_now_s};
 pub use types::{
-    resolve_err, resolve_ok, ResolveError, ResultBool, ResultId, ResultObj, ResultPass,
-    ResultPublicKey, ResultSecretKey, ResultsList,
+    resolve_err, resolve_ok, FileBytesFormat, FilePath, FilePathBlob, FileMimeType, ResolveError,
+    ResultBool, ResultId, ResultObj, ResultPass, ResultPublicKey, ResultSecretKey, ResultsList,
+    WebFilePath,
 };
