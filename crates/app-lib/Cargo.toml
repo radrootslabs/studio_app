@@ -10,6 +10,14 @@ rust-version.workspace = true
 crate-type = ["rlib"]
 
 [dependencies]
+serde = { workspace = true }
+serde-wasm-bindgen = { workspace = true }
+js-sys = { workspace = true }
+wasm-bindgen = { workspace = true }
+wasm-bindgen-futures = { workspace = true }
 once_cell = { workspace = true }
 regex = { workspace = true }
 web-sys = { workspace = true }
+
+[dev-dependencies]
+futures = { workspace = true }

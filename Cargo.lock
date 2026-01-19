@@ -1575,8 +1575,14 @@ dependencies = [
 name = "radroots-app-lib"
 version = "0.1.0"
 dependencies = [
+ "futures",
+ "js-sys",
  "once_cell",
  "regex",
+ "serde",
+ "serde-wasm-bindgen",
+ "wasm-bindgen",
+ "wasm-bindgen-futures",
  "web-sys",
 ]
 
