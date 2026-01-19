@@ -3,6 +3,7 @@ pub mod types;
 pub mod envelope;
 pub mod random;
 pub mod keys;
+pub mod kdf;
 
 pub use error::{RadrootsClientCryptoError, RadrootsClientCryptoErrorMessage};
 pub use types::{
@@ -20,6 +21,7 @@ pub use types::{
 };
 pub use envelope::{crypto_envelope_decode, crypto_envelope_encode};
 pub use keys::crypto_key_id_create;
+pub use kdf::{crypto_kdf_iterations_default, crypto_kdf_salt_create};
 #[cfg(target_arch = "wasm32")]
 pub use keys::{
     crypto_key_export_raw,
@@ -28,3 +30,5 @@ pub use keys::{
     crypto_key_unwrap,
     crypto_key_wrap,
 };
+#[cfg(target_arch = "wasm32")]
+pub use kdf::crypto_kdf_derive_kek;
