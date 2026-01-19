@@ -4,7 +4,13 @@ use crate::backup::RadrootsClientBackupKeystorePayload;
 #[cfg(target_arch = "wasm32")]
 use crate::crypto::RadrootsClientCryptoError;
 use crate::crypto::RadrootsClientLegacyKeyConfig;
-use crate::idb::{IDB_CONFIG_KEYSTORE, IDB_STORE_KEYSTORE_CIPHER, RadrootsClientIdbConfig};
+use crate::idb::{
+    IDB_CONFIG_KEYSTORE,
+    IDB_STORE_KEYSTORE_CIPHER,
+    IDB_STORE_KEYSTORE_NOSTR,
+    IDB_STORE_KEYSTORE_NOSTR_CIPHER,
+    RadrootsClientIdbConfig,
+};
 #[cfg(target_arch = "wasm32")]
 use crate::idb::RadrootsClientIdbStoreError;
 use crate::idb::{RadrootsClientWebEncryptedStore, RadrootsClientWebEncryptedStoreConfig};
@@ -28,7 +34,11 @@ impl RadrootsClientWebKeystore {
     pub fn new(config: Option<RadrootsClientIdbConfig>) -> Self {
         let config = config.unwrap_or(IDB_CONFIG_KEYSTORE);
         let store_id = format!("keystore:{}:{}", config.database, config.store);
-        let legacy_store = IDB_STORE_KEYSTORE_CIPHER;
+        let legacy_store = if config.store == IDB_STORE_KEYSTORE_NOSTR {
+            IDB_STORE_KEYSTORE_NOSTR_CIPHER
+        } else {
+            IDB_STORE_KEYSTORE_CIPHER
+        };
         let legacy_key_config = RadrootsClientLegacyKeyConfig {
             idb_config: RadrootsClientIdbConfig::new(config.database, legacy_store),
             key_name: format!("radroots.keystore.{}.aes-gcm.key", config.store),
