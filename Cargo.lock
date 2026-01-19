@@ -1574,6 +1574,11 @@ dependencies = [
 [[package]]
 name = "radroots-app-lib"
 version = "0.1.0"
+dependencies = [
+ "once_cell",
+ "regex",
+ "web-sys",
+]
 
 [[package]]
 name = "radroots-app-utils"
