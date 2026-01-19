@@ -113,6 +113,52 @@ pub fn app_key_maps_validate(config: &AppKeyMapConfig) -> AppConfigResult<()> {
     Ok(())
 }
 
+pub fn app_datastore_key(config: &AppKeyMapConfig, key: &'static str) -> AppConfigResult<&'static str> {
+    config
+        .key_map
+        .get(key)
+        .copied()
+        .ok_or(AppConfigError::MissingKeyMap(key))
+}
+
+pub fn app_datastore_obj_key(
+    config: &AppKeyMapConfig,
+    key: &'static str,
+) -> AppConfigResult<&'static str> {
+    config
+        .obj_map
+        .get(key)
+        .copied()
+        .ok_or(AppConfigError::MissingObjMap(key))
+}
+
+pub fn app_datastore_param_key(
+    config: &AppKeyMapConfig,
+    key: &'static str,
+) -> AppConfigResult<AppDatastoreKeyParam> {
+    config
+        .param_map
+        .get(key)
+        .copied()
+        .ok_or(AppConfigError::MissingParamMap(key))
+}
+
+pub fn app_datastore_key_nostr_key(config: &AppKeyMapConfig) -> AppConfigResult<&'static str> {
+    app_datastore_key(config, "nostr_key")
+}
+
+pub fn app_datastore_key_eula_date(config: &AppKeyMapConfig) -> AppConfigResult<&'static str> {
+    app_datastore_key(config, "eula_date")
+}
+
+pub fn app_datastore_obj_key_cfg_data(config: &AppKeyMapConfig) -> AppConfigResult<&'static str> {
+    app_datastore_obj_key(config, "cfg_data")
+}
+
+pub fn app_datastore_obj_key_app_data(config: &AppKeyMapConfig) -> AppConfigResult<&'static str> {
+    app_datastore_obj_key(config, "app_data")
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AppKeystoreConfig {
     pub nostr_store: RadrootsClientIdbConfig,
@@ -188,8 +234,13 @@ mod tests {
         app_config_default,
         app_config_from_env,
         app_datastore_param_nostr_profile,
+        app_datastore_key_eula_date,
+        app_datastore_key_nostr_key,
+        app_datastore_obj_key_app_data,
+        app_datastore_obj_key_cfg_data,
         app_key_maps_validate,
         app_keystore_key_maps_default,
+        app_datastore_param_key,
         AppConfig,
         AppConfigError,
         AppDatastoreConfig,
@@ -285,5 +336,28 @@ mod tests {
         missing.key_map.insert("nostr_key", APP_DATASTORE_KEY_NOSTR_KEY);
         let err = app_key_maps_validate(&missing).expect_err("missing keys");
         assert_eq!(err, AppConfigError::MissingKeyMap("eula_date"));
+    }
+
+    #[test]
+    fn datastore_key_accessors_read_defaults() {
+        let config = super::app_key_maps_default();
+        assert_eq!(
+            app_datastore_key_nostr_key(&config).expect("nostr key"),
+            APP_DATASTORE_KEY_NOSTR_KEY
+        );
+        assert_eq!(
+            app_datastore_key_eula_date(&config).expect("eula key"),
+            APP_DATASTORE_KEY_EULA_DATE
+        );
+        assert_eq!(
+            app_datastore_obj_key_cfg_data(&config).expect("cfg key"),
+            APP_DATASTORE_KEY_OBJ_CFG_DATA
+        );
+        assert_eq!(
+            app_datastore_obj_key_app_data(&config).expect("app key"),
+            APP_DATASTORE_KEY_OBJ_APP_DATA
+        );
+        let nostr_param = app_datastore_param_key(&config, "nostr_profile").expect("param");
+        assert_eq!(nostr_param("abc"), "nostr:abc:profile");
     }
 }
