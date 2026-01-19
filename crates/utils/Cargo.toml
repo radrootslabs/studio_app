@@ -11,3 +11,6 @@ crate-type = ["rlib"]
 
 [dependencies]
 radroots-types = { workspace = true }
+getrandom = { workspace = true }
+js-sys = { workspace = true }
+web-sys = { workspace = true }

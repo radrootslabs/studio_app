@@ -9,7 +9,7 @@ pub mod time;
 pub mod types;
 
 pub use errors::{err_msg, handle_err, throw_err, ERR_PREFIX_APP, ERR_PREFIX_UTILS};
-pub use numbers::{num_str, parse_float, parse_int};
+pub use numbers::{num_interval_range, num_str, parse_float, parse_int};
 pub use path::{
     parse_route_path,
     resolve_route_path,
