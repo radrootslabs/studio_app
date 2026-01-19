@@ -43,6 +43,9 @@ pub use config::{
     app_datastore_obj_key_app_data,
     app_datastore_obj_key_cfg_data,
     app_keystore_key_maps_default,
+    app_keystore_key_maps_validate,
+    app_keystore_key,
+    app_keystore_key_nostr_default,
     app_key_maps_default,
     app_key_maps_validate,
     AppConfig,
@@ -60,6 +63,7 @@ pub use config::{
     APP_DATASTORE_KEY_NOSTR_KEY,
     APP_DATASTORE_KEY_OBJ_APP_DATA,
     APP_DATASTORE_KEY_OBJ_CFG_DATA,
+    APP_KEYSTORE_KEY_NOSTR_DEFAULT,
 };
 pub use init::{
     app_init_backends,

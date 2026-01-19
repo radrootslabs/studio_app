@@ -18,6 +18,7 @@ pub const APP_DATASTORE_KEY_NOSTR_KEY: &str = "nostr:key";
 pub const APP_DATASTORE_KEY_EULA_DATE: &str = "app:eula:date";
 pub const APP_DATASTORE_KEY_OBJ_CFG_DATA: &str = "cfg:data";
 pub const APP_DATASTORE_KEY_OBJ_APP_DATA: &str = "app:data";
+pub const APP_KEYSTORE_KEY_NOSTR_DEFAULT: &str = "nostr:default";
 
 pub fn app_datastore_param_nostr_profile(public_key: &str) -> String {
     format!("nostr:{public_key}:profile")
@@ -69,6 +70,7 @@ pub enum AppConfigError {
     MissingKeyMap(&'static str),
     MissingParamMap(&'static str),
     MissingObjMap(&'static str),
+    MissingKeystoreKeyMap(&'static str),
 }
 
 pub type AppConfigResult<T> = Result<T, AppConfigError>;
@@ -79,6 +81,7 @@ impl AppConfigError {
             AppConfigError::MissingKeyMap(_) => "error.app.config.key_map_missing",
             AppConfigError::MissingParamMap(_) => "error.app.config.param_map_missing",
             AppConfigError::MissingObjMap(_) => "error.app.config.obj_map_missing",
+            AppConfigError::MissingKeystoreKeyMap(_) => "error.app.config.keystore_map_missing",
         }
     }
 }
@@ -109,6 +112,13 @@ pub fn app_key_maps_validate(config: &AppKeyMapConfig) -> AppConfigResult<()> {
     }
     if !config.obj_map.contains_key("app_data") {
         return Err(AppConfigError::MissingObjMap("app_data"));
+    }
+    Ok(())
+}
+
+pub fn app_keystore_key_maps_validate(config: &AppKeystoreKeyMap) -> AppConfigResult<()> {
+    if !config.contains_key("nostr_default") {
+        return Err(AppConfigError::MissingKeystoreKeyMap("nostr_default"));
     }
     Ok(())
 }
@@ -159,6 +169,20 @@ pub fn app_datastore_obj_key_app_data(config: &AppKeyMapConfig) -> AppConfigResu
     app_datastore_obj_key(config, "app_data")
 }
 
+pub fn app_keystore_key(
+    config: &AppKeystoreKeyMap,
+    key: &'static str,
+) -> AppConfigResult<&'static str> {
+    config
+        .get(key)
+        .copied()
+        .ok_or(AppConfigError::MissingKeystoreKeyMap(key))
+}
+
+pub fn app_keystore_key_nostr_default(config: &AppKeystoreKeyMap) -> AppConfigResult<&'static str> {
+    app_keystore_key(config, "nostr_default")
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AppKeystoreConfig {
     pub nostr_store: RadrootsClientIdbConfig,
@@ -175,7 +199,9 @@ impl AppKeystoreConfig {
 }
 
 pub fn app_keystore_key_maps_default() -> AppKeystoreKeyMap {
-    BTreeMap::new()
+    let mut map = BTreeMap::new();
+    map.insert("nostr_default", APP_KEYSTORE_KEY_NOSTR_DEFAULT);
+    map
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -216,7 +242,9 @@ impl AppConfig {
     }
 
     pub fn validate(&self) -> AppConfigResult<()> {
-        app_key_maps_validate(&self.datastore.key_maps)
+        app_key_maps_validate(&self.datastore.key_maps)?;
+        app_keystore_key_maps_validate(&self.keystore.key_map)?;
+        Ok(())
     }
 }
 
@@ -240,18 +268,24 @@ mod tests {
         app_datastore_obj_key_cfg_data,
         app_key_maps_validate,
         app_keystore_key_maps_default,
+        app_keystore_key_maps_validate,
+        app_keystore_key_nostr_default,
+        app_keystore_key,
         app_datastore_param_key,
         AppConfig,
         AppConfigError,
         AppDatastoreConfig,
         AppKeyMapConfig,
         AppKeystoreConfig,
+        AppKeystoreKeyMap,
         APP_DATASTORE_KEY_EULA_DATE,
         APP_DATASTORE_KEY_NOSTR_KEY,
         APP_DATASTORE_KEY_OBJ_APP_DATA,
         APP_DATASTORE_KEY_OBJ_CFG_DATA,
+        APP_KEYSTORE_KEY_NOSTR_DEFAULT,
     };
     use radroots_studio_app_core::idb::{IDB_CONFIG_DATASTORE, IDB_CONFIG_KEYSTORE_NOSTR};
+    use std::collections::BTreeMap;
 
     #[test]
     fn key_map_config_defaults_empty() {
@@ -295,7 +329,10 @@ mod tests {
     #[test]
     fn keystore_key_maps_defaults_empty() {
         let map = app_keystore_key_maps_default();
-        assert!(map.is_empty());
+        assert_eq!(
+            map.get("nostr_default"),
+            Some(&APP_KEYSTORE_KEY_NOSTR_DEFAULT)
+        );
     }
 
     #[test]
@@ -339,6 +376,16 @@ mod tests {
     }
 
     #[test]
+    fn keystore_map_validation_requires_expected_keys() {
+        let map = app_keystore_key_maps_default();
+        assert!(app_keystore_key_maps_validate(&map).is_ok());
+        let empty: AppKeystoreKeyMap = BTreeMap::new();
+        let err = app_keystore_key_maps_validate(&empty)
+            .expect_err("missing keys");
+        assert_eq!(err, AppConfigError::MissingKeystoreKeyMap("nostr_default"));
+    }
+
+    #[test]
     fn datastore_key_accessors_read_defaults() {
         let config = super::app_key_maps_default();
         assert_eq!(
@@ -359,5 +406,18 @@ mod tests {
         );
         let nostr_param = app_datastore_param_key(&config, "nostr_profile").expect("param");
         assert_eq!(nostr_param("abc"), "nostr:abc:profile");
+    }
+
+    #[test]
+    fn keystore_key_accessors_read_defaults() {
+        let map = app_keystore_key_maps_default();
+        assert_eq!(
+            app_keystore_key_nostr_default(&map).expect("nostr default"),
+            APP_KEYSTORE_KEY_NOSTR_DEFAULT
+        );
+        assert_eq!(
+            app_keystore_key(&map, "nostr_default").expect("nostr default"),
+            APP_KEYSTORE_KEY_NOSTR_DEFAULT
+        );
     }
 }
