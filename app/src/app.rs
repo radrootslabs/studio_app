@@ -9,6 +9,7 @@ use crate::{
     app_config_default,
     app_health_check_all,
     AppBackends,
+    AppConfig,
     AppHealthCheckResult,
     AppHealthCheckStatus,
     AppHealthReport,
@@ -31,6 +32,25 @@ fn health_result_label(result: &AppHealthCheckResult) -> String {
     }
 }
 
+fn spawn_health_checks(
+    config: AppConfig,
+    health_report: RwSignal<AppHealthReport, LocalStorage>,
+    health_running: RwSignal<bool, LocalStorage>,
+) {
+    health_running.set(true);
+    spawn_local(async move {
+        let datastore = radroots_studio_app_core::datastore::RadrootsClientWebDatastore::new(
+            Some(config.datastore.idb_config),
+        );
+        let keystore = radroots_studio_app_core::keystore::RadrootsClientWebKeystoreNostr::new(
+            Some(config.keystore.nostr_store),
+        );
+        let report = app_health_check_all(&datastore, &keystore, &config.datastore.key_maps).await;
+        health_report.set(report);
+        health_running.set(false);
+    });
+}
+
 #[component]
 pub fn App() -> impl IntoView {
     let backends = RwSignal::new_local(None::<AppBackends>);
@@ -39,6 +59,7 @@ pub fn App() -> impl IntoView {
     let reset_status = RwSignal::new_local(None::<String>);
     let health_report = RwSignal::new_local(AppHealthReport::empty());
     let health_running = RwSignal::new_local(false);
+    let health_autorun = RwSignal::new_local(false);
     provide_context(backends);
     provide_context(init_error);
     provide_context(init_state);
@@ -57,6 +78,20 @@ pub fn App() -> impl IntoView {
                 }
             }
         })
+    });
+    Effect::new(move || {
+        if init_state.get().stage != AppInitStage::Ready {
+            return;
+        }
+        if health_autorun.get() {
+            return;
+        }
+        let config = backends.with_untracked(|value| value.as_ref().map(|backends| backends.config.clone()));
+        let Some(config) = config else {
+            return;
+        };
+        health_autorun.set(true);
+        spawn_health_checks(config, health_report, health_running);
     });
     let status_color = move || match init_state.get().stage {
         AppInitStage::Ready => "green",
@@ -120,22 +155,10 @@ pub fn App() -> impl IntoView {
                     <button
                         on:click=move |_| {
                             let config = backends.with_untracked(|value| value.as_ref().map(|backends| backends.config.clone()));
-                            health_running.set(true);
-                            spawn_local(async move {
-                                let Some(config) = config else {
-                                    health_running.set(false);
-                                    return;
-                                };
-                                let datastore = radroots_studio_app_core::datastore::RadrootsClientWebDatastore::new(
-                                    Some(config.datastore.idb_config),
-                                );
-                                let keystore = radroots_studio_app_core::keystore::RadrootsClientWebKeystoreNostr::new(
-                                    Some(config.keystore.nostr_store),
-                                );
-                                let report = app_health_check_all(&datastore, &keystore, &config.datastore.key_maps).await;
-                                health_report.set(report);
-                                health_running.set(false);
-                            });
+                            let Some(config) = config else {
+                                return;
+                            };
+                            spawn_health_checks(config, health_report, health_running);
                         }
                         disabled=health_disabled
                     >
