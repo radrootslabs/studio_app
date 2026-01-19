@@ -1,10 +1,12 @@
 #![forbid(unsafe_code)]
 
 mod app;
+mod context;
 mod init;
 mod entry;
 
 pub use app::App;
+pub use context::{app_context, AppContext};
 pub use init::{
     app_init_backends,
     app_init_has_completed,
