@@ -1,6 +1,7 @@
 [workspace]
 members = [
   "app",
+  "crates/app-lib",
   "crates/core",
   "crates/utils"
 ]
