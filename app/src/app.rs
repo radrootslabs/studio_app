@@ -14,6 +14,8 @@ use crate::{
     app_init_stage_set,
     app_init_total_add,
     app_init_total_unknown,
+    app_log_buffer_flush,
+    app_log_debug_emit,
     app_log_error_emit,
     app_log_error_store,
     app_config_default,
@@ -56,6 +58,10 @@ fn active_key_label(value: Option<String>) -> String {
     let head = &value[..8];
     let tail = &value[value.len() - 4..];
     format!("{head}...{tail}")
+}
+
+fn log_init_stage(stage: AppInitStage) {
+    let _ = app_log_debug_emit("log.app.init.stage", stage.as_str(), None);
 }
 
 fn spawn_health_checks(
@@ -108,7 +114,9 @@ fn HomePage() -> impl IntoView {
     provide_context(init_state);
     Effect::new(move || {
         spawn_local(async move {
-            init_state.update(|state| app_init_stage_set(state, AppInitStage::Storage));
+            let stage = AppInitStage::Storage;
+            init_state.update(|state| app_init_stage_set(state, stage));
+            log_init_stage(stage);
             let config = app_config_default();
             if !app_init_has_completed() {
                 init_state.update(|state| {
@@ -117,7 +125,10 @@ fn HomePage() -> impl IntoView {
                 });
                 let assets_result = app_init_assets(
                     &config,
-                    |stage| init_state.update(|state| app_init_stage_set(state, stage)),
+                    |stage| {
+                        init_state.update(|state| app_init_stage_set(state, stage));
+                        log_init_stage(stage);
+                    },
                     |loaded, total| {
                         init_state.update(|state| {
                             app_init_progress_add(state, loaded);
@@ -133,21 +144,30 @@ fn HomePage() -> impl IntoView {
                     let init_err = AppInitError::Assets(err);
                     let _ = app_log_error_emit(&init_err);
                     init_error.set(Some(init_err));
-                    init_state.update(|state| app_init_stage_set(state, AppInitStage::Error));
+                    let stage = AppInitStage::Error;
+                    init_state.update(|state| app_init_stage_set(state, stage));
+                    log_init_stage(stage);
                     return;
                 }
-                init_state.update(|state| app_init_stage_set(state, AppInitStage::Storage));
+                let stage = AppInitStage::Storage;
+                init_state.update(|state| app_init_stage_set(state, stage));
+                log_init_stage(stage);
             }
             match app_init_backends(config).await {
                 Ok(value) => {
+                    let _ = app_log_buffer_flush(&value.datastore, &value.config.datastore.key_maps).await;
                     backends.set(Some(value));
                     app_init_mark_completed();
-                    init_state.update(|state| app_init_stage_set(state, AppInitStage::Ready));
+                    let stage = AppInitStage::Ready;
+                    init_state.update(|state| app_init_stage_set(state, stage));
+                    log_init_stage(stage);
                 }
                 Err(err) => {
                     let _ = app_log_error_emit(&err);
                     init_error.set(Some(err));
-                    init_state.update(|state| app_init_stage_set(state, AppInitStage::Error));
+                    let stage = AppInitStage::Error;
+                    init_state.update(|state| app_init_stage_set(state, stage));
+                    log_init_stage(stage);
                 }
             }
         })

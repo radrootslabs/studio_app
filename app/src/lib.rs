@@ -54,6 +54,7 @@ pub use logging::{
     app_log_entry_record,
     app_log_entry_store,
     app_log_buffer_drain,
+    app_log_buffer_flush,
     app_log_buffer_push,
     app_log_entries_dump,
     app_log_entries_load,
