@@ -1575,12 +1575,14 @@ dependencies = [
 name = "radroots-app-utils"
 version = "0.1.0"
 dependencies = [
+ "base64",
  "futures",
  "getrandom 0.2.17",
  "gloo-timers",
  "js-sys",
  "radroots-types",
  "serde_json",
+ "uuid",
  "web-sys",
 ]
 

@@ -70,6 +70,7 @@ url = "2"
 chrono = "0.4"
 hex = "0.4"
 sha2 = "0.10"
+uuid = { version = "1.8", features = ["v4", "v7"] }
 radroots-nostr = { path = "refs/crates/nostr" }
 radroots-types = { path = "refs/crates/types" }
 radroots-sql-core = { path = "refs/crates/sql-core" }
