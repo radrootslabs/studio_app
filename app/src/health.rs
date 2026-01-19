@@ -144,9 +144,24 @@ pub async fn app_health_check_keystore_access<T: RadrootsClientKeystoreNostr>(
     }
 }
 
+pub async fn app_health_check_all<T: RadrootsClientDatastore, K: RadrootsClientKeystoreNostr>(
+    datastore: &T,
+    keystore: &K,
+    key_maps: &AppKeyMapConfig,
+) -> AppHealthReport {
+    AppHealthReport {
+        key_maps: app_health_check_key_maps(key_maps),
+        bootstrap_config: app_health_check_bootstrap_config(datastore, key_maps).await,
+        bootstrap_app_data: app_health_check_bootstrap_app_data(datastore, key_maps).await,
+        datastore_roundtrip: app_health_check_datastore_roundtrip(datastore).await,
+        keystore: app_health_check_keystore_access(keystore).await,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
+        app_health_check_all,
         app_health_check_key_maps,
         app_health_check_bootstrap_app_data,
         app_health_check_bootstrap_config,
@@ -276,5 +291,19 @@ mod tests {
         let result =
             futures::executor::block_on(app_health_check_keystore_access(&keystore));
         assert_eq!(result.status, AppHealthCheckStatus::Error);
+    }
+
+    #[test]
+    fn health_check_all_reports_idb_errors() {
+        let datastore = RadrootsClientWebDatastore::new(None);
+        let keystore = RadrootsClientWebKeystoreNostr::new(None);
+        let key_maps = crate::app_key_maps_default();
+        let report =
+            futures::executor::block_on(app_health_check_all(&datastore, &keystore, &key_maps));
+        assert_eq!(report.key_maps.status, AppHealthCheckStatus::Ok);
+        assert_eq!(report.bootstrap_config.status, AppHealthCheckStatus::Error);
+        assert_eq!(report.bootstrap_app_data.status, AppHealthCheckStatus::Error);
+        assert_eq!(report.datastore_roundtrip.status, AppHealthCheckStatus::Error);
+        assert_eq!(report.keystore.status, AppHealthCheckStatus::Error);
     }
 }
