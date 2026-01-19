@@ -44,10 +44,20 @@ web-sys = { version = "0.3.77", features = [
   "IdbRequest",
   "IdbTransaction",
   "IdbTransactionMode",
+  "Coordinates",
+  "Geolocation",
   "Navigator",
   "Notification",
   "NotificationOptions",
   "NotificationPermission",
+  "PermissionDescriptor",
+  "PermissionName",
+  "PermissionState",
+  "PermissionStatus",
+  "Permissions",
+  "Position",
+  "PositionError",
+  "PositionOptions",
 ] }
 wasm-bindgen-futures = "0.4"
 base64 = "0.22"
