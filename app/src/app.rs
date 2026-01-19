@@ -12,6 +12,8 @@ use crate::{
     app_init_stage_set,
     app_init_total_add,
     app_init_total_unknown,
+    app_log_error_emit,
+    app_log_error_store,
     app_config_default,
     app_datastore_read_app_data,
     app_health_check_all,
@@ -125,7 +127,9 @@ pub fn App() -> impl IntoView {
                 )
                 .await;
                 if let Err(err) = assets_result {
-                    init_error.set(Some(AppInitError::Assets(err)));
+                    let init_err = AppInitError::Assets(err);
+                    let _ = app_log_error_emit(&init_err);
+                    init_error.set(Some(init_err));
                     init_state.update(|state| app_init_stage_set(state, AppInitStage::Error));
                     return;
                 }
@@ -138,6 +142,7 @@ pub fn App() -> impl IntoView {
                     init_state.update(|state| app_init_stage_set(state, AppInitStage::Ready));
                 }
                 Err(err) => {
+                    let _ = app_log_error_emit(&err);
                     init_error.set(Some(err));
                     init_state.update(|state| app_init_stage_set(state, AppInitStage::Error));
                 }
@@ -218,7 +223,10 @@ pub fn App() -> impl IntoView {
                                     reset_status.set(Some("reset_done".to_string()));
                                     spawn_health_checks(config, health_report, health_running, active_key);
                                 }
-                                Err(err) => reset_status.set(Some(err.to_string())),
+                                Err(err) => {
+                                    let _ = app_log_error_store(&datastore, &config.datastore.key_maps, &err).await;
+                                    reset_status.set(Some(err.to_string()));
+                                }
                             }
                         });
                     }

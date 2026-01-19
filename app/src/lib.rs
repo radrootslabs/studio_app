@@ -8,6 +8,7 @@ mod data;
 mod health;
 mod init;
 mod keystore;
+mod logging;
 mod notifications;
 mod tangle;
 mod entry;
@@ -44,6 +45,25 @@ pub use keystore::{
     AppKeystoreError,
     AppKeystoreResult,
 };
+pub use logging::{
+    app_log_entry_error,
+    app_log_entry_emit,
+    app_log_entry_store,
+    app_log_error_emit,
+    app_log_error_store,
+    app_log_error_key,
+    app_log_metadata,
+    app_log_timestamp_ms,
+    app_logging_init,
+    AppLogEntry,
+    AppLogError,
+    AppLogLevel,
+    AppLogResult,
+    AppLoggableError,
+    AppLogMetadata,
+    AppLoggingError,
+    AppLoggingResult,
+};
 pub use notifications::{AppNotifications, AppNotificationsError, AppNotificationsResult};
 pub use tangle::{AppTangleClient, AppTangleClientStub, AppTangleError, AppTangleResult};
 pub use config::{
@@ -53,6 +73,7 @@ pub use config::{
     app_datastore_key_eula_date,
     app_datastore_key_nostr_key,
     app_datastore_param_nostr_profile,
+    app_datastore_param_log_error,
     app_datastore_param_radroots_profile,
     app_datastore_param_key,
     app_datastore_obj_key,
@@ -79,6 +100,7 @@ pub use config::{
     AppKeystoreKeyMap,
     AppKeyMapConfig,
     APP_DATASTORE_KEY_EULA_DATE,
+    APP_DATASTORE_KEY_LOG_ERROR,
     APP_DATASTORE_KEY_NOSTR_KEY,
     APP_DATASTORE_KEY_OBJ_APP_DATA,
     APP_DATASTORE_KEY_OBJ_CFG_DATA,
