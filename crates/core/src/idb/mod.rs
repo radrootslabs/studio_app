@@ -1,5 +1,6 @@
 pub mod config;
 pub mod error;
+pub mod keyval;
 pub mod store;
 pub mod types;
 pub mod value;
@@ -27,4 +28,5 @@ pub use config::{
 pub use types::RadrootsClientIdbConfig;
 pub use value::{idb_value_as_bytes, RadrootsClientIdbValue};
 pub use error::{RadrootsClientIdbStoreError, RadrootsClientIdbStoreErrorMessage};
+pub use keyval::{idb_clear, idb_del, idb_get, idb_keys, idb_set};
 pub use store::{idb_store_bootstrap, idb_store_ensure, idb_store_exists};

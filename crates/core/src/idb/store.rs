@@ -70,7 +70,7 @@ fn map_open_error(err: JsValue) -> RadrootsClientIdbStoreError {
 }
 
 #[cfg(target_arch = "wasm32")]
-async fn idb_open(
+pub(crate) async fn idb_open(
     database: &str,
     version: Option<u32>,
     stores: &[String],
