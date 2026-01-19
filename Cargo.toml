@@ -64,7 +64,14 @@ base64 = "0.22"
 serde-wasm-bindgen = "0.6"
 rusqlite = { version = "0.31", default-features = false }
 url = "2"
+chrono = "0.4"
+hex = "0.4"
+sha2 = "0.10"
 radroots-nostr = { path = "refs/crates/nostr" }
+radroots-sql-core = { path = "refs/crates/sql-core" }
+radroots-tangle-db = { path = "refs/crates/tangle-db" }
+radroots-tangle-db-schema = { path = "refs/crates/tangle-db-schema" }
+radroots-tangle-events = { path = "refs/crates/tangle-events" }
 
 [profile.release]
 codegen-units = 1
