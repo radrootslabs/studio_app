@@ -12,6 +12,7 @@ pub type AppDatastoreKeyParam = fn(&str) -> String;
 pub type AppDatastoreKeyMap = BTreeMap<&'static str, &'static str>;
 pub type AppDatastoreKeyParamMap = BTreeMap<&'static str, AppDatastoreKeyParam>;
 pub type AppDatastoreKeyObjMap = BTreeMap<&'static str, &'static str>;
+pub type AppKeystoreKeyMap = BTreeMap<&'static str, &'static str>;
 
 pub const APP_DATASTORE_KEY_NOSTR_KEY: &str = "nostr:key";
 pub const APP_DATASTORE_KEY_EULA_DATE: &str = "app:eula:date";
@@ -112,17 +113,23 @@ pub fn app_key_maps_validate(config: &AppKeyMapConfig) -> AppConfigResult<()> {
     Ok(())
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AppKeystoreConfig {
     pub nostr_store: RadrootsClientIdbConfig,
+    pub key_map: AppKeystoreKeyMap,
 }
 
 impl AppKeystoreConfig {
-    pub const fn default_config() -> Self {
+    pub fn default_config() -> Self {
         Self {
             nostr_store: IDB_CONFIG_KEYSTORE_NOSTR,
+            key_map: app_keystore_key_maps_default(),
         }
     }
+}
+
+pub fn app_keystore_key_maps_default() -> AppKeystoreKeyMap {
+    BTreeMap::new()
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -178,6 +185,7 @@ mod tests {
         app_config_from_env,
         app_datastore_param_nostr_profile,
         app_key_maps_validate,
+        app_keystore_key_maps_default,
         AppConfig,
         AppConfigError,
         AppDatastoreConfig,
@@ -219,6 +227,12 @@ mod tests {
     fn keystore_config_defaults_to_nostr_store() {
         let config = AppKeystoreConfig::default_config();
         assert_eq!(config.nostr_store, IDB_CONFIG_KEYSTORE_NOSTR);
+    }
+
+    #[test]
+    fn keystore_key_maps_defaults_empty() {
+        let map = app_keystore_key_maps_default();
+        assert!(map.is_empty());
     }
 
     #[test]
