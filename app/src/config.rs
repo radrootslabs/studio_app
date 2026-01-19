@@ -64,6 +64,55 @@ pub fn app_key_maps_default() -> AppKeyMapConfig {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AppConfigError {
+    MissingKeyMap(&'static str),
+    MissingParamMap(&'static str),
+    MissingObjMap(&'static str),
+}
+
+pub type AppConfigResult<T> = Result<T, AppConfigError>;
+
+impl AppConfigError {
+    pub const fn message(&self) -> &'static str {
+        match self {
+            AppConfigError::MissingKeyMap(_) => "error.app.config.key_map_missing",
+            AppConfigError::MissingParamMap(_) => "error.app.config.param_map_missing",
+            AppConfigError::MissingObjMap(_) => "error.app.config.obj_map_missing",
+        }
+    }
+}
+
+impl std::fmt::Display for AppConfigError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.message())
+    }
+}
+
+impl std::error::Error for AppConfigError {}
+
+pub fn app_key_maps_validate(config: &AppKeyMapConfig) -> AppConfigResult<()> {
+    if !config.key_map.contains_key("nostr_key") {
+        return Err(AppConfigError::MissingKeyMap("nostr_key"));
+    }
+    if !config.key_map.contains_key("eula_date") {
+        return Err(AppConfigError::MissingKeyMap("eula_date"));
+    }
+    if !config.param_map.contains_key("nostr_profile") {
+        return Err(AppConfigError::MissingParamMap("nostr_profile"));
+    }
+    if !config.param_map.contains_key("radroots_profile") {
+        return Err(AppConfigError::MissingParamMap("radroots_profile"));
+    }
+    if !config.obj_map.contains_key("cfg_data") {
+        return Err(AppConfigError::MissingObjMap("cfg_data"));
+    }
+    if !config.obj_map.contains_key("app_data") {
+        return Err(AppConfigError::MissingObjMap("app_data"));
+    }
+    Ok(())
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct AppKeystoreConfig {
     pub nostr_store: RadrootsClientIdbConfig,
 }
@@ -128,7 +177,9 @@ mod tests {
         app_config_default,
         app_config_from_env,
         app_datastore_param_nostr_profile,
+        app_key_maps_validate,
         AppConfig,
+        AppConfigError,
         AppDatastoreConfig,
         AppKeyMapConfig,
         AppKeystoreConfig,
@@ -198,5 +249,15 @@ mod tests {
             Some(&APP_DATASTORE_KEY_OBJ_APP_DATA)
         );
         assert_eq!(app_datastore_param_nostr_profile("abc"), "nostr:abc:profile");
+    }
+
+    #[test]
+    fn key_map_validation_requires_expected_keys() {
+        let config = super::app_key_maps_default();
+        assert!(app_key_maps_validate(&config).is_ok());
+        let mut missing = AppKeyMapConfig::empty();
+        missing.key_map.insert("nostr_key", APP_DATASTORE_KEY_NOSTR_KEY);
+        let err = app_key_maps_validate(&missing).expect_err("missing keys");
+        assert_eq!(err, AppConfigError::MissingKeyMap("eula_date"));
     }
 }
