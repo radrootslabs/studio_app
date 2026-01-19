@@ -14,7 +14,7 @@ use radroots_studio_app_core::idb::{
 };
 use radroots_studio_app_core::keystore::{RadrootsClientKeystoreError, RadrootsClientWebKeystoreNostr};
 
-use crate::{app_key_maps_validate, AppConfig, AppConfigError};
+use crate::{AppConfig, AppConfigError};
 
 #[cfg(target_arch = "wasm32")]
 use leptos::prelude::window;
@@ -153,7 +153,7 @@ pub fn app_init_reset() {
 }
 
 pub async fn app_init_backends(config: AppConfig) -> AppInitResult<AppBackends> {
-    app_key_maps_validate(&config.datastore.key_maps).map_err(AppInitError::Config)?;
+    config.validate().map_err(AppInitError::Config)?;
     idb_store_bootstrap(RADROOTS_IDB_DATABASE, None)
         .await
         .map_err(AppInitError::Idb)?;

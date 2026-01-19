@@ -168,6 +168,10 @@ impl AppConfig {
             keystore: AppKeystoreConfig::default_config(),
         }
     }
+
+    pub fn validate(&self) -> AppConfigResult<()> {
+        app_key_maps_validate(&self.datastore.key_maps)
+    }
 }
 
 pub fn app_config_default() -> AppConfig {
@@ -221,6 +225,14 @@ mod tests {
             config.datastore.key_maps.key_map.get("nostr_key"),
             Some(&APP_DATASTORE_KEY_NOSTR_KEY)
         );
+    }
+
+    #[test]
+    fn app_config_validate_uses_key_map_rules() {
+        let config = app_config_default();
+        assert!(config.validate().is_ok());
+        let empty = AppConfig::empty();
+        assert!(empty.validate().is_err());
     }
 
     #[test]
