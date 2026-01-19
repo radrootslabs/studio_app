@@ -14,3 +14,8 @@ crate-type = ["rlib"]
 async-trait = "0.1.83"
 serde = { workspace = true }
 serde_json = { workspace = true }
+getrandom = { workspace = true }
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+js-sys = { workspace = true }
+web-sys = { workspace = true }
