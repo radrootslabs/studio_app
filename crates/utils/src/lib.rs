@@ -4,5 +4,5 @@ pub mod error;
 pub mod errors;
 pub mod types;
 
-pub use errors::{err_msg, ERR_PREFIX_APP, ERR_PREFIX_UTILS};
+pub use errors::{err_msg, throw_err, ERR_PREFIX_APP, ERR_PREFIX_UTILS};
 pub use types::{resolve_err, resolve_ok, ResolveError, ResultPass};
