@@ -9,7 +9,7 @@ mod init;
 mod entry;
 
 pub use app::App;
-pub use bootstrap::app_datastore_write_config;
+pub use bootstrap::{app_datastore_write_app_data, app_datastore_write_config};
 pub use context::{app_context, AppContext};
 pub use data::{AppAppData, AppConfigData, AppConfigRole};
 pub use config::{
