@@ -1,5 +1,7 @@
 #![forbid(unsafe_code)]
 
+use std::fmt;
+
 use radroots_types::types::IError;
 
 pub const ERR_PREFIX_APP: &str = "error.app";
@@ -40,9 +42,19 @@ pub fn throw_err(err: impl Into<ErrInput>) -> ! {
     panic!("{}", err.err);
 }
 
+pub fn handle_err(err: impl fmt::Display, append: Option<&str>) -> IError<String> {
+    let mut msg = err.to_string();
+    if let Some(append) = append {
+        if !append.is_empty() {
+            msg = format!("{msg} {append}");
+        }
+    }
+    IError { err: msg }
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{err_msg, throw_err, ERR_PREFIX_APP, ERR_PREFIX_UTILS};
+    use super::{err_msg, handle_err, throw_err, ERR_PREFIX_APP, ERR_PREFIX_UTILS};
     use radroots_types::types::IError;
 
     #[test]
@@ -67,6 +79,18 @@ mod tests {
     #[should_panic(expected = "boom")]
     fn throw_err_panics_with_error() {
         throw_err(IError { err: "boom".to_string() });
+    }
+
+    #[test]
+    fn handle_err_adds_append() {
+        let err = handle_err("boom", Some("context"));
+        assert_eq!(err.err, "boom context");
+    }
+
+    #[test]
+    fn handle_err_without_append() {
+        let err = handle_err("boom", None);
+        assert_eq!(err.err, "boom");
     }
 
     #[test]
