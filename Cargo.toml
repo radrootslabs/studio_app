@@ -19,7 +19,19 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 getrandom = "0.2"
 js-sys = "0.3.77"
-web-sys = { version = "0.3.77", features = ["Crypto", "CryptoKey", "SubtleCrypto", "Window"] }
+web-sys = { version = "0.3.77", features = [
+  "Crypto",
+  "CryptoKey",
+  "SubtleCrypto",
+  "Window",
+  "DomException",
+  "DomStringList",
+  "Event",
+  "IdbDatabase",
+  "IdbFactory",
+  "IdbObjectStore",
+  "IdbOpenDbRequest",
+] }
 wasm-bindgen-futures = "0.4"
 base64 = "0.22"
 
