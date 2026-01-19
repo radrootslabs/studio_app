@@ -154,7 +154,7 @@ pub async fn app_init_backends(config: AppConfig) -> AppInitResult<AppBackends> 
     idb_store_bootstrap(RADROOTS_IDB_DATABASE, None)
         .await
         .map_err(AppInitError::Idb)?;
-    let datastore = RadrootsClientWebDatastore::new(None);
+    let datastore = RadrootsClientWebDatastore::new(Some(config.datastore.idb_config));
     datastore
         .init()
         .await
