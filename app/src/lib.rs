@@ -23,6 +23,7 @@ pub use context::{app_context, AppContext};
 pub use data::{AppAppData, AppConfigData, AppConfigRole};
 pub use health::{
     app_health_check_all,
+    app_health_check_app_data_active_key,
     app_health_check_bootstrap_app_data,
     app_health_check_bootstrap_config,
     app_health_check_datastore_roundtrip,

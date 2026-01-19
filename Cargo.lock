@@ -1545,6 +1545,7 @@ dependencies = [
  "leptos",
  "radroots-app-core",
  "serde",
+ "serde_json",
  "wasm-bindgen",
 ]
 

@@ -51,6 +51,7 @@ pub struct AppHealthReport {
     pub key_maps: AppHealthCheckResult,
     pub bootstrap_config: AppHealthCheckResult,
     pub bootstrap_app_data: AppHealthCheckResult,
+    pub app_data_active_key: AppHealthCheckResult,
     pub datastore_roundtrip: AppHealthCheckResult,
     pub keystore: AppHealthCheckResult,
 }
@@ -61,6 +62,7 @@ impl Default for AppHealthReport {
             key_maps: AppHealthCheckResult::skipped(),
             bootstrap_config: AppHealthCheckResult::skipped(),
             bootstrap_app_data: AppHealthCheckResult::skipped(),
+            app_data_active_key: AppHealthCheckResult::skipped(),
             datastore_roundtrip: AppHealthCheckResult::skipped(),
             keystore: AppHealthCheckResult::skipped(),
         }
@@ -77,6 +79,7 @@ use crate::{
     app_datastore_has_app_data,
     app_datastore_has_config,
     app_datastore_key_nostr_key,
+    app_datastore_read_app_data,
     app_key_maps_validate,
     AppKeyMapConfig,
 };
@@ -110,6 +113,32 @@ pub async fn app_health_check_bootstrap_app_data<T: RadrootsClientDatastore>(
         Ok(false) => AppHealthCheckResult::error("missing"),
         Err(err) => AppHealthCheckResult::error(err.to_string()),
     }
+}
+
+pub async fn app_health_check_app_data_active_key<T: RadrootsClientDatastore>(
+    datastore: &T,
+    key_maps: &AppKeyMapConfig,
+) -> AppHealthCheckResult {
+    let app_data = match app_datastore_read_app_data(datastore, key_maps).await {
+        Ok(value) => value,
+        Err(err) => return AppHealthCheckResult::error(err.to_string()),
+    };
+    if app_data.active_key.is_empty() {
+        return AppHealthCheckResult::error("missing");
+    }
+    let key_name = match app_datastore_key_nostr_key(key_maps) {
+        Ok(value) => value,
+        Err(err) => return AppHealthCheckResult::error(err.to_string()),
+    };
+    let stored = match datastore.get(key_name).await {
+        Ok(value) => value,
+        Err(RadrootsClientDatastoreError::NoResult) => return AppHealthCheckResult::error("missing"),
+        Err(err) => return AppHealthCheckResult::error(err.to_string()),
+    };
+    if stored != app_data.active_key {
+        return AppHealthCheckResult::error("mismatch");
+    }
+    AppHealthCheckResult::ok()
 }
 
 const APP_HEALTH_TEMP_KEY: &str = "radroots.health.temp";
@@ -167,6 +196,7 @@ pub async fn app_health_check_all<T: RadrootsClientDatastore, K: RadrootsClientK
         key_maps: app_health_check_key_maps(key_maps),
         bootstrap_config: app_health_check_bootstrap_config(datastore, key_maps).await,
         bootstrap_app_data: app_health_check_bootstrap_app_data(datastore, key_maps).await,
+        app_data_active_key: app_health_check_app_data_active_key(datastore, key_maps).await,
         datastore_roundtrip: app_health_check_datastore_roundtrip(datastore).await,
         keystore: app_health_check_keystore_access(datastore, keystore, key_maps).await,
     }
@@ -175,6 +205,7 @@ pub async fn app_health_check_all<T: RadrootsClientDatastore, K: RadrootsClientK
 #[cfg(test)]
 mod tests {
     use super::{
+        app_health_check_app_data_active_key,
         app_health_check_all,
         app_health_check_key_maps,
         app_health_check_bootstrap_app_data,
@@ -228,6 +259,7 @@ mod tests {
         assert_eq!(report.key_maps.status, AppHealthCheckStatus::Skipped);
         assert_eq!(report.bootstrap_config.status, AppHealthCheckStatus::Skipped);
         assert_eq!(report.bootstrap_app_data.status, AppHealthCheckStatus::Skipped);
+        assert_eq!(report.app_data_active_key.status, AppHealthCheckStatus::Skipped);
         assert_eq!(report.datastore_roundtrip.status, AppHealthCheckStatus::Skipped);
         assert_eq!(report.keystore.status, AppHealthCheckStatus::Skipped);
     }
@@ -269,6 +301,7 @@ mod tests {
 
     struct TestDatastore {
         get_result: RadrootsClientDatastoreResult<String>,
+        app_data: Option<crate::AppAppData>,
     }
 
     fn datastore_err<T>() -> RadrootsClientDatastoreResult<T> {
@@ -315,7 +348,13 @@ mod tests {
         where
             T: serde::de::DeserializeOwned,
         {
-            datastore_err()
+            let Some(data) = self.app_data.as_ref() else {
+                return Err(RadrootsClientDatastoreError::NoResult);
+            };
+            let serialized =
+                serde_json::to_string(data).map_err(|_| RadrootsClientDatastoreError::NoResult)?;
+            serde_json::from_str(&serialized)
+                .map_err(|_| RadrootsClientDatastoreError::NoResult)
         }
 
         async fn del_obj(&self, _key: &str) -> RadrootsClientDatastoreResult<String> {
@@ -421,6 +460,7 @@ mod tests {
     fn health_check_keystore_reports_missing_datastore_key() {
         let datastore = TestDatastore {
             get_result: Err(RadrootsClientDatastoreError::NoResult),
+            app_data: None,
         };
         let keystore = TestKeystore {
             read_result: Err(RadrootsClientKeystoreError::MissingKey),
@@ -439,6 +479,7 @@ mod tests {
     fn health_check_keystore_reports_missing_keystore_key() {
         let datastore = TestDatastore {
             get_result: Ok("pub".to_string()),
+            app_data: None,
         };
         let keystore = TestKeystore {
             read_result: Err(RadrootsClientKeystoreError::MissingKey),
@@ -457,6 +498,7 @@ mod tests {
     fn health_check_keystore_accepts_matching_key() {
         let datastore = TestDatastore {
             get_result: Ok("pub".to_string()),
+            app_data: None,
         };
         let keystore = TestKeystore {
             read_result: Ok("secret".to_string()),
@@ -465,6 +507,54 @@ mod tests {
         let result = futures::executor::block_on(app_health_check_keystore_access(
             &datastore,
             &keystore,
+            &key_maps,
+        ));
+        assert_eq!(result.status, AppHealthCheckStatus::Ok);
+    }
+
+    #[test]
+    fn health_check_app_data_requires_active_key() {
+        let datastore = TestDatastore {
+            get_result: Ok("pub".to_string()),
+            app_data: Some(crate::AppAppData::default()),
+        };
+        let key_maps = crate::app_key_maps_default();
+        let result = futures::executor::block_on(app_health_check_app_data_active_key(
+            &datastore,
+            &key_maps,
+        ));
+        assert_eq!(result.status, AppHealthCheckStatus::Error);
+        assert_eq!(result.message.as_deref(), Some("missing"));
+    }
+
+    #[test]
+    fn health_check_app_data_detects_mismatch() {
+        let mut app_data = crate::AppAppData::default();
+        app_data.active_key = "other".to_string();
+        let datastore = TestDatastore {
+            get_result: Ok("pub".to_string()),
+            app_data: Some(app_data),
+        };
+        let key_maps = crate::app_key_maps_default();
+        let result = futures::executor::block_on(app_health_check_app_data_active_key(
+            &datastore,
+            &key_maps,
+        ));
+        assert_eq!(result.status, AppHealthCheckStatus::Error);
+        assert_eq!(result.message.as_deref(), Some("mismatch"));
+    }
+
+    #[test]
+    fn health_check_app_data_accepts_match() {
+        let mut app_data = crate::AppAppData::default();
+        app_data.active_key = "pub".to_string();
+        let datastore = TestDatastore {
+            get_result: Ok("pub".to_string()),
+            app_data: Some(app_data),
+        };
+        let key_maps = crate::app_key_maps_default();
+        let result = futures::executor::block_on(app_health_check_app_data_active_key(
+            &datastore,
             &key_maps,
         ));
         assert_eq!(result.status, AppHealthCheckStatus::Ok);
@@ -480,6 +570,7 @@ mod tests {
         assert_eq!(report.key_maps.status, AppHealthCheckStatus::Ok);
         assert_eq!(report.bootstrap_config.status, AppHealthCheckStatus::Error);
         assert_eq!(report.bootstrap_app_data.status, AppHealthCheckStatus::Error);
+        assert_eq!(report.app_data_active_key.status, AppHealthCheckStatus::Error);
         assert_eq!(report.datastore_roundtrip.status, AppHealthCheckStatus::Error);
         assert_eq!(report.keystore.status, AppHealthCheckStatus::Error);
     }
