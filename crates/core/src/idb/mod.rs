@@ -1,5 +1,6 @@
 pub mod config;
 pub mod types;
+pub mod value;
 
 pub use config::{
     IDB_CONFIG_CIPHER_AES_GCM,
@@ -22,3 +23,4 @@ pub use config::{
     RADROOTS_IDB_STORES,
 };
 pub use types::RadrootsClientIdbConfig;
+pub use value::{idb_value_as_bytes, RadrootsClientIdbValue};
