@@ -1,7 +1,8 @@
 [workspace]
 members = [
   "app",
-  "crates/core"
+  "crates/core",
+  "crates/utils"
 ]
 exclude = [
   "refs/crates"
