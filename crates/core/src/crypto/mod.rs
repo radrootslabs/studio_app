@@ -5,6 +5,7 @@ pub mod random;
 pub mod keys;
 pub mod kdf;
 pub mod registry;
+pub mod provider;
 
 pub use error::{RadrootsClientCryptoError, RadrootsClientCryptoErrorMessage};
 pub use types::{
@@ -20,6 +21,7 @@ pub use types::{
     RadrootsClientLegacyKeyConfig,
     RadrootsClientWebCryptoService,
 };
+pub use provider::RadrootsClientDeviceKeyMaterialProvider;
 pub use envelope::{crypto_envelope_decode, crypto_envelope_encode};
 pub use keys::crypto_key_id_create;
 pub use kdf::{crypto_kdf_iterations_default, crypto_kdf_salt_create};
