@@ -1,6 +1,7 @@
 #![forbid(unsafe_code)]
 
 use crate::error::RadrootsAppUtilsError;
+use regex::Regex;
 
 pub type ResolveError<T> = Result<T, RadrootsAppUtilsError>;
 
@@ -40,6 +41,12 @@ pub struct IdbClientConfig {
 }
 
 pub type ValStr = Option<String>;
+
+#[derive(Debug, Clone, Copy)]
+pub struct ValidationRegex {
+    pub value: &'static Regex,
+    pub charset: &'static Regex,
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ResultPass {
@@ -92,9 +99,10 @@ mod tests {
     use super::{
         resolve_err, resolve_ok, FileBytesFormat, FilePath, FilePathBlob, IdbClientConfig,
         ResultBool, ResultId, ResultObj, ResultPass, ResultPublicKey, ResultSecretKey, ResultsList,
-        ValStr, WebFilePath,
+        ValidationRegex, ValStr, WebFilePath,
     };
     use crate::error::RadrootsAppUtilsError;
+    use regex::Regex;
 
     #[test]
     fn result_pass_is_true() {
@@ -168,5 +176,16 @@ mod tests {
         assert_eq!(config.store, "store");
         let value: ValStr = None;
         assert!(value.is_none());
+    }
+
+    #[test]
+    fn validation_regex_tracks_patterns() {
+        let regex = Regex::new("^a+$").expect("regex");
+        let value = Box::leak(Box::new(regex));
+        let validation = ValidationRegex {
+            value,
+            charset: value,
+        };
+        assert!(validation.value.is_match("aa"));
     }
 }

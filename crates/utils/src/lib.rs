@@ -12,6 +12,7 @@ pub mod text;
 pub mod time;
 pub mod types;
 pub mod unit;
+pub mod validation;
 
 pub use r#async::exe_iter;
 pub use binary::{as_array_buffer, RadrootsAppArrayBuffer};
@@ -30,9 +31,10 @@ pub use time::{time_now_ms, time_now_s};
 pub use types::{
     resolve_err, resolve_ok, FileBytesFormat, FilePath, FilePathBlob, FileMimeType, IdbClientConfig,
     ResolveError, ResultBool, ResultId, ResultObj, ResultPass, ResultPublicKey, ResultSecretKey,
-    ResultsList, ValStr, WebFilePath,
+    ResultsList, ValidationRegex, ValStr, WebFilePath,
 };
 pub use unit::{
     mass_to_g, parse_area_unit, parse_area_unit_default, parse_mass_unit, parse_mass_unit_default,
     AreaUnit, MassUnit, AREA_UNITS, MASS_UNITS,
 };
+pub use validation::regex::{form_fields, FormField, FormFieldsKey, UtilRegex};
