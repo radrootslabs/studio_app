@@ -1543,6 +1543,7 @@ dependencies = [
  "futures",
  "leptos",
  "radroots-app-core",
+ "serde",
  "wasm-bindgen",
 ]
 
