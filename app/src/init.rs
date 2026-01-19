@@ -16,6 +16,8 @@ use radroots_studio_app_core::keystore::{RadrootsClientKeystoreError, RadrootsCl
 
 use crate::{
     app_datastore_clear_bootstrap,
+    app_datastore_has_app_data,
+    app_datastore_has_config,
     app_datastore_write_app_data,
     app_datastore_write_config,
     AppAppData,
@@ -178,10 +180,19 @@ pub async fn app_init_backends(config: AppConfig) -> AppInitResult<AppBackends> 
         .init()
         .await
         .map_err(AppInitError::Datastore)?;
-    let config_data = AppConfigData::default();
-    let _ = app_datastore_write_config(&datastore, &config.datastore.key_maps, &config_data).await?;
-    let app_data = AppAppData::default();
-    let _ = app_datastore_write_app_data(&datastore, &config.datastore.key_maps, &app_data).await?;
+    let has_config = app_datastore_has_config(&datastore, &config.datastore.key_maps).await?;
+    if !has_config {
+        let config_data = AppConfigData::default();
+        let _ =
+            app_datastore_write_config(&datastore, &config.datastore.key_maps, &config_data)
+                .await?;
+    }
+    let has_app_data = app_datastore_has_app_data(&datastore, &config.datastore.key_maps).await?;
+    if !has_app_data {
+        let app_data = AppAppData::default();
+        let _ = app_datastore_write_app_data(&datastore, &config.datastore.key_maps, &app_data)
+            .await?;
+    }
     let nostr_keystore = RadrootsClientWebKeystoreNostr::new(Some(config.keystore.nostr_store));
     Ok(AppBackends {
         config,
