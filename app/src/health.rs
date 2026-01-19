@@ -110,12 +110,36 @@ pub async fn app_health_check_bootstrap_app_data<T: RadrootsClientDatastore>(
     }
 }
 
+const APP_HEALTH_TEMP_KEY: &str = "radroots.health.temp";
+
+pub async fn app_health_check_datastore_roundtrip<T: RadrootsClientDatastore>(
+    datastore: &T,
+) -> AppHealthCheckResult {
+    let value = "ok";
+    if let Err(err) = datastore.set(APP_HEALTH_TEMP_KEY, value).await {
+        return AppHealthCheckResult::error(err.to_string());
+    }
+    match datastore.get(APP_HEALTH_TEMP_KEY).await {
+        Ok(read) => {
+            if read != value {
+                return AppHealthCheckResult::error("mismatch");
+            }
+        }
+        Err(err) => return AppHealthCheckResult::error(err.to_string()),
+    }
+    if let Err(err) = datastore.del(APP_HEALTH_TEMP_KEY).await {
+        return AppHealthCheckResult::error(err.to_string());
+    }
+    AppHealthCheckResult::ok()
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
         app_health_check_key_maps,
         app_health_check_bootstrap_app_data,
         app_health_check_bootstrap_config,
+        app_health_check_datastore_roundtrip,
         AppHealthCheckResult,
         AppHealthCheckStatus,
         AppHealthReport,
@@ -175,6 +199,14 @@ mod tests {
             &datastore,
             &key_maps,
         ));
+        assert_eq!(result.status, AppHealthCheckStatus::Error);
+    }
+
+    #[test]
+    fn health_check_roundtrip_reports_idb_errors() {
+        let datastore = RadrootsClientWebDatastore::new(None);
+        let result =
+            futures::executor::block_on(app_health_check_datastore_roundtrip(&datastore));
         assert_eq!(result.status, AppHealthCheckStatus::Error);
     }
 }
