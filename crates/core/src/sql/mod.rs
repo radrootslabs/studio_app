@@ -1,8 +1,10 @@
 pub mod error;
 pub mod types;
+pub mod web;
 
 pub use error::{RadrootsClientSqlError, RadrootsClientSqlErrorMessage};
 pub use types::{
+    RadrootsClientSqlCipherConfig,
     RadrootsClientSqlEncryptedStore,
     RadrootsClientSqlEngine,
     RadrootsClientSqlEngineConfig,
@@ -14,3 +16,4 @@ pub use types::{
     RadrootsClientSqlResult,
     RadrootsClientSqlValue,
 };
+pub use web::RadrootsClientWebSqlEngine;

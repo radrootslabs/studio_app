@@ -38,10 +38,17 @@ pub enum RadrootsClientSqlParams {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RadrootsClientSqlCipherConfig {
+    Default,
+    Disabled,
+    Custom(RadrootsClientIdbConfig),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RadrootsClientSqlEngineConfig {
     pub store_key: String,
     pub idb_config: RadrootsClientIdbConfig,
-    pub cipher_config: Option<RadrootsClientIdbConfig>,
+    pub cipher_config: RadrootsClientSqlCipherConfig,
     pub sql_wasm_path: Option<String>,
 }
 
