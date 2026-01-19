@@ -7,6 +7,7 @@ mod config;
 mod data;
 mod health;
 mod init;
+mod keystore;
 mod entry;
 
 pub use app::App;
@@ -29,6 +30,13 @@ pub use health::{
     AppHealthCheckResult,
     AppHealthCheckStatus,
     AppHealthReport,
+};
+pub use keystore::{
+    app_keystore_nostr_ensure_key,
+    app_keystore_nostr_keys,
+    app_keystore_nostr_public_key,
+    AppKeystoreError,
+    AppKeystoreResult,
 };
 pub use config::{
     app_config_default,
