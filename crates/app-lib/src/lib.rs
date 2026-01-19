@@ -1,6 +1,7 @@
 #![forbid(unsafe_code)]
 
 pub mod browser;
+pub mod dom;
 pub mod fetch;
 pub mod geo;
 pub mod locale;
@@ -12,6 +13,7 @@ pub mod symbols;
 pub mod theme;
 
 pub use browser::{browser_platform, BrowserPlatformInfo};
+pub use dom::{el_id, view_effect, DomError};
 pub use fetch::{fetch_json, FetchJsonError, FetchJsonErrorKind, FetchJsonResult};
 pub use geo::{geop_init, geop_is_valid, AppGeolocationPoint};
 pub use locale::{get_locale, resolve_locale};
