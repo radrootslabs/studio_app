@@ -4,6 +4,7 @@ use leptos::task::spawn_local;
 use crate::{
     app_init_backends,
     app_init_state_default,
+    app_init_mark_completed,
     AppBackends,
     AppInitError,
     AppInitStage,
@@ -23,6 +24,7 @@ pub fn App() -> impl IntoView {
             match app_init_backends().await {
                 Ok(value) => {
                     backends.set(Some(value));
+                    app_init_mark_completed();
                     init_state.update(|state| state.stage = AppInitStage::Ready);
                 }
                 Err(err) => {
