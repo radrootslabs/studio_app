@@ -63,6 +63,7 @@ wasm-bindgen-futures = "0.4"
 base64 = "0.22"
 serde-wasm-bindgen = "0.6"
 rusqlite = { version = "0.31", default-features = false }
+url = "2"
 radroots-nostr = { path = "refs/crates/nostr" }
 
 [profile.release]

@@ -1,5 +1,6 @@
 pub mod error;
 pub mod types;
+pub mod web;
 
 pub use error::{RadrootsClientRadrootsError, RadrootsClientRadrootsErrorMessage};
 pub use types::{
@@ -11,3 +12,4 @@ pub use types::{
     RadrootsClientRadrootsAccountsRequest,
     RadrootsClientRadrootsResult,
 };
+pub use web::RadrootsClientWebRadroots;
