@@ -15,6 +15,7 @@ serde-wasm-bindgen = { workspace = true }
 js-sys = { workspace = true }
 wasm-bindgen = { workspace = true }
 wasm-bindgen-futures = { workspace = true }
+url = { workspace = true }
 once_cell = { workspace = true }
 regex = { workspace = true }
 web-sys = { workspace = true }

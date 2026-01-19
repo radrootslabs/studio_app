@@ -1582,6 +1582,7 @@ dependencies = [
  "regex",
  "serde",
  "serde-wasm-bindgen",
+ "url",
  "wasm-bindgen",
  "wasm-bindgen-futures",
  "web-sys",
