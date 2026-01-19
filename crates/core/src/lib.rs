@@ -10,3 +10,4 @@ pub mod keystore;
 pub mod notifications;
 pub mod radroots;
 pub mod sql;
+pub mod tangle;
