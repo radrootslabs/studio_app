@@ -20,12 +20,12 @@ use radroots_studio_app_core::keystore::{
 
 use crate::{
     app_datastore_clear_bootstrap,
-    app_datastore_has_app_data,
-    app_datastore_has_config,
+    app_datastore_has_state,
+    app_datastore_has_settings,
     app_datastore_key_nostr_key,
-    app_datastore_read_app_data,
-    app_datastore_write_app_data,
-    app_datastore_write_config,
+    app_datastore_read_state,
+    app_datastore_write_state,
+    app_datastore_write_settings,
     app_assets_geocoder_db_url,
     app_assets_sql_wasm_url,
     app_keystore_nostr_ensure_key,
@@ -391,11 +391,11 @@ pub async fn app_init_backends(config: RadrootsAppConfig) -> RadrootsAppInitResu
         .await
         .map_err(RadrootsAppInitError::Datastore)?;
     let _ = app_log_debug_emit("log.app.init.backends", "datastore_ready", None);
-    let has_config = app_datastore_has_config(&datastore, &config.datastore.key_maps).await?;
+    let has_config = app_datastore_has_settings(&datastore, &config.datastore.key_maps).await?;
     if !has_config {
         let config_data = RadrootsAppSettings::default();
         let _ =
-            app_datastore_write_config(&datastore, &config.datastore.key_maps, &config_data)
+            app_datastore_write_settings(&datastore, &config.datastore.key_maps, &config_data)
                 .await?;
     }
     let _ = app_log_debug_emit("log.app.init.backends", "config_ready", None);
@@ -432,9 +432,9 @@ pub async fn app_init_backends(config: RadrootsAppConfig) -> RadrootsAppInitResu
         Err(err) => return Err(RadrootsAppInitError::Datastore(err)),
     }
     let _ = app_log_debug_emit("log.app.init.backends", "nostr_key_synced", None);
-    let has_app_data = app_datastore_has_app_data(&datastore, &config.datastore.key_maps).await?;
+    let has_app_data = app_datastore_has_state(&datastore, &config.datastore.key_maps).await?;
     let mut app_data = if has_app_data {
-        app_datastore_read_app_data(&datastore, &config.datastore.key_maps).await?
+        app_datastore_read_state(&datastore, &config.datastore.key_maps).await?
     } else {
         RadrootsAppState::default()
     };
@@ -442,7 +442,7 @@ pub async fn app_init_backends(config: RadrootsAppConfig) -> RadrootsAppInitResu
     if should_write {
         app_data.active_key = nostr_public_key;
         let _ =
-            app_datastore_write_app_data(&datastore, &config.datastore.key_maps, &app_data)
+            app_datastore_write_state(&datastore, &config.datastore.key_maps, &app_data)
                 .await?;
     }
     let _ = app_log_debug_emit("log.app.init.backends", "app_data_ready", None);

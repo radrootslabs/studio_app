@@ -80,10 +80,10 @@ impl RadrootsAppHealthReport {
 }
 
 use crate::{
-    app_datastore_has_app_data,
-    app_datastore_has_config,
+    app_datastore_has_state,
+    app_datastore_has_settings,
     app_datastore_key_nostr_key,
-    app_datastore_read_app_data,
+    app_datastore_read_state,
     app_log_buffer_flush_critical,
     app_log_debug_emit,
     app_log_entry_new,
@@ -130,7 +130,7 @@ pub async fn app_health_check_bootstrap_config<T: RadrootsClientDatastore>(
     datastore: &T,
     key_maps: &RadrootsAppKeyMapConfig,
 ) -> RadrootsAppHealthCheckResult {
-    match app_datastore_has_config(datastore, key_maps).await {
+    match app_datastore_has_settings(datastore, key_maps).await {
         Ok(true) => RadrootsAppHealthCheckResult::ok(),
         Ok(false) => RadrootsAppHealthCheckResult::error("missing"),
         Err(err) => RadrootsAppHealthCheckResult::error(err.to_string()),
@@ -141,7 +141,7 @@ pub async fn app_health_check_bootstrap_app_data<T: RadrootsClientDatastore>(
     datastore: &T,
     key_maps: &RadrootsAppKeyMapConfig,
 ) -> RadrootsAppHealthCheckResult {
-    match app_datastore_has_app_data(datastore, key_maps).await {
+    match app_datastore_has_state(datastore, key_maps).await {
         Ok(true) => RadrootsAppHealthCheckResult::ok(),
         Ok(false) => RadrootsAppHealthCheckResult::error("missing"),
         Err(err) => RadrootsAppHealthCheckResult::error(err.to_string()),
@@ -152,7 +152,7 @@ pub async fn app_health_check_app_data_active_key<T: RadrootsClientDatastore>(
     datastore: &T,
     key_maps: &RadrootsAppKeyMapConfig,
 ) -> RadrootsAppHealthCheckResult {
-    let app_data = match app_datastore_read_app_data(datastore, key_maps).await {
+    let app_data = match app_datastore_read_state(datastore, key_maps).await {
         Ok(value) => value,
         Err(err) => return RadrootsAppHealthCheckResult::error(err.to_string()),
     };
@@ -281,7 +281,7 @@ pub async fn app_health_check_all<T: RadrootsClientDatastore, K: RadrootsClientK
     let app_data_active_key = app_health_check_app_data_active_key(datastore, key_maps).await;
     log_health_end("app_data_active_key", &app_data_active_key);
     log_health_start("notifications");
-    let stored_permission = app_datastore_read_app_data(datastore, key_maps)
+    let stored_permission = app_datastore_read_state(datastore, key_maps)
         .await
         .ok()
         .and_then(|data| data.notifications_permission);

@@ -17,12 +17,12 @@ mod entry;
 pub use app::App;
 pub use bootstrap::{
     app_datastore_clear_bootstrap,
-    app_datastore_has_app_data,
-    app_datastore_has_config,
-    app_datastore_read_app_data,
-    app_datastore_set_notifications_permission,
-    app_datastore_write_app_data,
-    app_datastore_write_config,
+    app_datastore_has_state,
+    app_datastore_has_settings,
+    app_datastore_read_state,
+    app_state_set_notifications_permission,
+    app_datastore_write_state,
+    app_datastore_write_settings,
 };
 pub use context::{app_context, RadrootsAppContext};
 pub use data::{RadrootsAppState, RadrootsAppSettings, RadrootsAppRole};

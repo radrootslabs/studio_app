@@ -13,7 +13,7 @@ use crate::{
     RadrootsAppKeyMapConfig,
 };
 
-pub async fn app_datastore_write_config<T: RadrootsClientDatastore>(
+pub async fn app_datastore_write_settings<T: RadrootsClientDatastore>(
     datastore: &T,
     key_maps: &RadrootsAppKeyMapConfig,
     data: &RadrootsAppSettings,
@@ -27,7 +27,7 @@ pub async fn app_datastore_write_config<T: RadrootsClientDatastore>(
     Ok(value)
 }
 
-pub async fn app_datastore_has_config<T: RadrootsClientDatastore>(
+pub async fn app_datastore_has_settings<T: RadrootsClientDatastore>(
     datastore: &T,
     key_maps: &RadrootsAppKeyMapConfig,
 ) -> RadrootsAppInitResult<bool> {
@@ -39,7 +39,7 @@ pub async fn app_datastore_has_config<T: RadrootsClientDatastore>(
     }
 }
 
-pub async fn app_datastore_write_app_data<T: RadrootsClientDatastore>(
+pub async fn app_datastore_write_state<T: RadrootsClientDatastore>(
     datastore: &T,
     key_maps: &RadrootsAppKeyMapConfig,
     data: &RadrootsAppState,
@@ -53,7 +53,7 @@ pub async fn app_datastore_write_app_data<T: RadrootsClientDatastore>(
     Ok(value)
 }
 
-pub async fn app_datastore_read_app_data<T: RadrootsClientDatastore>(
+pub async fn app_datastore_read_state<T: RadrootsClientDatastore>(
     datastore: &T,
     key_maps: &RadrootsAppKeyMapConfig,
 ) -> RadrootsAppInitResult<RadrootsAppState> {
@@ -66,7 +66,7 @@ pub async fn app_datastore_read_app_data<T: RadrootsClientDatastore>(
     Ok(value)
 }
 
-pub async fn app_datastore_has_app_data<T: RadrootsClientDatastore>(
+pub async fn app_datastore_has_state<T: RadrootsClientDatastore>(
     datastore: &T,
     key_maps: &RadrootsAppKeyMapConfig,
 ) -> RadrootsAppInitResult<bool> {
@@ -96,17 +96,17 @@ pub async fn app_datastore_clear_bootstrap<T: RadrootsClientDatastore>(
     Ok(())
 }
 
-pub async fn app_datastore_set_notifications_permission<T: RadrootsClientDatastore>(
+pub async fn app_state_set_notifications_permission<T: RadrootsClientDatastore>(
     datastore: &T,
     key_maps: &RadrootsAppKeyMapConfig,
     permission: &str,
 ) -> RadrootsAppInitResult<RadrootsAppState> {
-    let mut data = match app_datastore_has_app_data(datastore, key_maps).await? {
-        true => app_datastore_read_app_data(datastore, key_maps).await?,
+    let mut data = match app_datastore_has_state(datastore, key_maps).await? {
+        true => app_datastore_read_state(datastore, key_maps).await?,
         false => RadrootsAppState::default(),
     };
     data.notifications_permission = Some(permission.to_string());
-    let value = app_datastore_write_app_data(datastore, key_maps, &data).await?;
+    let value = app_datastore_write_state(datastore, key_maps, &data).await?;
     Ok(value)
 }
 
@@ -114,12 +114,12 @@ pub async fn app_datastore_set_notifications_permission<T: RadrootsClientDatasto
 mod tests {
     use super::{
         app_datastore_clear_bootstrap,
-        app_datastore_has_app_data,
-        app_datastore_has_config,
-        app_datastore_read_app_data,
-        app_datastore_set_notifications_permission,
-        app_datastore_write_app_data,
-        app_datastore_write_config,
+        app_datastore_has_state,
+        app_datastore_has_settings,
+        app_datastore_read_state,
+        app_state_set_notifications_permission,
+        app_datastore_write_state,
+        app_datastore_write_settings,
     };
     use crate::{app_key_maps_default, RadrootsAppState, RadrootsAppSettings, RadrootsAppInitError};
     use radroots_studio_app_core::datastore::{RadrootsClientDatastoreError, RadrootsClientWebDatastore};
@@ -129,7 +129,7 @@ mod tests {
         let datastore = RadrootsClientWebDatastore::new(None);
         let key_maps = app_key_maps_default();
         let data = RadrootsAppSettings::default();
-        let err = futures::executor::block_on(app_datastore_write_config(
+        let err = futures::executor::block_on(app_datastore_write_settings(
             &datastore,
             &key_maps,
             &data,
@@ -143,7 +143,7 @@ mod tests {
         let datastore = RadrootsClientWebDatastore::new(None);
         let key_maps = app_key_maps_default();
         let data = RadrootsAppState::default();
-        let err = futures::executor::block_on(app_datastore_write_app_data(
+        let err = futures::executor::block_on(app_datastore_write_state(
             &datastore,
             &key_maps,
             &data,
@@ -156,7 +156,7 @@ mod tests {
     fn app_data_read_maps_idb_errors() {
         let datastore = RadrootsClientWebDatastore::new(None);
         let key_maps = app_key_maps_default();
-        let err = futures::executor::block_on(app_datastore_read_app_data(
+        let err = futures::executor::block_on(app_datastore_read_state(
             &datastore,
             &key_maps,
         ))
@@ -180,7 +180,7 @@ mod tests {
     fn has_config_maps_idb_errors() {
         let datastore = RadrootsClientWebDatastore::new(None);
         let key_maps = app_key_maps_default();
-        let err = futures::executor::block_on(app_datastore_has_config(&datastore, &key_maps))
+        let err = futures::executor::block_on(app_datastore_has_settings(&datastore, &key_maps))
             .expect_err("idb undefined");
         assert_eq!(err, RadrootsAppInitError::Datastore(RadrootsClientDatastoreError::IdbUndefined));
     }
@@ -189,7 +189,7 @@ mod tests {
     fn has_app_data_maps_idb_errors() {
         let datastore = RadrootsClientWebDatastore::new(None);
         let key_maps = app_key_maps_default();
-        let err = futures::executor::block_on(app_datastore_has_app_data(&datastore, &key_maps))
+        let err = futures::executor::block_on(app_datastore_has_state(&datastore, &key_maps))
             .expect_err("idb undefined");
         assert_eq!(err, RadrootsAppInitError::Datastore(RadrootsClientDatastoreError::IdbUndefined));
     }
@@ -198,7 +198,7 @@ mod tests {
     fn set_notifications_permission_maps_idb_errors() {
         let datastore = RadrootsClientWebDatastore::new(None);
         let key_maps = app_key_maps_default();
-        let err = futures::executor::block_on(app_datastore_set_notifications_permission(
+        let err = futures::executor::block_on(app_state_set_notifications_permission(
             &datastore,
             &key_maps,
             "granted",
