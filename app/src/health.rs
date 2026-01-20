@@ -84,6 +84,7 @@ use crate::{
     app_datastore_has_config,
     app_datastore_key_nostr_key,
     app_datastore_read_app_data,
+    app_log_buffer_flush,
     app_log_debug_emit,
     app_log_entry_new,
     app_log_entry_record,
@@ -283,11 +284,24 @@ pub async fn app_health_check_all<T: RadrootsClientDatastore, K: RadrootsClientK
     }
 }
 
+pub async fn app_health_check_all_logged<T: RadrootsClientDatastore, K: RadrootsClientKeystoreNostr, G: AppTangleClient>(
+    datastore: &T,
+    keystore: &K,
+    notifications: &AppNotifications,
+    tangle: &G,
+    key_maps: &AppKeyMapConfig,
+) -> AppHealthReport {
+    let report = app_health_check_all(datastore, keystore, notifications, tangle, key_maps).await;
+    let _ = app_log_buffer_flush(datastore, key_maps).await;
+    report
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
         app_health_check_app_data_active_key,
         app_health_check_all,
+        app_health_check_all_logged,
         app_health_check_key_maps,
         app_health_check_bootstrap_app_data,
         app_health_check_bootstrap_config,
@@ -300,11 +314,13 @@ mod tests {
         AppHealthCheckStatus,
         AppHealthReport,
     };
+    use crate::app_log_buffer_drain;
     use crate::AppKeyMapConfig;
     use async_trait::async_trait;
     use radroots_studio_app_core::datastore::{
         RadrootsClientDatastore,
         RadrootsClientDatastoreEntries,
+        RadrootsClientDatastoreEntry,
         RadrootsClientDatastoreError,
         RadrootsClientDatastoreResult,
         RadrootsClientWebDatastore,
@@ -318,6 +334,7 @@ mod tests {
     use radroots_studio_app_core::idb::IDB_CONFIG_DATASTORE;
     use radroots_studio_app_core::backup::RadrootsClientBackupDatastorePayload;
     use radroots_studio_app_core::idb::RadrootsClientIdbConfig;
+    use std::sync::Mutex;
 
     #[test]
     fn health_status_as_str() {
@@ -692,5 +709,150 @@ mod tests {
         let result = app_health_check_tangle(&tangle);
         assert_eq!(result.status, AppHealthCheckStatus::Error);
         assert_eq!(result.message.as_deref(), Some("error.app.tangle.not_implemented"));
+    }
+
+    struct FlushDatastore {
+        entries: Mutex<Vec<RadrootsClientDatastoreEntry>>,
+    }
+
+    impl FlushDatastore {
+        fn new() -> Self {
+            Self {
+                entries: Mutex::new(Vec::new()),
+            }
+        }
+
+        fn entry_len(&self) -> usize {
+            self.entries.lock().unwrap_or_else(|err| err.into_inner()).len()
+        }
+    }
+
+    #[async_trait(?Send)]
+    impl RadrootsClientDatastore for FlushDatastore {
+        fn get_config(&self) -> RadrootsClientIdbConfig {
+            IDB_CONFIG_DATASTORE
+        }
+
+        fn get_store_id(&self) -> &str {
+            "test"
+        }
+
+        async fn init(&self) -> RadrootsClientDatastoreResult<()> {
+            Err(RadrootsClientDatastoreError::IdbUndefined)
+        }
+
+        async fn set(&self, _key: &str, _value: &str) -> RadrootsClientDatastoreResult<String> {
+            Err(RadrootsClientDatastoreError::IdbUndefined)
+        }
+
+        async fn get(&self, _key: &str) -> RadrootsClientDatastoreResult<String> {
+            Err(RadrootsClientDatastoreError::IdbUndefined)
+        }
+
+        async fn set_obj<T>(&self, key: &str, value: &T) -> RadrootsClientDatastoreResult<T>
+        where
+            T: serde::Serialize + serde::de::DeserializeOwned + Clone,
+        {
+            let serialized =
+                serde_json::to_string(value).map_err(|_| RadrootsClientDatastoreError::NoResult)?;
+            let mut entries = self.entries.lock().unwrap_or_else(|err| err.into_inner());
+            entries.push(RadrootsClientDatastoreEntry::new(
+                key.to_string(),
+                Some(serialized),
+            ));
+            Ok(value.clone())
+        }
+
+        async fn update_obj<T>(&self, _key: &str, _value: &T) -> RadrootsClientDatastoreResult<T>
+        where
+            T: serde::Serialize + serde::de::DeserializeOwned + Clone,
+        {
+            Err(RadrootsClientDatastoreError::IdbUndefined)
+        }
+
+        async fn get_obj<T>(&self, _key: &str) -> RadrootsClientDatastoreResult<T>
+        where
+            T: serde::de::DeserializeOwned,
+        {
+            Err(RadrootsClientDatastoreError::IdbUndefined)
+        }
+
+        async fn del_obj(&self, _key: &str) -> RadrootsClientDatastoreResult<String> {
+            Err(RadrootsClientDatastoreError::IdbUndefined)
+        }
+
+        async fn del(&self, key: &str) -> RadrootsClientDatastoreResult<String> {
+            let mut entries = self.entries.lock().unwrap_or_else(|err| err.into_inner());
+            entries.retain(|entry| entry.key != key);
+            Ok(key.to_string())
+        }
+
+        async fn del_pref(&self, _key_prefix: &str) -> RadrootsClientDatastoreResult<Vec<String>> {
+            Err(RadrootsClientDatastoreError::IdbUndefined)
+        }
+
+        async fn set_param(
+            &self,
+            _key: &str,
+            _key_param: &str,
+            _value: &str,
+        ) -> RadrootsClientDatastoreResult<String> {
+            Err(RadrootsClientDatastoreError::IdbUndefined)
+        }
+
+        async fn get_param(
+            &self,
+            _key: &str,
+            _key_param: &str,
+        ) -> RadrootsClientDatastoreResult<String> {
+            Err(RadrootsClientDatastoreError::IdbUndefined)
+        }
+
+        async fn keys(&self) -> RadrootsClientDatastoreResult<Vec<String>> {
+            Err(RadrootsClientDatastoreError::IdbUndefined)
+        }
+
+        async fn entries(&self) -> RadrootsClientDatastoreResult<RadrootsClientDatastoreEntries> {
+            let entries = self.entries.lock().unwrap_or_else(|err| err.into_inner());
+            Ok(entries.clone())
+        }
+
+        async fn reset(&self) -> RadrootsClientDatastoreResult<()> {
+            Err(RadrootsClientDatastoreError::IdbUndefined)
+        }
+
+        async fn export_backup(
+            &self,
+        ) -> RadrootsClientDatastoreResult<RadrootsClientBackupDatastorePayload> {
+            Err(RadrootsClientDatastoreError::IdbUndefined)
+        }
+
+        async fn import_backup(
+            &self,
+            _payload: RadrootsClientBackupDatastorePayload,
+        ) -> RadrootsClientDatastoreResult<()> {
+            Err(RadrootsClientDatastoreError::IdbUndefined)
+        }
+    }
+
+    #[test]
+    fn health_check_all_logged_flushes_buffer() {
+        let _ = app_log_buffer_drain();
+        let datastore = FlushDatastore::new();
+        let keystore = TestKeystore {
+            read_result: Err(RadrootsClientKeystoreError::MissingKey),
+        };
+        let notifications = crate::AppNotifications::new(None);
+        let tangle = crate::AppTangleClientStub::new();
+        let key_maps = crate::app_key_maps_default();
+        let report = futures::executor::block_on(app_health_check_all_logged(
+            &datastore,
+            &keystore,
+            &notifications,
+            &tangle,
+            &key_maps,
+        ));
+        assert_eq!(report.key_maps.status, AppHealthCheckStatus::Ok);
+        assert!(datastore.entry_len() > 0);
     }
 }

@@ -20,7 +20,7 @@ use crate::{
     app_log_error_store,
     app_config_default,
     app_datastore_read_app_data,
-    app_health_check_all,
+    app_health_check_all_logged,
     AppBackends,
     AppConfig,
     AppHealthCheckResult,
@@ -80,7 +80,7 @@ fn spawn_health_checks(
         );
         let notifications = AppNotifications::new(None);
         let tangle = AppTangleClientStub::new();
-        let report = app_health_check_all(
+        let report = app_health_check_all_logged(
             &datastore,
             &keystore,
             &notifications,
