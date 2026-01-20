@@ -1643,6 +1643,7 @@ dependencies = [
  "async-trait",
  "console_error_panic_hook",
  "futures",
+ "gloo-timers",
  "js-sys",
  "leptos",
  "leptos_router",

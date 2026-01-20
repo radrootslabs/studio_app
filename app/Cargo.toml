@@ -17,6 +17,7 @@ wasm-bindgen.workspace = true
 wasm-bindgen-futures.workspace = true
 js-sys.workspace = true
 web-sys.workspace = true
+gloo-timers.workspace = true
 radroots-app-core = { path = "../crates/core" }
 radroots-log = { path = "../refs/crates/log", default-features = false }
 tracing-wasm = "0.2"

@@ -1,5 +1,6 @@
 #![forbid(unsafe_code)]
 
+use gloo_timers::callback::Interval;
 use leptos::prelude::*;
 use leptos::task::spawn_local;
 use std::rc::Rc;
@@ -16,6 +17,12 @@ use crate::{
     AppLogLevel,
 };
 
+const LOGS_AUTO_REFRESH_MS: u32 = 5000;
+
+fn logs_auto_refresh_ms() -> u32 {
+    LOGS_AUTO_REFRESH_MS
+}
+
 fn log_level_color(level: AppLogLevel) -> &'static str {
     match level {
         AppLogLevel::Debug => "#6b7280",
@@ -31,6 +38,7 @@ pub fn LogsPage() -> impl IntoView {
     let dump = RwSignal::new_local(String::new());
     let loading = RwSignal::new_local(false);
     let did_load = RwSignal::new_local(false);
+    let interval_started = RwSignal::new_local(false);
     let context = Rc::new(app_context());
     let refresh = {
         let context = Rc::clone(&context);
@@ -105,6 +113,16 @@ pub fn LogsPage() -> impl IntoView {
         did_load.set(true);
         refresh_effect();
     });
+    let interval_effect = Rc::clone(&refresh);
+    Effect::new(move || {
+        if interval_started.get() {
+            return;
+        }
+        interval_started.set(true);
+        let refresh = Rc::clone(&interval_effect);
+        let interval = Interval::new(logs_auto_refresh_ms(), move || refresh());
+        interval.forget();
+    });
     let status_label = move || if loading.get() { "loading" } else { "idle" };
     view! {
         <main>
@@ -171,5 +189,15 @@ pub fn LogsPage() -> impl IntoView {
                 </section>
             </div>
         </main>
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::logs_auto_refresh_ms;
+
+    #[test]
+    fn logs_auto_refresh_is_positive() {
+        assert!(logs_auto_refresh_ms() > 0);
     }
 }
