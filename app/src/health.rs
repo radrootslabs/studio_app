@@ -196,6 +196,18 @@ fn app_health_check_notifications_permission(
     }
 }
 
+pub async fn app_health_check_notifications_with_state(
+    notifications: &AppNotifications,
+    stored_permission: Option<&str>,
+) -> AppHealthCheckResult {
+    if let Some(value) = stored_permission {
+        if let Some(permission) = RadrootsClientNotificationsPermission::parse(value) {
+            return app_health_check_notifications_permission(permission);
+        }
+    }
+    app_health_check_notifications(notifications).await
+}
+
 pub fn app_health_check_tangle<T: AppTangleClient>(tangle: &T) -> AppHealthCheckResult {
     match tangle.init() {
         Ok(()) => AppHealthCheckResult::ok(),
@@ -269,7 +281,13 @@ pub async fn app_health_check_all<T: RadrootsClientDatastore, K: RadrootsClientK
     let app_data_active_key = app_health_check_app_data_active_key(datastore, key_maps).await;
     log_health_end("app_data_active_key", &app_data_active_key);
     log_health_start("notifications");
-    let notifications_result = app_health_check_notifications(notifications).await;
+    let stored_permission = app_datastore_read_app_data(datastore, key_maps)
+        .await
+        .ok()
+        .and_then(|data| data.notifications_permission);
+    let notifications_result =
+        app_health_check_notifications_with_state(notifications, stored_permission.as_deref())
+            .await;
     log_health_end("notifications", &notifications_result);
     log_health_start("tangle");
     let tangle_result = app_health_check_tangle(tangle);
@@ -316,6 +334,7 @@ mod tests {
         app_health_check_datastore_roundtrip,
         app_health_check_keystore_access,
         app_health_check_notifications,
+        app_health_check_notifications_with_state,
         app_health_check_notifications_permission,
         app_health_check_tangle,
         log_health_context,
@@ -721,6 +740,16 @@ mod tests {
         let denied_result =
             app_health_check_notifications_permission(RadrootsClientNotificationsPermission::Denied);
         assert_eq!(denied_result.status, AppHealthCheckStatus::Skipped);
+    }
+
+    #[test]
+    fn health_check_notifications_uses_stored_permission() {
+        let notifications = crate::AppNotifications::new(None);
+        let result = futures::executor::block_on(app_health_check_notifications_with_state(
+            &notifications,
+            Some("granted"),
+        ));
+        assert_eq!(result.status, AppHealthCheckStatus::Ok);
     }
 
     #[test]
