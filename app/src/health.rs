@@ -85,24 +85,36 @@ use crate::{
     app_datastore_key_nostr_key,
     app_datastore_read_app_data,
     app_log_debug_emit,
+    app_log_entry_new,
+    app_log_entry_record,
     app_key_maps_validate,
     AppNotifications,
+    AppLogLevel,
     AppTangleClient,
     AppKeyMapConfig,
 };
 use radroots_studio_app_core::datastore::{RadrootsClientDatastore, RadrootsClientDatastoreError};
 use radroots_studio_app_core::keystore::{RadrootsClientKeystoreError, RadrootsClientKeystoreNostr};
 
+fn log_health_context(result: &AppHealthCheckResult) -> Option<String> {
+    match result.message.as_deref() {
+        Some(message) => Some(format!("status={},detail={message}", result.status.as_str())),
+        None => Some(format!("status={}", result.status.as_str())),
+    }
+}
+
 fn log_health_start(name: &str) {
     let _ = app_log_debug_emit("log.app.health.start", name, None);
 }
 
 fn log_health_end(name: &str, result: &AppHealthCheckResult) {
-    let context = match result.message.as_deref() {
-        Some(message) => Some(format!("status={},detail={message}", result.status.as_str())),
-        None => Some(format!("status={}", result.status.as_str())),
-    };
-    let _ = app_log_debug_emit("log.app.health.end", name, context);
+    let context = log_health_context(result);
+    if result.status == AppHealthCheckStatus::Error {
+        let entry = app_log_entry_new(AppLogLevel::Error, "log.app.health.end", name, context);
+        let _ = app_log_entry_record(entry);
+    } else {
+        let _ = app_log_debug_emit("log.app.health.end", name, context);
+    }
 }
 
 pub fn app_health_check_key_maps(key_maps: &AppKeyMapConfig) -> AppHealthCheckResult {
@@ -283,6 +295,7 @@ mod tests {
         app_health_check_keystore_access,
         app_health_check_notifications,
         app_health_check_tangle,
+        log_health_context,
         AppHealthCheckResult,
         AppHealthCheckStatus,
         AppHealthReport,
@@ -322,6 +335,13 @@ mod tests {
         let err = AppHealthCheckResult::error("boom");
         assert_eq!(err.status, AppHealthCheckStatus::Error);
         assert_eq!(err.message.as_deref(), Some("boom"));
+    }
+
+    #[test]
+    fn health_log_context_formats_error_detail() {
+        let result = AppHealthCheckResult::error("missing");
+        let context = log_health_context(&result);
+        assert_eq!(context.as_deref(), Some("status=error,detail=missing"));
     }
 
     #[test]
