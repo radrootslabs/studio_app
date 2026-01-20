@@ -367,9 +367,10 @@ fn app_log_entry_should_persist(level: RadrootsAppLogLevel) -> bool {
     matches!(level, RadrootsAppLogLevel::Warn | RadrootsAppLogLevel::Error)
 }
 
-pub async fn app_log_buffer_flush<T: RadrootsClientDatastore>(
+async fn app_log_buffer_flush_internal<T: RadrootsClientDatastore>(
     datastore: &T,
     key_maps: &RadrootsAppKeyMapConfig,
+    prune: bool,
 ) -> RadrootsAppLogResult<usize> {
     let entries = app_log_buffer_drain();
     let mut stored = 0;
@@ -384,8 +385,24 @@ pub async fn app_log_buffer_flush<T: RadrootsClientDatastore>(
         }
         stored += 1;
     }
-    let _ = app_log_entries_prune(datastore, key_maps, APP_LOG_MAX_ENTRIES).await?;
+    if prune {
+        let _ = app_log_entries_prune(datastore, key_maps, APP_LOG_MAX_ENTRIES).await?;
+    }
     Ok(stored)
+}
+
+pub async fn app_log_buffer_flush<T: RadrootsClientDatastore>(
+    datastore: &T,
+    key_maps: &RadrootsAppKeyMapConfig,
+) -> RadrootsAppLogResult<usize> {
+    app_log_buffer_flush_internal(datastore, key_maps, true).await
+}
+
+pub async fn app_log_buffer_flush_no_prune<T: RadrootsClientDatastore>(
+    datastore: &T,
+    key_maps: &RadrootsAppKeyMapConfig,
+) -> RadrootsAppLogResult<usize> {
+    app_log_buffer_flush_internal(datastore, key_maps, false).await
 }
 
 pub async fn app_log_buffer_flush_critical<T: RadrootsClientDatastore>(
@@ -433,13 +450,13 @@ pub async fn app_log_entries_load<T: RadrootsClientDatastore>(
     datastore: &T,
     key_maps: &RadrootsAppKeyMapConfig,
 ) -> RadrootsAppLogResult<Vec<RadrootsAppLogEntry>> {
-    let entries = datastore.entries().await.map_err(RadrootsAppLogError::Datastore)?;
     let prefix = app_log_entry_prefix(key_maps)?;
+    let entries = datastore
+        .entries_pref(&prefix)
+        .await
+        .map_err(RadrootsAppLogError::Datastore)?;
     let mut out = Vec::new();
     for entry in entries {
-        if !entry.key.starts_with(&prefix) {
-            continue;
-        }
         let Some(value) = entry.value else {
             continue;
         };
@@ -559,6 +576,7 @@ mod tests {
         app_log_entry_prefix,
         app_log_buffer_drain,
         app_log_buffer_flush_critical,
+        app_log_buffer_flush_no_prune,
         app_log_buffer_flush,
         app_log_buffer_push,
         app_log_metadata,
@@ -938,6 +956,25 @@ mod tests {
         ));
         let stored = futures::executor::block_on(app_log_buffer_flush(&datastore, &key_maps))
             .expect("flush");
+        assert_eq!(stored, 1);
+        assert_eq!(datastore.len(), 1);
+    }
+
+    #[test]
+    fn log_buffer_flush_no_prune_stores_entries() {
+        let _guard = LOG_TEST_LOCK.lock().unwrap_or_else(|err| err.into_inner());
+        let _ = app_log_buffer_drain();
+        let key_maps = app_key_maps_default();
+        let datastore = TestDatastore::new(Vec::new());
+        app_log_buffer_push(app_log_entry_new(
+            RadrootsAppLogLevel::Info,
+            "log.code.flush.noprune",
+            "flush",
+            None,
+        ));
+        let stored =
+            futures::executor::block_on(app_log_buffer_flush_no_prune(&datastore, &key_maps))
+                .expect("flush");
         assert_eq!(stored, 1);
         assert_eq!(datastore.len(), 1);
     }
