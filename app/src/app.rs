@@ -31,8 +31,8 @@ use crate::{
     RadrootsAppInitError,
     RadrootsAppInitStage,
     RadrootsAppNotifications,
+    RadrootsAppLogsPage,
     RadrootsAppTangleClientStub,
-    LogsPage,
 };
 
 fn health_status_color(status: RadrootsAppHealthCheckStatus) -> &'static str {
@@ -480,7 +480,7 @@ fn HomePage() -> impl IntoView {
 }
 
 #[component]
-pub fn App() -> impl IntoView {
+pub fn RadrootsApp() -> impl IntoView {
     view! {
         <Router>
             <nav style="display:flex;gap:12px;margin-bottom:12px;">
@@ -489,7 +489,7 @@ pub fn App() -> impl IntoView {
             </nav>
             <Routes fallback=|| view! { <div>"not_found"</div> }>
                 <Route path=path!("") view=HomePage />
-                <Route path=path!("logs") view=LogsPage />
+                <Route path=path!("logs") view=RadrootsAppLogsPage />
             </Routes>
         </Router>
     }

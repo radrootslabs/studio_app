@@ -35,7 +35,7 @@ fn log_level_color(level: RadrootsAppLogLevel) -> &'static str {
 }
 
 #[component]
-pub fn LogsPage() -> impl IntoView {
+pub fn RadrootsAppLogsPage() -> impl IntoView {
     let entries = RwSignal::new_local(Vec::<RadrootsAppLogEntry>::new());
     let dump = RwSignal::new_local(String::new());
     let loading = RwSignal::new_local(false);

@@ -14,7 +14,7 @@ mod notifications;
 mod tangle;
 mod entry;
 
-pub use app::App;
+pub use app::RadrootsApp;
 pub use bootstrap::{
     app_datastore_clear_bootstrap,
     app_datastore_has_state,
@@ -48,7 +48,7 @@ pub use keystore::{
     RadrootsAppKeystoreError,
     RadrootsAppKeystoreResult,
 };
-pub use logs::LogsPage;
+pub use logs::RadrootsAppLogsPage;
 pub use logging::{
     app_log_entry_error,
     app_log_entry_emit,
