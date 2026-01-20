@@ -1,3 +1,4 @@
+use gloo_timers::future::TimeoutFuture;
 use leptos::prelude::*;
 use leptos::task::spawn_local;
 use leptos_router::components::{A, Route, Router, Routes};
@@ -99,6 +100,12 @@ fn spawn_health_checks(
     });
 }
 
+const APP_HEALTH_CHECK_DELAY_MS: u32 = 300;
+
+fn app_health_check_delay_ms() -> u32 {
+    APP_HEALTH_CHECK_DELAY_MS
+}
+
 #[component]
 fn HomePage() -> impl IntoView {
     let backends = RwSignal::new_local(None::<AppBackends>);
@@ -184,7 +191,11 @@ fn HomePage() -> impl IntoView {
             return;
         };
         health_autorun.set(true);
-        spawn_health_checks(config, health_report, health_running, active_key);
+        let delay_ms = app_health_check_delay_ms();
+        spawn_local(async move {
+            TimeoutFuture::new(delay_ms).await;
+            spawn_health_checks(config, health_report, health_running, active_key);
+        });
     });
     let status_color = move || match init_state.get().stage {
         AppInitStage::Ready => "green",
@@ -379,5 +390,15 @@ pub fn App() -> impl IntoView {
                 <Route path=path!("logs") view=LogsPage />
             </Routes>
         </Router>
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::app_health_check_delay_ms;
+
+    #[test]
+    fn health_check_delay_is_positive() {
+        assert!(app_health_check_delay_ms() > 0);
     }
 }
