@@ -345,8 +345,16 @@ impl RadrootsClientDatastore for RadrootsClientWebDatastore {
     }
 
     async fn entries(&self) -> RadrootsClientDatastoreResult<RadrootsClientDatastoreEntries> {
+        self.entries_pref("").await
+    }
+
+    async fn entries_pref(
+        &self,
+        key_prefix: &str,
+    ) -> RadrootsClientDatastoreResult<RadrootsClientDatastoreEntries> {
         #[cfg(not(target_arch = "wasm32"))]
         {
+            let _ = key_prefix;
             return Err(RadrootsClientDatastoreError::IdbUndefined);
         }
         #[cfg(target_arch = "wasm32")]
@@ -357,8 +365,12 @@ impl RadrootsClientDatastore for RadrootsClientWebDatastore {
             )
             .await
             .map_err(map_idb_error)?;
-            let mut out = Vec::new();
-            for key in keys {
+            let prefixed: Vec<String> = keys
+                .into_iter()
+                .filter(|key| key.starts_with(key_prefix))
+                .collect();
+            let mut out = Vec::with_capacity(prefixed.len());
+            for key in prefixed {
                 let stored = crate::idb::idb_get(
                     self.encrypted_store.get_config().database,
                     self.encrypted_store.get_config().store,
@@ -514,6 +526,14 @@ mod tests {
     fn non_wasm_get_errors() {
         let store = RadrootsClientWebDatastore::new(None);
         let err = futures::executor::block_on(store.get("key"))
+            .expect_err("idb undefined");
+        assert_eq!(err, crate::datastore::RadrootsClientDatastoreError::IdbUndefined);
+    }
+
+    #[test]
+    fn non_wasm_entries_pref_errors() {
+        let store = RadrootsClientWebDatastore::new(None);
+        let err = futures::executor::block_on(store.entries_pref("log:"))
             .expect_err("idb undefined");
         assert_eq!(err, crate::datastore::RadrootsClientDatastoreError::IdbUndefined);
     }

@@ -716,6 +716,20 @@ mod tests {
                 .clone())
         }
 
+        async fn entries_pref(
+            &self,
+            key_prefix: &str,
+        ) -> RadrootsClientDatastoreResult<RadrootsClientDatastoreEntries> {
+            Ok(self
+                .entries
+                .lock()
+                .unwrap_or_else(|err| err.into_inner())
+                .iter()
+                .filter(|entry| entry.key.starts_with(key_prefix))
+                .cloned()
+                .collect())
+        }
+
         async fn reset(&self) -> RadrootsClientDatastoreResult<()> {
             Err(RadrootsClientDatastoreError::IdbUndefined)
         }

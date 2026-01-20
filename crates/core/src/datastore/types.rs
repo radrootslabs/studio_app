@@ -60,6 +60,10 @@ pub trait RadrootsClientDatastore {
     ) -> RadrootsClientDatastoreResult<String>;
     async fn keys(&self) -> RadrootsClientDatastoreResult<Vec<String>>;
     async fn entries(&self) -> RadrootsClientDatastoreResult<RadrootsClientDatastoreEntries>;
+    async fn entries_pref(
+        &self,
+        key_prefix: &str,
+    ) -> RadrootsClientDatastoreResult<RadrootsClientDatastoreEntries>;
     async fn reset(&self) -> RadrootsClientDatastoreResult<()>;
     async fn export_backup(
         &self,

@@ -533,6 +533,13 @@ mod tests {
             datastore_err()
         }
 
+        async fn entries_pref(
+            &self,
+            _key_prefix: &str,
+        ) -> RadrootsClientDatastoreResult<RadrootsClientDatastoreEntries> {
+            datastore_err()
+        }
+
         async fn reset(&self) -> RadrootsClientDatastoreResult<()> {
             datastore_err()
         }
@@ -864,6 +871,18 @@ mod tests {
         async fn entries(&self) -> RadrootsClientDatastoreResult<RadrootsClientDatastoreEntries> {
             let entries = self.entries.lock().unwrap_or_else(|err| err.into_inner());
             Ok(entries.clone())
+        }
+
+        async fn entries_pref(
+            &self,
+            key_prefix: &str,
+        ) -> RadrootsClientDatastoreResult<RadrootsClientDatastoreEntries> {
+            let entries = self.entries.lock().unwrap_or_else(|err| err.into_inner());
+            Ok(entries
+                .iter()
+                .filter(|entry| entry.key.starts_with(key_prefix))
+                .cloned()
+                .collect())
         }
 
         async fn reset(&self) -> RadrootsClientDatastoreResult<()> {
