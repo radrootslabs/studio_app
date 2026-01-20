@@ -15,6 +15,7 @@ use crate::{
     app_init_stage_set,
     app_init_total_add,
     app_init_total_unknown,
+    app_context,
     app_log_buffer_flush_critical,
     app_log_debug_emit,
     app_log_error_emit,
@@ -117,9 +118,22 @@ fn app_health_check_delay_ms() -> u32 {
 
 #[component]
 fn HomePage() -> impl IntoView {
-    let backends = RwSignal::new_local(None::<RadrootsAppBackends>);
-    let init_error = RwSignal::new_local(None::<RadrootsAppInitError>);
-    let init_state = RwSignal::new_local(app_init_state_default());
+    let context = app_context();
+    let fallback_backends = RwSignal::new_local(None::<RadrootsAppBackends>);
+    let fallback_init_error = RwSignal::new_local(None::<RadrootsAppInitError>);
+    let fallback_init_state = RwSignal::new_local(app_init_state_default());
+    let backends = context
+        .as_ref()
+        .map(|value| value.backends)
+        .unwrap_or(fallback_backends);
+    let init_state = context
+        .as_ref()
+        .map(|value| value.init_state)
+        .unwrap_or(fallback_init_state);
+    let _init_error = context
+        .as_ref()
+        .map(|value| value.init_error)
+        .unwrap_or(fallback_init_error);
     let reset_status = RwSignal::new_local(None::<String>);
     let health_report = RwSignal::new_local(RadrootsAppHealthReport::empty());
     let health_running = RwSignal::new_local(false);
@@ -127,73 +141,6 @@ fn HomePage() -> impl IntoView {
     let active_key = RwSignal::new_local(None::<String>);
     let notifications_status = RwSignal::new_local(None::<String>);
     let notifications_requesting = RwSignal::new_local(false);
-    provide_context(backends);
-    provide_context(init_error);
-    provide_context(init_state);
-    Effect::new(move || {
-        spawn_local(async move {
-            let stage = RadrootsAppInitStage::Storage;
-            init_state.update(|state| app_init_stage_set(state, stage));
-            log_init_stage(stage);
-            let config = app_config_default();
-            if !app_init_has_completed() {
-                init_state.update(|state| {
-                    state.loaded_bytes = 0;
-                    state.total_bytes = Some(0);
-                });
-                let assets_result = app_init_assets(
-                    &config,
-                    |stage| {
-                        init_state.update(|state| app_init_stage_set(state, stage));
-                        log_init_stage(stage);
-                    },
-                    |loaded, total| {
-                        init_state.update(|state| {
-                            app_init_progress_add(state, loaded);
-                            match total {
-                                Some(value) => app_init_total_add(state, value),
-                                None => app_init_total_unknown(state),
-                            }
-                        });
-                    },
-                )
-                .await;
-                if let Err(err) = assets_result {
-                    let init_err = RadrootsAppInitError::Assets(err);
-                    let _ = app_log_error_emit(&init_err);
-                    init_error.set(Some(init_err));
-                    let stage = RadrootsAppInitStage::Error;
-                    init_state.update(|state| app_init_stage_set(state, stage));
-                    log_init_stage(stage);
-                    return;
-                }
-                let stage = RadrootsAppInitStage::Storage;
-                init_state.update(|state| app_init_stage_set(state, stage));
-                log_init_stage(stage);
-            }
-            match app_init_backends(config).await {
-                Ok(value) => {
-                    let _ = app_log_buffer_flush_critical(
-                        &value.datastore,
-                        &value.config.datastore.key_maps,
-                    )
-                    .await;
-                    backends.set(Some(value));
-                    app_init_mark_completed();
-                    let stage = RadrootsAppInitStage::Ready;
-                    init_state.update(|state| app_init_stage_set(state, stage));
-                    log_init_stage(stage);
-                }
-                Err(err) => {
-                    let _ = app_log_error_emit(&err);
-                    init_error.set(Some(err));
-                    let stage = RadrootsAppInitStage::Error;
-                    init_state.update(|state| app_init_stage_set(state, stage));
-                    log_init_stage(stage);
-                }
-            }
-        })
-    });
     Effect::new(move || {
         if init_state.get().stage != RadrootsAppInitStage::Ready {
             return;
@@ -481,6 +428,76 @@ fn HomePage() -> impl IntoView {
 
 #[component]
 pub fn RadrootsApp() -> impl IntoView {
+    let backends = RwSignal::new_local(None::<RadrootsAppBackends>);
+    let init_error = RwSignal::new_local(None::<RadrootsAppInitError>);
+    let init_state = RwSignal::new_local(app_init_state_default());
+    provide_context(backends);
+    provide_context(init_error);
+    provide_context(init_state);
+    Effect::new(move || {
+        spawn_local(async move {
+            let stage = RadrootsAppInitStage::Storage;
+            init_state.update(|state| app_init_stage_set(state, stage));
+            log_init_stage(stage);
+            let config = app_config_default();
+            if !app_init_has_completed() {
+                init_state.update(|state| {
+                    state.loaded_bytes = 0;
+                    state.total_bytes = Some(0);
+                });
+                let assets_result = app_init_assets(
+                    &config,
+                    |stage| {
+                        init_state.update(|state| app_init_stage_set(state, stage));
+                        log_init_stage(stage);
+                    },
+                    |loaded, total| {
+                        init_state.update(|state| {
+                            app_init_progress_add(state, loaded);
+                            match total {
+                                Some(value) => app_init_total_add(state, value),
+                                None => app_init_total_unknown(state),
+                            }
+                        });
+                    },
+                )
+                .await;
+                if let Err(err) = assets_result {
+                    let init_err = RadrootsAppInitError::Assets(err);
+                    let _ = app_log_error_emit(&init_err);
+                    init_error.set(Some(init_err));
+                    let stage = RadrootsAppInitStage::Error;
+                    init_state.update(|state| app_init_stage_set(state, stage));
+                    log_init_stage(stage);
+                    return;
+                }
+                let stage = RadrootsAppInitStage::Storage;
+                init_state.update(|state| app_init_stage_set(state, stage));
+                log_init_stage(stage);
+            }
+            match app_init_backends(config).await {
+                Ok(value) => {
+                    let _ = app_log_buffer_flush_critical(
+                        &value.datastore,
+                        &value.config.datastore.key_maps,
+                    )
+                    .await;
+                    backends.set(Some(value));
+                    app_init_mark_completed();
+                    let stage = RadrootsAppInitStage::Ready;
+                    init_state.update(|state| app_init_stage_set(state, stage));
+                    log_init_stage(stage);
+                }
+                Err(err) => {
+                    let _ = app_log_error_emit(&err);
+                    init_error.set(Some(err));
+                    let stage = RadrootsAppInitStage::Error;
+                    init_state.update(|state| app_init_stage_set(state, stage));
+                    log_init_stage(stage);
+                }
+            }
+        })
+    });
     view! {
         <Router>
             <nav style="display:flex;gap:12px;margin-bottom:12px;">
