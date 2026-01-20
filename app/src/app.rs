@@ -23,13 +23,13 @@ use crate::{
     app_datastore_read_app_data,
     app_datastore_set_notifications_permission,
     app_health_check_all_logged,
-    AppBackends,
+    RadrootsAppBackends,
     RadrootsAppConfig,
     AppHealthCheckResult,
     AppHealthCheckStatus,
     AppHealthReport,
-    AppInitError,
-    AppInitStage,
+    RadrootsAppInitError,
+    RadrootsAppInitStage,
     AppNotifications,
     AppTangleClientStub,
     LogsPage,
@@ -62,7 +62,7 @@ fn active_key_label(value: Option<String>) -> String {
     format!("{head}...{tail}")
 }
 
-fn log_init_stage(stage: AppInitStage) {
+fn log_init_stage(stage: RadrootsAppInitStage) {
     let _ = app_log_debug_emit("log.app.init.stage", stage.as_str(), None);
 }
 
@@ -117,8 +117,8 @@ fn app_health_check_delay_ms() -> u32 {
 
 #[component]
 fn HomePage() -> impl IntoView {
-    let backends = RwSignal::new_local(None::<AppBackends>);
-    let init_error = RwSignal::new_local(None::<AppInitError>);
+    let backends = RwSignal::new_local(None::<RadrootsAppBackends>);
+    let init_error = RwSignal::new_local(None::<RadrootsAppInitError>);
     let init_state = RwSignal::new_local(app_init_state_default());
     let reset_status = RwSignal::new_local(None::<String>);
     let health_report = RwSignal::new_local(AppHealthReport::empty());
@@ -132,7 +132,7 @@ fn HomePage() -> impl IntoView {
     provide_context(init_state);
     Effect::new(move || {
         spawn_local(async move {
-            let stage = AppInitStage::Storage;
+            let stage = RadrootsAppInitStage::Storage;
             init_state.update(|state| app_init_stage_set(state, stage));
             log_init_stage(stage);
             let config = app_config_default();
@@ -159,15 +159,15 @@ fn HomePage() -> impl IntoView {
                 )
                 .await;
                 if let Err(err) = assets_result {
-                    let init_err = AppInitError::Assets(err);
+                    let init_err = RadrootsAppInitError::Assets(err);
                     let _ = app_log_error_emit(&init_err);
                     init_error.set(Some(init_err));
-                    let stage = AppInitStage::Error;
+                    let stage = RadrootsAppInitStage::Error;
                     init_state.update(|state| app_init_stage_set(state, stage));
                     log_init_stage(stage);
                     return;
                 }
-                let stage = AppInitStage::Storage;
+                let stage = RadrootsAppInitStage::Storage;
                 init_state.update(|state| app_init_stage_set(state, stage));
                 log_init_stage(stage);
             }
@@ -180,14 +180,14 @@ fn HomePage() -> impl IntoView {
                     .await;
                     backends.set(Some(value));
                     app_init_mark_completed();
-                    let stage = AppInitStage::Ready;
+                    let stage = RadrootsAppInitStage::Ready;
                     init_state.update(|state| app_init_stage_set(state, stage));
                     log_init_stage(stage);
                 }
                 Err(err) => {
                     let _ = app_log_error_emit(&err);
                     init_error.set(Some(err));
-                    let stage = AppInitStage::Error;
+                    let stage = RadrootsAppInitStage::Error;
                     init_state.update(|state| app_init_stage_set(state, stage));
                     log_init_stage(stage);
                 }
@@ -195,7 +195,7 @@ fn HomePage() -> impl IntoView {
         })
     });
     Effect::new(move || {
-        if init_state.get().stage != AppInitStage::Ready {
+        if init_state.get().stage != RadrootsAppInitStage::Ready {
             return;
         }
         if health_autorun.get() {
@@ -219,14 +219,14 @@ fn HomePage() -> impl IntoView {
     });
     });
     let status_color = move || match init_state.get().stage {
-        AppInitStage::Ready => "green",
-        AppInitStage::Error => "red",
-        AppInitStage::Storage => "orange",
-        AppInitStage::DownloadSql => "orange",
-        AppInitStage::DownloadGeo => "orange",
-        AppInitStage::Database => "orange",
-        AppInitStage::Geocoder => "orange",
-        AppInitStage::Idle => "gray",
+        RadrootsAppInitStage::Ready => "green",
+        RadrootsAppInitStage::Error => "red",
+        RadrootsAppInitStage::Storage => "orange",
+        RadrootsAppInitStage::DownloadSql => "orange",
+        RadrootsAppInitStage::DownloadGeo => "orange",
+        RadrootsAppInitStage::Database => "orange",
+        RadrootsAppInitStage::Geocoder => "orange",
+        RadrootsAppInitStage::Idle => "gray",
     };
     let reset_disabled = move || backends.with(|value| value.is_none());
     let reset_label = move || {

@@ -2,27 +2,27 @@
 
 use leptos::prelude::{use_context, LocalStorage, RwSignal};
 
-use crate::{AppBackends, AppInitError, AppInitState};
+use crate::{RadrootsAppBackends, RadrootsAppInitError, RadrootsAppInitState};
 
 #[derive(Clone)]
-pub struct AppContext {
-    pub backends: RwSignal<Option<AppBackends>, LocalStorage>,
-    pub init_error: RwSignal<Option<AppInitError>, LocalStorage>,
-    pub init_state: RwSignal<AppInitState, LocalStorage>,
+pub struct RadrootsAppContext {
+    pub backends: RwSignal<Option<RadrootsAppBackends>, LocalStorage>,
+    pub init_error: RwSignal<Option<RadrootsAppInitError>, LocalStorage>,
+    pub init_state: RwSignal<RadrootsAppInitState, LocalStorage>,
 }
 
-pub fn app_context() -> Option<AppContext> {
-    Some(AppContext {
-        backends: use_context::<RwSignal<Option<AppBackends>, LocalStorage>>()?,
-        init_error: use_context::<RwSignal<Option<AppInitError>, LocalStorage>>()?,
-        init_state: use_context::<RwSignal<AppInitState, LocalStorage>>()?,
+pub fn app_context() -> Option<RadrootsAppContext> {
+    Some(RadrootsAppContext {
+        backends: use_context::<RwSignal<Option<RadrootsAppBackends>, LocalStorage>>()?,
+        init_error: use_context::<RwSignal<Option<RadrootsAppInitError>, LocalStorage>>()?,
+        init_state: use_context::<RwSignal<RadrootsAppInitState, LocalStorage>>()?,
     })
 }
 
 #[cfg(test)]
 mod tests {
     use super::app_context;
-    use crate::{app_init_state_default, AppBackends, AppInitError, AppInitStage};
+    use crate::{app_init_state_default, RadrootsAppBackends, RadrootsAppInitError, RadrootsAppInitStage};
     use leptos::prelude::{provide_context, Owner, RwSignal, WithUntracked};
 
     #[test]
@@ -36,8 +36,8 @@ mod tests {
     fn app_context_reads_provided_signals() {
         let owner = Owner::new();
         owner.set();
-        let backends = RwSignal::new_local(None::<AppBackends>);
-        let init_error = RwSignal::new_local(None::<AppInitError>);
+        let backends = RwSignal::new_local(None::<RadrootsAppBackends>);
+        let init_error = RwSignal::new_local(None::<RadrootsAppInitError>);
         let init_state = RwSignal::new_local(app_init_state_default());
         provide_context(backends);
         provide_context(init_error);
@@ -47,7 +47,7 @@ mod tests {
         assert!(context.init_error.with_untracked(|value| value.is_none()));
         assert_eq!(
             context.init_state.with_untracked(|state| state.stage),
-            AppInitStage::Idle
+            RadrootsAppInitStage::Idle
         );
     }
 }

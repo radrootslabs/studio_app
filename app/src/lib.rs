@@ -24,7 +24,7 @@ pub use bootstrap::{
     app_datastore_write_app_data,
     app_datastore_write_config,
 };
-pub use context::{app_context, AppContext};
+pub use context::{app_context, RadrootsAppContext};
 pub use data::{RadrootsAppState, RadrootsAppSettings, RadrootsAppRole};
 pub use health::{
     app_health_check_all,
@@ -138,13 +138,13 @@ pub use init::{
     app_init_stage_set,
     app_init_total_add,
     app_init_total_unknown,
-    AppBackends,
-    AppInitAssetError,
-    AppInitAssetProgress,
-    AppInitError,
-    AppInitErrorMessage,
-    AppInitResult,
-    AppInitStage,
-    AppInitState,
+    RadrootsAppBackends,
+    RadrootsAppInitAssetError,
+    RadrootsAppInitAssetProgress,
+    RadrootsAppInitError,
+    RadrootsAppInitErrorMessage,
+    RadrootsAppInitResult,
+    RadrootsAppInitStage,
+    RadrootsAppInitState,
     APP_INIT_STORAGE_KEY,
 };

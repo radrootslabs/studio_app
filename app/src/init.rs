@@ -56,7 +56,7 @@ use std::time::Instant;
 pub const APP_INIT_STORAGE_KEY: &str = "radroots.app.init.ready";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum AppInitStage {
+pub enum RadrootsAppInitStage {
     Idle,
     Storage,
     DownloadSql,
@@ -67,62 +67,62 @@ pub enum AppInitStage {
     Error,
 }
 
-impl AppInitStage {
+impl RadrootsAppInitStage {
     pub const fn as_str(self) -> &'static str {
         match self {
-            AppInitStage::Idle => "idle",
-            AppInitStage::Storage => "storage",
-            AppInitStage::DownloadSql => "download_sql",
-            AppInitStage::DownloadGeo => "download_geo",
-            AppInitStage::Database => "database",
-            AppInitStage::Geocoder => "geocoder",
-            AppInitStage::Ready => "ready",
-            AppInitStage::Error => "error",
+            RadrootsAppInitStage::Idle => "idle",
+            RadrootsAppInitStage::Storage => "storage",
+            RadrootsAppInitStage::DownloadSql => "download_sql",
+            RadrootsAppInitStage::DownloadGeo => "download_geo",
+            RadrootsAppInitStage::Database => "database",
+            RadrootsAppInitStage::Geocoder => "geocoder",
+            RadrootsAppInitStage::Ready => "ready",
+            RadrootsAppInitStage::Error => "error",
         }
     }
 
     pub fn parse(value: &str) -> Option<Self> {
         match value {
-            "idle" => Some(AppInitStage::Idle),
-            "storage" => Some(AppInitStage::Storage),
-            "download_sql" => Some(AppInitStage::DownloadSql),
-            "download_geo" => Some(AppInitStage::DownloadGeo),
-            "database" => Some(AppInitStage::Database),
-            "geocoder" => Some(AppInitStage::Geocoder),
-            "ready" => Some(AppInitStage::Ready),
-            "error" => Some(AppInitStage::Error),
+            "idle" => Some(RadrootsAppInitStage::Idle),
+            "storage" => Some(RadrootsAppInitStage::Storage),
+            "download_sql" => Some(RadrootsAppInitStage::DownloadSql),
+            "download_geo" => Some(RadrootsAppInitStage::DownloadGeo),
+            "database" => Some(RadrootsAppInitStage::Database),
+            "geocoder" => Some(RadrootsAppInitStage::Geocoder),
+            "ready" => Some(RadrootsAppInitStage::Ready),
+            "error" => Some(RadrootsAppInitStage::Error),
             _ => None,
         }
     }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct AppInitState {
-    pub stage: AppInitStage,
+pub struct RadrootsAppInitState {
+    pub stage: RadrootsAppInitStage,
     pub loaded_bytes: u64,
     pub total_bytes: Option<u64>,
 }
 
-pub const fn app_init_state_default() -> AppInitState {
-    AppInitState {
-        stage: AppInitStage::Idle,
+pub const fn app_init_state_default() -> RadrootsAppInitState {
+    RadrootsAppInitState {
+        stage: RadrootsAppInitStage::Idle,
         loaded_bytes: 0,
         total_bytes: Some(0),
     }
 }
 
-pub fn app_init_stage_set(state: &mut AppInitState, stage: AppInitStage) {
+pub fn app_init_stage_set(state: &mut RadrootsAppInitState, stage: RadrootsAppInitStage) {
     state.stage = stage;
 }
 
-pub fn app_init_progress_add(state: &mut AppInitState, bytes: u64) {
+pub fn app_init_progress_add(state: &mut RadrootsAppInitState, bytes: u64) {
     if bytes == 0 {
         return;
     }
     state.loaded_bytes = state.loaded_bytes.saturating_add(bytes);
 }
 
-pub fn app_init_total_add(state: &mut AppInitState, bytes: u64) {
+pub fn app_init_total_add(state: &mut RadrootsAppInitState, bytes: u64) {
     if bytes == 0 {
         return;
     }
@@ -132,7 +132,7 @@ pub fn app_init_total_add(state: &mut AppInitState, bytes: u64) {
     state.total_bytes = Some(total.saturating_add(bytes));
 }
 
-pub fn app_init_total_unknown(state: &mut AppInitState) {
+pub fn app_init_total_unknown(state: &mut RadrootsAppInitState) {
     state.total_bytes = None;
 }
 
@@ -162,12 +162,12 @@ fn app_init_timing_context(label: &str, elapsed_ms: u64) -> String {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct AppInitAssetProgress {
+pub struct RadrootsAppInitAssetProgress {
     pub loaded_bytes: u64,
     pub total_bytes: Option<u64>,
 }
 
-impl AppInitAssetProgress {
+impl RadrootsAppInitAssetProgress {
     pub const fn empty() -> Self {
         Self {
             loaded_bytes: 0,
@@ -177,60 +177,60 @@ impl AppInitAssetProgress {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum AppInitAssetError {
+pub enum RadrootsAppInitAssetError {
     MissingUrl,
     FetchUnavailable,
     FetchFailed,
 }
 
-impl AppInitAssetError {
+impl RadrootsAppInitAssetError {
     pub const fn message(self) -> &'static str {
         match self {
-            AppInitAssetError::MissingUrl => "error.app.init.asset_missing_url",
-            AppInitAssetError::FetchUnavailable => "error.app.init.asset_unavailable",
-            AppInitAssetError::FetchFailed => "error.app.init.asset_fetch_failed",
+            RadrootsAppInitAssetError::MissingUrl => "error.app.init.asset_missing_url",
+            RadrootsAppInitAssetError::FetchUnavailable => "error.app.init.asset_unavailable",
+            RadrootsAppInitAssetError::FetchFailed => "error.app.init.asset_fetch_failed",
         }
     }
 }
 
-impl fmt::Display for AppInitAssetError {
+impl fmt::Display for RadrootsAppInitAssetError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(self.message())
     }
 }
 
-impl std::error::Error for AppInitAssetError {}
+impl std::error::Error for RadrootsAppInitAssetError {}
 
 #[cfg(target_arch = "wasm32")]
 pub async fn app_init_fetch_asset<F>(
     url: &str,
     mut on_progress: F,
-) -> Result<AppInitAssetProgress, AppInitAssetError>
+) -> Result<RadrootsAppInitAssetProgress, RadrootsAppInitAssetError>
 where
     F: FnMut(u64, Option<u64>),
 {
     if url.is_empty() {
-        return Err(AppInitAssetError::MissingUrl);
+        return Err(RadrootsAppInitAssetError::MissingUrl);
     }
     let response_value = JsFuture::from(window().fetch_with_str(url))
         .await
-        .map_err(|_| AppInitAssetError::FetchFailed)?;
+        .map_err(|_| RadrootsAppInitAssetError::FetchFailed)?;
     let response: Response = response_value
         .dyn_into()
-        .map_err(|_| AppInitAssetError::FetchFailed)?;
+        .map_err(|_| RadrootsAppInitAssetError::FetchFailed)?;
     let total_bytes = response
         .headers()
         .get("content-length")
         .ok()
         .flatten()
         .and_then(|value| value.parse::<u64>().ok());
-    let buffer_value = JsFuture::from(response.array_buffer().map_err(|_| AppInitAssetError::FetchFailed)?)
+    let buffer_value = JsFuture::from(response.array_buffer().map_err(|_| RadrootsAppInitAssetError::FetchFailed)?)
         .await
-        .map_err(|_| AppInitAssetError::FetchFailed)?;
+        .map_err(|_| RadrootsAppInitAssetError::FetchFailed)?;
     let buffer = Uint8Array::new(&buffer_value);
     let loaded_bytes = buffer.length() as u64;
     on_progress(loaded_bytes, total_bytes);
-    Ok(AppInitAssetProgress {
+    Ok(RadrootsAppInitAssetProgress {
         loaded_bytes,
         total_bytes,
     })
@@ -240,68 +240,68 @@ where
 pub async fn app_init_fetch_asset<F>(
     url: &str,
     _on_progress: F,
-) -> Result<AppInitAssetProgress, AppInitAssetError>
+) -> Result<RadrootsAppInitAssetProgress, RadrootsAppInitAssetError>
 where
     F: FnMut(u64, Option<u64>),
 {
     if url.is_empty() {
-        return Err(AppInitAssetError::MissingUrl);
+        return Err(RadrootsAppInitAssetError::MissingUrl);
     }
-    Err(AppInitAssetError::FetchUnavailable)
+    Err(RadrootsAppInitAssetError::FetchUnavailable)
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum AppInitError {
+pub enum RadrootsAppInitError {
     Idb(RadrootsClientIdbStoreError),
     Datastore(RadrootsClientDatastoreError),
     Keystore(RadrootsClientKeystoreError),
     Config(RadrootsAppConfigError),
-    Assets(AppInitAssetError),
+    Assets(RadrootsAppInitAssetError),
 }
 
-pub type AppInitErrorMessage = &'static str;
+pub type RadrootsAppInitErrorMessage = &'static str;
 
-impl AppInitError {
-    pub const fn message(&self) -> AppInitErrorMessage {
+impl RadrootsAppInitError {
+    pub const fn message(&self) -> RadrootsAppInitErrorMessage {
         match self {
-            AppInitError::Idb(_) => "error.app.init.idb",
-            AppInitError::Datastore(_) => "error.app.init.datastore",
-            AppInitError::Keystore(_) => "error.app.init.keystore",
-            AppInitError::Config(_) => "error.app.init.config",
-            AppInitError::Assets(_) => "error.app.init.assets",
+            RadrootsAppInitError::Idb(_) => "error.app.init.idb",
+            RadrootsAppInitError::Datastore(_) => "error.app.init.datastore",
+            RadrootsAppInitError::Keystore(_) => "error.app.init.keystore",
+            RadrootsAppInitError::Config(_) => "error.app.init.config",
+            RadrootsAppInitError::Assets(_) => "error.app.init.assets",
         }
     }
 }
 
-impl fmt::Display for AppInitError {
+impl fmt::Display for RadrootsAppInitError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(self.message())
     }
 }
 
-impl std::error::Error for AppInitError {}
+impl std::error::Error for RadrootsAppInitError {}
 
-pub struct AppBackends {
+pub struct RadrootsAppBackends {
     pub config: RadrootsAppConfig,
     pub datastore: RadrootsClientWebDatastore,
     pub nostr_keystore: RadrootsClientWebKeystoreNostr,
 }
 
-pub type AppInitResult<T> = Result<T, AppInitError>;
+pub type RadrootsAppInitResult<T> = Result<T, RadrootsAppInitError>;
 
 pub async fn app_init_assets<F, G>(
     config: &RadrootsAppConfig,
     mut on_stage: F,
     mut on_progress: G,
-) -> Result<(), AppInitAssetError>
+) -> Result<(), RadrootsAppInitAssetError>
 where
-    F: FnMut(AppInitStage),
+    F: FnMut(RadrootsAppInitStage),
     G: FnMut(u64, Option<u64>),
 {
     let _ = app_log_debug_emit("log.app.init.assets", "start", None);
     if let Some(url) = app_assets_sql_wasm_url(config).filter(|value| !value.is_empty()) {
         let _ = app_log_debug_emit("log.app.init.assets.sql", "download_start", Some(url.to_string()));
-        on_stage(AppInitStage::DownloadSql);
+        on_stage(RadrootsAppInitStage::DownloadSql);
         app_init_fetch_asset(url, |loaded, total| {
             on_progress(loaded, total);
         })
@@ -310,7 +310,7 @@ where
     }
     if let Some(url) = app_assets_geocoder_db_url(config).filter(|value| !value.is_empty()) {
         let _ = app_log_debug_emit("log.app.init.assets.geo", "download_start", Some(url.to_string()));
-        on_stage(AppInitStage::DownloadGeo);
+        on_stage(RadrootsAppInitStage::DownloadGeo);
         app_init_fetch_asset(url, |loaded, total| {
             on_progress(loaded, total);
         })
@@ -353,13 +353,13 @@ pub async fn app_init_reset<T: RadrootsClientDatastore, K: RadrootsClientKeystor
     datastore: Option<&T>,
     key_maps: Option<&RadrootsAppKeyMapConfig>,
     keystore: Option<&K>,
-) -> AppInitResult<()> {
+) -> RadrootsAppInitResult<()> {
     let _ = app_log_debug_emit("log.app.init.reset", "start", None);
     if let (Some(datastore), Some(key_maps)) = (datastore, key_maps) {
         app_datastore_clear_bootstrap(datastore, key_maps).await?;
     }
     if let Some(keystore) = keystore {
-        keystore.reset().await.map_err(AppInitError::Keystore)?;
+        keystore.reset().await.map_err(RadrootsAppInitError::Keystore)?;
     }
     #[cfg(target_arch = "wasm32")]
     {
@@ -372,13 +372,13 @@ pub async fn app_init_reset<T: RadrootsClientDatastore, K: RadrootsClientKeystor
     Ok(())
 }
 
-pub async fn app_init_backends(config: RadrootsAppConfig) -> AppInitResult<AppBackends> {
+pub async fn app_init_backends(config: RadrootsAppConfig) -> RadrootsAppInitResult<RadrootsAppBackends> {
     let _ = app_log_debug_emit("log.app.init.backends", "start", None);
-    config.validate().map_err(AppInitError::Config)?;
+    config.validate().map_err(RadrootsAppInitError::Config)?;
     let idb_start = app_init_timer_start();
     idb_store_bootstrap(RADROOTS_IDB_DATABASE, None)
         .await
-        .map_err(AppInitError::Idb)?;
+        .map_err(RadrootsAppInitError::Idb)?;
     let idb_ms = app_init_elapsed_ms(idb_start);
     let _ = app_log_debug_emit(
         "log.app.init.backends",
@@ -389,7 +389,7 @@ pub async fn app_init_backends(config: RadrootsAppConfig) -> AppInitResult<AppBa
     datastore
         .init()
         .await
-        .map_err(AppInitError::Datastore)?;
+        .map_err(RadrootsAppInitError::Datastore)?;
     let _ = app_log_debug_emit("log.app.init.backends", "datastore_ready", None);
     let has_config = app_datastore_has_config(&datastore, &config.datastore.key_maps).await?;
     if !has_config {
@@ -404,7 +404,7 @@ pub async fn app_init_backends(config: RadrootsAppConfig) -> AppInitResult<AppBa
     let nostr_public_key = app_keystore_nostr_ensure_key(&nostr_keystore)
         .await
         .map_err(|err| match err {
-            AppKeystoreError::Keystore(inner) => AppInitError::Keystore(inner),
+            AppKeystoreError::Keystore(inner) => RadrootsAppInitError::Keystore(inner),
         })?;
     let key_ms = app_init_elapsed_ms(key_start);
     let _ = app_log_debug_emit(
@@ -413,23 +413,23 @@ pub async fn app_init_backends(config: RadrootsAppConfig) -> AppInitResult<AppBa
         Some(app_init_timing_context("elapsed", key_ms)),
     );
     let nostr_key =
-        app_datastore_key_nostr_key(&config.datastore.key_maps).map_err(AppInitError::Config)?;
+        app_datastore_key_nostr_key(&config.datastore.key_maps).map_err(RadrootsAppInitError::Config)?;
     match datastore.get(nostr_key).await {
         Ok(existing) => {
             if existing != nostr_public_key {
                 let _ = datastore
                     .set(nostr_key, &nostr_public_key)
                     .await
-                    .map_err(AppInitError::Datastore)?;
+                    .map_err(RadrootsAppInitError::Datastore)?;
             }
         }
         Err(RadrootsClientDatastoreError::NoResult) => {
             let _ = datastore
                 .set(nostr_key, &nostr_public_key)
                 .await
-                .map_err(AppInitError::Datastore)?;
+                .map_err(RadrootsAppInitError::Datastore)?;
         }
-        Err(err) => return Err(AppInitError::Datastore(err)),
+        Err(err) => return Err(RadrootsAppInitError::Datastore(err)),
     }
     let _ = app_log_debug_emit("log.app.init.backends", "nostr_key_synced", None);
     let has_app_data = app_datastore_has_app_data(&datastore, &config.datastore.key_maps).await?;
@@ -446,7 +446,7 @@ pub async fn app_init_backends(config: RadrootsAppConfig) -> AppInitResult<AppBa
                 .await?;
     }
     let _ = app_log_debug_emit("log.app.init.backends", "app_data_ready", None);
-    Ok(AppBackends {
+    Ok(RadrootsAppBackends {
         config,
         datastore,
         nostr_keystore,
@@ -464,10 +464,10 @@ mod tests {
         app_init_stage_set,
         app_init_total_add,
         app_init_total_unknown,
-        AppInitError,
-        AppInitErrorMessage,
-        AppInitStage,
-        AppInitAssetError,
+        RadrootsAppInitError,
+        RadrootsAppInitErrorMessage,
+        RadrootsAppInitStage,
+        RadrootsAppInitAssetError,
     };
     use crate::{app_config_default, RadrootsAppConfig};
     use radroots_studio_app_core::datastore::RadrootsClientDatastoreError;
@@ -482,25 +482,25 @@ mod tests {
 
     #[test]
     fn app_init_error_messages_match_spec() {
-        let cases: &[(AppInitError, AppInitErrorMessage)] = &[
+        let cases: &[(RadrootsAppInitError, RadrootsAppInitErrorMessage)] = &[
             (
-                AppInitError::Idb(RadrootsClientIdbStoreError::IdbUndefined),
+                RadrootsAppInitError::Idb(RadrootsClientIdbStoreError::IdbUndefined),
                 "error.app.init.idb",
             ),
             (
-                AppInitError::Datastore(RadrootsClientDatastoreError::IdbUndefined),
+                RadrootsAppInitError::Datastore(RadrootsClientDatastoreError::IdbUndefined),
                 "error.app.init.datastore",
             ),
             (
-                AppInitError::Keystore(RadrootsClientKeystoreError::IdbUndefined),
+                RadrootsAppInitError::Keystore(RadrootsClientKeystoreError::IdbUndefined),
                 "error.app.init.keystore",
             ),
             (
-                AppInitError::Config(RadrootsAppConfigError::MissingKeyMap("nostr_key")),
+                RadrootsAppInitError::Config(RadrootsAppConfigError::MissingKeyMap("nostr_key")),
                 "error.app.init.config",
             ),
             (
-                AppInitError::Assets(AppInitAssetError::FetchUnavailable),
+                RadrootsAppInitError::Assets(RadrootsAppInitAssetError::FetchUnavailable),
                 "error.app.init.assets",
             ),
         ];
@@ -518,7 +518,7 @@ mod tests {
         };
         assert_eq!(
             err,
-            AppInitError::Idb(RadrootsClientIdbStoreError::IdbUndefined)
+            RadrootsAppInitError::Idb(RadrootsClientIdbStoreError::IdbUndefined)
         );
     }
 
@@ -582,22 +582,22 @@ mod tests {
         .expect_err("keystore reset should error on native");
         assert_eq!(
             err,
-            AppInitError::Keystore(RadrootsClientKeystoreError::IdbUndefined)
+            RadrootsAppInitError::Keystore(RadrootsClientKeystoreError::IdbUndefined)
         );
     }
 
     #[test]
     fn app_init_stage_roundtrip() {
-        let stage = AppInitStage::Ready;
+        let stage = RadrootsAppInitStage::Ready;
         assert_eq!(stage.as_str(), "ready");
-        assert_eq!(AppInitStage::parse("ready"), Some(stage));
-        assert_eq!(AppInitStage::parse("unknown"), None);
+        assert_eq!(RadrootsAppInitStage::parse("ready"), Some(stage));
+        assert_eq!(RadrootsAppInitStage::parse("unknown"), None);
     }
 
     #[test]
     fn app_init_state_defaults_match_spec() {
         let state = app_init_state_default();
-        assert_eq!(state.stage, AppInitStage::Idle);
+        assert_eq!(state.stage, RadrootsAppInitStage::Idle);
         assert_eq!(state.loaded_bytes, 0);
         assert_eq!(state.total_bytes, Some(0));
     }
@@ -605,8 +605,8 @@ mod tests {
     #[test]
     fn app_init_progress_helpers_update_state() {
         let mut state = app_init_state_default();
-        app_init_stage_set(&mut state, AppInitStage::Storage);
-        assert_eq!(state.stage, AppInitStage::Storage);
+        app_init_stage_set(&mut state, RadrootsAppInitStage::Storage);
+        assert_eq!(state.stage, RadrootsAppInitStage::Storage);
         app_init_progress_add(&mut state, 0);
         assert_eq!(state.loaded_bytes, 0);
         app_init_progress_add(&mut state, 5);
@@ -644,6 +644,6 @@ mod tests {
             |_loaded, _total| {},
         ))
         .expect_err("asset fetch should error on native");
-        assert_eq!(result, AppInitAssetError::FetchUnavailable);
+        assert_eq!(result, RadrootsAppInitAssetError::FetchUnavailable);
     }
 }

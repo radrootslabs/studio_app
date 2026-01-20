@@ -8,8 +8,8 @@ use crate::{
     app_log_debug_emit,
     RadrootsAppState,
     RadrootsAppSettings,
-    AppInitError,
-    AppInitResult,
+    RadrootsAppInitError,
+    RadrootsAppInitResult,
     RadrootsAppKeyMapConfig,
 };
 
@@ -17,12 +17,12 @@ pub async fn app_datastore_write_config<T: RadrootsClientDatastore>(
     datastore: &T,
     key_maps: &RadrootsAppKeyMapConfig,
     data: &RadrootsAppSettings,
-) -> AppInitResult<RadrootsAppSettings> {
-    let key = app_datastore_obj_key_cfg_data(key_maps).map_err(AppInitError::Config)?;
+) -> RadrootsAppInitResult<RadrootsAppSettings> {
+    let key = app_datastore_obj_key_cfg_data(key_maps).map_err(RadrootsAppInitError::Config)?;
     let value = datastore
         .set_obj(key, data)
         .await
-        .map_err(AppInitError::Datastore)?;
+        .map_err(RadrootsAppInitError::Datastore)?;
     let _ = app_log_debug_emit("log.app.bootstrap.config", "write", Some(key.to_string()));
     Ok(value)
 }
@@ -30,12 +30,12 @@ pub async fn app_datastore_write_config<T: RadrootsClientDatastore>(
 pub async fn app_datastore_has_config<T: RadrootsClientDatastore>(
     datastore: &T,
     key_maps: &RadrootsAppKeyMapConfig,
-) -> AppInitResult<bool> {
-    let key = app_datastore_obj_key_cfg_data(key_maps).map_err(AppInitError::Config)?;
+) -> RadrootsAppInitResult<bool> {
+    let key = app_datastore_obj_key_cfg_data(key_maps).map_err(RadrootsAppInitError::Config)?;
     match datastore.get_obj::<RadrootsAppSettings>(key).await {
         Ok(_) => Ok(true),
         Err(RadrootsClientDatastoreError::NoResult) => Ok(false),
-        Err(err) => Err(AppInitError::Datastore(err)),
+        Err(err) => Err(RadrootsAppInitError::Datastore(err)),
     }
 }
 
@@ -43,12 +43,12 @@ pub async fn app_datastore_write_app_data<T: RadrootsClientDatastore>(
     datastore: &T,
     key_maps: &RadrootsAppKeyMapConfig,
     data: &RadrootsAppState,
-) -> AppInitResult<RadrootsAppState> {
-    let key = app_datastore_obj_key_app_data(key_maps).map_err(AppInitError::Config)?;
+) -> RadrootsAppInitResult<RadrootsAppState> {
+    let key = app_datastore_obj_key_app_data(key_maps).map_err(RadrootsAppInitError::Config)?;
     let value = datastore
         .set_obj(key, data)
         .await
-        .map_err(AppInitError::Datastore)?;
+        .map_err(RadrootsAppInitError::Datastore)?;
     let _ = app_log_debug_emit("log.app.bootstrap.app_data", "write", Some(key.to_string()));
     Ok(value)
 }
@@ -56,12 +56,12 @@ pub async fn app_datastore_write_app_data<T: RadrootsClientDatastore>(
 pub async fn app_datastore_read_app_data<T: RadrootsClientDatastore>(
     datastore: &T,
     key_maps: &RadrootsAppKeyMapConfig,
-) -> AppInitResult<RadrootsAppState> {
-    let key = app_datastore_obj_key_app_data(key_maps).map_err(AppInitError::Config)?;
+) -> RadrootsAppInitResult<RadrootsAppState> {
+    let key = app_datastore_obj_key_app_data(key_maps).map_err(RadrootsAppInitError::Config)?;
     let value = datastore
         .get_obj::<RadrootsAppState>(key)
         .await
-        .map_err(AppInitError::Datastore)?;
+        .map_err(RadrootsAppInitError::Datastore)?;
     let _ = app_log_debug_emit("log.app.bootstrap.app_data", "read", Some(key.to_string()));
     Ok(value)
 }
@@ -69,29 +69,29 @@ pub async fn app_datastore_read_app_data<T: RadrootsClientDatastore>(
 pub async fn app_datastore_has_app_data<T: RadrootsClientDatastore>(
     datastore: &T,
     key_maps: &RadrootsAppKeyMapConfig,
-) -> AppInitResult<bool> {
-    let key = app_datastore_obj_key_app_data(key_maps).map_err(AppInitError::Config)?;
+) -> RadrootsAppInitResult<bool> {
+    let key = app_datastore_obj_key_app_data(key_maps).map_err(RadrootsAppInitError::Config)?;
     match datastore.get_obj::<RadrootsAppState>(key).await {
         Ok(_) => Ok(true),
         Err(RadrootsClientDatastoreError::NoResult) => Ok(false),
-        Err(err) => Err(AppInitError::Datastore(err)),
+        Err(err) => Err(RadrootsAppInitError::Datastore(err)),
     }
 }
 
 pub async fn app_datastore_clear_bootstrap<T: RadrootsClientDatastore>(
     datastore: &T,
     key_maps: &RadrootsAppKeyMapConfig,
-) -> AppInitResult<()> {
-    let cfg_key = app_datastore_obj_key_cfg_data(key_maps).map_err(AppInitError::Config)?;
+) -> RadrootsAppInitResult<()> {
+    let cfg_key = app_datastore_obj_key_cfg_data(key_maps).map_err(RadrootsAppInitError::Config)?;
     datastore
         .del_obj(cfg_key)
         .await
-        .map_err(AppInitError::Datastore)?;
-    let app_key = app_datastore_obj_key_app_data(key_maps).map_err(AppInitError::Config)?;
+        .map_err(RadrootsAppInitError::Datastore)?;
+    let app_key = app_datastore_obj_key_app_data(key_maps).map_err(RadrootsAppInitError::Config)?;
     datastore
         .del_obj(app_key)
         .await
-        .map_err(AppInitError::Datastore)?;
+        .map_err(RadrootsAppInitError::Datastore)?;
     let _ = app_log_debug_emit("log.app.bootstrap.reset", "clear", None);
     Ok(())
 }
@@ -100,7 +100,7 @@ pub async fn app_datastore_set_notifications_permission<T: RadrootsClientDatasto
     datastore: &T,
     key_maps: &RadrootsAppKeyMapConfig,
     permission: &str,
-) -> AppInitResult<RadrootsAppState> {
+) -> RadrootsAppInitResult<RadrootsAppState> {
     let mut data = match app_datastore_has_app_data(datastore, key_maps).await? {
         true => app_datastore_read_app_data(datastore, key_maps).await?,
         false => RadrootsAppState::default(),
@@ -121,7 +121,7 @@ mod tests {
         app_datastore_write_app_data,
         app_datastore_write_config,
     };
-    use crate::{app_key_maps_default, RadrootsAppState, RadrootsAppSettings, AppInitError};
+    use crate::{app_key_maps_default, RadrootsAppState, RadrootsAppSettings, RadrootsAppInitError};
     use radroots_studio_app_core::datastore::{RadrootsClientDatastoreError, RadrootsClientWebDatastore};
 
     #[test]
@@ -135,7 +135,7 @@ mod tests {
             &data,
         ))
         .expect_err("idb undefined");
-        assert_eq!(err, AppInitError::Datastore(RadrootsClientDatastoreError::IdbUndefined));
+        assert_eq!(err, RadrootsAppInitError::Datastore(RadrootsClientDatastoreError::IdbUndefined));
     }
 
     #[test]
@@ -149,7 +149,7 @@ mod tests {
             &data,
         ))
         .expect_err("idb undefined");
-        assert_eq!(err, AppInitError::Datastore(RadrootsClientDatastoreError::IdbUndefined));
+        assert_eq!(err, RadrootsAppInitError::Datastore(RadrootsClientDatastoreError::IdbUndefined));
     }
 
     #[test]
@@ -161,7 +161,7 @@ mod tests {
             &key_maps,
         ))
         .expect_err("idb undefined");
-        assert_eq!(err, AppInitError::Datastore(RadrootsClientDatastoreError::IdbUndefined));
+        assert_eq!(err, RadrootsAppInitError::Datastore(RadrootsClientDatastoreError::IdbUndefined));
     }
 
     #[test]
@@ -173,7 +173,7 @@ mod tests {
             &key_maps,
         ))
         .expect_err("idb undefined");
-        assert_eq!(err, AppInitError::Datastore(RadrootsClientDatastoreError::IdbUndefined));
+        assert_eq!(err, RadrootsAppInitError::Datastore(RadrootsClientDatastoreError::IdbUndefined));
     }
 
     #[test]
@@ -182,7 +182,7 @@ mod tests {
         let key_maps = app_key_maps_default();
         let err = futures::executor::block_on(app_datastore_has_config(&datastore, &key_maps))
             .expect_err("idb undefined");
-        assert_eq!(err, AppInitError::Datastore(RadrootsClientDatastoreError::IdbUndefined));
+        assert_eq!(err, RadrootsAppInitError::Datastore(RadrootsClientDatastoreError::IdbUndefined));
     }
 
     #[test]
@@ -191,7 +191,7 @@ mod tests {
         let key_maps = app_key_maps_default();
         let err = futures::executor::block_on(app_datastore_has_app_data(&datastore, &key_maps))
             .expect_err("idb undefined");
-        assert_eq!(err, AppInitError::Datastore(RadrootsClientDatastoreError::IdbUndefined));
+        assert_eq!(err, RadrootsAppInitError::Datastore(RadrootsClientDatastoreError::IdbUndefined));
     }
 
     #[test]
@@ -204,6 +204,6 @@ mod tests {
             "granted",
         ))
         .expect_err("idb undefined");
-        assert_eq!(err, AppInitError::Datastore(RadrootsClientDatastoreError::IdbUndefined));
+        assert_eq!(err, RadrootsAppInitError::Datastore(RadrootsClientDatastoreError::IdbUndefined));
     }
 }

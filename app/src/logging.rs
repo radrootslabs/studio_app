@@ -23,8 +23,8 @@ use radroots_studio_app_core::datastore::{RadrootsClientDatastore, RadrootsClien
 use crate::{
     app_datastore_param_key,
     RadrootsAppConfigError,
-    AppInitAssetError,
-    AppInitError,
+    RadrootsAppInitAssetError,
+    RadrootsAppInitError,
     AppKeystoreError,
     RadrootsAppKeyMapConfig,
     AppNotificationsError,
@@ -108,7 +108,7 @@ pub trait AppLoggableError: std::fmt::Display {
     }
 }
 
-impl AppLoggableError for AppInitAssetError {
+impl AppLoggableError for RadrootsAppInitAssetError {
     fn log_code(&self) -> &'static str {
         self.message()
     }
@@ -129,18 +129,18 @@ impl AppLoggableError for RadrootsAppConfigError {
     }
 }
 
-impl AppLoggableError for AppInitError {
+impl AppLoggableError for RadrootsAppInitError {
     fn log_code(&self) -> &'static str {
         self.message()
     }
 
     fn log_context(&self) -> Option<String> {
         match self {
-            AppInitError::Idb(err) => Some(err.to_string()),
-            AppInitError::Datastore(err) => Some(err.to_string()),
-            AppInitError::Keystore(err) => Some(err.to_string()),
-            AppInitError::Config(err) => err.log_context().or_else(|| Some(err.message().to_string())),
-            AppInitError::Assets(err) => Some(err.message().to_string()),
+            RadrootsAppInitError::Idb(err) => Some(err.to_string()),
+            RadrootsAppInitError::Datastore(err) => Some(err.to_string()),
+            RadrootsAppInitError::Keystore(err) => Some(err.to_string()),
+            RadrootsAppInitError::Config(err) => err.log_context().or_else(|| Some(err.message().to_string())),
+            RadrootsAppInitError::Assets(err) => Some(err.message().to_string()),
         }
     }
 }
