@@ -94,6 +94,7 @@ use crate::{
     AppTangleClient,
     AppKeyMapConfig,
 };
+use radroots_studio_app_core::notifications::RadrootsClientNotificationsPermission;
 use radroots_studio_app_core::datastore::{RadrootsClientDatastore, RadrootsClientDatastoreError};
 use radroots_studio_app_core::keystore::{RadrootsClientKeystoreError, RadrootsClientKeystoreNostr};
 
@@ -177,21 +178,28 @@ pub async fn app_health_check_notifications(
     notifications: &AppNotifications,
 ) -> AppHealthCheckResult {
     match notifications.permission().await {
-        Ok(permission) => {
-            if permission == radroots_studio_app_core::notifications::RadrootsClientNotificationsPermission::Granted {
-                AppHealthCheckResult::ok()
-            } else {
-                AppHealthCheckResult::error(permission.as_str())
-            }
-        }
+        Ok(permission) => app_health_check_notifications_permission(permission),
         Err(err) => AppHealthCheckResult::error(err.to_string()),
+    }
+}
+
+fn app_health_check_notifications_permission(
+    permission: RadrootsClientNotificationsPermission,
+) -> AppHealthCheckResult {
+    match permission {
+        RadrootsClientNotificationsPermission::Granted => AppHealthCheckResult::ok(),
+        RadrootsClientNotificationsPermission::Denied
+        | RadrootsClientNotificationsPermission::Default => AppHealthCheckResult::skipped(),
+        RadrootsClientNotificationsPermission::Unavailable => {
+            AppHealthCheckResult::error(permission.as_str())
+        }
     }
 }
 
 pub fn app_health_check_tangle<T: AppTangleClient>(tangle: &T) -> AppHealthCheckResult {
     match tangle.init() {
         Ok(()) => AppHealthCheckResult::ok(),
-        Err(err) => AppHealthCheckResult::error(err.to_string()),
+        Err(crate::AppTangleError::NotImplemented) => AppHealthCheckResult::skipped(),
     }
 }
 
@@ -308,6 +316,7 @@ mod tests {
         app_health_check_datastore_roundtrip,
         app_health_check_keystore_access,
         app_health_check_notifications,
+        app_health_check_notifications_permission,
         app_health_check_tangle,
         log_health_context,
         AppHealthCheckResult,
@@ -331,6 +340,7 @@ mod tests {
         RadrootsClientKeystoreResult,
         RadrootsClientWebKeystoreNostr,
     };
+    use radroots_studio_app_core::notifications::RadrootsClientNotificationsPermission;
     use radroots_studio_app_core::idb::IDB_CONFIG_DATASTORE;
     use radroots_studio_app_core::backup::RadrootsClientBackupDatastorePayload;
     use radroots_studio_app_core::idb::RadrootsClientIdbConfig;
@@ -689,7 +699,7 @@ mod tests {
         assert_eq!(report.bootstrap_app_data.status, AppHealthCheckStatus::Error);
         assert_eq!(report.app_data_active_key.status, AppHealthCheckStatus::Error);
         assert_eq!(report.notifications.status, AppHealthCheckStatus::Error);
-        assert_eq!(report.tangle.status, AppHealthCheckStatus::Error);
+        assert_eq!(report.tangle.status, AppHealthCheckStatus::Skipped);
         assert_eq!(report.datastore_roundtrip.status, AppHealthCheckStatus::Error);
         assert_eq!(report.keystore.status, AppHealthCheckStatus::Error);
     }
@@ -704,11 +714,21 @@ mod tests {
     }
 
     #[test]
+    fn health_check_notifications_skips_default_and_denied() {
+        let default_result =
+            app_health_check_notifications_permission(RadrootsClientNotificationsPermission::Default);
+        assert_eq!(default_result.status, AppHealthCheckStatus::Skipped);
+        let denied_result =
+            app_health_check_notifications_permission(RadrootsClientNotificationsPermission::Denied);
+        assert_eq!(denied_result.status, AppHealthCheckStatus::Skipped);
+    }
+
+    #[test]
     fn health_check_tangle_reports_not_implemented() {
         let tangle = crate::AppTangleClientStub::new();
         let result = app_health_check_tangle(&tangle);
-        assert_eq!(result.status, AppHealthCheckStatus::Error);
-        assert_eq!(result.message.as_deref(), Some("error.app.tangle.not_implemented"));
+        assert_eq!(result.status, AppHealthCheckStatus::Skipped);
+        assert!(result.message.is_none());
     }
 
     struct FlushDatastore {
