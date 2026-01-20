@@ -1,6 +1,7 @@
 #![forbid(unsafe_code)]
 
 use std::fmt;
+use std::time::Instant;
 
 use radroots_studio_app_core::datastore::{
     RadrootsClientDatastore,
@@ -130,6 +131,14 @@ pub fn app_init_total_add(state: &mut AppInitState, bytes: u64) {
 
 pub fn app_init_total_unknown(state: &mut AppInitState) {
     state.total_bytes = None;
+}
+
+fn app_init_elapsed_ms(start: Instant) -> u64 {
+    start.elapsed().as_millis() as u64
+}
+
+fn app_init_timing_context(label: &str, elapsed_ms: u64) -> String {
+    format!("{label}_ms={elapsed_ms}")
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -346,10 +355,16 @@ pub async fn app_init_reset<T: RadrootsClientDatastore, K: RadrootsClientKeystor
 pub async fn app_init_backends(config: AppConfig) -> AppInitResult<AppBackends> {
     let _ = app_log_debug_emit("log.app.init.backends", "start", None);
     config.validate().map_err(AppInitError::Config)?;
+    let idb_start = Instant::now();
     idb_store_bootstrap(RADROOTS_IDB_DATABASE, None)
         .await
         .map_err(AppInitError::Idb)?;
-    let _ = app_log_debug_emit("log.app.init.backends", "idb_bootstrap", None);
+    let idb_ms = app_init_elapsed_ms(idb_start);
+    let _ = app_log_debug_emit(
+        "log.app.init.backends",
+        "idb_bootstrap",
+        Some(app_init_timing_context("elapsed", idb_ms)),
+    );
     let datastore = RadrootsClientWebDatastore::new(Some(config.datastore.idb_config));
     datastore
         .init()
@@ -365,12 +380,18 @@ pub async fn app_init_backends(config: AppConfig) -> AppInitResult<AppBackends> 
     }
     let _ = app_log_debug_emit("log.app.init.backends", "config_ready", None);
     let nostr_keystore = RadrootsClientWebKeystoreNostr::new(Some(config.keystore.nostr_store));
+    let key_start = Instant::now();
     let nostr_public_key = app_keystore_nostr_ensure_key(&nostr_keystore)
         .await
         .map_err(|err| match err {
             AppKeystoreError::Keystore(inner) => AppInitError::Keystore(inner),
         })?;
-    let _ = app_log_debug_emit("log.app.init.backends", "nostr_key_ready", None);
+    let key_ms = app_init_elapsed_ms(key_start);
+    let _ = app_log_debug_emit(
+        "log.app.init.backends",
+        "nostr_key_ready",
+        Some(app_init_timing_context("elapsed", key_ms)),
+    );
     let nostr_key =
         app_datastore_key_nostr_key(&config.datastore.key_maps).map_err(AppInitError::Config)?;
     match datastore.get(nostr_key).await {
@@ -417,6 +438,7 @@ mod tests {
     use super::{
         app_init_backends,
         app_init_assets,
+        app_init_timing_context,
         app_init_progress_add,
         app_init_state_default,
         app_init_stage_set,
@@ -478,6 +500,12 @@ mod tests {
             err,
             AppInitError::Idb(RadrootsClientIdbStoreError::IdbUndefined)
         );
+    }
+
+    #[test]
+    fn app_init_timing_context_formats_elapsed() {
+        let context = app_init_timing_context("idb", 123);
+        assert_eq!(context, "idb_ms=123");
     }
 
     #[test]
