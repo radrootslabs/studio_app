@@ -445,7 +445,7 @@ pub async fn app_init_backends(config: RadrootsAppConfig) -> RadrootsAppInitResu
             app_datastore_write_state(&datastore, &config.datastore.key_maps, &app_data)
                 .await?;
     }
-    let _ = app_log_debug_emit("log.app.init.backends", "app_data_ready", None);
+    let _ = app_log_debug_emit("log.app.init.backends", "state_ready", None);
     Ok(RadrootsAppBackends {
         config,
         datastore,

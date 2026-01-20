@@ -49,7 +49,7 @@ pub async fn app_datastore_write_state<T: RadrootsClientDatastore>(
         .set_obj(key, data)
         .await
         .map_err(RadrootsAppInitError::Datastore)?;
-    let _ = app_log_debug_emit("log.app.bootstrap.app_data", "write", Some(key.to_string()));
+    let _ = app_log_debug_emit("log.app.bootstrap.state", "write", Some(key.to_string()));
     Ok(value)
 }
 
@@ -62,7 +62,7 @@ pub async fn app_datastore_read_state<T: RadrootsClientDatastore>(
         .get_obj::<RadrootsAppState>(key)
         .await
         .map_err(RadrootsAppInitError::Datastore)?;
-    let _ = app_log_debug_emit("log.app.bootstrap.app_data", "read", Some(key.to_string()));
+    let _ = app_log_debug_emit("log.app.bootstrap.state", "read", Some(key.to_string()));
     Ok(value)
 }
 
