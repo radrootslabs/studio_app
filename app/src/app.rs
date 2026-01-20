@@ -21,6 +21,7 @@ use crate::{
     app_log_error_store,
     app_config_default,
     app_datastore_read_app_data,
+    app_datastore_set_notifications_permission,
     app_health_check_all_logged,
     AppBackends,
     AppConfig,
@@ -70,6 +71,7 @@ fn spawn_health_checks(
     health_report: RwSignal<AppHealthReport, LocalStorage>,
     health_running: RwSignal<bool, LocalStorage>,
     active_key: RwSignal<Option<String>, LocalStorage>,
+    notifications_status: RwSignal<Option<String>, LocalStorage>,
 ) {
     health_running.set(true);
     spawn_local(async move {
@@ -89,13 +91,20 @@ fn spawn_health_checks(
             &config.datastore.key_maps,
         )
         .await;
-        let active_key_value = match app_datastore_read_app_data(&datastore, &config.datastore.key_maps).await {
-            Ok(data) if data.active_key.is_empty() => None,
-            Ok(data) => Some(data.active_key),
-            Err(_) => None,
-        };
+        let app_data = app_datastore_read_app_data(&datastore, &config.datastore.key_maps)
+            .await
+            .ok();
+        let active_key_value = app_data.as_ref().and_then(|data| {
+            if data.active_key.is_empty() {
+                None
+            } else {
+                Some(data.active_key.clone())
+            }
+        });
+        let notifications_value = app_data.and_then(|data| data.notifications_permission);
         health_report.set(report);
         active_key.set(active_key_value);
+        notifications_status.set(notifications_value);
         health_running.set(false);
     });
 }
@@ -116,6 +125,8 @@ fn HomePage() -> impl IntoView {
     let health_running = RwSignal::new_local(false);
     let health_autorun = RwSignal::new_local(false);
     let active_key = RwSignal::new_local(None::<String>);
+    let notifications_status = RwSignal::new_local(None::<String>);
+    let notifications_requesting = RwSignal::new_local(false);
     provide_context(backends);
     provide_context(init_error);
     provide_context(init_state);
@@ -198,8 +209,14 @@ fn HomePage() -> impl IntoView {
         let delay_ms = app_health_check_delay_ms();
         spawn_local(async move {
             TimeoutFuture::new(delay_ms).await;
-            spawn_health_checks(config, health_report, health_running, active_key);
-        });
+        spawn_health_checks(
+            config,
+            health_report,
+            health_running,
+            active_key,
+            notifications_status,
+        );
+    });
     });
     let status_color = move || match init_state.get().stage {
         AppInitStage::Ready => "green",
@@ -217,8 +234,22 @@ fn HomePage() -> impl IntoView {
             .get()
             .unwrap_or_else(|| "reset_idle".to_string())
     };
-    let health_disabled = move || {
-        backends.with(|value| value.is_none()) || health_running.get()
+    let health_disabled =
+        move || backends.with(|value| value.is_none()) || health_running.get();
+    let notifications_disabled = move || {
+        backends.with(|value| value.is_none()) || notifications_requesting.get()
+    };
+    let notifications_label = move || {
+        notifications_status
+            .get()
+            .unwrap_or_else(|| "unknown".to_string())
+    };
+    let notifications_button_label = move || {
+        if notifications_requesting.get() {
+            "requesting"
+        } else {
+            "request"
+        }
     };
     view! {
         <main>
@@ -239,6 +270,7 @@ fn HomePage() -> impl IntoView {
                         reset_status.set(Some("resetting".to_string()));
                         health_report.set(AppHealthReport::empty());
                         active_key.set(None);
+                        notifications_status.set(None);
                         spawn_local(async move {
                             let Some(config) = config else {
                                 reset_status.set(Some("reset_missing_backends".to_string()));
@@ -259,7 +291,13 @@ fn HomePage() -> impl IntoView {
                             {
                                 Ok(()) => {
                                     reset_status.set(Some("reset_done".to_string()));
-                                    spawn_health_checks(config, health_report, health_running, active_key);
+                                    spawn_health_checks(
+                                        config,
+                                        health_report,
+                                        health_running,
+                                        active_key,
+                                        notifications_status,
+                                    );
                                 }
                                 Err(err) => {
                                     let _ = app_log_error_store(&datastore, &config.datastore.key_maps, &err).await;
@@ -275,6 +313,60 @@ fn HomePage() -> impl IntoView {
                 <span>{reset_label}</span>
             </div>
             <div style="margin-top: 16px;">
+                <div style="font-weight: 600;">"notifications"</div>
+                <div style="margin-top: 8px; display: flex; align-items: center; gap: 8px;">
+                    <button
+                        on:click=move |_| {
+                            let config = backends.with_untracked(|value| value.as_ref().map(|backends| backends.config.clone()));
+                            notifications_requesting.set(true);
+                            spawn_local(async move {
+                                let Some(config) = config else {
+                                    notifications_requesting.set(false);
+                                    return;
+                                };
+                                let datastore = radroots_studio_app_core::datastore::RadrootsClientWebDatastore::new(
+                                    Some(config.datastore.idb_config),
+                                );
+                                let notifications = AppNotifications::new(None);
+                                match notifications.request_permission().await {
+                                    Ok(permission) => {
+                                        let value = permission.as_str().to_string();
+                                        let _ = app_datastore_set_notifications_permission(
+                                            &datastore,
+                                            &config.datastore.key_maps,
+                                            &value,
+                                        )
+                                        .await;
+                                        notifications_status.set(Some(value));
+                                        spawn_health_checks(
+                                            config,
+                                            health_report,
+                                            health_running,
+                                            active_key,
+                                            notifications_status,
+                                        );
+                                    }
+                                    Err(err) => {
+                                        let _ = app_log_error_store(
+                                            &datastore,
+                                            &config.datastore.key_maps,
+                                            &err,
+                                        )
+                                        .await;
+                                        notifications_status.set(Some(err.to_string()));
+                                    }
+                                }
+                                notifications_requesting.set(false);
+                            });
+                        }
+                        disabled=notifications_disabled
+                    >
+                        {notifications_button_label}
+                    </button>
+                    <span>{notifications_label}</span>
+                </div>
+            </div>
+            <div style="margin-top: 16px;">
                 <div style="font-weight: 600;">"health checks"</div>
                 <div style="margin-top: 8px; display: flex; align-items: center; gap: 8px;">
                     <button
@@ -283,7 +375,13 @@ fn HomePage() -> impl IntoView {
                             let Some(config) = config else {
                                 return;
                             };
-                            spawn_health_checks(config, health_report, health_running, active_key);
+                            spawn_health_checks(
+                                config,
+                                health_report,
+                                health_running,
+                                active_key,
+                                notifications_status,
+                            );
                         }
                         disabled=health_disabled
                     >
