@@ -478,7 +478,7 @@ pub fn RadrootsApp() -> impl IntoView {
             match app_init_backends(config).await {
                 Ok(value) => {
                     let _ = app_log_buffer_flush_critical(
-                        &value.datastore,
+                        value.datastore.as_ref(),
                         &value.config.datastore.key_maps,
                     )
                     .await;

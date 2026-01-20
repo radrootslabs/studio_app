@@ -1,6 +1,7 @@
 #![forbid(unsafe_code)]
 
 use std::fmt;
+use std::rc::Rc;
 
 use radroots_studio_app_core::datastore::{
     RadrootsClientDatastore,
@@ -283,7 +284,7 @@ impl std::error::Error for RadrootsAppInitError {}
 
 pub struct RadrootsAppBackends {
     pub config: RadrootsAppConfig,
-    pub datastore: RadrootsClientWebDatastore,
+    pub datastore: Rc<RadrootsClientWebDatastore>,
     pub nostr_keystore: RadrootsClientWebKeystoreNostr,
 }
 
@@ -385,17 +386,22 @@ pub async fn app_init_backends(config: RadrootsAppConfig) -> RadrootsAppInitResu
         "idb_bootstrap",
         Some(app_init_timing_context("elapsed", idb_ms)),
     );
-    let datastore = RadrootsClientWebDatastore::new(Some(config.datastore.idb_config));
+    let datastore = Rc::new(RadrootsClientWebDatastore::new(Some(config.datastore.idb_config)));
     datastore
         .init()
         .await
         .map_err(RadrootsAppInitError::Datastore)?;
     let _ = app_log_debug_emit("log.app.init.backends", "datastore_ready", None);
-    let has_config = app_datastore_has_settings(&datastore, &config.datastore.key_maps).await?;
+    let has_config =
+        app_datastore_has_settings(datastore.as_ref(), &config.datastore.key_maps).await?;
     if !has_config {
         let config_data = RadrootsAppSettings::default();
         let _ =
-            app_datastore_write_settings(&datastore, &config.datastore.key_maps, &config_data)
+            app_datastore_write_settings(
+                datastore.as_ref(),
+                &config.datastore.key_maps,
+                &config_data,
+            )
                 .await?;
     }
     let _ = app_log_debug_emit("log.app.init.backends", "config_ready", None);
@@ -432,9 +438,10 @@ pub async fn app_init_backends(config: RadrootsAppConfig) -> RadrootsAppInitResu
         Err(err) => return Err(RadrootsAppInitError::Datastore(err)),
     }
     let _ = app_log_debug_emit("log.app.init.backends", "nostr_key_synced", None);
-    let has_app_data = app_datastore_has_state(&datastore, &config.datastore.key_maps).await?;
+    let has_app_data =
+        app_datastore_has_state(datastore.as_ref(), &config.datastore.key_maps).await?;
     let mut app_data = if has_app_data {
-        app_datastore_read_state(&datastore, &config.datastore.key_maps).await?
+        app_datastore_read_state(datastore.as_ref(), &config.datastore.key_maps).await?
     } else {
         RadrootsAppState::default()
     };
@@ -442,7 +449,7 @@ pub async fn app_init_backends(config: RadrootsAppConfig) -> RadrootsAppInitResu
     if should_write {
         app_data.active_key = nostr_public_key;
         let _ =
-            app_datastore_write_state(&datastore, &config.datastore.key_maps, &app_data)
+            app_datastore_write_state(datastore.as_ref(), &config.datastore.key_maps, &app_data)
                 .await?;
     }
     let _ = app_log_debug_emit("log.app.init.backends", "state_ready", None);
