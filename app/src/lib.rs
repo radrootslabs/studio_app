@@ -97,8 +97,8 @@ pub use config::{
     app_datastore_param_radroots_profile,
     app_datastore_param_key,
     app_datastore_obj_key,
-    app_datastore_obj_key_app_data,
-    app_datastore_obj_key_cfg_data,
+    app_datastore_obj_key_state,
+    app_datastore_obj_key_settings,
     app_assets_geocoder_db_url,
     app_assets_sql_wasm_url,
     app_keystore_key_maps_default,
@@ -122,8 +122,8 @@ pub use config::{
     APP_DATASTORE_KEY_EULA_DATE,
     APP_DATASTORE_KEY_LOG_ENTRY,
     APP_DATASTORE_KEY_NOSTR_KEY,
-    APP_DATASTORE_KEY_OBJ_APP_DATA,
-    APP_DATASTORE_KEY_OBJ_CFG_DATA,
+    APP_DATASTORE_KEY_OBJ_STATE,
+    APP_DATASTORE_KEY_OBJ_SETTINGS,
     APP_KEYSTORE_KEY_NOSTR_DEFAULT,
 };
 pub use init::{
