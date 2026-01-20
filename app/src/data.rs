@@ -60,12 +60,12 @@ mod tests {
     use super::{RadrootsAppState, RadrootsAppSettings, RadrootsAppRole};
 
     #[test]
-    fn config_role_defaults_to_public() {
+    fn role_defaults_to_public() {
         assert_eq!(RadrootsAppRole::default(), RadrootsAppRole::Public);
     }
 
     #[test]
-    fn config_data_defaults_empty() {
+    fn settings_defaults_empty() {
         let data = RadrootsAppSettings::default();
         assert!(data.nostr_public_key.is_none());
         assert!(data.nostr_profile.is_none());
@@ -75,7 +75,7 @@ mod tests {
     }
 
     #[test]
-    fn app_data_defaults_empty() {
+    fn state_defaults_empty() {
         let data = RadrootsAppState::default();
         assert_eq!(data.active_key, "");
         assert_eq!(data.role, RadrootsAppRole::Public);

@@ -125,7 +125,7 @@ mod tests {
     use radroots_studio_app_core::datastore::{RadrootsClientDatastoreError, RadrootsClientWebDatastore};
 
     #[test]
-    fn config_write_maps_idb_errors() {
+    fn settings_write_maps_idb_errors() {
         let datastore = RadrootsClientWebDatastore::new(None);
         let key_maps = app_key_maps_default();
         let data = RadrootsAppSettings::default();
@@ -139,7 +139,7 @@ mod tests {
     }
 
     #[test]
-    fn app_data_write_maps_idb_errors() {
+    fn state_write_maps_idb_errors() {
         let datastore = RadrootsClientWebDatastore::new(None);
         let key_maps = app_key_maps_default();
         let data = RadrootsAppState::default();
@@ -153,7 +153,7 @@ mod tests {
     }
 
     #[test]
-    fn app_data_read_maps_idb_errors() {
+    fn state_read_maps_idb_errors() {
         let datastore = RadrootsClientWebDatastore::new(None);
         let key_maps = app_key_maps_default();
         let err = futures::executor::block_on(app_datastore_read_state(
@@ -177,7 +177,7 @@ mod tests {
     }
 
     #[test]
-    fn has_config_maps_idb_errors() {
+    fn has_settings_maps_idb_errors() {
         let datastore = RadrootsClientWebDatastore::new(None);
         let key_maps = app_key_maps_default();
         let err = futures::executor::block_on(app_datastore_has_settings(&datastore, &key_maps))
@@ -186,7 +186,7 @@ mod tests {
     }
 
     #[test]
-    fn has_app_data_maps_idb_errors() {
+    fn has_state_maps_idb_errors() {
         let datastore = RadrootsClientWebDatastore::new(None);
         let key_maps = app_key_maps_default();
         let err = futures::executor::block_on(app_datastore_has_state(&datastore, &key_maps))

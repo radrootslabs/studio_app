@@ -652,7 +652,7 @@ mod tests {
     }
 
     #[test]
-    fn health_check_app_data_requires_active_key() {
+    fn health_check_state_requires_active_key() {
         let datastore = TestDatastore {
             get_result: Ok("pub".to_string()),
             app_data: Some(crate::RadrootsAppState::default()),
@@ -667,12 +667,12 @@ mod tests {
     }
 
     #[test]
-    fn health_check_app_data_detects_mismatch() {
-        let mut app_data = crate::RadrootsAppState::default();
-        app_data.active_key = "other".to_string();
+    fn health_check_state_detects_mismatch() {
+        let mut state = crate::RadrootsAppState::default();
+        state.active_key = "other".to_string();
         let datastore = TestDatastore {
             get_result: Ok("pub".to_string()),
-            app_data: Some(app_data),
+            app_data: Some(state),
         };
         let key_maps = crate::app_key_maps_default();
         let result = futures::executor::block_on(app_health_check_state_active_key(
@@ -684,12 +684,12 @@ mod tests {
     }
 
     #[test]
-    fn health_check_app_data_accepts_match() {
-        let mut app_data = crate::RadrootsAppState::default();
-        app_data.active_key = "pub".to_string();
+    fn health_check_state_accepts_match() {
+        let mut state = crate::RadrootsAppState::default();
+        state.active_key = "pub".to_string();
         let datastore = TestDatastore {
             get_result: Ok("pub".to_string()),
-            app_data: Some(app_data),
+            app_data: Some(state),
         };
         let key_maps = crate::app_key_maps_default();
         let result = futures::executor::block_on(app_health_check_state_active_key(
