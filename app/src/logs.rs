@@ -8,6 +8,7 @@ use radroots_studio_app_core::datastore::RadrootsClientWebDatastore;
 
 use crate::{
     app_context,
+    app_log_buffer_flush,
     app_log_entries_dump,
     app_log_entries_load,
     AppLogEntry,
@@ -50,6 +51,7 @@ pub fn LogsPage() -> impl IntoView {
         let loading_signal = loading;
         spawn_local(async move {
             let datastore = RadrootsClientWebDatastore::new(Some(config.datastore.idb_config));
+            let _ = app_log_buffer_flush(&datastore, &config.datastore.key_maps).await;
             let result = app_log_entries_load(&datastore, &config.datastore.key_maps).await;
             match result {
                 Ok(mut items) => {
