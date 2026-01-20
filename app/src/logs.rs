@@ -9,6 +9,7 @@ use radroots_studio_app_core::datastore::RadrootsClientWebDatastore;
 use crate::{
     app_context,
     app_log_buffer_flush,
+    app_log_entries_clear,
     app_log_entries_dump,
     app_log_entries_load,
     AppLogEntry,
@@ -30,43 +31,72 @@ pub fn LogsPage() -> impl IntoView {
     let dump = RwSignal::new_local(String::new());
     let loading = RwSignal::new_local(false);
     let did_load = RwSignal::new_local(false);
-    let context = app_context();
-    let refresh = Rc::new(move || {
-        let Some(context) = context.clone() else {
-            entries.set(Vec::new());
-            dump.set(String::new());
-            return;
-        };
-        let config = context
-            .backends
-            .with_untracked(|value| value.as_ref().map(|backends| backends.config.clone()));
-        let Some(config) = config else {
-            entries.set(Vec::new());
-            dump.set(String::new());
-            return;
-        };
-        loading.set(true);
-        let entries_signal = entries;
-        let dump_signal = dump;
-        let loading_signal = loading;
-        spawn_local(async move {
-            let datastore = RadrootsClientWebDatastore::new(Some(config.datastore.idb_config));
-            let _ = app_log_buffer_flush(&datastore, &config.datastore.key_maps).await;
-            let result = app_log_entries_load(&datastore, &config.datastore.key_maps).await;
-            match result {
-                Ok(mut items) => {
-                    items.sort_by(|a, b| b.timestamp_ms.cmp(&a.timestamp_ms));
-                    dump_signal.set(app_log_entries_dump(&items));
-                    entries_signal.set(items);
+    let context = Rc::new(app_context());
+    let refresh = {
+        let context = Rc::clone(&context);
+        Rc::new(move || {
+            let Some(context) = context.as_ref().clone() else {
+                entries.set(Vec::new());
+                dump.set(String::new());
+                return;
+            };
+            let config = context
+                .backends
+                .with_untracked(|value| value.as_ref().map(|backends| backends.config.clone()));
+            let Some(config) = config else {
+                entries.set(Vec::new());
+                dump.set(String::new());
+                return;
+            };
+            loading.set(true);
+            let entries_signal = entries;
+            let dump_signal = dump;
+            let loading_signal = loading;
+            spawn_local(async move {
+                let datastore = RadrootsClientWebDatastore::new(Some(config.datastore.idb_config));
+                let _ = app_log_buffer_flush(&datastore, &config.datastore.key_maps).await;
+                let result = app_log_entries_load(&datastore, &config.datastore.key_maps).await;
+                match result {
+                    Ok(mut items) => {
+                        items.sort_by(|a, b| b.timestamp_ms.cmp(&a.timestamp_ms));
+                        dump_signal.set(app_log_entries_dump(&items));
+                        entries_signal.set(items);
+                    }
+                    Err(err) => {
+                        dump_signal.set(format!("error: {err}"));
+                        entries_signal.set(Vec::new());
+                    }
                 }
-                Err(err) => {
-                    dump_signal.set(format!("error: {err}"));
-                    entries_signal.set(Vec::new());
-                }
-            }
-            loading_signal.set(false);
-        });
-    });
+                loading_signal.set(false);
+            });
+        })
+    };
+    let clear = {
+        let context = Rc::clone(&context);
+        let refresh = Rc::clone(&refresh);
+        Rc::new(move || {
+            let Some(context) = context.as_ref().clone() else {
+                entries.set(Vec::new());
+                dump.set(String::new());
+                return;
+            };
+            let config = context
+                .backends
+                .with_untracked(|value| value.as_ref().map(|backends| backends.config.clone()));
+            let Some(config) = config else {
+                entries.set(Vec::new());
+                dump.set(String::new());
+                return;
+            };
+            loading.set(true);
+            let refresh = Rc::clone(&refresh);
+            spawn_local(async move {
+                let datastore = RadrootsClientWebDatastore::new(Some(config.datastore.idb_config));
+                let _ = app_log_entries_clear(&datastore, &config.datastore.key_maps).await;
+                refresh();
+            });
+        })
+    };
     let refresh_effect = Rc::clone(&refresh);
     Effect::new(move || {
         if did_load.get() {
@@ -81,6 +111,7 @@ pub fn LogsPage() -> impl IntoView {
             <div style="display:flex;align-items:center;gap:12px;">
                 <div style="font-size:18px;font-weight:600;">"logs"</div>
                 <button on:click=move |_| refresh()>"refresh"</button>
+                <button on:click=move |_| clear()>"clear"</button>
                 <div style="font-size:12px;color:#6b7280;">{status_label}</div>
             </div>
             <div style="margin-top:12px;display:flex;flex-wrap:wrap;gap:16px;">

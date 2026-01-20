@@ -410,6 +410,18 @@ pub async fn app_log_entries_load<T: RadrootsClientDatastore>(
     Ok(out)
 }
 
+pub async fn app_log_entries_clear<T: RadrootsClientDatastore>(
+    datastore: &T,
+    key_maps: &AppKeyMapConfig,
+) -> AppLogResult<usize> {
+    let prefix = app_log_entry_prefix(key_maps)?;
+    let removed = datastore
+        .del_pref(&prefix)
+        .await
+        .map_err(AppLogError::Datastore)?;
+    Ok(removed.len())
+}
+
 pub fn app_log_entries_dump(entries: &[AppLogEntry]) -> String {
     let mut out = String::new();
     for (idx, entry) in entries.iter().enumerate() {
@@ -497,6 +509,7 @@ pub fn app_logging_init(meta: Option<AppLogMetadata>) -> AppLoggingResult<()> {
 #[cfg(test)]
 mod tests {
     use super::{
+        app_log_entries_clear,
         app_log_entries_dump,
         app_log_entries_load,
         app_log_entries_prune,
@@ -618,8 +631,19 @@ mod tests {
             Ok(key.to_string())
         }
 
-        async fn del_pref(&self, _key_prefix: &str) -> RadrootsClientDatastoreResult<Vec<String>> {
-            Err(RadrootsClientDatastoreError::IdbUndefined)
+        async fn del_pref(&self, key_prefix: &str) -> RadrootsClientDatastoreResult<Vec<String>> {
+            let mut entries = self.entries.lock().unwrap_or_else(|err| err.into_inner());
+            let mut removed = Vec::new();
+            let mut kept = Vec::new();
+            for entry in entries.drain(..) {
+                if entry.key.starts_with(key_prefix) {
+                    removed.push(entry.key);
+                } else {
+                    kept.push(entry);
+                }
+            }
+            *entries = kept;
+            Ok(removed)
         }
 
         async fn set_param(
@@ -734,6 +758,21 @@ mod tests {
         let key_maps = app_key_maps_default();
         let prefix = app_log_entry_prefix(&key_maps).expect("prefix");
         assert_eq!(prefix, format!("{APP_DATASTORE_KEY_LOG_ENTRY}:"));
+    }
+
+    #[test]
+    fn log_entries_clear_removes_prefixed_keys() {
+        let key_maps = app_key_maps_default();
+        let key_a = app_log_entry_key(&key_maps, "a").expect("key");
+        let entries = vec![
+            RadrootsClientDatastoreEntry::new(key_a, Some(String::from("{}"))),
+            RadrootsClientDatastoreEntry::new(String::from("other:1"), Some(String::from("{}"))),
+        ];
+        let datastore = TestDatastore::new(entries);
+        let removed = futures::executor::block_on(app_log_entries_clear(&datastore, &key_maps))
+            .expect("clear");
+        assert_eq!(removed, 1);
+        assert_eq!(datastore.len(), 1);
     }
 
     #[test]
