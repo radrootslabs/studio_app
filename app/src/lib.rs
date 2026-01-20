@@ -29,9 +29,9 @@ pub use data::{RadrootsAppState, RadrootsAppSettings, RadrootsAppRole};
 pub use health::{
     app_health_check_all,
     app_health_check_all_logged,
-    app_health_check_app_data_active_key,
-    app_health_check_bootstrap_app_data,
-    app_health_check_bootstrap_config,
+    app_health_check_state_active_key,
+    app_health_check_bootstrap_state,
+    app_health_check_bootstrap_settings,
     app_health_check_datastore_roundtrip,
     app_health_check_keystore_access,
     app_health_check_notifications,

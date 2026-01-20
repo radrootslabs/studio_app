@@ -403,31 +403,31 @@ fn HomePage() -> impl IntoView {
                         <span
                             style=move || format!(
                                 "display:inline-block;width:10px;height:10px;border-radius:50%;background:{};",
-                                health_status_color(health_report.get().bootstrap_config.status)
+                                health_status_color(health_report.get().bootstrap_settings.status)
                             )
                         ></span>
-                        <span>"bootstrap_config"</span>
-                        <span>{move || health_result_label(&health_report.get().bootstrap_config)}</span>
+                        <span>"bootstrap_settings"</span>
+                        <span>{move || health_result_label(&health_report.get().bootstrap_settings)}</span>
                     </div>
                     <div style="display: flex; align-items: center; gap: 8px;">
                         <span
                             style=move || format!(
                                 "display:inline-block;width:10px;height:10px;border-radius:50%;background:{};",
-                                health_status_color(health_report.get().bootstrap_app_data.status)
+                                health_status_color(health_report.get().bootstrap_state.status)
                             )
                         ></span>
-                        <span>"bootstrap_app_data"</span>
-                        <span>{move || health_result_label(&health_report.get().bootstrap_app_data)}</span>
+                        <span>"bootstrap_state"</span>
+                        <span>{move || health_result_label(&health_report.get().bootstrap_state)}</span>
                     </div>
                     <div style="display: flex; align-items: center; gap: 8px;">
                         <span
                             style=move || format!(
                                 "display:inline-block;width:10px;height:10px;border-radius:50%;background:{};",
-                                health_status_color(health_report.get().app_data_active_key.status)
+                                health_status_color(health_report.get().state_active_key.status)
                             )
                         ></span>
-                        <span>"app_data_active_key"</span>
-                        <span>{move || health_result_label(&health_report.get().app_data_active_key)}</span>
+                        <span>"state_active_key"</span>
+                        <span>{move || health_result_label(&health_report.get().state_active_key)}</span>
                     </div>
                     <div style="display: flex; align-items: center; gap: 8px;">
                         <span

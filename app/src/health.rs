@@ -49,9 +49,9 @@ impl RadrootsAppHealthCheckResult {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RadrootsAppHealthReport {
     pub key_maps: RadrootsAppHealthCheckResult,
-    pub bootstrap_config: RadrootsAppHealthCheckResult,
-    pub bootstrap_app_data: RadrootsAppHealthCheckResult,
-    pub app_data_active_key: RadrootsAppHealthCheckResult,
+    pub bootstrap_settings: RadrootsAppHealthCheckResult,
+    pub bootstrap_state: RadrootsAppHealthCheckResult,
+    pub state_active_key: RadrootsAppHealthCheckResult,
     pub notifications: RadrootsAppHealthCheckResult,
     pub tangle: RadrootsAppHealthCheckResult,
     pub datastore_roundtrip: RadrootsAppHealthCheckResult,
@@ -62,9 +62,9 @@ impl Default for RadrootsAppHealthReport {
     fn default() -> Self {
         Self {
             key_maps: RadrootsAppHealthCheckResult::skipped(),
-            bootstrap_config: RadrootsAppHealthCheckResult::skipped(),
-            bootstrap_app_data: RadrootsAppHealthCheckResult::skipped(),
-            app_data_active_key: RadrootsAppHealthCheckResult::skipped(),
+            bootstrap_settings: RadrootsAppHealthCheckResult::skipped(),
+            bootstrap_state: RadrootsAppHealthCheckResult::skipped(),
+            state_active_key: RadrootsAppHealthCheckResult::skipped(),
             notifications: RadrootsAppHealthCheckResult::skipped(),
             tangle: RadrootsAppHealthCheckResult::skipped(),
             datastore_roundtrip: RadrootsAppHealthCheckResult::skipped(),
@@ -126,7 +126,7 @@ pub fn app_health_check_key_maps(key_maps: &RadrootsAppKeyMapConfig) -> Radroots
     }
 }
 
-pub async fn app_health_check_bootstrap_config<T: RadrootsClientDatastore>(
+pub async fn app_health_check_bootstrap_settings<T: RadrootsClientDatastore>(
     datastore: &T,
     key_maps: &RadrootsAppKeyMapConfig,
 ) -> RadrootsAppHealthCheckResult {
@@ -137,7 +137,7 @@ pub async fn app_health_check_bootstrap_config<T: RadrootsClientDatastore>(
     }
 }
 
-pub async fn app_health_check_bootstrap_app_data<T: RadrootsClientDatastore>(
+pub async fn app_health_check_bootstrap_state<T: RadrootsClientDatastore>(
     datastore: &T,
     key_maps: &RadrootsAppKeyMapConfig,
 ) -> RadrootsAppHealthCheckResult {
@@ -148,7 +148,7 @@ pub async fn app_health_check_bootstrap_app_data<T: RadrootsClientDatastore>(
     }
 }
 
-pub async fn app_health_check_app_data_active_key<T: RadrootsClientDatastore>(
+pub async fn app_health_check_state_active_key<T: RadrootsClientDatastore>(
     datastore: &T,
     key_maps: &RadrootsAppKeyMapConfig,
 ) -> RadrootsAppHealthCheckResult {
@@ -271,15 +271,15 @@ pub async fn app_health_check_all<T: RadrootsClientDatastore, K: RadrootsClientK
     log_health_start("key_maps");
     let key_maps_result = app_health_check_key_maps(key_maps);
     log_health_end("key_maps", &key_maps_result);
-    log_health_start("bootstrap_config");
-    let bootstrap_config = app_health_check_bootstrap_config(datastore, key_maps).await;
-    log_health_end("bootstrap_config", &bootstrap_config);
-    log_health_start("bootstrap_app_data");
-    let bootstrap_app_data = app_health_check_bootstrap_app_data(datastore, key_maps).await;
-    log_health_end("bootstrap_app_data", &bootstrap_app_data);
-    log_health_start("app_data_active_key");
-    let app_data_active_key = app_health_check_app_data_active_key(datastore, key_maps).await;
-    log_health_end("app_data_active_key", &app_data_active_key);
+    log_health_start("bootstrap_settings");
+    let bootstrap_settings = app_health_check_bootstrap_settings(datastore, key_maps).await;
+    log_health_end("bootstrap_settings", &bootstrap_settings);
+    log_health_start("bootstrap_state");
+    let bootstrap_state = app_health_check_bootstrap_state(datastore, key_maps).await;
+    log_health_end("bootstrap_state", &bootstrap_state);
+    log_health_start("state_active_key");
+    let state_active_key = app_health_check_state_active_key(datastore, key_maps).await;
+    log_health_end("state_active_key", &state_active_key);
     log_health_start("notifications");
     let stored_permission = app_datastore_read_state(datastore, key_maps)
         .await
@@ -300,9 +300,9 @@ pub async fn app_health_check_all<T: RadrootsClientDatastore, K: RadrootsClientK
     log_health_end("keystore", &keystore_result);
     RadrootsAppHealthReport {
         key_maps: key_maps_result,
-        bootstrap_config,
-        bootstrap_app_data,
-        app_data_active_key,
+        bootstrap_settings,
+        bootstrap_state,
+        state_active_key,
         notifications: notifications_result,
         tangle: tangle_result,
         datastore_roundtrip,
@@ -325,12 +325,12 @@ pub async fn app_health_check_all_logged<T: RadrootsClientDatastore, K: Radroots
 #[cfg(test)]
 mod tests {
     use super::{
-        app_health_check_app_data_active_key,
+        app_health_check_state_active_key,
         app_health_check_all,
         app_health_check_all_logged,
         app_health_check_key_maps,
-        app_health_check_bootstrap_app_data,
-        app_health_check_bootstrap_config,
+        app_health_check_bootstrap_state,
+        app_health_check_bootstrap_settings,
         app_health_check_datastore_roundtrip,
         app_health_check_keystore_access,
         app_health_check_notifications,
@@ -394,9 +394,9 @@ mod tests {
     fn health_report_defaults_skipped() {
         let report = RadrootsAppHealthReport::default();
         assert_eq!(report.key_maps.status, RadrootsAppHealthCheckStatus::Skipped);
-        assert_eq!(report.bootstrap_config.status, RadrootsAppHealthCheckStatus::Skipped);
-        assert_eq!(report.bootstrap_app_data.status, RadrootsAppHealthCheckStatus::Skipped);
-        assert_eq!(report.app_data_active_key.status, RadrootsAppHealthCheckStatus::Skipped);
+        assert_eq!(report.bootstrap_settings.status, RadrootsAppHealthCheckStatus::Skipped);
+        assert_eq!(report.bootstrap_state.status, RadrootsAppHealthCheckStatus::Skipped);
+        assert_eq!(report.state_active_key.status, RadrootsAppHealthCheckStatus::Skipped);
         assert_eq!(report.notifications.status, RadrootsAppHealthCheckStatus::Skipped);
         assert_eq!(report.tangle.status, RadrootsAppHealthCheckStatus::Skipped);
         assert_eq!(report.datastore_roundtrip.status, RadrootsAppHealthCheckStatus::Skipped);
@@ -418,12 +418,12 @@ mod tests {
     fn health_check_bootstrap_reports_idb_errors() {
         let datastore = RadrootsClientWebDatastore::new(None);
         let key_maps = crate::app_key_maps_default();
-        let result = futures::executor::block_on(app_health_check_bootstrap_config(
+        let result = futures::executor::block_on(app_health_check_bootstrap_settings(
             &datastore,
             &key_maps,
         ));
         assert_eq!(result.status, RadrootsAppHealthCheckStatus::Error);
-        let result = futures::executor::block_on(app_health_check_bootstrap_app_data(
+        let result = futures::executor::block_on(app_health_check_bootstrap_state(
             &datastore,
             &key_maps,
         ));
@@ -658,7 +658,7 @@ mod tests {
             app_data: Some(crate::RadrootsAppState::default()),
         };
         let key_maps = crate::app_key_maps_default();
-        let result = futures::executor::block_on(app_health_check_app_data_active_key(
+        let result = futures::executor::block_on(app_health_check_state_active_key(
             &datastore,
             &key_maps,
         ));
@@ -675,7 +675,7 @@ mod tests {
             app_data: Some(app_data),
         };
         let key_maps = crate::app_key_maps_default();
-        let result = futures::executor::block_on(app_health_check_app_data_active_key(
+        let result = futures::executor::block_on(app_health_check_state_active_key(
             &datastore,
             &key_maps,
         ));
@@ -692,7 +692,7 @@ mod tests {
             app_data: Some(app_data),
         };
         let key_maps = crate::app_key_maps_default();
-        let result = futures::executor::block_on(app_health_check_app_data_active_key(
+        let result = futures::executor::block_on(app_health_check_state_active_key(
             &datastore,
             &key_maps,
         ));
@@ -714,9 +714,9 @@ mod tests {
             &key_maps,
         ));
         assert_eq!(report.key_maps.status, RadrootsAppHealthCheckStatus::Ok);
-        assert_eq!(report.bootstrap_config.status, RadrootsAppHealthCheckStatus::Error);
-        assert_eq!(report.bootstrap_app_data.status, RadrootsAppHealthCheckStatus::Error);
-        assert_eq!(report.app_data_active_key.status, RadrootsAppHealthCheckStatus::Error);
+        assert_eq!(report.bootstrap_settings.status, RadrootsAppHealthCheckStatus::Error);
+        assert_eq!(report.bootstrap_state.status, RadrootsAppHealthCheckStatus::Error);
+        assert_eq!(report.state_active_key.status, RadrootsAppHealthCheckStatus::Error);
         assert_eq!(report.notifications.status, RadrootsAppHealthCheckStatus::Error);
         assert_eq!(report.tangle.status, RadrootsAppHealthCheckStatus::Skipped);
         assert_eq!(report.datastore_roundtrip.status, RadrootsAppHealthCheckStatus::Error);
