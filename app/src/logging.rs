@@ -1,6 +1,12 @@
 #![forbid(unsafe_code)]
 
-use std::sync::{Mutex, OnceLock};
+use std::sync::OnceLock;
+
+#[cfg(not(test))]
+use std::sync::Mutex;
+
+#[cfg(test)]
+use std::cell::RefCell;
 
 #[cfg(not(target_arch = "wasm32"))]
 use std::path::PathBuf;
@@ -53,7 +59,14 @@ impl Default for AppLogMetadata {
 }
 
 static LOG_META: OnceLock<AppLogMetadata> = OnceLock::new();
+
+#[cfg(not(test))]
 static LOG_BUFFER: OnceLock<Mutex<Vec<AppLogEntry>>> = OnceLock::new();
+
+#[cfg(test)]
+thread_local! {
+    static LOG_BUFFER: RefCell<Vec<AppLogEntry>> = RefCell::new(Vec::new());
+}
 
 pub const APP_LOG_BUFFER_MAX_ENTRIES: usize = 512;
 pub const APP_LOG_MAX_ENTRIES: usize = 2000;
@@ -314,19 +327,40 @@ pub async fn app_log_error_store<T: RadrootsClientDatastore, E: AppLoggableError
 }
 
 pub fn app_log_buffer_push(entry: AppLogEntry) {
-    let buffer = LOG_BUFFER.get_or_init(|| Mutex::new(Vec::new()));
-    let mut entries = buffer.lock().unwrap_or_else(|err| err.into_inner());
-    entries.push(entry);
-    if entries.len() > APP_LOG_BUFFER_MAX_ENTRIES {
-        let drop = entries.len() - APP_LOG_BUFFER_MAX_ENTRIES;
-        entries.drain(0..drop);
+    #[cfg(test)]
+    {
+        LOG_BUFFER.with(|buffer| {
+            let mut entries = buffer.borrow_mut();
+            entries.push(entry);
+            if entries.len() > APP_LOG_BUFFER_MAX_ENTRIES {
+                let drop = entries.len() - APP_LOG_BUFFER_MAX_ENTRIES;
+                entries.drain(0..drop);
+            }
+        });
+    }
+    #[cfg(not(test))]
+    {
+        let buffer = LOG_BUFFER.get_or_init(|| Mutex::new(Vec::new()));
+        let mut entries = buffer.lock().unwrap_or_else(|err| err.into_inner());
+        entries.push(entry);
+        if entries.len() > APP_LOG_BUFFER_MAX_ENTRIES {
+            let drop = entries.len() - APP_LOG_BUFFER_MAX_ENTRIES;
+            entries.drain(0..drop);
+        }
     }
 }
 
 pub fn app_log_buffer_drain() -> Vec<AppLogEntry> {
-    let buffer = LOG_BUFFER.get_or_init(|| Mutex::new(Vec::new()));
-    let mut entries = buffer.lock().unwrap_or_else(|err| err.into_inner());
-    entries.drain(..).collect()
+    #[cfg(test)]
+    {
+        LOG_BUFFER.with(|buffer| buffer.borrow_mut().drain(..).collect())
+    }
+    #[cfg(not(test))]
+    {
+        let buffer = LOG_BUFFER.get_or_init(|| Mutex::new(Vec::new()));
+        let mut entries = buffer.lock().unwrap_or_else(|err| err.into_inner());
+        entries.drain(..).collect()
+    }
 }
 
 pub async fn app_log_buffer_flush<T: RadrootsClientDatastore>(
