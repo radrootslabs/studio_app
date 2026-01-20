@@ -27,8 +27,8 @@ use crate::{
     RadrootsAppInitError,
     RadrootsAppKeystoreError,
     RadrootsAppKeyMapConfig,
-    AppNotificationsError,
-    AppTangleError,
+    RadrootsAppNotificationsError,
+    RadrootsAppTangleError,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -157,19 +157,19 @@ impl AppLoggableError for RadrootsAppKeystoreError {
     }
 }
 
-impl AppLoggableError for AppNotificationsError {
+impl AppLoggableError for RadrootsAppNotificationsError {
     fn log_code(&self) -> &'static str {
         self.message()
     }
 
     fn log_context(&self) -> Option<String> {
         match self {
-            AppNotificationsError::Notifications(err) => Some(err.message().to_string()),
+            RadrootsAppNotificationsError::Notifications(err) => Some(err.message().to_string()),
         }
     }
 }
 
-impl AppLoggableError for AppTangleError {
+impl AppLoggableError for RadrootsAppTangleError {
     fn log_code(&self) -> &'static str {
         self.message()
     }

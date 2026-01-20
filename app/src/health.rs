@@ -89,9 +89,9 @@ use crate::{
     app_log_entry_new,
     app_log_entry_record,
     app_key_maps_validate,
-    AppNotifications,
+    RadrootsAppNotifications,
     AppLogLevel,
-    AppTangleClient,
+    RadrootsAppTangleClient,
     RadrootsAppKeyMapConfig,
 };
 use radroots_studio_app_core::notifications::RadrootsClientNotificationsPermission;
@@ -175,7 +175,7 @@ pub async fn app_health_check_app_data_active_key<T: RadrootsClientDatastore>(
 }
 
 pub async fn app_health_check_notifications(
-    notifications: &AppNotifications,
+    notifications: &RadrootsAppNotifications,
 ) -> RadrootsAppHealthCheckResult {
     match notifications.permission().await {
         Ok(permission) => app_health_check_notifications_permission(permission),
@@ -197,7 +197,7 @@ fn app_health_check_notifications_permission(
 }
 
 pub async fn app_health_check_notifications_with_state(
-    notifications: &AppNotifications,
+    notifications: &RadrootsAppNotifications,
     stored_permission: Option<&str>,
 ) -> RadrootsAppHealthCheckResult {
     if let Some(value) = stored_permission {
@@ -208,10 +208,10 @@ pub async fn app_health_check_notifications_with_state(
     app_health_check_notifications(notifications).await
 }
 
-pub fn app_health_check_tangle<T: AppTangleClient>(tangle: &T) -> RadrootsAppHealthCheckResult {
+pub fn app_health_check_tangle<T: RadrootsAppTangleClient>(tangle: &T) -> RadrootsAppHealthCheckResult {
     match tangle.init() {
         Ok(()) => RadrootsAppHealthCheckResult::ok(),
-        Err(crate::AppTangleError::NotImplemented) => RadrootsAppHealthCheckResult::skipped(),
+        Err(crate::RadrootsAppTangleError::NotImplemented) => RadrootsAppHealthCheckResult::skipped(),
     }
 }
 
@@ -261,10 +261,10 @@ pub async fn app_health_check_keystore_access<T: RadrootsClientDatastore, K: Rad
     }
 }
 
-pub async fn app_health_check_all<T: RadrootsClientDatastore, K: RadrootsClientKeystoreNostr, G: AppTangleClient>(
+pub async fn app_health_check_all<T: RadrootsClientDatastore, K: RadrootsClientKeystoreNostr, G: RadrootsAppTangleClient>(
     datastore: &T,
     keystore: &K,
-    notifications: &AppNotifications,
+    notifications: &RadrootsAppNotifications,
     tangle: &G,
     key_maps: &RadrootsAppKeyMapConfig,
 ) -> RadrootsAppHealthReport {
@@ -310,10 +310,10 @@ pub async fn app_health_check_all<T: RadrootsClientDatastore, K: RadrootsClientK
     }
 }
 
-pub async fn app_health_check_all_logged<T: RadrootsClientDatastore, K: RadrootsClientKeystoreNostr, G: AppTangleClient>(
+pub async fn app_health_check_all_logged<T: RadrootsClientDatastore, K: RadrootsClientKeystoreNostr, G: RadrootsAppTangleClient>(
     datastore: &T,
     keystore: &K,
-    notifications: &AppNotifications,
+    notifications: &RadrootsAppNotifications,
     tangle: &G,
     key_maps: &RadrootsAppKeyMapConfig,
 ) -> RadrootsAppHealthReport {
@@ -703,8 +703,8 @@ mod tests {
     fn health_check_all_reports_idb_errors() {
         let datastore = RadrootsClientWebDatastore::new(None);
         let keystore = RadrootsClientWebKeystoreNostr::new(None);
-        let notifications = crate::AppNotifications::new(None);
-        let tangle = crate::AppTangleClientStub::new();
+        let notifications = crate::RadrootsAppNotifications::new(None);
+        let tangle = crate::RadrootsAppTangleClientStub::new();
         let key_maps = crate::app_key_maps_default();
         let report = futures::executor::block_on(app_health_check_all(
             &datastore,
@@ -725,7 +725,7 @@ mod tests {
 
     #[test]
     fn health_check_notifications_reports_unavailable() {
-        let notifications = crate::AppNotifications::new(None);
+        let notifications = crate::RadrootsAppNotifications::new(None);
         let result =
             futures::executor::block_on(app_health_check_notifications(&notifications));
         assert_eq!(result.status, RadrootsAppHealthCheckStatus::Error);
@@ -744,7 +744,7 @@ mod tests {
 
     #[test]
     fn health_check_notifications_uses_stored_permission() {
-        let notifications = crate::AppNotifications::new(None);
+        let notifications = crate::RadrootsAppNotifications::new(None);
         let result = futures::executor::block_on(app_health_check_notifications_with_state(
             &notifications,
             Some("granted"),
@@ -754,7 +754,7 @@ mod tests {
 
     #[test]
     fn health_check_tangle_reports_not_implemented() {
-        let tangle = crate::AppTangleClientStub::new();
+        let tangle = crate::RadrootsAppTangleClientStub::new();
         let result = app_health_check_tangle(&tangle);
         assert_eq!(result.status, RadrootsAppHealthCheckStatus::Skipped);
         assert!(result.message.is_none());
@@ -891,8 +891,8 @@ mod tests {
         let keystore = TestKeystore {
             read_result: Err(RadrootsClientKeystoreError::MissingKey),
         };
-        let notifications = crate::AppNotifications::new(None);
-        let tangle = crate::AppTangleClientStub::new();
+        let notifications = crate::RadrootsAppNotifications::new(None);
+        let tangle = crate::RadrootsAppTangleClientStub::new();
         let key_maps = crate::app_key_maps_default();
         let report = futures::executor::block_on(app_health_check_all_logged(
             &datastore,

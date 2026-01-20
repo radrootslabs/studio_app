@@ -84,8 +84,8 @@ pub use logging::{
     APP_LOG_BUFFER_MAX_ENTRIES,
     APP_LOG_MAX_ENTRIES,
 };
-pub use notifications::{AppNotifications, AppNotificationsError, AppNotificationsResult};
-pub use tangle::{AppTangleClient, AppTangleClientStub, AppTangleError, AppTangleResult};
+pub use notifications::{RadrootsAppNotifications, RadrootsAppNotificationsError, RadrootsAppNotificationsResult};
+pub use tangle::{RadrootsAppTangleClient, RadrootsAppTangleClientStub, RadrootsAppTangleError, RadrootsAppTangleResult};
 pub use config::{
     app_config_default,
     app_config_from_env,

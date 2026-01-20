@@ -30,8 +30,8 @@ use crate::{
     RadrootsAppHealthReport,
     RadrootsAppInitError,
     RadrootsAppInitStage,
-    AppNotifications,
-    AppTangleClientStub,
+    RadrootsAppNotifications,
+    RadrootsAppTangleClientStub,
     LogsPage,
 };
 
@@ -81,8 +81,8 @@ fn spawn_health_checks(
         let keystore = radroots_studio_app_core::keystore::RadrootsClientWebKeystoreNostr::new(
             Some(config.keystore.nostr_store),
         );
-        let notifications = AppNotifications::new(None);
-        let tangle = AppTangleClientStub::new();
+        let notifications = RadrootsAppNotifications::new(None);
+        let tangle = RadrootsAppTangleClientStub::new();
         let report = app_health_check_all_logged(
             &datastore,
             &keystore,
@@ -327,7 +327,7 @@ fn HomePage() -> impl IntoView {
                                 let datastore = radroots_studio_app_core::datastore::RadrootsClientWebDatastore::new(
                                     Some(config.datastore.idb_config),
                                 );
-                                let notifications = AppNotifications::new(None);
+                                let notifications = RadrootsAppNotifications::new(None);
                                 match notifications.request_permission().await {
                                     Ok(permission) => {
                                         let value = permission.as_str().to_string();

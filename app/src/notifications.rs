@@ -14,39 +14,39 @@ use crate::app_log_debug_emit;
 use wasm_bindgen::JsValue;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum AppNotificationsError {
+pub enum RadrootsAppNotificationsError {
     Notifications(RadrootsClientNotificationsError),
 }
 
-pub type AppNotificationsResult<T> = Result<T, AppNotificationsError>;
+pub type RadrootsAppNotificationsResult<T> = Result<T, RadrootsAppNotificationsError>;
 
-impl AppNotificationsError {
+impl RadrootsAppNotificationsError {
     pub const fn message(self) -> &'static str {
         match self {
-            AppNotificationsError::Notifications(err) => err.message(),
+            RadrootsAppNotificationsError::Notifications(err) => err.message(),
         }
     }
 }
 
-impl std::fmt::Display for AppNotificationsError {
+impl std::fmt::Display for RadrootsAppNotificationsError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str(self.message())
     }
 }
 
-impl std::error::Error for AppNotificationsError {}
+impl std::error::Error for RadrootsAppNotificationsError {}
 
-impl From<RadrootsClientNotificationsError> for AppNotificationsError {
+impl From<RadrootsClientNotificationsError> for RadrootsAppNotificationsError {
     fn from(err: RadrootsClientNotificationsError) -> Self {
-        AppNotificationsError::Notifications(err)
+        RadrootsAppNotificationsError::Notifications(err)
     }
 }
 
-pub struct AppNotifications {
+pub struct RadrootsAppNotifications {
     client: RadrootsClientWebNotifications,
 }
 
-impl AppNotifications {
+impl RadrootsAppNotifications {
     pub fn new(config: Option<RadrootsClientNotificationsConfig>) -> Self {
         Self {
             client: RadrootsClientWebNotifications::new(config),
@@ -81,7 +81,7 @@ impl AppNotifications {
 
     pub async fn permission(
         &self,
-    ) -> AppNotificationsResult<RadrootsClientNotificationsPermission> {
+    ) -> RadrootsAppNotificationsResult<RadrootsClientNotificationsPermission> {
         let _ = app_log_debug_emit("log.app.notifications.permission", "start", None);
         #[cfg(not(target_arch = "wasm32"))]
         {
@@ -106,12 +106,12 @@ impl AppNotifications {
 
     pub async fn request_permission(
         &self,
-    ) -> AppNotificationsResult<RadrootsClientNotificationsPermission> {
+    ) -> RadrootsAppNotificationsResult<RadrootsClientNotificationsPermission> {
         let _ = app_log_debug_emit("log.app.notifications.request", "start", None);
         let result = self.client
             .notify_init()
             .await
-            .map_err(AppNotificationsError::from);
+            .map_err(RadrootsAppNotificationsError::from);
         if let Ok(permission) = &result {
             let _ = app_log_debug_emit(
                 "log.app.notifications.request",
@@ -125,7 +125,7 @@ impl AppNotifications {
 
 #[cfg(test)]
 mod tests {
-    use super::{AppNotifications, AppNotificationsError};
+    use super::{RadrootsAppNotifications, RadrootsAppNotificationsError};
     use radroots_studio_app_core::notifications::{
         RadrootsClientNotificationsConfig,
         RadrootsClientNotificationsError,
@@ -134,7 +134,7 @@ mod tests {
 
     #[test]
     fn permission_is_unavailable_on_native() {
-        let app = AppNotifications::new(Some(RadrootsClientNotificationsConfig {
+        let app = RadrootsAppNotifications::new(Some(RadrootsClientNotificationsConfig {
             app_name: String::from("Radroots"),
         }));
         let permission = futures::executor::block_on(app.permission())
@@ -144,12 +144,12 @@ mod tests {
 
     #[test]
     fn request_permission_maps_errors() {
-        let app = AppNotifications::new(None);
+        let app = RadrootsAppNotifications::new(None);
         let err = futures::executor::block_on(app.request_permission())
             .expect_err("permission request error");
         assert_eq!(
             err,
-            AppNotificationsError::Notifications(RadrootsClientNotificationsError::Unavailable)
+            RadrootsAppNotificationsError::Notifications(RadrootsClientNotificationsError::Unavailable)
         );
         assert_eq!(err.to_string(), "error.client.notifications.unavailable");
     }

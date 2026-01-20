@@ -3,56 +3,56 @@
 use crate::app_log_debug_emit;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum AppTangleError {
+pub enum RadrootsAppTangleError {
     NotImplemented,
 }
 
-pub type AppTangleResult<T> = Result<T, AppTangleError>;
+pub type RadrootsAppTangleResult<T> = Result<T, RadrootsAppTangleError>;
 
-impl AppTangleError {
+impl RadrootsAppTangleError {
     pub const fn message(self) -> &'static str {
         match self {
-            AppTangleError::NotImplemented => "error.app.tangle.not_implemented",
+            RadrootsAppTangleError::NotImplemented => "error.app.tangle.not_implemented",
         }
     }
 }
 
-impl std::fmt::Display for AppTangleError {
+impl std::fmt::Display for RadrootsAppTangleError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str(self.message())
     }
 }
 
-impl std::error::Error for AppTangleError {}
+impl std::error::Error for RadrootsAppTangleError {}
 
-pub trait AppTangleClient {
-    fn init(&self) -> AppTangleResult<()>;
+pub trait RadrootsAppTangleClient {
+    fn init(&self) -> RadrootsAppTangleResult<()>;
 }
 
-pub struct AppTangleClientStub;
+pub struct RadrootsAppTangleClientStub;
 
-impl AppTangleClientStub {
+impl RadrootsAppTangleClientStub {
     pub fn new() -> Self {
         Self
     }
 }
 
-impl AppTangleClient for AppTangleClientStub {
-    fn init(&self) -> AppTangleResult<()> {
+impl RadrootsAppTangleClient for RadrootsAppTangleClientStub {
+    fn init(&self) -> RadrootsAppTangleResult<()> {
         let _ = app_log_debug_emit("log.app.tangle.init", "stub", None);
-        Err(AppTangleError::NotImplemented)
+        Err(RadrootsAppTangleError::NotImplemented)
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{AppTangleClient, AppTangleClientStub, AppTangleError};
+    use super::{RadrootsAppTangleClient, RadrootsAppTangleClientStub, RadrootsAppTangleError};
 
     #[test]
     fn tangle_stub_reports_not_implemented() {
-        let client = AppTangleClientStub::new();
+        let client = RadrootsAppTangleClientStub::new();
         let err = client.init().expect_err("not implemented");
-        assert_eq!(err, AppTangleError::NotImplemented);
+        assert_eq!(err, RadrootsAppTangleError::NotImplemented);
         assert_eq!(err.to_string(), "error.app.tangle.not_implemented");
     }
 }
