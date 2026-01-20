@@ -7,11 +7,9 @@ use leptos::prelude::*;
 use leptos::task::spawn_local;
 use std::rc::Rc;
 
-use radroots_studio_app_core::datastore::RadrootsClientWebDatastore;
-
 use crate::{
     app_context,
-    app_log_buffer_flush,
+    app_log_buffer_flush_no_prune,
     app_log_entries_clear,
     app_log_entries_dump,
     app_log_entries_load,
@@ -42,18 +40,24 @@ pub fn RadrootsAppLogsPage() -> impl IntoView {
     let did_load = RwSignal::new_local(false);
     let interval_started = RwSignal::new_local(false);
     let context = Rc::new(app_context());
-    let refresh = {
+    let resolve_backends = {
         let context = Rc::clone(&context);
         Rc::new(move || {
-            let Some(context) = context.as_ref().clone() else {
-                entries.set(Vec::new());
-                dump.set(String::new());
-                return;
-            };
-            let config = context
-                .backends
-                .with_untracked(|value| value.as_ref().map(|backends| backends.config.clone()));
-            let Some(config) = config else {
+            context.as_ref().as_ref().and_then(|context| {
+                context
+                    .backends
+                    .with_untracked(|value| {
+                        value.as_ref().map(|backends| {
+                            (backends.datastore.clone(), backends.config.datastore.key_maps.clone())
+                        })
+                    })
+            })
+        })
+    };
+    let refresh = {
+        let resolve_backends = Rc::clone(&resolve_backends);
+        Rc::new(move || {
+            let Some((datastore, key_maps)) = resolve_backends() else {
                 entries.set(Vec::new());
                 dump.set(String::new());
                 return;
@@ -63,9 +67,8 @@ pub fn RadrootsAppLogsPage() -> impl IntoView {
             let dump_signal = dump;
             let loading_signal = loading;
             spawn_local(async move {
-                let datastore = RadrootsClientWebDatastore::new(Some(config.datastore.idb_config));
-                let _ = app_log_buffer_flush(&datastore, &config.datastore.key_maps).await;
-                let result = app_log_entries_load(&datastore, &config.datastore.key_maps).await;
+                let _ = app_log_buffer_flush_no_prune(datastore.as_ref(), &key_maps).await;
+                let result = app_log_entries_load(datastore.as_ref(), &key_maps).await;
                 match result {
                     Ok(mut items) => {
                         items.sort_by(|a, b| b.timestamp_ms.cmp(&a.timestamp_ms));
@@ -82,18 +85,10 @@ pub fn RadrootsAppLogsPage() -> impl IntoView {
         })
     };
     let clear = {
-        let context = Rc::clone(&context);
+        let resolve_backends = Rc::clone(&resolve_backends);
         let refresh = Rc::clone(&refresh);
         Rc::new(move || {
-            let Some(context) = context.as_ref().clone() else {
-                entries.set(Vec::new());
-                dump.set(String::new());
-                return;
-            };
-            let config = context
-                .backends
-                .with_untracked(|value| value.as_ref().map(|backends| backends.config.clone()));
-            let Some(config) = config else {
+            let Some((datastore, key_maps)) = resolve_backends() else {
                 entries.set(Vec::new());
                 dump.set(String::new());
                 return;
@@ -101,15 +96,22 @@ pub fn RadrootsAppLogsPage() -> impl IntoView {
             loading.set(true);
             let refresh = Rc::clone(&refresh);
             spawn_local(async move {
-                let datastore = RadrootsClientWebDatastore::new(Some(config.datastore.idb_config));
-                let _ = app_log_entries_clear(&datastore, &config.datastore.key_maps).await;
+                let _ = app_log_entries_clear(datastore.as_ref(), &key_maps).await;
                 refresh();
             });
         })
     };
     let refresh_effect = Rc::clone(&refresh);
+    let context_effect = Rc::clone(&context);
     Effect::new(move || {
+        let Some(context) = context_effect.as_ref() else {
+            return;
+        };
         if did_load.get() {
+            return;
+        }
+        let has_backends = context.backends.with(|value| value.is_some());
+        if !has_backends {
             return;
         }
         did_load.set(true);
