@@ -96,16 +96,31 @@ pub async fn app_datastore_clear_bootstrap<T: RadrootsClientDatastore>(
     Ok(())
 }
 
+pub async fn app_datastore_set_notifications_permission<T: RadrootsClientDatastore>(
+    datastore: &T,
+    key_maps: &AppKeyMapConfig,
+    permission: &str,
+) -> AppInitResult<AppAppData> {
+    let mut data = match app_datastore_has_app_data(datastore, key_maps).await? {
+        true => app_datastore_read_app_data(datastore, key_maps).await?,
+        false => AppAppData::default(),
+    };
+    data.notifications_permission = Some(permission.to_string());
+    let value = app_datastore_write_app_data(datastore, key_maps, &data).await?;
+    Ok(value)
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
         app_datastore_clear_bootstrap,
-    app_datastore_has_app_data,
-    app_datastore_has_config,
-    app_datastore_read_app_data,
-    app_datastore_write_app_data,
-    app_datastore_write_config,
-};
+        app_datastore_has_app_data,
+        app_datastore_has_config,
+        app_datastore_read_app_data,
+        app_datastore_set_notifications_permission,
+        app_datastore_write_app_data,
+        app_datastore_write_config,
+    };
     use crate::{app_key_maps_default, AppAppData, AppConfigData, AppInitError};
     use radroots_studio_app_core::datastore::{RadrootsClientDatastoreError, RadrootsClientWebDatastore};
 
@@ -176,6 +191,19 @@ mod tests {
         let key_maps = app_key_maps_default();
         let err = futures::executor::block_on(app_datastore_has_app_data(&datastore, &key_maps))
             .expect_err("idb undefined");
+        assert_eq!(err, AppInitError::Datastore(RadrootsClientDatastoreError::IdbUndefined));
+    }
+
+    #[test]
+    fn set_notifications_permission_maps_idb_errors() {
+        let datastore = RadrootsClientWebDatastore::new(None);
+        let key_maps = app_key_maps_default();
+        let err = futures::executor::block_on(app_datastore_set_notifications_permission(
+            &datastore,
+            &key_maps,
+            "granted",
+        ))
+        .expect_err("idb undefined");
         assert_eq!(err, AppInitError::Datastore(RadrootsClientDatastoreError::IdbUndefined));
     }
 }

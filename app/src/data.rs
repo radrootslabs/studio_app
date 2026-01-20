@@ -40,6 +40,7 @@ pub struct AppAppData {
     pub role: AppConfigRole,
     pub eula_date: String,
     pub nip05_key: Option<String>,
+    pub notifications_permission: Option<String>,
 }
 
 impl Default for AppAppData {
@@ -49,6 +50,7 @@ impl Default for AppAppData {
             role: AppConfigRole::default(),
             eula_date: String::new(),
             nip05_key: None,
+            notifications_permission: None,
         }
     }
 }
@@ -79,5 +81,6 @@ mod tests {
         assert_eq!(data.role, AppConfigRole::Public);
         assert_eq!(data.eula_date, "");
         assert!(data.nip05_key.is_none());
+        assert!(data.notifications_permission.is_none());
     }
 }

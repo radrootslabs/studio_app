@@ -20,6 +20,7 @@ pub use bootstrap::{
     app_datastore_has_app_data,
     app_datastore_has_config,
     app_datastore_read_app_data,
+    app_datastore_set_notifications_permission,
     app_datastore_write_app_data,
     app_datastore_write_config,
 };
