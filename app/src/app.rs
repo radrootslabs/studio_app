@@ -25,9 +25,9 @@ use crate::{
     app_health_check_all_logged,
     RadrootsAppBackends,
     RadrootsAppConfig,
-    AppHealthCheckResult,
-    AppHealthCheckStatus,
-    AppHealthReport,
+    RadrootsAppHealthCheckResult,
+    RadrootsAppHealthCheckStatus,
+    RadrootsAppHealthReport,
     RadrootsAppInitError,
     RadrootsAppInitStage,
     AppNotifications,
@@ -35,15 +35,15 @@ use crate::{
     LogsPage,
 };
 
-fn health_status_color(status: AppHealthCheckStatus) -> &'static str {
+fn health_status_color(status: RadrootsAppHealthCheckStatus) -> &'static str {
     match status {
-        AppHealthCheckStatus::Ok => "green",
-        AppHealthCheckStatus::Error => "red",
-        AppHealthCheckStatus::Skipped => "gray",
+        RadrootsAppHealthCheckStatus::Ok => "green",
+        RadrootsAppHealthCheckStatus::Error => "red",
+        RadrootsAppHealthCheckStatus::Skipped => "gray",
     }
 }
 
-fn health_result_label(result: &AppHealthCheckResult) -> String {
+fn health_result_label(result: &RadrootsAppHealthCheckResult) -> String {
     match result.message.as_deref() {
         Some(message) => format!("{}: {}", result.status.as_str(), message),
         None => result.status.as_str().to_string(),
@@ -68,7 +68,7 @@ fn log_init_stage(stage: RadrootsAppInitStage) {
 
 fn spawn_health_checks(
     config: RadrootsAppConfig,
-    health_report: RwSignal<AppHealthReport, LocalStorage>,
+    health_report: RwSignal<RadrootsAppHealthReport, LocalStorage>,
     health_running: RwSignal<bool, LocalStorage>,
     active_key: RwSignal<Option<String>, LocalStorage>,
     notifications_status: RwSignal<Option<String>, LocalStorage>,
@@ -121,7 +121,7 @@ fn HomePage() -> impl IntoView {
     let init_error = RwSignal::new_local(None::<RadrootsAppInitError>);
     let init_state = RwSignal::new_local(app_init_state_default());
     let reset_status = RwSignal::new_local(None::<String>);
-    let health_report = RwSignal::new_local(AppHealthReport::empty());
+    let health_report = RwSignal::new_local(RadrootsAppHealthReport::empty());
     let health_running = RwSignal::new_local(false);
     let health_autorun = RwSignal::new_local(false);
     let active_key = RwSignal::new_local(None::<String>);
@@ -268,7 +268,7 @@ fn HomePage() -> impl IntoView {
                     on:click=move |_| {
                         let config = backends.with_untracked(|value| value.as_ref().map(|backends| backends.config.clone()));
                         reset_status.set(Some("resetting".to_string()));
-                        health_report.set(AppHealthReport::empty());
+                        health_report.set(RadrootsAppHealthReport::empty());
                         active_key.set(None);
                         notifications_status.set(None);
                         spawn_local(async move {

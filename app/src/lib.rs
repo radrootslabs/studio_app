@@ -37,9 +37,9 @@ pub use health::{
     app_health_check_notifications,
     app_health_check_tangle,
     app_health_check_key_maps,
-    AppHealthCheckResult,
-    AppHealthCheckStatus,
-    AppHealthReport,
+    RadrootsAppHealthCheckResult,
+    RadrootsAppHealthCheckStatus,
+    RadrootsAppHealthReport,
 };
 pub use keystore::{
     app_keystore_nostr_ensure_key,

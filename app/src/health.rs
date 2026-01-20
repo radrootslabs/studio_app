@@ -1,79 +1,79 @@
 #![forbid(unsafe_code)]
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum AppHealthCheckStatus {
+pub enum RadrootsAppHealthCheckStatus {
     Ok,
     Error,
     Skipped,
 }
 
-impl AppHealthCheckStatus {
+impl RadrootsAppHealthCheckStatus {
     pub const fn as_str(self) -> &'static str {
         match self {
-            AppHealthCheckStatus::Ok => "ok",
-            AppHealthCheckStatus::Error => "error",
-            AppHealthCheckStatus::Skipped => "skipped",
+            RadrootsAppHealthCheckStatus::Ok => "ok",
+            RadrootsAppHealthCheckStatus::Error => "error",
+            RadrootsAppHealthCheckStatus::Skipped => "skipped",
         }
     }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct AppHealthCheckResult {
-    pub status: AppHealthCheckStatus,
+pub struct RadrootsAppHealthCheckResult {
+    pub status: RadrootsAppHealthCheckStatus,
     pub message: Option<String>,
 }
 
-impl AppHealthCheckResult {
+impl RadrootsAppHealthCheckResult {
     pub fn ok() -> Self {
         Self {
-            status: AppHealthCheckStatus::Ok,
+            status: RadrootsAppHealthCheckStatus::Ok,
             message: None,
         }
     }
 
     pub fn error(message: impl Into<String>) -> Self {
         Self {
-            status: AppHealthCheckStatus::Error,
+            status: RadrootsAppHealthCheckStatus::Error,
             message: Some(message.into()),
         }
     }
 
     pub fn skipped() -> Self {
         Self {
-            status: AppHealthCheckStatus::Skipped,
+            status: RadrootsAppHealthCheckStatus::Skipped,
             message: None,
         }
     }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct AppHealthReport {
-    pub key_maps: AppHealthCheckResult,
-    pub bootstrap_config: AppHealthCheckResult,
-    pub bootstrap_app_data: AppHealthCheckResult,
-    pub app_data_active_key: AppHealthCheckResult,
-    pub notifications: AppHealthCheckResult,
-    pub tangle: AppHealthCheckResult,
-    pub datastore_roundtrip: AppHealthCheckResult,
-    pub keystore: AppHealthCheckResult,
+pub struct RadrootsAppHealthReport {
+    pub key_maps: RadrootsAppHealthCheckResult,
+    pub bootstrap_config: RadrootsAppHealthCheckResult,
+    pub bootstrap_app_data: RadrootsAppHealthCheckResult,
+    pub app_data_active_key: RadrootsAppHealthCheckResult,
+    pub notifications: RadrootsAppHealthCheckResult,
+    pub tangle: RadrootsAppHealthCheckResult,
+    pub datastore_roundtrip: RadrootsAppHealthCheckResult,
+    pub keystore: RadrootsAppHealthCheckResult,
 }
 
-impl Default for AppHealthReport {
+impl Default for RadrootsAppHealthReport {
     fn default() -> Self {
         Self {
-            key_maps: AppHealthCheckResult::skipped(),
-            bootstrap_config: AppHealthCheckResult::skipped(),
-            bootstrap_app_data: AppHealthCheckResult::skipped(),
-            app_data_active_key: AppHealthCheckResult::skipped(),
-            notifications: AppHealthCheckResult::skipped(),
-            tangle: AppHealthCheckResult::skipped(),
-            datastore_roundtrip: AppHealthCheckResult::skipped(),
-            keystore: AppHealthCheckResult::skipped(),
+            key_maps: RadrootsAppHealthCheckResult::skipped(),
+            bootstrap_config: RadrootsAppHealthCheckResult::skipped(),
+            bootstrap_app_data: RadrootsAppHealthCheckResult::skipped(),
+            app_data_active_key: RadrootsAppHealthCheckResult::skipped(),
+            notifications: RadrootsAppHealthCheckResult::skipped(),
+            tangle: RadrootsAppHealthCheckResult::skipped(),
+            datastore_roundtrip: RadrootsAppHealthCheckResult::skipped(),
+            keystore: RadrootsAppHealthCheckResult::skipped(),
         }
     }
 }
 
-impl AppHealthReport {
+impl RadrootsAppHealthReport {
     pub fn empty() -> Self {
         Self::default()
     }
@@ -98,7 +98,7 @@ use radroots_studio_app_core::notifications::RadrootsClientNotificationsPermissi
 use radroots_studio_app_core::datastore::{RadrootsClientDatastore, RadrootsClientDatastoreError};
 use radroots_studio_app_core::keystore::{RadrootsClientKeystoreError, RadrootsClientKeystoreNostr};
 
-fn log_health_context(result: &AppHealthCheckResult) -> Option<String> {
+fn log_health_context(result: &RadrootsAppHealthCheckResult) -> Option<String> {
     match result.message.as_deref() {
         Some(message) => Some(format!("status={},detail={message}", result.status.as_str())),
         None => Some(format!("status={}", result.status.as_str())),
@@ -109,9 +109,9 @@ fn log_health_start(name: &str) {
     let _ = app_log_debug_emit("log.app.health.start", name, None);
 }
 
-fn log_health_end(name: &str, result: &AppHealthCheckResult) {
+fn log_health_end(name: &str, result: &RadrootsAppHealthCheckResult) {
     let context = log_health_context(result);
-    if result.status == AppHealthCheckStatus::Error {
+    if result.status == RadrootsAppHealthCheckStatus::Error {
         let entry = app_log_entry_new(AppLogLevel::Error, "log.app.health.end", name, context);
         let _ = app_log_entry_record(entry);
     } else {
@@ -119,79 +119,79 @@ fn log_health_end(name: &str, result: &AppHealthCheckResult) {
     }
 }
 
-pub fn app_health_check_key_maps(key_maps: &RadrootsAppKeyMapConfig) -> AppHealthCheckResult {
+pub fn app_health_check_key_maps(key_maps: &RadrootsAppKeyMapConfig) -> RadrootsAppHealthCheckResult {
     match app_key_maps_validate(key_maps) {
-        Ok(()) => AppHealthCheckResult::ok(),
-        Err(err) => AppHealthCheckResult::error(err.to_string()),
+        Ok(()) => RadrootsAppHealthCheckResult::ok(),
+        Err(err) => RadrootsAppHealthCheckResult::error(err.to_string()),
     }
 }
 
 pub async fn app_health_check_bootstrap_config<T: RadrootsClientDatastore>(
     datastore: &T,
     key_maps: &RadrootsAppKeyMapConfig,
-) -> AppHealthCheckResult {
+) -> RadrootsAppHealthCheckResult {
     match app_datastore_has_config(datastore, key_maps).await {
-        Ok(true) => AppHealthCheckResult::ok(),
-        Ok(false) => AppHealthCheckResult::error("missing"),
-        Err(err) => AppHealthCheckResult::error(err.to_string()),
+        Ok(true) => RadrootsAppHealthCheckResult::ok(),
+        Ok(false) => RadrootsAppHealthCheckResult::error("missing"),
+        Err(err) => RadrootsAppHealthCheckResult::error(err.to_string()),
     }
 }
 
 pub async fn app_health_check_bootstrap_app_data<T: RadrootsClientDatastore>(
     datastore: &T,
     key_maps: &RadrootsAppKeyMapConfig,
-) -> AppHealthCheckResult {
+) -> RadrootsAppHealthCheckResult {
     match app_datastore_has_app_data(datastore, key_maps).await {
-        Ok(true) => AppHealthCheckResult::ok(),
-        Ok(false) => AppHealthCheckResult::error("missing"),
-        Err(err) => AppHealthCheckResult::error(err.to_string()),
+        Ok(true) => RadrootsAppHealthCheckResult::ok(),
+        Ok(false) => RadrootsAppHealthCheckResult::error("missing"),
+        Err(err) => RadrootsAppHealthCheckResult::error(err.to_string()),
     }
 }
 
 pub async fn app_health_check_app_data_active_key<T: RadrootsClientDatastore>(
     datastore: &T,
     key_maps: &RadrootsAppKeyMapConfig,
-) -> AppHealthCheckResult {
+) -> RadrootsAppHealthCheckResult {
     let app_data = match app_datastore_read_app_data(datastore, key_maps).await {
         Ok(value) => value,
-        Err(err) => return AppHealthCheckResult::error(err.to_string()),
+        Err(err) => return RadrootsAppHealthCheckResult::error(err.to_string()),
     };
     if app_data.active_key.is_empty() {
-        return AppHealthCheckResult::error("missing");
+        return RadrootsAppHealthCheckResult::error("missing");
     }
     let key_name = match app_datastore_key_nostr_key(key_maps) {
         Ok(value) => value,
-        Err(err) => return AppHealthCheckResult::error(err.to_string()),
+        Err(err) => return RadrootsAppHealthCheckResult::error(err.to_string()),
     };
     let stored = match datastore.get(key_name).await {
         Ok(value) => value,
-        Err(RadrootsClientDatastoreError::NoResult) => return AppHealthCheckResult::error("missing"),
-        Err(err) => return AppHealthCheckResult::error(err.to_string()),
+        Err(RadrootsClientDatastoreError::NoResult) => return RadrootsAppHealthCheckResult::error("missing"),
+        Err(err) => return RadrootsAppHealthCheckResult::error(err.to_string()),
     };
     if stored != app_data.active_key {
-        return AppHealthCheckResult::error("mismatch");
+        return RadrootsAppHealthCheckResult::error("mismatch");
     }
-    AppHealthCheckResult::ok()
+    RadrootsAppHealthCheckResult::ok()
 }
 
 pub async fn app_health_check_notifications(
     notifications: &AppNotifications,
-) -> AppHealthCheckResult {
+) -> RadrootsAppHealthCheckResult {
     match notifications.permission().await {
         Ok(permission) => app_health_check_notifications_permission(permission),
-        Err(err) => AppHealthCheckResult::error(err.to_string()),
+        Err(err) => RadrootsAppHealthCheckResult::error(err.to_string()),
     }
 }
 
 fn app_health_check_notifications_permission(
     permission: RadrootsClientNotificationsPermission,
-) -> AppHealthCheckResult {
+) -> RadrootsAppHealthCheckResult {
     match permission {
-        RadrootsClientNotificationsPermission::Granted => AppHealthCheckResult::ok(),
+        RadrootsClientNotificationsPermission::Granted => RadrootsAppHealthCheckResult::ok(),
         RadrootsClientNotificationsPermission::Denied
-        | RadrootsClientNotificationsPermission::Default => AppHealthCheckResult::skipped(),
+        | RadrootsClientNotificationsPermission::Default => RadrootsAppHealthCheckResult::skipped(),
         RadrootsClientNotificationsPermission::Unavailable => {
-            AppHealthCheckResult::error(permission.as_str())
+            RadrootsAppHealthCheckResult::error(permission.as_str())
         }
     }
 }
@@ -199,7 +199,7 @@ fn app_health_check_notifications_permission(
 pub async fn app_health_check_notifications_with_state(
     notifications: &AppNotifications,
     stored_permission: Option<&str>,
-) -> AppHealthCheckResult {
+) -> RadrootsAppHealthCheckResult {
     if let Some(value) = stored_permission {
         if let Some(permission) = RadrootsClientNotificationsPermission::parse(value) {
             return app_health_check_notifications_permission(permission);
@@ -208,10 +208,10 @@ pub async fn app_health_check_notifications_with_state(
     app_health_check_notifications(notifications).await
 }
 
-pub fn app_health_check_tangle<T: AppTangleClient>(tangle: &T) -> AppHealthCheckResult {
+pub fn app_health_check_tangle<T: AppTangleClient>(tangle: &T) -> RadrootsAppHealthCheckResult {
     match tangle.init() {
-        Ok(()) => AppHealthCheckResult::ok(),
-        Err(crate::AppTangleError::NotImplemented) => AppHealthCheckResult::skipped(),
+        Ok(()) => RadrootsAppHealthCheckResult::ok(),
+        Err(crate::AppTangleError::NotImplemented) => RadrootsAppHealthCheckResult::skipped(),
     }
 }
 
@@ -219,45 +219,45 @@ const APP_HEALTH_TEMP_KEY: &str = "radroots.health.temp";
 
 pub async fn app_health_check_datastore_roundtrip<T: RadrootsClientDatastore>(
     datastore: &T,
-) -> AppHealthCheckResult {
+) -> RadrootsAppHealthCheckResult {
     let value = "ok";
     if let Err(err) = datastore.set(APP_HEALTH_TEMP_KEY, value).await {
-        return AppHealthCheckResult::error(err.to_string());
+        return RadrootsAppHealthCheckResult::error(err.to_string());
     }
     match datastore.get(APP_HEALTH_TEMP_KEY).await {
         Ok(read) => {
             if read != value {
-                return AppHealthCheckResult::error("mismatch");
+                return RadrootsAppHealthCheckResult::error("mismatch");
             }
         }
-        Err(err) => return AppHealthCheckResult::error(err.to_string()),
+        Err(err) => return RadrootsAppHealthCheckResult::error(err.to_string()),
     }
     if let Err(err) = datastore.del(APP_HEALTH_TEMP_KEY).await {
-        return AppHealthCheckResult::error(err.to_string());
+        return RadrootsAppHealthCheckResult::error(err.to_string());
     }
-    AppHealthCheckResult::ok()
+    RadrootsAppHealthCheckResult::ok()
 }
 
 pub async fn app_health_check_keystore_access<T: RadrootsClientDatastore, K: RadrootsClientKeystoreNostr>(
     datastore: &T,
     keystore: &K,
     key_maps: &RadrootsAppKeyMapConfig,
-) -> AppHealthCheckResult {
+) -> RadrootsAppHealthCheckResult {
     let key_name = match app_datastore_key_nostr_key(key_maps) {
         Ok(value) => value,
-        Err(err) => return AppHealthCheckResult::error(err.to_string()),
+        Err(err) => return RadrootsAppHealthCheckResult::error(err.to_string()),
     };
     let public_key = match datastore.get(key_name).await {
         Ok(value) if !value.is_empty() => value,
-        Ok(_) => return AppHealthCheckResult::error("missing"),
-        Err(RadrootsClientDatastoreError::NoResult) => return AppHealthCheckResult::error("missing"),
-        Err(err) => return AppHealthCheckResult::error(err.to_string()),
+        Ok(_) => return RadrootsAppHealthCheckResult::error("missing"),
+        Err(RadrootsClientDatastoreError::NoResult) => return RadrootsAppHealthCheckResult::error("missing"),
+        Err(err) => return RadrootsAppHealthCheckResult::error(err.to_string()),
     };
     match keystore.read(&public_key).await {
-        Ok(_) => AppHealthCheckResult::ok(),
-        Err(RadrootsClientKeystoreError::MissingKey) => AppHealthCheckResult::error("missing"),
-        Err(RadrootsClientKeystoreError::NostrNoResults) => AppHealthCheckResult::error("missing"),
-        Err(err) => AppHealthCheckResult::error(err.to_string()),
+        Ok(_) => RadrootsAppHealthCheckResult::ok(),
+        Err(RadrootsClientKeystoreError::MissingKey) => RadrootsAppHealthCheckResult::error("missing"),
+        Err(RadrootsClientKeystoreError::NostrNoResults) => RadrootsAppHealthCheckResult::error("missing"),
+        Err(err) => RadrootsAppHealthCheckResult::error(err.to_string()),
     }
 }
 
@@ -267,7 +267,7 @@ pub async fn app_health_check_all<T: RadrootsClientDatastore, K: RadrootsClientK
     notifications: &AppNotifications,
     tangle: &G,
     key_maps: &RadrootsAppKeyMapConfig,
-) -> AppHealthReport {
+) -> RadrootsAppHealthReport {
     log_health_start("key_maps");
     let key_maps_result = app_health_check_key_maps(key_maps);
     log_health_end("key_maps", &key_maps_result);
@@ -298,7 +298,7 @@ pub async fn app_health_check_all<T: RadrootsClientDatastore, K: RadrootsClientK
     log_health_start("keystore");
     let keystore_result = app_health_check_keystore_access(datastore, keystore, key_maps).await;
     log_health_end("keystore", &keystore_result);
-    AppHealthReport {
+    RadrootsAppHealthReport {
         key_maps: key_maps_result,
         bootstrap_config,
         bootstrap_app_data,
@@ -316,7 +316,7 @@ pub async fn app_health_check_all_logged<T: RadrootsClientDatastore, K: Radroots
     notifications: &AppNotifications,
     tangle: &G,
     key_maps: &RadrootsAppKeyMapConfig,
-) -> AppHealthReport {
+) -> RadrootsAppHealthReport {
     let report = app_health_check_all(datastore, keystore, notifications, tangle, key_maps).await;
     let _ = app_log_buffer_flush_critical(datastore, key_maps).await;
     report
@@ -338,9 +338,9 @@ mod tests {
         app_health_check_notifications_permission,
         app_health_check_tangle,
         log_health_context,
-        AppHealthCheckResult,
-        AppHealthCheckStatus,
-        AppHealthReport,
+        RadrootsAppHealthCheckResult,
+        RadrootsAppHealthCheckStatus,
+        RadrootsAppHealthReport,
     };
     use crate::app_log_buffer_drain;
     use crate::RadrootsAppKeyMapConfig;
@@ -367,47 +367,47 @@ mod tests {
 
     #[test]
     fn health_status_as_str() {
-        assert_eq!(AppHealthCheckStatus::Ok.as_str(), "ok");
-        assert_eq!(AppHealthCheckStatus::Error.as_str(), "error");
-        assert_eq!(AppHealthCheckStatus::Skipped.as_str(), "skipped");
+        assert_eq!(RadrootsAppHealthCheckStatus::Ok.as_str(), "ok");
+        assert_eq!(RadrootsAppHealthCheckStatus::Error.as_str(), "error");
+        assert_eq!(RadrootsAppHealthCheckStatus::Skipped.as_str(), "skipped");
     }
 
     #[test]
     fn health_result_constructors() {
-        let ok = AppHealthCheckResult::ok();
-        assert_eq!(ok.status, AppHealthCheckStatus::Ok);
+        let ok = RadrootsAppHealthCheckResult::ok();
+        assert_eq!(ok.status, RadrootsAppHealthCheckStatus::Ok);
         assert!(ok.message.is_none());
 
-        let err = AppHealthCheckResult::error("boom");
-        assert_eq!(err.status, AppHealthCheckStatus::Error);
+        let err = RadrootsAppHealthCheckResult::error("boom");
+        assert_eq!(err.status, RadrootsAppHealthCheckStatus::Error);
         assert_eq!(err.message.as_deref(), Some("boom"));
     }
 
     #[test]
     fn health_log_context_formats_error_detail() {
-        let result = AppHealthCheckResult::error("missing");
+        let result = RadrootsAppHealthCheckResult::error("missing");
         let context = log_health_context(&result);
         assert_eq!(context.as_deref(), Some("status=error,detail=missing"));
     }
 
     #[test]
     fn health_report_defaults_skipped() {
-        let report = AppHealthReport::default();
-        assert_eq!(report.key_maps.status, AppHealthCheckStatus::Skipped);
-        assert_eq!(report.bootstrap_config.status, AppHealthCheckStatus::Skipped);
-        assert_eq!(report.bootstrap_app_data.status, AppHealthCheckStatus::Skipped);
-        assert_eq!(report.app_data_active_key.status, AppHealthCheckStatus::Skipped);
-        assert_eq!(report.notifications.status, AppHealthCheckStatus::Skipped);
-        assert_eq!(report.tangle.status, AppHealthCheckStatus::Skipped);
-        assert_eq!(report.datastore_roundtrip.status, AppHealthCheckStatus::Skipped);
-        assert_eq!(report.keystore.status, AppHealthCheckStatus::Skipped);
+        let report = RadrootsAppHealthReport::default();
+        assert_eq!(report.key_maps.status, RadrootsAppHealthCheckStatus::Skipped);
+        assert_eq!(report.bootstrap_config.status, RadrootsAppHealthCheckStatus::Skipped);
+        assert_eq!(report.bootstrap_app_data.status, RadrootsAppHealthCheckStatus::Skipped);
+        assert_eq!(report.app_data_active_key.status, RadrootsAppHealthCheckStatus::Skipped);
+        assert_eq!(report.notifications.status, RadrootsAppHealthCheckStatus::Skipped);
+        assert_eq!(report.tangle.status, RadrootsAppHealthCheckStatus::Skipped);
+        assert_eq!(report.datastore_roundtrip.status, RadrootsAppHealthCheckStatus::Skipped);
+        assert_eq!(report.keystore.status, RadrootsAppHealthCheckStatus::Skipped);
     }
 
     #[test]
     fn health_check_key_maps_reports_errors() {
         let empty = RadrootsAppKeyMapConfig::empty();
         let result = app_health_check_key_maps(&empty);
-        assert_eq!(result.status, AppHealthCheckStatus::Error);
+        assert_eq!(result.status, RadrootsAppHealthCheckStatus::Error);
         assert_eq!(
             result.message.as_deref(),
             Some("error.app.config.key_map_missing")
@@ -422,12 +422,12 @@ mod tests {
             &datastore,
             &key_maps,
         ));
-        assert_eq!(result.status, AppHealthCheckStatus::Error);
+        assert_eq!(result.status, RadrootsAppHealthCheckStatus::Error);
         let result = futures::executor::block_on(app_health_check_bootstrap_app_data(
             &datastore,
             &key_maps,
         ));
-        assert_eq!(result.status, AppHealthCheckStatus::Error);
+        assert_eq!(result.status, RadrootsAppHealthCheckStatus::Error);
     }
 
     #[test]
@@ -435,7 +435,7 @@ mod tests {
         let datastore = RadrootsClientWebDatastore::new(None);
         let result =
             futures::executor::block_on(app_health_check_datastore_roundtrip(&datastore));
-        assert_eq!(result.status, AppHealthCheckStatus::Error);
+        assert_eq!(result.status, RadrootsAppHealthCheckStatus::Error);
     }
 
     struct TestDatastore {
@@ -592,7 +592,7 @@ mod tests {
             &keystore,
             &key_maps,
         ));
-        assert_eq!(result.status, AppHealthCheckStatus::Error);
+        assert_eq!(result.status, RadrootsAppHealthCheckStatus::Error);
     }
 
     #[test]
@@ -610,7 +610,7 @@ mod tests {
             &keystore,
             &key_maps,
         ));
-        assert_eq!(result.status, AppHealthCheckStatus::Error);
+        assert_eq!(result.status, RadrootsAppHealthCheckStatus::Error);
         assert_eq!(result.message.as_deref(), Some("missing"));
     }
 
@@ -629,7 +629,7 @@ mod tests {
             &keystore,
             &key_maps,
         ));
-        assert_eq!(result.status, AppHealthCheckStatus::Error);
+        assert_eq!(result.status, RadrootsAppHealthCheckStatus::Error);
         assert_eq!(result.message.as_deref(), Some("missing"));
     }
 
@@ -648,7 +648,7 @@ mod tests {
             &keystore,
             &key_maps,
         ));
-        assert_eq!(result.status, AppHealthCheckStatus::Ok);
+        assert_eq!(result.status, RadrootsAppHealthCheckStatus::Ok);
     }
 
     #[test]
@@ -662,7 +662,7 @@ mod tests {
             &datastore,
             &key_maps,
         ));
-        assert_eq!(result.status, AppHealthCheckStatus::Error);
+        assert_eq!(result.status, RadrootsAppHealthCheckStatus::Error);
         assert_eq!(result.message.as_deref(), Some("missing"));
     }
 
@@ -679,7 +679,7 @@ mod tests {
             &datastore,
             &key_maps,
         ));
-        assert_eq!(result.status, AppHealthCheckStatus::Error);
+        assert_eq!(result.status, RadrootsAppHealthCheckStatus::Error);
         assert_eq!(result.message.as_deref(), Some("mismatch"));
     }
 
@@ -696,7 +696,7 @@ mod tests {
             &datastore,
             &key_maps,
         ));
-        assert_eq!(result.status, AppHealthCheckStatus::Ok);
+        assert_eq!(result.status, RadrootsAppHealthCheckStatus::Ok);
     }
 
     #[test]
@@ -713,14 +713,14 @@ mod tests {
             &tangle,
             &key_maps,
         ));
-        assert_eq!(report.key_maps.status, AppHealthCheckStatus::Ok);
-        assert_eq!(report.bootstrap_config.status, AppHealthCheckStatus::Error);
-        assert_eq!(report.bootstrap_app_data.status, AppHealthCheckStatus::Error);
-        assert_eq!(report.app_data_active_key.status, AppHealthCheckStatus::Error);
-        assert_eq!(report.notifications.status, AppHealthCheckStatus::Error);
-        assert_eq!(report.tangle.status, AppHealthCheckStatus::Skipped);
-        assert_eq!(report.datastore_roundtrip.status, AppHealthCheckStatus::Error);
-        assert_eq!(report.keystore.status, AppHealthCheckStatus::Error);
+        assert_eq!(report.key_maps.status, RadrootsAppHealthCheckStatus::Ok);
+        assert_eq!(report.bootstrap_config.status, RadrootsAppHealthCheckStatus::Error);
+        assert_eq!(report.bootstrap_app_data.status, RadrootsAppHealthCheckStatus::Error);
+        assert_eq!(report.app_data_active_key.status, RadrootsAppHealthCheckStatus::Error);
+        assert_eq!(report.notifications.status, RadrootsAppHealthCheckStatus::Error);
+        assert_eq!(report.tangle.status, RadrootsAppHealthCheckStatus::Skipped);
+        assert_eq!(report.datastore_roundtrip.status, RadrootsAppHealthCheckStatus::Error);
+        assert_eq!(report.keystore.status, RadrootsAppHealthCheckStatus::Error);
     }
 
     #[test]
@@ -728,7 +728,7 @@ mod tests {
         let notifications = crate::AppNotifications::new(None);
         let result =
             futures::executor::block_on(app_health_check_notifications(&notifications));
-        assert_eq!(result.status, AppHealthCheckStatus::Error);
+        assert_eq!(result.status, RadrootsAppHealthCheckStatus::Error);
         assert_eq!(result.message.as_deref(), Some("unavailable"));
     }
 
@@ -736,10 +736,10 @@ mod tests {
     fn health_check_notifications_skips_default_and_denied() {
         let default_result =
             app_health_check_notifications_permission(RadrootsClientNotificationsPermission::Default);
-        assert_eq!(default_result.status, AppHealthCheckStatus::Skipped);
+        assert_eq!(default_result.status, RadrootsAppHealthCheckStatus::Skipped);
         let denied_result =
             app_health_check_notifications_permission(RadrootsClientNotificationsPermission::Denied);
-        assert_eq!(denied_result.status, AppHealthCheckStatus::Skipped);
+        assert_eq!(denied_result.status, RadrootsAppHealthCheckStatus::Skipped);
     }
 
     #[test]
@@ -749,14 +749,14 @@ mod tests {
             &notifications,
             Some("granted"),
         ));
-        assert_eq!(result.status, AppHealthCheckStatus::Ok);
+        assert_eq!(result.status, RadrootsAppHealthCheckStatus::Ok);
     }
 
     #[test]
     fn health_check_tangle_reports_not_implemented() {
         let tangle = crate::AppTangleClientStub::new();
         let result = app_health_check_tangle(&tangle);
-        assert_eq!(result.status, AppHealthCheckStatus::Skipped);
+        assert_eq!(result.status, RadrootsAppHealthCheckStatus::Skipped);
         assert!(result.message.is_none());
     }
 
@@ -901,7 +901,7 @@ mod tests {
             &tangle,
             &key_maps,
         ));
-        assert_eq!(report.key_maps.status, AppHealthCheckStatus::Ok);
+        assert_eq!(report.key_maps.status, RadrootsAppHealthCheckStatus::Ok);
         assert!(datastore.entry_len() > 0);
     }
 }
