@@ -1,6 +1,8 @@
 #![forbid(unsafe_code)]
 
-use gloo_timers::callback::Interval;
+use futures::future::{AbortHandle, Abortable};
+use futures::StreamExt;
+use gloo_timers::future::IntervalStream;
 use leptos::prelude::*;
 use leptos::task::spawn_local;
 use std::rc::Rc;
@@ -120,8 +122,18 @@ pub fn LogsPage() -> impl IntoView {
         }
         interval_started.set(true);
         let refresh = Rc::clone(&interval_effect);
-        let interval = Interval::new(logs_auto_refresh_ms(), move || refresh());
-        interval.forget();
+        let (abort_handle, abort_reg) = AbortHandle::new_pair();
+        let abort_handle_cleanup = abort_handle.clone();
+        spawn_local(async move {
+            let mut ticks = IntervalStream::new(logs_auto_refresh_ms());
+            let task = async move {
+                while ticks.next().await.is_some() {
+                    refresh();
+                }
+            };
+            let _ = Abortable::new(task, abort_reg).await;
+        });
+        on_cleanup(move || abort_handle_cleanup.abort());
     });
     let status_label = move || if loading.get() { "loading" } else { "idle" };
     view! {
