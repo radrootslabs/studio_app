@@ -440,7 +440,7 @@ mod tests {
 
     struct TestDatastore {
         get_result: RadrootsClientDatastoreResult<String>,
-        app_data: Option<crate::AppAppData>,
+        app_data: Option<crate::RadrootsAppState>,
     }
 
     fn datastore_err<T>() -> RadrootsClientDatastoreResult<T> {
@@ -655,7 +655,7 @@ mod tests {
     fn health_check_app_data_requires_active_key() {
         let datastore = TestDatastore {
             get_result: Ok("pub".to_string()),
-            app_data: Some(crate::AppAppData::default()),
+            app_data: Some(crate::RadrootsAppState::default()),
         };
         let key_maps = crate::app_key_maps_default();
         let result = futures::executor::block_on(app_health_check_app_data_active_key(
@@ -668,7 +668,7 @@ mod tests {
 
     #[test]
     fn health_check_app_data_detects_mismatch() {
-        let mut app_data = crate::AppAppData::default();
+        let mut app_data = crate::RadrootsAppState::default();
         app_data.active_key = "other".to_string();
         let datastore = TestDatastore {
             get_result: Ok("pub".to_string()),
@@ -685,7 +685,7 @@ mod tests {
 
     #[test]
     fn health_check_app_data_accepts_match() {
-        let mut app_data = crate::AppAppData::default();
+        let mut app_data = crate::RadrootsAppState::default();
         app_data.active_key = "pub".to_string();
         let datastore = TestDatastore {
             get_result: Ok("pub".to_string()),

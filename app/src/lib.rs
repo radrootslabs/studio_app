@@ -25,7 +25,7 @@ pub use bootstrap::{
     app_datastore_write_config,
 };
 pub use context::{app_context, AppContext};
-pub use data::{AppAppData, AppConfigData, AppConfigRole};
+pub use data::{RadrootsAppState, RadrootsAppSettings, RadrootsAppRole};
 pub use health::{
     app_health_check_all,
     app_health_check_all_logged,

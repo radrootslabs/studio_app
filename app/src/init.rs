@@ -30,9 +30,9 @@ use crate::{
     app_assets_sql_wasm_url,
     app_keystore_nostr_ensure_key,
     app_log_debug_emit,
-    AppAppData,
+    RadrootsAppState,
     AppConfig,
-    AppConfigData,
+    RadrootsAppSettings,
     AppConfigError,
     AppKeystoreError,
     AppKeyMapConfig,
@@ -393,7 +393,7 @@ pub async fn app_init_backends(config: AppConfig) -> AppInitResult<AppBackends> 
     let _ = app_log_debug_emit("log.app.init.backends", "datastore_ready", None);
     let has_config = app_datastore_has_config(&datastore, &config.datastore.key_maps).await?;
     if !has_config {
-        let config_data = AppConfigData::default();
+        let config_data = RadrootsAppSettings::default();
         let _ =
             app_datastore_write_config(&datastore, &config.datastore.key_maps, &config_data)
                 .await?;
@@ -436,7 +436,7 @@ pub async fn app_init_backends(config: AppConfig) -> AppInitResult<AppBackends> 
     let mut app_data = if has_app_data {
         app_datastore_read_app_data(&datastore, &config.datastore.key_maps).await?
     } else {
-        AppAppData::default()
+        RadrootsAppState::default()
     };
     let should_write = !has_app_data || app_data.active_key != nostr_public_key;
     if should_write {
