@@ -15,7 +15,7 @@ use crate::{
     app_init_stage_set,
     app_init_total_add,
     app_init_total_unknown,
-    app_log_buffer_flush,
+    app_log_buffer_flush_critical,
     app_log_debug_emit,
     app_log_error_emit,
     app_log_error_store,
@@ -162,7 +162,11 @@ fn HomePage() -> impl IntoView {
             }
             match app_init_backends(config).await {
                 Ok(value) => {
-                    let _ = app_log_buffer_flush(&value.datastore, &value.config.datastore.key_maps).await;
+                    let _ = app_log_buffer_flush_critical(
+                        &value.datastore,
+                        &value.config.datastore.key_maps,
+                    )
+                    .await;
                     backends.set(Some(value));
                     app_init_mark_completed();
                     let stage = AppInitStage::Ready;

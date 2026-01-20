@@ -84,7 +84,7 @@ use crate::{
     app_datastore_has_config,
     app_datastore_key_nostr_key,
     app_datastore_read_app_data,
-    app_log_buffer_flush,
+    app_log_buffer_flush_critical,
     app_log_debug_emit,
     app_log_entry_new,
     app_log_entry_record,
@@ -300,7 +300,7 @@ pub async fn app_health_check_all_logged<T: RadrootsClientDatastore, K: Radroots
     key_maps: &AppKeyMapConfig,
 ) -> AppHealthReport {
     let report = app_health_check_all(datastore, keystore, notifications, tangle, key_maps).await;
-    let _ = app_log_buffer_flush(datastore, key_maps).await;
+    let _ = app_log_buffer_flush_critical(datastore, key_maps).await;
     report
 }
 

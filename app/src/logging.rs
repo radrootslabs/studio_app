@@ -363,6 +363,10 @@ pub fn app_log_buffer_drain() -> Vec<AppLogEntry> {
     }
 }
 
+fn app_log_entry_should_persist(level: AppLogLevel) -> bool {
+    matches!(level, AppLogLevel::Warn | AppLogLevel::Error)
+}
+
 pub async fn app_log_buffer_flush<T: RadrootsClientDatastore>(
     datastore: &T,
     key_maps: &AppKeyMapConfig,
@@ -379,6 +383,42 @@ pub async fn app_log_buffer_flush<T: RadrootsClientDatastore>(
             return Err(err);
         }
         stored += 1;
+    }
+    let _ = app_log_entries_prune(datastore, key_maps, APP_LOG_MAX_ENTRIES).await?;
+    Ok(stored)
+}
+
+pub async fn app_log_buffer_flush_critical<T: RadrootsClientDatastore>(
+    datastore: &T,
+    key_maps: &AppKeyMapConfig,
+) -> AppLogResult<usize> {
+    let entries = app_log_buffer_drain();
+    let mut keep = Vec::new();
+    let mut persist = Vec::new();
+    for entry in entries {
+        if app_log_entry_should_persist(entry.level) {
+            persist.push(entry);
+        } else {
+            keep.push(entry);
+        }
+    }
+    let mut stored = 0;
+    let mut iter = persist.into_iter();
+    while let Some(entry) = iter.next() {
+        if let Err(err) = app_log_entry_store(datastore, key_maps, &entry).await {
+            app_log_buffer_push(entry);
+            for remaining in iter {
+                app_log_buffer_push(remaining);
+            }
+            for remaining in keep {
+                app_log_buffer_push(remaining);
+            }
+            return Err(err);
+        }
+        stored += 1;
+    }
+    for entry in keep {
+        app_log_buffer_push(entry);
     }
     let _ = app_log_entries_prune(datastore, key_maps, APP_LOG_MAX_ENTRIES).await?;
     Ok(stored)
@@ -518,6 +558,7 @@ mod tests {
         app_log_entry_key,
         app_log_entry_prefix,
         app_log_buffer_drain,
+        app_log_buffer_flush_critical,
         app_log_buffer_flush,
         app_log_buffer_push,
         app_log_metadata,
@@ -751,6 +792,27 @@ mod tests {
         assert_eq!(drained.len(), 1);
         assert_eq!(drained[0].id, entry.id);
         assert!(app_log_buffer_drain().is_empty());
+    }
+
+    #[test]
+    fn log_buffer_flush_critical_keeps_debug_entries() {
+        let _guard = LOG_TEST_LOCK.lock().unwrap_or_else(|err| err.into_inner());
+        let _ = app_log_buffer_drain();
+        let debug = app_log_entry_new(AppLogLevel::Debug, "log.code.debug", "debug", None);
+        let error = app_log_entry_new(AppLogLevel::Error, "log.code.error", "error", None);
+        app_log_buffer_push(debug.clone());
+        app_log_buffer_push(error.clone());
+        let datastore = TestDatastore::new(Vec::new());
+        let key_maps = app_key_maps_default();
+        let stored = futures::executor::block_on(app_log_buffer_flush_critical(
+            &datastore,
+            &key_maps,
+        ))
+        .expect("flush");
+        assert_eq!(stored, 1);
+        let remaining = app_log_buffer_drain();
+        assert_eq!(remaining.len(), 1);
+        assert_eq!(remaining[0].id, debug.id);
     }
 
     #[test]
