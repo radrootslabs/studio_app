@@ -24,7 +24,7 @@ use crate::{
     app_datastore_set_notifications_permission,
     app_health_check_all_logged,
     AppBackends,
-    AppConfig,
+    RadrootsAppConfig,
     AppHealthCheckResult,
     AppHealthCheckStatus,
     AppHealthReport,
@@ -67,7 +67,7 @@ fn log_init_stage(stage: AppInitStage) {
 }
 
 fn spawn_health_checks(
-    config: AppConfig,
+    config: RadrootsAppConfig,
     health_report: RwSignal<AppHealthReport, LocalStorage>,
     health_running: RwSignal<bool, LocalStorage>,
     active_key: RwSignal<Option<String>, LocalStorage>,

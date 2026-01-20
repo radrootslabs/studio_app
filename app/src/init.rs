@@ -31,11 +31,11 @@ use crate::{
     app_keystore_nostr_ensure_key,
     app_log_debug_emit,
     RadrootsAppState,
-    AppConfig,
+    RadrootsAppConfig,
     RadrootsAppSettings,
-    AppConfigError,
+    RadrootsAppConfigError,
     AppKeystoreError,
-    AppKeyMapConfig,
+    RadrootsAppKeyMapConfig,
 };
 
 #[cfg(target_arch = "wasm32")]
@@ -255,7 +255,7 @@ pub enum AppInitError {
     Idb(RadrootsClientIdbStoreError),
     Datastore(RadrootsClientDatastoreError),
     Keystore(RadrootsClientKeystoreError),
-    Config(AppConfigError),
+    Config(RadrootsAppConfigError),
     Assets(AppInitAssetError),
 }
 
@@ -282,7 +282,7 @@ impl fmt::Display for AppInitError {
 impl std::error::Error for AppInitError {}
 
 pub struct AppBackends {
-    pub config: AppConfig,
+    pub config: RadrootsAppConfig,
     pub datastore: RadrootsClientWebDatastore,
     pub nostr_keystore: RadrootsClientWebKeystoreNostr,
 }
@@ -290,7 +290,7 @@ pub struct AppBackends {
 pub type AppInitResult<T> = Result<T, AppInitError>;
 
 pub async fn app_init_assets<F, G>(
-    config: &AppConfig,
+    config: &RadrootsAppConfig,
     mut on_stage: F,
     mut on_progress: G,
 ) -> Result<(), AppInitAssetError>
@@ -351,7 +351,7 @@ pub fn app_init_mark_completed() {
 
 pub async fn app_init_reset<T: RadrootsClientDatastore, K: RadrootsClientKeystoreNostr>(
     datastore: Option<&T>,
-    key_maps: Option<&AppKeyMapConfig>,
+    key_maps: Option<&RadrootsAppKeyMapConfig>,
     keystore: Option<&K>,
 ) -> AppInitResult<()> {
     let _ = app_log_debug_emit("log.app.init.reset", "start", None);
@@ -372,7 +372,7 @@ pub async fn app_init_reset<T: RadrootsClientDatastore, K: RadrootsClientKeystor
     Ok(())
 }
 
-pub async fn app_init_backends(config: AppConfig) -> AppInitResult<AppBackends> {
+pub async fn app_init_backends(config: RadrootsAppConfig) -> AppInitResult<AppBackends> {
     let _ = app_log_debug_emit("log.app.init.backends", "start", None);
     config.validate().map_err(AppInitError::Config)?;
     let idb_start = app_init_timer_start();
@@ -469,7 +469,7 @@ mod tests {
         AppInitStage,
         AppInitAssetError,
     };
-    use crate::{app_config_default, AppConfig};
+    use crate::{app_config_default, RadrootsAppConfig};
     use radroots_studio_app_core::datastore::RadrootsClientDatastoreError;
     use radroots_studio_app_core::idb::RadrootsClientIdbStoreError;
     use radroots_studio_app_core::keystore::{
@@ -478,7 +478,7 @@ mod tests {
         RadrootsClientKeystoreResult,
     };
     use async_trait::async_trait;
-    use crate::AppConfigError;
+    use crate::RadrootsAppConfigError;
 
     #[test]
     fn app_init_error_messages_match_spec() {
@@ -496,7 +496,7 @@ mod tests {
                 "error.app.init.keystore",
             ),
             (
-                AppInitError::Config(AppConfigError::MissingKeyMap("nostr_key")),
+                AppInitError::Config(RadrootsAppConfigError::MissingKeyMap("nostr_key")),
                 "error.app.init.config",
             ),
             (
@@ -636,7 +636,7 @@ mod tests {
 
     #[test]
     fn app_init_assets_reports_unavailable_on_native() {
-        let mut config = AppConfig::empty();
+        let mut config = RadrootsAppConfig::empty();
         config.assets.sql_wasm_url = Some("http://example.com/sql.wasm".to_string());
         let result = futures::executor::block_on(app_init_assets(
             &config,

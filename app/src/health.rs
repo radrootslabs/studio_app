@@ -92,7 +92,7 @@ use crate::{
     AppNotifications,
     AppLogLevel,
     AppTangleClient,
-    AppKeyMapConfig,
+    RadrootsAppKeyMapConfig,
 };
 use radroots_studio_app_core::notifications::RadrootsClientNotificationsPermission;
 use radroots_studio_app_core::datastore::{RadrootsClientDatastore, RadrootsClientDatastoreError};
@@ -119,7 +119,7 @@ fn log_health_end(name: &str, result: &AppHealthCheckResult) {
     }
 }
 
-pub fn app_health_check_key_maps(key_maps: &AppKeyMapConfig) -> AppHealthCheckResult {
+pub fn app_health_check_key_maps(key_maps: &RadrootsAppKeyMapConfig) -> AppHealthCheckResult {
     match app_key_maps_validate(key_maps) {
         Ok(()) => AppHealthCheckResult::ok(),
         Err(err) => AppHealthCheckResult::error(err.to_string()),
@@ -128,7 +128,7 @@ pub fn app_health_check_key_maps(key_maps: &AppKeyMapConfig) -> AppHealthCheckRe
 
 pub async fn app_health_check_bootstrap_config<T: RadrootsClientDatastore>(
     datastore: &T,
-    key_maps: &AppKeyMapConfig,
+    key_maps: &RadrootsAppKeyMapConfig,
 ) -> AppHealthCheckResult {
     match app_datastore_has_config(datastore, key_maps).await {
         Ok(true) => AppHealthCheckResult::ok(),
@@ -139,7 +139,7 @@ pub async fn app_health_check_bootstrap_config<T: RadrootsClientDatastore>(
 
 pub async fn app_health_check_bootstrap_app_data<T: RadrootsClientDatastore>(
     datastore: &T,
-    key_maps: &AppKeyMapConfig,
+    key_maps: &RadrootsAppKeyMapConfig,
 ) -> AppHealthCheckResult {
     match app_datastore_has_app_data(datastore, key_maps).await {
         Ok(true) => AppHealthCheckResult::ok(),
@@ -150,7 +150,7 @@ pub async fn app_health_check_bootstrap_app_data<T: RadrootsClientDatastore>(
 
 pub async fn app_health_check_app_data_active_key<T: RadrootsClientDatastore>(
     datastore: &T,
-    key_maps: &AppKeyMapConfig,
+    key_maps: &RadrootsAppKeyMapConfig,
 ) -> AppHealthCheckResult {
     let app_data = match app_datastore_read_app_data(datastore, key_maps).await {
         Ok(value) => value,
@@ -241,7 +241,7 @@ pub async fn app_health_check_datastore_roundtrip<T: RadrootsClientDatastore>(
 pub async fn app_health_check_keystore_access<T: RadrootsClientDatastore, K: RadrootsClientKeystoreNostr>(
     datastore: &T,
     keystore: &K,
-    key_maps: &AppKeyMapConfig,
+    key_maps: &RadrootsAppKeyMapConfig,
 ) -> AppHealthCheckResult {
     let key_name = match app_datastore_key_nostr_key(key_maps) {
         Ok(value) => value,
@@ -266,7 +266,7 @@ pub async fn app_health_check_all<T: RadrootsClientDatastore, K: RadrootsClientK
     keystore: &K,
     notifications: &AppNotifications,
     tangle: &G,
-    key_maps: &AppKeyMapConfig,
+    key_maps: &RadrootsAppKeyMapConfig,
 ) -> AppHealthReport {
     log_health_start("key_maps");
     let key_maps_result = app_health_check_key_maps(key_maps);
@@ -315,7 +315,7 @@ pub async fn app_health_check_all_logged<T: RadrootsClientDatastore, K: Radroots
     keystore: &K,
     notifications: &AppNotifications,
     tangle: &G,
-    key_maps: &AppKeyMapConfig,
+    key_maps: &RadrootsAppKeyMapConfig,
 ) -> AppHealthReport {
     let report = app_health_check_all(datastore, keystore, notifications, tangle, key_maps).await;
     let _ = app_log_buffer_flush_critical(datastore, key_maps).await;
@@ -343,7 +343,7 @@ mod tests {
         AppHealthReport,
     };
     use crate::app_log_buffer_drain;
-    use crate::AppKeyMapConfig;
+    use crate::RadrootsAppKeyMapConfig;
     use async_trait::async_trait;
     use radroots_studio_app_core::datastore::{
         RadrootsClientDatastore,
@@ -405,7 +405,7 @@ mod tests {
 
     #[test]
     fn health_check_key_maps_reports_errors() {
-        let empty = AppKeyMapConfig::empty();
+        let empty = RadrootsAppKeyMapConfig::empty();
         let result = app_health_check_key_maps(&empty);
         assert_eq!(result.status, AppHealthCheckStatus::Error);
         assert_eq!(

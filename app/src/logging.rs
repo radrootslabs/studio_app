@@ -22,11 +22,11 @@ use radroots_studio_app_core::datastore::{RadrootsClientDatastore, RadrootsClien
 
 use crate::{
     app_datastore_param_key,
-    AppConfigError,
+    RadrootsAppConfigError,
     AppInitAssetError,
     AppInitError,
     AppKeystoreError,
-    AppKeyMapConfig,
+    RadrootsAppKeyMapConfig,
     AppNotificationsError,
     AppTangleError,
 };
@@ -114,17 +114,17 @@ impl AppLoggableError for AppInitAssetError {
     }
 }
 
-impl AppLoggableError for AppConfigError {
+impl AppLoggableError for RadrootsAppConfigError {
     fn log_code(&self) -> &'static str {
         self.message()
     }
 
     fn log_context(&self) -> Option<String> {
         match self {
-            AppConfigError::MissingKeyMap(key) => Some(format!("key_map={key}")),
-            AppConfigError::MissingParamMap(key) => Some(format!("param_map={key}")),
-            AppConfigError::MissingObjMap(key) => Some(format!("obj_map={key}")),
-            AppConfigError::MissingKeystoreKeyMap(key) => Some(format!("keystore_map={key}")),
+            RadrootsAppConfigError::MissingKeyMap(key) => Some(format!("key_map={key}")),
+            RadrootsAppConfigError::MissingParamMap(key) => Some(format!("param_map={key}")),
+            RadrootsAppConfigError::MissingObjMap(key) => Some(format!("obj_map={key}")),
+            RadrootsAppConfigError::MissingKeystoreKeyMap(key) => Some(format!("keystore_map={key}")),
         }
     }
 }
@@ -177,7 +177,7 @@ impl AppLoggableError for AppTangleError {
 
 #[derive(Debug)]
 pub enum AppLogError {
-    Config(AppConfigError),
+    Config(RadrootsAppConfigError),
     Datastore(RadrootsClientDatastoreError),
 }
 
@@ -194,8 +194,8 @@ impl std::fmt::Display for AppLogError {
 
 impl std::error::Error for AppLogError {}
 
-impl From<AppConfigError> for AppLogError {
-    fn from(err: AppConfigError) -> Self {
+impl From<RadrootsAppConfigError> for AppLogError {
+    fn from(err: RadrootsAppConfigError) -> Self {
         AppLogError::Config(err)
     }
 }
@@ -298,7 +298,7 @@ pub fn app_log_warn_emit(code: &str, message: &str, context: Option<String>) -> 
 }
 
 pub fn app_log_entry_key(
-    key_maps: &AppKeyMapConfig,
+    key_maps: &RadrootsAppKeyMapConfig,
     entry_id: &str,
 ) -> AppLogResult<String> {
     let param = app_datastore_param_key(key_maps, "log_entry")?;
@@ -307,7 +307,7 @@ pub fn app_log_entry_key(
 
 pub async fn app_log_entry_store<T: RadrootsClientDatastore>(
     datastore: &T,
-    key_maps: &AppKeyMapConfig,
+    key_maps: &RadrootsAppKeyMapConfig,
     entry: &AppLogEntry,
 ) -> AppLogResult<AppLogEntry> {
     let key = app_log_entry_key(key_maps, &entry.id)?;
@@ -319,7 +319,7 @@ pub async fn app_log_entry_store<T: RadrootsClientDatastore>(
 
 pub async fn app_log_error_store<T: RadrootsClientDatastore, E: AppLoggableError>(
     datastore: &T,
-    key_maps: &AppKeyMapConfig,
+    key_maps: &RadrootsAppKeyMapConfig,
     err: &E,
 ) -> AppLogResult<AppLogEntry> {
     let entry = app_log_error_emit(err);
@@ -369,7 +369,7 @@ fn app_log_entry_should_persist(level: AppLogLevel) -> bool {
 
 pub async fn app_log_buffer_flush<T: RadrootsClientDatastore>(
     datastore: &T,
-    key_maps: &AppKeyMapConfig,
+    key_maps: &RadrootsAppKeyMapConfig,
 ) -> AppLogResult<usize> {
     let entries = app_log_buffer_drain();
     let mut stored = 0;
@@ -390,7 +390,7 @@ pub async fn app_log_buffer_flush<T: RadrootsClientDatastore>(
 
 pub async fn app_log_buffer_flush_critical<T: RadrootsClientDatastore>(
     datastore: &T,
-    key_maps: &AppKeyMapConfig,
+    key_maps: &RadrootsAppKeyMapConfig,
 ) -> AppLogResult<usize> {
     let entries = app_log_buffer_drain();
     let mut keep = Vec::new();
@@ -424,14 +424,14 @@ pub async fn app_log_buffer_flush_critical<T: RadrootsClientDatastore>(
     Ok(stored)
 }
 
-pub fn app_log_entry_prefix(key_maps: &AppKeyMapConfig) -> AppLogResult<String> {
+pub fn app_log_entry_prefix(key_maps: &RadrootsAppKeyMapConfig) -> AppLogResult<String> {
     let param = app_datastore_param_key(key_maps, "log_entry")?;
     Ok(param(""))
 }
 
 pub async fn app_log_entries_load<T: RadrootsClientDatastore>(
     datastore: &T,
-    key_maps: &AppKeyMapConfig,
+    key_maps: &RadrootsAppKeyMapConfig,
 ) -> AppLogResult<Vec<AppLogEntry>> {
     let entries = datastore.entries().await.map_err(AppLogError::Datastore)?;
     let prefix = app_log_entry_prefix(key_maps)?;
@@ -452,7 +452,7 @@ pub async fn app_log_entries_load<T: RadrootsClientDatastore>(
 
 pub async fn app_log_entries_clear<T: RadrootsClientDatastore>(
     datastore: &T,
-    key_maps: &AppKeyMapConfig,
+    key_maps: &RadrootsAppKeyMapConfig,
 ) -> AppLogResult<usize> {
     let prefix = app_log_entry_prefix(key_maps)?;
     let removed = datastore
@@ -478,7 +478,7 @@ pub fn app_log_entries_dump(entries: &[AppLogEntry]) -> String {
 
 pub async fn app_log_entries_prune<T: RadrootsClientDatastore>(
     datastore: &T,
-    key_maps: &AppKeyMapConfig,
+    key_maps: &RadrootsAppKeyMapConfig,
     max_entries: usize,
 ) -> AppLogResult<usize> {
     let mut entries = app_log_entries_load(datastore, key_maps).await?;
@@ -569,7 +569,7 @@ mod tests {
     };
     use crate::{
         app_key_maps_default,
-        AppConfigError,
+        RadrootsAppConfigError,
         APP_DATASTORE_KEY_LOG_ENTRY,
     };
     use async_trait::async_trait;
@@ -751,7 +751,7 @@ mod tests {
 
     #[test]
     fn log_entry_error_includes_context() {
-        let err = AppConfigError::MissingKeyMap("nostr_key");
+        let err = RadrootsAppConfigError::MissingKeyMap("nostr_key");
         let entry = app_log_entry_error(&err);
         assert_eq!(entry.level, AppLogLevel::Error);
         assert_eq!(entry.code, err.message());

@@ -8,11 +8,11 @@ use radroots_studio_app_core::idb::{
     IDB_CONFIG_KEYSTORE_NOSTR,
 };
 
-pub type AppDatastoreKeyParam = fn(&str) -> String;
-pub type AppDatastoreKeyMap = BTreeMap<&'static str, &'static str>;
-pub type AppDatastoreKeyParamMap = BTreeMap<&'static str, AppDatastoreKeyParam>;
-pub type AppDatastoreKeyObjMap = BTreeMap<&'static str, &'static str>;
-pub type AppKeystoreKeyMap = BTreeMap<&'static str, &'static str>;
+pub type RadrootsAppDatastoreKeyParam = fn(&str) -> String;
+pub type RadrootsAppDatastoreKeyMap = BTreeMap<&'static str, &'static str>;
+pub type RadrootsAppDatastoreKeyParamMap = BTreeMap<&'static str, RadrootsAppDatastoreKeyParam>;
+pub type RadrootsAppDatastoreKeyObjMap = BTreeMap<&'static str, &'static str>;
+pub type RadrootsAppKeystoreKeyMap = BTreeMap<&'static str, &'static str>;
 
 pub const APP_DATASTORE_KEY_NOSTR_KEY: &str = "nostr:key";
 pub const APP_DATASTORE_KEY_EULA_DATE: &str = "app:eula:date";
@@ -34,13 +34,13 @@ pub fn app_datastore_param_log_entry(entry_id: &str) -> String {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct AppKeyMapConfig {
-    pub key_map: AppDatastoreKeyMap,
-    pub param_map: AppDatastoreKeyParamMap,
-    pub obj_map: AppDatastoreKeyObjMap,
+pub struct RadrootsAppKeyMapConfig {
+    pub key_map: RadrootsAppDatastoreKeyMap,
+    pub param_map: RadrootsAppDatastoreKeyParamMap,
+    pub obj_map: RadrootsAppDatastoreKeyObjMap,
 }
 
-impl AppKeyMapConfig {
+impl RadrootsAppKeyMapConfig {
     pub fn empty() -> Self {
         Self {
             key_map: BTreeMap::new(),
@@ -50,21 +50,21 @@ impl AppKeyMapConfig {
     }
 }
 
-pub fn app_key_maps_default() -> AppKeyMapConfig {
+pub fn app_key_maps_default() -> RadrootsAppKeyMapConfig {
     let mut key_map = BTreeMap::new();
     key_map.insert("nostr_key", APP_DATASTORE_KEY_NOSTR_KEY);
     key_map.insert("eula_date", APP_DATASTORE_KEY_EULA_DATE);
     let mut param_map = BTreeMap::new();
-    param_map.insert("nostr_profile", app_datastore_param_nostr_profile as AppDatastoreKeyParam);
+    param_map.insert("nostr_profile", app_datastore_param_nostr_profile as RadrootsAppDatastoreKeyParam);
     param_map.insert(
         "radroots_profile",
-        app_datastore_param_radroots_profile as AppDatastoreKeyParam,
+        app_datastore_param_radroots_profile as RadrootsAppDatastoreKeyParam,
     );
-    param_map.insert("log_entry", app_datastore_param_log_entry as AppDatastoreKeyParam);
+    param_map.insert("log_entry", app_datastore_param_log_entry as RadrootsAppDatastoreKeyParam);
     let mut obj_map = BTreeMap::new();
     obj_map.insert("cfg_data", APP_DATASTORE_KEY_OBJ_CFG_DATA);
     obj_map.insert("app_data", APP_DATASTORE_KEY_OBJ_APP_DATA);
-    AppKeyMapConfig {
+    RadrootsAppKeyMapConfig {
         key_map,
         param_map,
         obj_map,
@@ -72,133 +72,133 @@ pub fn app_key_maps_default() -> AppKeyMapConfig {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum AppConfigError {
+pub enum RadrootsAppConfigError {
     MissingKeyMap(&'static str),
     MissingParamMap(&'static str),
     MissingObjMap(&'static str),
     MissingKeystoreKeyMap(&'static str),
 }
 
-pub type AppConfigResult<T> = Result<T, AppConfigError>;
+pub type RadrootsAppConfigResult<T> = Result<T, RadrootsAppConfigError>;
 
-impl AppConfigError {
+impl RadrootsAppConfigError {
     pub const fn message(&self) -> &'static str {
         match self {
-            AppConfigError::MissingKeyMap(_) => "error.app.config.key_map_missing",
-            AppConfigError::MissingParamMap(_) => "error.app.config.param_map_missing",
-            AppConfigError::MissingObjMap(_) => "error.app.config.obj_map_missing",
-            AppConfigError::MissingKeystoreKeyMap(_) => "error.app.config.keystore_map_missing",
+            RadrootsAppConfigError::MissingKeyMap(_) => "error.app.config.key_map_missing",
+            RadrootsAppConfigError::MissingParamMap(_) => "error.app.config.param_map_missing",
+            RadrootsAppConfigError::MissingObjMap(_) => "error.app.config.obj_map_missing",
+            RadrootsAppConfigError::MissingKeystoreKeyMap(_) => "error.app.config.keystore_map_missing",
         }
     }
 }
 
-impl std::fmt::Display for AppConfigError {
+impl std::fmt::Display for RadrootsAppConfigError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str(self.message())
     }
 }
 
-impl std::error::Error for AppConfigError {}
+impl std::error::Error for RadrootsAppConfigError {}
 
-pub fn app_key_maps_validate(config: &AppKeyMapConfig) -> AppConfigResult<()> {
+pub fn app_key_maps_validate(config: &RadrootsAppKeyMapConfig) -> RadrootsAppConfigResult<()> {
     if !config.key_map.contains_key("nostr_key") {
-        return Err(AppConfigError::MissingKeyMap("nostr_key"));
+        return Err(RadrootsAppConfigError::MissingKeyMap("nostr_key"));
     }
     if !config.key_map.contains_key("eula_date") {
-        return Err(AppConfigError::MissingKeyMap("eula_date"));
+        return Err(RadrootsAppConfigError::MissingKeyMap("eula_date"));
     }
     if !config.param_map.contains_key("nostr_profile") {
-        return Err(AppConfigError::MissingParamMap("nostr_profile"));
+        return Err(RadrootsAppConfigError::MissingParamMap("nostr_profile"));
     }
     if !config.param_map.contains_key("radroots_profile") {
-        return Err(AppConfigError::MissingParamMap("radroots_profile"));
+        return Err(RadrootsAppConfigError::MissingParamMap("radroots_profile"));
     }
     if !config.param_map.contains_key("log_entry") {
-        return Err(AppConfigError::MissingParamMap("log_entry"));
+        return Err(RadrootsAppConfigError::MissingParamMap("log_entry"));
     }
     if !config.obj_map.contains_key("cfg_data") {
-        return Err(AppConfigError::MissingObjMap("cfg_data"));
+        return Err(RadrootsAppConfigError::MissingObjMap("cfg_data"));
     }
     if !config.obj_map.contains_key("app_data") {
-        return Err(AppConfigError::MissingObjMap("app_data"));
+        return Err(RadrootsAppConfigError::MissingObjMap("app_data"));
     }
     Ok(())
 }
 
-pub fn app_keystore_key_maps_validate(config: &AppKeystoreKeyMap) -> AppConfigResult<()> {
+pub fn app_keystore_key_maps_validate(config: &RadrootsAppKeystoreKeyMap) -> RadrootsAppConfigResult<()> {
     if !config.contains_key("nostr_default") {
-        return Err(AppConfigError::MissingKeystoreKeyMap("nostr_default"));
+        return Err(RadrootsAppConfigError::MissingKeystoreKeyMap("nostr_default"));
     }
     Ok(())
 }
 
-pub fn app_datastore_key(config: &AppKeyMapConfig, key: &'static str) -> AppConfigResult<&'static str> {
+pub fn app_datastore_key(config: &RadrootsAppKeyMapConfig, key: &'static str) -> RadrootsAppConfigResult<&'static str> {
     config
         .key_map
         .get(key)
         .copied()
-        .ok_or(AppConfigError::MissingKeyMap(key))
+        .ok_or(RadrootsAppConfigError::MissingKeyMap(key))
 }
 
 pub fn app_datastore_obj_key(
-    config: &AppKeyMapConfig,
+    config: &RadrootsAppKeyMapConfig,
     key: &'static str,
-) -> AppConfigResult<&'static str> {
+) -> RadrootsAppConfigResult<&'static str> {
     config
         .obj_map
         .get(key)
         .copied()
-        .ok_or(AppConfigError::MissingObjMap(key))
+        .ok_or(RadrootsAppConfigError::MissingObjMap(key))
 }
 
 pub fn app_datastore_param_key(
-    config: &AppKeyMapConfig,
+    config: &RadrootsAppKeyMapConfig,
     key: &'static str,
-) -> AppConfigResult<AppDatastoreKeyParam> {
+) -> RadrootsAppConfigResult<RadrootsAppDatastoreKeyParam> {
     config
         .param_map
         .get(key)
         .copied()
-        .ok_or(AppConfigError::MissingParamMap(key))
+        .ok_or(RadrootsAppConfigError::MissingParamMap(key))
 }
 
-pub fn app_datastore_key_nostr_key(config: &AppKeyMapConfig) -> AppConfigResult<&'static str> {
+pub fn app_datastore_key_nostr_key(config: &RadrootsAppKeyMapConfig) -> RadrootsAppConfigResult<&'static str> {
     app_datastore_key(config, "nostr_key")
 }
 
-pub fn app_datastore_key_eula_date(config: &AppKeyMapConfig) -> AppConfigResult<&'static str> {
+pub fn app_datastore_key_eula_date(config: &RadrootsAppKeyMapConfig) -> RadrootsAppConfigResult<&'static str> {
     app_datastore_key(config, "eula_date")
 }
 
-pub fn app_datastore_obj_key_cfg_data(config: &AppKeyMapConfig) -> AppConfigResult<&'static str> {
+pub fn app_datastore_obj_key_cfg_data(config: &RadrootsAppKeyMapConfig) -> RadrootsAppConfigResult<&'static str> {
     app_datastore_obj_key(config, "cfg_data")
 }
 
-pub fn app_datastore_obj_key_app_data(config: &AppKeyMapConfig) -> AppConfigResult<&'static str> {
+pub fn app_datastore_obj_key_app_data(config: &RadrootsAppKeyMapConfig) -> RadrootsAppConfigResult<&'static str> {
     app_datastore_obj_key(config, "app_data")
 }
 
 pub fn app_keystore_key(
-    config: &AppKeystoreKeyMap,
+    config: &RadrootsAppKeystoreKeyMap,
     key: &'static str,
-) -> AppConfigResult<&'static str> {
+) -> RadrootsAppConfigResult<&'static str> {
     config
         .get(key)
         .copied()
-        .ok_or(AppConfigError::MissingKeystoreKeyMap(key))
+        .ok_or(RadrootsAppConfigError::MissingKeystoreKeyMap(key))
 }
 
-pub fn app_keystore_key_nostr_default(config: &AppKeystoreKeyMap) -> AppConfigResult<&'static str> {
+pub fn app_keystore_key_nostr_default(config: &RadrootsAppKeystoreKeyMap) -> RadrootsAppConfigResult<&'static str> {
     app_keystore_key(config, "nostr_default")
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct AppKeystoreConfig {
+pub struct RadrootsAppKeystoreConfig {
     pub nostr_store: RadrootsClientIdbConfig,
-    pub key_map: AppKeystoreKeyMap,
+    pub key_map: RadrootsAppKeystoreKeyMap,
 }
 
-impl AppKeystoreConfig {
+impl RadrootsAppKeystoreConfig {
     pub fn default_config() -> Self {
         Self {
             nostr_store: IDB_CONFIG_KEYSTORE_NOSTR,
@@ -207,20 +207,20 @@ impl AppKeystoreConfig {
     }
 }
 
-pub fn app_keystore_key_maps_default() -> AppKeystoreKeyMap {
+pub fn app_keystore_key_maps_default() -> RadrootsAppKeystoreKeyMap {
     let mut map = BTreeMap::new();
     map.insert("nostr_default", APP_KEYSTORE_KEY_NOSTR_DEFAULT);
     map
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct AppDatastoreConfig {
+pub struct RadrootsAppDatastoreConfig {
     pub idb_config: RadrootsClientIdbConfig,
-    pub key_maps: AppKeyMapConfig,
+    pub key_maps: RadrootsAppKeyMapConfig,
 }
 
-impl AppDatastoreConfig {
-    pub fn default_config(key_maps: AppKeyMapConfig) -> Self {
+impl RadrootsAppDatastoreConfig {
+    pub fn default_config(key_maps: RadrootsAppKeyMapConfig) -> Self {
         Self {
             idb_config: IDB_CONFIG_DATASTORE,
             key_maps,
@@ -229,56 +229,56 @@ impl AppDatastoreConfig {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
-pub struct AppAssetConfig {
+pub struct RadrootsAppAssetConfig {
     pub sql_wasm_url: Option<String>,
     pub geocoder_db_url: Option<String>,
 }
 
-pub fn app_assets_sql_wasm_url(config: &AppConfig) -> Option<&str> {
+pub fn app_assets_sql_wasm_url(config: &RadrootsAppConfig) -> Option<&str> {
     config.assets.sql_wasm_url.as_deref()
 }
 
-pub fn app_assets_geocoder_db_url(config: &AppConfig) -> Option<&str> {
+pub fn app_assets_geocoder_db_url(config: &RadrootsAppConfig) -> Option<&str> {
     config.assets.geocoder_db_url.as_deref()
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct AppConfig {
-    pub datastore: AppDatastoreConfig,
-    pub keystore: AppKeystoreConfig,
-    pub assets: AppAssetConfig,
+pub struct RadrootsAppConfig {
+    pub datastore: RadrootsAppDatastoreConfig,
+    pub keystore: RadrootsAppKeystoreConfig,
+    pub assets: RadrootsAppAssetConfig,
 }
 
-impl AppConfig {
+impl RadrootsAppConfig {
     pub fn empty() -> Self {
-        let key_maps = AppKeyMapConfig::empty();
+        let key_maps = RadrootsAppKeyMapConfig::empty();
         Self {
-            datastore: AppDatastoreConfig::default_config(key_maps),
-            keystore: AppKeystoreConfig::default_config(),
-            assets: AppAssetConfig::default(),
+            datastore: RadrootsAppDatastoreConfig::default_config(key_maps),
+            keystore: RadrootsAppKeystoreConfig::default_config(),
+            assets: RadrootsAppAssetConfig::default(),
         }
     }
 
-    pub fn from_key_maps(key_maps: AppKeyMapConfig) -> Self {
+    pub fn from_key_maps(key_maps: RadrootsAppKeyMapConfig) -> Self {
         Self {
-            datastore: AppDatastoreConfig::default_config(key_maps),
-            keystore: AppKeystoreConfig::default_config(),
-            assets: AppAssetConfig::default(),
+            datastore: RadrootsAppDatastoreConfig::default_config(key_maps),
+            keystore: RadrootsAppKeystoreConfig::default_config(),
+            assets: RadrootsAppAssetConfig::default(),
         }
     }
 
-    pub fn validate(&self) -> AppConfigResult<()> {
+    pub fn validate(&self) -> RadrootsAppConfigResult<()> {
         app_key_maps_validate(&self.datastore.key_maps)?;
         app_keystore_key_maps_validate(&self.keystore.key_map)?;
         Ok(())
     }
 }
 
-pub fn app_config_default() -> AppConfig {
-    AppConfig::from_key_maps(app_key_maps_default())
+pub fn app_config_default() -> RadrootsAppConfig {
+    RadrootsAppConfig::from_key_maps(app_key_maps_default())
 }
 
-pub fn app_config_from_env() -> AppConfig {
+pub fn app_config_from_env() -> RadrootsAppConfig {
     app_config_default()
 }
 
@@ -301,13 +301,13 @@ mod tests {
         app_datastore_param_key,
         app_assets_geocoder_db_url,
         app_assets_sql_wasm_url,
-        AppAssetConfig,
-        AppConfig,
-        AppConfigError,
-        AppDatastoreConfig,
-        AppKeyMapConfig,
-        AppKeystoreConfig,
-        AppKeystoreKeyMap,
+        RadrootsAppAssetConfig,
+        RadrootsAppConfig,
+        RadrootsAppConfigError,
+        RadrootsAppDatastoreConfig,
+        RadrootsAppKeyMapConfig,
+        RadrootsAppKeystoreConfig,
+        RadrootsAppKeystoreKeyMap,
         APP_DATASTORE_KEY_EULA_DATE,
         APP_DATASTORE_KEY_NOSTR_KEY,
         APP_DATASTORE_KEY_OBJ_APP_DATA,
@@ -320,7 +320,7 @@ mod tests {
 
     #[test]
     fn key_map_config_defaults_empty() {
-        let config = AppKeyMapConfig::empty();
+        let config = RadrootsAppKeyMapConfig::empty();
         assert!(config.key_map.is_empty());
         assert!(config.param_map.is_empty());
         assert!(config.obj_map.is_empty());
@@ -328,7 +328,7 @@ mod tests {
 
     #[test]
     fn app_config_defaults_empty() {
-        let config = AppConfig::empty();
+        let config = RadrootsAppConfig::empty();
         assert!(config.datastore.key_maps.key_map.is_empty());
     }
 
@@ -347,13 +347,13 @@ mod tests {
     fn app_config_validate_uses_key_map_rules() {
         let config = app_config_default();
         assert!(config.validate().is_ok());
-        let empty = AppConfig::empty();
+        let empty = RadrootsAppConfig::empty();
         assert!(empty.validate().is_err());
     }
 
     #[test]
     fn keystore_config_defaults_to_nostr_store() {
-        let config = AppKeystoreConfig::default_config();
+        let config = RadrootsAppKeystoreConfig::default_config();
         assert_eq!(config.nostr_store, IDB_CONFIG_KEYSTORE_NOSTR);
     }
 
@@ -368,15 +368,15 @@ mod tests {
 
     #[test]
     fn asset_config_defaults_empty() {
-        let config = AppAssetConfig::default();
+        let config = RadrootsAppAssetConfig::default();
         assert!(config.sql_wasm_url.is_none());
         assert!(config.geocoder_db_url.is_none());
     }
 
     #[test]
     fn datastore_config_defaults_to_idb_store() {
-        let key_maps = AppKeyMapConfig::empty();
-        let config = AppDatastoreConfig::default_config(key_maps);
+        let key_maps = RadrootsAppKeyMapConfig::empty();
+        let config = RadrootsAppDatastoreConfig::default_config(key_maps);
         assert_eq!(config.idb_config, IDB_CONFIG_DATASTORE);
         assert!(config.key_maps.key_map.is_empty());
     }
@@ -411,20 +411,20 @@ mod tests {
     fn key_map_validation_requires_expected_keys() {
         let config = super::app_key_maps_default();
         assert!(app_key_maps_validate(&config).is_ok());
-        let mut missing = AppKeyMapConfig::empty();
+        let mut missing = RadrootsAppKeyMapConfig::empty();
         missing.key_map.insert("nostr_key", APP_DATASTORE_KEY_NOSTR_KEY);
         let err = app_key_maps_validate(&missing).expect_err("missing keys");
-        assert_eq!(err, AppConfigError::MissingKeyMap("eula_date"));
+        assert_eq!(err, RadrootsAppConfigError::MissingKeyMap("eula_date"));
     }
 
     #[test]
     fn keystore_map_validation_requires_expected_keys() {
         let map = app_keystore_key_maps_default();
         assert!(app_keystore_key_maps_validate(&map).is_ok());
-        let empty: AppKeystoreKeyMap = BTreeMap::new();
+        let empty: RadrootsAppKeystoreKeyMap = BTreeMap::new();
         let err = app_keystore_key_maps_validate(&empty)
             .expect_err("missing keys");
-        assert_eq!(err, AppConfigError::MissingKeystoreKeyMap("nostr_default"));
+        assert_eq!(err, RadrootsAppConfigError::MissingKeystoreKeyMap("nostr_default"));
     }
 
     #[test]
