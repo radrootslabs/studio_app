@@ -1,7 +1,6 @@
 #![forbid(unsafe_code)]
 
 use std::fmt;
-use std::time::Instant;
 
 use radroots_studio_app_core::datastore::{
     RadrootsClientDatastore,
@@ -48,7 +47,11 @@ use wasm_bindgen_futures::JsFuture;
 #[cfg(target_arch = "wasm32")]
 use js_sys::Uint8Array;
 #[cfg(target_arch = "wasm32")]
+use js_sys::Date;
+#[cfg(target_arch = "wasm32")]
 use web_sys::Response;
+#[cfg(not(target_arch = "wasm32"))]
+use std::time::Instant;
 
 pub const APP_INIT_STORAGE_KEY: &str = "radroots.app.init.ready";
 
@@ -133,6 +136,23 @@ pub fn app_init_total_unknown(state: &mut AppInitState) {
     state.total_bytes = None;
 }
 
+#[cfg(target_arch = "wasm32")]
+fn app_init_timer_start() -> u64 {
+    Date::now() as u64
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn app_init_timer_start() -> Instant {
+    Instant::now()
+}
+
+#[cfg(target_arch = "wasm32")]
+fn app_init_elapsed_ms(start: u64) -> u64 {
+    let now = Date::now() as u64;
+    now.saturating_sub(start)
+}
+
+#[cfg(not(target_arch = "wasm32"))]
 fn app_init_elapsed_ms(start: Instant) -> u64 {
     start.elapsed().as_millis() as u64
 }
@@ -355,7 +375,7 @@ pub async fn app_init_reset<T: RadrootsClientDatastore, K: RadrootsClientKeystor
 pub async fn app_init_backends(config: AppConfig) -> AppInitResult<AppBackends> {
     let _ = app_log_debug_emit("log.app.init.backends", "start", None);
     config.validate().map_err(AppInitError::Config)?;
-    let idb_start = Instant::now();
+    let idb_start = app_init_timer_start();
     idb_store_bootstrap(RADROOTS_IDB_DATABASE, None)
         .await
         .map_err(AppInitError::Idb)?;
@@ -380,7 +400,7 @@ pub async fn app_init_backends(config: AppConfig) -> AppInitResult<AppBackends> 
     }
     let _ = app_log_debug_emit("log.app.init.backends", "config_ready", None);
     let nostr_keystore = RadrootsClientWebKeystoreNostr::new(Some(config.keystore.nostr_store));
-    let key_start = Instant::now();
+    let key_start = app_init_timer_start();
     let nostr_public_key = app_keystore_nostr_ensure_key(&nostr_keystore)
         .await
         .map_err(|err| match err {
