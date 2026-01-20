@@ -32,14 +32,14 @@ use crate::{
 };
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct AppLogMetadata {
+pub struct RadrootsAppLogMetadata {
     pub app_name: String,
     pub app_version: String,
     pub app_hash: String,
     pub target: String,
 }
 
-impl Default for AppLogMetadata {
+impl Default for RadrootsAppLogMetadata {
     fn default() -> Self {
         let app_name = String::from(env!("CARGO_PKG_NAME"));
         let app_version = String::from(env!("CARGO_PKG_VERSION"));
@@ -58,63 +58,63 @@ impl Default for AppLogMetadata {
     }
 }
 
-static LOG_META: OnceLock<AppLogMetadata> = OnceLock::new();
+static LOG_META: OnceLock<RadrootsAppLogMetadata> = OnceLock::new();
 
 #[cfg(not(test))]
-static LOG_BUFFER: OnceLock<Mutex<Vec<AppLogEntry>>> = OnceLock::new();
+static LOG_BUFFER: OnceLock<Mutex<Vec<RadrootsAppLogEntry>>> = OnceLock::new();
 
 #[cfg(test)]
 thread_local! {
-    static LOG_BUFFER: RefCell<Vec<AppLogEntry>> = RefCell::new(Vec::new());
+    static LOG_BUFFER: RefCell<Vec<RadrootsAppLogEntry>> = RefCell::new(Vec::new());
 }
 
 pub const APP_LOG_BUFFER_MAX_ENTRIES: usize = 512;
 pub const APP_LOG_MAX_ENTRIES: usize = 2000;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub enum AppLogLevel {
+pub enum RadrootsAppLogLevel {
     Debug,
     Info,
     Warn,
     Error,
 }
 
-impl AppLogLevel {
+impl RadrootsAppLogLevel {
     pub const fn as_str(self) -> &'static str {
         match self {
-            AppLogLevel::Debug => "debug",
-            AppLogLevel::Info => "info",
-            AppLogLevel::Warn => "warn",
-            AppLogLevel::Error => "error",
+            RadrootsAppLogLevel::Debug => "debug",
+            RadrootsAppLogLevel::Info => "info",
+            RadrootsAppLogLevel::Warn => "warn",
+            RadrootsAppLogLevel::Error => "error",
         }
     }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct AppLogEntry {
+pub struct RadrootsAppLogEntry {
     pub id: String,
     pub timestamp_ms: i64,
-    pub level: AppLogLevel,
+    pub level: RadrootsAppLogLevel,
     pub code: String,
     pub message: String,
     pub context: Option<String>,
-    pub metadata: AppLogMetadata,
+    pub metadata: RadrootsAppLogMetadata,
 }
 
-pub trait AppLoggableError: std::fmt::Display {
+pub trait RadrootsAppLoggableError: std::fmt::Display {
     fn log_code(&self) -> &'static str;
     fn log_context(&self) -> Option<String> {
         None
     }
 }
 
-impl AppLoggableError for RadrootsAppInitAssetError {
+impl RadrootsAppLoggableError for RadrootsAppInitAssetError {
     fn log_code(&self) -> &'static str {
         self.message()
     }
 }
 
-impl AppLoggableError for RadrootsAppConfigError {
+impl RadrootsAppLoggableError for RadrootsAppConfigError {
     fn log_code(&self) -> &'static str {
         self.message()
     }
@@ -129,7 +129,7 @@ impl AppLoggableError for RadrootsAppConfigError {
     }
 }
 
-impl AppLoggableError for RadrootsAppInitError {
+impl RadrootsAppLoggableError for RadrootsAppInitError {
     fn log_code(&self) -> &'static str {
         self.message()
     }
@@ -145,7 +145,7 @@ impl AppLoggableError for RadrootsAppInitError {
     }
 }
 
-impl AppLoggableError for RadrootsAppKeystoreError {
+impl RadrootsAppLoggableError for RadrootsAppKeystoreError {
     fn log_code(&self) -> &'static str {
         self.message()
     }
@@ -157,7 +157,7 @@ impl AppLoggableError for RadrootsAppKeystoreError {
     }
 }
 
-impl AppLoggableError for RadrootsAppNotificationsError {
+impl RadrootsAppLoggableError for RadrootsAppNotificationsError {
     fn log_code(&self) -> &'static str {
         self.message()
     }
@@ -169,40 +169,40 @@ impl AppLoggableError for RadrootsAppNotificationsError {
     }
 }
 
-impl AppLoggableError for RadrootsAppTangleError {
+impl RadrootsAppLoggableError for RadrootsAppTangleError {
     fn log_code(&self) -> &'static str {
         self.message()
     }
 }
 
 #[derive(Debug)]
-pub enum AppLogError {
+pub enum RadrootsAppLogError {
     Config(RadrootsAppConfigError),
     Datastore(RadrootsClientDatastoreError),
 }
 
-pub type AppLogResult<T> = Result<T, AppLogError>;
+pub type RadrootsAppLogResult<T> = Result<T, RadrootsAppLogError>;
 
-impl std::fmt::Display for AppLogError {
+impl std::fmt::Display for RadrootsAppLogError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            AppLogError::Config(err) => write!(f, "{err}"),
-            AppLogError::Datastore(err) => write!(f, "{err}"),
+            RadrootsAppLogError::Config(err) => write!(f, "{err}"),
+            RadrootsAppLogError::Datastore(err) => write!(f, "{err}"),
         }
     }
 }
 
-impl std::error::Error for AppLogError {}
+impl std::error::Error for RadrootsAppLogError {}
 
-impl From<RadrootsAppConfigError> for AppLogError {
+impl From<RadrootsAppConfigError> for RadrootsAppLogError {
     fn from(err: RadrootsAppConfigError) -> Self {
-        AppLogError::Config(err)
+        RadrootsAppLogError::Config(err)
     }
 }
 
-impl From<RadrootsClientDatastoreError> for AppLogError {
+impl From<RadrootsClientDatastoreError> for RadrootsAppLogError {
     fn from(err: RadrootsClientDatastoreError) -> Self {
-        AppLogError::Datastore(err)
+        RadrootsAppLogError::Datastore(err)
     }
 }
 
@@ -220,11 +220,11 @@ pub fn app_log_timestamp_ms() -> i64 {
     }
 }
 
-pub fn app_log_entry_error<E: AppLoggableError>(err: &E) -> AppLogEntry {
-    AppLogEntry {
+pub fn app_log_entry_error<E: RadrootsAppLoggableError>(err: &E) -> RadrootsAppLogEntry {
+    RadrootsAppLogEntry {
         id: Uuid::new_v4().to_string(),
         timestamp_ms: app_log_timestamp_ms(),
-        level: AppLogLevel::Error,
+        level: RadrootsAppLogLevel::Error,
         code: err.log_code().to_string(),
         message: err.to_string(),
         context: err.log_context(),
@@ -233,12 +233,12 @@ pub fn app_log_entry_error<E: AppLoggableError>(err: &E) -> AppLogEntry {
 }
 
 pub fn app_log_entry_new(
-    level: AppLogLevel,
+    level: RadrootsAppLogLevel,
     code: &str,
     message: &str,
     context: Option<String>,
-) -> AppLogEntry {
-    AppLogEntry {
+) -> RadrootsAppLogEntry {
+    RadrootsAppLogEntry {
         id: Uuid::new_v4().to_string(),
         timestamp_ms: app_log_timestamp_ms(),
         level,
@@ -249,48 +249,48 @@ pub fn app_log_entry_new(
     }
 }
 
-pub fn app_log_entry_emit(entry: &AppLogEntry) {
+pub fn app_log_entry_emit(entry: &RadrootsAppLogEntry) {
     let payload = serde_json::to_string(entry)
         .unwrap_or_else(|_| format!("{}: {}", entry.code, entry.message));
     match entry.level {
-        AppLogLevel::Error => radroots_log::log_error(payload),
-        AppLogLevel::Warn => radroots_log::log_info(payload),
-        AppLogLevel::Info => radroots_log::log_info(payload),
-        AppLogLevel::Debug => radroots_log::log_debug(payload),
+        RadrootsAppLogLevel::Error => radroots_log::log_error(payload),
+        RadrootsAppLogLevel::Warn => radroots_log::log_info(payload),
+        RadrootsAppLogLevel::Info => radroots_log::log_info(payload),
+        RadrootsAppLogLevel::Debug => radroots_log::log_debug(payload),
     }
 }
 
-pub fn app_log_entry_record(entry: AppLogEntry) -> AppLogEntry {
+pub fn app_log_entry_record(entry: RadrootsAppLogEntry) -> RadrootsAppLogEntry {
     app_log_entry_emit(&entry);
     app_log_buffer_push(entry.clone());
     entry
 }
 
-pub fn app_log_error_emit<E: AppLoggableError>(err: &E) -> AppLogEntry {
+pub fn app_log_error_emit<E: RadrootsAppLoggableError>(err: &E) -> RadrootsAppLogEntry {
     app_log_entry_record(app_log_entry_error(err))
 }
 
-pub fn app_log_debug_emit(code: &str, message: &str, context: Option<String>) -> AppLogEntry {
+pub fn app_log_debug_emit(code: &str, message: &str, context: Option<String>) -> RadrootsAppLogEntry {
     app_log_entry_record(app_log_entry_new(
-        AppLogLevel::Debug,
+        RadrootsAppLogLevel::Debug,
         code,
         message,
         context,
     ))
 }
 
-pub fn app_log_info_emit(code: &str, message: &str, context: Option<String>) -> AppLogEntry {
+pub fn app_log_info_emit(code: &str, message: &str, context: Option<String>) -> RadrootsAppLogEntry {
     app_log_entry_record(app_log_entry_new(
-        AppLogLevel::Info,
+        RadrootsAppLogLevel::Info,
         code,
         message,
         context,
     ))
 }
 
-pub fn app_log_warn_emit(code: &str, message: &str, context: Option<String>) -> AppLogEntry {
+pub fn app_log_warn_emit(code: &str, message: &str, context: Option<String>) -> RadrootsAppLogEntry {
     app_log_entry_record(app_log_entry_new(
-        AppLogLevel::Warn,
+        RadrootsAppLogLevel::Warn,
         code,
         message,
         context,
@@ -300,7 +300,7 @@ pub fn app_log_warn_emit(code: &str, message: &str, context: Option<String>) -> 
 pub fn app_log_entry_key(
     key_maps: &RadrootsAppKeyMapConfig,
     entry_id: &str,
-) -> AppLogResult<String> {
+) -> RadrootsAppLogResult<String> {
     let param = app_datastore_param_key(key_maps, "log_entry")?;
     Ok(param(entry_id))
 }
@@ -308,25 +308,25 @@ pub fn app_log_entry_key(
 pub async fn app_log_entry_store<T: RadrootsClientDatastore>(
     datastore: &T,
     key_maps: &RadrootsAppKeyMapConfig,
-    entry: &AppLogEntry,
-) -> AppLogResult<AppLogEntry> {
+    entry: &RadrootsAppLogEntry,
+) -> RadrootsAppLogResult<RadrootsAppLogEntry> {
     let key = app_log_entry_key(key_maps, &entry.id)?;
     datastore
         .set_obj(&key, entry)
         .await
-        .map_err(AppLogError::Datastore)
+        .map_err(RadrootsAppLogError::Datastore)
 }
 
-pub async fn app_log_error_store<T: RadrootsClientDatastore, E: AppLoggableError>(
+pub async fn app_log_error_store<T: RadrootsClientDatastore, E: RadrootsAppLoggableError>(
     datastore: &T,
     key_maps: &RadrootsAppKeyMapConfig,
     err: &E,
-) -> AppLogResult<AppLogEntry> {
+) -> RadrootsAppLogResult<RadrootsAppLogEntry> {
     let entry = app_log_error_emit(err);
     app_log_entry_store(datastore, key_maps, &entry).await
 }
 
-pub fn app_log_buffer_push(entry: AppLogEntry) {
+pub fn app_log_buffer_push(entry: RadrootsAppLogEntry) {
     #[cfg(test)]
     {
         LOG_BUFFER.with(|buffer| {
@@ -350,7 +350,7 @@ pub fn app_log_buffer_push(entry: AppLogEntry) {
     }
 }
 
-pub fn app_log_buffer_drain() -> Vec<AppLogEntry> {
+pub fn app_log_buffer_drain() -> Vec<RadrootsAppLogEntry> {
     #[cfg(test)]
     {
         LOG_BUFFER.with(|buffer| buffer.borrow_mut().drain(..).collect())
@@ -363,14 +363,14 @@ pub fn app_log_buffer_drain() -> Vec<AppLogEntry> {
     }
 }
 
-fn app_log_entry_should_persist(level: AppLogLevel) -> bool {
-    matches!(level, AppLogLevel::Warn | AppLogLevel::Error)
+fn app_log_entry_should_persist(level: RadrootsAppLogLevel) -> bool {
+    matches!(level, RadrootsAppLogLevel::Warn | RadrootsAppLogLevel::Error)
 }
 
 pub async fn app_log_buffer_flush<T: RadrootsClientDatastore>(
     datastore: &T,
     key_maps: &RadrootsAppKeyMapConfig,
-) -> AppLogResult<usize> {
+) -> RadrootsAppLogResult<usize> {
     let entries = app_log_buffer_drain();
     let mut stored = 0;
     let mut iter = entries.into_iter();
@@ -391,7 +391,7 @@ pub async fn app_log_buffer_flush<T: RadrootsClientDatastore>(
 pub async fn app_log_buffer_flush_critical<T: RadrootsClientDatastore>(
     datastore: &T,
     key_maps: &RadrootsAppKeyMapConfig,
-) -> AppLogResult<usize> {
+) -> RadrootsAppLogResult<usize> {
     let entries = app_log_buffer_drain();
     let mut keep = Vec::new();
     let mut persist = Vec::new();
@@ -424,7 +424,7 @@ pub async fn app_log_buffer_flush_critical<T: RadrootsClientDatastore>(
     Ok(stored)
 }
 
-pub fn app_log_entry_prefix(key_maps: &RadrootsAppKeyMapConfig) -> AppLogResult<String> {
+pub fn app_log_entry_prefix(key_maps: &RadrootsAppKeyMapConfig) -> RadrootsAppLogResult<String> {
     let param = app_datastore_param_key(key_maps, "log_entry")?;
     Ok(param(""))
 }
@@ -432,8 +432,8 @@ pub fn app_log_entry_prefix(key_maps: &RadrootsAppKeyMapConfig) -> AppLogResult<
 pub async fn app_log_entries_load<T: RadrootsClientDatastore>(
     datastore: &T,
     key_maps: &RadrootsAppKeyMapConfig,
-) -> AppLogResult<Vec<AppLogEntry>> {
-    let entries = datastore.entries().await.map_err(AppLogError::Datastore)?;
+) -> RadrootsAppLogResult<Vec<RadrootsAppLogEntry>> {
+    let entries = datastore.entries().await.map_err(RadrootsAppLogError::Datastore)?;
     let prefix = app_log_entry_prefix(key_maps)?;
     let mut out = Vec::new();
     for entry in entries {
@@ -443,7 +443,7 @@ pub async fn app_log_entries_load<T: RadrootsClientDatastore>(
         let Some(value) = entry.value else {
             continue;
         };
-        if let Ok(parsed) = serde_json::from_str::<AppLogEntry>(&value) {
+        if let Ok(parsed) = serde_json::from_str::<RadrootsAppLogEntry>(&value) {
             out.push(parsed);
         }
     }
@@ -453,16 +453,16 @@ pub async fn app_log_entries_load<T: RadrootsClientDatastore>(
 pub async fn app_log_entries_clear<T: RadrootsClientDatastore>(
     datastore: &T,
     key_maps: &RadrootsAppKeyMapConfig,
-) -> AppLogResult<usize> {
+) -> RadrootsAppLogResult<usize> {
     let prefix = app_log_entry_prefix(key_maps)?;
     let removed = datastore
         .del_pref(&prefix)
         .await
-        .map_err(AppLogError::Datastore)?;
+        .map_err(RadrootsAppLogError::Datastore)?;
     Ok(removed.len())
 }
 
-pub fn app_log_entries_dump(entries: &[AppLogEntry]) -> String {
+pub fn app_log_entries_dump(entries: &[RadrootsAppLogEntry]) -> String {
     let mut out = String::new();
     for (idx, entry) in entries.iter().enumerate() {
         if idx > 0 {
@@ -480,7 +480,7 @@ pub async fn app_log_entries_prune<T: RadrootsClientDatastore>(
     datastore: &T,
     key_maps: &RadrootsAppKeyMapConfig,
     max_entries: usize,
-) -> AppLogResult<usize> {
+) -> RadrootsAppLogResult<usize> {
     let mut entries = app_log_entries_load(datastore, key_maps).await?;
     if entries.len() <= max_entries {
         return Ok(0);
@@ -490,34 +490,34 @@ pub async fn app_log_entries_prune<T: RadrootsClientDatastore>(
     let mut removed = 0;
     for entry in entries.into_iter().take(prune_count) {
         let key = app_log_entry_key(key_maps, &entry.id)?;
-        let _ = datastore.del(&key).await.map_err(AppLogError::Datastore)?;
+        let _ = datastore.del(&key).await.map_err(RadrootsAppLogError::Datastore)?;
         removed += 1;
     }
     Ok(removed)
 }
 
 #[derive(Debug)]
-pub enum AppLoggingError {
+pub enum RadrootsAppLoggingError {
     Logging(radroots_log::Error),
 }
 
-pub type AppLoggingResult<T> = Result<T, AppLoggingError>;
+pub type RadrootsAppLoggingResult<T> = Result<T, RadrootsAppLoggingError>;
 
-impl std::fmt::Display for AppLoggingError {
+impl std::fmt::Display for RadrootsAppLoggingError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            AppLoggingError::Logging(err) => write!(f, "{err:?}"),
+            RadrootsAppLoggingError::Logging(err) => write!(f, "{err:?}"),
         }
     }
 }
 
-impl std::error::Error for AppLoggingError {}
+impl std::error::Error for RadrootsAppLoggingError {}
 
-pub fn app_log_metadata() -> &'static AppLogMetadata {
-    LOG_META.get_or_init(AppLogMetadata::default)
+pub fn app_log_metadata() -> &'static RadrootsAppLogMetadata {
+    LOG_META.get_or_init(RadrootsAppLogMetadata::default)
 }
 
-pub fn app_logging_init(meta: Option<AppLogMetadata>) -> AppLoggingResult<()> {
+pub fn app_logging_init(meta: Option<RadrootsAppLogMetadata>) -> RadrootsAppLoggingResult<()> {
     if LOG_META.get().is_none() {
         let _ = LOG_META.set(meta.unwrap_or_default());
     }
@@ -538,7 +538,7 @@ pub fn app_logging_init(meta: Option<AppLogMetadata>) -> AppLoggingResult<()> {
         match radroots_log::init_logging(opts) {
             Ok(()) => Ok(()),
             Err(err) => {
-                radroots_log::init_stdout().map_err(AppLoggingError::Logging)?;
+                radroots_log::init_stdout().map_err(RadrootsAppLoggingError::Logging)?;
                 radroots_log::log_error(format!("logging_init_failed: {err}"));
                 Ok(())
             }
@@ -563,9 +563,9 @@ mod tests {
         app_log_buffer_push,
         app_log_metadata,
         app_log_timestamp_ms,
-        AppLogLevel,
-        AppLogEntry,
-        AppLogMetadata,
+        RadrootsAppLogLevel,
+        RadrootsAppLogEntry,
+        RadrootsAppLogMetadata,
     };
     use crate::{
         app_key_maps_default,
@@ -736,7 +736,7 @@ mod tests {
 
     #[test]
     fn log_metadata_defaults_populated() {
-        let meta = AppLogMetadata::default();
+        let meta = RadrootsAppLogMetadata::default();
         assert!(!meta.app_name.is_empty());
         assert!(!meta.app_version.is_empty());
         assert!(!meta.app_hash.is_empty());
@@ -753,7 +753,7 @@ mod tests {
     fn log_entry_error_includes_context() {
         let err = RadrootsAppConfigError::MissingKeyMap("nostr_key");
         let entry = app_log_entry_error(&err);
-        assert_eq!(entry.level, AppLogLevel::Error);
+        assert_eq!(entry.level, RadrootsAppLogLevel::Error);
         assert_eq!(entry.code, err.message());
         assert_eq!(entry.message, err.to_string());
         assert_eq!(entry.context.as_deref(), Some("key_map=nostr_key"));
@@ -770,12 +770,12 @@ mod tests {
     #[test]
     fn log_entry_new_populates_fields() {
         let entry = app_log_entry_new(
-            AppLogLevel::Info,
+            RadrootsAppLogLevel::Info,
             "log.code.test",
             "hello",
             Some(String::from("ctx")),
         );
-        assert_eq!(entry.level, AppLogLevel::Info);
+        assert_eq!(entry.level, RadrootsAppLogLevel::Info);
         assert_eq!(entry.code, "log.code.test");
         assert_eq!(entry.message, "hello");
         assert_eq!(entry.context.as_deref(), Some("ctx"));
@@ -786,7 +786,7 @@ mod tests {
     fn log_buffer_drains_entries() {
         let _guard = LOG_TEST_LOCK.lock().unwrap_or_else(|err| err.into_inner());
         let _ = app_log_buffer_drain();
-        let entry = app_log_entry_new(AppLogLevel::Debug, "log.code.test", "buf", None);
+        let entry = app_log_entry_new(RadrootsAppLogLevel::Debug, "log.code.test", "buf", None);
         app_log_buffer_push(entry.clone());
         let drained = app_log_buffer_drain();
         assert_eq!(drained.len(), 1);
@@ -798,8 +798,8 @@ mod tests {
     fn log_buffer_flush_critical_keeps_debug_entries() {
         let _guard = LOG_TEST_LOCK.lock().unwrap_or_else(|err| err.into_inner());
         let _ = app_log_buffer_drain();
-        let debug = app_log_entry_new(AppLogLevel::Debug, "log.code.debug", "debug", None);
-        let error = app_log_entry_new(AppLogLevel::Error, "log.code.error", "error", None);
+        let debug = app_log_entry_new(RadrootsAppLogLevel::Debug, "log.code.debug", "debug", None);
+        let error = app_log_entry_new(RadrootsAppLogLevel::Error, "log.code.error", "error", None);
         app_log_buffer_push(debug.clone());
         app_log_buffer_push(error.clone());
         let datastore = TestDatastore::new(Vec::new());
@@ -839,14 +839,14 @@ mod tests {
 
     #[test]
     fn log_entries_dump_serializes_jsonl() {
-        let entries = vec![AppLogEntry {
+        let entries = vec![RadrootsAppLogEntry {
             id: String::from("a"),
             timestamp_ms: 1,
-            level: AppLogLevel::Info,
+            level: RadrootsAppLogLevel::Info,
             code: String::from("code"),
             message: String::from("hello"),
             context: None,
-            metadata: AppLogMetadata::default(),
+            metadata: RadrootsAppLogMetadata::default(),
         }];
         let dump = app_log_entries_dump(&entries);
         assert!(dump.contains("\"code\":\"code\""));
@@ -856,14 +856,14 @@ mod tests {
     #[test]
     fn log_entries_load_filters_by_prefix() {
         let key_maps = app_key_maps_default();
-        let entry = AppLogEntry {
+        let entry = RadrootsAppLogEntry {
             id: String::from("a"),
             timestamp_ms: 1,
-            level: AppLogLevel::Info,
+            level: RadrootsAppLogLevel::Info,
             code: String::from("code"),
             message: String::from("hello"),
             context: None,
-            metadata: AppLogMetadata::default(),
+            metadata: RadrootsAppLogMetadata::default(),
         };
         let key = app_log_entry_key(&key_maps, &entry.id).expect("key");
         let entries = vec![
@@ -884,14 +884,14 @@ mod tests {
     fn log_entries_prune_enforces_limit() {
         let key_maps = app_key_maps_default();
         let entries = (0..3)
-            .map(|idx| AppLogEntry {
+            .map(|idx| RadrootsAppLogEntry {
                 id: format!("id-{idx}"),
                 timestamp_ms: idx,
-                level: AppLogLevel::Info,
+                level: RadrootsAppLogLevel::Info,
                 code: String::from("code"),
                 message: String::from("hello"),
                 context: None,
-                metadata: AppLogMetadata::default(),
+                metadata: RadrootsAppLogMetadata::default(),
             })
             .collect::<Vec<_>>();
         let mut stored = Vec::new();
@@ -917,7 +917,7 @@ mod tests {
         let key_maps = app_key_maps_default();
         let datastore = TestDatastore::new(Vec::new());
         app_log_buffer_push(app_log_entry_new(
-            AppLogLevel::Info,
+            RadrootsAppLogLevel::Info,
             "log.code.flush",
             "flush",
             None,

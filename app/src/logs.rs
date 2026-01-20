@@ -15,8 +15,8 @@ use crate::{
     app_log_entries_clear,
     app_log_entries_dump,
     app_log_entries_load,
-    AppLogEntry,
-    AppLogLevel,
+    RadrootsAppLogEntry,
+    RadrootsAppLogLevel,
 };
 
 const LOGS_AUTO_REFRESH_MS: u32 = 5000;
@@ -25,18 +25,18 @@ fn logs_auto_refresh_ms() -> u32 {
     LOGS_AUTO_REFRESH_MS
 }
 
-fn log_level_color(level: AppLogLevel) -> &'static str {
+fn log_level_color(level: RadrootsAppLogLevel) -> &'static str {
     match level {
-        AppLogLevel::Debug => "#6b7280",
-        AppLogLevel::Info => "#0f172a",
-        AppLogLevel::Warn => "#b45309",
-        AppLogLevel::Error => "#b91c1c",
+        RadrootsAppLogLevel::Debug => "#6b7280",
+        RadrootsAppLogLevel::Info => "#0f172a",
+        RadrootsAppLogLevel::Warn => "#b45309",
+        RadrootsAppLogLevel::Error => "#b91c1c",
     }
 }
 
 #[component]
 pub fn LogsPage() -> impl IntoView {
-    let entries = RwSignal::new_local(Vec::<AppLogEntry>::new());
+    let entries = RwSignal::new_local(Vec::<RadrootsAppLogEntry>::new());
     let dump = RwSignal::new_local(String::new());
     let loading = RwSignal::new_local(false);
     let did_load = RwSignal::new_local(false);

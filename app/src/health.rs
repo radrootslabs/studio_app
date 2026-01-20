@@ -90,7 +90,7 @@ use crate::{
     app_log_entry_record,
     app_key_maps_validate,
     RadrootsAppNotifications,
-    AppLogLevel,
+    RadrootsAppLogLevel,
     RadrootsAppTangleClient,
     RadrootsAppKeyMapConfig,
 };
@@ -112,7 +112,7 @@ fn log_health_start(name: &str) {
 fn log_health_end(name: &str, result: &RadrootsAppHealthCheckResult) {
     let context = log_health_context(result);
     if result.status == RadrootsAppHealthCheckStatus::Error {
-        let entry = app_log_entry_new(AppLogLevel::Error, "log.app.health.end", name, context);
+        let entry = app_log_entry_new(RadrootsAppLogLevel::Error, "log.app.health.end", name, context);
         let _ = app_log_entry_record(entry);
     } else {
         let _ = app_log_debug_emit("log.app.health.end", name, context);
