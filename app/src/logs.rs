@@ -27,9 +27,14 @@ use crate::{
 use js_sys::Array;
 
 const LOGS_AUTO_REFRESH_MS: u32 = 5000;
+const LOGS_MAX_VISIBLE: usize = 500;
 
 fn logs_auto_refresh_ms() -> u32 {
     LOGS_AUTO_REFRESH_MS
+}
+
+fn logs_max_visible() -> usize {
+    LOGS_MAX_VISIBLE
 }
 
 fn log_level_color(level: RadrootsAppLogLevel) -> &'static str {
@@ -39,6 +44,35 @@ fn log_level_color(level: RadrootsAppLogLevel) -> &'static str {
         RadrootsAppLogLevel::Warn => "#b45309",
         RadrootsAppLogLevel::Error => "#b91c1c",
     }
+}
+
+fn log_level_matches(level: RadrootsAppLogLevel, filter: &str) -> bool {
+    if filter.is_empty() || filter == "all" {
+        return true;
+    }
+    level.as_str() == filter
+}
+
+fn log_query_matches(entry: &RadrootsAppLogEntry, query: &str) -> bool {
+    let trimmed = query.trim();
+    if trimmed.is_empty() {
+        return true;
+    }
+    let needle = trimmed.to_lowercase();
+    if entry.code.to_lowercase().contains(&needle) {
+        return true;
+    }
+    if entry.message.to_lowercase().contains(&needle) {
+        return true;
+    }
+    if let Some(context) = entry.context.as_ref() {
+        return context.to_lowercase().contains(&needle);
+    }
+    false
+}
+
+fn log_entry_matches(entry: &RadrootsAppLogEntry, level_filter: &str, query: &str) -> bool {
+    log_level_matches(entry.level, level_filter) && log_query_matches(entry, query)
 }
 
 #[cfg(any(test, target_arch = "wasm32"))]
@@ -109,13 +143,36 @@ async fn log_dump_download(text: String) -> Result<(), String> {
 #[component]
 pub fn RadrootsAppLogsPage() -> impl IntoView {
     let entries = RwSignal::new_local(Vec::<RadrootsAppLogEntry>::new());
-    let dump = RwSignal::new_local(String::new());
+    let dump_error = RwSignal::new_local(None::<String>);
     let loading = RwSignal::new_local(false);
     let dump_status = RwSignal::new_local(None::<String>);
     let dump_action_running = RwSignal::new_local(false);
     let did_load = RwSignal::new_local(false);
     let interval_started = RwSignal::new_local(false);
+    let filter_query = RwSignal::new_local(String::new());
+    let filter_level = RwSignal::new_local(String::from("all"));
+    let filter_limit = RwSignal::new_local(logs_max_visible());
     let context = Rc::new(app_context());
+    let filtered_entries = Memo::new(move |_| {
+        let level_filter = filter_level.get();
+        let query = filter_query.get();
+        let limit = filter_limit.get();
+        entries.with(|items| {
+            items
+                .iter()
+                .filter(|entry| log_entry_matches(entry, &level_filter, &query))
+                .take(limit)
+                .cloned()
+                .collect::<Vec<_>>()
+        })
+    });
+    let dump_text = Memo::new(move |_| {
+        if let Some(err) = dump_error.get() {
+            return err;
+        }
+        let items = filtered_entries.get();
+        app_log_entries_dump(&items)
+    });
     let resolve_backends = {
         let context = Rc::clone(&context);
         Rc::new(move || {
@@ -135,12 +192,11 @@ pub fn RadrootsAppLogsPage() -> impl IntoView {
         Rc::new(move || {
             let Some((datastore, key_maps)) = resolve_backends() else {
                 entries.set(Vec::new());
-                dump.set(String::new());
+                dump_error.set(None);
                 return;
             };
             loading.set(true);
             let entries_signal = entries;
-            let dump_signal = dump;
             let loading_signal = loading;
             spawn_local(async move {
                 let _ = app_log_buffer_flush_no_prune(datastore.as_ref(), &key_maps).await;
@@ -148,11 +204,11 @@ pub fn RadrootsAppLogsPage() -> impl IntoView {
                 match result {
                     Ok(mut items) => {
                         items.sort_by(|a, b| b.timestamp_ms.cmp(&a.timestamp_ms));
-                        dump_signal.set(app_log_entries_dump(&items));
+                        dump_error.set(None);
                         entries_signal.set(items);
                     }
                     Err(err) => {
-                        dump_signal.set(format!("error: {err}"));
+                        dump_error.set(Some(format!("error: {err}")));
                         entries_signal.set(Vec::new());
                     }
                 }
@@ -166,7 +222,7 @@ pub fn RadrootsAppLogsPage() -> impl IntoView {
         Rc::new(move || {
             let Some((datastore, key_maps)) = resolve_backends() else {
                 entries.set(Vec::new());
-                dump.set(String::new());
+                dump_error.set(None);
                 return;
             };
             loading.set(true);
@@ -178,9 +234,9 @@ pub fn RadrootsAppLogsPage() -> impl IntoView {
         })
     };
     let copy_dump = {
-        let dump_signal = dump;
+        let dump_text = dump_text.clone();
         Rc::new(move || {
-            let text = dump_signal.get();
+            let text = dump_text.get();
             if text.is_empty() {
                 dump_status.set(Some(String::from("dump_empty")));
                 return;
@@ -197,9 +253,9 @@ pub fn RadrootsAppLogsPage() -> impl IntoView {
         })
     };
     let download_dump = {
-        let dump_signal = dump;
+        let dump_text = dump_text.clone();
         Rc::new(move || {
-            let text = dump_signal.get();
+            let text = dump_text.get();
             if text.is_empty() {
                 dump_status.set(Some(String::from("dump_empty")));
                 return;
@@ -266,12 +322,44 @@ pub fn RadrootsAppLogsPage() -> impl IntoView {
                 <div style="font-size:12px;color:#6b7280;">{status_label}</div>
                 <div style="font-size:12px;color:#6b7280;">{dump_action_label}</div>
             </div>
+            <div style="margin-top:12px;display:flex;flex-wrap:wrap;gap:12px;align-items:center;">
+                <input
+                    type="text"
+                    placeholder="search code/message/context"
+                    prop:value=move || filter_query.get()
+                    on:input=move |ev| {
+                        filter_query.set(event_target_value(&ev));
+                    }
+                    style="flex:1 1 260px;border:1px solid #e5e7eb;border-radius:8px;padding:6px 8px;font-size:12px;"
+                />
+                <select
+                    prop:value=move || filter_level.get()
+                    on:change=move |ev| {
+                        filter_level.set(event_target_value(&ev));
+                    }
+                    style="border:1px solid #e5e7eb;border-radius:8px;padding:6px 8px;font-size:12px;"
+                >
+                    <option value="all">"all"</option>
+                    <option value="debug">"debug"</option>
+                    <option value="info">"info"</option>
+                    <option value="warn">"warn"</option>
+                    <option value="error">"error"</option>
+                </select>
+                <div style="font-size:12px;color:#6b7280;">
+                    {move || {
+                        let total = entries.get().len();
+                        let visible = filtered_entries.get().len();
+                        let limit = filter_limit.get();
+                        format!("showing {visible} of {total} (limit {limit})")
+                    }}
+                </div>
+            </div>
             <div style="margin-top:12px;display:flex;flex-wrap:wrap;gap:16px;">
                 <section style="flex:1 1 520px;min-width:280px;">
                     <div style="font-weight:600;font-size:14px;">"entries"</div>
                     <div style="margin-top:8px;border:1px solid #e5e7eb;border-radius:8px;height:60vh;overflow:auto;padding:10px;display:flex;flex-direction:column;gap:10px;">
                         <For
-                            each=move || entries.get()
+                            each=move || filtered_entries.get()
                             key=|entry| entry.id.clone()
                             children=move |entry| {
                                 let level = entry.level;
@@ -317,7 +405,7 @@ pub fn RadrootsAppLogsPage() -> impl IntoView {
                     <div style="font-weight:600;font-size:14px;">"dump (jsonl)"</div>
                     <textarea
                         readonly
-                        prop:value=move || dump.get()
+                        prop:value=move || dump_text.get()
                         style="margin-top:8px;width:100%;height:60vh;border:1px solid #e5e7eb;border-radius:8px;padding:8px;font-size:12px;font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,\"Liberation Mono\",\"Courier New\",monospace;"
                     ></textarea>
                 </section>
@@ -328,7 +416,13 @@ pub fn RadrootsAppLogsPage() -> impl IntoView {
 
 #[cfg(test)]
 mod tests {
-    use super::{log_dump_filename_from_ms, logs_auto_refresh_ms};
+    use super::{
+        log_dump_filename_from_ms,
+        log_entry_matches,
+        logs_auto_refresh_ms,
+        logs_max_visible,
+    };
+    use crate::{RadrootsAppLogEntry, RadrootsAppLogLevel, RadrootsAppLogMetadata};
 
     #[test]
     fn logs_auto_refresh_is_positive() {
@@ -339,5 +433,26 @@ mod tests {
     fn log_dump_filename_uses_timestamp() {
         let name = log_dump_filename_from_ms(123);
         assert_eq!(name, "radroots-logs-123.jsonl");
+    }
+
+    #[test]
+    fn logs_max_visible_is_positive() {
+        assert!(logs_max_visible() > 0);
+    }
+
+    #[test]
+    fn log_entry_matches_filters_level_and_query() {
+        let entry = RadrootsAppLogEntry {
+            id: String::from("a"),
+            timestamp_ms: 1,
+            level: RadrootsAppLogLevel::Info,
+            code: String::from("log.code.test"),
+            message: String::from("Hello World"),
+            context: Some(String::from("context")),
+            metadata: RadrootsAppLogMetadata::default(),
+        };
+        assert!(log_entry_matches(&entry, "info", "hello"));
+        assert!(!log_entry_matches(&entry, "error", "hello"));
+        assert!(!log_entry_matches(&entry, "info", "missing"));
     }
 }
