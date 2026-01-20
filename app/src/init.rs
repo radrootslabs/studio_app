@@ -34,7 +34,7 @@ use crate::{
     RadrootsAppConfig,
     RadrootsAppSettings,
     RadrootsAppConfigError,
-    AppKeystoreError,
+    RadrootsAppKeystoreError,
     RadrootsAppKeyMapConfig,
 };
 
@@ -404,7 +404,7 @@ pub async fn app_init_backends(config: RadrootsAppConfig) -> RadrootsAppInitResu
     let nostr_public_key = app_keystore_nostr_ensure_key(&nostr_keystore)
         .await
         .map_err(|err| match err {
-            AppKeystoreError::Keystore(inner) => RadrootsAppInitError::Keystore(inner),
+            RadrootsAppKeystoreError::Keystore(inner) => RadrootsAppInitError::Keystore(inner),
         })?;
     let key_ms = app_init_elapsed_ms(key_start);
     let _ = app_log_debug_emit(

@@ -45,8 +45,8 @@ pub use keystore::{
     app_keystore_nostr_ensure_key,
     app_keystore_nostr_keys,
     app_keystore_nostr_public_key,
-    AppKeystoreError,
-    AppKeystoreResult,
+    RadrootsAppKeystoreError,
+    RadrootsAppKeystoreResult,
 };
 pub use logs::LogsPage;
 pub use logging::{
