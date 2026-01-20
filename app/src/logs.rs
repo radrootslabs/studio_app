@@ -5,6 +5,12 @@ use futures::StreamExt;
 use gloo_timers::future::IntervalStream;
 use leptos::prelude::*;
 use leptos::task::spawn_local;
+#[cfg(target_arch = "wasm32")]
+use wasm_bindgen::JsCast;
+#[cfg(target_arch = "wasm32")]
+use wasm_bindgen_futures::JsFuture;
+#[cfg(target_arch = "wasm32")]
+use wasm_bindgen::JsValue;
 use std::rc::Rc;
 
 use crate::{
@@ -16,6 +22,9 @@ use crate::{
     RadrootsAppLogEntry,
     RadrootsAppLogLevel,
 };
+
+#[cfg(target_arch = "wasm32")]
+use js_sys::Array;
 
 const LOGS_AUTO_REFRESH_MS: u32 = 5000;
 
@@ -32,11 +41,78 @@ fn log_level_color(level: RadrootsAppLogLevel) -> &'static str {
     }
 }
 
+#[cfg(any(test, target_arch = "wasm32"))]
+fn log_dump_filename_from_ms(timestamp_ms: i64) -> String {
+    format!("radroots-logs-{timestamp_ms}.jsonl")
+}
+
+#[cfg(target_arch = "wasm32")]
+fn log_dump_filename() -> String {
+    log_dump_filename_from_ms(crate::app_log_timestamp_ms())
+}
+
+async fn log_dump_copy(text: String) -> Result<(), String> {
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = text;
+        return Err(String::from("copy_unavailable"));
+    }
+    #[cfg(target_arch = "wasm32")]
+    {
+        let Some(window) = web_sys::window() else {
+            return Err(String::from("window_unavailable"));
+        };
+        let Some(clipboard) = window.navigator().clipboard() else {
+            return Err(String::from("clipboard_unavailable"));
+        };
+        let promise = clipboard.write_text(&text);
+        JsFuture::from(promise)
+            .await
+            .map_err(|_| String::from("copy_failed"))?;
+        Ok(())
+    }
+}
+
+async fn log_dump_download(text: String) -> Result<(), String> {
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = text;
+        return Err(String::from("download_unavailable"));
+    }
+    #[cfg(target_arch = "wasm32")]
+    {
+        let Some(window) = web_sys::window() else {
+            return Err(String::from("window_unavailable"));
+        };
+        let Some(document) = window.document() else {
+            return Err(String::from("document_unavailable"));
+        };
+        let parts = Array::new();
+        parts.push(&JsValue::from_str(&text));
+        let blob = web_sys::Blob::new_with_str_sequence(&parts)
+            .map_err(|_| String::from("blob_failed"))?;
+        let url = web_sys::Url::create_object_url_with_blob(&blob)
+            .map_err(|_| String::from("url_failed"))?;
+        let anchor = document
+            .create_element("a")
+            .map_err(|_| String::from("anchor_failed"))?
+            .dyn_into::<web_sys::HtmlAnchorElement>()
+            .map_err(|_| String::from("anchor_cast_failed"))?;
+        anchor.set_href(&url);
+        anchor.set_download(&log_dump_filename());
+        anchor.click();
+        let _ = web_sys::Url::revoke_object_url(&url);
+        Ok(())
+    }
+}
+
 #[component]
 pub fn RadrootsAppLogsPage() -> impl IntoView {
     let entries = RwSignal::new_local(Vec::<RadrootsAppLogEntry>::new());
     let dump = RwSignal::new_local(String::new());
     let loading = RwSignal::new_local(false);
+    let dump_status = RwSignal::new_local(None::<String>);
+    let dump_action_running = RwSignal::new_local(false);
     let did_load = RwSignal::new_local(false);
     let interval_started = RwSignal::new_local(false);
     let context = Rc::new(app_context());
@@ -101,6 +177,44 @@ pub fn RadrootsAppLogsPage() -> impl IntoView {
             });
         })
     };
+    let copy_dump = {
+        let dump_signal = dump;
+        Rc::new(move || {
+            let text = dump_signal.get();
+            if text.is_empty() {
+                dump_status.set(Some(String::from("dump_empty")));
+                return;
+            }
+            dump_action_running.set(true);
+            spawn_local(async move {
+                let status = match log_dump_copy(text).await {
+                    Ok(()) => String::from("copy_ok"),
+                    Err(err) => err,
+                };
+                dump_status.set(Some(status));
+                dump_action_running.set(false);
+            });
+        })
+    };
+    let download_dump = {
+        let dump_signal = dump;
+        Rc::new(move || {
+            let text = dump_signal.get();
+            if text.is_empty() {
+                dump_status.set(Some(String::from("dump_empty")));
+                return;
+            }
+            dump_action_running.set(true);
+            spawn_local(async move {
+                let status = match log_dump_download(text).await {
+                    Ok(()) => String::from("download_ok"),
+                    Err(err) => err,
+                };
+                dump_status.set(Some(status));
+                dump_action_running.set(false);
+            });
+        })
+    };
     let refresh_effect = Rc::clone(&refresh);
     let context_effect = Rc::clone(&context);
     Effect::new(move || {
@@ -138,13 +252,19 @@ pub fn RadrootsAppLogsPage() -> impl IntoView {
         on_cleanup(move || abort_handle_cleanup.abort());
     });
     let status_label = move || if loading.get() { "loading" } else { "idle" };
+    let dump_action_label =
+        move || dump_status.get().unwrap_or_else(|| "idle".to_string());
+    let dump_action_disabled = move || dump_action_running.get();
     view! {
         <main>
             <div style="display:flex;align-items:center;gap:12px;">
                 <div style="font-size:18px;font-weight:600;">"logs"</div>
                 <button on:click=move |_| refresh()>"refresh"</button>
                 <button on:click=move |_| clear()>"clear"</button>
+                <button on:click=move |_| copy_dump() disabled=dump_action_disabled>"copy dump"</button>
+                <button on:click=move |_| download_dump() disabled=dump_action_disabled>"download dump"</button>
                 <div style="font-size:12px;color:#6b7280;">{status_label}</div>
+                <div style="font-size:12px;color:#6b7280;">{dump_action_label}</div>
             </div>
             <div style="margin-top:12px;display:flex;flex-wrap:wrap;gap:16px;">
                 <section style="flex:1 1 520px;min-width:280px;">
@@ -208,10 +328,16 @@ pub fn RadrootsAppLogsPage() -> impl IntoView {
 
 #[cfg(test)]
 mod tests {
-    use super::logs_auto_refresh_ms;
+    use super::{log_dump_filename_from_ms, logs_auto_refresh_ms};
 
     #[test]
     fn logs_auto_refresh_is_positive() {
         assert!(logs_auto_refresh_ms() > 0);
+    }
+
+    #[test]
+    fn log_dump_filename_uses_timestamp() {
+        let name = log_dump_filename_from_ms(123);
+        assert_eq!(name, "radroots-logs-123.jsonl");
     }
 }
