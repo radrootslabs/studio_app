@@ -6,6 +6,7 @@ mod dismissable;
 mod focus;
 mod scroll_lock;
 mod roving_focus;
+mod aria_hidden;
 
 pub use portal::{RadrootsAppUiPortal, RadrootsAppUiPortalMount};
 pub use presence::{
@@ -36,4 +37,12 @@ pub use roving_focus::{
     radroots_studio_app_ui_roving_focus_next_index,
     RadrootsAppUiRovingFocusAction,
     RadrootsAppUiRovingFocusOrientation,
+};
+pub use aria_hidden::{
+    radroots_studio_app_ui_modal_hide_siblings,
+    radroots_studio_app_ui_modal_restore,
+    RadrootsAppUiModalError,
+    RadrootsAppUiModalGuard,
+    RadrootsAppUiModalResult,
+    RadrootsAppUiModalTarget,
 };

@@ -19,6 +19,7 @@ web-sys = { workspace = true, features = [
   "Document",
   "Element",
   "EventTarget",
+  "HtmlCollection",
   "HtmlBodyElement",
   "FocusEvent",
   "HtmlElement",
