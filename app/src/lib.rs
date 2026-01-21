@@ -11,6 +11,7 @@ mod keystore;
 mod logging;
 mod logs;
 mod notifications;
+mod setup;
 mod tangle;
 mod entry;
 
@@ -100,6 +101,7 @@ pub use logging::{
     APP_LOG_MAX_ENTRIES,
 };
 pub use notifications::{RadrootsAppNotifications, RadrootsAppNotificationsError, RadrootsAppNotificationsResult};
+pub use setup::{app_setup_eula_date, app_setup_initialize, app_setup_state_new};
 pub use tangle::{RadrootsAppTangleClient, RadrootsAppTangleClientStub, RadrootsAppTangleError, RadrootsAppTangleResult};
 pub use config::{
     app_config_default,

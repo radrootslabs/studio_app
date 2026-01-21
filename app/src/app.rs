@@ -28,6 +28,7 @@ use crate::{
     app_datastore_read_state,
     app_state_notifications_permission_value,
     app_state_set_notifications_permission_value,
+    app_setup_initialize,
     app_health_check_all,
     RadrootsAppBackends,
     RadrootsAppConfig,
@@ -149,9 +150,86 @@ fn SplashPage() -> impl IntoView {
 
 #[component]
 fn SetupPage() -> impl IntoView {
+    let context = app_context();
+    let fallback_backends = RwSignal::new_local(None::<RadrootsAppBackends>);
+    let fallback_setup_required = RwSignal::new_local(None::<bool>);
+    let backends = context
+        .as_ref()
+        .map(|value| value.backends)
+        .unwrap_or(fallback_backends);
+    let setup_required = context
+        .as_ref()
+        .map(|value| value.setup_required)
+        .unwrap_or(fallback_setup_required);
+    let setup_running = RwSignal::new_local(false);
+    let setup_status = RwSignal::new_local(None::<String>);
+    let navigate = use_navigate();
+    let navigate_guard = navigate.clone();
+    Effect::new(move || {
+        if setup_required.get() == Some(false) {
+            navigate_guard("/", Default::default());
+        }
+    });
+    let setup_label = move || {
+        if setup_running.get() {
+            "setup_running"
+        } else {
+            "setup_initialize"
+        }
+    };
+    let setup_status_label =
+        move || setup_status.get().unwrap_or_else(|| "setup_idle".to_string());
     view! {
         <main>
             <div>"setup"</div>
+            <div style="margin-top: 12px; display: flex; align-items: center; gap: 8px;">
+                <button
+                    on:click=move |_| {
+                        if setup_running.get_untracked() {
+                            return;
+                        }
+                        let setup_ctx = backends.with_untracked(|value| {
+                            value.as_ref().map(|backends| {
+                                (
+                                    backends.datastore.clone(),
+                                    backends.config.datastore.key_maps.clone(),
+                                    backends.nostr_keystore.get_config(),
+                                )
+                            })
+                        });
+                        let Some((datastore, key_maps, keystore_config)) = setup_ctx else {
+                            return;
+                        };
+                        setup_running.set(true);
+                        setup_status.set(Some("setup_start".to_string()));
+                        let setup_required = setup_required.clone();
+                        let navigate = navigate.clone();
+                        spawn_local(async move {
+                            let keystore = radroots_studio_app_core::keystore::RadrootsClientWebKeystoreNostr::new(
+                                Some(keystore_config),
+                            );
+                            match app_setup_initialize(datastore.as_ref(), &keystore, &key_maps).await {
+                                Ok(_) => {
+                                    setup_status.set(Some("setup_done".to_string()));
+                                    setup_required.set(Some(false));
+                                    setup_running.set(false);
+                                    navigate("/", Default::default());
+                                }
+                                Err(err) => {
+                                    let log_datastore = logs_datastore();
+                                    let _ = app_log_error_store(&log_datastore, &key_maps, &err).await;
+                                    setup_status.set(Some(err.to_string()));
+                                    setup_running.set(false);
+                                }
+                            }
+                        });
+                    }
+                    disabled=move || setup_running.get()
+                >
+                    {setup_label}
+                </button>
+                <span>{setup_status_label}</span>
+            </div>
         </main>
     }
 }
