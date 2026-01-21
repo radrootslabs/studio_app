@@ -2,12 +2,14 @@ use gloo_timers::future::TimeoutFuture;
 use leptos::prelude::*;
 use leptos::task::spawn_local;
 use leptos_router::components::{A, Route, Router, Routes};
+use leptos_router::hooks::use_navigate;
 use leptos_router::path;
 
 use crate::{
     app_init_assets,
     app_init_backends,
     app_init_has_completed,
+    app_init_needs_setup,
     app_init_state_default,
     app_init_mark_completed,
     app_init_reset,
@@ -122,6 +124,15 @@ const APP_HEALTH_CHECK_DELAY_MS: u32 = 300;
 
 fn app_health_check_delay_ms() -> u32 {
     APP_HEALTH_CHECK_DELAY_MS
+}
+
+#[component]
+fn SetupPage() -> impl IntoView {
+    view! {
+        <main>
+            <div>"setup"</div>
+        </main>
+    }
 }
 
 #[component]
@@ -439,10 +450,12 @@ pub fn RadrootsApp() -> impl IntoView {
     let backends = RwSignal::new_local(None::<RadrootsAppBackends>);
     let init_error = RwSignal::new_local(None::<RadrootsAppInitError>);
     let init_state = RwSignal::new_local(app_init_state_default());
+    let navigate = use_navigate();
     provide_context(backends);
     provide_context(init_error);
     provide_context(init_state);
     Effect::new(move || {
+        let navigate = navigate.clone();
         spawn_local(async move {
             let stage = RadrootsAppInitStage::Storage;
             init_state.update(|state| app_init_stage_set(state, stage));
@@ -485,11 +498,28 @@ pub fn RadrootsApp() -> impl IntoView {
             }
             match app_init_backends(config).await {
                 Ok(value) => {
+                    let key_maps = value.config.datastore.key_maps.clone();
+                    let datastore = value.datastore.clone();
+                    let keystore_config = value.nostr_keystore.get_config();
                     backends.set(Some(value));
                     app_init_mark_completed();
                     let stage = RadrootsAppInitStage::Ready;
                     init_state.update(|state| app_init_stage_set(state, stage));
                     log_init_stage(stage);
+                    let navigate = navigate.clone();
+                    spawn_local(async move {
+                        let keystore = radroots_studio_app_core::keystore::RadrootsClientWebKeystoreNostr::new(
+                            Some(keystore_config),
+                        );
+                        match app_init_needs_setup(datastore.as_ref(), &keystore, &key_maps).await {
+                            Ok(true) => navigate("/setup", Default::default()),
+                            Ok(false) => {}
+                            Err(err) => {
+                                let _ = app_log_error_emit(&err);
+                                navigate("/setup", Default::default());
+                            }
+                        }
+                    });
                     let flush_ctx = backends.with_untracked(|value| {
                         value.as_ref().map(|backends| {
                             (
@@ -524,10 +554,12 @@ pub fn RadrootsApp() -> impl IntoView {
             <nav style="display:flex;gap:12px;margin-bottom:12px;">
                 <A href="/" exact=true>"home"</A>
                 <A href="/logs">"logs"</A>
+                <A href="/setup">"setup"</A>
             </nav>
             <Routes fallback=|| view! { <div>"not_found"</div> }>
                 <Route path=path!("") view=HomePage />
                 <Route path=path!("logs") view=RadrootsAppLogsPage />
+                <Route path=path!("setup") view=SetupPage />
             </Routes>
         </Router>
     }
