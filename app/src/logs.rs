@@ -16,6 +16,7 @@ use std::rc::Rc;
 use crate::{
     app_context,
     app_log_buffer_flush_no_prune,
+    app_log_dump_header,
     app_log_entries_clear,
     app_log_entries_dump,
     app_log_entries_load,
@@ -73,6 +74,13 @@ fn log_query_matches(entry: &RadrootsAppLogEntry, query: &str) -> bool {
 
 fn log_entry_matches(entry: &RadrootsAppLogEntry, level_filter: &str, query: &str) -> bool {
     log_level_matches(entry.level, level_filter) && log_query_matches(entry, query)
+}
+
+fn log_dump_with_header(entries: &[RadrootsAppLogEntry]) -> String {
+    if entries.is_empty() {
+        return String::new();
+    }
+    format!("{}\n{}", app_log_dump_header(), app_log_entries_dump(entries))
 }
 
 #[cfg(any(test, target_arch = "wasm32"))]
@@ -169,7 +177,7 @@ pub fn RadrootsAppLogsPage() -> impl IntoView {
             return err;
         }
         let items = filtered_entries.get();
-        app_log_entries_dump(&items)
+        log_dump_with_header(&items)
     });
     let resolve_backends = {
         let context = Rc::clone(&context);
@@ -416,6 +424,7 @@ pub fn RadrootsAppLogsPage() -> impl IntoView {
 mod tests {
     use super::{
         log_dump_filename_from_ms,
+        log_dump_with_header,
         log_entry_matches,
         logs_auto_refresh_ms,
         logs_max_visible,
@@ -452,5 +461,24 @@ mod tests {
         assert!(log_entry_matches(&entry, "info", "hello"));
         assert!(!log_entry_matches(&entry, "error", "hello"));
         assert!(!log_entry_matches(&entry, "info", "missing"));
+    }
+
+    #[test]
+    fn log_dump_with_header_prefixes_dump() {
+        let entry = RadrootsAppLogEntry {
+            id: String::from("a"),
+            timestamp_ms: 1,
+            level: RadrootsAppLogLevel::Info,
+            code: String::from("log.code.test"),
+            message: String::from("Hello"),
+            context: None,
+            metadata: RadrootsAppLogMetadata::default(),
+        };
+        let dump = log_dump_with_header(&[entry]);
+        let mut lines = dump.lines();
+        let header = lines.next().expect("header");
+        assert!(header.contains("radroots_log_dump"));
+        let entry_line = lines.next().expect("entry");
+        assert!(entry_line.contains("\"log.code.test\""));
     }
 }
