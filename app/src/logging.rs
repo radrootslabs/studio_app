@@ -60,6 +60,23 @@ impl Default for RadrootsAppLogMetadata {
 
 static LOG_META: OnceLock<RadrootsAppLogMetadata> = OnceLock::new();
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RadrootsAppLogDumpMeta {
+    pub kind: String,
+    pub generated_at_ms: i64,
+    pub metadata: RadrootsAppLogMetadata,
+}
+
+impl RadrootsAppLogDumpMeta {
+    pub fn new() -> Self {
+        Self {
+            kind: String::from("radroots_log_dump"),
+            generated_at_ms: app_log_timestamp_ms(),
+            metadata: app_log_metadata().clone(),
+        }
+    }
+}
+
 #[cfg(not(test))]
 static LOG_BUFFER: OnceLock<Mutex<Vec<RadrootsAppLogEntry>>> = OnceLock::new();
 
@@ -534,6 +551,12 @@ pub fn app_log_metadata() -> &'static RadrootsAppLogMetadata {
     LOG_META.get_or_init(RadrootsAppLogMetadata::default)
 }
 
+pub fn app_log_dump_header() -> String {
+    let header = RadrootsAppLogDumpMeta::new();
+    serde_json::to_string(&header)
+        .unwrap_or_else(|_| String::from("{\"error\":\"log_dump_header_failed\"}"))
+}
+
 pub fn app_logging_init(meta: Option<RadrootsAppLogMetadata>) -> RadrootsAppLoggingResult<()> {
     if LOG_META.get().is_none() {
         let _ = LOG_META.set(meta.unwrap_or_default());
@@ -579,10 +602,12 @@ mod tests {
         app_log_buffer_flush_no_prune,
         app_log_buffer_flush,
         app_log_buffer_push,
+        app_log_dump_header,
         app_log_metadata,
         app_log_timestamp_ms,
         RadrootsAppLogLevel,
         RadrootsAppLogEntry,
+        RadrootsAppLogDumpMeta,
         RadrootsAppLogMetadata,
     };
     use crate::{
@@ -779,6 +804,15 @@ mod tests {
     fn log_metadata_once_lock_returns_default() {
         let meta = app_log_metadata();
         assert!(!meta.app_name.is_empty());
+    }
+
+    #[test]
+    fn log_dump_header_serializes() {
+        let header = app_log_dump_header();
+        let parsed: RadrootsAppLogDumpMeta =
+            serde_json::from_str(&header).expect("header");
+        assert_eq!(parsed.kind, "radroots_log_dump");
+        assert!(!parsed.metadata.app_name.is_empty());
     }
 
     #[test]
