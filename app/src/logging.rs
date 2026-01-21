@@ -87,6 +87,15 @@ thread_local! {
 
 pub const APP_LOG_BUFFER_MAX_ENTRIES: usize = 512;
 pub const APP_LOG_MAX_ENTRIES: usize = 2000;
+const APP_LOG_PRUNE_MIN_INTERVAL_MS: i64 = 60_000;
+
+#[cfg(not(test))]
+static LOG_PRUNE_LAST_MS: OnceLock<Mutex<Option<i64>>> = OnceLock::new();
+
+#[cfg(test)]
+thread_local! {
+    static LOG_PRUNE_LAST_MS: RefCell<Option<i64>> = RefCell::new(None);
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum RadrootsAppLogLevel {
@@ -380,6 +389,43 @@ pub fn app_log_buffer_drain() -> Vec<RadrootsAppLogEntry> {
     }
 }
 
+fn app_log_prune_should_run(now_ms: i64) -> bool {
+    #[cfg(test)]
+    {
+        return LOG_PRUNE_LAST_MS.with(|value| {
+            let mut last = value.borrow_mut();
+            let should_run = match *last {
+                Some(prev) if now_ms >= prev && now_ms - prev < APP_LOG_PRUNE_MIN_INTERVAL_MS => false,
+                _ => true,
+            };
+            if should_run {
+                *last = Some(now_ms);
+            }
+            should_run
+        });
+    }
+    #[cfg(not(test))]
+    {
+        let lock = LOG_PRUNE_LAST_MS.get_or_init(|| Mutex::new(None));
+        let mut last = lock.lock().unwrap_or_else(|err| err.into_inner());
+        let should_run = match *last {
+            Some(prev) if now_ms >= prev && now_ms - prev < APP_LOG_PRUNE_MIN_INTERVAL_MS => false,
+            _ => true,
+        };
+        if should_run {
+            *last = Some(now_ms);
+        }
+        should_run
+    }
+}
+
+#[cfg(test)]
+fn app_log_prune_reset() {
+    LOG_PRUNE_LAST_MS.with(|value| {
+        *value.borrow_mut() = None;
+    });
+}
+
 fn app_log_entry_should_persist(level: RadrootsAppLogLevel) -> bool {
     matches!(level, RadrootsAppLogLevel::Warn | RadrootsAppLogLevel::Error)
 }
@@ -420,6 +466,17 @@ pub async fn app_log_buffer_flush_no_prune<T: RadrootsClientDatastore>(
     key_maps: &RadrootsAppKeyMapConfig,
 ) -> RadrootsAppLogResult<usize> {
     app_log_buffer_flush_internal(datastore, key_maps, false).await
+}
+
+pub async fn app_log_buffer_flush_deferred<T: RadrootsClientDatastore>(
+    datastore: &T,
+    key_maps: &RadrootsAppKeyMapConfig,
+    prune: bool,
+) -> RadrootsAppLogResult<usize> {
+    if prune && !app_log_prune_should_run(app_log_timestamp_ms()) {
+        return app_log_buffer_flush_no_prune(datastore, key_maps).await;
+    }
+    app_log_buffer_flush_internal(datastore, key_maps, prune).await
 }
 
 pub async fn app_log_buffer_flush_critical<T: RadrootsClientDatastore>(
@@ -598,6 +655,8 @@ mod tests {
         app_log_entry_key,
         app_log_entry_prefix,
         app_log_buffer_drain,
+        app_log_prune_reset,
+        app_log_prune_should_run,
         app_log_buffer_flush_critical,
         app_log_buffer_flush_no_prune,
         app_log_buffer_flush,
@@ -609,6 +668,7 @@ mod tests {
         RadrootsAppLogEntry,
         RadrootsAppLogDumpMeta,
         RadrootsAppLogMetadata,
+        APP_LOG_PRUNE_MIN_INTERVAL_MS,
     };
     use crate::{
         app_key_maps_default,
@@ -632,6 +692,16 @@ mod tests {
 
     struct TestDatastore {
         entries: Mutex<Vec<RadrootsClientDatastoreEntry>>,
+    }
+
+    #[test]
+    fn log_prune_throttles() {
+        let _guard = LOG_TEST_LOCK.lock().unwrap_or_else(|err| err.into_inner());
+        app_log_prune_reset();
+        let base = 1_000_000;
+        assert!(app_log_prune_should_run(base));
+        assert!(!app_log_prune_should_run(base + APP_LOG_PRUNE_MIN_INTERVAL_MS - 1));
+        assert!(app_log_prune_should_run(base + APP_LOG_PRUNE_MIN_INTERVAL_MS));
     }
 
     impl TestDatastore {

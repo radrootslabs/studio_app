@@ -59,6 +59,7 @@ pub use logging::{
     app_log_entry_store,
     app_log_buffer_drain,
     app_log_buffer_flush_critical,
+    app_log_buffer_flush_deferred,
     app_log_buffer_flush,
     app_log_buffer_flush_no_prune,
     app_log_buffer_push,
