@@ -5,6 +5,8 @@ use leptos_router::components::{A, Route, Router, Routes};
 use leptos_router::hooks::use_navigate;
 use leptos_router::path;
 
+use radroots_studio_app_core::idb::IDB_CONFIG_LOGS;
+
 use crate::{
     app_init_assets,
     app_init_backends,
@@ -70,6 +72,10 @@ fn log_init_stage(stage: RadrootsAppInitStage) {
     let _ = app_log_debug_emit("log.app.init.stage", stage.as_str(), None);
 }
 
+fn logs_datastore() -> radroots_studio_app_core::datastore::RadrootsClientWebDatastore {
+    radroots_studio_app_core::datastore::RadrootsClientWebDatastore::new(Some(IDB_CONFIG_LOGS))
+}
+
 fn spawn_health_checks(
     config: RadrootsAppConfig,
     setup_required: bool,
@@ -121,7 +127,8 @@ fn spawn_health_checks(
         health_running.set(false);
         let key_maps = config.datastore.key_maps.clone();
         spawn_local(async move {
-            let _ = app_log_buffer_flush_deferred(&datastore, &key_maps, true).await;
+            let log_datastore = logs_datastore();
+            let _ = app_log_buffer_flush_deferred(&log_datastore, &key_maps, true).await;
         });
     });
 }
@@ -136,7 +143,6 @@ fn app_health_check_delay_ms() -> u32 {
 fn SplashPage() -> impl IntoView {
     view! {
         <main style="min-height:100vh;background:white;display:flex;align-items:center;justify-content:center;">
-            <div>"loading"</div>
         </main>
     }
 }
@@ -296,7 +302,13 @@ fn HomePage() -> impl IntoView {
                                     );
                                 }
                                 Err(err) => {
-                                    let _ = app_log_error_store(&datastore, &config.datastore.key_maps, &err).await;
+                                    let log_datastore = logs_datastore();
+                                    let _ = app_log_error_store(
+                                        &log_datastore,
+                                        &config.datastore.key_maps,
+                                        &err,
+                                    )
+                                    .await;
                                     reset_status.set(Some(err.to_string()));
                                 }
                             }
@@ -344,8 +356,9 @@ fn HomePage() -> impl IntoView {
                                         );
                                     }
                                     Err(err) => {
+                                        let log_datastore = logs_datastore();
                                         let _ = app_log_error_store(
-                                            &datastore,
+                                            &log_datastore,
                                             &config.datastore.key_maps,
                                             &err,
                                         )
@@ -563,17 +576,12 @@ fn AppShell() -> impl IntoView {
                         }
                     });
                     let flush_ctx = backends.with_untracked(|value| {
-                        value.as_ref().map(|backends| {
-                            (
-                                backends.datastore.clone(),
-                                backends.config.datastore.key_maps.clone(),
-                            )
-                        })
+                        value.as_ref().map(|backends| backends.config.datastore.key_maps.clone())
                     });
-                    if let Some((datastore, key_maps)) = flush_ctx {
+                    if let Some(key_maps) = flush_ctx {
                         spawn_local(async move {
                             let _ = app_log_buffer_flush_deferred(
-                                datastore.as_ref(),
+                                &logs_datastore(),
                                 &key_maps,
                                 true,
                             )

@@ -14,6 +14,9 @@ use wasm_bindgen_futures::JsFuture;
 use wasm_bindgen::JsValue;
 use std::rc::Rc;
 
+use radroots_studio_app_core::datastore::RadrootsClientWebDatastore;
+use radroots_studio_app_core::idb::IDB_CONFIG_LOGS;
+
 use crate::{
     app_context,
     app_log_buffer_flush_no_prune,
@@ -42,6 +45,10 @@ fn logs_max_visible() -> usize {
 
 fn logs_page_size_default() -> usize {
     LOGS_PAGE_SIZE
+}
+
+fn logs_datastore() -> RadrootsClientWebDatastore {
+    RadrootsClientWebDatastore::new(Some(IDB_CONFIG_LOGS))
 }
 
 fn log_level_color(level: RadrootsAppLogLevel) -> &'static str {
@@ -372,7 +379,10 @@ pub fn RadrootsAppLogsPage() -> impl IntoView {
                     .backends
                     .with_untracked(|value| {
                         value.as_ref().map(|backends| {
-                            (backends.datastore.clone(), backends.config.datastore.key_maps.clone())
+                            (
+                                Rc::new(logs_datastore()),
+                                backends.config.datastore.key_maps.clone(),
+                            )
                         })
                     })
             })

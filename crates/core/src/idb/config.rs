@@ -3,6 +3,7 @@ use super::RadrootsClientIdbConfig;
 pub const RADROOTS_IDB_DATABASE: &str = "radroots-pwa-v1";
 
 pub const IDB_STORE_DATASTORE: &str = "radroots.app.datastore";
+pub const IDB_STORE_LOGS: &str = "radroots.app.logs";
 pub const IDB_STORE_KEYSTORE: &str = "radroots.security.keystore";
 pub const IDB_STORE_KEYSTORE_NOSTR: &str = "radroots.security.keystore.nostr";
 pub const IDB_STORE_CRYPTO_REGISTRY: &str = "radroots.security.crypto.registry";
@@ -16,6 +17,8 @@ pub const IDB_STORE_KEYSTORE_NOSTR_CIPHER: &str = "radroots.security.keystore.no
 
 pub const IDB_CONFIG_DATASTORE: RadrootsClientIdbConfig =
     RadrootsClientIdbConfig::new(RADROOTS_IDB_DATABASE, IDB_STORE_DATASTORE);
+pub const IDB_CONFIG_LOGS: RadrootsClientIdbConfig =
+    RadrootsClientIdbConfig::new(RADROOTS_IDB_DATABASE, IDB_STORE_LOGS);
 pub const IDB_CONFIG_KEYSTORE: RadrootsClientIdbConfig =
     RadrootsClientIdbConfig::new(RADROOTS_IDB_DATABASE, IDB_STORE_KEYSTORE);
 pub const IDB_CONFIG_KEYSTORE_NOSTR: RadrootsClientIdbConfig =
@@ -31,6 +34,7 @@ pub const IDB_CONFIG_TANGLE: RadrootsClientIdbConfig =
 
 pub const RADROOTS_IDB_CONFIGS: &[RadrootsClientIdbConfig] = &[
     IDB_CONFIG_DATASTORE,
+    IDB_CONFIG_LOGS,
     IDB_CONFIG_KEYSTORE,
     IDB_CONFIG_KEYSTORE_NOSTR,
     IDB_CONFIG_CRYPTO_REGISTRY,
@@ -41,6 +45,7 @@ pub const RADROOTS_IDB_CONFIGS: &[RadrootsClientIdbConfig] = &[
 
 pub const RADROOTS_IDB_STORES: &[&str] = &[
     IDB_STORE_DATASTORE,
+    IDB_STORE_LOGS,
     IDB_STORE_KEYSTORE,
     IDB_STORE_KEYSTORE_NOSTR,
     IDB_STORE_CRYPTO_REGISTRY,
