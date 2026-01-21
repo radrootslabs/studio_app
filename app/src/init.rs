@@ -31,6 +31,7 @@ use crate::{
     app_assets_sql_wasm_url,
     app_keystore_nostr_ensure_key,
     app_log_debug_emit,
+    app_state_is_initialized,
     RadrootsAppState,
     RadrootsAppConfig,
     RadrootsAppSettings,
@@ -373,6 +374,27 @@ pub async fn app_init_reset<T: RadrootsClientDatastore, K: RadrootsClientKeystor
     Ok(())
 }
 
+pub async fn app_init_needs_setup<T: RadrootsClientDatastore, K: RadrootsClientKeystoreNostr>(
+    datastore: &T,
+    keystore: &K,
+    key_maps: &RadrootsAppKeyMapConfig,
+) -> RadrootsAppInitResult<bool> {
+    let has_state = app_datastore_has_state(datastore, key_maps).await?;
+    if !has_state {
+        return Ok(true);
+    }
+    let state = app_datastore_read_state(datastore, key_maps).await?;
+    if !app_state_is_initialized(&state) {
+        return Ok(true);
+    }
+    match keystore.read(&state.active_key).await {
+        Ok(_) => Ok(false),
+        Err(RadrootsClientKeystoreError::MissingKey) => Ok(true),
+        Err(RadrootsClientKeystoreError::NostrNoResults) => Ok(true),
+        Err(err) => Err(RadrootsAppInitError::Keystore(err)),
+    }
+}
+
 pub async fn app_init_backends(config: RadrootsAppConfig) -> RadrootsAppInitResult<RadrootsAppBackends> {
     let _ = app_log_debug_emit("log.app.init.backends", "start", None);
     config.validate().map_err(RadrootsAppInitError::Config)?;
@@ -465,6 +487,7 @@ mod tests {
     use super::{
         app_init_backends,
         app_init_assets,
+        app_init_needs_setup,
         app_init_timing_context,
         app_init_progress_add,
         app_init_state_default,
@@ -476,8 +499,13 @@ mod tests {
         RadrootsAppInitStage,
         RadrootsAppInitAssetError,
     };
-    use crate::{app_config_default, RadrootsAppConfig};
-    use radroots_studio_app_core::datastore::RadrootsClientDatastoreError;
+    use crate::{app_config_default, app_key_maps_default, RadrootsAppConfig, RadrootsAppState};
+    use radroots_studio_app_core::datastore::{
+        RadrootsClientDatastore,
+        RadrootsClientDatastoreEntries,
+        RadrootsClientDatastoreError,
+        RadrootsClientDatastoreResult,
+    };
     use radroots_studio_app_core::idb::RadrootsClientIdbStoreError;
     use radroots_studio_app_core::keystore::{
         RadrootsClientKeystoreError,
@@ -486,6 +514,9 @@ mod tests {
     };
     use async_trait::async_trait;
     use crate::RadrootsAppConfigError;
+    use radroots_studio_app_core::backup::RadrootsClientBackupDatastorePayload;
+    use radroots_studio_app_core::idb::{RadrootsClientIdbConfig, IDB_CONFIG_DATASTORE};
+    use serde::{de::DeserializeOwned, Serialize};
 
     #[test]
     fn app_init_error_messages_match_spec() {
@@ -652,5 +683,230 @@ mod tests {
         ))
         .expect_err("asset fetch should error on native");
         assert_eq!(result, RadrootsAppInitAssetError::FetchUnavailable);
+    }
+
+    struct SetupDatastore {
+        state: Option<RadrootsAppState>,
+    }
+
+    #[async_trait(?Send)]
+    impl RadrootsClientDatastore for SetupDatastore {
+        fn get_config(&self) -> RadrootsClientIdbConfig {
+            IDB_CONFIG_DATASTORE
+        }
+
+        fn get_store_id(&self) -> &str {
+            "test"
+        }
+
+        async fn init(&self) -> RadrootsClientDatastoreResult<()> {
+            Ok(())
+        }
+
+        async fn set(&self, _key: &str, _value: &str) -> RadrootsClientDatastoreResult<String> {
+            Err(RadrootsClientDatastoreError::IdbUndefined)
+        }
+
+        async fn get(&self, _key: &str) -> RadrootsClientDatastoreResult<String> {
+            Err(RadrootsClientDatastoreError::IdbUndefined)
+        }
+
+        async fn set_obj<T>(
+            &self,
+            _key: &str,
+            _value: &T,
+        ) -> RadrootsClientDatastoreResult<T>
+        where
+            T: Serialize + DeserializeOwned + Clone,
+        {
+            Err(RadrootsClientDatastoreError::IdbUndefined)
+        }
+
+        async fn update_obj<T>(
+            &self,
+            _key: &str,
+            _value: &T,
+        ) -> RadrootsClientDatastoreResult<T>
+        where
+            T: Serialize + DeserializeOwned + Clone,
+        {
+            Err(RadrootsClientDatastoreError::IdbUndefined)
+        }
+
+        async fn get_obj<T>(&self, _key: &str) -> RadrootsClientDatastoreResult<T>
+        where
+            T: DeserializeOwned,
+        {
+            let Some(state) = self.state.as_ref() else {
+                return Err(RadrootsClientDatastoreError::NoResult);
+            };
+            let encoded = serde_json::to_string(state)
+                .map_err(|_| RadrootsClientDatastoreError::NoResult)?;
+            serde_json::from_str(&encoded).map_err(|_| RadrootsClientDatastoreError::NoResult)
+        }
+
+        async fn del_obj(&self, _key: &str) -> RadrootsClientDatastoreResult<String> {
+            Err(RadrootsClientDatastoreError::IdbUndefined)
+        }
+
+        async fn del(&self, _key: &str) -> RadrootsClientDatastoreResult<String> {
+            Err(RadrootsClientDatastoreError::IdbUndefined)
+        }
+
+        async fn del_pref(&self, _key_prefix: &str) -> RadrootsClientDatastoreResult<Vec<String>> {
+            Err(RadrootsClientDatastoreError::IdbUndefined)
+        }
+
+        async fn set_param(
+            &self,
+            _key: &str,
+            _key_param: &str,
+            _value: &str,
+        ) -> RadrootsClientDatastoreResult<String> {
+            Err(RadrootsClientDatastoreError::IdbUndefined)
+        }
+
+        async fn get_param(
+            &self,
+            _key: &str,
+            _key_param: &str,
+        ) -> RadrootsClientDatastoreResult<String> {
+            Err(RadrootsClientDatastoreError::IdbUndefined)
+        }
+
+        async fn keys(&self) -> RadrootsClientDatastoreResult<Vec<String>> {
+            Err(RadrootsClientDatastoreError::IdbUndefined)
+        }
+
+        async fn entries(&self) -> RadrootsClientDatastoreResult<RadrootsClientDatastoreEntries> {
+            Err(RadrootsClientDatastoreError::IdbUndefined)
+        }
+
+        async fn entries_pref(
+            &self,
+            _key_prefix: &str,
+        ) -> RadrootsClientDatastoreResult<RadrootsClientDatastoreEntries> {
+            Err(RadrootsClientDatastoreError::IdbUndefined)
+        }
+
+        async fn reset(&self) -> RadrootsClientDatastoreResult<()> {
+            Err(RadrootsClientDatastoreError::IdbUndefined)
+        }
+
+        async fn export_backup(
+            &self,
+        ) -> RadrootsClientDatastoreResult<RadrootsClientBackupDatastorePayload> {
+            Err(RadrootsClientDatastoreError::IdbUndefined)
+        }
+
+        async fn import_backup(
+            &self,
+            _payload: RadrootsClientBackupDatastorePayload,
+        ) -> RadrootsClientDatastoreResult<()> {
+            Err(RadrootsClientDatastoreError::IdbUndefined)
+        }
+    }
+
+    struct SetupKeystore {
+        read_result: RadrootsClientKeystoreResult<String>,
+    }
+
+    #[async_trait(?Send)]
+    impl RadrootsClientKeystoreNostr for SetupKeystore {
+        async fn generate(&self) -> RadrootsClientKeystoreResult<String> {
+            Err(RadrootsClientKeystoreError::IdbUndefined)
+        }
+
+        async fn add(&self, _secret_key: &str) -> RadrootsClientKeystoreResult<String> {
+            Err(RadrootsClientKeystoreError::IdbUndefined)
+        }
+
+        async fn read(&self, _public_key: &str) -> RadrootsClientKeystoreResult<String> {
+            self.read_result.clone()
+        }
+
+        async fn keys(&self) -> RadrootsClientKeystoreResult<Vec<String>> {
+            Err(RadrootsClientKeystoreError::IdbUndefined)
+        }
+
+        async fn remove(&self, _public_key: &str) -> RadrootsClientKeystoreResult<String> {
+            Err(RadrootsClientKeystoreError::IdbUndefined)
+        }
+
+        async fn reset(&self) -> RadrootsClientKeystoreResult<()> {
+            Err(RadrootsClientKeystoreError::IdbUndefined)
+        }
+    }
+
+    #[test]
+    fn app_init_needs_setup_when_state_missing() {
+        let datastore = SetupDatastore { state: None };
+        let keystore = SetupKeystore {
+            read_result: Ok("secret".to_string()),
+        };
+        let key_maps = app_key_maps_default();
+        let needs_setup = futures::executor::block_on(app_init_needs_setup(
+            &datastore,
+            &keystore,
+            &key_maps,
+        ))
+        .expect("needs setup");
+        assert!(needs_setup);
+    }
+
+    #[test]
+    fn app_init_needs_setup_when_state_incomplete() {
+        let datastore = SetupDatastore {
+            state: Some(RadrootsAppState::default()),
+        };
+        let keystore = SetupKeystore {
+            read_result: Ok("secret".to_string()),
+        };
+        let key_maps = app_key_maps_default();
+        let needs_setup = futures::executor::block_on(app_init_needs_setup(
+            &datastore,
+            &keystore,
+            &key_maps,
+        ))
+        .expect("needs setup");
+        assert!(needs_setup);
+    }
+
+    #[test]
+    fn app_init_needs_setup_when_keystore_missing() {
+        let mut state = RadrootsAppState::default();
+        state.active_key = "pub".to_string();
+        state.eula_date = "2025-01-01T00:00:00Z".to_string();
+        let datastore = SetupDatastore { state: Some(state) };
+        let keystore = SetupKeystore {
+            read_result: Err(RadrootsClientKeystoreError::MissingKey),
+        };
+        let key_maps = app_key_maps_default();
+        let needs_setup = futures::executor::block_on(app_init_needs_setup(
+            &datastore,
+            &keystore,
+            &key_maps,
+        ))
+        .expect("needs setup");
+        assert!(needs_setup);
+    }
+
+    #[test]
+    fn app_init_needs_setup_is_false_when_ready() {
+        let mut state = RadrootsAppState::default();
+        state.active_key = "pub".to_string();
+        state.eula_date = "2025-01-01T00:00:00Z".to_string();
+        let datastore = SetupDatastore { state: Some(state) };
+        let keystore = SetupKeystore {
+            read_result: Ok("secret".to_string()),
+        };
+        let key_maps = app_key_maps_default();
+        let needs_setup = futures::executor::block_on(app_init_needs_setup(
+            &datastore,
+            &keystore,
+            &key_maps,
+        ))
+        .expect("needs setup");
+        assert!(!needs_setup);
     }
 }
