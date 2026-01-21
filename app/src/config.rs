@@ -16,7 +16,6 @@ pub type RadrootsAppKeystoreKeyMap = BTreeMap<&'static str, &'static str>;
 
 pub const APP_DATASTORE_KEY_NOSTR_KEY: &str = "nostr:key";
 pub const APP_DATASTORE_KEY_EULA_DATE: &str = "app:eula:date";
-pub const APP_DATASTORE_KEY_OBJ_SETTINGS: &str = "cfg:data";
 pub const APP_DATASTORE_KEY_OBJ_STATE: &str = "app:data";
 pub const APP_DATASTORE_KEY_LOG_ENTRY: &str = "log:entry";
 pub const APP_KEYSTORE_KEY_NOSTR_DEFAULT: &str = "nostr:default";
@@ -62,7 +61,6 @@ pub fn app_key_maps_default() -> RadrootsAppKeyMapConfig {
     );
     param_map.insert("log_entry", app_datastore_param_log_entry as RadrootsAppDatastoreKeyParam);
     let mut obj_map = BTreeMap::new();
-    obj_map.insert("settings", APP_DATASTORE_KEY_OBJ_SETTINGS);
     obj_map.insert("state", APP_DATASTORE_KEY_OBJ_STATE);
     RadrootsAppKeyMapConfig {
         key_map,
@@ -116,9 +114,6 @@ pub fn app_key_maps_validate(config: &RadrootsAppKeyMapConfig) -> RadrootsAppCon
     if !config.param_map.contains_key("log_entry") {
         return Err(RadrootsAppConfigError::MissingParamMap("log_entry"));
     }
-    if !config.obj_map.contains_key("settings") {
-        return Err(RadrootsAppConfigError::MissingObjMap("settings"));
-    }
     if !config.obj_map.contains_key("state") {
         return Err(RadrootsAppConfigError::MissingObjMap("state"));
     }
@@ -168,10 +163,6 @@ pub fn app_datastore_key_nostr_key(config: &RadrootsAppKeyMapConfig) -> Radroots
 
 pub fn app_datastore_key_eula_date(config: &RadrootsAppKeyMapConfig) -> RadrootsAppConfigResult<&'static str> {
     app_datastore_key(config, "eula_date")
-}
-
-pub fn app_datastore_obj_key_settings(config: &RadrootsAppKeyMapConfig) -> RadrootsAppConfigResult<&'static str> {
-    app_datastore_obj_key(config, "settings")
 }
 
 pub fn app_datastore_obj_key_state(config: &RadrootsAppKeyMapConfig) -> RadrootsAppConfigResult<&'static str> {
@@ -292,7 +283,6 @@ mod tests {
         app_datastore_key_eula_date,
         app_datastore_key_nostr_key,
         app_datastore_obj_key_state,
-        app_datastore_obj_key_settings,
         app_key_maps_validate,
         app_keystore_key_maps_default,
         app_keystore_key_maps_validate,
@@ -311,7 +301,6 @@ mod tests {
         APP_DATASTORE_KEY_EULA_DATE,
         APP_DATASTORE_KEY_NOSTR_KEY,
         APP_DATASTORE_KEY_OBJ_STATE,
-        APP_DATASTORE_KEY_OBJ_SETTINGS,
         APP_DATASTORE_KEY_LOG_ENTRY,
         APP_KEYSTORE_KEY_NOSTR_DEFAULT,
     };
@@ -393,10 +382,6 @@ mod tests {
             Some(&APP_DATASTORE_KEY_EULA_DATE)
         );
         assert_eq!(
-            config.obj_map.get("settings"),
-            Some(&APP_DATASTORE_KEY_OBJ_SETTINGS)
-        );
-        assert_eq!(
             config.obj_map.get("state"),
             Some(&APP_DATASTORE_KEY_OBJ_STATE)
         );
@@ -437,10 +422,6 @@ mod tests {
         assert_eq!(
             app_datastore_key_eula_date(&config).expect("eula key"),
             APP_DATASTORE_KEY_EULA_DATE
-        );
-        assert_eq!(
-            app_datastore_obj_key_settings(&config).expect("settings key"),
-            APP_DATASTORE_KEY_OBJ_SETTINGS
         );
         assert_eq!(
             app_datastore_obj_key_state(&config).expect("state key"),

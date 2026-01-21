@@ -22,11 +22,9 @@ use radroots_studio_app_core::keystore::{
 use crate::{
     app_datastore_clear_bootstrap,
     app_datastore_has_state,
-    app_datastore_has_settings,
     app_datastore_key_nostr_key,
     app_datastore_read_state,
     app_datastore_write_state,
-    app_datastore_write_settings,
     app_assets_geocoder_db_url,
     app_assets_sql_wasm_url,
     app_keystore_nostr_ensure_key,
@@ -34,7 +32,6 @@ use crate::{
     app_state_is_initialized,
     RadrootsAppState,
     RadrootsAppConfig,
-    RadrootsAppSettings,
     RadrootsAppConfigError,
     RadrootsAppKeystoreError,
     RadrootsAppKeyMapConfig,
@@ -414,19 +411,6 @@ pub async fn app_init_backends(config: RadrootsAppConfig) -> RadrootsAppInitResu
         .await
         .map_err(RadrootsAppInitError::Datastore)?;
     let _ = app_log_debug_emit("log.app.init.backends", "datastore_ready", None);
-    let has_config =
-        app_datastore_has_settings(datastore.as_ref(), &config.datastore.key_maps).await?;
-    if !has_config {
-        let config_data = RadrootsAppSettings::default();
-        let _ =
-            app_datastore_write_settings(
-                datastore.as_ref(),
-                &config.datastore.key_maps,
-                &config_data,
-            )
-                .await?;
-    }
-    let _ = app_log_debug_emit("log.app.init.backends", "config_ready", None);
     let nostr_keystore = RadrootsClientWebKeystoreNostr::new(Some(config.keystore.nostr_store));
     let key_start = app_init_timer_start();
     let nostr_public_key = app_keystore_nostr_ensure_key(&nostr_keystore)

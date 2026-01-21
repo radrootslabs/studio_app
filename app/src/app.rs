@@ -369,16 +369,6 @@ fn HomePage() -> impl IntoView {
                         <span
                             style=move || format!(
                                 "display:inline-block;width:10px;height:10px;border-radius:50%;background:{};",
-                                health_status_color(health_report.get().bootstrap_settings.status)
-                            )
-                        ></span>
-                        <span>"bootstrap_settings"</span>
-                        <span>{move || health_result_label(&health_report.get().bootstrap_settings)}</span>
-                    </div>
-                    <div style="display: flex; align-items: center; gap: 8px;">
-                        <span
-                            style=move || format!(
-                                "display:inline-block;width:10px;height:10px;border-radius:50%;background:{};",
                                 health_status_color(health_report.get().bootstrap_state.status)
                             )
                         ></span>

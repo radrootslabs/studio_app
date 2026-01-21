@@ -14,27 +14,6 @@ impl Default for RadrootsAppRole {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct RadrootsAppSettings {
-    pub nostr_public_key: Option<String>,
-    pub nostr_profile: Option<String>,
-    pub role: Option<RadrootsAppRole>,
-    pub nip05_request: Option<bool>,
-    pub nip05_key: Option<String>,
-}
-
-impl Default for RadrootsAppSettings {
-    fn default() -> Self {
-        Self {
-            nostr_public_key: None,
-            nostr_profile: None,
-            role: None,
-            nip05_request: None,
-            nip05_key: None,
-        }
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RadrootsAppState {
     pub active_key: String,
     pub role: RadrootsAppRole,
@@ -61,21 +40,11 @@ pub fn app_state_is_initialized(state: &RadrootsAppState) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{app_state_is_initialized, RadrootsAppRole, RadrootsAppSettings, RadrootsAppState};
+    use super::{app_state_is_initialized, RadrootsAppRole, RadrootsAppState};
 
     #[test]
     fn role_defaults_to_public() {
         assert_eq!(RadrootsAppRole::default(), RadrootsAppRole::Public);
-    }
-
-    #[test]
-    fn settings_defaults_empty() {
-        let data = RadrootsAppSettings::default();
-        assert!(data.nostr_public_key.is_none());
-        assert!(data.nostr_profile.is_none());
-        assert!(data.role.is_none());
-        assert!(data.nip05_request.is_none());
-        assert!(data.nip05_key.is_none());
     }
 
     #[test]
