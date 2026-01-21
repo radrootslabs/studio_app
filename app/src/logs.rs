@@ -29,6 +29,7 @@ use js_sys::Array;
 
 const LOGS_AUTO_REFRESH_MS: u32 = 5000;
 const LOGS_MAX_VISIBLE: usize = 500;
+const LOGS_PAGE_SIZE: usize = 100;
 
 fn logs_auto_refresh_ms() -> u32 {
     LOGS_AUTO_REFRESH_MS
@@ -36,6 +37,10 @@ fn logs_auto_refresh_ms() -> u32 {
 
 fn logs_max_visible() -> usize {
     LOGS_MAX_VISIBLE
+}
+
+fn logs_page_size_default() -> usize {
+    LOGS_PAGE_SIZE
 }
 
 fn log_level_color(level: RadrootsAppLogLevel) -> &'static str {
@@ -111,6 +116,29 @@ fn log_dump_with_header(entries: &[RadrootsAppLogEntry]) -> String {
         return String::new();
     }
     format!("{}\n{}", app_log_dump_header(), app_log_entries_dump(entries))
+}
+
+fn log_page_count(total: usize, page_size: usize) -> usize {
+    if page_size == 0 {
+        return 0;
+    }
+    (total + page_size - 1) / page_size
+}
+
+fn log_entries_page(
+    entries: &[RadrootsAppLogEntry],
+    page_index: usize,
+    page_size: usize,
+) -> Vec<RadrootsAppLogEntry> {
+    if page_size == 0 {
+        return Vec::new();
+    }
+    let start = page_index.saturating_mul(page_size);
+    if start >= entries.len() {
+        return Vec::new();
+    }
+    let end = (start + page_size).min(entries.len());
+    entries[start..end].to_vec()
 }
 
 #[cfg(any(test, target_arch = "wasm32"))]
@@ -190,6 +218,8 @@ pub fn RadrootsAppLogsPage() -> impl IntoView {
     let filter_from = RwSignal::new_local(String::new());
     let filter_to = RwSignal::new_local(String::new());
     let filter_limit = RwSignal::new_local(logs_max_visible());
+    let page_size = RwSignal::new_local(logs_page_size_default());
+    let page_index = RwSignal::new_local(0usize);
     let context = Rc::new(app_context());
     let filtered_entries = Memo::new(move |_| {
         let level_filter = filter_level.get();
@@ -205,6 +235,13 @@ pub fn RadrootsAppLogsPage() -> impl IntoView {
                 .cloned()
                 .collect::<Vec<_>>()
         })
+    });
+    let paged_entries = Memo::new(move |_| {
+        let items = filtered_entries.get();
+        log_entries_page(&items, page_index.get(), page_size.get())
+    });
+    let page_total = Memo::new(move |_| {
+        log_page_count(filtered_entries.get().len(), page_size.get())
     });
     let dump_text = Memo::new(move |_| {
         if let Some(err) = dump_error.get() {
@@ -408,7 +445,9 @@ pub fn RadrootsAppLogsPage() -> impl IntoView {
                         let total = entries.get().len();
                         let visible = filtered_entries.get().len();
                         let limit = filter_limit.get();
-                        format!("showing {visible} of {total} (limit {limit})")
+                        let page = page_index.get() + 1;
+                        let pages = page_total.get();
+                        format!("showing {visible} of {total} (limit {limit}) page {page}/{pages}")
                     }}
                 </div>
             </div>
@@ -417,7 +456,7 @@ pub fn RadrootsAppLogsPage() -> impl IntoView {
                     <div style="font-weight:600;font-size:14px;">"entries"</div>
                     <div style="margin-top:8px;border:1px solid #e5e7eb;border-radius:8px;height:60vh;overflow:auto;padding:10px;display:flex;flex-direction:column;gap:10px;">
                         <For
-                            each=move || filtered_entries.get()
+                            each=move || paged_entries.get()
                             key=|entry| entry.id.clone()
                             children=move |entry| {
                                 let level = entry.level;
@@ -478,10 +517,13 @@ mod tests {
         log_dump_filename_from_ms,
         log_dump_with_header,
         log_entry_matches,
+        log_entries_page,
+        log_page_count,
         log_timestamp_matches,
         parse_log_timestamp,
         logs_auto_refresh_ms,
         logs_max_visible,
+        logs_page_size_default,
     };
     use crate::{RadrootsAppLogEntry, RadrootsAppLogLevel, RadrootsAppLogMetadata};
 
@@ -499,6 +541,11 @@ mod tests {
     #[test]
     fn logs_max_visible_is_positive() {
         assert!(logs_max_visible() > 0);
+    }
+
+    #[test]
+    fn logs_page_size_default_is_positive() {
+        assert!(logs_page_size_default() > 0);
     }
 
     #[test]
@@ -550,5 +597,30 @@ mod tests {
         assert!(log_timestamp_matches(100, None, Some(150)));
         assert!(!log_timestamp_matches(100, Some(120), None));
         assert!(!log_timestamp_matches(100, None, Some(80)));
+    }
+
+    #[test]
+    fn log_page_count_rounds_up() {
+        assert_eq!(log_page_count(0, 10), 0);
+        assert_eq!(log_page_count(1, 10), 1);
+        assert_eq!(log_page_count(11, 10), 2);
+    }
+
+    #[test]
+    fn log_entries_page_slices() {
+        let entries = (0..5)
+            .map(|idx| RadrootsAppLogEntry {
+                id: format!("id-{idx}"),
+                timestamp_ms: idx,
+                level: RadrootsAppLogLevel::Info,
+                code: String::from("log.code.test"),
+                message: String::from("Hello"),
+                context: None,
+                metadata: RadrootsAppLogMetadata::default(),
+            })
+            .collect::<Vec<_>>();
+        let page = log_entries_page(&entries, 1, 2);
+        assert_eq!(page.len(), 2);
+        assert_eq!(page[0].id, "id-2");
     }
 }
