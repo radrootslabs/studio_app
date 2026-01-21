@@ -22,18 +22,13 @@ use radroots_studio_app_core::keystore::{
 use crate::{
     app_datastore_clear_bootstrap,
     app_datastore_has_state,
-    app_datastore_key_nostr_key,
     app_datastore_read_state,
-    app_datastore_write_state,
     app_assets_geocoder_db_url,
     app_assets_sql_wasm_url,
-    app_keystore_nostr_ensure_key,
     app_log_debug_emit,
     app_state_is_initialized,
-    RadrootsAppState,
     RadrootsAppConfig,
     RadrootsAppConfigError,
-    RadrootsAppKeystoreError,
     RadrootsAppKeyMapConfig,
 };
 
@@ -412,53 +407,6 @@ pub async fn app_init_backends(config: RadrootsAppConfig) -> RadrootsAppInitResu
         .map_err(RadrootsAppInitError::Datastore)?;
     let _ = app_log_debug_emit("log.app.init.backends", "datastore_ready", None);
     let nostr_keystore = RadrootsClientWebKeystoreNostr::new(Some(config.keystore.nostr_store));
-    let key_start = app_init_timer_start();
-    let nostr_public_key = app_keystore_nostr_ensure_key(&nostr_keystore)
-        .await
-        .map_err(|err| match err {
-            RadrootsAppKeystoreError::Keystore(inner) => RadrootsAppInitError::Keystore(inner),
-        })?;
-    let key_ms = app_init_elapsed_ms(key_start);
-    let _ = app_log_debug_emit(
-        "log.app.init.backends",
-        "nostr_key_ready",
-        Some(app_init_timing_context("elapsed", key_ms)),
-    );
-    let nostr_key =
-        app_datastore_key_nostr_key(&config.datastore.key_maps).map_err(RadrootsAppInitError::Config)?;
-    match datastore.get(nostr_key).await {
-        Ok(existing) => {
-            if existing != nostr_public_key {
-                let _ = datastore
-                    .set(nostr_key, &nostr_public_key)
-                    .await
-                    .map_err(RadrootsAppInitError::Datastore)?;
-            }
-        }
-        Err(RadrootsClientDatastoreError::NoResult) => {
-            let _ = datastore
-                .set(nostr_key, &nostr_public_key)
-                .await
-                .map_err(RadrootsAppInitError::Datastore)?;
-        }
-        Err(err) => return Err(RadrootsAppInitError::Datastore(err)),
-    }
-    let _ = app_log_debug_emit("log.app.init.backends", "nostr_key_synced", None);
-    let has_app_data =
-        app_datastore_has_state(datastore.as_ref(), &config.datastore.key_maps).await?;
-    let mut app_data = if has_app_data {
-        app_datastore_read_state(datastore.as_ref(), &config.datastore.key_maps).await?
-    } else {
-        RadrootsAppState::default()
-    };
-    let should_write = !has_app_data || app_data.active_key != nostr_public_key;
-    if should_write {
-        app_data.active_key = nostr_public_key;
-        let _ =
-            app_datastore_write_state(datastore.as_ref(), &config.datastore.key_maps, &app_data)
-                .await?;
-    }
-    let _ = app_log_debug_emit("log.app.init.backends", "state_ready", None);
     Ok(RadrootsAppBackends {
         config,
         datastore,
