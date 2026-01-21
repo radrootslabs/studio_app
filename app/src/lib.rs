@@ -21,6 +21,8 @@ pub use bootstrap::{
     app_datastore_has_settings,
     app_datastore_read_state,
     app_state_set_notifications_permission,
+    app_state_set_notifications_permission_value,
+    app_state_notifications_permission_value,
     app_datastore_write_state,
     app_datastore_write_settings,
 };

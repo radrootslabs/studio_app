@@ -1,6 +1,7 @@
 #![forbid(unsafe_code)]
 
 use radroots_studio_app_core::datastore::{RadrootsClientDatastore, RadrootsClientDatastoreError};
+use radroots_studio_app_core::notifications::RadrootsClientNotificationsPermission;
 
 use crate::{
     app_datastore_obj_key_settings,
@@ -110,6 +111,22 @@ pub async fn app_state_set_notifications_permission<T: RadrootsClientDatastore>(
     Ok(value)
 }
 
+pub fn app_state_notifications_permission_value(
+    data: &RadrootsAppState,
+) -> Option<RadrootsClientNotificationsPermission> {
+    data.notifications_permission
+        .as_deref()
+        .and_then(RadrootsClientNotificationsPermission::parse)
+}
+
+pub async fn app_state_set_notifications_permission_value<T: RadrootsClientDatastore>(
+    datastore: &T,
+    key_maps: &RadrootsAppKeyMapConfig,
+    permission: RadrootsClientNotificationsPermission,
+) -> RadrootsAppInitResult<RadrootsAppState> {
+    app_state_set_notifications_permission(datastore, key_maps, permission.as_str()).await
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
@@ -118,11 +135,14 @@ mod tests {
         app_datastore_has_settings,
         app_datastore_read_state,
         app_state_set_notifications_permission,
+        app_state_set_notifications_permission_value,
+        app_state_notifications_permission_value,
         app_datastore_write_state,
         app_datastore_write_settings,
     };
     use crate::{app_key_maps_default, RadrootsAppState, RadrootsAppSettings, RadrootsAppInitError};
     use radroots_studio_app_core::datastore::{RadrootsClientDatastoreError, RadrootsClientWebDatastore};
+    use radroots_studio_app_core::notifications::RadrootsClientNotificationsPermission;
 
     #[test]
     fn settings_write_maps_idb_errors() {
@@ -202,6 +222,30 @@ mod tests {
             &datastore,
             &key_maps,
             "granted",
+        ))
+        .expect_err("idb undefined");
+        assert_eq!(err, RadrootsAppInitError::Datastore(RadrootsClientDatastoreError::IdbUndefined));
+    }
+
+    #[test]
+    fn notifications_permission_value_parses_state() {
+        let mut state = RadrootsAppState::default();
+        assert!(app_state_notifications_permission_value(&state).is_none());
+        state.notifications_permission = Some(String::from("granted"));
+        assert_eq!(
+            app_state_notifications_permission_value(&state),
+            Some(RadrootsClientNotificationsPermission::Granted)
+        );
+    }
+
+    #[test]
+    fn notifications_permission_value_maps_idb_errors() {
+        let datastore = RadrootsClientWebDatastore::new(None);
+        let key_maps = app_key_maps_default();
+        let err = futures::executor::block_on(app_state_set_notifications_permission_value(
+            &datastore,
+            &key_maps,
+            RadrootsClientNotificationsPermission::Granted,
         ))
         .expect_err("idb undefined");
         assert_eq!(err, RadrootsAppInitError::Datastore(RadrootsClientDatastoreError::IdbUndefined));
