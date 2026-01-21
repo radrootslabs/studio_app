@@ -25,10 +25,10 @@ pub fn radroots_studio_app_ui_sheet_handle_data_ui_value() -> &'static str {
 
 #[component]
 pub fn RadrootsAppUiSheetRoot(
-    #[prop(optional)] open: Option<ReadSignal<bool>>,
+    open: Option<ReadSignal<bool>>,
     #[prop(optional)] default_open: bool,
-    #[prop(optional)] modal: Option<bool>,
-    #[prop(optional)] on_open_change: Option<Callback<bool>>,
+    modal: Option<bool>,
+    on_open_change: Option<Callback<bool>>,
     children: ChildrenFn,
 ) -> impl IntoView {
     view! {
@@ -46,9 +46,9 @@ pub fn RadrootsAppUiSheetRoot(
 #[component]
 pub fn RadrootsAppUiSheetTrigger(
     #[prop(optional)] disabled: bool,
-    #[prop(optional)] class: Option<String>,
-    #[prop(optional)] id: Option<String>,
-    #[prop(optional)] style: Option<String>,
+    class: Option<String>,
+    id: Option<String>,
+    style: Option<String>,
     children: Children,
 ) -> impl IntoView {
     view! {
@@ -74,10 +74,10 @@ pub fn RadrootsAppUiSheetPortal(children: ChildrenFn) -> impl IntoView {
 
 #[component]
 pub fn RadrootsAppUiSheetOverlay(
-    #[prop(optional)] close_on_click: Option<bool>,
-    #[prop(optional)] class: Option<String>,
-    #[prop(optional)] id: Option<String>,
-    #[prop(optional)] style: Option<String>,
+    close_on_click: Option<bool>,
+    class: Option<String>,
+    id: Option<String>,
+    style: Option<String>,
 ) -> impl IntoView {
     view! {
         <RadrootsAppUiDialogOverlay
@@ -94,9 +94,9 @@ pub fn RadrootsAppUiSheetOverlay(
 pub fn RadrootsAppUiSheetContent(
     #[prop(optional)] disable_outside_pointer_events: bool,
     #[prop(optional)] show_handle: bool,
-    #[prop(optional)] class: Option<String>,
-    #[prop(optional)] id: Option<String>,
-    #[prop(optional)] style: Option<String>,
+    class: Option<String>,
+    id: Option<String>,
+    style: Option<String>,
     children: ChildrenFn,
 ) -> impl IntoView {
     let handle = show_handle;
@@ -128,9 +128,9 @@ pub fn RadrootsAppUiSheetContent(
 
 #[component]
 pub fn RadrootsAppUiSheetTitle(
-    #[prop(optional)] class: Option<String>,
-    #[prop(optional)] id: Option<String>,
-    #[prop(optional)] style: Option<String>,
+    class: Option<String>,
+    id: Option<String>,
+    style: Option<String>,
     children: Children,
 ) -> impl IntoView {
     view! {
@@ -146,9 +146,9 @@ pub fn RadrootsAppUiSheetTitle(
 
 #[component]
 pub fn RadrootsAppUiSheetDescription(
-    #[prop(optional)] class: Option<String>,
-    #[prop(optional)] id: Option<String>,
-    #[prop(optional)] style: Option<String>,
+    class: Option<String>,
+    id: Option<String>,
+    style: Option<String>,
     children: Children,
 ) -> impl IntoView {
     view! {
@@ -164,9 +164,9 @@ pub fn RadrootsAppUiSheetDescription(
 
 #[component]
 pub fn RadrootsAppUiSheetClose(
-    #[prop(optional)] class: Option<String>,
-    #[prop(optional)] id: Option<String>,
-    #[prop(optional)] style: Option<String>,
+    class: Option<String>,
+    id: Option<String>,
+    style: Option<String>,
     children: Children,
 ) -> impl IntoView {
     view! {

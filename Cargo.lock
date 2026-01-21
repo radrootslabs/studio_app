@@ -1651,6 +1651,7 @@ dependencies = [
  "leptos",
  "leptos_router",
  "radroots-app-core",
+ "radroots-app-ui-components",
  "radroots-log",
  "serde",
  "serde_json",

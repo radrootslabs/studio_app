@@ -40,6 +40,7 @@ use crate::{
     RadrootsAppInitStage,
     RadrootsAppNotifications,
     RadrootsAppLogsPage,
+    RadrootsAppUiDemoPage,
     RadrootsAppTangleClientStub,
 };
 
@@ -700,11 +701,13 @@ fn AppShell() -> impl IntoView {
                 <nav style="display:flex;gap:12px;margin-bottom:12px;">
                     <A href="/" exact=true>"home"</A>
                     <A href="/logs">"logs"</A>
+                    <A href="/ui">"ui"</A>
                     <A href="/setup">"setup"</A>
                 </nav>
                 <Routes fallback=|| view! { <div>"not_found"</div> }>
                     <Route path=path!("") view=HomePage />
                     <Route path=path!("logs") view=RadrootsAppLogsPage />
+                    <Route path=path!("ui") view=RadrootsAppUiDemoPage />
                     <Route path=path!("setup") view=SetupPage />
                 </Routes>
             </Show>
