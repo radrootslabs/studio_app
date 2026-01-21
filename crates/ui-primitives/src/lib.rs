@@ -4,6 +4,7 @@ mod portal;
 mod presence;
 mod dismissable;
 mod focus;
+mod scroll_lock;
 
 pub use portal::{RadrootsAppUiPortal, RadrootsAppUiPortalMount};
 pub use presence::{
@@ -21,4 +22,11 @@ pub use focus::{
     radroots_studio_app_ui_focus_scope_next_index,
     radroots_studio_app_ui_focus_scope_selector,
     RadrootsAppUiFocusScope,
+};
+pub use scroll_lock::{
+    radroots_studio_app_ui_scroll_lock_acquire,
+    radroots_studio_app_ui_scroll_lock_release,
+    RadrootsAppUiScrollLockError,
+    RadrootsAppUiScrollLockGuard,
+    RadrootsAppUiScrollLockResult,
 };
