@@ -202,6 +202,16 @@ fn log_dump_with_context(entries: &[RadrootsAppLogEntry], header: String) -> Str
     format!("{header}\n{}", app_log_entries_dump(entries))
 }
 
+fn support_instructions_text() -> String {
+    let lines = [
+        "support bundle",
+        "1) download the log dump jsonl file",
+        "2) share the file with support",
+        "3) include notes about the issue and time window",
+    ];
+    lines.join("\n")
+}
+
 #[cfg(any(test, target_arch = "wasm32"))]
 fn log_dump_filename_from_ms(timestamp_ms: i64) -> String {
     format!("radroots-logs-{timestamp_ms}.jsonl")
@@ -272,6 +282,8 @@ pub fn RadrootsAppLogsPage() -> impl IntoView {
     let loading = RwSignal::new_local(false);
     let dump_status = RwSignal::new_local(None::<String>);
     let dump_action_running = RwSignal::new_local(false);
+    let support_status = RwSignal::new_local(None::<String>);
+    let support_running = RwSignal::new_local(false);
     let did_load = RwSignal::new_local(false);
     let interval_started = RwSignal::new_local(false);
     let filter_query = RwSignal::new_local(String::new());
@@ -450,6 +462,43 @@ pub fn RadrootsAppLogsPage() -> impl IntoView {
             });
         })
     };
+    let copy_support = {
+        Rc::new(move || {
+            let text = support_instructions_text();
+            support_running.set(true);
+            spawn_local(async move {
+                let status = match log_dump_copy(text).await {
+                    Ok(()) => String::from("support_copy_ok"),
+                    Err(err) => err,
+                };
+                support_status.set(Some(status));
+                support_running.set(false);
+            });
+        })
+    };
+    let support_bundle = {
+        let dump_text = dump_text.clone();
+        Rc::new(move || {
+            let text = dump_text.get();
+            if text.is_empty() {
+                support_status.set(Some(String::from("dump_empty")));
+                return;
+            }
+            support_running.set(true);
+            let instructions = support_instructions_text();
+            spawn_local(async move {
+                let download = log_dump_download(text).await;
+                let copy = log_dump_copy(instructions).await;
+                let status = match (download, copy) {
+                    (Ok(()), Ok(())) => String::from("support_bundle_ready"),
+                    (Err(err), _) => err,
+                    (_, Err(err)) => err,
+                };
+                support_status.set(Some(status));
+                support_running.set(false);
+            });
+        })
+    };
     let refresh_effect = Rc::clone(&refresh);
     let context_effect = Rc::clone(&context);
     Effect::new(move || {
@@ -503,6 +552,9 @@ pub fn RadrootsAppLogsPage() -> impl IntoView {
     let dump_action_label =
         move || dump_status.get().unwrap_or_else(|| "idle".to_string());
     let dump_action_disabled = move || dump_action_running.get();
+    let support_label =
+        move || support_status.get().unwrap_or_else(|| "idle".to_string());
+    let support_disabled = move || support_running.get();
     let prev_disabled = move || page_index.get() == 0;
     let next_disabled = move || {
         let total = page_total.get();
@@ -605,6 +657,13 @@ pub fn RadrootsAppLogsPage() -> impl IntoView {
                 >
                     "next"
                 </button>
+                <button on:click=move |_| support_bundle() disabled=support_disabled>
+                    "support bundle"
+                </button>
+                <button on:click=move |_| copy_support() disabled=support_disabled>
+                    "copy instructions"
+                </button>
+                <div style="font-size:12px;color:#6b7280;">{support_label}</div>
             </div>
             <div style="margin-top:12px;display:flex;flex-wrap:wrap;gap:16px;">
                 <section style="flex:1 1 520px;min-width:280px;">
@@ -660,6 +719,12 @@ pub fn RadrootsAppLogsPage() -> impl IntoView {
                         prop:value=move || dump_text.get()
                         style="margin-top:8px;width:100%;height:60vh;border:1px solid #e5e7eb;border-radius:8px;padding:8px;font-size:12px;font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,\"Liberation Mono\",\"Courier New\",monospace;"
                     ></textarea>
+                    <div style="margin-top:12px;font-weight:600;font-size:14px;">"support instructions"</div>
+                    <textarea
+                        readonly
+                        prop:value=move || support_instructions_text()
+                        style="margin-top:8px;width:100%;height:140px;border:1px solid #e5e7eb;border-radius:8px;padding:8px;font-size:12px;font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,\"Liberation Mono\",\"Courier New\",monospace;"
+                    ></textarea>
                 </section>
             </div>
         </main>
@@ -681,6 +746,7 @@ mod tests {
         log_page_count,
         log_timestamp_matches,
         parse_log_timestamp,
+        support_instructions_text,
         logs_auto_refresh_ms,
         logs_max_visible,
         logs_page_size_default,
@@ -810,5 +876,11 @@ mod tests {
         assert_eq!(log_page_index_clamp(0, 0), 0);
         assert_eq!(log_page_index_clamp(3, 2), 1);
         assert_eq!(log_page_index_clamp(1, 3), 1);
+    }
+
+    #[test]
+    fn support_instructions_are_present() {
+        let text = support_instructions_text();
+        assert!(text.contains("support bundle"));
     }
 }
