@@ -115,10 +115,7 @@ pub async fn app_state_set_notifications_permission<T: RadrootsClientDatastore>(
     key_maps: &RadrootsAppKeyMapConfig,
     permission: &str,
 ) -> RadrootsAppInitResult<RadrootsAppState> {
-    let mut data = match app_datastore_has_state(datastore, key_maps).await? {
-        true => app_datastore_read_state(datastore, key_maps).await?,
-        false => RadrootsAppState::default(),
-    };
+    let mut data = app_datastore_read_state(datastore, key_maps).await?;
     data.notifications_permission = Some(permission.to_string());
     let value = app_datastore_write_state(datastore, key_maps, &data).await?;
     Ok(value)
@@ -151,9 +148,163 @@ mod tests {
         app_state_notifications_permission_value,
         app_datastore_write_state,
     };
-    use crate::{app_key_maps_default, RadrootsAppState, RadrootsAppInitError};
-    use radroots_studio_app_core::datastore::{RadrootsClientDatastoreError, RadrootsClientWebDatastore};
+    use crate::{
+        app_key_maps_default,
+        RadrootsAppInitError,
+        RadrootsAppState,
+        RadrootsAppStateError,
+        RadrootsAppStateRecord,
+    };
+    use async_trait::async_trait;
+    use radroots_studio_app_core::backup::RadrootsClientBackupDatastorePayload;
+    use radroots_studio_app_core::datastore::{
+        RadrootsClientDatastore,
+        RadrootsClientDatastoreEntries,
+        RadrootsClientDatastoreError,
+        RadrootsClientDatastoreResult,
+        RadrootsClientWebDatastore,
+    };
+    use radroots_studio_app_core::idb::{RadrootsClientIdbConfig, IDB_CONFIG_DATASTORE};
     use radroots_studio_app_core::notifications::RadrootsClientNotificationsPermission;
+    use serde::de::DeserializeOwned;
+    use serde::Serialize;
+    use std::cell::RefCell;
+
+    struct TestDatastore {
+        state: Option<RadrootsAppState>,
+        record: RefCell<Option<RadrootsAppStateRecord>>,
+    }
+
+    #[async_trait(?Send)]
+    impl RadrootsClientDatastore for TestDatastore {
+        fn get_config(&self) -> RadrootsClientIdbConfig {
+            IDB_CONFIG_DATASTORE
+        }
+
+        fn get_store_id(&self) -> &str {
+            "test"
+        }
+
+        async fn init(&self) -> RadrootsClientDatastoreResult<()> {
+            Ok(())
+        }
+
+        async fn set(&self, _key: &str, _value: &str) -> RadrootsClientDatastoreResult<String> {
+            Err(RadrootsClientDatastoreError::IdbUndefined)
+        }
+
+        async fn get(&self, _key: &str) -> RadrootsClientDatastoreResult<String> {
+            Err(RadrootsClientDatastoreError::IdbUndefined)
+        }
+
+        async fn set_obj<T>(
+            &self,
+            _key: &str,
+            value: &T,
+        ) -> RadrootsClientDatastoreResult<T>
+        where
+            T: Serialize + DeserializeOwned + Clone,
+        {
+            let encoded = serde_json::to_string(value)
+                .map_err(|_| RadrootsClientDatastoreError::IdbUndefined)?;
+            if let Ok(parsed) = serde_json::from_str::<RadrootsAppStateRecord>(&encoded) {
+                *self.record.borrow_mut() = Some(parsed);
+                return Ok(value.clone());
+            }
+            Err(RadrootsClientDatastoreError::IdbUndefined)
+        }
+
+        async fn update_obj<T>(
+            &self,
+            _key: &str,
+            _value: &T,
+        ) -> RadrootsClientDatastoreResult<T>
+        where
+            T: Serialize + DeserializeOwned + Clone,
+        {
+            Err(RadrootsClientDatastoreError::IdbUndefined)
+        }
+
+        async fn get_obj<T>(&self, _key: &str) -> RadrootsClientDatastoreResult<T>
+        where
+            T: DeserializeOwned,
+        {
+            if let Some(record) = self.record.borrow().as_ref() {
+                let encoded = serde_json::to_string(record)
+                    .map_err(|_| RadrootsClientDatastoreError::NoResult)?;
+                if let Ok(parsed) = serde_json::from_str(&encoded) {
+                    return Ok(parsed);
+                }
+            };
+            let Some(state) = self.state.as_ref() else {
+                return Err(RadrootsClientDatastoreError::NoResult);
+            };
+            let encoded = serde_json::to_string(state)
+                .map_err(|_| RadrootsClientDatastoreError::NoResult)?;
+            serde_json::from_str(&encoded).map_err(|_| RadrootsClientDatastoreError::NoResult)
+        }
+
+        async fn del_obj(&self, _key: &str) -> RadrootsClientDatastoreResult<String> {
+            Err(RadrootsClientDatastoreError::IdbUndefined)
+        }
+
+        async fn del(&self, _key: &str) -> RadrootsClientDatastoreResult<String> {
+            Err(RadrootsClientDatastoreError::IdbUndefined)
+        }
+
+        async fn del_pref(&self, _key_prefix: &str) -> RadrootsClientDatastoreResult<Vec<String>> {
+            Err(RadrootsClientDatastoreError::IdbUndefined)
+        }
+
+        async fn set_param(
+            &self,
+            _key: &str,
+            _key_param: &str,
+            _value: &str,
+        ) -> RadrootsClientDatastoreResult<String> {
+            Err(RadrootsClientDatastoreError::IdbUndefined)
+        }
+
+        async fn get_param(
+            &self,
+            _key: &str,
+            _key_param: &str,
+        ) -> RadrootsClientDatastoreResult<String> {
+            Err(RadrootsClientDatastoreError::IdbUndefined)
+        }
+
+        async fn keys(&self) -> RadrootsClientDatastoreResult<Vec<String>> {
+            Err(RadrootsClientDatastoreError::IdbUndefined)
+        }
+
+        async fn entries(&self) -> RadrootsClientDatastoreResult<RadrootsClientDatastoreEntries> {
+            Err(RadrootsClientDatastoreError::IdbUndefined)
+        }
+
+        async fn entries_pref(
+            &self,
+            _key_prefix: &str,
+        ) -> RadrootsClientDatastoreResult<RadrootsClientDatastoreEntries> {
+            Err(RadrootsClientDatastoreError::IdbUndefined)
+        }
+
+        async fn reset(&self) -> RadrootsClientDatastoreResult<()> {
+            Err(RadrootsClientDatastoreError::IdbUndefined)
+        }
+
+        async fn export_backup(
+            &self,
+        ) -> RadrootsClientDatastoreResult<RadrootsClientBackupDatastorePayload> {
+            Err(RadrootsClientDatastoreError::IdbUndefined)
+        }
+
+        async fn import_backup(
+            &self,
+            _payload: RadrootsClientBackupDatastorePayload,
+        ) -> RadrootsClientDatastoreResult<()> {
+            Err(RadrootsClientDatastoreError::IdbUndefined)
+        }
+    }
 
     #[test]
     fn state_write_maps_idb_errors() {
@@ -237,5 +388,43 @@ mod tests {
         ))
         .expect_err("idb undefined");
         assert_eq!(err, RadrootsAppInitError::Datastore(RadrootsClientDatastoreError::IdbUndefined));
+    }
+
+    #[test]
+    fn set_notifications_permission_requires_state() {
+        let datastore = TestDatastore {
+            state: None,
+            record: RefCell::new(None),
+        };
+        let key_maps = app_key_maps_default();
+        let err = futures::executor::block_on(app_state_set_notifications_permission(
+            &datastore,
+            &key_maps,
+            "granted",
+        ))
+        .expect_err("missing state");
+        assert_eq!(err, RadrootsAppInitError::State(RadrootsAppStateError::Missing));
+    }
+
+    #[test]
+    fn set_notifications_permission_updates_state() {
+        let mut state = RadrootsAppState::default();
+        state.active_key = "pub".to_string();
+        state.eula_date = "2025-01-01T00:00:00Z".to_string();
+        let datastore = TestDatastore {
+            state: Some(state),
+            record: RefCell::new(None),
+        };
+        let key_maps = app_key_maps_default();
+        let updated = futures::executor::block_on(app_state_set_notifications_permission(
+            &datastore,
+            &key_maps,
+            "granted",
+        ))
+        .expect("updated");
+        assert_eq!(updated.notifications_permission.as_deref(), Some("granted"));
+        let record = datastore.record.borrow();
+        let record = record.as_ref().expect("record");
+        assert_eq!(record.state.notifications_permission.as_deref(), Some("granted"));
     }
 }
