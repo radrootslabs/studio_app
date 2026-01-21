@@ -17,8 +17,10 @@ mod entry;
 pub use app::RadrootsApp;
 pub use bootstrap::{
     app_datastore_clear_bootstrap,
+    app_datastore_create_state,
     app_datastore_has_state,
     app_datastore_read_state,
+    app_datastore_update_state,
     app_state_set_notifications_permission,
     app_state_set_notifications_permission_value,
     app_state_notifications_permission_value,

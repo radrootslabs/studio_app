@@ -66,11 +66,36 @@ pub async fn app_datastore_write_state<T: RadrootsClientDatastore>(
     key_maps: &RadrootsAppKeyMapConfig,
     data: &RadrootsAppState,
 ) -> RadrootsAppInitResult<RadrootsAppState> {
+    app_datastore_update_state(datastore, key_maps, data).await
+}
+
+pub async fn app_datastore_create_state<T: RadrootsClientDatastore>(
+    datastore: &T,
+    key_maps: &RadrootsAppKeyMapConfig,
+    data: &RadrootsAppState,
+) -> RadrootsAppInitResult<RadrootsAppState> {
+    let now_ms = app_state_timestamp_ms();
+    match app_datastore_read_state_record(datastore, key_maps).await {
+        Ok(_) => Err(RadrootsAppInitError::State(RadrootsAppStateError::AlreadyExists)),
+        Err(RadrootsAppInitError::State(RadrootsAppStateError::Missing)) => {
+            let record = app_state_record_new(data.clone(), 1, now_ms);
+            let value = app_datastore_write_state_record(datastore, key_maps, &record).await?;
+            Ok(value.state)
+        }
+        Err(err) => Err(err),
+    }
+}
+
+pub async fn app_datastore_update_state<T: RadrootsClientDatastore>(
+    datastore: &T,
+    key_maps: &RadrootsAppKeyMapConfig,
+    data: &RadrootsAppState,
+) -> RadrootsAppInitResult<RadrootsAppState> {
     let now_ms = app_state_timestamp_ms();
     let record = match app_datastore_read_state_record(datastore, key_maps).await {
         Ok(existing) => app_state_record_new(data.clone(), existing.revision + 1, now_ms),
         Err(RadrootsAppInitError::State(RadrootsAppStateError::Missing)) => {
-            app_state_record_new(data.clone(), 1, now_ms)
+            return Err(RadrootsAppInitError::State(RadrootsAppStateError::Missing));
         }
         Err(err) => return Err(err),
     };
@@ -117,7 +142,7 @@ pub async fn app_state_set_notifications_permission<T: RadrootsClientDatastore>(
 ) -> RadrootsAppInitResult<RadrootsAppState> {
     let mut data = app_datastore_read_state(datastore, key_maps).await?;
     data.notifications_permission = Some(permission.to_string());
-    let value = app_datastore_write_state(datastore, key_maps, &data).await?;
+    let value = app_datastore_update_state(datastore, key_maps, &data).await?;
     Ok(value)
 }
 
@@ -141,8 +166,10 @@ pub async fn app_state_set_notifications_permission_value<T: RadrootsClientDatas
 mod tests {
     use super::{
         app_datastore_clear_bootstrap,
+        app_datastore_create_state,
         app_datastore_has_state,
         app_datastore_read_state,
+        app_datastore_update_state,
         app_state_set_notifications_permission,
         app_state_set_notifications_permission_value,
         app_state_notifications_permission_value,
@@ -426,5 +453,65 @@ mod tests {
         let record = datastore.record.borrow();
         let record = record.as_ref().expect("record");
         assert_eq!(record.state.notifications_permission.as_deref(), Some("granted"));
+    }
+
+    #[test]
+    fn create_state_writes_record() {
+        let mut state = RadrootsAppState::default();
+        state.active_key = "pub".to_string();
+        state.eula_date = "2025-01-01T00:00:00Z".to_string();
+        let datastore = TestDatastore {
+            state: None,
+            record: RefCell::new(None),
+        };
+        let key_maps = app_key_maps_default();
+        let created = futures::executor::block_on(app_datastore_create_state(
+            &datastore,
+            &key_maps,
+            &state,
+        ))
+        .expect("created");
+        assert_eq!(created.active_key, "pub");
+        let record = datastore.record.borrow();
+        let record = record.as_ref().expect("record");
+        assert_eq!(record.state.active_key, "pub");
+    }
+
+    #[test]
+    fn create_state_reports_existing() {
+        let mut state = RadrootsAppState::default();
+        state.active_key = "pub".to_string();
+        state.eula_date = "2025-01-01T00:00:00Z".to_string();
+        let datastore = TestDatastore {
+            state: Some(state.clone()),
+            record: RefCell::new(None),
+        };
+        let key_maps = app_key_maps_default();
+        let err = futures::executor::block_on(app_datastore_create_state(
+            &datastore,
+            &key_maps,
+            &state,
+        ))
+        .expect_err("exists");
+        assert_eq!(err, RadrootsAppInitError::State(RadrootsAppStateError::AlreadyExists));
+    }
+
+    #[test]
+    fn update_state_requires_existing_record() {
+        let mut state = RadrootsAppState::default();
+        state.active_key = "pub".to_string();
+        state.eula_date = "2025-01-01T00:00:00Z".to_string();
+        let datastore = TestDatastore {
+            state: None,
+            record: RefCell::new(None),
+        };
+        let key_maps = app_key_maps_default();
+        let err = futures::executor::block_on(app_datastore_update_state(
+            &datastore,
+            &key_maps,
+            &state,
+        ))
+        .expect_err("missing");
+        assert_eq!(err, RadrootsAppInitError::State(RadrootsAppStateError::Missing));
     }
 }
