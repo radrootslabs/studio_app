@@ -39,10 +39,10 @@ pub fn radroots_studio_app_ui_dialog_state_value(open: bool) -> &'static str {
 
 #[component]
 pub fn RadrootsAppUiDialogRoot(
-    #[prop(optional)] open: Option<ReadSignal<bool>>,
+    open: Option<ReadSignal<bool>>,
     #[prop(optional)] default_open: bool,
-    #[prop(optional)] modal: Option<bool>,
-    #[prop(optional)] on_open_change: Option<Callback<bool>>,
+    modal: Option<bool>,
+    on_open_change: Option<Callback<bool>>,
     children: ChildrenFn,
 ) -> impl IntoView {
     let open_state = RwSignal::new(default_open);
@@ -79,9 +79,9 @@ pub fn RadrootsAppUiDialogRoot(
 #[component]
 pub fn RadrootsAppUiDialogTrigger(
     #[prop(optional)] disabled: bool,
-    #[prop(optional)] class: Option<String>,
-    #[prop(optional)] id: Option<String>,
-    #[prop(optional)] style: Option<String>,
+    class: Option<String>,
+    id: Option<String>,
+    style: Option<String>,
     children: Children,
 ) -> impl IntoView {
     let context = use_context::<RadrootsAppUiDialogContext>()
@@ -129,14 +129,16 @@ pub fn RadrootsAppUiDialogPortal(children: ChildrenFn) -> impl IntoView {
 
 #[component]
 pub fn RadrootsAppUiDialogOverlay(
-    #[prop(optional)] close_on_click: Option<bool>,
-    #[prop(optional)] class: Option<String>,
-    #[prop(optional)] id: Option<String>,
-    #[prop(optional)] style: Option<String>,
+    close_on_click: Option<bool>,
+    data_ui: Option<String>,
+    class: Option<String>,
+    id: Option<String>,
+    style: Option<String>,
 ) -> impl IntoView {
     let context = use_context::<RadrootsAppUiDialogContext>()
         .expect("dialog context");
     let close_on_click = close_on_click.unwrap_or(true);
+    let data_ui = StoredValue::new(data_ui.unwrap_or_else(|| "dialog-overlay".to_string()));
     let on_click = move |_event: MouseEvent| {
         if close_on_click {
             context.set_open.run(false);
@@ -147,7 +149,7 @@ pub fn RadrootsAppUiDialogOverlay(
             id=id
             class=class
             style=style
-            data-ui="dialog-overlay"
+            data-ui=move || data_ui.get_value()
             data-state=move || radroots_studio_app_ui_dialog_state_value(context.open.get())
             on:click=on_click
         ></div>
@@ -157,9 +159,10 @@ pub fn RadrootsAppUiDialogOverlay(
 #[component]
 pub fn RadrootsAppUiDialogContent(
     #[prop(optional)] disable_outside_pointer_events: bool,
-    #[prop(optional)] class: Option<String>,
-    #[prop(optional)] id: Option<String>,
-    #[prop(optional)] style: Option<String>,
+    data_ui: Option<String>,
+    class: Option<String>,
+    id: Option<String>,
+    style: Option<String>,
     children: ChildrenFn,
 ) -> impl IntoView {
     let context = use_context::<RadrootsAppUiDialogContext>()
@@ -218,6 +221,7 @@ pub fn RadrootsAppUiDialogContent(
     let labelled_by = move || context.title_id.get();
     let described_by = move || context.description_id.get();
     let aria_modal = StoredValue::new(if modal { Some("true".to_string()) } else { None });
+    let data_ui = StoredValue::new(data_ui.unwrap_or_else(|| "dialog".to_string()));
     let id_value = StoredValue::new(id.unwrap_or_else(|| content_id.clone()));
     let class_value = StoredValue::new(class);
     let style_value = StoredValue::new(style);
@@ -238,7 +242,7 @@ pub fn RadrootsAppUiDialogContent(
                     aria-modal=move || aria_modal.get_value()
                     aria-labelledby=labelled_by
                     aria-describedby=described_by
-                    data-ui="dialog"
+                    data-ui=move || data_ui.get_value()
                     data-state=move || radroots_studio_app_ui_dialog_state_value(context.open.get())
                 >
                     {(children.get_value())()}
@@ -250,9 +254,9 @@ pub fn RadrootsAppUiDialogContent(
 
 #[component]
 pub fn RadrootsAppUiDialogTitle(
-    #[prop(optional)] class: Option<String>,
-    #[prop(optional)] id: Option<String>,
-    #[prop(optional)] style: Option<String>,
+    class: Option<String>,
+    id: Option<String>,
+    style: Option<String>,
     children: Children,
 ) -> impl IntoView {
     let context = use_context::<RadrootsAppUiDialogContext>()
@@ -280,9 +284,9 @@ pub fn RadrootsAppUiDialogTitle(
 
 #[component]
 pub fn RadrootsAppUiDialogDescription(
-    #[prop(optional)] class: Option<String>,
-    #[prop(optional)] id: Option<String>,
-    #[prop(optional)] style: Option<String>,
+    class: Option<String>,
+    id: Option<String>,
+    style: Option<String>,
     children: Children,
 ) -> impl IntoView {
     let context = use_context::<RadrootsAppUiDialogContext>()
@@ -310,9 +314,9 @@ pub fn RadrootsAppUiDialogDescription(
 
 #[component]
 pub fn RadrootsAppUiDialogClose(
-    #[prop(optional)] class: Option<String>,
-    #[prop(optional)] id: Option<String>,
-    #[prop(optional)] style: Option<String>,
+    class: Option<String>,
+    id: Option<String>,
+    style: Option<String>,
     children: Children,
 ) -> impl IntoView {
     let context = use_context::<RadrootsAppUiDialogContext>()
