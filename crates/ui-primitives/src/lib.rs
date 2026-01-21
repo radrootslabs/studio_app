@@ -3,6 +3,7 @@
 mod portal;
 mod presence;
 mod dismissable;
+mod focus;
 
 pub use portal::{RadrootsAppUiPortal, RadrootsAppUiPortalMount};
 pub use presence::{
@@ -15,4 +16,9 @@ pub use dismissable::{
     radroots_studio_app_ui_dismissable_is_outside,
     RadrootsAppUiDismissableLayer,
     RadrootsAppUiDismissableReason,
+};
+pub use focus::{
+    radroots_studio_app_ui_focus_scope_next_index,
+    radroots_studio_app_ui_focus_scope_selector,
+    RadrootsAppUiFocusScope,
 };

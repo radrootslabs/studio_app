@@ -19,8 +19,10 @@ web-sys = { workspace = true, features = [
   "Element",
   "EventTarget",
   "FocusEvent",
+  "HtmlElement",
   "KeyboardEvent",
   "Node",
+  "NodeList",
   "PointerEvent",
   "Window"
 ] }
