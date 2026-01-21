@@ -4,6 +4,7 @@ use futures::future::{AbortHandle, Abortable};
 use futures::StreamExt;
 use gloo_timers::future::IntervalStream;
 use leptos::prelude::*;
+use serde::Serialize;
 use leptos::task::spawn_local;
 #[cfg(target_arch = "wasm32")]
 use wasm_bindgen::JsCast;
@@ -16,10 +17,10 @@ use std::rc::Rc;
 use crate::{
     app_context,
     app_log_buffer_flush_no_prune,
-    app_log_dump_header,
     app_log_entries_clear,
     app_log_entries_dump,
     app_log_entries_load,
+    app_log_metadata,
     RadrootsAppLogEntry,
     RadrootsAppLogLevel,
 };
@@ -111,13 +112,6 @@ fn log_entry_matches(
         && log_timestamp_matches(entry.timestamp_ms, from_ms, to_ms)
 }
 
-fn log_dump_with_header(entries: &[RadrootsAppLogEntry]) -> String {
-    if entries.is_empty() {
-        return String::new();
-    }
-    format!("{}\n{}", app_log_dump_header(), app_log_entries_dump(entries))
-}
-
 fn log_page_count(total: usize, page_size: usize) -> usize {
     if page_size == 0 {
         return 0;
@@ -149,6 +143,63 @@ fn log_page_index_clamp(page_index: usize, total_pages: usize) -> usize {
         return total_pages - 1;
     }
     page_index
+}
+
+fn log_dump_config_from_app(config: &crate::RadrootsAppConfig) -> RadrootsAppLogDumpConfig {
+    RadrootsAppLogDumpConfig {
+        datastore_database: config.datastore.idb_config.database.to_string(),
+        datastore_store: config.datastore.idb_config.store.to_string(),
+        keystore_nostr_database: config.keystore.nostr_store.database.to_string(),
+        keystore_nostr_store: config.keystore.nostr_store.store.to_string(),
+    }
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct RadrootsAppLogDumpConfig {
+    datastore_database: String,
+    datastore_store: String,
+    keystore_nostr_database: String,
+    keystore_nostr_store: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct RadrootsAppLogDumpFilters {
+    level: String,
+    query: String,
+    from_ms: Option<i64>,
+    to_ms: Option<i64>,
+    page_size: usize,
+    page_index: usize,
+    limit: usize,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct RadrootsAppLogDumpStats {
+    total_entries: usize,
+    filtered_entries: usize,
+    visible_entries: usize,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct RadrootsAppLogDumpContext {
+    kind: String,
+    generated_at_ms: i64,
+    metadata: crate::RadrootsAppLogMetadata,
+    config: Option<RadrootsAppLogDumpConfig>,
+    filters: RadrootsAppLogDumpFilters,
+    stats: RadrootsAppLogDumpStats,
+}
+
+fn log_dump_header_with_context(context: RadrootsAppLogDumpContext) -> String {
+    serde_json::to_string(&context)
+        .unwrap_or_else(|_| String::from("{\"error\":\"log_dump_header_failed\"}"))
+}
+
+fn log_dump_with_context(entries: &[RadrootsAppLogEntry], header: String) -> String {
+    if entries.is_empty() {
+        return String::new();
+    }
+    format!("{header}\n{}", app_log_entries_dump(entries))
 }
 
 #[cfg(any(test, target_arch = "wasm32"))]
@@ -230,6 +281,7 @@ pub fn RadrootsAppLogsPage() -> impl IntoView {
     let filter_limit = RwSignal::new_local(logs_max_visible());
     let page_size = RwSignal::new_local(logs_page_size_default());
     let page_index = RwSignal::new_local(0usize);
+    let dump_config = RwSignal::new_local(None::<RadrootsAppLogDumpConfig>);
     let context = Rc::new(app_context());
     let filtered_entries = Memo::new(move |_| {
         let level_filter = filter_level.get();
@@ -272,7 +324,33 @@ pub fn RadrootsAppLogsPage() -> impl IntoView {
             return err;
         }
         let items = filtered_entries.get();
-        log_dump_with_header(&items)
+        let total_entries = entries.get().len();
+        let filtered_len = filtered_entries.get().len();
+        let visible_len = paged_entries.get().len();
+        let filters = RadrootsAppLogDumpFilters {
+            level: filter_level.get(),
+            query: filter_query.get(),
+            from_ms: parse_log_timestamp(&filter_from.get()),
+            to_ms: parse_log_timestamp(&filter_to.get()),
+            page_size: page_size.get(),
+            page_index: page_index.get(),
+            limit: filter_limit.get(),
+        };
+        let stats = RadrootsAppLogDumpStats {
+            total_entries,
+            filtered_entries: filtered_len,
+            visible_entries: visible_len,
+        };
+        let context = RadrootsAppLogDumpContext {
+            kind: String::from("radroots_log_dump"),
+            generated_at_ms: crate::app_log_timestamp_ms(),
+            metadata: app_log_metadata().clone(),
+            config: dump_config.get(),
+            filters,
+            stats,
+        };
+        let header = log_dump_header_with_context(context);
+        log_dump_with_context(&items, header)
     });
     let resolve_backends = {
         let context = Rc::clone(&context);
@@ -387,6 +465,19 @@ pub fn RadrootsAppLogsPage() -> impl IntoView {
         }
         did_load.set(true);
         refresh_effect();
+    });
+    let config_effect = Rc::clone(&context);
+    Effect::new(move || {
+        let Some(context) = config_effect.as_ref() else {
+            return;
+        };
+        let config = context
+            .backends
+            .with(|value| value.as_ref().map(|backends| backends.config.clone()));
+        let Some(config) = config else {
+            return;
+        };
+        dump_config.set(Some(log_dump_config_from_app(&config)));
     });
     let interval_effect = Rc::clone(&refresh);
     Effect::new(move || {
@@ -579,9 +670,13 @@ pub fn RadrootsAppLogsPage() -> impl IntoView {
 mod tests {
     use super::{
         log_dump_filename_from_ms,
-        log_dump_with_header,
+        log_dump_header_with_context,
+        log_dump_with_context,
         log_entry_matches,
         log_entries_page,
+        RadrootsAppLogDumpContext,
+        RadrootsAppLogDumpFilters,
+        RadrootsAppLogDumpStats,
         log_page_index_clamp,
         log_page_count,
         log_timestamp_matches,
@@ -630,7 +725,7 @@ mod tests {
     }
 
     #[test]
-    fn log_dump_with_header_prefixes_dump() {
+    fn log_dump_with_context_prefixes_dump() {
         let entry = RadrootsAppLogEntry {
             id: String::from("a"),
             timestamp_ms: 1,
@@ -640,7 +735,28 @@ mod tests {
             context: None,
             metadata: RadrootsAppLogMetadata::default(),
         };
-        let dump = log_dump_with_header(&[entry]);
+        let context = RadrootsAppLogDumpContext {
+            kind: String::from("radroots_log_dump"),
+            generated_at_ms: 1,
+            metadata: RadrootsAppLogMetadata::default(),
+            config: None,
+            filters: RadrootsAppLogDumpFilters {
+                level: String::from("all"),
+                query: String::new(),
+                from_ms: None,
+                to_ms: None,
+                page_size: 100,
+                page_index: 0,
+                limit: 500,
+            },
+            stats: RadrootsAppLogDumpStats {
+                total_entries: 1,
+                filtered_entries: 1,
+                visible_entries: 1,
+            },
+        };
+        let header = log_dump_header_with_context(context);
+        let dump = log_dump_with_context(&[entry], header);
         let mut lines = dump.lines();
         let header = lines.next().expect("header");
         assert!(header.contains("radroots_log_dump"));
