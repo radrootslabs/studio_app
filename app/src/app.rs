@@ -5,6 +5,7 @@ use leptos_router::components::{A, Route, Router, Routes};
 use leptos_router::hooks::use_navigate;
 use leptos_router::path;
 
+use radroots_studio_app_core::datastore::RadrootsClientDatastore;
 use radroots_studio_app_core::idb::IDB_CONFIG_LOGS;
 
 use crate::{
@@ -369,6 +370,13 @@ fn HomePage() -> impl IntoView {
                             .await
                             {
                                 Ok(()) => {
+                                    let log_datastore = logs_datastore();
+                                    if let Err(err) = log_datastore.reset().await {
+                                        let reset_err = RadrootsAppInitError::Datastore(err);
+                                        let _ = app_log_error_emit(&reset_err);
+                                        reset_status.set(Some(reset_err.to_string()));
+                                        return;
+                                    }
                                     reset_status.set(Some("reset_done".to_string()));
                                     spawn_health_checks(
                                         config,

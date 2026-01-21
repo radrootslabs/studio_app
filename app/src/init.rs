@@ -20,7 +20,6 @@ use radroots_studio_app_core::keystore::{
 };
 
 use crate::{
-    app_datastore_clear_bootstrap,
     app_datastore_has_state,
     app_datastore_read_state,
     app_assets_geocoder_db_url,
@@ -348,12 +347,12 @@ pub fn app_init_mark_completed() {
 
 pub async fn app_init_reset<T: RadrootsClientDatastore, K: RadrootsClientKeystoreNostr>(
     datastore: Option<&T>,
-    key_maps: Option<&RadrootsAppKeyMapConfig>,
+    _key_maps: Option<&RadrootsAppKeyMapConfig>,
     keystore: Option<&K>,
 ) -> RadrootsAppInitResult<()> {
     let _ = app_log_debug_emit("log.app.init.reset", "start", None);
-    if let (Some(datastore), Some(key_maps)) = (datastore, key_maps) {
-        app_datastore_clear_bootstrap(datastore, key_maps).await?;
+    if let Some(datastore) = datastore {
+        datastore.reset().await.map_err(RadrootsAppInitError::Datastore)?;
     }
     if let Some(keystore) = keystore {
         keystore.reset().await.map_err(RadrootsAppInitError::Keystore)?;
@@ -525,6 +524,20 @@ mod tests {
             TestKeystore,
         >(None, None, None));
         assert!(result.is_ok());
+    }
+
+    #[test]
+    fn app_init_reset_maps_datastore_errors() {
+        let datastore = radroots_studio_app_core::datastore::RadrootsClientWebDatastore::new(None);
+        let err = futures::executor::block_on(super::app_init_reset::<
+            radroots_studio_app_core::datastore::RadrootsClientWebDatastore,
+            TestKeystore,
+        >(Some(&datastore), None, None))
+        .expect_err("datastore reset should error on native");
+        assert_eq!(
+            err,
+            RadrootsAppInitError::Datastore(RadrootsClientDatastoreError::IdbUndefined)
+        );
     }
 
     struct TestKeystore;
