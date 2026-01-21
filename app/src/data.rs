@@ -55,9 +55,13 @@ impl Default for RadrootsAppState {
     }
 }
 
+pub fn app_state_is_initialized(state: &RadrootsAppState) -> bool {
+    !state.active_key.is_empty() && !state.eula_date.is_empty()
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{RadrootsAppState, RadrootsAppSettings, RadrootsAppRole};
+    use super::{app_state_is_initialized, RadrootsAppRole, RadrootsAppSettings, RadrootsAppState};
 
     #[test]
     fn role_defaults_to_public() {
@@ -82,5 +86,16 @@ mod tests {
         assert_eq!(data.eula_date, "");
         assert!(data.nip05_key.is_none());
         assert!(data.notifications_permission.is_none());
+    }
+
+    #[test]
+    fn state_initialized_requires_key_and_eula() {
+        let data = RadrootsAppState::default();
+        assert!(!app_state_is_initialized(&data));
+        let mut data = RadrootsAppState::default();
+        data.active_key = "pub".to_string();
+        assert!(!app_state_is_initialized(&data));
+        data.eula_date = "2025-01-01T00:00:00Z".to_string();
+        assert!(app_state_is_initialized(&data));
     }
 }
