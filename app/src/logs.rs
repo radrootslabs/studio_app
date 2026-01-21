@@ -141,6 +141,16 @@ fn log_entries_page(
     entries[start..end].to_vec()
 }
 
+fn log_page_index_clamp(page_index: usize, total_pages: usize) -> usize {
+    if total_pages == 0 {
+        return 0;
+    }
+    if page_index >= total_pages {
+        return total_pages - 1;
+    }
+    page_index
+}
+
 #[cfg(any(test, target_arch = "wasm32"))]
 fn log_dump_filename_from_ms(timestamp_ms: i64) -> String {
     format!("radroots-logs-{timestamp_ms}.jsonl")
@@ -242,6 +252,20 @@ pub fn RadrootsAppLogsPage() -> impl IntoView {
     });
     let page_total = Memo::new(move |_| {
         log_page_count(filtered_entries.get().len(), page_size.get())
+    });
+    Effect::new(move || {
+        let _ = filter_query.get();
+        let _ = filter_level.get();
+        let _ = filter_from.get();
+        let _ = filter_to.get();
+        page_index.set(0);
+    });
+    Effect::new(move || {
+        let total_pages = page_total.get();
+        let next = log_page_index_clamp(page_index.get(), total_pages);
+        if next != page_index.get() {
+            page_index.set(next);
+        }
     });
     let dump_text = Memo::new(move |_| {
         if let Some(err) = dump_error.get() {
@@ -388,6 +412,11 @@ pub fn RadrootsAppLogsPage() -> impl IntoView {
     let dump_action_label =
         move || dump_status.get().unwrap_or_else(|| "idle".to_string());
     let dump_action_disabled = move || dump_action_running.get();
+    let prev_disabled = move || page_index.get() == 0;
+    let next_disabled = move || {
+        let total = page_total.get();
+        total == 0 || page_index.get() + 1 >= total
+    };
     view! {
         <main>
             <div style="display:flex;align-items:center;gap:12px;">
@@ -440,16 +469,51 @@ pub fn RadrootsAppLogsPage() -> impl IntoView {
                     }
                     style="width:130px;border:1px solid #e5e7eb;border-radius:8px;padding:6px 8px;font-size:12px;"
                 />
+                <select
+                    prop:value=move || page_size.get().to_string()
+                    on:change=move |ev| {
+                        if let Ok(size) = event_target_value(&ev).parse::<usize>() {
+                            page_size.set(size);
+                            page_index.set(0);
+                        }
+                    }
+                    style="border:1px solid #e5e7eb;border-radius:8px;padding:6px 8px;font-size:12px;"
+                >
+                    <option value="25">"25"</option>
+                    <option value="50">"50"</option>
+                    <option value="100">"100"</option>
+                    <option value="250">"250"</option>
+                </select>
                 <div style="font-size:12px;color:#6b7280;">
                     {move || {
                         let total = entries.get().len();
                         let visible = filtered_entries.get().len();
                         let limit = filter_limit.get();
-                        let page = page_index.get() + 1;
                         let pages = page_total.get();
+                        let page = if pages == 0 { 0 } else { page_index.get() + 1 };
                         format!("showing {visible} of {total} (limit {limit}) page {page}/{pages}")
                     }}
                 </div>
+            </div>
+            <div style="margin-top:8px;display:flex;align-items:center;gap:8px;">
+                <button
+                    on:click=move |_| {
+                        let next = page_index.get().saturating_sub(1);
+                        page_index.set(next);
+                    }
+                    disabled=prev_disabled
+                >
+                    "prev"
+                </button>
+                <button
+                    on:click=move |_| {
+                        let next = page_index.get() + 1;
+                        page_index.set(next);
+                    }
+                    disabled=next_disabled
+                >
+                    "next"
+                </button>
             </div>
             <div style="margin-top:12px;display:flex;flex-wrap:wrap;gap:16px;">
                 <section style="flex:1 1 520px;min-width:280px;">
@@ -518,6 +582,7 @@ mod tests {
         log_dump_with_header,
         log_entry_matches,
         log_entries_page,
+        log_page_index_clamp,
         log_page_count,
         log_timestamp_matches,
         parse_log_timestamp,
@@ -622,5 +687,12 @@ mod tests {
         let page = log_entries_page(&entries, 1, 2);
         assert_eq!(page.len(), 2);
         assert_eq!(page[0].id, "id-2");
+    }
+
+    #[test]
+    fn log_page_index_clamp_bounds() {
+        assert_eq!(log_page_index_clamp(0, 0), 0);
+        assert_eq!(log_page_index_clamp(3, 2), 1);
+        assert_eq!(log_page_index_clamp(1, 3), 1);
     }
 }
