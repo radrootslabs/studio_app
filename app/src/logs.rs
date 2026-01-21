@@ -96,9 +96,7 @@ async fn log_dump_copy(text: String) -> Result<(), String> {
         let Some(window) = web_sys::window() else {
             return Err(String::from("window_unavailable"));
         };
-        let Some(clipboard) = window.navigator().clipboard() else {
-            return Err(String::from("clipboard_unavailable"));
-        };
+        let clipboard = window.navigator().clipboard();
         let promise = clipboard.write_text(&text);
         JsFuture::from(promise)
             .await
