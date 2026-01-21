@@ -2,7 +2,7 @@ use super::RadrootsClientIdbConfig;
 
 pub const RADROOTS_IDB_DATABASE: &str = "radroots-pwa-v1";
 
-pub const IDB_STORE_DATASTORE: &str = "radroots.app.datastore";
+pub const IDB_STORE_DATASTORE: &str = "radroots.app.data";
 pub const IDB_STORE_LOGS: &str = "radroots.app.logs";
 pub const IDB_STORE_KEYSTORE: &str = "radroots.security.keystore";
 pub const IDB_STORE_KEYSTORE_NOSTR: &str = "radroots.security.keystore.nostr";
