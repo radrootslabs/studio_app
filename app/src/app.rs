@@ -22,7 +22,8 @@ use crate::{
     app_log_error_store,
     app_config_default,
     app_datastore_read_state,
-    app_state_set_notifications_permission,
+    app_state_notifications_permission_value,
+    app_state_set_notifications_permission_value,
     app_health_check_all_logged,
     RadrootsAppBackends,
     RadrootsAppConfig,
@@ -102,7 +103,10 @@ fn spawn_health_checks(
                 Some(data.active_key.clone())
             }
         });
-        let notifications_value = app_data.and_then(|data| data.notifications_permission);
+        let notifications_value = app_data
+            .as_ref()
+            .and_then(app_state_notifications_permission_value)
+            .map(|permission| permission.as_str().to_string());
         health_report.set(report);
         active_key.set(active_key_value);
         notifications_status.set(notifications_value);
@@ -278,10 +282,10 @@ fn HomePage() -> impl IntoView {
                                 match notifications.request_permission().await {
                                     Ok(permission) => {
                                         let value = permission.as_str().to_string();
-                                        let _ = app_state_set_notifications_permission(
+                                        let _ = app_state_set_notifications_permission_value(
                                             &datastore,
                                             &config.datastore.key_maps,
-                                            &value,
+                                            permission,
                                         )
                                         .await;
                                         notifications_status.set(Some(value));
