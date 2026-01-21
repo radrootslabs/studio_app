@@ -93,7 +93,9 @@ use crate::{
     RadrootsAppLogLevel,
     RadrootsAppTangleClient,
     RadrootsAppKeyMapConfig,
+    RadrootsAppState,
 };
+use futures::join;
 use radroots_studio_app_core::notifications::RadrootsClientNotificationsPermission;
 use radroots_studio_app_core::datastore::{RadrootsClientDatastore, RadrootsClientDatastoreError};
 use radroots_studio_app_core::keystore::{RadrootsClientKeystoreError, RadrootsClientKeystoreNostr};
@@ -152,11 +154,25 @@ pub async fn app_health_check_state_active_key<T: RadrootsClientDatastore>(
     datastore: &T,
     key_maps: &RadrootsAppKeyMapConfig,
 ) -> RadrootsAppHealthCheckResult {
-    let app_data = match app_datastore_read_state(datastore, key_maps).await {
-        Ok(value) => value,
-        Err(err) => return RadrootsAppHealthCheckResult::error(err.to_string()),
+    app_health_check_state_active_key_with_state(datastore, key_maps, None).await
+}
+
+async fn app_health_check_state_active_key_with_state<T: RadrootsClientDatastore>(
+    datastore: &T,
+    key_maps: &RadrootsAppKeyMapConfig,
+    state: Option<&RadrootsAppState>,
+) -> RadrootsAppHealthCheckResult {
+    let active_key = match state {
+        Some(value) => value.active_key.clone(),
+        None => {
+            let app_data = match app_datastore_read_state(datastore, key_maps).await {
+                Ok(value) => value,
+                Err(err) => return RadrootsAppHealthCheckResult::error(err.to_string()),
+            };
+            app_data.active_key
+        }
     };
-    if app_data.active_key.is_empty() {
+    if active_key.is_empty() {
         return RadrootsAppHealthCheckResult::error("missing");
     }
     let key_name = match app_datastore_key_nostr_key(key_maps) {
@@ -168,7 +184,7 @@ pub async fn app_health_check_state_active_key<T: RadrootsClientDatastore>(
         Err(RadrootsClientDatastoreError::NoResult) => return RadrootsAppHealthCheckResult::error("missing"),
         Err(err) => return RadrootsAppHealthCheckResult::error(err.to_string()),
     };
-    if stored != app_data.active_key {
+    if stored != active_key {
         return RadrootsAppHealthCheckResult::error("mismatch");
     }
     RadrootsAppHealthCheckResult::ok()
@@ -272,31 +288,39 @@ pub async fn app_health_check_all<T: RadrootsClientDatastore, K: RadrootsClientK
     let key_maps_result = app_health_check_key_maps(key_maps);
     log_health_end("key_maps", &key_maps_result);
     log_health_start("bootstrap_settings");
-    let bootstrap_settings = app_health_check_bootstrap_settings(datastore, key_maps).await;
-    log_health_end("bootstrap_settings", &bootstrap_settings);
     log_health_start("bootstrap_state");
-    let bootstrap_state = app_health_check_bootstrap_state(datastore, key_maps).await;
-    log_health_end("bootstrap_state", &bootstrap_state);
     log_health_start("state_active_key");
-    let state_active_key = app_health_check_state_active_key(datastore, key_maps).await;
-    log_health_end("state_active_key", &state_active_key);
     log_health_start("notifications");
-    let stored_permission = app_datastore_read_state(datastore, key_maps)
-        .await
-        .ok()
-        .and_then(|data| data.notifications_permission);
-    let notifications_result =
-        app_health_check_notifications_with_state(notifications, stored_permission.as_deref())
-            .await;
-    log_health_end("notifications", &notifications_result);
     log_health_start("tangle");
-    let tangle_result = app_health_check_tangle(tangle);
-    log_health_end("tangle", &tangle_result);
     log_health_start("datastore_roundtrip");
-    let datastore_roundtrip = app_health_check_datastore_roundtrip(datastore).await;
-    log_health_end("datastore_roundtrip", &datastore_roundtrip);
     log_health_start("keystore");
-    let keystore_result = app_health_check_keystore_access(datastore, keystore, key_maps).await;
+    let stored_state = app_datastore_read_state(datastore, key_maps).await.ok();
+    let stored_permission = stored_state
+        .as_ref()
+        .and_then(|data| data.notifications_permission.as_deref());
+    let (
+        bootstrap_settings,
+        bootstrap_state,
+        state_active_key,
+        notifications_result,
+        tangle_result,
+        datastore_roundtrip,
+        keystore_result,
+    ) = join!(
+        app_health_check_bootstrap_settings(datastore, key_maps),
+        app_health_check_bootstrap_state(datastore, key_maps),
+        app_health_check_state_active_key_with_state(datastore, key_maps, stored_state.as_ref()),
+        app_health_check_notifications_with_state(notifications, stored_permission),
+        async { app_health_check_tangle(tangle) },
+        app_health_check_datastore_roundtrip(datastore),
+        app_health_check_keystore_access(datastore, keystore, key_maps),
+    );
+    log_health_end("bootstrap_settings", &bootstrap_settings);
+    log_health_end("bootstrap_state", &bootstrap_state);
+    log_health_end("state_active_key", &state_active_key);
+    log_health_end("notifications", &notifications_result);
+    log_health_end("tangle", &tangle_result);
+    log_health_end("datastore_roundtrip", &datastore_roundtrip);
     log_health_end("keystore", &keystore_result);
     RadrootsAppHealthReport {
         key_maps: key_maps_result,
@@ -326,6 +350,7 @@ pub async fn app_health_check_all_logged<T: RadrootsClientDatastore, K: Radroots
 mod tests {
     use super::{
         app_health_check_state_active_key,
+        app_health_check_state_active_key_with_state,
         app_health_check_all,
         app_health_check_all_logged,
         app_health_check_key_maps,
@@ -702,6 +727,23 @@ mod tests {
         let result = futures::executor::block_on(app_health_check_state_active_key(
             &datastore,
             &key_maps,
+        ));
+        assert_eq!(result.status, RadrootsAppHealthCheckStatus::Ok);
+    }
+
+    #[test]
+    fn health_check_state_uses_provided_state() {
+        let mut state = crate::RadrootsAppState::default();
+        state.active_key = "pub".to_string();
+        let datastore = TestDatastore {
+            get_result: Ok("pub".to_string()),
+            app_data: None,
+        };
+        let key_maps = crate::app_key_maps_default();
+        let result = futures::executor::block_on(app_health_check_state_active_key_with_state(
+            &datastore,
+            &key_maps,
+            Some(&state),
         ));
         assert_eq!(result.status, RadrootsAppHealthCheckStatus::Ok);
     }
