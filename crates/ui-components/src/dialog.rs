@@ -1,0 +1,346 @@
+use leptos::ev::MouseEvent;
+use leptos::html;
+use leptos::prelude::*;
+use std::sync::{Arc, Mutex};
+
+use radroots_studio_app_ui_core::RadrootsAppUiId;
+use radroots_studio_app_ui_primitives::{
+    RadrootsAppUiDismissableLayer,
+    RadrootsAppUiFocusScope,
+    RadrootsAppUiModalGuard,
+    RadrootsAppUiPresence,
+    RadrootsAppUiPortal,
+    RadrootsAppUiScrollLockGuard,
+};
+
+#[cfg(target_arch = "wasm32")]
+use radroots_studio_app_ui_primitives::{
+    radroots_studio_app_ui_modal_hide_siblings,
+    radroots_studio_app_ui_scroll_lock_acquire,
+};
+
+#[derive(Clone)]
+struct RadrootsAppUiDialogContext {
+    open: Signal<bool>,
+    set_open: Callback<bool>,
+    modal: bool,
+    content_id: String,
+    title_id: RwSignal<Option<String>>,
+    description_id: RwSignal<Option<String>>,
+}
+
+pub fn radroots_studio_app_ui_dialog_state_value(open: bool) -> &'static str {
+    if open {
+        "open"
+    } else {
+        "closed"
+    }
+}
+
+#[component]
+pub fn RadrootsAppUiDialogRoot(
+    #[prop(optional)] open: Option<ReadSignal<bool>>,
+    #[prop(optional)] default_open: bool,
+    #[prop(optional)] modal: Option<bool>,
+    #[prop(optional)] on_open_change: Option<Callback<bool>>,
+    children: ChildrenFn,
+) -> impl IntoView {
+    let open_state = RwSignal::new(default_open);
+    let open_prop = open;
+    let is_controlled = open_prop.is_some();
+    let open_signal = match open_prop {
+        Some(open) => Signal::derive(move || open.get()),
+        None => open_state.into(),
+    };
+    let on_open_change = on_open_change.clone();
+    let set_open = Callback::new(move |value| {
+        if !is_controlled {
+            open_state.set(value);
+        }
+        if let Some(callback) = on_open_change.as_ref() {
+            callback.run(value);
+        }
+    });
+    let content_id = RadrootsAppUiId::next().prefixed("dialog-content");
+    let modal = modal.unwrap_or(true);
+    let title_id = RwSignal::new(None::<String>);
+    let description_id = RwSignal::new(None::<String>);
+    provide_context(RadrootsAppUiDialogContext {
+        open: open_signal,
+        set_open,
+        modal,
+        content_id,
+        title_id,
+        description_id,
+    });
+    view! { <>{children()}</> }
+}
+
+#[component]
+pub fn RadrootsAppUiDialogTrigger(
+    #[prop(optional)] disabled: bool,
+    #[prop(optional)] class: Option<String>,
+    #[prop(optional)] id: Option<String>,
+    #[prop(optional)] style: Option<String>,
+    children: Children,
+) -> impl IntoView {
+    let context = use_context::<RadrootsAppUiDialogContext>()
+        .expect("dialog context");
+    let content_id = context.content_id.clone();
+    let on_click = move |_event: MouseEvent| {
+        if disabled {
+            return;
+        }
+        context.set_open.run(true);
+    };
+    view! {
+        <button
+            type="button"
+            id=id
+            class=class
+            style=style
+            disabled=disabled
+            aria-haspopup="dialog"
+            aria-expanded=move || if context.open.get() { "true" } else { "false" }
+            aria-controls=content_id
+            data-ui="dialog-trigger"
+            data-state=move || radroots_studio_app_ui_dialog_state_value(context.open.get())
+            on:click=on_click
+        >
+            {children()}
+        </button>
+    }
+}
+
+#[component]
+pub fn RadrootsAppUiDialogPortal(children: ChildrenFn) -> impl IntoView {
+    let context = use_context::<RadrootsAppUiDialogContext>()
+        .expect("dialog context");
+    let present = Signal::derive(move || context.open.get());
+    let children = StoredValue::new(children);
+    view! {
+        <RadrootsAppUiPresence present=present>
+            <RadrootsAppUiPortal>
+                {(children.get_value())()}
+            </RadrootsAppUiPortal>
+        </RadrootsAppUiPresence>
+    }
+}
+
+#[component]
+pub fn RadrootsAppUiDialogOverlay(
+    #[prop(optional)] close_on_click: Option<bool>,
+    #[prop(optional)] class: Option<String>,
+    #[prop(optional)] id: Option<String>,
+    #[prop(optional)] style: Option<String>,
+) -> impl IntoView {
+    let context = use_context::<RadrootsAppUiDialogContext>()
+        .expect("dialog context");
+    let close_on_click = close_on_click.unwrap_or(true);
+    let on_click = move |_event: MouseEvent| {
+        if close_on_click {
+            context.set_open.run(false);
+        }
+    };
+    view! {
+        <div
+            id=id
+            class=class
+            style=style
+            data-ui="dialog-overlay"
+            data-state=move || radroots_studio_app_ui_dialog_state_value(context.open.get())
+            on:click=on_click
+        ></div>
+    }
+}
+
+#[component]
+pub fn RadrootsAppUiDialogContent(
+    #[prop(optional)] disable_outside_pointer_events: bool,
+    #[prop(optional)] class: Option<String>,
+    #[prop(optional)] id: Option<String>,
+    #[prop(optional)] style: Option<String>,
+    children: ChildrenFn,
+) -> impl IntoView {
+    let context = use_context::<RadrootsAppUiDialogContext>()
+        .expect("dialog context");
+    let node_ref = NodeRef::<html::Div>::new();
+    let content_id = context.content_id.clone();
+    let scroll_guard = Arc::new(Mutex::new(None::<RadrootsAppUiScrollLockGuard>));
+    let modal_guard = Arc::new(Mutex::new(None::<RadrootsAppUiModalGuard>));
+    let modal = context.modal;
+
+    #[cfg(target_arch = "wasm32")]
+    {
+        let node_ref = node_ref.clone();
+        let scroll_guard = Arc::clone(&scroll_guard);
+        let modal_guard = Arc::clone(&modal_guard);
+        on_mount(move || {
+            if modal {
+                if let Ok(guard) = radroots_studio_app_ui_scroll_lock_acquire() {
+                    let mut state = scroll_guard
+                        .lock()
+                        .unwrap_or_else(|poisoned| poisoned.into_inner());
+                    *state = Some(guard);
+                }
+                if let Some(root) = node_ref.get() {
+                    if let Ok(guard) = radroots_studio_app_ui_modal_hide_siblings(&root) {
+                        let mut state = modal_guard
+                            .lock()
+                            .unwrap_or_else(|poisoned| poisoned.into_inner());
+                        *state = Some(guard);
+                    }
+                }
+            }
+        });
+    }
+
+    let scroll_guard_cleanup = Arc::clone(&scroll_guard);
+    let modal_guard_cleanup = Arc::clone(&modal_guard);
+    on_cleanup(move || {
+        let _ = scroll_guard_cleanup
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .take();
+        let _ = modal_guard_cleanup
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .take();
+    });
+
+    let on_dismiss = {
+        let set_open = context.set_open.clone();
+        Callback::new(move |_reason| {
+            set_open.run(false);
+        })
+    };
+
+    let labelled_by = move || context.title_id.get();
+    let described_by = move || context.description_id.get();
+    let aria_modal = StoredValue::new(if modal { Some("true".to_string()) } else { None });
+    let id_value = StoredValue::new(id.unwrap_or_else(|| content_id.clone()));
+    let class_value = StoredValue::new(class);
+    let style_value = StoredValue::new(style);
+    let children = StoredValue::new(children);
+
+    view! {
+        <RadrootsAppUiDismissableLayer
+            on_dismiss=on_dismiss
+            disable_outside_pointer_events=disable_outside_pointer_events
+        >
+            <RadrootsAppUiFocusScope trapped=modal auto_focus=true return_focus=true>
+                <div
+                    node_ref=node_ref
+                    id=move || id_value.get_value()
+                    class=move || class_value.get_value()
+                    style=move || style_value.get_value()
+                    role="dialog"
+                    aria-modal=move || aria_modal.get_value()
+                    aria-labelledby=labelled_by
+                    aria-describedby=described_by
+                    data-ui="dialog"
+                    data-state=move || radroots_studio_app_ui_dialog_state_value(context.open.get())
+                >
+                    {(children.get_value())()}
+                </div>
+            </RadrootsAppUiFocusScope>
+        </RadrootsAppUiDismissableLayer>
+    }
+}
+
+#[component]
+pub fn RadrootsAppUiDialogTitle(
+    #[prop(optional)] class: Option<String>,
+    #[prop(optional)] id: Option<String>,
+    #[prop(optional)] style: Option<String>,
+    children: Children,
+) -> impl IntoView {
+    let context = use_context::<RadrootsAppUiDialogContext>()
+        .expect("dialog context");
+    let title_id = id.unwrap_or_else(|| RadrootsAppUiId::next().prefixed("dialog-title"));
+    context.title_id.set(Some(title_id.clone()));
+    let title_id_cleanup = title_id.clone();
+    let title_signal = context.title_id;
+    on_cleanup(move || {
+        if title_signal.get_untracked().as_deref() == Some(&title_id_cleanup) {
+            title_signal.set(None);
+        }
+    });
+    view! {
+        <h2
+            id=title_id
+            class=class
+            style=style
+            data-ui="dialog-title"
+        >
+            {children()}
+        </h2>
+    }
+}
+
+#[component]
+pub fn RadrootsAppUiDialogDescription(
+    #[prop(optional)] class: Option<String>,
+    #[prop(optional)] id: Option<String>,
+    #[prop(optional)] style: Option<String>,
+    children: Children,
+) -> impl IntoView {
+    let context = use_context::<RadrootsAppUiDialogContext>()
+        .expect("dialog context");
+    let description_id = id.unwrap_or_else(|| RadrootsAppUiId::next().prefixed("dialog-desc"));
+    context.description_id.set(Some(description_id.clone()));
+    let desc_id_cleanup = description_id.clone();
+    let desc_signal = context.description_id;
+    on_cleanup(move || {
+        if desc_signal.get_untracked().as_deref() == Some(&desc_id_cleanup) {
+            desc_signal.set(None);
+        }
+    });
+    view! {
+        <p
+            id=description_id
+            class=class
+            style=style
+            data-ui="dialog-description"
+        >
+            {children()}
+        </p>
+    }
+}
+
+#[component]
+pub fn RadrootsAppUiDialogClose(
+    #[prop(optional)] class: Option<String>,
+    #[prop(optional)] id: Option<String>,
+    #[prop(optional)] style: Option<String>,
+    children: Children,
+) -> impl IntoView {
+    let context = use_context::<RadrootsAppUiDialogContext>()
+        .expect("dialog context");
+    let on_click = move |_event: MouseEvent| {
+        context.set_open.run(false);
+    };
+    view! {
+        <button
+            type="button"
+            id=id
+            class=class
+            style=style
+            data-ui="dialog-close"
+            on:click=on_click
+        >
+            {children()}
+        </button>
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::radroots_studio_app_ui_dialog_state_value;
+
+    #[test]
+    fn dialog_state_value_matches_open() {
+        assert_eq!(radroots_studio_app_ui_dialog_state_value(true), "open");
+        assert_eq!(radroots_studio_app_ui_dialog_state_value(false), "closed");
+    }
+}

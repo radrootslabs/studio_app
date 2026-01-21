@@ -9,7 +9,7 @@ pub type RadrootsAppUiPortalMount = ();
 #[component]
 pub fn RadrootsAppUiPortal(
     #[prop(into, optional)] mount: Option<RadrootsAppUiPortalMount>,
-    children: Children,
+    children: ChildrenFn,
 ) -> impl IntoView {
     #[cfg(target_arch = "wasm32")]
     {
