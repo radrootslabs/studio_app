@@ -133,6 +133,15 @@ fn app_health_check_delay_ms() -> u32 {
 }
 
 #[component]
+fn SplashPage() -> impl IntoView {
+    view! {
+        <main style="min-height:100vh;background:white;display:flex;align-items:center;justify-content:center;">
+            <div>"loading"</div>
+        </main>
+    }
+}
+
+#[component]
 fn SetupPage() -> impl IntoView {
     view! {
         <main>
@@ -583,16 +592,29 @@ fn AppShell() -> impl IntoView {
         })
     });
     view! {
-        <nav style="display:flex;gap:12px;margin-bottom:12px;">
-            <A href="/" exact=true>"home"</A>
-            <A href="/logs">"logs"</A>
-            <A href="/setup">"setup"</A>
-        </nav>
-        <Routes fallback=|| view! { <div>"not_found"</div> }>
-            <Route path=path!("") view=HomePage />
-            <Route path=path!("logs") view=RadrootsAppLogsPage />
-            <Route path=path!("setup") view=SetupPage />
-        </Routes>
+        <Show
+            when=move || {
+                init_state.get().stage == RadrootsAppInitStage::Ready
+                    && setup_required.get().is_some()
+            }
+            fallback=|| view! { <SplashPage /> }
+        >
+            <Show
+                when=move || setup_required.get() == Some(false)
+                fallback=|| view! { <SetupPage /> }
+            >
+                <nav style="display:flex;gap:12px;margin-bottom:12px;">
+                    <A href="/" exact=true>"home"</A>
+                    <A href="/logs">"logs"</A>
+                    <A href="/setup">"setup"</A>
+                </nav>
+                <Routes fallback=|| view! { <div>"not_found"</div> }>
+                    <Route path=path!("") view=HomePage />
+                    <Route path=path!("logs") view=RadrootsAppLogsPage />
+                    <Route path=path!("setup") view=SetupPage />
+                </Routes>
+            </Show>
+        </Show>
     }
 }
 
