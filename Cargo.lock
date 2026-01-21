@@ -1719,12 +1719,18 @@ dependencies = [
 [[package]]
 name = "radroots-app-ui-core"
 version = "0.1.0"
+dependencies = [
+ "wasm-bindgen",
+ "web-sys",
+]
 
 [[package]]
 name = "radroots-app-ui-primitives"
 version = "0.1.0"
 dependencies = [
+ "leptos",
  "radroots-app-ui-core",
+ "web-sys",
 ]
 
 [[package]]
