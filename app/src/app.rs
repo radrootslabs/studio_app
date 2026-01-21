@@ -16,7 +16,7 @@ use crate::{
     app_init_total_add,
     app_init_total_unknown,
     app_context,
-    app_log_buffer_flush_critical,
+    app_log_buffer_flush_deferred,
     app_log_debug_emit,
     app_log_error_emit,
     app_log_error_store,
@@ -24,7 +24,7 @@ use crate::{
     app_datastore_read_state,
     app_state_notifications_permission_value,
     app_state_set_notifications_permission_value,
-    app_health_check_all_logged,
+    app_health_check_all,
     RadrootsAppBackends,
     RadrootsAppConfig,
     RadrootsAppHealthCheckResult,
@@ -85,7 +85,7 @@ fn spawn_health_checks(
         );
         let notifications = RadrootsAppNotifications::new(None);
         let tangle = RadrootsAppTangleClientStub::new();
-        let report = app_health_check_all_logged(
+        let report = app_health_check_all(
             &datastore,
             &keystore,
             &notifications,
@@ -111,6 +111,10 @@ fn spawn_health_checks(
         active_key.set(active_key_value);
         notifications_status.set(notifications_value);
         health_running.set(false);
+        let key_maps = config.datastore.key_maps.clone();
+        spawn_local(async move {
+            let _ = app_log_buffer_flush_deferred(&datastore, &key_maps, true).await;
+        });
     });
 }
 
@@ -481,16 +485,29 @@ pub fn RadrootsApp() -> impl IntoView {
             }
             match app_init_backends(config).await {
                 Ok(value) => {
-                    let _ = app_log_buffer_flush_critical(
-                        value.datastore.as_ref(),
-                        &value.config.datastore.key_maps,
-                    )
-                    .await;
                     backends.set(Some(value));
                     app_init_mark_completed();
                     let stage = RadrootsAppInitStage::Ready;
                     init_state.update(|state| app_init_stage_set(state, stage));
                     log_init_stage(stage);
+                    let flush_ctx = backends.with_untracked(|value| {
+                        value.as_ref().map(|backends| {
+                            (
+                                backends.datastore.clone(),
+                                backends.config.datastore.key_maps.clone(),
+                            )
+                        })
+                    });
+                    if let Some((datastore, key_maps)) = flush_ctx {
+                        spawn_local(async move {
+                            let _ = app_log_buffer_flush_deferred(
+                                datastore.as_ref(),
+                                &key_maps,
+                                true,
+                            )
+                            .await;
+                        });
+                    }
                 }
                 Err(err) => {
                     let _ = app_log_error_emit(&err);
