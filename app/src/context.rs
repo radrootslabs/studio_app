@@ -9,6 +9,7 @@ pub struct RadrootsAppContext {
     pub backends: RwSignal<Option<RadrootsAppBackends>, LocalStorage>,
     pub init_error: RwSignal<Option<RadrootsAppInitError>, LocalStorage>,
     pub init_state: RwSignal<RadrootsAppInitState, LocalStorage>,
+    pub setup_required: RwSignal<Option<bool>, LocalStorage>,
 }
 
 pub fn app_context() -> Option<RadrootsAppContext> {
@@ -16,6 +17,7 @@ pub fn app_context() -> Option<RadrootsAppContext> {
         backends: use_context::<RwSignal<Option<RadrootsAppBackends>, LocalStorage>>()?,
         init_error: use_context::<RwSignal<Option<RadrootsAppInitError>, LocalStorage>>()?,
         init_state: use_context::<RwSignal<RadrootsAppInitState, LocalStorage>>()?,
+        setup_required: use_context::<RwSignal<Option<bool>, LocalStorage>>()?,
     })
 }
 
@@ -39,9 +41,11 @@ mod tests {
         let backends = RwSignal::new_local(None::<RadrootsAppBackends>);
         let init_error = RwSignal::new_local(None::<RadrootsAppInitError>);
         let init_state = RwSignal::new_local(app_init_state_default());
+        let setup_required = RwSignal::new_local(None::<bool>);
         provide_context(backends);
         provide_context(init_error);
         provide_context(init_state);
+        provide_context(setup_required);
         let context = app_context().expect("context");
         assert!(context.backends.with_untracked(|value| value.is_none()));
         assert!(context.init_error.with_untracked(|value| value.is_none()));
@@ -49,5 +53,6 @@ mod tests {
             context.init_state.with_untracked(|state| state.stage),
             RadrootsAppInitStage::Idle
         );
+        assert!(context.setup_required.with_untracked(|value| value.is_none()));
     }
 }

@@ -44,6 +44,13 @@ impl RadrootsAppHealthCheckResult {
             message: None,
         }
     }
+
+    pub fn skipped_with_message(message: impl Into<String>) -> Self {
+        Self {
+            status: RadrootsAppHealthCheckStatus::Skipped,
+            message: Some(message.into()),
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -269,6 +276,7 @@ pub async fn app_health_check_all<T: RadrootsClientDatastore, K: RadrootsClientK
     notifications: &RadrootsAppNotifications,
     tangle: &G,
     key_maps: &RadrootsAppKeyMapConfig,
+    setup_required: bool,
 ) -> RadrootsAppHealthReport {
     log_health_start("key_maps");
     let key_maps_result = app_health_check_key_maps(key_maps);
@@ -279,6 +287,25 @@ pub async fn app_health_check_all<T: RadrootsClientDatastore, K: RadrootsClientK
     log_health_start("tangle");
     log_health_start("datastore_roundtrip");
     log_health_start("keystore");
+    if setup_required {
+        let uninitialized =
+            RadrootsAppHealthCheckResult::skipped_with_message("uninitialized");
+        log_health_end("bootstrap_state", &uninitialized);
+        log_health_end("state_active_key", &uninitialized);
+        log_health_end("notifications", &uninitialized);
+        log_health_end("tangle", &uninitialized);
+        log_health_end("datastore_roundtrip", &uninitialized);
+        log_health_end("keystore", &uninitialized);
+        return RadrootsAppHealthReport {
+            key_maps: key_maps_result,
+            bootstrap_state: uninitialized.clone(),
+            state_active_key: uninitialized.clone(),
+            notifications: uninitialized.clone(),
+            tangle: uninitialized.clone(),
+            datastore_roundtrip: uninitialized.clone(),
+            keystore: uninitialized,
+        };
+    }
     let stored_state = app_datastore_read_state(datastore, key_maps).await.ok();
     let stored_permission = stored_state
         .as_ref()
@@ -321,8 +348,11 @@ pub async fn app_health_check_all_logged<T: RadrootsClientDatastore, K: Radroots
     notifications: &RadrootsAppNotifications,
     tangle: &G,
     key_maps: &RadrootsAppKeyMapConfig,
+    setup_required: bool,
 ) -> RadrootsAppHealthReport {
-    let report = app_health_check_all(datastore, keystore, notifications, tangle, key_maps).await;
+    let report =
+        app_health_check_all(datastore, keystore, notifications, tangle, key_maps, setup_required)
+            .await;
     let _ = app_log_buffer_flush_critical(datastore, key_maps).await;
     report
 }
@@ -735,6 +765,7 @@ mod tests {
             &notifications,
             &tangle,
             &key_maps,
+            false,
         ));
         assert_eq!(report.key_maps.status, RadrootsAppHealthCheckStatus::Ok);
         assert_eq!(report.bootstrap_state.status, RadrootsAppHealthCheckStatus::Error);
@@ -743,6 +774,30 @@ mod tests {
         assert_eq!(report.tangle.status, RadrootsAppHealthCheckStatus::Skipped);
         assert_eq!(report.datastore_roundtrip.status, RadrootsAppHealthCheckStatus::Error);
         assert_eq!(report.keystore.status, RadrootsAppHealthCheckStatus::Error);
+    }
+
+    #[test]
+    fn health_check_all_skips_when_setup_required() {
+        let datastore = RadrootsClientWebDatastore::new(None);
+        let keystore = RadrootsClientWebKeystoreNostr::new(None);
+        let notifications = crate::RadrootsAppNotifications::new(None);
+        let tangle = crate::RadrootsAppTangleClientStub::new();
+        let key_maps = crate::app_key_maps_default();
+        let report = futures::executor::block_on(app_health_check_all(
+            &datastore,
+            &keystore,
+            &notifications,
+            &tangle,
+            &key_maps,
+            true,
+        ));
+        assert_eq!(report.key_maps.status, RadrootsAppHealthCheckStatus::Ok);
+        assert_eq!(report.bootstrap_state.status, RadrootsAppHealthCheckStatus::Skipped);
+        assert_eq!(report.state_active_key.status, RadrootsAppHealthCheckStatus::Skipped);
+        assert_eq!(report.notifications.status, RadrootsAppHealthCheckStatus::Skipped);
+        assert_eq!(report.tangle.status, RadrootsAppHealthCheckStatus::Skipped);
+        assert_eq!(report.datastore_roundtrip.status, RadrootsAppHealthCheckStatus::Skipped);
+        assert_eq!(report.keystore.status, RadrootsAppHealthCheckStatus::Skipped);
     }
 
     #[test]
@@ -934,6 +989,7 @@ mod tests {
             &notifications,
             &tangle,
             &key_maps,
+            false,
         ));
         assert_eq!(report.key_maps.status, RadrootsAppHealthCheckStatus::Ok);
         assert!(datastore.entry_len() > 0);

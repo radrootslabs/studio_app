@@ -72,6 +72,7 @@ fn log_init_stage(stage: RadrootsAppInitStage) {
 
 fn spawn_health_checks(
     config: RadrootsAppConfig,
+    setup_required: bool,
     health_report: RwSignal<RadrootsAppHealthReport, LocalStorage>,
     health_running: RwSignal<bool, LocalStorage>,
     active_key: RwSignal<Option<String>, LocalStorage>,
@@ -93,22 +94,27 @@ fn spawn_health_checks(
             &notifications,
             &tangle,
             &config.datastore.key_maps,
+            setup_required,
         )
         .await;
-        let app_data = app_datastore_read_state(&datastore, &config.datastore.key_maps)
-            .await
-            .ok();
-        let active_key_value = app_data.as_ref().and_then(|data| {
-            if data.active_key.is_empty() {
-                None
-            } else {
-                Some(data.active_key.clone())
-            }
-        });
-        let notifications_value = app_data
-            .as_ref()
-            .and_then(app_state_notifications_permission_value)
-            .map(|permission| permission.as_str().to_string());
+        let mut active_key_value = None;
+        let mut notifications_value = None;
+        if !setup_required {
+            let app_data = app_datastore_read_state(&datastore, &config.datastore.key_maps)
+                .await
+                .ok();
+            active_key_value = app_data.as_ref().and_then(|data| {
+                if data.active_key.is_empty() {
+                    None
+                } else {
+                    Some(data.active_key.clone())
+                }
+            });
+            notifications_value = app_data
+                .as_ref()
+                .and_then(app_state_notifications_permission_value)
+                .map(|permission| permission.as_str().to_string());
+        }
         health_report.set(report);
         active_key.set(active_key_value);
         notifications_status.set(notifications_value);
@@ -141,6 +147,7 @@ fn HomePage() -> impl IntoView {
     let fallback_backends = RwSignal::new_local(None::<RadrootsAppBackends>);
     let fallback_init_error = RwSignal::new_local(None::<RadrootsAppInitError>);
     let fallback_init_state = RwSignal::new_local(app_init_state_default());
+    let fallback_setup_required = RwSignal::new_local(None::<bool>);
     let backends = context
         .as_ref()
         .map(|value| value.backends)
@@ -149,6 +156,10 @@ fn HomePage() -> impl IntoView {
         .as_ref()
         .map(|value| value.init_state)
         .unwrap_or(fallback_init_state);
+    let setup_required = context
+        .as_ref()
+        .map(|value| value.setup_required)
+        .unwrap_or(fallback_setup_required);
     let _init_error = context
         .as_ref()
         .map(|value| value.init_error)
@@ -167,6 +178,10 @@ fn HomePage() -> impl IntoView {
         if health_autorun.get() {
             return;
         }
+        let setup_required = setup_required.get();
+        let Some(setup_required_value) = setup_required else {
+            return;
+        };
         let config = backends.with_untracked(|value| value.as_ref().map(|backends| backends.config.clone()));
         let Some(config) = config else {
             return;
@@ -175,14 +190,15 @@ fn HomePage() -> impl IntoView {
         let delay_ms = app_health_check_delay_ms();
         spawn_local(async move {
             TimeoutFuture::new(delay_ms).await;
-        spawn_health_checks(
-            config,
-            health_report,
-            health_running,
-            active_key,
-            notifications_status,
-        );
-    });
+            spawn_health_checks(
+                config,
+                setup_required_value,
+                health_report,
+                health_running,
+                active_key,
+                notifications_status,
+            );
+        });
     });
     let status_color = move || match init_state.get().stage {
         RadrootsAppInitStage::Ready => "green",
@@ -200,8 +216,11 @@ fn HomePage() -> impl IntoView {
             .get()
             .unwrap_or_else(|| "reset_idle".to_string())
     };
-    let health_disabled =
-        move || backends.with(|value| value.is_none()) || health_running.get();
+    let health_disabled = move || {
+        backends.with(|value| value.is_none())
+            || health_running.get()
+            || setup_required.get().is_none()
+    };
     let notifications_disabled = move || {
         backends.with(|value| value.is_none()) || notifications_requesting.get()
     };
@@ -237,6 +256,7 @@ fn HomePage() -> impl IntoView {
                         health_report.set(RadrootsAppHealthReport::empty());
                         active_key.set(None);
                         notifications_status.set(None);
+                        setup_required.set(Some(true));
                         spawn_local(async move {
                             let Some(config) = config else {
                                 reset_status.set(Some("reset_missing_backends".to_string()));
@@ -259,6 +279,7 @@ fn HomePage() -> impl IntoView {
                                     reset_status.set(Some("reset_done".to_string()));
                                     spawn_health_checks(
                                         config,
+                                        true,
                                         health_report,
                                         health_running,
                                         active_key,
@@ -306,6 +327,7 @@ fn HomePage() -> impl IntoView {
                                         notifications_status.set(Some(value));
                                         spawn_health_checks(
                                             config,
+                                            false,
                                             health_report,
                                             health_running,
                                             active_key,
@@ -341,8 +363,12 @@ fn HomePage() -> impl IntoView {
                             let Some(config) = config else {
                                 return;
                             };
+                            let setup_required_value = setup_required
+                                .get()
+                                .unwrap_or(false);
                             spawn_health_checks(
                                 config,
+                                setup_required_value,
                                 health_report,
                                 health_running,
                                 active_key,
@@ -437,13 +463,24 @@ fn HomePage() -> impl IntoView {
 
 #[component]
 pub fn RadrootsApp() -> impl IntoView {
+    view! {
+        <Router>
+            <AppShell />
+        </Router>
+    }
+}
+
+#[component]
+fn AppShell() -> impl IntoView {
     let backends = RwSignal::new_local(None::<RadrootsAppBackends>);
     let init_error = RwSignal::new_local(None::<RadrootsAppInitError>);
     let init_state = RwSignal::new_local(app_init_state_default());
+    let setup_required = RwSignal::new_local(None::<bool>);
     let navigate = use_navigate();
     provide_context(backends);
     provide_context(init_error);
     provide_context(init_state);
+    provide_context(setup_required);
     Effect::new(move || {
         let navigate = navigate.clone();
         spawn_local(async move {
@@ -497,15 +534,21 @@ pub fn RadrootsApp() -> impl IntoView {
                     init_state.update(|state| app_init_stage_set(state, stage));
                     log_init_stage(stage);
                     let navigate = navigate.clone();
+                    let setup_required = setup_required.clone();
                     spawn_local(async move {
                         let keystore = radroots_studio_app_core::keystore::RadrootsClientWebKeystoreNostr::new(
                             Some(keystore_config),
                         );
                         match app_init_needs_setup(datastore.as_ref(), &keystore, &key_maps).await {
-                            Ok(true) => navigate("/setup", Default::default()),
-                            Ok(false) => {}
+                            Ok(needs_setup) => {
+                                setup_required.set(Some(needs_setup));
+                                if needs_setup {
+                                    navigate("/setup", Default::default());
+                                }
+                            }
                             Err(err) => {
                                 let _ = app_log_error_emit(&err);
+                                setup_required.set(Some(true));
                                 navigate("/setup", Default::default());
                             }
                         }
@@ -540,18 +583,16 @@ pub fn RadrootsApp() -> impl IntoView {
         })
     });
     view! {
-        <Router>
-            <nav style="display:flex;gap:12px;margin-bottom:12px;">
-                <A href="/" exact=true>"home"</A>
-                <A href="/logs">"logs"</A>
-                <A href="/setup">"setup"</A>
-            </nav>
-            <Routes fallback=|| view! { <div>"not_found"</div> }>
-                <Route path=path!("") view=HomePage />
-                <Route path=path!("logs") view=RadrootsAppLogsPage />
-                <Route path=path!("setup") view=SetupPage />
-            </Routes>
-        </Router>
+        <nav style="display:flex;gap:12px;margin-bottom:12px;">
+            <A href="/" exact=true>"home"</A>
+            <A href="/logs">"logs"</A>
+            <A href="/setup">"setup"</A>
+        </nav>
+        <Routes fallback=|| view! { <div>"not_found"</div> }>
+            <Route path=path!("") view=HomePage />
+            <Route path=path!("logs") view=RadrootsAppLogsPage />
+            <Route path=path!("setup") view=SetupPage />
+        </Routes>
     }
 }
 
