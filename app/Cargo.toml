@@ -26,6 +26,8 @@ console_error_panic_hook = "0.1"
 serde.workspace = true
 serde_json.workspace = true
 uuid.workspace = true
+sha2.workspace = true
+hex.workspace = true
 
 [dev-dependencies]
 async-trait.workspace = true

@@ -25,7 +25,17 @@ pub use bootstrap::{
     app_datastore_write_state,
 };
 pub use context::{app_context, RadrootsAppContext};
-pub use data::{app_state_is_initialized, RadrootsAppRole, RadrootsAppState};
+pub use data::{
+    app_state_is_initialized,
+    app_state_record_new,
+    app_state_record_validate,
+    app_state_timestamp_ms,
+    RadrootsAppRole,
+    RadrootsAppState,
+    RadrootsAppStateError,
+    RadrootsAppStateRecord,
+    APP_STATE_SCHEMA_VERSION,
+};
 pub use health::{
     app_health_check_all,
     app_health_check_all_logged,
