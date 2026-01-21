@@ -27,6 +27,7 @@ use crate::{
     app_assets_sql_wasm_url,
     app_log_debug_emit,
     app_state_is_initialized,
+    RadrootsAppStateError,
     RadrootsAppConfig,
     RadrootsAppConfigError,
     RadrootsAppKeyMapConfig,
@@ -251,6 +252,7 @@ pub enum RadrootsAppInitError {
     Keystore(RadrootsClientKeystoreError),
     Config(RadrootsAppConfigError),
     Assets(RadrootsAppInitAssetError),
+    State(RadrootsAppStateError),
 }
 
 pub type RadrootsAppInitErrorMessage = &'static str;
@@ -263,6 +265,7 @@ impl RadrootsAppInitError {
             RadrootsAppInitError::Keystore(_) => "error.app.init.keystore",
             RadrootsAppInitError::Config(_) => "error.app.init.config",
             RadrootsAppInitError::Assets(_) => "error.app.init.assets",
+            RadrootsAppInitError::State(err) => err.message(),
         }
     }
 }
@@ -431,7 +434,14 @@ mod tests {
         RadrootsAppInitStage,
         RadrootsAppInitAssetError,
     };
-    use crate::{app_config_default, app_key_maps_default, RadrootsAppConfig, RadrootsAppState};
+    use crate::{
+        app_config_default,
+        app_key_maps_default,
+        RadrootsAppConfig,
+        RadrootsAppState,
+        RadrootsAppStateError,
+        RadrootsAppStateRecord,
+    };
     use radroots_studio_app_core::datastore::{
         RadrootsClientDatastore,
         RadrootsClientDatastoreEntries,
@@ -472,6 +482,10 @@ mod tests {
             (
                 RadrootsAppInitError::Assets(RadrootsAppInitAssetError::FetchUnavailable),
                 "error.app.init.assets",
+            ),
+            (
+                RadrootsAppInitError::State(RadrootsAppStateError::Missing),
+                "error.app.state.missing",
             ),
         ];
         for (err, expected) in cases {
@@ -617,8 +631,11 @@ mod tests {
         assert_eq!(result, RadrootsAppInitAssetError::FetchUnavailable);
     }
 
+    use std::cell::RefCell;
+
     struct SetupDatastore {
         state: Option<RadrootsAppState>,
+        record: RefCell<Option<RadrootsAppStateRecord>>,
     }
 
     #[async_trait(?Send)]
@@ -646,11 +663,17 @@ mod tests {
         async fn set_obj<T>(
             &self,
             _key: &str,
-            _value: &T,
+            value: &T,
         ) -> RadrootsClientDatastoreResult<T>
         where
             T: Serialize + DeserializeOwned + Clone,
         {
+            let encoded = serde_json::to_string(value)
+                .map_err(|_| RadrootsClientDatastoreError::IdbUndefined)?;
+            if let Ok(parsed) = serde_json::from_str::<RadrootsAppStateRecord>(&encoded) {
+                *self.record.borrow_mut() = Some(parsed);
+                return Ok(value.clone());
+            }
             Err(RadrootsClientDatastoreError::IdbUndefined)
         }
 
@@ -669,6 +692,13 @@ mod tests {
         where
             T: DeserializeOwned,
         {
+            if let Some(record) = self.record.borrow().as_ref() {
+                let encoded = serde_json::to_string(record)
+                    .map_err(|_| RadrootsClientDatastoreError::NoResult)?;
+                if let Ok(parsed) = serde_json::from_str(&encoded) {
+                    return Ok(parsed);
+                }
+            };
             let Some(state) = self.state.as_ref() else {
                 return Err(RadrootsClientDatastoreError::NoResult);
             };
@@ -772,7 +802,10 @@ mod tests {
 
     #[test]
     fn app_init_needs_setup_when_state_missing() {
-        let datastore = SetupDatastore { state: None };
+        let datastore = SetupDatastore {
+            state: None,
+            record: RefCell::new(None),
+        };
         let keystore = SetupKeystore {
             read_result: Ok("secret".to_string()),
         };
@@ -790,6 +823,7 @@ mod tests {
     fn app_init_needs_setup_when_state_incomplete() {
         let datastore = SetupDatastore {
             state: Some(RadrootsAppState::default()),
+            record: RefCell::new(None),
         };
         let keystore = SetupKeystore {
             read_result: Ok("secret".to_string()),
@@ -809,7 +843,10 @@ mod tests {
         let mut state = RadrootsAppState::default();
         state.active_key = "pub".to_string();
         state.eula_date = "2025-01-01T00:00:00Z".to_string();
-        let datastore = SetupDatastore { state: Some(state) };
+        let datastore = SetupDatastore {
+            state: Some(state),
+            record: RefCell::new(None),
+        };
         let keystore = SetupKeystore {
             read_result: Err(RadrootsClientKeystoreError::MissingKey),
         };
@@ -828,7 +865,10 @@ mod tests {
         let mut state = RadrootsAppState::default();
         state.active_key = "pub".to_string();
         state.eula_date = "2025-01-01T00:00:00Z".to_string();
-        let datastore = SetupDatastore { state: Some(state) };
+        let datastore = SetupDatastore {
+            state: Some(state),
+            record: RefCell::new(None),
+        };
         let keystore = SetupKeystore {
             read_result: Ok("secret".to_string()),
         };

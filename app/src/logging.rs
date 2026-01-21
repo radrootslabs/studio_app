@@ -167,6 +167,7 @@ impl RadrootsAppLoggableError for RadrootsAppInitError {
             RadrootsAppInitError::Keystore(err) => Some(err.to_string()),
             RadrootsAppInitError::Config(err) => err.log_context().or_else(|| Some(err.message().to_string())),
             RadrootsAppInitError::Assets(err) => Some(err.message().to_string()),
+            RadrootsAppInitError::State(err) => Some(err.message().to_string()),
         }
     }
 }

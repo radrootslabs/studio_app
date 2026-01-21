@@ -38,7 +38,7 @@ impl Default for RadrootsAppState {
 
 pub const APP_STATE_SCHEMA_VERSION: u32 = 1;
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RadrootsAppStateError {
     Missing,
     Corrupt,

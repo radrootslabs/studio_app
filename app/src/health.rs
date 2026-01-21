@@ -378,7 +378,7 @@ mod tests {
         RadrootsAppHealthReport,
     };
     use crate::app_log_buffer_drain;
-    use crate::RadrootsAppKeyMapConfig;
+    use crate::{RadrootsAppKeyMapConfig, RadrootsAppStateRecord};
     use async_trait::async_trait;
     use radroots_studio_app_core::datastore::{
         RadrootsClientDatastore,
@@ -398,6 +398,7 @@ mod tests {
     use radroots_studio_app_core::idb::IDB_CONFIG_DATASTORE;
     use radroots_studio_app_core::backup::RadrootsClientBackupDatastorePayload;
     use radroots_studio_app_core::idb::RadrootsClientIdbConfig;
+    use std::cell::RefCell;
     use std::sync::Mutex;
 
     #[test]
@@ -470,6 +471,7 @@ mod tests {
     struct TestDatastore {
         get_result: RadrootsClientDatastoreResult<String>,
         app_data: Option<crate::RadrootsAppState>,
+        record: RefCell<Option<RadrootsAppStateRecord>>,
     }
 
     fn datastore_err<T>() -> RadrootsClientDatastoreResult<T> {
@@ -502,6 +504,12 @@ mod tests {
         where
             T: serde::Serialize + serde::de::DeserializeOwned + Clone,
         {
+            let encoded = serde_json::to_string(_value)
+                .map_err(|_| RadrootsClientDatastoreError::IdbUndefined)?;
+            if let Ok(parsed) = serde_json::from_str::<RadrootsAppStateRecord>(&encoded) {
+                *self.record.borrow_mut() = Some(parsed);
+                return Ok(_value.clone());
+            }
             datastore_err()
         }
 
@@ -516,6 +524,13 @@ mod tests {
         where
             T: serde::de::DeserializeOwned,
         {
+            if let Some(record) = self.record.borrow().as_ref() {
+                let serialized = serde_json::to_string(record)
+                    .map_err(|_| RadrootsClientDatastoreError::NoResult)?;
+                if let Ok(parsed) = serde_json::from_str(&serialized) {
+                    return Ok(parsed);
+                }
+            }
             let Some(data) = self.app_data.as_ref() else {
                 return Err(RadrootsClientDatastoreError::NoResult);
             };
@@ -636,6 +651,7 @@ mod tests {
         let datastore = TestDatastore {
             get_result: Err(RadrootsClientDatastoreError::NoResult),
             app_data: None,
+            record: RefCell::new(None),
         };
         let keystore = TestKeystore {
             read_result: Err(RadrootsClientKeystoreError::MissingKey),
@@ -655,6 +671,7 @@ mod tests {
         let datastore = TestDatastore {
             get_result: Ok("pub".to_string()),
             app_data: None,
+            record: RefCell::new(None),
         };
         let keystore = TestKeystore {
             read_result: Err(RadrootsClientKeystoreError::MissingKey),
@@ -674,6 +691,7 @@ mod tests {
         let datastore = TestDatastore {
             get_result: Ok("pub".to_string()),
             app_data: None,
+            record: RefCell::new(None),
         };
         let keystore = TestKeystore {
             read_result: Ok("secret".to_string()),
@@ -692,6 +710,7 @@ mod tests {
         let datastore = TestDatastore {
             get_result: Ok("pub".to_string()),
             app_data: Some(crate::RadrootsAppState::default()),
+            record: RefCell::new(None),
         };
         let key_maps = crate::app_key_maps_default();
         let result = futures::executor::block_on(app_health_check_state_active_key(
@@ -709,6 +728,7 @@ mod tests {
         let datastore = TestDatastore {
             get_result: Ok("pub".to_string()),
             app_data: Some(state),
+            record: RefCell::new(None),
         };
         let key_maps = crate::app_key_maps_default();
         let result = futures::executor::block_on(app_health_check_state_active_key(
@@ -726,6 +746,7 @@ mod tests {
         let datastore = TestDatastore {
             get_result: Ok("pub".to_string()),
             app_data: Some(state),
+            record: RefCell::new(None),
         };
         let key_maps = crate::app_key_maps_default();
         let result = futures::executor::block_on(app_health_check_state_active_key(
@@ -742,6 +763,7 @@ mod tests {
         let datastore = TestDatastore {
             get_result: Ok("pub".to_string()),
             app_data: None,
+            record: RefCell::new(None),
         };
         let key_maps = crate::app_key_maps_default();
         let result = futures::executor::block_on(app_health_check_state_active_key_with_state(

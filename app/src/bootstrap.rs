@@ -6,48 +6,94 @@ use radroots_studio_app_core::notifications::RadrootsClientNotificationsPermissi
 use crate::{
     app_datastore_obj_key_state,
     app_log_debug_emit,
+    app_state_record_new,
+    app_state_record_validate,
+    app_state_timestamp_ms,
     RadrootsAppState,
+    RadrootsAppStateError,
+    RadrootsAppStateRecord,
     RadrootsAppInitError,
     RadrootsAppInitResult,
     RadrootsAppKeyMapConfig,
 };
 
-pub async fn app_datastore_write_state<T: RadrootsClientDatastore>(
+pub async fn app_datastore_write_state_record<T: RadrootsClientDatastore>(
     datastore: &T,
     key_maps: &RadrootsAppKeyMapConfig,
-    data: &RadrootsAppState,
-) -> RadrootsAppInitResult<RadrootsAppState> {
+    record: &RadrootsAppStateRecord,
+) -> RadrootsAppInitResult<RadrootsAppStateRecord> {
     let key = app_datastore_obj_key_state(key_maps).map_err(RadrootsAppInitError::Config)?;
     let value = datastore
-        .set_obj(key, data)
+        .set_obj(key, record)
         .await
         .map_err(RadrootsAppInitError::Datastore)?;
     let _ = app_log_debug_emit("log.app.bootstrap.state", "write", Some(key.to_string()));
     Ok(value)
 }
 
+pub async fn app_datastore_read_state_record<T: RadrootsClientDatastore>(
+    datastore: &T,
+    key_maps: &RadrootsAppKeyMapConfig,
+) -> RadrootsAppInitResult<RadrootsAppStateRecord> {
+    let key = app_datastore_obj_key_state(key_maps).map_err(RadrootsAppInitError::Config)?;
+    match datastore.get_obj::<RadrootsAppStateRecord>(key).await {
+        Ok(record) => {
+            app_state_record_validate(&record).map_err(RadrootsAppInitError::State)?;
+            let _ =
+                app_log_debug_emit("log.app.bootstrap.state", "read", Some(key.to_string()));
+            Ok(record)
+        }
+        Err(RadrootsClientDatastoreError::NoResult) => {
+            match datastore.get_obj::<RadrootsAppState>(key).await {
+                Ok(state) => {
+                    let record = app_state_record_new(state, 1, app_state_timestamp_ms());
+                    let value = app_datastore_write_state_record(datastore, key_maps, &record)
+                        .await?;
+                    Ok(value)
+                }
+                Err(RadrootsClientDatastoreError::NoResult) => {
+                    Err(RadrootsAppInitError::State(RadrootsAppStateError::Missing))
+                }
+                Err(err) => Err(RadrootsAppInitError::Datastore(err)),
+            }
+        }
+        Err(err) => Err(RadrootsAppInitError::Datastore(err)),
+    }
+}
+
+pub async fn app_datastore_write_state<T: RadrootsClientDatastore>(
+    datastore: &T,
+    key_maps: &RadrootsAppKeyMapConfig,
+    data: &RadrootsAppState,
+) -> RadrootsAppInitResult<RadrootsAppState> {
+    let now_ms = app_state_timestamp_ms();
+    let record = match app_datastore_read_state_record(datastore, key_maps).await {
+        Ok(existing) => app_state_record_new(data.clone(), existing.revision + 1, now_ms),
+        Err(RadrootsAppInitError::State(RadrootsAppStateError::Missing)) => {
+            app_state_record_new(data.clone(), 1, now_ms)
+        }
+        Err(err) => return Err(err),
+    };
+    let value = app_datastore_write_state_record(datastore, key_maps, &record).await?;
+    Ok(value.state)
+}
+
 pub async fn app_datastore_read_state<T: RadrootsClientDatastore>(
     datastore: &T,
     key_maps: &RadrootsAppKeyMapConfig,
 ) -> RadrootsAppInitResult<RadrootsAppState> {
-    let key = app_datastore_obj_key_state(key_maps).map_err(RadrootsAppInitError::Config)?;
-    let value = datastore
-        .get_obj::<RadrootsAppState>(key)
-        .await
-        .map_err(RadrootsAppInitError::Datastore)?;
-    let _ = app_log_debug_emit("log.app.bootstrap.state", "read", Some(key.to_string()));
-    Ok(value)
+    let record = app_datastore_read_state_record(datastore, key_maps).await?;
+    Ok(record.state)
 }
 
 pub async fn app_datastore_has_state<T: RadrootsClientDatastore>(
     datastore: &T,
     key_maps: &RadrootsAppKeyMapConfig,
 ) -> RadrootsAppInitResult<bool> {
-    let key = app_datastore_obj_key_state(key_maps).map_err(RadrootsAppInitError::Config)?;
-    match datastore.get_obj::<RadrootsAppState>(key).await {
+    match app_datastore_read_state_record(datastore, key_maps).await {
         Ok(_) => Ok(true),
-        Err(RadrootsClientDatastoreError::NoResult) => Ok(false),
-        Err(err) => Err(RadrootsAppInitError::Datastore(err)),
+        Err(RadrootsAppInitError::State(RadrootsAppStateError::Missing)) => Ok(false),
+        Err(err) => Err(err),
     }
 }
 
