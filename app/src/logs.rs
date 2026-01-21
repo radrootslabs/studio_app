@@ -72,8 +72,38 @@ fn log_query_matches(entry: &RadrootsAppLogEntry, query: &str) -> bool {
     false
 }
 
-fn log_entry_matches(entry: &RadrootsAppLogEntry, level_filter: &str, query: &str) -> bool {
-    log_level_matches(entry.level, level_filter) && log_query_matches(entry, query)
+fn parse_log_timestamp(value: &str) -> Option<i64> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    trimmed.parse::<i64>().ok()
+}
+
+fn log_timestamp_matches(timestamp_ms: i64, from_ms: Option<i64>, to_ms: Option<i64>) -> bool {
+    if let Some(from_ms) = from_ms {
+        if timestamp_ms < from_ms {
+            return false;
+        }
+    }
+    if let Some(to_ms) = to_ms {
+        if timestamp_ms > to_ms {
+            return false;
+        }
+    }
+    true
+}
+
+fn log_entry_matches(
+    entry: &RadrootsAppLogEntry,
+    level_filter: &str,
+    query: &str,
+    from_ms: Option<i64>,
+    to_ms: Option<i64>,
+) -> bool {
+    log_level_matches(entry.level, level_filter)
+        && log_query_matches(entry, query)
+        && log_timestamp_matches(entry.timestamp_ms, from_ms, to_ms)
 }
 
 fn log_dump_with_header(entries: &[RadrootsAppLogEntry]) -> String {
@@ -157,16 +187,20 @@ pub fn RadrootsAppLogsPage() -> impl IntoView {
     let interval_started = RwSignal::new_local(false);
     let filter_query = RwSignal::new_local(String::new());
     let filter_level = RwSignal::new_local(String::from("all"));
+    let filter_from = RwSignal::new_local(String::new());
+    let filter_to = RwSignal::new_local(String::new());
     let filter_limit = RwSignal::new_local(logs_max_visible());
     let context = Rc::new(app_context());
     let filtered_entries = Memo::new(move |_| {
         let level_filter = filter_level.get();
         let query = filter_query.get();
+        let from_ms = parse_log_timestamp(&filter_from.get());
+        let to_ms = parse_log_timestamp(&filter_to.get());
         let limit = filter_limit.get();
         entries.with(|items| {
             items
                 .iter()
-                .filter(|entry| log_entry_matches(entry, &level_filter, &query))
+                .filter(|entry| log_entry_matches(entry, &level_filter, &query, from_ms, to_ms))
                 .take(limit)
                 .cloned()
                 .collect::<Vec<_>>()
@@ -351,6 +385,24 @@ pub fn RadrootsAppLogsPage() -> impl IntoView {
                     <option value="warn">"warn"</option>
                     <option value="error">"error"</option>
                 </select>
+                <input
+                    type="number"
+                    placeholder="from ms"
+                    prop:value=move || filter_from.get()
+                    on:input=move |ev| {
+                        filter_from.set(event_target_value(&ev));
+                    }
+                    style="width:130px;border:1px solid #e5e7eb;border-radius:8px;padding:6px 8px;font-size:12px;"
+                />
+                <input
+                    type="number"
+                    placeholder="to ms"
+                    prop:value=move || filter_to.get()
+                    on:input=move |ev| {
+                        filter_to.set(event_target_value(&ev));
+                    }
+                    style="width:130px;border:1px solid #e5e7eb;border-radius:8px;padding:6px 8px;font-size:12px;"
+                />
                 <div style="font-size:12px;color:#6b7280;">
                     {move || {
                         let total = entries.get().len();
@@ -426,6 +478,8 @@ mod tests {
         log_dump_filename_from_ms,
         log_dump_with_header,
         log_entry_matches,
+        log_timestamp_matches,
+        parse_log_timestamp,
         logs_auto_refresh_ms,
         logs_max_visible,
     };
@@ -458,9 +512,9 @@ mod tests {
             context: Some(String::from("context")),
             metadata: RadrootsAppLogMetadata::default(),
         };
-        assert!(log_entry_matches(&entry, "info", "hello"));
-        assert!(!log_entry_matches(&entry, "error", "hello"));
-        assert!(!log_entry_matches(&entry, "info", "missing"));
+        assert!(log_entry_matches(&entry, "info", "hello", None, None));
+        assert!(!log_entry_matches(&entry, "error", "hello", None, None));
+        assert!(!log_entry_matches(&entry, "info", "missing", None, None));
     }
 
     #[test]
@@ -480,5 +534,21 @@ mod tests {
         assert!(header.contains("radroots_log_dump"));
         let entry_line = lines.next().expect("entry");
         assert!(entry_line.contains("\"log.code.test\""));
+    }
+
+    #[test]
+    fn parse_log_timestamp_accepts_integers() {
+        assert_eq!(parse_log_timestamp("123"), Some(123));
+        assert_eq!(parse_log_timestamp(""), None);
+        assert_eq!(parse_log_timestamp("abc"), None);
+    }
+
+    #[test]
+    fn log_timestamp_matches_respects_bounds() {
+        assert!(log_timestamp_matches(100, None, None));
+        assert!(log_timestamp_matches(100, Some(50), None));
+        assert!(log_timestamp_matches(100, None, Some(150)));
+        assert!(!log_timestamp_matches(100, Some(120), None));
+        assert!(!log_timestamp_matches(100, None, Some(80)));
     }
 }
