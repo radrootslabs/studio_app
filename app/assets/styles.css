@@ -1,3 +1,68 @@
+@import "../../crates/ui-tokens/assets/tokens.css";
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+@layer base {
+  html {
+    font-family: var(--font-sans);
+    background: var(--bg-app);
+    color: var(--text-primary);
+  }
+
+  body {
+    min-height: 100dvh;
+    margin: 0;
+    background: var(--bg-app);
+  }
+
+  * {
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  html[data-input="keyboard"] :focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+    border-radius: 8px;
+  }
+
+  html[data-input="pointer"] :focus {
+    outline: none;
+  }
+
+  [data-disabled] {
+    opacity: 0.5;
+    pointer-events: none;
+  }
+}
+
+@layer components {
+  .ui-surface {
+    background: var(--bg-elevated);
+    color: var(--text-primary);
+    border-radius: var(--radius-lg);
+    box-shadow: var(--shadow-1);
+  }
+
+  .ui-card {
+    background: var(--bg-elevated);
+    color: var(--text-primary);
+    border-radius: var(--radius-md);
+    box-shadow: var(--shadow-1);
+  }
+
+  .ui-separator {
+    height: 1px;
+    background: var(--separator);
+  }
+
+  .ui-text-secondary {
+    color: var(--text-secondary);
+  }
+
+  .ui-material-regular {
+    background: var(--material-regular);
+    backdrop-filter: blur(18px) saturate(180%);
+  }
+}
