@@ -3,6 +3,10 @@ members = [
   "app",
   "crates/app-lib",
   "crates/core",
+  "crates/ui-components",
+  "crates/ui-core",
+  "crates/ui-primitives",
+  "crates/ui-tokens",
   "crates/utils"
 ]
 exclude = [
