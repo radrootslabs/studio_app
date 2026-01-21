@@ -5,6 +5,7 @@ mod presence;
 mod dismissable;
 mod focus;
 mod scroll_lock;
+mod roving_focus;
 
 pub use portal::{RadrootsAppUiPortal, RadrootsAppUiPortalMount};
 pub use presence::{
@@ -29,4 +30,10 @@ pub use scroll_lock::{
     RadrootsAppUiScrollLockError,
     RadrootsAppUiScrollLockGuard,
     RadrootsAppUiScrollLockResult,
+};
+pub use roving_focus::{
+    radroots_studio_app_ui_roving_focus_action_from_key,
+    radroots_studio_app_ui_roving_focus_next_index,
+    RadrootsAppUiRovingFocusAction,
+    RadrootsAppUiRovingFocusOrientation,
 };
