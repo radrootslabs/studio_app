@@ -69,6 +69,8 @@ pub use ui_demo::RadrootsAppUiDemoPage;
 pub use theme::{
     app_theme_apply_mode,
     app_theme_init,
+    app_theme_read_mode,
+    app_theme_store_mode,
     app_theme_mode_from_value,
     app_theme_mode_to_name,
     RadrootsAppThemeError,

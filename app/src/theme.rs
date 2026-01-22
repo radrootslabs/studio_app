@@ -117,12 +117,33 @@ fn app_theme_read_storage() -> Option<String> {
     None
 }
 
-pub fn app_theme_init() -> RadrootsAppThemeResult<&'static str> {
-    let prefers_dark = app_theme_prefers_dark();
-    let mode = app_theme_read_storage()
+#[cfg(target_arch = "wasm32")]
+fn app_theme_write_storage(value: &str) -> RadrootsAppThemeResult<()> {
+    let window = web_sys::window().ok_or(RadrootsAppThemeError::Unavailable)?;
+    let storage = window
+        .local_storage()
+        .map_err(|_| RadrootsAppThemeError::Storage)?
+        .ok_or(RadrootsAppThemeError::Storage)?;
+    storage
+        .set_item(APP_THEME_STORAGE_KEY, value)
+        .map_err(|_| RadrootsAppThemeError::Storage)?;
+    Ok(())
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn app_theme_write_storage(_value: &str) -> RadrootsAppThemeResult<()> {
+    Ok(())
+}
+
+pub fn app_theme_read_mode() -> Option<RadrootsAppThemeMode> {
+    app_theme_read_storage()
         .as_deref()
         .and_then(app_theme_mode_from_value)
-        .unwrap_or(RadrootsAppThemeMode::System);
+}
+
+pub fn app_theme_init() -> RadrootsAppThemeResult<&'static str> {
+    let prefers_dark = app_theme_prefers_dark();
+    let mode = app_theme_read_mode().unwrap_or(RadrootsAppThemeMode::System);
     let theme_name = app_theme_mode_to_name(mode, prefers_dark);
     app_theme_apply_name(theme_name)?;
     Ok(theme_name)
@@ -133,6 +154,10 @@ pub fn app_theme_apply_mode(mode: RadrootsAppThemeMode) -> RadrootsAppThemeResul
     let name = app_theme_mode_to_name(mode, prefers_dark);
     app_theme_apply_name(name)?;
     Ok(name)
+}
+
+pub fn app_theme_store_mode(mode: RadrootsAppThemeMode) -> RadrootsAppThemeResult<()> {
+    app_theme_write_storage(mode.as_str())
 }
 
 #[cfg(test)]

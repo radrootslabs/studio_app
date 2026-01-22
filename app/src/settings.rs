@@ -3,6 +3,13 @@
 use leptos::ev::MouseEvent;
 use leptos::prelude::*;
 
+use crate::{
+    app_theme_apply_mode,
+    app_theme_mode_from_value,
+    app_theme_read_mode,
+    app_theme_store_mode,
+    RadrootsAppThemeMode,
+};
 use radroots_studio_app_ui_components::{
     RadrootsAppUiList,
     RadrootsAppUiListIcon,
@@ -50,8 +57,15 @@ fn settings_label(value: &str, classes: Option<&str>) -> RadrootsAppUiListLabelV
 
 #[component]
 pub fn RadrootsAppSettingsPage() -> impl IntoView {
-    let color_mode_callback = Callback::new(move |_value: String| {
+    let initial_mode = app_theme_read_mode().unwrap_or(RadrootsAppThemeMode::System);
+    let color_mode_value = initial_mode.as_str().to_string();
+    let color_mode_callback = Callback::new(move |value: String| {
         log_settings_action("settings_color_mode");
+        let Some(mode) = app_theme_mode_from_value(&value) else {
+            return;
+        };
+        let _ = app_theme_store_mode(mode);
+        let _ = app_theme_apply_mode(mode);
     });
     let appearance_list = RadrootsAppUiList {
         id: Some("settings-appearance".to_string()),
@@ -68,8 +82,13 @@ pub fn RadrootsAppSettingsPage() -> impl IntoView {
         list: Some(vec![Some(RadrootsAppUiListItem {
             kind: RadrootsAppUiListItemKind::Select(RadrootsAppUiListSelect {
                 field: RadrootsAppUiListSelectField {
-                    value: "light".to_string(),
+                    value: color_mode_value,
                     options: vec![
+                        RadrootsAppUiListSelectOption {
+                            label: "System".to_string(),
+                            value: "system".to_string(),
+                            classes: None,
+                        },
                         RadrootsAppUiListSelectOption {
                             label: "Light".to_string(),
                             value: "light".to_string(),
