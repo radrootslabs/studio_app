@@ -42,6 +42,29 @@ pub fn app_setup_state_new(active_key: String, eula_date: String) -> RadrootsApp
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RadrootsAppSetupStep {
+    Intro,
+    KeyChoice,
+}
+
+impl RadrootsAppSetupStep {
+    pub const fn next(self) -> Self {
+        match self {
+            RadrootsAppSetupStep::Intro => RadrootsAppSetupStep::KeyChoice,
+            RadrootsAppSetupStep::KeyChoice => RadrootsAppSetupStep::KeyChoice,
+        }
+    }
+
+    pub const fn is_terminal(self) -> bool {
+        matches!(self, RadrootsAppSetupStep::KeyChoice)
+    }
+}
+
+pub const fn app_setup_step_default() -> RadrootsAppSetupStep {
+    RadrootsAppSetupStep::Intro
+}
+
 pub async fn app_setup_initialize<T: RadrootsClientDatastore, K: RadrootsClientKeystoreNostr>(
     datastore: &T,
     keystore: &K,
@@ -65,7 +88,13 @@ pub async fn app_setup_initialize<T: RadrootsClientDatastore, K: RadrootsClientK
 
 #[cfg(test)]
 mod tests {
-    use super::{app_setup_eula_date, app_setup_initialize, app_setup_state_new};
+    use super::{
+        app_setup_eula_date,
+        app_setup_initialize,
+        app_setup_state_new,
+        app_setup_step_default,
+        RadrootsAppSetupStep,
+    };
     use crate::{app_datastore_key_nostr_key, app_key_maps_default, RadrootsAppRole, RadrootsAppStateRecord};
     use async_trait::async_trait;
     use radroots_studio_app_core::backup::RadrootsClientBackupDatastorePayload;
@@ -268,6 +297,29 @@ mod tests {
     fn setup_eula_date_is_non_empty() {
         let value = app_setup_eula_date();
         assert!(!value.is_empty());
+    }
+
+    #[test]
+    fn setup_step_default_is_intro() {
+        assert_eq!(app_setup_step_default(), RadrootsAppSetupStep::Intro);
+    }
+
+    #[test]
+    fn setup_step_next_advances_once() {
+        assert_eq!(
+            RadrootsAppSetupStep::Intro.next(),
+            RadrootsAppSetupStep::KeyChoice
+        );
+        assert_eq!(
+            RadrootsAppSetupStep::KeyChoice.next(),
+            RadrootsAppSetupStep::KeyChoice
+        );
+    }
+
+    #[test]
+    fn setup_step_terminal_matches_key_choice() {
+        assert!(!RadrootsAppSetupStep::Intro.is_terminal());
+        assert!(RadrootsAppSetupStep::KeyChoice.is_terminal());
     }
 
     #[test]

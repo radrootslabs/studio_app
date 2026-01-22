@@ -105,7 +105,13 @@ pub use logging::{
     APP_LOG_MAX_ENTRIES,
 };
 pub use notifications::{RadrootsAppNotifications, RadrootsAppNotificationsError, RadrootsAppNotificationsResult};
-pub use setup::{app_setup_eula_date, app_setup_initialize, app_setup_state_new};
+pub use setup::{
+    app_setup_eula_date,
+    app_setup_initialize,
+    app_setup_state_new,
+    app_setup_step_default,
+    RadrootsAppSetupStep,
+};
 pub use tangle::{RadrootsAppTangleClient, RadrootsAppTangleClientStub, RadrootsAppTangleError, RadrootsAppTangleResult};
 pub use config::{
     app_config_default,
