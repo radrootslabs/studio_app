@@ -8,9 +8,12 @@ use leptos::prelude::*;
 use crate::{
     radroots_studio_app_ui_list_icon_key,
     RadrootsAppUiIcon,
+    RadrootsAppUiIconKey,
     RadrootsAppUiListDisplay,
     RadrootsAppUiListDisplayValue,
     RadrootsAppUiListDefaultLabel,
+    RadrootsAppUiListInput,
+    RadrootsAppUiListInputAction,
     RadrootsAppUiListLabel,
     RadrootsAppUiListLabelValue,
     RadrootsAppUiListLabelValueKind,
@@ -253,6 +256,16 @@ fn radroots_studio_app_ui_list_offset_mod(
     mod_value: Option<&RadrootsAppUiListOffsetMod>,
 ) -> RadrootsAppUiListOffsetMod {
     mod_value.cloned().unwrap_or(RadrootsAppUiListOffsetMod::Small)
+}
+
+fn radroots_studio_app_ui_list_input_action_icon_key(
+    action: &RadrootsAppUiListInputAction,
+) -> RadrootsAppUiIconKey {
+    action
+        .icon
+        .as_ref()
+        .and_then(radroots_studio_app_ui_list_icon_key)
+        .unwrap_or(RadrootsAppUiIconKey::Plus)
 }
 
 fn radroots_studio_app_ui_list_label_value_view(
@@ -564,6 +577,105 @@ pub fn RadrootsAppUiListTouchRow(
 }
 
 #[component]
+pub fn RadrootsAppUiListInputRow(
+    basis: RadrootsAppUiListInput,
+    #[prop(optional)] hide_border_top: bool,
+    #[prop(optional)] hide_border_bottom: bool,
+) -> impl IntoView {
+    let RadrootsAppUiListInput {
+        field,
+        line_label,
+        action,
+    } = basis;
+    let border_class = radroots_studio_app_ui_list_border_classes(hide_border_top, hide_border_bottom);
+    let wrap_class = radroots_studio_app_ui_list_class_merge(&[
+        Some("flex flex-row h-line w-full justify-start items-center border-t-line overflow-hidden"),
+        Some(border_class.as_str()),
+    ]);
+    let line_label_view = line_label.map(|line_label| {
+        let label_class = radroots_studio_app_ui_list_class_merge(&[
+            Some("text-form_base ui-text-secondary"),
+            line_label.classes.as_deref(),
+        ]);
+        view! {
+            <div class="flex flex-row h-full justify-start items-center overflow-x-hidden">
+                <p class=label_class>{line_label.value}</p>
+            </div>
+        }
+        .into_any()
+    });
+    let input_class = radroots_studio_app_ui_list_class_merge(&[
+        Some("el-input"),
+        field.classes.as_deref(),
+    ]);
+    let input_id = field.id;
+    let input_value = field.value;
+    let input_placeholder = field.placeholder;
+    let input_disabled = field.disabled;
+    let on_input = field.on_input;
+    let action_view = action.and_then(|action| {
+        if !action.visible {
+            return None;
+        }
+        let action_loading = action.loading;
+        let action_icon_key = radroots_studio_app_ui_list_input_action_icon_key(&action);
+        let action_icon_class = radroots_studio_app_ui_list_class_merge(&[
+            Some("ui-text-secondary"),
+            action.icon.as_ref().and_then(|icon| icon.class.as_deref()),
+        ]);
+        let on_click = action.on_click;
+        Some(
+            view! {
+                <div class="absolute top-0 right-0 flex flex-row h-full w-12 pr-4 justify-end items-center fade-in">
+                    {if action_loading {
+                        view! { <RadrootsAppUiSpinner class="text-[12px]".to_string() /> }
+                            .into_any()
+                    } else {
+                        view! {
+                            <button
+                                type="button"
+                                class="group fade-in-long"
+                                on:click=move |ev: MouseEvent| {
+                                    if let Some(callback) = &on_click {
+                                        callback.run(ev);
+                                    }
+                                }
+                            >
+                                <RadrootsAppUiIcon key=action_icon_key class=action_icon_class size=18 />
+                            </button>
+                        }
+                        .into_any()
+                    }}
+                </div>
+            }
+            .into_any(),
+        )
+    });
+    view! {
+        <div class="flex flex-row flex-grow h-full w-full" data-ui="list-input">
+            <div class=wrap_class>
+                {line_label_view}
+                <div class="relative flex flex-row flex-grow h-full pr-12 justify-start items-center">
+                    <input
+                        id=input_id
+                        class=input_class
+                        disabled=input_disabled
+                        placeholder=input_placeholder
+                        prop:value=input_value
+                        on:input=move |ev| {
+                            if let Some(callback) = &on_input {
+                                callback.run(event_target_value(&ev));
+                            }
+                        }
+                    />
+                    {action_view}
+                </div>
+            </div>
+        </div>
+    }
+}
+
+#[component]
 pub fn RadrootsAppUiListTitleView(basis: RadrootsAppUiListTitle) -> impl IntoView {
     let title_class = radroots_studio_app_ui_list_class_merge(&[
         Some("flex flex-row h-[24px] w-full pl-[2px] gap-1 items-center"),
@@ -712,9 +824,14 @@ mod tests {
         radroots_studio_app_ui_list_section_data_ui_value,
         radroots_studio_app_ui_list_default_labels,
         radroots_studio_app_ui_list_offset_mod,
+        radroots_studio_app_ui_list_input_action_icon_key,
         radroots_studio_app_ui_list_title_padding_class,
     };
-    use crate::RadrootsAppUiListOffsetMod;
+    use crate::{
+        RadrootsAppUiIconKey,
+        RadrootsAppUiListInputAction,
+        RadrootsAppUiListOffsetMod,
+    };
 
     #[test]
     fn list_data_ui_values() {
@@ -780,5 +897,19 @@ mod tests {
     fn list_offset_defaults_to_small() {
         let resolved = radroots_studio_app_ui_list_offset_mod(None);
         assert!(matches!(resolved, RadrootsAppUiListOffsetMod::Small));
+    }
+
+    #[test]
+    fn list_input_action_defaults_to_plus() {
+        let action = RadrootsAppUiListInputAction {
+            visible: true,
+            loading: false,
+            icon: None,
+            on_click: None,
+        };
+        assert_eq!(
+            radroots_studio_app_ui_list_input_action_icon_key(&action),
+            RadrootsAppUiIconKey::Plus
+        );
     }
 }

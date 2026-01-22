@@ -27,6 +27,7 @@ pub use list::{
     RadrootsAppUiListDefaultLabels,
     RadrootsAppUiListGroup,
     RadrootsAppUiListLine,
+    RadrootsAppUiListInputRow,
     RadrootsAppUiListOffsetView,
     RadrootsAppUiListRowDisplayValue,
     RadrootsAppUiListRow,
