@@ -1,0 +1,13 @@
+@import "tailwindcss";
+
+@custom-variant ios1 {
+  @media (orientation: portrait) and (min-height: 750px) {
+    @slot;
+  }
+}
+
+@custom-variant ios0 {
+  @media (orientation: portrait) and (max-height: 680px) {
+    @slot;
+  }
+}

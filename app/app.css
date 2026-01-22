@@ -1,5 +1,9 @@
 @import "tailwindcss";
 @import "../crates/ui-tokens/assets/tokens.css";
+@import "../crates/ui-tokens/assets/themes/styles.css";
+@import "../crates/ui-tokens/assets/themes/layout.css";
+@import "../crates/ui-tokens/assets/themes/screens.css";
+@import "../crates/ui-tokens/assets/themes/theme_os.css";
 @import "../crates/ui-components/assets/list.css";
 
 @source "./index.html";
