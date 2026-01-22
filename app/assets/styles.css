@@ -449,6 +449,24 @@
     font: var(--type-subheadline);
     color: var(--text-secondary);
   }
+
+  [data-ui="list-line"] {
+    min-height: var(--size-line);
+  }
+
+  [data-ui="list-input"] input {
+    text-align: left;
+  }
+
+  [data-ui="list-select"] select {
+    min-width: var(--size-trellis-value);
+    text-align: right;
+    text-align-last: right;
+  }
+
+  [data-ui="list-select"] option {
+    color: var(--text-primary);
+  }
 }
 
 @keyframes overlay-fade-in {
