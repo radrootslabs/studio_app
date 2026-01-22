@@ -1,0 +1,59 @@
+.round-8 {
+    mask-image: paint(squircle);
+    --squircle-smooth: 0.6;
+    --squircle-radius: 8px;
+}
+
+.round-12 {
+    mask-image: paint(squircle);
+    --squircle-smooth: 0.6;
+    --squircle-radius: 12px;
+}
+
+.round-16 {
+    mask-image: paint(squircle);
+    --squircle-smooth: 0.6;
+    --squircle-radius: 16px;
+}
+
+.round-20 {
+    mask-image: paint(squircle);
+    --squircle-smooth: 0.6;
+    --squircle-radius: 20px;
+}
+
+.round-24 {
+    mask-image: paint(squircle);
+    --squircle-smooth: 0.6;
+    --squircle-radius: 24px;
+}
+
+.round-32 {
+    mask-image: paint(squircle);
+    --squircle-smooth: 0.6;
+    --squircle-radius: 32px;
+}
+
+.round-36 {
+    mask-image: paint(squircle);
+    --squircle-smooth: 0.6;
+    --squircle-radius: 36px;
+}
+
+.round-40 {
+    mask-image: paint(squircle);
+    --squircle-smooth: 0.6;
+    --squircle-radius: 40px;
+}
+
+.round-44 {
+    mask-image: paint(squircle);
+    --squircle-smooth: 0.6;
+    --squircle-radius: 44px;
+}
+
+.round-48 {
+    mask-image: paint(squircle);
+    --squircle-smooth: 0.6;
+    --squircle-radius: 48px;
+}
