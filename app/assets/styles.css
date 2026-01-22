@@ -1,4 +1,5 @@
 @import "../../crates/ui-tokens/assets/tokens.css";
+@import "./list.css";
 
 @tailwind base;
 @tailwind components;
@@ -78,6 +79,10 @@
     color: var(--text-secondary);
   }
 
+  .ui-text-tertiary {
+    color: var(--text-tertiary);
+  }
+
   .ui-material-regular {
     background: var(--material-regular);
     backdrop-filter: blur(18px) saturate(180%);
@@ -124,55 +129,6 @@
   .h-line_button {
     height: var(--size-line-button);
     min-height: var(--size-line-button);
-  }
-
-  .w-trellis_display {
-    width: var(--size-trellis-display);
-    min-width: var(--size-trellis-display);
-  }
-
-  .w-trellis_value {
-    width: var(--size-trellis-value);
-    min-width: var(--size-trellis-value);
-  }
-
-  .w-trellisOffset {
-    width: var(--size-trellis-offset);
-    min-width: var(--size-trellis-offset);
-  }
-
-  .text-trellis_ti {
-    font: var(--type-caption1);
-    letter-spacing: 0.02em;
-  }
-
-  .text-line_d {
-    font: var(--type-body);
-  }
-
-  .text-line_d_e {
-    font: var(--type-subheadline);
-  }
-
-  .text-form_base {
-    font: var(--type-body);
-  }
-
-  .border-t-line {
-    border-top: 1px solid var(--separator);
-  }
-
-  .border-b-line {
-    border-bottom: 1px solid var(--separator);
-  }
-
-  .el-re {
-    transition: all var(--dur-2) var(--ease-ios);
-  }
-
-  .opacity-active:active,
-  .opacity-active:focus {
-    opacity: 0.8;
   }
 
   .carousel-container {
@@ -226,43 +182,6 @@
     width: 100%;
     padding: 0 var(--space-2);
     align-items: center;
-  }
-
-  .el-textarea {
-    width: 100%;
-    height: max-content;
-    outline: none;
-    border-radius: var(--radius-xl);
-    text-wrap: wrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-    padding: 0;
-  }
-
-  .el-input,
-  .el-select,
-  .el-textarea {
-    display: flex;
-    flex-direction: row;
-    width: 100%;
-    justify-content: center;
-    align-items: center;
-    border: 0;
-    outline: 0;
-    background: transparent;
-    font: var(--type-body);
-  }
-
-  .el-input::placeholder,
-  .el-select::placeholder,
-  .el-textarea::placeholder {
-    font: var(--type-body);
-  }
-
-  .el-select-centered {
-    text-align: center;
-    text-align-last: center;
   }
 
   .button-base {
@@ -420,53 +339,6 @@
     background: var(--separator);
   }
 
-  [data-ui="list-group"] {
-    margin: var(--space-5);
-    background: var(--bg-elevated);
-    border-radius: var(--radius-lg);
-    overflow: hidden;
-    box-shadow: var(--shadow-1);
-  }
-
-  [data-ui="list-row"] {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: 12px 16px;
-    min-height: 44px;
-  }
-
-  [data-ui="list-row"] + [data-ui="list-row"] {
-    border-top: 1px solid var(--separator);
-  }
-
-  [data-ui="list-row-leading"] {
-    font: var(--type-body);
-    color: var(--text-primary);
-  }
-
-  [data-ui="list-row-trailing"] {
-    font: var(--type-subheadline);
-    color: var(--text-secondary);
-  }
-
-  [data-ui="list-line"] {
-    min-height: var(--size-line);
-  }
-
-  [data-ui="list-input"] input {
-    text-align: left;
-  }
-
-  [data-ui="list-select"] select {
-    min-width: var(--size-trellis-value);
-    text-align: right;
-    text-align-last: right;
-  }
-
-  [data-ui="list-select"] option {
-    color: var(--text-primary);
-  }
 }
 
 @keyframes overlay-fade-in {

@@ -15,7 +15,6 @@ use radroots_studio_app_ui_components::{
     RadrootsAppUiListSelect,
     RadrootsAppUiListSelectField,
     RadrootsAppUiListSelectOption,
-    RadrootsAppUiListStyles,
     RadrootsAppUiListTitle,
     RadrootsAppUiListTitleValue,
     RadrootsAppUiListTouch,
@@ -109,13 +108,7 @@ pub fn RadrootsAppSettingsPage() -> impl IntoView {
             offset: None,
         })]),
         hide_offset: false,
-        styles: Some(RadrootsAppUiListStyles {
-            hide_border_top: None,
-            hide_border_bottom: None,
-            hide_rounded: None,
-            set_title_background: Some(true),
-            set_default_background: None,
-        }),
+        styles: None,
     };
     let actions_list = RadrootsAppUiList {
         id: Some("settings-actions".to_string()),

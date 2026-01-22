@@ -53,6 +53,27 @@ pub fn radroots_studio_app_ui_list_row_trailing_data_ui_value() -> &'static str 
     "list-row-trailing"
 }
 
+fn radroots_studio_app_ui_list_base_id(id: Option<&str>, view: Option<&str>) -> String {
+    let suffix = id.or(view).unwrap_or("default");
+    format!("app-list-{suffix}")
+}
+
+fn radroots_studio_app_ui_list_title_id(base_id: &str) -> String {
+    format!("{base_id}-title")
+}
+
+fn radroots_studio_app_ui_list_items_id(base_id: &str) -> String {
+    format!("{base_id}-items")
+}
+
+fn radroots_studio_app_ui_list_item_id(base_id: &str, index: usize) -> String {
+    format!("{base_id}-item-{index}")
+}
+
+fn radroots_studio_app_ui_list_line_id(base_id: &str, index: usize) -> String {
+    format!("{base_id}-line-{index}")
+}
+
 #[component]
 pub fn RadrootsAppUiListGroup(
     class: Option<String>,
@@ -61,14 +82,14 @@ pub fn RadrootsAppUiListGroup(
     children: ChildrenFn,
 ) -> impl IntoView {
     view! {
-        <div
+        <section
             id=id
             class=class
             style=style
             data-ui=radroots_studio_app_ui_list_group_data_ui_value()
         >
             {children()}
-        </div>
+        </section>
     }
 }
 
@@ -80,14 +101,14 @@ pub fn RadrootsAppUiListSection(
     children: ChildrenFn,
 ) -> impl IntoView {
     view! {
-        <div
+        <section
             id=id
             class=class
             style=style
             data-ui=radroots_studio_app_ui_list_section_data_ui_value()
         >
             {children()}
-        </div>
+        </section>
     }
 }
 
@@ -99,14 +120,14 @@ pub fn RadrootsAppUiListRow(
     children: ChildrenFn,
 ) -> impl IntoView {
     view! {
-        <div
+        <li
             id=id
             class=class
             style=style
             data-ui=radroots_studio_app_ui_list_row_data_ui_value()
         >
             {children()}
-        </div>
+        </li>
     }
 }
 
@@ -187,11 +208,14 @@ pub fn radroots_studio_app_ui_list_border_classes(
 
 #[component]
 pub fn RadrootsAppUiListLine(
+    #[prop(optional)] id: String,
+    as_button: bool,
     #[prop(optional)] loading: bool,
     #[prop(optional)] hide_border_top: bool,
     #[prop(optional)] hide_border_bottom: bool,
     on_click: Option<Callback<MouseEvent>>,
     end: Option<ChildrenFn>,
+    #[prop(optional)] overlay: Option<ChildrenFn>,
     children: ChildrenFn,
 ) -> impl IntoView {
     let border_class = radroots_studio_app_ui_list_border_classes(hide_border_top, hide_border_bottom);
@@ -199,38 +223,70 @@ pub fn RadrootsAppUiListLine(
         Some("flex flex-row h-full w-full justify-center items-center border-t-line el-re"),
         Some(border_class.as_str()),
     ]);
+    let line_state = if loading { "loading" } else { "ready" };
     let end_view = end.map(|slot| slot());
-    view! {
-        <button
-            type="button"
-            class="flex flex-row flex-grow overflow-hidden"
-            on:click=move |ev: MouseEvent| {
-                if let Some(callback) = &on_click {
-                    callback.run(ev);
+    let overlay_view = overlay.map(|slot| slot());
+    let id = if id.is_empty() { None } else { Some(id) };
+    let line_inner = view! {
+        <div class=line_class data-ui="list-line">
+            {if loading {
+                view! {
+                    <div class="flex flex-row h-full w-full justify-center items-center">
+                        <RadrootsAppUiSpinner />
+                    </div>
                 }
-            }
-        >
-            <div class=line_class data-ui="list-line">
-                {if loading {
-                    view! {
-                        <div class="flex flex-row h-full w-full justify-center items-center">
-                            <RadrootsAppUiSpinner />
+                .into_any()
+            } else {
+                view! {
+                    <div class="relative group flex flex-row h-line w-full pr-[2px] justify-between items-center el-re">
+                        <div class="flex flex-row h-full w-trellis_display justify-between items-center">
+                            {children()}
                         </div>
-                    }
-                    .into_any()
-                } else {
-                    view! {
-                        <div class="relative group flex flex-row h-line w-full pr-[2px] justify-between items-center el-re">
-                            <div class="flex flex-row h-full w-trellis_display justify-between items-center">
-                                {children()}
-                            </div>
-                            {end_view}
-                        </div>
-                    }
-                    .into_any()
-                }}
+                        {end_view}
+                        {overlay_view}
+                    </div>
+                }
+                .into_any()
+            }}
+        </div>
+    };
+    let has_click = on_click.is_some();
+    let click_handler = move |ev: MouseEvent| {
+        if let Some(callback) = &on_click {
+            callback.run(ev);
+        }
+    };
+    if as_button {
+        view! {
+            <button
+                type="button"
+                id=id
+                class="flex flex-row flex-grow overflow-hidden"
+                aria-busy=loading
+                data-state=line_state
+                on:click=click_handler
+            >
+                {line_inner}
+            </button>
+        }
+        .into_any()
+    } else {
+        let role = if has_click { Some("button") } else { None };
+        let tabindex = if has_click { Some(0) } else { None };
+        view! {
+            <div
+                id=id
+                class="flex flex-row flex-grow overflow-hidden"
+                aria-busy=loading
+                data-state=line_state
+                role=role
+                tabindex=tabindex
+                on:click=click_handler
+            >
+                {line_inner}
             </div>
-        </button>
+        }
+        .into_any()
     }
 }
 
@@ -296,6 +352,7 @@ fn radroots_studio_app_ui_list_row_class(
     let active_class = radroots_studio_app_ui_list_active_class(item.hide_active);
     radroots_studio_app_ui_list_class_merge(&[
         Some("group flex flex-row h-full w-full justify-end items-center el-re"),
+        Some("list-row-surface"),
         if item.hide_field { Some("hidden") } else { None },
         if item.full_rounded { Some("rounded-touch") } else { None },
         if styles.hide_rounded {
@@ -403,7 +460,7 @@ pub fn RadrootsAppUiListRowDisplayValue(
         RadrootsAppUiListDisplayValue::Label(label) => {
             let active_class = radroots_studio_app_ui_list_active_class(hide_active);
             let text_class = radroots_studio_app_ui_list_class_merge(&[
-                Some("text-line_d_e ui-text-secondary line-clamp-1"),
+                Some("font-sans text-line_d_e line-clamp-1 text-ly0-gl-label el-re"),
                 active_class,
                 label.classes.as_deref(),
             ]);
@@ -582,6 +639,7 @@ pub fn RadrootsAppUiListTouchEndView(
 #[component]
 pub fn RadrootsAppUiListTouchRow(
     basis: RadrootsAppUiListTouch,
+    #[prop(optional)] line_id: String,
     #[prop(optional)] hide_active: bool,
     #[prop(optional)] hide_border_top: bool,
     #[prop(optional)] hide_border_bottom: bool,
@@ -600,6 +658,8 @@ pub fn RadrootsAppUiListTouchRow(
     });
     view! {
         <RadrootsAppUiListLine
+            id=line_id
+            as_button=true
             loading=loading
             hide_border_top=hide_border_top
             hide_border_bottom=hide_border_bottom
@@ -618,6 +678,7 @@ pub fn RadrootsAppUiListTouchRow(
 #[component]
 pub fn RadrootsAppUiListInputRow(
     basis: RadrootsAppUiListInput,
+    #[prop(optional)] line_id: String,
     #[prop(optional)] hide_border_top: bool,
     #[prop(optional)] hide_border_bottom: bool,
 ) -> impl IntoView {
@@ -626,6 +687,7 @@ pub fn RadrootsAppUiListInputRow(
         line_label,
         action,
     } = basis;
+    let line_id = if line_id.is_empty() { None } else { Some(line_id) };
     let border_class = radroots_studio_app_ui_list_border_classes(hide_border_top, hide_border_bottom);
     let wrap_class = radroots_studio_app_ui_list_class_merge(&[
         Some("flex flex-row h-line w-full justify-start items-center border-t-line overflow-hidden"),
@@ -691,7 +753,11 @@ pub fn RadrootsAppUiListInputRow(
         )
     });
     view! {
-        <div class="flex flex-row flex-grow h-full w-full" data-ui="list-input">
+        <div
+            id=line_id
+            class="flex flex-row flex-grow h-full w-full"
+            data-ui="list-input"
+        >
             <div class=wrap_class>
                 {line_label_view}
                 <div class="relative flex flex-row flex-grow h-full pr-12 justify-start items-center">
@@ -717,6 +783,7 @@ pub fn RadrootsAppUiListInputRow(
 #[component]
 pub fn RadrootsAppUiListSelectRow(
     basis: RadrootsAppUiListSelect,
+    #[prop(optional)] line_id: String,
     #[prop(optional)] hide_active: bool,
     #[prop(optional)] hide_border_top: bool,
     #[prop(optional)] hide_border_bottom: bool,
@@ -736,33 +803,76 @@ pub fn RadrootsAppUiListSelectRow(
             view! { <RadrootsAppUiListTouchEndView basis=end_value hide_active=hide_active /> }.into_any()
         }) as ChildrenFn
     });
+    let display_loading = radroots_studio_app_ui_list_display_loading(display.as_ref());
     let select_class = radroots_studio_app_ui_list_class_merge(&[
         Some("el-select"),
+        Some("list-select-hit"),
         field.classes.as_deref(),
     ]);
     let select_id = field.id;
     let select_value = field.value.clone();
-    let select_disabled = field.disabled;
+    let select_disabled = field.disabled || loading;
     let on_change = field.on_change;
-    let display_loading = radroots_studio_app_ui_list_display_loading(display.as_ref());
-    let options = field.options;
-    view! {
-        <RadrootsAppUiListLine
-            loading=loading
-            hide_border_top=hide_border_top
-            hide_border_bottom=hide_border_bottom
-            on_click=on_click
-            end=end_slot
-        >
-            <RadrootsAppUiListRowLabel basis=label.clone() hide_active=hide_active />
-            <div class="flex flex-row pr-3 justify-center items-end" data-ui="list-select">
-                {if display_loading {
-                    view! { <RadrootsAppUiSpinner class="text-[12px]".to_string() /> }.into_any()
-                } else if let Some(display) = display.as_ref() {
-                    let display = display.clone();
-                    view! { <RadrootsAppUiListRowDisplayValue basis=display hide_active=hide_active /> }.into_any()
-                } else {
-                    let options_view = options
+    let options = Arc::new(field.options);
+    let selected_value = RwSignal::new(select_value.clone());
+    let selected_label = RwSignal::new(
+        options
+            .iter()
+            .find(|option| option.value == select_value)
+            .map(|option| option.label.clone())
+            .unwrap_or_default(),
+    );
+    let selected_class = radroots_studio_app_ui_list_class_merge(&[
+        Some("font-sans text-line_d_e line-clamp-1 text-ly0-gl-label el-re"),
+        radroots_studio_app_ui_list_active_class(hide_active),
+    ]);
+    let select_overlay = {
+        let select_class = select_class.clone();
+        let select_id = select_id.clone();
+        let on_change = on_change.clone();
+        let on_click = on_click.clone();
+        let options = Arc::clone(&options);
+        let selected_label = selected_label;
+        Arc::new(move || {
+            let options_for_change = Arc::clone(&options);
+            let options_for_view = Arc::clone(&options);
+            view! {
+                <select
+                    id=select_id.clone()
+                    class=select_class.clone()
+                    disabled=select_disabled
+                    prop:value=move || selected_value.get()
+                    on:click=move |ev| {
+                        if let Some(callback) = &on_click {
+                            callback.run(ev);
+                        }
+                    }
+                    on:change=move |ev| {
+                        let next_value = event_target_value(&ev);
+                        selected_value.set(next_value.clone());
+                        let next_label = options_for_change
+                            .iter()
+                            .find(|option| option.value == next_value)
+                            .map(|option| option.label.clone())
+                            .unwrap_or_default();
+                        selected_label.set(next_label);
+                        if let Some(callback) = &on_change {
+                            callback.run(next_value);
+                        }
+                        #[cfg(target_arch = "wasm32")]
+                        {
+                            use leptos::wasm_bindgen::JsCast;
+                            use leptos::web_sys;
+
+                            if let Some(target) = ev.target() {
+                                if let Ok(select) = target.dyn_into::<web_sys::HtmlSelectElement>() {
+                                    let _ = select.blur();
+                                }
+                            }
+                        }
+                    }
+                >
+                    {options_for_view
                         .iter()
                         .cloned()
                         .map(|option| {
@@ -771,21 +881,35 @@ pub fn RadrootsAppUiListSelectRow(
                             ]);
                             view! { <option value=option.value class=class>{option.label}</option> }
                         })
-                        .collect_view();
+                        .collect_view()}
+                </select>
+            }
+            .into_any()
+        }) as ChildrenFn
+    };
+    view! {
+        <RadrootsAppUiListLine
+            id=line_id
+            as_button=false
+            loading=loading
+            hide_border_top=hide_border_top
+            hide_border_bottom=hide_border_bottom
+            on_click=None
+            end=end_slot
+            overlay=select_overlay
+        >
+            <RadrootsAppUiListRowLabel basis=label.clone() hide_active=hide_active />
+            <div class="relative flex flex-row pr-3 justify-center items-end" data-ui="list-select">
+                {if display_loading {
+                    view! { <RadrootsAppUiSpinner class="text-[12px]".to_string() /> }.into_any()
+                } else if let Some(display) = display.as_ref() {
+                    let display = display.clone();
+                    view! { <RadrootsAppUiListRowDisplayValue basis=display hide_active=hide_active /> }.into_any()
+                } else {
                     view! {
-                        <select
-                            id=select_id.clone()
-                            class=select_class.clone()
-                            disabled=select_disabled
-                            prop:value=select_value.clone()
-                            on:change=move |ev| {
-                                if let Some(callback) = &on_change {
-                                    callback.run(event_target_value(&ev));
-                                }
-                            }
-                        >
-                            {options_view}
-                        </select>
+                        <p class=selected_class.clone()>
+                            {move || selected_label.get()}
+                        </p>
                     }
                     .into_any()
                 }}
@@ -795,7 +919,10 @@ pub fn RadrootsAppUiListSelectRow(
 }
 
 #[component]
-pub fn RadrootsAppUiListTitleView(basis: RadrootsAppUiListTitle) -> impl IntoView {
+pub fn RadrootsAppUiListTitleView(
+    basis: RadrootsAppUiListTitle,
+    id: Option<String>,
+) -> impl IntoView {
     let title_class = radroots_studio_app_ui_list_class_merge(&[
         Some("flex flex-row h-[24px] w-full pl-[2px] gap-1 items-center"),
         basis.classes.as_deref(),
@@ -806,12 +933,13 @@ pub fn RadrootsAppUiListTitleView(basis: RadrootsAppUiListTitle) -> impl IntoVie
         padding_class,
     ]);
     let on_click = basis.on_click;
+    let has_click = on_click.is_some();
     let title_value = match basis.value {
         RadrootsAppUiListTitleValue::Spacer => {
             view! { <div class="flex-fluid"></div> }.into_any()
         }
         RadrootsAppUiListTitleValue::Text(value) => {
-            view! { <p class="text-trellis_ti uppercase ui-text-secondary">{value}</p> }.into_any()
+            view! { <p class="text-trellis_ti uppercase ui-text-tertiary">{value}</p> }.into_any()
         }
     };
     let link_view = basis.link.map(|link| {
@@ -867,10 +995,11 @@ pub fn RadrootsAppUiListTitleView(basis: RadrootsAppUiListTitle) -> impl IntoVie
         }
         .into_any()
     });
-    view! {
-        <div class=title_class>
+    let title_button = if has_click {
+        view! {
             <button
                 type="button"
+                id=id.clone()
                 class=button_class
                 on:click=move |_| {
                     if let Some(callback) = &on_click {
@@ -880,6 +1009,19 @@ pub fn RadrootsAppUiListTitleView(basis: RadrootsAppUiListTitle) -> impl IntoVie
             >
                 {title_value}
             </button>
+        }
+        .into_any()
+    } else {
+        view! {
+            <div id=id.clone() class=button_class>
+                {title_value}
+            </div>
+        }
+        .into_any()
+    };
+    view! {
+        <div class=title_class>
+            {title_button}
             {link_view}
         </div>
     }
@@ -925,7 +1067,7 @@ pub fn RadrootsAppUiListDefaultLabels(
         .collect_view();
     view! {
         <div class=wrap_class>
-            <p class="text-trellis_ti ui-text-secondary">{items}</p>
+            <p class="text-trellis_ti ui-text-tertiary">{items}</p>
         </div>
     }
 }
@@ -942,6 +1084,9 @@ pub fn RadrootsAppUiListView(basis: RadrootsAppUiList) -> impl IntoView {
         hide_offset,
         styles,
     } = basis;
+    let base_id = radroots_studio_app_ui_list_base_id(id.as_deref(), view.as_deref());
+    let title_id = radroots_studio_app_ui_list_title_id(base_id.as_str());
+    let items_id = radroots_studio_app_ui_list_items_id(base_id.as_str());
     let resolved_styles = radroots_studio_app_ui_list_styles_resolve(styles.as_ref());
     let wrap_class = radroots_studio_app_ui_list_class_merge(&[
         Some("flex flex-col"),
@@ -949,8 +1094,11 @@ pub fn RadrootsAppUiListView(basis: RadrootsAppUiList) -> impl IntoView {
     ]);
     let group_class = radroots_studio_app_ui_list_class_merge(&[
         Some("relative flex flex-col h-auto w-full gap-[3px]"),
+    ]);
+    let list_class = radroots_studio_app_ui_list_class_merge(&[
+        Some("flex flex-col w-full justify-center items-center"),
         if resolved_styles.set_title_background {
-            Some("ui-surface")
+            Some("list-group-surface")
         } else {
             None
         },
@@ -958,7 +1106,18 @@ pub fn RadrootsAppUiListView(basis: RadrootsAppUiList) -> impl IntoView {
     let view_value = view.unwrap_or_default();
     let title_view = if radroots_studio_app_ui_list_title_visible(title.as_ref(), default_state.as_ref())
     {
-        title.map(|title| view! { <RadrootsAppUiListTitleView basis=title /> }.into_any())
+        let title = title.map(|title| {
+            view! { <RadrootsAppUiListTitleView basis=title id=Some(title_id.clone()) /> }
+                .into_any()
+        });
+        Some(
+            view! {
+                <header class="flex flex-col w-full" data-ui="list-header">
+                    {title}
+                </header>
+            }
+            .into_any(),
+        )
     } else {
         None
     };
@@ -983,9 +1142,13 @@ pub fn RadrootsAppUiListView(basis: RadrootsAppUiList) -> impl IntoView {
     } else if let Some(list) = list {
         let items = list
             .into_iter()
-            .filter_map(|item| item)
-            .map(|item| {
+            .enumerate()
+            .filter_map(|(index, item)| item.map(|item| (index, item)))
+            .map(|(index, item)| {
                 let row_class = radroots_studio_app_ui_list_row_class(&item, &resolved_styles);
+                let row_id = radroots_studio_app_ui_list_item_id(base_id.as_str(), index);
+                let line_id = radroots_studio_app_ui_list_line_id(base_id.as_str(), index);
+                let row_state = if item.loading { "loading" } else { "ready" };
                 let offset_view = if hide_offset {
                     None
                 } else {
@@ -1002,6 +1165,7 @@ pub fn RadrootsAppUiListView(basis: RadrootsAppUiList) -> impl IntoView {
                             hide_active=item.hide_active
                             hide_border_top=resolved_styles.hide_border_top
                             hide_border_bottom=resolved_styles.hide_border_bottom
+                            line_id=line_id.clone()
                         />
                     }
                     .into_any(),
@@ -1010,6 +1174,7 @@ pub fn RadrootsAppUiListView(basis: RadrootsAppUiList) -> impl IntoView {
                             basis=input
                             hide_border_top=resolved_styles.hide_border_top
                             hide_border_bottom=resolved_styles.hide_border_bottom
+                            line_id=line_id.clone()
                         />
                     }
                     .into_any(),
@@ -1019,35 +1184,47 @@ pub fn RadrootsAppUiListView(basis: RadrootsAppUiList) -> impl IntoView {
                             hide_active=item.hide_active
                             hide_border_top=resolved_styles.hide_border_top
                             hide_border_bottom=resolved_styles.hide_border_bottom
+                            line_id=line_id.clone()
                         />
                     }
                     .into_any(),
                 };
                 view! {
-                    <div class=row_class>
+                    <li
+                        id=row_id
+                        class=row_class
+                        data-ui="list-row"
+                        data-state=row_state
+                    >
                         <div class="flex flex-row h-full w-full gap-1 items-center overflow-y-hidden">
                             {offset_view}
                             {row_view}
                         </div>
-                    </div>
+                    </li>
                 }
                 .into_any()
             })
             .collect_view();
         Some(
-            view! { <div class="flex flex-col w-full justify-center items-center">{items}</div> }
-                .into_any(),
+            view! { <ul id=items_id class=list_class>{items}</ul> }.into_any(),
         )
     } else {
         None
     };
+    let has_title = title_view.is_some();
     view! {
-        <div id=id class=wrap_class data-view=view_value>
+        <section
+            id=base_id
+            class=wrap_class
+            data-view=view_value
+            data-ui="list-group"
+            aria-labelledby=if has_title { Some(title_id.clone()) } else { None }
+        >
             <div class=group_class>
                 {title_view}
                 {content_view}
             </div>
-        </div>
+        </section>
     }
 }
 
