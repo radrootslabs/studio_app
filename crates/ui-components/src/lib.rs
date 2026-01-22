@@ -1,12 +1,19 @@
 #![forbid(unsafe_code)]
 
 mod button;
+mod icon;
 mod label;
 mod separator;
 mod dialog;
 mod sheet;
 
 pub use button::RadrootsAppUiButton;
+pub use icon::{
+    radroots_studio_app_ui_icon_data,
+    radroots_studio_app_ui_icon_key_from_name,
+    RadrootsAppUiIcon,
+    RadrootsAppUiIconKey,
+};
 pub use label::RadrootsAppUiLabel;
 pub use separator::{
     radroots_studio_app_ui_separator_orientation_value,
