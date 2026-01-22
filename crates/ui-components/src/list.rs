@@ -151,6 +151,72 @@ fn radroots_studio_app_ui_list_class_merge(parts: &[Option<&str>]) -> String {
     result
 }
 
+pub fn radroots_studio_app_ui_list_border_classes(
+    hide_border_top: bool,
+    hide_border_bottom: bool,
+) -> String {
+    let top = if hide_border_top {
+        "group-first:border-t-0"
+    } else {
+        "group-first:border-t-line"
+    };
+    let bottom = if hide_border_bottom {
+        "group-last:border-b-0"
+    } else {
+        "group-last:border-b-line"
+    };
+    format!("{top} {bottom}")
+}
+
+#[component]
+pub fn RadrootsAppUiListLine(
+    #[prop(optional)] loading: bool,
+    #[prop(optional)] hide_border_top: bool,
+    #[prop(optional)] hide_border_bottom: bool,
+    #[prop(optional)] on_click: Option<Callback<MouseEvent>>,
+    #[prop(optional)] end: Option<ChildrenFn>,
+    children: ChildrenFn,
+) -> impl IntoView {
+    let border_class = radroots_studio_app_ui_list_border_classes(hide_border_top, hide_border_bottom);
+    let line_class = radroots_studio_app_ui_list_class_merge(&[
+        Some("flex flex-row h-full w-full justify-center items-center border-t-line el-re"),
+        Some(border_class.as_str()),
+    ]);
+    let end_view = end.map(|slot| slot());
+    view! {
+        <button
+            type="button"
+            class="flex flex-row flex-grow overflow-hidden"
+            on:click=move |ev: MouseEvent| {
+                if let Some(callback) = &on_click {
+                    callback.run(ev);
+                }
+            }
+        >
+            <div class=line_class data-ui="list-line">
+                {if loading {
+                    view! {
+                        <div class="flex flex-row h-full w-full justify-center items-center">
+                            <RadrootsAppUiSpinner />
+                        </div>
+                    }
+                    .into_any()
+                } else {
+                    view! {
+                        <div class="relative group flex flex-row h-line w-full pr-[2px] justify-between items-center el-re">
+                            <div class="flex flex-row h-full w-trellis_display justify-between items-center">
+                                {children()}
+                            </div>
+                            {end_view}
+                        </div>
+                    }
+                    .into_any()
+                }}
+            </div>
+        </button>
+    }
+}
+
 fn radroots_studio_app_ui_list_title_padding_class(mod_value: Option<&RadrootsAppUiListOffsetMod>) -> Option<&'static str> {
     match mod_value {
         Some(RadrootsAppUiListOffsetMod::Small) => Some("pl-[16px]"),
@@ -591,6 +657,7 @@ pub fn RadrootsAppUiListDefaultLabels(
 mod tests {
     use super::{
         radroots_studio_app_ui_list_class_merge,
+        radroots_studio_app_ui_list_border_classes,
         radroots_studio_app_ui_list_group_data_ui_value,
         radroots_studio_app_ui_list_row_data_ui_value,
         radroots_studio_app_ui_list_row_leading_data_ui_value,
@@ -626,6 +693,14 @@ mod tests {
             Some("beta"),
         ]);
         assert_eq!(merged, "alpha beta");
+    }
+
+    #[test]
+    fn list_border_classes_match_flags() {
+        let classes = radroots_studio_app_ui_list_border_classes(true, false);
+        assert_eq!(classes, "group-first:border-t-0 group-last:border-b-line");
+        let classes = radroots_studio_app_ui_list_border_classes(false, true);
+        assert_eq!(classes, "group-first:border-t-line group-last:border-b-0");
     }
 
     #[test]
