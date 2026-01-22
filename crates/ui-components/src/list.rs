@@ -19,6 +19,7 @@ use crate::{
     RadrootsAppUiListLabelValueKind,
     RadrootsAppUiListOffset,
     RadrootsAppUiListOffsetMod,
+    RadrootsAppUiListSelect,
     RadrootsAppUiListTitle,
     RadrootsAppUiListTitleValue,
     RadrootsAppUiListTouch,
@@ -266,6 +267,10 @@ fn radroots_studio_app_ui_list_input_action_icon_key(
         .as_ref()
         .and_then(radroots_studio_app_ui_list_icon_key)
         .unwrap_or(RadrootsAppUiIconKey::Plus)
+}
+
+fn radroots_studio_app_ui_list_display_loading(display: Option<&RadrootsAppUiListDisplay>) -> bool {
+    display.map(|value| value.loading).unwrap_or(false)
 }
 
 fn radroots_studio_app_ui_list_label_value_view(
@@ -676,6 +681,86 @@ pub fn RadrootsAppUiListInputRow(
 }
 
 #[component]
+pub fn RadrootsAppUiListSelectRow(
+    basis: RadrootsAppUiListSelect,
+    #[prop(optional)] hide_active: bool,
+    #[prop(optional)] hide_border_top: bool,
+    #[prop(optional)] hide_border_bottom: bool,
+) -> impl IntoView {
+    let RadrootsAppUiListSelect {
+        field,
+        label,
+        display,
+        end,
+        loading,
+        on_click,
+    } = basis;
+    let end_slot = end.map(|end| {
+        let hide_active = hide_active;
+        Arc::new(move || {
+            let end_value = end.clone();
+            view! { <RadrootsAppUiListTouchEndView basis=end_value hide_active=hide_active /> }.into_any()
+        }) as ChildrenFn
+    });
+    let select_class = radroots_studio_app_ui_list_class_merge(&[
+        Some("el-select"),
+        field.classes.as_deref(),
+    ]);
+    let select_id = field.id;
+    let select_value = field.value.clone();
+    let select_disabled = field.disabled;
+    let on_change = field.on_change;
+    let display_loading = radroots_studio_app_ui_list_display_loading(display.as_ref());
+    let options = field.options;
+    view! {
+        <RadrootsAppUiListLine
+            loading=loading
+            hide_border_top=hide_border_top
+            hide_border_bottom=hide_border_bottom
+            on_click=on_click
+            end=end_slot
+        >
+            <RadrootsAppUiListRowLabel basis=label.clone() hide_active=hide_active />
+            <div class="flex flex-row pr-3 justify-center items-end" data-ui="list-select">
+                {if display_loading {
+                    view! { <RadrootsAppUiSpinner class="text-[12px]".to_string() /> }.into_any()
+                } else if let Some(display) = display.as_ref() {
+                    let display = display.clone();
+                    view! { <RadrootsAppUiListRowDisplayValue basis=display hide_active=hide_active /> }.into_any()
+                } else {
+                    let options_view = options
+                        .iter()
+                        .cloned()
+                        .map(|option| {
+                            let class = radroots_studio_app_ui_list_class_merge(&[
+                                option.classes.as_deref(),
+                            ]);
+                            view! { <option value=option.value class=class>{option.label}</option> }
+                        })
+                        .collect_view();
+                    view! {
+                        <select
+                            id=select_id.clone()
+                            class=select_class.clone()
+                            disabled=select_disabled
+                            prop:value=select_value.clone()
+                            on:change=move |ev| {
+                                if let Some(callback) = &on_change {
+                                    callback.run(event_target_value(&ev));
+                                }
+                            }
+                        >
+                            {options_view}
+                        </select>
+                    }
+                    .into_any()
+                }}
+            </div>
+        </RadrootsAppUiListLine>
+    }
+}
+
+#[component]
 pub fn RadrootsAppUiListTitleView(basis: RadrootsAppUiListTitle) -> impl IntoView {
     let title_class = radroots_studio_app_ui_list_class_merge(&[
         Some("flex flex-row h-[24px] w-full pl-[2px] gap-1 items-center"),
@@ -825,6 +910,7 @@ mod tests {
         radroots_studio_app_ui_list_default_labels,
         radroots_studio_app_ui_list_offset_mod,
         radroots_studio_app_ui_list_input_action_icon_key,
+        radroots_studio_app_ui_list_display_loading,
         radroots_studio_app_ui_list_title_padding_class,
     };
     use crate::{
@@ -911,5 +997,10 @@ mod tests {
             radroots_studio_app_ui_list_input_action_icon_key(&action),
             RadrootsAppUiIconKey::Plus
         );
+    }
+
+    #[test]
+    fn list_display_loading_defaults_false() {
+        assert!(!radroots_studio_app_ui_list_display_loading(None));
     }
 }
