@@ -11,6 +11,7 @@ mod keystore;
 mod logging;
 mod logs;
 mod notifications;
+mod settings;
 mod setup;
 mod tangle;
 mod ui_demo;
@@ -62,6 +63,7 @@ pub use keystore::{
     RadrootsAppKeystoreResult,
 };
 pub use logs::RadrootsAppLogsPage;
+pub use settings::RadrootsAppSettingsPage;
 pub use ui_demo::RadrootsAppUiDemoPage;
 pub use logging::{
     app_log_entry_error,
