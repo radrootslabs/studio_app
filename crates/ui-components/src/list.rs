@@ -1,5 +1,7 @@
 #![forbid(unsafe_code)]
 
+use std::sync::Arc;
+
 use leptos::ev::MouseEvent;
 use leptos::prelude::*;
 
@@ -16,6 +18,7 @@ use crate::{
     RadrootsAppUiListOffsetMod,
     RadrootsAppUiListTitle,
     RadrootsAppUiListTitleValue,
+    RadrootsAppUiListTouch,
     RadrootsAppUiListTouchEnd,
     RadrootsAppUiSpinner,
 };
@@ -151,6 +154,10 @@ fn radroots_studio_app_ui_list_class_merge(parts: &[Option<&str>]) -> String {
     result
 }
 
+fn radroots_studio_app_ui_list_active_class(hide_active: bool) -> Option<&'static str> {
+    if hide_active { None } else { Some("opacity-active") }
+}
+
 pub fn radroots_studio_app_ui_list_border_classes(
     hide_border_top: bool,
     hide_border_bottom: bool,
@@ -173,8 +180,8 @@ pub fn RadrootsAppUiListLine(
     #[prop(optional)] loading: bool,
     #[prop(optional)] hide_border_top: bool,
     #[prop(optional)] hide_border_bottom: bool,
-    #[prop(optional)] on_click: Option<Callback<MouseEvent>>,
-    #[prop(optional)] end: Option<ChildrenFn>,
+    on_click: Option<Callback<MouseEvent>>,
+    end: Option<ChildrenFn>,
     children: ChildrenFn,
 ) -> impl IntoView {
     let border_class = radroots_studio_app_ui_list_border_classes(hide_border_top, hide_border_bottom);
@@ -258,12 +265,12 @@ fn radroots_studio_app_ui_list_label_value_view(
         hide_truncate,
         value,
     } = value;
+    let active_class = radroots_studio_app_ui_list_active_class(hide_active);
     let wrap_class = radroots_studio_app_ui_list_class_merge(&[
         Some("flex flex-row h-full items-center"),
         if hide_truncate { None } else { Some("truncate") },
         classes_wrap.as_deref(),
     ]);
-    let active_class = if hide_active { None } else { Some("opacity-active") };
     let view = match value {
         RadrootsAppUiListLabelValueKind::Text(value) => {
             let text_class = radroots_studio_app_ui_list_class_merge(&[
@@ -329,9 +336,10 @@ pub fn RadrootsAppUiListRowDisplayValue(
     let display = match basis.value {
         RadrootsAppUiListDisplayValue::Icon(icon) => {
             let icon_key = radroots_studio_app_ui_list_icon_key(&icon);
+            let active_class = radroots_studio_app_ui_list_active_class(hide_active);
             let icon_class = radroots_studio_app_ui_list_class_merge(&[
                 Some("ui-text-secondary"),
-                if hide_active { None } else { Some("opacity-active") },
+                active_class,
                 icon.class.as_deref(),
             ]);
             if let Some(icon_key) = icon_key {
@@ -341,9 +349,10 @@ pub fn RadrootsAppUiListRowDisplayValue(
             }
         }
         RadrootsAppUiListDisplayValue::Label(label) => {
+            let active_class = radroots_studio_app_ui_list_active_class(hide_active);
             let text_class = radroots_studio_app_ui_list_class_merge(&[
                 Some("text-line_d_e ui-text-secondary line-clamp-1"),
-                if hide_active { None } else { Some("opacity-active") },
+                active_class,
                 label.classes.as_deref(),
             ]);
             view! { <p class=text_class>{label.value}</p> }.into_any()
@@ -491,9 +500,10 @@ pub fn RadrootsAppUiListTouchEndView(
     #[prop(optional)] hide_active: bool,
 ) -> impl IntoView {
     let icon_key = radroots_studio_app_ui_list_icon_key(&basis.icon);
+    let active_class = radroots_studio_app_ui_list_active_class(hide_active);
     let icon_class = radroots_studio_app_ui_list_class_merge(&[
         Some("ui-text-secondary opacity-70 translate-y-[1px]"),
-        if hide_active { None } else { Some("opacity-active") },
+        active_class,
         basis.icon.class.as_deref(),
     ]);
     let on_click = basis.on_click;
@@ -514,6 +524,42 @@ pub fn RadrootsAppUiListTouchEndView(
                 {icon_view}
             </button>
         </div>
+    }
+}
+
+#[component]
+pub fn RadrootsAppUiListTouchRow(
+    basis: RadrootsAppUiListTouch,
+    #[prop(optional)] hide_active: bool,
+    #[prop(optional)] hide_border_top: bool,
+    #[prop(optional)] hide_border_bottom: bool,
+    #[prop(optional)] loading: bool,
+) -> impl IntoView {
+    let label = basis.label;
+    let display = basis.display;
+    let end = basis.end;
+    let on_click = basis.on_click;
+    let end_slot = end.map(|end| {
+        let hide_active = hide_active;
+        Arc::new(move || {
+            let end_value = end.clone();
+            view! { <RadrootsAppUiListTouchEndView basis=end_value hide_active=hide_active /> }.into_any()
+        }) as ChildrenFn
+    });
+    view! {
+        <RadrootsAppUiListLine
+            loading=loading
+            hide_border_top=hide_border_top
+            hide_border_bottom=hide_border_bottom
+            on_click=on_click
+            end=end_slot
+        >
+            <RadrootsAppUiListRowLabel basis=label.clone() hide_active=hide_active />
+            {display.as_ref().map(|display| {
+                let display = display.clone();
+                view! { <RadrootsAppUiListRowDisplayValue basis=display hide_active=hide_active /> }.into_any()
+            })}
+        </RadrootsAppUiListLine>
     }
 }
 
@@ -656,6 +702,7 @@ pub fn RadrootsAppUiListDefaultLabels(
 #[cfg(test)]
 mod tests {
     use super::{
+        radroots_studio_app_ui_list_active_class,
         radroots_studio_app_ui_list_class_merge,
         radroots_studio_app_ui_list_border_classes,
         radroots_studio_app_ui_list_group_data_ui_value,
@@ -693,6 +740,12 @@ mod tests {
             Some("beta"),
         ]);
         assert_eq!(merged, "alpha beta");
+    }
+
+    #[test]
+    fn list_active_class_respects_flag() {
+        assert_eq!(radroots_studio_app_ui_list_active_class(true), None);
+        assert_eq!(radroots_studio_app_ui_list_active_class(false), Some("opacity-active"));
     }
 
     #[test]

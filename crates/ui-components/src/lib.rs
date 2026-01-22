@@ -36,6 +36,7 @@ pub use list::{
     RadrootsAppUiListSection,
     RadrootsAppUiListTitleView,
     RadrootsAppUiListTouchEndView,
+    RadrootsAppUiListTouchRow,
 };
 pub use list_types::{
     radroots_studio_app_ui_list_icon_key,
