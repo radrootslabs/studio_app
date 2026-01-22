@@ -5,6 +5,7 @@ use std::sync::{Arc, Mutex};
 
 use radroots_studio_app_ui_core::RadrootsAppUiId;
 use radroots_studio_app_ui_primitives::{
+    RadrootsAppUiDismissableReason,
     RadrootsAppUiDismissableLayer,
     RadrootsAppUiFocusScope,
     RadrootsAppUiModalGuard,
@@ -23,6 +24,7 @@ use radroots_studio_app_ui_primitives::{
 struct RadrootsAppUiDialogContext {
     open: Signal<bool>,
     set_open: Callback<bool>,
+    dismiss: Callback<RadrootsAppUiDismissableReason>,
     modal: bool,
     content_id: String,
     title_id: RwSignal<Option<String>>,
@@ -49,7 +51,7 @@ pub fn RadrootsAppUiDialogRoot(
     let open_prop = open;
     let is_controlled = open_prop.is_some();
     let open_signal = match open_prop {
-        Some(open) => Signal::derive(move || open.get()),
+        Some(open) => open.into(),
         None => open_state.into(),
     };
     let on_open_change = on_open_change.clone();
@@ -61,6 +63,12 @@ pub fn RadrootsAppUiDialogRoot(
             callback.run(value);
         }
     });
+    let dismiss = {
+        let set_open = set_open.clone();
+        Callback::new(move |_reason: RadrootsAppUiDismissableReason| {
+            set_open.run(false);
+        })
+    };
     let content_id = RadrootsAppUiId::next().prefixed("dialog-content");
     let modal = modal.unwrap_or(true);
     let title_id = RwSignal::new(None::<String>);
@@ -68,6 +76,7 @@ pub fn RadrootsAppUiDialogRoot(
     provide_context(RadrootsAppUiDialogContext {
         open: open_signal,
         set_open,
+        dismiss,
         modal,
         content_id,
         title_id,
@@ -116,7 +125,7 @@ pub fn RadrootsAppUiDialogTrigger(
 pub fn RadrootsAppUiDialogPortal(children: ChildrenFn) -> impl IntoView {
     let context = use_context::<RadrootsAppUiDialogContext>()
         .expect("dialog context");
-    let present = Signal::derive(move || context.open.get());
+    let present = context.open;
     let children = StoredValue::new(children);
     view! {
         <RadrootsAppUiPresence present=present>
@@ -175,10 +184,13 @@ pub fn RadrootsAppUiDialogContent(
 
     #[cfg(target_arch = "wasm32")]
     {
-        let node_ref = node_ref.clone();
+        use leptos::wasm_bindgen::JsCast;
+        use leptos::web_sys;
+
+        let node_ref = node_ref;
         let scroll_guard = Arc::clone(&scroll_guard);
         let modal_guard = Arc::clone(&modal_guard);
-        on_mount(move || {
+        node_ref.on_load(move |root| {
             if modal {
                 if let Ok(guard) = radroots_studio_app_ui_scroll_lock_acquire() {
                     let mut state = scroll_guard
@@ -186,13 +198,12 @@ pub fn RadrootsAppUiDialogContent(
                         .unwrap_or_else(|poisoned| poisoned.into_inner());
                     *state = Some(guard);
                 }
-                if let Some(root) = node_ref.get() {
-                    if let Ok(guard) = radroots_studio_app_ui_modal_hide_siblings(&root) {
-                        let mut state = modal_guard
-                            .lock()
-                            .unwrap_or_else(|poisoned| poisoned.into_inner());
-                        *state = Some(guard);
-                    }
+                let element: web_sys::Element = root.unchecked_into();
+                if let Ok(guard) = radroots_studio_app_ui_modal_hide_siblings(&element) {
+                    let mut state = modal_guard
+                        .lock()
+                        .unwrap_or_else(|poisoned| poisoned.into_inner());
+                    *state = Some(guard);
                 }
             }
         });
@@ -211,12 +222,7 @@ pub fn RadrootsAppUiDialogContent(
             .take();
     });
 
-    let on_dismiss = {
-        let set_open = context.set_open.clone();
-        Callback::new(move |_reason| {
-            set_open.run(false);
-        })
-    };
+    let on_dismiss = context.dismiss.clone();
 
     let labelled_by = move || context.title_id.get();
     let described_by = move || context.description_id.get();

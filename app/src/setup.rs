@@ -6,12 +6,14 @@ use radroots_studio_app_core::keystore::RadrootsClientKeystoreNostr;
 #[cfg(target_arch = "wasm32")]
 use js_sys::Date;
 
+#[cfg(not(target_arch = "wasm32"))]
+use chrono::{SecondsFormat, Utc};
+
 use crate::{
     app_datastore_create_state,
     app_datastore_key_nostr_key,
     app_keystore_nostr_ensure_key,
     app_log_debug_emit,
-    app_state_timestamp_ms,
     RadrootsAppInitError,
     RadrootsAppInitResult,
     RadrootsAppKeyMapConfig,
@@ -27,7 +29,7 @@ pub fn app_setup_eula_date() -> String {
 
 #[cfg(not(target_arch = "wasm32"))]
 pub fn app_setup_eula_date() -> String {
-    app_state_timestamp_ms().to_string()
+    Utc::now().to_rfc3339_opts(SecondsFormat::Millis, true)
 }
 
 pub fn app_setup_state_new(active_key: String, eula_date: String) -> RadrootsAppState {

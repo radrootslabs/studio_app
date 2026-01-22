@@ -1,6 +1,9 @@
 use core::fmt;
 use core::sync::atomic::{AtomicU8, Ordering};
 
+#[cfg(target_arch = "wasm32")]
+use alloc::boxed::Box;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RadrootsAppUiInputModality {
     Keyboard,
@@ -99,20 +102,29 @@ mod tests {
         radroots_studio_app_ui_input_modality_get,
         radroots_studio_app_ui_input_modality_set,
         RadrootsAppUiInputModality,
+        RADROOTS_APP_UI_INPUT_MODE,
     };
+    use core::sync::atomic::Ordering;
+
+    fn reset_input_modality() {
+        RADROOTS_APP_UI_INPUT_MODE.store(0, Ordering::Relaxed);
+    }
 
     #[test]
     fn input_modality_defaults_to_none() {
+        reset_input_modality();
         let current = radroots_studio_app_ui_input_modality_get();
         assert!(current.is_none());
     }
 
     #[test]
     fn input_modality_set_roundtrips() {
+        reset_input_modality();
         radroots_studio_app_ui_input_modality_set(RadrootsAppUiInputModality::Keyboard);
         assert_eq!(
             radroots_studio_app_ui_input_modality_get(),
             Some(RadrootsAppUiInputModality::Keyboard)
         );
+        reset_input_modality();
     }
 }

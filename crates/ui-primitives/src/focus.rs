@@ -2,6 +2,9 @@ use leptos::ev::KeyboardEvent;
 use leptos::html;
 use leptos::prelude::*;
 
+#[cfg(target_arch = "wasm32")]
+use wasm_bindgen::JsCast;
+
 const RADROOTS_APP_UI_FOCUSABLE_SELECTOR: &str =
     "a[href],button,textarea,input,select,[tabindex]:not([tabindex='-1'])";
 
@@ -44,22 +47,18 @@ pub fn RadrootsAppUiFocusScope(
     #[cfg(target_arch = "wasm32")]
     {
         use wasm_bindgen::closure::Closure;
-        use wasm_bindgen::JsCast;
+        use send_wrapper::SendWrapper;
 
         let on_mount_auto_focus = on_mount_auto_focus.clone();
         let on_unmount_auto_focus = on_unmount_auto_focus.clone();
-        let node_ref = node_ref.clone();
+        let node_ref = node_ref;
 
-        on_mount(move || {
-            let document = match window().and_then(|window| window.document()) {
+        node_ref.on_load(move |root| {
+            let document = match web_sys::window().and_then(|window| window.document()) {
                 Some(document) => document,
                 None => return,
             };
-            let root = match node_ref.get() {
-                Some(root) => root,
-                None => return,
-            };
-            let previous_focus = document.active_element();
+            let previous_focus = document.active_element().map(SendWrapper::new);
 
             if auto_focus {
                 let _ = radroots_studio_app_ui_focus_scope_focus_first(&root, &document);
@@ -90,10 +89,13 @@ pub fn RadrootsAppUiFocusScope(
 
             if return_focus {
                 let on_unmount_auto_focus = on_unmount_auto_focus.clone();
-                let previous_focus = previous_focus.clone();
+                let previous_focus = previous_focus;
                 on_cleanup(move || {
                     if let Some(element) = previous_focus {
-                        let _ = element.dyn_ref::<web_sys::HtmlElement>().map(|el| el.focus());
+                        let element = element.take();
+                        let _ = element
+                            .dyn_ref::<web_sys::HtmlElement>()
+                            .map(|el| el.focus());
                     }
                     if let Some(callback) = on_unmount_auto_focus.as_ref() {
                         callback.run(());
@@ -135,16 +137,20 @@ fn radroots_studio_app_ui_focus_scope_focus_first(
         .map_err(|_| ())?;
     if list.length() == 0 {
         if let Some(element) = root.dyn_ref::<web_sys::HtmlElement>() {
-            element.focus();
+            let _ = element.focus();
         }
         return Ok(());
     }
     let first = list
         .item(0)
         .and_then(|node| node.dyn_into::<web_sys::HtmlElement>().ok())
-        .or_else(|| document.active_element().and_then(|el| el.dyn_into().ok()));
+        .or_else(|| {
+            document
+                .active_element()
+                .and_then(|el| el.dyn_into::<web_sys::HtmlElement>().ok())
+        });
     if let Some(element) = first {
-        element.focus();
+        let _ = element.focus();
     }
     Ok(())
 }
@@ -182,7 +188,7 @@ fn radroots_studio_app_ui_focus_scope_cycle(
         .item(next_index as u32)
         .and_then(|node| node.dyn_into::<web_sys::HtmlElement>().ok())
     {
-        next.focus();
+        let _ = next.focus();
     }
     Ok(())
 }

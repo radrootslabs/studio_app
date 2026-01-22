@@ -44,19 +44,16 @@ pub fn RadrootsAppUiDismissableLayer(
     {
         use wasm_bindgen::closure::Closure;
         use wasm_bindgen::JsCast;
+        use send_wrapper::SendWrapper;
 
         let on_dismiss = on_dismiss.clone();
         let on_pointer_down_outside = on_pointer_down_outside.clone();
         let on_focus_outside = on_focus_outside.clone();
-        let node_ref = node_ref.clone();
+        let node_ref = node_ref;
 
-        on_mount(move || {
-            let document = match window().and_then(|window| window.document()) {
+        node_ref.on_load(move |root| {
+            let document = match web_sys::window().and_then(|window| window.document()) {
                 Some(document) => document,
-                None => return,
-            };
-            let root = match node_ref.get() {
-                Some(root) => root,
                 None => return,
             };
 
@@ -85,7 +82,16 @@ pub fn RadrootsAppUiDismissableLayer(
                     "pointerdown",
                     handler.as_ref().unchecked_ref(),
                 );
-                handler.forget();
+                let cleanup_doc = SendWrapper::new(document.clone());
+                let cleanup_handler = SendWrapper::new(handler);
+                on_cleanup(move || {
+                    let document = cleanup_doc.take();
+                    let handler = cleanup_handler.take();
+                    let _ = document.remove_event_listener_with_callback(
+                        "pointerdown",
+                        handler.as_ref().unchecked_ref(),
+                    );
+                });
             }
 
             let root_focus = root.clone();
@@ -112,7 +118,16 @@ pub fn RadrootsAppUiDismissableLayer(
                 "focusin",
                 focus_handler.as_ref().unchecked_ref(),
             );
-            focus_handler.forget();
+            let cleanup_doc = SendWrapper::new(document);
+            let cleanup_handler = SendWrapper::new(focus_handler);
+            on_cleanup(move || {
+                let document = cleanup_doc.take();
+                let handler = cleanup_handler.take();
+                let _ = document.remove_event_listener_with_callback(
+                    "focusin",
+                    handler.as_ref().unchecked_ref(),
+                );
+            });
         });
     }
     #[cfg(not(target_arch = "wasm32"))]

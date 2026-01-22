@@ -40,7 +40,7 @@ pub fn RadrootsAppUiPresence(
     #[prop(optional)] on_exit_complete: Option<Callback<()>>,
     children: ChildrenFn,
 ) -> impl IntoView {
-    let state = RwSignal::new(if present.get() {
+    let state = RwSignal::new(if present.get_untracked() {
         RadrootsAppUiPresenceState::Mounted
     } else {
         RadrootsAppUiPresenceState::Unmounted
@@ -55,8 +55,13 @@ pub fn RadrootsAppUiPresence(
 
     let on_exit_complete = on_exit_complete.clone();
     let end_handler = Arc::new(move || {
-        let next = radroots_studio_app_ui_presence_state_next(state.get(), present.get(), true);
-        if next != state.get() {
+        let current_state = state.get_untracked();
+        let next = radroots_studio_app_ui_presence_state_next(
+            current_state,
+            present.get_untracked(),
+            true,
+        );
+        if next != current_state {
             state.set(next);
             if next == RadrootsAppUiPresenceState::Unmounted {
                 if let Some(callback) = on_exit_complete.as_ref() {

@@ -1,6 +1,9 @@
 use leptos::prelude::*;
 
 #[cfg(target_arch = "wasm32")]
+use leptos::portal::Portal;
+
+#[cfg(target_arch = "wasm32")]
 pub type RadrootsAppUiPortalMount = web_sys::Element;
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -8,12 +11,15 @@ pub type RadrootsAppUiPortalMount = ();
 
 #[component]
 pub fn RadrootsAppUiPortal(
-    #[prop(into, optional)] mount: Option<RadrootsAppUiPortalMount>,
+    #[prop(optional)] mount: Option<RadrootsAppUiPortalMount>,
     children: ChildrenFn,
 ) -> impl IntoView {
     #[cfg(target_arch = "wasm32")]
     {
-        view! { <Portal mount=mount>{children()}</Portal> }
+        match mount {
+            Some(mount) => view! { <Portal mount=mount>{children()}</Portal> },
+            None => view! { <Portal>{children()}</Portal> },
+        }
     }
     #[cfg(not(target_arch = "wasm32"))]
     {

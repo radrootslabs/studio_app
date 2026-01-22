@@ -14,6 +14,8 @@ radroots-app-ui-core = { path = "../ui-core" }
 leptos = { workspace = true, features = ["csr"] }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
+wasm-bindgen = { workspace = true }
+send_wrapper = { workspace = true }
 web-sys = { workspace = true, features = [
   "CssStyleDeclaration",
   "Document",

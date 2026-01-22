@@ -1,7 +1,11 @@
+#[cfg(target_arch = "wasm32")]
+use std::cell::RefCell;
+
+#[cfg(not(target_arch = "wasm32"))]
 use std::sync::{Mutex, OnceLock};
 
 #[cfg(target_arch = "wasm32")]
-use web_sys::{window, Element, HtmlCollection};
+use web_sys::{window, Element};
 
 #[cfg(target_arch = "wasm32")]
 #[derive(Debug, Clone)]
@@ -58,36 +62,51 @@ impl Drop for RadrootsAppUiModalGuard {
     }
 }
 
+#[cfg(target_arch = "wasm32")]
+thread_local! {
+    static MODAL_STATE: RefCell<ModalState> = RefCell::new(ModalState::default());
+}
+
+#[cfg(not(target_arch = "wasm32"))]
 static MODAL_STATE: OnceLock<Mutex<ModalState>> = OnceLock::new();
 
-fn modal_state() -> &'static Mutex<ModalState> {
-    MODAL_STATE.get_or_init(|| Mutex::new(ModalState::default()))
+#[cfg(target_arch = "wasm32")]
+fn modal_state_with<T>(f: impl FnOnce(&mut ModalState) -> T) -> T {
+    MODAL_STATE.with(|state| f(&mut state.borrow_mut()))
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn modal_state_with<T>(f: impl FnOnce(&mut ModalState) -> T) -> T {
+    let mut state = MODAL_STATE
+        .get_or_init(|| Mutex::new(ModalState::default()))
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    f(&mut state)
 }
 
 pub fn radroots_studio_app_ui_modal_hide_siblings(
     root: &RadrootsAppUiModalTarget,
 ) -> RadrootsAppUiModalResult<RadrootsAppUiModalGuard> {
-    let mut state = modal_state()
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner());
-    let id = state.next_id;
-    state.next_id = state.next_id.saturating_add(1);
-    let hidden = modal_collect_hidden(root)?;
-    state.layers.push(ModalLayer { id, hidden });
+    let id = modal_state_with(|state| {
+        let id = state.next_id;
+        state.next_id = state.next_id.saturating_add(1);
+        let hidden = modal_collect_hidden(root)?;
+        state.layers.push(ModalLayer { id, hidden });
+        Ok(id)
+    })?;
     Ok(RadrootsAppUiModalGuard { id, active: true })
 }
 
 pub fn radroots_studio_app_ui_modal_restore(id: u64) -> RadrootsAppUiModalResult<()> {
-    let mut state = modal_state()
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner());
-    let index = state.layers.iter().position(|layer| layer.id == id);
-    let Some(index) = index else {
-        return Ok(());
-    };
-    let removed = state.layers.remove(index);
-    modal_restore_hidden(&state.layers, removed.hidden)?;
-    Ok(())
+    modal_state_with(|state| {
+        let index = state.layers.iter().position(|layer| layer.id == id);
+        let Some(index) = index else {
+            return Ok(());
+        };
+        let removed = state.layers.remove(index);
+        modal_restore_hidden(&state.layers, removed.hidden)?;
+        Ok(())
+    })
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -192,10 +211,7 @@ fn modal_is_hidden_by_layers(_layers: &[ModalLayer], _element: &RadrootsAppUiMod
 
 #[cfg(test)]
 fn modal_layer_count_for_test() -> usize {
-    let state = modal_state()
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner());
-    state.layers.len()
+    modal_state_with(|state| state.layers.len())
 }
 
 #[cfg(test)]

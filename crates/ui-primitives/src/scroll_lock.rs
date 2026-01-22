@@ -84,8 +84,11 @@ fn scroll_lock_apply(state: &mut ScrollLockState) -> RadrootsAppUiScrollLockResu
         .body()
         .ok_or(RadrootsAppUiScrollLockError::BodyUnavailable)?;
     let style = body.style();
+    let scroll_y = window
+        .scroll_y()
+        .map_err(|_| RadrootsAppUiScrollLockError::StyleUnavailable)?;
     let snapshot = ScrollLockSnapshot {
-        scroll_y: window.scroll_y(),
+        scroll_y,
         overflow: style_value(&style, "overflow")?,
         position: style_value(&style, "position")?,
         top: style_value(&style, "top")?,
