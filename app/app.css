@@ -1,9 +1,10 @@
-@import "../../crates/ui-tokens/assets/tokens.css";
-@import "./list.css";
+@import "tailwindcss";
+@import "../crates/ui-tokens/assets/tokens.css";
+@import "../crates/ui-components/assets/list.css";
 
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
+@source "./index.html";
+@source "./src/**/*.rs";
+@source "../crates/**/*.rs";
 
 @layer base {
   html {
