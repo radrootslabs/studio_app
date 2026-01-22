@@ -6,6 +6,7 @@ mod label;
 mod list;
 mod list_types;
 mod separator;
+mod spinner;
 mod dialog;
 mod sheet;
 
@@ -70,6 +71,7 @@ pub use separator::{
     RadrootsAppUiSeparator,
     RadrootsAppUiSeparatorOrientation,
 };
+pub use spinner::RadrootsAppUiSpinner;
 pub use dialog::{
     radroots_studio_app_ui_dialog_state_value,
     RadrootsAppUiDialogClose,
