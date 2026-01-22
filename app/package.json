@@ -1,0 +1,7 @@
+{
+  "name": "radroots-app",
+  "private": true,
+  "devDependencies": {
+    "daisyui": "^4.12.0"
+  }
+}
