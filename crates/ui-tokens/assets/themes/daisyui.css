@@ -13,7 +13,7 @@
   --sc: var(--accent-contrast);
   --a: var(--accent);
   --ac: var(--accent-contrast);
-  --n: var(--text-tertiary);
+  --n: var(--bg-elevated);
   --nc: var(--text-primary);
   --b1: var(--bg-app);
   --b2: var(--bg-grouped);
@@ -46,7 +46,7 @@
   --sc: var(--accent-contrast);
   --a: var(--accent);
   --ac: var(--accent-contrast);
-  --n: var(--text-tertiary);
+  --n: var(--bg-elevated);
   --nc: var(--text-primary);
   --b1: var(--bg-app);
   --b2: var(--bg-grouped);
