@@ -44,6 +44,10 @@
     @apply flex flex-row w-full px-2 items-center;
 }
 
+@utility el-textarea {
+    @apply w-full p-0 pl-2 py-3 rounded-touch;
+}
+
 .el-textarea-ly1:focus {
     border-color: hsl(var(--ly1-focus));
 }
@@ -60,6 +64,10 @@
 }
 
 @utility el-input {
+    @apply input w-full p-0;
+}
+
+@utility el-input {
     @apply flex flex-row w-full p-0 justify-center items-center border-0 focus:border-0 outline-0 focus:outline-0 bg-transparent disabled:bg-transparent font-sans font-[400] placeholder:font-[400] text-form_base;
 }
 
@@ -68,7 +76,7 @@
 }
 
 @utility el-textarea {
-    @apply flex flex-row w-full p-0 pl-2 py-3 justify-center items-center border-0 focus:border-0 outline-0 focus:outline-0 bg-transparent disabled:bg-transparent font-sans font-[400] placeholder:font-[400] text-form_base rounded-touch;
+    @apply flex flex-row w-full p-0 justify-center items-center border-0 focus:border-0 outline-0 focus:outline-0 bg-transparent disabled:bg-transparent font-sans font-[400] placeholder:font-[400] text-form_base;
 }
 
 @utility el-select-centered {
