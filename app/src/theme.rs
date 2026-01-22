@@ -81,6 +81,7 @@ fn app_theme_prefers_dark() -> bool {
 
 #[cfg(target_arch = "wasm32")]
 fn app_theme_apply_name(name: &str) -> RadrootsAppThemeResult<()> {
+    use leptos::wasm_bindgen::JsCast;
     let Some(window) = web_sys::window() else {
         return Err(RadrootsAppThemeError::Unavailable);
     };
@@ -93,8 +94,10 @@ fn app_theme_apply_name(name: &str) -> RadrootsAppThemeResult<()> {
     root.set_attribute("data-theme", name)
         .map_err(|_| RadrootsAppThemeError::Unavailable)?;
     let color_scheme = if name == "os_dark" { "dark" } else { "light" };
-    let style = root.style();
-    style
+    let html = root
+        .dyn_into::<web_sys::HtmlElement>()
+        .map_err(|_| RadrootsAppThemeError::Unavailable)?;
+    html.style()
         .set_property("color-scheme", color_scheme)
         .map_err(|_| RadrootsAppThemeError::Unavailable)?;
     Ok(())

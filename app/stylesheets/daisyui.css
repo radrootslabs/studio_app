@@ -1,11 +1,5 @@
-@plugin "daisyui" {
-  themes: os_light, os_dark;
-}
-
-@plugin "daisyui/theme" {
-  name: "os_light";
-  default: false;
-  prefersdark: false;
+:root,
+:root[data-theme="os_light"] {
   color-scheme: light;
   --p: var(--accent);
   --pc: var(--accent-contrast);
@@ -35,10 +29,39 @@
   --tab-radius: 0.75rem;
 }
 
-@plugin "daisyui/theme" {
-  name: "os_dark";
-  default: false;
-  prefersdark: true;
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="os_light"]) {
+    color-scheme: dark;
+    --p: var(--accent);
+    --pc: var(--accent-contrast);
+    --s: var(--accent);
+    --sc: var(--accent-contrast);
+    --a: var(--accent);
+    --ac: var(--accent-contrast);
+    --n: var(--bg-elevated);
+    --nc: var(--text-primary);
+    --b1: var(--bg-app);
+    --b2: var(--bg-grouped);
+    --b3: var(--bg-elevated);
+    --bc: var(--text-primary);
+    --in: var(--accent);
+    --inc: var(--accent-contrast);
+    --su: var(--success);
+    --suc: var(--accent-contrast);
+    --wa: var(--warning);
+    --wac: var(--accent-contrast);
+    --er: var(--destructive);
+    --erc: var(--accent-contrast);
+    --rounded-box: 1rem;
+    --rounded-btn: 0.75rem;
+    --rounded-badge: 0.5rem;
+    --border-btn: 1px;
+    --tab-border: 1px;
+    --tab-radius: 0.75rem;
+  }
+}
+
+:root[data-theme="os_dark"] {
   color-scheme: dark;
   --p: var(--accent);
   --pc: var(--accent-contrast);

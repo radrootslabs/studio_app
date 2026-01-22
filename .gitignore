@@ -11,6 +11,7 @@ logs/
 
 # OS
 .DS_Store
+app/node_modules/
 Thumbs.db
 
 # secrets
