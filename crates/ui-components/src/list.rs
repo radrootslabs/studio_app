@@ -7,19 +7,25 @@ use leptos::prelude::*;
 
 use crate::{
     radroots_studio_app_ui_list_icon_key,
+    radroots_studio_app_ui_list_styles_resolve,
     RadrootsAppUiIcon,
     RadrootsAppUiIconKey,
+    RadrootsAppUiList,
     RadrootsAppUiListDisplay,
     RadrootsAppUiListDisplayValue,
+    RadrootsAppUiListDefault,
     RadrootsAppUiListDefaultLabel,
     RadrootsAppUiListInput,
     RadrootsAppUiListInputAction,
+    RadrootsAppUiListItem,
+    RadrootsAppUiListItemKind,
     RadrootsAppUiListLabel,
     RadrootsAppUiListLabelValue,
     RadrootsAppUiListLabelValueKind,
     RadrootsAppUiListOffset,
     RadrootsAppUiListOffsetMod,
     RadrootsAppUiListSelect,
+    RadrootsAppUiListStylesResolved,
     RadrootsAppUiListTitle,
     RadrootsAppUiListTitleValue,
     RadrootsAppUiListTouch,
@@ -271,6 +277,34 @@ fn radroots_studio_app_ui_list_input_action_icon_key(
 
 fn radroots_studio_app_ui_list_display_loading(display: Option<&RadrootsAppUiListDisplay>) -> bool {
     display.map(|value| value.loading).unwrap_or(false)
+}
+
+fn radroots_studio_app_ui_list_title_visible(
+    title: Option<&RadrootsAppUiListTitle>,
+    default_state: Option<&RadrootsAppUiListDefault>,
+) -> bool {
+    match title {
+        None => false,
+        Some(_) => default_state.map(|value| value.show_title).unwrap_or(true),
+    }
+}
+
+fn radroots_studio_app_ui_list_row_class(
+    item: &RadrootsAppUiListItem,
+    styles: &RadrootsAppUiListStylesResolved,
+) -> String {
+    let active_class = radroots_studio_app_ui_list_active_class(item.hide_active);
+    radroots_studio_app_ui_list_class_merge(&[
+        Some("group flex flex-row h-full w-full justify-end items-center el-re"),
+        if item.hide_field { Some("hidden") } else { None },
+        if item.full_rounded { Some("rounded-touch") } else { None },
+        if styles.hide_rounded {
+            None
+        } else {
+            Some("first:rounded-t-2xl last:rounded-b-2xl")
+        },
+        active_class,
+    ])
 }
 
 fn radroots_studio_app_ui_list_label_value_view(
@@ -896,6 +930,127 @@ pub fn RadrootsAppUiListDefaultLabels(
     }
 }
 
+#[component]
+pub fn RadrootsAppUiListView(basis: RadrootsAppUiList) -> impl IntoView {
+    let RadrootsAppUiList {
+        id,
+        view,
+        classes,
+        title,
+        default_state,
+        list,
+        hide_offset,
+        styles,
+    } = basis;
+    let resolved_styles = radroots_studio_app_ui_list_styles_resolve(styles.as_ref());
+    let wrap_class = radroots_studio_app_ui_list_class_merge(&[
+        Some("flex flex-col"),
+        classes.as_deref(),
+    ]);
+    let group_class = radroots_studio_app_ui_list_class_merge(&[
+        Some("relative flex flex-col h-auto w-full gap-[3px]"),
+        if resolved_styles.set_title_background {
+            Some("ui-surface")
+        } else {
+            None
+        },
+    ]);
+    let view_value = view.unwrap_or_default();
+    let title_view = if radroots_studio_app_ui_list_title_visible(title.as_ref(), default_state.as_ref())
+    {
+        title.map(|title| view! { <RadrootsAppUiListTitleView basis=title /> }.into_any())
+    } else {
+        None
+    };
+    let content_view = if let Some(default_state) = default_state {
+        let default_class = radroots_studio_app_ui_list_class_merge(&[
+            Some("flex flex-col h-auto w-full justify-center items-center"),
+            if resolved_styles.set_default_background {
+                Some("ui-surface")
+            } else {
+                None
+            },
+            default_state.classes.as_deref(),
+        ]);
+        Some(
+            view! {
+                <div class=default_class>
+                    <RadrootsAppUiListDefaultLabels labels=default_state.labels />
+                </div>
+            }
+            .into_any(),
+        )
+    } else if let Some(list) = list {
+        let items = list
+            .into_iter()
+            .filter_map(|item| item)
+            .map(|item| {
+                let row_class = radroots_studio_app_ui_list_row_class(&item, &resolved_styles);
+                let offset_view = if hide_offset {
+                    None
+                } else {
+                    Some(
+                        view! { <RadrootsAppUiListOffsetView basis=item.offset.clone() /> }
+                            .into_any(),
+                    )
+                };
+                let row_view = match item.kind {
+                    RadrootsAppUiListItemKind::Touch(touch) => view! {
+                        <RadrootsAppUiListTouchRow
+                            basis=touch
+                            loading=item.loading
+                            hide_active=item.hide_active
+                            hide_border_top=resolved_styles.hide_border_top
+                            hide_border_bottom=resolved_styles.hide_border_bottom
+                        />
+                    }
+                    .into_any(),
+                    RadrootsAppUiListItemKind::Input(input) => view! {
+                        <RadrootsAppUiListInputRow
+                            basis=input
+                            hide_border_top=resolved_styles.hide_border_top
+                            hide_border_bottom=resolved_styles.hide_border_bottom
+                        />
+                    }
+                    .into_any(),
+                    RadrootsAppUiListItemKind::Select(select) => view! {
+                        <RadrootsAppUiListSelectRow
+                            basis=select
+                            hide_active=item.hide_active
+                            hide_border_top=resolved_styles.hide_border_top
+                            hide_border_bottom=resolved_styles.hide_border_bottom
+                        />
+                    }
+                    .into_any(),
+                };
+                view! {
+                    <div class=row_class>
+                        <div class="flex flex-row h-full w-full gap-1 items-center overflow-y-hidden">
+                            {offset_view}
+                            {row_view}
+                        </div>
+                    </div>
+                }
+                .into_any()
+            })
+            .collect_view();
+        Some(
+            view! { <div class="flex flex-col w-full justify-center items-center">{items}</div> }
+                .into_any(),
+        )
+    } else {
+        None
+    };
+    view! {
+        <div id=id class=wrap_class data-view=view_value>
+            <div class=group_class>
+                {title_view}
+                {content_view}
+            </div>
+        </div>
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
@@ -911,12 +1066,21 @@ mod tests {
         radroots_studio_app_ui_list_offset_mod,
         radroots_studio_app_ui_list_input_action_icon_key,
         radroots_studio_app_ui_list_display_loading,
+        radroots_studio_app_ui_list_row_class,
+        radroots_studio_app_ui_list_title_visible,
         radroots_studio_app_ui_list_title_padding_class,
     };
     use crate::{
         RadrootsAppUiIconKey,
         RadrootsAppUiListInputAction,
+        RadrootsAppUiListInputField,
+        RadrootsAppUiListInput,
+        RadrootsAppUiListItem,
+        RadrootsAppUiListItemKind,
         RadrootsAppUiListOffsetMod,
+        RadrootsAppUiListStylesResolved,
+        RadrootsAppUiListTitle,
+        RadrootsAppUiListTitleValue,
     };
 
     #[test]
@@ -1002,5 +1166,61 @@ mod tests {
     #[test]
     fn list_display_loading_defaults_false() {
         assert!(!radroots_studio_app_ui_list_display_loading(None));
+    }
+
+    #[test]
+    fn list_title_visible_requires_title() {
+        assert!(!radroots_studio_app_ui_list_title_visible(None, None));
+        let title = RadrootsAppUiListTitle {
+            value: RadrootsAppUiListTitleValue::Text("Title".to_string()),
+            classes: None,
+            mod_value: None,
+            link: None,
+            on_click: None,
+        };
+        assert!(radroots_studio_app_ui_list_title_visible(Some(&title), None));
+        let default_state = crate::RadrootsAppUiListDefault {
+            labels: None,
+            show_title: false,
+            classes: None,
+        };
+        assert!(!radroots_studio_app_ui_list_title_visible(
+            Some(&title),
+            Some(&default_state)
+        ));
+    }
+
+    #[test]
+    fn list_row_class_flags_hidden_and_rounding() {
+        let item = RadrootsAppUiListItem {
+            kind: RadrootsAppUiListItemKind::Input(RadrootsAppUiListInput {
+                field: RadrootsAppUiListInputField {
+                    value: String::new(),
+                    placeholder: None,
+                    disabled: false,
+                    classes: None,
+                    id: None,
+                    on_input: None,
+                },
+                line_label: None,
+                action: None,
+            }),
+            loading: false,
+            hide_active: true,
+            hide_field: true,
+            full_rounded: true,
+            offset: None,
+        };
+        let styles = RadrootsAppUiListStylesResolved {
+            hide_border_top: false,
+            hide_border_bottom: false,
+            hide_rounded: false,
+            set_title_background: false,
+            set_default_background: false,
+        };
+        let class = radroots_studio_app_ui_list_row_class(&item, &styles);
+        assert!(class.contains("hidden"));
+        assert!(class.contains("rounded-touch"));
+        assert!(class.contains("first:rounded-t-2xl"));
     }
 }
