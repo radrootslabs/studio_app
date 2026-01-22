@@ -22,7 +22,7 @@ use radroots_studio_app_ui_primitives::{
 
 #[derive(Clone)]
 struct RadrootsAppUiDialogContext {
-    open: Signal<bool>,
+    open: ReadSignal<bool>,
     set_open: Callback<bool>,
     dismiss: Callback<RadrootsAppUiDismissableReason>,
     modal: bool,
@@ -51,8 +51,8 @@ pub fn RadrootsAppUiDialogRoot(
     let open_prop = open;
     let is_controlled = open_prop.is_some();
     let open_signal = match open_prop {
-        Some(open) => open.into(),
-        None => open_state.into(),
+        Some(open) => open,
+        None => open_state.read_only(),
     };
     let on_open_change = on_open_change.clone();
     let set_open = Callback::new(move |value| {
@@ -125,14 +125,14 @@ pub fn RadrootsAppUiDialogTrigger(
 pub fn RadrootsAppUiDialogPortal(children: ChildrenFn) -> impl IntoView {
     let context = use_context::<RadrootsAppUiDialogContext>()
         .expect("dialog context");
-    let present = context.open;
+    let present = Signal::derive(move || context.open.get());
     let children = StoredValue::new(children);
     view! {
-        <RadrootsAppUiPresence present=present>
-            <RadrootsAppUiPortal>
+        <RadrootsAppUiPortal>
+            <RadrootsAppUiPresence present=present>
                 {(children.get_value())()}
-            </RadrootsAppUiPortal>
-        </RadrootsAppUiPresence>
+            </RadrootsAppUiPresence>
+        </RadrootsAppUiPortal>
     }
 }
 
