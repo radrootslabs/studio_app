@@ -40,6 +40,13 @@
   --space-7: 32px;
   --space-8: 40px;
 
+  --size-line: 46px;
+  --size-line-button: 52px;
+  --size-touch-guide: 54px;
+  --size-trellis-display: 286px;
+  --size-trellis-value: 180px;
+  --size-trellis-offset: 32px;
+
   --radius-sm: 8px;
   --radius-md: 12px;
   --radius-lg: 16px;
