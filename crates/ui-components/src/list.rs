@@ -8,9 +8,13 @@ use crate::{
     RadrootsAppUiIcon,
     RadrootsAppUiListDisplay,
     RadrootsAppUiListDisplayValue,
+    RadrootsAppUiListDefaultLabel,
     RadrootsAppUiListLabel,
     RadrootsAppUiListLabelValue,
     RadrootsAppUiListLabelValueKind,
+    RadrootsAppUiListOffsetMod,
+    RadrootsAppUiListTitle,
+    RadrootsAppUiListTitleValue,
 };
 
 pub fn radroots_studio_app_ui_list_group_data_ui_value() -> &'static str {
@@ -144,6 +148,31 @@ fn radroots_studio_app_ui_list_class_merge(parts: &[Option<&str>]) -> String {
     result
 }
 
+fn radroots_studio_app_ui_list_title_padding_class(mod_value: Option<&RadrootsAppUiListOffsetMod>) -> Option<&'static str> {
+    match mod_value {
+        Some(RadrootsAppUiListOffsetMod::Small) => Some("pl-[16px]"),
+        Some(RadrootsAppUiListOffsetMod::Glyph)
+        | Some(RadrootsAppUiListOffsetMod::Icon { .. })
+        | Some(RadrootsAppUiListOffsetMod::IconCircle { .. }) => Some("pl-[36px]"),
+        None => None,
+    }
+}
+
+fn radroots_studio_app_ui_list_default_labels(
+    labels: Option<&[RadrootsAppUiListDefaultLabel]>,
+) -> Vec<RadrootsAppUiListDefaultLabel> {
+    labels.map_or_else(
+        || {
+            vec![RadrootsAppUiListDefaultLabel {
+                label: "No items to display.".to_string(),
+                classes: None,
+                on_click: None,
+            }]
+        },
+        |labels| labels.to_vec(),
+    )
+}
+
 fn radroots_studio_app_ui_list_label_value_view(
     value: RadrootsAppUiListLabelValue,
     is_right: bool,
@@ -261,6 +290,142 @@ pub fn RadrootsAppUiListRowDisplayValue(
     }
 }
 
+#[component]
+pub fn RadrootsAppUiListTitleView(basis: RadrootsAppUiListTitle) -> impl IntoView {
+    let title_class = radroots_studio_app_ui_list_class_merge(&[
+        Some("flex flex-row h-[24px] w-full pl-[2px] gap-1 items-center"),
+        basis.classes.as_deref(),
+    ]);
+    let padding_class = radroots_studio_app_ui_list_title_padding_class(basis.mod_value.as_ref());
+    let button_class = radroots_studio_app_ui_list_class_merge(&[
+        Some("flex flex-row h-full w-max items-center gap-1"),
+        padding_class,
+    ]);
+    let on_click = basis.on_click;
+    let title_value = match basis.value {
+        RadrootsAppUiListTitleValue::Spacer => {
+            view! { <div class="flex-fluid"></div> }.into_any()
+        }
+        RadrootsAppUiListTitleValue::Text(value) => {
+            view! { <p class="text-trellis_ti uppercase ui-text-secondary">{value}</p> }.into_any()
+        }
+    };
+    let link_view = basis.link.map(|link| {
+        let label_view = link.label.map(|label| match label.value {
+            RadrootsAppUiListLabelValueKind::Text(text) => {
+                let class = radroots_studio_app_ui_list_class_merge(&[
+                    Some("text-trellis_ti uppercase fade-in"),
+                    text.classes.as_deref(),
+                ]);
+                view! { <p class=class>{text.value}</p> }.into_any()
+            }
+            RadrootsAppUiListLabelValueKind::Icon(icon) => {
+                let icon_key = radroots_studio_app_ui_list_icon_key(&icon);
+                let icon_class = radroots_studio_app_ui_list_class_merge(&[
+                    Some("fade-in"),
+                    icon.class.as_deref(),
+                ]);
+                if let Some(icon_key) = icon_key {
+                    view! { <RadrootsAppUiIcon key=icon_key class=icon_class size=16 /> }
+                        .into_any()
+                } else {
+                    view! { <div></div> }.into_any()
+                }
+            }
+        });
+        let icon_view = link.icon.and_then(|icon| {
+            radroots_studio_app_ui_list_icon_key(&icon).map(|icon_key| {
+                let icon_class = radroots_studio_app_ui_list_class_merge(&[
+                    Some("fade-in"),
+                    icon.class.as_deref(),
+                ]);
+                view! { <RadrootsAppUiIcon key=icon_key class=icon_class size=16 /> }.into_any()
+            })
+        });
+        let link_class = radroots_studio_app_ui_list_class_merge(&[
+            Some("group flex flex-row h-full w-max items-center"),
+            link.classes.as_deref(),
+        ]);
+        let on_click = link.on_click;
+        view! {
+            <button
+                type="button"
+                class=link_class
+                on:click=move |_| {
+                    if let Some(callback) = &on_click {
+                        callback.run(());
+                    }
+                }
+            >
+                {label_view}
+                {icon_view}
+            </button>
+        }
+        .into_any()
+    });
+    view! {
+        <div class=title_class>
+            <button
+                type="button"
+                class=button_class
+                on:click=move |_| {
+                    if let Some(callback) = &on_click {
+                        callback.run(());
+                    }
+                }
+            >
+                {title_value}
+            </button>
+            {link_view}
+        </div>
+    }
+}
+
+#[component]
+pub fn RadrootsAppUiListDefaultLabels(
+    labels: Option<Vec<RadrootsAppUiListDefaultLabel>>,
+    #[prop(optional)] class: Option<String>,
+) -> impl IntoView {
+    let labels = radroots_studio_app_ui_list_default_labels(labels.as_deref());
+    let wrap_class = radroots_studio_app_ui_list_class_merge(&[
+        Some("flex flex-row"),
+        class.as_deref(),
+    ]);
+    let items = labels
+        .into_iter()
+        .map(|label| {
+            let inner_class = radroots_studio_app_ui_list_class_merge(&[
+                Some("text-trellis_ti"),
+                label.classes.as_deref(),
+            ]);
+            let on_click = label.on_click;
+            if on_click.is_some() {
+                view! {
+                    <button
+                        type="button"
+                        class=inner_class
+                        on:click=move |_| {
+                            if let Some(callback) = &on_click {
+                                callback.run(());
+                            }
+                        }
+                    >
+                        {label.label}
+                    </button>
+                }
+                .into_any()
+            } else {
+                view! { <span class=inner_class>{label.label}</span> }.into_any()
+            }
+        })
+        .collect_view();
+    view! {
+        <div class=wrap_class>
+            <p class="text-trellis_ti ui-text-secondary">{items}</p>
+        </div>
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
@@ -270,7 +435,10 @@ mod tests {
         radroots_studio_app_ui_list_row_leading_data_ui_value,
         radroots_studio_app_ui_list_row_trailing_data_ui_value,
         radroots_studio_app_ui_list_section_data_ui_value,
+        radroots_studio_app_ui_list_default_labels,
+        radroots_studio_app_ui_list_title_padding_class,
     };
+    use crate::RadrootsAppUiListOffsetMod;
 
     #[test]
     fn list_data_ui_values() {
@@ -296,5 +464,25 @@ mod tests {
             Some("beta"),
         ]);
         assert_eq!(merged, "alpha beta");
+    }
+
+    #[test]
+    fn list_title_padding_matches_mod() {
+        assert_eq!(
+            radroots_studio_app_ui_list_title_padding_class(Some(&RadrootsAppUiListOffsetMod::Small)),
+            Some("pl-[16px]")
+        );
+        assert_eq!(
+            radroots_studio_app_ui_list_title_padding_class(Some(&RadrootsAppUiListOffsetMod::Glyph)),
+            Some("pl-[36px]")
+        );
+        assert_eq!(radroots_studio_app_ui_list_title_padding_class(None), None);
+    }
+
+    #[test]
+    fn list_default_labels_fallbacks() {
+        let labels = radroots_studio_app_ui_list_default_labels(None);
+        assert_eq!(labels.len(), 1);
+        assert_eq!(labels[0].label, "No items to display.");
     }
 }
