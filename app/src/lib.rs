@@ -13,6 +13,7 @@ mod logs;
 mod notifications;
 mod settings;
 mod setup;
+mod theme;
 mod tangle;
 mod ui_demo;
 mod entry;
@@ -65,6 +66,16 @@ pub use keystore::{
 pub use logs::RadrootsAppLogsPage;
 pub use settings::RadrootsAppSettingsPage;
 pub use ui_demo::RadrootsAppUiDemoPage;
+pub use theme::{
+    app_theme_apply_mode,
+    app_theme_init,
+    app_theme_mode_from_value,
+    app_theme_mode_to_name,
+    RadrootsAppThemeError,
+    RadrootsAppThemeMode,
+    RadrootsAppThemeResult,
+    APP_THEME_STORAGE_KEY,
+};
 pub use logging::{
     app_log_entry_error,
     app_log_entry_emit,
