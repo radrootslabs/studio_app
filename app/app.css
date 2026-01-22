@@ -19,12 +19,17 @@
     font-family: var(--font-sans);
     background: var(--bg-app);
     color: var(--text-primary);
+    height: 100%;
+    overscroll-behavior: none;
+    touch-action: manipulation;
   }
 
   body {
     min-height: 100dvh;
     margin: 0;
     background: var(--bg-app);
+    height: 100%;
+    overscroll-behavior: none;
   }
 
   * {
@@ -45,7 +50,25 @@
     opacity: 0.5;
     pointer-events: none;
   }
+}
 
+@layer base {
+  #app-root {
+    min-height: 100dvh;
+    height: 100%;
+  }
+
+  #app-shell {
+    min-height: 100dvh;
+    display: flex;
+    flex-direction: column;
+  }
+
+  [data-app-scroll] {
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior: contain;
+  }
 }
 
 @layer components {

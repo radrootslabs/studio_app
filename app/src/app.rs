@@ -178,7 +178,10 @@ fn app_health_check_delay_ms() -> u32 {
 #[component]
 fn SplashPage() -> impl IntoView {
     view! {
-        <main style="min-height:100vh;background:white;display:flex;align-items:center;justify-content:center;">
+        <main
+            id="app-splash"
+            style="min-height:100dvh;background:white;display:flex;align-items:center;justify-content:center;"
+        >
         </main>
     }
 }
@@ -260,10 +263,10 @@ fn SetupPage() -> impl IntoView {
         });
     };
     view! {
-        <main class="min-h-[100dvh] w-full px-6 pt-10 pb-16">
+        <main id="app-setup" data-app-scroll class="min-h-[100dvh] w-full px-6 pt-10 pb-16">
             {move || match setup_step.get() {
                 RadrootsAppSetupStep::Intro => view! {
-                    <section class="flex flex-col w-full gap-6">
+                    <section id="app-setup-intro" class="flex flex-col w-full gap-6">
                         <header class="flex flex-col gap-3">
                             <p class="font-sans text-sm uppercase tracking-[0.14em] text-ly0-gl-label">
                                 "Radroots"
@@ -289,7 +292,7 @@ fn SetupPage() -> impl IntoView {
                     </section>
                 }.into_any(),
                 RadrootsAppSetupStep::KeyChoice => view! {
-                    <section class="flex flex-col w-full gap-4">
+                    <section id="app-setup-key-choice" class="flex flex-col w-full gap-4">
                         <header class="flex flex-col gap-2">
                             <p class="font-sans text-sm uppercase tracking-[0.14em] text-ly0-gl-label">
                                 "Setup"
@@ -405,7 +408,7 @@ fn HomePage() -> impl IntoView {
         }
     };
     view! {
-        <main>
+        <main id="app-home" data-app-scroll>
             <div>"app"</div>
             <div style="margin-top: 8px; display: flex; align-items: center; gap: 8px;">
                 <span
@@ -767,11 +770,12 @@ fn AppShell() -> impl IntoView {
             }
             fallback=|| view! { <SplashPage /> }
         >
-            <Show
-                when=move || setup_required.get() == Some(false)
-                fallback=|| view! { <SetupPage /> }
-            >
-                <nav style="display:flex;gap:12px;margin-bottom:12px;">
+        <Show
+            when=move || setup_required.get() == Some(false)
+            fallback=|| view! { <SetupPage /> }
+        >
+            <div id="app-shell">
+                <nav id="app-nav" aria-label="Primary" style="display:flex;gap:12px;margin-bottom:12px;">
                     <A href="/" exact=true>"home"</A>
                     <A href="/logs">"logs"</A>
                     <A href="/ui">"ui"</A>
@@ -785,8 +789,9 @@ fn AppShell() -> impl IntoView {
                     <Route path=path!("settings") view=RadrootsAppSettingsPage />
                     <Route path=path!("setup") view=SetupPage />
                 </Routes>
-            </Show>
+            </div>
         </Show>
+    </Show>
     }
 }
 
