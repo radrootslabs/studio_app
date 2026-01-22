@@ -1,12 +1,26 @@
 use gloo_timers::future::TimeoutFuture;
 use leptos::prelude::*;
 use leptos::task::spawn_local;
+use leptos::ev::MouseEvent;
 use leptos_router::components::{A, Route, Router, Routes};
 use leptos_router::hooks::use_navigate;
 use leptos_router::path;
 
 use radroots_studio_app_core::datastore::RadrootsClientDatastore;
 use radroots_studio_app_core::idb::IDB_CONFIG_LOGS;
+use radroots_studio_app_ui_components::{
+    RadrootsAppUiList,
+    RadrootsAppUiListIcon,
+    RadrootsAppUiListItem,
+    RadrootsAppUiListItemKind,
+    RadrootsAppUiListLabel,
+    RadrootsAppUiListLabelText,
+    RadrootsAppUiListLabelValue,
+    RadrootsAppUiListLabelValueKind,
+    RadrootsAppUiListTouch,
+    RadrootsAppUiListTouchEnd,
+    RadrootsAppUiListView,
+};
 
 use crate::{
     app_init_assets,
@@ -59,6 +73,23 @@ fn health_result_label(result: &RadrootsAppHealthCheckResult) -> String {
         Some(message) => format!("{}: {}", result.status.as_str(), message),
         None => result.status.as_str().to_string(),
     }
+}
+
+fn setup_label(value: &str) -> RadrootsAppUiListLabelValue {
+    RadrootsAppUiListLabelValue {
+        classes_wrap: None,
+        hide_truncate: false,
+        value: RadrootsAppUiListLabelValueKind::Text(RadrootsAppUiListLabelText {
+            value: value.to_string(),
+            classes: Some("capitalize".to_string()),
+        }),
+    }
+}
+
+fn setup_touch_callback(action: &'static str) -> Callback<MouseEvent> {
+    Callback::new(move |_| {
+        let _ = app_log_debug_emit("log.app.setup.choice", action, None);
+    })
 }
 
 fn active_key_label(value: Option<String>) -> String {
@@ -163,6 +194,61 @@ fn SetupPage() -> impl IntoView {
     let navigate = use_navigate();
     let navigate_guard = navigate.clone();
     let setup_step = RwSignal::new_local(app_setup_step_default());
+    let key_choice_list = RadrootsAppUiList {
+        id: Some("setup-key-choice".to_string()),
+        view: Some("setup".to_string()),
+        classes: None,
+        title: None,
+        default_state: None,
+        list: Some(vec![
+            Some(RadrootsAppUiListItem {
+                kind: RadrootsAppUiListItemKind::Touch(RadrootsAppUiListTouch {
+                    label: RadrootsAppUiListLabel {
+                        left: vec![setup_label("generate new key")],
+                        right: Vec::new(),
+                    },
+                    display: None,
+                    end: Some(RadrootsAppUiListTouchEnd {
+                        icon: RadrootsAppUiListIcon {
+                            key: "caret-right".to_string(),
+                            class: None,
+                        },
+                        on_click: None,
+                    }),
+                    on_click: Some(setup_touch_callback("generate_key")),
+                }),
+                loading: false,
+                hide_active: false,
+                hide_field: false,
+                full_rounded: false,
+                offset: None,
+            }),
+            Some(RadrootsAppUiListItem {
+                kind: RadrootsAppUiListItemKind::Touch(RadrootsAppUiListTouch {
+                    label: RadrootsAppUiListLabel {
+                        left: vec![setup_label("add existing key")],
+                        right: Vec::new(),
+                    },
+                    display: None,
+                    end: Some(RadrootsAppUiListTouchEnd {
+                        icon: RadrootsAppUiListIcon {
+                            key: "caret-right".to_string(),
+                            class: None,
+                        },
+                        on_click: None,
+                    }),
+                    on_click: Some(setup_touch_callback("add_key")),
+                }),
+                loading: false,
+                hide_active: false,
+                hide_field: false,
+                full_rounded: false,
+                offset: None,
+            }),
+        ]),
+        hide_offset: false,
+        styles: None,
+    };
     Effect::new(move || {
         if setup_required.get() == Some(false) {
             navigate_guard("/", Default::default());
@@ -215,6 +301,7 @@ fn SetupPage() -> impl IntoView {
                                 "Select how you want to add your Nostr key."
                             </p>
                         </header>
+                        <RadrootsAppUiListView basis=key_choice_list.clone() />
                     </section>
                 }.into_any(),
             }}
