@@ -12,9 +12,12 @@ use crate::{
     RadrootsAppUiListLabel,
     RadrootsAppUiListLabelValue,
     RadrootsAppUiListLabelValueKind,
+    RadrootsAppUiListOffset,
     RadrootsAppUiListOffsetMod,
     RadrootsAppUiListTitle,
     RadrootsAppUiListTitleValue,
+    RadrootsAppUiListTouchEnd,
+    RadrootsAppUiSpinner,
 };
 
 pub fn radroots_studio_app_ui_list_group_data_ui_value() -> &'static str {
@@ -173,6 +176,12 @@ fn radroots_studio_app_ui_list_default_labels(
     )
 }
 
+fn radroots_studio_app_ui_list_offset_mod(
+    mod_value: Option<&RadrootsAppUiListOffsetMod>,
+) -> RadrootsAppUiListOffsetMod {
+    mod_value.cloned().unwrap_or(RadrootsAppUiListOffsetMod::Small)
+}
+
 fn radroots_studio_app_ui_list_label_value_view(
     value: RadrootsAppUiListLabelValue,
     is_right: bool,
@@ -287,6 +296,158 @@ pub fn RadrootsAppUiListRowDisplayValue(
         >
             {display}
         </button>
+    }
+}
+
+#[component]
+pub fn RadrootsAppUiListOffsetView(
+    basis: Option<RadrootsAppUiListOffset>,
+    #[prop(optional)] class: Option<String>,
+) -> impl IntoView {
+    let basis = basis.unwrap_or(RadrootsAppUiListOffset {
+        mod_value: None,
+        classes: None,
+        hide_space: false,
+        hide_offset: false,
+        on_click: None,
+    });
+    if basis.hide_offset {
+        return view! { <div></div> }.into_any();
+    }
+    let mod_value = radroots_studio_app_ui_list_offset_mod(basis.mod_value.as_ref());
+    let wrap_class = radroots_studio_app_ui_list_class_merge(&[
+        Some("flex flex-row h-full"),
+        class.as_deref(),
+        basis.classes.as_deref(),
+    ]);
+    let on_click = basis.on_click;
+    match mod_value {
+        RadrootsAppUiListOffsetMod::Small => view! {
+            <div class=wrap_class>
+                <div class="flex flex-row h-full w-[22px]">
+                    <div class="flex-fluid"></div>
+                </div>
+            </div>
+        }
+        .into_any(),
+        RadrootsAppUiListOffsetMod::Glyph => view! {
+            <div class=wrap_class>
+                <div class="flex flex-row pr-[2px]">
+                    <div class="flex flex-row h-full w-trellisOffset">
+                        <div class="flex-fluid"></div>
+                    </div>
+                </div>
+            </div>
+        }
+        .into_any(),
+        RadrootsAppUiListOffsetMod::Icon { icon, loading } => {
+            let icon_key = radroots_studio_app_ui_list_icon_key(&icon);
+            let icon_class = radroots_studio_app_ui_list_class_merge(&[
+                Some("ui-text-secondary"),
+                icon.class.as_deref(),
+            ]);
+            let button_class = radroots_studio_app_ui_list_class_merge(&[
+                Some("fade-in pl-2 translate-x-[3px] translate-y-[1px]"),
+            ]);
+            let icon_view = if loading {
+                view! { <RadrootsAppUiSpinner class="text-[12px]".to_string() /> }.into_any()
+            } else if let Some(icon_key) = icon_key {
+                view! { <RadrootsAppUiIcon key=icon_key class=icon_class size=16 /> }.into_any()
+            } else {
+                view! { <div></div> }.into_any()
+            };
+            view! {
+                <div class=wrap_class>
+                    <div class="flex flex-row h-full min-w-[20px] w-trellisOffset justify-center items-center pr-3">
+                        <button
+                            type="button"
+                            class=button_class
+                            on:click=move |ev: MouseEvent| {
+                                if loading {
+                                    return;
+                                }
+                                if let Some(callback) = &on_click {
+                                    callback.run(ev);
+                                }
+                            }
+                        >
+                            {icon_view}
+                        </button>
+                    </div>
+                </div>
+            }
+            .into_any()
+        }
+        RadrootsAppUiListOffsetMod::IconCircle { icon, loading } => {
+            let icon_key = radroots_studio_app_ui_list_icon_key(&icon);
+            let icon_class = radroots_studio_app_ui_list_class_merge(&[
+                Some("ui-text-secondary"),
+                icon.class.as_deref(),
+            ]);
+            let button_class = radroots_studio_app_ui_list_class_merge(&[
+                Some("fade-in pl-2 translate-x-[3px] translate-y-[1px] rounded-full"),
+            ]);
+            let icon_view = if loading {
+                view! { <RadrootsAppUiSpinner class="text-[12px]".to_string() /> }.into_any()
+            } else if let Some(icon_key) = icon_key {
+                view! { <RadrootsAppUiIcon key=icon_key class=icon_class size=16 /> }.into_any()
+            } else {
+                view! { <div></div> }.into_any()
+            };
+            view! {
+                <div class=wrap_class>
+                    <div class="flex flex-row h-full min-w-[20px] w-trellisOffset justify-center items-center pr-3">
+                        <button
+                            type="button"
+                            class=button_class
+                            on:click=move |ev: MouseEvent| {
+                                if loading {
+                                    return;
+                                }
+                                if let Some(callback) = &on_click {
+                                    callback.run(ev);
+                                }
+                            }
+                        >
+                            {icon_view}
+                        </button>
+                    </div>
+                </div>
+            }
+            .into_any()
+        }
+    }
+}
+
+#[component]
+pub fn RadrootsAppUiListTouchEndView(
+    basis: RadrootsAppUiListTouchEnd,
+    #[prop(optional)] hide_active: bool,
+) -> impl IntoView {
+    let icon_key = radroots_studio_app_ui_list_icon_key(&basis.icon);
+    let icon_class = radroots_studio_app_ui_list_class_merge(&[
+        Some("ui-text-secondary opacity-70 translate-y-[1px]"),
+        if hide_active { None } else { Some("opacity-active") },
+        basis.icon.class.as_deref(),
+    ]);
+    let on_click = basis.on_click;
+    let icon_view = icon_key.map(|icon_key| {
+        view! { <RadrootsAppUiIcon key=icon_key class=icon_class size=14 /> }.into_any()
+    });
+    view! {
+        <div class="absolute top-0 right-0 h-full w-max flex flex-row justify-center items-center">
+            <button
+                type="button"
+                class="flex pr-3"
+                on:click=move |ev: MouseEvent| {
+                    if let Some(callback) = &on_click {
+                        callback.run(ev);
+                    }
+                }
+            >
+                {icon_view}
+            </button>
+        </div>
     }
 }
 
@@ -436,6 +597,7 @@ mod tests {
         radroots_studio_app_ui_list_row_trailing_data_ui_value,
         radroots_studio_app_ui_list_section_data_ui_value,
         radroots_studio_app_ui_list_default_labels,
+        radroots_studio_app_ui_list_offset_mod,
         radroots_studio_app_ui_list_title_padding_class,
     };
     use crate::RadrootsAppUiListOffsetMod;
@@ -484,5 +646,11 @@ mod tests {
         let labels = radroots_studio_app_ui_list_default_labels(None);
         assert_eq!(labels.len(), 1);
         assert_eq!(labels[0].label, "No items to display.");
+    }
+
+    #[test]
+    fn list_offset_defaults_to_small() {
+        let resolved = radroots_studio_app_ui_list_offset_mod(None);
+        assert!(matches!(resolved, RadrootsAppUiListOffsetMod::Small));
     }
 }

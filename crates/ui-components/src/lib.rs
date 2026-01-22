@@ -25,6 +25,7 @@ pub use list::{
     radroots_studio_app_ui_list_section_data_ui_value,
     RadrootsAppUiListDefaultLabels,
     RadrootsAppUiListGroup,
+    RadrootsAppUiListOffsetView,
     RadrootsAppUiListRowDisplayValue,
     RadrootsAppUiListRow,
     RadrootsAppUiListRowLabel,
@@ -32,6 +33,7 @@ pub use list::{
     RadrootsAppUiListRowTrailing,
     RadrootsAppUiListSection,
     RadrootsAppUiListTitleView,
+    RadrootsAppUiListTouchEndView,
 };
 pub use list_types::{
     radroots_studio_app_ui_list_icon_key,
