@@ -4,6 +4,7 @@
 @import "../crates/ui-tokens/assets/themes/layout.css";
 @import "../crates/ui-tokens/assets/themes/screens.css";
 @import "../crates/ui-tokens/assets/themes/theme_os.css";
+@import "../crates/ui-tokens/assets/themes/theme_os_daisyui.css";
 @import "./stylesheets/daisyui.css";
 @import "./stylesheets/apps-base.css";
 @import "./stylesheets/apps-ui.css";
@@ -14,6 +15,10 @@
 @source "./index.html";
 @source "./src/**/*.rs";
 @source "../crates/**/*.rs";
+
+@plugin "daisyui" {
+  themes: os_light, os_dark;
+}
 
 @theme {
   --font-sans: "SF Pro Rounded", system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
@@ -114,6 +119,20 @@
 }
 
 @layer components {
+  .app-view {
+    will-change: transform, opacity;
+  }
+
+  .app-view-enter {
+    animation: app-view-enter 360ms var(--ease-ios) both;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .app-view-enter {
+      animation: none;
+    }
+  }
+
   .ui-surface {
     background: var(--bg-elevated);
     color: var(--text-primary);
@@ -238,5 +257,20 @@
   100% {
     transform: translateY(110%);
     opacity: 0;
+  }
+}
+
+@keyframes app-view-enter {
+  0% {
+    opacity: 0;
+    transform: translateY(10px) scale(0.98);
+  }
+  60% {
+    opacity: 1;
+    transform: translateY(-2px) scale(1.005);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0) scale(1);
   }
 }

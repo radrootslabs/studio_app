@@ -187,6 +187,22 @@ fn SplashPage() -> impl IntoView {
 }
 
 #[component]
+fn LogoCircle() -> impl IntoView {
+    view! {
+        <div class="relative flex flex-col h-[196px] w-full justify-center items-center">
+            <div class="relative flex flex-row h-36 w-36 justify-center items-center bg-ly2 rounded-full">
+                <p class="font-sans font-[900] text-6xl text-ly0-gl -tracking-[0.4rem] -translate-x-[6px]">
+                    "\u{00BB}`,"
+                </p>
+                <p class="font-sans font-[900] text-6xl text-ly0-gl translate-x-[8px]">
+                    "-"
+                </p>
+            </div>
+        </div>
+    }
+}
+
+#[component]
 fn SetupPage() -> impl IntoView {
     let context = app_context();
     let fallback_setup_required = RwSignal::new_local(None::<bool>);
@@ -196,6 +212,7 @@ fn SetupPage() -> impl IntoView {
         .unwrap_or(fallback_setup_required);
     let navigate = use_navigate();
     let navigate_guard = navigate.clone();
+    let navigate_home = navigate.clone();
     let setup_step = RwSignal::new_local(app_setup_step_default());
     let key_choice_list = RadrootsAppUiList {
         id: Some("setup-key-choice".to_string()),
@@ -263,36 +280,71 @@ fn SetupPage() -> impl IntoView {
         });
     };
     view! {
-        <main id="app-setup" data-app-scroll class="min-h-[100dvh] w-full px-6 pt-10 pb-16">
+        <main
+            id="app-setup"
+            data-app-scroll
+            class="min-h-[100dvh] h-[100dvh] w-full flex flex-col"
+        >
             {move || match setup_step.get() {
-                RadrootsAppSetupStep::Intro => view! {
-                    <section id="app-setup-intro" class="flex flex-col w-full gap-6">
-                        <header class="flex flex-col gap-3">
-                            <p class="font-sans text-sm uppercase tracking-[0.14em] text-ly0-gl-label">
-                                "Radroots"
-                            </p>
-                            <h1 class="font-sans font-[600] text-3xl text-ly0-gl">
-                                "Welcome to Radroots"
-                            </h1>
-                            <p class="font-sans text-line_d_e text-ly0-gl-label">
-                                "Set up your key and preferences to get started."
-                            </p>
-                        </header>
-                        <div class="flex flex-col gap-3">
-                            <button
-                                type="button"
-                                class="button-submit rounded-touch px-6 py-3"
-                                on:click=advance_step
-                            >
-                                <span class="font-sans font-[600] text-ly2-gl">
-                                    "Get started"
-                                </span>
-                            </button>
-                        </div>
-                    </section>
-                }.into_any(),
+                RadrootsAppSetupStep::Intro => {
+                    let navigate_home = navigate_home.clone();
+                    view! {
+                        <section
+                            id="app-setup-intro"
+                        class="app-view app-view-enter relative flex flex-col h-[100dvh] w-full justify-start items-center"
+                        >
+                            <div class="flex flex-col h-full w-full justify-start items-center">
+                                <div class="relative flex flex-col h-full w-full justify-center items-center">
+                                    <div class="flex flex-row w-full justify-start items-center -translate-y-16">
+                                        <button
+                                            type="button"
+                                            class="flex flex-row w-full justify-center items-center"
+                                            on:click=move |_| navigate_home("/", Default::default())
+                                        >
+                                            <LogoCircle />
+                                        </button>
+                                    </div>
+                                    <div class="absolute bottom-0 left-0 flex flex-col h-[20rem] w-full px-10 gap-2 justify-start items-center">
+                                        <div class="flex flex-row w-full justify-start items-center">
+                                            <p class="font-sans font-[400] text-sm uppercase text-ly0-gl-label">
+                                                "Configure"
+                                            </p>
+                                        </div>
+                                        <div class="flex flex-col w-full gap-2 justify-start items-center">
+                                            <div class="flex flex-row w-full justify-start items-center">
+                                                <p class="font-mono font-[400] text-[1.1rem] text-ly0-gl">
+                                                    "Welcome to Radroots!"
+                                                </p>
+                                            </div>
+                                            <div class="flex flex-row w-full justify-start items-center">
+                                                <p class="font-mono font-[400] text-[1.1rem] text-ly0-gl">
+                                                    "Your device will be configured by the setup wizard."
+                                                </p>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="z-10 absolute bottom-10 left-0 flex flex-col w-full justify-center items-center">
+                                <button
+                                    type="button"
+                                    class="button-submit rounded-touch px-6 py-3"
+                                    on:click=advance_step
+                                >
+                                    <span class="font-sans font-[600] text-ly2-gl">
+                                        "Get started"
+                                    </span>
+                                </button>
+                            </div>
+                        </section>
+                    }
+                    .into_any()
+                },
                 RadrootsAppSetupStep::KeyChoice => view! {
-                    <section id="app-setup-key-choice" class="flex flex-col w-full gap-4">
+                    <section
+                        id="app-setup-key-choice"
+                        class="app-view app-view-enter flex flex-col w-full gap-4 px-6 pt-10 pb-16"
+                    >
                         <header class="flex flex-col gap-2">
                             <p class="font-sans text-sm uppercase tracking-[0.14em] text-ly0-gl-label">
                                 "Setup"

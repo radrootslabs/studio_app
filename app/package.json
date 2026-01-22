@@ -2,6 +2,6 @@
   "name": "radroots-app",
   "private": true,
   "devDependencies": {
-    "daisyui": "^4.12.0"
+    "daisyui": "^5.5.14"
   }
 }
