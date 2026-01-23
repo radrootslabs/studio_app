@@ -15,9 +15,7 @@
 @source "./src/**/*.rs";
 @source "../crates/**/*.rs";
 
-@plugin "daisyui" {
-  themes: os_light, os_dark;
-}
+@plugin "daisyui";
 
 @theme {
   --font-sans: "SF Pro Rounded", system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
