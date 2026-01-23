@@ -5,7 +5,6 @@
 @import "../crates/ui-tokens/assets/themes/screens.css";
 @import "../crates/ui-tokens/assets/themes/theme_os.css";
 @import "./stylesheets/daisyui.css";
-@import "./stylesheets/daisyui-theme-os.css";
 @import "./stylesheets/apps-base.css";
 @import "./stylesheets/apps-ui.css";
 @import "./stylesheets/styles-maplibre-gl.css";
