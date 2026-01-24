@@ -32,6 +32,22 @@
     @apply button-base h-line_button min-w-[82px] w-fit rounded-2xl active:bg-ly1-a bg-ly1 text-ly2-gl;
 }
 
+@utility input-base {
+    @apply flex w-full items-center rounded-touch border border-ly1-edge/60 bg-ly1 px-3 py-2 font-sans text-form_base text-ly1-gl placeholder:text-ly1-gl-label/70 transition-all focus:outline-none focus:ring-2 focus:ring-ly1-edge/60 focus:border-ly1-gl-hl disabled:opacity-60;
+}
+
+@utility input-search {
+    @apply input-base pl-10 bg-ly1-focus;
+}
+
+@utility select-ghost {
+    @apply input-base bg-transparent border-transparent pr-8;
+}
+
+@utility textarea-base {
+    @apply input-base min-h-[8rem] resize-none;
+}
+
 @utility entry-line-fluid {
     @apply h-full w-full rounded-2xl;
 }
@@ -45,7 +61,7 @@
 }
 
 @utility el-textarea {
-    @apply w-full p-0 pl-2 py-3 rounded-touch;
+    @apply flex flex-row w-full p-0 pl-2 py-3 justify-center items-center rounded-touch border-0 focus:border-0 outline-0 focus:outline-0 bg-transparent disabled:bg-transparent font-sans font-[400] placeholder:font-[400] text-form_base;
 }
 
 .el-textarea-ly1:focus {
@@ -64,18 +80,10 @@
 }
 
 @utility el-input {
-    @apply input w-full p-0;
-}
-
-@utility el-input {
     @apply flex flex-row w-full p-0 justify-center items-center border-0 focus:border-0 outline-0 focus:outline-0 bg-transparent disabled:bg-transparent font-sans font-[400] placeholder:font-[400] text-form_base;
 }
 
 @utility el-select {
-    @apply flex flex-row w-full p-0 justify-center items-center border-0 focus:border-0 outline-0 focus:outline-0 bg-transparent disabled:bg-transparent font-sans font-[400] placeholder:font-[400] text-form_base;
-}
-
-@utility el-textarea {
     @apply flex flex-row w-full p-0 justify-center items-center border-0 focus:border-0 outline-0 focus:outline-0 bg-transparent disabled:bg-transparent font-sans font-[400] placeholder:font-[400] text-form_base;
 }
 

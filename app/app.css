@@ -4,7 +4,7 @@
 @import "../crates/ui-tokens/assets/themes/layout.css";
 @import "../crates/ui-tokens/assets/themes/screens.css";
 @import "../crates/ui-tokens/assets/themes/theme_os.css";
-@import "./stylesheets/daisyui.css";
+@import "../crates/ui-tokens/assets/themes/semantic.css";
 @import "./stylesheets/apps-base.css";
 @import "./stylesheets/apps-ui.css";
 @import "./stylesheets/styles-maplibre-gl.css";
@@ -14,8 +14,6 @@
 @source "./index.html";
 @source "./src/**/*.rs";
 @source "../crates/**/*.rs";
-
-@plugin "daisyui";
 
 @theme {
   --font-sans: "SF Pro Rounded", system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;

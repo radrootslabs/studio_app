@@ -1,0 +1,20 @@
+:root {
+  --bg-app: hsl(var(--ly0) / 1);
+  --bg-grouped: hsl(var(--ly1) / 1);
+  --bg-elevated: hsl(var(--ly2) / 1);
+
+  --text-primary: hsl(var(--ly0-gl) / 1);
+  --text-secondary: hsl(var(--ly0-gl-label) / 1);
+  --text-tertiary: hsl(var(--ly0-gl-shade) / 1);
+
+  --separator: hsl(var(--ly1-edge) / 0.6);
+  --stroke: hsl(var(--ly1-edge) / 0.35);
+
+  --accent: hsl(var(--ly0-gl-hl) / 1);
+  --accent-contrast: hsl(var(--ly1-gl) / 1);
+
+  --material-thin: color-mix(in srgb, hsl(var(--ly1) / 1) 55%, transparent);
+  --material-regular: color-mix(in srgb, hsl(var(--ly1) / 1) 72%, transparent);
+  --material-thick: color-mix(in srgb, hsl(var(--ly1) / 1) 85%, transparent);
+  --material-chrome: color-mix(in srgb, hsl(var(--ly0) / 1) 90%, transparent);
+}

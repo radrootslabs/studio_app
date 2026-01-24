@@ -1,5 +1,3 @@
-@import "tailwindcss";
-
 @theme {
   --height-bold_button: 4.25rem;
   --height-entry_line: 48px;
