@@ -328,11 +328,11 @@ fn SetupPage() -> impl IntoView {
                             <div class="z-10 absolute bottom-10 left-0 flex flex-col w-full justify-center items-center">
                                 <button
                                     type="button"
-                                    class="button-submit rounded-touch px-6 py-3"
+                                    class="group flex flex-row h-touch_guide w-lo_ios0 ios1:w-lo_ios1 justify-center items-center bg-ly1 rounded-touch ly1-active-surface ly1-active-raise-less ly1-active-ring-less el-re"
                                     on:click=advance_step
                                 >
-                                    <span class="font-sans font-[600] text-ly2-gl">
-                                        "Get started"
+                                    <span class="font-sans font-[600] tracking-wide text-ly1-gl-shade group-active:text-ly1-gl/40 el-re">
+                                        "Continue"
                                     </span>
                                 </button>
                             </div>

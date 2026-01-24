@@ -32,6 +32,14 @@
     @apply button-base h-line_button min-w-[82px] w-fit rounded-2xl active:bg-ly1-a bg-ly1 text-ly2-gl;
 }
 
+@utility button-layout {
+    @apply flex flex-row h-touch_guide w-lo_ios0 ios1:w-lo_ios1 justify-center items-center bg-ly1 rounded-touch el-re ly1-active-surface ly1-active-raise-less ly1-active-ring-less disabled:opacity-60;
+}
+
+@utility button-layout-label {
+    @apply font-sans font-[600] tracking-wide text-ly1-gl-shade group-active:text-ly1-gl/40 el-re;
+}
+
 @utility input-base {
     @apply flex w-full items-center rounded-touch border border-ly1-edge/60 bg-ly1 px-3 py-2 font-sans text-form_base text-ly1-gl placeholder:text-ly1-gl-label/70 transition-all focus:outline-none focus:ring-2 focus:ring-ly1-edge/60 focus:border-ly1-gl-hl disabled:opacity-60;
 }
