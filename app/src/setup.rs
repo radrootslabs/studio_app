@@ -56,6 +56,13 @@ impl RadrootsAppSetupStep {
         }
     }
 
+    pub const fn prev(self) -> Self {
+        match self {
+            RadrootsAppSetupStep::Intro => RadrootsAppSetupStep::Intro,
+            RadrootsAppSetupStep::KeyChoice => RadrootsAppSetupStep::Intro,
+        }
+    }
+
     pub const fn is_terminal(self) -> bool {
         matches!(self, RadrootsAppSetupStep::KeyChoice)
     }
@@ -313,6 +320,18 @@ mod tests {
         assert_eq!(
             RadrootsAppSetupStep::KeyChoice.next(),
             RadrootsAppSetupStep::KeyChoice
+        );
+    }
+
+    #[test]
+    fn setup_step_prev_rewinds_once() {
+        assert_eq!(
+            RadrootsAppSetupStep::Intro.prev(),
+            RadrootsAppSetupStep::Intro
+        );
+        assert_eq!(
+            RadrootsAppSetupStep::KeyChoice.prev(),
+            RadrootsAppSetupStep::Intro
         );
     }
 

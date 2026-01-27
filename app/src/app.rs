@@ -9,6 +9,9 @@ use leptos_router::path;
 use radroots_studio_app_core::datastore::RadrootsClientDatastore;
 use radroots_studio_app_core::idb::IDB_CONFIG_LOGS;
 use radroots_studio_app_ui_components::{
+    RadrootsAppUiButtonLayoutAction,
+    RadrootsAppUiButtonLayoutBackAction,
+    RadrootsAppUiButtonLayoutPair,
     RadrootsAppUiList,
     RadrootsAppUiListIcon,
     RadrootsAppUiListItem,
@@ -274,16 +277,27 @@ fn SetupPage() -> impl IntoView {
             navigate_guard("/", Default::default());
         }
     });
-    let advance_step = move |_| {
-        setup_step.update(|step| {
-            *step = step.next();
-        });
+    let advance_step: Callback<MouseEvent> = {
+        let setup_step = setup_step.clone();
+        Callback::new(move |_| {
+            setup_step.update(|step| {
+                *step = step.next();
+            });
+        })
+    };
+    let rewind_step: Callback<MouseEvent> = {
+        let setup_step = setup_step.clone();
+        Callback::new(move |_| {
+            setup_step.update(|step| {
+                *step = step.prev();
+            });
+        })
     };
     view! {
         <main
             id="app-setup"
             data-app-scroll
-            class="min-h-[100dvh] h-[100dvh] w-full flex flex-col"
+            class="relative min-h-[100dvh] h-[100dvh] w-full flex flex-col"
         >
             {move || match setup_step.get() {
                 RadrootsAppSetupStep::Intro => {
@@ -325,17 +339,6 @@ fn SetupPage() -> impl IntoView {
                                     </div>
                                 </div>
                             </div>
-                            <div class="z-10 absolute bottom-10 left-0 flex flex-col w-full justify-center items-center">
-                                <button
-                                    type="button"
-                                    class="group flex flex-row h-touch_guide w-lo_ios0 ios1:w-lo_ios1 justify-center items-center bg-ly1 rounded-touch ly1-active-surface ly1-active-raise-less ly1-active-ring-less el-re"
-                                    on:click=advance_step
-                                >
-                                    <span class="font-sans font-[600] tracking-wide text-ly1-gl-shade group-active:text-ly1-gl/40 el-re">
-                                        "Continue"
-                                    </span>
-                                </button>
-                            </div>
                         </section>
                     }
                     .into_any()
@@ -360,6 +363,29 @@ fn SetupPage() -> impl IntoView {
                     </section>
                 }.into_any(),
             }}
+            <div class="z-10 absolute bottom-10 left-0 flex flex-col w-full justify-center items-center">
+                {move || {
+                    let step = setup_step.get();
+                    let continue_action = RadrootsAppUiButtonLayoutAction {
+                        label: "Continue".to_string(),
+                        disabled: step.is_terminal(),
+                        loading: false,
+                        on_click: advance_step.clone(),
+                    };
+                    let back_action = RadrootsAppUiButtonLayoutBackAction {
+                        visible: !matches!(step, RadrootsAppSetupStep::Intro),
+                        label: Some("Back".to_string()),
+                        disabled: false,
+                        on_click: rewind_step.clone(),
+                    };
+                    view! {
+                        <RadrootsAppUiButtonLayoutPair
+                            continue_action=continue_action
+                            back=Some(back_action)
+                        />
+                    }
+                }}
+            </div>
         </main>
     }
 }
