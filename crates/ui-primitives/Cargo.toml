@@ -13,6 +13,7 @@ crate-type = ["rlib"]
 radroots-app-ui-core = { path = "../ui-core" }
 leptos = { workspace = true, features = ["csr"] }
 ui-primitives-core = { path = "../../refs/ui-primitives/crates/ui-primitives-core" }
+ui-primitives-leptos = { path = "../../refs/ui-primitives/crates/ui-primitives-leptos" }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 wasm-bindgen = { workspace = true }

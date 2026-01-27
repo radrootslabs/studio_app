@@ -46,3 +46,17 @@ pub use aria_hidden::{
     RadrootsAppUiModalResult,
     RadrootsAppUiModalTarget,
 };
+pub use ui_primitives_core::dialog::DialogModel;
+pub use ui_primitives_leptos::builders::{
+    dialog_content_attrs,
+    dialog_trigger_attrs,
+};
+pub use ui_primitives_leptos::{
+    use_primitive,
+    PrimitiveAttribute,
+    PrimitiveAttributeValue,
+    PrimitiveElement,
+    PrimitiveError,
+    PrimitiveEvent,
+    PrimitiveResult,
+};

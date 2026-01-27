@@ -5,6 +5,10 @@ use std::sync::{Arc, Mutex};
 
 use radroots_studio_app_ui_core::RadrootsAppUiId;
 use radroots_studio_app_ui_primitives::{
+    dialog_content_attrs,
+    dialog_trigger_attrs,
+    use_primitive,
+    DialogModel,
     RadrootsAppUiDismissableReason,
     RadrootsAppUiDismissableLayer,
     RadrootsAppUiFocusScope,
@@ -95,7 +99,13 @@ pub fn RadrootsAppUiDialogTrigger(
 ) -> impl IntoView {
     let context = use_context::<RadrootsAppUiDialogContext>()
         .expect("dialog context");
+    let open = context.open;
     let content_id = context.content_id.clone();
+    let attrs = Signal::derive(move || {
+        let model = DialogModel::new(open.get());
+        dialog_trigger_attrs(&model, Some(content_id.as_str()))
+    });
+    let trigger = use_primitive::<html::Button>(attrs, Vec::new());
     let on_click = move |_event: MouseEvent| {
         if disabled {
             return;
@@ -104,16 +114,13 @@ pub fn RadrootsAppUiDialogTrigger(
     };
     view! {
         <button
+            node_ref=trigger.node_ref()
             type="button"
             id=id
             class=class
             style=style
             disabled=disabled
-            aria-haspopup="dialog"
-            aria-expanded=move || if context.open.get() { "true" } else { "false" }
-            aria-controls=content_id
             data-ui="dialog-trigger"
-            data-state=move || radroots_studio_app_ui_dialog_state_value(context.open.get())
             on:click=on_click
         >
             {children()}
@@ -176,11 +183,24 @@ pub fn RadrootsAppUiDialogContent(
 ) -> impl IntoView {
     let context = use_context::<RadrootsAppUiDialogContext>()
         .expect("dialog context");
-    let node_ref = NodeRef::<html::Div>::new();
     let content_id = context.content_id.clone();
+    let open = context.open;
+    let title_id = context.title_id;
+    let description_id = context.description_id;
     let scroll_guard = Arc::new(Mutex::new(None::<RadrootsAppUiScrollLockGuard>));
     let modal_guard = Arc::new(Mutex::new(None::<RadrootsAppUiModalGuard>));
     let modal = context.modal;
+    let attrs = Signal::derive(move || {
+        let mut model = DialogModel::new(open.get());
+        model.set_modal(modal);
+        dialog_content_attrs(
+            &model,
+            title_id.get().as_deref(),
+            description_id.get().as_deref(),
+        )
+    });
+    let primitive = use_primitive::<html::Div>(attrs, Vec::new());
+    let node_ref = primitive.node_ref();
 
     #[cfg(target_arch = "wasm32")]
     {
@@ -224,9 +244,6 @@ pub fn RadrootsAppUiDialogContent(
 
     let on_dismiss = context.dismiss.clone();
 
-    let labelled_by = move || context.title_id.get();
-    let described_by = move || context.description_id.get();
-    let aria_modal = StoredValue::new(if modal { Some("true".to_string()) } else { None });
     let data_ui = StoredValue::new(data_ui.unwrap_or_else(|| "dialog".to_string()));
     let id_value = StoredValue::new(id.unwrap_or_else(|| content_id.clone()));
     let class_value = StoredValue::new(class);
@@ -244,12 +261,7 @@ pub fn RadrootsAppUiDialogContent(
                     id=move || id_value.get_value()
                     class=move || class_value.get_value()
                     style=move || style_value.get_value()
-                    role="dialog"
-                    aria-modal=move || aria_modal.get_value()
-                    aria-labelledby=labelled_by
-                    aria-describedby=described_by
                     data-ui=move || data_ui.get_value()
-                    data-state=move || radroots_studio_app_ui_dialog_state_value(context.open.get())
                 >
                     {(children.get_value())()}
                 </div>
