@@ -1,3 +1,5 @@
+use ui_primitives_core::roving_focus::RovingFocus;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RadrootsAppUiRovingFocusOrientation {
     Horizontal,
@@ -53,31 +55,13 @@ pub fn radroots_studio_app_ui_roving_focus_next_index(
     if count == 0 {
         return 0;
     }
+
+    let mut focus = RovingFocus::with_active(count, Some(current), looped);
     match action {
-        RadrootsAppUiRovingFocusAction::First => 0,
-        RadrootsAppUiRovingFocusAction::Last => count.saturating_sub(1),
-        RadrootsAppUiRovingFocusAction::Next => {
-            if current + 1 >= count {
-                if looped {
-                    0
-                } else {
-                    current
-                }
-            } else {
-                current + 1
-            }
-        }
-        RadrootsAppUiRovingFocusAction::Prev => {
-            if current == 0 {
-                if looped {
-                    count.saturating_sub(1)
-                } else {
-                    0
-                }
-            } else {
-                current - 1
-            }
-        }
+        RadrootsAppUiRovingFocusAction::First => focus.move_first().unwrap_or(0),
+        RadrootsAppUiRovingFocusAction::Last => focus.move_last().unwrap_or(0),
+        RadrootsAppUiRovingFocusAction::Next => focus.move_next().unwrap_or(current),
+        RadrootsAppUiRovingFocusAction::Prev => focus.move_prev().unwrap_or(current),
     }
 }
 
