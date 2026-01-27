@@ -183,6 +183,7 @@ fn SplashPage() -> impl IntoView {
     view! {
         <main
             id="app-splash"
+            class="app-page app-page-fixed"
             style="min-height:100dvh;background:white;display:flex;align-items:center;justify-content:center;"
         >
         </main>
@@ -192,8 +193,14 @@ fn SplashPage() -> impl IntoView {
 #[component]
 fn LogoCircle() -> impl IntoView {
     view! {
-        <div class="relative flex flex-col h-[196px] w-full justify-center items-center">
-            <div class="relative flex flex-row h-36 w-36 justify-center items-center bg-ly2 rounded-full">
+        <div
+            id="app-logo-circle"
+            class="relative flex flex-col h-[196px] w-full justify-center items-center"
+        >
+            <div
+                id="app-logo-mark"
+                class="relative flex flex-row h-36 w-36 justify-center items-center bg-ly2 rounded-full"
+            >
                 <p class="font-sans font-[900] text-6xl text-ly0-gl -tracking-[0.4rem] -translate-x-[6px]">
                     "\u{00BB}`,"
                 </p>
@@ -296,8 +303,7 @@ fn SetupPage() -> impl IntoView {
     view! {
         <main
             id="app-setup"
-            data-app-scroll
-            class="relative min-h-[100dvh] h-[100dvh] w-full flex flex-col"
+            class="app-page app-page-fixed relative w-full flex flex-col"
         >
             {move || match setup_step.get() {
                 RadrootsAppSetupStep::Intro => {
@@ -305,38 +311,57 @@ fn SetupPage() -> impl IntoView {
                     view! {
                         <section
                             id="app-setup-intro"
-                        class="app-view app-view-enter relative flex flex-col h-[100dvh] w-full justify-start items-center"
+                            class="app-view app-view-enter relative flex flex-col h-[100dvh] w-full justify-start items-center"
                         >
-                            <div class="flex flex-col h-full w-full justify-start items-center">
-                                <div class="relative flex flex-col h-full w-full justify-center items-center">
-                                    <div class="flex flex-row w-full justify-start items-center -translate-y-16">
+                            <div
+                                id="app-setup-intro-body"
+                                class="flex flex-col h-full w-full justify-start items-center"
+                            >
+                                <div
+                                    id="app-setup-intro-stage"
+                                    class="relative flex flex-col h-full w-full justify-center items-center"
+                                >
+                                    <header
+                                        id="app-setup-intro-header"
+                                        class="flex flex-row w-full justify-start items-center -translate-y-16"
+                                    >
                                         <button
                                             type="button"
+                                            id="app-setup-intro-logo-button"
                                             class="flex flex-row w-full justify-center items-center"
                                             on:click=move |_| navigate_home("/", Default::default())
                                         >
                                             <LogoCircle />
                                         </button>
-                                    </div>
-                                    <div class="absolute bottom-0 left-0 flex flex-col h-[20rem] w-full px-10 gap-2 justify-start items-center">
-                                        <div class="flex flex-row w-full justify-start items-center">
-                                            <p class="font-sans font-[400] text-sm uppercase text-ly0-gl-label">
-                                                "Configure"
+                                    </header>
+                                    <footer
+                                        id="app-setup-intro-footer"
+                                        class="absolute bottom-0 left-0 flex flex-col h-[20rem] w-full px-10 gap-2 justify-start items-center"
+                                    >
+                                        <p
+                                            id="app-setup-intro-kicker"
+                                            class="w-full text-left font-sans font-[400] text-sm uppercase text-ly0-gl-label"
+                                        >
+                                            "Configure"
+                                        </p>
+                                        <div
+                                            id="app-setup-intro-copy"
+                                            class="flex flex-col w-full gap-2 justify-start items-center"
+                                        >
+                                            <p
+                                                id="app-setup-intro-line-welcome"
+                                                class="w-full text-left font-mono font-[400] text-[1.1rem] text-ly0-gl"
+                                            >
+                                                "Welcome to Radroots!"
+                                            </p>
+                                            <p
+                                                id="app-setup-intro-line-body"
+                                                class="w-full text-left font-mono font-[400] text-[1.1rem] text-ly0-gl"
+                                            >
+                                                "Your device will be configured by the setup wizard."
                                             </p>
                                         </div>
-                                        <div class="flex flex-col w-full gap-2 justify-start items-center">
-                                            <div class="flex flex-row w-full justify-start items-center">
-                                                <p class="font-mono font-[400] text-[1.1rem] text-ly0-gl">
-                                                    "Welcome to Radroots!"
-                                                </p>
-                                            </div>
-                                            <div class="flex flex-row w-full justify-start items-center">
-                                                <p class="font-mono font-[400] text-[1.1rem] text-ly0-gl">
-                                                    "Your device will be configured by the setup wizard."
-                                                </p>
-                                            </div>
-                                        </div>
-                                    </div>
+                                    </footer>
                                 </div>
                             </div>
                         </section>
@@ -348,7 +373,7 @@ fn SetupPage() -> impl IntoView {
                         id="app-setup-key-choice"
                         class="app-view app-view-enter flex flex-col w-full gap-4 px-6 pt-10 pb-16"
                     >
-                        <header class="flex flex-col gap-2">
+                        <header id="app-setup-key-choice-header" class="flex flex-col gap-2">
                             <p class="font-sans text-sm uppercase tracking-[0.14em] text-ly0-gl-label">
                                 "Setup"
                             </p>
@@ -359,11 +384,16 @@ fn SetupPage() -> impl IntoView {
                                 "Select how you want to add your Nostr key."
                             </p>
                         </header>
-                        <RadrootsAppUiListView basis=key_choice_list.clone() />
+                        <div id="app-setup-key-choice-list" class="w-full">
+                            <RadrootsAppUiListView basis=key_choice_list.clone() />
+                        </div>
                     </section>
                 }.into_any(),
             }}
-            <div class="z-10 absolute bottom-10 left-0 flex flex-col w-full justify-center items-center">
+            <footer
+                id="app-setup-actions"
+                class="z-10 absolute bottom-4 left-0 flex flex-col w-full justify-center items-center"
+            >
                 {move || {
                     let step = setup_step.get();
                     let continue_action = RadrootsAppUiButtonLayoutAction {
@@ -381,11 +411,11 @@ fn SetupPage() -> impl IntoView {
                     view! {
                         <RadrootsAppUiButtonLayoutPair
                             continue_action=continue_action
-                            back=Some(back_action)
+                            back=back_action
                         />
                     }
                 }}
-            </div>
+            </footer>
         </main>
     }
 }
@@ -486,84 +516,92 @@ fn HomePage() -> impl IntoView {
         }
     };
     view! {
-        <main id="app-home" data-app-scroll>
-            <div>"app"</div>
-            <div style="margin-top: 8px; display: flex; align-items: center; gap: 8px;">
-                <span
-                    style=move || format!(
-                        "display:inline-block;width:10px;height:10px;border-radius:50%;background:{};",
-                        status_color()
-                    )
-                ></span>
-                <span>{move || init_state.get().stage.as_str()}</span>
-            </div>
-            <div style="margin-top: 12px; display: flex; align-items: center; gap: 8px;">
-                <button
-                    on:click=move |_| {
-                        let config = backends.with_untracked(|value| value.as_ref().map(|backends| backends.config.clone()));
-                        reset_status.set(Some("resetting".to_string()));
-                        health_report.set(RadrootsAppHealthReport::empty());
-                        active_key.set(None);
-                        notifications_status.set(None);
-                        setup_required.set(Some(true));
-                        spawn_local(async move {
-                            let Some(config) = config else {
-                                reset_status.set(Some("reset_missing_backends".to_string()));
-                                return;
-                            };
-                            let datastore = radroots_studio_app_core::datastore::RadrootsClientWebDatastore::new(
-                                Some(config.datastore.idb_config),
-                            );
-                            let keystore = radroots_studio_app_core::keystore::RadrootsClientWebKeystoreNostr::new(
-                                Some(config.keystore.nostr_store),
-                            );
-                            match app_init_reset(
-                                Some(&datastore),
-                                Some(&config.datastore.key_maps),
-                                Some(&keystore),
-                            )
-                            .await
-                            {
-                                Ok(()) => {
-                                    let log_datastore = logs_datastore();
-                                    if let Err(err) = log_datastore.reset().await {
-                                        let reset_err = RadrootsAppInitError::Datastore(err);
-                                        let _ = app_log_error_emit(&reset_err);
-                                        reset_status.set(Some(reset_err.to_string()));
-                                        return;
+        <main id="app-home" class="app-page app-page-scroll">
+            <header id="app-home-header">
+                <h1 id="app-home-title">"app"</h1>
+            </header>
+            <section id="app-home-status" aria-label="Status">
+                <div id="app-home-status-row" style="margin-top: 8px; display: flex; align-items: center; gap: 8px;">
+                    <span
+                        style=move || format!(
+                            "display:inline-block;width:10px;height:10px;border-radius:50%;background:{};",
+                            status_color()
+                        )
+                    ></span>
+                    <span>{move || init_state.get().stage.as_str()}</span>
+                </div>
+            </section>
+            <section id="app-home-reset" aria-label="Reset">
+                <div id="app-home-reset-row" style="margin-top: 12px; display: flex; align-items: center; gap: 8px;">
+                    <button
+                        on:click=move |_| {
+                            let config = backends.with_untracked(|value| value.as_ref().map(|backends| backends.config.clone()));
+                            reset_status.set(Some("resetting".to_string()));
+                            health_report.set(RadrootsAppHealthReport::empty());
+                            active_key.set(None);
+                            notifications_status.set(None);
+                            setup_required.set(Some(true));
+                            spawn_local(async move {
+                                let Some(config) = config else {
+                                    reset_status.set(Some("reset_missing_backends".to_string()));
+                                    return;
+                                };
+                                let datastore = radroots_studio_app_core::datastore::RadrootsClientWebDatastore::new(
+                                    Some(config.datastore.idb_config),
+                                );
+                                let keystore = radroots_studio_app_core::keystore::RadrootsClientWebKeystoreNostr::new(
+                                    Some(config.keystore.nostr_store),
+                                );
+                                match app_init_reset(
+                                    Some(&datastore),
+                                    Some(&config.datastore.key_maps),
+                                    Some(&keystore),
+                                )
+                                .await
+                                {
+                                    Ok(()) => {
+                                        let log_datastore = logs_datastore();
+                                        if let Err(err) = log_datastore.reset().await {
+                                            let reset_err = RadrootsAppInitError::Datastore(err);
+                                            let _ = app_log_error_emit(&reset_err);
+                                            reset_status.set(Some(reset_err.to_string()));
+                                            return;
+                                        }
+                                        reset_status.set(Some("reset_done".to_string()));
+                                        spawn_health_checks(
+                                            config,
+                                            true,
+                                            health_report,
+                                            health_running,
+                                            active_key,
+                                            notifications_status,
+                                        );
                                     }
-                                    reset_status.set(Some("reset_done".to_string()));
-                                    spawn_health_checks(
-                                        config,
-                                        true,
-                                        health_report,
-                                        health_running,
-                                        active_key,
-                                        notifications_status,
-                                    );
+                                    Err(err) => {
+                                        let log_datastore = logs_datastore();
+                                        let _ = app_log_error_store(
+                                            &log_datastore,
+                                            &config.datastore.key_maps,
+                                            &err,
+                                        )
+                                        .await;
+                                        reset_status.set(Some(err.to_string()));
+                                    }
                                 }
-                                Err(err) => {
-                                    let log_datastore = logs_datastore();
-                                    let _ = app_log_error_store(
-                                        &log_datastore,
-                                        &config.datastore.key_maps,
-                                        &err,
-                                    )
-                                    .await;
-                                    reset_status.set(Some(err.to_string()));
-                                }
-                            }
-                        });
-                    }
-                    disabled=reset_disabled
-                >
-                    "reset"
-                </button>
-                <span>{reset_label}</span>
-            </div>
-            <div style="margin-top: 16px;">
-                <div style="font-weight: 600;">"notifications"</div>
-                <div style="margin-top: 8px; display: flex; align-items: center; gap: 8px;">
+                            });
+                        }
+                        disabled=reset_disabled
+                    >
+                        "reset"
+                    </button>
+                    <span>{reset_label}</span>
+                </div>
+            </section>
+            <section id="app-home-notifications" aria-label="Notifications" style="margin-top: 16px;">
+                <header id="app-home-notifications-header">
+                    <h2 id="app-home-notifications-title" style="font-weight: 600;">"notifications"</h2>
+                </header>
+                <div id="app-home-notifications-actions" style="margin-top: 8px; display: flex; align-items: center; gap: 8px;">
                     <button
                         on:click=move |_| {
                             let config = backends.with_untracked(|value| value.as_ref().map(|backends| backends.config.clone()));
@@ -616,10 +654,12 @@ fn HomePage() -> impl IntoView {
                     </button>
                     <span>{notifications_label}</span>
                 </div>
-            </div>
-            <div style="margin-top: 16px;">
-                <div style="font-weight: 600;">"health checks"</div>
-                <div style="margin-top: 8px; display: flex; align-items: center; gap: 8px;">
+            </section>
+            <section id="app-home-health" aria-label="Health checks" style="margin-top: 16px;">
+                <header id="app-home-health-header">
+                    <h2 id="app-home-health-title" style="font-weight: 600;">"health checks"</h2>
+                </header>
+                <div id="app-home-health-actions" style="margin-top: 8px; display: flex; align-items: center; gap: 8px;">
                     <button
                         on:click=move |_| {
                             let config = backends.with_untracked(|value| value.as_ref().map(|backends| backends.config.clone()));
@@ -643,8 +683,8 @@ fn HomePage() -> impl IntoView {
                         {move || if health_running.get() { "checking" } else { "run checks" }}
                     </button>
                 </div>
-                <div style="margin-top: 8px; display: grid; gap: 6px;">
-                    <div style="display: flex; align-items: center; gap: 8px;">
+                <ul id="app-home-health-list" style="margin-top: 8px; display: grid; gap: 6px;">
+                    <li id="app-home-health-key-maps" style="display: flex; align-items: center; gap: 8px;">
                         <span
                             style=move || format!(
                                 "display:inline-block;width:10px;height:10px;border-radius:50%;background:{};",
@@ -653,8 +693,8 @@ fn HomePage() -> impl IntoView {
                         ></span>
                         <span>"key_maps"</span>
                         <span>{move || health_result_label(&health_report.get().key_maps)}</span>
-                    </div>
-                    <div style="display: flex; align-items: center; gap: 8px;">
+                    </li>
+                    <li id="app-home-health-bootstrap-state" style="display: flex; align-items: center; gap: 8px;">
                         <span
                             style=move || format!(
                                 "display:inline-block;width:10px;height:10px;border-radius:50%;background:{};",
@@ -663,8 +703,8 @@ fn HomePage() -> impl IntoView {
                         ></span>
                         <span>"bootstrap_state"</span>
                         <span>{move || health_result_label(&health_report.get().bootstrap_state)}</span>
-                    </div>
-                    <div style="display: flex; align-items: center; gap: 8px;">
+                    </li>
+                    <li id="app-home-health-active-key-state" style="display: flex; align-items: center; gap: 8px;">
                         <span
                             style=move || format!(
                                 "display:inline-block;width:10px;height:10px;border-radius:50%;background:{};",
@@ -673,8 +713,8 @@ fn HomePage() -> impl IntoView {
                         ></span>
                         <span>"state_active_key"</span>
                         <span>{move || health_result_label(&health_report.get().state_active_key)}</span>
-                    </div>
-                    <div style="display: flex; align-items: center; gap: 8px;">
+                    </li>
+                    <li id="app-home-health-notifications" style="display: flex; align-items: center; gap: 8px;">
                         <span
                             style=move || format!(
                                 "display:inline-block;width:10px;height:10px;border-radius:50%;background:{};",
@@ -683,8 +723,8 @@ fn HomePage() -> impl IntoView {
                         ></span>
                         <span>"notifications"</span>
                         <span>{move || health_result_label(&health_report.get().notifications)}</span>
-                    </div>
-                    <div style="display: flex; align-items: center; gap: 8px;">
+                    </li>
+                    <li id="app-home-health-tangle" style="display: flex; align-items: center; gap: 8px;">
                         <span
                             style=move || format!(
                                 "display:inline-block;width:10px;height:10px;border-radius:50%;background:{};",
@@ -693,8 +733,8 @@ fn HomePage() -> impl IntoView {
                         ></span>
                         <span>"tangle"</span>
                         <span>{move || health_result_label(&health_report.get().tangle)}</span>
-                    </div>
-                    <div style="display: flex; align-items: center; gap: 8px;">
+                    </li>
+                    <li id="app-home-health-datastore" style="display: flex; align-items: center; gap: 8px;">
                         <span
                             style=move || format!(
                                 "display:inline-block;width:10px;height:10px;border-radius:50%;background:{};",
@@ -703,8 +743,8 @@ fn HomePage() -> impl IntoView {
                         ></span>
                         <span>"datastore_roundtrip"</span>
                         <span>{move || health_result_label(&health_report.get().datastore_roundtrip)}</span>
-                    </div>
-                    <div style="display: flex; align-items: center; gap: 8px;">
+                    </li>
+                    <li id="app-home-health-keystore" style="display: flex; align-items: center; gap: 8px;">
                         <span
                             style=move || format!(
                                 "display:inline-block;width:10px;height:10px;border-radius:50%;background:{};",
@@ -713,13 +753,13 @@ fn HomePage() -> impl IntoView {
                         ></span>
                         <span>"keystore"</span>
                         <span>{move || health_result_label(&health_report.get().keystore)}</span>
-                    </div>
-                    <div style="display: flex; align-items: center; gap: 8px;">
+                    </li>
+                    <li id="app-home-health-active-key" style="display: flex; align-items: center; gap: 8px;">
                         <span>"active_key"</span>
                         <span>{move || active_key_label(active_key.get())}</span>
-                    </div>
-                </div>
-            </div>
+                    </li>
+                </ul>
+            </section>
         </main>
     }
 }
@@ -860,7 +900,13 @@ fn AppShell() -> impl IntoView {
                     <A href="/settings">"settings"</A>
                     <A href="/setup">"setup"</A>
                 </nav>
-                <Routes fallback=|| view! { <div>"not_found"</div> }>
+                <Routes
+                    fallback=|| view! {
+                        <main id="app-not-found" class="app-page app-page-fixed">
+                            <p id="app-not-found-label">"not_found"</p>
+                        </main>
+                    }
+                >
                     <Route path=path!("") view=HomePage />
                     <Route path=path!("logs") view=RadrootsAppLogsPage />
                     <Route path=path!("ui") view=RadrootsAppUiDemoPage />

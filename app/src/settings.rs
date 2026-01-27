@@ -185,12 +185,14 @@ pub fn RadrootsAppSettingsPage() -> impl IntoView {
         styles: None,
     };
     view! {
-        <main style="padding: 16px;">
-            <div style="font: var(--type-title2); margin-bottom: 12px;">"settings"</div>
-            <div style="display:flex;flex-direction:column;gap:16px;">
+        <main id="app-settings" class="app-page app-page-scroll" style="padding: 16px;">
+            <header id="app-settings-header" style="font: var(--type-title2); margin-bottom: 12px;">
+                <h1 id="app-settings-title">"settings"</h1>
+            </header>
+            <section id="app-settings-content" style="display:flex;flex-direction:column;gap:16px;">
                 <RadrootsAppUiListView basis=appearance_list />
                 <RadrootsAppUiListView basis=actions_list />
-            </div>
+            </section>
         </main>
     }
 }

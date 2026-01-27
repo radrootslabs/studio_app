@@ -571,17 +571,17 @@ pub fn RadrootsAppLogsPage() -> impl IntoView {
         total == 0 || page_index.get() + 1 >= total
     };
     view! {
-        <main>
-            <div style="display:flex;align-items:center;gap:12px;">
-                <div style="font-size:18px;font-weight:600;">"logs"</div>
+        <main id="app-logs" class="app-page app-page-scroll">
+            <header id="app-logs-header" style="display:flex;align-items:center;gap:12px;">
+                <h1 id="app-logs-title" style="font-size:18px;font-weight:600;">"logs"</h1>
                 <button on:click=move |_| refresh()>"refresh"</button>
                 <button on:click=move |_| clear()>"clear"</button>
                 <button on:click=move |_| copy_dump() disabled=dump_action_disabled>"copy dump"</button>
                 <button on:click=move |_| download_dump() disabled=dump_action_disabled>"download dump"</button>
-                <div style="font-size:12px;color:#6b7280;">{status_label}</div>
-                <div style="font-size:12px;color:#6b7280;">{dump_action_label}</div>
-            </div>
-            <div style="margin-top:12px;display:flex;flex-wrap:wrap;gap:12px;align-items:center;">
+                <div id="app-logs-status" style="font-size:12px;color:#6b7280;">{status_label}</div>
+                <div id="app-logs-dump-status" style="font-size:12px;color:#6b7280;">{dump_action_label}</div>
+            </header>
+            <section id="app-logs-filters" aria-label="Filters" style="margin-top:12px;display:flex;flex-wrap:wrap;gap:12px;align-items:center;">
                 <input
                     type="text"
                     placeholder="search code/message/context"
@@ -637,7 +637,7 @@ pub fn RadrootsAppLogsPage() -> impl IntoView {
                     <option value="100">"100"</option>
                     <option value="250">"250"</option>
                 </select>
-                <div style="font-size:12px;color:#6b7280;">
+                <div id="app-logs-filter-summary" style="font-size:12px;color:#6b7280;">
                     {move || {
                         let total = entries.get().len();
                         let visible = filtered_entries.get().len();
@@ -647,8 +647,8 @@ pub fn RadrootsAppLogsPage() -> impl IntoView {
                         format!("showing {visible} of {total} (limit {limit}) page {page}/{pages}")
                     }}
                 </div>
-            </div>
-            <div style="margin-top:8px;display:flex;align-items:center;gap:8px;">
+            </section>
+            <section id="app-logs-pagination" aria-label="Pagination" style="margin-top:8px;display:flex;align-items:center;gap:8px;">
                 <button
                     on:click=move |_| {
                         let next = page_index.get().saturating_sub(1);
@@ -673,12 +673,12 @@ pub fn RadrootsAppLogsPage() -> impl IntoView {
                 <button on:click=move |_| copy_support() disabled=support_disabled>
                     "copy instructions"
                 </button>
-                <div style="font-size:12px;color:#6b7280;">{support_label}</div>
-            </div>
-            <div style="margin-top:12px;display:flex;flex-wrap:wrap;gap:16px;">
-                <section style="flex:1 1 520px;min-width:280px;">
-                    <div style="font-weight:600;font-size:14px;">"entries"</div>
-                    <div style="margin-top:8px;border:1px solid #e5e7eb;border-radius:8px;height:60vh;overflow:auto;padding:10px;display:flex;flex-direction:column;gap:10px;">
+                <div id="app-logs-support-status" style="font-size:12px;color:#6b7280;">{support_label}</div>
+            </section>
+            <section id="app-logs-content" aria-label="Log content" style="margin-top:12px;display:flex;flex-wrap:wrap;gap:16px;">
+                <section id="app-logs-entries" style="flex:1 1 520px;min-width:280px;">
+                    <h2 id="app-logs-entries-title" style="font-weight:600;font-size:14px;">"entries"</h2>
+                    <div id="app-logs-entries-list" style="margin-top:8px;border:1px solid #e5e7eb;border-radius:8px;height:60vh;overflow:auto;padding:10px;display:flex;flex-direction:column;gap:10px;">
                         <For
                             each=move || paged_entries.get()
                             key=|entry| entry.id.clone()
@@ -722,21 +722,21 @@ pub fn RadrootsAppLogsPage() -> impl IntoView {
                         />
                     </div>
                 </section>
-                <section style="flex:1 1 320px;min-width:260px;">
-                    <div style="font-weight:600;font-size:14px;">"dump (jsonl)"</div>
+                <section id="app-logs-dump" style="flex:1 1 320px;min-width:260px;">
+                    <h2 id="app-logs-dump-title" style="font-weight:600;font-size:14px;">"dump (jsonl)"</h2>
                     <textarea
                         readonly
                         prop:value=move || dump_text.get()
                         style="margin-top:8px;width:100%;height:60vh;border:1px solid #e5e7eb;border-radius:8px;padding:8px;font-size:12px;font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,\"Liberation Mono\",\"Courier New\",monospace;"
                     ></textarea>
-                    <div style="margin-top:12px;font-weight:600;font-size:14px;">"support instructions"</div>
+                    <h3 id="app-logs-support-title" style="margin-top:12px;font-weight:600;font-size:14px;">"support instructions"</h3>
                     <textarea
                         readonly
                         prop:value=move || support_instructions_text()
                         style="margin-top:8px;width:100%;height:140px;border:1px solid #e5e7eb;border-radius:8px;padding:8px;font-size:12px;font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,\"Liberation Mono\",\"Courier New\",monospace;"
                     ></textarea>
                 </section>
-            </div>
+            </section>
         </main>
     }
 }

@@ -181,62 +181,66 @@ pub fn RadrootsAppUiDemoPage() -> impl IntoView {
         }),
     };
     view! {
-        <main style="padding: 16px;">
-            <div style="font: var(--type-title2); margin-bottom: 12px;">"UI Demo"</div>
-            <RadrootsAppUiListView basis=list />
+        <main id="app-ui-demo" class="app-page app-page-scroll" style="padding: 16px;">
+            <header id="app-ui-demo-header" style="font: var(--type-title2); margin-bottom: 12px;">
+                <h1 id="app-ui-demo-title">"UI Demo"</h1>
+            </header>
+            <section id="app-ui-demo-content">
+                <RadrootsAppUiListView basis=list />
 
-            <RadrootsAppUiSheetRoot
-                open=Some(sheet_open_read)
-                default_open=false
-                modal=None
-                on_open_change=Some(sheet_open_set)
-            >
-                <RadrootsAppUiSheetTrigger
-                    disabled=false
-                    class=Some("ui-card".to_string())
-                    id=None
-                    style=Some("padding:12px 16px; width: 100%; text-align: left;".to_string())
+                <RadrootsAppUiSheetRoot
+                    open=Some(sheet_open_read)
+                    default_open=false
+                    modal=None
+                    on_open_change=Some(sheet_open_set)
                 >
-                    "Open Sheet"
-                </RadrootsAppUiSheetTrigger>
-                <RadrootsAppUiSheetPortal>
-                    <RadrootsAppUiSheetOverlay
-                        close_on_click=None
-                        class=None
+                    <RadrootsAppUiSheetTrigger
+                        disabled=false
+                        class=Some("ui-card".to_string())
                         id=None
-                        style=None
-                    />
-                    <RadrootsAppUiSheetContent
-                        disable_outside_pointer_events=false
-                        show_handle=true
-                        class=None
-                        id=None
-                        style=None
+                        style=Some("padding:12px 16px; width: 100%; text-align: left;".to_string())
                     >
-                        <RadrootsAppUiSheetTitle
+                        "Open Sheet"
+                    </RadrootsAppUiSheetTrigger>
+                    <RadrootsAppUiSheetPortal>
+                        <RadrootsAppUiSheetOverlay
+                            close_on_click=None
+                            class=None
+                            id=None
+                            style=None
+                        />
+                        <RadrootsAppUiSheetContent
+                            disable_outside_pointer_events=false
+                            show_handle=true
                             class=None
                             id=None
                             style=None
                         >
-                            "Sheet Preview"
-                        </RadrootsAppUiSheetTitle>
-                        <RadrootsAppUiSheetDescription
-                            class=None
-                            id=None
-                            style=Some("margin-top: 6px;".to_string())
-                        >
-                            "This is a placeholder sheet for iOS styling."
-                        </RadrootsAppUiSheetDescription>
-                        <RadrootsAppUiSheetClose
-                            class=Some("ui-card".to_string())
-                            id=None
-                            style=Some("margin-top: 16px; padding: 10px 14px;".to_string())
-                        >
-                            "Close"
-                        </RadrootsAppUiSheetClose>
-                    </RadrootsAppUiSheetContent>
-                </RadrootsAppUiSheetPortal>
-            </RadrootsAppUiSheetRoot>
+                            <RadrootsAppUiSheetTitle
+                                class=None
+                                id=None
+                                style=None
+                            >
+                                "Sheet Preview"
+                            </RadrootsAppUiSheetTitle>
+                            <RadrootsAppUiSheetDescription
+                                class=None
+                                id=None
+                                style=Some("margin-top: 6px;".to_string())
+                            >
+                                "This is a placeholder sheet for iOS styling."
+                            </RadrootsAppUiSheetDescription>
+                            <RadrootsAppUiSheetClose
+                                class=Some("ui-card".to_string())
+                                id=None
+                                style=Some("margin-top: 16px; padding: 10px 14px;".to_string())
+                            >
+                                "Close"
+                            </RadrootsAppUiSheetClose>
+                        </RadrootsAppUiSheetContent>
+                    </RadrootsAppUiSheetPortal>
+                </RadrootsAppUiSheetRoot>
+            </section>
         </main>
     }
 }
