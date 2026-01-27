@@ -20,6 +20,12 @@ version = "0.1.0"
 edition = "2024"
 rust-version = "1.92.0"
 license = "GPL-3.0-or-later"
+authors = ["Radroots Authors"]
+repository = "https://github.com/triesap/radroots"
+readme = "README.md"
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
 
 [workspace.dependencies]
 leptos = { version = "0.8.5", default-features = false }
