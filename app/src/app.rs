@@ -209,6 +209,8 @@ fn SetupPage() -> impl IntoView {
     let navigate_home = navigate.clone();
     let setup_step = RwSignal::new_local(app_setup_step_default());
     let setup_key_choice = RwSignal::new_local(None::<RadrootsAppSetupKeyChoice>);
+    let profile_name = RwSignal::new_local(String::new());
+    let profile_nip05 = RwSignal::new_local(true);
     let on_generate_key = setup_touch_callback("generate_key");
     let on_add_key = setup_touch_callback("add_key");
     Effect::new(move || {
@@ -379,11 +381,64 @@ fn SetupPage() -> impl IntoView {
                 RadrootsAppSetupStep::Profile => view! {
                     <section
                         id="app-setup-profile"
-                        class="app-view app-view-enter flex flex-col w-full px-6 pt-10 pb-16 justify-center items-center"
+                        class="app-view app-view-enter flex flex-col w-full px-6 pt-10 pb-16"
                     >
-                        <p class="font-sans font-[600] text-ly0-gl text-2xl">
-                            "Add Profile"
-                        </p>
+                        <div
+                            id="app-setup-profile-body"
+                            class="flex flex-1 w-full flex-col justify-center items-center"
+                        >
+                            <div
+                                id="app-setup-profile-card"
+                                class="flex flex-col h-[16rem] w-full px-4 gap-6 justify-start items-center"
+                            >
+                                <p
+                                    id="app-setup-profile-title"
+                                    class="font-sans font-[600] text-ly0-gl text-3xl"
+                                >
+                                    "Add Profile"
+                                </p>
+                                <div
+                                    id="app-setup-profile-fields"
+                                    class="flex flex-col w-full gap-4 justify-center items-center"
+                                >
+                                    <input
+                                        id="app-setup-profile-name"
+                                        class="input-base w-lo_ios0 ios1:w-lo_ios1 text-[1.25rem] text-center placeholder:opacity-60"
+                                        type="text"
+                                        placeholder="Enter profile name"
+                                        prop:value=move || profile_name.get()
+                                        on:input=move |ev| {
+                                            profile_name.set(event_target_value(&ev));
+                                        }
+                                    />
+                                    <div
+                                        id="app-setup-profile-nip05"
+                                        class="flex flex-row w-full gap-2 justify-center items-center"
+                                    >
+                                        <input
+                                            id="app-setup-profile-nip05-toggle"
+                                            type="checkbox"
+                                            prop:checked=move || profile_nip05.get()
+                                            on:change=move |ev| {
+                                                profile_nip05.set(event_target_checked(&ev));
+                                            }
+                                        />
+                                        <label
+                                            for="app-setup-profile-nip05-toggle"
+                                            class="flex flex-row justify-center items-center"
+                                        >
+                                            <span class="font-sans font-[400] text-ly0-gl text-[14px] tracking-wide">
+                                                "Create "
+                                                <span class="font-mono font-[500] tracking-tight px-[3px]">
+                                                    "@radroots"
+                                                </span>
+                                                " NIP-05 address"
+                                            </span>
+                                        </label>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
                     </section>
                 }.into_any(),
             }}
