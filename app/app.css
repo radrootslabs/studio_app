@@ -11,6 +11,9 @@
 @import "./stylesheets/styles-superellipse.css";
 @import "../crates/ui-components/assets/list.css";
 
+@custom-variant h-compact "@media (max-height: 540px)";
+@custom-variant se-compact "@media (max-width: 375px) and (max-height: 540px)";
+
 @source "./index.html";
 @source "./src/**/*.rs";
 @source "../crates/**/*.rs";
@@ -54,6 +57,11 @@
 @utility h-line_button {
   height: var(--size-line-button);
   min-height: var(--size-line-button);
+}
+
+@utility h-bold_button {
+  height: var(--height-bold_button);
+  min-height: var(--height-bold_button);
 }
 
 @layer base {
@@ -128,6 +136,8 @@
     flex-direction: column;
     flex: 1 1 auto;
     min-height: 0;
+    height: 100dvh;
+    min-height: 100dvh;
     overscroll-behavior: none;
   }
 
@@ -149,11 +159,15 @@
   }
 
   .app-view {
-    will-change: transform, opacity;
+    will-change: opacity;
+    position: relative;
+    width: 100%;
+    flex: 1 1 auto;
+    min-height: 0;
   }
 
   .app-view-enter {
-    animation: app-view-enter 360ms var(--ease-ios) both;
+    animation: app-view-enter 200ms cubic-bezier(.2,.8,.2,1) both;
   }
 
   @media (prefers-reduced-motion: reduce) {
@@ -290,16 +304,10 @@
 }
 
 @keyframes app-view-enter {
-  0% {
+  from {
     opacity: 0;
-    transform: translateY(10px) scale(0.98);
   }
-  60% {
+  to {
     opacity: 1;
-    transform: translateY(-2px) scale(1.005);
-  }
-  100% {
-    opacity: 1;
-    transform: translateY(0) scale(1);
   }
 }

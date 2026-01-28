@@ -12,17 +12,6 @@ use radroots_studio_app_ui_components::{
     RadrootsAppUiButtonLayoutAction,
     RadrootsAppUiButtonLayoutBackAction,
     RadrootsAppUiButtonLayoutPair,
-    RadrootsAppUiList,
-    RadrootsAppUiListIcon,
-    RadrootsAppUiListItem,
-    RadrootsAppUiListItemKind,
-    RadrootsAppUiListLabel,
-    RadrootsAppUiListLabelText,
-    RadrootsAppUiListLabelValue,
-    RadrootsAppUiListLabelValueKind,
-    RadrootsAppUiListTouch,
-    RadrootsAppUiListTouchEnd,
-    RadrootsAppUiListView,
 };
 
 use crate::{
@@ -78,21 +67,16 @@ fn health_result_label(result: &RadrootsAppHealthCheckResult) -> String {
     }
 }
 
-fn setup_label(value: &str) -> RadrootsAppUiListLabelValue {
-    RadrootsAppUiListLabelValue {
-        classes_wrap: None,
-        hide_truncate: false,
-        value: RadrootsAppUiListLabelValueKind::Text(RadrootsAppUiListLabelText {
-            value: value.to_string(),
-            classes: Some("capitalize".to_string()),
-        }),
-    }
-}
-
 fn setup_touch_callback(action: &'static str) -> Callback<MouseEvent> {
     Callback::new(move |_| {
         let _ = app_log_debug_emit("log.app.setup.choice", action, None);
     })
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum RadrootsAppSetupKeyChoice {
+    Generate,
+    AddExisting,
 }
 
 fn active_key_label(value: Option<String>) -> String {
@@ -224,61 +208,9 @@ fn SetupPage() -> impl IntoView {
     let navigate_guard = navigate.clone();
     let navigate_home = navigate.clone();
     let setup_step = RwSignal::new_local(app_setup_step_default());
-    let key_choice_list = RadrootsAppUiList {
-        id: Some("setup-key-choice".to_string()),
-        view: Some("setup".to_string()),
-        classes: None,
-        title: None,
-        default_state: None,
-        list: Some(vec![
-            Some(RadrootsAppUiListItem {
-                kind: RadrootsAppUiListItemKind::Touch(RadrootsAppUiListTouch {
-                    label: RadrootsAppUiListLabel {
-                        left: vec![setup_label("generate new key")],
-                        right: Vec::new(),
-                    },
-                    display: None,
-                    end: Some(RadrootsAppUiListTouchEnd {
-                        icon: RadrootsAppUiListIcon {
-                            key: "caret-right".to_string(),
-                            class: None,
-                        },
-                        on_click: None,
-                    }),
-                    on_click: Some(setup_touch_callback("generate_key")),
-                }),
-                loading: false,
-                hide_active: false,
-                hide_field: false,
-                full_rounded: false,
-                offset: None,
-            }),
-            Some(RadrootsAppUiListItem {
-                kind: RadrootsAppUiListItemKind::Touch(RadrootsAppUiListTouch {
-                    label: RadrootsAppUiListLabel {
-                        left: vec![setup_label("add existing key")],
-                        right: Vec::new(),
-                    },
-                    display: None,
-                    end: Some(RadrootsAppUiListTouchEnd {
-                        icon: RadrootsAppUiListIcon {
-                            key: "caret-right".to_string(),
-                            class: None,
-                        },
-                        on_click: None,
-                    }),
-                    on_click: Some(setup_touch_callback("add_key")),
-                }),
-                loading: false,
-                hide_active: false,
-                hide_field: false,
-                full_rounded: false,
-                offset: None,
-            }),
-        ]),
-        hide_offset: false,
-        styles: None,
-    };
+    let setup_key_choice = RwSignal::new_local(None::<RadrootsAppSetupKeyChoice>);
+    let on_generate_key = setup_touch_callback("generate_key");
+    let on_add_key = setup_touch_callback("add_key");
     Effect::new(move || {
         if setup_required.get() == Some(false) {
             navigate_guard("/", Default::default());
@@ -294,12 +226,16 @@ fn SetupPage() -> impl IntoView {
     };
     let rewind_step: Callback<MouseEvent> = {
         let setup_step = setup_step.clone();
+        let setup_key_choice = setup_key_choice.clone();
         Callback::new(move |_| {
             setup_step.update(|step| {
                 *step = step.prev();
             });
+            setup_key_choice.set(None);
         })
     };
+    let on_generate_key = on_generate_key.clone();
+    let on_add_key = on_add_key.clone();
     view! {
         <main
             id="app-setup"
@@ -371,34 +307,87 @@ fn SetupPage() -> impl IntoView {
                 RadrootsAppSetupStep::KeyChoice => view! {
                     <section
                         id="app-setup-key-choice"
-                        class="app-view app-view-enter flex flex-col w-full gap-4 px-6 pt-10 pb-16"
+                        class="app-view app-view-enter flex flex-col w-full px-6 pt-10 pb-16"
+                        on:click=move |_| {
+                            setup_key_choice.set(None);
+                        }
                     >
-                        <header id="app-setup-key-choice-header" class="flex flex-col gap-2">
-                            <p class="font-sans text-sm uppercase tracking-[0.14em] text-ly0-gl-label">
-                                "Setup"
-                            </p>
-                            <h2 class="font-sans font-[600] text-2xl text-ly0-gl">
-                                "Choose your key"
-                            </h2>
-                            <p class="font-sans text-line_d_e text-ly0-gl-label">
-                                "Select how you want to add your Nostr key."
-                            </p>
-                        </header>
-                        <div id="app-setup-key-choice-list" class="w-full">
-                            <RadrootsAppUiListView basis=key_choice_list.clone() />
+                        <div
+                            id="app-setup-key-choice-body"
+                            class="flex flex-1 w-full flex-col justify-center items-center gap-8"
+                        >
+                            <div
+                                id="app-setup-key-choice-title"
+                                class="flex flex-row w-full justify-center items-center"
+                            >
+                                <p class="font-sans font-[600] text-ly0-gl text-3xl">
+                                    "Configure Device"
+                                </p>
+                            </div>
+                            <div
+                                id="app-setup-key-choice-actions"
+                                class="flex flex-col w-full gap-6 justify-center items-center"
+                            >
+                                <button
+                                    id="app-setup-key-choice-generate"
+                                    type="button"
+                                    class=move || {
+                                        if setup_key_choice.get()
+                                            == Some(RadrootsAppSetupKeyChoice::Generate)
+                                        {
+                                            "flex flex-col h-bold_button w-lo_ios0 ios1:w-lo_ios1 justify-center items-center rounded-touch ly1-apply-active ly1-raise-apply ly1-ring-apply el-re"
+                                        } else {
+                                            "flex flex-col h-bold_button w-lo_ios0 ios1:w-lo_ios1 justify-center items-center rounded-touch bg-ly1 el-re"
+                                        }
+                                    }
+                                    on:click=move |ev| {
+                                        ev.stop_propagation();
+                                        setup_key_choice.set(Some(RadrootsAppSetupKeyChoice::Generate));
+                                        on_generate_key.run(ev);
+                                    }
+                                >
+                                    <span class="font-sans font-[600] text-ly0-gl text-xl">
+                                        "Create new keypair"
+                                    </span>
+                                </button>
+                                <button
+                                    id="app-setup-key-choice-add"
+                                    type="button"
+                                    class=move || {
+                                        if setup_key_choice.get()
+                                            == Some(RadrootsAppSetupKeyChoice::AddExisting)
+                                        {
+                                            "flex flex-col h-bold_button w-lo_ios0 ios1:w-lo_ios1 justify-center items-center rounded-touch ly1-apply-active ly1-raise-apply ly1-ring-apply el-re"
+                                        } else {
+                                            "flex flex-col h-bold_button w-lo_ios0 ios1:w-lo_ios1 justify-center items-center rounded-touch bg-ly1 el-re"
+                                        }
+                                    }
+                                    on:click=move |ev| {
+                                        ev.stop_propagation();
+                                        setup_key_choice.set(Some(RadrootsAppSetupKeyChoice::AddExisting));
+                                        on_add_key.run(ev);
+                                    }
+                                >
+                                    <span class="font-sans font-[600] text-ly0-gl text-xl">
+                                        "Use existing keypair"
+                                    </span>
+                                </button>
+                            </div>
                         </div>
                     </section>
                 }.into_any(),
             }}
             <footer
                 id="app-setup-actions"
-                class="z-10 absolute bottom-4 left-0 flex flex-col w-full justify-center items-center"
+                class="z-10 absolute bottom-4 left-0 flex flex-col w-full justify-center items-center se-compact:bottom-0"
             >
                 {move || {
                     let step = setup_step.get();
+                    let continue_disabled = matches!(step, RadrootsAppSetupStep::KeyChoice)
+                        && setup_key_choice.get().is_none();
                     let continue_action = RadrootsAppUiButtonLayoutAction {
                         label: "Continue".to_string(),
-                        disabled: step.is_terminal(),
+                        disabled: continue_disabled,
                         loading: false,
                         on_click: advance_step.clone(),
                     };

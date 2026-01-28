@@ -97,8 +97,7 @@ pub fn RadrootsAppUiButtonLayoutPair(
         .map(|value| value.visible)
         .unwrap_or(false);
     let wrapper_class = radroots_studio_app_ui_button_class_merge(&[
-        Some("flex flex-col gap-1 justify-center items-center el-re"),
-        if back_visible { Some("-translate-y-8") } else { None },
+        Some("flex flex-col gap-1 justify-center items-center"),
         class.as_deref(),
     ]);
     view! {
@@ -111,19 +110,24 @@ pub fn RadrootsAppUiButtonLayoutPair(
             />
             {back.map(|back_action| {
                 view! {
-                    <div class="flex flex-col justify-center items-center el-re">
-                        {if back_action.visible {
+                    <div class="flex flex-col justify-center items-center">
+                        {{
                             let back_label = back_action.label.clone().unwrap_or_default();
                             let back_disabled = back_action.disabled;
                             let back_on_click = back_action.on_click.clone();
+                            let back_visible = back_action.visible;
                             let back_text_class = radroots_studio_app_ui_button_class_merge(&[
-                                Some("font-sans font-[600] tracking-wide text-ly1-gl-shade el-re"),
+                                Some("font-sans font-[600] tracking-wide text-ly1-gl-shade"),
                                 if back_disabled { None } else { Some("group-active:text-ly1-gl/40") },
+                            ]);
+                            let back_button_class = radroots_studio_app_ui_button_class_merge(&[
+                                Some("group flex flex-row h-12 w-lo_ios0 ios1:w-lo_ios1 justify-center items-center -translate-y-[2px] transition-opacity duration-[160ms] ease-[cubic-bezier(.2,.8,.2,1)]"),
+                                if back_visible { Some("opacity-100") } else { Some("opacity-0 pointer-events-none") },
                             ]);
                             view! {
                                 <button
                                     type="button"
-                                    class="group flex flex-row h-12 w-lo_ios0 ios1:w-lo_ios1 justify-center items-center fade-in el-re"
+                                    class=back_button_class
                                     disabled=back_disabled
                                     on:click=move |ev| {
                                         ev.stop_propagation();
@@ -135,12 +139,6 @@ pub fn RadrootsAppUiButtonLayoutPair(
                                 >
                                     <span class=back_text_class>{back_label}</span>
                                 </button>
-                            }.into_any()
-                        } else {
-                            view! {
-                                <div class="flex flex-row h-4 w-full justify-start items-center">
-                                    <div class="flex-fluid"></div>
-                                </div>
                             }.into_any()
                         }}
                     </div>
