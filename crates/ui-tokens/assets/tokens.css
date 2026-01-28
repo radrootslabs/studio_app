@@ -43,6 +43,8 @@
   --shadow-2: 0 8px 20px rgba(0, 0, 0, 0.12);
   --shadow-popover: 0 12px 30px rgba(0, 0, 0, 0.18);
   --shadow-sheet: 0 -8px 30px rgba(0, 0, 0, 0.18);
+  --shadow-press: 0 1px 2px rgba(0, 0, 0, 0.08);
+  --opacity-press: 0.92;
 
   --dur-1: 120ms;
   --dur-2: 180ms;

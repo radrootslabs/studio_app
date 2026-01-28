@@ -366,7 +366,7 @@ fn SetupPage() -> impl IntoView {
                                         if setup_key_choice.get()
                                             == Some(RadrootsAppSetupKeyChoice::Generate)
                                         {
-                                            "flex flex-col h-bold_button w-lo_ios0 ios1:w-lo_ios1 justify-center items-center rounded-touch ly1-apply-active ly1-raise-apply ly1-ring-apply el-re"
+                                            "flex flex-col h-bold_button w-lo_ios0 ios1:w-lo_ios1 justify-center items-center rounded-touch ly1-selected-press el-re"
                                         } else {
                                             "flex flex-col h-bold_button w-lo_ios0 ios1:w-lo_ios1 justify-center items-center rounded-touch bg-ly1 el-re"
                                         }
@@ -388,7 +388,7 @@ fn SetupPage() -> impl IntoView {
                                         if setup_key_choice.get()
                                             == Some(RadrootsAppSetupKeyChoice::AddExisting)
                                         {
-                                            "flex flex-col h-bold_button w-lo_ios0 ios1:w-lo_ios1 justify-center items-center rounded-touch ly1-apply-active ly1-raise-apply ly1-ring-apply el-re"
+                                            "flex flex-col h-bold_button w-lo_ios0 ios1:w-lo_ios1 justify-center items-center rounded-touch ly1-selected-press el-re"
                                         } else {
                                             "flex flex-col h-bold_button w-lo_ios0 ios1:w-lo_ios1 justify-center items-center rounded-touch bg-ly1 el-re"
                                         }

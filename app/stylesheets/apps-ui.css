@@ -33,7 +33,7 @@
 }
 
 @utility button-layout {
-    @apply flex flex-row h-touch_guide w-lo_ios0 ios1:w-lo_ios1 justify-center items-center bg-ly1 rounded-touch el-re ly1-active-surface ly1-active-raise-less ly1-active-ring-less disabled:opacity-60;
+    @apply flex flex-row h-touch_guide w-lo_ios0 ios1:w-lo_ios1 justify-center items-center bg-ly1 rounded-touch el-re ly1-active-press disabled:opacity-60;
 }
 
 @utility button-layout-label {
@@ -41,7 +41,8 @@
 }
 
 @utility input-base {
-    @apply flex w-full items-center rounded-touch border border-ly1-edge/60 bg-ly1 px-3 py-2 font-sans text-form_base text-ly1-gl placeholder:text-ly1-gl-label/70 transition-all focus:outline-none focus:ring-2 focus:ring-ly1-edge/60 focus:border-ly1-gl-hl disabled:opacity-60;
+    @apply flex w-full items-center rounded-touch border border-ly1-edge/60 bg-ly1 px-3 py-2 font-sans text-form_base text-ly1-gl placeholder:text-ly1-gl-label/70 transition-colors focus:outline-none focus:bg-ly1-focus focus:border-ly1-edge/80 disabled:opacity-60;
+    @apply focus:shadow-[inset_0_0_0_1px_hsl(var(--ly1-edge)/0.6)];
 }
 
 @utility input-search {
@@ -111,6 +112,11 @@
     @apply bg-ly1-focus;
 }
 
+@utility ly1-selected-press {
+    @apply bg-ly1-focus;
+    box-shadow: var(--shadow-press);
+}
+
 @utility ly1-ring-apply {
     @apply ring-[0.3rem] ring-ly1-edge;
 }
@@ -129,6 +135,10 @@
 
 @utility ly1-active-surface {
     @apply active:bg-ly1-focus group-active:bg-ly1-focus;
+}
+
+@utility ly1-active-press {
+    @apply active:bg-ly1-focus group-active:bg-ly1-focus active:opacity-[var(--opacity-press)] group-active:opacity-[var(--opacity-press)] active:shadow-[var(--shadow-press)] group-active:shadow-[var(--shadow-press)];
 }
 
 @utility ly1-active-raise {
