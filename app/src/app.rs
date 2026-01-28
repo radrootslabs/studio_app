@@ -79,6 +79,12 @@ enum RadrootsAppSetupKeyChoice {
     AddExisting,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum RadrootsAppSetupFarmerChoice {
+    Yes,
+    No,
+}
+
 fn active_key_label(value: Option<String>) -> String {
     let Some(value) = value else {
         return "missing".to_string();
@@ -157,6 +163,8 @@ fn spawn_health_checks(
 }
 
 const APP_HEALTH_CHECK_DELAY_MS: u32 = 300;
+const APP_SETUP_NO_PROFILE_NAME_CONFIRM: &str =
+    "Your profile will be created without a name. You can change this later in Settings > Profile";
 
 fn app_health_check_delay_ms() -> u32 {
     APP_HEALTH_CHECK_DELAY_MS
@@ -209,6 +217,7 @@ fn SetupPage() -> impl IntoView {
     let navigate_home = navigate.clone();
     let setup_step = RwSignal::new_local(app_setup_step_default());
     let setup_key_choice = RwSignal::new_local(None::<RadrootsAppSetupKeyChoice>);
+    let setup_farmer_choice = RwSignal::new_local(None::<RadrootsAppSetupFarmerChoice>);
     let nostr_key_add = RwSignal::new_local(String::new());
     let profile_name = RwSignal::new_local(String::new());
     let profile_nip05 = RwSignal::new_local(true);
@@ -222,7 +231,27 @@ fn SetupPage() -> impl IntoView {
     let advance_step: Callback<MouseEvent> = {
         let setup_step = setup_step.clone();
         let setup_key_choice = setup_key_choice.clone();
+        let profile_name = profile_name.clone();
         Callback::new(move |_| {
+            let current_step = setup_step.get();
+            if matches!(current_step, RadrootsAppSetupStep::Profile) {
+                let profile_name = profile_name.get();
+                if profile_name.trim().is_empty() {
+                    let setup_step = setup_step.clone();
+                    spawn_local(async move {
+                        let notifications = RadrootsAppNotifications::new(None);
+                        let confirm = notifications
+                            .confirm_message(APP_SETUP_NO_PROFILE_NAME_CONFIRM)
+                            .await;
+                        if confirm {
+                            setup_step.set(RadrootsAppSetupStep::FarmerSetup);
+                        }
+                    });
+                    return;
+                }
+                setup_step.set(RadrootsAppSetupStep::FarmerSetup);
+                return;
+            }
             setup_step.update(|step| {
                 *step = match *step {
                     RadrootsAppSetupStep::Intro => RadrootsAppSetupStep::KeyChoice,
@@ -238,7 +267,8 @@ fn SetupPage() -> impl IntoView {
                         }
                     }
                     RadrootsAppSetupStep::KeyAddExisting => RadrootsAppSetupStep::Profile,
-                    RadrootsAppSetupStep::Profile => RadrootsAppSetupStep::Profile,
+                    RadrootsAppSetupStep::Profile => RadrootsAppSetupStep::FarmerSetup,
+                    RadrootsAppSetupStep::FarmerSetup => RadrootsAppSetupStep::FarmerSetup,
                 };
             });
         })
@@ -258,6 +288,7 @@ fn SetupPage() -> impl IntoView {
                     }
                     _ => RadrootsAppSetupStep::KeyChoice,
                 },
+                RadrootsAppSetupStep::FarmerSetup => RadrootsAppSetupStep::Profile,
             };
             setup_step.set(next_step);
             if matches!(next_step, RadrootsAppSetupStep::Intro) {
@@ -503,6 +534,81 @@ fn SetupPage() -> impl IntoView {
                         </div>
                     </section>
                 }.into_any(),
+                RadrootsAppSetupStep::FarmerSetup => view! {
+                    <section
+                        id="app-setup-farmer"
+                        class="app-view app-view-enter flex flex-col w-full px-6 pt-10 pb-16"
+                        on:click=move |_| {
+                            setup_farmer_choice.set(None);
+                        }
+                    >
+                        <div
+                            id="app-setup-farmer-body"
+                            class="flex flex-1 w-full flex-col justify-center items-center"
+                        >
+                            <div
+                                id="app-setup-farmer-card"
+                                class="flex flex-col h-[16rem] w-full gap-10 justify-start items-center"
+                            >
+                                <div
+                                    id="app-setup-farmer-title"
+                                    class="flex flex-row w-full justify-center items-center"
+                                >
+                                    <p class="font-sans font-[600] text-ly0-gl text-3xl">
+                                        "Setup for Farmer"
+                                    </p>
+                                </div>
+                                <div
+                                    id="app-setup-farmer-actions"
+                                    class="flex flex-col w-full gap-5 justify-center items-center"
+                                >
+                                    <button
+                                        id="app-setup-farmer-yes"
+                                        type="button"
+                                        class=move || {
+                                            if setup_farmer_choice.get()
+                                                == Some(RadrootsAppSetupFarmerChoice::Yes)
+                                            {
+                                                "flex flex-col h-bold_button w-lo_ios0 ios1:w-lo_ios1 justify-center items-center rounded-touch ly1-selected-press el-re"
+                                            } else {
+                                                "flex flex-col h-bold_button w-lo_ios0 ios1:w-lo_ios1 justify-center items-center rounded-touch bg-ly1 el-re"
+                                            }
+                                        }
+                                        on:click=move |ev| {
+                                            ev.stop_propagation();
+                                            setup_farmer_choice.set(Some(RadrootsAppSetupFarmerChoice::Yes));
+                                        }
+                                    >
+                                        <span class="font-sans font-[600] text-ly0-gl text-xl">
+                                            "Yes"
+                                        </span>
+                                    </button>
+                                    <button
+                                        id="app-setup-farmer-no"
+                                        type="button"
+                                        class=move || {
+                                            if setup_farmer_choice.get()
+                                                == Some(RadrootsAppSetupFarmerChoice::No)
+                                            {
+                                                "flex flex-col h-bold_button w-lo_ios0 ios1:w-lo_ios1 justify-center items-center rounded-touch ly1-selected-press el-re"
+                                            } else {
+                                                "flex flex-col h-bold_button w-lo_ios0 ios1:w-lo_ios1 justify-center items-center rounded-touch bg-ly1 el-re"
+                                            }
+                                        }
+                                        on:click=move |ev| {
+                                            ev.stop_propagation();
+                                            setup_farmer_choice.set(Some(RadrootsAppSetupFarmerChoice::No));
+                                        }
+                                    >
+                                        <span class="font-sans font-[600] text-ly0-gl text-xl">
+                                            "No"
+                                        </span>
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    </section>
+                }.into_any(),
             }}
             <footer
                 id="app-setup-actions"
@@ -510,8 +616,10 @@ fn SetupPage() -> impl IntoView {
             >
                 {move || {
                     let step = setup_step.get();
-                    let continue_disabled = matches!(step, RadrootsAppSetupStep::KeyChoice)
-                        && setup_key_choice.get().is_none();
+                    let continue_disabled = (matches!(step, RadrootsAppSetupStep::KeyChoice)
+                        && setup_key_choice.get().is_none())
+                        || (matches!(step, RadrootsAppSetupStep::FarmerSetup)
+                            && setup_farmer_choice.get().is_none());
                     let continue_action = RadrootsAppUiButtonLayoutAction {
                         label: "Continue".to_string(),
                         disabled: continue_disabled,

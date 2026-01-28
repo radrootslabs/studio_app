@@ -3,6 +3,7 @@
 use radroots_studio_app_core::notifications::{
     RadrootsClientNotifications,
     RadrootsClientNotificationsConfig,
+    RadrootsClientNotificationsDialogConfirmOpts,
     RadrootsClientNotificationsError,
     RadrootsClientNotificationsPermission,
     RadrootsClientWebNotifications,
@@ -120,6 +121,14 @@ impl RadrootsAppNotifications {
             );
         }
         result
+    }
+
+    pub async fn confirm_message(&self, message: &str) -> bool {
+        self.client
+            .confirm(RadrootsClientNotificationsDialogConfirmOpts::Message(
+                message.to_string(),
+            ))
+            .await
     }
 }
 

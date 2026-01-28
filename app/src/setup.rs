@@ -48,6 +48,7 @@ pub enum RadrootsAppSetupStep {
     KeyChoice,
     KeyAddExisting,
     Profile,
+    FarmerSetup,
 }
 
 impl RadrootsAppSetupStep {
@@ -56,7 +57,8 @@ impl RadrootsAppSetupStep {
             RadrootsAppSetupStep::Intro => RadrootsAppSetupStep::KeyChoice,
             RadrootsAppSetupStep::KeyChoice => RadrootsAppSetupStep::KeyAddExisting,
             RadrootsAppSetupStep::KeyAddExisting => RadrootsAppSetupStep::Profile,
-            RadrootsAppSetupStep::Profile => RadrootsAppSetupStep::Profile,
+            RadrootsAppSetupStep::Profile => RadrootsAppSetupStep::FarmerSetup,
+            RadrootsAppSetupStep::FarmerSetup => RadrootsAppSetupStep::FarmerSetup,
         }
     }
 
@@ -66,11 +68,12 @@ impl RadrootsAppSetupStep {
             RadrootsAppSetupStep::KeyChoice => RadrootsAppSetupStep::Intro,
             RadrootsAppSetupStep::KeyAddExisting => RadrootsAppSetupStep::KeyChoice,
             RadrootsAppSetupStep::Profile => RadrootsAppSetupStep::KeyAddExisting,
+            RadrootsAppSetupStep::FarmerSetup => RadrootsAppSetupStep::Profile,
         }
     }
 
     pub const fn is_terminal(self) -> bool {
-        matches!(self, RadrootsAppSetupStep::Profile)
+        matches!(self, RadrootsAppSetupStep::FarmerSetup)
     }
 }
 
@@ -333,7 +336,11 @@ mod tests {
         );
         assert_eq!(
             RadrootsAppSetupStep::Profile.next(),
-            RadrootsAppSetupStep::Profile
+            RadrootsAppSetupStep::FarmerSetup
+        );
+        assert_eq!(
+            RadrootsAppSetupStep::FarmerSetup.next(),
+            RadrootsAppSetupStep::FarmerSetup
         );
     }
 
@@ -355,14 +362,19 @@ mod tests {
             RadrootsAppSetupStep::Profile.prev(),
             RadrootsAppSetupStep::KeyAddExisting
         );
+        assert_eq!(
+            RadrootsAppSetupStep::FarmerSetup.prev(),
+            RadrootsAppSetupStep::Profile
+        );
     }
 
     #[test]
-    fn setup_step_terminal_matches_profile() {
+    fn setup_step_terminal_matches_farmer_setup() {
         assert!(!RadrootsAppSetupStep::Intro.is_terminal());
         assert!(!RadrootsAppSetupStep::KeyChoice.is_terminal());
         assert!(!RadrootsAppSetupStep::KeyAddExisting.is_terminal());
-        assert!(RadrootsAppSetupStep::Profile.is_terminal());
+        assert!(!RadrootsAppSetupStep::Profile.is_terminal());
+        assert!(RadrootsAppSetupStep::FarmerSetup.is_terminal());
     }
 
     #[test]
