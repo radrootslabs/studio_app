@@ -376,6 +376,16 @@ fn SetupPage() -> impl IntoView {
                         </div>
                     </section>
                 }.into_any(),
+                RadrootsAppSetupStep::Profile => view! {
+                    <section
+                        id="app-setup-profile"
+                        class="app-view app-view-enter flex flex-col w-full px-6 pt-10 pb-16 justify-center items-center"
+                    >
+                        <p class="font-sans font-[600] text-ly0-gl text-2xl">
+                            "Add Profile"
+                        </p>
+                    </section>
+                }.into_any(),
             }}
             <footer
                 id="app-setup-actions"

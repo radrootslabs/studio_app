@@ -46,13 +46,15 @@ pub fn app_setup_state_new(active_key: String, eula_date: String) -> RadrootsApp
 pub enum RadrootsAppSetupStep {
     Intro,
     KeyChoice,
+    Profile,
 }
 
 impl RadrootsAppSetupStep {
     pub const fn next(self) -> Self {
         match self {
             RadrootsAppSetupStep::Intro => RadrootsAppSetupStep::KeyChoice,
-            RadrootsAppSetupStep::KeyChoice => RadrootsAppSetupStep::KeyChoice,
+            RadrootsAppSetupStep::KeyChoice => RadrootsAppSetupStep::Profile,
+            RadrootsAppSetupStep::Profile => RadrootsAppSetupStep::Profile,
         }
     }
 
@@ -60,11 +62,12 @@ impl RadrootsAppSetupStep {
         match self {
             RadrootsAppSetupStep::Intro => RadrootsAppSetupStep::Intro,
             RadrootsAppSetupStep::KeyChoice => RadrootsAppSetupStep::Intro,
+            RadrootsAppSetupStep::Profile => RadrootsAppSetupStep::KeyChoice,
         }
     }
 
     pub const fn is_terminal(self) -> bool {
-        matches!(self, RadrootsAppSetupStep::KeyChoice)
+        matches!(self, RadrootsAppSetupStep::Profile)
     }
 }
 
@@ -319,7 +322,11 @@ mod tests {
         );
         assert_eq!(
             RadrootsAppSetupStep::KeyChoice.next(),
-            RadrootsAppSetupStep::KeyChoice
+            RadrootsAppSetupStep::Profile
+        );
+        assert_eq!(
+            RadrootsAppSetupStep::Profile.next(),
+            RadrootsAppSetupStep::Profile
         );
     }
 
@@ -333,12 +340,17 @@ mod tests {
             RadrootsAppSetupStep::KeyChoice.prev(),
             RadrootsAppSetupStep::Intro
         );
+        assert_eq!(
+            RadrootsAppSetupStep::Profile.prev(),
+            RadrootsAppSetupStep::KeyChoice
+        );
     }
 
     #[test]
-    fn setup_step_terminal_matches_key_choice() {
+    fn setup_step_terminal_matches_profile() {
         assert!(!RadrootsAppSetupStep::Intro.is_terminal());
-        assert!(RadrootsAppSetupStep::KeyChoice.is_terminal());
+        assert!(!RadrootsAppSetupStep::KeyChoice.is_terminal());
+        assert!(RadrootsAppSetupStep::Profile.is_terminal());
     }
 
     #[test]
