@@ -46,6 +46,7 @@ pub fn app_setup_state_new(active_key: String, eula_date: String) -> RadrootsApp
 pub enum RadrootsAppSetupStep {
     Intro,
     KeyChoice,
+    KeyAddExisting,
     Profile,
 }
 
@@ -53,7 +54,8 @@ impl RadrootsAppSetupStep {
     pub const fn next(self) -> Self {
         match self {
             RadrootsAppSetupStep::Intro => RadrootsAppSetupStep::KeyChoice,
-            RadrootsAppSetupStep::KeyChoice => RadrootsAppSetupStep::Profile,
+            RadrootsAppSetupStep::KeyChoice => RadrootsAppSetupStep::KeyAddExisting,
+            RadrootsAppSetupStep::KeyAddExisting => RadrootsAppSetupStep::Profile,
             RadrootsAppSetupStep::Profile => RadrootsAppSetupStep::Profile,
         }
     }
@@ -62,7 +64,8 @@ impl RadrootsAppSetupStep {
         match self {
             RadrootsAppSetupStep::Intro => RadrootsAppSetupStep::Intro,
             RadrootsAppSetupStep::KeyChoice => RadrootsAppSetupStep::Intro,
-            RadrootsAppSetupStep::Profile => RadrootsAppSetupStep::KeyChoice,
+            RadrootsAppSetupStep::KeyAddExisting => RadrootsAppSetupStep::KeyChoice,
+            RadrootsAppSetupStep::Profile => RadrootsAppSetupStep::KeyAddExisting,
         }
     }
 
@@ -322,6 +325,10 @@ mod tests {
         );
         assert_eq!(
             RadrootsAppSetupStep::KeyChoice.next(),
+            RadrootsAppSetupStep::KeyAddExisting
+        );
+        assert_eq!(
+            RadrootsAppSetupStep::KeyAddExisting.next(),
             RadrootsAppSetupStep::Profile
         );
         assert_eq!(
@@ -341,8 +348,12 @@ mod tests {
             RadrootsAppSetupStep::Intro
         );
         assert_eq!(
-            RadrootsAppSetupStep::Profile.prev(),
+            RadrootsAppSetupStep::KeyAddExisting.prev(),
             RadrootsAppSetupStep::KeyChoice
+        );
+        assert_eq!(
+            RadrootsAppSetupStep::Profile.prev(),
+            RadrootsAppSetupStep::KeyAddExisting
         );
     }
 
@@ -350,6 +361,7 @@ mod tests {
     fn setup_step_terminal_matches_profile() {
         assert!(!RadrootsAppSetupStep::Intro.is_terminal());
         assert!(!RadrootsAppSetupStep::KeyChoice.is_terminal());
+        assert!(!RadrootsAppSetupStep::KeyAddExisting.is_terminal());
         assert!(RadrootsAppSetupStep::Profile.is_terminal());
     }
 

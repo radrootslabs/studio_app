@@ -209,6 +209,7 @@ fn SetupPage() -> impl IntoView {
     let navigate_home = navigate.clone();
     let setup_step = RwSignal::new_local(app_setup_step_default());
     let setup_key_choice = RwSignal::new_local(None::<RadrootsAppSetupKeyChoice>);
+    let nostr_key_add = RwSignal::new_local(String::new());
     let profile_name = RwSignal::new_local(String::new());
     let profile_nip05 = RwSignal::new_local(true);
     let on_generate_key = setup_touch_callback("generate_key");
@@ -220,9 +221,25 @@ fn SetupPage() -> impl IntoView {
     });
     let advance_step: Callback<MouseEvent> = {
         let setup_step = setup_step.clone();
+        let setup_key_choice = setup_key_choice.clone();
         Callback::new(move |_| {
             setup_step.update(|step| {
-                *step = step.next();
+                *step = match *step {
+                    RadrootsAppSetupStep::Intro => RadrootsAppSetupStep::KeyChoice,
+                    RadrootsAppSetupStep::KeyChoice => {
+                        match setup_key_choice.get() {
+                            Some(RadrootsAppSetupKeyChoice::Generate) => {
+                                RadrootsAppSetupStep::Profile
+                            }
+                            Some(RadrootsAppSetupKeyChoice::AddExisting) => {
+                                RadrootsAppSetupStep::KeyAddExisting
+                            }
+                            None => RadrootsAppSetupStep::KeyChoice,
+                        }
+                    }
+                    RadrootsAppSetupStep::KeyAddExisting => RadrootsAppSetupStep::Profile,
+                    RadrootsAppSetupStep::Profile => RadrootsAppSetupStep::Profile,
+                };
             });
         })
     };
@@ -230,10 +247,22 @@ fn SetupPage() -> impl IntoView {
         let setup_step = setup_step.clone();
         let setup_key_choice = setup_key_choice.clone();
         Callback::new(move |_| {
-            setup_step.update(|step| {
-                *step = step.prev();
-            });
-            setup_key_choice.set(None);
+            let current_step = setup_step.get();
+            let next_step = match current_step {
+                RadrootsAppSetupStep::Intro => RadrootsAppSetupStep::Intro,
+                RadrootsAppSetupStep::KeyChoice => RadrootsAppSetupStep::Intro,
+                RadrootsAppSetupStep::KeyAddExisting => RadrootsAppSetupStep::KeyChoice,
+                RadrootsAppSetupStep::Profile => match setup_key_choice.get() {
+                    Some(RadrootsAppSetupKeyChoice::AddExisting) => {
+                        RadrootsAppSetupStep::KeyAddExisting
+                    }
+                    _ => RadrootsAppSetupStep::KeyChoice,
+                },
+            };
+            setup_step.set(next_step);
+            if matches!(next_step, RadrootsAppSetupStep::Intro) {
+                setup_key_choice.set(None);
+            }
         })
     };
     let on_generate_key = on_generate_key.clone();
@@ -374,6 +403,39 @@ fn SetupPage() -> impl IntoView {
                                         "Use existing keypair"
                                     </span>
                                 </button>
+                            </div>
+                        </div>
+                    </section>
+                }.into_any(),
+                RadrootsAppSetupStep::KeyAddExisting => view! {
+                    <section
+                        id="app-setup-key-add-existing"
+                        class="app-view app-view-enter flex flex-col w-full px-6 pt-10 pb-16"
+                    >
+                        <div
+                            id="app-setup-key-add-existing-body"
+                            class="flex flex-1 w-full flex-col justify-center items-center"
+                        >
+                            <div
+                                id="app-setup-key-add-existing-card"
+                                class="flex flex-col w-full gap-6 justify-center items-center"
+                            >
+                                <p
+                                    id="app-setup-key-add-existing-title"
+                                    class="font-sans font-[600] text-ly0-gl text-3xl capitalize"
+                                >
+                                    "Add existing key"
+                                </p>
+                                <input
+                                    id="app-setup-key-add-existing-input"
+                                    class="input-base w-lo_ios0 ios1:w-lo_ios1 text-[1.25rem] text-center placeholder:opacity-60"
+                                    type="text"
+                                    placeholder="Enter nostr nsec/hex"
+                                    prop:value=move || nostr_key_add.get()
+                                    on:input=move |ev| {
+                                        nostr_key_add.set(event_target_value(&ev));
+                                    }
+                                />
                             </div>
                         </div>
                     </section>
