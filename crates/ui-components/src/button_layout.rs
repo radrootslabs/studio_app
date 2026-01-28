@@ -48,13 +48,14 @@ pub fn RadrootsAppUiButtonLayout(
     #[prop(optional)] class_label: Option<String>,
     #[prop(optional)] hide_active: bool,
 ) -> impl IntoView {
-    let base_class = if hide_active {
-        "flex flex-row h-touch_guide w-lo_ios0 ios1:w-lo_ios1 justify-center items-center bg-ly1 rounded-touch el-re disabled:opacity-60"
-    } else {
+    let allow_active = !disabled && !hide_active;
+    let base_class = if allow_active {
         "button-layout"
+    } else {
+        "flex flex-row h-touch_guide w-lo_ios0 ios1:w-lo_ios1 justify-center items-center bg-ly1 rounded-touch el-re disabled:opacity-60"
     };
     let button_class = radroots_studio_app_ui_button_class_merge(&[
-        Some("group"),
+        if allow_active { Some("group") } else { None },
         Some(base_class),
         class.as_deref(),
     ]);
@@ -121,7 +122,8 @@ pub fn RadrootsAppUiButtonLayoutPair(
                                 if back_disabled { None } else { Some("group-active:text-ly1-gl/40") },
                             ]);
                             let back_button_class = radroots_studio_app_ui_button_class_merge(&[
-                                Some("group flex flex-row h-12 w-lo_ios0 ios1:w-lo_ios1 justify-center items-center -translate-y-[2px] transition-opacity duration-[160ms] ease-[cubic-bezier(.2,.8,.2,1)]"),
+                                if back_disabled { None } else { Some("group") },
+                                Some("flex flex-row h-12 w-lo_ios0 ios1:w-lo_ios1 justify-center items-center -translate-y-[2px] transition-opacity duration-[160ms] ease-[cubic-bezier(.2,.8,.2,1)]"),
                                 if back_visible { Some("opacity-100") } else { Some("opacity-0 pointer-events-none") },
                             ]);
                             view! {
