@@ -10,26 +10,5 @@ rust-version.workspace = true
 crate-type = ["rlib"]
 
 [dependencies]
-radroots-app-ui-core = { path = "../ui-core" }
-leptos = { workspace = true, features = ["csr"] }
 ui-primitives-core = { path = "../../refs/ui-primitives/crates/ui-primitives-core" }
 ui-primitives-leptos = { path = "../../refs/ui-primitives/crates/ui-primitives-leptos" }
-
-[target.'cfg(target_arch = "wasm32")'.dependencies]
-wasm-bindgen = { workspace = true }
-send_wrapper = { workspace = true }
-web-sys = { workspace = true, features = [
-  "CssStyleDeclaration",
-  "Document",
-  "Element",
-  "EventTarget",
-  "HtmlCollection",
-  "HtmlBodyElement",
-  "FocusEvent",
-  "HtmlElement",
-  "KeyboardEvent",
-  "Node",
-  "NodeList",
-  "PointerEvent",
-  "Window"
-] }

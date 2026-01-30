@@ -1757,13 +1757,8 @@ dependencies = [
 name = "radroots-app-ui-primitives"
 version = "0.1.0"
 dependencies = [
- "leptos",
- "radroots-app-ui-core",
- "send_wrapper",
  "ui-primitives-core",
  "ui-primitives-leptos",
- "wasm-bindgen",
- "web-sys",
 ]
 
 [[package]]
