@@ -1,10 +1,11 @@
 use gloo_timers::future::TimeoutFuture;
+use leptos::ev::{KeyboardEvent, MouseEvent};
 use leptos::prelude::*;
 use leptos::task::spawn_local;
-use leptos::ev::MouseEvent;
 use leptos_router::components::{A, Route, Router, Routes};
 use leptos_router::hooks::use_navigate;
 use leptos_router::path;
+use web_sys::HtmlElement;
 
 use radroots_studio_app_core::datastore::RadrootsClientDatastore;
 use radroots_studio_app_core::idb::IDB_CONFIG_LOGS;
@@ -218,6 +219,7 @@ fn SetupPage() -> impl IntoView {
     let setup_step = RwSignal::new_local(app_setup_step_default());
     let setup_key_choice = RwSignal::new_local(None::<RadrootsAppSetupKeyChoice>);
     let setup_farmer_choice = RwSignal::new_local(None::<RadrootsAppSetupFarmerChoice>);
+    let setup_eula_scrolled = RwSignal::new_local(false);
     let nostr_key_add = RwSignal::new_local(String::new());
     let profile_name = RwSignal::new_local(String::new());
     let profile_nip05 = RwSignal::new_local(true);
@@ -228,12 +230,17 @@ fn SetupPage() -> impl IntoView {
             navigate_guard("/", Default::default());
         }
     });
-    let advance_step: Callback<MouseEvent> = {
+    let advance_step: Callback<()> = {
         let setup_step = setup_step.clone();
         let setup_key_choice = setup_key_choice.clone();
         let profile_name = profile_name.clone();
+        let setup_required = setup_required.clone();
         Callback::new(move |_| {
             let current_step = setup_step.get();
+            if matches!(current_step, RadrootsAppSetupStep::Eula) {
+                setup_required.set(Some(false));
+                return;
+            }
             if matches!(current_step, RadrootsAppSetupStep::Profile) {
                 let profile_name = profile_name.get();
                 if profile_name.trim().is_empty() {
@@ -268,9 +275,16 @@ fn SetupPage() -> impl IntoView {
                     }
                     RadrootsAppSetupStep::KeyAddExisting => RadrootsAppSetupStep::Profile,
                     RadrootsAppSetupStep::Profile => RadrootsAppSetupStep::FarmerSetup,
-                    RadrootsAppSetupStep::FarmerSetup => RadrootsAppSetupStep::FarmerSetup,
+                    RadrootsAppSetupStep::FarmerSetup => RadrootsAppSetupStep::Eula,
+                    RadrootsAppSetupStep::Eula => RadrootsAppSetupStep::Eula,
                 };
             });
+        })
+    };
+    let advance_step_click: Callback<MouseEvent> = {
+        let advance_step = advance_step.clone();
+        Callback::new(move |_| {
+            advance_step.run(());
         })
     };
     let rewind_step: Callback<MouseEvent> = {
@@ -289,6 +303,7 @@ fn SetupPage() -> impl IntoView {
                     _ => RadrootsAppSetupStep::KeyChoice,
                 },
                 RadrootsAppSetupStep::FarmerSetup => RadrootsAppSetupStep::Profile,
+                RadrootsAppSetupStep::Eula => RadrootsAppSetupStep::FarmerSetup,
             };
             setup_step.set(next_step);
             if matches!(next_step, RadrootsAppSetupStep::Intro) {
@@ -298,6 +313,15 @@ fn SetupPage() -> impl IntoView {
     };
     let on_generate_key = on_generate_key.clone();
     let on_add_key = on_add_key.clone();
+    Effect::new({
+        let setup_step = setup_step.clone();
+        let setup_eula_scrolled = setup_eula_scrolled.clone();
+        move |_| {
+            if !matches!(setup_step.get(), RadrootsAppSetupStep::Eula) {
+                setup_eula_scrolled.set(false);
+            }
+        }
+    });
     view! {
         <main
             id="app-setup"
@@ -500,6 +524,12 @@ fn SetupPage() -> impl IntoView {
                                         type="text"
                                         placeholder="Enter profile name"
                                         prop:value=move || profile_name.get()
+                                        on:keydown=move |ev: KeyboardEvent| {
+                                            if ev.key() == "Enter" {
+                                                ev.prevent_default();
+                                                advance_step.run(());
+                                            }
+                                        }
                                         on:input=move |ev| {
                                             profile_name.set(event_target_value(&ev));
                                         }
@@ -609,6 +639,198 @@ fn SetupPage() -> impl IntoView {
                         </div>
                     </section>
                 }.into_any(),
+                RadrootsAppSetupStep::Eula => view! {
+                    <section
+                        id="app-setup-eula"
+                        class="app-view app-view-enter flex flex-col h-full w-full px-6 pt-8 pb-6"
+                    >
+                        <div
+                            id="app-setup-eula-body"
+                            class="flex flex-col flex-1 min-h-0 w-full gap-5"
+                        >
+                            <header
+                                id="app-setup-eula-header"
+                                class="flex flex-row w-full justify-center items-center"
+                            >
+                                <p class="font-sans font-[600] text-ly0-gl text-2xl text-center">
+                                    "End User License Agreement"
+                                </p>
+                            </header>
+                            <div
+                                id="app-setup-eula-scroll"
+                                class="app-page-scroll scroll-hide flex flex-col flex-1 min-h-0 w-full gap-6 px-1 pb-6 overscroll-contain"
+                                on:scroll=move |ev| {
+                                    if setup_eula_scrolled.get() {
+                                        return;
+                                    }
+                                    let target = event_target::<HtmlElement>(&ev);
+                                    let scroll_top = target.scroll_top();
+                                    let scroll_height = target.scroll_height();
+                                    let client_height = target.client_height();
+                                    if scroll_top + client_height >= scroll_height {
+                                        setup_eula_scrolled.set(true);
+                                    }
+                                }
+                            >
+                                <section
+                                    id="app-setup-eula-introduction"
+                                    class="flex flex-col gap-2"
+                                >
+                                    <h3 class="font-sans font-[600] text-ly0-gl text-base">
+                                        "Introduction"
+                                    </h3>
+                                    <p class="font-mono font-[400] text-ly0-gl text-sm leading-relaxed">
+                                        "This End User License Agreement (\"EULA\") is a legal agreement between you and Radroots Inc. for the use of our mobile application Radroots. By installing, accessing, or using our application, you agree to be bound by the terms and conditions of this EULA."
+                                    </p>
+                                </section>
+                                <section
+                                    id="app-setup-eula-prohibited-content"
+                                    class="flex flex-col gap-2"
+                                >
+                                    <h3 class="font-sans font-[600] text-ly0-gl text-base">
+                                        "Prohibited Content and Conduct"
+                                    </h3>
+                                    <p class="font-mono font-[400] text-ly0-gl text-sm leading-relaxed">
+                                        "You agree not to use our application to create, upload, post, send, or store any content that:"
+                                    </p>
+                                    <ul class="flex flex-col gap-1 pl-5 list-disc text-sm text-ly0-gl leading-relaxed">
+                                        <li>"Is illegal, infringing, or fraudulent"</li>
+                                        <li>"Is pornographic, obscene, or offensive"</li>
+                                        <li>"Is discriminatory or promotes hate speech"</li>
+                                        <li>"Is harmful to minors"</li>
+                                        <li>"Is intended to harass or bully others"</li>
+                                        <li>"Is intended to impersonate others"</li>
+                                    </ul>
+                                </section>
+                                <section
+                                    id="app-setup-eula-prohibited-conduct"
+                                    class="flex flex-col gap-2"
+                                >
+                                    <h3 class="font-sans font-[600] text-ly0-gl text-base">
+                                        "You also agree not to engage in any conduct that:"
+                                    </h3>
+                                    <ul class="flex flex-col gap-1 pl-5 list-disc text-sm text-ly0-gl leading-relaxed">
+                                        <li>"Harasses or bullies others"</li>
+                                        <li>"Impersonates others"</li>
+                                        <li>"Is intended to intimidate or threaten others"</li>
+                                        <li>"Is intended to promote or incite violence"</li>
+                                    </ul>
+                                </section>
+                                <section
+                                    id="app-setup-eula-consequences"
+                                    class="flex flex-col gap-2"
+                                >
+                                    <h3 class="font-sans font-[600] text-ly0-gl text-base">
+                                        "Consequences of Violation"
+                                    </h3>
+                                    <p class="font-mono font-[400] text-ly0-gl text-sm leading-relaxed">
+                                        "Any violation of this EULA, including the prohibited content and conduct outlined above, may result in the termination of your access to our application."
+                                    </p>
+                                </section>
+                                <section
+                                    id="app-setup-eula-disclaimer"
+                                    class="flex flex-col gap-2"
+                                >
+                                    <h3 class="font-sans font-[600] text-ly0-gl text-base">
+                                        "Disclaimer of Warranties and Limitation of Liability"
+                                    </h3>
+                                    <p class="font-mono font-[400] text-ly0-gl text-sm leading-relaxed">
+                                        "Our application is provided \"as is\" and \"as available\" without warranty of any kind, either express or implied, including but not limited to the implied warranties of merchantability and fitness for a particular purpose. We do not guarantee that our application will be uninterrupted or error-free. In no event shall Radroots Inc. be liable for any damages whatsoever, including but not limited to direct, indirect, special, incidental, or consequential damages, arising out of or in connection with the use or inability to use our application."
+                                    </p>
+                                </section>
+                                <section
+                                    id="app-setup-eula-changes"
+                                    class="flex flex-col gap-2"
+                                >
+                                    <h3 class="font-sans font-[600] text-ly0-gl text-base">
+                                        "Changes to EULA"
+                                    </h3>
+                                    <p class="font-mono font-[400] text-ly0-gl text-sm leading-relaxed">
+                                        "We reserve the right to update or modify this EULA at any time and without prior notice. Your continued use of our application following any changes to this EULA will be deemed to be your acceptance of such changes."
+                                    </p>
+                                </section>
+                                <section
+                                    id="app-setup-eula-contact"
+                                    class="flex flex-col gap-2"
+                                >
+                                    <h3 class="font-sans font-[600] text-ly0-gl text-base">
+                                        "Contact Information"
+                                    </h3>
+                                    <p class="font-mono font-[400] text-ly0-gl text-sm leading-relaxed">
+                                        "If you have any questions about this EULA, please contact us at info@radroots.org."
+                                    </p>
+                                </section>
+                                <section
+                                    id="app-setup-eula-acceptance"
+                                    class="flex flex-col gap-2"
+                                >
+                                    <h3 class="font-sans font-[600] text-ly0-gl text-base">
+                                        "Acceptance of Terms"
+                                    </h3>
+                                    <p class="font-mono font-[400] text-ly0-gl text-sm leading-relaxed">
+                                        "By using our application, you signify your acceptance of this EULA. If you do not agree to this EULA, you may not use our application."
+                                    </p>
+                                </section>
+                            </div>
+                        </div>
+                        <div
+                            id="app-setup-eula-actions"
+                            class="flex flex-row w-full pt-4 justify-center items-center"
+                        >
+                            <button
+                                type="button"
+                                class=move || {
+                                    if setup_eula_scrolled.get() {
+                                        "group flex flex-row basis-1/2 gap-3 justify-center items-center"
+                                    } else {
+                                        "group flex flex-row basis-1/2 gap-3 justify-center items-center opacity-80"
+                                    }
+                                }
+                                on:click=move |ev| {
+                                    ev.stop_propagation();
+                                    rewind_step.run(ev);
+                                }
+                            >
+                                <span class="font-mono font-[400] text-sm text-ly0-gl group-active:text-ly0-gl/80 el-re">
+                                    "-"
+                                </span>
+                                <span class="font-mono font-[400] text-sm text-ly0-gl group-active:text-ly0-gl/80 el-re">
+                                    "Disagree"
+                                </span>
+                                <span class="font-mono font-[400] text-sm text-ly0-gl group-active:text-ly0-gl/80 el-re">
+                                    "-"
+                                </span>
+                            </button>
+                            <button
+                                type="button"
+                                aria-disabled=move || !setup_eula_scrolled.get()
+                                class=move || {
+                                    if setup_eula_scrolled.get() {
+                                        "relative group flex flex-row basis-1/2 gap-3 justify-center items-center el-re"
+                                    } else {
+                                        "relative group flex flex-row basis-1/2 gap-3 justify-center items-center opacity-40 pointer-events-none"
+                                    }
+                                }
+                                on:click=move |ev| {
+                                    ev.stop_propagation();
+                                    if setup_eula_scrolled.get() {
+                                        advance_step.run(());
+                                    }
+                                }
+                            >
+                                <span class="font-mono font-[400] text-sm text-ly0-gl-hl group-active:text-ly0-gl-hl/80 el-re">
+                                    "-"
+                                </span>
+                                <span class="font-mono font-[400] text-sm text-ly0-gl-hl group-active:text-ly0-gl-hl/80 el-re">
+                                    "Agree"
+                                </span>
+                                <span class="font-mono font-[400] text-sm text-ly0-gl-hl group-active:text-ly0-gl-hl/80 el-re">
+                                    "-"
+                                </span>
+                            </button>
+                        </div>
+                    </section>
+                }.into_any(),
             }}
             <footer
                 id="app-setup-actions"
@@ -616,19 +838,24 @@ fn SetupPage() -> impl IntoView {
             >
                 {move || {
                     let step = setup_step.get();
+                    if matches!(step, RadrootsAppSetupStep::Eula) {
+                        return view! { <></> }.into_any();
+                    }
                     let continue_disabled = (matches!(step, RadrootsAppSetupStep::KeyChoice)
                         && setup_key_choice.get().is_none())
                         || (matches!(step, RadrootsAppSetupStep::FarmerSetup)
                             && setup_farmer_choice.get().is_none());
+                    let continue_label = "Continue";
+                    let back_label = "Back";
                     let continue_action = RadrootsAppUiButtonLayoutAction {
-                        label: "Continue".to_string(),
+                        label: continue_label.to_string(),
                         disabled: continue_disabled,
                         loading: false,
-                        on_click: advance_step.clone(),
+                        on_click: advance_step_click.clone(),
                     };
                     let back_action = RadrootsAppUiButtonLayoutBackAction {
                         visible: !matches!(step, RadrootsAppSetupStep::Intro),
-                        label: Some("Back".to_string()),
+                        label: Some(back_label.to_string()),
                         disabled: false,
                         on_click: rewind_step.clone(),
                     };
@@ -637,7 +864,7 @@ fn SetupPage() -> impl IntoView {
                             continue_action=continue_action
                             back=back_action
                         />
-                    }
+                    }.into_any()
                 }}
             </footer>
         </main>

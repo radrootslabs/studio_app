@@ -93,10 +93,6 @@ pub fn RadrootsAppUiButtonLayoutPair(
     #[prop(optional)] back: Option<RadrootsAppUiButtonLayoutBackAction>,
     #[prop(optional)] class: Option<String>,
 ) -> impl IntoView {
-    let back_visible = back
-        .as_ref()
-        .map(|value| value.visible)
-        .unwrap_or(false);
     let wrapper_class = radroots_studio_app_ui_button_class_merge(&[
         Some("flex flex-col gap-1 justify-center items-center"),
         class.as_deref(),

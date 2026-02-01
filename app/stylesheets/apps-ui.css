@@ -113,7 +113,7 @@
 }
 
 @utility ly1-selected-press {
-    @apply bg-ly1-focus;
+    @apply bg-ly1-focus ring-[0.2rem] ring-ly1-edge/40;
     box-shadow: var(--shadow-press);
 }
 
