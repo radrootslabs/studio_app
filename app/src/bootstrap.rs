@@ -5,11 +5,13 @@ use radroots_studio_app_core::notifications::RadrootsClientNotificationsPermissi
 
 use crate::{
     app_datastore_obj_key_state,
+    app_datastore_obj_key_setup_draft,
     app_log_debug_emit,
     app_state_record_new,
     app_state_record_validate,
     app_state_timestamp_ms,
     RadrootsAppState,
+    RadrootsAppSetupDraft,
     RadrootsAppStateError,
     RadrootsAppStateRecord,
     RadrootsAppInitError,
@@ -135,6 +137,43 @@ pub async fn app_datastore_clear_bootstrap<T: RadrootsClientDatastore>(
     Ok(())
 }
 
+pub async fn app_datastore_read_setup_draft<T: RadrootsClientDatastore>(
+    datastore: &T,
+    key_maps: &RadrootsAppKeyMapConfig,
+) -> RadrootsAppInitResult<Option<RadrootsAppSetupDraft>> {
+    let key = app_datastore_obj_key_setup_draft(key_maps).map_err(RadrootsAppInitError::Config)?;
+    match datastore.get_obj::<RadrootsAppSetupDraft>(key).await {
+        Ok(draft) => Ok(Some(draft)),
+        Err(RadrootsClientDatastoreError::NoResult) => Ok(None),
+        Err(err) => Err(RadrootsAppInitError::Datastore(err)),
+    }
+}
+
+pub async fn app_datastore_write_setup_draft<T: RadrootsClientDatastore>(
+    datastore: &T,
+    key_maps: &RadrootsAppKeyMapConfig,
+    draft: &RadrootsAppSetupDraft,
+) -> RadrootsAppInitResult<RadrootsAppSetupDraft> {
+    let key = app_datastore_obj_key_setup_draft(key_maps).map_err(RadrootsAppInitError::Config)?;
+    let value = datastore
+        .set_obj(key, draft)
+        .await
+        .map_err(RadrootsAppInitError::Datastore)?;
+    Ok(value)
+}
+
+pub async fn app_datastore_clear_setup_draft<T: RadrootsClientDatastore>(
+    datastore: &T,
+    key_maps: &RadrootsAppKeyMapConfig,
+) -> RadrootsAppInitResult<()> {
+    let key = app_datastore_obj_key_setup_draft(key_maps).map_err(RadrootsAppInitError::Config)?;
+    match datastore.del_obj(key).await {
+        Ok(_) => Ok(()),
+        Err(RadrootsClientDatastoreError::NoResult) => Ok(()),
+        Err(err) => Err(RadrootsAppInitError::Datastore(err)),
+    }
+}
+
 pub async fn app_state_set_notifications_permission<T: RadrootsClientDatastore>(
     datastore: &T,
     key_maps: &RadrootsAppKeyMapConfig,
@@ -166,10 +205,13 @@ pub async fn app_state_set_notifications_permission_value<T: RadrootsClientDatas
 mod tests {
     use super::{
         app_datastore_clear_bootstrap,
+        app_datastore_clear_setup_draft,
         app_datastore_create_state,
         app_datastore_has_state,
         app_datastore_read_state,
+        app_datastore_read_setup_draft,
         app_datastore_update_state,
+        app_datastore_write_setup_draft,
         app_state_set_notifications_permission,
         app_state_set_notifications_permission_value,
         app_state_notifications_permission_value,
@@ -178,9 +220,11 @@ mod tests {
     use crate::{
         app_key_maps_default,
         RadrootsAppInitError,
+        RadrootsAppRole,
         RadrootsAppState,
         RadrootsAppStateError,
         RadrootsAppStateRecord,
+        RadrootsAppSetupDraft,
     };
     use async_trait::async_trait;
     use radroots_studio_app_core::backup::RadrootsClientBackupDatastorePayload;
@@ -196,6 +240,136 @@ mod tests {
     use serde::de::DeserializeOwned;
     use serde::Serialize;
     use std::cell::RefCell;
+
+    struct SetupDraftDatastore {
+        draft: RefCell<Option<RadrootsAppSetupDraft>>,
+    }
+
+    #[async_trait(?Send)]
+    impl RadrootsClientDatastore for SetupDraftDatastore {
+        fn get_config(&self) -> RadrootsClientIdbConfig {
+            IDB_CONFIG_DATASTORE
+        }
+
+        fn get_store_id(&self) -> &str {
+            "test"
+        }
+
+        async fn init(&self) -> RadrootsClientDatastoreResult<()> {
+            Ok(())
+        }
+
+        async fn set(&self, _key: &str, _value: &str) -> RadrootsClientDatastoreResult<String> {
+            Err(RadrootsClientDatastoreError::IdbUndefined)
+        }
+
+        async fn get(&self, _key: &str) -> RadrootsClientDatastoreResult<String> {
+            Err(RadrootsClientDatastoreError::IdbUndefined)
+        }
+
+        async fn set_obj<T>(
+            &self,
+            _key: &str,
+            value: &T,
+        ) -> RadrootsClientDatastoreResult<T>
+        where
+            T: Serialize + DeserializeOwned + Clone,
+        {
+            let encoded = serde_json::to_string(value)
+                .map_err(|_| RadrootsClientDatastoreError::IdbUndefined)?;
+            if let Ok(parsed) = serde_json::from_str::<RadrootsAppSetupDraft>(&encoded) {
+                *self.draft.borrow_mut() = Some(parsed);
+                return Ok(value.clone());
+            }
+            Err(RadrootsClientDatastoreError::IdbUndefined)
+        }
+
+        async fn update_obj<T>(
+            &self,
+            _key: &str,
+            _value: &T,
+        ) -> RadrootsClientDatastoreResult<T>
+        where
+            T: Serialize + DeserializeOwned + Clone,
+        {
+            Err(RadrootsClientDatastoreError::IdbUndefined)
+        }
+
+        async fn get_obj<T>(&self, _key: &str) -> RadrootsClientDatastoreResult<T>
+        where
+            T: DeserializeOwned,
+        {
+            if let Some(draft) = self.draft.borrow().as_ref() {
+                let encoded = serde_json::to_string(draft)
+                    .map_err(|_| RadrootsClientDatastoreError::NoResult)?;
+                return serde_json::from_str(&encoded)
+                    .map_err(|_| RadrootsClientDatastoreError::NoResult);
+            }
+            Err(RadrootsClientDatastoreError::NoResult)
+        }
+
+        async fn del_obj(&self, _key: &str) -> RadrootsClientDatastoreResult<String> {
+            *self.draft.borrow_mut() = None;
+            Ok("cleared".to_string())
+        }
+
+        async fn del(&self, _key: &str) -> RadrootsClientDatastoreResult<String> {
+            Err(RadrootsClientDatastoreError::IdbUndefined)
+        }
+
+        async fn del_pref(&self, _key_prefix: &str) -> RadrootsClientDatastoreResult<Vec<String>> {
+            Err(RadrootsClientDatastoreError::IdbUndefined)
+        }
+
+        async fn set_param(
+            &self,
+            _key: &str,
+            _key_param: &str,
+            _value: &str,
+        ) -> RadrootsClientDatastoreResult<String> {
+            Err(RadrootsClientDatastoreError::IdbUndefined)
+        }
+
+        async fn get_param(
+            &self,
+            _key: &str,
+            _key_param: &str,
+        ) -> RadrootsClientDatastoreResult<String> {
+            Err(RadrootsClientDatastoreError::IdbUndefined)
+        }
+
+        async fn keys(&self) -> RadrootsClientDatastoreResult<Vec<String>> {
+            Err(RadrootsClientDatastoreError::IdbUndefined)
+        }
+
+        async fn entries(&self) -> RadrootsClientDatastoreResult<RadrootsClientDatastoreEntries> {
+            Err(RadrootsClientDatastoreError::IdbUndefined)
+        }
+
+        async fn entries_pref(
+            &self,
+            _key_prefix: &str,
+        ) -> RadrootsClientDatastoreResult<RadrootsClientDatastoreEntries> {
+            Err(RadrootsClientDatastoreError::IdbUndefined)
+        }
+
+        async fn reset(&self) -> RadrootsClientDatastoreResult<()> {
+            Err(RadrootsClientDatastoreError::IdbUndefined)
+        }
+
+        async fn export_backup(
+            &self,
+        ) -> RadrootsClientDatastoreResult<RadrootsClientBackupDatastorePayload> {
+            Err(RadrootsClientDatastoreError::IdbUndefined)
+        }
+
+        async fn import_backup(
+            &self,
+            _payload: RadrootsClientBackupDatastorePayload,
+        ) -> RadrootsClientDatastoreResult<()> {
+            Err(RadrootsClientDatastoreError::IdbUndefined)
+        }
+    }
 
     struct TestDatastore {
         state: Option<RadrootsAppState>,
@@ -513,5 +687,43 @@ mod tests {
         ))
         .expect_err("missing");
         assert_eq!(err, RadrootsAppInitError::State(RadrootsAppStateError::Missing));
+    }
+
+    #[test]
+    fn setup_draft_roundtrip() {
+        let datastore = SetupDraftDatastore {
+            draft: RefCell::new(None),
+        };
+        let key_maps = app_key_maps_default();
+        let draft = RadrootsAppSetupDraft {
+            nostr_public_key: Some("pub".to_string()),
+            profile_name: Some("radroots".to_string()),
+            role: Some(RadrootsAppRole::Public),
+            nip05_request: Some(true),
+        };
+        let stored = futures::executor::block_on(app_datastore_write_setup_draft(
+            &datastore,
+            &key_maps,
+            &draft,
+        ))
+        .expect("store draft");
+        assert_eq!(stored, draft);
+        let loaded = futures::executor::block_on(app_datastore_read_setup_draft(
+            &datastore,
+            &key_maps,
+        ))
+        .expect("read draft");
+        assert_eq!(loaded, Some(draft));
+        let cleared = futures::executor::block_on(app_datastore_clear_setup_draft(
+            &datastore,
+            &key_maps,
+        ));
+        assert!(cleared.is_ok());
+        let loaded = futures::executor::block_on(app_datastore_read_setup_draft(
+            &datastore,
+            &key_maps,
+        ))
+        .expect("read draft");
+        assert!(loaded.is_none());
     }
 }

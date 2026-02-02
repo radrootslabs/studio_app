@@ -24,6 +24,9 @@ pub use bootstrap::{
     app_datastore_create_state,
     app_datastore_has_state,
     app_datastore_read_state,
+    app_datastore_read_setup_draft,
+    app_datastore_write_setup_draft,
+    app_datastore_clear_setup_draft,
     app_datastore_update_state,
     app_state_set_notifications_permission,
     app_state_set_notifications_permission_value,
@@ -38,6 +41,7 @@ pub use data::{
     app_state_timestamp_ms,
     RadrootsAppRole,
     RadrootsAppState,
+    RadrootsAppSetupDraft,
     RadrootsAppStateError,
     RadrootsAppStateRecord,
     APP_STATE_SCHEMA_VERSION,
@@ -138,6 +142,7 @@ pub use config::{
     app_datastore_param_key,
     app_datastore_obj_key,
     app_datastore_obj_key_state,
+    app_datastore_obj_key_setup_draft,
     app_assets_geocoder_db_url,
     app_assets_sql_wasm_url,
     app_keystore_key_maps_default,
@@ -162,6 +167,7 @@ pub use config::{
     APP_DATASTORE_KEY_LOG_ENTRY,
     APP_DATASTORE_KEY_NOSTR_KEY,
     APP_DATASTORE_KEY_OBJ_STATE,
+    APP_DATASTORE_KEY_OBJ_SETUP_DRAFT,
     APP_KEYSTORE_KEY_NOSTR_DEFAULT,
 };
 pub use init::{

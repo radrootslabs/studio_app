@@ -17,6 +17,7 @@ pub type RadrootsAppKeystoreKeyMap = BTreeMap<&'static str, &'static str>;
 pub const APP_DATASTORE_KEY_NOSTR_KEY: &str = "nostr:key";
 pub const APP_DATASTORE_KEY_EULA_DATE: &str = "app:eula:date";
 pub const APP_DATASTORE_KEY_OBJ_STATE: &str = "app:data";
+pub const APP_DATASTORE_KEY_OBJ_SETUP_DRAFT: &str = "setup:draft";
 pub const APP_DATASTORE_KEY_LOG_ENTRY: &str = "log:entry";
 pub const APP_KEYSTORE_KEY_NOSTR_DEFAULT: &str = "nostr:default";
 
@@ -62,6 +63,7 @@ pub fn app_key_maps_default() -> RadrootsAppKeyMapConfig {
     param_map.insert("log_entry", app_datastore_param_log_entry as RadrootsAppDatastoreKeyParam);
     let mut obj_map = BTreeMap::new();
     obj_map.insert("state", APP_DATASTORE_KEY_OBJ_STATE);
+    obj_map.insert("setup_draft", APP_DATASTORE_KEY_OBJ_SETUP_DRAFT);
     RadrootsAppKeyMapConfig {
         key_map,
         param_map,
@@ -117,6 +119,9 @@ pub fn app_key_maps_validate(config: &RadrootsAppKeyMapConfig) -> RadrootsAppCon
     if !config.obj_map.contains_key("state") {
         return Err(RadrootsAppConfigError::MissingObjMap("state"));
     }
+    if !config.obj_map.contains_key("setup_draft") {
+        return Err(RadrootsAppConfigError::MissingObjMap("setup_draft"));
+    }
     Ok(())
 }
 
@@ -167,6 +172,12 @@ pub fn app_datastore_key_eula_date(config: &RadrootsAppKeyMapConfig) -> Radroots
 
 pub fn app_datastore_obj_key_state(config: &RadrootsAppKeyMapConfig) -> RadrootsAppConfigResult<&'static str> {
     app_datastore_obj_key(config, "state")
+}
+
+pub fn app_datastore_obj_key_setup_draft(
+    config: &RadrootsAppKeyMapConfig,
+) -> RadrootsAppConfigResult<&'static str> {
+    app_datastore_obj_key(config, "setup_draft")
 }
 
 pub fn app_keystore_key(
@@ -280,9 +291,11 @@ mod tests {
         app_config_from_env,
         app_datastore_param_nostr_profile,
         app_datastore_param_log_entry,
+        app_datastore_param_radroots_profile,
         app_datastore_key_eula_date,
         app_datastore_key_nostr_key,
         app_datastore_obj_key_state,
+        app_datastore_obj_key_setup_draft,
         app_key_maps_validate,
         app_keystore_key_maps_default,
         app_keystore_key_maps_validate,
@@ -295,12 +308,14 @@ mod tests {
         RadrootsAppConfig,
         RadrootsAppConfigError,
         RadrootsAppDatastoreConfig,
+        RadrootsAppDatastoreKeyParam,
         RadrootsAppKeyMapConfig,
         RadrootsAppKeystoreConfig,
         RadrootsAppKeystoreKeyMap,
         APP_DATASTORE_KEY_EULA_DATE,
         APP_DATASTORE_KEY_NOSTR_KEY,
         APP_DATASTORE_KEY_OBJ_STATE,
+        APP_DATASTORE_KEY_OBJ_SETUP_DRAFT,
         APP_DATASTORE_KEY_LOG_ENTRY,
         APP_KEYSTORE_KEY_NOSTR_DEFAULT,
     };
@@ -385,6 +400,10 @@ mod tests {
             config.obj_map.get("state"),
             Some(&APP_DATASTORE_KEY_OBJ_STATE)
         );
+        assert_eq!(
+            config.obj_map.get("setup_draft"),
+            Some(&APP_DATASTORE_KEY_OBJ_SETUP_DRAFT)
+        );
         assert_eq!(app_datastore_param_nostr_profile("abc"), "nostr:abc:profile");
         assert_eq!(
             app_datastore_param_log_entry("entry"),
@@ -400,6 +419,13 @@ mod tests {
         missing.key_map.insert("nostr_key", APP_DATASTORE_KEY_NOSTR_KEY);
         let err = app_key_maps_validate(&missing).expect_err("missing keys");
         assert_eq!(err, RadrootsAppConfigError::MissingKeyMap("eula_date"));
+        missing.key_map.insert("eula_date", APP_DATASTORE_KEY_EULA_DATE);
+        missing.obj_map.insert("state", APP_DATASTORE_KEY_OBJ_STATE);
+        missing.param_map.insert("nostr_profile", app_datastore_param_nostr_profile as RadrootsAppDatastoreKeyParam);
+        missing.param_map.insert("radroots_profile", app_datastore_param_radroots_profile as RadrootsAppDatastoreKeyParam);
+        missing.param_map.insert("log_entry", app_datastore_param_log_entry as RadrootsAppDatastoreKeyParam);
+        let err = app_key_maps_validate(&missing).expect_err("missing draft");
+        assert_eq!(err, RadrootsAppConfigError::MissingObjMap("setup_draft"));
     }
 
     #[test]
@@ -426,6 +452,10 @@ mod tests {
         assert_eq!(
             app_datastore_obj_key_state(&config).expect("state key"),
             APP_DATASTORE_KEY_OBJ_STATE
+        );
+        assert_eq!(
+            app_datastore_obj_key_setup_draft(&config).expect("draft key"),
+            APP_DATASTORE_KEY_OBJ_SETUP_DRAFT
         );
         let nostr_param = app_datastore_param_key(&config, "nostr_profile").expect("param");
         assert_eq!(nostr_param("abc"), "nostr:abc:profile");

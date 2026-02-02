@@ -37,6 +37,8 @@ pub fn app_setup_state_new(active_key: String, eula_date: String) -> RadrootsApp
         active_key,
         role: RadrootsAppRole::default(),
         eula_date,
+        eula_version: String::from("0.1.0"),
+        eula_hash: String::from("unknown"),
         nip05_key: None,
         notifications_permission: None,
     }
