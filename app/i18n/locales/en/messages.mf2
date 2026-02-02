@@ -3,6 +3,14 @@ app.common.missing = missing
 
 app.common.unknown = unknown
 
+app.common.back = Back
+
+app.common.continue = Continue
+
+app.common.no = No
+
+app.common.yes = Yes
+
 # nav
 app.nav.primary_aria = primary
 
@@ -106,6 +114,35 @@ app.home.health.message.mismatch = mismatch
 app.home.health.message.uninitialized = uninitialized
 
 app.home.health.message.unavailable = unavailable
+
+# setup
+app.setup.intro.kicker = Configure
+
+app.setup.intro.welcome = Welcome to Radroots!
+
+app.setup.intro.body = Your device will be configured by the setup wizard.
+
+app.setup.key_choice.title = Configure Device
+
+app.setup.key_choice.create = Create new keypair
+
+app.setup.key_choice.use_existing = Use existing keypair
+
+app.setup.key_add.title = Add existing key
+
+app.setup.key_add.placeholder = Enter nostr nsec/hex
+
+app.setup.profile.title = Add Profile
+
+app.setup.profile.placeholder = Enter profile name
+
+app.setup.profile.nip05.prefix = Create
+
+app.setup.profile.nip05.suffix = NIP-05 address
+
+app.setup.profile.confirm_no_name = Your profile will be created without a name. You can change this later in Settings > Profile
+
+app.setup.farmer.title = Setup for Farmer
 
 # errors
 error.app.init.idb = storage unavailable

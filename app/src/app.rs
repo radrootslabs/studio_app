@@ -253,9 +253,6 @@ fn spawn_health_checks(
 }
 
 const APP_HEALTH_CHECK_DELAY_MS: u32 = 300;
-const APP_SETUP_NO_PROFILE_NAME_CONFIRM: &str =
-    "Your profile will be created without a name. You can change this later in Settings > Profile";
-
 fn app_health_check_delay_ms() -> u32 {
     APP_HEALTH_CHECK_DELAY_MS
 }
@@ -518,11 +515,10 @@ fn SetupPage() -> impl IntoView {
                 let profile_name = profile_name.get();
                 if profile_name.trim().is_empty() {
                     let setup_step = setup_step.clone();
+                    let confirm_message = t!("app.setup.profile.confirm_no_name");
                     spawn_local(async move {
                         let notifications = RadrootsAppNotifications::new(None);
-                        let confirm = notifications
-                            .confirm_message(APP_SETUP_NO_PROFILE_NAME_CONFIRM)
-                            .await;
+                        let confirm = notifications.confirm_message(&confirm_message).await;
                         if confirm {
                             setup_step.set(RadrootsAppSetupStep::FarmerSetup);
                         }
@@ -637,7 +633,7 @@ fn SetupPage() -> impl IntoView {
                                             id="app-setup-intro-kicker"
                                             class="w-full text-left font-sans font-[400] text-sm uppercase text-ly0-gl-label"
                                         >
-                                            "Configure"
+                                            {t!("app.setup.intro.kicker")}
                                         </p>
                                         <div
                                             id="app-setup-intro-copy"
@@ -647,13 +643,13 @@ fn SetupPage() -> impl IntoView {
                                                 id="app-setup-intro-line-welcome"
                                                 class="w-full text-left font-mono font-[400] text-[1.1rem] text-ly0-gl"
                                             >
-                                                "Welcome to Radroots!"
+                                                {t!("app.setup.intro.welcome")}
                                             </p>
                                             <p
                                                 id="app-setup-intro-line-body"
                                                 class="w-full text-left font-mono font-[400] text-[1.1rem] text-ly0-gl"
                                             >
-                                                "Your device will be configured by the setup wizard."
+                                                {t!("app.setup.intro.body")}
                                             </p>
                                         </div>
                                     </footer>
@@ -680,7 +676,7 @@ fn SetupPage() -> impl IntoView {
                                 class="flex flex-row w-full justify-center items-center"
                             >
                                 <p class="font-sans font-[600] text-ly0-gl text-3xl">
-                                    "Configure Device"
+                                    {t!("app.setup.key_choice.title")}
                                 </p>
                             </div>
                             <div
@@ -706,7 +702,7 @@ fn SetupPage() -> impl IntoView {
                                     }
                                 >
                                     <span class="font-sans font-[600] text-ly0-gl text-xl">
-                                        "Create new keypair"
+                                        {t!("app.setup.key_choice.create")}
                                     </span>
                                 </button>
                                 <button
@@ -728,7 +724,7 @@ fn SetupPage() -> impl IntoView {
                                     }
                                 >
                                     <span class="font-sans font-[600] text-ly0-gl text-xl">
-                                        "Use existing keypair"
+                                        {t!("app.setup.key_choice.use_existing")}
                                     </span>
                                 </button>
                             </div>
@@ -752,13 +748,13 @@ fn SetupPage() -> impl IntoView {
                                     id="app-setup-key-add-existing-title"
                                     class="font-sans font-[600] text-ly0-gl text-3xl capitalize"
                                 >
-                                    "Add existing key"
+                                    {t!("app.setup.key_add.title")}
                                 </p>
                                 <input
                                     id="app-setup-key-add-existing-input"
                                     class="input-base w-lo_ios0 ios1:w-lo_ios1 text-[1.25rem] text-center placeholder:opacity-60"
                                     type="text"
-                                    placeholder="Enter nostr nsec/hex"
+                                    placeholder=t!("app.setup.key_add.placeholder")
                                     prop:value=move || nostr_key_add.get()
                                     on:input=move |ev| {
                                         nostr_key_add.set(event_target_value(&ev));
@@ -785,7 +781,7 @@ fn SetupPage() -> impl IntoView {
                                     id="app-setup-profile-title"
                                     class="font-sans font-[600] text-ly0-gl text-3xl"
                                 >
-                                    "Add Profile"
+                                    {t!("app.setup.profile.title")}
                                 </p>
                                 <div
                                     id="app-setup-profile-fields"
@@ -795,7 +791,7 @@ fn SetupPage() -> impl IntoView {
                                         id="app-setup-profile-name"
                                         class="input-base w-lo_ios0 ios1:w-lo_ios1 text-[1.25rem] text-center placeholder:opacity-60"
                                         type="text"
-                                        placeholder="Enter profile name"
+                                        placeholder=t!("app.setup.profile.placeholder")
                                         prop:value=move || profile_name.get()
                                         on:keydown=move |ev: KeyboardEvent| {
                                             if ev.key() == "Enter" {
@@ -824,11 +820,13 @@ fn SetupPage() -> impl IntoView {
                                             class="flex flex-row justify-center items-center"
                                         >
                                             <span class="font-sans font-[400] text-ly0-gl text-[14px] tracking-wide">
-                                                "Create "
+                                                {t!("app.setup.profile.nip05.prefix")}
+                                                {" "}
                                                 <span class="font-mono font-[500] tracking-tight px-[3px]">
                                                     "@radroots"
                                                 </span>
-                                                " NIP-05 address"
+                                                {" "}
+                                                {t!("app.setup.profile.nip05.suffix")}
                                             </span>
                                         </label>
                                     </div>
@@ -858,7 +856,7 @@ fn SetupPage() -> impl IntoView {
                                     class="flex flex-row w-full justify-center items-center"
                                 >
                                     <p class="font-sans font-[600] text-ly0-gl text-3xl">
-                                        "Setup for Farmer"
+                                        {t!("app.setup.farmer.title")}
                                     </p>
                                 </div>
                                 <div
@@ -883,7 +881,7 @@ fn SetupPage() -> impl IntoView {
                                         }
                                     >
                                         <span class="font-sans font-[600] text-ly0-gl text-xl">
-                                            "Yes"
+                                            {t!("app.common.yes")}
                                         </span>
                                     </button>
                                     <button
@@ -904,7 +902,7 @@ fn SetupPage() -> impl IntoView {
                                         }
                                     >
                                         <span class="font-sans font-[600] text-ly0-gl text-xl">
-                                            "No"
+                                            {t!("app.common.no")}
                                         </span>
                                     </button>
                                 </div>
@@ -1118,17 +1116,17 @@ fn SetupPage() -> impl IntoView {
                         && setup_key_choice.get().is_none())
                         || (matches!(step, RadrootsAppSetupStep::FarmerSetup)
                             && setup_farmer_choice.get().is_none());
-                    let continue_label = "Continue";
-                    let back_label = "Back";
+                    let continue_label = t!("app.common.continue");
+                    let back_label = t!("app.common.back");
                     let continue_action = RadrootsAppUiButtonLayoutAction {
-                        label: continue_label.to_string(),
+                        label: continue_label,
                         disabled: continue_disabled,
                         loading: false,
                         on_click: advance_step_click.clone(),
                     };
                     let back_action = RadrootsAppUiButtonLayoutBackAction {
                         visible: !matches!(step, RadrootsAppSetupStep::Intro),
-                        label: Some(back_label.to_string()),
+                        label: Some(back_label),
                         disabled: false,
                         on_click: rewind_step.clone(),
                     };
