@@ -180,6 +180,7 @@ impl RadrootsAppLoggableError for RadrootsAppKeystoreError {
     fn log_context(&self) -> Option<String> {
         match self {
             RadrootsAppKeystoreError::Keystore(err) => Some(err.to_string()),
+            RadrootsAppKeystoreError::KeyMismatch => Some(self.message().to_string()),
         }
     }
 }

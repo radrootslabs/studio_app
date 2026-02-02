@@ -22,6 +22,7 @@ gloo-timers = { workspace = true, features = ["futures"] }
 radroots-app-core = { path = "../crates/core" }
 radroots-app-ui-components = { path = "../crates/ui-components" }
 radroots-log = { path = "../refs/crates/log", default-features = false }
+radroots-nostr = { workspace = true }
 tracing-wasm = "0.2"
 console_error_panic_hook = "0.1"
 serde.workspace = true

@@ -1679,6 +1679,7 @@ dependencies = [
  "radroots-app-core",
  "radroots-app-ui-components",
  "radroots-log",
+ "radroots-nostr",
  "serde",
  "serde_json",
  "sha2",

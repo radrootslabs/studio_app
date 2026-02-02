@@ -64,6 +64,7 @@ pub use keystore::{
     app_keystore_nostr_ensure_key,
     app_keystore_nostr_keys,
     app_keystore_nostr_public_key,
+    app_keystore_nostr_verify_key,
     RadrootsAppKeystoreError,
     RadrootsAppKeystoreResult,
 };

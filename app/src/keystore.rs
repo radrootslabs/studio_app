@@ -1,12 +1,14 @@
 #![forbid(unsafe_code)]
 
 use radroots_studio_app_core::keystore::{RadrootsClientKeystoreError, RadrootsClientKeystoreNostr};
+use radroots_nostr::prelude::{RadrootsNostrKeys, RadrootsNostrSecretKey};
 
 use crate::app_log_debug_emit;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RadrootsAppKeystoreError {
     Keystore(RadrootsClientKeystoreError),
+    KeyMismatch,
 }
 
 pub type RadrootsAppKeystoreResult<T> = Result<T, RadrootsAppKeystoreError>;
@@ -15,6 +17,7 @@ impl RadrootsAppKeystoreError {
     pub const fn message(&self) -> &'static str {
         match self {
             RadrootsAppKeystoreError::Keystore(err) => err.message(),
+            RadrootsAppKeystoreError::KeyMismatch => "error.app.keystore.key_mismatch",
         }
     }
 }
@@ -77,12 +80,28 @@ pub async fn app_keystore_nostr_ensure_key<T: RadrootsClientKeystoreNostr>(
     }
 }
 
+pub async fn app_keystore_nostr_verify_key<T: RadrootsClientKeystoreNostr>(
+    keystore: &T,
+    public_key: &str,
+) -> RadrootsAppKeystoreResult<()> {
+    let secret_hex = keystore.read(public_key).await.map_err(RadrootsAppKeystoreError::from)?;
+    let secret_key = RadrootsNostrSecretKey::parse(&secret_hex)
+        .map_err(|_| RadrootsAppKeystoreError::Keystore(RadrootsClientKeystoreError::NostrInvalidSecretKey))?;
+    let keys = RadrootsNostrKeys::new(secret_key);
+    let derived = keys.public_key().to_hex();
+    if derived != public_key {
+        return Err(RadrootsAppKeystoreError::KeyMismatch);
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
         app_keystore_nostr_ensure_key,
         app_keystore_nostr_public_key,
         app_keystore_nostr_keys,
+        app_keystore_nostr_verify_key,
         RadrootsAppKeystoreError,
     };
     use async_trait::async_trait;
@@ -91,10 +110,12 @@ mod tests {
         RadrootsClientKeystoreNostr,
         RadrootsClientKeystoreResult,
     };
+    use radroots_nostr::prelude::{RadrootsNostrKeys, RadrootsNostrSecretKey};
 
     struct TestKeystore {
         keys_result: RadrootsClientKeystoreResult<Vec<String>>,
         generate_result: RadrootsClientKeystoreResult<String>,
+        read_result: RadrootsClientKeystoreResult<String>,
     }
 
     #[async_trait(?Send)]
@@ -108,7 +129,7 @@ mod tests {
         }
 
         async fn read(&self, _public_key: &str) -> RadrootsClientKeystoreResult<String> {
-            Err(RadrootsClientKeystoreError::IdbUndefined)
+            self.read_result.clone()
         }
 
         async fn keys(&self) -> RadrootsClientKeystoreResult<Vec<String>> {
@@ -129,6 +150,7 @@ mod tests {
         let keystore = TestKeystore {
             keys_result: Err(RadrootsClientKeystoreError::NostrNoResults),
             generate_result: Ok("generated".to_string()),
+            read_result: Err(RadrootsClientKeystoreError::IdbUndefined),
         };
         let result = futures::executor::block_on(app_keystore_nostr_public_key(&keystore))
             .expect("nostr key");
@@ -140,6 +162,7 @@ mod tests {
         let keystore = TestKeystore {
             keys_result: Ok(vec!["a".to_string(), "b".to_string()]),
             generate_result: Ok("generated".to_string()),
+            read_result: Err(RadrootsClientKeystoreError::IdbUndefined),
         };
         let result = futures::executor::block_on(app_keystore_nostr_public_key(&keystore))
             .expect("nostr key");
@@ -151,6 +174,7 @@ mod tests {
         let keystore = TestKeystore {
             keys_result: Err(RadrootsClientKeystoreError::IdbUndefined),
             generate_result: Ok("generated".to_string()),
+            read_result: Err(RadrootsClientKeystoreError::IdbUndefined),
         };
         let err = futures::executor::block_on(app_keystore_nostr_keys(&keystore))
             .expect_err("nostr key");
@@ -165,6 +189,7 @@ mod tests {
         let keystore = TestKeystore {
             keys_result: Err(RadrootsClientKeystoreError::NostrNoResults),
             generate_result: Ok("generated".to_string()),
+            read_result: Err(RadrootsClientKeystoreError::IdbUndefined),
         };
         let result = futures::executor::block_on(app_keystore_nostr_ensure_key(&keystore))
             .expect("nostr key");
@@ -176,9 +201,57 @@ mod tests {
         let keystore = TestKeystore {
             keys_result: Ok(vec!["a".to_string()]),
             generate_result: Ok("generated".to_string()),
+            read_result: Err(RadrootsClientKeystoreError::IdbUndefined),
         };
         let result = futures::executor::block_on(app_keystore_nostr_ensure_key(&keystore))
             .expect("nostr key");
         assert_eq!(result, "a");
+    }
+
+    #[test]
+    fn keystore_verify_matches_public_key() {
+        let secret_key = RadrootsNostrSecretKey::generate();
+        let secret_hex = secret_key.to_secret_hex();
+        let keys = RadrootsNostrKeys::new(secret_key);
+        let public_key = keys.public_key().to_hex();
+        let keystore = TestKeystore {
+            keys_result: Ok(vec![]),
+            generate_result: Ok("generated".to_string()),
+            read_result: Ok(secret_hex),
+        };
+        let result = futures::executor::block_on(app_keystore_nostr_verify_key(&keystore, &public_key))
+            .expect("nostr key");
+        assert_eq!(result, ());
+    }
+
+    #[test]
+    fn keystore_verify_rejects_mismatch() {
+        let secret_key = RadrootsNostrSecretKey::generate();
+        let secret_hex = secret_key.to_secret_hex();
+        let other_keys = RadrootsNostrKeys::new(RadrootsNostrSecretKey::generate());
+        let public_key = other_keys.public_key().to_hex();
+        let keystore = TestKeystore {
+            keys_result: Ok(vec![]),
+            generate_result: Ok("generated".to_string()),
+            read_result: Ok(secret_hex),
+        };
+        let err = futures::executor::block_on(app_keystore_nostr_verify_key(&keystore, &public_key))
+            .expect_err("nostr key");
+        assert_eq!(err, RadrootsAppKeystoreError::KeyMismatch);
+    }
+
+    #[test]
+    fn keystore_verify_rejects_invalid_secret() {
+        let keystore = TestKeystore {
+            keys_result: Ok(vec![]),
+            generate_result: Ok("generated".to_string()),
+            read_result: Ok("not-a-key".to_string()),
+        };
+        let err = futures::executor::block_on(app_keystore_nostr_verify_key(&keystore, "pub"))
+            .expect_err("nostr key");
+        assert_eq!(
+            err,
+            RadrootsAppKeystoreError::Keystore(RadrootsClientKeystoreError::NostrInvalidSecretKey)
+        );
     }
 }

@@ -1,7 +1,7 @@
 #![forbid(unsafe_code)]
 
 use radroots_studio_app_core::datastore::RadrootsClientDatastore;
-use radroots_studio_app_core::keystore::RadrootsClientKeystoreNostr;
+use radroots_studio_app_core::keystore::{RadrootsClientKeystoreError, RadrootsClientKeystoreNostr};
 
 #[cfg(target_arch = "wasm32")]
 use js_sys::Date;
@@ -13,6 +13,7 @@ use crate::{
     app_datastore_create_state,
     app_datastore_key_nostr_key,
     app_keystore_nostr_ensure_key,
+    app_keystore_nostr_verify_key,
     app_log_debug_emit,
     RadrootsAppInitError,
     RadrootsAppInitResult,
@@ -95,6 +96,17 @@ pub async fn app_setup_initialize<T: RadrootsClientDatastore, K: RadrootsClientK
         .await
         .map_err(|err| match err {
             RadrootsAppKeystoreError::Keystore(inner) => RadrootsAppInitError::Keystore(inner),
+            RadrootsAppKeystoreError::KeyMismatch => {
+                RadrootsAppInitError::Keystore(RadrootsClientKeystoreError::NostrInvalidSecretKey)
+            }
+        })?;
+    app_keystore_nostr_verify_key(keystore, &active_key)
+        .await
+        .map_err(|err| match err {
+            RadrootsAppKeystoreError::Keystore(inner) => RadrootsAppInitError::Keystore(inner),
+            RadrootsAppKeystoreError::KeyMismatch => {
+                RadrootsAppInitError::Keystore(RadrootsClientKeystoreError::NostrInvalidSecretKey)
+            }
         })?;
     let state = app_setup_state_new(active_key.clone(), app_setup_eula_date());
     let stored_state = app_datastore_create_state(datastore, key_maps, &state).await?;
@@ -131,6 +143,7 @@ mod tests {
         RadrootsClientKeystoreNostr,
         RadrootsClientKeystoreResult,
     };
+    use radroots_nostr::prelude::{RadrootsNostrKeys, RadrootsNostrSecretKey};
     use serde::de::DeserializeOwned;
     use serde::Serialize;
     use std::cell::RefCell;
@@ -139,6 +152,7 @@ mod tests {
     struct TestKeystore {
         keys_result: RadrootsClientKeystoreResult<Vec<String>>,
         generate_result: RadrootsClientKeystoreResult<String>,
+        read_result: RadrootsClientKeystoreResult<String>,
     }
 
     #[async_trait(?Send)]
@@ -152,7 +166,7 @@ mod tests {
         }
 
         async fn read(&self, _public_key: &str) -> RadrootsClientKeystoreResult<String> {
-            Err(RadrootsClientKeystoreError::IdbUndefined)
+            self.read_result.clone()
         }
 
         async fn keys(&self) -> RadrootsClientKeystoreResult<Vec<String>> {
@@ -393,13 +407,18 @@ mod tests {
 
     #[test]
     fn setup_initialize_creates_state_and_key() {
+        let secret_key = RadrootsNostrSecretKey::generate();
+        let secret_hex = secret_key.to_secret_hex();
+        let keys = RadrootsNostrKeys::new(secret_key);
+        let public_key = keys.public_key().to_hex();
         let datastore = TestDatastore {
             record: RefCell::new(None),
             values: RefCell::new(BTreeMap::new()),
         };
         let keystore = TestKeystore {
             keys_result: Err(RadrootsClientKeystoreError::NostrNoResults),
-            generate_result: Ok("pub".to_string()),
+            generate_result: Ok(public_key.clone()),
+            read_result: Ok(secret_hex),
         };
         let key_maps = app_key_maps_default();
         let state = futures::executor::block_on(app_setup_initialize(
@@ -408,10 +427,10 @@ mod tests {
             &key_maps,
         ))
         .expect("setup");
-        assert_eq!(state.active_key, "pub");
+        assert_eq!(state.active_key, public_key);
         let key_name = app_datastore_key_nostr_key(&key_maps).expect("key name");
         let stored = futures::executor::block_on(datastore.get(key_name)).expect("stored");
-        assert_eq!(stored, "pub");
+        assert_eq!(stored, public_key);
         assert!(datastore.record.borrow().is_some());
     }
 }
