@@ -1160,6 +1160,28 @@
       }
     },
     {
+      "key": "app.recovery.reset.button",
+      "id": 3705159239,
+      "args": [],
+      "features": {
+        "select": false,
+        "plural_cardinal": false,
+        "plural_ordinal": false,
+        "formatters": []
+      }
+    },
+    {
+      "key": "app.recovery.reset.confirm",
+      "id": 1689963212,
+      "args": [],
+      "features": {
+        "select": false,
+        "plural_cardinal": false,
+        "plural_ordinal": false,
+        "formatters": []
+      }
+    },
+    {
       "key": "app.recovery.title",
       "id": 853393776,
       "args": [],

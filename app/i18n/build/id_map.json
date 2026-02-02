@@ -104,6 +104,8 @@
   "app.nav.ui": 2416341108,
   "app.not_found": 3182331848,
   "app.recovery.body": 3376325333,
+  "app.recovery.reset.button": 3705159239,
+  "app.recovery.reset.confirm": 1689963212,
   "app.recovery.title": 853393776,
   "app.settings.actions.export_db": 4012031673,
   "app.settings.actions.logout": 1314061244,

@@ -34,6 +34,10 @@ app.recovery.title = Recovery required
 
 app.recovery.body = This device could not verify its setup state. Reset the device to continue.
 
+app.recovery.reset.button = Reset device
+
+app.recovery.reset.confirm = This will erase local data on this device. Continue?
+
 # init stages
 app.init.stage.idle = idle
 

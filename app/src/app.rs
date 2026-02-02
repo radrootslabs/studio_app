@@ -1414,6 +1414,93 @@ fn SetupPage() -> impl IntoView {
 
 #[component]
 fn RecoveryPage() -> impl IntoView {
+    let context = app_context();
+    let fallback_backends = RwSignal::new_local(None::<RadrootsAppBackends>);
+    let fallback_setup_status = RwSignal::new_local(RadrootsAppSetupStatus::Unknown);
+    let backends = context
+        .as_ref()
+        .map(|value| value.backends)
+        .unwrap_or(fallback_backends);
+    let setup_status = context
+        .as_ref()
+        .map(|value| value.setup_status)
+        .unwrap_or(fallback_setup_status);
+    let reset_running = RwSignal::new_local(false);
+    let reset_status = RwSignal::new_local(None::<String>);
+    let navigate = use_navigate();
+    let reset_disabled = move || backends.with(|value| value.is_none()) || reset_running.get();
+    let reset_label = move || reset_status.get().as_deref().map(reset_status_label);
+    let on_reset: Callback<MouseEvent> = {
+        let backends = backends.clone();
+        let reset_running = reset_running.clone();
+        let reset_status = reset_status.clone();
+        let setup_status = setup_status.clone();
+        let navigate = navigate.clone();
+        Callback::new(move |_| {
+            if reset_running.get() {
+                return;
+            }
+            reset_status.set(None);
+            let config = backends
+                .with_untracked(|value| value.as_ref().map(|backends| backends.config.clone()));
+            let reset_running = reset_running.clone();
+            let reset_status = reset_status.clone();
+            let setup_status = setup_status.clone();
+            let navigate = navigate.clone();
+            spawn_local(async move {
+                let Some(config) = config else {
+                    reset_status.set(Some("reset_missing_backends".to_string()));
+                    return;
+                };
+                let notifications = RadrootsAppNotifications::new(None);
+                let confirm_message = t!("app.recovery.reset.confirm");
+                let confirm = notifications.confirm_message(&confirm_message).await;
+                if !confirm {
+                    return;
+                }
+                reset_running.set(true);
+                reset_status.set(Some("resetting".to_string()));
+                let datastore = radroots_studio_app_core::datastore::RadrootsClientWebDatastore::new(
+                    Some(config.datastore.idb_config),
+                );
+                let keystore = radroots_studio_app_core::keystore::RadrootsClientWebKeystoreNostr::new(
+                    Some(config.keystore.nostr_store),
+                );
+                match app_init_reset(
+                    Some(&datastore),
+                    Some(&config.datastore.key_maps),
+                    Some(&keystore),
+                )
+                .await
+                {
+                    Ok(()) => {
+                        let log_datastore = logs_datastore();
+                        if let Err(err) = log_datastore.reset().await {
+                            let reset_err = RadrootsAppInitError::Datastore(err);
+                            let _ = app_log_error_emit(&reset_err);
+                            reset_status.set(Some(reset_err.to_string()));
+                            reset_running.set(false);
+                            return;
+                        }
+                        reset_status.set(Some("reset_done".to_string()));
+                        setup_status.set(RadrootsAppSetupStatus::Required);
+                        navigate("/setup", Default::default());
+                    }
+                    Err(err) => {
+                        let log_datastore = logs_datastore();
+                        let _ = app_log_error_store(
+                            &log_datastore,
+                            &config.datastore.key_maps,
+                            &err,
+                        )
+                        .await;
+                        reset_status.set(Some(err.to_string()));
+                    }
+                }
+                reset_running.set(false);
+            });
+        })
+    };
     view! {
         <main id="app-recovery" class="app-page app-page-fixed relative w-full flex flex-col">
             <section
@@ -1430,6 +1517,35 @@ fn RecoveryPage() -> impl IntoView {
                     <p class="font-mono font-[400] text-ly0-gl text-base text-center">
                         {t!("app.recovery.body")}
                     </p>
+                    {move || {
+                        reset_label()
+                            .map(|label| {
+                                view! {
+                                    <p class="font-mono font-[400] text-ly0-gl text-sm text-center">
+                                        {label}
+                                    </p>
+                                }
+                                .into_any()
+                            })
+                            .unwrap_or_else(|| view! { <></> }.into_any())
+                    }}
+                </div>
+                <div
+                    id="app-recovery-actions"
+                    class="flex flex-col w-full pt-6 justify-center items-center"
+                >
+                    {move || {
+                        let reset_action = RadrootsAppUiButtonLayoutAction {
+                            label: t!("app.recovery.reset.button"),
+                            disabled: reset_disabled(),
+                            loading: reset_running.get(),
+                            on_click: on_reset.clone(),
+                            class: None,
+                            class_label: None,
+                            style: None,
+                        };
+                        view! { <RadrootsAppUiButtonLayoutPair continue_action=reset_action class="gap-2".to_string() /> }
+                    }}
                 </div>
             </section>
         </main>
