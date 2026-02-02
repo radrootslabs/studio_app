@@ -21,6 +21,9 @@ web-sys.workspace = true
 gloo-timers = { workspace = true, features = ["futures"] }
 radroots-app-core = { path = "../crates/core" }
 radroots-app-ui-components = { path = "../crates/ui-components" }
+radroots-app-lib = { path = "../crates/app-lib" }
+mf2-i18n-core = { path = "../refs/mf2-i18n/crates/mf2-i18n-core" }
+mf2-i18n-embedded = { path = "../refs/mf2-i18n/crates/mf2-i18n-embedded" }
 radroots-log = { path = "../refs/crates/log", default-features = false }
 radroots-nostr = { workspace = true }
 tracing-wasm = "0.2"

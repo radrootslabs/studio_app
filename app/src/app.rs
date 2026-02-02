@@ -33,6 +33,7 @@ use crate::{
     app_init_total_add,
     app_init_total_unknown,
     app_context,
+    app_i18n_init,
     app_log_buffer_flush_deferred,
     app_log_debug_emit,
     app_log_error_emit,
@@ -1435,6 +1436,7 @@ fn AppShell() -> impl IntoView {
     provide_context(init_error);
     provide_context(init_state);
     provide_context(setup_required);
+    provide_context(app_i18n_init());
     Effect::new(move || {
         let navigate = navigate.clone();
         spawn_local(async move {

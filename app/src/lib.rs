@@ -7,6 +7,7 @@ mod config;
 mod data;
 mod health;
 mod init;
+mod i18n;
 mod keystore;
 mod logging;
 mod logs;
@@ -198,3 +199,4 @@ pub use init::{
     RadrootsAppInitState,
     APP_INIT_STORAGE_KEY,
 };
+pub use i18n::{app_i18n, app_i18n_init, RadrootsAppI18nContext};

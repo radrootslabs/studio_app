@@ -111,6 +111,8 @@ radroots-sql-core = { path = "refs/crates/sql-core" }
 radroots-tangle-db = { path = "refs/crates/tangle-db" }
 radroots-tangle-db-schema = { path = "refs/crates/tangle-db-schema" }
 radroots-tangle-events = { path = "refs/crates/tangle-events" }
+mf2-i18n-core = { path = "refs/mf2-i18n/crates/mf2-i18n-core" }
+mf2-i18n-embedded = { path = "refs/mf2-i18n/crates/mf2-i18n-embedded" }
 
 [profile.release]
 codegen-units = 1
