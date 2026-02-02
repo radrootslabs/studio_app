@@ -1,1 +1,133 @@
-# radroots app messages
+# common
+app.common.missing = missing
+
+app.common.unknown = unknown
+
+# nav
+app.nav.primary_aria = primary
+
+app.nav.home = home
+
+app.nav.logs = logs
+
+app.nav.ui = ui
+
+app.nav.settings = settings
+
+app.nav.setup = setup
+
+# not found
+app.not_found = not found
+
+# init stages
+app.init.stage.idle = idle
+
+app.init.stage.storage = storage
+
+app.init.stage.download_sql = download sql
+
+app.init.stage.download_geo = download geo
+
+app.init.stage.database = database
+
+app.init.stage.geocoder = geocoder
+
+app.init.stage.ready = ready
+
+app.init.stage.error = error
+
+# home
+app.home.title = app
+
+app.home.status.aria = status
+
+app.home.reset.aria = reset
+
+app.home.reset.button = reset
+
+app.home.reset.status.idle = idle
+
+app.home.reset.status.resetting = resetting
+
+app.home.reset.status.missing_backends = backends unavailable
+
+app.home.reset.status.done = reset complete
+
+app.home.notifications.aria = notifications
+
+app.home.notifications.title = notifications
+
+app.home.notifications.button.request = request
+
+app.home.notifications.button.requesting = requesting
+
+app.home.notifications.status.granted = granted
+
+app.home.notifications.status.denied = denied
+
+app.home.notifications.status.default = default
+
+app.home.notifications.status.unavailable = unavailable
+
+app.home.health.aria = health checks
+
+app.home.health.title = health checks
+
+app.home.health.button.checking = checking
+
+app.home.health.button.run = run checks
+
+app.home.health.item.key_maps = key maps
+
+app.home.health.item.bootstrap_state = bootstrap state
+
+app.home.health.item.state_active_key = active key state
+
+app.home.health.item.notifications = notifications
+
+app.home.health.item.tangle = tangle
+
+app.home.health.item.datastore_roundtrip = datastore roundtrip
+
+app.home.health.item.keystore = keystore
+
+app.home.health.item.active_key = active key
+
+app.home.health.status.ok = ok
+
+app.home.health.status.error = error
+
+app.home.health.status.skipped = skipped
+
+app.home.health.message.missing = missing
+
+app.home.health.message.mismatch = mismatch
+
+app.home.health.message.uninitialized = uninitialized
+
+app.home.health.message.unavailable = unavailable
+
+# errors
+error.app.init.idb = storage unavailable
+
+error.app.init.datastore = datastore unavailable
+
+error.app.init.keystore = keystore unavailable
+
+error.app.init.config = configuration error
+
+error.app.init.assets = assets unavailable
+
+error.app.state.missing = setup required
+
+error.app.state.corrupt = stored data is corrupt
+
+error.app.state.checksum_invalid = stored data checksum invalid
+
+error.app.state.schema_unsupported = stored data schema unsupported
+
+error.app.state.already_exists = setup already completed
+
+error.client.notifications.unavailable = notifications unavailable
+
+error.client.notifications.read_failure = notifications permission read failed

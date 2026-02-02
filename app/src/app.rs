@@ -20,6 +20,7 @@ use radroots_studio_app_ui_components::{
     RadrootsAppUiButtonLayoutPair,
 };
 
+use crate::t;
 use crate::{
     app_init_assets,
     app_init_backends,
@@ -78,10 +79,81 @@ fn health_status_color(status: RadrootsAppHealthCheckStatus) -> &'static str {
     }
 }
 
+fn init_stage_label(stage: RadrootsAppInitStage) -> String {
+    match stage {
+        RadrootsAppInitStage::Idle => t!("app.init.stage.idle"),
+        RadrootsAppInitStage::Storage => t!("app.init.stage.storage"),
+        RadrootsAppInitStage::DownloadSql => t!("app.init.stage.download_sql"),
+        RadrootsAppInitStage::DownloadGeo => t!("app.init.stage.download_geo"),
+        RadrootsAppInitStage::Database => t!("app.init.stage.database"),
+        RadrootsAppInitStage::Geocoder => t!("app.init.stage.geocoder"),
+        RadrootsAppInitStage::Ready => t!("app.init.stage.ready"),
+        RadrootsAppInitStage::Error => t!("app.init.stage.error"),
+    }
+}
+
+fn health_status_label(status: RadrootsAppHealthCheckStatus) -> String {
+    match status {
+        RadrootsAppHealthCheckStatus::Ok => t!("app.home.health.status.ok"),
+        RadrootsAppHealthCheckStatus::Error => t!("app.home.health.status.error"),
+        RadrootsAppHealthCheckStatus::Skipped => t!("app.home.health.status.skipped"),
+    }
+}
+
+fn health_message_label(message: &str) -> String {
+    match message {
+        "missing" => t!("app.home.health.message.missing"),
+        "mismatch" => t!("app.home.health.message.mismatch"),
+        "uninitialized" => t!("app.home.health.message.uninitialized"),
+        "unavailable" => t!("app.home.health.message.unavailable"),
+        _ => message.to_string(),
+    }
+}
+
 fn health_result_label(result: &RadrootsAppHealthCheckResult) -> String {
+    let status = health_status_label(result.status);
     match result.message.as_deref() {
-        Some(message) => format!("{}: {}", result.status.as_str(), message),
-        None => result.status.as_str().to_string(),
+        Some(message) => format!("{}: {}", status, health_message_label(message)),
+        None => status,
+    }
+}
+
+fn error_label(key: &str) -> Option<String> {
+    let label = match key {
+        "error.app.init.idb" => t!("error.app.init.idb"),
+        "error.app.init.datastore" => t!("error.app.init.datastore"),
+        "error.app.init.keystore" => t!("error.app.init.keystore"),
+        "error.app.init.config" => t!("error.app.init.config"),
+        "error.app.init.assets" => t!("error.app.init.assets"),
+        "error.app.state.missing" => t!("error.app.state.missing"),
+        "error.app.state.corrupt" => t!("error.app.state.corrupt"),
+        "error.app.state.checksum_invalid" => t!("error.app.state.checksum_invalid"),
+        "error.app.state.schema_unsupported" => t!("error.app.state.schema_unsupported"),
+        "error.app.state.already_exists" => t!("error.app.state.already_exists"),
+        "error.client.notifications.unavailable" => t!("error.client.notifications.unavailable"),
+        "error.client.notifications.read_failure" => t!("error.client.notifications.read_failure"),
+        _ => return None,
+    };
+    Some(label)
+}
+
+fn reset_status_label(value: &str) -> String {
+    match value {
+        "reset_idle" => t!("app.home.reset.status.idle"),
+        "resetting" => t!("app.home.reset.status.resetting"),
+        "reset_missing_backends" => t!("app.home.reset.status.missing_backends"),
+        "reset_done" => t!("app.home.reset.status.done"),
+        _ => error_label(value).unwrap_or_else(|| value.to_string()),
+    }
+}
+
+fn notifications_status_label(value: &str) -> String {
+    match value {
+        "granted" => t!("app.home.notifications.status.granted"),
+        "denied" => t!("app.home.notifications.status.denied"),
+        "default" => t!("app.home.notifications.status.default"),
+        "unavailable" => t!("app.home.notifications.status.unavailable"),
+        _ => error_label(value).unwrap_or_else(|| value.to_string()),
     }
 }
 
@@ -105,7 +177,7 @@ enum RadrootsAppSetupFarmerChoice {
 
 fn active_key_label(value: Option<String>) -> String {
     let Some(value) = value else {
-        return "missing".to_string();
+        return t!("app.common.missing");
     };
     if value.len() <= 12 {
         return value;
@@ -1145,7 +1217,9 @@ fn HomePage() -> impl IntoView {
     let reset_label = move || {
         reset_status
             .get()
-            .unwrap_or_else(|| "reset_idle".to_string())
+            .as_deref()
+            .map(reset_status_label)
+            .unwrap_or_else(|| t!("app.home.reset.status.idle"))
     };
     let health_disabled = move || {
         backends.with(|value| value.is_none())
@@ -1158,21 +1232,23 @@ fn HomePage() -> impl IntoView {
     let notifications_label = move || {
         notifications_status
             .get()
-            .unwrap_or_else(|| "unknown".to_string())
+            .as_deref()
+            .map(notifications_status_label)
+            .unwrap_or_else(|| t!("app.common.unknown"))
     };
     let notifications_button_label = move || {
         if notifications_requesting.get() {
-            "requesting"
+            t!("app.home.notifications.button.requesting")
         } else {
-            "request"
+            t!("app.home.notifications.button.request")
         }
     };
     view! {
         <main id="app-home" class="app-page app-page-scroll">
             <header id="app-home-header">
-                <h1 id="app-home-title">"app"</h1>
+                <h1 id="app-home-title">{t!("app.home.title")}</h1>
             </header>
-            <section id="app-home-status" aria-label="Status">
+            <section id="app-home-status" aria-label=t!("app.home.status.aria")>
                 <div id="app-home-status-row" style="margin-top: 8px; display: flex; align-items: center; gap: 8px;">
                     <span
                         style=move || format!(
@@ -1180,10 +1256,10 @@ fn HomePage() -> impl IntoView {
                             status_color()
                         )
                     ></span>
-                    <span>{move || init_state.get().stage.as_str()}</span>
+                    <span>{move || init_stage_label(init_state.get().stage)}</span>
                 </div>
             </section>
-            <section id="app-home-reset" aria-label="Reset">
+            <section id="app-home-reset" aria-label=t!("app.home.reset.aria")>
                 <div id="app-home-reset-row" style="margin-top: 12px; display: flex; align-items: center; gap: 8px;">
                     <button
                         on:click=move |_| {
@@ -1244,14 +1320,14 @@ fn HomePage() -> impl IntoView {
                         }
                         disabled=reset_disabled
                     >
-                        "reset"
+                        {t!("app.home.reset.button")}
                     </button>
                     <span>{reset_label}</span>
                 </div>
             </section>
-            <section id="app-home-notifications" aria-label="Notifications" style="margin-top: 16px;">
+            <section id="app-home-notifications" aria-label=t!("app.home.notifications.aria") style="margin-top: 16px;">
                 <header id="app-home-notifications-header">
-                    <h2 id="app-home-notifications-title" style="font-weight: 600;">"notifications"</h2>
+                    <h2 id="app-home-notifications-title" style="font-weight: 600;">{t!("app.home.notifications.title")}</h2>
                 </header>
                 <div id="app-home-notifications-actions" style="margin-top: 8px; display: flex; align-items: center; gap: 8px;">
                     <button
@@ -1307,9 +1383,9 @@ fn HomePage() -> impl IntoView {
                     <span>{notifications_label}</span>
                 </div>
             </section>
-            <section id="app-home-health" aria-label="Health checks" style="margin-top: 16px;">
+            <section id="app-home-health" aria-label=t!("app.home.health.aria") style="margin-top: 16px;">
                 <header id="app-home-health-header">
-                    <h2 id="app-home-health-title" style="font-weight: 600;">"health checks"</h2>
+                    <h2 id="app-home-health-title" style="font-weight: 600;">{t!("app.home.health.title")}</h2>
                 </header>
                 <div id="app-home-health-actions" style="margin-top: 8px; display: flex; align-items: center; gap: 8px;">
                     <button
@@ -1332,7 +1408,13 @@ fn HomePage() -> impl IntoView {
                         }
                         disabled=health_disabled
                     >
-                        {move || if health_running.get() { "checking" } else { "run checks" }}
+                        {move || {
+                            if health_running.get() {
+                                t!("app.home.health.button.checking")
+                            } else {
+                                t!("app.home.health.button.run")
+                            }
+                        }}
                     </button>
                 </div>
                 <ul id="app-home-health-list" style="margin-top: 8px; display: grid; gap: 6px;">
@@ -1343,7 +1425,7 @@ fn HomePage() -> impl IntoView {
                                 health_status_color(health_report.get().key_maps.status)
                             )
                         ></span>
-                        <span>"key_maps"</span>
+                        <span>{t!("app.home.health.item.key_maps")}</span>
                         <span>{move || health_result_label(&health_report.get().key_maps)}</span>
                     </li>
                     <li id="app-home-health-bootstrap-state" style="display: flex; align-items: center; gap: 8px;">
@@ -1353,7 +1435,7 @@ fn HomePage() -> impl IntoView {
                                 health_status_color(health_report.get().bootstrap_state.status)
                             )
                         ></span>
-                        <span>"bootstrap_state"</span>
+                        <span>{t!("app.home.health.item.bootstrap_state")}</span>
                         <span>{move || health_result_label(&health_report.get().bootstrap_state)}</span>
                     </li>
                     <li id="app-home-health-active-key-state" style="display: flex; align-items: center; gap: 8px;">
@@ -1363,7 +1445,7 @@ fn HomePage() -> impl IntoView {
                                 health_status_color(health_report.get().state_active_key.status)
                             )
                         ></span>
-                        <span>"state_active_key"</span>
+                        <span>{t!("app.home.health.item.state_active_key")}</span>
                         <span>{move || health_result_label(&health_report.get().state_active_key)}</span>
                     </li>
                     <li id="app-home-health-notifications" style="display: flex; align-items: center; gap: 8px;">
@@ -1373,7 +1455,7 @@ fn HomePage() -> impl IntoView {
                                 health_status_color(health_report.get().notifications.status)
                             )
                         ></span>
-                        <span>"notifications"</span>
+                        <span>{t!("app.home.health.item.notifications")}</span>
                         <span>{move || health_result_label(&health_report.get().notifications)}</span>
                     </li>
                     <li id="app-home-health-tangle" style="display: flex; align-items: center; gap: 8px;">
@@ -1383,7 +1465,7 @@ fn HomePage() -> impl IntoView {
                                 health_status_color(health_report.get().tangle.status)
                             )
                         ></span>
-                        <span>"tangle"</span>
+                        <span>{t!("app.home.health.item.tangle")}</span>
                         <span>{move || health_result_label(&health_report.get().tangle)}</span>
                     </li>
                     <li id="app-home-health-datastore" style="display: flex; align-items: center; gap: 8px;">
@@ -1393,7 +1475,7 @@ fn HomePage() -> impl IntoView {
                                 health_status_color(health_report.get().datastore_roundtrip.status)
                             )
                         ></span>
-                        <span>"datastore_roundtrip"</span>
+                        <span>{t!("app.home.health.item.datastore_roundtrip")}</span>
                         <span>{move || health_result_label(&health_report.get().datastore_roundtrip)}</span>
                     </li>
                     <li id="app-home-health-keystore" style="display: flex; align-items: center; gap: 8px;">
@@ -1403,11 +1485,11 @@ fn HomePage() -> impl IntoView {
                                 health_status_color(health_report.get().keystore.status)
                             )
                         ></span>
-                        <span>"keystore"</span>
+                        <span>{t!("app.home.health.item.keystore")}</span>
                         <span>{move || health_result_label(&health_report.get().keystore)}</span>
                     </li>
                     <li id="app-home-health-active-key" style="display: flex; align-items: center; gap: 8px;">
-                        <span>"active_key"</span>
+                        <span>{t!("app.home.health.item.active_key")}</span>
                         <span>{move || active_key_label(active_key.get())}</span>
                     </li>
                 </ul>
@@ -1546,17 +1628,17 @@ fn AppShell() -> impl IntoView {
             fallback=|| view! { <SetupPage /> }
         >
             <div id="app-shell">
-                <nav id="app-nav" aria-label="Primary" style="display:flex;gap:12px;margin-bottom:12px;">
-                    <A href="/" exact=true>"home"</A>
-                    <A href="/logs">"logs"</A>
-                    <A href="/ui">"ui"</A>
-                    <A href="/settings">"settings"</A>
-                    <A href="/setup">"setup"</A>
+                <nav id="app-nav" aria-label=t!("app.nav.primary_aria") style="display:flex;gap:12px;margin-bottom:12px;">
+                    <A href="/" exact=true>{t!("app.nav.home")}</A>
+                    <A href="/logs">{t!("app.nav.logs")}</A>
+                    <A href="/ui">{t!("app.nav.ui")}</A>
+                    <A href="/settings">{t!("app.nav.settings")}</A>
+                    <A href="/setup">{t!("app.nav.setup")}</A>
                 </nav>
                 <Routes
                     fallback=|| view! {
                         <main id="app-not-found" class="app-page app-page-fixed">
-                            <p id="app-not-found-label">"not_found"</p>
+                            <p id="app-not-found-label">{t!("app.not_found")}</p>
                         </main>
                     }
                 >
