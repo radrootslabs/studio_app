@@ -30,6 +30,9 @@ use crate::{
     RadrootsAppConfig,
     RadrootsAppConfigError,
     RadrootsAppKeyMapConfig,
+    RadrootsAppSetupStatus,
+    APP_EULA_HASH,
+    APP_EULA_VERSION,
 };
 
 #[cfg(target_arch = "wasm32")]
@@ -389,6 +392,39 @@ pub async fn app_init_needs_setup<T: RadrootsClientDatastore, K: RadrootsClientK
     }
 }
 
+pub async fn app_init_setup_status<T: RadrootsClientDatastore, K: RadrootsClientKeystoreNostr>(
+    datastore: &T,
+    keystore: &K,
+    key_maps: &RadrootsAppKeyMapConfig,
+) -> RadrootsAppInitResult<RadrootsAppSetupStatus> {
+    let has_state = app_datastore_has_state(datastore, key_maps).await?;
+    if !has_state {
+        return Ok(RadrootsAppSetupStatus::Required);
+    }
+    let state = match app_datastore_read_state(datastore, key_maps).await {
+        Ok(state) => state,
+        Err(RadrootsAppInitError::State(RadrootsAppStateError::Corrupt))
+        | Err(RadrootsAppInitError::State(RadrootsAppStateError::UnsupportedVersion(_))) => {
+            return Ok(RadrootsAppSetupStatus::Corrupt);
+        }
+        Err(err) => return Err(err),
+    };
+    if !app_state_is_initialized(&state) {
+        return Ok(RadrootsAppSetupStatus::Required);
+    }
+    if state.eula_version != APP_EULA_VERSION || state.eula_hash != APP_EULA_HASH {
+        return Ok(RadrootsAppSetupStatus::Corrupt);
+    }
+    match keystore.read(&state.active_key).await {
+        Ok(_) => Ok(RadrootsAppSetupStatus::Configured),
+        Err(RadrootsClientKeystoreError::MissingKey)
+        | Err(RadrootsClientKeystoreError::NostrNoResults) => {
+            Ok(RadrootsAppSetupStatus::Corrupt)
+        }
+        Err(err) => Err(RadrootsAppInitError::Keystore(err)),
+    }
+}
+
 pub async fn app_init_backends(config: RadrootsAppConfig) -> RadrootsAppInitResult<RadrootsAppBackends> {
     let _ = app_log_debug_emit("log.app.init.backends", "start", None);
     config.validate().map_err(RadrootsAppInitError::Config)?;
@@ -422,6 +458,7 @@ mod tests {
         app_init_backends,
         app_init_assets,
         app_init_needs_setup,
+        app_init_setup_status,
         app_init_timing_context,
         app_init_progress_add,
         app_init_state_default,
@@ -440,6 +477,9 @@ mod tests {
         RadrootsAppState,
         RadrootsAppStateError,
         RadrootsAppStateRecord,
+        RadrootsAppSetupStatus,
+        APP_EULA_HASH,
+        APP_EULA_VERSION,
     };
     use radroots_studio_app_core::datastore::{
         RadrootsClientDatastore,
@@ -813,6 +853,15 @@ mod tests {
         }
     }
 
+    fn ready_state() -> RadrootsAppState {
+        let mut state = RadrootsAppState::default();
+        state.active_key = "pub".to_string();
+        state.eula_date = "2025-01-01T00:00:00Z".to_string();
+        state.eula_version = APP_EULA_VERSION.to_string();
+        state.eula_hash = APP_EULA_HASH.to_string();
+        state
+    }
+
     #[test]
     fn app_init_needs_setup_when_state_missing() {
         let datastore = SetupDatastore {
@@ -875,9 +924,7 @@ mod tests {
 
     #[test]
     fn app_init_needs_setup_is_false_when_ready() {
-        let mut state = RadrootsAppState::default();
-        state.active_key = "pub".to_string();
-        state.eula_date = "2025-01-01T00:00:00Z".to_string();
+        let state = ready_state();
         let datastore = SetupDatastore {
             state: Some(state),
             record: RefCell::new(None),
@@ -893,5 +940,85 @@ mod tests {
         ))
         .expect("needs setup");
         assert!(!needs_setup);
+    }
+
+    #[test]
+    fn app_init_setup_status_required_when_state_missing() {
+        let datastore = SetupDatastore {
+            state: None,
+            record: RefCell::new(None),
+        };
+        let keystore = SetupKeystore {
+            read_result: Ok("secret".to_string()),
+        };
+        let key_maps = app_key_maps_default();
+        let status = futures::executor::block_on(app_init_setup_status(
+            &datastore,
+            &keystore,
+            &key_maps,
+        ))
+        .expect("setup status");
+        assert_eq!(status, RadrootsAppSetupStatus::Required);
+    }
+
+    #[test]
+    fn app_init_setup_status_corrupt_when_eula_mismatch() {
+        let mut state = ready_state();
+        state.eula_version = "0.0.0".to_string();
+        let datastore = SetupDatastore {
+            state: Some(state),
+            record: RefCell::new(None),
+        };
+        let keystore = SetupKeystore {
+            read_result: Ok("secret".to_string()),
+        };
+        let key_maps = app_key_maps_default();
+        let status = futures::executor::block_on(app_init_setup_status(
+            &datastore,
+            &keystore,
+            &key_maps,
+        ))
+        .expect("setup status");
+        assert_eq!(status, RadrootsAppSetupStatus::Corrupt);
+    }
+
+    #[test]
+    fn app_init_setup_status_corrupt_when_keystore_missing() {
+        let state = ready_state();
+        let datastore = SetupDatastore {
+            state: Some(state),
+            record: RefCell::new(None),
+        };
+        let keystore = SetupKeystore {
+            read_result: Err(RadrootsClientKeystoreError::MissingKey),
+        };
+        let key_maps = app_key_maps_default();
+        let status = futures::executor::block_on(app_init_setup_status(
+            &datastore,
+            &keystore,
+            &key_maps,
+        ))
+        .expect("setup status");
+        assert_eq!(status, RadrootsAppSetupStatus::Corrupt);
+    }
+
+    #[test]
+    fn app_init_setup_status_configured_when_ready() {
+        let state = ready_state();
+        let datastore = SetupDatastore {
+            state: Some(state),
+            record: RefCell::new(None),
+        };
+        let keystore = SetupKeystore {
+            read_result: Ok("secret".to_string()),
+        };
+        let key_maps = app_key_maps_default();
+        let status = futures::executor::block_on(app_init_setup_status(
+            &datastore,
+            &keystore,
+            &key_maps,
+        ))
+        .expect("setup status");
+        assert_eq!(status, RadrootsAppSetupStatus::Configured);
     }
 }

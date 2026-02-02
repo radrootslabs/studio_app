@@ -190,6 +190,7 @@ pub use init::{
     app_init_fetch_asset,
     app_init_has_completed,
     app_init_needs_setup,
+    app_init_setup_status,
     app_init_mark_completed,
     app_init_progress_add,
     app_init_reset,
