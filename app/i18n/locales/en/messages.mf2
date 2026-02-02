@@ -296,6 +296,52 @@ app.logs.support.instructions.share = 2) share the file with support
 
 app.logs.support.instructions.notes = 3) include notes about the issue and time window
 
+# settings
+app.settings.title = settings
+
+app.settings.appearance.title = appearance
+
+app.settings.appearance.color_mode.label = color mode
+
+app.settings.appearance.color_mode.option.system = system
+
+app.settings.appearance.color_mode.option.light = light
+
+app.settings.appearance.color_mode.option.dark = dark
+
+app.settings.actions.export_db = export database
+
+app.settings.actions.logout = logout
+
+# ui demo
+app.ui_demo.title = ui demo
+
+app.ui_demo.list.title = list preview
+
+app.ui_demo.item.notifications = notifications
+
+app.ui_demo.status.enabled = enabled
+
+app.ui_demo.input.placeholder = add a note
+
+app.ui_demo.input.label = note
+
+app.ui_demo.sync.label = sync frequency
+
+app.ui_demo.sync.option.daily = daily
+
+app.ui_demo.sync.option.weekly = weekly
+
+app.ui_demo.sync.option.never = never
+
+app.ui_demo.sheet.open = open sheet
+
+app.ui_demo.sheet.title = sheet preview
+
+app.ui_demo.sheet.description = this is a placeholder sheet for iOS styling.
+
+app.ui_demo.sheet.close = close
+
 # errors
 error.app.init.idb = storage unavailable
 

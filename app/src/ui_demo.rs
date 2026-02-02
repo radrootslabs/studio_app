@@ -1,5 +1,6 @@
 use leptos::prelude::*;
 
+use crate::t;
 use radroots_studio_app_ui_components::{
     RadrootsAppUiList,
     RadrootsAppUiListDisplay,
@@ -43,11 +44,11 @@ pub fn RadrootsAppUiDemoPage() -> impl IntoView {
     let select_value = RwSignal::new("daily".to_string());
     let on_input = Callback::new(move |value| input_value.set(value));
     let on_select = Callback::new(move |value| select_value.set(value));
-    let text_label = |value: &str| RadrootsAppUiListLabelValue {
+    let text_label = |value: String| RadrootsAppUiListLabelValue {
         classes_wrap: None,
         hide_truncate: false,
         value: RadrootsAppUiListLabelValueKind::Text(RadrootsAppUiListLabelText {
-            value: value.to_string(),
+            value,
             classes: None,
         }),
     };
@@ -56,7 +57,7 @@ pub fn RadrootsAppUiDemoPage() -> impl IntoView {
         view: Some("ui-demo".to_string()),
         classes: None,
         title: Some(RadrootsAppUiListTitle {
-            value: RadrootsAppUiListTitleValue::Text("List Preview".to_string()),
+            value: RadrootsAppUiListTitleValue::Text(t!("app.ui_demo.list.title")),
             classes: None,
             mod_value: None,
             link: None,
@@ -67,12 +68,12 @@ pub fn RadrootsAppUiDemoPage() -> impl IntoView {
             Some(RadrootsAppUiListItem {
                 kind: RadrootsAppUiListItemKind::Touch(RadrootsAppUiListTouch {
                     label: RadrootsAppUiListLabel {
-                        left: vec![text_label("Notifications")],
+                        left: vec![text_label(t!("app.ui_demo.item.notifications"))],
                         right: Vec::new(),
                     },
                     display: Some(RadrootsAppUiListDisplay {
                         value: RadrootsAppUiListDisplayValue::Label(RadrootsAppUiListLabelText {
-                            value: "Enabled".to_string(),
+                            value: t!("app.ui_demo.status.enabled"),
                             classes: None,
                         }),
                         loading: false,
@@ -97,14 +98,14 @@ pub fn RadrootsAppUiDemoPage() -> impl IntoView {
                 kind: RadrootsAppUiListItemKind::Input(RadrootsAppUiListInput {
                     field: RadrootsAppUiListInputField {
                         value: input_value.get_untracked(),
-                        placeholder: Some("Add a note".to_string()),
+                        placeholder: Some(t!("app.ui_demo.input.placeholder")),
                         disabled: false,
                         classes: None,
                         id: Some("ui-demo-note".to_string()),
                         on_input: Some(on_input),
                     },
                     line_label: Some(RadrootsAppUiListInputLineLabel {
-                        value: "Note".to_string(),
+                        value: t!("app.ui_demo.input.label"),
                         classes: None,
                     }),
                     action: Some(RadrootsAppUiListInputAction {
@@ -129,17 +130,17 @@ pub fn RadrootsAppUiDemoPage() -> impl IntoView {
                         value: select_value.get_untracked(),
                         options: vec![
                             RadrootsAppUiListSelectOption {
-                                label: "Daily".to_string(),
+                                label: t!("app.ui_demo.sync.option.daily"),
                                 value: "daily".to_string(),
                                 classes: None,
                             },
                             RadrootsAppUiListSelectOption {
-                                label: "Weekly".to_string(),
+                                label: t!("app.ui_demo.sync.option.weekly"),
                                 value: "weekly".to_string(),
                                 classes: None,
                             },
                             RadrootsAppUiListSelectOption {
-                                label: "Never".to_string(),
+                                label: t!("app.ui_demo.sync.option.never"),
                                 value: "never".to_string(),
                                 classes: None,
                             },
@@ -150,7 +151,7 @@ pub fn RadrootsAppUiDemoPage() -> impl IntoView {
                         on_change: Some(on_select),
                     },
                     label: RadrootsAppUiListLabel {
-                        left: vec![text_label("Sync Frequency")],
+                        left: vec![text_label(t!("app.ui_demo.sync.label"))],
                         right: Vec::new(),
                     },
                     display: None,
@@ -183,7 +184,7 @@ pub fn RadrootsAppUiDemoPage() -> impl IntoView {
     view! {
         <main id="app-ui-demo" class="app-page app-page-scroll" style="padding: 16px;">
             <header id="app-ui-demo-header" style="font: var(--type-title2); margin-bottom: 12px;">
-                <h1 id="app-ui-demo-title">"UI Demo"</h1>
+                <h1 id="app-ui-demo-title">{t!("app.ui_demo.title")}</h1>
             </header>
             <section id="app-ui-demo-content">
                 <RadrootsAppUiListView basis=list />
@@ -200,7 +201,7 @@ pub fn RadrootsAppUiDemoPage() -> impl IntoView {
                         id=None
                         style=Some("padding:12px 16px; width: 100%; text-align: left;".to_string())
                     >
-                        "Open Sheet"
+                        {t!("app.ui_demo.sheet.open")}
                     </RadrootsAppUiSheetTrigger>
                     <RadrootsAppUiSheetPortal>
                         <RadrootsAppUiSheetOverlay
@@ -221,21 +222,21 @@ pub fn RadrootsAppUiDemoPage() -> impl IntoView {
                                 id=None
                                 style=None
                             >
-                                "Sheet Preview"
+                                {t!("app.ui_demo.sheet.title")}
                             </RadrootsAppUiSheetTitle>
                             <RadrootsAppUiSheetDescription
                                 class=None
                                 id=None
                                 style=Some("margin-top: 6px;".to_string())
                             >
-                                "This is a placeholder sheet for iOS styling."
+                                {t!("app.ui_demo.sheet.description")}
                             </RadrootsAppUiSheetDescription>
                             <RadrootsAppUiSheetClose
                                 class=Some("ui-card".to_string())
                                 id=None
                                 style=Some("margin-top: 16px; padding: 10px 14px;".to_string())
                             >
-                                "Close"
+                                {t!("app.ui_demo.sheet.close")}
                             </RadrootsAppUiSheetClose>
                         </RadrootsAppUiSheetContent>
                     </RadrootsAppUiSheetPortal>
