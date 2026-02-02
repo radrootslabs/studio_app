@@ -14,6 +14,7 @@ mod logs;
 mod notifications;
 mod settings;
 mod setup;
+mod setup_flow;
 mod setup_lock;
 mod setup_status;
 mod theme;
@@ -143,6 +144,17 @@ pub use setup::{
     app_setup_state_new,
     app_setup_step_default,
     RadrootsAppSetupStep,
+};
+pub use setup_flow::{
+    app_setup_flow_next_step,
+    app_setup_flow_prev_step,
+    app_setup_flow_role_from_choices,
+    app_setup_flow_validate,
+    RadrootsAppSetupBusinessChoice,
+    RadrootsAppSetupFarmerChoice,
+    RadrootsAppSetupFlowDraft,
+    RadrootsAppSetupFlowValidation,
+    RadrootsAppSetupKeyChoice,
 };
 pub use setup_lock::{
     app_setup_lock_acquire,
