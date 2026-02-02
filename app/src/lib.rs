@@ -48,6 +48,8 @@ pub use data::{
     RadrootsAppSetupDraft,
     RadrootsAppStateError,
     RadrootsAppStateRecord,
+    APP_EULA_HASH,
+    APP_EULA_VERSION,
     APP_STATE_SCHEMA_VERSION,
 };
 pub use health::{

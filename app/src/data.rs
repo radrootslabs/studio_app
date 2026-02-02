@@ -32,14 +32,17 @@ pub struct RadrootsAppState {
     pub notifications_permission: Option<String>,
 }
 
+pub const APP_EULA_VERSION: &str = "0.1.0";
+pub const APP_EULA_HASH: &str = "unknown";
+
 impl Default for RadrootsAppState {
     fn default() -> Self {
         Self {
             active_key: String::new(),
             role: RadrootsAppRole::default(),
             eula_date: String::new(),
-            eula_version: String::from("0.1.0"),
-            eula_hash: String::from("unknown"),
+            eula_version: String::from(APP_EULA_VERSION),
+            eula_hash: String::from(APP_EULA_HASH),
             relays: Vec::new(),
             nip05_key: None,
             notifications_permission: None,
@@ -176,7 +179,10 @@ pub fn app_state_record_validate(
 }
 
 pub fn app_state_is_initialized(state: &RadrootsAppState) -> bool {
-    !state.active_key.is_empty() && !state.eula_date.is_empty()
+    !state.active_key.is_empty()
+        && !state.eula_date.is_empty()
+        && !state.eula_version.is_empty()
+        && !state.eula_hash.is_empty()
 }
 
 #[cfg(test)]
@@ -189,6 +195,8 @@ mod tests {
         RadrootsAppRole,
         RadrootsAppState,
         RadrootsAppStateError,
+        APP_EULA_HASH,
+        APP_EULA_VERSION,
         APP_STATE_SCHEMA_VERSION,
     };
 
@@ -203,8 +211,8 @@ mod tests {
         assert_eq!(data.active_key, "");
         assert_eq!(data.role, RadrootsAppRole::Individual);
         assert_eq!(data.eula_date, "");
-        assert_eq!(data.eula_version, "0.1.0");
-        assert_eq!(data.eula_hash, "unknown");
+        assert_eq!(data.eula_version, APP_EULA_VERSION);
+        assert_eq!(data.eula_hash, APP_EULA_HASH);
         assert!(data.relays.is_empty());
         assert!(data.nip05_key.is_none());
         assert!(data.notifications_permission.is_none());
@@ -218,6 +226,12 @@ mod tests {
         data.active_key = "pub".to_string();
         assert!(!app_state_is_initialized(&data));
         data.eula_date = "2025-01-01T00:00:00Z".to_string();
+        data.eula_version.clear();
+        assert!(!app_state_is_initialized(&data));
+        data.eula_version = APP_EULA_VERSION.to_string();
+        data.eula_hash.clear();
+        assert!(!app_state_is_initialized(&data));
+        data.eula_hash = APP_EULA_HASH.to_string();
         assert!(app_state_is_initialized(&data));
     }
 

@@ -22,6 +22,8 @@ use crate::{
     RadrootsAppKeystoreError,
     RadrootsAppRole,
     RadrootsAppState,
+    APP_EULA_HASH,
+    APP_EULA_VERSION,
 };
 
 #[cfg(target_arch = "wasm32")]
@@ -43,8 +45,8 @@ pub fn app_setup_state_new(
         active_key,
         role,
         eula_date,
-        eula_version: String::from("0.1.0"),
-        eula_hash: String::from("unknown"),
+        eula_version: String::from(APP_EULA_VERSION),
+        eula_hash: String::from(APP_EULA_HASH),
         relays: app_default_relays(),
         nip05_key: None,
         notifications_permission: None,
@@ -158,7 +160,14 @@ mod tests {
         app_setup_step_default,
         RadrootsAppSetupStep,
     };
-    use crate::{app_datastore_key_nostr_key, app_key_maps_default, RadrootsAppRole, RadrootsAppStateRecord};
+    use crate::{
+        app_datastore_key_nostr_key,
+        app_key_maps_default,
+        RadrootsAppRole,
+        RadrootsAppStateRecord,
+        APP_EULA_HASH,
+        APP_EULA_VERSION,
+    };
     use async_trait::async_trait;
     use radroots_studio_app_core::backup::RadrootsClientBackupDatastorePayload;
     use radroots_studio_app_core::datastore::{
@@ -358,6 +367,8 @@ mod tests {
         assert_eq!(state.active_key, "pub");
         assert_eq!(state.role, RadrootsAppRole::Individual);
         assert_eq!(state.eula_date, "2025-01-01T00:00:00Z");
+        assert_eq!(state.eula_version, APP_EULA_VERSION);
+        assert_eq!(state.eula_hash, APP_EULA_HASH);
         assert!(!state.relays.is_empty());
         assert!(state.nip05_key.is_none());
         assert!(state.notifications_permission.is_none());
