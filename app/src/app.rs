@@ -924,7 +924,7 @@ fn SetupPage() -> impl IntoView {
                                 class="flex flex-row w-full justify-center items-center"
                             >
                                 <p class="font-sans font-[600] text-ly0-gl text-2xl text-center">
-                                    "End User License Agreement"
+                                    {t!("app.setup.eula.title")}
                                 </p>
                             </header>
                             <div
@@ -948,10 +948,10 @@ fn SetupPage() -> impl IntoView {
                                     class="flex flex-col gap-2"
                                 >
                                     <h3 class="font-sans font-[600] text-ly0-gl text-base">
-                                        "Introduction"
+                                        {t!("app.setup.eula.introduction.title")}
                                     </h3>
                                     <p class="font-mono font-[400] text-ly0-gl text-sm leading-relaxed">
-                                        "This End User License Agreement (\"EULA\") is a legal agreement between you and Radroots Inc. for the use of our mobile application Radroots. By installing, accessing, or using our application, you agree to be bound by the terms and conditions of this EULA."
+                                        {t!("app.setup.eula.introduction.body")}
                                     </p>
                                 </section>
                                 <section
@@ -959,18 +959,18 @@ fn SetupPage() -> impl IntoView {
                                     class="flex flex-col gap-2"
                                 >
                                     <h3 class="font-sans font-[600] text-ly0-gl text-base">
-                                        "Prohibited Content and Conduct"
+                                        {t!("app.setup.eula.prohibited_content.title")}
                                     </h3>
                                     <p class="font-mono font-[400] text-ly0-gl text-sm leading-relaxed">
-                                        "You agree not to use our application to create, upload, post, send, or store any content that:"
+                                        {t!("app.setup.eula.prohibited_content.body")}
                                     </p>
                                     <ul class="flex flex-col gap-1 pl-5 list-disc text-sm text-ly0-gl leading-relaxed">
-                                        <li>"Is illegal, infringing, or fraudulent"</li>
-                                        <li>"Is pornographic, obscene, or offensive"</li>
-                                        <li>"Is discriminatory or promotes hate speech"</li>
-                                        <li>"Is harmful to minors"</li>
-                                        <li>"Is intended to harass or bully others"</li>
-                                        <li>"Is intended to impersonate others"</li>
+                                        <li>{t!("app.setup.eula.prohibited_content.item.illegal")}</li>
+                                        <li>{t!("app.setup.eula.prohibited_content.item.pornographic")}</li>
+                                        <li>{t!("app.setup.eula.prohibited_content.item.hate_speech")}</li>
+                                        <li>{t!("app.setup.eula.prohibited_content.item.minors")}</li>
+                                        <li>{t!("app.setup.eula.prohibited_content.item.harass")}</li>
+                                        <li>{t!("app.setup.eula.prohibited_content.item.impersonate")}</li>
                                     </ul>
                                 </section>
                                 <section
@@ -978,13 +978,13 @@ fn SetupPage() -> impl IntoView {
                                     class="flex flex-col gap-2"
                                 >
                                     <h3 class="font-sans font-[600] text-ly0-gl text-base">
-                                        "You also agree not to engage in any conduct that:"
+                                        {t!("app.setup.eula.prohibited_conduct.title")}
                                     </h3>
                                     <ul class="flex flex-col gap-1 pl-5 list-disc text-sm text-ly0-gl leading-relaxed">
-                                        <li>"Harasses or bullies others"</li>
-                                        <li>"Impersonates others"</li>
-                                        <li>"Is intended to intimidate or threaten others"</li>
-                                        <li>"Is intended to promote or incite violence"</li>
+                                        <li>{t!("app.setup.eula.prohibited_conduct.item.harass")}</li>
+                                        <li>{t!("app.setup.eula.prohibited_conduct.item.impersonate")}</li>
+                                        <li>{t!("app.setup.eula.prohibited_conduct.item.intimidate")}</li>
+                                        <li>{t!("app.setup.eula.prohibited_conduct.item.violence")}</li>
                                     </ul>
                                 </section>
                                 <section
@@ -992,10 +992,10 @@ fn SetupPage() -> impl IntoView {
                                     class="flex flex-col gap-2"
                                 >
                                     <h3 class="font-sans font-[600] text-ly0-gl text-base">
-                                        "Consequences of Violation"
+                                        {t!("app.setup.eula.consequences.title")}
                                     </h3>
                                     <p class="font-mono font-[400] text-ly0-gl text-sm leading-relaxed">
-                                        "Any violation of this EULA, including the prohibited content and conduct outlined above, may result in the termination of your access to our application."
+                                        {t!("app.setup.eula.consequences.body")}
                                     </p>
                                 </section>
                                 <section
@@ -1003,10 +1003,10 @@ fn SetupPage() -> impl IntoView {
                                     class="flex flex-col gap-2"
                                 >
                                     <h3 class="font-sans font-[600] text-ly0-gl text-base">
-                                        "Disclaimer of Warranties and Limitation of Liability"
+                                        {t!("app.setup.eula.disclaimer.title")}
                                     </h3>
                                     <p class="font-mono font-[400] text-ly0-gl text-sm leading-relaxed">
-                                        "Our application is provided \"as is\" and \"as available\" without warranty of any kind, either express or implied, including but not limited to the implied warranties of merchantability and fitness for a particular purpose. We do not guarantee that our application will be uninterrupted or error-free. In no event shall Radroots Inc. be liable for any damages whatsoever, including but not limited to direct, indirect, special, incidental, or consequential damages, arising out of or in connection with the use or inability to use our application."
+                                        {t!("app.setup.eula.disclaimer.body")}
                                     </p>
                                 </section>
                                 <section
@@ -1014,10 +1014,10 @@ fn SetupPage() -> impl IntoView {
                                     class="flex flex-col gap-2"
                                 >
                                     <h3 class="font-sans font-[600] text-ly0-gl text-base">
-                                        "Changes to EULA"
+                                        {t!("app.setup.eula.changes.title")}
                                     </h3>
                                     <p class="font-mono font-[400] text-ly0-gl text-sm leading-relaxed">
-                                        "We reserve the right to update or modify this EULA at any time and without prior notice. Your continued use of our application following any changes to this EULA will be deemed to be your acceptance of such changes."
+                                        {t!("app.setup.eula.changes.body")}
                                     </p>
                                 </section>
                                 <section
@@ -1025,10 +1025,10 @@ fn SetupPage() -> impl IntoView {
                                     class="flex flex-col gap-2"
                                 >
                                     <h3 class="font-sans font-[600] text-ly0-gl text-base">
-                                        "Contact Information"
+                                        {t!("app.setup.eula.contact.title")}
                                     </h3>
                                     <p class="font-mono font-[400] text-ly0-gl text-sm leading-relaxed">
-                                        "If you have any questions about this EULA, please contact us at info@radroots.org."
+                                        {t!("app.setup.eula.contact.body")}
                                     </p>
                                 </section>
                                 <section
@@ -1036,10 +1036,10 @@ fn SetupPage() -> impl IntoView {
                                     class="flex flex-col gap-2"
                                 >
                                     <h3 class="font-sans font-[600] text-ly0-gl text-base">
-                                        "Acceptance of Terms"
+                                        {t!("app.setup.eula.acceptance.title")}
                                     </h3>
                                     <p class="font-mono font-[400] text-ly0-gl text-sm leading-relaxed">
-                                        "By using our application, you signify your acceptance of this EULA. If you do not agree to this EULA, you may not use our application."
+                                        {t!("app.setup.eula.acceptance.body")}
                                     </p>
                                 </section>
                             </div>
@@ -1066,7 +1066,7 @@ fn SetupPage() -> impl IntoView {
                                     "-"
                                 </span>
                                 <span class="font-mono font-[400] text-sm text-ly0-gl group-active:text-ly0-gl/80 el-re">
-                                    "Disagree"
+                                    {t!("app.common.disagree")}
                                 </span>
                                 <span class="font-mono font-[400] text-sm text-ly0-gl group-active:text-ly0-gl/80 el-re">
                                     "-"
@@ -1093,7 +1093,7 @@ fn SetupPage() -> impl IntoView {
                                     "-"
                                 </span>
                                 <span class="font-mono font-[400] text-sm text-ly0-gl-hl group-active:text-ly0-gl-hl/80 el-re">
-                                    "Agree"
+                                    {t!("app.common.agree")}
                                 </span>
                                 <span class="font-mono font-[400] text-sm text-ly0-gl-hl group-active:text-ly0-gl-hl/80 el-re">
                                     "-"

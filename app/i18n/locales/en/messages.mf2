@@ -11,6 +11,10 @@ app.common.no = No
 
 app.common.yes = Yes
 
+app.common.agree = Agree
+
+app.common.disagree = Disagree
+
 # nav
 app.nav.primary_aria = primary
 
@@ -143,6 +147,59 @@ app.setup.profile.nip05.suffix = NIP-05 address
 app.setup.profile.confirm_no_name = Your profile will be created without a name. You can change this later in Settings > Profile
 
 app.setup.farmer.title = Setup for Farmer
+
+# eula
+app.setup.eula.title = End User License Agreement
+
+app.setup.eula.introduction.title = Introduction
+
+app.setup.eula.introduction.body = This End User License Agreement ("EULA") is a legal agreement between you and Radroots Inc. for the use of our mobile application Radroots. By installing, accessing, or using our application, you agree to be bound by the terms and conditions of this EULA.
+
+app.setup.eula.prohibited_content.title = Prohibited Content and Conduct
+
+app.setup.eula.prohibited_content.body = You agree not to use our application to create, upload, post, send, or store any content that:
+
+app.setup.eula.prohibited_content.item.illegal = Is illegal, infringing, or fraudulent
+
+app.setup.eula.prohibited_content.item.pornographic = Is pornographic, obscene, or offensive
+
+app.setup.eula.prohibited_content.item.hate_speech = Is discriminatory or promotes hate speech
+
+app.setup.eula.prohibited_content.item.minors = Is harmful to minors
+
+app.setup.eula.prohibited_content.item.harass = Is intended to harass or bully others
+
+app.setup.eula.prohibited_content.item.impersonate = Is intended to impersonate others
+
+app.setup.eula.prohibited_conduct.title = You also agree not to engage in any conduct that:
+
+app.setup.eula.prohibited_conduct.item.harass = Harasses or bullies others
+
+app.setup.eula.prohibited_conduct.item.impersonate = Impersonates others
+
+app.setup.eula.prohibited_conduct.item.intimidate = Is intended to intimidate or threaten others
+
+app.setup.eula.prohibited_conduct.item.violence = Is intended to promote or incite violence
+
+app.setup.eula.consequences.title = Consequences of Violation
+
+app.setup.eula.consequences.body = Any violation of this EULA, including the prohibited content and conduct outlined above, may result in the termination of your access to our application.
+
+app.setup.eula.disclaimer.title = Disclaimer of Warranties and Limitation of Liability
+
+app.setup.eula.disclaimer.body = Our application is provided "as is" and "as available" without warranty of any kind, either express or implied, including but not limited to the implied warranties of merchantability and fitness for a particular purpose. We do not guarantee that our application will be uninterrupted or error-free. In no event shall Radroots Inc. be liable for any damages whatsoever, including but not limited to direct, indirect, special, incidental, or consequential damages, arising out of or in connection with the use or inability to use our application.
+
+app.setup.eula.changes.title = Changes to EULA
+
+app.setup.eula.changes.body = We reserve the right to update or modify this EULA at any time and without prior notice. Your continued use of our application following any changes to this EULA will be deemed to be your acceptance of such changes.
+
+app.setup.eula.contact.title = Contact Information
+
+app.setup.eula.contact.body = If you have any questions about this EULA, please contact us at info@radroots.org.
+
+app.setup.eula.acceptance.title = Acceptance of Terms
+
+app.setup.eula.acceptance.body = By using our application, you signify your acceptance of this EULA. If you do not agree to this EULA, you may not use our application.
 
 # errors
 error.app.init.idb = storage unavailable
