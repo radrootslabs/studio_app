@@ -9,9 +9,12 @@ use crate::idb::{IDB_CONFIG_DATASTORE, RadrootsClientIdbConfig};
 #[cfg(target_arch = "wasm32")]
 use crate::idb::RadrootsClientIdbStoreError;
 use crate::idb::{RadrootsClientWebEncryptedStore, RadrootsClientWebEncryptedStoreConfig};
+#[cfg(target_arch = "wasm32")]
+use crate::idb::idb_set_entries;
 
 use super::{
     RadrootsClientDatastore,
+    RadrootsClientDatastoreEntry,
     RadrootsClientDatastoreEntries,
     RadrootsClientDatastoreError,
     RadrootsClientDatastoreResult,
@@ -160,6 +163,43 @@ impl RadrootsClientDatastore for RadrootsClientWebDatastore {
                 return Err(RadrootsClientDatastoreError::NoResult);
             };
             self.decrypt_value(key, stored).await
+        }
+    }
+
+    async fn set_entries(
+        &self,
+        entries: &[RadrootsClientDatastoreEntry],
+    ) -> RadrootsClientDatastoreResult<()> {
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            let _ = entries;
+            return Err(RadrootsClientDatastoreError::IdbUndefined);
+        }
+        #[cfg(target_arch = "wasm32")]
+        {
+            let mut encrypted_entries = Vec::with_capacity(entries.len());
+            for entry in entries {
+                let value = match entry.value.as_deref() {
+                    Some(value) => {
+                        let encrypted = self
+                            .encrypted_store
+                            .encrypt_bytes(value.as_bytes())
+                            .await
+                            .map_err(map_crypto_error)?;
+                        Some(js_sys::Uint8Array::from(&encrypted[..]).into())
+                    }
+                    None => None,
+                };
+                encrypted_entries.push((entry.key.clone(), value));
+            }
+            idb_set_entries(
+                self.encrypted_store.get_config().database,
+                self.encrypted_store.get_config().store,
+                &encrypted_entries,
+            )
+            .await
+            .map_err(map_idb_error)?;
+            Ok(())
         }
     }
 

@@ -9,7 +9,7 @@ use wasm_bindgen::{JsCast, JsValue};
 #[cfg(target_arch = "wasm32")]
 use wasm_bindgen_futures::JsFuture;
 #[cfg(target_arch = "wasm32")]
-use web_sys::{IdbRequest, IdbTransactionMode};
+use web_sys::{IdbRequest, IdbTransaction, IdbTransactionMode};
 
 #[cfg(target_arch = "wasm32")]
 use super::store::idb_open;
@@ -102,6 +102,65 @@ pub async fn idb_set(
 }
 
 #[cfg(target_arch = "wasm32")]
+pub async fn idb_set_entries(
+    database: &str,
+    store: &str,
+    entries: &[(String, Option<RadrootsClientIdbValue>)],
+) -> Result<(), RadrootsClientIdbStoreError> {
+    let db = idb_open(database, None, &[]).await?;
+    let transaction = db
+        .transaction_with_str_and_mode(store, IdbTransactionMode::Readwrite)
+        .map_err(|_| RadrootsClientIdbStoreError::OperationFailure)?;
+    let object_store = transaction
+        .object_store(store)
+        .map_err(|_| RadrootsClientIdbStoreError::OperationFailure)?;
+    let promise = idb_transaction_complete(transaction.clone())?;
+    for (key, value) in entries {
+        let key = JsValue::from_str(key);
+        match value {
+            Some(value) => {
+                object_store
+                    .put_with_key(value, &key)
+                    .map_err(|_| RadrootsClientIdbStoreError::OperationFailure)?;
+            }
+            None => {
+                object_store
+                    .delete(&key)
+                    .map_err(|_| RadrootsClientIdbStoreError::OperationFailure)?;
+            }
+        }
+    }
+    JsFuture::from(promise)
+        .await
+        .map_err(|_| RadrootsClientIdbStoreError::OperationFailure)?;
+    db.close();
+    Ok(())
+}
+
+#[cfg(target_arch = "wasm32")]
+fn idb_transaction_complete(
+    transaction: IdbTransaction,
+) -> Result<Promise, RadrootsClientIdbStoreError> {
+    let promise = Promise::new(&mut |resolve, reject| {
+        let resolve = resolve.clone();
+        let on_complete = Closure::wrap(Box::new(move |_event: web_sys::Event| {
+            let _ = resolve.call0(&JsValue::UNDEFINED);
+        }) as Box<dyn FnMut(_)>);
+        transaction.set_oncomplete(Some(on_complete.as_ref().unchecked_ref()));
+        on_complete.forget();
+
+        let reject = reject.clone();
+        let on_error = Closure::wrap(Box::new(move |_event: web_sys::Event| {
+            let _ = reject.call1(&JsValue::UNDEFINED, &JsValue::from_str("idb_tx_failed"));
+        }) as Box<dyn FnMut(_)>);
+        transaction.set_onerror(Some(on_error.as_ref().unchecked_ref()));
+        transaction.set_onabort(Some(on_error.as_ref().unchecked_ref()));
+        on_error.forget();
+    });
+    Ok(promise)
+}
+
+#[cfg(target_arch = "wasm32")]
 pub async fn idb_del(
     database: &str,
     store: &str,
@@ -165,6 +224,15 @@ pub async fn idb_set(
 }
 
 #[cfg(not(target_arch = "wasm32"))]
+pub async fn idb_set_entries(
+    _database: &str,
+    _store: &str,
+    _entries: &[(String, Option<RadrootsClientIdbValue>)],
+) -> Result<(), RadrootsClientIdbStoreError> {
+    Err(RadrootsClientIdbStoreError::IdbUndefined)
+}
+
+#[cfg(not(target_arch = "wasm32"))]
 pub async fn idb_del(
     _database: &str,
     _store: &str,
@@ -191,12 +259,20 @@ pub async fn idb_keys(
 
 #[cfg(test)]
 mod tests {
-    use super::{idb_clear, idb_del, idb_get, idb_keys, idb_set};
+    use super::{idb_clear, idb_del, idb_get, idb_keys, idb_set, idb_set_entries};
     use crate::idb::RadrootsClientIdbStoreError;
 
     #[test]
     fn non_wasm_keyval_returns_idb_undefined() {
         let err = futures::executor::block_on(idb_get("db", "store", "key"))
+            .expect_err("idb undefined");
+        assert_eq!(err, RadrootsClientIdbStoreError::IdbUndefined);
+    }
+
+    #[test]
+    fn non_wasm_keyval_batch_returns_idb_undefined() {
+        let entries = Vec::new();
+        let err = futures::executor::block_on(idb_set_entries("db", "store", &entries))
             .expect_err("idb undefined");
         assert_eq!(err, RadrootsClientIdbStoreError::IdbUndefined);
     }

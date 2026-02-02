@@ -35,6 +35,22 @@ pub trait RadrootsClientDatastore {
     async fn init(&self) -> RadrootsClientDatastoreResult<()>;
     async fn set(&self, key: &str, value: &str) -> RadrootsClientDatastoreResult<String>;
     async fn get(&self, key: &str) -> RadrootsClientDatastoreResult<String>;
+    async fn set_entries(
+        &self,
+        entries: &[RadrootsClientDatastoreEntry],
+    ) -> RadrootsClientDatastoreResult<()> {
+        for entry in entries {
+            match entry.value.as_deref() {
+                Some(value) => {
+                    let _ = self.set(&entry.key, value).await?;
+                }
+                None => {
+                    let _ = self.del(&entry.key).await?;
+                }
+            }
+        }
+        Ok(())
+    }
     async fn set_obj<T>(&self, key: &str, value: &T) -> RadrootsClientDatastoreResult<T>
     where
         T: Serialize + DeserializeOwned + Clone;

@@ -33,7 +33,7 @@ pub use config::{
 pub use types::RadrootsClientIdbConfig;
 pub use value::{idb_value_as_bytes, RadrootsClientIdbValue};
 pub use error::{RadrootsClientIdbStoreError, RadrootsClientIdbStoreErrorMessage};
-pub use keyval::{idb_clear, idb_del, idb_get, idb_keys, idb_set};
+pub use keyval::{idb_clear, idb_del, idb_get, idb_keys, idb_set, idb_set_entries};
 pub use encrypted_store::{
     RadrootsClientWebEncryptedStore,
     RadrootsClientWebEncryptedStoreConfig,
