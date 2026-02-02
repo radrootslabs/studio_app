@@ -34,6 +34,8 @@ use crate::{
     app_log_error_store,
     app_config_default,
     app_datastore_read_state,
+    app_datastore_read_setup_draft,
+    app_datastore_write_setup_draft,
     app_state_notifications_permission_value,
     app_state_set_notifications_permission_value,
     app_setup_step_default,
@@ -47,7 +49,9 @@ use crate::{
     RadrootsAppInitStage,
     RadrootsAppNotifications,
     RadrootsAppLogsPage,
+    RadrootsAppRole,
     RadrootsAppSettingsPage,
+    RadrootsAppSetupDraft,
     RadrootsAppUiDemoPage,
     RadrootsAppSetupStep,
     RadrootsAppTangleClientStub,
@@ -208,6 +212,11 @@ fn LogoCircle() -> impl IntoView {
 #[component]
 fn SetupPage() -> impl IntoView {
     let context = app_context();
+    let fallback_backends = RwSignal::new_local(None::<RadrootsAppBackends>);
+    let backends = context
+        .as_ref()
+        .map(|value| value.backends)
+        .unwrap_or(fallback_backends);
     let fallback_setup_required = RwSignal::new_local(None::<bool>);
     let setup_required = context
         .as_ref()
@@ -223,11 +232,91 @@ fn SetupPage() -> impl IntoView {
     let nostr_key_add = RwSignal::new_local(String::new());
     let profile_name = RwSignal::new_local(String::new());
     let profile_nip05 = RwSignal::new_local(true);
+    let setup_draft_loaded = RwSignal::new_local(false);
     let on_generate_key = setup_touch_callback("generate_key");
     let on_add_key = setup_touch_callback("add_key");
     Effect::new(move || {
         if setup_required.get() == Some(false) {
             navigate_guard("/", Default::default());
+        }
+    });
+    Effect::new({
+        let backends = backends.clone();
+        let setup_draft_loaded = setup_draft_loaded.clone();
+        let setup_key_choice = setup_key_choice.clone();
+        let nostr_key_add = nostr_key_add.clone();
+        let profile_name = profile_name.clone();
+        let profile_nip05 = profile_nip05.clone();
+        move |_| {
+            if setup_draft_loaded.get() {
+                return;
+            }
+            let Some((datastore, key_maps)) = backends
+                .with(|value| value.as_ref().map(|backends| (backends.datastore.clone(), backends.config.datastore.key_maps.clone())))
+            else {
+                return;
+            };
+            spawn_local(async move {
+                if let Ok(Some(draft)) = app_datastore_read_setup_draft(datastore.as_ref(), &key_maps).await {
+                    if let Some(public_key) = draft.nostr_public_key {
+                        nostr_key_add.set(public_key);
+                        setup_key_choice.set(Some(RadrootsAppSetupKeyChoice::AddExisting));
+                    }
+                    if let Some(name) = draft.profile_name {
+                        profile_name.set(name);
+                    }
+                    if let Some(nip05_request) = draft.nip05_request {
+                        profile_nip05.set(nip05_request);
+                    }
+                }
+                setup_draft_loaded.set(true);
+            });
+        }
+    });
+    Effect::new({
+        let backends = backends.clone();
+        let setup_draft_loaded = setup_draft_loaded.clone();
+        let setup_key_choice = setup_key_choice.clone();
+        let setup_farmer_choice = setup_farmer_choice.clone();
+        let nostr_key_add = nostr_key_add.clone();
+        let profile_name = profile_name.clone();
+        let profile_nip05 = profile_nip05.clone();
+        move |_| {
+            if !setup_draft_loaded.get() {
+                return;
+            }
+            let Some((datastore, key_maps)) = backends
+                .with(|value| value.as_ref().map(|backends| (backends.datastore.clone(), backends.config.datastore.key_maps.clone())))
+            else {
+                return;
+            };
+            let nostr_public_key = match setup_key_choice.get() {
+                Some(RadrootsAppSetupKeyChoice::AddExisting) => {
+                    let value = nostr_key_add.get();
+                    let value = value.trim();
+                    if value.is_empty() {
+                        None
+                    } else {
+                        Some(value.to_string())
+                    }
+                }
+                _ => None,
+            };
+            let profile_value = profile_name.get();
+            let profile_name = if profile_value.trim().is_empty() {
+                None
+            } else {
+                Some(profile_value)
+            };
+            let draft = RadrootsAppSetupDraft {
+                nostr_public_key,
+                profile_name,
+                role: setup_farmer_choice.get().map(|_| RadrootsAppRole::default()),
+                nip05_request: Some(profile_nip05.get()),
+            };
+            spawn_local(async move {
+                let _ = app_datastore_write_setup_draft(datastore.as_ref(), &key_maps, &draft).await;
+            });
         }
     });
     let advance_step: Callback<()> = {
