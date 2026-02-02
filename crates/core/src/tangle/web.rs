@@ -209,7 +209,7 @@ use super::types::{
     RadrootsClientTangleResult,
 };
 
-const DEFAULT_TANGLE_STORE_KEY: &str = "radroots-pwa-v1-tangle-db";
+const DEFAULT_TANGLE_STORE_KEY: &str = "radroots-app-v1-tangle-db";
 
 pub struct RadrootsClientWebTangle {
     store_key: String,

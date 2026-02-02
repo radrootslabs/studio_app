@@ -1,6 +1,6 @@
 use super::RadrootsClientIdbConfig;
 
-pub const RADROOTS_IDB_DATABASE: &str = "radroots-pwa-v1";
+pub const RADROOTS_IDB_DATABASE: &str = "radroots-app-v1";
 
 pub const IDB_STORE_DATASTORE: &str = "radroots.app.data";
 pub const IDB_STORE_LOGS: &str = "radroots.app.logs";
