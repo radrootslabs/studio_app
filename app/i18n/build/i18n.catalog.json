@@ -1248,6 +1248,17 @@
       }
     },
     {
+      "key": "app.setup.business.title",
+      "id": 1801429027,
+      "args": [],
+      "features": {
+        "select": false,
+        "plural_cardinal": false,
+        "plural_ordinal": false,
+        "formatters": []
+      }
+    },
+    {
       "key": "app.setup.eula.acceptance.body",
       "id": 2382792662,
       "args": [],

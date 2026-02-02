@@ -28,6 +28,9 @@ pub struct RadrootsAppUiButtonLayoutAction {
     pub disabled: bool,
     pub loading: bool,
     pub on_click: Callback<MouseEvent>,
+    pub class: Option<String>,
+    pub class_label: Option<String>,
+    pub style: Option<String>,
 }
 
 #[derive(Clone)]
@@ -36,6 +39,7 @@ pub struct RadrootsAppUiButtonLayoutBackAction {
     pub label: Option<String>,
     pub disabled: bool,
     pub on_click: Callback<MouseEvent>,
+    pub compact: bool,
 }
 
 #[component]
@@ -46,6 +50,7 @@ pub fn RadrootsAppUiButtonLayout(
     #[prop(optional)] loading: bool,
     #[prop(optional)] class: Option<String>,
     #[prop(optional)] class_label: Option<String>,
+    #[prop(optional)] style: Option<String>,
     #[prop(optional)] hide_active: bool,
 ) -> impl IntoView {
     let allow_active = !disabled && !hide_active;
@@ -67,6 +72,7 @@ pub fn RadrootsAppUiButtonLayout(
         <button
             type="button"
             class=button_class
+            style=style
             disabled=disabled
             on:click=move |ev| {
                 ev.stop_propagation();
@@ -104,6 +110,9 @@ pub fn RadrootsAppUiButtonLayoutPair(
                 disabled=continue_action.disabled
                 loading=continue_action.loading
                 on_click=continue_action.on_click
+                class=continue_action.class.unwrap_or_default()
+                class_label=continue_action.class_label.unwrap_or_default()
+                style=continue_action.style.unwrap_or_default()
             />
             {back.map(|back_action| {
                 view! {
@@ -113,15 +122,24 @@ pub fn RadrootsAppUiButtonLayoutPair(
                             let back_disabled = back_action.disabled;
                             let back_on_click = back_action.on_click.clone();
                             let back_visible = back_action.visible;
+                            let back_compact = back_action.compact;
                             let back_text_class = radroots_studio_app_ui_button_class_merge(&[
                                 Some("font-sans font-[600] tracking-wide text-ly1-gl-shade"),
                                 if back_disabled { None } else { Some("group-active:text-ly1-gl/40") },
                             ]);
-                            let back_button_class = radroots_studio_app_ui_button_class_merge(&[
-                                if back_disabled { None } else { Some("group") },
-                                Some("flex flex-row h-12 w-lo_ios0 ios1:w-lo_ios1 justify-center items-center -translate-y-[2px] transition-opacity duration-[160ms] ease-[cubic-bezier(.2,.8,.2,1)]"),
-                                if back_visible { Some("opacity-100") } else { Some("opacity-0 pointer-events-none") },
-                            ]);
+                            let back_button_class = if back_compact {
+                                radroots_studio_app_ui_button_class_merge(&[
+                                    if back_disabled { None } else { Some("group") },
+                                    Some("flex flex-row w-fit justify-center items-center py-1 transition-opacity duration-[160ms] ease-[cubic-bezier(.2,.8,.2,1)]"),
+                                    if back_visible { Some("opacity-100") } else { Some("opacity-0 pointer-events-none") },
+                                ])
+                            } else {
+                                radroots_studio_app_ui_button_class_merge(&[
+                                    if back_disabled { None } else { Some("group") },
+                                    Some("flex flex-row h-12 w-lo_ios0 ios1:w-lo_ios1 justify-center items-center -translate-y-[2px] transition-opacity duration-[160ms] ease-[cubic-bezier(.2,.8,.2,1)]"),
+                                    if back_visible { Some("opacity-100") } else { Some("opacity-0 pointer-events-none") },
+                                ])
+                            };
                             view! {
                                 <button
                                     type="button"

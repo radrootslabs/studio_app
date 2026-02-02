@@ -40,6 +40,36 @@
     @apply font-sans font-[600] tracking-wide text-ly1-gl-shade group-active:text-ly1-gl/40 el-re;
 }
 
+@layer utilities {
+    .button-layout-compact {
+        height: 48px;
+        min-height: 48px;
+    }
+
+    .button-layout-accent {
+        background: hsl(var(--ly0-gl-hl) / 1);
+        color: #fff;
+    }
+
+    .button-layout-accent:active {
+        background: hsl(var(--ly0-gl-hl) / 0.85);
+    }
+
+    .button-layout-accent:disabled {
+        opacity: 1;
+        background: hsl(var(--ly0-gl-hl) / 0.6);
+        color: #fff;
+    }
+
+    .button-layout-accent .button-layout-label {
+        color: #fff;
+    }
+
+    .button-layout-accent:active .button-layout-label {
+        color: rgba(255, 255, 255, 0.8);
+    }
+}
+
 @utility input-base {
     @apply flex w-full items-center rounded-touch border border-ly1-edge/60 bg-ly1 px-3 py-2 font-sans text-form_base text-ly1-gl placeholder:text-ly1-gl-label/70 transition-colors focus:outline-none focus:bg-ly1-focus focus:border-ly1-edge/80 disabled:opacity-60;
     @apply focus:shadow-[inset_0_0_0_1px_hsl(var(--ly1-edge)/0.6)];

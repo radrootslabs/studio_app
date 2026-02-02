@@ -148,6 +148,8 @@ app.setup.profile.confirm_no_name = Your profile will be created without a name.
 
 app.setup.farmer.title = Setup for Farmer
 
+app.setup.business.title = Setup for Business
+
 # eula
 app.setup.eula.title = End User License Agreement
 

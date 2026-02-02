@@ -6,12 +6,17 @@ use sha2::{Digest, Sha256};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum RadrootsAppRole {
-    Public,
+    #[serde(rename = "individual", alias = "Public", alias = "public", alias = "Individual")]
+    Individual,
+    #[serde(rename = "farm")]
+    Farm,
+    #[serde(rename = "business")]
+    Business,
 }
 
 impl Default for RadrootsAppRole {
     fn default() -> Self {
-        RadrootsAppRole::Public
+        RadrootsAppRole::Individual
     }
 }
 
@@ -188,15 +193,15 @@ mod tests {
     };
 
     #[test]
-    fn role_defaults_to_public() {
-        assert_eq!(RadrootsAppRole::default(), RadrootsAppRole::Public);
+    fn role_defaults_to_individual() {
+        assert_eq!(RadrootsAppRole::default(), RadrootsAppRole::Individual);
     }
 
     #[test]
     fn state_defaults_empty() {
         let data = RadrootsAppState::default();
         assert_eq!(data.active_key, "");
-        assert_eq!(data.role, RadrootsAppRole::Public);
+        assert_eq!(data.role, RadrootsAppRole::Individual);
         assert_eq!(data.eula_date, "");
         assert_eq!(data.eula_version, "0.1.0");
         assert_eq!(data.eula_hash, "unknown");

@@ -42,7 +42,6 @@ use crate::{
     app_config_default,
     app_datastore_clear_setup_draft,
     app_datastore_read_state,
-    app_datastore_read_setup_draft,
     app_datastore_write_profile_seed,
     app_datastore_write_setup_draft,
     app_keystore_nostr_ensure_key,
@@ -173,6 +172,25 @@ enum RadrootsAppSetupKeyChoice {
 enum RadrootsAppSetupFarmerChoice {
     Yes,
     No,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum RadrootsAppSetupBusinessChoice {
+    Yes,
+    No,
+}
+
+fn setup_role_from_choices(
+    farmer_choice: Option<RadrootsAppSetupFarmerChoice>,
+    business_choice: Option<RadrootsAppSetupBusinessChoice>,
+) -> Option<RadrootsAppRole> {
+    match farmer_choice? {
+        RadrootsAppSetupFarmerChoice::Yes => Some(RadrootsAppRole::Farm),
+        RadrootsAppSetupFarmerChoice::No => match business_choice? {
+            RadrootsAppSetupBusinessChoice::Yes => Some(RadrootsAppRole::Business),
+            RadrootsAppSetupBusinessChoice::No => Some(RadrootsAppRole::Individual),
+        },
+    }
 }
 
 fn active_key_label(value: Option<String>) -> String {
@@ -310,7 +328,9 @@ fn SetupPage() -> impl IntoView {
     let setup_step = RwSignal::new_local(app_setup_step_default());
     let setup_key_choice = RwSignal::new_local(None::<RadrootsAppSetupKeyChoice>);
     let setup_farmer_choice = RwSignal::new_local(None::<RadrootsAppSetupFarmerChoice>);
+    let setup_business_choice = RwSignal::new_local(None::<RadrootsAppSetupBusinessChoice>);
     let setup_eula_scrolled = RwSignal::new_local(false);
+    let setup_eula_scroll_ref: NodeRef<leptos::html::Div> = NodeRef::new();
     let nostr_key_add = RwSignal::new_local(String::new());
     let profile_name = RwSignal::new_local(String::new());
     let profile_nip05 = RwSignal::new_local(true);
@@ -326,6 +346,8 @@ fn SetupPage() -> impl IntoView {
         let backends = backends.clone();
         let setup_draft_loaded = setup_draft_loaded.clone();
         let setup_key_choice = setup_key_choice.clone();
+        let setup_farmer_choice = setup_farmer_choice.clone();
+        let setup_business_choice = setup_business_choice.clone();
         let nostr_key_add = nostr_key_add.clone();
         let profile_name = profile_name.clone();
         let profile_nip05 = profile_nip05.clone();
@@ -338,20 +360,15 @@ fn SetupPage() -> impl IntoView {
             else {
                 return;
             };
+            setup_draft_loaded.set(true);
+            setup_key_choice.set(None);
+            setup_farmer_choice.set(None);
+            setup_business_choice.set(None);
+            nostr_key_add.set(String::new());
+            profile_name.set(String::new());
+            profile_nip05.set(true);
             spawn_local(async move {
-                if let Ok(Some(draft)) = app_datastore_read_setup_draft(datastore.as_ref(), &key_maps).await {
-                    if let Some(public_key) = draft.nostr_public_key {
-                        nostr_key_add.set(public_key);
-                        setup_key_choice.set(Some(RadrootsAppSetupKeyChoice::AddExisting));
-                    }
-                    if let Some(name) = draft.profile_name {
-                        profile_name.set(name);
-                    }
-                    if let Some(nip05_request) = draft.nip05_request {
-                        profile_nip05.set(nip05_request);
-                    }
-                }
-                setup_draft_loaded.set(true);
+                let _ = app_datastore_clear_setup_draft(datastore.as_ref(), &key_maps).await;
             });
         }
     });
@@ -360,6 +377,7 @@ fn SetupPage() -> impl IntoView {
         let setup_draft_loaded = setup_draft_loaded.clone();
         let setup_key_choice = setup_key_choice.clone();
         let setup_farmer_choice = setup_farmer_choice.clone();
+        let setup_business_choice = setup_business_choice.clone();
         let nostr_key_add = nostr_key_add.clone();
         let profile_name = profile_name.clone();
         let profile_nip05 = profile_nip05.clone();
@@ -390,10 +408,14 @@ fn SetupPage() -> impl IntoView {
             } else {
                 Some(profile_value)
             };
+            let role = setup_role_from_choices(
+                setup_farmer_choice.get(),
+                setup_business_choice.get(),
+            );
             let draft = RadrootsAppSetupDraft {
                 nostr_public_key,
                 profile_name,
-                role: setup_farmer_choice.get().map(|_| RadrootsAppRole::default()),
+                role,
                 nip05_request: Some(profile_nip05.get()),
             };
             spawn_local(async move {
@@ -405,6 +427,8 @@ fn SetupPage() -> impl IntoView {
         let backends = backends.clone();
         let setup_step = setup_step.clone();
         let setup_key_choice = setup_key_choice.clone();
+        let setup_farmer_choice = setup_farmer_choice.clone();
+        let setup_business_choice = setup_business_choice.clone();
         let nostr_key_add = nostr_key_add.clone();
         let profile_name = profile_name.clone();
         let setup_required = setup_required.clone();
@@ -412,6 +436,11 @@ fn SetupPage() -> impl IntoView {
             let current_step = setup_step.get();
             if matches!(current_step, RadrootsAppSetupStep::Eula) {
                 let key_choice = setup_key_choice.get();
+                let setup_role = setup_role_from_choices(
+                    setup_farmer_choice.get(),
+                    setup_business_choice.get(),
+                )
+                .unwrap_or_else(RadrootsAppRole::default);
                 let nostr_key_add = nostr_key_add.get();
                 let profile_name = profile_name.get();
                 let profile_nip05 = profile_nip05.get();
@@ -500,6 +529,7 @@ fn SetupPage() -> impl IntoView {
                         active_key,
                         eula_date,
                         nip05_key,
+                        setup_role,
                     )
                     .await
                     {
@@ -513,6 +543,9 @@ fn SetupPage() -> impl IntoView {
             }
             if matches!(current_step, RadrootsAppSetupStep::Profile) {
                 let profile_name = profile_name.get();
+                if profile_nip05.get() && profile_name.trim().is_empty() {
+                    return;
+                }
                 if profile_name.trim().is_empty() {
                     let setup_step = setup_step.clone();
                     let confirm_message = t!("app.setup.profile.confirm_no_name");
@@ -544,7 +577,12 @@ fn SetupPage() -> impl IntoView {
                     }
                     RadrootsAppSetupStep::KeyAddExisting => RadrootsAppSetupStep::Profile,
                     RadrootsAppSetupStep::Profile => RadrootsAppSetupStep::FarmerSetup,
-                    RadrootsAppSetupStep::FarmerSetup => RadrootsAppSetupStep::Eula,
+                    RadrootsAppSetupStep::FarmerSetup => match setup_farmer_choice.get() {
+                        Some(RadrootsAppSetupFarmerChoice::Yes) => RadrootsAppSetupStep::Eula,
+                        Some(RadrootsAppSetupFarmerChoice::No) => RadrootsAppSetupStep::BusinessSetup,
+                        None => RadrootsAppSetupStep::FarmerSetup,
+                    },
+                    RadrootsAppSetupStep::BusinessSetup => RadrootsAppSetupStep::Eula,
                     RadrootsAppSetupStep::Eula => RadrootsAppSetupStep::Eula,
                 };
             });
@@ -559,6 +597,7 @@ fn SetupPage() -> impl IntoView {
     let rewind_step: Callback<MouseEvent> = {
         let setup_step = setup_step.clone();
         let setup_key_choice = setup_key_choice.clone();
+        let setup_farmer_choice = setup_farmer_choice.clone();
         Callback::new(move |_| {
             let current_step = setup_step.get();
             let next_step = match current_step {
@@ -572,7 +611,11 @@ fn SetupPage() -> impl IntoView {
                     _ => RadrootsAppSetupStep::KeyChoice,
                 },
                 RadrootsAppSetupStep::FarmerSetup => RadrootsAppSetupStep::Profile,
-                RadrootsAppSetupStep::Eula => RadrootsAppSetupStep::FarmerSetup,
+                RadrootsAppSetupStep::BusinessSetup => RadrootsAppSetupStep::FarmerSetup,
+                RadrootsAppSetupStep::Eula => match setup_farmer_choice.get() {
+                    Some(RadrootsAppSetupFarmerChoice::No) => RadrootsAppSetupStep::BusinessSetup,
+                    _ => RadrootsAppSetupStep::FarmerSetup,
+                },
             };
             setup_step.set(next_step);
             if matches!(next_step, RadrootsAppSetupStep::Intro) {
@@ -588,6 +631,22 @@ fn SetupPage() -> impl IntoView {
         move |_| {
             if !matches!(setup_step.get(), RadrootsAppSetupStep::Eula) {
                 setup_eula_scrolled.set(false);
+            }
+        }
+    });
+    Effect::new({
+        let setup_step = setup_step.clone();
+        let setup_eula_scrolled = setup_eula_scrolled.clone();
+        let setup_eula_scroll_ref = setup_eula_scroll_ref.clone();
+        move |_| {
+            if !matches!(setup_step.get(), RadrootsAppSetupStep::Eula) {
+                return;
+            }
+            let Some(target) = setup_eula_scroll_ref.get() else {
+                return;
+            };
+            if target.scroll_height() <= target.client_height() {
+                setup_eula_scrolled.set(true);
             }
         }
     });
@@ -910,6 +969,81 @@ fn SetupPage() -> impl IntoView {
                         </div>
                     </section>
                 }.into_any(),
+                RadrootsAppSetupStep::BusinessSetup => view! {
+                    <section
+                        id="app-setup-business"
+                        class="app-view app-view-enter flex flex-col w-full px-6 pt-10 pb-16"
+                        on:click=move |_| {
+                            setup_business_choice.set(None);
+                        }
+                    >
+                        <div
+                            id="app-setup-business-body"
+                            class="flex flex-1 w-full flex-col justify-center items-center"
+                        >
+                            <div
+                                id="app-setup-business-card"
+                                class="flex flex-col h-[16rem] w-full gap-10 justify-start items-center"
+                            >
+                                <div
+                                    id="app-setup-business-title"
+                                    class="flex flex-row w-full justify-center items-center"
+                                >
+                                    <p class="font-sans font-[600] text-ly0-gl text-3xl">
+                                        {t!("app.setup.business.title")}
+                                    </p>
+                                </div>
+                                <div
+                                    id="app-setup-business-actions"
+                                    class="flex flex-col w-full gap-5 justify-center items-center"
+                                >
+                                    <button
+                                        id="app-setup-business-yes"
+                                        type="button"
+                                        class=move || {
+                                            if setup_business_choice.get()
+                                                == Some(RadrootsAppSetupBusinessChoice::Yes)
+                                            {
+                                                "flex flex-col h-bold_button w-lo_ios0 ios1:w-lo_ios1 justify-center items-center rounded-touch ly1-selected-press el-re"
+                                            } else {
+                                                "flex flex-col h-bold_button w-lo_ios0 ios1:w-lo_ios1 justify-center items-center rounded-touch bg-ly1 el-re"
+                                            }
+                                        }
+                                        on:click=move |ev| {
+                                            ev.stop_propagation();
+                                            setup_business_choice.set(Some(RadrootsAppSetupBusinessChoice::Yes));
+                                        }
+                                    >
+                                        <span class="font-sans font-[600] text-ly0-gl text-xl">
+                                            {t!("app.common.yes")}
+                                        </span>
+                                    </button>
+                                    <button
+                                        id="app-setup-business-no"
+                                        type="button"
+                                        class=move || {
+                                            if setup_business_choice.get()
+                                                == Some(RadrootsAppSetupBusinessChoice::No)
+                                            {
+                                                "flex flex-col h-bold_button w-lo_ios0 ios1:w-lo_ios1 justify-center items-center rounded-touch ly1-selected-press el-re"
+                                            } else {
+                                                "flex flex-col h-bold_button w-lo_ios0 ios1:w-lo_ios1 justify-center items-center rounded-touch bg-ly1 el-re"
+                                            }
+                                        }
+                                        on:click=move |ev| {
+                                            ev.stop_propagation();
+                                            setup_business_choice.set(Some(RadrootsAppSetupBusinessChoice::No));
+                                        }
+                                    >
+                                        <span class="font-sans font-[600] text-ly0-gl text-xl">
+                                            {t!("app.common.no")}
+                                        </span>
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    </section>
+                }.into_any(),
                 RadrootsAppSetupStep::Eula => view! {
                     <section
                         id="app-setup-eula"
@@ -929,7 +1063,8 @@ fn SetupPage() -> impl IntoView {
                             </header>
                             <div
                                 id="app-setup-eula-scroll"
-                                class="app-page-scroll scroll-hide flex flex-col flex-1 min-h-0 w-full gap-6 px-1 pb-6 overscroll-contain"
+                                class="app-page-scroll scroll-hide flex flex-col flex-1 min-h-0 w-full gap-6 px-1 pb-20 se-compact:pb-12 overscroll-contain font-mono"
+                                node_ref=setup_eula_scroll_ref
                                 on:scroll=move |ev| {
                                     if setup_eula_scrolled.get() {
                                         return;
@@ -938,7 +1073,7 @@ fn SetupPage() -> impl IntoView {
                                     let scroll_top = target.scroll_top();
                                     let scroll_height = target.scroll_height();
                                     let client_height = target.client_height();
-                                    if scroll_top + client_height >= scroll_height {
+                                    if scroll_top + client_height + 1 >= scroll_height {
                                         setup_eula_scrolled.set(true);
                                     }
                                 }
@@ -1046,59 +1181,33 @@ fn SetupPage() -> impl IntoView {
                         </div>
                         <div
                             id="app-setup-eula-actions"
-                            class="flex flex-row w-full pt-4 justify-center items-center"
+                            class="flex flex-col w-full pt-4 pb-2 justify-center items-center"
                         >
-                            <button
-                                type="button"
-                                class=move || {
-                                    if setup_eula_scrolled.get() {
-                                        "group flex flex-row basis-1/2 gap-3 justify-center items-center"
-                                    } else {
-                                        "group flex flex-row basis-1/2 gap-3 justify-center items-center opacity-80"
-                                    }
-                                }
-                                on:click=move |ev| {
-                                    ev.stop_propagation();
-                                    rewind_step.run(ev);
-                                }
-                            >
-                                <span class="font-mono font-[400] text-sm text-ly0-gl group-active:text-ly0-gl/80 el-re">
-                                    "-"
-                                </span>
-                                <span class="font-mono font-[400] text-sm text-ly0-gl group-active:text-ly0-gl/80 el-re">
-                                    {t!("app.common.disagree")}
-                                </span>
-                                <span class="font-mono font-[400] text-sm text-ly0-gl group-active:text-ly0-gl/80 el-re">
-                                    "-"
-                                </span>
-                            </button>
-                            <button
-                                type="button"
-                                aria-disabled=move || !setup_eula_scrolled.get()
-                                class=move || {
-                                    if setup_eula_scrolled.get() {
-                                        "relative group flex flex-row basis-1/2 gap-3 justify-center items-center el-re"
-                                    } else {
-                                        "relative group flex flex-row basis-1/2 gap-3 justify-center items-center opacity-40 pointer-events-none"
-                                    }
-                                }
-                                on:click=move |ev| {
-                                    ev.stop_propagation();
-                                    if setup_eula_scrolled.get() {
-                                        advance_step.run(());
-                                    }
-                                }
-                            >
-                                <span class="font-mono font-[400] text-sm text-ly0-gl-hl group-active:text-ly0-gl-hl/80 el-re">
-                                    "-"
-                                </span>
-                                <span class="font-mono font-[400] text-sm text-ly0-gl-hl group-active:text-ly0-gl-hl/80 el-re">
-                                    {t!("app.common.agree")}
-                                </span>
-                                <span class="font-mono font-[400] text-sm text-ly0-gl-hl group-active:text-ly0-gl-hl/80 el-re">
-                                    "-"
-                                </span>
-                            </button>
+                            {move || {
+                                let continue_action = RadrootsAppUiButtonLayoutAction {
+                                    label: t!("app.common.agree"),
+                                    disabled: !setup_eula_scrolled.get(),
+                                    loading: false,
+                                    on_click: advance_step_click.clone(),
+                                    class: Some("button-layout-accent button-layout-compact".to_string()),
+                                    class_label: Some("text-base".to_string()),
+                                    style: None,
+                                };
+                                let back_action = RadrootsAppUiButtonLayoutBackAction {
+                                    visible: true,
+                                    label: Some(t!("app.common.disagree")),
+                                    disabled: false,
+                                    on_click: rewind_step.clone(),
+                                    compact: true,
+                                };
+                                view! {
+                                    <RadrootsAppUiButtonLayoutPair
+                                        continue_action=continue_action
+                                        back=back_action
+                                        class="gap-2".to_string()
+                                    />
+                                }.into_any()
+                            }}
                         </div>
                     </section>
                 }.into_any(),
@@ -1115,7 +1224,12 @@ fn SetupPage() -> impl IntoView {
                     let continue_disabled = (matches!(step, RadrootsAppSetupStep::KeyChoice)
                         && setup_key_choice.get().is_none())
                         || (matches!(step, RadrootsAppSetupStep::FarmerSetup)
-                            && setup_farmer_choice.get().is_none());
+                            && setup_farmer_choice.get().is_none())
+                        || (matches!(step, RadrootsAppSetupStep::BusinessSetup)
+                            && setup_business_choice.get().is_none())
+                        || (matches!(step, RadrootsAppSetupStep::Profile)
+                            && profile_nip05.get()
+                            && profile_name.get().trim().is_empty());
                     let continue_label = t!("app.common.continue");
                     let back_label = t!("app.common.back");
                     let continue_action = RadrootsAppUiButtonLayoutAction {
@@ -1123,12 +1237,16 @@ fn SetupPage() -> impl IntoView {
                         disabled: continue_disabled,
                         loading: false,
                         on_click: advance_step_click.clone(),
+                        class: None,
+                        class_label: None,
+                        style: None,
                     };
                     let back_action = RadrootsAppUiButtonLayoutBackAction {
                         visible: !matches!(step, RadrootsAppSetupStep::Intro),
                         label: Some(back_label),
                         disabled: false,
                         on_click: rewind_step.clone(),
+                        compact: false,
                     };
                     view! {
                         <RadrootsAppUiButtonLayoutPair

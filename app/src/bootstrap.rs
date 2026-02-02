@@ -15,6 +15,7 @@ use crate::{
     app_state_record_validate,
     app_state_timestamp_ms,
     RadrootsAppProfileSeed,
+    RadrootsAppRole,
     RadrootsAppState,
     RadrootsAppSetupDraft,
     RadrootsAppStateError,
@@ -85,7 +86,7 @@ async fn app_datastore_migrate_legacy_state<T: RadrootsClientDatastore>(
         Ok(value) => value,
         Err(_) => return Ok(None),
     };
-    let state = app_setup_state_new(active_key.clone(), eula_date);
+    let state = app_setup_state_new(active_key.clone(), eula_date, RadrootsAppRole::default());
     let record = app_state_record_new(state, 1, app_state_timestamp_ms());
     let stored = app_datastore_write_state_record(datastore, key_maps, &record).await?;
     let _ = datastore.del(key_nostr).await;
@@ -1020,7 +1021,7 @@ mod tests {
         let draft = RadrootsAppSetupDraft {
             nostr_public_key: Some("pub".to_string()),
             profile_name: Some("radroots".to_string()),
-            role: Some(RadrootsAppRole::Public),
+            role: Some(RadrootsAppRole::Individual),
             nip05_request: Some(true),
         };
         let stored = futures::executor::block_on(app_datastore_write_setup_draft(

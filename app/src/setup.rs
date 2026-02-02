@@ -34,10 +34,14 @@ pub fn app_setup_eula_date() -> String {
     Utc::now().to_rfc3339_opts(SecondsFormat::Millis, true)
 }
 
-pub fn app_setup_state_new(active_key: String, eula_date: String) -> RadrootsAppState {
+pub fn app_setup_state_new(
+    active_key: String,
+    eula_date: String,
+    role: RadrootsAppRole,
+) -> RadrootsAppState {
     RadrootsAppState {
         active_key,
-        role: RadrootsAppRole::default(),
+        role,
         eula_date,
         eula_version: String::from("0.1.0"),
         eula_hash: String::from("unknown"),
@@ -54,6 +58,7 @@ pub enum RadrootsAppSetupStep {
     KeyAddExisting,
     Profile,
     FarmerSetup,
+    BusinessSetup,
     Eula,
 }
 
@@ -64,7 +69,8 @@ impl RadrootsAppSetupStep {
             RadrootsAppSetupStep::KeyChoice => RadrootsAppSetupStep::KeyAddExisting,
             RadrootsAppSetupStep::KeyAddExisting => RadrootsAppSetupStep::Profile,
             RadrootsAppSetupStep::Profile => RadrootsAppSetupStep::FarmerSetup,
-            RadrootsAppSetupStep::FarmerSetup => RadrootsAppSetupStep::Eula,
+            RadrootsAppSetupStep::FarmerSetup => RadrootsAppSetupStep::BusinessSetup,
+            RadrootsAppSetupStep::BusinessSetup => RadrootsAppSetupStep::Eula,
             RadrootsAppSetupStep::Eula => RadrootsAppSetupStep::Eula,
         }
     }
@@ -76,7 +82,8 @@ impl RadrootsAppSetupStep {
             RadrootsAppSetupStep::KeyAddExisting => RadrootsAppSetupStep::KeyChoice,
             RadrootsAppSetupStep::Profile => RadrootsAppSetupStep::KeyAddExisting,
             RadrootsAppSetupStep::FarmerSetup => RadrootsAppSetupStep::Profile,
-            RadrootsAppSetupStep::Eula => RadrootsAppSetupStep::FarmerSetup,
+            RadrootsAppSetupStep::BusinessSetup => RadrootsAppSetupStep::FarmerSetup,
+            RadrootsAppSetupStep::Eula => RadrootsAppSetupStep::BusinessSetup,
         }
     }
 
@@ -110,7 +117,15 @@ pub async fn app_setup_initialize<T: RadrootsClientDatastore, K: RadrootsClientK
                 RadrootsAppInitError::Keystore(RadrootsClientKeystoreError::NostrInvalidSecretKey)
             }
         })?;
-    app_setup_finalize_with_key(datastore, key_maps, active_key, app_setup_eula_date(), None).await
+    app_setup_finalize_with_key(
+        datastore,
+        key_maps,
+        active_key,
+        app_setup_eula_date(),
+        None,
+        RadrootsAppRole::default(),
+    )
+    .await
 }
 
 pub async fn app_setup_finalize_with_key<T: RadrootsClientDatastore>(
@@ -119,8 +134,9 @@ pub async fn app_setup_finalize_with_key<T: RadrootsClientDatastore>(
     active_key: String,
     eula_date: String,
     nip05_key: Option<String>,
+    role: RadrootsAppRole,
 ) -> RadrootsAppInitResult<RadrootsAppState> {
-    let mut state = app_setup_state_new(active_key.clone(), eula_date);
+    let mut state = app_setup_state_new(active_key.clone(), eula_date, role);
     state.nip05_key = nip05_key;
     let stored_state = app_datastore_create_state(datastore, key_maps, &state).await?;
     let key_name = app_datastore_key_nostr_key(key_maps).map_err(RadrootsAppInitError::Config)?;
@@ -334,9 +350,13 @@ mod tests {
 
     #[test]
     fn setup_state_new_populates_defaults() {
-        let state = app_setup_state_new("pub".to_string(), "2025-01-01T00:00:00Z".to_string());
+        let state = app_setup_state_new(
+            "pub".to_string(),
+            "2025-01-01T00:00:00Z".to_string(),
+            RadrootsAppRole::default(),
+        );
         assert_eq!(state.active_key, "pub");
-        assert_eq!(state.role, RadrootsAppRole::Public);
+        assert_eq!(state.role, RadrootsAppRole::Individual);
         assert_eq!(state.eula_date, "2025-01-01T00:00:00Z");
         assert!(!state.relays.is_empty());
         assert!(state.nip05_key.is_none());
@@ -374,6 +394,10 @@ mod tests {
         );
         assert_eq!(
             RadrootsAppSetupStep::FarmerSetup.next(),
+            RadrootsAppSetupStep::BusinessSetup
+        );
+        assert_eq!(
+            RadrootsAppSetupStep::BusinessSetup.next(),
             RadrootsAppSetupStep::Eula
         );
         assert_eq!(
@@ -405,8 +429,12 @@ mod tests {
             RadrootsAppSetupStep::Profile
         );
         assert_eq!(
-            RadrootsAppSetupStep::Eula.prev(),
+            RadrootsAppSetupStep::BusinessSetup.prev(),
             RadrootsAppSetupStep::FarmerSetup
+        );
+        assert_eq!(
+            RadrootsAppSetupStep::Eula.prev(),
+            RadrootsAppSetupStep::BusinessSetup
         );
     }
 
@@ -417,6 +445,7 @@ mod tests {
         assert!(!RadrootsAppSetupStep::KeyAddExisting.is_terminal());
         assert!(!RadrootsAppSetupStep::Profile.is_terminal());
         assert!(!RadrootsAppSetupStep::FarmerSetup.is_terminal());
+        assert!(!RadrootsAppSetupStep::BusinessSetup.is_terminal());
         assert!(RadrootsAppSetupStep::Eula.is_terminal());
     }
 
@@ -462,6 +491,7 @@ mod tests {
             "pub".to_string(),
             "2025-01-01T00:00:00Z".to_string(),
             None,
+            RadrootsAppRole::default(),
         ))
         .expect("finalize");
         assert_eq!(state.active_key, "pub");
