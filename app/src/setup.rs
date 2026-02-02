@@ -1,6 +1,6 @@
 #![forbid(unsafe_code)]
 
-use radroots_studio_app_core::datastore::RadrootsClientDatastore;
+use radroots_studio_app_core::datastore::{RadrootsClientDatastore, RadrootsClientDatastoreEntry};
 use radroots_studio_app_core::keystore::{RadrootsClientKeystoreError, RadrootsClientKeystoreNostr};
 
 #[cfg(target_arch = "wasm32")]
@@ -10,18 +10,22 @@ use js_sys::Date;
 use chrono::{SecondsFormat, Utc};
 
 use crate::{
-    app_datastore_create_state,
     app_datastore_key_nostr_key,
+    app_datastore_obj_key_state,
+    app_datastore_read_state,
     app_default_relays,
     app_keystore_nostr_ensure_key,
     app_keystore_nostr_verify_key,
     app_log_debug_emit,
+    app_state_record_new,
+    app_state_timestamp_ms,
     RadrootsAppInitError,
     RadrootsAppInitResult,
     RadrootsAppKeyMapConfig,
     RadrootsAppKeystoreError,
     RadrootsAppRole,
     RadrootsAppState,
+    RadrootsAppStateError,
     APP_EULA_HASH,
     APP_EULA_VERSION,
 };
@@ -138,21 +142,83 @@ pub async fn app_setup_finalize_with_key<T: RadrootsClientDatastore>(
     nip05_key: Option<String>,
     role: RadrootsAppRole,
 ) -> RadrootsAppInitResult<RadrootsAppState> {
+    let stored_state = app_setup_commit(
+        datastore,
+        key_maps,
+        active_key.clone(),
+        eula_date,
+        nip05_key,
+        role,
+    )
+    .await?;
+    let _ = app_log_debug_emit("log.app.setup", "created", Some(format!("key={active_key}")));
+    Ok(stored_state)
+}
+
+pub async fn app_setup_commit<T: RadrootsClientDatastore>(
+    datastore: &T,
+    key_maps: &RadrootsAppKeyMapConfig,
+    active_key: String,
+    eula_date: String,
+    nip05_key: Option<String>,
+    role: RadrootsAppRole,
+) -> RadrootsAppInitResult<RadrootsAppState> {
     let mut state = app_setup_state_new(active_key.clone(), eula_date, role);
     state.nip05_key = nip05_key;
-    let stored_state = app_datastore_create_state(datastore, key_maps, &state).await?;
+    match app_datastore_read_state(datastore, key_maps).await {
+        Ok(existing) => {
+            if existing == state {
+                let key_name =
+                    app_datastore_key_nostr_key(key_maps).map_err(RadrootsAppInitError::Config)?;
+                let stored_key = datastore
+                    .get(key_name)
+                    .await
+                    .map_err(RadrootsAppInitError::Datastore)?;
+                if stored_key != active_key {
+                    return Err(RadrootsAppInitError::State(RadrootsAppStateError::Corrupt));
+                }
+                return Ok(existing);
+            }
+            return Err(RadrootsAppInitError::State(
+                RadrootsAppStateError::AlreadyExists,
+            ));
+        }
+        Err(RadrootsAppInitError::State(RadrootsAppStateError::Missing)) => {}
+        Err(err) => return Err(err),
+    }
+    let now_ms = app_state_timestamp_ms();
+    let record = app_state_record_new(state.clone(), 1, now_ms);
+    let encoded = serde_json::to_string(&record)
+        .map_err(|_| RadrootsAppInitError::State(RadrootsAppStateError::Corrupt))?;
     let key_name = app_datastore_key_nostr_key(key_maps).map_err(RadrootsAppInitError::Config)?;
+    let state_key =
+        app_datastore_obj_key_state(key_maps).map_err(RadrootsAppInitError::Config)?;
+    let entries = [
+        RadrootsClientDatastoreEntry::new(state_key, Some(encoded)),
+        RadrootsClientDatastoreEntry::new(key_name, Some(active_key.clone())),
+    ];
     datastore
-        .set(key_name, &active_key)
+        .set_entries(&entries)
         .await
         .map_err(RadrootsAppInitError::Datastore)?;
-    let _ = app_log_debug_emit("log.app.setup", "created", Some(format!("key={active_key}")));
+    let stored_state = app_datastore_read_state(datastore, key_maps).await?;
+    if stored_state != state {
+        return Err(RadrootsAppInitError::State(RadrootsAppStateError::Corrupt));
+    }
+    let stored_key = datastore
+        .get(key_name)
+        .await
+        .map_err(RadrootsAppInitError::Datastore)?;
+    if stored_key != active_key {
+        return Err(RadrootsAppInitError::State(RadrootsAppStateError::Corrupt));
+    }
     Ok(stored_state)
 }
 
 #[cfg(test)]
 mod tests {
     use super::{
+        app_setup_commit,
         app_setup_eula_date,
         app_setup_finalize_with_key,
         app_setup_initialize,
@@ -163,7 +229,9 @@ mod tests {
     use crate::{
         app_datastore_key_nostr_key,
         app_key_maps_default,
+        RadrootsAppInitError,
         RadrootsAppRole,
+        RadrootsAppStateError,
         RadrootsAppStateRecord,
         APP_EULA_HASH,
         APP_EULA_VERSION,
@@ -173,6 +241,7 @@ mod tests {
     use radroots_studio_app_core::datastore::{
         RadrootsClientDatastore,
         RadrootsClientDatastoreEntries,
+        RadrootsClientDatastoreEntry,
         RadrootsClientDatastoreError,
         RadrootsClientDatastoreResult,
     };
@@ -251,6 +320,25 @@ mod tests {
                 .get(key)
                 .cloned()
                 .ok_or(RadrootsClientDatastoreError::NoResult)
+        }
+
+        async fn set_entries(
+            &self,
+            entries: &[RadrootsClientDatastoreEntry],
+        ) -> RadrootsClientDatastoreResult<()> {
+            for entry in entries {
+                let Some(value) = entry.value.as_deref() else {
+                    continue;
+                };
+                if let Ok(parsed) = serde_json::from_str::<RadrootsAppStateRecord>(value) {
+                    *self.record.borrow_mut() = Some(parsed);
+                    continue;
+                }
+                self.values
+                    .borrow_mut()
+                    .insert(entry.key.clone(), value.to_string());
+            }
+            Ok(())
         }
 
         async fn set_obj<T>(
@@ -510,5 +598,65 @@ mod tests {
         let stored = futures::executor::block_on(datastore.get(key_name)).expect("stored");
         assert_eq!(stored, "pub");
         assert!(datastore.record.borrow().is_some());
+    }
+
+    #[test]
+    fn setup_commit_is_idempotent() {
+        let datastore = TestDatastore {
+            record: RefCell::new(None),
+            values: RefCell::new(BTreeMap::new()),
+        };
+        let key_maps = app_key_maps_default();
+        let state = futures::executor::block_on(app_setup_commit(
+            &datastore,
+            &key_maps,
+            "pub".to_string(),
+            "2025-01-01T00:00:00Z".to_string(),
+            None,
+            RadrootsAppRole::default(),
+        ))
+        .expect("commit");
+        assert_eq!(state.active_key, "pub");
+        let state_again = futures::executor::block_on(app_setup_commit(
+            &datastore,
+            &key_maps,
+            "pub".to_string(),
+            "2025-01-01T00:00:00Z".to_string(),
+            None,
+            RadrootsAppRole::default(),
+        ))
+        .expect("commit");
+        assert_eq!(state_again.active_key, "pub");
+    }
+
+    #[test]
+    fn setup_commit_rejects_mismatch() {
+        let datastore = TestDatastore {
+            record: RefCell::new(None),
+            values: RefCell::new(BTreeMap::new()),
+        };
+        let key_maps = app_key_maps_default();
+        let _state = futures::executor::block_on(app_setup_commit(
+            &datastore,
+            &key_maps,
+            "pub".to_string(),
+            "2025-01-01T00:00:00Z".to_string(),
+            None,
+            RadrootsAppRole::default(),
+        ))
+        .expect("commit");
+        let err = futures::executor::block_on(app_setup_commit(
+            &datastore,
+            &key_maps,
+            "other".to_string(),
+            "2025-01-01T00:00:00Z".to_string(),
+            None,
+            RadrootsAppRole::default(),
+        ))
+        .expect_err("mismatch");
+        assert_eq!(
+            err,
+            RadrootsAppInitError::State(RadrootsAppStateError::AlreadyExists)
+        );
     }
 }

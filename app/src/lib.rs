@@ -136,6 +136,7 @@ pub use logging::{
 pub use notifications::{RadrootsAppNotifications, RadrootsAppNotificationsError, RadrootsAppNotificationsResult};
 pub use setup::{
     app_setup_eula_date,
+    app_setup_commit,
     app_setup_finalize_with_key,
     app_setup_initialize,
     app_setup_state_new,
