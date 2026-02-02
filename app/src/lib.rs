@@ -14,6 +14,7 @@ mod logs;
 mod notifications;
 mod settings;
 mod setup;
+mod setup_status;
 mod theme;
 mod tangle;
 mod ui_demo;
@@ -73,6 +74,11 @@ pub use keystore::{
 };
 pub use logs::RadrootsAppLogsPage;
 pub use settings::RadrootsAppSettingsPage;
+pub use setup_status::{
+    app_setup_gate_from_status,
+    RadrootsAppSetupGate,
+    RadrootsAppSetupStatus,
+};
 pub use ui_demo::RadrootsAppUiDemoPage;
 pub use theme::{
     app_theme_apply_mode,
