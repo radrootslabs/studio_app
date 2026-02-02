@@ -566,6 +566,523 @@
       }
     },
     {
+      "key": "app.logs.action.clear",
+      "id": 618410449,
+      "args": [],
+      "features": {
+        "select": false,
+        "plural_cardinal": false,
+        "plural_ordinal": false,
+        "formatters": []
+      }
+    },
+    {
+      "key": "app.logs.action.copy_dump",
+      "id": 4122246909,
+      "args": [],
+      "features": {
+        "select": false,
+        "plural_cardinal": false,
+        "plural_ordinal": false,
+        "formatters": []
+      }
+    },
+    {
+      "key": "app.logs.action.download_dump",
+      "id": 4154904867,
+      "args": [],
+      "features": {
+        "select": false,
+        "plural_cardinal": false,
+        "plural_ordinal": false,
+        "formatters": []
+      }
+    },
+    {
+      "key": "app.logs.action.refresh",
+      "id": 2946508119,
+      "args": [],
+      "features": {
+        "select": false,
+        "plural_cardinal": false,
+        "plural_ordinal": false,
+        "formatters": []
+      }
+    },
+    {
+      "key": "app.logs.content.aria",
+      "id": 495027300,
+      "args": [],
+      "features": {
+        "select": false,
+        "plural_cardinal": false,
+        "plural_ordinal": false,
+        "formatters": []
+      }
+    },
+    {
+      "key": "app.logs.dump.title",
+      "id": 1388485668,
+      "args": [],
+      "features": {
+        "select": false,
+        "plural_cardinal": false,
+        "plural_ordinal": false,
+        "formatters": []
+      }
+    },
+    {
+      "key": "app.logs.entries.title",
+      "id": 684273162,
+      "args": [],
+      "features": {
+        "select": false,
+        "plural_cardinal": false,
+        "plural_ordinal": false,
+        "formatters": []
+      }
+    },
+    {
+      "key": "app.logs.error.anchor_cast_failed",
+      "id": 2533250272,
+      "args": [],
+      "features": {
+        "select": false,
+        "plural_cardinal": false,
+        "plural_ordinal": false,
+        "formatters": []
+      }
+    },
+    {
+      "key": "app.logs.error.anchor_failed",
+      "id": 3154831416,
+      "args": [],
+      "features": {
+        "select": false,
+        "plural_cardinal": false,
+        "plural_ordinal": false,
+        "formatters": []
+      }
+    },
+    {
+      "key": "app.logs.error.blob_failed",
+      "id": 2801667274,
+      "args": [],
+      "features": {
+        "select": false,
+        "plural_cardinal": false,
+        "plural_ordinal": false,
+        "formatters": []
+      }
+    },
+    {
+      "key": "app.logs.error.copy_failed",
+      "id": 3247522700,
+      "args": [],
+      "features": {
+        "select": false,
+        "plural_cardinal": false,
+        "plural_ordinal": false,
+        "formatters": []
+      }
+    },
+    {
+      "key": "app.logs.error.copy_unavailable",
+      "id": 4141297599,
+      "args": [],
+      "features": {
+        "select": false,
+        "plural_cardinal": false,
+        "plural_ordinal": false,
+        "formatters": []
+      }
+    },
+    {
+      "key": "app.logs.error.document_unavailable",
+      "id": 1080722381,
+      "args": [],
+      "features": {
+        "select": false,
+        "plural_cardinal": false,
+        "plural_ordinal": false,
+        "formatters": []
+      }
+    },
+    {
+      "key": "app.logs.error.download_unavailable",
+      "id": 4264123149,
+      "args": [],
+      "features": {
+        "select": false,
+        "plural_cardinal": false,
+        "plural_ordinal": false,
+        "formatters": []
+      }
+    },
+    {
+      "key": "app.logs.error.url_failed",
+      "id": 2872906070,
+      "args": [],
+      "features": {
+        "select": false,
+        "plural_cardinal": false,
+        "plural_ordinal": false,
+        "formatters": []
+      }
+    },
+    {
+      "key": "app.logs.error.window_unavailable",
+      "id": 2350479185,
+      "args": [],
+      "features": {
+        "select": false,
+        "plural_cardinal": false,
+        "plural_ordinal": false,
+        "formatters": []
+      }
+    },
+    {
+      "key": "app.logs.filters.aria",
+      "id": 2416988381,
+      "args": [],
+      "features": {
+        "select": false,
+        "plural_cardinal": false,
+        "plural_ordinal": false,
+        "formatters": []
+      }
+    },
+    {
+      "key": "app.logs.filters.from_ms",
+      "id": 1695556959,
+      "args": [],
+      "features": {
+        "select": false,
+        "plural_cardinal": false,
+        "plural_ordinal": false,
+        "formatters": []
+      }
+    },
+    {
+      "key": "app.logs.filters.search_placeholder",
+      "id": 2459121539,
+      "args": [],
+      "features": {
+        "select": false,
+        "plural_cardinal": false,
+        "plural_ordinal": false,
+        "formatters": []
+      }
+    },
+    {
+      "key": "app.logs.filters.to_ms",
+      "id": 3879399801,
+      "args": [],
+      "features": {
+        "select": false,
+        "plural_cardinal": false,
+        "plural_ordinal": false,
+        "formatters": []
+      }
+    },
+    {
+      "key": "app.logs.level.all",
+      "id": 3715000598,
+      "args": [],
+      "features": {
+        "select": false,
+        "plural_cardinal": false,
+        "plural_ordinal": false,
+        "formatters": []
+      }
+    },
+    {
+      "key": "app.logs.level.debug",
+      "id": 2466649524,
+      "args": [],
+      "features": {
+        "select": false,
+        "plural_cardinal": false,
+        "plural_ordinal": false,
+        "formatters": []
+      }
+    },
+    {
+      "key": "app.logs.level.error",
+      "id": 135430264,
+      "args": [],
+      "features": {
+        "select": false,
+        "plural_cardinal": false,
+        "plural_ordinal": false,
+        "formatters": []
+      }
+    },
+    {
+      "key": "app.logs.level.info",
+      "id": 289833569,
+      "args": [],
+      "features": {
+        "select": false,
+        "plural_cardinal": false,
+        "plural_ordinal": false,
+        "formatters": []
+      }
+    },
+    {
+      "key": "app.logs.level.warn",
+      "id": 3186734388,
+      "args": [],
+      "features": {
+        "select": false,
+        "plural_cardinal": false,
+        "plural_ordinal": false,
+        "formatters": []
+      }
+    },
+    {
+      "key": "app.logs.pagination.aria",
+      "id": 887319320,
+      "args": [],
+      "features": {
+        "select": false,
+        "plural_cardinal": false,
+        "plural_ordinal": false,
+        "formatters": []
+      }
+    },
+    {
+      "key": "app.logs.pagination.next",
+      "id": 2509771422,
+      "args": [],
+      "features": {
+        "select": false,
+        "plural_cardinal": false,
+        "plural_ordinal": false,
+        "formatters": []
+      }
+    },
+    {
+      "key": "app.logs.pagination.prev",
+      "id": 3713405982,
+      "args": [],
+      "features": {
+        "select": false,
+        "plural_cardinal": false,
+        "plural_ordinal": false,
+        "formatters": []
+      }
+    },
+    {
+      "key": "app.logs.status.copy_ok",
+      "id": 4173530628,
+      "args": [],
+      "features": {
+        "select": false,
+        "plural_cardinal": false,
+        "plural_ordinal": false,
+        "formatters": []
+      }
+    },
+    {
+      "key": "app.logs.status.download_ok",
+      "id": 251408416,
+      "args": [],
+      "features": {
+        "select": false,
+        "plural_cardinal": false,
+        "plural_ordinal": false,
+        "formatters": []
+      }
+    },
+    {
+      "key": "app.logs.status.dump_empty",
+      "id": 3480269256,
+      "args": [],
+      "features": {
+        "select": false,
+        "plural_cardinal": false,
+        "plural_ordinal": false,
+        "formatters": []
+      }
+    },
+    {
+      "key": "app.logs.status.idle",
+      "id": 3608732267,
+      "args": [],
+      "features": {
+        "select": false,
+        "plural_cardinal": false,
+        "plural_ordinal": false,
+        "formatters": []
+      }
+    },
+    {
+      "key": "app.logs.status.loading",
+      "id": 2750762471,
+      "args": [],
+      "features": {
+        "select": false,
+        "plural_cardinal": false,
+        "plural_ordinal": false,
+        "formatters": []
+      }
+    },
+    {
+      "key": "app.logs.status.support_bundle_ready",
+      "id": 3166859448,
+      "args": [],
+      "features": {
+        "select": false,
+        "plural_cardinal": false,
+        "plural_ordinal": false,
+        "formatters": []
+      }
+    },
+    {
+      "key": "app.logs.status.support_copy_ok",
+      "id": 1839220955,
+      "args": [],
+      "features": {
+        "select": false,
+        "plural_cardinal": false,
+        "plural_ordinal": false,
+        "formatters": []
+      }
+    },
+    {
+      "key": "app.logs.summary.limit",
+      "id": 3457741666,
+      "args": [],
+      "features": {
+        "select": false,
+        "plural_cardinal": false,
+        "plural_ordinal": false,
+        "formatters": []
+      }
+    },
+    {
+      "key": "app.logs.summary.of",
+      "id": 2155553479,
+      "args": [],
+      "features": {
+        "select": false,
+        "plural_cardinal": false,
+        "plural_ordinal": false,
+        "formatters": []
+      }
+    },
+    {
+      "key": "app.logs.summary.page",
+      "id": 1355876668,
+      "args": [],
+      "features": {
+        "select": false,
+        "plural_cardinal": false,
+        "plural_ordinal": false,
+        "formatters": []
+      }
+    },
+    {
+      "key": "app.logs.summary.showing",
+      "id": 2923985603,
+      "args": [],
+      "features": {
+        "select": false,
+        "plural_cardinal": false,
+        "plural_ordinal": false,
+        "formatters": []
+      }
+    },
+    {
+      "key": "app.logs.support.button.bundle",
+      "id": 2889964186,
+      "args": [],
+      "features": {
+        "select": false,
+        "plural_cardinal": false,
+        "plural_ordinal": false,
+        "formatters": []
+      }
+    },
+    {
+      "key": "app.logs.support.button.copy_instructions",
+      "id": 3553383813,
+      "args": [],
+      "features": {
+        "select": false,
+        "plural_cardinal": false,
+        "plural_ordinal": false,
+        "formatters": []
+      }
+    },
+    {
+      "key": "app.logs.support.instructions.download",
+      "id": 483676330,
+      "args": [],
+      "features": {
+        "select": false,
+        "plural_cardinal": false,
+        "plural_ordinal": false,
+        "formatters": []
+      }
+    },
+    {
+      "key": "app.logs.support.instructions.notes",
+      "id": 3320932212,
+      "args": [],
+      "features": {
+        "select": false,
+        "plural_cardinal": false,
+        "plural_ordinal": false,
+        "formatters": []
+      }
+    },
+    {
+      "key": "app.logs.support.instructions.share",
+      "id": 1138860050,
+      "args": [],
+      "features": {
+        "select": false,
+        "plural_cardinal": false,
+        "plural_ordinal": false,
+        "formatters": []
+      }
+    },
+    {
+      "key": "app.logs.support.instructions.title",
+      "id": 3942736448,
+      "args": [],
+      "features": {
+        "select": false,
+        "plural_cardinal": false,
+        "plural_ordinal": false,
+        "formatters": []
+      }
+    },
+    {
+      "key": "app.logs.support.title",
+      "id": 1704291719,
+      "args": [],
+      "features": {
+        "select": false,
+        "plural_cardinal": false,
+        "plural_ordinal": false,
+        "formatters": []
+      }
+    },
+    {
+      "key": "app.logs.title",
+      "id": 2765296598,
+      "args": [],
+      "features": {
+        "select": false,
+        "plural_cardinal": false,
+        "plural_ordinal": false,
+        "formatters": []
+      }
+    },
+    {
       "key": "app.nav.home",
       "id": 2360822558,
       "args": [],

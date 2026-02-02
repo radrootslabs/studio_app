@@ -201,6 +201,101 @@ app.setup.eula.acceptance.title = Acceptance of Terms
 
 app.setup.eula.acceptance.body = By using our application, you signify your acceptance of this EULA. If you do not agree to this EULA, you may not use our application.
 
+# logs
+app.logs.title = logs
+
+app.logs.action.refresh = refresh
+
+app.logs.action.clear = clear
+
+app.logs.action.copy_dump = copy dump
+
+app.logs.action.download_dump = download dump
+
+app.logs.status.idle = idle
+
+app.logs.status.loading = loading
+
+app.logs.status.dump_empty = dump empty
+
+app.logs.status.copy_ok = copied
+
+app.logs.status.download_ok = download ready
+
+app.logs.status.support_copy_ok = instructions copied
+
+app.logs.status.support_bundle_ready = support bundle ready
+
+app.logs.error.copy_unavailable = copy unavailable
+
+app.logs.error.copy_failed = copy failed
+
+app.logs.error.window_unavailable = window unavailable
+
+app.logs.error.download_unavailable = download unavailable
+
+app.logs.error.document_unavailable = document unavailable
+
+app.logs.error.blob_failed = blob creation failed
+
+app.logs.error.url_failed = url creation failed
+
+app.logs.error.anchor_failed = anchor creation failed
+
+app.logs.error.anchor_cast_failed = anchor cast failed
+
+app.logs.filters.aria = filters
+
+app.logs.filters.search_placeholder = search code/message/context
+
+app.logs.filters.from_ms = from ms
+
+app.logs.filters.to_ms = to ms
+
+app.logs.level.all = all
+
+app.logs.level.debug = debug
+
+app.logs.level.info = info
+
+app.logs.level.warn = warn
+
+app.logs.level.error = error
+
+app.logs.summary.showing = showing
+
+app.logs.summary.of = of
+
+app.logs.summary.limit = limit
+
+app.logs.summary.page = page
+
+app.logs.pagination.aria = pagination
+
+app.logs.pagination.prev = prev
+
+app.logs.pagination.next = next
+
+app.logs.support.button.bundle = support bundle
+
+app.logs.support.button.copy_instructions = copy instructions
+
+app.logs.content.aria = log content
+
+app.logs.entries.title = entries
+
+app.logs.dump.title = dump (jsonl)
+
+app.logs.support.title = support instructions
+
+app.logs.support.instructions.title = support bundle
+
+app.logs.support.instructions.download = 1) download the log dump jsonl file
+
+app.logs.support.instructions.share = 2) share the file with support
+
+app.logs.support.instructions.notes = 3) include notes about the issue and time window
+
 # errors
 error.app.init.idb = storage unavailable
 

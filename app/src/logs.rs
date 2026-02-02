@@ -27,6 +27,7 @@ use crate::{
     RadrootsAppLogEntry,
     RadrootsAppLogLevel,
 };
+use crate::t;
 
 #[cfg(target_arch = "wasm32")]
 use js_sys::Array;
@@ -57,6 +58,28 @@ fn log_level_color(level: RadrootsAppLogLevel) -> &'static str {
         RadrootsAppLogLevel::Info => "#0f172a",
         RadrootsAppLogLevel::Warn => "#b45309",
         RadrootsAppLogLevel::Error => "#b91c1c",
+    }
+}
+
+fn log_status_label(value: &str) -> String {
+    match value {
+        "idle" => t!("app.logs.status.idle"),
+        "loading" => t!("app.logs.status.loading"),
+        "dump_empty" => t!("app.logs.status.dump_empty"),
+        "copy_ok" => t!("app.logs.status.copy_ok"),
+        "download_ok" => t!("app.logs.status.download_ok"),
+        "support_copy_ok" => t!("app.logs.status.support_copy_ok"),
+        "support_bundle_ready" => t!("app.logs.status.support_bundle_ready"),
+        "copy_unavailable" => t!("app.logs.error.copy_unavailable"),
+        "copy_failed" => t!("app.logs.error.copy_failed"),
+        "window_unavailable" => t!("app.logs.error.window_unavailable"),
+        "download_unavailable" => t!("app.logs.error.download_unavailable"),
+        "document_unavailable" => t!("app.logs.error.document_unavailable"),
+        "blob_failed" => t!("app.logs.error.blob_failed"),
+        "url_failed" => t!("app.logs.error.url_failed"),
+        "anchor_failed" => t!("app.logs.error.anchor_failed"),
+        "anchor_cast_failed" => t!("app.logs.error.anchor_cast_failed"),
+        _ => value.to_string(),
     }
 }
 
@@ -211,10 +234,10 @@ fn log_dump_with_context(entries: &[RadrootsAppLogEntry], header: String) -> Str
 
 fn support_instructions_text() -> String {
     let lines = [
-        "support bundle",
-        "1) download the log dump jsonl file",
-        "2) share the file with support",
-        "3) include notes about the issue and time window",
+        t!("app.logs.support.instructions.title"),
+        t!("app.logs.support.instructions.download"),
+        t!("app.logs.support.instructions.share"),
+        t!("app.logs.support.instructions.notes"),
     ];
     lines.join("\n")
 }
@@ -558,12 +581,28 @@ pub fn RadrootsAppLogsPage() -> impl IntoView {
         });
         on_cleanup(move || abort_handle_cleanup.abort());
     });
-    let status_label = move || if loading.get() { "loading" } else { "idle" };
-    let dump_action_label =
-        move || dump_status.get().unwrap_or_else(|| "idle".to_string());
+    let status_label = move || {
+        if loading.get() {
+            t!("app.logs.status.loading")
+        } else {
+            t!("app.logs.status.idle")
+        }
+    };
+    let dump_action_label = move || {
+        dump_status
+            .get()
+            .as_deref()
+            .map(log_status_label)
+            .unwrap_or_else(|| t!("app.logs.status.idle"))
+    };
     let dump_action_disabled = move || dump_action_running.get();
-    let support_label =
-        move || support_status.get().unwrap_or_else(|| "idle".to_string());
+    let support_label = move || {
+        support_status
+            .get()
+            .as_deref()
+            .map(log_status_label)
+            .unwrap_or_else(|| t!("app.logs.status.idle"))
+    };
     let support_disabled = move || support_running.get();
     let prev_disabled = move || page_index.get() == 0;
     let next_disabled = move || {
@@ -573,18 +612,18 @@ pub fn RadrootsAppLogsPage() -> impl IntoView {
     view! {
         <main id="app-logs" class="app-page app-page-scroll">
             <header id="app-logs-header" style="display:flex;align-items:center;gap:12px;">
-                <h1 id="app-logs-title" style="font-size:18px;font-weight:600;">"logs"</h1>
-                <button on:click=move |_| refresh()>"refresh"</button>
-                <button on:click=move |_| clear()>"clear"</button>
-                <button on:click=move |_| copy_dump() disabled=dump_action_disabled>"copy dump"</button>
-                <button on:click=move |_| download_dump() disabled=dump_action_disabled>"download dump"</button>
+                <h1 id="app-logs-title" style="font-size:18px;font-weight:600;">{t!("app.logs.title")}</h1>
+                <button on:click=move |_| refresh()>{t!("app.logs.action.refresh")}</button>
+                <button on:click=move |_| clear()>{t!("app.logs.action.clear")}</button>
+                <button on:click=move |_| copy_dump() disabled=dump_action_disabled>{t!("app.logs.action.copy_dump")}</button>
+                <button on:click=move |_| download_dump() disabled=dump_action_disabled>{t!("app.logs.action.download_dump")}</button>
                 <div id="app-logs-status" style="font-size:12px;color:#6b7280;">{status_label}</div>
                 <div id="app-logs-dump-status" style="font-size:12px;color:#6b7280;">{dump_action_label}</div>
             </header>
-            <section id="app-logs-filters" aria-label="Filters" style="margin-top:12px;display:flex;flex-wrap:wrap;gap:12px;align-items:center;">
+            <section id="app-logs-filters" aria-label=t!("app.logs.filters.aria") style="margin-top:12px;display:flex;flex-wrap:wrap;gap:12px;align-items:center;">
                 <input
                     type="text"
-                    placeholder="search code/message/context"
+                    placeholder=t!("app.logs.filters.search_placeholder")
                     prop:value=move || filter_query.get()
                     on:input=move |ev| {
                         filter_query.set(event_target_value(&ev));
@@ -598,15 +637,15 @@ pub fn RadrootsAppLogsPage() -> impl IntoView {
                     }
                     style="border:1px solid #e5e7eb;border-radius:8px;padding:6px 8px;font-size:12px;"
                 >
-                    <option value="all">"all"</option>
-                    <option value="debug">"debug"</option>
-                    <option value="info">"info"</option>
-                    <option value="warn">"warn"</option>
-                    <option value="error">"error"</option>
+                    <option value="all">{t!("app.logs.level.all")}</option>
+                    <option value="debug">{t!("app.logs.level.debug")}</option>
+                    <option value="info">{t!("app.logs.level.info")}</option>
+                    <option value="warn">{t!("app.logs.level.warn")}</option>
+                    <option value="error">{t!("app.logs.level.error")}</option>
                 </select>
                 <input
                     type="number"
-                    placeholder="from ms"
+                    placeholder=t!("app.logs.filters.from_ms")
                     prop:value=move || filter_from.get()
                     on:input=move |ev| {
                         filter_from.set(event_target_value(&ev));
@@ -615,7 +654,7 @@ pub fn RadrootsAppLogsPage() -> impl IntoView {
                 />
                 <input
                     type="number"
-                    placeholder="to ms"
+                    placeholder=t!("app.logs.filters.to_ms")
                     prop:value=move || filter_to.get()
                     on:input=move |ev| {
                         filter_to.set(event_target_value(&ev));
@@ -644,11 +683,22 @@ pub fn RadrootsAppLogsPage() -> impl IntoView {
                         let limit = filter_limit.get();
                         let pages = page_total.get();
                         let page = if pages == 0 { 0 } else { page_index.get() + 1 };
-                        format!("showing {visible} of {total} (limit {limit}) page {page}/{pages}")
+                        format!(
+                            "{} {} {} {} ({} {}) {} {}/{}",
+                            t!("app.logs.summary.showing"),
+                            visible,
+                            t!("app.logs.summary.of"),
+                            total,
+                            t!("app.logs.summary.limit"),
+                            limit,
+                            t!("app.logs.summary.page"),
+                            page,
+                            pages
+                        )
                     }}
                 </div>
             </section>
-            <section id="app-logs-pagination" aria-label="Pagination" style="margin-top:8px;display:flex;align-items:center;gap:8px;">
+            <section id="app-logs-pagination" aria-label=t!("app.logs.pagination.aria") style="margin-top:8px;display:flex;align-items:center;gap:8px;">
                 <button
                     on:click=move |_| {
                         let next = page_index.get().saturating_sub(1);
@@ -656,7 +706,7 @@ pub fn RadrootsAppLogsPage() -> impl IntoView {
                     }
                     disabled=prev_disabled
                 >
-                    "prev"
+                    {t!("app.logs.pagination.prev")}
                 </button>
                 <button
                     on:click=move |_| {
@@ -665,19 +715,19 @@ pub fn RadrootsAppLogsPage() -> impl IntoView {
                     }
                     disabled=next_disabled
                 >
-                    "next"
+                    {t!("app.logs.pagination.next")}
                 </button>
                 <button on:click=move |_| support_bundle() disabled=support_disabled>
-                    "support bundle"
+                    {t!("app.logs.support.button.bundle")}
                 </button>
                 <button on:click=move |_| copy_support() disabled=support_disabled>
-                    "copy instructions"
+                    {t!("app.logs.support.button.copy_instructions")}
                 </button>
                 <div id="app-logs-support-status" style="font-size:12px;color:#6b7280;">{support_label}</div>
             </section>
-            <section id="app-logs-content" aria-label="Log content" style="margin-top:12px;display:flex;flex-wrap:wrap;gap:16px;">
+            <section id="app-logs-content" aria-label=t!("app.logs.content.aria") style="margin-top:12px;display:flex;flex-wrap:wrap;gap:16px;">
                 <section id="app-logs-entries" style="flex:1 1 520px;min-width:280px;">
-                    <h2 id="app-logs-entries-title" style="font-weight:600;font-size:14px;">"entries"</h2>
+                    <h2 id="app-logs-entries-title" style="font-weight:600;font-size:14px;">{t!("app.logs.entries.title")}</h2>
                     <div id="app-logs-entries-list" style="margin-top:8px;border:1px solid #e5e7eb;border-radius:8px;height:60vh;overflow:auto;padding:10px;display:flex;flex-direction:column;gap:10px;">
                         <For
                             each=move || paged_entries.get()
@@ -723,13 +773,13 @@ pub fn RadrootsAppLogsPage() -> impl IntoView {
                     </div>
                 </section>
                 <section id="app-logs-dump" style="flex:1 1 320px;min-width:260px;">
-                    <h2 id="app-logs-dump-title" style="font-weight:600;font-size:14px;">"dump (jsonl)"</h2>
+                    <h2 id="app-logs-dump-title" style="font-weight:600;font-size:14px;">{t!("app.logs.dump.title")}</h2>
                     <textarea
                         readonly
                         prop:value=move || dump_text.get()
                         style="margin-top:8px;width:100%;height:60vh;border:1px solid #e5e7eb;border-radius:8px;padding:8px;font-size:12px;font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,\"Liberation Mono\",\"Courier New\",monospace;"
                     ></textarea>
-                    <h3 id="app-logs-support-title" style="margin-top:12px;font-weight:600;font-size:14px;">"support instructions"</h3>
+                    <h3 id="app-logs-support-title" style="margin-top:12px;font-weight:600;font-size:14px;">{t!("app.logs.support.title")}</h3>
                     <textarea
                         readonly
                         prop:value=move || support_instructions_text()
@@ -761,7 +811,8 @@ mod tests {
         logs_max_visible,
         logs_page_size_default,
     };
-    use crate::{RadrootsAppLogEntry, RadrootsAppLogLevel, RadrootsAppLogMetadata};
+    use crate::{app_i18n_init, RadrootsAppLogEntry, RadrootsAppLogLevel, RadrootsAppLogMetadata};
+    use leptos::prelude::{provide_context, Owner};
 
     #[test]
     fn logs_auto_refresh_is_positive() {
@@ -890,6 +941,9 @@ mod tests {
 
     #[test]
     fn support_instructions_are_present() {
+        let owner = Owner::new();
+        owner.set();
+        provide_context(app_i18n_init());
         let text = support_instructions_text();
         assert!(text.contains("support bundle"));
     }
