@@ -9,6 +9,11 @@ use web_sys::HtmlElement;
 
 use radroots_studio_app_core::datastore::RadrootsClientDatastore;
 use radroots_studio_app_core::idb::IDB_CONFIG_LOGS;
+use radroots_studio_app_core::keystore::{
+    RadrootsClientKeystoreError,
+    RadrootsClientKeystoreNostr,
+    RadrootsClientWebKeystoreNostr,
+};
 use radroots_studio_app_ui_components::{
     RadrootsAppUiButtonLayoutAction,
     RadrootsAppUiButtonLayoutBackAction,
@@ -33,11 +38,15 @@ use crate::{
     app_log_error_emit,
     app_log_error_store,
     app_config_default,
+    app_datastore_clear_setup_draft,
     app_datastore_read_state,
     app_datastore_read_setup_draft,
     app_datastore_write_setup_draft,
+    app_keystore_nostr_ensure_key,
     app_state_notifications_permission_value,
     app_state_set_notifications_permission_value,
+    app_setup_eula_date,
+    app_setup_finalize_with_key,
     app_setup_step_default,
     app_health_check_all,
     RadrootsAppBackends,
@@ -49,6 +58,7 @@ use crate::{
     RadrootsAppInitStage,
     RadrootsAppNotifications,
     RadrootsAppLogsPage,
+    RadrootsAppKeystoreError,
     RadrootsAppRole,
     RadrootsAppSettingsPage,
     RadrootsAppSetupDraft,
@@ -320,14 +330,82 @@ fn SetupPage() -> impl IntoView {
         }
     });
     let advance_step: Callback<()> = {
+        let backends = backends.clone();
         let setup_step = setup_step.clone();
         let setup_key_choice = setup_key_choice.clone();
+        let nostr_key_add = nostr_key_add.clone();
         let profile_name = profile_name.clone();
         let setup_required = setup_required.clone();
         Callback::new(move |_| {
             let current_step = setup_step.get();
             if matches!(current_step, RadrootsAppSetupStep::Eula) {
-                setup_required.set(Some(false));
+                let key_choice = setup_key_choice.get();
+                let nostr_key_add = nostr_key_add.get();
+                let eula_date = app_setup_eula_date();
+                let setup_required = setup_required.clone();
+                let backends = backends.clone();
+                spawn_local(async move {
+                    let Some((datastore, key_maps, keystore_config)) = backends.with_untracked(|value| {
+                        value.as_ref().map(|backends| {
+                            (
+                                backends.datastore.clone(),
+                                backends.config.datastore.key_maps.clone(),
+                                backends.nostr_keystore.get_config(),
+                            )
+                        })
+                    }) else {
+                        return;
+                    };
+                    let keystore = RadrootsClientWebKeystoreNostr::new(Some(keystore_config));
+                    let active_key = match key_choice {
+                        Some(RadrootsAppSetupKeyChoice::AddExisting) => {
+                            let secret_key = nostr_key_add.trim();
+                            if secret_key.is_empty() {
+                                let err = RadrootsAppInitError::Keystore(
+                                    RadrootsClientKeystoreError::NostrInvalidSecretKey,
+                                );
+                                let _ = app_log_error_emit(&err);
+                                return;
+                            }
+                            match keystore.add(secret_key).await {
+                                Ok(value) => value,
+                                Err(err) => {
+                                    let init_err = RadrootsAppInitError::Keystore(err);
+                                    let _ = app_log_error_emit(&init_err);
+                                    return;
+                                }
+                            }
+                        }
+                        _ => match app_keystore_nostr_ensure_key(&keystore).await {
+                            Ok(value) => value,
+                            Err(err) => {
+                                let init_err = match err {
+                                    RadrootsAppKeystoreError::Keystore(inner) => {
+                                        RadrootsAppInitError::Keystore(inner)
+                                    }
+                                    RadrootsAppKeystoreError::KeyMismatch => RadrootsAppInitError::Keystore(
+                                        RadrootsClientKeystoreError::NostrInvalidSecretKey,
+                                    ),
+                                };
+                                let _ = app_log_error_emit(&init_err);
+                                return;
+                            }
+                        },
+                    };
+                    if let Err(err) = app_setup_finalize_with_key(
+                        datastore.as_ref(),
+                        &key_maps,
+                        active_key,
+                        eula_date,
+                    )
+                    .await
+                    {
+                        let _ = app_log_error_emit(&err);
+                        return;
+                    }
+                    let _ = app_datastore_clear_setup_draft(datastore.as_ref(), &key_maps).await;
+                    setup_required.set(Some(false));
+                });
                 return;
             }
             if matches!(current_step, RadrootsAppSetupStep::Profile) {

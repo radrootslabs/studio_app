@@ -108,7 +108,16 @@ pub async fn app_setup_initialize<T: RadrootsClientDatastore, K: RadrootsClientK
                 RadrootsAppInitError::Keystore(RadrootsClientKeystoreError::NostrInvalidSecretKey)
             }
         })?;
-    let state = app_setup_state_new(active_key.clone(), app_setup_eula_date());
+    app_setup_finalize_with_key(datastore, key_maps, active_key, app_setup_eula_date()).await
+}
+
+pub async fn app_setup_finalize_with_key<T: RadrootsClientDatastore>(
+    datastore: &T,
+    key_maps: &RadrootsAppKeyMapConfig,
+    active_key: String,
+    eula_date: String,
+) -> RadrootsAppInitResult<RadrootsAppState> {
+    let state = app_setup_state_new(active_key.clone(), eula_date);
     let stored_state = app_datastore_create_state(datastore, key_maps, &state).await?;
     let key_name = app_datastore_key_nostr_key(key_maps).map_err(RadrootsAppInitError::Config)?;
     datastore
@@ -123,6 +132,7 @@ pub async fn app_setup_initialize<T: RadrootsClientDatastore, K: RadrootsClientK
 mod tests {
     use super::{
         app_setup_eula_date,
+        app_setup_finalize_with_key,
         app_setup_initialize,
         app_setup_state_new,
         app_setup_step_default,
@@ -431,6 +441,27 @@ mod tests {
         let key_name = app_datastore_key_nostr_key(&key_maps).expect("key name");
         let stored = futures::executor::block_on(datastore.get(key_name)).expect("stored");
         assert_eq!(stored, public_key);
+        assert!(datastore.record.borrow().is_some());
+    }
+
+    #[test]
+    fn setup_finalize_with_key_writes_state() {
+        let datastore = TestDatastore {
+            record: RefCell::new(None),
+            values: RefCell::new(BTreeMap::new()),
+        };
+        let key_maps = app_key_maps_default();
+        let state = futures::executor::block_on(app_setup_finalize_with_key(
+            &datastore,
+            &key_maps,
+            "pub".to_string(),
+            "2025-01-01T00:00:00Z".to_string(),
+        ))
+        .expect("finalize");
+        assert_eq!(state.active_key, "pub");
+        let key_name = app_datastore_key_nostr_key(&key_maps).expect("key name");
+        let stored = futures::executor::block_on(datastore.get(key_name)).expect("stored");
+        assert_eq!(stored, "pub");
         assert!(datastore.record.borrow().is_some());
     }
 }
