@@ -27,7 +27,7 @@ use crate::{
     app_init_assets,
     app_init_backends,
     app_init_has_completed,
-    app_init_needs_setup,
+    app_init_setup_status,
     app_init_state_default,
     app_init_mark_completed,
     app_init_reset,
@@ -58,6 +58,7 @@ use crate::{
     app_state_timestamp_ms,
     app_setup_eula_date,
     app_setup_finalize_with_key,
+    app_setup_gate_from_status,
     app_setup_step_default,
     app_health_check_all,
     RadrootsAppBackends,
@@ -80,6 +81,7 @@ use crate::{
     RadrootsAppSetupBusinessChoice,
     RadrootsAppSetupLock,
     RadrootsAppSetupLockStatus,
+    RadrootsAppSetupStatus,
     RadrootsAppUiDemoPage,
     RadrootsAppSetupStep,
     RadrootsAppTangleClientStub,
@@ -301,11 +303,11 @@ fn SetupPage() -> impl IntoView {
         .as_ref()
         .map(|value| value.backends)
         .unwrap_or(fallback_backends);
-    let fallback_setup_required = RwSignal::new_local(None::<bool>);
-    let setup_required = context
+    let fallback_setup_status = RwSignal::new_local(RadrootsAppSetupStatus::Unknown);
+    let setup_status = context
         .as_ref()
-        .map(|value| value.setup_required)
-        .unwrap_or(fallback_setup_required);
+        .map(|value| value.setup_status)
+        .unwrap_or(fallback_setup_status);
     let navigate = use_navigate();
     let navigate_guard = navigate.clone();
     let navigate_home = navigate.clone();
@@ -358,8 +360,14 @@ fn SetupPage() -> impl IntoView {
     let on_generate_key = setup_touch_callback("generate_key");
     let on_add_key = setup_touch_callback("add_key");
     Effect::new(move || {
-        if setup_required.get() == Some(false) {
-            navigate_guard("/", Default::default());
+        match setup_status.get() {
+            RadrootsAppSetupStatus::Configured => {
+                navigate_guard("/", Default::default());
+            }
+            RadrootsAppSetupStatus::Corrupt => {
+                navigate_guard("/recovery", Default::default());
+            }
+            _ => {}
         }
     });
     Effect::new({
@@ -516,7 +524,7 @@ fn SetupPage() -> impl IntoView {
         let setup_lock_status = setup_lock_status.clone();
         let nostr_key_add = nostr_key_add.clone();
         let profile_name = profile_name.clone();
-        let setup_required = setup_required.clone();
+        let setup_status = setup_status.clone();
         Callback::new(move |_| {
             if app_setup_lock_enabled()
                 && !matches!(
@@ -547,7 +555,7 @@ fn SetupPage() -> impl IntoView {
                 let profile_name = draft.profile_name;
                 let profile_nip05 = draft.profile_nip05;
                 let eula_date = app_setup_eula_date();
-                let setup_required = setup_required.clone();
+                let setup_status = setup_status.clone();
                 let backends = backends.clone();
                 spawn_local(async move {
                     let Some((datastore, key_maps, keystore_config)) = backends.with_untracked(|value| {
@@ -642,7 +650,7 @@ fn SetupPage() -> impl IntoView {
                     if app_setup_lock_enabled() {
                         let _ = app_setup_lock_release(datastore.as_ref(), &key_maps).await;
                     }
-                    setup_required.set(Some(false));
+                    setup_status.set(RadrootsAppSetupStatus::Configured);
                 });
                 return;
             }
@@ -1405,12 +1413,36 @@ fn SetupPage() -> impl IntoView {
 }
 
 #[component]
+fn RecoveryPage() -> impl IntoView {
+    view! {
+        <main id="app-recovery" class="app-page app-page-fixed relative w-full flex flex-col">
+            <section
+                id="app-recovery-view"
+                class="app-view app-view-enter flex flex-col h-[100dvh] w-full px-6 pt-10 pb-16"
+            >
+                <div
+                    id="app-recovery-body"
+                    class="flex flex-1 w-full flex-col justify-center items-center gap-4"
+                >
+                    <p class="font-sans font-[600] text-ly0-gl text-2xl text-center">
+                        {t!("app.recovery.title")}
+                    </p>
+                    <p class="font-mono font-[400] text-ly0-gl text-base text-center">
+                        {t!("app.recovery.body")}
+                    </p>
+                </div>
+            </section>
+        </main>
+    }
+}
+
+#[component]
 fn HomePage() -> impl IntoView {
     let context = app_context();
     let fallback_backends = RwSignal::new_local(None::<RadrootsAppBackends>);
     let fallback_init_error = RwSignal::new_local(None::<RadrootsAppInitError>);
     let fallback_init_state = RwSignal::new_local(app_init_state_default());
-    let fallback_setup_required = RwSignal::new_local(None::<bool>);
+    let fallback_setup_status = RwSignal::new_local(RadrootsAppSetupStatus::Unknown);
     let backends = context
         .as_ref()
         .map(|value| value.backends)
@@ -1419,10 +1451,10 @@ fn HomePage() -> impl IntoView {
         .as_ref()
         .map(|value| value.init_state)
         .unwrap_or(fallback_init_state);
-    let setup_required = context
+    let setup_status = context
         .as_ref()
-        .map(|value| value.setup_required)
-        .unwrap_or(fallback_setup_required);
+        .map(|value| value.setup_status)
+        .unwrap_or(fallback_setup_status);
     let _init_error = context
         .as_ref()
         .map(|value| value.init_error)
@@ -1441,10 +1473,11 @@ fn HomePage() -> impl IntoView {
         if health_autorun.get() {
             return;
         }
-        let setup_required = setup_required.get();
-        let Some(setup_required_value) = setup_required else {
+        let setup_status = setup_status.get();
+        if matches!(setup_status, RadrootsAppSetupStatus::Unknown) {
             return;
-        };
+        }
+        let setup_required_value = !matches!(setup_status, RadrootsAppSetupStatus::Configured);
         let config = backends.with_untracked(|value| value.as_ref().map(|backends| backends.config.clone()));
         let Some(config) = config else {
             return;
@@ -1484,7 +1517,7 @@ fn HomePage() -> impl IntoView {
     let health_disabled = move || {
         backends.with(|value| value.is_none())
             || health_running.get()
-            || setup_required.get().is_none()
+            || matches!(setup_status.get(), RadrootsAppSetupStatus::Unknown)
     };
     let notifications_disabled = move || {
         backends.with(|value| value.is_none()) || notifications_requesting.get()
@@ -1528,7 +1561,7 @@ fn HomePage() -> impl IntoView {
                             health_report.set(RadrootsAppHealthReport::empty());
                             active_key.set(None);
                             notifications_status.set(None);
-                            setup_required.set(Some(true));
+                            setup_status.set(RadrootsAppSetupStatus::Required);
                             spawn_local(async move {
                                 let Some(config) = config else {
                                     reset_status.set(Some("reset_missing_backends".to_string()));
@@ -1654,9 +1687,8 @@ fn HomePage() -> impl IntoView {
                             let Some(config) = config else {
                                 return;
                             };
-                            let setup_required_value = setup_required
-                                .get()
-                                .unwrap_or(false);
+                            let setup_required_value =
+                                !matches!(setup_status.get(), RadrootsAppSetupStatus::Configured);
                             spawn_health_checks(
                                 config,
                                 setup_required_value,
@@ -1772,12 +1804,12 @@ fn AppShell() -> impl IntoView {
     let backends = RwSignal::new_local(None::<RadrootsAppBackends>);
     let init_error = RwSignal::new_local(None::<RadrootsAppInitError>);
     let init_state = RwSignal::new_local(app_init_state_default());
-    let setup_required = RwSignal::new_local(None::<bool>);
+    let setup_status = RwSignal::new_local(RadrootsAppSetupStatus::Unknown);
     let navigate = use_navigate();
     provide_context(backends);
     provide_context(init_error);
     provide_context(init_state);
-    provide_context(setup_required);
+    provide_context(setup_status);
     provide_context(app_i18n_init());
     Effect::new(move || {
         let navigate = navigate.clone();
@@ -1832,22 +1864,28 @@ fn AppShell() -> impl IntoView {
                     init_state.update(|state| app_init_stage_set(state, stage));
                     log_init_stage(stage);
                     let navigate = navigate.clone();
-                    let setup_required = setup_required.clone();
+                    let setup_status = setup_status.clone();
                     spawn_local(async move {
                         let keystore = radroots_studio_app_core::keystore::RadrootsClientWebKeystoreNostr::new(
                             Some(keystore_config),
                         );
-                        match app_init_needs_setup(datastore.as_ref(), &keystore, &key_maps).await {
-                            Ok(needs_setup) => {
-                                setup_required.set(Some(needs_setup));
-                                if needs_setup {
-                                    navigate("/setup", Default::default());
+                        match app_init_setup_status(datastore.as_ref(), &keystore, &key_maps).await {
+                            Ok(status) => {
+                                setup_status.set(status);
+                                match status {
+                                    RadrootsAppSetupStatus::Required | RadrootsAppSetupStatus::Locked => {
+                                        navigate("/setup", Default::default());
+                                    }
+                                    RadrootsAppSetupStatus::Corrupt => {
+                                        navigate("/recovery", Default::default());
+                                    }
+                                    _ => {}
                                 }
                             }
                             Err(err) => {
                                 let _ = app_log_error_emit(&err);
-                                setup_required.set(Some(true));
-                                navigate("/setup", Default::default());
+                                setup_status.set(RadrootsAppSetupStatus::Corrupt);
+                                navigate("/recovery", Default::default());
                             }
                         }
                     });
@@ -1875,42 +1913,51 @@ fn AppShell() -> impl IntoView {
             }
         })
     });
+    let setup_gate = move || app_setup_gate_from_status(setup_status.get());
     view! {
         <Show
             when=move || {
                 init_state.get().stage == RadrootsAppInitStage::Ready
-                    && setup_required.get().is_some()
+                    && !matches!(setup_status.get(), RadrootsAppSetupStatus::Unknown)
             }
             fallback=|| view! { <SplashPage /> }
         >
-        <Show
-            when=move || setup_required.get() == Some(false)
-            fallback=|| view! { <SetupPage /> }
-        >
-            <div id="app-shell">
-                <nav id="app-nav" aria-label=t!("app.nav.primary_aria") style="display:flex;gap:12px;margin-bottom:12px;">
-                    <A href="/" exact=true>{t!("app.nav.home")}</A>
-                    <A href="/logs">{t!("app.nav.logs")}</A>
-                    <A href="/ui">{t!("app.nav.ui")}</A>
-                    <A href="/settings">{t!("app.nav.settings")}</A>
-                    <A href="/setup">{t!("app.nav.setup")}</A>
-                </nav>
-                <Routes
-                    fallback=|| view! {
-                        <main id="app-not-found" class="app-page app-page-fixed">
-                            <p id="app-not-found-label">{t!("app.not_found")}</p>
-                        </main>
+            {move || {
+                let gate = setup_gate();
+                if gate.show_recovery {
+                    return view! { <RecoveryPage /> }.into_any();
+                }
+                if gate.show_setup {
+                    return view! { <SetupPage /> }.into_any();
+                }
+                if gate.show_app {
+                    return view! {
+                        <div id="app-shell">
+                            <nav id="app-nav" aria-label=t!("app.nav.primary_aria") style="display:flex;gap:12px;margin-bottom:12px;">
+                                <A href="/" exact=true>{t!("app.nav.home")}</A>
+                                <A href="/logs">{t!("app.nav.logs")}</A>
+                                <A href="/ui">{t!("app.nav.ui")}</A>
+                                <A href="/settings">{t!("app.nav.settings")}</A>
+                            </nav>
+                            <Routes
+                                fallback=|| view! {
+                                    <main id="app-not-found" class="app-page app-page-fixed">
+                                        <p id="app-not-found-label">{t!("app.not_found")}</p>
+                                    </main>
+                                }
+                            >
+                                <Route path=path!("") view=HomePage />
+                                <Route path=path!("logs") view=RadrootsAppLogsPage />
+                                <Route path=path!("ui") view=RadrootsAppUiDemoPage />
+                                <Route path=path!("settings") view=RadrootsAppSettingsPage />
+                            </Routes>
+                        </div>
                     }
-                >
-                    <Route path=path!("") view=HomePage />
-                    <Route path=path!("logs") view=RadrootsAppLogsPage />
-                    <Route path=path!("ui") view=RadrootsAppUiDemoPage />
-                    <Route path=path!("settings") view=RadrootsAppSettingsPage />
-                    <Route path=path!("setup") view=SetupPage />
-                </Routes>
-            </div>
+                    .into_any();
+                }
+                view! { <SplashPage /> }.into_any()
+            }}
         </Show>
-    </Show>
     }
 }
 

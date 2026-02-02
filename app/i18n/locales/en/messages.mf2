@@ -26,10 +26,13 @@ app.nav.ui = ui
 
 app.nav.settings = settings
 
-app.nav.setup = setup
-
 # not found
 app.not_found = not found
+
+# recovery
+app.recovery.title = Recovery required
+
+app.recovery.body = This device could not verify its setup state. Reset the device to continue.
 
 # init stages
 app.init.stage.idle = idle

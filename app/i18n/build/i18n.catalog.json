@@ -1127,17 +1127,6 @@
       }
     },
     {
-      "key": "app.nav.setup",
-      "id": 2066290074,
-      "args": [],
-      "features": {
-        "select": false,
-        "plural_cardinal": false,
-        "plural_ordinal": false,
-        "formatters": []
-      }
-    },
-    {
       "key": "app.nav.ui",
       "id": 2416341108,
       "args": [],
@@ -1151,6 +1140,28 @@
     {
       "key": "app.not_found",
       "id": 3182331848,
+      "args": [],
+      "features": {
+        "select": false,
+        "plural_cardinal": false,
+        "plural_ordinal": false,
+        "formatters": []
+      }
+    },
+    {
+      "key": "app.recovery.body",
+      "id": 3376325333,
+      "args": [],
+      "features": {
+        "select": false,
+        "plural_cardinal": false,
+        "plural_ordinal": false,
+        "formatters": []
+      }
+    },
+    {
+      "key": "app.recovery.title",
+      "id": 853393776,
       "args": [],
       "features": {
         "select": false,

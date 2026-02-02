@@ -2,14 +2,14 @@
 
 use leptos::prelude::{use_context, LocalStorage, RwSignal};
 
-use crate::{RadrootsAppBackends, RadrootsAppInitError, RadrootsAppInitState};
+use crate::{RadrootsAppBackends, RadrootsAppInitError, RadrootsAppInitState, RadrootsAppSetupStatus};
 
 #[derive(Clone)]
 pub struct RadrootsAppContext {
     pub backends: RwSignal<Option<RadrootsAppBackends>, LocalStorage>,
     pub init_error: RwSignal<Option<RadrootsAppInitError>, LocalStorage>,
     pub init_state: RwSignal<RadrootsAppInitState, LocalStorage>,
-    pub setup_required: RwSignal<Option<bool>, LocalStorage>,
+    pub setup_status: RwSignal<RadrootsAppSetupStatus, LocalStorage>,
 }
 
 pub fn app_context() -> Option<RadrootsAppContext> {
@@ -17,14 +17,20 @@ pub fn app_context() -> Option<RadrootsAppContext> {
         backends: use_context::<RwSignal<Option<RadrootsAppBackends>, LocalStorage>>()?,
         init_error: use_context::<RwSignal<Option<RadrootsAppInitError>, LocalStorage>>()?,
         init_state: use_context::<RwSignal<RadrootsAppInitState, LocalStorage>>()?,
-        setup_required: use_context::<RwSignal<Option<bool>, LocalStorage>>()?,
+        setup_status: use_context::<RwSignal<RadrootsAppSetupStatus, LocalStorage>>()?,
     })
 }
 
 #[cfg(test)]
 mod tests {
     use super::app_context;
-    use crate::{app_init_state_default, RadrootsAppBackends, RadrootsAppInitError, RadrootsAppInitStage};
+    use crate::{
+        app_init_state_default,
+        RadrootsAppBackends,
+        RadrootsAppInitError,
+        RadrootsAppInitStage,
+        RadrootsAppSetupStatus,
+    };
     use leptos::prelude::{provide_context, Owner, RwSignal, WithUntracked};
 
     #[test]
@@ -41,11 +47,11 @@ mod tests {
         let backends = RwSignal::new_local(None::<RadrootsAppBackends>);
         let init_error = RwSignal::new_local(None::<RadrootsAppInitError>);
         let init_state = RwSignal::new_local(app_init_state_default());
-        let setup_required = RwSignal::new_local(None::<bool>);
+        let setup_status = RwSignal::new_local(RadrootsAppSetupStatus::Unknown);
         provide_context(backends);
         provide_context(init_error);
         provide_context(init_state);
-        provide_context(setup_required);
+        provide_context(setup_status);
         let context = app_context().expect("context");
         assert!(context.backends.with_untracked(|value| value.is_none()));
         assert!(context.init_error.with_untracked(|value| value.is_none()));
@@ -53,6 +59,11 @@ mod tests {
             context.init_state.with_untracked(|state| state.stage),
             RadrootsAppInitStage::Idle
         );
-        assert!(context.setup_required.with_untracked(|value| value.is_none()));
+        assert_eq!(
+            context
+                .setup_status
+                .with_untracked(|value| *value),
+            RadrootsAppSetupStatus::Unknown
+        );
     }
 }
