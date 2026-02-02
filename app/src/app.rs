@@ -18,7 +18,9 @@ use radroots_studio_app_ui_components::{
     RadrootsAppUiButtonLayoutAction,
     RadrootsAppUiButtonLayoutBackAction,
     RadrootsAppUiButtonLayoutPair,
+    RadrootsAppUiSpinner,
 };
+use uuid::Uuid;
 
 use crate::t;
 use crate::{
@@ -45,8 +47,15 @@ use crate::{
     app_datastore_write_profile_seed,
     app_datastore_write_setup_draft,
     app_keystore_nostr_ensure_key,
+    app_setup_flow_role_from_choices,
+    app_setup_flow_validate,
+    app_setup_lock_acquire,
+    app_setup_lock_enabled,
+    app_setup_lock_release,
+    app_setup_lock_ttl_ms,
     app_state_notifications_permission_value,
     app_state_set_notifications_permission_value,
+    app_state_timestamp_ms,
     app_setup_eula_date,
     app_setup_finalize_with_key,
     app_setup_step_default,
@@ -65,6 +74,12 @@ use crate::{
     RadrootsAppRole,
     RadrootsAppSettingsPage,
     RadrootsAppSetupDraft,
+    RadrootsAppSetupFlowDraft,
+    RadrootsAppSetupKeyChoice,
+    RadrootsAppSetupFarmerChoice,
+    RadrootsAppSetupBusinessChoice,
+    RadrootsAppSetupLock,
+    RadrootsAppSetupLockStatus,
     RadrootsAppUiDemoPage,
     RadrootsAppSetupStep,
     RadrootsAppTangleClientStub,
@@ -160,37 +175,6 @@ fn setup_touch_callback(action: &'static str) -> Callback<MouseEvent> {
     Callback::new(move |_| {
         let _ = app_log_debug_emit("log.app.setup.choice", action, None);
     })
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum RadrootsAppSetupKeyChoice {
-    Generate,
-    AddExisting,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum RadrootsAppSetupFarmerChoice {
-    Yes,
-    No,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum RadrootsAppSetupBusinessChoice {
-    Yes,
-    No,
-}
-
-fn setup_role_from_choices(
-    farmer_choice: Option<RadrootsAppSetupFarmerChoice>,
-    business_choice: Option<RadrootsAppSetupBusinessChoice>,
-) -> Option<RadrootsAppRole> {
-    match farmer_choice? {
-        RadrootsAppSetupFarmerChoice::Yes => Some(RadrootsAppRole::Farm),
-        RadrootsAppSetupFarmerChoice::No => match business_choice? {
-            RadrootsAppSetupBusinessChoice::Yes => Some(RadrootsAppRole::Business),
-            RadrootsAppSetupBusinessChoice::No => Some(RadrootsAppRole::Individual),
-        },
-    }
 }
 
 fn active_key_label(value: Option<String>) -> String {
@@ -335,6 +319,42 @@ fn SetupPage() -> impl IntoView {
     let profile_name = RwSignal::new_local(String::new());
     let profile_nip05 = RwSignal::new_local(true);
     let setup_draft_loaded = RwSignal::new_local(false);
+    let setup_lock_owner = RwSignal::new_local(Uuid::new_v4().to_string());
+    let setup_lock_status = RwSignal::new_local(None::<RadrootsAppSetupLockStatus>);
+    let setup_lock_attempted = RwSignal::new_local(false);
+    let setup_flow = move || RadrootsAppSetupFlowDraft {
+        step: setup_step.get(),
+        key_choice: setup_key_choice.get(),
+        farmer_choice: setup_farmer_choice.get(),
+        business_choice: setup_business_choice.get(),
+        profile_name: profile_name.get(),
+        profile_nip05: profile_nip05.get(),
+    };
+    let setup_validation = move || app_setup_flow_validate(&setup_flow());
+    let setup_lock_ready = move || {
+        !app_setup_lock_enabled()
+            || matches!(
+                setup_lock_status.get(),
+                Some(RadrootsAppSetupLockStatus::Acquired(_))
+            )
+    };
+    let setup_locked = move || {
+        matches!(
+            setup_lock_status.get(),
+            Some(RadrootsAppSetupLockStatus::Locked(_))
+        )
+    };
+    let setup_lock_pending = move || app_setup_lock_enabled() && setup_lock_status.get().is_none();
+    let retry_setup_lock: Callback<MouseEvent> = {
+        let setup_lock_status = setup_lock_status.clone();
+        let setup_lock_attempted = setup_lock_attempted.clone();
+        let setup_lock_owner = setup_lock_owner.clone();
+        Callback::new(move |_| {
+            setup_lock_status.set(None);
+            setup_lock_attempted.set(false);
+            setup_lock_owner.set(Uuid::new_v4().to_string());
+        })
+    };
     let on_generate_key = setup_touch_callback("generate_key");
     let on_add_key = setup_touch_callback("add_key");
     Effect::new(move || {
@@ -344,7 +364,54 @@ fn SetupPage() -> impl IntoView {
     });
     Effect::new({
         let backends = backends.clone();
+        let setup_lock_status = setup_lock_status.clone();
+        let setup_lock_attempted = setup_lock_attempted.clone();
+        let setup_lock_owner = setup_lock_owner.clone();
+        move |_| {
+            if setup_lock_attempted.get() {
+                return;
+            }
+            if !app_setup_lock_enabled() {
+                setup_lock_attempted.set(true);
+                return;
+            }
+            let Some((datastore, key_maps)) = backends
+                .with(|value| value.as_ref().map(|backends| (backends.datastore.clone(), backends.config.datastore.key_maps.clone())))
+            else {
+                return;
+            };
+            setup_lock_attempted.set(true);
+            let owner = setup_lock_owner.get();
+            let setup_lock_status = setup_lock_status.clone();
+            spawn_local(async move {
+                let now_ms = u64::try_from(app_state_timestamp_ms()).unwrap_or(0);
+                let ttl_ms = app_setup_lock_ttl_ms();
+                match app_setup_lock_acquire(
+                    datastore.as_ref(),
+                    &key_maps,
+                    &owner,
+                    now_ms,
+                    ttl_ms,
+                )
+                .await
+                {
+                    Ok(status) => setup_lock_status.set(Some(status)),
+                    Err(err) => {
+                        let _ = app_log_error_emit(&err);
+                        let fallback = RadrootsAppSetupLock {
+                            owner,
+                            expires_at_ms: now_ms.saturating_add(ttl_ms),
+                        };
+                        setup_lock_status.set(Some(RadrootsAppSetupLockStatus::Acquired(fallback)));
+                    }
+                }
+            });
+        }
+    });
+    Effect::new({
+        let backends = backends.clone();
         let setup_draft_loaded = setup_draft_loaded.clone();
+        let setup_lock_status = setup_lock_status.clone();
         let setup_key_choice = setup_key_choice.clone();
         let setup_farmer_choice = setup_farmer_choice.clone();
         let setup_business_choice = setup_business_choice.clone();
@@ -352,6 +419,14 @@ fn SetupPage() -> impl IntoView {
         let profile_name = profile_name.clone();
         let profile_nip05 = profile_nip05.clone();
         move |_| {
+            if app_setup_lock_enabled()
+                && !matches!(
+                    setup_lock_status.get(),
+                    Some(RadrootsAppSetupLockStatus::Acquired(_))
+                )
+            {
+                return;
+            }
             if setup_draft_loaded.get() {
                 return;
             }
@@ -375,6 +450,7 @@ fn SetupPage() -> impl IntoView {
     Effect::new({
         let backends = backends.clone();
         let setup_draft_loaded = setup_draft_loaded.clone();
+        let setup_lock_status = setup_lock_status.clone();
         let setup_key_choice = setup_key_choice.clone();
         let setup_farmer_choice = setup_farmer_choice.clone();
         let setup_business_choice = setup_business_choice.clone();
@@ -382,6 +458,14 @@ fn SetupPage() -> impl IntoView {
         let profile_name = profile_name.clone();
         let profile_nip05 = profile_nip05.clone();
         move |_| {
+            if app_setup_lock_enabled()
+                && !matches!(
+                    setup_lock_status.get(),
+                    Some(RadrootsAppSetupLockStatus::Acquired(_))
+                )
+            {
+                return;
+            }
             if !setup_draft_loaded.get() {
                 return;
             }
@@ -408,7 +492,7 @@ fn SetupPage() -> impl IntoView {
             } else {
                 Some(profile_value)
             };
-            let role = setup_role_from_choices(
+            let role = app_setup_flow_role_from_choices(
                 setup_farmer_choice.get(),
                 setup_business_choice.get(),
             );
@@ -429,21 +513,39 @@ fn SetupPage() -> impl IntoView {
         let setup_key_choice = setup_key_choice.clone();
         let setup_farmer_choice = setup_farmer_choice.clone();
         let setup_business_choice = setup_business_choice.clone();
+        let setup_lock_status = setup_lock_status.clone();
         let nostr_key_add = nostr_key_add.clone();
         let profile_name = profile_name.clone();
         let setup_required = setup_required.clone();
         Callback::new(move |_| {
-            let current_step = setup_step.get();
+            if app_setup_lock_enabled()
+                && !matches!(
+                    setup_lock_status.get(),
+                    Some(RadrootsAppSetupLockStatus::Acquired(_))
+                )
+            {
+                return;
+            }
+            let draft = RadrootsAppSetupFlowDraft {
+                step: setup_step.get(),
+                key_choice: setup_key_choice.get(),
+                farmer_choice: setup_farmer_choice.get(),
+                business_choice: setup_business_choice.get(),
+                profile_name: profile_name.get(),
+                profile_nip05: profile_nip05.get(),
+            };
+            let validation = app_setup_flow_validate(&draft);
+            let current_step = draft.step;
             if matches!(current_step, RadrootsAppSetupStep::Eula) {
-                let key_choice = setup_key_choice.get();
-                let setup_role = setup_role_from_choices(
+                let key_choice = draft.key_choice;
+                let setup_role = app_setup_flow_role_from_choices(
                     setup_farmer_choice.get(),
                     setup_business_choice.get(),
                 )
                 .unwrap_or_else(RadrootsAppRole::default);
                 let nostr_key_add = nostr_key_add.get();
-                let profile_name = profile_name.get();
-                let profile_nip05 = profile_nip05.get();
+                let profile_name = draft.profile_name;
+                let profile_nip05 = draft.profile_nip05;
                 let eula_date = app_setup_eula_date();
                 let setup_required = setup_required.clone();
                 let backends = backends.clone();
@@ -537,55 +639,32 @@ fn SetupPage() -> impl IntoView {
                         return;
                     }
                     let _ = app_datastore_clear_setup_draft(datastore.as_ref(), &key_maps).await;
+                    if app_setup_lock_enabled() {
+                        let _ = app_setup_lock_release(datastore.as_ref(), &key_maps).await;
+                    }
                     setup_required.set(Some(false));
                 });
                 return;
             }
+            if !validation.can_continue {
+                return;
+            }
             if matches!(current_step, RadrootsAppSetupStep::Profile) {
-                let profile_name = profile_name.get();
-                if profile_nip05.get() && profile_name.trim().is_empty() {
-                    return;
-                }
-                if profile_name.trim().is_empty() {
+                if draft.profile_name.trim().is_empty() {
                     let setup_step = setup_step.clone();
                     let confirm_message = t!("app.setup.profile.confirm_no_name");
+                    let next_step = validation.next_step;
                     spawn_local(async move {
                         let notifications = RadrootsAppNotifications::new(None);
                         let confirm = notifications.confirm_message(&confirm_message).await;
                         if confirm {
-                            setup_step.set(RadrootsAppSetupStep::FarmerSetup);
+                            setup_step.set(next_step);
                         }
                     });
                     return;
                 }
-                setup_step.set(RadrootsAppSetupStep::FarmerSetup);
-                return;
             }
-            setup_step.update(|step| {
-                *step = match *step {
-                    RadrootsAppSetupStep::Intro => RadrootsAppSetupStep::KeyChoice,
-                    RadrootsAppSetupStep::KeyChoice => {
-                        match setup_key_choice.get() {
-                            Some(RadrootsAppSetupKeyChoice::Generate) => {
-                                RadrootsAppSetupStep::Profile
-                            }
-                            Some(RadrootsAppSetupKeyChoice::AddExisting) => {
-                                RadrootsAppSetupStep::KeyAddExisting
-                            }
-                            None => RadrootsAppSetupStep::KeyChoice,
-                        }
-                    }
-                    RadrootsAppSetupStep::KeyAddExisting => RadrootsAppSetupStep::Profile,
-                    RadrootsAppSetupStep::Profile => RadrootsAppSetupStep::FarmerSetup,
-                    RadrootsAppSetupStep::FarmerSetup => match setup_farmer_choice.get() {
-                        Some(RadrootsAppSetupFarmerChoice::Yes) => RadrootsAppSetupStep::Eula,
-                        Some(RadrootsAppSetupFarmerChoice::No) => RadrootsAppSetupStep::BusinessSetup,
-                        None => RadrootsAppSetupStep::FarmerSetup,
-                    },
-                    RadrootsAppSetupStep::BusinessSetup => RadrootsAppSetupStep::Eula,
-                    RadrootsAppSetupStep::Eula => RadrootsAppSetupStep::Eula,
-                };
-            });
+            setup_step.set(validation.next_step);
         })
     };
     let advance_step_click: Callback<MouseEvent> = {
@@ -598,27 +677,34 @@ fn SetupPage() -> impl IntoView {
         let setup_step = setup_step.clone();
         let setup_key_choice = setup_key_choice.clone();
         let setup_farmer_choice = setup_farmer_choice.clone();
+        let setup_business_choice = setup_business_choice.clone();
+        let setup_lock_status = setup_lock_status.clone();
+        let profile_name = profile_name.clone();
+        let profile_nip05 = profile_nip05.clone();
         Callback::new(move |_| {
-            let current_step = setup_step.get();
-            let next_step = match current_step {
-                RadrootsAppSetupStep::Intro => RadrootsAppSetupStep::Intro,
-                RadrootsAppSetupStep::KeyChoice => RadrootsAppSetupStep::Intro,
-                RadrootsAppSetupStep::KeyAddExisting => RadrootsAppSetupStep::KeyChoice,
-                RadrootsAppSetupStep::Profile => match setup_key_choice.get() {
-                    Some(RadrootsAppSetupKeyChoice::AddExisting) => {
-                        RadrootsAppSetupStep::KeyAddExisting
-                    }
-                    _ => RadrootsAppSetupStep::KeyChoice,
-                },
-                RadrootsAppSetupStep::FarmerSetup => RadrootsAppSetupStep::Profile,
-                RadrootsAppSetupStep::BusinessSetup => RadrootsAppSetupStep::FarmerSetup,
-                RadrootsAppSetupStep::Eula => match setup_farmer_choice.get() {
-                    Some(RadrootsAppSetupFarmerChoice::No) => RadrootsAppSetupStep::BusinessSetup,
-                    _ => RadrootsAppSetupStep::FarmerSetup,
-                },
+            if app_setup_lock_enabled()
+                && !matches!(
+                    setup_lock_status.get(),
+                    Some(RadrootsAppSetupLockStatus::Acquired(_))
+                )
+            {
+                return;
+            }
+            let draft = RadrootsAppSetupFlowDraft {
+                step: setup_step.get(),
+                key_choice: setup_key_choice.get(),
+                farmer_choice: setup_farmer_choice.get(),
+                business_choice: setup_business_choice.get(),
+                profile_name: profile_name.get(),
+                profile_nip05: profile_nip05.get(),
             };
-            setup_step.set(next_step);
-            if matches!(next_step, RadrootsAppSetupStep::Intro) {
+            let validation = app_setup_flow_validate(&draft);
+            if !validation.can_back {
+                return;
+            }
+            let prev_step = validation.prev_step;
+            setup_step.set(prev_step);
+            if matches!(prev_step, RadrootsAppSetupStep::Intro) {
                 setup_key_choice.set(None);
             }
         })
@@ -655,7 +741,68 @@ fn SetupPage() -> impl IntoView {
             id="app-setup"
             class="app-page app-page-fixed relative w-full flex flex-col"
         >
-            {move || match setup_step.get() {
+            {move || {
+                if setup_lock_pending() {
+                    return view! {
+                        <section
+                            id="app-setup-lock-pending"
+                            class="app-view app-view-enter flex flex-col h-[100dvh] w-full px-6 pt-10 pb-16"
+                        >
+                            <div
+                                id="app-setup-lock-pending-body"
+                                class="flex flex-1 w-full flex-col justify-center items-center gap-4"
+                            >
+                                <RadrootsAppUiSpinner class="text-[24px]".to_string() />
+                                <p class="font-sans font-[600] text-ly0-gl text-2xl text-center">
+                                    {t!("app.setup.lock.pending.title")}
+                                </p>
+                                <p class="font-mono font-[400] text-ly0-gl text-base text-center">
+                                    {t!("app.setup.lock.pending.body")}
+                                </p>
+                            </div>
+                        </section>
+                    }
+                    .into_any();
+                }
+                if setup_locked() {
+                    return view! {
+                        <section
+                            id="app-setup-lock"
+                            class="app-view app-view-enter flex flex-col h-[100dvh] w-full px-6 pt-10 pb-16"
+                        >
+                            <div
+                                id="app-setup-lock-body"
+                                class="flex flex-1 w-full flex-col justify-center items-center gap-4"
+                            >
+                                <p class="font-sans font-[600] text-ly0-gl text-2xl text-center">
+                                    {t!("app.setup.locked.title")}
+                                </p>
+                                <p class="font-mono font-[400] text-ly0-gl text-base text-center">
+                                    {t!("app.setup.locked.body")}
+                                </p>
+                            </div>
+                            <div
+                                id="app-setup-lock-actions"
+                                class="flex flex-col w-full pt-4 justify-center items-center"
+                            >
+                                {{
+                                    let retry_action = RadrootsAppUiButtonLayoutAction {
+                                        label: t!("app.setup.lock.retry"),
+                                        disabled: false,
+                                        loading: false,
+                                        on_click: retry_setup_lock.clone(),
+                                        class: None,
+                                        class_label: None,
+                                        style: None,
+                                    };
+                                    view! { <RadrootsAppUiButtonLayoutPair continue_action=retry_action class="gap-2".to_string() /> }
+                                }}
+                            </div>
+                        </section>
+                    }
+                    .into_any();
+                }
+                match setup_step.get() {
                 RadrootsAppSetupStep::Intro => {
                     let navigate_home = navigate_home.clone();
                     view! {
@@ -1211,25 +1358,22 @@ fn SetupPage() -> impl IntoView {
                         </div>
                     </section>
                 }.into_any(),
+                }
             }}
             <footer
                 id="app-setup-actions"
                 class="z-10 absolute bottom-4 left-0 flex flex-col w-full justify-center items-center se-compact:bottom-0"
             >
                 {move || {
+                    if !setup_lock_ready() {
+                        return view! { <></> }.into_any();
+                    }
                     let step = setup_step.get();
                     if matches!(step, RadrootsAppSetupStep::Eula) {
                         return view! { <></> }.into_any();
                     }
-                    let continue_disabled = (matches!(step, RadrootsAppSetupStep::KeyChoice)
-                        && setup_key_choice.get().is_none())
-                        || (matches!(step, RadrootsAppSetupStep::FarmerSetup)
-                            && setup_farmer_choice.get().is_none())
-                        || (matches!(step, RadrootsAppSetupStep::BusinessSetup)
-                            && setup_business_choice.get().is_none())
-                        || (matches!(step, RadrootsAppSetupStep::Profile)
-                            && profile_nip05.get()
-                            && profile_name.get().trim().is_empty());
+                    let validation = setup_validation();
+                    let continue_disabled = !validation.can_continue;
                     let continue_label = t!("app.common.continue");
                     let back_label = t!("app.common.back");
                     let continue_action = RadrootsAppUiButtonLayoutAction {
@@ -1242,7 +1386,7 @@ fn SetupPage() -> impl IntoView {
                         style: None,
                     };
                     let back_action = RadrootsAppUiButtonLayoutBackAction {
-                        visible: !matches!(step, RadrootsAppSetupStep::Intro),
+                        visible: validation.can_back,
                         label: Some(back_label),
                         disabled: false,
                         on_click: rewind_step.clone(),

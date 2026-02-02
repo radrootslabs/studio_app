@@ -1644,6 +1644,61 @@
       }
     },
     {
+      "key": "app.setup.lock.pending.body",
+      "id": 1475586291,
+      "args": [],
+      "features": {
+        "select": false,
+        "plural_cardinal": false,
+        "plural_ordinal": false,
+        "formatters": []
+      }
+    },
+    {
+      "key": "app.setup.lock.pending.title",
+      "id": 2337040532,
+      "args": [],
+      "features": {
+        "select": false,
+        "plural_cardinal": false,
+        "plural_ordinal": false,
+        "formatters": []
+      }
+    },
+    {
+      "key": "app.setup.lock.retry",
+      "id": 2739457561,
+      "args": [],
+      "features": {
+        "select": false,
+        "plural_cardinal": false,
+        "plural_ordinal": false,
+        "formatters": []
+      }
+    },
+    {
+      "key": "app.setup.locked.body",
+      "id": 3219932589,
+      "args": [],
+      "features": {
+        "select": false,
+        "plural_cardinal": false,
+        "plural_ordinal": false,
+        "formatters": []
+      }
+    },
+    {
+      "key": "app.setup.locked.title",
+      "id": 2703779876,
+      "args": [],
+      "features": {
+        "select": false,
+        "plural_cardinal": false,
+        "plural_ordinal": false,
+        "formatters": []
+      }
+    },
+    {
       "key": "app.setup.profile.confirm_no_name",
       "id": 420411302,
       "args": [],

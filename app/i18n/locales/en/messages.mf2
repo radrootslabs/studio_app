@@ -146,6 +146,16 @@ app.setup.profile.nip05.suffix = NIP-05 address
 
 app.setup.profile.confirm_no_name = Your profile will be created without a name. You can change this later in Settings > Profile
 
+app.setup.lock.pending.title = Preparing setup
+
+app.setup.lock.pending.body = Checking if this device is already being configured.
+
+app.setup.locked.title = Setup in progress
+
+app.setup.locked.body = This device is being configured in another session. Wait a moment and try again.
+
+app.setup.lock.retry = Try again
+
 app.setup.farmer.title = Setup for Farmer
 
 app.setup.business.title = Setup for Business
