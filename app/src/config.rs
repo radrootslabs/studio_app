@@ -16,6 +16,7 @@ pub type RadrootsAppKeystoreKeyMap = BTreeMap<&'static str, &'static str>;
 
 pub const APP_DATASTORE_KEY_NOSTR_KEY: &str = "nostr:key";
 pub const APP_DATASTORE_KEY_EULA_DATE: &str = "app:eula:date";
+pub const APP_DATASTORE_KEY_SETUP_LOCK: &str = "app:setup:lock";
 pub const APP_DATASTORE_KEY_OBJ_STATE: &str = "app:data";
 pub const APP_DATASTORE_KEY_OBJ_SETUP_DRAFT: &str = "setup:draft";
 pub const APP_DATASTORE_KEY_LOG_ENTRY: &str = "log:entry";
@@ -54,6 +55,7 @@ pub fn app_key_maps_default() -> RadrootsAppKeyMapConfig {
     let mut key_map = BTreeMap::new();
     key_map.insert("nostr_key", APP_DATASTORE_KEY_NOSTR_KEY);
     key_map.insert("eula_date", APP_DATASTORE_KEY_EULA_DATE);
+    key_map.insert("setup_lock", APP_DATASTORE_KEY_SETUP_LOCK);
     let mut param_map = BTreeMap::new();
     param_map.insert("nostr_profile", app_datastore_param_nostr_profile as RadrootsAppDatastoreKeyParam);
     param_map.insert(
@@ -106,6 +108,9 @@ pub fn app_key_maps_validate(config: &RadrootsAppKeyMapConfig) -> RadrootsAppCon
     }
     if !config.key_map.contains_key("eula_date") {
         return Err(RadrootsAppConfigError::MissingKeyMap("eula_date"));
+    }
+    if !config.key_map.contains_key("setup_lock") {
+        return Err(RadrootsAppConfigError::MissingKeyMap("setup_lock"));
     }
     if !config.param_map.contains_key("nostr_profile") {
         return Err(RadrootsAppConfigError::MissingParamMap("nostr_profile"));
@@ -168,6 +173,10 @@ pub fn app_datastore_key_nostr_key(config: &RadrootsAppKeyMapConfig) -> Radroots
 
 pub fn app_datastore_key_eula_date(config: &RadrootsAppKeyMapConfig) -> RadrootsAppConfigResult<&'static str> {
     app_datastore_key(config, "eula_date")
+}
+
+pub fn app_datastore_key_setup_lock(config: &RadrootsAppKeyMapConfig) -> RadrootsAppConfigResult<&'static str> {
+    app_datastore_key(config, "setup_lock")
 }
 
 pub fn app_datastore_obj_key_state(config: &RadrootsAppKeyMapConfig) -> RadrootsAppConfigResult<&'static str> {
@@ -316,6 +325,7 @@ mod tests {
         app_datastore_param_radroots_profile,
         app_datastore_key_eula_date,
         app_datastore_key_nostr_key,
+        app_datastore_key_setup_lock,
         app_datastore_obj_key_state,
         app_datastore_obj_key_setup_draft,
         app_key_maps_validate,
@@ -339,6 +349,7 @@ mod tests {
         APP_DATASTORE_KEY_OBJ_STATE,
         APP_DATASTORE_KEY_OBJ_SETUP_DRAFT,
         APP_DATASTORE_KEY_LOG_ENTRY,
+        APP_DATASTORE_KEY_SETUP_LOCK,
         APP_KEYSTORE_KEY_NOSTR_DEFAULT,
     };
     use radroots_studio_app_core::idb::{IDB_CONFIG_DATASTORE, IDB_CONFIG_KEYSTORE_NOSTR};
@@ -426,6 +437,10 @@ mod tests {
             Some(&APP_DATASTORE_KEY_EULA_DATE)
         );
         assert_eq!(
+            config.key_map.get("setup_lock"),
+            Some(&APP_DATASTORE_KEY_SETUP_LOCK)
+        );
+        assert_eq!(
             config.obj_map.get("state"),
             Some(&APP_DATASTORE_KEY_OBJ_STATE)
         );
@@ -449,6 +464,9 @@ mod tests {
         let err = app_key_maps_validate(&missing).expect_err("missing keys");
         assert_eq!(err, RadrootsAppConfigError::MissingKeyMap("eula_date"));
         missing.key_map.insert("eula_date", APP_DATASTORE_KEY_EULA_DATE);
+        let err = app_key_maps_validate(&missing).expect_err("missing lock");
+        assert_eq!(err, RadrootsAppConfigError::MissingKeyMap("setup_lock"));
+        missing.key_map.insert("setup_lock", APP_DATASTORE_KEY_SETUP_LOCK);
         missing.obj_map.insert("state", APP_DATASTORE_KEY_OBJ_STATE);
         missing.param_map.insert("nostr_profile", app_datastore_param_nostr_profile as RadrootsAppDatastoreKeyParam);
         missing.param_map.insert("radroots_profile", app_datastore_param_radroots_profile as RadrootsAppDatastoreKeyParam);
@@ -477,6 +495,10 @@ mod tests {
         assert_eq!(
             app_datastore_key_eula_date(&config).expect("eula key"),
             APP_DATASTORE_KEY_EULA_DATE
+        );
+        assert_eq!(
+            app_datastore_key_setup_lock(&config).expect("setup lock key"),
+            APP_DATASTORE_KEY_SETUP_LOCK
         );
         assert_eq!(
             app_datastore_obj_key_state(&config).expect("state key"),

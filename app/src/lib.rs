@@ -14,6 +14,7 @@ mod logs;
 mod notifications;
 mod settings;
 mod setup;
+mod setup_lock;
 mod setup_status;
 mod theme;
 mod tangle;
@@ -143,6 +144,16 @@ pub use setup::{
     app_setup_step_default,
     RadrootsAppSetupStep,
 };
+pub use setup_lock::{
+    app_setup_lock_acquire,
+    app_setup_lock_enabled,
+    app_setup_lock_is_expired,
+    app_setup_lock_release,
+    app_setup_lock_ttl_ms,
+    RadrootsAppSetupLock,
+    RadrootsAppSetupLockStatus,
+    APP_SETUP_LOCK_TTL_MS,
+};
 pub use tangle::{RadrootsAppTangleClient, RadrootsAppTangleClientStub, RadrootsAppTangleError, RadrootsAppTangleResult};
 pub use config::{
     app_config_default,
@@ -183,7 +194,9 @@ pub use config::{
     APP_DATASTORE_KEY_NOSTR_KEY,
     APP_DATASTORE_KEY_OBJ_STATE,
     APP_DATASTORE_KEY_OBJ_SETUP_DRAFT,
+    APP_DATASTORE_KEY_SETUP_LOCK,
     APP_KEYSTORE_KEY_NOSTR_DEFAULT,
+    app_datastore_key_setup_lock,
 };
 pub use init::{
     app_init_assets,
