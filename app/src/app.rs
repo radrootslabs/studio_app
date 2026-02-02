@@ -41,6 +41,7 @@ use crate::{
     app_datastore_clear_setup_draft,
     app_datastore_read_state,
     app_datastore_read_setup_draft,
+    app_datastore_write_profile_seed,
     app_datastore_write_setup_draft,
     app_keystore_nostr_ensure_key,
     app_state_notifications_permission_value,
@@ -59,6 +60,7 @@ use crate::{
     RadrootsAppNotifications,
     RadrootsAppLogsPage,
     RadrootsAppKeystoreError,
+    RadrootsAppProfileSeed,
     RadrootsAppRole,
     RadrootsAppSettingsPage,
     RadrootsAppSetupDraft,
@@ -341,6 +343,8 @@ fn SetupPage() -> impl IntoView {
             if matches!(current_step, RadrootsAppSetupStep::Eula) {
                 let key_choice = setup_key_choice.get();
                 let nostr_key_add = nostr_key_add.get();
+                let profile_name = profile_name.get();
+                let profile_nip05 = profile_nip05.get();
                 let eula_date = app_setup_eula_date();
                 let setup_required = setup_required.clone();
                 let backends = backends.clone();
@@ -392,11 +396,40 @@ fn SetupPage() -> impl IntoView {
                             }
                         },
                     };
+                    let nip05_key = if profile_nip05 {
+                        let profile_name = profile_name.trim();
+                        if profile_name.is_empty() {
+                            None
+                        } else {
+                            Some(profile_name.to_string())
+                        }
+                    } else {
+                        None
+                    };
+                    if !profile_name.trim().is_empty() {
+                        let profile_seed = RadrootsAppProfileSeed {
+                            public_key: active_key.clone(),
+                            name: profile_name.trim().to_string(),
+                            display_name: Some(profile_name.trim().to_string()),
+                            nip05_request: profile_nip05,
+                        };
+                        if let Err(err) = app_datastore_write_profile_seed(
+                            datastore.as_ref(),
+                            &key_maps,
+                            &profile_seed,
+                        )
+                        .await
+                        {
+                            let _ = app_log_error_emit(&err);
+                            return;
+                        }
+                    }
                     if let Err(err) = app_setup_finalize_with_key(
                         datastore.as_ref(),
                         &key_maps,
                         active_key,
                         eula_date,
+                        nip05_key,
                     )
                     .await
                     {

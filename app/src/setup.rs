@@ -12,6 +12,7 @@ use chrono::{SecondsFormat, Utc};
 use crate::{
     app_datastore_create_state,
     app_datastore_key_nostr_key,
+    app_default_relays,
     app_keystore_nostr_ensure_key,
     app_keystore_nostr_verify_key,
     app_log_debug_emit,
@@ -40,6 +41,7 @@ pub fn app_setup_state_new(active_key: String, eula_date: String) -> RadrootsApp
         eula_date,
         eula_version: String::from("0.1.0"),
         eula_hash: String::from("unknown"),
+        relays: app_default_relays(),
         nip05_key: None,
         notifications_permission: None,
     }
@@ -108,7 +110,7 @@ pub async fn app_setup_initialize<T: RadrootsClientDatastore, K: RadrootsClientK
                 RadrootsAppInitError::Keystore(RadrootsClientKeystoreError::NostrInvalidSecretKey)
             }
         })?;
-    app_setup_finalize_with_key(datastore, key_maps, active_key, app_setup_eula_date()).await
+    app_setup_finalize_with_key(datastore, key_maps, active_key, app_setup_eula_date(), None).await
 }
 
 pub async fn app_setup_finalize_with_key<T: RadrootsClientDatastore>(
@@ -116,8 +118,10 @@ pub async fn app_setup_finalize_with_key<T: RadrootsClientDatastore>(
     key_maps: &RadrootsAppKeyMapConfig,
     active_key: String,
     eula_date: String,
+    nip05_key: Option<String>,
 ) -> RadrootsAppInitResult<RadrootsAppState> {
-    let state = app_setup_state_new(active_key.clone(), eula_date);
+    let mut state = app_setup_state_new(active_key.clone(), eula_date);
+    state.nip05_key = nip05_key;
     let stored_state = app_datastore_create_state(datastore, key_maps, &state).await?;
     let key_name = app_datastore_key_nostr_key(key_maps).map_err(RadrootsAppInitError::Config)?;
     datastore
@@ -334,6 +338,7 @@ mod tests {
         assert_eq!(state.active_key, "pub");
         assert_eq!(state.role, RadrootsAppRole::Public);
         assert_eq!(state.eula_date, "2025-01-01T00:00:00Z");
+        assert!(!state.relays.is_empty());
         assert!(state.nip05_key.is_none());
         assert!(state.notifications_permission.is_none());
     }
@@ -456,6 +461,7 @@ mod tests {
             &key_maps,
             "pub".to_string(),
             "2025-01-01T00:00:00Z".to_string(),
+            None,
         ))
         .expect("finalize");
         assert_eq!(state.active_key, "pub");

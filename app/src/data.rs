@@ -22,6 +22,7 @@ pub struct RadrootsAppState {
     pub eula_date: String,
     pub eula_version: String,
     pub eula_hash: String,
+    pub relays: Vec<String>,
     pub nip05_key: Option<String>,
     pub notifications_permission: Option<String>,
 }
@@ -34,6 +35,7 @@ impl Default for RadrootsAppState {
             eula_date: String::new(),
             eula_version: String::from("0.1.0"),
             eula_hash: String::from("unknown"),
+            relays: Vec::new(),
             nip05_key: None,
             notifications_permission: None,
         }
@@ -46,6 +48,14 @@ pub struct RadrootsAppSetupDraft {
     pub profile_name: Option<String>,
     pub role: Option<RadrootsAppRole>,
     pub nip05_request: Option<bool>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RadrootsAppProfileSeed {
+    pub public_key: String,
+    pub name: String,
+    pub display_name: Option<String>,
+    pub nip05_request: bool,
 }
 
 pub const APP_STATE_SCHEMA_VERSION: u32 = 1;
@@ -190,6 +200,7 @@ mod tests {
         assert_eq!(data.eula_date, "");
         assert_eq!(data.eula_version, "0.1.0");
         assert_eq!(data.eula_hash, "unknown");
+        assert!(data.relays.is_empty());
         assert!(data.nip05_key.is_none());
         assert!(data.notifications_permission.is_none());
     }

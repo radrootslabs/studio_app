@@ -1,6 +1,6 @@
 #![forbid(unsafe_code)]
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use radroots_studio_app_core::idb::{
     RadrootsClientIdbConfig,
@@ -244,6 +244,27 @@ pub fn app_assets_geocoder_db_url(config: &RadrootsAppConfig) -> Option<&str> {
     config.assets.geocoder_db_url.as_deref()
 }
 
+const APP_DEFAULT_RELAY_FALLBACK: &str = "ws://localhost:8080";
+
+pub fn app_default_relays() -> Vec<String> {
+    let raw = option_env!("VITE_PUBLIC_DEFAULT_RELAYS")
+        .or(option_env!("VITE_PUBLIC_RADROOTS_RELAY"))
+        .unwrap_or(APP_DEFAULT_RELAY_FALLBACK);
+    let mut seen = BTreeSet::new();
+    let mut relays = Vec::new();
+    for relay in raw.split(',') {
+        let relay = relay.trim();
+        if relay.is_empty() || !seen.insert(relay.to_string()) {
+            continue;
+        }
+        relays.push(relay.to_string());
+    }
+    if relays.is_empty() {
+        relays.push(APP_DEFAULT_RELAY_FALLBACK.to_string());
+    }
+    relays
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RadrootsAppConfig {
     pub datastore: RadrootsAppDatastoreConfig,
@@ -289,6 +310,7 @@ mod tests {
     use super::{
         app_config_default,
         app_config_from_env,
+        app_default_relays,
         app_datastore_param_nostr_profile,
         app_datastore_param_log_entry,
         app_datastore_param_radroots_profile,
@@ -334,6 +356,13 @@ mod tests {
     fn app_config_defaults_empty() {
         let config = RadrootsAppConfig::empty();
         assert!(config.datastore.key_maps.key_map.is_empty());
+    }
+
+    #[test]
+    fn default_relays_are_non_empty() {
+        let relays = app_default_relays();
+        assert!(!relays.is_empty());
+        assert!(relays.iter().all(|relay| !relay.trim().is_empty()));
     }
 
     #[test]

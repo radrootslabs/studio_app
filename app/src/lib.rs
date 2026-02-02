@@ -27,6 +27,7 @@ pub use bootstrap::{
     app_datastore_read_setup_draft,
     app_datastore_write_setup_draft,
     app_datastore_clear_setup_draft,
+    app_datastore_write_profile_seed,
     app_datastore_update_state,
     app_state_set_notifications_permission,
     app_state_set_notifications_permission_value,
@@ -39,6 +40,7 @@ pub use data::{
     app_state_record_new,
     app_state_record_validate,
     app_state_timestamp_ms,
+    RadrootsAppProfileSeed,
     RadrootsAppRole,
     RadrootsAppState,
     RadrootsAppSetupDraft,
@@ -135,6 +137,7 @@ pub use tangle::{RadrootsAppTangleClient, RadrootsAppTangleClientStub, RadrootsA
 pub use config::{
     app_config_default,
     app_config_from_env,
+    app_default_relays,
     app_datastore_key,
     app_datastore_key_eula_date,
     app_datastore_key_nostr_key,

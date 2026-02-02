@@ -6,10 +6,12 @@ use radroots_studio_app_core::notifications::RadrootsClientNotificationsPermissi
 use crate::{
     app_datastore_obj_key_state,
     app_datastore_obj_key_setup_draft,
+    app_datastore_param_key,
     app_log_debug_emit,
     app_state_record_new,
     app_state_record_validate,
     app_state_timestamp_ms,
+    RadrootsAppProfileSeed,
     RadrootsAppState,
     RadrootsAppSetupDraft,
     RadrootsAppStateError,
@@ -174,6 +176,22 @@ pub async fn app_datastore_clear_setup_draft<T: RadrootsClientDatastore>(
     }
 }
 
+pub async fn app_datastore_write_profile_seed<T: RadrootsClientDatastore>(
+    datastore: &T,
+    key_maps: &RadrootsAppKeyMapConfig,
+    profile: &RadrootsAppProfileSeed,
+) -> RadrootsAppInitResult<RadrootsAppProfileSeed> {
+    let param = app_datastore_param_key(key_maps, "nostr_profile")
+        .map_err(RadrootsAppInitError::Config)?;
+    let key = param(&profile.public_key);
+    let stored = datastore
+        .set_obj(&key, profile)
+        .await
+        .map_err(RadrootsAppInitError::Datastore)?;
+    let _ = app_log_debug_emit("log.app.bootstrap.profile", "write", Some(key));
+    Ok(stored)
+}
+
 pub async fn app_state_set_notifications_permission<T: RadrootsClientDatastore>(
     datastore: &T,
     key_maps: &RadrootsAppKeyMapConfig,
@@ -212,6 +230,7 @@ mod tests {
         app_datastore_read_setup_draft,
         app_datastore_update_state,
         app_datastore_write_setup_draft,
+        app_datastore_write_profile_seed,
         app_state_set_notifications_permission,
         app_state_set_notifications_permission_value,
         app_state_notifications_permission_value,
@@ -220,6 +239,7 @@ mod tests {
     use crate::{
         app_key_maps_default,
         RadrootsAppInitError,
+        RadrootsAppProfileSeed,
         RadrootsAppRole,
         RadrootsAppState,
         RadrootsAppStateError,
@@ -243,6 +263,10 @@ mod tests {
 
     struct SetupDraftDatastore {
         draft: RefCell<Option<RadrootsAppSetupDraft>>,
+    }
+
+    struct ProfileSeedDatastore {
+        profile: RefCell<Option<RadrootsAppProfileSeed>>,
     }
 
     #[async_trait(?Send)]
@@ -310,6 +334,132 @@ mod tests {
 
         async fn del_obj(&self, _key: &str) -> RadrootsClientDatastoreResult<String> {
             *self.draft.borrow_mut() = None;
+            Ok("cleared".to_string())
+        }
+
+        async fn del(&self, _key: &str) -> RadrootsClientDatastoreResult<String> {
+            Err(RadrootsClientDatastoreError::IdbUndefined)
+        }
+
+        async fn del_pref(&self, _key_prefix: &str) -> RadrootsClientDatastoreResult<Vec<String>> {
+            Err(RadrootsClientDatastoreError::IdbUndefined)
+        }
+
+        async fn set_param(
+            &self,
+            _key: &str,
+            _key_param: &str,
+            _value: &str,
+        ) -> RadrootsClientDatastoreResult<String> {
+            Err(RadrootsClientDatastoreError::IdbUndefined)
+        }
+
+        async fn get_param(
+            &self,
+            _key: &str,
+            _key_param: &str,
+        ) -> RadrootsClientDatastoreResult<String> {
+            Err(RadrootsClientDatastoreError::IdbUndefined)
+        }
+
+        async fn keys(&self) -> RadrootsClientDatastoreResult<Vec<String>> {
+            Err(RadrootsClientDatastoreError::IdbUndefined)
+        }
+
+        async fn entries(&self) -> RadrootsClientDatastoreResult<RadrootsClientDatastoreEntries> {
+            Err(RadrootsClientDatastoreError::IdbUndefined)
+        }
+
+        async fn entries_pref(
+            &self,
+            _key_prefix: &str,
+        ) -> RadrootsClientDatastoreResult<RadrootsClientDatastoreEntries> {
+            Err(RadrootsClientDatastoreError::IdbUndefined)
+        }
+
+        async fn reset(&self) -> RadrootsClientDatastoreResult<()> {
+            Err(RadrootsClientDatastoreError::IdbUndefined)
+        }
+
+        async fn export_backup(
+            &self,
+        ) -> RadrootsClientDatastoreResult<RadrootsClientBackupDatastorePayload> {
+            Err(RadrootsClientDatastoreError::IdbUndefined)
+        }
+
+        async fn import_backup(
+            &self,
+            _payload: RadrootsClientBackupDatastorePayload,
+        ) -> RadrootsClientDatastoreResult<()> {
+            Err(RadrootsClientDatastoreError::IdbUndefined)
+        }
+    }
+
+    #[async_trait(?Send)]
+    impl RadrootsClientDatastore for ProfileSeedDatastore {
+        fn get_config(&self) -> RadrootsClientIdbConfig {
+            IDB_CONFIG_DATASTORE
+        }
+
+        fn get_store_id(&self) -> &str {
+            "test"
+        }
+
+        async fn init(&self) -> RadrootsClientDatastoreResult<()> {
+            Ok(())
+        }
+
+        async fn set(&self, _key: &str, _value: &str) -> RadrootsClientDatastoreResult<String> {
+            Err(RadrootsClientDatastoreError::IdbUndefined)
+        }
+
+        async fn get(&self, _key: &str) -> RadrootsClientDatastoreResult<String> {
+            Err(RadrootsClientDatastoreError::IdbUndefined)
+        }
+
+        async fn set_obj<T>(
+            &self,
+            _key: &str,
+            value: &T,
+        ) -> RadrootsClientDatastoreResult<T>
+        where
+            T: Serialize + DeserializeOwned + Clone,
+        {
+            let encoded = serde_json::to_string(value)
+                .map_err(|_| RadrootsClientDatastoreError::IdbUndefined)?;
+            if let Ok(parsed) = serde_json::from_str::<RadrootsAppProfileSeed>(&encoded) {
+                *self.profile.borrow_mut() = Some(parsed);
+                return Ok(value.clone());
+            }
+            Err(RadrootsClientDatastoreError::IdbUndefined)
+        }
+
+        async fn update_obj<T>(
+            &self,
+            _key: &str,
+            _value: &T,
+        ) -> RadrootsClientDatastoreResult<T>
+        where
+            T: Serialize + DeserializeOwned + Clone,
+        {
+            Err(RadrootsClientDatastoreError::IdbUndefined)
+        }
+
+        async fn get_obj<T>(&self, _key: &str) -> RadrootsClientDatastoreResult<T>
+        where
+            T: DeserializeOwned,
+        {
+            if let Some(profile) = self.profile.borrow().as_ref() {
+                let encoded = serde_json::to_string(profile)
+                    .map_err(|_| RadrootsClientDatastoreError::NoResult)?;
+                return serde_json::from_str(&encoded)
+                    .map_err(|_| RadrootsClientDatastoreError::NoResult);
+            }
+            Err(RadrootsClientDatastoreError::NoResult)
+        }
+
+        async fn del_obj(&self, _key: &str) -> RadrootsClientDatastoreResult<String> {
+            *self.profile.borrow_mut() = None;
             Ok("cleared".to_string())
         }
 
@@ -725,5 +875,28 @@ mod tests {
         ))
         .expect("read draft");
         assert!(loaded.is_none());
+    }
+
+    #[test]
+    fn profile_seed_write_persists_data() {
+        let datastore = ProfileSeedDatastore {
+            profile: RefCell::new(None),
+        };
+        let key_maps = app_key_maps_default();
+        let profile = RadrootsAppProfileSeed {
+            public_key: "pub".to_string(),
+            name: "radroots".to_string(),
+            display_name: Some("Radroots".to_string()),
+            nip05_request: true,
+        };
+        let stored = futures::executor::block_on(app_datastore_write_profile_seed(
+            &datastore,
+            &key_maps,
+            &profile,
+        ))
+        .expect("profile seed");
+        assert_eq!(stored, profile);
+        let stored_profile = datastore.profile.borrow().clone();
+        assert_eq!(stored_profile, Some(profile));
     }
 }
