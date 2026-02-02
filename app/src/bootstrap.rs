@@ -7,7 +7,10 @@ use crate::{
     app_datastore_obj_key_state,
     app_datastore_obj_key_setup_draft,
     app_datastore_param_key,
+    app_datastore_key_eula_date,
+    app_datastore_key_nostr_key,
     app_log_debug_emit,
+    app_setup_state_new,
     app_state_record_new,
     app_state_record_validate,
     app_state_timestamp_ms,
@@ -56,6 +59,9 @@ pub async fn app_datastore_read_state_record<T: RadrootsClientDatastore>(
                     Ok(value)
                 }
                 Err(RadrootsClientDatastoreError::NoResult) => {
+                    if let Some(record) = app_datastore_migrate_legacy_state(datastore, key_maps).await? {
+                        return Ok(record);
+                    }
                     Err(RadrootsAppInitError::State(RadrootsAppStateError::Missing))
                 }
                 Err(err) => Err(RadrootsAppInitError::Datastore(err)),
@@ -63,6 +69,28 @@ pub async fn app_datastore_read_state_record<T: RadrootsClientDatastore>(
         }
         Err(err) => Err(RadrootsAppInitError::Datastore(err)),
     }
+}
+
+async fn app_datastore_migrate_legacy_state<T: RadrootsClientDatastore>(
+    datastore: &T,
+    key_maps: &RadrootsAppKeyMapConfig,
+) -> RadrootsAppInitResult<Option<RadrootsAppStateRecord>> {
+    let key_nostr = app_datastore_key_nostr_key(key_maps).map_err(RadrootsAppInitError::Config)?;
+    let key_eula = app_datastore_key_eula_date(key_maps).map_err(RadrootsAppInitError::Config)?;
+    let active_key = match datastore.get(key_nostr).await {
+        Ok(value) => value,
+        Err(_) => return Ok(None),
+    };
+    let eula_date = match datastore.get(key_eula).await {
+        Ok(value) => value,
+        Err(_) => return Ok(None),
+    };
+    let state = app_setup_state_new(active_key.clone(), eula_date);
+    let record = app_state_record_new(state, 1, app_state_timestamp_ms());
+    let stored = app_datastore_write_state_record(datastore, key_maps, &record).await?;
+    let _ = datastore.del(key_nostr).await;
+    let _ = datastore.del(key_eula).await;
+    Ok(Some(stored))
 }
 
 pub async fn app_datastore_write_state<T: RadrootsClientDatastore>(
@@ -226,6 +254,7 @@ mod tests {
         app_datastore_clear_setup_draft,
         app_datastore_create_state,
         app_datastore_has_state,
+        app_datastore_read_state_record,
         app_datastore_read_state,
         app_datastore_read_setup_draft,
         app_datastore_update_state,
@@ -237,6 +266,8 @@ mod tests {
         app_datastore_write_state,
     };
     use crate::{
+        app_datastore_key_eula_date,
+        app_datastore_key_nostr_key,
         app_key_maps_default,
         RadrootsAppInitError,
         RadrootsAppProfileSeed,
@@ -260,6 +291,7 @@ mod tests {
     use serde::de::DeserializeOwned;
     use serde::Serialize;
     use std::cell::RefCell;
+    use std::collections::BTreeMap;
 
     struct SetupDraftDatastore {
         draft: RefCell<Option<RadrootsAppSetupDraft>>,
@@ -526,6 +558,11 @@ mod tests {
         record: RefCell<Option<RadrootsAppStateRecord>>,
     }
 
+    struct LegacyKeyDatastore {
+        record: RefCell<Option<RadrootsAppStateRecord>>,
+        values: RefCell<BTreeMap<String, String>>,
+    }
+
     #[async_trait(?Send)]
     impl RadrootsClientDatastore for TestDatastore {
         fn get_config(&self) -> RadrootsClientIdbConfig {
@@ -601,6 +638,141 @@ mod tests {
 
         async fn del(&self, _key: &str) -> RadrootsClientDatastoreResult<String> {
             Err(RadrootsClientDatastoreError::IdbUndefined)
+        }
+
+        async fn del_pref(&self, _key_prefix: &str) -> RadrootsClientDatastoreResult<Vec<String>> {
+            Err(RadrootsClientDatastoreError::IdbUndefined)
+        }
+
+        async fn set_param(
+            &self,
+            _key: &str,
+            _key_param: &str,
+            _value: &str,
+        ) -> RadrootsClientDatastoreResult<String> {
+            Err(RadrootsClientDatastoreError::IdbUndefined)
+        }
+
+        async fn get_param(
+            &self,
+            _key: &str,
+            _key_param: &str,
+        ) -> RadrootsClientDatastoreResult<String> {
+            Err(RadrootsClientDatastoreError::IdbUndefined)
+        }
+
+        async fn keys(&self) -> RadrootsClientDatastoreResult<Vec<String>> {
+            Err(RadrootsClientDatastoreError::IdbUndefined)
+        }
+
+        async fn entries(&self) -> RadrootsClientDatastoreResult<RadrootsClientDatastoreEntries> {
+            Err(RadrootsClientDatastoreError::IdbUndefined)
+        }
+
+        async fn entries_pref(
+            &self,
+            _key_prefix: &str,
+        ) -> RadrootsClientDatastoreResult<RadrootsClientDatastoreEntries> {
+            Err(RadrootsClientDatastoreError::IdbUndefined)
+        }
+
+        async fn reset(&self) -> RadrootsClientDatastoreResult<()> {
+            Err(RadrootsClientDatastoreError::IdbUndefined)
+        }
+
+        async fn export_backup(
+            &self,
+        ) -> RadrootsClientDatastoreResult<RadrootsClientBackupDatastorePayload> {
+            Err(RadrootsClientDatastoreError::IdbUndefined)
+        }
+
+        async fn import_backup(
+            &self,
+            _payload: RadrootsClientBackupDatastorePayload,
+        ) -> RadrootsClientDatastoreResult<()> {
+            Err(RadrootsClientDatastoreError::IdbUndefined)
+        }
+    }
+
+    #[async_trait(?Send)]
+    impl RadrootsClientDatastore for LegacyKeyDatastore {
+        fn get_config(&self) -> RadrootsClientIdbConfig {
+            IDB_CONFIG_DATASTORE
+        }
+
+        fn get_store_id(&self) -> &str {
+            "test"
+        }
+
+        async fn init(&self) -> RadrootsClientDatastoreResult<()> {
+            Ok(())
+        }
+
+        async fn set(&self, key: &str, value: &str) -> RadrootsClientDatastoreResult<String> {
+            self.values
+                .borrow_mut()
+                .insert(key.to_string(), value.to_string());
+            Ok(value.to_string())
+        }
+
+        async fn get(&self, key: &str) -> RadrootsClientDatastoreResult<String> {
+            self.values
+                .borrow()
+                .get(key)
+                .cloned()
+                .ok_or(RadrootsClientDatastoreError::NoResult)
+        }
+
+        async fn set_obj<T>(
+            &self,
+            _key: &str,
+            value: &T,
+        ) -> RadrootsClientDatastoreResult<T>
+        where
+            T: Serialize + DeserializeOwned + Clone,
+        {
+            let encoded = serde_json::to_string(value)
+                .map_err(|_| RadrootsClientDatastoreError::IdbUndefined)?;
+            if let Ok(parsed) = serde_json::from_str::<RadrootsAppStateRecord>(&encoded) {
+                *self.record.borrow_mut() = Some(parsed);
+                return Ok(value.clone());
+            }
+            Err(RadrootsClientDatastoreError::IdbUndefined)
+        }
+
+        async fn update_obj<T>(
+            &self,
+            _key: &str,
+            _value: &T,
+        ) -> RadrootsClientDatastoreResult<T>
+        where
+            T: Serialize + DeserializeOwned + Clone,
+        {
+            Err(RadrootsClientDatastoreError::IdbUndefined)
+        }
+
+        async fn get_obj<T>(&self, _key: &str) -> RadrootsClientDatastoreResult<T>
+        where
+            T: DeserializeOwned,
+        {
+            if let Some(record) = self.record.borrow().as_ref() {
+                let encoded = serde_json::to_string(record)
+                    .map_err(|_| RadrootsClientDatastoreError::NoResult)?;
+                if let Ok(parsed) = serde_json::from_str(&encoded) {
+                    return Ok(parsed);
+                }
+            }
+            Err(RadrootsClientDatastoreError::NoResult)
+        }
+
+        async fn del_obj(&self, _key: &str) -> RadrootsClientDatastoreResult<String> {
+            *self.record.borrow_mut() = None;
+            Ok("cleared".to_string())
+        }
+
+        async fn del(&self, key: &str) -> RadrootsClientDatastoreResult<String> {
+            self.values.borrow_mut().remove(key);
+            Ok(key.to_string())
         }
 
         async fn del_pref(&self, _key_prefix: &str) -> RadrootsClientDatastoreResult<Vec<String>> {
@@ -898,5 +1070,28 @@ mod tests {
         assert_eq!(stored, profile);
         let stored_profile = datastore.profile.borrow().clone();
         assert_eq!(stored_profile, Some(profile));
+    }
+
+    #[test]
+    fn state_record_migrates_legacy_keys() {
+        let key_maps = app_key_maps_default();
+        let key_nostr = app_datastore_key_nostr_key(&key_maps).expect("nostr key");
+        let key_eula = app_datastore_key_eula_date(&key_maps).expect("eula key");
+        let mut values = BTreeMap::new();
+        values.insert(key_nostr.to_string(), "pub".to_string());
+        values.insert(key_eula.to_string(), "2025-01-01T00:00:00Z".to_string());
+        let datastore = LegacyKeyDatastore {
+            record: RefCell::new(None),
+            values: RefCell::new(values),
+        };
+        let record = futures::executor::block_on(app_datastore_read_state_record(
+            &datastore,
+            &key_maps,
+        ))
+        .expect("record");
+        assert_eq!(record.state.active_key, "pub");
+        assert_eq!(record.state.eula_date, "2025-01-01T00:00:00Z");
+        assert!(datastore.values.borrow().get(key_nostr).is_none());
+        assert!(datastore.values.borrow().get(key_eula).is_none());
     }
 }
