@@ -88,7 +88,12 @@ fn fmt_price_value(locale: &str, value: f64, currency: FiatCurrency) -> String {
         &JsValue::from_f64(2.0),
     );
     let formatter = js_sys::Intl::NumberFormat::new(&locales, &options);
-    formatter.format(value).into()
+    let formatted = formatter
+        .format()
+        .call1(&JsValue::NULL, &JsValue::from_f64(value))
+        .ok()
+        .and_then(|value| value.as_string());
+    formatted.unwrap_or_else(|| format!("{} {:.2}", currency.as_upper(), value))
 }
 
 #[cfg(not(target_arch = "wasm32"))]

@@ -112,14 +112,18 @@ pub async fn select_file() -> Result<Option<web_sys::File>, FileError> {
         input.set_accept("*/*");
 
         let (sender, receiver) = futures::channel::oneshot::channel();
+        let sender = Rc::new(RefCell::new(Some(sender)));
         let closure_holder: Rc<RefCell<Option<wasm_bindgen::closure::Closure<dyn FnMut(_)>>>> =
             Rc::new(RefCell::new(None));
         let closure_ref = closure_holder.clone();
+        let sender_ref = Rc::clone(&sender);
         let input_clone = input.clone();
         *closure_holder.borrow_mut() = Some(wasm_bindgen::closure::Closure::wrap(Box::new(
             move |_event: web_sys::Event| {
                 let file = input_clone.files().and_then(|list| list.get(0));
-                let _ = sender.send(file);
+                if let Some(sender) = sender_ref.borrow_mut().take() {
+                    let _ = sender.send(file);
+                }
                 closure_ref.borrow_mut().take();
             },
         ) as Box<dyn FnMut(_)>));

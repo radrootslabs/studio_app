@@ -2,6 +2,7 @@
 
 use crate::error::RadrootsAppUtilsError;
 use std::future::Future;
+#[cfg(not(target_arch = "wasm32"))]
 use std::time::Duration;
 
 pub async fn exe_iter<F, Fut>(

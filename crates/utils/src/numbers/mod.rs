@@ -44,12 +44,10 @@ fn random_u64() -> Result<u64, RadrootsAppUtilsError> {
     let crypto = window
         .crypto()
         .map_err(|_| RadrootsAppUtilsError::Unavailable)?;
-    let array = js_sys::Uint8Array::new_with_length(8);
-    crypto
-        .get_random_values_with_u8_array(&array)
-        .map_err(|_| RadrootsAppUtilsError::Unavailable)?;
     let mut bytes = [0u8; 8];
-    array.copy_to(&mut bytes);
+    crypto
+        .get_random_values_with_u8_array(&mut bytes)
+        .map_err(|_| RadrootsAppUtilsError::Unavailable)?;
     Ok(u64::from_le_bytes(bytes))
 }
 

@@ -51,7 +51,10 @@ pub async fn asset_cache_fetch_bytes(
         if !response.ok() {
             return Ok(None);
         }
-        let buffer = wasm_bindgen_futures::JsFuture::from(response.array_buffer())
+        let promise = response
+            .array_buffer()
+            .map_err(|_| RadrootsAppUtilsError::Unavailable)?;
+        let buffer = wasm_bindgen_futures::JsFuture::from(promise)
             .await
             .map_err(|_| RadrootsAppUtilsError::Unavailable)?;
         let array = js_sys::Uint8Array::new(&buffer);
@@ -84,8 +87,6 @@ async fn asset_cache_fetch_impl(
     url: &str,
     config: Option<&AssetCacheFetchConfig>,
 ) -> Result<AssetResponse, RadrootsAppUtilsError> {
-    use wasm_bindgen::JsCast;
-
     let cache_name = cache_name_resolve(config);
     let cache_key = cache_key_resolve(url);
     if let Some(cached) = cache_read(&cache_name, &cache_key).await? {
@@ -93,7 +94,10 @@ async fn asset_cache_fetch_impl(
     }
     let response = fetch_with_init(url, config).await?;
     if response.ok() || response.type_() == web_sys::ResponseType::Opaque {
-        cache_write(&cache_name, &cache_key, response.clone()).await?;
+        let response = response
+            .clone()
+            .map_err(|_| RadrootsAppUtilsError::Unavailable)?;
+        cache_write(&cache_name, &cache_key, response).await?;
     }
     Ok(response)
 }
@@ -114,10 +118,10 @@ async fn fetch_with_init(
     use wasm_bindgen::JsCast;
 
     let window = web_sys::window().ok_or(RadrootsAppUtilsError::Unavailable)?;
-    let mut init = web_sys::RequestInit::new();
+    let init = web_sys::RequestInit::new();
     if let Some(request_init) = config.and_then(|config| config.request_init.as_ref()) {
         if let Some(cache_mode) = request_init.cache {
-            init.cache(cache_mode.to_request_cache());
+            init.set_cache(cache_mode.to_request_cache());
         }
     }
     let response = wasm_bindgen_futures::JsFuture::from(window.fetch_with_str_and_init(url, &init))

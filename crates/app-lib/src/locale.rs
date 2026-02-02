@@ -29,7 +29,7 @@ pub fn resolve_locale(locales: &[&str], navigator_locale: Option<&str>) -> Strin
 pub fn get_locale(locales: &[&str]) -> String {
     #[cfg(target_arch = "wasm32")]
     {
-        let navigator_locale = web_sys::window().map(|window| window.navigator().language());
+        let navigator_locale = web_sys::window().and_then(|window| window.navigator().language());
         resolve_locale(locales, navigator_locale.as_deref())
     }
     #[cfg(not(target_arch = "wasm32"))]
