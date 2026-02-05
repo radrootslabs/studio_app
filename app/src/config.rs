@@ -256,8 +256,8 @@ pub fn app_assets_geocoder_db_url(config: &RadrootsAppConfig) -> Option<&str> {
 const APP_DEFAULT_RELAY_FALLBACK: &str = "ws://localhost:8080";
 
 pub fn app_default_relays() -> Vec<String> {
-    let raw = option_env!("VITE_PUBLIC_DEFAULT_RELAYS")
-        .or(option_env!("VITE_PUBLIC_RADROOTS_RELAY"))
+    let raw = option_env!("RADROOTS_DEFAULT_RELAYS")
+        .or(option_env!("RADROOTS_RELAY"))
         .unwrap_or(APP_DEFAULT_RELAY_FALLBACK);
     let mut seen = BTreeSet::new();
     let mut relays = Vec::new();
