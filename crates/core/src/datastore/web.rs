@@ -20,9 +20,6 @@ use super::{
     RadrootsClientDatastoreResult,
 };
 
-#[cfg(target_arch = "wasm32")]
-use super::RadrootsClientDatastoreEntry;
-
 const DATASTORE_STORE_PREFIX: &str = "datastore";
 const DEFAULT_IV_LENGTH: u32 = 12;
 
