@@ -17,6 +17,9 @@ use radroots_studio_app_ui_components::{
     RadrootsAppUiButtonLayoutAction,
     RadrootsAppUiButtonLayoutBackAction,
     RadrootsAppUiButtonLayoutPair,
+    RadrootsAppUiChip,
+    RadrootsAppUiChips,
+    RadrootsAppUiFormField,
     RadrootsAppUiIcon,
     RadrootsAppUiIconKey,
     RadrootsAppUiNavHeader,
@@ -42,6 +45,8 @@ use crate::{
     app_init_stage_set,
     app_init_total_add,
     app_init_total_unknown,
+    app_config_flow_validate,
+    app_config_step_default,
     app_context,
     app_i18n_init,
     app_log_buffer_flush_deferred,
@@ -67,6 +72,8 @@ use crate::{
     app_setup_gate_from_status,
     app_setup_step_default,
     RadrootsAppBackends,
+    RadrootsAppConfigFlowDraft,
+    RadrootsAppConfigStep,
     RadrootsAppConfigStatus,
     RadrootsAppInitError,
     RadrootsAppInitStage,
@@ -1518,16 +1525,543 @@ fn RecoveryPage() -> impl IntoView {
 
 #[component]
 fn ConfigPage() -> impl IntoView {
+    let context = app_context();
+    let fallback_config_status = RwSignal::new_local(RadrootsAppConfigStatus::Unknown);
+    let config_status = context
+        .as_ref()
+        .map(|value| value.config_status)
+        .unwrap_or(fallback_config_status);
+    let navigate = use_navigate();
+    let config_step = RwSignal::new_local(app_config_step_default());
+    let profile_name = RwSignal::new_local(String::new());
+    let profile_location = RwSignal::new_local(String::new());
+    let role = RwSignal::new_local(None::<RadrootsAppRole>);
+    let farmer_farm_name = RwSignal::new_local(String::new());
+    let farmer_location = RwSignal::new_local(String::new());
+    let farmer_products = RwSignal::new_local(Vec::<String>::new());
+    let farmer_products_input = RwSignal::new_local(String::new());
+    let individual_name = RwSignal::new_local(String::new());
+    let individual_location = RwSignal::new_local(String::new());
+    let individual_products = RwSignal::new_local(Vec::<String>::new());
+    let individual_products_input = RwSignal::new_local(String::new());
+    let business_name = RwSignal::new_local(String::new());
+    let business_location = RwSignal::new_local(String::new());
+    let business_operations = RwSignal::new_local(String::new());
+    let notifications_orders = RwSignal::new_local(true);
+    let notifications_messages = RwSignal::new_local(true);
+    let payment_method = RwSignal::new_local(String::new());
+    let config_flow = move || RadrootsAppConfigFlowDraft {
+        step: config_step.get(),
+        profile_name: profile_name.get(),
+        profile_location: profile_location.get(),
+        role: role.get(),
+        farmer_farm_name: farmer_farm_name.get(),
+        farmer_location: farmer_location.get(),
+        farmer_products: farmer_products.get(),
+        individual_name: individual_name.get(),
+        individual_location: individual_location.get(),
+        individual_products: individual_products.get(),
+        business_name: business_name.get(),
+        business_location: business_location.get(),
+        business_operations: business_operations.get(),
+        notifications_orders: notifications_orders.get(),
+        notifications_messages: notifications_messages.get(),
+        payment_method: payment_method.get(),
+    };
+    let config_validation = move || app_config_flow_validate(&config_flow());
+    let advance_step = {
+        let config_status = config_status.clone();
+        let navigate = navigate.clone();
+        Callback::new(move |_| {
+            let validation = config_validation();
+            if !validation.can_continue {
+                return;
+            }
+            if matches!(config_step.get(), RadrootsAppConfigStep::Preferences) {
+                config_status.set(RadrootsAppConfigStatus::Configured);
+                navigate("/", Default::default());
+                return;
+            }
+            config_step.set(validation.next_step);
+        })
+    };
+    let advance_step_click = {
+        let advance_step = advance_step.clone();
+        Callback::new(move |_ev: MouseEvent| {
+            advance_step.run(());
+        })
+    };
+    let rewind_step = Callback::new(move |_ev: MouseEvent| {
+        let validation = config_validation();
+        config_step.set(validation.prev_step);
+    });
+    let add_farmer_product = {
+        let farmer_products = farmer_products.clone();
+        let farmer_products_input = farmer_products_input.clone();
+        move || {
+            let entry = farmer_products_input.get_untracked();
+            let trimmed = entry.trim().to_string();
+            if trimmed.is_empty() {
+                return;
+            }
+            farmer_products.update(|items| {
+                if !items.iter().any(|item| item.eq_ignore_ascii_case(&trimmed)) {
+                    items.push(trimmed.clone());
+                }
+            });
+            farmer_products_input.set(String::new());
+        }
+    };
+    let add_individual_product = {
+        let individual_products = individual_products.clone();
+        let individual_products_input = individual_products_input.clone();
+        move || {
+            let entry = individual_products_input.get_untracked();
+            let trimmed = entry.trim().to_string();
+            if trimmed.is_empty() {
+                return;
+            }
+            individual_products.update(|items| {
+                if !items.iter().any(|item| item.eq_ignore_ascii_case(&trimmed)) {
+                    items.push(trimmed.clone());
+                }
+            });
+            individual_products_input.set(String::new());
+        }
+    };
     view! {
-        <main id="app-config" class="app-page app-page-fixed">
-            <section id="app-config-body" class="flex flex-col gap-2 px-4 pt-6">
-                <h1 id="app-config-title" class="text-xl font-semibold">
-                    {"Configure your profile"}
-                </h1>
-                <p id="app-config-subtitle" class="text-sm text-[var(--text-secondary)]">
-                    {"Complete your configuration to continue."}
-                </p>
+        <main id="app-config" class="app-page app-page-fixed relative w-full flex flex-col">
+            <section
+                id="app-config-body"
+                class="app-page-scroll scroll-hide flex flex-col flex-1 min-h-0 w-full gap-6 px-4 pt-6 pb-28 overscroll-contain"
+            >
+                <header id="app-config-header" class="flex flex-col gap-2">
+                    <p class="text-[0.7rem] font-semibold uppercase tracking-[0.2em] text-ly1-gl-label/60">
+                        {"Configuration"}
+                    </p>
+                    <h1 id="app-config-title" class="text-2xl font-semibold text-ly0-gl">
+                        {"Set up your profile"}
+                    </h1>
+                    <p id="app-config-step" class="text-sm text-ly1-gl-label/80">
+                        {move || {
+                            let step = config_step.get();
+                            let index = match step {
+                                RadrootsAppConfigStep::Profile => 1,
+                                RadrootsAppConfigStep::Role => 2,
+                                RadrootsAppConfigStep::Preferences => 3,
+                            };
+                            format!("Step {index} of 3")
+                        }}
+                    </p>
+                </header>
+                {move || match config_step.get() {
+                    RadrootsAppConfigStep::Profile => view! {
+                        <section
+                            id="app-config-profile"
+                            class="app-view app-view-enter flex flex-col w-full gap-5"
+                        >
+                            <RadrootsAppUiFormField
+                                label="Profile name".to_string()
+                                id="app-config-profile-name-field".to_string()
+                            >
+                                <input
+                                    id="app-config-profile-name"
+                                    class="input-base"
+                                    type="text"
+                                    placeholder="Your name".to_string()
+                                    prop:value=move || profile_name.get()
+                                    on:input=move |ev| {
+                                        profile_name.set(event_target_value(&ev));
+                                    }
+                                />
+                            </RadrootsAppUiFormField>
+                            <RadrootsAppUiFormField
+                                label="Location".to_string()
+                                id="app-config-profile-location-field".to_string()
+                                hint="City or region".to_string()
+                            >
+                                <input
+                                    id="app-config-profile-location"
+                                    class="input-base"
+                                    type="text"
+                                    placeholder="e.g. Sonoma, CA".to_string()
+                                    prop:value=move || profile_location.get()
+                                    on:keydown=move |ev: KeyboardEvent| {
+                                        if ev.key() == "Enter" {
+                                            ev.prevent_default();
+                                            advance_step.run(());
+                                        }
+                                    }
+                                    on:input=move |ev| {
+                                        profile_location.set(event_target_value(&ev));
+                                    }
+                                />
+                            </RadrootsAppUiFormField>
+                        </section>
+                    }.into_any(),
+                    RadrootsAppConfigStep::Role => view! {
+                        <section
+                            id="app-config-role"
+                            class="app-view app-view-enter flex flex-col w-full gap-5"
+                        >
+                            <RadrootsAppUiFormField
+                                label="Role".to_string()
+                                id="app-config-role-select".to_string()
+                                hint="Choose the best fit for you right now".to_string()
+                            >
+                                <RadrootsAppUiChips id="app-config-role-options".to_string()>
+                                    <button
+                                        id="app-config-role-farmer"
+                                        type="button"
+                                        class="form-chip"
+                                        attr:data-active=move || if role.get() == Some(RadrootsAppRole::Farm) { "true" } else { "false" }
+                                        on:click=move |_| {
+                                            role.set(Some(RadrootsAppRole::Farm));
+                                        }
+                                    >
+                                        {"Farmer"}
+                                    </button>
+                                    <button
+                                        id="app-config-role-business"
+                                        type="button"
+                                        class="form-chip"
+                                        attr:data-active=move || if role.get() == Some(RadrootsAppRole::Business) { "true" } else { "false" }
+                                        on:click=move |_| {
+                                            role.set(Some(RadrootsAppRole::Business));
+                                        }
+                                    >
+                                        {"Business"}
+                                    </button>
+                                    <button
+                                        id="app-config-role-individual"
+                                        type="button"
+                                        class="form-chip"
+                                        attr:data-active=move || if role.get() == Some(RadrootsAppRole::Individual) { "true" } else { "false" }
+                                        on:click=move |_| {
+                                            role.set(Some(RadrootsAppRole::Individual));
+                                        }
+                                    >
+                                        {"Individual"}
+                                    </button>
+                                </RadrootsAppUiChips>
+                            </RadrootsAppUiFormField>
+                            {move || match role.get() {
+                                Some(RadrootsAppRole::Farm) => view! {
+                                    <div
+                                        id="app-config-role-farm"
+                                        class="flex flex-col gap-4"
+                                    >
+                                        <RadrootsAppUiFormField
+                                            label="Farm name".to_string()
+                                            id="app-config-farm-name-field".to_string()
+                                        >
+                                            <input
+                                                id="app-config-farm-name"
+                                                class="input-base"
+                                                type="text"
+                                                placeholder="e.g. Willow Creek Farm".to_string()
+                                                prop:value=move || farmer_farm_name.get()
+                                                on:input=move |ev| {
+                                                    farmer_farm_name.set(event_target_value(&ev));
+                                                }
+                                            />
+                                        </RadrootsAppUiFormField>
+                                        <RadrootsAppUiFormField
+                                            label="Location".to_string()
+                                            id="app-config-farm-location-field".to_string()
+                                        >
+                                            <input
+                                                id="app-config-farm-location"
+                                                class="input-base"
+                                                type="text"
+                                                placeholder="City or region".to_string()
+                                                prop:value=move || farmer_location.get()
+                                                on:input=move |ev| {
+                                                    farmer_location.set(event_target_value(&ev));
+                                                }
+                                            />
+                                        </RadrootsAppUiFormField>
+                                        <RadrootsAppUiFormField
+                                            label="Products growing".to_string()
+                                            id="app-config-farm-products-field".to_string()
+                                            hint="Press enter to add items".to_string()
+                                        >
+                                            <input
+                                                id="app-config-farm-products-input"
+                                                class="input-base"
+                                                type="text"
+                                                placeholder="Add a product".to_string()
+                                                prop:value=move || farmer_products_input.get()
+                                                on:keydown=move |ev: KeyboardEvent| {
+                                                    if ev.key() == "Enter" || ev.key() == "," {
+                                                        ev.prevent_default();
+                                                        add_farmer_product();
+                                                    }
+                                                }
+                                                on:input=move |ev| {
+                                                    farmer_products_input.set(event_target_value(&ev));
+                                                }
+                                            />
+                                            <RadrootsAppUiChips id="app-config-farm-products".to_string()>
+                                                <For
+                                                    each=move || farmer_products.get()
+                                                    key=|value| value.clone()
+                                                    children=move |value| {
+                                                        let remove_value = value.clone();
+                                                        view! {
+                                                            <RadrootsAppUiChip
+                                                                label=value.clone()
+                                                                active=true
+                                                                on_click=Callback::new(move |_| {
+                                                                    farmer_products.update(|items| {
+                                                                        items.retain(|item| item != &remove_value);
+                                                                    });
+                                                                })
+                                                            />
+                                                        }
+                                                    }
+                                                />
+                                            </RadrootsAppUiChips>
+                                        </RadrootsAppUiFormField>
+                                    </div>
+                                }.into_any(),
+                                Some(RadrootsAppRole::Individual) => view! {
+                                    <div
+                                        id="app-config-role-individual"
+                                        class="flex flex-col gap-4"
+                                    >
+                                        <RadrootsAppUiFormField
+                                            label="Name".to_string()
+                                            id="app-config-individual-name-field".to_string()
+                                        >
+                                            <input
+                                                id="app-config-individual-name"
+                                                class="input-base"
+                                                type="text"
+                                                placeholder="Your name".to_string()
+                                                prop:value=move || individual_name.get()
+                                                on:input=move |ev| {
+                                                    individual_name.set(event_target_value(&ev));
+                                                }
+                                            />
+                                        </RadrootsAppUiFormField>
+                                        <RadrootsAppUiFormField
+                                            label="Location".to_string()
+                                            id="app-config-individual-location-field".to_string()
+                                        >
+                                            <input
+                                                id="app-config-individual-location"
+                                                class="input-base"
+                                                type="text"
+                                                placeholder="City or region".to_string()
+                                                prop:value=move || individual_location.get()
+                                                on:input=move |ev| {
+                                                    individual_location.set(event_target_value(&ev));
+                                                }
+                                            />
+                                        </RadrootsAppUiFormField>
+                                        <RadrootsAppUiFormField
+                                            label="Products interested in".to_string()
+                                            id="app-config-individual-products-field".to_string()
+                                            hint="Press enter to add items".to_string()
+                                        >
+                                            <input
+                                                id="app-config-individual-products-input"
+                                                class="input-base"
+                                                type="text"
+                                                placeholder="Add a product".to_string()
+                                                prop:value=move || individual_products_input.get()
+                                                on:keydown=move |ev: KeyboardEvent| {
+                                                    if ev.key() == "Enter" || ev.key() == "," {
+                                                        ev.prevent_default();
+                                                        add_individual_product();
+                                                    }
+                                                }
+                                                on:input=move |ev| {
+                                                    individual_products_input.set(event_target_value(&ev));
+                                                }
+                                            />
+                                            <RadrootsAppUiChips id="app-config-individual-products".to_string()>
+                                                <For
+                                                    each=move || individual_products.get()
+                                                    key=|value| value.clone()
+                                                    children=move |value| {
+                                                        let remove_value = value.clone();
+                                                        view! {
+                                                            <RadrootsAppUiChip
+                                                                label=value.clone()
+                                                                active=true
+                                                                on_click=Callback::new(move |_| {
+                                                                    individual_products.update(|items| {
+                                                                        items.retain(|item| item != &remove_value);
+                                                                    });
+                                                                })
+                                                            />
+                                                        }
+                                                    }
+                                                />
+                                            </RadrootsAppUiChips>
+                                        </RadrootsAppUiFormField>
+                                    </div>
+                                }.into_any(),
+                                Some(RadrootsAppRole::Business) => view! {
+                                    <div
+                                        id="app-config-role-business"
+                                        class="flex flex-col gap-4"
+                                    >
+                                        <RadrootsAppUiFormField
+                                            label="Business name".to_string()
+                                            id="app-config-business-name-field".to_string()
+                                        >
+                                            <input
+                                                id="app-config-business-name"
+                                                class="input-base"
+                                                type="text"
+                                                placeholder="Business name".to_string()
+                                                prop:value=move || business_name.get()
+                                                on:input=move |ev| {
+                                                    business_name.set(event_target_value(&ev));
+                                                }
+                                            />
+                                        </RadrootsAppUiFormField>
+                                        <RadrootsAppUiFormField
+                                            label="Location".to_string()
+                                            id="app-config-business-location-field".to_string()
+                                        >
+                                            <input
+                                                id="app-config-business-location"
+                                                class="input-base"
+                                                type="text"
+                                                placeholder="City or region".to_string()
+                                                prop:value=move || business_location.get()
+                                                on:input=move |ev| {
+                                                    business_location.set(event_target_value(&ev));
+                                                }
+                                            />
+                                        </RadrootsAppUiFormField>
+                                        <RadrootsAppUiFormField
+                                            label="Type of operations".to_string()
+                                            id="app-config-business-operations-field".to_string()
+                                            hint="What do you coordinate or purchase?".to_string()
+                                        >
+                                            <textarea
+                                                id="app-config-business-operations"
+                                                class="textarea-base"
+                                                rows="3"
+                                                placeholder="Tell us about your operations".to_string()
+                                                prop:value=move || business_operations.get()
+                                                on:input=move |ev| {
+                                                    business_operations.set(event_target_value(&ev));
+                                                }
+                                            ></textarea>
+                                        </RadrootsAppUiFormField>
+                                    </div>
+                                }.into_any(),
+                                None => view! {
+                                    <p class="text-sm text-ly1-gl-label/80">
+                                        {"Select a role to continue."}
+                                    </p>
+                                }.into_any(),
+                            }}
+                        </section>
+                    }.into_any(),
+                    RadrootsAppConfigStep::Preferences => view! {
+                        <section
+                            id="app-config-preferences"
+                            class="app-view app-view-enter flex flex-col w-full gap-5"
+                        >
+                            <RadrootsAppUiFormField
+                                label="Notifications".to_string()
+                                id="app-config-preferences-notifications".to_string()
+                            >
+                                <div class="flex flex-col gap-3">
+                                    <label
+                                        id="app-config-notifications-orders"
+                                        class="flex items-center justify-between gap-4 rounded-touch border border-ly1-edge/60 bg-ly1 px-3 py-2 text-sm text-ly1-gl"
+                                    >
+                                        <span>{"Order updates"}</span>
+                                        <input
+                                            type="checkbox"
+                                            class="h-4 w-4 accent-[hsl(var(--ly1-gl))]"
+                                            prop:checked=move || notifications_orders.get()
+                                            on:change=move |ev| {
+                                                notifications_orders.set(event_target_checked(&ev));
+                                            }
+                                        />
+                                    </label>
+                                    <label
+                                        id="app-config-notifications-messages"
+                                        class="flex items-center justify-between gap-4 rounded-touch border border-ly1-edge/60 bg-ly1 px-3 py-2 text-sm text-ly1-gl"
+                                    >
+                                        <span>{"Messages"}</span>
+                                        <input
+                                            type="checkbox"
+                                            class="h-4 w-4 accent-[hsl(var(--ly1-gl))]"
+                                            prop:checked=move || notifications_messages.get()
+                                            on:change=move |ev| {
+                                                notifications_messages.set(event_target_checked(&ev));
+                                            }
+                                        />
+                                    </label>
+                                </div>
+                            </RadrootsAppUiFormField>
+                            <RadrootsAppUiFormField
+                                label="Payment method".to_string()
+                                id="app-config-payment-method".to_string()
+                                hint="Optional".to_string()
+                            >
+                                <input
+                                    id="app-config-payment-method-input"
+                                    class="input-base"
+                                    type="text"
+                                    placeholder="e.g. Cash, card, or invoice".to_string()
+                                    prop:value=move || payment_method.get()
+                                    on:input=move |ev| {
+                                        payment_method.set(event_target_value(&ev));
+                                    }
+                                />
+                            </RadrootsAppUiFormField>
+                        </section>
+                    }.into_any(),
+                }}
             </section>
+            <footer
+                id="app-config-actions"
+                class="z-10 absolute bottom-4 left-0 flex flex-col w-full justify-center items-center se-compact:bottom-0"
+            >
+                {move || {
+                    let validation = config_validation();
+                    let continue_disabled = !validation.can_continue;
+                    let continue_label = if matches!(config_step.get(), RadrootsAppConfigStep::Preferences) {
+                        "Finish".to_string()
+                    } else {
+                        "Continue".to_string()
+                    };
+                    let back_label = "Back".to_string();
+                    let continue_action = RadrootsAppUiButtonLayoutAction {
+                        label: continue_label,
+                        disabled: continue_disabled,
+                        loading: false,
+                        on_click: advance_step_click.clone(),
+                        class: None,
+                        class_label: None,
+                        style: None,
+                    };
+                    let back_action = RadrootsAppUiButtonLayoutBackAction {
+                        visible: validation.can_back,
+                        label: Some(back_label),
+                        disabled: false,
+                        on_click: rewind_step.clone(),
+                        compact: false,
+                    };
+                    view! {
+                        <RadrootsAppUiButtonLayoutPair
+                            continue_action=continue_action
+                            back=back_action
+                        />
+                    }.into_any()
+                }}
+            </footer>
         </main>
     }
 }
