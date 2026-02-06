@@ -158,4 +158,34 @@
     -moz-appearance: none;
     z-index: 30;
   }
+
+  .status-ok {
+    color: var(--status-ok);
+  }
+
+  .status-warn {
+    color: var(--status-warn);
+  }
+
+  .status-error {
+    color: var(--status-error);
+  }
+
+  .status-neutral {
+    color: var(--status-neutral);
+  }
+
+  .status-dot {
+    font-size: 0.6rem;
+    line-height: 1;
+  }
+
+  .status-pill {
+    display: inline-flex;
+    align-items: center;
+    padding: 2px 8px;
+    border-radius: 999px;
+    font: var(--type-caption1);
+    background: color-mix(in srgb, currentColor 12%, transparent);
+  }
 }

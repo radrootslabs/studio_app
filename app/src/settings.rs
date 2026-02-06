@@ -2,6 +2,7 @@
 
 use leptos::ev::MouseEvent;
 use leptos::prelude::*;
+use leptos_router::hooks::use_navigate;
 
 use crate::{
     app_theme_apply_mode,
@@ -45,6 +46,17 @@ fn settings_touch_callback(action: &'static str) -> Callback<MouseEvent> {
     Callback::new(move |_| log_settings_action(action))
 }
 
+fn settings_capitalize(value: &str) -> String {
+    let mut chars = value.chars();
+    let Some(first) = chars.next() else {
+        return String::new();
+    };
+    let mut out = String::new();
+    out.extend(first.to_uppercase());
+    out.push_str(chars.as_str());
+    out
+}
+
 fn settings_label(value: String, classes: Option<&str>) -> RadrootsAppUiListLabelValue {
     RadrootsAppUiListLabelValue {
         classes_wrap: None,
@@ -58,6 +70,7 @@ fn settings_label(value: String, classes: Option<&str>) -> RadrootsAppUiListLabe
 
 #[component]
 pub fn RadrootsAppSettingsPage() -> impl IntoView {
+    let navigate = use_navigate();
     let initial_mode = app_theme_read_mode().unwrap_or(RadrootsAppThemeMode::System);
     let color_mode_value = initial_mode.as_str().to_string();
     let color_mode_callback = Callback::new(move |value: String| {
@@ -86,17 +99,23 @@ pub fn RadrootsAppSettingsPage() -> impl IntoView {
                     value: color_mode_value,
                     options: vec![
                         RadrootsAppUiListSelectOption {
-                            label: t!("app.settings.appearance.color_mode.option.system"),
+                            label: settings_capitalize(
+                                &t!("app.settings.appearance.color_mode.option.system"),
+                            ),
                             value: "system".to_string(),
                             classes: None,
                         },
                         RadrootsAppUiListSelectOption {
-                            label: t!("app.settings.appearance.color_mode.option.light"),
+                            label: settings_capitalize(
+                                &t!("app.settings.appearance.color_mode.option.light"),
+                            ),
                             value: "light".to_string(),
                             classes: None,
                         },
                         RadrootsAppUiListSelectOption {
-                            label: t!("app.settings.appearance.color_mode.option.dark"),
+                            label: settings_capitalize(
+                                &t!("app.settings.appearance.color_mode.option.dark"),
+                            ),
                             value: "dark".to_string(),
                             classes: None,
                         },
@@ -194,6 +213,52 @@ pub fn RadrootsAppSettingsPage() -> impl IntoView {
         hide_offset: false,
         styles: None,
     };
+    let system_status_action = {
+        let navigate = navigate.clone();
+        Callback::new(move |_| {
+            navigate("/settings/status", Default::default());
+        })
+    };
+    let system_list = RadrootsAppUiList {
+        id: Some("settings-system".to_string()),
+        view: Some("settings".to_string()),
+        classes: None,
+        title: Some(RadrootsAppUiListTitle {
+            value: RadrootsAppUiListTitleValue::Text(t!("app.settings.system.title")),
+            classes: None,
+            mod_value: None,
+            link: None,
+            on_click: None,
+        }),
+        default_state: None,
+        list: Some(vec![Some(RadrootsAppUiListItem {
+            kind: RadrootsAppUiListItemKind::Touch(RadrootsAppUiListTouch {
+                label: RadrootsAppUiListLabel {
+                    left: vec![settings_label(
+                        t!("app.settings.system.status"),
+                        Some("capitalize"),
+                    )],
+                    right: Vec::new(),
+                },
+                display: None,
+                end: Some(RadrootsAppUiListTouchEnd {
+                    icon: RadrootsAppUiListIcon {
+                        key: "chevron-right".to_string(),
+                        class: None,
+                    },
+                    on_click: None,
+                }),
+                on_click: Some(system_status_action),
+            }),
+            loading: false,
+            hide_active: false,
+            hide_field: false,
+            full_rounded: false,
+            offset: None,
+        })]),
+        hide_offset: false,
+        styles: None,
+    };
     view! {
         <main id="app-settings" class="app-page app-page-scroll" style="padding: 16px;">
             <header id="app-settings-header" style="font: var(--type-title2); margin-bottom: 12px;">
@@ -202,6 +267,7 @@ pub fn RadrootsAppSettingsPage() -> impl IntoView {
             <section id="app-settings-content" style="display:flex;flex-direction:column;gap:16px;">
                 <RadrootsAppUiListView basis=appearance_list />
                 <RadrootsAppUiListView basis=actions_list />
+                <RadrootsAppUiListView basis=system_list />
             </section>
         </main>
     }

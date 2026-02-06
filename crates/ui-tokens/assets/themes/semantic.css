@@ -17,4 +17,9 @@
   --material-regular: color-mix(in srgb, hsl(var(--ly1) / 1) 72%, transparent);
   --material-thick: color-mix(in srgb, hsl(var(--ly1) / 1) 85%, transparent);
   --material-chrome: color-mix(in srgb, hsl(var(--ly0) / 1) 90%, transparent);
+
+  --status-ok: var(--success);
+  --status-warn: var(--warning);
+  --status-error: var(--destructive);
+  --status-neutral: var(--text-secondary);
 }

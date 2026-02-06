@@ -43,7 +43,6 @@ use crate::{
     app_log_error_store,
     app_config_default,
     app_datastore_clear_setup_draft,
-    app_datastore_read_state,
     app_datastore_write_profile_seed,
     app_datastore_write_setup_draft,
     app_keystore_nostr_ensure_key,
@@ -53,18 +52,18 @@ use crate::{
     app_setup_lock_enabled,
     app_setup_lock_release,
     app_setup_lock_ttl_ms,
-    app_state_notifications_permission_value,
     app_state_set_notifications_permission_value,
     app_state_timestamp_ms,
     app_setup_eula_date,
     app_setup_finalize_with_key,
     app_setup_gate_from_status,
     app_setup_step_default,
-    app_health_check_all,
+    app_health_check_delay_ms,
+    health_report_summary,
+    health_result_label,
+    health_status_class,
     RadrootsAppBackends,
-    RadrootsAppConfig,
     RadrootsAppHealthCheckResult,
-    RadrootsAppHealthCheckStatus,
     RadrootsAppHealthReport,
     RadrootsAppInitError,
     RadrootsAppInitStage,
@@ -84,16 +83,9 @@ use crate::{
     RadrootsAppSetupStatus,
     RadrootsAppUiDemoPage,
     RadrootsAppSetupStep,
-    RadrootsAppTangleClientStub,
+    RadrootsAppSettingsStatusPage,
+    spawn_health_checks,
 };
-
-fn health_status_color(status: RadrootsAppHealthCheckStatus) -> &'static str {
-    match status {
-        RadrootsAppHealthCheckStatus::Ok => "green",
-        RadrootsAppHealthCheckStatus::Error => "red",
-        RadrootsAppHealthCheckStatus::Skipped => "gray",
-    }
-}
 
 fn init_stage_label(stage: RadrootsAppInitStage) -> String {
     match stage {
@@ -105,32 +97,6 @@ fn init_stage_label(stage: RadrootsAppInitStage) -> String {
         RadrootsAppInitStage::Geocoder => t!("app.init.stage.geocoder"),
         RadrootsAppInitStage::Ready => t!("app.init.stage.ready"),
         RadrootsAppInitStage::Error => t!("app.init.stage.error"),
-    }
-}
-
-fn health_status_label(status: RadrootsAppHealthCheckStatus) -> String {
-    match status {
-        RadrootsAppHealthCheckStatus::Ok => t!("app.home.health.status.ok"),
-        RadrootsAppHealthCheckStatus::Error => t!("app.home.health.status.error"),
-        RadrootsAppHealthCheckStatus::Skipped => t!("app.home.health.status.skipped"),
-    }
-}
-
-fn health_message_label(message: &str) -> String {
-    match message {
-        "missing" => t!("app.home.health.message.missing"),
-        "mismatch" => t!("app.home.health.message.mismatch"),
-        "uninitialized" => t!("app.home.health.message.uninitialized"),
-        "unavailable" => t!("app.home.health.message.unavailable"),
-        _ => message.to_string(),
-    }
-}
-
-fn health_result_label(result: &RadrootsAppHealthCheckResult) -> String {
-    let status = health_status_label(result.status);
-    match result.message.as_deref() {
-        Some(message) => format!("{}: {}", status, health_message_label(message)),
-        None => status,
     }
 }
 
@@ -179,86 +145,12 @@ fn setup_touch_callback(action: &'static str) -> Callback<MouseEvent> {
     })
 }
 
-fn active_key_label(value: Option<String>) -> String {
-    let Some(value) = value else {
-        return t!("app.common.missing");
-    };
-    if value.len() <= 12 {
-        return value;
-    }
-    let head = &value[..8];
-    let tail = &value[value.len() - 4..];
-    format!("{head}...{tail}")
-}
-
 fn log_init_stage(stage: RadrootsAppInitStage) {
     let _ = app_log_debug_emit("log.app.init.stage", stage.as_str(), None);
 }
 
 fn logs_datastore() -> radroots_studio_app_core::datastore::RadrootsClientWebDatastore {
     radroots_studio_app_core::datastore::RadrootsClientWebDatastore::new(Some(IDB_CONFIG_LOGS))
-}
-
-fn spawn_health_checks(
-    config: RadrootsAppConfig,
-    setup_required: bool,
-    health_report: RwSignal<RadrootsAppHealthReport, LocalStorage>,
-    health_running: RwSignal<bool, LocalStorage>,
-    active_key: RwSignal<Option<String>, LocalStorage>,
-    notifications_status: RwSignal<Option<String>, LocalStorage>,
-) {
-    health_running.set(true);
-    spawn_local(async move {
-        let datastore = radroots_studio_app_core::datastore::RadrootsClientWebDatastore::new(
-            Some(config.datastore.idb_config),
-        );
-        let keystore = radroots_studio_app_core::keystore::RadrootsClientWebKeystoreNostr::new(
-            Some(config.keystore.nostr_store),
-        );
-        let notifications = RadrootsAppNotifications::new(None);
-        let tangle = RadrootsAppTangleClientStub::new();
-        let report = app_health_check_all(
-            &datastore,
-            &keystore,
-            &notifications,
-            &tangle,
-            &config.datastore.key_maps,
-            setup_required,
-        )
-        .await;
-        let mut active_key_value = None;
-        let mut notifications_value = None;
-        if !setup_required {
-            let app_data = app_datastore_read_state(&datastore, &config.datastore.key_maps)
-                .await
-                .ok();
-            active_key_value = app_data.as_ref().and_then(|data| {
-                if data.active_key.is_empty() {
-                    None
-                } else {
-                    Some(data.active_key.clone())
-                }
-            });
-            notifications_value = app_data
-                .as_ref()
-                .and_then(app_state_notifications_permission_value)
-                .map(|permission| permission.as_str().to_string());
-        }
-        health_report.set(report);
-        active_key.set(active_key_value);
-        notifications_status.set(notifications_value);
-        health_running.set(false);
-        let key_maps = config.datastore.key_maps.clone();
-        spawn_local(async move {
-            let log_datastore = logs_datastore();
-            let _ = app_log_buffer_flush_deferred(&log_datastore, &key_maps, true).await;
-        });
-    });
-}
-
-const APP_HEALTH_CHECK_DELAY_MS: u32 = 300;
-fn app_health_check_delay_ms() -> u32 {
-    APP_HEALTH_CHECK_DELAY_MS
 }
 
 #[component]
@@ -1582,6 +1474,7 @@ fn HomePage() -> impl IntoView {
     let active_key = RwSignal::new_local(None::<String>);
     let notifications_status = RwSignal::new_local(None::<String>);
     let notifications_requesting = RwSignal::new_local(false);
+    let last_run = RwSignal::new_local(None::<i64>);
     Effect::new(move || {
         if init_state.get().stage != RadrootsAppInitStage::Ready {
             return;
@@ -1609,6 +1502,7 @@ fn HomePage() -> impl IntoView {
                 health_running,
                 active_key,
                 notifications_status,
+                last_run,
             );
         });
     });
@@ -1629,11 +1523,6 @@ fn HomePage() -> impl IntoView {
             .as_deref()
             .map(reset_status_label)
             .unwrap_or_else(|| t!("app.home.reset.status.idle"))
-    };
-    let health_disabled = move || {
-        backends.with(|value| value.is_none())
-            || health_running.get()
-            || matches!(setup_status.get(), RadrootsAppSetupStatus::Unknown)
     };
     let notifications_disabled = move || {
         backends.with(|value| value.is_none()) || notifications_requesting.get()
@@ -1712,6 +1601,7 @@ fn HomePage() -> impl IntoView {
                                             health_running,
                                             active_key,
                                             notifications_status,
+                                            last_run,
                                         );
                                     }
                                     Err(err) => {
@@ -1769,6 +1659,7 @@ fn HomePage() -> impl IntoView {
                                             health_running,
                                             active_key,
                                             notifications_status,
+                                            last_run,
                                         );
                                     }
                                     Err(err) => {
@@ -1793,114 +1684,31 @@ fn HomePage() -> impl IntoView {
                 </div>
             </section>
             <section id="app-home-health" aria-label=t!("app.home.health.aria") style="margin-top: 16px;">
-                <header id="app-home-health-header">
-                    <h2 id="app-home-health-title" style="font-weight: 600;">{t!("app.home.health.title")}</h2>
+                <header id="app-home-health-header" style="display:flex;align-items:center;gap:12px;">
+                    <h2 id="app-home-health-title" style="font-weight: 600;">
+                        {t!("app.settings.status.title")}
+                    </h2>
+                    <A href="/settings/status" attr:id="app-home-health-link">
+                        {t!("app.settings.status.view")}
+                    </A>
                 </header>
-                <div id="app-home-health-actions" style="margin-top: 8px; display: flex; align-items: center; gap: 8px;">
-                    <button
-                        on:click=move |_| {
-                            let config = backends.with_untracked(|value| value.as_ref().map(|backends| backends.config.clone()));
-                            let Some(config) = config else {
-                                return;
-                            };
-                            let setup_required_value =
-                                !matches!(setup_status.get(), RadrootsAppSetupStatus::Configured);
-                            spawn_health_checks(
-                                config,
-                                setup_required_value,
-                                health_report,
-                                health_running,
-                                active_key,
-                                notifications_status,
-                            );
+                <div id="app-home-health-summary" style="margin-top: 8px; display: flex; align-items: center; gap: 8px;">
+                    <span
+                        class=move || {
+                            let summary = health_report_summary(&health_report.get());
+                            format!("status-dot {}", health_status_class(summary))
                         }
-                        disabled=health_disabled
                     >
-                        {move || {
-                            if health_running.get() {
-                                t!("app.home.health.button.checking")
-                            } else {
-                                t!("app.home.health.button.run")
-                            }
-                        }}
-                    </button>
+                        {"●"}
+                    </span>
+                    <span>{move || {
+                        let summary = health_report_summary(&health_report.get());
+                        health_result_label(&RadrootsAppHealthCheckResult {
+                            status: summary,
+                            message: None,
+                        })
+                    }}</span>
                 </div>
-                <ul id="app-home-health-list" style="margin-top: 8px; display: grid; gap: 6px;">
-                    <li id="app-home-health-key-maps" style="display: flex; align-items: center; gap: 8px;">
-                        <span
-                            style=move || format!(
-                                "display:inline-block;width:10px;height:10px;border-radius:50%;background:{};",
-                                health_status_color(health_report.get().key_maps.status)
-                            )
-                        ></span>
-                        <span>{t!("app.home.health.item.key_maps")}</span>
-                        <span>{move || health_result_label(&health_report.get().key_maps)}</span>
-                    </li>
-                    <li id="app-home-health-bootstrap-state" style="display: flex; align-items: center; gap: 8px;">
-                        <span
-                            style=move || format!(
-                                "display:inline-block;width:10px;height:10px;border-radius:50%;background:{};",
-                                health_status_color(health_report.get().bootstrap_state.status)
-                            )
-                        ></span>
-                        <span>{t!("app.home.health.item.bootstrap_state")}</span>
-                        <span>{move || health_result_label(&health_report.get().bootstrap_state)}</span>
-                    </li>
-                    <li id="app-home-health-active-key-state" style="display: flex; align-items: center; gap: 8px;">
-                        <span
-                            style=move || format!(
-                                "display:inline-block;width:10px;height:10px;border-radius:50%;background:{};",
-                                health_status_color(health_report.get().state_active_key.status)
-                            )
-                        ></span>
-                        <span>{t!("app.home.health.item.state_active_key")}</span>
-                        <span>{move || health_result_label(&health_report.get().state_active_key)}</span>
-                    </li>
-                    <li id="app-home-health-notifications" style="display: flex; align-items: center; gap: 8px;">
-                        <span
-                            style=move || format!(
-                                "display:inline-block;width:10px;height:10px;border-radius:50%;background:{};",
-                                health_status_color(health_report.get().notifications.status)
-                            )
-                        ></span>
-                        <span>{t!("app.home.health.item.notifications")}</span>
-                        <span>{move || health_result_label(&health_report.get().notifications)}</span>
-                    </li>
-                    <li id="app-home-health-tangle" style="display: flex; align-items: center; gap: 8px;">
-                        <span
-                            style=move || format!(
-                                "display:inline-block;width:10px;height:10px;border-radius:50%;background:{};",
-                                health_status_color(health_report.get().tangle.status)
-                            )
-                        ></span>
-                        <span>{t!("app.home.health.item.tangle")}</span>
-                        <span>{move || health_result_label(&health_report.get().tangle)}</span>
-                    </li>
-                    <li id="app-home-health-datastore" style="display: flex; align-items: center; gap: 8px;">
-                        <span
-                            style=move || format!(
-                                "display:inline-block;width:10px;height:10px;border-radius:50%;background:{};",
-                                health_status_color(health_report.get().datastore_roundtrip.status)
-                            )
-                        ></span>
-                        <span>{t!("app.home.health.item.datastore_roundtrip")}</span>
-                        <span>{move || health_result_label(&health_report.get().datastore_roundtrip)}</span>
-                    </li>
-                    <li id="app-home-health-keystore" style="display: flex; align-items: center; gap: 8px;">
-                        <span
-                            style=move || format!(
-                                "display:inline-block;width:10px;height:10px;border-radius:50%;background:{};",
-                                health_status_color(health_report.get().keystore.status)
-                            )
-                        ></span>
-                        <span>{t!("app.home.health.item.keystore")}</span>
-                        <span>{move || health_result_label(&health_report.get().keystore)}</span>
-                    </li>
-                    <li id="app-home-health-active-key" style="display: flex; align-items: center; gap: 8px;">
-                        <span>{t!("app.home.health.item.active_key")}</span>
-                        <span>{move || active_key_label(active_key.get())}</span>
-                    </li>
-                </ul>
             </section>
         </main>
     }
@@ -2065,6 +1873,10 @@ fn AppShell() -> impl IntoView {
                                 <Route path=path!("") view=HomePage />
                                 <Route path=path!("logs") view=RadrootsAppLogsPage />
                                 <Route path=path!("ui") view=RadrootsAppUiDemoPage />
+                                <Route
+                                    path=path!("settings/status")
+                                    view=RadrootsAppSettingsStatusPage
+                                />
                                 <Route path=path!("settings") view=RadrootsAppSettingsPage />
                             </Routes>
                         </div>
@@ -2079,7 +1891,7 @@ fn AppShell() -> impl IntoView {
 
 #[cfg(test)]
 mod tests {
-    use super::app_health_check_delay_ms;
+    use crate::app_health_check_delay_ms;
 
     #[test]
     fn health_check_delay_is_positive() {

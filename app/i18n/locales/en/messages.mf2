@@ -332,6 +332,16 @@ app.settings.actions.export_db = export database
 
 app.settings.actions.logout = logout
 
+app.settings.system.title = system
+
+app.settings.system.status = system status
+
+app.settings.status.title = system status
+
+app.settings.status.updated = last updated
+
+app.settings.status.view = view status
+
 # ui demo
 app.ui_demo.title = ui demo
 

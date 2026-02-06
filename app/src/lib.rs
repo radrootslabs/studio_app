@@ -6,6 +6,7 @@ mod context;
 mod config;
 mod data;
 mod health;
+mod health_ui;
 mod init;
 mod i18n;
 mod keystore;
@@ -13,6 +14,7 @@ mod logging;
 mod logs;
 mod notifications;
 mod settings;
+mod settings_status;
 mod setup;
 mod setup_flow;
 mod setup_lock;
@@ -68,6 +70,16 @@ pub use health::{
     RadrootsAppHealthCheckStatus,
     RadrootsAppHealthReport,
 };
+pub use health_ui::{
+    active_key_label,
+    app_health_check_delay_ms,
+    health_message_label,
+    health_report_summary,
+    health_result_label,
+    health_status_class,
+    health_status_label,
+    spawn_health_checks,
+};
 pub use keystore::{
     app_keystore_nostr_ensure_key,
     app_keystore_nostr_keys,
@@ -78,6 +90,7 @@ pub use keystore::{
 };
 pub use logs::RadrootsAppLogsPage;
 pub use settings::RadrootsAppSettingsPage;
+pub use settings_status::RadrootsAppSettingsStatusPage;
 pub use setup_status::{
     app_setup_gate_from_status,
     RadrootsAppSetupGate,
