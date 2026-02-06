@@ -65,6 +65,16 @@
 }
 
 @layer base {
+  :root {
+    --nav-header-height: var(--padding-h_nav_page_header_ios0);
+    --nav-tabs-height: var(--padding-h_nav_tabs_ios0);
+  }
+
+  html[data-layout="ios1"] {
+    --nav-header-height: var(--padding-h_nav_page_header_ios1);
+    --nav-tabs-height: var(--padding-h_nav_tabs_ios1);
+  }
+
   html {
     font-family: var(--font-sans);
     background: var(--bg-app);
@@ -156,6 +166,11 @@
 
   .app-page-scroll::-webkit-scrollbar {
     display: none;
+  }
+
+  .app-page-chrome {
+    padding-top: calc(var(--nav-header-height) + var(--safe-t));
+    padding-bottom: calc(var(--nav-tabs-height) + var(--safe-b));
   }
 
   .app-view {
