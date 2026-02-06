@@ -10,6 +10,7 @@
 @import "./stylesheets/styles-maplibre-gl.css";
 @import "./stylesheets/styles-superellipse.css";
 @import "../crates/ui-components/assets/list.css";
+@import "../crates/ui-components/assets/form.css";
 @import "../crates/ui-components/assets/nav.css";
 @import "../crates/ui-components/assets/nav_tabs.css";
 

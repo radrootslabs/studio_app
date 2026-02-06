@@ -1,0 +1,29 @@
+@layer components {
+  .form-field {
+    @apply flex flex-col gap-2;
+  }
+
+  .form-field__label {
+    @apply text-[0.72rem] font-semibold uppercase tracking-[0.08em] text-ly1-gl-label/80;
+  }
+
+  .form-field__control {
+    @apply flex flex-col gap-2;
+  }
+
+  .form-field__hint {
+    @apply text-xs text-ly1-gl-label/70;
+  }
+
+  .form-chips {
+    @apply flex flex-wrap gap-2;
+  }
+
+  .form-chip {
+    @apply inline-flex items-center justify-center rounded-full border border-ly1-edge/60 bg-ly1 px-3 py-1 text-sm text-ly1-gl transition-colors;
+  }
+
+  .form-chip[data-active="true"] {
+    @apply border-ly1-edge/80 bg-ly1-focus text-ly1-gl;
+  }
+}
