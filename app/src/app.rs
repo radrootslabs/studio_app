@@ -48,7 +48,9 @@ use crate::{
     app_log_debug_emit,
     app_log_error_emit,
     app_log_error_store,
+    app_config_gate_from_status,
     app_config_default,
+    app_config_status,
     app_datastore_clear_setup_draft,
     app_datastore_write_profile_seed,
     app_datastore_write_setup_draft,
@@ -65,6 +67,7 @@ use crate::{
     app_setup_gate_from_status,
     app_setup_step_default,
     RadrootsAppBackends,
+    RadrootsAppConfigStatus,
     RadrootsAppInitError,
     RadrootsAppInitStage,
     RadrootsAppNotifications,
@@ -1514,6 +1517,22 @@ fn RecoveryPage() -> impl IntoView {
 }
 
 #[component]
+fn ConfigPage() -> impl IntoView {
+    view! {
+        <main id="app-config" class="app-page app-page-fixed">
+            <section id="app-config-body" class="flex flex-col gap-2 px-4 pt-6">
+                <h1 id="app-config-title" class="text-xl font-semibold">
+                    {"Configure your profile"}
+                </h1>
+                <p id="app-config-subtitle" class="text-sm text-[var(--text-secondary)]">
+                    {"Complete your configuration to continue."}
+                </p>
+            </section>
+        </main>
+    }
+}
+
+#[component]
 fn HomePage() -> impl IntoView {
     let current_view = RwSignal::new_local(HomeView::Activity);
     let is_activity = move || matches!(current_view.get(), HomeView::Activity);
@@ -1579,11 +1598,13 @@ fn AppShell() -> impl IntoView {
     let init_error = RwSignal::new_local(None::<RadrootsAppInitError>);
     let init_state = RwSignal::new_local(app_init_state_default());
     let setup_status = RwSignal::new_local(RadrootsAppSetupStatus::Unknown);
+    let config_status = RwSignal::new_local(RadrootsAppConfigStatus::Unknown);
     let navigate = use_navigate();
     provide_context(backends);
     provide_context(init_error);
     provide_context(init_state);
     provide_context(setup_status);
+    provide_context(config_status);
     provide_context(app_i18n_init());
     Effect::new(move || {
         let navigate = navigate.clone();
@@ -1639,6 +1660,7 @@ fn AppShell() -> impl IntoView {
                     log_init_stage(stage);
                     let navigate = navigate.clone();
                     let setup_status = setup_status.clone();
+                    let config_status = config_status.clone();
                     spawn_local(async move {
                         let keystore = radroots_studio_app_core::keystore::RadrootsClientWebKeystoreNostr::new(
                             Some(keystore_config),
@@ -1648,17 +1670,30 @@ fn AppShell() -> impl IntoView {
                                 setup_status.set(status);
                                 match status {
                                     RadrootsAppSetupStatus::Required | RadrootsAppSetupStatus::Locked => {
+                                        config_status.set(RadrootsAppConfigStatus::Unknown);
                                         navigate("/setup", Default::default());
                                     }
                                     RadrootsAppSetupStatus::Corrupt => {
+                                        config_status.set(RadrootsAppConfigStatus::Unknown);
                                         navigate("/recovery", Default::default());
                                     }
-                                    _ => {}
+                                    RadrootsAppSetupStatus::Configured => {
+                                        let config_state = app_config_status(datastore.as_ref(), &key_maps).await;
+                                        config_status.set(config_state);
+                                        if matches!(
+                                            config_state,
+                                            RadrootsAppConfigStatus::Required | RadrootsAppConfigStatus::Corrupt
+                                        ) {
+                                            navigate("/setup/config", Default::default());
+                                        }
+                                    }
+                                    RadrootsAppSetupStatus::Unknown => {}
                                 }
                             }
                             Err(err) => {
                                 let _ = app_log_error_emit(&err);
                                 setup_status.set(RadrootsAppSetupStatus::Corrupt);
+                                config_status.set(RadrootsAppConfigStatus::Unknown);
                                 navigate("/recovery", Default::default());
                             }
                         }
@@ -1688,11 +1723,21 @@ fn AppShell() -> impl IntoView {
         })
     });
     let setup_gate = move || app_setup_gate_from_status(setup_status.get());
+    let config_gate = move || app_config_gate_from_status(config_status.get());
+    let config_ready = move || {
+        let status = setup_status.get();
+        if matches!(status, RadrootsAppSetupStatus::Configured) {
+            !matches!(config_status.get(), RadrootsAppConfigStatus::Unknown)
+        } else {
+            true
+        }
+    };
     view! {
         <Show
             when=move || {
                 init_state.get().stage == RadrootsAppInitStage::Ready
                     && !matches!(setup_status.get(), RadrootsAppSetupStatus::Unknown)
+                    && config_ready()
             }
             fallback=|| view! { <SplashPage /> }
         >
@@ -1705,6 +1750,10 @@ fn AppShell() -> impl IntoView {
                     return view! { <SetupPage /> }.into_any();
                 }
                 if gate.show_app {
+                    let config_gate = config_gate();
+                    if config_gate.show_config {
+                        return view! { <ConfigPage /> }.into_any();
+                    }
                     return view! {
                         <div id="app-shell">
                             <Routes

@@ -122,6 +122,35 @@ impl Default for RadrootsAppConfigData {
 pub const APP_CONFIG_SCHEMA_VERSION: u32 = 1;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RadrootsAppConfigStatus {
+    Unknown,
+    Required,
+    Configured,
+    Corrupt,
+}
+
+impl Default for RadrootsAppConfigStatus {
+    fn default() -> Self {
+        RadrootsAppConfigStatus::Unknown
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RadrootsAppConfigGate {
+    pub show_config: bool,
+    pub show_app: bool,
+}
+
+impl RadrootsAppConfigGate {
+    pub const fn splash() -> Self {
+        Self {
+            show_config: false,
+            show_app: false,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RadrootsAppConfigRecordError {
     Missing,
     Corrupt,
@@ -236,6 +265,44 @@ impl std::error::Error for RadrootsAppConfigStoreError {}
 
 pub type RadrootsAppConfigStoreResult<T> = Result<T, RadrootsAppConfigStoreError>;
 
+pub async fn app_config_status<T: RadrootsClientDatastore>(
+    datastore: &T,
+    key_maps: &RadrootsAppKeyMapConfig,
+) -> RadrootsAppConfigStatus {
+    match app_datastore_read_config_record(datastore, key_maps).await {
+        Ok(_) => RadrootsAppConfigStatus::Configured,
+        Err(RadrootsAppConfigStoreError::Record(RadrootsAppConfigRecordError::Missing)) => {
+            RadrootsAppConfigStatus::Required
+        }
+        Err(RadrootsAppConfigStoreError::Record(RadrootsAppConfigRecordError::InvalidChecksum))
+        | Err(RadrootsAppConfigStoreError::Record(RadrootsAppConfigRecordError::UnsupportedVersion(_)))
+        | Err(RadrootsAppConfigStoreError::Datastore(_)) => RadrootsAppConfigStatus::Corrupt,
+        Err(RadrootsAppConfigStoreError::Config(_))
+        | Err(RadrootsAppConfigStoreError::Record(RadrootsAppConfigRecordError::Corrupt))
+        | Err(RadrootsAppConfigStoreError::Record(RadrootsAppConfigRecordError::AlreadyExists)) => {
+            RadrootsAppConfigStatus::Corrupt
+        }
+    }
+}
+
+pub const fn app_config_gate_from_status(
+    status: RadrootsAppConfigStatus,
+) -> RadrootsAppConfigGate {
+    match status {
+        RadrootsAppConfigStatus::Unknown => RadrootsAppConfigGate::splash(),
+        RadrootsAppConfigStatus::Required | RadrootsAppConfigStatus::Corrupt => {
+            RadrootsAppConfigGate {
+                show_config: true,
+                show_app: false,
+            }
+        }
+        RadrootsAppConfigStatus::Configured => RadrootsAppConfigGate {
+            show_config: false,
+            show_app: true,
+        },
+    }
+}
+
 pub async fn app_datastore_write_config_record<T: RadrootsClientDatastore>(
     datastore: &T,
     key_maps: &RadrootsAppKeyMapConfig,
@@ -333,10 +400,13 @@ pub async fn app_datastore_clear_config<T: RadrootsClientDatastore>(
 #[cfg(test)]
 mod tests {
     use super::{
+        app_config_gate_from_status,
         app_config_record_new,
         app_config_record_validate,
+        RadrootsAppConfigGate,
         RadrootsAppConfigData,
         RadrootsAppConfigRecordError,
+        RadrootsAppConfigStatus,
         APP_CONFIG_SCHEMA_VERSION,
     };
 
@@ -358,5 +428,19 @@ mod tests {
         record.checksum = String::from("invalid");
         let err = app_config_record_validate(&record).expect_err("checksum");
         assert_eq!(err, RadrootsAppConfigRecordError::InvalidChecksum);
+    }
+
+    #[test]
+    fn config_gate_maps_status() {
+        assert_eq!(
+            app_config_gate_from_status(RadrootsAppConfigStatus::Unknown),
+            RadrootsAppConfigGate::splash()
+        );
+        let required = app_config_gate_from_status(RadrootsAppConfigStatus::Required);
+        assert!(required.show_config);
+        assert!(!required.show_app);
+        let configured = app_config_gate_from_status(RadrootsAppConfigStatus::Configured);
+        assert!(configured.show_app);
+        assert!(!configured.show_config);
     }
 }

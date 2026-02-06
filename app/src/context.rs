@@ -2,7 +2,13 @@
 
 use leptos::prelude::{use_context, LocalStorage, RwSignal};
 
-use crate::{RadrootsAppBackends, RadrootsAppInitError, RadrootsAppInitState, RadrootsAppSetupStatus};
+use crate::{
+    RadrootsAppBackends,
+    RadrootsAppConfigStatus,
+    RadrootsAppInitError,
+    RadrootsAppInitState,
+    RadrootsAppSetupStatus,
+};
 
 #[derive(Clone)]
 pub struct RadrootsAppContext {
@@ -10,6 +16,7 @@ pub struct RadrootsAppContext {
     pub init_error: RwSignal<Option<RadrootsAppInitError>, LocalStorage>,
     pub init_state: RwSignal<RadrootsAppInitState, LocalStorage>,
     pub setup_status: RwSignal<RadrootsAppSetupStatus, LocalStorage>,
+    pub config_status: RwSignal<RadrootsAppConfigStatus, LocalStorage>,
 }
 
 pub fn app_context() -> Option<RadrootsAppContext> {
@@ -18,6 +25,7 @@ pub fn app_context() -> Option<RadrootsAppContext> {
         init_error: use_context::<RwSignal<Option<RadrootsAppInitError>, LocalStorage>>()?,
         init_state: use_context::<RwSignal<RadrootsAppInitState, LocalStorage>>()?,
         setup_status: use_context::<RwSignal<RadrootsAppSetupStatus, LocalStorage>>()?,
+        config_status: use_context::<RwSignal<RadrootsAppConfigStatus, LocalStorage>>()?,
     })
 }
 
@@ -29,6 +37,7 @@ mod tests {
         RadrootsAppBackends,
         RadrootsAppInitError,
         RadrootsAppInitStage,
+        RadrootsAppConfigStatus,
         RadrootsAppSetupStatus,
     };
     use leptos::prelude::{provide_context, Owner, RwSignal, WithUntracked};
@@ -48,10 +57,12 @@ mod tests {
         let init_error = RwSignal::new_local(None::<RadrootsAppInitError>);
         let init_state = RwSignal::new_local(app_init_state_default());
         let setup_status = RwSignal::new_local(RadrootsAppSetupStatus::Unknown);
+        let config_status = RwSignal::new_local(RadrootsAppConfigStatus::Unknown);
         provide_context(backends);
         provide_context(init_error);
         provide_context(init_state);
         provide_context(setup_status);
+        provide_context(config_status);
         let context = app_context().expect("context");
         assert!(context.backends.with_untracked(|value| value.is_none()));
         assert!(context.init_error.with_untracked(|value| value.is_none()));
@@ -64,6 +75,12 @@ mod tests {
                 .setup_status
                 .with_untracked(|value| *value),
             RadrootsAppSetupStatus::Unknown
+        );
+        assert_eq!(
+            context
+                .config_status
+                .with_untracked(|value| *value),
+            RadrootsAppConfigStatus::Unknown
         );
     }
 }

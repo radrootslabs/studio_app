@@ -14,6 +14,7 @@ use crate::{
     spawn_health_checks,
     t,
     RadrootsAppBackends,
+    RadrootsAppConfigStatus,
     RadrootsAppHealthCheckResult,
     RadrootsAppHealthReport,
     RadrootsAppSetupStatus,
@@ -51,6 +52,43 @@ fn status_text(value: String) -> RadrootsAppUiListLabelValue {
             value,
             classes: None,
         }),
+    }
+}
+
+fn config_status_label(status: RadrootsAppConfigStatus) -> String {
+    match status {
+        RadrootsAppConfigStatus::Unknown => t!("app.common.unknown"),
+        RadrootsAppConfigStatus::Required => String::from("required"),
+        RadrootsAppConfigStatus::Configured => String::from("configured"),
+        RadrootsAppConfigStatus::Corrupt => String::from("corrupt"),
+    }
+}
+
+fn config_status_class(status: RadrootsAppConfigStatus) -> &'static str {
+    match status {
+        RadrootsAppConfigStatus::Configured => "status-good",
+        RadrootsAppConfigStatus::Required => "status-warn",
+        RadrootsAppConfigStatus::Corrupt => "status-error",
+        RadrootsAppConfigStatus::Unknown => "status-neutral",
+    }
+}
+
+fn setup_status_label(status: RadrootsAppSetupStatus) -> String {
+    match status {
+        RadrootsAppSetupStatus::Unknown => t!("app.common.unknown"),
+        RadrootsAppSetupStatus::Required => String::from("required"),
+        RadrootsAppSetupStatus::Configured => String::from("configured"),
+        RadrootsAppSetupStatus::Corrupt => String::from("corrupt"),
+        RadrootsAppSetupStatus::Locked => String::from("locked"),
+    }
+}
+
+fn setup_status_class(status: RadrootsAppSetupStatus) -> &'static str {
+    match status {
+        RadrootsAppSetupStatus::Configured => "status-good",
+        RadrootsAppSetupStatus::Required | RadrootsAppSetupStatus::Locked => "status-warn",
+        RadrootsAppSetupStatus::Corrupt => "status-error",
+        RadrootsAppSetupStatus::Unknown => "status-neutral",
     }
 }
 
@@ -97,6 +135,7 @@ pub fn RadrootsAppSettingsStatusPage() -> impl IntoView {
     let context = app_context();
     let fallback_backends = RwSignal::new_local(None::<RadrootsAppBackends>);
     let fallback_setup_status = RwSignal::new_local(RadrootsAppSetupStatus::Unknown);
+    let fallback_config_status = RwSignal::new_local(RadrootsAppConfigStatus::Unknown);
     let backends = context
         .as_ref()
         .map(|value| value.backends)
@@ -105,6 +144,10 @@ pub fn RadrootsAppSettingsStatusPage() -> impl IntoView {
         .as_ref()
         .map(|value| value.setup_status)
         .unwrap_or(fallback_setup_status);
+    let config_status = context
+        .as_ref()
+        .map(|value| value.config_status)
+        .unwrap_or(fallback_config_status);
     let health_report = RwSignal::new_local(RadrootsAppHealthReport::empty());
     let health_running = RwSignal::new_local(false);
     let health_autorun = RwSignal::new_local(false);
@@ -189,6 +232,63 @@ pub fn RadrootsAppSettingsStatusPage() -> impl IntoView {
                 {move || {
                     let report = health_report.get();
                     let active = active_key_label(active_key.get());
+                    let setup_value = setup_status.get();
+                    let config_value = config_status.get();
+                    let config_list = RadrootsAppUiList {
+                        id: Some("settings-config-status-list".to_string()),
+                        view: Some("settings-config-status".to_string()),
+                        classes: None,
+                        title: Some(RadrootsAppUiListTitle {
+                            value: RadrootsAppUiListTitleValue::Text(String::from("Configuration")),
+                            classes: None,
+                            mod_value: None,
+                            link: None,
+                            on_click: None,
+                        }),
+                        default_state: None,
+                        list: Some(vec![
+                            Some(RadrootsAppUiListItem {
+                                kind: RadrootsAppUiListItemKind::Touch(RadrootsAppUiListTouch {
+                                    label: RadrootsAppUiListLabel {
+                                        left: vec![status_text(String::from("setup status"))],
+                                        right: vec![
+                                            status_text(setup_status_label(setup_value)),
+                                            status_dot(setup_status_class(setup_value)),
+                                        ],
+                                    },
+                                    display: None,
+                                    end: None,
+                                    on_click: None,
+                                }),
+                                loading: false,
+                                hide_active: true,
+                                hide_field: false,
+                                full_rounded: false,
+                                offset: None,
+                            }),
+                            Some(RadrootsAppUiListItem {
+                                kind: RadrootsAppUiListItemKind::Touch(RadrootsAppUiListTouch {
+                                    label: RadrootsAppUiListLabel {
+                                        left: vec![status_text(String::from("config status"))],
+                                        right: vec![
+                                            status_text(config_status_label(config_value)),
+                                            status_dot(config_status_class(config_value)),
+                                        ],
+                                    },
+                                    display: None,
+                                    end: None,
+                                    on_click: None,
+                                }),
+                                loading: false,
+                                hide_active: true,
+                                hide_field: false,
+                                full_rounded: false,
+                                offset: None,
+                            }),
+                        ]),
+                        hide_offset: false,
+                        styles: None,
+                    };
                     let list = RadrootsAppUiList {
                         id: Some("settings-status-list".to_string()),
                         view: Some("settings-status".to_string()),
@@ -241,7 +341,13 @@ pub fn RadrootsAppSettingsStatusPage() -> impl IntoView {
                         hide_offset: false,
                         styles: None,
                     };
-                    view! { <RadrootsAppUiListView basis=list /> }.into_any()
+                    view! {
+                        <div class="flex flex-col gap-4">
+                            <RadrootsAppUiListView basis=config_list />
+                            <RadrootsAppUiListView basis=list />
+                        </div>
+                    }
+                    .into_any()
                 }}
             </section>
         </AppPageChrome>
