@@ -4,6 +4,7 @@ mod app;
 mod bootstrap;
 mod context;
 mod config;
+mod configuration;
 mod data;
 mod health;
 mod health_ui;
@@ -55,6 +56,28 @@ pub use data::{
     APP_EULA_HASH,
     APP_EULA_VERSION,
     APP_STATE_SCHEMA_VERSION,
+};
+pub use configuration::{
+    app_config_record_new,
+    app_config_record_validate,
+    app_datastore_clear_config,
+    app_datastore_create_config,
+    app_datastore_has_config,
+    app_datastore_read_config,
+    app_datastore_read_config_record,
+    app_datastore_update_config,
+    app_datastore_write_config_record,
+    RadrootsAppConfigBusiness,
+    RadrootsAppConfigData,
+    RadrootsAppConfigFarmer,
+    RadrootsAppConfigIndividual,
+    RadrootsAppConfigPreferences,
+    RadrootsAppConfigProfile,
+    RadrootsAppConfigRecord,
+    RadrootsAppConfigRecordError,
+    RadrootsAppConfigStoreError,
+    RadrootsAppConfigStoreResult,
+    APP_CONFIG_SCHEMA_VERSION,
 };
 pub use health::{
     app_health_check_all,
@@ -194,6 +217,7 @@ pub use config::{
     app_datastore_obj_key,
     app_datastore_obj_key_state,
     app_datastore_obj_key_setup_draft,
+    app_datastore_obj_key_config,
     app_assets_geocoder_db_url,
     app_assets_sql_wasm_url,
     app_keystore_key_maps_default,
@@ -219,6 +243,7 @@ pub use config::{
     APP_DATASTORE_KEY_NOSTR_KEY,
     APP_DATASTORE_KEY_OBJ_STATE,
     APP_DATASTORE_KEY_OBJ_SETUP_DRAFT,
+    APP_DATASTORE_KEY_OBJ_CONFIG,
     APP_DATASTORE_KEY_SETUP_LOCK,
     APP_KEYSTORE_KEY_NOSTR_DEFAULT,
     app_datastore_key_setup_lock,
