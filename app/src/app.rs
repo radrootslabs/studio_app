@@ -1888,8 +1888,8 @@ fn ConfigPage() -> impl IntoView {
                                         >
                                             <textarea
                                                 id="app-config-individual-products-input"
-                                                class="textarea-base min-h-[7.5rem]"
-                                                rows="4"
+                                                class="textarea-base min-h-[15rem]"
+                                                rows="8"
                                                 placeholder="Apples, tomatoes, fresh herbs".to_string()
                                                 prop:value=move || individual_products_input.get()
                                                 on:input=move |ev| {
@@ -1965,39 +1965,123 @@ fn ConfigPage() -> impl IntoView {
                             id="app-config-preferences"
                             class="app-view app-view-enter flex flex-col w-full gap-5"
                         >
+                            {move || {
+                                if role.get() == Some(RadrootsAppRole::Individual) {
+                                    view! {
+                                        <div
+                                            id="app-config-summary"
+                                            class="flex flex-col gap-3"
+                                        >
+                                            <p class="text-xs font-semibold uppercase tracking-[0.18em] text-ly1-gl-label/70">
+                                                {"Summary"}
+                                            </p>
+                                            <div class="flex flex-col rounded-touch border border-ly1-edge/60 bg-ly1 overflow-hidden">
+                                                <button
+                                                    id="app-config-summary-profile"
+                                                    type="button"
+                                                    class="flex items-center justify-between gap-4 px-4 py-3 text-left"
+                                                    on:click=move |_| {
+                                                        config_step.set(RadrootsAppConfigStep::Profile);
+                                                    }
+                                                >
+                                                    <div class="flex flex-col gap-1">
+                                                        <span class="text-sm font-semibold text-ly1-gl">
+                                                            {"Profile"}
+                                                        </span>
+                                                        <span class="text-xs text-ly1-gl-label/80 line-clamp-2">
+                                                            {move || {
+                                                                let name = profile_name.get();
+                                                                let location = profile_location.get();
+                                                                let name = name.trim().to_string();
+                                                                let location = location.trim().to_string();
+                                                                if name.is_empty() && location.is_empty() {
+                                                                    "Add name and location".to_string()
+                                                                } else if location.is_empty() {
+                                                                    name
+                                                                } else if name.is_empty() {
+                                                                    location
+                                                                } else {
+                                                                    format!("{name} • {location}")
+                                                                }
+                                                            }}
+                                                        </span>
+                                                    </div>
+                                                    <RadrootsAppUiIcon key=RadrootsAppUiIconKey::CaretRight size=18 />
+                                                </button>
+                                                <button
+                                                    id="app-config-summary-products"
+                                                    type="button"
+                                                    class="flex items-center justify-between gap-4 border-t border-ly1-edge/50 px-4 py-3 text-left"
+                                                    on:click=move |_| {
+                                                        config_step.set(RadrootsAppConfigStep::Role);
+                                                    }
+                                                >
+                                                    <div class="flex flex-col gap-1">
+                                                        <span class="text-sm font-semibold text-ly1-gl">
+                                                            {"Products interested in"}
+                                                        </span>
+                                                        <span class="text-xs text-ly1-gl-label/80 line-clamp-2">
+                                                            {move || {
+                                                                let items = individual_products.get();
+                                                                if items.is_empty() {
+                                                                    "Add products".to_string()
+                                                                } else {
+                                                                    items.join(", ")
+                                                                }
+                                                            }}
+                                                        </span>
+                                                    </div>
+                                                    <RadrootsAppUiIcon key=RadrootsAppUiIconKey::CaretRight size=18 />
+                                                </button>
+                                            </div>
+                                        </div>
+                                    }
+                                    .into_any()
+                                } else {
+                                    view! { <></> }.into_any()
+                                }
+                            }}
                             <RadrootsAppUiFormField
                                 label="Notifications".to_string()
                                 id="app-config-preferences-notifications".to_string()
                             >
-                                <div class="flex flex-col gap-3">
-                                    <label
+                                <div class="flex flex-col rounded-touch border border-ly1-edge/60 bg-ly1 overflow-hidden">
+                                    <div
                                         id="app-config-notifications-orders"
-                                        class="flex items-center justify-between gap-4 rounded-touch border border-ly1-edge/60 bg-ly1 px-3 py-2 text-sm text-ly1-gl"
+                                        class="flex items-center justify-between gap-4 px-4 py-3 text-sm text-ly1-gl"
                                     >
                                         <span>{"Order updates"}</span>
-                                        <input
-                                            type="checkbox"
-                                            class="h-4 w-4 accent-[hsl(var(--ly1-gl))]"
-                                            prop:checked=move || notifications_orders.get()
-                                            on:change=move |ev| {
-                                                notifications_orders.set(event_target_checked(&ev));
+                                        <button
+                                            type="button"
+                                            class="ios-switch"
+                                            role="switch"
+                                            aria-checked=move || if notifications_orders.get() { "true" } else { "false" }
+                                            attr:data-checked=move || if notifications_orders.get() { "true" } else { "false" }
+                                            on:click=move |_| {
+                                                notifications_orders.update(|value| *value = !*value);
                                             }
-                                        />
-                                    </label>
-                                    <label
+                                        >
+                                            <span class="ios-switch__thumb"></span>
+                                        </button>
+                                    </div>
+                                    <div
                                         id="app-config-notifications-messages"
-                                        class="flex items-center justify-between gap-4 rounded-touch border border-ly1-edge/60 bg-ly1 px-3 py-2 text-sm text-ly1-gl"
+                                        class="flex items-center justify-between gap-4 border-t border-ly1-edge/50 px-4 py-3 text-sm text-ly1-gl"
                                     >
                                         <span>{"Messages"}</span>
-                                        <input
-                                            type="checkbox"
-                                            class="h-4 w-4 accent-[hsl(var(--ly1-gl))]"
-                                            prop:checked=move || notifications_messages.get()
-                                            on:change=move |ev| {
-                                                notifications_messages.set(event_target_checked(&ev));
+                                        <button
+                                            type="button"
+                                            class="ios-switch"
+                                            role="switch"
+                                            aria-checked=move || if notifications_messages.get() { "true" } else { "false" }
+                                            attr:data-checked=move || if notifications_messages.get() { "true" } else { "false" }
+                                            on:click=move |_| {
+                                                notifications_messages.update(|value| *value = !*value);
                                             }
-                                        />
-                                    </label>
+                                        >
+                                            <span class="ios-switch__thumb"></span>
+                                        </button>
+                                    </div>
                                 </div>
                             </RadrootsAppUiFormField>
                             <RadrootsAppUiFormField
