@@ -171,8 +171,15 @@
   }
 
   .app-page-chrome {
-    padding-top: calc(var(--nav-header-height) + var(--safe-t));
     padding-bottom: calc(var(--nav-tabs-height) + var(--safe-b));
+  }
+
+  .app-page-body {
+    padding: 0 16px 24px;
+  }
+
+  .app-page-shell {
+    display: contents;
   }
 
   .app-view {

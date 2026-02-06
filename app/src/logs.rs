@@ -12,18 +12,20 @@ use wasm_bindgen::JsCast;
 use wasm_bindgen_futures::JsFuture;
 #[cfg(target_arch = "wasm32")]
 use wasm_bindgen::JsValue;
-use std::rc::Rc;
 
 use radroots_studio_app_core::datastore::RadrootsClientWebDatastore;
 use radroots_studio_app_core::idb::IDB_CONFIG_LOGS;
 
 use crate::{
+    app::AppPageChrome,
     app_context,
     app_log_buffer_flush_no_prune,
     app_log_entries_clear,
     app_log_entries_dump,
     app_log_entries_load,
     app_log_metadata,
+    RadrootsAppContext,
+    RadrootsAppKeyMapConfig,
     RadrootsAppLogEntry,
     RadrootsAppLogLevel,
 };
@@ -50,6 +52,79 @@ fn logs_page_size_default() -> usize {
 
 fn logs_datastore() -> RadrootsClientWebDatastore {
     RadrootsClientWebDatastore::new(Some(IDB_CONFIG_LOGS))
+}
+
+fn logs_resolve_backends(
+    context: &Option<RadrootsAppContext>,
+) -> Option<(RadrootsClientWebDatastore, RadrootsAppKeyMapConfig)> {
+    context.as_ref().and_then(|context| {
+        context.backends.with_untracked(|value| {
+            value.as_ref().map(|backends| {
+                (logs_datastore(), backends.config.datastore.key_maps.clone())
+            })
+        })
+    })
+}
+
+fn logs_refresh(
+    context: &Option<RadrootsAppContext>,
+    entries: RwSignal<Vec<RadrootsAppLogEntry>, LocalStorage>,
+    loading: RwSignal<bool, LocalStorage>,
+    dump_error: RwSignal<Option<String>, LocalStorage>,
+) {
+    let Some((datastore, key_maps)) = logs_resolve_backends(context) else {
+        entries.set(Vec::new());
+        dump_error.set(None);
+        return;
+    };
+    loading.set(true);
+    spawn_local(async move {
+        let _ = app_log_buffer_flush_no_prune(&datastore, &key_maps).await;
+        let result = app_log_entries_load(&datastore, &key_maps).await;
+        match result {
+            Ok(mut items) => {
+                items.sort_by(|a, b| b.timestamp_ms.cmp(&a.timestamp_ms));
+                dump_error.set(None);
+                entries.set(items);
+            }
+            Err(err) => {
+                dump_error.set(Some(format!("error: {err}")));
+                entries.set(Vec::new());
+            }
+        }
+        loading.set(false);
+    });
+}
+
+fn logs_clear(
+    context: &Option<RadrootsAppContext>,
+    entries: RwSignal<Vec<RadrootsAppLogEntry>, LocalStorage>,
+    loading: RwSignal<bool, LocalStorage>,
+    dump_error: RwSignal<Option<String>, LocalStorage>,
+) {
+    let Some((datastore, key_maps)) = logs_resolve_backends(context) else {
+        entries.set(Vec::new());
+        dump_error.set(None);
+        return;
+    };
+    loading.set(true);
+    spawn_local(async move {
+        let _ = app_log_entries_clear(&datastore, &key_maps).await;
+        let _ = app_log_buffer_flush_no_prune(&datastore, &key_maps).await;
+        let result = app_log_entries_load(&datastore, &key_maps).await;
+        match result {
+            Ok(mut items) => {
+                items.sort_by(|a, b| b.timestamp_ms.cmp(&a.timestamp_ms));
+                dump_error.set(None);
+                entries.set(items);
+            }
+            Err(err) => {
+                dump_error.set(Some(format!("error: {err}")));
+                entries.set(Vec::new());
+            }
+        }
+        loading.set(false);
+    });
 }
 
 fn log_level_color(level: RadrootsAppLogLevel) -> &'static str {
@@ -324,7 +399,7 @@ pub fn RadrootsAppLogsPage() -> impl IntoView {
     let page_size = RwSignal::new_local(logs_page_size_default());
     let page_index = RwSignal::new_local(0usize);
     let dump_config = RwSignal::new_local(None::<RadrootsAppLogDumpConfig>);
-    let context = Rc::new(app_context());
+    let context = app_context();
     let filtered_entries = Memo::new(move |_| {
         let level_filter = filter_level.get();
         let query = filter_query.get();
@@ -394,72 +469,21 @@ pub fn RadrootsAppLogsPage() -> impl IntoView {
         let header = log_dump_header_with_context(context);
         log_dump_with_context(&items, header)
     });
-    let resolve_backends = {
-        let context = Rc::clone(&context);
-        Rc::new(move || {
-            context.as_ref().as_ref().and_then(|context| {
-                context
-                    .backends
-                    .with_untracked(|value| {
-                        value.as_ref().map(|backends| {
-                            (
-                                Rc::new(logs_datastore()),
-                                backends.config.datastore.key_maps.clone(),
-                            )
-                        })
-                    })
-            })
-        })
+    let refresh_action = {
+        let context = context.clone();
+        move || {
+            logs_refresh(&context, entries, loading, dump_error);
+        }
     };
-    let refresh = {
-        let resolve_backends = Rc::clone(&resolve_backends);
-        Rc::new(move || {
-            let Some((datastore, key_maps)) = resolve_backends() else {
-                entries.set(Vec::new());
-                dump_error.set(None);
-                return;
-            };
-            loading.set(true);
-            let entries_signal = entries;
-            let loading_signal = loading;
-            spawn_local(async move {
-                let _ = app_log_buffer_flush_no_prune(datastore.as_ref(), &key_maps).await;
-                let result = app_log_entries_load(datastore.as_ref(), &key_maps).await;
-                match result {
-                    Ok(mut items) => {
-                        items.sort_by(|a, b| b.timestamp_ms.cmp(&a.timestamp_ms));
-                        dump_error.set(None);
-                        entries_signal.set(items);
-                    }
-                    Err(err) => {
-                        dump_error.set(Some(format!("error: {err}")));
-                        entries_signal.set(Vec::new());
-                    }
-                }
-                loading_signal.set(false);
-            });
-        })
-    };
-    let clear = {
-        let resolve_backends = Rc::clone(&resolve_backends);
-        let refresh = Rc::clone(&refresh);
-        Rc::new(move || {
-            let Some((datastore, key_maps)) = resolve_backends() else {
-                entries.set(Vec::new());
-                dump_error.set(None);
-                return;
-            };
-            loading.set(true);
-            let refresh = Rc::clone(&refresh);
-            spawn_local(async move {
-                let _ = app_log_entries_clear(datastore.as_ref(), &key_maps).await;
-                refresh();
-            });
-        })
+    let clear_action = {
+        let context = context.clone();
+        move || {
+            logs_clear(&context, entries, loading, dump_error);
+        }
     };
     let copy_dump = {
         let dump_text = dump_text.clone();
-        Rc::new(move || {
+        move || {
             let text = dump_text.get();
             if text.is_empty() {
                 dump_status.set(Some(String::from("dump_empty")));
@@ -474,11 +498,11 @@ pub fn RadrootsAppLogsPage() -> impl IntoView {
                 dump_status.set(Some(status));
                 dump_action_running.set(false);
             });
-        })
+        }
     };
     let download_dump = {
         let dump_text = dump_text.clone();
-        Rc::new(move || {
+        move || {
             let text = dump_text.get();
             if text.is_empty() {
                 dump_status.set(Some(String::from("dump_empty")));
@@ -493,25 +517,23 @@ pub fn RadrootsAppLogsPage() -> impl IntoView {
                 dump_status.set(Some(status));
                 dump_action_running.set(false);
             });
-        })
+        }
     };
-    let copy_support = {
-        Rc::new(move || {
-            let text = support_instructions_text();
-            support_running.set(true);
-            spawn_local(async move {
-                let status = match log_dump_copy(text).await {
-                    Ok(()) => String::from("support_copy_ok"),
-                    Err(err) => err,
-                };
-                support_status.set(Some(status));
-                support_running.set(false);
-            });
-        })
+    let copy_support = move || {
+        let text = support_instructions_text();
+        support_running.set(true);
+        spawn_local(async move {
+            let status = match log_dump_copy(text).await {
+                Ok(()) => String::from("support_copy_ok"),
+                Err(err) => err,
+            };
+            support_status.set(Some(status));
+            support_running.set(false);
+        });
     };
     let support_bundle = {
         let dump_text = dump_text.clone();
-        Rc::new(move || {
+        move || {
             let text = dump_text.get();
             if text.is_empty() {
                 support_status.set(Some(String::from("dump_empty")));
@@ -530,56 +552,64 @@ pub fn RadrootsAppLogsPage() -> impl IntoView {
                 support_status.set(Some(status));
                 support_running.set(false);
             });
-        })
+        }
     };
-    let refresh_effect = Rc::clone(&refresh);
-    let context_effect = Rc::clone(&context);
-    Effect::new(move || {
-        let Some(context) = context_effect.as_ref() else {
-            return;
-        };
-        if did_load.get() {
-            return;
-        }
-        let has_backends = context.backends.with(|value| value.is_some());
-        if !has_backends {
-            return;
-        }
-        did_load.set(true);
-        refresh_effect();
-    });
-    let config_effect = Rc::clone(&context);
-    Effect::new(move || {
-        let Some(context) = config_effect.as_ref() else {
-            return;
-        };
-        let config = context
-            .backends
-            .with(|value| value.as_ref().map(|backends| backends.config.clone()));
-        let Some(config) = config else {
-            return;
-        };
-        dump_config.set(Some(log_dump_config_from_app(&config)));
-    });
-    let interval_effect = Rc::clone(&refresh);
-    Effect::new(move || {
-        if interval_started.get() {
-            return;
-        }
-        interval_started.set(true);
-        let refresh = Rc::clone(&interval_effect);
-        let (abort_handle, abort_reg) = AbortHandle::new_pair();
-        let abort_handle_cleanup = abort_handle.clone();
-        spawn_local(async move {
-            let mut ticks = IntervalStream::new(logs_auto_refresh_ms());
-            let task = async move {
-                while ticks.next().await.is_some() {
-                    refresh();
-                }
+    Effect::new({
+        let context = context.clone();
+        move || {
+            let Some(context_ref) = context.as_ref() else {
+                return;
             };
-            let _ = Abortable::new(task, abort_reg).await;
-        });
-        on_cleanup(move || abort_handle_cleanup.abort());
+            if did_load.get() {
+                return;
+            }
+            let has_backends = context_ref.backends.with(|value| value.is_some());
+            if !has_backends {
+                return;
+            }
+            did_load.set(true);
+            logs_refresh(&context, entries, loading, dump_error);
+        }
+    });
+    Effect::new({
+        let context = context.clone();
+        move || {
+            let Some(context) = context.as_ref() else {
+                return;
+            };
+            let config = context
+                .backends
+                .with(|value| value.as_ref().map(|backends| backends.config.clone()));
+            let Some(config) = config else {
+                return;
+            };
+            dump_config.set(Some(log_dump_config_from_app(&config)));
+        }
+    });
+    Effect::new({
+        let context = context.clone();
+        move || {
+            if interval_started.get() {
+                return;
+            }
+            interval_started.set(true);
+            let context = context.clone();
+            let entries = entries;
+            let loading = loading;
+            let dump_error = dump_error;
+            let (abort_handle, abort_reg) = AbortHandle::new_pair();
+            let abort_handle_cleanup = abort_handle.clone();
+            spawn_local(async move {
+                let mut ticks = IntervalStream::new(logs_auto_refresh_ms());
+                let task = async move {
+                    while ticks.next().await.is_some() {
+                        logs_refresh(&context, entries, loading, dump_error);
+                    }
+                };
+                let _ = Abortable::new(task, abort_reg).await;
+            });
+            on_cleanup(move || abort_handle_cleanup.abort());
+        }
     });
     let status_label = move || {
         if loading.get() {
@@ -610,11 +640,10 @@ pub fn RadrootsAppLogsPage() -> impl IntoView {
         total == 0 || page_index.get() + 1 >= total
     };
     view! {
-        <main id="app-logs" class="app-page app-page-scroll">
+        <AppPageChrome title=t!("app.logs.title")>
             <header id="app-logs-header" style="display:flex;align-items:center;gap:12px;">
-                <h1 id="app-logs-title" style="font-size:18px;font-weight:600;">{t!("app.logs.title")}</h1>
-                <button on:click=move |_| refresh()>{t!("app.logs.action.refresh")}</button>
-                <button on:click=move |_| clear()>{t!("app.logs.action.clear")}</button>
+                <button on:click=move |_| refresh_action()>{t!("app.logs.action.refresh")}</button>
+                <button on:click=move |_| clear_action()>{t!("app.logs.action.clear")}</button>
                 <button on:click=move |_| copy_dump() disabled=dump_action_disabled>{t!("app.logs.action.copy_dump")}</button>
                 <button on:click=move |_| download_dump() disabled=dump_action_disabled>{t!("app.logs.action.download_dump")}</button>
                 <div id="app-logs-status" style="font-size:12px;color:#6b7280;">{status_label}</div>
@@ -787,7 +816,7 @@ pub fn RadrootsAppLogsPage() -> impl IntoView {
                     ></textarea>
                 </section>
             </section>
-        </main>
+        </AppPageChrome>
     }
 }
 

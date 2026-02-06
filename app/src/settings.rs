@@ -5,6 +5,7 @@ use leptos::prelude::*;
 use leptos_router::hooks::use_navigate;
 
 use crate::{
+    app::AppPageChrome,
     app_theme_apply_mode,
     app_theme_mode_from_value,
     app_theme_read_mode,
@@ -285,18 +286,12 @@ pub fn RadrootsAppSettingsPage() -> impl IntoView {
         styles: None,
     };
     view! {
-        <main id="app-settings" class="app-page app-page-scroll" style="padding: 16px;">
-            <header
-                id="app-settings-header"
-                style="font-family: var(--font-sans); font-size: 34px; line-height: 41px; font-weight: 600; letter-spacing: -0.01em; margin-bottom: 12px;"
-            >
-                <h1 id="app-settings-title" class="capitalize">{t!("app.settings.title")}</h1>
-            </header>
-            <section id="app-settings-content" style="display:flex;flex-direction:column;gap:16px;">
+        <AppPageChrome title=t!("app.settings.title")>
+            <section id="app-settings-content" class="flex flex-col gap-4">
                 <RadrootsAppUiListView basis=appearance_list />
                 <RadrootsAppUiListView basis=actions_list />
                 <RadrootsAppUiListView basis=system_list />
             </section>
-        </main>
+        </AppPageChrome>
     }
 }

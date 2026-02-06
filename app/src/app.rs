@@ -2,7 +2,7 @@ use leptos::ev::{KeyboardEvent, MouseEvent};
 use leptos::prelude::*;
 use leptos::task::spawn_local;
 use leptos_router::components::{A, Route, Router, Routes};
-use leptos_router::hooks::use_navigate;
+use leptos_router::hooks::{use_location, use_navigate};
 use leptos_router::path;
 use web_sys::HtmlElement;
 
@@ -19,6 +19,12 @@ use radroots_studio_app_ui_components::{
     RadrootsAppUiButtonLayoutPair,
     RadrootsAppUiIcon,
     RadrootsAppUiIconKey,
+    RadrootsAppUiNavHeader,
+    RadrootsAppUiNavHeaderBgMode,
+    RadrootsAppUiNavHeaderCollapseMode,
+    RadrootsAppUiNavTabs,
+    RadrootsAppUiScrollContainer,
+    RadrootsAppUiScrollContext,
     RadrootsAppUiSpinner,
 };
 use uuid::Uuid;
@@ -92,6 +98,84 @@ impl HomeView {
             HomeView::Activity => "Activity",
             HomeView::Profile => "Profile",
         }
+    }
+}
+
+#[component]
+pub(crate) fn AppPageChrome(
+    title: String,
+    #[prop(optional)] header_right: Option<ChildrenFn>,
+    #[prop(optional)] show_tabs: Option<bool>,
+    #[prop(optional)] bg_mode: Option<RadrootsAppUiNavHeaderBgMode>,
+    #[prop(optional)] collapse_mode: Option<RadrootsAppUiNavHeaderCollapseMode>,
+    children: Children,
+) -> impl IntoView {
+    let scroll_context = RadrootsAppUiScrollContext::new();
+    provide_context(scroll_context.clone());
+    let show_tabs = show_tabs.unwrap_or(true);
+    let bg_mode = bg_mode.unwrap_or(RadrootsAppUiNavHeaderBgMode::AutoBlur);
+    let collapse_mode = collapse_mode.unwrap_or(RadrootsAppUiNavHeaderCollapseMode::Scroll);
+    let location = use_location();
+    let is_home = move || location.pathname.get() == "/";
+    let is_test = move || location.pathname.get().starts_with("/test");
+    let is_settings = move || location.pathname.get().starts_with("/settings");
+    view! {
+        <div class="app-page-shell">
+            <RadrootsAppUiScrollContainer
+                id=None
+                classes=Some("app-page app-page-scroll app-page-chrome".to_string())
+                collapse_range=None
+                context=Some(scroll_context.clone())
+            >
+                <RadrootsAppUiNavHeader
+                    label=title
+                    on_label_click=None
+                    bg_mode=Some(bg_mode)
+                    collapse_mode=Some(collapse_mode)
+                    right=header_right
+                    id=None
+                    class=None
+                />
+                <div class="app-page-body">
+                    {children()}
+                </div>
+            </RadrootsAppUiScrollContainer>
+            {move || {
+                if show_tabs {
+                    view! {
+                        <RadrootsAppUiNavTabs>
+                            <A
+                                href="/"
+                                attr:class="nav-tabs__item"
+                                attr:data-active=move || if is_home() { "true" } else { "false" }
+                                attr:aria-label=t!("app.nav.home")
+                            >
+                                <RadrootsAppUiIcon key=RadrootsAppUiIconKey::Home size=22 />
+                            </A>
+                            <A
+                                href="/test"
+                                attr:class="nav-tabs__item"
+                                attr:data-active=move || if is_test() { "true" } else { "false" }
+                                attr:aria-label=t!("app.nav.ui")
+                            >
+                                <RadrootsAppUiIcon key=RadrootsAppUiIconKey::Beaker size=22 />
+                            </A>
+                            <A
+                                href="/settings"
+                                attr:class="nav-tabs__item"
+                                attr:data-active=move || if is_settings() { "true" } else { "false" }
+                                attr:aria-label=t!("app.nav.settings")
+                            >
+                                <RadrootsAppUiIcon key=RadrootsAppUiIconKey::Settings size=22 />
+                            </A>
+                        </RadrootsAppUiNavTabs>
+                    }
+                    .into_any()
+                } else {
+                    view! { <></> }.into_any()
+                }
+            }}
+        </div>
     }
 }
 
@@ -1435,43 +1519,48 @@ fn HomePage() -> impl IntoView {
     let is_activity = move || matches!(current_view.get(), HomeView::Activity);
     let is_profile = move || matches!(current_view.get(), HomeView::Profile);
     view! {
-        <main id="app-home" class="app-page app-page-fixed flex flex-col items-center justify-start gap-6 pt-10">
-            <div
-                id="app-home-toggle"
-                class="home-toggle"
-                class:home-toggle--left=is_activity
-                class:home-toggle--right=is_profile
-                role="tablist"
-                aria-label="Home view"
+        <AppPageChrome title=t!("app.nav.home")>
+            <section
+                id="app-home"
+                class="flex flex-col items-center justify-start gap-6 pt-6"
             >
-                <div class="home-toggle__indicator" aria-hidden="true"></div>
-                <button
-                    id="app-home-toggle-activity"
-                    class="home-toggle__button"
-                    class:is-active=is_activity
-                    type="button"
-                    role="tab"
-                    aria-selected=move || if is_activity() { "true" } else { "false" }
-                    on:click=move |_| current_view.set(HomeView::Activity)
+                <div
+                    id="app-home-toggle"
+                    class="home-toggle"
+                    class:home-toggle--left=is_activity
+                    class:home-toggle--right=is_profile
+                    role="tablist"
+                    aria-label="Home view"
                 >
-                    {"Activity"}
-                </button>
-                <button
-                    id="app-home-toggle-profile"
-                    class="home-toggle__button"
-                    class:is-active=is_profile
-                    type="button"
-                    role="tab"
-                    aria-selected=move || if is_profile() { "true" } else { "false" }
-                    on:click=move |_| current_view.set(HomeView::Profile)
-                >
-                    {"Profile"}
-                </button>
-            </div>
-            <p id="app-home-view-title" class="home-toggle__title">
-                {move || current_view.get().label()}
-            </p>
-        </main>
+                    <div class="home-toggle__indicator" aria-hidden="true"></div>
+                    <button
+                        id="app-home-toggle-activity"
+                        class="home-toggle__button"
+                        class:is-active=is_activity
+                        type="button"
+                        role="tab"
+                        aria-selected=move || if is_activity() { "true" } else { "false" }
+                        on:click=move |_| current_view.set(HomeView::Activity)
+                    >
+                        {"Activity"}
+                    </button>
+                    <button
+                        id="app-home-toggle-profile"
+                        class="home-toggle__button"
+                        class:is-active=is_profile
+                        type="button"
+                        role="tab"
+                        aria-selected=move || if is_profile() { "true" } else { "false" }
+                        on:click=move |_| current_view.set(HomeView::Profile)
+                    >
+                        {"Profile"}
+                    </button>
+                </div>
+                <p id="app-home-view-title" class="home-toggle__title">
+                    {move || current_view.get().label()}
+                </p>
+            </section>
+        </AppPageChrome>
     }
 }
 
@@ -1618,18 +1707,6 @@ fn AppShell() -> impl IntoView {
                 if gate.show_app {
                     return view! {
                         <div id="app-shell">
-                            <div
-                                id="app-topbar"
-                                class="flex items-center justify-end px-4 pt-4"
-                            >
-                                <A
-                                    href="/settings"
-                                    attr:aria-label=t!("app.nav.settings")
-                                    attr:class="inline-flex h-9 w-9 items-center justify-center rounded-full"
-                                >
-                                    <RadrootsAppUiIcon key=RadrootsAppUiIconKey::Settings size=20 />
-                                </A>
-                            </div>
                             <Routes
                                 fallback=|| view! {
                                     <main id="app-not-found" class="app-page app-page-fixed">

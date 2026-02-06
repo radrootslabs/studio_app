@@ -5,6 +5,7 @@ use leptos::prelude::*;
 use leptos::task::spawn_local;
 
 use crate::{
+    app::AppPageChrome,
     active_key_label,
     app_context,
     app_health_check_delay_ms,
@@ -148,44 +149,43 @@ pub fn RadrootsAppSettingsStatusPage() -> impl IntoView {
         value.unwrap_or_else(|| t!("app.common.unknown"))
     };
     view! {
-        <main id="app-settings-status" class="app-page app-page-scroll" style="padding: 16px;">
-            <header id="app-settings-status-header" style="display:flex;align-items:center;gap:12px;">
-                <h1 id="app-settings-status-title" style="font: var(--type-title2);">
-                    {t!("app.settings.status.title")}
-                </h1>
-                <button
-                    on:click=move |_| {
-                        let config = backends.with_untracked(|value| value.as_ref().map(|backends| backends.config.clone()));
-                        let Some(config) = config else {
-                            return;
-                        };
-                        let setup_required_value =
-                            !matches!(setup_status.get(), RadrootsAppSetupStatus::Configured);
-                        spawn_health_checks(
-                            config,
-                            setup_required_value,
-                            health_report,
-                            health_running,
-                            active_key,
-                            notifications_status,
-                            last_run,
-                        );
-                    }
-                    disabled=health_disabled
-                >
-                    {move || {
-                        if health_running.get() {
-                            t!("app.home.health.button.checking")
-                        } else {
-                            t!("app.home.health.button.run")
+        <AppPageChrome title=t!("app.settings.status.title")>
+            <header id="app-settings-status-header" class="flex flex-col gap-2">
+                <div class="flex flex-row items-center gap-4">
+                    <button
+                        on:click=move |_| {
+                            let config = backends.with_untracked(|value| value.as_ref().map(|backends| backends.config.clone()));
+                            let Some(config) = config else {
+                                return;
+                            };
+                            let setup_required_value =
+                                !matches!(setup_status.get(), RadrootsAppSetupStatus::Configured);
+                            spawn_health_checks(
+                                config,
+                                setup_required_value,
+                                health_report,
+                                health_running,
+                                active_key,
+                                notifications_status,
+                                last_run,
+                            );
                         }
-                    }}
-                </button>
-                <div id="app-settings-status-updated" style="font-size:12px;color:var(--text-secondary);">
-                    {move || format!("{}: {}", t!("app.settings.status.updated"), last_updated_label())}
+                        disabled=health_disabled
+                    >
+                        {move || {
+                            if health_running.get() {
+                                t!("app.home.health.button.checking")
+                            } else {
+                                t!("app.home.health.button.run")
+                            }
+                        }}
+                    </button>
+                    <div id="app-settings-status-updated" class="text-xs text-[var(--text-secondary)]">
+                        {move || format!("{}: {}", t!("app.settings.status.updated"), last_updated_label())}
+                    </div>
                 </div>
             </header>
-            <section id="app-settings-status-content" style="display:flex;flex-direction:column;gap:16px;margin-top:12px;">
+            <section id="app-settings-status-content" class="flex flex-col gap-4 mt-3">
                 {move || {
                     let report = health_report.get();
                     let active = active_key_label(active_key.get());
@@ -244,6 +244,6 @@ pub fn RadrootsAppSettingsStatusPage() -> impl IntoView {
                     view! { <RadrootsAppUiListView basis=list /> }.into_any()
                 }}
             </section>
-        </main>
+        </AppPageChrome>
     }
 }

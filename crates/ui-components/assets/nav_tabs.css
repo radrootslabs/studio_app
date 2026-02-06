@@ -25,6 +25,21 @@
   box-shadow: var(--shadow-1);
 }
 
+.nav-tabs__item {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 40px;
+  width: 40px;
+  border-radius: 999px;
+  color: var(--text-secondary);
+  transition: color var(--dur-1) var(--ease-ios);
+}
+
+.nav-tabs__item[data-active="true"] {
+  color: var(--text-primary);
+}
+
 .nav-tabs[data-hidden="true"] {
   transform: translateY(calc(100% + 12px));
   opacity: 0;

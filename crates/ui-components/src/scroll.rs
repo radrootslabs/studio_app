@@ -54,17 +54,18 @@ pub fn radroots_studio_app_ui_scroll_velocity(prev_top: f64, next_top: f64, dt_m
 
 #[component]
 pub fn RadrootsAppUiScrollContainer(
-    #[prop(optional)] id: Option<String>,
-    #[prop(optional)] class: Option<String>,
-    #[prop(optional)] collapse_range: Option<f64>,
-    #[prop(optional)] context: Option<RadrootsAppUiScrollContext>,
+    id: Option<String>,
+    classes: Option<String>,
+    collapse_range: Option<f64>,
+    context: Option<RadrootsAppUiScrollContext>,
     children: Children,
 ) -> impl IntoView {
     let context = context.unwrap_or_else(RadrootsAppUiScrollContext::new);
     provide_context(context.clone());
     let last_sample = RwSignal::new_local(RadrootsAppUiScrollSample::default());
     let collapse_range_value = collapse_range.unwrap_or(DEFAULT_COLLAPSE_RANGE);
-    let class_value = class.unwrap_or_else(|| "app-page app-page-scroll app-page-chrome".to_string());
+    let class_value =
+        classes.unwrap_or_else(|| "app-page app-page-scroll app-page-chrome".to_string());
     let on_scroll = move |ev: Event| {
         let target = event_target::<HtmlElement>(&ev);
         let scroll_top = target.scroll_top() as f64;

@@ -1,6 +1,6 @@
 use leptos::prelude::*;
 
-use crate::t;
+use crate::{app::AppPageChrome, t};
 use radroots_studio_app_ui_components::{
     RadrootsAppUiList,
     RadrootsAppUiListDisplay,
@@ -182,10 +182,7 @@ pub fn RadrootsAppUiDemoPage() -> impl IntoView {
         }),
     };
     view! {
-        <main id="app-ui-demo" class="app-page app-page-scroll" style="padding: 16px;">
-            <header id="app-ui-demo-header" style="font: var(--type-title2); margin-bottom: 12px;">
-                <h1 id="app-ui-demo-title">{t!("app.ui_demo.title")}</h1>
-            </header>
+        <AppPageChrome title=t!("app.ui_demo.title")>
             <section id="app-ui-demo-content">
                 <RadrootsAppUiListView basis=list />
 
@@ -242,6 +239,6 @@ pub fn RadrootsAppUiDemoPage() -> impl IntoView {
                     </RadrootsAppUiSheetPortal>
                 </RadrootsAppUiSheetRoot>
             </section>
-        </main>
+        </AppPageChrome>
     }
 }

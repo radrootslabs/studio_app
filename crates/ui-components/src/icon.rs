@@ -1,6 +1,6 @@
 #![forbid(unsafe_code)]
 
-use icondata::{Icon, LuChevronRight, LuChevronsUpDown, LuPlus, LuSettings};
+use icondata::{Icon, LuBeaker, LuChevronRight, LuChevronsUpDown, LuHome, LuPlus, LuSettings};
 use leptos::prelude::*;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -9,6 +9,8 @@ pub enum RadrootsAppUiIconKey {
     CaretUpDown,
     Plus,
     Settings,
+    Home,
+    Beaker,
 }
 
 impl RadrootsAppUiIconKey {
@@ -18,6 +20,8 @@ impl RadrootsAppUiIconKey {
             RadrootsAppUiIconKey::CaretUpDown => "caret-up-down",
             RadrootsAppUiIconKey::Plus => "plus",
             RadrootsAppUiIconKey::Settings => "settings",
+            RadrootsAppUiIconKey::Home => "home",
+            RadrootsAppUiIconKey::Beaker => "beaker",
         }
     }
 }
@@ -28,6 +32,8 @@ pub fn radroots_studio_app_ui_icon_key_from_name(name: &str) -> Option<RadrootsA
         "caret-up-down" | "chevrons-up-down" => Some(RadrootsAppUiIconKey::CaretUpDown),
         "plus" => Some(RadrootsAppUiIconKey::Plus),
         "settings" | "gear" => Some(RadrootsAppUiIconKey::Settings),
+        "home" => Some(RadrootsAppUiIconKey::Home),
+        "beaker" | "test" => Some(RadrootsAppUiIconKey::Beaker),
         _ => None,
     }
 }
@@ -38,6 +44,8 @@ pub fn radroots_studio_app_ui_icon_data(key: RadrootsAppUiIconKey) -> Icon {
         RadrootsAppUiIconKey::CaretUpDown => LuChevronsUpDown,
         RadrootsAppUiIconKey::Plus => LuPlus,
         RadrootsAppUiIconKey::Settings => LuSettings,
+        RadrootsAppUiIconKey::Home => LuHome,
+        RadrootsAppUiIconKey::Beaker => LuBeaker,
     }
 }
 
@@ -115,6 +123,18 @@ mod tests {
         assert_eq!(
             radroots_studio_app_ui_icon_key_from_name("gear"),
             Some(RadrootsAppUiIconKey::Settings)
+        );
+        assert_eq!(
+            radroots_studio_app_ui_icon_key_from_name("home"),
+            Some(RadrootsAppUiIconKey::Home)
+        );
+        assert_eq!(
+            radroots_studio_app_ui_icon_key_from_name("beaker"),
+            Some(RadrootsAppUiIconKey::Beaker)
+        );
+        assert_eq!(
+            radroots_studio_app_ui_icon_key_from_name("test"),
+            Some(RadrootsAppUiIconKey::Beaker)
         );
         assert_eq!(radroots_studio_app_ui_icon_key_from_name("unknown"), None);
     }

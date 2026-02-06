@@ -40,12 +40,12 @@ pub enum RadrootsAppUiNavHeaderCollapseMode {
 #[component]
 pub fn RadrootsAppUiNavHeader(
     label: String,
-    #[prop(optional)] on_label_click: Option<Callback<MouseEvent>>,
-    #[prop(optional)] bg_mode: Option<RadrootsAppUiNavHeaderBgMode>,
-    #[prop(optional)] collapse_mode: Option<RadrootsAppUiNavHeaderCollapseMode>,
-    #[prop(optional)] right: Option<ChildrenFn>,
-    #[prop(optional)] id: Option<String>,
-    #[prop(optional)] class: Option<String>,
+    on_label_click: Option<Callback<MouseEvent>>,
+    bg_mode: Option<RadrootsAppUiNavHeaderBgMode>,
+    collapse_mode: Option<RadrootsAppUiNavHeaderCollapseMode>,
+    right: Option<ChildrenFn>,
+    id: Option<String>,
+    class: Option<String>,
 ) -> impl IntoView {
     let bg_mode = bg_mode.unwrap_or(RadrootsAppUiNavHeaderBgMode::AutoBlur);
     let collapse_mode = collapse_mode.unwrap_or(RadrootsAppUiNavHeaderCollapseMode::Scroll);
