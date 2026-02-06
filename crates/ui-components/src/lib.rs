@@ -120,4 +120,8 @@ pub use scroll::{
     RadrootsAppUiScrollContainer,
     RadrootsAppUiScrollContext,
 };
-pub use nav_header::RadrootsAppUiNavHeader;
+pub use nav_header::{
+    RadrootsAppUiNavHeader,
+    RadrootsAppUiNavHeaderBgMode,
+    RadrootsAppUiNavHeaderCollapseMode,
+};
