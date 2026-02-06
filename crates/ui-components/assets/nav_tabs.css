@@ -1,0 +1,38 @@
+.nav-tabs {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  z-index: 20;
+  width: 100%;
+  height: var(--nav-tabs-height);
+  padding: 8px 16px calc(var(--safe-b) + 8px);
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  transition: transform var(--dur-2) var(--ease-ios), opacity var(--dur-2) var(--ease-ios);
+  will-change: transform, opacity;
+}
+
+.nav-tabs__tray {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 20px;
+  padding: 8px 20px;
+  border-radius: 999px;
+  background: var(--material-regular);
+  backdrop-filter: blur(18px) saturate(180%);
+  box-shadow: var(--shadow-1);
+}
+
+.nav-tabs[data-hidden="true"] {
+  transform: translateY(calc(100% + 12px));
+  opacity: 0;
+  pointer-events: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .nav-tabs {
+    transition: none;
+  }
+}

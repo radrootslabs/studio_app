@@ -12,6 +12,7 @@ mod dialog;
 mod sheet;
 mod scroll;
 mod nav_header;
+mod nav_tabs;
 
 pub use button::RadrootsAppUiButton;
 pub use button_layout::{
@@ -125,3 +126,4 @@ pub use nav_header::{
     RadrootsAppUiNavHeaderBgMode,
     RadrootsAppUiNavHeaderCollapseMode,
 };
+pub use nav_tabs::RadrootsAppUiNavTabs;
