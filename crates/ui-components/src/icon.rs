@@ -1,6 +1,6 @@
 #![forbid(unsafe_code)]
 
-use icondata::{Icon, LuChevronRight, LuChevronsUpDown, LuPlus};
+use icondata::{Icon, LuChevronRight, LuChevronsUpDown, LuPlus, LuSettings};
 use leptos::prelude::*;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -8,6 +8,7 @@ pub enum RadrootsAppUiIconKey {
     CaretRight,
     CaretUpDown,
     Plus,
+    Settings,
 }
 
 impl RadrootsAppUiIconKey {
@@ -16,6 +17,7 @@ impl RadrootsAppUiIconKey {
             RadrootsAppUiIconKey::CaretRight => "caret-right",
             RadrootsAppUiIconKey::CaretUpDown => "caret-up-down",
             RadrootsAppUiIconKey::Plus => "plus",
+            RadrootsAppUiIconKey::Settings => "settings",
         }
     }
 }
@@ -25,6 +27,7 @@ pub fn radroots_studio_app_ui_icon_key_from_name(name: &str) -> Option<RadrootsA
         "caret-right" | "chevron-right" => Some(RadrootsAppUiIconKey::CaretRight),
         "caret-up-down" | "chevrons-up-down" => Some(RadrootsAppUiIconKey::CaretUpDown),
         "plus" => Some(RadrootsAppUiIconKey::Plus),
+        "settings" | "gear" => Some(RadrootsAppUiIconKey::Settings),
         _ => None,
     }
 }
@@ -34,6 +37,7 @@ pub fn radroots_studio_app_ui_icon_data(key: RadrootsAppUiIconKey) -> Icon {
         RadrootsAppUiIconKey::CaretRight => LuChevronRight,
         RadrootsAppUiIconKey::CaretUpDown => LuChevronsUpDown,
         RadrootsAppUiIconKey::Plus => LuPlus,
+        RadrootsAppUiIconKey::Settings => LuSettings,
     }
 }
 
@@ -104,12 +108,20 @@ mod tests {
             radroots_studio_app_ui_icon_key_from_name("plus"),
             Some(RadrootsAppUiIconKey::Plus)
         );
+        assert_eq!(
+            radroots_studio_app_ui_icon_key_from_name("settings"),
+            Some(RadrootsAppUiIconKey::Settings)
+        );
+        assert_eq!(
+            radroots_studio_app_ui_icon_key_from_name("gear"),
+            Some(RadrootsAppUiIconKey::Settings)
+        );
         assert_eq!(radroots_studio_app_ui_icon_key_from_name("unknown"), None);
     }
 
     #[test]
     fn icon_data_resolves() {
-        let icon = radroots_studio_app_ui_icon_data(RadrootsAppUiIconKey::Plus);
+        let icon = radroots_studio_app_ui_icon_data(RadrootsAppUiIconKey::Settings);
         assert!(!icon.data.is_empty());
     }
 }

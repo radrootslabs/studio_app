@@ -152,6 +152,7 @@ pub fn RadrootsAppSettingsPage() -> impl IntoView {
         hide_offset: false,
         styles: None,
     };
+    let logs_navigate = navigate.clone();
     let actions_list = RadrootsAppUiList {
         id: Some("settings-actions".to_string()),
         view: Some("settings".to_string()),
@@ -177,6 +178,30 @@ pub fn RadrootsAppSettingsPage() -> impl IntoView {
                         on_click: None,
                     }),
                     on_click: Some(settings_touch_callback("settings_export_database")),
+                }),
+                loading: false,
+                hide_active: true,
+                hide_field: false,
+                full_rounded: false,
+                offset: None,
+            }),
+            Some(RadrootsAppUiListItem {
+                kind: RadrootsAppUiListItemKind::Touch(RadrootsAppUiListTouch {
+                    label: RadrootsAppUiListLabel {
+                        left: vec![settings_label(t!("app.nav.logs"), Some("capitalize"))],
+                        right: Vec::new(),
+                    },
+                    display: None,
+                    end: Some(RadrootsAppUiListTouchEnd {
+                        icon: RadrootsAppUiListIcon {
+                            key: "caret-right".to_string(),
+                            class: None,
+                        },
+                        on_click: None,
+                    }),
+                    on_click: Some(Callback::new(move |_| {
+                        logs_navigate("/settings/logs", Default::default());
+                    })),
                 }),
                 loading: false,
                 hide_active: true,
@@ -261,8 +286,11 @@ pub fn RadrootsAppSettingsPage() -> impl IntoView {
     };
     view! {
         <main id="app-settings" class="app-page app-page-scroll" style="padding: 16px;">
-            <header id="app-settings-header" style="font: var(--type-title2); margin-bottom: 12px;">
-                <h1 id="app-settings-title">{t!("app.settings.title")}</h1>
+            <header
+                id="app-settings-header"
+                style="font-family: var(--font-sans); font-size: 34px; line-height: 41px; font-weight: 600; letter-spacing: -0.01em; margin-bottom: 12px;"
+            >
+                <h1 id="app-settings-title" class="capitalize">{t!("app.settings.title")}</h1>
             </header>
             <section id="app-settings-content" style="display:flex;flex-direction:column;gap:16px;">
                 <RadrootsAppUiListView basis=appearance_list />

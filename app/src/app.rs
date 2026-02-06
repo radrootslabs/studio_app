@@ -17,6 +17,8 @@ use radroots_studio_app_ui_components::{
     RadrootsAppUiButtonLayoutAction,
     RadrootsAppUiButtonLayoutBackAction,
     RadrootsAppUiButtonLayoutPair,
+    RadrootsAppUiIcon,
+    RadrootsAppUiIconKey,
     RadrootsAppUiSpinner,
 };
 use uuid::Uuid;
@@ -716,7 +718,7 @@ fn SetupPage() -> impl IntoView {
                                     </header>
                                     <footer
                                         id="app-setup-intro-footer"
-                                        class="absolute bottom-0 left-0 flex flex-col h-[20rem] w-full px-10 gap-2 justify-start items-center"
+                                        class="absolute bottom-0 left-0 flex flex-col h-[20rem] w-full gap-2 justify-start items-center"
                                     >
                                         <p
                                             id="app-setup-intro-kicker"
@@ -1616,12 +1618,18 @@ fn AppShell() -> impl IntoView {
                 if gate.show_app {
                     return view! {
                         <div id="app-shell">
-                            <nav id="app-nav" aria-label=t!("app.nav.primary_aria") style="display:flex;gap:12px;margin-bottom:12px;">
-                                <A href="/" exact=true>{t!("app.nav.home")}</A>
-                                <A href="/logs">{t!("app.nav.logs")}</A>
-                                <A href="/ui">{t!("app.nav.ui")}</A>
-                                <A href="/settings">{t!("app.nav.settings")}</A>
-                            </nav>
+                            <div
+                                id="app-topbar"
+                                class="flex items-center justify-end px-4 pt-4"
+                            >
+                                <A
+                                    href="/settings"
+                                    attr:aria-label=t!("app.nav.settings")
+                                    attr:class="inline-flex h-9 w-9 items-center justify-center rounded-full"
+                                >
+                                    <RadrootsAppUiIcon key=RadrootsAppUiIconKey::Settings size=20 />
+                                </A>
+                            </div>
                             <Routes
                                 fallback=|| view! {
                                     <main id="app-not-found" class="app-page app-page-fixed">
@@ -1630,8 +1638,8 @@ fn AppShell() -> impl IntoView {
                                 }
                             >
                                 <Route path=path!("") view=HomePage />
-                                <Route path=path!("logs") view=RadrootsAppLogsPage />
-                                <Route path=path!("ui") view=RadrootsAppUiDemoPage />
+                                <Route path=path!("settings/logs") view=RadrootsAppLogsPage />
+                                <Route path=path!("test") view=RadrootsAppUiDemoPage />
                                 <Route
                                     path=path!("settings/status")
                                     view=RadrootsAppSettingsStatusPage
