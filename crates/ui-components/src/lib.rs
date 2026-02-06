@@ -11,6 +11,7 @@ mod spinner;
 mod dialog;
 mod sheet;
 mod scroll;
+mod nav_header;
 
 pub use button::RadrootsAppUiButton;
 pub use button_layout::{
@@ -119,3 +120,4 @@ pub use scroll::{
     RadrootsAppUiScrollContainer,
     RadrootsAppUiScrollContext,
 };
+pub use nav_header::RadrootsAppUiNavHeader;
