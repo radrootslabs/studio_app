@@ -1,4 +1,3 @@
-use gloo_timers::future::TimeoutFuture;
 use leptos::ev::{KeyboardEvent, MouseEvent};
 use leptos::prelude::*;
 use leptos::task::spawn_local;
@@ -52,19 +51,12 @@ use crate::{
     app_setup_lock_enabled,
     app_setup_lock_release,
     app_setup_lock_ttl_ms,
-    app_state_set_notifications_permission_value,
     app_state_timestamp_ms,
     app_setup_eula_date,
     app_setup_finalize_with_key,
     app_setup_gate_from_status,
     app_setup_step_default,
-    app_health_check_delay_ms,
-    health_report_summary,
-    health_result_label,
-    health_status_class,
     RadrootsAppBackends,
-    RadrootsAppHealthCheckResult,
-    RadrootsAppHealthReport,
     RadrootsAppInitError,
     RadrootsAppInitStage,
     RadrootsAppNotifications,
@@ -84,19 +76,20 @@ use crate::{
     RadrootsAppUiDemoPage,
     RadrootsAppSetupStep,
     RadrootsAppSettingsStatusPage,
-    spawn_health_checks,
 };
 
-fn init_stage_label(stage: RadrootsAppInitStage) -> String {
-    match stage {
-        RadrootsAppInitStage::Idle => t!("app.init.stage.idle"),
-        RadrootsAppInitStage::Storage => t!("app.init.stage.storage"),
-        RadrootsAppInitStage::DownloadSql => t!("app.init.stage.download_sql"),
-        RadrootsAppInitStage::DownloadGeo => t!("app.init.stage.download_geo"),
-        RadrootsAppInitStage::Database => t!("app.init.stage.database"),
-        RadrootsAppInitStage::Geocoder => t!("app.init.stage.geocoder"),
-        RadrootsAppInitStage::Ready => t!("app.init.stage.ready"),
-        RadrootsAppInitStage::Error => t!("app.init.stage.error"),
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum HomeView {
+    Activity,
+    Profile,
+}
+
+impl HomeView {
+    fn label(self) -> &'static str {
+        match self {
+            HomeView::Activity => "Activity",
+            HomeView::Profile => "Profile",
+        }
     }
 }
 
@@ -125,16 +118,6 @@ fn reset_status_label(value: &str) -> String {
         "resetting" => t!("app.home.reset.status.resetting"),
         "reset_missing_backends" => t!("app.home.reset.status.missing_backends"),
         "reset_done" => t!("app.home.reset.status.done"),
-        _ => error_label(value).unwrap_or_else(|| value.to_string()),
-    }
-}
-
-fn notifications_status_label(value: &str) -> String {
-    match value {
-        "granted" => t!("app.home.notifications.status.granted"),
-        "denied" => t!("app.home.notifications.status.denied"),
-        "default" => t!("app.home.notifications.status.default"),
-        "unavailable" => t!("app.home.notifications.status.unavailable"),
         _ => error_label(value).unwrap_or_else(|| value.to_string()),
     }
 }
@@ -1446,270 +1429,46 @@ fn RecoveryPage() -> impl IntoView {
 
 #[component]
 fn HomePage() -> impl IntoView {
-    let context = app_context();
-    let fallback_backends = RwSignal::new_local(None::<RadrootsAppBackends>);
-    let fallback_init_error = RwSignal::new_local(None::<RadrootsAppInitError>);
-    let fallback_init_state = RwSignal::new_local(app_init_state_default());
-    let fallback_setup_status = RwSignal::new_local(RadrootsAppSetupStatus::Unknown);
-    let backends = context
-        .as_ref()
-        .map(|value| value.backends)
-        .unwrap_or(fallback_backends);
-    let init_state = context
-        .as_ref()
-        .map(|value| value.init_state)
-        .unwrap_or(fallback_init_state);
-    let setup_status = context
-        .as_ref()
-        .map(|value| value.setup_status)
-        .unwrap_or(fallback_setup_status);
-    let _init_error = context
-        .as_ref()
-        .map(|value| value.init_error)
-        .unwrap_or(fallback_init_error);
-    let reset_status = RwSignal::new_local(None::<String>);
-    let health_report = RwSignal::new_local(RadrootsAppHealthReport::empty());
-    let health_running = RwSignal::new_local(false);
-    let health_autorun = RwSignal::new_local(false);
-    let active_key = RwSignal::new_local(None::<String>);
-    let notifications_status = RwSignal::new_local(None::<String>);
-    let notifications_requesting = RwSignal::new_local(false);
-    let last_run = RwSignal::new_local(None::<i64>);
-    Effect::new(move || {
-        if init_state.get().stage != RadrootsAppInitStage::Ready {
-            return;
-        }
-        if health_autorun.get() {
-            return;
-        }
-        let setup_status = setup_status.get();
-        if matches!(setup_status, RadrootsAppSetupStatus::Unknown) {
-            return;
-        }
-        let setup_required_value = !matches!(setup_status, RadrootsAppSetupStatus::Configured);
-        let config = backends.with_untracked(|value| value.as_ref().map(|backends| backends.config.clone()));
-        let Some(config) = config else {
-            return;
-        };
-        health_autorun.set(true);
-        let delay_ms = app_health_check_delay_ms();
-        spawn_local(async move {
-            TimeoutFuture::new(delay_ms).await;
-            spawn_health_checks(
-                config,
-                setup_required_value,
-                health_report,
-                health_running,
-                active_key,
-                notifications_status,
-                last_run,
-            );
-        });
-    });
-    let status_color = move || match init_state.get().stage {
-        RadrootsAppInitStage::Ready => "green",
-        RadrootsAppInitStage::Error => "red",
-        RadrootsAppInitStage::Storage => "orange",
-        RadrootsAppInitStage::DownloadSql => "orange",
-        RadrootsAppInitStage::DownloadGeo => "orange",
-        RadrootsAppInitStage::Database => "orange",
-        RadrootsAppInitStage::Geocoder => "orange",
-        RadrootsAppInitStage::Idle => "gray",
-    };
-    let reset_disabled = move || backends.with(|value| value.is_none());
-    let reset_label = move || {
-        reset_status
-            .get()
-            .as_deref()
-            .map(reset_status_label)
-            .unwrap_or_else(|| t!("app.home.reset.status.idle"))
-    };
-    let notifications_disabled = move || {
-        backends.with(|value| value.is_none()) || notifications_requesting.get()
-    };
-    let notifications_label = move || {
-        notifications_status
-            .get()
-            .as_deref()
-            .map(notifications_status_label)
-            .unwrap_or_else(|| t!("app.common.unknown"))
-    };
-    let notifications_button_label = move || {
-        if notifications_requesting.get() {
-            t!("app.home.notifications.button.requesting")
-        } else {
-            t!("app.home.notifications.button.request")
-        }
-    };
+    let current_view = RwSignal::new_local(HomeView::Activity);
+    let is_activity = move || matches!(current_view.get(), HomeView::Activity);
+    let is_profile = move || matches!(current_view.get(), HomeView::Profile);
     view! {
-        <main id="app-home" class="app-page app-page-scroll">
-            <header id="app-home-header">
-                <h1 id="app-home-title">{t!("app.home.title")}</h1>
-            </header>
-            <section id="app-home-status" aria-label=t!("app.home.status.aria")>
-                <div id="app-home-status-row" style="margin-top: 8px; display: flex; align-items: center; gap: 8px;">
-                    <span
-                        style=move || format!(
-                            "display:inline-block;width:10px;height:10px;border-radius:50%;background:{};",
-                            status_color()
-                        )
-                    ></span>
-                    <span>{move || init_stage_label(init_state.get().stage)}</span>
-                </div>
-            </section>
-            <section id="app-home-reset" aria-label=t!("app.home.reset.aria")>
-                <div id="app-home-reset-row" style="margin-top: 12px; display: flex; align-items: center; gap: 8px;">
-                    <button
-                        on:click=move |_| {
-                            let config = backends.with_untracked(|value| value.as_ref().map(|backends| backends.config.clone()));
-                            reset_status.set(Some("resetting".to_string()));
-                            health_report.set(RadrootsAppHealthReport::empty());
-                            active_key.set(None);
-                            notifications_status.set(None);
-                            setup_status.set(RadrootsAppSetupStatus::Required);
-                            spawn_local(async move {
-                                let Some(config) = config else {
-                                    reset_status.set(Some("reset_missing_backends".to_string()));
-                                    return;
-                                };
-                                let datastore = radroots_studio_app_core::datastore::RadrootsClientWebDatastore::new(
-                                    Some(config.datastore.idb_config),
-                                );
-                                let keystore = radroots_studio_app_core::keystore::RadrootsClientWebKeystoreNostr::new(
-                                    Some(config.keystore.nostr_store),
-                                );
-                                match app_init_reset(
-                                    Some(&datastore),
-                                    Some(&config.datastore.key_maps),
-                                    Some(&keystore),
-                                )
-                                .await
-                                {
-                                    Ok(()) => {
-                                        let log_datastore = logs_datastore();
-                                        if let Err(err) = log_datastore.reset().await {
-                                            let reset_err = RadrootsAppInitError::Datastore(err);
-                                            let _ = app_log_error_emit(&reset_err);
-                                            reset_status.set(Some(reset_err.to_string()));
-                                            return;
-                                        }
-                                        reset_status.set(Some("reset_done".to_string()));
-                                        spawn_health_checks(
-                                            config,
-                                            true,
-                                            health_report,
-                                            health_running,
-                                            active_key,
-                                            notifications_status,
-                                            last_run,
-                                        );
-                                    }
-                                    Err(err) => {
-                                        let log_datastore = logs_datastore();
-                                        let _ = app_log_error_store(
-                                            &log_datastore,
-                                            &config.datastore.key_maps,
-                                            &err,
-                                        )
-                                        .await;
-                                        reset_status.set(Some(err.to_string()));
-                                    }
-                                }
-                            });
-                        }
-                        disabled=reset_disabled
-                    >
-                        {t!("app.home.reset.button")}
-                    </button>
-                    <span>{reset_label}</span>
-                </div>
-            </section>
-            <section id="app-home-notifications" aria-label=t!("app.home.notifications.aria") style="margin-top: 16px;">
-                <header id="app-home-notifications-header">
-                    <h2 id="app-home-notifications-title" style="font-weight: 600;">{t!("app.home.notifications.title")}</h2>
-                </header>
-                <div id="app-home-notifications-actions" style="margin-top: 8px; display: flex; align-items: center; gap: 8px;">
-                    <button
-                        on:click=move |_| {
-                            let config = backends.with_untracked(|value| value.as_ref().map(|backends| backends.config.clone()));
-                            notifications_requesting.set(true);
-                            spawn_local(async move {
-                                let Some(config) = config else {
-                                    notifications_requesting.set(false);
-                                    return;
-                                };
-                                let datastore = radroots_studio_app_core::datastore::RadrootsClientWebDatastore::new(
-                                    Some(config.datastore.idb_config),
-                                );
-                                let notifications = RadrootsAppNotifications::new(None);
-                                match notifications.request_permission().await {
-                                    Ok(permission) => {
-                                        let value = permission.as_str().to_string();
-                                        let _ = app_state_set_notifications_permission_value(
-                                            &datastore,
-                                            &config.datastore.key_maps,
-                                            permission,
-                                        )
-                                        .await;
-                                        notifications_status.set(Some(value));
-                                        spawn_health_checks(
-                                            config,
-                                            false,
-                                            health_report,
-                                            health_running,
-                                            active_key,
-                                            notifications_status,
-                                            last_run,
-                                        );
-                                    }
-                                    Err(err) => {
-                                        let log_datastore = logs_datastore();
-                                        let _ = app_log_error_store(
-                                            &log_datastore,
-                                            &config.datastore.key_maps,
-                                            &err,
-                                        )
-                                        .await;
-                                        notifications_status.set(Some(err.to_string()));
-                                    }
-                                }
-                                notifications_requesting.set(false);
-                            });
-                        }
-                        disabled=notifications_disabled
-                    >
-                        {notifications_button_label}
-                    </button>
-                    <span>{notifications_label}</span>
-                </div>
-            </section>
-            <section id="app-home-health" aria-label=t!("app.home.health.aria") style="margin-top: 16px;">
-                <header id="app-home-health-header" style="display:flex;align-items:center;gap:12px;">
-                    <h2 id="app-home-health-title" style="font-weight: 600;">
-                        {t!("app.settings.status.title")}
-                    </h2>
-                    <A href="/settings/status" attr:id="app-home-health-link">
-                        {t!("app.settings.status.view")}
-                    </A>
-                </header>
-                <div id="app-home-health-summary" style="margin-top: 8px; display: flex; align-items: center; gap: 8px;">
-                    <span
-                        class=move || {
-                            let summary = health_report_summary(&health_report.get());
-                            format!("status-dot {}", health_status_class(summary))
-                        }
-                    >
-                        {"●"}
-                    </span>
-                    <span>{move || {
-                        let summary = health_report_summary(&health_report.get());
-                        health_result_label(&RadrootsAppHealthCheckResult {
-                            status: summary,
-                            message: None,
-                        })
-                    }}</span>
-                </div>
-            </section>
+        <main id="app-home" class="app-page app-page-fixed flex flex-col items-center justify-start gap-6 pt-10">
+            <div
+                id="app-home-toggle"
+                class="home-toggle"
+                class:home-toggle--left=is_activity
+                class:home-toggle--right=is_profile
+                role="tablist"
+                aria-label="Home view"
+            >
+                <div class="home-toggle__indicator" aria-hidden="true"></div>
+                <button
+                    id="app-home-toggle-activity"
+                    class="home-toggle__button"
+                    class:is-active=is_activity
+                    type="button"
+                    role="tab"
+                    aria-selected=move || if is_activity() { "true" } else { "false" }
+                    on:click=move |_| current_view.set(HomeView::Activity)
+                >
+                    {"Activity"}
+                </button>
+                <button
+                    id="app-home-toggle-profile"
+                    class="home-toggle__button"
+                    class:is-active=is_profile
+                    type="button"
+                    role="tab"
+                    aria-selected=move || if is_profile() { "true" } else { "false" }
+                    on:click=move |_| current_view.set(HomeView::Profile)
+                >
+                    {"Profile"}
+                </button>
+            </div>
+            <p id="app-home-view-title" class="home-toggle__title">
+                {move || current_view.get().label()}
+            </p>
         </main>
     }
 }

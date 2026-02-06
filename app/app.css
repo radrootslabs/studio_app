@@ -257,6 +257,81 @@
     background: var(--separator);
   }
 
+  .home-toggle {
+    position: relative;
+    display: grid;
+    --home-toggle-seg: 98px;
+    --home-toggle-pad: 2px;
+    --home-toggle-inset-x: 0.75px;
+    --home-toggle-border: 1px;
+    grid-template-columns: var(--home-toggle-seg) var(--home-toggle-seg);
+    align-items: center;
+    width: calc(
+      (var(--home-toggle-seg) * 2)
+      + (var(--home-toggle-pad) * 2)
+      + (var(--home-toggle-border) * 2)
+    );
+    padding: var(--home-toggle-pad);
+    height: 32px;
+    border-radius: 12px;
+    background: var(--material-regular);
+    border: var(--home-toggle-border) solid var(--stroke);
+    box-shadow: var(--shadow-press);
+    gap: 0;
+    box-sizing: border-box;
+  }
+
+  .home-toggle__indicator {
+    position: absolute;
+    top: var(--home-toggle-pad);
+    bottom: var(--home-toggle-pad);
+    left: calc(var(--home-toggle-pad) + var(--home-toggle-inset-x));
+    width: calc(var(--home-toggle-seg) - (var(--home-toggle-inset-x) * 2));
+    border-radius: 8px;
+    background: var(--bg-elevated);
+    box-shadow: var(--shadow-1);
+    transition: transform var(--dur-2) var(--ease-ios);
+    will-change: transform;
+    box-sizing: border-box;
+  }
+
+  .home-toggle--right .home-toggle__indicator {
+    transform: translateX(var(--home-toggle-seg));
+  }
+
+  .home-toggle__button {
+    position: relative;
+    z-index: 1;
+    border: none;
+    background: transparent;
+    height: 28px;
+    padding: 0 var(--home-toggle-inset-x);
+    border-radius: 8px;
+    font-size: 0.95rem;
+    font-weight: 600;
+    color: var(--text-secondary);
+    letter-spacing: 0.01em;
+    cursor: pointer;
+    transition: color var(--dur-1) var(--ease-ios);
+  }
+
+  .home-toggle__button.is-active {
+    color: var(--text-primary);
+  }
+
+  .home-toggle__title {
+    font-size: 1.1rem;
+    font-weight: 600;
+    color: var(--text-primary);
+    text-align: center;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .home-toggle__indicator {
+      transition: none;
+    }
+  }
+
 }
 
 @keyframes overlay-fade-in {
