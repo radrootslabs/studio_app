@@ -4,6 +4,7 @@ mod app;
 mod bootstrap;
 mod context;
 mod config;
+mod config_flow;
 mod configuration;
 mod data;
 mod health;
@@ -251,6 +252,15 @@ pub use config::{
     APP_DATASTORE_KEY_SETUP_LOCK,
     APP_KEYSTORE_KEY_NOSTR_DEFAULT,
     app_datastore_key_setup_lock,
+};
+pub use config_flow::{
+    app_config_flow_next_step,
+    app_config_flow_prev_step,
+    app_config_flow_validate,
+    app_config_step_default,
+    RadrootsAppConfigFlowDraft,
+    RadrootsAppConfigFlowValidation,
+    RadrootsAppConfigStep,
 };
 pub use init::{
     app_init_assets,
