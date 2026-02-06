@@ -38,7 +38,6 @@ pub struct RadrootsAppConfigFlowDraft {
     pub business_operations: String,
     pub notifications_orders: bool,
     pub notifications_messages: bool,
-    pub payment_method: String,
 }
 
 impl Default for RadrootsAppConfigFlowDraft {
@@ -59,7 +58,6 @@ impl Default for RadrootsAppConfigFlowDraft {
             business_operations: String::new(),
             notifications_orders: true,
             notifications_messages: true,
-            payment_method: String::new(),
         }
     }
 }
@@ -169,7 +167,7 @@ pub fn app_config_flow_build_config(
     let preferences = RadrootsAppConfigPreferences {
         notifications_orders: draft.notifications_orders,
         notifications_messages: draft.notifications_messages,
-        payment_method: normalize_text(&draft.payment_method),
+        payment_method: None,
     };
     match role {
         RadrootsAppRole::Farm => {

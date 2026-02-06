@@ -1559,7 +1559,6 @@ fn ConfigPage() -> impl IntoView {
     let business_operations = RwSignal::new_local(String::new());
     let notifications_orders = RwSignal::new_local(true);
     let notifications_messages = RwSignal::new_local(true);
-    let payment_method = RwSignal::new_local(String::new());
     let config_saving = RwSignal::new_local(false);
     let config_flow = move || RadrootsAppConfigFlowDraft {
         step: config_step.get(),
@@ -1577,7 +1576,6 @@ fn ConfigPage() -> impl IntoView {
         business_operations: business_operations.get(),
         notifications_orders: notifications_orders.get(),
         notifications_messages: notifications_messages.get(),
-        payment_method: payment_method.get(),
     };
     let config_validation = move || app_config_flow_validate(&config_flow());
     let advance_step = {
@@ -2083,22 +2081,6 @@ fn ConfigPage() -> impl IntoView {
                                         </button>
                                     </div>
                                 </div>
-                            </RadrootsAppUiFormField>
-                            <RadrootsAppUiFormField
-                                label="Payment method".to_string()
-                                id="app-config-payment-method".to_string()
-                                hint="Optional".to_string()
-                            >
-                                <input
-                                    id="app-config-payment-method-input"
-                                    class="input-base"
-                                    type="text"
-                                    placeholder="e.g. Cash, card, or invoice".to_string()
-                                    prop:value=move || payment_method.get()
-                                    on:input=move |ev| {
-                                        payment_method.set(event_target_value(&ev));
-                                    }
-                                />
                             </RadrootsAppUiFormField>
                         </section>
                     }.into_any(),
