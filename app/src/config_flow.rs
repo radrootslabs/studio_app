@@ -128,9 +128,7 @@ fn role_step_valid(draft: &RadrootsAppConfigFlowDraft) -> bool {
                 && has_items(&draft.farmer_products)
         }
         Some(RadrootsAppRole::Individual) => {
-            has_text(&draft.individual_name)
-                && has_text(&draft.individual_location)
-                && has_items(&draft.individual_products)
+            has_items(&draft.individual_products)
         }
         Some(RadrootsAppRole::Business) => {
             has_text(&draft.business_name)
@@ -182,7 +180,7 @@ pub fn app_config_flow_build_config(
                 return None;
             }
             Some(RadrootsAppConfigData {
-                profile,
+                profile: profile.clone(),
                 role,
                 farmer: Some(RadrootsAppConfigFarmer {
                     farm_name,
@@ -195,20 +193,18 @@ pub fn app_config_flow_build_config(
             })
         }
         RadrootsAppRole::Individual => {
-            let name = normalize_text(&draft.individual_name)?;
-            let location = normalize_text(&draft.individual_location)?;
             let products = normalize_items(&draft.individual_products);
             if products.is_empty() {
                 return None;
             }
             Some(RadrootsAppConfigData {
-                profile,
+                profile: profile.clone(),
                 role,
                 farmer: None,
                 business: None,
                 individual: Some(RadrootsAppConfigIndividual {
-                    name,
-                    location,
+                    name: profile.name.clone(),
+                    location: profile.location.clone(),
                     products_interested: products,
                 }),
                 preferences,
@@ -219,7 +215,7 @@ pub fn app_config_flow_build_config(
             let location = normalize_text(&draft.business_location)?;
             let operations = normalize_text(&draft.business_operations)?;
             Some(RadrootsAppConfigData {
-                profile,
+                profile: profile.clone(),
                 role,
                 farmer: None,
                 business: Some(RadrootsAppConfigBusiness {

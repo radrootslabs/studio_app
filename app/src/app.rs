@@ -1552,8 +1552,6 @@ fn ConfigPage() -> impl IntoView {
     let farmer_location = RwSignal::new_local(String::new());
     let farmer_products = RwSignal::new_local(Vec::<String>::new());
     let farmer_products_input = RwSignal::new_local(String::new());
-    let individual_name = RwSignal::new_local(String::new());
-    let individual_location = RwSignal::new_local(String::new());
     let individual_products = RwSignal::new_local(Vec::<String>::new());
     let individual_products_input = RwSignal::new_local(String::new());
     let business_name = RwSignal::new_local(String::new());
@@ -1571,8 +1569,8 @@ fn ConfigPage() -> impl IntoView {
         farmer_farm_name: farmer_farm_name.get(),
         farmer_location: farmer_location.get(),
         farmer_products: farmer_products.get(),
-        individual_name: individual_name.get(),
-        individual_location: individual_location.get(),
+        individual_name: profile_name.get(),
+        individual_location: profile_location.get(),
         individual_products: individual_products.get(),
         business_name: business_name.get(),
         business_location: business_location.get(),
@@ -1674,21 +1672,23 @@ fn ConfigPage() -> impl IntoView {
             farmer_products_input.set(String::new());
         }
     };
-    let add_individual_product = {
+    let update_individual_products = {
         let individual_products = individual_products.clone();
         let individual_products_input = individual_products_input.clone();
-        move || {
-            let entry = individual_products_input.get_untracked();
-            let trimmed = entry.trim().to_string();
-            if trimmed.is_empty() {
-                return;
-            }
-            individual_products.update(|items| {
-                if !items.iter().any(|item| item.eq_ignore_ascii_case(&trimmed)) {
-                    items.push(trimmed.clone());
+        move |value: String| {
+            individual_products_input.set(value.clone());
+            let mut items = Vec::new();
+            for entry in value.split(|c| c == ',' || c == '\n') {
+                let trimmed = entry.trim();
+                if trimmed.is_empty() {
+                    continue;
                 }
-            });
-            individual_products_input.set(String::new());
+                if items.iter().any(|item: &String| item.eq_ignore_ascii_case(trimmed)) {
+                    continue;
+                }
+                items.push(trimmed.to_string());
+            }
+            individual_products.set(items);
         }
     };
     Effect::new(move || {
@@ -1795,23 +1795,7 @@ fn ConfigPage() -> impl IntoView {
                             id="app-config-role"
                             class="app-view app-view-enter flex flex-col w-full gap-5"
                         >
-                            <RadrootsAppUiFormField
-                                label="Role".to_string()
-                                id="app-config-role-select".to_string()
-                                hint="Selected during setup".to_string()
-                            >
-                                <div
-                                    id="app-config-role-value"
-                                    class="input-base bg-ly1-focus text-sm font-semibold text-ly1-gl"
-                                >
-                                    {move || match role.get() {
-                                        Some(RadrootsAppRole::Farm) => "Farmer",
-                                        Some(RadrootsAppRole::Business) => "Business",
-                                        Some(RadrootsAppRole::Individual) => "Individual",
-                                        None => "Role unavailable",
-                                    }}
-                                </div>
-                            </RadrootsAppUiFormField>
+                            <div id="app-config-role-spacer"></div>
                             {move || match role.get() {
                                 Some(RadrootsAppRole::Farm) => view! {
                                     <div
@@ -1898,76 +1882,20 @@ fn ConfigPage() -> impl IntoView {
                                         class="flex flex-col gap-4"
                                     >
                                         <RadrootsAppUiFormField
-                                            label="Name".to_string()
-                                            id="app-config-individual-name-field".to_string()
-                                        >
-                                            <input
-                                                id="app-config-individual-name"
-                                                class="input-base"
-                                                type="text"
-                                                placeholder="Your name".to_string()
-                                                prop:value=move || individual_name.get()
-                                                on:input=move |ev| {
-                                                    individual_name.set(event_target_value(&ev));
-                                                }
-                                            />
-                                        </RadrootsAppUiFormField>
-                                        <RadrootsAppUiFormField
-                                            label="Location".to_string()
-                                            id="app-config-individual-location-field".to_string()
-                                        >
-                                            <input
-                                                id="app-config-individual-location"
-                                                class="input-base"
-                                                type="text"
-                                                placeholder="City or region".to_string()
-                                                prop:value=move || individual_location.get()
-                                                on:input=move |ev| {
-                                                    individual_location.set(event_target_value(&ev));
-                                                }
-                                            />
-                                        </RadrootsAppUiFormField>
-                                        <RadrootsAppUiFormField
                                             label="Products interested in".to_string()
                                             id="app-config-individual-products-field".to_string()
-                                            hint="Press enter to add items".to_string()
+                                            hint="Use commas or new lines".to_string()
                                         >
-                                            <input
+                                            <textarea
                                                 id="app-config-individual-products-input"
-                                                class="input-base"
-                                                type="text"
-                                                placeholder="Add a product".to_string()
+                                                class="textarea-base min-h-[7.5rem]"
+                                                rows="4"
+                                                placeholder="Apples, tomatoes, fresh herbs".to_string()
                                                 prop:value=move || individual_products_input.get()
-                                                on:keydown=move |ev: KeyboardEvent| {
-                                                    if ev.key() == "Enter" || ev.key() == "," {
-                                                        ev.prevent_default();
-                                                        add_individual_product();
-                                                    }
-                                                }
                                                 on:input=move |ev| {
-                                                    individual_products_input.set(event_target_value(&ev));
+                                                    update_individual_products(event_target_value(&ev));
                                                 }
-                                            />
-                                            <RadrootsAppUiChips id="app-config-individual-products".to_string()>
-                                                <For
-                                                    each=move || individual_products.get()
-                                                    key=|value| value.clone()
-                                                    children=move |value| {
-                                                        let remove_value = value.clone();
-                                                        view! {
-                                                            <RadrootsAppUiChip
-                                                                label=value.clone()
-                                                                active=true
-                                                                on_click=Callback::new(move |_| {
-                                                                    individual_products.update(|items| {
-                                                                        items.retain(|item| item != &remove_value);
-                                                                    });
-                                                                })
-                                                            />
-                                                        }
-                                                    }
-                                                />
-                                            </RadrootsAppUiChips>
+                                            ></textarea>
                                         </RadrootsAppUiFormField>
                                     </div>
                                 }.into_any(),
