@@ -2044,42 +2044,42 @@ fn ConfigPage() -> impl IntoView {
                                 id="app-config-preferences-notifications".to_string()
                             >
                                 <div class="flex flex-col rounded-touch border border-ly1-edge/60 bg-ly1 overflow-hidden">
-                                    <div
+                                    <button
                                         id="app-config-notifications-orders"
-                                        class="flex items-center justify-between gap-4 px-4 py-3 text-sm text-ly1-gl"
+                                        type="button"
+                                        class="flex w-full items-center justify-between gap-4 px-4 py-3 text-left text-sm text-ly1-gl"
+                                        role="switch"
+                                        aria-checked=move || if notifications_orders.get() { "true" } else { "false" }
+                                        on:click=move |_| {
+                                            notifications_orders.update(|value| *value = !*value);
+                                        }
                                     >
                                         <span>{"Order updates"}</span>
-                                        <button
-                                            type="button"
+                                        <span
                                             class="ios-switch"
-                                            role="switch"
-                                            aria-checked=move || if notifications_orders.get() { "true" } else { "false" }
                                             attr:data-checked=move || if notifications_orders.get() { "true" } else { "false" }
-                                            on:click=move |_| {
-                                                notifications_orders.update(|value| *value = !*value);
-                                            }
                                         >
                                             <span class="ios-switch__thumb"></span>
-                                        </button>
-                                    </div>
-                                    <div
+                                        </span>
+                                    </button>
+                                    <button
                                         id="app-config-notifications-messages"
-                                        class="flex items-center justify-between gap-4 border-t border-ly1-edge/50 px-4 py-3 text-sm text-ly1-gl"
+                                        type="button"
+                                        class="flex w-full items-center justify-between gap-4 border-t border-ly1-edge/50 px-4 py-3 text-left text-sm text-ly1-gl"
+                                        role="switch"
+                                        aria-checked=move || if notifications_messages.get() { "true" } else { "false" }
+                                        on:click=move |_| {
+                                            notifications_messages.update(|value| *value = !*value);
+                                        }
                                     >
                                         <span>{"Messages"}</span>
-                                        <button
-                                            type="button"
+                                        <span
                                             class="ios-switch"
-                                            role="switch"
-                                            aria-checked=move || if notifications_messages.get() { "true" } else { "false" }
                                             attr:data-checked=move || if notifications_messages.get() { "true" } else { "false" }
-                                            on:click=move |_| {
-                                                notifications_messages.update(|value| *value = !*value);
-                                            }
                                         >
                                             <span class="ios-switch__thumb"></span>
-                                        </button>
-                                    </div>
+                                        </span>
+                                    </button>
                                 </div>
                             </RadrootsAppUiFormField>
                         </section>
