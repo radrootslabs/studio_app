@@ -254,6 +254,7 @@ pub use config::{
     app_datastore_key_setup_lock,
 };
 pub use config_flow::{
+    app_config_flow_build_config,
     app_config_flow_next_step,
     app_config_flow_prev_step,
     app_config_flow_validate,

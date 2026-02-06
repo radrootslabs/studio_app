@@ -2,15 +2,21 @@
 
 use leptos::ev::MouseEvent;
 use leptos::prelude::*;
+use leptos::task::spawn_local;
 use leptos_router::hooks::use_navigate;
 
 use crate::{
     app::AppPageChrome,
+    app_context,
+    app_datastore_clear_config,
+    app_log_error_emit,
     app_theme_apply_mode,
     app_theme_mode_from_value,
     app_theme_read_mode,
     app_theme_store_mode,
     t,
+    RadrootsAppBackends,
+    RadrootsAppConfigStatus,
     RadrootsAppThemeMode,
 };
 use radroots_studio_app_ui_components::{
@@ -71,6 +77,17 @@ fn settings_label(value: String, classes: Option<&str>) -> RadrootsAppUiListLabe
 
 #[component]
 pub fn RadrootsAppSettingsPage() -> impl IntoView {
+    let context = app_context();
+    let fallback_backends = RwSignal::new_local(None::<RadrootsAppBackends>);
+    let fallback_config_status = RwSignal::new_local(RadrootsAppConfigStatus::Unknown);
+    let backends = context
+        .as_ref()
+        .map(|value| value.backends)
+        .unwrap_or(fallback_backends);
+    let config_status = context
+        .as_ref()
+        .map(|value| value.config_status)
+        .unwrap_or(fallback_config_status);
     let navigate = use_navigate();
     let initial_mode = app_theme_read_mode().unwrap_or(RadrootsAppThemeMode::System);
     let color_mode_value = initial_mode.as_str().to_string();
@@ -154,6 +171,36 @@ pub fn RadrootsAppSettingsPage() -> impl IntoView {
         styles: None,
     };
     let logs_navigate = navigate.clone();
+    let reconfigure_action = {
+        let navigate = navigate.clone();
+        let backends = backends.clone();
+        let config_status = config_status.clone();
+        Callback::new(move |_| {
+            let Some((datastore, key_maps)) = backends.with(|value| {
+                value.as_ref().map(|backends| {
+                    (
+                        backends.datastore.clone(),
+                        backends.config.datastore.key_maps.clone(),
+                    )
+                })
+            }) else {
+                return;
+            };
+            let navigate = navigate.clone();
+            let config_status = config_status.clone();
+            spawn_local(async move {
+                match app_datastore_clear_config(datastore.as_ref(), &key_maps).await {
+                    Ok(()) => {
+                        config_status.set(RadrootsAppConfigStatus::Required);
+                        navigate("/setup/config", Default::default());
+                    }
+                    Err(err) => {
+                        let _ = app_log_error_emit(&err);
+                    }
+                }
+            });
+        })
+    };
     let actions_list = RadrootsAppUiList {
         id: Some("settings-actions".to_string()),
         view: Some("settings".to_string()),
@@ -179,6 +226,31 @@ pub fn RadrootsAppSettingsPage() -> impl IntoView {
                         on_click: None,
                     }),
                     on_click: Some(settings_touch_callback("settings_export_database")),
+                }),
+                loading: false,
+                hide_active: true,
+                hide_field: false,
+                full_rounded: false,
+                offset: None,
+            }),
+            Some(RadrootsAppUiListItem {
+                kind: RadrootsAppUiListItemKind::Touch(RadrootsAppUiListTouch {
+                    label: RadrootsAppUiListLabel {
+                        left: vec![settings_label(
+                            "update configuration".to_string(),
+                            Some("capitalize"),
+                        )],
+                        right: Vec::new(),
+                    },
+                    display: None,
+                    end: Some(RadrootsAppUiListTouchEnd {
+                        icon: RadrootsAppUiListIcon {
+                            key: "caret-right".to_string(),
+                            class: None,
+                        },
+                        on_click: None,
+                    }),
+                    on_click: Some(reconfigure_action),
                 }),
                 loading: false,
                 hide_active: true,

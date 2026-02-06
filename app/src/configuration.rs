@@ -10,6 +10,7 @@ use crate::{
     app_state_timestamp_ms,
     RadrootsAppConfigError,
     RadrootsAppKeyMapConfig,
+    RadrootsAppLoggableError,
     RadrootsAppRole,
 };
 
@@ -262,6 +263,20 @@ impl std::fmt::Display for RadrootsAppConfigStoreError {
 }
 
 impl std::error::Error for RadrootsAppConfigStoreError {}
+
+impl RadrootsAppLoggableError for RadrootsAppConfigStoreError {
+    fn log_code(&self) -> &'static str {
+        match self {
+            RadrootsAppConfigStoreError::Datastore(_) => "error.app.config.datastore",
+            RadrootsAppConfigStoreError::Config(err) => err.message(),
+            RadrootsAppConfigStoreError::Record(err) => err.message(),
+        }
+    }
+
+    fn log_context(&self) -> Option<String> {
+        Some(self.to_string())
+    }
+}
 
 pub type RadrootsAppConfigStoreResult<T> = Result<T, RadrootsAppConfigStoreError>;
 

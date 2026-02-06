@@ -45,6 +45,7 @@ use crate::{
     app_init_stage_set,
     app_init_total_add,
     app_init_total_unknown,
+    app_config_flow_build_config,
     app_config_flow_validate,
     app_config_step_default,
     app_context,
@@ -56,6 +57,8 @@ use crate::{
     app_config_gate_from_status,
     app_config_default,
     app_config_status,
+    app_datastore_create_config,
+    app_datastore_update_config,
     app_datastore_clear_setup_draft,
     app_datastore_write_profile_seed,
     app_datastore_write_setup_draft,
@@ -75,6 +78,8 @@ use crate::{
     RadrootsAppConfigFlowDraft,
     RadrootsAppConfigStep,
     RadrootsAppConfigStatus,
+    RadrootsAppConfigRecordError,
+    RadrootsAppConfigStoreError,
     RadrootsAppInitError,
     RadrootsAppInitStage,
     RadrootsAppNotifications,
@@ -1526,7 +1531,12 @@ fn RecoveryPage() -> impl IntoView {
 #[component]
 fn ConfigPage() -> impl IntoView {
     let context = app_context();
+    let fallback_backends = RwSignal::new_local(None::<RadrootsAppBackends>);
     let fallback_config_status = RwSignal::new_local(RadrootsAppConfigStatus::Unknown);
+    let backends = context
+        .as_ref()
+        .map(|value| value.backends)
+        .unwrap_or(fallback_backends);
     let config_status = context
         .as_ref()
         .map(|value| value.config_status)
@@ -1550,6 +1560,7 @@ fn ConfigPage() -> impl IntoView {
     let notifications_orders = RwSignal::new_local(true);
     let notifications_messages = RwSignal::new_local(true);
     let payment_method = RwSignal::new_local(String::new());
+    let config_saving = RwSignal::new_local(false);
     let config_flow = move || RadrootsAppConfigFlowDraft {
         step: config_step.get(),
         profile_name: profile_name.get(),
@@ -1570,16 +1581,65 @@ fn ConfigPage() -> impl IntoView {
     };
     let config_validation = move || app_config_flow_validate(&config_flow());
     let advance_step = {
+        let backends = backends.clone();
         let config_status = config_status.clone();
+        let config_saving = config_saving.clone();
         let navigate = navigate.clone();
         Callback::new(move |_| {
             let validation = config_validation();
-            if !validation.can_continue {
+            if !validation.can_continue || config_saving.get() {
                 return;
             }
             if matches!(config_step.get(), RadrootsAppConfigStep::Preferences) {
-                config_status.set(RadrootsAppConfigStatus::Configured);
-                navigate("/", Default::default());
+                let Some(config_data) = app_config_flow_build_config(&config_flow()) else {
+                    return;
+                };
+                let Some((datastore, key_maps)) = backends.with(|value| {
+                    value.as_ref().map(|backends| {
+                        (
+                            backends.datastore.clone(),
+                            backends.config.datastore.key_maps.clone(),
+                        )
+                    })
+                }) else {
+                    return;
+                };
+                let config_status = config_status.clone();
+                let config_saving = config_saving.clone();
+                let navigate = navigate.clone();
+                config_saving.set(true);
+                spawn_local(async move {
+                    let result = match app_datastore_create_config(
+                        datastore.as_ref(),
+                        &key_maps,
+                        &config_data,
+                    )
+                    .await
+                    {
+                        Ok(_) => Ok(()),
+                        Err(RadrootsAppConfigStoreError::Record(
+                            RadrootsAppConfigRecordError::AlreadyExists,
+                        )) => app_datastore_update_config(
+                            datastore.as_ref(),
+                            &key_maps,
+                            &config_data,
+                        )
+                        .await
+                        .map(|_| ()),
+                        Err(err) => Err(err),
+                    };
+                    match result {
+                        Ok(()) => {
+                            config_status.set(RadrootsAppConfigStatus::Configured);
+                            navigate("/", Default::default());
+                        }
+                        Err(err) => {
+                            let _ = app_log_error_emit(&err);
+                            config_status.set(RadrootsAppConfigStatus::Corrupt);
+                        }
+                    }
+                    config_saving.set(false);
+                });
                 return;
             }
             config_step.set(validation.next_step);

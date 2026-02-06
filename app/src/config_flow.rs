@@ -1,6 +1,14 @@
 #![forbid(unsafe_code)]
 
-use crate::RadrootsAppRole;
+use crate::{
+    RadrootsAppConfigBusiness,
+    RadrootsAppConfigData,
+    RadrootsAppConfigFarmer,
+    RadrootsAppConfigIndividual,
+    RadrootsAppConfigPreferences,
+    RadrootsAppConfigProfile,
+    RadrootsAppRole,
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RadrootsAppConfigStep {
@@ -88,6 +96,30 @@ fn has_items(values: &[String]) -> bool {
     values.iter().any(|value| !value.trim().is_empty())
 }
 
+fn normalize_text(value: &str) -> Option<String> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        None
+    } else {
+        Some(trimmed.to_string())
+    }
+}
+
+fn normalize_items(values: &[String]) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    for value in values {
+        let trimmed = value.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        if out.iter().any(|item| item.eq_ignore_ascii_case(trimmed)) {
+            continue;
+        }
+        out.push(trimmed.to_string());
+    }
+    out
+}
+
 fn role_step_valid(draft: &RadrootsAppConfigFlowDraft) -> bool {
     match draft.role {
         Some(RadrootsAppRole::Farm) => {
@@ -126,9 +158,86 @@ pub fn app_config_flow_validate(draft: &RadrootsAppConfigFlowDraft) -> RadrootsA
     }
 }
 
+pub fn app_config_flow_build_config(
+    draft: &RadrootsAppConfigFlowDraft,
+) -> Option<RadrootsAppConfigData> {
+    let profile_name = normalize_text(&draft.profile_name)?;
+    let profile_location = normalize_text(&draft.profile_location)?;
+    let role = draft.role?;
+    let profile = RadrootsAppConfigProfile {
+        name: profile_name,
+        location: profile_location,
+    };
+    let preferences = RadrootsAppConfigPreferences {
+        notifications_orders: draft.notifications_orders,
+        notifications_messages: draft.notifications_messages,
+        payment_method: normalize_text(&draft.payment_method),
+    };
+    match role {
+        RadrootsAppRole::Farm => {
+            let farm_name = normalize_text(&draft.farmer_farm_name)?;
+            let farm_location = normalize_text(&draft.farmer_location)?;
+            let products = normalize_items(&draft.farmer_products);
+            if products.is_empty() {
+                return None;
+            }
+            Some(RadrootsAppConfigData {
+                profile,
+                role,
+                farmer: Some(RadrootsAppConfigFarmer {
+                    farm_name,
+                    farm_location,
+                    products_growing: products,
+                }),
+                business: None,
+                individual: None,
+                preferences,
+            })
+        }
+        RadrootsAppRole::Individual => {
+            let name = normalize_text(&draft.individual_name)?;
+            let location = normalize_text(&draft.individual_location)?;
+            let products = normalize_items(&draft.individual_products);
+            if products.is_empty() {
+                return None;
+            }
+            Some(RadrootsAppConfigData {
+                profile,
+                role,
+                farmer: None,
+                business: None,
+                individual: Some(RadrootsAppConfigIndividual {
+                    name,
+                    location,
+                    products_interested: products,
+                }),
+                preferences,
+            })
+        }
+        RadrootsAppRole::Business => {
+            let name = normalize_text(&draft.business_name)?;
+            let location = normalize_text(&draft.business_location)?;
+            let operations = normalize_text(&draft.business_operations)?;
+            Some(RadrootsAppConfigData {
+                profile,
+                role,
+                farmer: None,
+                business: Some(RadrootsAppConfigBusiness {
+                    name,
+                    location,
+                    operations,
+                }),
+                individual: None,
+                preferences,
+            })
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
+        app_config_flow_build_config,
         app_config_flow_next_step,
         app_config_flow_prev_step,
         app_config_flow_validate,
@@ -175,5 +284,31 @@ mod tests {
         draft.farmer_products = vec![String::from("tomatoes")];
         let validation = app_config_flow_validate(&draft);
         assert!(validation.can_continue);
+    }
+
+    #[test]
+    fn flow_build_config_requires_role() {
+        let draft = RadrootsAppConfigFlowDraft::default();
+        assert!(app_config_flow_build_config(&draft).is_none());
+    }
+
+    #[test]
+    fn flow_build_config_maps_farm_values() {
+        let mut draft = RadrootsAppConfigFlowDraft::default();
+        draft.profile_name = String::from("Radroots");
+        draft.profile_location = String::from("Valley");
+        draft.role = Some(RadrootsAppRole::Farm);
+        draft.farmer_farm_name = String::from("Willow Farm");
+        draft.farmer_location = String::from("Valley");
+        draft.farmer_products = vec![
+            String::from("tomatoes"),
+            String::from(" Tomatoes "),
+            String::from(" "),
+        ];
+        let config = app_config_flow_build_config(&draft).expect("config");
+        let farmer = config.farmer.expect("farmer");
+        assert_eq!(config.profile.name, "Radroots");
+        assert_eq!(config.profile.location, "Valley");
+        assert_eq!(farmer.products_growing, vec![String::from("tomatoes")]);
     }
 }
