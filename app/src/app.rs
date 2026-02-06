@@ -58,6 +58,7 @@ use crate::{
     app_config_default,
     app_config_status,
     app_datastore_create_config,
+    app_datastore_read_state,
     app_datastore_update_config,
     app_datastore_clear_setup_draft,
     app_datastore_write_profile_seed,
@@ -1546,6 +1547,7 @@ fn ConfigPage() -> impl IntoView {
     let profile_name = RwSignal::new_local(String::new());
     let profile_location = RwSignal::new_local(String::new());
     let role = RwSignal::new_local(None::<RadrootsAppRole>);
+    let role_loaded = RwSignal::new_local(false);
     let farmer_farm_name = RwSignal::new_local(String::new());
     let farmer_location = RwSignal::new_local(String::new());
     let farmer_products = RwSignal::new_local(Vec::<String>::new());
@@ -1689,6 +1691,35 @@ fn ConfigPage() -> impl IntoView {
             individual_products_input.set(String::new());
         }
     };
+    Effect::new(move || {
+        if role_loaded.get() {
+            return;
+        }
+        let Some((datastore, key_maps)) = backends.with(|value| {
+            value.as_ref().map(|backends| {
+                (
+                    backends.datastore.clone(),
+                    backends.config.datastore.key_maps.clone(),
+                )
+            })
+        }) else {
+            return;
+        };
+        role_loaded.set(true);
+        let role = role.clone();
+        let config_status = config_status.clone();
+        spawn_local(async move {
+            match app_datastore_read_state(datastore.as_ref(), &key_maps).await {
+                Ok(state) => {
+                    role.set(Some(state.role));
+                }
+                Err(err) => {
+                    let _ = app_log_error_emit(&err);
+                    config_status.set(RadrootsAppConfigStatus::Corrupt);
+                }
+            }
+        });
+    });
     view! {
         <main id="app-config" class="app-page app-page-fixed relative w-full flex flex-col">
             <section
@@ -1767,43 +1798,19 @@ fn ConfigPage() -> impl IntoView {
                             <RadrootsAppUiFormField
                                 label="Role".to_string()
                                 id="app-config-role-select".to_string()
-                                hint="Choose the best fit for you right now".to_string()
+                                hint="Selected during setup".to_string()
                             >
-                                <RadrootsAppUiChips id="app-config-role-options".to_string()>
-                                    <button
-                                        id="app-config-role-farmer"
-                                        type="button"
-                                        class="form-chip"
-                                        attr:data-active=move || if role.get() == Some(RadrootsAppRole::Farm) { "true" } else { "false" }
-                                        on:click=move |_| {
-                                            role.set(Some(RadrootsAppRole::Farm));
-                                        }
-                                    >
-                                        {"Farmer"}
-                                    </button>
-                                    <button
-                                        id="app-config-role-business"
-                                        type="button"
-                                        class="form-chip"
-                                        attr:data-active=move || if role.get() == Some(RadrootsAppRole::Business) { "true" } else { "false" }
-                                        on:click=move |_| {
-                                            role.set(Some(RadrootsAppRole::Business));
-                                        }
-                                    >
-                                        {"Business"}
-                                    </button>
-                                    <button
-                                        id="app-config-role-individual"
-                                        type="button"
-                                        class="form-chip"
-                                        attr:data-active=move || if role.get() == Some(RadrootsAppRole::Individual) { "true" } else { "false" }
-                                        on:click=move |_| {
-                                            role.set(Some(RadrootsAppRole::Individual));
-                                        }
-                                    >
-                                        {"Individual"}
-                                    </button>
-                                </RadrootsAppUiChips>
+                                <div
+                                    id="app-config-role-value"
+                                    class="input-base bg-ly1-focus text-sm font-semibold text-ly1-gl"
+                                >
+                                    {move || match role.get() {
+                                        Some(RadrootsAppRole::Farm) => "Farmer",
+                                        Some(RadrootsAppRole::Business) => "Business",
+                                        Some(RadrootsAppRole::Individual) => "Individual",
+                                        None => "Role unavailable",
+                                    }}
+                                </div>
                             </RadrootsAppUiFormField>
                             {move || match role.get() {
                                 Some(RadrootsAppRole::Farm) => view! {
