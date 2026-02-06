@@ -2057,7 +2057,7 @@ fn ConfigPage() -> impl IntoView {
                                         <span>{"Order updates"}</span>
                                         <span
                                             class="ios-switch"
-                                            attr:data-checked=move || if notifications_orders.get() { "true" } else { "false" }
+                                            class:ios-switch--checked=move || notifications_orders.get()
                                         >
                                             <span class="ios-switch__thumb"></span>
                                         </span>
@@ -2075,7 +2075,7 @@ fn ConfigPage() -> impl IntoView {
                                         <span>{"Messages"}</span>
                                         <span
                                             class="ios-switch"
-                                            attr:data-checked=move || if notifications_messages.get() { "true" } else { "false" }
+                                            class:ios-switch--checked=move || notifications_messages.get()
                                         >
                                             <span class="ios-switch__thumb"></span>
                                         </span>

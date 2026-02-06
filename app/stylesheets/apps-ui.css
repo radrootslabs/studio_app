@@ -162,12 +162,12 @@
         transform: translateX(0);
     }
 
-    .ios-switch[data-checked="true"] {
+    .ios-switch--checked {
         background: #34c759;
         border-color: #34c759;
     }
 
-    .ios-switch[data-checked="true"] .ios-switch__thumb {
+    .ios-switch--checked .ios-switch__thumb {
         transform: translateX(18px);
         background: #fff;
     }
