@@ -1758,6 +1758,7 @@ dependencies = [
  "leptos",
  "radroots-app-ui-core",
  "radroots-app-ui-primitives",
+ "web-sys",
 ]
 
 [[package]]

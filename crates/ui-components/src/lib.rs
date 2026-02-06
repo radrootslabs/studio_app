@@ -10,6 +10,7 @@ mod separator;
 mod spinner;
 mod dialog;
 mod sheet;
+mod scroll;
 
 pub use button::RadrootsAppUiButton;
 pub use button_layout::{
@@ -111,4 +112,10 @@ pub use sheet::{
     RadrootsAppUiSheetRoot,
     RadrootsAppUiSheetTitle,
     RadrootsAppUiSheetTrigger,
+};
+pub use scroll::{
+    radroots_studio_app_ui_collapse_progress,
+    radroots_studio_app_ui_scroll_velocity,
+    RadrootsAppUiScrollContainer,
+    RadrootsAppUiScrollContext,
 };

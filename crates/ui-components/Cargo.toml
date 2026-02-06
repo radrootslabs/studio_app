@@ -14,3 +14,4 @@ radroots-app-ui-core = { path = "../ui-core" }
 radroots-app-ui-primitives = { path = "../ui-primitives" }
 leptos = { workspace = true, features = ["csr"] }
 icondata.workspace = true
+web-sys.workspace = true
