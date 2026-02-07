@@ -159,6 +159,14 @@ pub struct RadrootsAppUiListTouch {
 }
 
 #[derive(Debug, Clone)]
+pub struct RadrootsAppUiListToggle {
+    pub label: RadrootsAppUiListLabel,
+    pub checked: bool,
+    pub disabled: bool,
+    pub on_toggle: Option<Callback<bool>>,
+}
+
+#[derive(Debug, Clone)]
 pub struct RadrootsAppUiListInputAction {
     pub visible: bool,
     pub loading: bool,
@@ -242,6 +250,7 @@ pub struct RadrootsAppUiListOffset {
 #[derive(Debug, Clone)]
 pub enum RadrootsAppUiListItemKind {
     Touch(RadrootsAppUiListTouch),
+    Toggle(RadrootsAppUiListToggle),
     Input(RadrootsAppUiListInput),
     Select(RadrootsAppUiListSelect),
 }

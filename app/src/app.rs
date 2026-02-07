@@ -22,6 +22,20 @@ use radroots_studio_app_ui_components::{
     RadrootsAppUiFormField,
     RadrootsAppUiIcon,
     RadrootsAppUiIconKey,
+    RadrootsAppUiList,
+    RadrootsAppUiListIcon,
+    RadrootsAppUiListItem,
+    RadrootsAppUiListItemKind,
+    RadrootsAppUiListLabel,
+    RadrootsAppUiListLabelText,
+    RadrootsAppUiListLabelValue,
+    RadrootsAppUiListLabelValueKind,
+    RadrootsAppUiListTitle,
+    RadrootsAppUiListTitleValue,
+    RadrootsAppUiListTouch,
+    RadrootsAppUiListTouchEnd,
+    RadrootsAppUiListToggle,
+    RadrootsAppUiListView,
     RadrootsAppUiNavHeader,
     RadrootsAppUiNavHeaderBgMode,
     RadrootsAppUiNavHeaderCollapseMode,
@@ -1577,6 +1591,14 @@ fn ConfigPage() -> impl IntoView {
         notifications_orders: notifications_orders.get(),
         notifications_messages: notifications_messages.get(),
     };
+    let list_label = |value: String, classes: Option<&str>| RadrootsAppUiListLabelValue {
+        classes_wrap: None,
+        hide_truncate: false,
+        value: RadrootsAppUiListLabelValueKind::Text(RadrootsAppUiListLabelText {
+            value,
+            classes: classes.map(str::to_string),
+        }),
+    };
     let config_validation = move || app_config_flow_validate(&config_flow());
     let advance_step = {
         let backends = backends.clone();
@@ -1965,123 +1987,163 @@ fn ConfigPage() -> impl IntoView {
                         >
                             {move || {
                                 if role.get() == Some(RadrootsAppRole::Individual) {
-                                    view! {
-                                        <div
-                                            id="app-config-summary"
-                                            class="flex flex-col gap-3"
-                                        >
-                                            <p class="text-xs font-semibold uppercase tracking-[0.18em] text-ly1-gl-label/70">
-                                                {"Summary"}
-                                            </p>
-                                            <div class="flex flex-col rounded-touch border border-ly1-edge/60 bg-ly1 overflow-hidden">
-                                                <button
-                                                    id="app-config-summary-profile"
-                                                    type="button"
-                                                    class="flex items-center justify-between gap-4 px-4 py-3 text-left"
-                                                    on:click=move |_| {
+                                    let profile_summary = {
+                                        let name = profile_name.get();
+                                        let location = profile_location.get();
+                                        let name = name.trim().to_string();
+                                        let location = location.trim().to_string();
+                                        if name.is_empty() && location.is_empty() {
+                                            "Add name and location".to_string()
+                                        } else if location.is_empty() {
+                                            name
+                                        } else if name.is_empty() {
+                                            location
+                                        } else {
+                                            format!("{name} • {location}")
+                                        }
+                                    };
+                                    let products_summary = {
+                                        let items = individual_products.get();
+                                        if items.is_empty() {
+                                            "Add products".to_string()
+                                        } else {
+                                            items.join(", ")
+                                        }
+                                    };
+                                    let summary_list = RadrootsAppUiList {
+                                        id: Some("app-config-summary-list".to_string()),
+                                        view: Some("app-config-summary".to_string()),
+                                        classes: None,
+                                        title: Some(RadrootsAppUiListTitle {
+                                            value: RadrootsAppUiListTitleValue::Text("Summary".to_string()),
+                                            classes: None,
+                                            mod_value: None,
+                                            link: None,
+                                            on_click: None,
+                                        }),
+                                        default_state: None,
+                                        list: Some(vec![
+                                            Some(RadrootsAppUiListItem {
+                                                kind: RadrootsAppUiListItemKind::Touch(RadrootsAppUiListTouch {
+                                                    label: RadrootsAppUiListLabel {
+                                                        left: vec![list_label("Profile".to_string(), None)],
+                                                        right: vec![list_label(profile_summary, Some("text-xs"))],
+                                                    },
+                                                    display: None,
+                                                    end: Some(RadrootsAppUiListTouchEnd {
+                                                        icon: RadrootsAppUiListIcon {
+                                                            key: "caret-right".to_string(),
+                                                            class: None,
+                                                        },
+                                                        on_click: None,
+                                                    }),
+                                                    on_click: Some(Callback::new(move |_| {
                                                         config_step.set(RadrootsAppConfigStep::Profile);
-                                                    }
-                                                >
-                                                    <div class="flex flex-col gap-1">
-                                                        <span class="text-sm font-semibold text-ly1-gl">
-                                                            {"Profile"}
-                                                        </span>
-                                                        <span class="text-xs text-ly1-gl-label/80 line-clamp-2">
-                                                            {move || {
-                                                                let name = profile_name.get();
-                                                                let location = profile_location.get();
-                                                                let name = name.trim().to_string();
-                                                                let location = location.trim().to_string();
-                                                                if name.is_empty() && location.is_empty() {
-                                                                    "Add name and location".to_string()
-                                                                } else if location.is_empty() {
-                                                                    name
-                                                                } else if name.is_empty() {
-                                                                    location
-                                                                } else {
-                                                                    format!("{name} • {location}")
-                                                                }
-                                                            }}
-                                                        </span>
-                                                    </div>
-                                                    <RadrootsAppUiIcon key=RadrootsAppUiIconKey::CaretRight size=18 />
-                                                </button>
-                                                <button
-                                                    id="app-config-summary-products"
-                                                    type="button"
-                                                    class="flex items-center justify-between gap-4 border-t border-ly1-edge/50 px-4 py-3 text-left"
-                                                    on:click=move |_| {
+                                                    })),
+                                                }),
+                                                loading: false,
+                                                hide_active: false,
+                                                hide_field: false,
+                                                full_rounded: false,
+                                                offset: None,
+                                            }),
+                                            Some(RadrootsAppUiListItem {
+                                                kind: RadrootsAppUiListItemKind::Touch(RadrootsAppUiListTouch {
+                                                    label: RadrootsAppUiListLabel {
+                                                        left: vec![list_label("Products interested in".to_string(), None)],
+                                                        right: vec![list_label(products_summary, Some("text-xs"))],
+                                                    },
+                                                    display: None,
+                                                    end: Some(RadrootsAppUiListTouchEnd {
+                                                        icon: RadrootsAppUiListIcon {
+                                                            key: "caret-right".to_string(),
+                                                            class: None,
+                                                        },
+                                                        on_click: None,
+                                                    }),
+                                                    on_click: Some(Callback::new(move |_| {
                                                         config_step.set(RadrootsAppConfigStep::Role);
-                                                    }
-                                                >
-                                                    <div class="flex flex-col gap-1">
-                                                        <span class="text-sm font-semibold text-ly1-gl">
-                                                            {"Products interested in"}
-                                                        </span>
-                                                        <span class="text-xs text-ly1-gl-label/80 line-clamp-2">
-                                                            {move || {
-                                                                let items = individual_products.get();
-                                                                if items.is_empty() {
-                                                                    "Add products".to_string()
-                                                                } else {
-                                                                    items.join(", ")
-                                                                }
-                                                            }}
-                                                        </span>
-                                                    </div>
-                                                    <RadrootsAppUiIcon key=RadrootsAppUiIconKey::CaretRight size=18 />
-                                                </button>
-                                            </div>
-                                        </div>
-                                    }
-                                    .into_any()
+                                                    })),
+                                                }),
+                                                loading: false,
+                                                hide_active: false,
+                                                hide_field: false,
+                                                full_rounded: false,
+                                                offset: None,
+                                            }),
+                                        ]),
+                                        hide_offset: false,
+                                        styles: None,
+                                    };
+                                    view! { <RadrootsAppUiListView basis=summary_list /> }.into_any()
                                 } else {
                                     view! { <></> }.into_any()
                                 }
                             }}
-                            <RadrootsAppUiFormField
-                                label="Notifications".to_string()
-                                id="app-config-preferences-notifications".to_string()
-                            >
-                                <div class="flex flex-col rounded-touch border border-ly1-edge/60 bg-ly1 overflow-hidden">
-                                    <button
-                                        id="app-config-notifications-orders"
-                                        type="button"
-                                        class="flex w-full items-center justify-between gap-4 px-4 py-3 text-left text-sm text-ly1-gl"
-                                        role="switch"
-                                        aria-checked=move || if notifications_orders.get() { "true" } else { "false" }
-                                        on:click=move |_| {
-                                            notifications_orders.update(|value| *value = !*value);
-                                        }
-                                    >
-                                        <span>{"Order updates"}</span>
-                                        <span
-                                            class="ios-switch"
-                                            class:ios-switch--checked=move || notifications_orders.get()
-                                        >
-                                            <span class="ios-switch__thumb"></span>
-                                        </span>
-                                    </button>
-                                    <button
-                                        id="app-config-notifications-messages"
-                                        type="button"
-                                        class="flex w-full items-center justify-between gap-4 border-t border-ly1-edge/50 px-4 py-3 text-left text-sm text-ly1-gl"
-                                        role="switch"
-                                        aria-checked=move || if notifications_messages.get() { "true" } else { "false" }
-                                        on:click=move |_| {
-                                            notifications_messages.update(|value| *value = !*value);
-                                        }
-                                    >
-                                        <span>{"Messages"}</span>
-                                        <span
-                                            class="ios-switch"
-                                            class:ios-switch--checked=move || notifications_messages.get()
-                                        >
-                                            <span class="ios-switch__thumb"></span>
-                                        </span>
-                                    </button>
-                                </div>
-                            </RadrootsAppUiFormField>
+                            {move || {
+                                let toggle_orders = {
+                                    let notifications_orders = notifications_orders.clone();
+                                    Callback::new(move |value: bool| {
+                                        notifications_orders.set(value);
+                                    })
+                                };
+                                let toggle_messages = {
+                                    let notifications_messages = notifications_messages.clone();
+                                    Callback::new(move |value: bool| {
+                                        notifications_messages.set(value);
+                                    })
+                                };
+                                let notifications_list = RadrootsAppUiList {
+                                    id: Some("app-config-notifications-list".to_string()),
+                                    view: Some("app-config-notifications".to_string()),
+                                    classes: None,
+                                    title: Some(RadrootsAppUiListTitle {
+                                        value: RadrootsAppUiListTitleValue::Text("Notifications".to_string()),
+                                        classes: None,
+                                        mod_value: None,
+                                        link: None,
+                                        on_click: None,
+                                    }),
+                                    default_state: None,
+                                    list: Some(vec![
+                                        Some(RadrootsAppUiListItem {
+                                            kind: RadrootsAppUiListItemKind::Toggle(RadrootsAppUiListToggle {
+                                                label: RadrootsAppUiListLabel {
+                                                    left: vec![list_label("Order updates".to_string(), None)],
+                                                    right: Vec::new(),
+                                                },
+                                                checked: notifications_orders.get(),
+                                                disabled: false,
+                                                on_toggle: Some(toggle_orders),
+                                            }),
+                                            loading: false,
+                                            hide_active: true,
+                                            hide_field: false,
+                                            full_rounded: false,
+                                            offset: None,
+                                        }),
+                                        Some(RadrootsAppUiListItem {
+                                            kind: RadrootsAppUiListItemKind::Toggle(RadrootsAppUiListToggle {
+                                                label: RadrootsAppUiListLabel {
+                                                    left: vec![list_label("Messages".to_string(), None)],
+                                                    right: Vec::new(),
+                                                },
+                                                checked: notifications_messages.get(),
+                                                disabled: false,
+                                                on_toggle: Some(toggle_messages),
+                                            }),
+                                            loading: false,
+                                            hide_active: true,
+                                            hide_field: false,
+                                            full_rounded: false,
+                                            offset: None,
+                                        }),
+                                    ]),
+                                    hide_offset: false,
+                                    styles: None,
+                                };
+                                view! { <RadrootsAppUiListView basis=notifications_list /> }
+                            }}
                         </section>
                     }.into_any(),
                 }}

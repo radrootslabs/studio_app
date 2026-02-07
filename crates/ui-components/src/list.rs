@@ -30,6 +30,7 @@ use crate::{
     RadrootsAppUiListTitleValue,
     RadrootsAppUiListTouch,
     RadrootsAppUiListTouchEnd,
+    RadrootsAppUiListToggle,
     RadrootsAppUiSpinner,
 };
 
@@ -676,6 +677,59 @@ pub fn RadrootsAppUiListTouchRow(
 }
 
 #[component]
+pub fn RadrootsAppUiListToggleRow(
+    basis: RadrootsAppUiListToggle,
+    #[prop(optional)] line_id: String,
+    #[prop(optional)] hide_active: bool,
+    #[prop(optional)] hide_border_top: bool,
+    #[prop(optional)] hide_border_bottom: bool,
+    #[prop(optional)] loading: bool,
+) -> impl IntoView {
+    let label = basis.label;
+    let checked = basis.checked;
+    let disabled = basis.disabled;
+    let on_toggle = basis.on_toggle;
+    let switch_class = if checked {
+        "ios-switch ios-switch--checked"
+    } else {
+        "ios-switch"
+    };
+    let end_slot = Arc::new(move || {
+        view! {
+            <span class="flex flex-row h-full items-center pr-3">
+                <span class=switch_class aria-hidden="true">
+                    <span class="ios-switch__thumb"></span>
+                </span>
+            </span>
+        }
+        .into_any()
+    }) as ChildrenFn;
+    let on_click = if disabled {
+        None
+    } else {
+        let on_toggle = on_toggle.clone();
+        Some(Callback::new(move |_ev: MouseEvent| {
+            if let Some(callback) = &on_toggle {
+                callback.run(!checked);
+            }
+        }))
+    };
+    view! {
+        <RadrootsAppUiListLine
+            id=line_id
+            as_button=true
+            loading=loading
+            hide_border_top=hide_border_top
+            hide_border_bottom=hide_border_bottom
+            on_click=on_click
+            end=Some(end_slot)
+        >
+            <RadrootsAppUiListRowLabel basis=label.clone() hide_active=hide_active />
+        </RadrootsAppUiListLine>
+    }
+}
+
+#[component]
 pub fn RadrootsAppUiListInputRow(
     basis: RadrootsAppUiListInput,
     #[prop(optional)] line_id: String,
@@ -1161,6 +1215,17 @@ pub fn RadrootsAppUiListView(basis: RadrootsAppUiList) -> impl IntoView {
                     RadrootsAppUiListItemKind::Touch(touch) => view! {
                         <RadrootsAppUiListTouchRow
                             basis=touch
+                            loading=item.loading
+                            hide_active=item.hide_active
+                            hide_border_top=resolved_styles.hide_border_top
+                            hide_border_bottom=resolved_styles.hide_border_bottom
+                            line_id=line_id.clone()
+                        />
+                    }
+                    .into_any(),
+                    RadrootsAppUiListItemKind::Toggle(toggle) => view! {
+                        <RadrootsAppUiListToggleRow
+                            basis=toggle
                             loading=item.loading
                             hide_active=item.hide_active
                             hide_border_top=resolved_styles.hide_border_top
