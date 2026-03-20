@@ -19,7 +19,7 @@ fn fill_random_inner(bytes: &mut [u8]) -> Result<(), RadrootsClientCryptoError> 
 
 #[cfg(not(target_arch = "wasm32"))]
 fn fill_random_inner(bytes: &mut [u8]) -> Result<(), RadrootsClientCryptoError> {
-    getrandom::getrandom(bytes).map_err(|_| RadrootsClientCryptoError::CryptoUndefined)
+    getrandom::fill(bytes).map_err(|_| RadrootsClientCryptoError::CryptoUndefined)
 }
 
 #[cfg(test)]

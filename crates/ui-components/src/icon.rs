@@ -1,6 +1,6 @@
 #![forbid(unsafe_code)]
 
-use icondata::{Icon, LuBeaker, LuChevronRight, LuChevronsUpDown, LuHome, LuPlus, LuSettings};
+use icondata::{Icon, LuBeaker, LuChevronRight, LuChevronsUpDown, LuHouse, LuPlus, LuSettings};
 use leptos::prelude::*;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -44,7 +44,7 @@ pub fn radroots_studio_app_ui_icon_data(key: RadrootsAppUiIconKey) -> Icon {
         RadrootsAppUiIconKey::CaretUpDown => LuChevronsUpDown,
         RadrootsAppUiIconKey::Plus => LuPlus,
         RadrootsAppUiIconKey::Settings => LuSettings,
-        RadrootsAppUiIconKey::Home => LuHome,
+        RadrootsAppUiIconKey::Home => LuHouse,
         RadrootsAppUiIconKey::Beaker => LuBeaker,
     }
 }

@@ -54,7 +54,7 @@ fn random_u64() -> Result<u64, RadrootsAppUtilsError> {
 #[cfg(not(target_arch = "wasm32"))]
 fn random_u64() -> Result<u64, RadrootsAppUtilsError> {
     let mut bytes = [0u8; 8];
-    getrandom::getrandom(&mut bytes).map_err(|_| RadrootsAppUtilsError::Unavailable)?;
+    getrandom::fill(&mut bytes).map_err(|_| RadrootsAppUtilsError::Unavailable)?;
     Ok(u64::from_le_bytes(bytes))
 }
 
