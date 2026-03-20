@@ -1,4 +1,0 @@
-# Local dev defaults for compile-time env access (trunk/cargo).
-[env]
-RADROOTS_DEFAULT_RELAYS = "ws://localhost:8080,ws://localhost:8081"
-RADROOTS_RELAY = "ws://localhost:8082"

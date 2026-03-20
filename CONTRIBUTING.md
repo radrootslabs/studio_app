@@ -1,107 +1,100 @@
 # Contributing
 
-Rad Roots is an open-source project, and we welcome all contributions — including code improvements, bug fixes, translations, new features, and bug reports.
+Rad Roots is an open-source application. Contributions are welcome, including bug fixes, usability improvements, documentation updates, tests, and new features.
 
-## Translations
+## Scope
 
-If you would like to contribute by translating the app into another language, please visit our [localisation repository](https://github.com/radrootslabs/packages-locales). To contribute translations:
+This repository is the standalone Rad Roots application repository. The main application code is organized under `crates/`.
 
-1. *Fork the repository and add your language files following the existing structure.*
+## Prerequisites
 
-2. *Submit a Pull Request with your changes.*
-
-
-If the language you would like to add translations for is not yet set up in the repository let us know by [opening an issue](https://github.com/radrootslabs/packages-locales/issues), or [email us](mailto:support@radroots.dev) and we will assist you in adding the required files.
-
-## Development Environment
-
-Ensure the required system dependencies are installed:
-
-*Rust*
-```bash
-$ cargo --version
-> cargo 1.88.0 (873a06493 2025-05-10)
-```
-
-*NodeJS*
-```bash
-$ node --version
-> v20.18.0
-```
-
-*Yarn*
-```bash
-$ yarn --version
-> 1.22.22
-```
-
-## Building
-
-This app is implemented as a progressive web application using [SvelteKit](https://svelte.dev/), and maintained as a monorepository using [Turbo](https://turborepo.com/) with individual packages tracked as Git submodules. 
-
-To begin, first clone the repository and set up your local working copy:
+Install the Rust toolchain used by this repository:
 
 ```bash
-mkdir pwa && cd pwa
-
-git clone https://github.com/radrootslabs/pwa .
-
-git remote rename origin upstream
-
-git remote add origin https://github.com/<YOUR-USERNAME>/pwa.git
-
-git push -u origin master
+rustup toolchain install 1.92.0
 ```
 
-Initialize and update Git submodules:
+Confirm your environment:
+
 ```bash
-git submodule update --init --recursive
+cargo --version
+rustc --version
 ```
 
-Checkout Git submodules branches:
+## Getting Started
+
+Clone your fork and enter the repository root:
+
 ```bash
-git submodule foreach 'git checkout $(git config -f $toplevel/.gitmodules submodule.$name.branch)'
+git clone https://github.com/<YOUR-USERNAME>/app.git
+cd app
 ```
 
-Install the application dependencies:
+To use the repository-pinned toolchain:
+
 ```bash
-yarn
+rustup override set 1.92.0
 ```
 
+## Development Commands
 
-Configure local environment variables (optional overrides):
+Run these commands from the repository root.
+
+Inspect workspace metadata:
+
 ```bash
-cat <<'EOF' > app/.env
-RADROOTS_DEFAULT_RELAYS=ws://localhost:8080,ws://localhost:8081
-RADROOTS_RELAY=ws://localhost:8082
-EOF
+cargo metadata --format-version 1 --no-deps
 ```
 
-Build the application:
+Check the application:
+
 ```bash
-yarn build
+cargo check
 ```
 
-Run the application in development mode:
+Run tests:
+
 ```bash
-yarn dev
+cargo test
 ```
 
-## Contributing
+Run the native application:
 
-1. Create a feature branch
-2. Make your changes
-3. Submit a Pull Request
-4. Wait for review and address feedback
+```bash
+cargo run -p radroots-app
+```
 
-## Additional Resources
+## Contribution Guidelines
 
-- [Rust Documentation](https://www.rust-lang.org/tools/install)
-- [NodeJS Documentation](https://github.com/nvm-sh/nvm?tab=readme-ov-file#installing-and-updating)
-- [Yarn Documentation](https://classic.yarnpkg.com/en/docs)
-- [SvelteKit Documentation](https://svelte.dev/docs/kit/introduction)
-- [Turbo Documentation](https://turborepo.com/docs)
+- Keep changes scoped to a single coherent change.
+- Prefer small, reviewable commits.
+- Update tests when behavior changes.
+- Update documentation when commands, structure, or contributor workflow changes.
+- Remove obsolete code and dependencies when they are clearly replaced.
+- Use workspace-managed dependency versions from the root [Cargo.toml](/Users/treesap/dev/radroots/radroots-platform-v1/domains/community/apps/app/Cargo.toml).
+
+## Reporting Issues
+
+When reporting a bug, include:
+
+- your operating system and version
+- Rust toolchain version
+- the command you ran
+- the observed behavior
+- the expected behavior
+- logs, screenshots, or backtraces if available
+
+## Submitting Changes
+
+1. Create a branch for your change.
+2. Make the smallest coherent update that solves the issue.
+3. Run the relevant validation commands from this document.
+4. Open a pull request with a clear summary of what changed and how it was verified.
+
+## Code of Conduct
+
+Be respectful, direct, and constructive in issues and reviews.
 
 ## License
 
-Refer to the LICENSE file in the repository for terms of use and distribution.
+By contributing to this repository, you agree that your contributions will be distributed under the repository's license. See [LICENSE](LICENSE).

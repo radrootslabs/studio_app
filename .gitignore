@@ -1,33 +1,18 @@
-/target
+/target/
 
-# Debug
-logs/
-
-# Local env files
+# Local environment files
 .env
 .env.*
-!.env.example
-!.env.test
 
-# OS
+# OS and editor files
 .DS_Store
-app/node_modules/
 Thumbs.db
 
-# secrets
+# Local development files
+.vscode/
+.idea/
+
+# Local secrets
 *.pem
 *.crt
 *.key
-*.pem
-
-# local
-.local*
-.vscode
-notes*.txt
-justfile
-
-# dev
-*dev*.toml
-*dev*.json
-
-refs
