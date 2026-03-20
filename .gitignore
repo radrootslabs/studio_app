@@ -1,4 +1,7 @@
 /target/
+/.trunk/
+/crates/app-web/.trunk/
+/crates/app-web/dist/
 
 # Local environment files
 .env

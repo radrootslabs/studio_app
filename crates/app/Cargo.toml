@@ -10,6 +10,9 @@ homepage.workspace = true
 description = "GPUI desktop client for Radroots"
 publish = false
 
+[lib]
+path = "src/lib.rs"
+
 [lints]
 workspace = true
 

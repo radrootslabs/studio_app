@@ -12,6 +12,13 @@ Install the Rust toolchain used by this repository:
 
 ```bash
 rustup toolchain install 1.92.0
+rustup target add wasm32-unknown-unknown
+```
+
+Install Trunk for the wasm target:
+
+```bash
+cargo install trunk
 ```
 
 Confirm your environment:
@@ -19,6 +26,7 @@ Confirm your environment:
 ```bash
 cargo --version
 rustc --version
+trunk --version
 ```
 
 ## Getting Started
@@ -62,6 +70,26 @@ Run the native application:
 
 ```bash
 cargo run -p radroots-app
+```
+
+Check the wasm application:
+
+```bash
+env -u NO_COLOR cargo check -p radroots-app-web --target wasm32-unknown-unknown
+```
+
+Build the wasm application:
+
+```bash
+cd crates/app-web
+env -u NO_COLOR trunk build
+```
+
+Run the wasm application:
+
+```bash
+cd crates/app-web
+env -u NO_COLOR trunk serve --open
 ```
 
 ## Contribution Guidelines
