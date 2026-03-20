@@ -2,9 +2,9 @@ use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use radroots_tangle_db::backup::DatabaseBackup;
-use radroots_tangle_db::ReplicaDbExportManifestRs;
-pub use radroots_tangle_db_schema::{
+use radroots_replica_db::backup::DatabaseBackup;
+use radroots_replica_db::ReplicaDbExportManifestRs;
+pub use radroots_replica_db_schema::{
     farm::*,
     farm_gcs_location::*,
     farm_member::*,
@@ -24,7 +24,7 @@ pub use radroots_tangle_db_schema::{
     trade_product_location::*,
     trade_product_media::*,
 };
-use radroots_tangle_events::{RadrootsReplicaEventDraft, RadrootsReplicaSyncBundle};
+use radroots_replica_sync::{RadrootsReplicaEventDraft, RadrootsReplicaSyncBundle};
 
 use crate::idb::RadrootsClientIdbConfig;
 use crate::sql::{RadrootsClientSqlCipherConfig, RadrootsClientSqlMigrationState};

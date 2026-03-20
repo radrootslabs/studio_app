@@ -25,9 +25,9 @@ sha2 = { workspace = true }
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 rusqlite = { workspace = true, features = ["bundled", "serialize"] }
 radroots-sql-core = { workspace = true, features = ["native"] }
-radroots-tangle-db = { workspace = true }
-radroots-tangle-db-schema = { workspace = true }
-radroots-tangle-events = { workspace = true }
+radroots-replica-db = { workspace = true }
+radroots-replica-db-schema = { workspace = true }
+radroots-replica-sync = { workspace = true }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 js-sys = { workspace = true }

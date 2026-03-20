@@ -16,10 +16,10 @@ use radroots_nostr::prelude::{
 use radroots_sql_core::error::SqlError;
 use radroots_sql_core::{ExecOutcome, SqlExecutor};
 use radroots_sql_core::sqlite_util;
-use radroots_tangle_db::{export_manifest, ReplicaSql as TangleSql};
-use radroots_tangle_events::{
-    radroots_replica_ingest_event as radroots_tangle_ingest_event,
-    radroots_replica_sync_all as radroots_tangle_sync_all,
+use radroots_replica_db::{export_manifest, ReplicaSql};
+use radroots_replica_sync::{
+    radroots_replica_ingest_event,
+    radroots_replica_sync_all,
     RadrootsReplicaEventDraft as RadrootsTangleEventDraft,
     RadrootsReplicaFarmSelector as RadrootsTangleFarmSelector,
     RadrootsReplicaSyncRequest as RadrootsTangleSyncRequest,
@@ -281,8 +281,8 @@ impl RadrootsClientWebTangle {
         result
     }
 
-    fn tangle(&self, engine: &RadrootsClientWebSqlEngine) -> TangleSql<TangleSqlExecutor> {
-        TangleSql::new(TangleSqlExecutor::new(engine.shared_connection()))
+    fn tangle(&self, engine: &RadrootsClientWebSqlEngine) -> ReplicaSql<TangleSqlExecutor> {
+        ReplicaSql::new(TangleSqlExecutor::new(engine.shared_connection()))
     }
 }
 
@@ -429,7 +429,7 @@ impl RadrootsClientTangle for RadrootsClientWebTangle {
                 },
                 options: None,
             };
-            let bundle = radroots_tangle_sync_all(tangle.executor(), &request)
+            let bundle = radroots_replica_sync_all(tangle.executor(), &request)
                 .map_err(|_| RadrootsClientTangleError::InvalidResponse)?;
             for draft in bundle.events {
                 let key = tangle_sync_event_key(&draft);
@@ -460,7 +460,7 @@ impl RadrootsClientTangle for RadrootsClientWebTangle {
             match publish_signed_event(&relays, secret_key, &event).await {
                 Ok(()) => {
                     let event = radroots_event_from_nostr(&event);
-                    match radroots_tangle_ingest_event(tangle.executor(), &event) {
+                    match radroots_replica_ingest_event(tangle.executor(), &event) {
                         Ok(_) => events_published += 1,
                         Err(_) => events_failed += 1,
                     }
