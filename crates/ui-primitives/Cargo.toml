@@ -10,5 +10,5 @@ rust-version.workspace = true
 crate-type = ["rlib"]
 
 [dependencies]
-ui-primitives-core = { path = "../../refs/ui-primitives/crates/ui-primitives-core" }
-ui-primitives-leptos = { path = "../../refs/ui-primitives/crates/ui-primitives-leptos" }
+ui-primitives-core = { package = "headless-primitives-core", path = "../../../../../../vendor/triesap/headless-primitives/crates/headless-primitives-core" }
+ui-primitives-leptos = { package = "headless-primitives-leptos", path = "../../../../../../vendor/triesap/headless-primitives/crates/headless-primitives-leptos" }
