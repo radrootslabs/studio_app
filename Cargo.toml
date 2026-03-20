@@ -27,18 +27,18 @@ readme = "README.md"
 unsafe_code = "forbid"
 
 [workspace.dependencies]
-leptos = { version = "0.8.5", default-features = false }
-leptos_router = { version = "0.8.5", default-features = false }
+leptos = { version = "0.8.17", default-features = false }
+leptos_router = { version = "0.8.12", default-features = false }
 icondata = { version = "0.4", default-features = false, features = ["lucide"] }
-wasm-bindgen = "=0.2.108"
+wasm-bindgen = "=0.2.114"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 futures = "0.3"
 async-trait = "0.1.89"
 getrandom = "0.2"
-js-sys = "0.3.77"
+js-sys = "0.3.91"
 gloo-timers = "0.3"
-web-sys = { version = "0.3.77", features = [
+web-sys = { version = "0.3.91", features = [
   "Crypto",
   "CryptoKey",
   "SubtleCrypto",
@@ -101,7 +101,7 @@ url = "2"
 chrono = "0.4"
 hex = "0.4"
 sha2 = "0.10"
-uuid = { version = "1.8", features = ["v4", "v7", "js"] }
+uuid = { version = "1.22", features = ["v4", "v7", "js"] }
 regex = "1"
 once_cell = "1"
 radroots-nostr = { path = "../lib/crates/nostr" }
