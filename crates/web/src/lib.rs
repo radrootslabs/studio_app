@@ -166,6 +166,50 @@ impl RadrootsAppBackend for WebBackend {
 }
 
 #[cfg(target_arch = "wasm32")]
+fn loading_text_element() -> Option<web_sys::Element> {
+    let window = web_sys::window()?;
+    let document = window.document()?;
+    document.get_element_by_id("loading_text")
+}
+
+#[cfg(target_arch = "wasm32")]
+fn clear_loading_text() {
+    if let Some(loading_text) = loading_text_element() {
+        loading_text.remove();
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+fn show_loading_failure() {
+    if let Some(loading_text) = loading_text_element() {
+        loading_text.set_inner_html("<p>failed to start radroots app</p>");
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+async fn launch_app() -> Result<(), String> {
+    let web_options = eframe::WebOptions::default();
+    let window = web_sys::window().ok_or_else(|| "window unavailable".to_owned())?;
+    let document = window
+        .document()
+        .ok_or_else(|| "document unavailable".to_owned())?;
+    let canvas = document
+        .get_element_by_id("radroots_studio_app_canvas")
+        .ok_or_else(|| "radroots_studio_app_canvas missing".to_owned())?
+        .dyn_into::<web_sys::HtmlCanvasElement>()
+        .map_err(|_| "radroots_studio_app_canvas is not a canvas element".to_owned())?;
+
+    eframe::WebRunner::new()
+        .start(
+            canvas,
+            web_options,
+            Box::new(|_cc| Ok(Box::new(RadrootsApp::new(Box::new(WebBackend::new()))))),
+        )
+        .await
+        .map_err(|err| format!("failed to start radroots app: {err:?}"))
+}
+
+#[cfg(target_arch = "wasm32")]
 pub fn launch() {
     let log_level = if cfg!(debug_assertions) {
         log::LevelFilter::Info
@@ -175,28 +219,11 @@ pub fn launch() {
     let _ = eframe::WebLogger::init(log_level);
 
     wasm_bindgen_futures::spawn_local(async {
-        let web_options = eframe::WebOptions::default();
-        let window = web_sys::window().expect("window");
-        let document = window.document().expect("document");
-        let canvas = document
-            .get_element_by_id("radroots_studio_app_canvas")
-            .expect("radroots_studio_app_canvas")
-            .dyn_into::<web_sys::HtmlCanvasElement>()
-            .expect("canvas");
-
-        let result = eframe::WebRunner::new()
-            .start(
-                canvas,
-                web_options,
-                Box::new(|_cc| Ok(Box::new(RadrootsApp::new(Box::new(WebBackend::new()))))),
-            )
-            .await;
-
-        if let Some(loading_text) = document.get_element_by_id("loading_text") {
-            if result.is_ok() {
-                loading_text.remove();
-            } else {
-                loading_text.set_inner_html("<p>failed to start radroots app</p>");
+        match launch_app().await {
+            Ok(()) => clear_loading_text(),
+            Err(err) => {
+                log::error!("{err}");
+                show_loading_failure();
             }
         }
     });
