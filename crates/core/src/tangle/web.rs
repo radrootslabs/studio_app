@@ -8,6 +8,7 @@ use async_trait::async_trait;
 use radroots_nostr::prelude::{
     radroots_event_from_nostr,
     radroots_nostr_build_event,
+    RadrootsNostrClient,
     RadrootsNostrEvent,
     RadrootsNostrKeys,
     RadrootsNostrSecretKey,
@@ -456,9 +457,14 @@ impl RadrootsClientTangle for RadrootsClientWebTangle {
                 continue;
             };
             let event = sign_draft_event(draft, secret_key)?;
-            let event = radroots_event_from_nostr(&event);
-            match radroots_tangle_ingest_event(tangle.executor(), &event) {
-                Ok(_) => events_published += 1,
+            match publish_signed_event(&relays, secret_key, &event).await {
+                Ok(()) => {
+                    let event = radroots_event_from_nostr(&event);
+                    match radroots_tangle_ingest_event(tangle.executor(), &event) {
+                        Ok(_) => events_published += 1,
+                        Err(_) => events_failed += 1,
+                    }
+                }
                 Err(_) => events_failed += 1,
             }
         }
@@ -472,7 +478,6 @@ impl RadrootsClientTangle for RadrootsClientWebTangle {
         if !summary.missing_signers.is_empty() || summary.events_failed > 0 {
             return Err(RadrootsClientTangleError::InvalidResponse);
         }
-        let _ = relays;
         Ok(summary)
     }
 
@@ -1113,6 +1118,36 @@ fn sign_draft_event(
         .map_err(|_| RadrootsClientTangleError::CryptoUnavailable)
 }
 
+async fn build_publish_client(
+    relays: &[String],
+    secret_key: &str,
+) -> RadrootsClientTangleResult<RadrootsNostrClient> {
+    let secret_key = RadrootsNostrSecretKey::from_str(secret_key)
+        .map_err(|_| RadrootsClientTangleError::CryptoUnavailable)?;
+    let client = RadrootsNostrClient::new(RadrootsNostrKeys::new(secret_key));
+    for relay in relays {
+        client
+            .add_write_relay(relay)
+            .await
+            .map_err(|_| RadrootsClientTangleError::InvalidResponse)?;
+    }
+    Ok(client)
+}
+
+async fn publish_signed_event(
+    relays: &[String],
+    secret_key: &str,
+    event: &RadrootsNostrEvent,
+) -> RadrootsClientTangleResult<()> {
+    let client = build_publish_client(relays, secret_key).await?;
+    client.connect().await;
+    client
+        .send_event(event)
+        .await
+        .map_err(|_| RadrootsClientTangleError::InvalidResponse)?;
+    Ok(())
+}
+
 fn sha256_hex(bytes: &[u8]) -> String {
     let mut hasher = Sha256::new();
     hasher.update(bytes);
@@ -1132,6 +1167,7 @@ fn export_timestamp() -> String {
 #[cfg(test)]
 mod tests {
     use super::{
+        build_publish_client,
         RadrootsClientWebTangle,
         DEFAULT_TANGLE_STORE_KEY,
     };
@@ -1161,5 +1197,20 @@ mod tests {
         let err = futures::executor::block_on(tangle.nostr_sync_all(opts))
             .expect_err("invalid response");
         assert_eq!(err, RadrootsClientTangleError::InvalidResponse);
+    }
+
+    #[test]
+    fn build_publish_client_registers_requested_relays() {
+        let client = futures::executor::block_on(build_publish_client(
+            &[
+                "wss://relay.one".to_string(),
+                "wss://relay.two".to_string(),
+            ],
+            "5c4b53425ff8f8734229781dc8b4c40ce6bb6ed15c93dffa50e1399c049b8367",
+        ))
+        .expect("client");
+
+        let relays = futures::executor::block_on(client.relays());
+        assert_eq!(relays.len(), 2);
     }
 }

@@ -16,7 +16,7 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 getrandom = { workspace = true }
 base64 = { workspace = true }
-radroots-nostr = { workspace = true, features = ["events"] }
+radroots-nostr = { workspace = true, features = ["client", "events"] }
 url = { workspace = true }
 chrono = { workspace = true }
 hex = { workspace = true }
