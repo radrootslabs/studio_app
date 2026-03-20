@@ -2,6 +2,26 @@
 
 #[cfg(target_arch = "wasm32")]
 use eframe::wasm_bindgen::JsCast as _;
+#[cfg(target_arch = "wasm32")]
+use radroots_studio_app_core::{IdentityGateState, RadrootsApp, RadrootsAppBackend};
+
+#[cfg(target_arch = "wasm32")]
+struct WebBackend;
+
+#[cfg(target_arch = "wasm32")]
+impl RadrootsAppBackend for WebBackend {
+    fn load_identity_state(&self) -> Result<IdentityGateState, String> {
+        Ok(IdentityGateState::Unsupported {
+            reason: "Local secure onboarding is not enabled for the web target.".to_owned(),
+        })
+    }
+
+    fn generate_new_key(&self) -> Result<IdentityGateState, String> {
+        Ok(IdentityGateState::Unsupported {
+            reason: "Local secure onboarding is not enabled for the web target.".to_owned(),
+        })
+    }
+}
 
 #[cfg(target_arch = "wasm32")]
 pub fn launch() {
@@ -26,7 +46,7 @@ pub fn launch() {
             .start(
                 canvas,
                 web_options,
-                Box::new(|_cc| Ok(Box::new(radroots_studio_app_core::RadrootsApp))),
+                Box::new(|_cc| Ok(Box::new(RadrootsApp::new(Box::new(WebBackend))))),
             )
             .await;
 

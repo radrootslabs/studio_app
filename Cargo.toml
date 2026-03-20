@@ -17,10 +17,12 @@ homepage = "https://radroots.org"
 readme = "README.md"
 
 [workspace.dependencies]
+directories = "6"
 eframe = { version = "0.33.3", default-features = false, features = ["default_fonts", "wgpu", "wayland", "x11"] }
 egui = { version = "0.33.3", features = ["serde"] }
 log = "0.4.28"
 objc2-foundation = { version = "0.3.2", default-features = false, features = ["std"] }
+radroots-nostr-accounts = { path = "../lib/crates/nostr-accounts", default-features = false, features = ["std", "file-store", "os-keyring"] }
 wasm-bindgen-futures = "0.4.50"
 web-sys = { version = "0.3.91", features = ["Document", "HtmlCanvasElement", "Window"] }
 wgpu = { version = "27.0.1", default-features = false }
