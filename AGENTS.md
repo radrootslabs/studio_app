@@ -49,6 +49,8 @@ Before making substantial changes:
 - Keep the repository root as the workspace root.
 - Keep shared application code under `crates/core`.
 - Keep target launchers and bridge crates under `crates/`.
+- Keep reusable platform-native libraries under `native/`.
+- Keep native host projects under `platforms/`.
 - Add new crates only when they represent a durable architectural boundary.
 - Keep manifests, paths, and crate boundaries simple and intentional.
 - Do not reintroduce obsolete framework scaffolding unless the requested change explicitly requires it.

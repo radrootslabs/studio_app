@@ -4,7 +4,7 @@ Rad Roots is an open-source application. Contributions are welcome, including bu
 
 ## Scope
 
-This repository is the standalone Rad Roots application repository. The main application code is organized under `crates/`.
+This repository is the standalone Rad Roots application repository. Shared Rust application code is organized under `crates/`. Reusable native libraries are organized under `native/`, and native host projects are organized under `platforms/`.
 
 ## Prerequisites
 
@@ -90,6 +90,13 @@ Run the wasm application:
 ```bash
 cd crates/web
 env -u NO_COLOR trunk serve --open
+```
+
+Test the Apple native security package:
+
+```bash
+cd native/apple/swift/RadRootsAppleSecurity
+swift test
 ```
 
 ## Contribution Guidelines

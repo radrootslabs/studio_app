@@ -17,6 +17,11 @@ configs:
   Debug: debug
   Release: release
 
+packages:
+  RadRootsAppleSecurity:
+    path: ../../native/apple/swift/RadRootsAppleSecurity
+    group: Native/Apple/Swift
+
 targetTemplates:
   app_base:
     type: application
@@ -61,6 +66,8 @@ targetTemplates:
       - sdk: Foundation.framework
       - sdk: CoreFoundation.framework
       - sdk: Metal.framework
+      - package: RadRootsAppleSecurity
+        product: RadRootsAppleSecurityFFI
 
 targets:
   RadRootsIOS:

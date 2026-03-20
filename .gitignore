@@ -2,6 +2,8 @@
 /.trunk/
 /crates/web/.trunk/
 /crates/web/dist/
+/native/apple/swift/**/.build/
+/native/apple/swift/**/.swiftpm/
 /platforms/ios/.derived-data/
 /platforms/ios/*.xcodeproj/
 
