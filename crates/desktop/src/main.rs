@@ -11,6 +11,8 @@ use radroots_nostr_accounts::prelude::{
     RadrootsNostrAccountsManager, RadrootsNostrFileAccountStore, RadrootsNostrSecretVaultOsKeyring,
     RadrootsNostrSelectedAccountStatus,
 };
+#[cfg(target_os = "macos")]
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 #[cfg(target_os = "macos")]
@@ -29,22 +31,52 @@ struct DesktopBackend;
 
 impl DesktopBackend {
     #[cfg(target_os = "macos")]
-    fn app_data_root() -> Result<std::path::PathBuf, String> {
+    fn radroots_root() -> Result<PathBuf, String> {
         let base_dirs =
             BaseDirs::new().ok_or_else(|| "failed to resolve home directory".to_owned())?;
-        Ok(base_dirs
-            .home_dir()
-            .join(".radroots")
-            .join("app")
-            .join("desktop"))
+        Ok(base_dirs.home_dir().join(".radroots"))
+    }
+
+    #[cfg(target_os = "macos")]
+    fn app_data_root() -> Result<PathBuf, String> {
+        Ok(Self::radroots_root()?.join("app").join("desktop"))
+    }
+
+    #[cfg(target_os = "macos")]
+    fn private_directory_chain(root: &Path, leaf: &Path) -> Result<Vec<PathBuf>, String> {
+        let relative = leaf
+            .strip_prefix(root)
+            .map_err(|_| "private directory escaped radroots root".to_owned())?;
+        let mut current = root.to_path_buf();
+        let mut chain = vec![current.clone()];
+        for component in relative.components() {
+            current.push(component);
+            chain.push(current.clone());
+        }
+        Ok(chain)
+    }
+
+    #[cfg(target_os = "macos")]
+    fn ensure_private_directory_tree(leaf: &Path) -> Result<(), String> {
+        use std::os::unix::fs::PermissionsExt;
+
+        std::fs::create_dir_all(leaf)
+            .map_err(|source| format!("failed to create accounts directory: {source}"))?;
+
+        for path in Self::private_directory_chain(&Self::radroots_root()?, leaf)? {
+            std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o700)).map_err(
+                |source| format!("failed to set private directory permissions: {source}"),
+            )?;
+        }
+
+        Ok(())
     }
 
     #[cfg(target_os = "macos")]
     fn accounts_manager() -> Result<RadrootsNostrAccountsManager, String> {
         let accounts_path = Self::app_data_root()?.join("nostr").join("accounts.json");
         if let Some(parent) = accounts_path.parent() {
-            std::fs::create_dir_all(parent)
-                .map_err(|source| format!("failed to create accounts directory: {source}"))?;
+            Self::ensure_private_directory_tree(parent)?;
         }
 
         let store = Arc::new(RadrootsNostrFileAccountStore::new(accounts_path));
@@ -142,4 +174,28 @@ fn main() -> eframe::Result<()> {
         options,
         Box::new(|_cc| Ok(Box::new(RadrootsApp::new(Box::new(DesktopBackend))))),
     )
+}
+
+#[cfg(all(test, target_os = "macos"))]
+mod tests {
+    use super::DesktopBackend;
+    use std::path::PathBuf;
+
+    #[test]
+    fn private_directory_chain_covers_only_radroots_subtree() {
+        let root = PathBuf::from("/tmp/example/.radroots");
+        let leaf = root.join("app").join("desktop").join("nostr");
+
+        let chain = DesktopBackend::private_directory_chain(&root, &leaf).unwrap();
+
+        assert_eq!(
+            chain,
+            vec![
+                PathBuf::from("/tmp/example/.radroots"),
+                PathBuf::from("/tmp/example/.radroots/app"),
+                PathBuf::from("/tmp/example/.radroots/app/desktop"),
+                PathBuf::from("/tmp/example/.radroots/app/desktop/nostr"),
+            ]
+        );
+    }
 }
