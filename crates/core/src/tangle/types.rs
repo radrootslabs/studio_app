@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use radroots_tangle_db::backup::DatabaseBackup;
-use radroots_tangle_db::TangleDbExportManifestRs;
+use radroots_tangle_db::ReplicaDbExportManifestRs;
 pub use radroots_tangle_db_schema::{
     farm::*,
     farm_gcs_location::*,
@@ -24,7 +24,7 @@ pub use radroots_tangle_db_schema::{
     trade_product_location::*,
     trade_product_media::*,
 };
-use radroots_tangle_events::{RadrootsTangleEventDraft, RadrootsTangleSyncBundle};
+use radroots_tangle_events::{RadrootsReplicaEventDraft, RadrootsReplicaSyncBundle};
 
 use crate::idb::RadrootsClientIdbConfig;
 use crate::sql::{RadrootsClientSqlCipherConfig, RadrootsClientSqlMigrationState};
@@ -33,9 +33,9 @@ use super::RadrootsClientTangleError;
 
 pub type RadrootsClientTangleResult<T> = Result<T, RadrootsClientTangleError>;
 pub type RadrootsClientTangleDatabaseJsonExport = DatabaseBackup;
-pub type RadrootsClientTangleDatabaseExportManifestRs = TangleDbExportManifestRs;
-pub type RadrootsClientTangleNostrEventDraft = RadrootsTangleEventDraft;
-pub type RadrootsClientTangleNostrSyncBundle = RadrootsTangleSyncBundle;
+pub type RadrootsClientTangleDatabaseExportManifestRs = ReplicaDbExportManifestRs;
+pub type RadrootsClientTangleNostrEventDraft = RadrootsReplicaEventDraft;
+pub type RadrootsClientTangleNostrSyncBundle = RadrootsReplicaSyncBundle;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct RadrootsClientTangleDatabaseExportManifestClient {

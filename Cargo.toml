@@ -109,7 +109,7 @@ radroots-types = { path = "../lib/crates/types" }
 radroots-sql-core = { path = "../lib/crates/sql-core" }
 radroots-tangle-db = { package = "radroots-replica-db", path = "../lib/crates/replica-db" }
 radroots-tangle-db-schema = { package = "radroots-replica-db-schema", path = "../lib/crates/replica-db-schema" }
-radroots-tangle-events = { package = "radroots-events", path = "../lib/crates/events" }
+radroots-tangle-events = { package = "radroots-replica-sync", path = "../lib/crates/replica-sync" }
 mf2-i18n-core = { path = "../../../../vendor/triesap/mf2-i18n/crates/mf2-i18n-core" }
 mf2-i18n-embedded = { path = "../../../../vendor/triesap/mf2-i18n/crates/mf2-i18n-embedded" }
 

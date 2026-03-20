@@ -15,13 +15,13 @@ use radroots_nostr::prelude::{
 use radroots_sql_core::error::SqlError;
 use radroots_sql_core::{ExecOutcome, SqlExecutor};
 use radroots_sql_core::sqlite_util;
-use radroots_tangle_db::{export_manifest, TangleSql};
+use radroots_tangle_db::{export_manifest, ReplicaSql as TangleSql};
 use radroots_tangle_events::{
-    radroots_tangle_ingest_event,
-    radroots_tangle_sync_all,
-    RadrootsTangleEventDraft,
-    RadrootsTangleFarmSelector,
-    RadrootsTangleSyncRequest,
+    radroots_replica_ingest_event as radroots_tangle_ingest_event,
+    radroots_replica_sync_all as radroots_tangle_sync_all,
+    RadrootsReplicaEventDraft as RadrootsTangleEventDraft,
+    RadrootsReplicaFarmSelector as RadrootsTangleFarmSelector,
+    RadrootsReplicaSyncRequest as RadrootsTangleSyncRequest,
 };
 use rusqlite::{params_from_iter, Connection};
 use sha2::{Digest, Sha256};

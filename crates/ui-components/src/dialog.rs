@@ -253,7 +253,7 @@ pub fn RadrootsAppUiDialogContent(
     view! {
         <RadrootsAppUiDismissableLayer
             on_dismiss=on_dismiss
-            disable_outside_pointer_events=disable_outside_pointer_events
+            disable_pointer_down_outside_dismiss=disable_outside_pointer_events
         >
             <RadrootsAppUiFocusScope trapped=modal auto_focus=true return_focus=true>
                 <div
