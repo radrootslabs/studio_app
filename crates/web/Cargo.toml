@@ -22,6 +22,8 @@ wasm-bindgen-futures.workspace = true
 web-sys.workspace = true
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
+nostr.workspace = true
+nostr-browser-signer.workspace = true
 wgpu = { workspace = true, features = ["std", "wgsl", "webgpu", "fragile-send-sync-non-atomic-wasm"] }
 
 [lints]

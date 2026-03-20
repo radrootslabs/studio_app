@@ -3,7 +3,9 @@
 
 use directories::BaseDirs;
 use eframe::egui;
-use radroots_studio_app_core::{APP_NAME, IdentityGateState, RadrootsApp, RadrootsAppBackend};
+use radroots_studio_app_core::{
+    APP_NAME, IdentityGateState, RadrootsApp, RadrootsAppBackend, SetupActionState,
+};
 #[cfg(target_os = "macos")]
 use radroots_nostr_accounts::prelude::{
     RadrootsNostrAccountsManager, RadrootsNostrFileAccountStore, RadrootsNostrSecretVaultOsKeyring,
@@ -85,22 +87,42 @@ impl RadrootsAppBackend for DesktopBackend {
         }
     }
 
-    fn generate_new_key(&self) -> Result<IdentityGateState, String> {
+    fn setup_action_state(&self) -> SetupActionState {
+        #[cfg(target_os = "macos")]
+        {
+            return SetupActionState {
+                label: "Generate New Key".to_owned(),
+                enabled: true,
+                pending: false,
+            };
+        }
+
+        #[cfg(not(target_os = "macos"))]
+        {
+            SetupActionState {
+                label: "Generate New Key".to_owned(),
+                enabled: false,
+                pending: false,
+            }
+        }
+    }
+
+    fn request_setup_action(&self) -> Result<Option<IdentityGateState>, String> {
         #[cfg(target_os = "macos")]
         {
             let manager = Self::accounts_manager()?;
             manager
                 .generate_identity(Some("local".to_owned()), true)
                 .map_err(|source| source.to_string())?;
-            return self.load_identity_state();
+            return self.load_identity_state().map(Some);
         }
 
         #[cfg(not(target_os = "macos"))]
         {
-            Ok(IdentityGateState::Unsupported {
+            Ok(Some(IdentityGateState::Unsupported {
                 reason: "Local secure onboarding is only implemented for macOS in this slice."
                     .to_owned(),
-            })
+            }))
         }
     }
 }
