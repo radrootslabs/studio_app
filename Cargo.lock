@@ -1984,12 +1984,21 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "69cdb34c158ceb288df11e18b4bd39de994f6657d83847bdffdbd7f346754b0f"
 
 [[package]]
-name = "radroots-app"
+name = "radroots-app-core"
+version = "0.1.0"
+dependencies = [
+ "eframe",
+ "egui",
+]
+
+[[package]]
+name = "radroots-app-desktop"
 version = "0.1.0"
 dependencies = [
  "eframe",
  "egui",
  "objc2-foundation 0.3.2",
+ "radroots-app-core",
  "wgpu",
 ]
 
@@ -1999,7 +2008,7 @@ version = "0.1.0"
 dependencies = [
  "eframe",
  "log",
- "radroots-app",
+ "radroots-app-core",
  "wasm-bindgen-futures",
  "web-sys",
  "wgpu",

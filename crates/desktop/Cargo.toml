@@ -1,5 +1,5 @@
 [package]
-name = "radroots-app"
+name = "radroots-app-desktop"
 authors.workspace = true
 version.workspace = true
 edition.workspace = true
@@ -7,11 +7,8 @@ license.workspace = true
 rust-version.workspace = true
 repository.workspace = true
 homepage.workspace = true
-description = "GPUI desktop client for Radroots"
+description = "Rad Roots desktop launcher"
 publish = false
-
-[lib]
-path = "src/lib.rs"
 
 [lints]
 workspace = true
@@ -19,6 +16,7 @@ workspace = true
 [dependencies]
 eframe.workspace = true
 egui.workspace = true
+radroots-app-core = { path = "../core" }
 
 [target.'cfg(any(target_os = "macos", target_os = "ios"))'.dependencies]
 wgpu = { workspace = true, features = ["metal", "wgsl"] }

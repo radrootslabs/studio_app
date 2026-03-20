@@ -26,7 +26,7 @@ pub fn launch() {
             .start(
                 canvas,
                 web_options,
-                Box::new(|_cc| Ok(Box::new(radroots_studio_app::RadrootsApp))),
+                Box::new(|_cc| Ok(Box::new(radroots_studio_app_core::RadrootsApp))),
             )
             .await;
 

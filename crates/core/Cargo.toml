@@ -1,0 +1,18 @@
+[package]
+name = "radroots-app-core"
+authors.workspace = true
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+homepage.workspace = true
+description = "Core application orchestration for Radroots Studio"
+publish = false
+
+[lints]
+workspace = true
+
+[dependencies]
+eframe.workspace = true
+egui.workspace = true

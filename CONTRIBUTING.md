@@ -69,7 +69,7 @@ cargo test
 Run the native application:
 
 ```bash
-cargo run -p radroots-app
+cargo run -p radroots-app-desktop
 ```
 
 Check the wasm application:
@@ -81,14 +81,14 @@ env -u NO_COLOR cargo check -p radroots-app-web --target wasm32-unknown-unknown
 Build the wasm application:
 
 ```bash
-cd crates/app-web
+cd crates/web
 env -u NO_COLOR trunk build
 ```
 
 Run the wasm application:
 
 ```bash
-cd crates/app-web
+cd crates/web
 env -u NO_COLOR trunk serve --open
 ```
 

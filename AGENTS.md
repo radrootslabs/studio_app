@@ -41,13 +41,14 @@ Before making substantial changes:
   - `cargo metadata --format-version 1 --no-deps`
   - `cargo check`
   - targeted `cargo test`
-  - targeted `cargo run -p radroots-app`
+  - targeted `cargo run -p radroots-app-desktop`
 - If validation cannot be run, report the blocker clearly.
 
 ## 6. Workspace structure
 
 - Keep the repository root as the workspace root.
-- Keep the main application crate under `crates/app`.
+- Keep shared application code under `crates/core`.
+- Keep target launchers and bridge crates under `crates/`.
 - Add new crates only when they represent a durable architectural boundary.
 - Keep manifests, paths, and crate boundaries simple and intentional.
 - Do not reintroduce obsolete framework scaffolding unless the requested change explicitly requires it.

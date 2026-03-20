@@ -7,7 +7,7 @@ rust-version.workspace = true
 authors.workspace = true
 repository.workspace = true
 homepage.workspace = true
-description = "Rad Roots app wasm launcher"
+description = "Rad Roots web launcher"
 publish = false
 
 [lib]
@@ -17,7 +17,7 @@ crate-type = ["cdylib", "rlib"]
 [dependencies]
 eframe.workspace = true
 log.workspace = true
-radroots-app = { path = "../app" }
+radroots-app-core = { path = "../core" }
 wasm-bindgen-futures.workspace = true
 web-sys.workspace = true
 
