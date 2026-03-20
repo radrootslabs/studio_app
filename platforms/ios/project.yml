@@ -1,0 +1,68 @@
+name: RadRootsIOS
+
+options:
+  createIntermediateGroups: true
+  deploymentTarget:
+    iOS: "17.0"
+
+settings:
+  base:
+    PRODUCT_BUNDLE_IDENTIFIER: org.radroots.app.ios
+    MARKETING_VERSION: 0.1.0
+    CURRENT_PROJECT_VERSION: 1
+    SWIFT_VERSION: 6.0
+    CODE_SIGN_STYLE: Automatic
+
+configs:
+  Debug: debug
+  Release: release
+
+targetTemplates:
+  app_base:
+    type: application
+    platform: iOS
+    deploymentTarget: "17.0"
+    supportedDestinations:
+      - iOS
+      - iOS Simulator
+    configFiles:
+      Debug: Config/Debug.xcconfig
+      Release: Config/Release.xcconfig
+    sources:
+      - path: App/main.swift
+      - path: App/Bridge
+        buildPhase: headers
+      - path: App/Resources
+        excludes:
+          - Info.plist
+    settings:
+      base:
+        PRODUCT_NAME: $(TARGET_NAME)
+        INFOPLIST_FILE: App/Resources/Info.plist
+        TARGETED_DEVICE_FAMILY: 1,2
+    preBuildScripts:
+      - name: Build Rust iOS Library
+        script: |
+          "$SRCROOT/Scripts/build_rust_ios.sh"
+        basedOnDependencyAnalysis: false
+        inputFiles:
+          - $(SRCROOT)/../../Cargo.toml
+          - $(SRCROOT)/../../Cargo.lock
+          - $(SRCROOT)/../../crates/core/Cargo.toml
+          - $(SRCROOT)/../../crates/core/src/lib.rs
+          - $(SRCROOT)/../../crates/ios/Cargo.toml
+          - $(SRCROOT)/../../crates/ios/src/lib.rs
+          - $(SRCROOT)/Scripts/build_rust_ios.sh
+        outputFiles:
+          - $(SRCROOT)/../../target/$(RUST_TARGET_TRIPLE)/$(RUST_CARGO_PROFILE)/libradroots_studio_app_ios.a
+          - $(SRCROOT)/../../target/x86_64-apple-ios/$(RUST_CARGO_PROFILE)/libradroots_studio_app_ios.a
+    dependencies:
+      - sdk: UIKit.framework
+      - sdk: Foundation.framework
+      - sdk: CoreFoundation.framework
+      - sdk: Metal.framework
+
+targets:
+  RadRootsIOS:
+    templates:
+      - app_base

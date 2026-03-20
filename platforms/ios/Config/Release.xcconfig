@@ -1,0 +1,3 @@
+#include "Base.xcconfig"
+
+RUST_CARGO_PROFILE = release

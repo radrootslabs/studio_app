@@ -1,0 +1,16 @@
+PRODUCT_NAME = $(TARGET_NAME)
+PRODUCT_MODULE_NAME = RadRootsIOS
+GENERATE_INFOPLIST_FILE = NO
+IPHONEOS_DEPLOYMENT_TARGET = 17.0
+SWIFT_OBJC_BRIDGING_HEADER = $(SRCROOT)/App/Bridge/RadRootsIOS-Bridging-Header.h
+LIBRARY_SEARCH_PATHS = $(inherited)
+LD_RUNPATH_SEARCH_PATHS = $(inherited) @executable_path/Frameworks
+OTHER_LDFLAGS = $(inherited) "$(RUST_LIBRARY_PATH)" -framework Foundation -framework UIKit -framework CoreFoundation -framework Metal -lobjc -liconv
+RUST_TARGET_TRIPLE = aarch64-apple-ios-sim
+RUST_TARGET_TRIPLE[sdk=iphoneos*] = aarch64-apple-ios
+RUST_TARGET_TRIPLE[sdk=iphonesimulator*] = aarch64-apple-ios-sim
+RUST_CARGO_PROFILE = debug
+RUST_LIBRARY_PATH = $(SRCROOT)/../../target/aarch64-apple-ios-sim/$(RUST_CARGO_PROFILE)/libradroots_studio_app_ios.a
+RUST_LIBRARY_PATH[sdk=iphoneos*] = $(SRCROOT)/../../target/aarch64-apple-ios/$(RUST_CARGO_PROFILE)/libradroots_studio_app_ios.a
+RUST_LIBRARY_PATH[sdk=iphonesimulator*][arch=x86_64] = $(SRCROOT)/../../target/x86_64-apple-ios/$(RUST_CARGO_PROFILE)/libradroots_studio_app_ios.a
+SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD = NO

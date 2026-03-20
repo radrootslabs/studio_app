@@ -1,0 +1,25 @@
+[package]
+name = "radroots-app-ios"
+authors.workspace = true
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+homepage.workspace = true
+description = "Rad Roots iOS launcher"
+publish = false
+
+[lib]
+path = "src/lib.rs"
+crate-type = ["staticlib", "rlib"]
+
+[dependencies]
+eframe.workspace = true
+radroots-app-core = { path = "../core" }
+
+[target.'cfg(target_os = "ios")'.dependencies]
+wgpu = { workspace = true, features = ["metal", "wgsl"] }
+
+[lints.rust]
+unsafe_code = { level = "allow", priority = 1 }

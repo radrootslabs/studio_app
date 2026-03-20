@@ -2757,6 +2757,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "radroots-app-ios"
+version = "0.1.0"
+dependencies = [
+ "eframe",
+ "radroots-app-core",
+ "wgpu",
+]
+
+[[package]]
 name = "radroots-app-web"
 version = "0.1.0"
 dependencies = [
