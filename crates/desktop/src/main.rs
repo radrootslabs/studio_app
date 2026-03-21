@@ -6,7 +6,7 @@ use eframe::egui;
 #[cfg(target_os = "macos")]
 use radroots_studio_app_apple_security::{APPLE_NOSTR_SERVICE, RadrootsAppleKeychainVault};
 use radroots_studio_app_core::{
-    APP_NAME, IdentityGateState, RadrootsApp, RadrootsAppBackend, SetupActionState,
+    APP_NAME, HomeActionState, IdentityGateState, RadrootsApp, RadrootsAppBackend, SetupActionState,
 };
 #[cfg(target_os = "macos")]
 use radroots_nostr_accounts::prelude::{
@@ -96,6 +96,26 @@ impl DesktopBackend {
             },
         }
     }
+
+    #[cfg(target_os = "macos")]
+    fn remove_selected_local_identity(
+        manager: &RadrootsNostrAccountsManager,
+    ) -> Result<IdentityGateState, String> {
+        let Some(account_id) = manager
+            .selected_account_id()
+            .map_err(|source| source.to_string())?
+        else {
+            return Ok(IdentityGateState::Missing);
+        };
+
+        manager
+            .remove_account(&account_id)
+            .map_err(|source| source.to_string())?;
+        let status = manager
+            .selected_account_status()
+            .map_err(|source| source.to_string())?;
+        Ok(Self::map_status(status))
+    }
 }
 
 impl RadrootsAppBackend for DesktopBackend {
@@ -154,6 +174,35 @@ impl RadrootsAppBackend for DesktopBackend {
                 reason: "Local secure onboarding is only implemented for macOS in this slice."
                     .to_owned(),
             }))
+        }
+    }
+
+    fn home_remove_action_state(&self) -> Option<HomeActionState> {
+        #[cfg(target_os = "macos")]
+        {
+            return Some(HomeActionState {
+                label: "Remove Key From This Device".to_owned(),
+                enabled: true,
+                pending: false,
+            });
+        }
+
+        #[cfg(not(target_os = "macos"))]
+        {
+            None
+        }
+    }
+
+    fn request_home_remove_action(&self) -> Result<Option<IdentityGateState>, String> {
+        #[cfg(target_os = "macos")]
+        {
+            let manager = Self::accounts_manager()?;
+            return Self::remove_selected_local_identity(&manager).map(Some);
+        }
+
+        #[cfg(not(target_os = "macos"))]
+        {
+            Ok(None)
         }
     }
 }

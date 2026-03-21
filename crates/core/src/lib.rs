@@ -12,6 +12,13 @@ pub struct SetupActionState {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HomeActionState {
+    pub label: String,
+    pub enabled: bool,
+    pub pending: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum IdentityGateState {
     Missing,
     Ready { account_id: String, npub: String },
@@ -22,6 +29,12 @@ pub trait RadrootsAppBackend {
     fn load_identity_state(&self) -> Result<IdentityGateState, String>;
     fn setup_action_state(&self) -> SetupActionState;
     fn request_setup_action(&self) -> Result<Option<IdentityGateState>, String>;
+    fn home_remove_action_state(&self) -> Option<HomeActionState> {
+        None
+    }
+    fn request_home_remove_action(&self) -> Result<Option<IdentityGateState>, String> {
+        Ok(None)
+    }
     fn poll_identity_state(&self) -> Result<Option<IdentityGateState>, String> {
         Ok(None)
     }
@@ -37,6 +50,7 @@ pub struct RadrootsApp {
     backend: Box<dyn RadrootsAppBackend>,
     screen: AppScreen,
     status_message: Option<String>,
+    home_remove_confirmation: bool,
 }
 
 impl RadrootsApp {
@@ -45,6 +59,7 @@ impl RadrootsApp {
             backend,
             screen: AppScreen::Setup,
             status_message: None,
+            home_remove_confirmation: false,
         };
         match app.backend.load_identity_state() {
             Ok(state) => app.apply_identity_state(state),
@@ -61,14 +76,17 @@ impl RadrootsApp {
             IdentityGateState::Missing => {
                 self.screen = AppScreen::Setup;
                 self.status_message = None;
+                self.home_remove_confirmation = false;
             }
             IdentityGateState::Ready { account_id, npub } => {
                 self.screen = AppScreen::Home { account_id, npub };
                 self.status_message = None;
+                self.home_remove_confirmation = false;
             }
             IdentityGateState::Unsupported { reason } => {
                 self.screen = AppScreen::Setup;
                 self.status_message = Some(reason);
+                self.home_remove_confirmation = false;
             }
         }
     }
@@ -76,6 +94,17 @@ impl RadrootsApp {
     fn request_setup_action(&mut self) {
         self.status_message = None;
         match self.backend.request_setup_action() {
+            Ok(Some(state)) => self.apply_identity_state(state),
+            Ok(None) => {}
+            Err(err) => {
+                self.status_message = Some(err);
+            }
+        }
+    }
+
+    fn request_home_remove_action(&mut self) {
+        self.status_message = None;
+        match self.backend.request_home_remove_action() {
             Ok(Some(state)) => self.apply_identity_state(state),
             Ok(None) => {}
             Err(err) => {
@@ -130,6 +159,41 @@ impl eframe::App for RadrootsApp {
                         ui.add_space(12.0);
                         ui.monospace(format!("account id: {account_id}"));
                         ui.monospace(format!("npub: {npub}"));
+
+                        if let Some(action) = self.backend.home_remove_action_state() {
+                            ui.add_space(20.0);
+                            if action.pending {
+                                ctx.request_repaint();
+                            }
+
+                            if self.home_remove_confirmation {
+                                ui.vertical_centered(|ui| {
+                                    ui.set_max_width(ui.available_width().min(560.0));
+                                    ui.label(
+                                        "This removes the current key from this device and returns the app to setup.",
+                                    );
+                                    ui.add_space(8.0);
+                                    ui.horizontal_centered(|ui| {
+                                        let confirm_clicked = ui
+                                            .add_enabled(
+                                                action.enabled,
+                                                egui::Button::new(action.label.clone()),
+                                            )
+                                            .clicked();
+                                        if confirm_clicked {
+                                            self.request_home_remove_action();
+                                        }
+
+                                        if ui.button("Cancel").clicked() {
+                                            self.home_remove_confirmation = false;
+                                            self.status_message = None;
+                                        }
+                                    });
+                                });
+                            } else if ui.button(action.label).clicked() {
+                                self.home_remove_confirmation = true;
+                            }
+                        }
                     }
                 }
 
@@ -153,7 +217,9 @@ mod tests {
     struct MockBackend {
         load: Result<IdentityGateState, String>,
         action_state: Rc<RefCell<SetupActionState>>,
+        home_remove_action_state: Rc<RefCell<Option<HomeActionState>>>,
         request: Rc<RefCell<VecDeque<Result<Option<IdentityGateState>, String>>>>,
+        remove_request: Rc<RefCell<VecDeque<Result<Option<IdentityGateState>, String>>>>,
         poll: Rc<RefCell<VecDeque<Result<Option<IdentityGateState>, String>>>>,
     }
 
@@ -167,9 +233,21 @@ mod tests {
             Self {
                 load,
                 action_state: Rc::new(RefCell::new(action_state)),
+                home_remove_action_state: Rc::new(RefCell::new(None)),
                 request: Rc::new(RefCell::new(request.into())),
+                remove_request: Rc::new(RefCell::new(VecDeque::new())),
                 poll: Rc::new(RefCell::new(poll.into())),
             }
+        }
+
+        fn with_home_remove_action(
+            self,
+            action_state: Option<HomeActionState>,
+            request: Vec<Result<Option<IdentityGateState>, String>>,
+        ) -> Self {
+            *self.home_remove_action_state.borrow_mut() = action_state;
+            *self.remove_request.borrow_mut() = request.into();
+            self
         }
     }
 
@@ -187,6 +265,17 @@ mod tests {
                 .borrow_mut()
                 .pop_front()
                 .unwrap_or_else(|| Err("missing request response".into()))
+        }
+
+        fn home_remove_action_state(&self) -> Option<HomeActionState> {
+            self.home_remove_action_state.borrow().clone()
+        }
+
+        fn request_home_remove_action(&self) -> Result<Option<IdentityGateState>, String> {
+            self.remove_request
+                .borrow_mut()
+                .pop_front()
+                .unwrap_or_else(|| Err("missing remove response".into()))
         }
 
         fn poll_identity_state(&self) -> Result<Option<IdentityGateState>, String> {
@@ -308,5 +397,73 @@ mod tests {
                 npub: "npub1abc".into(),
             }
         );
+    }
+
+    #[test]
+    fn home_remove_action_transitions_to_setup() {
+        let mut app = RadrootsApp::new(Box::new(
+            MockBackend::new(
+                Ok(IdentityGateState::Ready {
+                    account_id: "abc".into(),
+                    npub: "npub1abc".into(),
+                }),
+                vec![],
+                vec![],
+                SetupActionState {
+                    label: "Generate New Key".into(),
+                    enabled: true,
+                    pending: false,
+                },
+            )
+            .with_home_remove_action(
+                Some(HomeActionState {
+                    label: "Remove Key From This Device".into(),
+                    enabled: true,
+                    pending: false,
+                }),
+                vec![Ok(Some(IdentityGateState::Missing))],
+            ),
+        ));
+
+        app.home_remove_confirmation = true;
+        app.request_home_remove_action();
+
+        assert_eq!(app.screen, AppScreen::Setup);
+        assert_eq!(app.status_message, None);
+        assert!(!app.home_remove_confirmation);
+    }
+
+    #[test]
+    fn failed_home_remove_action_keeps_home_screen_and_message() {
+        let mut app = RadrootsApp::new(Box::new(
+            MockBackend::new(
+                Ok(IdentityGateState::Ready {
+                    account_id: "abc".into(),
+                    npub: "npub1abc".into(),
+                }),
+                vec![],
+                vec![],
+                SetupActionState {
+                    label: "Generate New Key".into(),
+                    enabled: true,
+                    pending: false,
+                },
+            )
+            .with_home_remove_action(
+                Some(HomeActionState {
+                    label: "Remove Key From This Device".into(),
+                    enabled: true,
+                    pending: false,
+                }),
+                vec![Err("remove failed".into())],
+            ),
+        ));
+
+        app.home_remove_confirmation = true;
+        app.request_home_remove_action();
+
+        assert!(matches!(app.screen, AppScreen::Home { .. }));
+        assert_eq!(app.status_message.as_deref(), Some("remove failed"));
+        assert!(app.home_remove_confirmation);
     }
 }
