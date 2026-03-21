@@ -5,9 +5,9 @@ use directories::BaseDirs;
 use eframe::egui;
 use image::ImageFormat;
 #[cfg(target_os = "macos")]
-use radroots_studio_app_apple_security::{APPLE_NOSTR_SERVICE, RadrootsAppleKeychainVault};
+use radroots_studio_app_apple_security::{RadrootsAppleKeychainVault, APPLE_NOSTR_SERVICE};
 use radroots_studio_app_core::{
-    APP_NAME, HomeActionState, IdentityGateState, RadrootsApp, RadrootsAppBackend, SetupActionState,
+    HomeActionState, IdentityGateState, RadrootsApp, RadrootsAppBackend, SetupActionState, APP_NAME,
 };
 #[cfg(target_os = "macos")]
 use radroots_nostr_accounts::prelude::{
@@ -89,8 +89,13 @@ impl DesktopBackend {
     }
 
     #[cfg(target_os = "macos")]
+    fn accounts_path() -> Result<PathBuf, String> {
+        Ok(Self::app_data_root()?.join("nostr").join("accounts.json"))
+    }
+
+    #[cfg(target_os = "macos")]
     fn accounts_manager() -> Result<RadrootsNostrAccountsManager, String> {
-        let accounts_path = Self::app_data_root()?.join("nostr").join("accounts.json");
+        let accounts_path = Self::accounts_path()?;
         if let Some(parent) = accounts_path.parent() {
             Self::ensure_private_directory_tree(parent)?;
         }
@@ -130,6 +135,48 @@ impl DesktopBackend {
             .selected_account_status()
             .map_err(|source| source.to_string())?;
         Ok(Self::map_status(status))
+    }
+
+    #[cfg(target_os = "macos")]
+    fn remove_all_local_identities(
+        manager: &RadrootsNostrAccountsManager,
+    ) -> Result<IdentityGateState, String> {
+        let account_ids = manager
+            .list_accounts()
+            .map_err(|source| source.to_string())?
+            .into_iter()
+            .map(|record| record.account_id)
+            .collect::<Vec<_>>();
+
+        for account_id in account_ids {
+            manager
+                .remove_account(&account_id)
+                .map_err(|source| source.to_string())?;
+        }
+
+        let status = manager
+            .selected_account_status()
+            .map_err(|source| source.to_string())?;
+        Ok(Self::map_status(status))
+    }
+
+    #[cfg(target_os = "macos")]
+    fn remove_accounts_file_if_present(accounts_path: &Path) -> Result<(), String> {
+        match std::fs::remove_file(accounts_path) {
+            Ok(()) => Ok(()),
+            Err(source) if source.kind() == std::io::ErrorKind::NotFound => Ok(()),
+            Err(source) => Err(format!("failed to remove accounts file: {source}")),
+        }
+    }
+
+    #[cfg(target_os = "macos")]
+    fn reset_local_device_state(
+        manager: &RadrootsNostrAccountsManager,
+        accounts_path: &Path,
+    ) -> Result<IdentityGateState, String> {
+        let state = Self::remove_all_local_identities(manager)?;
+        Self::remove_accounts_file_if_present(accounts_path)?;
+        Ok(state)
     }
 }
 
@@ -220,6 +267,36 @@ impl RadrootsAppBackend for DesktopBackend {
             Ok(None)
         }
     }
+
+    fn home_reset_action_state(&self) -> Option<HomeActionState> {
+        #[cfg(target_os = "macos")]
+        {
+            return Some(HomeActionState {
+                label: "Reset This Device".to_owned(),
+                enabled: true,
+                pending: false,
+            });
+        }
+
+        #[cfg(not(target_os = "macos"))]
+        {
+            None
+        }
+    }
+
+    fn request_home_reset_action(&self) -> Result<Option<IdentityGateState>, String> {
+        #[cfg(target_os = "macos")]
+        {
+            let manager = Self::accounts_manager()?;
+            let accounts_path = Self::accounts_path()?;
+            return Self::reset_local_device_state(&manager, accounts_path.as_path()).map(Some);
+        }
+
+        #[cfg(not(target_os = "macos"))]
+        {
+            Ok(None)
+        }
+    }
 }
 
 fn main() -> eframe::Result<()> {
@@ -301,5 +378,42 @@ mod tests {
             vault.load_secret_hex(&account_id).expect("load missing"),
             None
         );
+    }
+
+    #[test]
+    fn remove_all_local_identities_clears_every_account() {
+        let manager =
+            radroots_nostr_accounts::prelude::RadrootsNostrAccountsManager::new_in_memory();
+
+        manager
+            .generate_identity(Some("first".into()), true)
+            .expect("generate first");
+        manager
+            .generate_identity(Some("second".into()), false)
+            .expect("generate second");
+
+        let state = DesktopBackend::remove_all_local_identities(&manager).expect("reset state");
+
+        assert_eq!(state, radroots_studio_app_core::IdentityGateState::Missing);
+        assert_eq!(manager.list_accounts().expect("list accounts").len(), 0);
+        assert_eq!(manager.selected_account_id().expect("selected"), None);
+    }
+
+    #[test]
+    fn remove_accounts_file_if_present_deletes_existing_file() {
+        let unique = format!(
+            "radroots-desktop-reset-{}-{}.json",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("system time")
+                .as_nanos()
+        );
+        let path = std::env::temp_dir().join(unique);
+        std::fs::write(&path, b"{}").expect("write accounts file");
+
+        DesktopBackend::remove_accounts_file_if_present(path.as_path()).expect("remove file");
+
+        assert!(!path.exists());
     }
 }

@@ -35,6 +35,12 @@ pub trait RadrootsAppBackend {
     fn request_home_remove_action(&self) -> Result<Option<IdentityGateState>, String> {
         Ok(None)
     }
+    fn home_reset_action_state(&self) -> Option<HomeActionState> {
+        None
+    }
+    fn request_home_reset_action(&self) -> Result<Option<IdentityGateState>, String> {
+        Ok(None)
+    }
     fn poll_identity_state(&self) -> Result<Option<IdentityGateState>, String> {
         Ok(None)
     }
@@ -46,11 +52,17 @@ enum AppScreen {
     Home { account_id: String, npub: String },
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PendingHomeConfirmation {
+    RemoveKey,
+    ResetDevice,
+}
+
 pub struct RadrootsApp {
     backend: Box<dyn RadrootsAppBackend>,
     screen: AppScreen,
     status_message: Option<String>,
-    home_remove_confirmation: bool,
+    pending_home_confirmation: Option<PendingHomeConfirmation>,
 }
 
 impl RadrootsApp {
@@ -59,7 +71,7 @@ impl RadrootsApp {
             backend,
             screen: AppScreen::Setup,
             status_message: None,
-            home_remove_confirmation: false,
+            pending_home_confirmation: None,
         };
         match app.backend.load_identity_state() {
             Ok(state) => app.apply_identity_state(state),
@@ -76,17 +88,17 @@ impl RadrootsApp {
             IdentityGateState::Missing => {
                 self.screen = AppScreen::Setup;
                 self.status_message = None;
-                self.home_remove_confirmation = false;
+                self.pending_home_confirmation = None;
             }
             IdentityGateState::Ready { account_id, npub } => {
                 self.screen = AppScreen::Home { account_id, npub };
                 self.status_message = None;
-                self.home_remove_confirmation = false;
+                self.pending_home_confirmation = None;
             }
             IdentityGateState::Unsupported { reason } => {
                 self.screen = AppScreen::Setup;
                 self.status_message = Some(reason);
-                self.home_remove_confirmation = false;
+                self.pending_home_confirmation = None;
             }
         }
     }
@@ -105,6 +117,17 @@ impl RadrootsApp {
     fn request_home_remove_action(&mut self) {
         self.status_message = None;
         match self.backend.request_home_remove_action() {
+            Ok(Some(state)) => self.apply_identity_state(state),
+            Ok(None) => {}
+            Err(err) => {
+                self.status_message = Some(err);
+            }
+        }
+    }
+
+    fn request_home_reset_action(&mut self) {
+        self.status_message = None;
+        match self.backend.request_home_reset_action() {
             Ok(Some(state)) => self.apply_identity_state(state),
             Ok(None) => {}
             Err(err) => {
@@ -166,7 +189,9 @@ impl eframe::App for RadrootsApp {
                                 ctx.request_repaint();
                             }
 
-                            if self.home_remove_confirmation {
+                            if self.pending_home_confirmation
+                                == Some(PendingHomeConfirmation::RemoveKey)
+                            {
                                 ui.vertical_centered(|ui| {
                                     ui.set_max_width(ui.available_width().min(560.0));
                                     ui.label(
@@ -185,13 +210,56 @@ impl eframe::App for RadrootsApp {
                                         }
 
                                         if ui.button("Cancel").clicked() {
-                                            self.home_remove_confirmation = false;
+                                            self.pending_home_confirmation = None;
                                             self.status_message = None;
                                         }
                                     });
                                 });
-                            } else if ui.button(action.label).clicked() {
-                                self.home_remove_confirmation = true;
+                            } else if self.pending_home_confirmation.is_none()
+                                && ui.button(action.label).clicked()
+                            {
+                                self.pending_home_confirmation =
+                                    Some(PendingHomeConfirmation::RemoveKey);
+                            }
+                        }
+
+                        if let Some(action) = self.backend.home_reset_action_state() {
+                            ui.add_space(12.0);
+                            if action.pending {
+                                ctx.request_repaint();
+                            }
+
+                            if self.pending_home_confirmation
+                                == Some(PendingHomeConfirmation::ResetDevice)
+                            {
+                                ui.vertical_centered(|ui| {
+                                    ui.set_max_width(ui.available_width().min(560.0));
+                                    ui.label(
+                                        "This removes all local identity and app state from this device and returns the app to setup.",
+                                    );
+                                    ui.add_space(8.0);
+                                    ui.horizontal_centered(|ui| {
+                                        let confirm_clicked = ui
+                                            .add_enabled(
+                                                action.enabled,
+                                                egui::Button::new(action.label.clone()),
+                                            )
+                                            .clicked();
+                                        if confirm_clicked {
+                                            self.request_home_reset_action();
+                                        }
+
+                                        if ui.button("Cancel").clicked() {
+                                            self.pending_home_confirmation = None;
+                                            self.status_message = None;
+                                        }
+                                    });
+                                });
+                            } else if self.pending_home_confirmation.is_none()
+                                && ui.button(action.label).clicked()
+                            {
+                                self.pending_home_confirmation =
+                                    Some(PendingHomeConfirmation::ResetDevice);
                             }
                         }
                     }
@@ -218,8 +286,10 @@ mod tests {
         load: Result<IdentityGateState, String>,
         action_state: Rc<RefCell<SetupActionState>>,
         home_remove_action_state: Rc<RefCell<Option<HomeActionState>>>,
+        home_reset_action_state: Rc<RefCell<Option<HomeActionState>>>,
         request: Rc<RefCell<VecDeque<Result<Option<IdentityGateState>, String>>>>,
         remove_request: Rc<RefCell<VecDeque<Result<Option<IdentityGateState>, String>>>>,
+        reset_request: Rc<RefCell<VecDeque<Result<Option<IdentityGateState>, String>>>>,
         poll: Rc<RefCell<VecDeque<Result<Option<IdentityGateState>, String>>>>,
     }
 
@@ -234,8 +304,10 @@ mod tests {
                 load,
                 action_state: Rc::new(RefCell::new(action_state)),
                 home_remove_action_state: Rc::new(RefCell::new(None)),
+                home_reset_action_state: Rc::new(RefCell::new(None)),
                 request: Rc::new(RefCell::new(request.into())),
                 remove_request: Rc::new(RefCell::new(VecDeque::new())),
+                reset_request: Rc::new(RefCell::new(VecDeque::new())),
                 poll: Rc::new(RefCell::new(poll.into())),
             }
         }
@@ -247,6 +319,16 @@ mod tests {
         ) -> Self {
             *self.home_remove_action_state.borrow_mut() = action_state;
             *self.remove_request.borrow_mut() = request.into();
+            self
+        }
+
+        fn with_home_reset_action(
+            self,
+            action_state: Option<HomeActionState>,
+            request: Vec<Result<Option<IdentityGateState>, String>>,
+        ) -> Self {
+            *self.home_reset_action_state.borrow_mut() = action_state;
+            *self.reset_request.borrow_mut() = request.into();
             self
         }
     }
@@ -276,6 +358,17 @@ mod tests {
                 .borrow_mut()
                 .pop_front()
                 .unwrap_or_else(|| Err("missing remove response".into()))
+        }
+
+        fn home_reset_action_state(&self) -> Option<HomeActionState> {
+            self.home_reset_action_state.borrow().clone()
+        }
+
+        fn request_home_reset_action(&self) -> Result<Option<IdentityGateState>, String> {
+            self.reset_request
+                .borrow_mut()
+                .pop_front()
+                .unwrap_or_else(|| Err("missing reset response".into()))
         }
 
         fn poll_identity_state(&self) -> Result<Option<IdentityGateState>, String> {
@@ -425,12 +518,12 @@ mod tests {
             ),
         ));
 
-        app.home_remove_confirmation = true;
+        app.pending_home_confirmation = Some(PendingHomeConfirmation::RemoveKey);
         app.request_home_remove_action();
 
         assert_eq!(app.screen, AppScreen::Setup);
         assert_eq!(app.status_message, None);
-        assert!(!app.home_remove_confirmation);
+        assert_eq!(app.pending_home_confirmation, None);
     }
 
     #[test]
@@ -459,11 +552,85 @@ mod tests {
             ),
         ));
 
-        app.home_remove_confirmation = true;
+        app.pending_home_confirmation = Some(PendingHomeConfirmation::RemoveKey);
         app.request_home_remove_action();
 
         assert!(matches!(app.screen, AppScreen::Home { .. }));
         assert_eq!(app.status_message.as_deref(), Some("remove failed"));
-        assert!(app.home_remove_confirmation);
+        assert_eq!(
+            app.pending_home_confirmation,
+            Some(PendingHomeConfirmation::RemoveKey)
+        );
+    }
+
+    #[test]
+    fn home_reset_action_transitions_to_setup() {
+        let mut app = RadrootsApp::new(Box::new(
+            MockBackend::new(
+                Ok(IdentityGateState::Ready {
+                    account_id: "abc".into(),
+                    npub: "npub1abc".into(),
+                }),
+                vec![],
+                vec![],
+                SetupActionState {
+                    label: "Generate New Key".into(),
+                    enabled: true,
+                    pending: false,
+                },
+            )
+            .with_home_reset_action(
+                Some(HomeActionState {
+                    label: "Reset This Device".into(),
+                    enabled: true,
+                    pending: false,
+                }),
+                vec![Ok(Some(IdentityGateState::Missing))],
+            ),
+        ));
+
+        app.pending_home_confirmation = Some(PendingHomeConfirmation::ResetDevice);
+        app.request_home_reset_action();
+
+        assert_eq!(app.screen, AppScreen::Setup);
+        assert_eq!(app.status_message, None);
+        assert_eq!(app.pending_home_confirmation, None);
+    }
+
+    #[test]
+    fn failed_home_reset_action_keeps_home_screen_and_message() {
+        let mut app = RadrootsApp::new(Box::new(
+            MockBackend::new(
+                Ok(IdentityGateState::Ready {
+                    account_id: "abc".into(),
+                    npub: "npub1abc".into(),
+                }),
+                vec![],
+                vec![],
+                SetupActionState {
+                    label: "Generate New Key".into(),
+                    enabled: true,
+                    pending: false,
+                },
+            )
+            .with_home_reset_action(
+                Some(HomeActionState {
+                    label: "Reset This Device".into(),
+                    enabled: true,
+                    pending: false,
+                }),
+                vec![Err("reset failed".into())],
+            ),
+        ));
+
+        app.pending_home_confirmation = Some(PendingHomeConfirmation::ResetDevice);
+        app.request_home_reset_action();
+
+        assert!(matches!(app.screen, AppScreen::Home { .. }));
+        assert_eq!(app.status_message.as_deref(), Some("reset failed"));
+        assert_eq!(
+            app.pending_home_confirmation,
+            Some(PendingHomeConfirmation::ResetDevice)
+        );
     }
 }
