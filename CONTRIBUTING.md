@@ -104,21 +104,21 @@ Run the Android app in the emulator:
 Check the wasm application:
 
 ```bash
-env -u NO_COLOR cargo check -p radroots-app-web --target wasm32-unknown-unknown
+./scripts/with-wasm-toolchain.sh env -u NO_COLOR cargo check -p radroots-app-web --target wasm32-unknown-unknown
 ```
 
 Build the wasm application:
 
 ```bash
 cd crates/web
-env -u NO_COLOR trunk build
+../../scripts/with-wasm-toolchain.sh env -u NO_COLOR trunk build
 ```
 
 Run the wasm application:
 
 ```bash
 cd crates/web
-env -u NO_COLOR trunk serve --open
+../../scripts/with-wasm-toolchain.sh env -u NO_COLOR trunk serve --open
 ```
 
 Test the Apple native security package:
