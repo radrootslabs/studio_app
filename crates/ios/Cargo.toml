@@ -17,6 +17,9 @@ crate-type = ["staticlib", "rlib"]
 [dependencies]
 eframe.workspace = true
 radroots-app-core = { path = "../core" }
+radroots-identity.workspace = true
+radroots-nostr-accounts.workspace = true
+zeroize.workspace = true
 
 [target.'cfg(target_os = "ios")'.dependencies]
 wgpu = { workspace = true, features = ["metal", "wgsl"] }

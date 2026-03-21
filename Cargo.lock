@@ -2762,7 +2762,10 @@ version = "0.1.0"
 dependencies = [
  "eframe",
  "radroots-app-core",
+ "radroots-identity",
+ "radroots-nostr-accounts",
  "wgpu",
+ "zeroize",
 ]
 
 [[package]]

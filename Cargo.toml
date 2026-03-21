@@ -25,10 +25,12 @@ log = "0.4.28"
 nostr = { version = "0.44.1", default-features = false, features = ["std"] }
 nostr-browser-signer = "0.44.1"
 objc2-foundation = { version = "0.3.2", default-features = false, features = ["std"] }
+radroots-identity = { path = "../lib/crates/identity", default-features = false, features = ["std"] }
 radroots-nostr-accounts = { path = "../lib/crates/nostr-accounts", default-features = false, features = ["std", "file-store", "os-keyring"] }
 wasm-bindgen-futures = "0.4.50"
 web-sys = { version = "0.3.91", features = ["Document", "HtmlCanvasElement", "Window"] }
 wgpu = { version = "27.0.1", default-features = false }
+zeroize = "1.8.2"
 
 [workspace.lints.rust]
 unsafe_code = "forbid"
