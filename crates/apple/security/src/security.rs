@@ -65,6 +65,11 @@ unsafe extern "C" {
         error_out: *mut *mut c_char,
     ) -> i32;
 
+    fn radroots_studio_apple_user_presence_verify(
+        reason: *const c_char,
+        error_out: *mut *mut c_char,
+    ) -> i32;
+
     fn radroots_studio_apple_buffer_free(buffer: *mut u8, length: isize);
     fn radroots_studio_apple_c_string_free(string: *mut c_char);
 }
@@ -315,6 +320,42 @@ pub fn remove_secret(
         let _ = (service, namespace, name);
         Err(RadrootsNostrAccountsError::Vault(
             "apple keychain storage is only available on ios and macos".to_owned(),
+        ))
+    }
+}
+
+pub fn verify_user_presence(reason: &str) -> Result<(), RadrootsNostrAccountsError> {
+    #[cfg(any(target_os = "ios", target_os = "macos"))]
+    {
+        let reason = c_string(reason)?;
+        let mut ffi_error = FfiErrorString::new();
+        let status = unsafe {
+            // SAFETY: the reason pointer is derived from a live CString and the error output
+            // references live local storage for the duration of the call.
+            radroots_studio_apple_user_presence_verify(reason.as_ptr(), ffi_error.as_mut_ptr())
+        };
+        return match AppleSecretStatus::from_raw(status)? {
+            AppleSecretStatus::Success => Ok(()),
+            AppleSecretStatus::NotFound => Err(vault_error(
+                ffi_error,
+                "apple security ffi reported not found during user presence verification",
+            )),
+            AppleSecretStatus::InvalidInput => Err(vault_error(
+                ffi_error,
+                "apple security ffi rejected the user presence request",
+            )),
+            AppleSecretStatus::Error => Err(vault_error(
+                ffi_error,
+                "apple user presence verification failed",
+            )),
+        };
+    }
+
+    #[cfg(not(any(target_os = "ios", target_os = "macos")))]
+    {
+        let _ = reason;
+        Err(RadrootsNostrAccountsError::Vault(
+            "apple user presence verification is only available on ios and macos".to_owned(),
         ))
     }
 }

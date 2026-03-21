@@ -5,7 +5,9 @@ use directories::BaseDirs;
 use eframe::egui;
 use image::ImageFormat;
 #[cfg(target_os = "macos")]
-use radroots_studio_app_apple_security::{APPLE_NOSTR_SERVICE, RadrootsAppleKeychainVault};
+use radroots_studio_app_apple_security::{
+    APPLE_NOSTR_SERVICE, RadrootsAppleKeychainVault, verify_user_presence,
+};
 use radroots_studio_app_core::{
     APP_NAME, HomeActionKind, HomeActionResult, HomeActionState, IdentityGateState, RadrootsApp,
     RadrootsAppBackend, SetupActionState,
@@ -146,6 +148,9 @@ impl DesktopBackend {
     fn export_selected_local_recovery_key(
         manager: &RadrootsNostrAccountsManager,
     ) -> Result<String, String> {
+        verify_user_presence("reveal the current recovery key")
+            .map_err(|source| source.to_string())?;
+
         let Some(account_id) = manager
             .selected_account_id()
             .map_err(|source| source.to_string())?

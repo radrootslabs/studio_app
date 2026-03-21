@@ -11,8 +11,10 @@ fn main() {
 
     let manifest_dir = PathBuf::from(env::var_os("CARGO_MANIFEST_DIR").expect("manifest dir"));
     let package_dir = manifest_dir.join("../../native/apple/swift/RadRootsAppleSecurity");
+    let info_plist_path = manifest_dir.join("macos/Info.plist");
 
     emit_rerun_paths(&package_dir);
+    println!("cargo:rerun-if-changed={}", info_plist_path.display());
 
     let configuration = if env::var("PROFILE").ok().as_deref() == Some("release") {
         "release"
@@ -38,6 +40,10 @@ fn main() {
     println!("cargo:rustc-link-lib=framework=Security");
     println!("cargo:rustc-link-lib=framework=LocalAuthentication");
     println!("cargo:rustc-link-arg=-Wl,-rpath,{}", bin_path.display());
+    println!(
+        "cargo:rustc-link-arg-bin=radroots-app-desktop=-Wl,-sectcreate,__TEXT,__info_plist,{}",
+        info_plist_path.display()
+    );
 }
 
 fn emit_rerun_paths(package_dir: &Path) {

@@ -45,6 +45,44 @@ public struct RadRootsAppleUserPresenceStatus: Sendable {
 public actor RadRootsAppleUserPresence {
     public init() {}
 
+    public static func verifySync(
+        reason: String,
+        policy: RadRootsAppleUserPresencePolicy = .deviceOwnerAuthentication
+    ) throws -> Bool {
+        #if canImport(LocalAuthentication)
+        let context = LAContext()
+        let lock = NSLock()
+        let semaphore = DispatchSemaphore(value: 0)
+        var result: Result<Bool, Error>?
+
+        context.evaluatePolicy(
+            Self.makePolicy(policy),
+            localizedReason: reason
+        ) { success, error in
+            lock.lock()
+            if let error {
+                result = .failure(Self.adapt(error: error))
+            } else {
+                result = .success(success)
+            }
+            lock.unlock()
+            semaphore.signal()
+        }
+
+        semaphore.wait()
+
+        lock.lock()
+        defer { lock.unlock() }
+        return try result?.get() ?? {
+            throw RadRootsAppleSecurityError.transientFailure(
+                "local authentication did not return a result"
+            )
+        }()
+        #else
+        throw RadRootsAppleSecurityError.unavailable("local authentication is unavailable")
+        #endif
+    }
+
     public func currentStatus() -> RadRootsAppleUserPresenceStatus {
         #if canImport(LocalAuthentication)
         let context = LAContext()

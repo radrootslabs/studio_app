@@ -114,6 +114,31 @@ public func radroots_studio_apple_secret_store_delete(
     }
 }
 
+@_cdecl("radroots_studio_apple_user_presence_verify")
+public func radroots_studio_apple_user_presence_verify(
+    _ reason: UnsafePointer<CChar>?,
+    _ errorOut: UnsafeMutablePointer<UnsafeMutablePointer<CChar>?>?
+) -> Int32 {
+    do {
+        guard let reasonPointer = reason else {
+            throw RadRootsAppleSecurityError.invalidRequest("verification reason is required")
+        }
+        let reason = String(cString: reasonPointer)
+        guard !reason.isEmpty else {
+            throw RadRootsAppleSecurityError.invalidRequest("verification reason cannot be empty")
+        }
+        guard try RadRootsAppleUserPresence.verifySync(reason: reason) else {
+            throw RadRootsAppleSecurityError.permissionDenied(
+                "local authentication did not authorize access"
+            )
+        }
+        return RadRootsAppleFFIStatus.success.rawValue
+    } catch {
+        setError(error, into: errorOut)
+        return statusForError(error)
+    }
+}
+
 @_cdecl("radroots_studio_apple_buffer_free")
 public func radroots_studio_apple_buffer_free(
     _ buffer: UnsafeMutablePointer<UInt8>?,
