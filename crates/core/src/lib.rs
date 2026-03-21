@@ -130,7 +130,7 @@ impl RadrootsApp {
                 "This removes the current key from this device and returns the app to setup."
             }
             HomeActionKind::ResetDevice => {
-                "This removes all local identity and app state from this device and returns the app to setup."
+                "This removes all app-managed local identity state from this device and returns the app to setup."
             }
             HomeActionKind::DisconnectSigner => {
                 "This disconnects the current browser signer from the app. It does not delete the signer key."
