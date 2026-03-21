@@ -3,6 +3,7 @@
 
 use directories::BaseDirs;
 use eframe::egui;
+use image::ImageFormat;
 #[cfg(target_os = "macos")]
 use radroots_studio_app_apple_security::{APPLE_NOSTR_SERVICE, RadrootsAppleKeychainVault};
 use radroots_studio_app_core::{
@@ -16,6 +17,8 @@ use radroots_nostr_accounts::prelude::{
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
+const RADROOTS_DESKTOP_ICON_BYTES: &[u8] = include_bytes!("../assets/icons/radroots-logo.ico");
+
 #[cfg(target_os = "macos")]
 fn set_macos_app_name() {
     use objc2_foundation::{NSProcessInfo, NSString};
@@ -27,6 +30,18 @@ fn set_macos_app_name() {
 
 #[cfg(not(target_os = "macos"))]
 fn set_macos_app_name() {}
+
+fn desktop_icon() -> Option<egui::IconData> {
+    let image =
+        image::load_from_memory_with_format(RADROOTS_DESKTOP_ICON_BYTES, ImageFormat::Ico).ok()?;
+    let image = image.into_rgba8();
+    let (width, height) = image.dimensions();
+    Some(egui::IconData {
+        rgba: image.into_raw(),
+        width,
+        height,
+    })
+}
 
 struct DesktopBackend;
 
@@ -210,10 +225,19 @@ impl RadrootsAppBackend for DesktopBackend {
 fn main() -> eframe::Result<()> {
     set_macos_app_name();
 
-    let options = eframe::NativeOptions {
-        viewport: egui::ViewportBuilder::default()
+    let viewport = {
+        let viewport = egui::ViewportBuilder::default()
             .with_inner_size([1280.0, 820.0])
-            .with_min_inner_size([480.0, 320.0]),
+            .with_min_inner_size([480.0, 320.0]);
+        if let Some(icon) = desktop_icon() {
+            viewport.with_icon(icon)
+        } else {
+            viewport
+        }
+    };
+
+    let options = eframe::NativeOptions {
+        viewport,
         ..Default::default()
     };
 

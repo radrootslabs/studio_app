@@ -18,6 +18,7 @@ workspace = true
 directories.workspace = true
 eframe.workspace = true
 egui.workspace = true
+image.workspace = true
 radroots-app-core = { path = "../core" }
 radroots-nostr-accounts.workspace = true
 

@@ -24,6 +24,7 @@ android_logger = "0.15.1"
 directories = "6"
 eframe = { version = "0.33.3", default-features = false, features = ["android-game-activity", "default_fonts", "glow", "wgpu", "wayland", "x11"] }
 egui = { version = "0.33.3", features = ["serde"] }
+image = { version = "0.25.10", default-features = false, features = ["ico", "png"] }
 jni = "0.21.1"
 log = "0.4.28"
 ndk-context = "0.1.1"
