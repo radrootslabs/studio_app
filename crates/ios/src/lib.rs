@@ -2,6 +2,8 @@
 
 #[cfg(target_os = "ios")]
 use eframe::egui::ViewportBuilder;
+#[cfg(target_os = "ios")]
+use radroots_studio_app_apple_security::verify_user_presence;
 #[cfg(any(target_os = "ios", test))]
 use radroots_studio_app_core::IdentityGateState;
 #[cfg(target_os = "ios")]
@@ -81,6 +83,8 @@ impl IosBackend {
     fn export_selected_local_recovery_key(
         manager: &RadrootsNostrAccountsManager,
     ) -> Result<String, String> {
+        Self::authorize_recovery_key_export()?;
+
         let Some(account_id) = manager
             .selected_account_id()
             .map_err(|source| source.to_string())?
@@ -99,6 +103,16 @@ impl IosBackend {
         let identity = RadrootsIdentity::from_secret_key_str(secret_key_hex.as_str())
             .map_err(|source| source.to_string())?;
         Ok(identity.nsec())
+    }
+
+    #[cfg(target_os = "ios")]
+    fn authorize_recovery_key_export() -> Result<(), String> {
+        verify_user_presence("reveal the current recovery key").map_err(|source| source.to_string())
+    }
+
+    #[cfg(not(target_os = "ios"))]
+    fn authorize_recovery_key_export() -> Result<(), String> {
+        Ok(())
     }
 
     fn remove_all_local_identities(
