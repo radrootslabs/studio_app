@@ -2,11 +2,11 @@
 
 #[cfg(target_os = "ios")]
 use eframe::egui::ViewportBuilder;
+#[cfg(any(target_os = "ios", test))]
+use radroots_studio_app_core::IdentityGateState;
 #[cfg(target_os = "ios")]
-use radroots_studio_app_core::{
-    APP_NAME, IdentityGateState, RadrootsApp, RadrootsAppBackend, SetupActionState,
-};
-#[cfg(target_os = "ios")]
+use radroots_studio_app_core::{APP_NAME, RadrootsApp, RadrootsAppBackend, SetupActionState};
+#[cfg(any(target_os = "ios", test))]
 use radroots_nostr_accounts::prelude::{
     RadrootsNostrAccountsManager, RadrootsNostrSelectedAccountStatus,
 };
@@ -18,32 +18,43 @@ mod storage;
 #[cfg(any(target_os = "ios", test))]
 mod vault;
 
-#[cfg(target_os = "ios")]
+#[cfg(any(target_os = "ios", test))]
 struct IosBackend;
 
-#[cfg(target_os = "ios")]
+#[cfg(any(target_os = "ios", test))]
 impl IosBackend {
-    fn unsupported_reason() -> String {
-        "Secure onboarding is not yet available on iOS.".to_owned()
-    }
-
+    #[cfg(target_os = "ios")]
     fn accounts_manager() -> Result<RadrootsNostrAccountsManager, String> {
         storage::accounts_manager()
     }
 
     fn map_status(status: RadrootsNostrSelectedAccountStatus) -> IdentityGateState {
         match status {
+            RadrootsNostrSelectedAccountStatus::NotConfigured => IdentityGateState::Missing,
+            RadrootsNostrSelectedAccountStatus::PublicOnly { .. } => IdentityGateState::Missing,
             RadrootsNostrSelectedAccountStatus::Ready { account } => IdentityGateState::Ready {
                 account_id: account.account_id.to_string(),
                 npub: account.public_identity.public_key_npub,
             },
-            RadrootsNostrSelectedAccountStatus::NotConfigured
-            | RadrootsNostrSelectedAccountStatus::PublicOnly { .. } => {
-                IdentityGateState::Unsupported {
-                    reason: Self::unsupported_reason(),
-                }
-            }
         }
+    }
+
+    fn identity_state_from_manager(
+        manager: &RadrootsNostrAccountsManager,
+    ) -> Result<IdentityGateState, String> {
+        let status = manager
+            .selected_account_status()
+            .map_err(|source| source.to_string())?;
+        Ok(Self::map_status(status))
+    }
+
+    fn generate_local_identity(
+        manager: &RadrootsNostrAccountsManager,
+    ) -> Result<IdentityGateState, String> {
+        manager
+            .generate_identity(Some("local".to_owned()), true)
+            .map_err(|source| source.to_string())?;
+        Self::identity_state_from_manager(manager)
     }
 }
 
@@ -51,24 +62,20 @@ impl IosBackend {
 impl RadrootsAppBackend for IosBackend {
     fn load_identity_state(&self) -> Result<IdentityGateState, String> {
         let manager = Self::accounts_manager()?;
-        let status = manager
-            .selected_account_status()
-            .map_err(|source| source.to_string())?;
-        Ok(Self::map_status(status))
+        Self::identity_state_from_manager(&manager)
     }
 
     fn setup_action_state(&self) -> SetupActionState {
         SetupActionState {
-            label: "Not Yet Available".to_owned(),
-            enabled: false,
+            label: "Generate New Key".to_owned(),
+            enabled: true,
             pending: false,
         }
     }
 
     fn request_setup_action(&self) -> Result<Option<IdentityGateState>, String> {
-        Ok(Some(IdentityGateState::Unsupported {
-            reason: Self::unsupported_reason(),
-        }))
+        let manager = Self::accounts_manager()?;
+        Self::generate_local_identity(&manager).map(Some)
     }
 }
 
@@ -111,6 +118,7 @@ pub extern "C" fn radroots_ios_run() -> i32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use radroots_nostr_accounts::prelude::RadrootsNostrAccountsManager;
 
     #[test]
     fn non_ios_run_is_rejected() {
@@ -124,5 +132,28 @@ mod tests {
     #[test]
     fn exported_entrypoint_symbol_is_stable() {
         assert_eq!(ENTRYPOINT_SYMBOL, "radroots_ios_run");
+    }
+
+    #[test]
+    fn new_ios_manager_starts_in_setup_state() {
+        let manager = RadrootsNostrAccountsManager::new_in_memory();
+
+        assert_eq!(
+            IosBackend::identity_state_from_manager(&manager),
+            Ok(IdentityGateState::Missing)
+        );
+    }
+
+    #[test]
+    fn local_identity_generation_transitions_to_ready() {
+        let manager = RadrootsNostrAccountsManager::new_in_memory();
+
+        let state = IosBackend::generate_local_identity(&manager).expect("generate identity");
+        let IdentityGateState::Ready { account_id, npub } = state else {
+            panic!("expected ready identity state");
+        };
+
+        assert!(!account_id.is_empty());
+        assert!(npub.starts_with("npub1"));
     }
 }
