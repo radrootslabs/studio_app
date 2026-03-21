@@ -6,10 +6,12 @@ use android_logger::Config;
 use eframe::egui::ViewportBuilder;
 #[cfg(any(target_os = "android", test))]
 use radroots_studio_app_core::RadrootsAppBackend;
-#[cfg(any(target_os = "android", test))]
-use radroots_studio_app_core::{HomeActionKind, HomeActionState, IdentityGateState, SetupActionState};
 #[cfg(target_os = "android")]
-use radroots_studio_app_core::{RadrootsApp, APP_NAME};
+use radroots_studio_app_core::{APP_NAME, RadrootsApp};
+#[cfg(any(target_os = "android", test))]
+use radroots_studio_app_core::{
+    HomeActionKind, HomeActionResult, HomeActionState, IdentityGateState, SetupActionState,
+};
 #[cfg(test)]
 use radroots_identity::RadrootsIdentity;
 #[cfg(test)]
@@ -98,29 +100,27 @@ impl RadrootsAppBackend for AndroidBackend {
         }
     }
 
-    fn request_home_action(
-        &self,
-        action: HomeActionKind,
-    ) -> Result<Option<IdentityGateState>, String> {
+    fn request_home_action(&self, action: HomeActionKind) -> Result<HomeActionResult, String> {
         #[cfg(target_os = "android")]
         {
             let manager = Self::accounts_manager()?;
             return match action {
-                HomeActionKind::RemoveLocalKey => {
-                    Self::remove_selected_local_identity(&manager).map(Some)
-                }
+                HomeActionKind::BackupRecoveryKey => Ok(HomeActionResult::None),
+                HomeActionKind::RemoveLocalKey => Self::remove_selected_local_identity(&manager)
+                    .map(HomeActionResult::IdentityState),
                 HomeActionKind::ResetDevice => {
                     let accounts_path = storage::accounts_path()?;
-                    Self::reset_local_device_state(&manager, accounts_path.as_path()).map(Some)
+                    Self::reset_local_device_state(&manager, accounts_path.as_path())
+                        .map(HomeActionResult::IdentityState)
                 }
-                HomeActionKind::DisconnectSigner => Ok(None),
+                HomeActionKind::DisconnectSigner => Ok(HomeActionResult::None),
             };
         }
 
         #[cfg(not(target_os = "android"))]
         {
             let _ = action;
-            Ok(None)
+            Ok(HomeActionResult::None)
         }
     }
 }

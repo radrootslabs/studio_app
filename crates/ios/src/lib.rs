@@ -6,7 +6,8 @@ use eframe::egui::ViewportBuilder;
 use radroots_studio_app_core::IdentityGateState;
 #[cfg(target_os = "ios")]
 use radroots_studio_app_core::{
-    HomeActionKind, HomeActionState, RadrootsApp, RadrootsAppBackend, SetupActionState, APP_NAME,
+    APP_NAME, HomeActionKind, HomeActionResult, HomeActionState, RadrootsApp, RadrootsAppBackend,
+    SetupActionState,
 };
 #[cfg(any(target_os = "ios", test))]
 use radroots_nostr_accounts::prelude::{
@@ -148,18 +149,19 @@ impl RadrootsAppBackend for IosBackend {
         ]
     }
 
-    fn request_home_action(
-        &self,
-        action: HomeActionKind,
-    ) -> Result<Option<IdentityGateState>, String> {
+    fn request_home_action(&self, action: HomeActionKind) -> Result<HomeActionResult, String> {
         let manager = Self::accounts_manager()?;
         match action {
-            HomeActionKind::RemoveLocalKey => Self::remove_selected_local_identity(&manager).map(Some),
+            HomeActionKind::BackupRecoveryKey => Ok(HomeActionResult::None),
+            HomeActionKind::RemoveLocalKey => {
+                Self::remove_selected_local_identity(&manager).map(HomeActionResult::IdentityState)
+            }
             HomeActionKind::ResetDevice => {
                 let accounts_path = storage::accounts_path()?;
-                Self::reset_local_device_state(&manager, accounts_path.as_path()).map(Some)
+                Self::reset_local_device_state(&manager, accounts_path.as_path())
+                    .map(HomeActionResult::IdentityState)
             }
-            HomeActionKind::DisconnectSigner => Ok(None),
+            HomeActionKind::DisconnectSigner => Ok(HomeActionResult::None),
         }
     }
 }

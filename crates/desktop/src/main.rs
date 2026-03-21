@@ -5,10 +5,10 @@ use directories::BaseDirs;
 use eframe::egui;
 use image::ImageFormat;
 #[cfg(target_os = "macos")]
-use radroots_studio_app_apple_security::{RadrootsAppleKeychainVault, APPLE_NOSTR_SERVICE};
+use radroots_studio_app_apple_security::{APPLE_NOSTR_SERVICE, RadrootsAppleKeychainVault};
 use radroots_studio_app_core::{
-    HomeActionKind, HomeActionState, IdentityGateState, RadrootsApp, RadrootsAppBackend,
-    SetupActionState, APP_NAME,
+    APP_NAME, HomeActionKind, HomeActionResult, HomeActionState, IdentityGateState, RadrootsApp,
+    RadrootsAppBackend, SetupActionState,
 };
 #[cfg(target_os = "macos")]
 use radroots_nostr_accounts::prelude::{
@@ -265,29 +265,27 @@ impl RadrootsAppBackend for DesktopBackend {
         }
     }
 
-    fn request_home_action(
-        &self,
-        action: HomeActionKind,
-    ) -> Result<Option<IdentityGateState>, String> {
+    fn request_home_action(&self, action: HomeActionKind) -> Result<HomeActionResult, String> {
         #[cfg(target_os = "macos")]
         {
             let manager = Self::accounts_manager()?;
             return match action {
-                HomeActionKind::RemoveLocalKey => {
-                    Self::remove_selected_local_identity(&manager).map(Some)
-                }
+                HomeActionKind::BackupRecoveryKey => Ok(HomeActionResult::None),
+                HomeActionKind::RemoveLocalKey => Self::remove_selected_local_identity(&manager)
+                    .map(HomeActionResult::IdentityState),
                 HomeActionKind::ResetDevice => {
                     let accounts_path = Self::accounts_path()?;
-                    Self::reset_local_device_state(&manager, accounts_path.as_path()).map(Some)
+                    Self::reset_local_device_state(&manager, accounts_path.as_path())
+                        .map(HomeActionResult::IdentityState)
                 }
-                HomeActionKind::DisconnectSigner => Ok(None),
+                HomeActionKind::DisconnectSigner => Ok(HomeActionResult::None),
             };
         }
 
         #[cfg(not(target_os = "macos"))]
         {
             let _ = action;
-            Ok(None)
+            Ok(HomeActionResult::None)
         }
     }
 }

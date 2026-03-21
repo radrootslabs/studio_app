@@ -15,8 +15,8 @@ use nostr::signer::NostrSigner;
 use nostr_browser_signer::{BrowserSigner, Error as BrowserSignerError};
 #[cfg(target_arch = "wasm32")]
 use radroots_studio_app_core::{
-    HomeActionKind, HomeActionState, IdentityGateState, RadrootsApp, RadrootsAppBackend,
-    SetupActionState,
+    HomeActionKind, HomeActionResult, HomeActionState, IdentityGateState, RadrootsApp,
+    RadrootsAppBackend, SetupActionState,
 };
 
 #[cfg(target_arch = "wasm32")]
@@ -168,13 +168,14 @@ impl RadrootsAppBackend for WebBackend {
         }
     }
 
-    fn request_home_action(
-        &self,
-        action: HomeActionKind,
-    ) -> Result<Option<IdentityGateState>, String> {
+    fn request_home_action(&self, action: HomeActionKind) -> Result<HomeActionResult, String> {
         match action {
-            HomeActionKind::DisconnectSigner => Ok(Some(self.disconnect_signer())),
-            HomeActionKind::RemoveLocalKey | HomeActionKind::ResetDevice => Ok(None),
+            HomeActionKind::DisconnectSigner => {
+                Ok(HomeActionResult::IdentityState(self.disconnect_signer()))
+            }
+            HomeActionKind::BackupRecoveryKey
+            | HomeActionKind::RemoveLocalKey
+            | HomeActionKind::ResetDevice => Ok(HomeActionResult::None),
         }
     }
 
