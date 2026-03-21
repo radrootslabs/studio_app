@@ -14,7 +14,10 @@ use nostr::signer::NostrSigner;
 #[cfg(target_arch = "wasm32")]
 use nostr_browser_signer::{BrowserSigner, Error as BrowserSignerError};
 #[cfg(target_arch = "wasm32")]
-use radroots_studio_app_core::{IdentityGateState, RadrootsApp, RadrootsAppBackend, SetupActionState};
+use radroots_studio_app_core::{
+    HomeActionKind, HomeActionState, IdentityGateState, RadrootsApp, RadrootsAppBackend,
+    SetupActionState,
+};
 
 #[cfg(target_arch = "wasm32")]
 #[derive(Clone)]
@@ -69,6 +72,13 @@ impl WebBackend {
             }
             other => format!("Browser signer connection failed: {other}"),
         }
+    }
+
+    fn disconnect_signer(&self) -> IdentityGateState {
+        let mut state = self.state.borrow_mut();
+        state.connection = WebConnectionState::Disconnected;
+        state.pending_result = None;
+        IdentityGateState::Missing
     }
 }
 
@@ -143,6 +153,29 @@ impl RadrootsAppBackend for WebBackend {
         });
 
         Ok(None)
+    }
+
+    fn home_action_states(&self) -> Vec<HomeActionState> {
+        let state = self.state.borrow();
+        match &state.connection {
+            WebConnectionState::Ready(_) => vec![HomeActionState {
+                kind: HomeActionKind::DisconnectSigner,
+                label: "Disconnect Browser Signer".to_owned(),
+                enabled: true,
+                pending: false,
+            }],
+            WebConnectionState::Disconnected | WebConnectionState::Connecting => Vec::new(),
+        }
+    }
+
+    fn request_home_action(
+        &self,
+        action: HomeActionKind,
+    ) -> Result<Option<IdentityGateState>, String> {
+        match action {
+            HomeActionKind::DisconnectSigner => Ok(Some(self.disconnect_signer())),
+            HomeActionKind::RemoveLocalKey | HomeActionKind::ResetDevice => Ok(None),
+        }
     }
 
     fn poll_identity_state(&self) -> Result<Option<IdentityGateState>, String> {
