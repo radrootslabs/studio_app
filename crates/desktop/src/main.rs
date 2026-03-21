@@ -11,12 +11,16 @@ use radroots_studio_app_core::{
     RadrootsAppBackend, SetupActionState,
 };
 #[cfg(target_os = "macos")]
+use radroots_identity::RadrootsIdentity;
+#[cfg(target_os = "macos")]
 use radroots_nostr_accounts::prelude::{
     RadrootsNostrAccountsManager, RadrootsNostrFileAccountStore, RadrootsNostrSelectedAccountStatus,
 };
 #[cfg(target_os = "macos")]
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+#[cfg(target_os = "macos")]
+use zeroize::Zeroizing;
 
 const RADROOTS_DESKTOP_ICON_BYTES: &[u8] = include_bytes!("../assets/icons/radroots-logo.ico");
 
@@ -139,6 +143,30 @@ impl DesktopBackend {
     }
 
     #[cfg(target_os = "macos")]
+    fn export_selected_local_recovery_key(
+        manager: &RadrootsNostrAccountsManager,
+    ) -> Result<String, String> {
+        let Some(account_id) = manager
+            .selected_account_id()
+            .map_err(|source| source.to_string())?
+        else {
+            return Err("no selected local identity is available to back up".to_owned());
+        };
+
+        let Some(secret_key_hex) = manager
+            .export_secret_hex(&account_id)
+            .map_err(|source| source.to_string())?
+        else {
+            return Err("selected local identity does not have an exportable secret".to_owned());
+        };
+
+        let secret_key_hex = Zeroizing::new(secret_key_hex);
+        let identity = RadrootsIdentity::from_secret_key_str(secret_key_hex.as_str())
+            .map_err(|source| source.to_string())?;
+        Ok(identity.nsec())
+    }
+
+    #[cfg(target_os = "macos")]
     fn remove_all_local_identities(
         manager: &RadrootsNostrAccountsManager,
     ) -> Result<IdentityGateState, String> {
@@ -245,6 +273,12 @@ impl RadrootsAppBackend for DesktopBackend {
         {
             return vec![
                 HomeActionState {
+                    kind: HomeActionKind::BackupRecoveryKey,
+                    label: "Back Up Recovery Key".to_owned(),
+                    enabled: true,
+                    pending: false,
+                },
+                HomeActionState {
                     kind: HomeActionKind::RemoveLocalKey,
                     label: "Remove Key From This Device".to_owned(),
                     enabled: true,
@@ -270,7 +304,10 @@ impl RadrootsAppBackend for DesktopBackend {
         {
             let manager = Self::accounts_manager()?;
             return match action {
-                HomeActionKind::BackupRecoveryKey => Ok(HomeActionResult::None),
+                HomeActionKind::BackupRecoveryKey => {
+                    Self::export_selected_local_recovery_key(&manager)
+                        .map(|nsec| HomeActionResult::RevealRecoveryKey { nsec })
+                }
                 HomeActionKind::RemoveLocalKey => Self::remove_selected_local_identity(&manager)
                     .map(HomeActionResult::IdentityState),
                 HomeActionKind::ResetDevice => {
@@ -320,6 +357,7 @@ fn main() -> eframe::Result<()> {
 mod tests {
     use super::DesktopBackend;
     use radroots_studio_app_apple_security::RadrootsAppleKeychainVault;
+    use radroots_identity::RadrootsIdentity;
     use radroots_identity::RadrootsIdentityId;
     use radroots_nostr_accounts::prelude::RadrootsNostrSecretVault;
     use std::path::PathBuf;
@@ -388,6 +426,23 @@ mod tests {
         assert_eq!(state, radroots_studio_app_core::IdentityGateState::Missing);
         assert_eq!(manager.list_accounts().expect("list accounts").len(), 0);
         assert_eq!(manager.selected_account_id().expect("selected"), None);
+    }
+
+    #[test]
+    fn export_selected_local_recovery_key_returns_nsec() {
+        let manager =
+            radroots_nostr_accounts::prelude::RadrootsNostrAccountsManager::new_in_memory();
+        let identity = RadrootsIdentity::generate();
+
+        manager
+            .upsert_identity(&identity, Some("primary".into()), true)
+            .expect("store identity");
+
+        let nsec =
+            DesktopBackend::export_selected_local_recovery_key(&manager).expect("export recovery");
+
+        assert_eq!(nsec, identity.nsec());
+        assert!(nsec.starts_with("nsec1"));
     }
 
     #[test]

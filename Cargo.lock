@@ -2817,6 +2817,7 @@ dependencies = [
  "radroots-identity",
  "radroots-nostr-accounts",
  "wgpu",
+ "zeroize",
 ]
 
 [[package]]

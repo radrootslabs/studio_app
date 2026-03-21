@@ -21,6 +21,7 @@ egui.workspace = true
 image.workspace = true
 radroots-app-core = { path = "../core" }
 radroots-nostr-accounts.workspace = true
+zeroize.workspace = true
 
 [target.'cfg(any(target_os = "macos", target_os = "ios"))'.dependencies]
 wgpu = { workspace = true, features = ["metal", "wgsl"] }
