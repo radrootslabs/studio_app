@@ -6,10 +6,10 @@ use android_logger::Config;
 use eframe::egui::ViewportBuilder;
 #[cfg(any(target_os = "android", test))]
 use radroots_studio_app_core::RadrootsAppBackend;
-#[cfg(target_os = "android")]
-use radroots_studio_app_core::{APP_NAME, RadrootsApp};
 #[cfg(any(target_os = "android", test))]
-use radroots_studio_app_core::{IdentityGateState, SetupActionState};
+use radroots_studio_app_core::{HomeActionState, IdentityGateState, SetupActionState};
+#[cfg(target_os = "android")]
+use radroots_studio_app_core::{RadrootsApp, APP_NAME};
 #[cfg(test)]
 use radroots_identity::RadrootsIdentity;
 #[cfg(test)]
@@ -68,6 +68,35 @@ impl RadrootsAppBackend for AndroidBackend {
         #[cfg(not(target_os = "android"))]
         {
             Ok(Some(Self::unsupported_identity_state()))
+        }
+    }
+
+    fn home_remove_action_state(&self) -> Option<HomeActionState> {
+        #[cfg(target_os = "android")]
+        {
+            return Some(HomeActionState {
+                label: "Remove Key From This Device".to_owned(),
+                enabled: true,
+                pending: false,
+            });
+        }
+
+        #[cfg(not(target_os = "android"))]
+        {
+            None
+        }
+    }
+
+    fn request_home_remove_action(&self) -> Result<Option<IdentityGateState>, String> {
+        #[cfg(target_os = "android")]
+        {
+            let manager = Self::accounts_manager()?;
+            return Self::remove_selected_local_identity(&manager).map(Some);
+        }
+
+        #[cfg(not(target_os = "android"))]
+        {
+            Ok(None)
         }
     }
 }
@@ -131,6 +160,22 @@ impl AndroidBackend {
     ) -> Result<IdentityGateState, String> {
         manager
             .generate_identity(Some("local".to_owned()), true)
+            .map_err(|source| source.to_string())?;
+        Self::identity_state_from_manager(manager)
+    }
+
+    fn remove_selected_local_identity(
+        manager: &RadrootsNostrAccountsManager,
+    ) -> Result<IdentityGateState, String> {
+        let Some(account_id) = manager
+            .selected_account_id()
+            .map_err(|source| source.to_string())?
+        else {
+            return Ok(IdentityGateState::Missing);
+        };
+
+        manager
+            .remove_account(&account_id)
             .map_err(|source| source.to_string())?;
         Self::identity_state_from_manager(manager)
     }
@@ -262,5 +307,20 @@ mod tests {
 
         assert!(!account_id.is_empty());
         assert!(npub.starts_with("npub1"));
+    }
+
+    #[test]
+    fn local_identity_removal_transitions_android_back_to_missing() {
+        let manager = RadrootsNostrAccountsManager::new_in_memory();
+
+        AndroidBackend::generate_local_identity(&manager).expect("generate identity");
+        let state = AndroidBackend::remove_selected_local_identity(&manager)
+            .expect("remove selected account");
+
+        assert_eq!(state, IdentityGateState::Missing);
+        assert_eq!(
+            manager.selected_account_id().expect("selected account"),
+            None
+        );
     }
 }
