@@ -1,9 +1,14 @@
 #![forbid(unsafe_code)]
 
 use eframe::egui;
+use std::time::Duration;
 use zeroize::Zeroizing;
 
+mod offline_geocoder;
+
 pub const APP_NAME: &str = "Rad Roots";
+
+pub use offline_geocoder::RadrootsOfflineGeocoderState;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SetupActionState {
@@ -58,6 +63,12 @@ pub enum IdentityGateState {
 
 pub trait RadrootsAppBackend {
     fn load_identity_state(&self) -> Result<IdentityGateState, String>;
+    fn offline_geocoder_state(&self) -> Option<RadrootsOfflineGeocoderState> {
+        None
+    }
+    fn poll_offline_geocoder_state(&self) -> Result<Option<RadrootsOfflineGeocoderState>, String> {
+        Ok(None)
+    }
     fn setup_action_state(&self) -> SetupActionState;
     fn request_setup_action(&self) -> Result<Option<IdentityGateState>, String>;
     fn import_action_state(&self) -> Option<ImportActionState> {
@@ -98,6 +109,7 @@ enum AppScreen {
 pub struct RadrootsApp {
     backend: Box<dyn RadrootsAppBackend>,
     screen: AppScreen,
+    offline_geocoder_state: Option<RadrootsOfflineGeocoderState>,
     status_message: Option<String>,
     pending_home_confirmation: Option<HomeActionKind>,
     pending_import_entry: bool,
@@ -110,12 +122,14 @@ impl RadrootsApp {
         let mut app = Self {
             backend,
             screen: AppScreen::Setup,
+            offline_geocoder_state: None,
             status_message: None,
             pending_home_confirmation: None,
             pending_import_entry: false,
             secret_key_input: Zeroizing::new(String::new()),
             revealed_secret_key: None,
         };
+        app.offline_geocoder_state = app.backend.offline_geocoder_state();
         match app.backend.load_identity_state() {
             Ok(state) => app.apply_identity_state(state),
             Err(err) => {
@@ -240,6 +254,15 @@ impl RadrootsApp {
     }
 
     fn sync_backend(&mut self) {
+        match self.backend.poll_offline_geocoder_state() {
+            Ok(Some(state)) => {
+                self.offline_geocoder_state = Some(state);
+            }
+            Ok(None) => {}
+            Err(err) => {
+                self.status_message = Some(err);
+            }
+        }
         match self.backend.poll_home_action_result() {
             Ok(Some(result)) => self.apply_home_action_result(result),
             Ok(None) => {}
@@ -255,11 +278,39 @@ impl RadrootsApp {
             }
         }
     }
+
+    fn render_offline_geocoder_status(&self, ui: &mut egui::Ui) {
+        let Some(state) = &self.offline_geocoder_state else {
+            return;
+        };
+
+        ui.add_space(16.0);
+        ui.label(state.summary_label());
+
+        if let RadrootsOfflineGeocoderState::Unavailable {
+            user_message,
+            debug_message,
+        } = state
+        {
+            ui.add_space(6.0);
+            ui.label(user_message);
+            ui.add_space(6.0);
+            ui.collapsing("Offline geocoder debug details", |ui| {
+                ui.monospace(debug_message);
+            });
+        }
+    }
 }
 
 impl eframe::App for RadrootsApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         self.sync_backend();
+        if matches!(
+            self.offline_geocoder_state,
+            Some(RadrootsOfflineGeocoderState::Initializing)
+        ) {
+            ctx.request_repaint_after(Duration::from_millis(100));
+        }
 
         egui::CentralPanel::default().show(ctx, |ui| {
             ui.vertical_centered(|ui| {
@@ -423,6 +474,8 @@ impl eframe::App for RadrootsApp {
                     ui.add_space(16.0);
                     ui.label(message);
                 }
+
+                self.render_offline_geocoder_status(ui);
             });
         });
     }
@@ -438,6 +491,9 @@ mod tests {
     #[derive(Clone)]
     struct MockBackend {
         load: Result<IdentityGateState, String>,
+        offline_geocoder_state: Rc<RefCell<Option<RadrootsOfflineGeocoderState>>>,
+        offline_geocoder_poll:
+            Rc<RefCell<VecDeque<Result<Option<RadrootsOfflineGeocoderState>, String>>>>,
         action_state: Rc<RefCell<SetupActionState>>,
         import_action_state: Rc<RefCell<Option<ImportActionState>>>,
         import_paste_action_state: Rc<RefCell<Option<PasteActionState>>>,
@@ -459,6 +515,8 @@ mod tests {
         ) -> Self {
             Self {
                 load,
+                offline_geocoder_state: Rc::new(RefCell::new(None)),
+                offline_geocoder_poll: Rc::new(RefCell::new(VecDeque::new())),
                 action_state: Rc::new(RefCell::new(action_state)),
                 import_action_state: Rc::new(RefCell::new(None)),
                 import_paste_action_state: Rc::new(RefCell::new(None)),
@@ -470,6 +528,16 @@ mod tests {
                 home_poll: Rc::new(RefCell::new(VecDeque::new())),
                 poll: Rc::new(RefCell::new(poll.into())),
             }
+        }
+
+        fn with_offline_geocoder_state(
+            self,
+            state: RadrootsOfflineGeocoderState,
+            poll: Vec<Result<Option<RadrootsOfflineGeocoderState>, String>>,
+        ) -> Self {
+            *self.offline_geocoder_state.borrow_mut() = Some(state);
+            self.offline_geocoder_poll.borrow_mut().extend(poll);
+            self
         }
 
         fn with_import_action(
@@ -520,6 +588,19 @@ mod tests {
     impl RadrootsAppBackend for MockBackend {
         fn load_identity_state(&self) -> Result<IdentityGateState, String> {
             self.load.clone()
+        }
+
+        fn offline_geocoder_state(&self) -> Option<RadrootsOfflineGeocoderState> {
+            self.offline_geocoder_state.borrow().clone()
+        }
+
+        fn poll_offline_geocoder_state(
+            &self,
+        ) -> Result<Option<RadrootsOfflineGeocoderState>, String> {
+            self.offline_geocoder_poll
+                .borrow_mut()
+                .pop_front()
+                .unwrap_or(Ok(None))
         }
 
         fn setup_action_state(&self) -> SetupActionState {
@@ -1007,6 +1088,88 @@ mod tests {
         assert_eq!(
             app.revealed_secret_key.as_ref().map(|value| value.as_str()),
             Some("nsec1example")
+        );
+    }
+
+    #[test]
+    fn startup_uses_initial_offline_geocoder_state() {
+        let app = RadrootsApp::new(Box::new(
+            MockBackend::new(
+                Ok(IdentityGateState::Missing),
+                vec![],
+                vec![],
+                SetupActionState {
+                    label: "Generate New Key".into(),
+                    enabled: true,
+                    pending: false,
+                },
+            )
+            .with_offline_geocoder_state(RadrootsOfflineGeocoderState::Initializing, vec![]),
+        ));
+
+        assert_eq!(
+            app.offline_geocoder_state,
+            Some(RadrootsOfflineGeocoderState::Initializing)
+        );
+    }
+
+    #[test]
+    fn offline_geocoder_state_updates_after_poll() {
+        let mut app = RadrootsApp::new(Box::new(
+            MockBackend::new(
+                Ok(IdentityGateState::Missing),
+                vec![],
+                vec![],
+                SetupActionState {
+                    label: "Generate New Key".into(),
+                    enabled: true,
+                    pending: false,
+                },
+            )
+            .with_offline_geocoder_state(
+                RadrootsOfflineGeocoderState::Initializing,
+                vec![Ok(Some(RadrootsOfflineGeocoderState::Ready))],
+            ),
+        ));
+
+        app.sync_backend();
+
+        assert_eq!(
+            app.offline_geocoder_state,
+            Some(RadrootsOfflineGeocoderState::Ready)
+        );
+    }
+
+    #[test]
+    fn offline_geocoder_failure_keeps_user_and_debug_messages() {
+        let mut app = RadrootsApp::new(Box::new(
+            MockBackend::new(
+                Ok(IdentityGateState::Missing),
+                vec![],
+                vec![],
+                SetupActionState {
+                    label: "Generate New Key".into(),
+                    enabled: true,
+                    pending: false,
+                },
+            )
+            .with_offline_geocoder_state(
+                RadrootsOfflineGeocoderState::Initializing,
+                vec![Ok(Some(RadrootsOfflineGeocoderState::Unavailable {
+                    user_message: "Offline geocoder is unavailable on this device.".into(),
+                    debug_message: "failed to open staged geocoder db".into(),
+                }))],
+            ),
+        ));
+
+        app.sync_backend();
+
+        assert_eq!(
+            app.offline_geocoder_state,
+            Some(RadrootsOfflineGeocoderState::Unavailable {
+                user_message: "Offline geocoder is unavailable on this device.".into(),
+                debug_message: "failed to open staged geocoder db".into(),
+            })
         );
     }
 }
