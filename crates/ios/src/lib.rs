@@ -10,11 +10,15 @@ use radroots_studio_app_core::{
     SetupActionState,
 };
 #[cfg(any(target_os = "ios", test))]
+use radroots_identity::RadrootsIdentity;
+#[cfg(any(target_os = "ios", test))]
 use radroots_nostr_accounts::prelude::{
     RadrootsNostrAccountsManager, RadrootsNostrSelectedAccountStatus,
 };
 #[cfg(any(target_os = "ios", test))]
 use std::path::Path;
+#[cfg(any(target_os = "ios", test))]
+use zeroize::Zeroizing;
 
 #[cfg(any(target_os = "ios", test))]
 mod storage;
@@ -72,6 +76,29 @@ impl IosBackend {
             .remove_account(&account_id)
             .map_err(|source| source.to_string())?;
         Self::identity_state_from_manager(manager)
+    }
+
+    fn export_selected_local_recovery_key(
+        manager: &RadrootsNostrAccountsManager,
+    ) -> Result<String, String> {
+        let Some(account_id) = manager
+            .selected_account_id()
+            .map_err(|source| source.to_string())?
+        else {
+            return Err("no selected local identity is available to back up".to_owned());
+        };
+
+        let Some(secret_key_hex) = manager
+            .export_secret_hex(&account_id)
+            .map_err(|source| source.to_string())?
+        else {
+            return Err("selected local identity does not have an exportable secret".to_owned());
+        };
+
+        let secret_key_hex = Zeroizing::new(secret_key_hex);
+        let identity = RadrootsIdentity::from_secret_key_str(secret_key_hex.as_str())
+            .map_err(|source| source.to_string())?;
+        Ok(identity.nsec())
     }
 
     fn remove_all_local_identities(
@@ -135,6 +162,12 @@ impl RadrootsAppBackend for IosBackend {
     fn home_action_states(&self) -> Vec<HomeActionState> {
         vec![
             HomeActionState {
+                kind: HomeActionKind::BackupRecoveryKey,
+                label: "Back Up Recovery Key".to_owned(),
+                enabled: true,
+                pending: false,
+            },
+            HomeActionState {
                 kind: HomeActionKind::RemoveLocalKey,
                 label: "Remove Key From This Device".to_owned(),
                 enabled: true,
@@ -152,7 +185,8 @@ impl RadrootsAppBackend for IosBackend {
     fn request_home_action(&self, action: HomeActionKind) -> Result<HomeActionResult, String> {
         let manager = Self::accounts_manager()?;
         match action {
-            HomeActionKind::BackupRecoveryKey => Ok(HomeActionResult::None),
+            HomeActionKind::BackupRecoveryKey => Self::export_selected_local_recovery_key(&manager)
+                .map(|nsec| HomeActionResult::RevealRecoveryKey { nsec }),
             HomeActionKind::RemoveLocalKey => {
                 Self::remove_selected_local_identity(&manager).map(HomeActionResult::IdentityState)
             }
@@ -275,6 +309,22 @@ mod tests {
         assert_eq!(state, IdentityGateState::Missing);
         assert_eq!(manager.list_accounts().expect("list accounts").len(), 0);
         assert_eq!(manager.selected_account_id().expect("selected"), None);
+    }
+
+    #[test]
+    fn export_selected_local_recovery_key_returns_nsec() {
+        let manager = RadrootsNostrAccountsManager::new_in_memory();
+        let identity = RadrootsIdentity::generate();
+
+        manager
+            .upsert_identity(&identity, Some("primary".into()), true)
+            .expect("store identity");
+
+        let nsec =
+            IosBackend::export_selected_local_recovery_key(&manager).expect("export recovery");
+
+        assert_eq!(nsec, identity.nsec());
+        assert!(nsec.starts_with("nsec1"));
     }
 
     #[test]
