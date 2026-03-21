@@ -21,6 +21,8 @@ Install Trunk for the wasm target:
 cargo install trunk
 ```
 
+On hosts that will build or run the Android shell, ensure Java 17 or newer is available. The Android scripts bootstrap the local Gradle, SDK, NDK, `cargo-ndk`, and emulator resources into `platforms/android/.tooling` on demand.
+
 On macOS, ensure the Apple Swift toolchain is available. The desktop target links the shared Apple native security package during build.
 
 Confirm your environment:
@@ -29,6 +31,7 @@ Confirm your environment:
 cargo --version
 rustc --version
 trunk --version
+java --version
 ```
 
 On macOS, also confirm:
@@ -78,6 +81,24 @@ Run the native application:
 
 ```bash
 cargo run -p radroots-app-desktop
+```
+
+Check the Android target:
+
+```bash
+./scripts/check-android-target.sh
+```
+
+Build the Android host:
+
+```bash
+./scripts/build-android-host.sh
+```
+
+Run the Android app in the emulator:
+
+```bash
+./scripts/run-android-emulator.sh
 ```
 
 Check the wasm application:

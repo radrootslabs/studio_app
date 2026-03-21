@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <application
+        android:allowBackup="false"
+        android:icon="@drawable/radroots_logo"
+        android:label="@string/app_name"
+        android:roundIcon="@drawable/radroots_logo"
+        android:supportsRtl="true"
+        android:theme="@style/Theme.RadRoots">
+        <activity
+            android:name=".MainActivity"
+            android:configChanges="orientation|screenSize|screenLayout|keyboardHidden|keyboard|smallestScreenSize|uiMode|fontScale"
+            android:exported="true"
+            android:launchMode="singleTask"
+            android:windowSoftInputMode="adjustResize">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+
+            <meta-data
+                android:name="android.app.lib_name"
+                android:value="radroots_studio_app_android" />
+        </activity>
+    </application>
+    <uses-permission android:name="android.permission.INTERNET" />
+</manifest>

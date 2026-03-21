@@ -4,6 +4,11 @@
 /crates/web/dist/
 /native/apple/swift/**/.build/
 /native/apple/swift/**/.swiftpm/
+/platforms/android/.gradle/
+/platforms/android/.tooling/
+/platforms/android/app/build/
+/platforms/android/build/
+/platforms/android/local.properties
 /platforms/ios/.derived-data*/
 /platforms/ios/*.xcodeproj/
 

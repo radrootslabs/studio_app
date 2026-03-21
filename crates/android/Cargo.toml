@@ -1,0 +1,28 @@
+[package]
+name = "radroots-app-android"
+authors.workspace = true
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+homepage.workspace = true
+description = "Rad Roots Android launcher"
+publish = false
+
+[lib]
+path = "src/lib.rs"
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+eframe.workspace = true
+log.workspace = true
+radroots-app-core = { path = "../core" }
+
+[target.'cfg(target_os = "android")'.dependencies]
+android_logger.workspace = true
+wgpu = { workspace = true, features = ["vulkan", "gles", "wgsl"] }
+winit.workspace = true
+
+[lints.rust]
+unsafe_code = { level = "allow", priority = 1 }
