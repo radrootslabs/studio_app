@@ -17,6 +17,28 @@ require_command() {
   exit 1
 }
 
+host_os() {
+  uname -s
+}
+
+host_arch() {
+  uname -m
+}
+
+android_emulator_gpu_mode() {
+  if [[ -n "${RADROOTS_ANDROID_EMULATOR_GPU_MODE:-}" ]]; then
+    printf '%s\n' "${RADROOTS_ANDROID_EMULATOR_GPU_MODE}"
+    return
+  fi
+
+  if [[ "$(host_os)" == "Darwin" && "$(host_arch)" == "arm64" ]]; then
+    printf '%s\n' "swiftshader"
+    return
+  fi
+
+  printf '%s\n' "auto"
+}
+
 running_emulator_serial() {
   local target_avd="$1"
   while read -r serial state _; do
@@ -53,15 +75,21 @@ wait_for_boot_complete() {
 launch_emulator_if_needed() {
   local avd_name="$1"
   local serial
+  local gpu_mode
   serial="$(running_emulator_serial "${avd_name}" || true)"
   if [[ -n "${serial}" ]]; then
     printf '%s\n' "${serial}"
     return
   fi
 
+  gpu_mode="$(android_emulator_gpu_mode)"
   ANDROID_AVD_HOME="${android_avd_home}" \
     ANDROID_EMULATOR_HOME="${android_emulator_home}" \
-    nohup "${android_emulator_bin}" -avd "${avd_name}" -no-snapshot-save >/tmp/radroots-android-emulator.log 2>&1 &
+    nohup "${android_emulator_bin}" \
+      -avd "${avd_name}" \
+      -gpu "${gpu_mode}" \
+      -no-snapshot-load \
+      -no-snapshot-save >/tmp/radroots-android-emulator.log 2>&1 &
 
   for _ in $(seq 1 60); do
     serial="$(running_emulator_serial "${avd_name}" || true)"
