@@ -3,13 +3,14 @@
 
 use directories::BaseDirs;
 use eframe::egui;
+#[cfg(target_os = "macos")]
+use radroots_studio_app_apple_security::{APPLE_NOSTR_SERVICE, RadrootsAppleKeychainVault};
 use radroots_studio_app_core::{
     APP_NAME, IdentityGateState, RadrootsApp, RadrootsAppBackend, SetupActionState,
 };
 #[cfg(target_os = "macos")]
 use radroots_nostr_accounts::prelude::{
-    RadrootsNostrAccountsManager, RadrootsNostrFileAccountStore, RadrootsNostrSecretVaultOsKeyring,
-    RadrootsNostrSelectedAccountStatus,
+    RadrootsNostrAccountsManager, RadrootsNostrFileAccountStore, RadrootsNostrSelectedAccountStatus,
 };
 #[cfg(target_os = "macos")]
 use std::path::{Path, PathBuf};
@@ -80,9 +81,7 @@ impl DesktopBackend {
         }
 
         let store = Arc::new(RadrootsNostrFileAccountStore::new(accounts_path));
-        let vault = Arc::new(RadrootsNostrSecretVaultOsKeyring::new(
-            "org.radroots.app.nostr",
-        ));
+        let vault = Arc::new(RadrootsAppleKeychainVault::new(APPLE_NOSTR_SERVICE));
         RadrootsNostrAccountsManager::new(store, vault).map_err(|source| source.to_string())
     }
 
@@ -179,6 +178,9 @@ fn main() -> eframe::Result<()> {
 #[cfg(all(test, target_os = "macos"))]
 mod tests {
     use super::DesktopBackend;
+    use radroots_studio_app_apple_security::RadrootsAppleKeychainVault;
+    use radroots_identity::RadrootsIdentityId;
+    use radroots_nostr_accounts::prelude::RadrootsNostrSecretVault;
     use std::path::PathBuf;
 
     #[test]
@@ -196,6 +198,35 @@ mod tests {
                 PathBuf::from("/tmp/example/.radroots/app/desktop"),
                 PathBuf::from("/tmp/example/.radroots/app/desktop/nostr"),
             ]
+        );
+    }
+
+    #[test]
+    fn apple_keychain_vault_round_trips_secret_hex() {
+        let vault = RadrootsAppleKeychainVault::new("org.radroots.app.tests.desktop.roundtrip");
+        let account_id = RadrootsIdentityId::parse(
+            "3bf0c63f0f4478a288f6b67f0429dbf7f5119d4fa7218a4c40ef1378f80f7606",
+        )
+        .expect("account id");
+
+        let _ = vault.remove_secret(&account_id);
+
+        vault
+            .store_secret_hex(
+                &account_id,
+                "a0468b0f2f5de9db868fb563b13632eb92ec4697dd4fddbdca0488f1a1b2c3d4",
+            )
+            .expect("store secret");
+
+        assert_eq!(
+            vault.load_secret_hex(&account_id).expect("load secret"),
+            Some("a0468b0f2f5de9db868fb563b13632eb92ec4697dd4fddbdca0488f1a1b2c3d4".to_owned())
+        );
+
+        vault.remove_secret(&account_id).expect("remove secret");
+        assert_eq!(
+            vault.load_secret_hex(&account_id).expect("load missing"),
+            None
         );
     }
 }

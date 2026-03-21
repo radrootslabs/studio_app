@@ -12,11 +12,7 @@ use radroots_nostr_accounts::prelude::{
 };
 
 #[cfg(any(target_os = "ios", test))]
-mod security;
-#[cfg(any(target_os = "ios", test))]
 mod storage;
-#[cfg(any(target_os = "ios", test))]
-mod vault;
 
 #[cfg(any(target_os = "ios", test))]
 struct IosBackend;

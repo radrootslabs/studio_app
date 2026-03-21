@@ -1,16 +1,16 @@
 use radroots_nostr_accounts::prelude::RadrootsNostrAccountsError;
-#[cfg(target_os = "ios")]
+#[cfg(any(target_os = "ios", target_os = "macos"))]
 use std::ffi::CStr;
 use std::ffi::CString;
-#[cfg(target_os = "ios")]
+#[cfg(any(target_os = "ios", target_os = "macos"))]
 use std::os::raw::{c_char, c_int};
-#[cfg(target_os = "ios")]
+#[cfg(any(target_os = "ios", target_os = "macos"))]
 use std::ptr;
 
-pub(crate) const APPLE_NOSTR_SERVICE: &str = "org.radroots.app.nostr";
-pub(crate) const APPLE_NOSTR_NAMESPACE: &str = "nostr";
+pub const APPLE_NOSTR_SERVICE: &str = "org.radroots.app.nostr";
+pub const APPLE_NOSTR_NAMESPACE: &str = "nostr";
 
-#[cfg(target_os = "ios")]
+#[cfg(any(target_os = "ios", target_os = "macos"))]
 #[repr(i32)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum AppleSecretStatus {
@@ -20,7 +20,7 @@ enum AppleSecretStatus {
     Error = 3,
 }
 
-#[cfg(target_os = "ios")]
+#[cfg(any(target_os = "ios", target_os = "macos"))]
 impl AppleSecretStatus {
     fn from_raw(value: i32) -> Result<Self, RadrootsNostrAccountsError> {
         match value {
@@ -35,7 +35,7 @@ impl AppleSecretStatus {
     }
 }
 
-#[cfg(target_os = "ios")]
+#[cfg(any(target_os = "ios", target_os = "macos"))]
 unsafe extern "C" {
     fn radroots_studio_apple_secret_store_put(
         service_prefix: *const c_char,
@@ -69,12 +69,12 @@ unsafe extern "C" {
     fn radroots_studio_apple_c_string_free(string: *mut c_char);
 }
 
-#[cfg(target_os = "ios")]
+#[cfg(any(target_os = "ios", target_os = "macos"))]
 struct FfiErrorString {
     ptr: *mut c_char,
 }
 
-#[cfg(target_os = "ios")]
+#[cfg(any(target_os = "ios", target_os = "macos"))]
 impl FfiErrorString {
     fn new() -> Self {
         Self {
@@ -96,13 +96,12 @@ impl FfiErrorString {
     }
 }
 
-#[cfg(target_os = "ios")]
+#[cfg(any(target_os = "ios", target_os = "macos"))]
 impl Drop for FfiErrorString {
     fn drop(&mut self) {
         if self.ptr.is_null() {
             return;
         }
-        #[cfg(target_os = "ios")]
         // SAFETY: the pointer originated from the Swift FFI string allocator.
         unsafe {
             radroots_studio_apple_c_string_free(self.ptr);
@@ -110,13 +109,13 @@ impl Drop for FfiErrorString {
     }
 }
 
-#[cfg(target_os = "ios")]
+#[cfg(any(target_os = "ios", target_os = "macos"))]
 struct FfiDataBuffer {
     ptr: *mut u8,
     len: isize,
 }
 
-#[cfg(target_os = "ios")]
+#[cfg(any(target_os = "ios", target_os = "macos"))]
 impl FfiDataBuffer {
     fn new() -> Self {
         Self {
@@ -153,13 +152,12 @@ impl FfiDataBuffer {
     }
 }
 
-#[cfg(target_os = "ios")]
+#[cfg(any(target_os = "ios", target_os = "macos"))]
 impl Drop for FfiDataBuffer {
     fn drop(&mut self) {
         if self.ptr.is_null() {
             return;
         }
-        #[cfg(target_os = "ios")]
         // SAFETY: the pointer originated from the Swift FFI buffer allocator.
         unsafe {
             radroots_studio_apple_buffer_free(self.ptr, self.len);
@@ -168,33 +166,33 @@ impl Drop for FfiDataBuffer {
 }
 
 #[derive(Debug, Clone, Copy)]
-pub(crate) enum AppleSecretAccessibility {
+pub enum AppleSecretAccessibility {
     WhenUnlocked = 0,
 }
 
 #[derive(Debug, Clone, Copy)]
-pub(crate) struct AppleSecretAccessPolicy {
+pub struct AppleSecretAccessPolicy {
     pub accessibility: AppleSecretAccessibility,
     pub device_local_only: bool,
     pub user_presence_required: bool,
 }
 
 impl AppleSecretAccessPolicy {
-    pub(crate) const SECURE_LOCAL_SECRET: Self = Self {
+    pub const SECURE_LOCAL_SECRET: Self = Self {
         accessibility: AppleSecretAccessibility::WhenUnlocked,
         device_local_only: true,
         user_presence_required: false,
     };
 }
 
-pub(crate) fn store_secret(
+pub fn store_secret(
     service: &str,
     namespace: &str,
     name: &str,
     value: &[u8],
     policy: AppleSecretAccessPolicy,
 ) -> Result<(), RadrootsNostrAccountsError> {
-    #[cfg(target_os = "ios")]
+    #[cfg(any(target_os = "ios", target_os = "macos"))]
     {
         let service = c_string(service)?;
         let namespace = c_string(namespace)?;
@@ -228,21 +226,21 @@ pub(crate) fn store_secret(
         };
     }
 
-    #[cfg(not(target_os = "ios"))]
+    #[cfg(not(any(target_os = "ios", target_os = "macos")))]
     {
         let _ = (service, namespace, name, value, policy);
         Err(RadrootsNostrAccountsError::Vault(
-            "apple keychain storage is only available on ios".to_owned(),
+            "apple keychain storage is only available on ios and macos".to_owned(),
         ))
     }
 }
 
-pub(crate) fn load_secret(
+pub fn load_secret(
     service: &str,
     namespace: &str,
     name: &str,
 ) -> Result<Option<Vec<u8>>, RadrootsNostrAccountsError> {
-    #[cfg(target_os = "ios")]
+    #[cfg(any(target_os = "ios", target_os = "macos"))]
     {
         let service = c_string(service)?;
         let namespace = c_string(namespace)?;
@@ -272,21 +270,21 @@ pub(crate) fn load_secret(
         };
     }
 
-    #[cfg(not(target_os = "ios"))]
+    #[cfg(not(any(target_os = "ios", target_os = "macos")))]
     {
         let _ = (service, namespace, name);
         Err(RadrootsNostrAccountsError::Vault(
-            "apple keychain storage is only available on ios".to_owned(),
+            "apple keychain storage is only available on ios and macos".to_owned(),
         ))
     }
 }
 
-pub(crate) fn remove_secret(
+pub fn remove_secret(
     service: &str,
     namespace: &str,
     name: &str,
 ) -> Result<(), RadrootsNostrAccountsError> {
-    #[cfg(target_os = "ios")]
+    #[cfg(any(target_os = "ios", target_os = "macos"))]
     {
         let service = c_string(service)?;
         let namespace = c_string(namespace)?;
@@ -312,11 +310,11 @@ pub(crate) fn remove_secret(
         };
     }
 
-    #[cfg(not(target_os = "ios"))]
+    #[cfg(not(any(target_os = "ios", target_os = "macos")))]
     {
         let _ = (service, namespace, name);
         Err(RadrootsNostrAccountsError::Vault(
-            "apple keychain storage is only available on ios".to_owned(),
+            "apple keychain storage is only available on ios and macos".to_owned(),
         ))
     }
 }
@@ -329,12 +327,12 @@ fn c_string(value: &str) -> Result<CString, RadrootsNostrAccountsError> {
     })
 }
 
-#[cfg(target_os = "ios")]
+#[cfg(any(target_os = "ios", target_os = "macos"))]
 fn bool_to_c_int(value: bool) -> c_int {
     if value { 1 } else { 0 }
 }
 
-#[cfg(target_os = "ios")]
+#[cfg(any(target_os = "ios", target_os = "macos"))]
 fn vault_error(
     ffi_error: FfiErrorString,
     fallback: impl Into<String>,

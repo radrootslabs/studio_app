@@ -14,6 +14,12 @@ let package = Package(
         ),
         .library(
             name: "RadRootsAppleSecurityFFI",
+            type: .static,
+            targets: ["RadRootsAppleSecurityFFI"]
+        ),
+        .library(
+            name: "RadRootsAppleSecurityFFIDynamic",
+            type: .dynamic,
             targets: ["RadRootsAppleSecurityFFI"]
         )
     ],

@@ -1,5 +1,5 @@
 [package]
-name = "radroots-app-ios"
+name = "radroots-app-apple-security"
 authors.workspace = true
 version.workspace = true
 edition.workspace = true
@@ -7,23 +7,13 @@ license.workspace = true
 rust-version.workspace = true
 repository.workspace = true
 homepage.workspace = true
-description = "Rad Roots iOS launcher"
+description = "Rad Roots Apple security bridge"
 publish = false
 
-[lib]
-path = "src/lib.rs"
-crate-type = ["staticlib", "rlib"]
-
 [dependencies]
-eframe.workspace = true
-radroots-app-apple-security.workspace = true
-radroots-app-core = { path = "../core" }
 radroots-identity.workspace = true
 radroots-nostr-accounts.workspace = true
 zeroize.workspace = true
-
-[target.'cfg(target_os = "ios")'.dependencies]
-wgpu = { workspace = true, features = ["metal", "wgsl"] }
 
 [lints.rust]
 unsafe_code = { level = "allow", priority = 1 }

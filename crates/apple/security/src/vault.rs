@@ -6,12 +6,12 @@ use radroots_nostr_accounts::prelude::{RadrootsNostrAccountsError, RadrootsNostr
 use zeroize::Zeroizing;
 
 #[derive(Debug, Clone)]
-pub(crate) struct IosAppleKeychainVault {
+pub struct RadrootsAppleKeychainVault {
     service_name: String,
 }
 
-impl IosAppleKeychainVault {
-    pub(crate) fn new(service_name: impl Into<String>) -> Self {
+impl RadrootsAppleKeychainVault {
+    pub fn new(service_name: impl Into<String>) -> Self {
         Self {
             service_name: service_name.into(),
         }
@@ -22,7 +22,7 @@ impl IosAppleKeychainVault {
     }
 }
 
-impl RadrootsNostrSecretVault for IosAppleKeychainVault {
+impl RadrootsNostrSecretVault for RadrootsAppleKeychainVault {
     fn store_secret_hex(
         &self,
         account_id: &RadrootsIdentityId,
@@ -75,8 +75,6 @@ impl RadrootsNostrSecretVault for IosAppleKeychainVault {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::security::APPLE_NOSTR_SERVICE;
-    use radroots_nostr_accounts::prelude::RadrootsNostrSecretVault;
 
     #[test]
     fn account_name_uses_account_id_string() {
@@ -86,15 +84,15 @@ mod tests {
         .expect("account id");
 
         assert_eq!(
-            IosAppleKeychainVault::account_name(&account_id),
+            RadrootsAppleKeychainVault::account_name(&account_id),
             "3bf0c63f0f4478a288f6b67f0429dbf7f5119d4fa7218a4c40ef1378f80f7606"
         );
     }
 
-    #[cfg(not(target_os = "ios"))]
+    #[cfg(not(any(target_os = "ios", target_os = "macos")))]
     #[test]
-    fn vault_operations_report_unavailable_off_ios() {
-        let vault = IosAppleKeychainVault::new(APPLE_NOSTR_SERVICE);
+    fn vault_operations_report_unavailable_off_apple() {
+        let vault = RadrootsAppleKeychainVault::new(crate::APPLE_NOSTR_SERVICE);
         let account_id = RadrootsIdentityId::parse(
             "3bf0c63f0f4478a288f6b67f0429dbf7f5119d4fa7218a4c40ef1378f80f7606",
         )
@@ -102,17 +100,17 @@ mod tests {
 
         let load = vault
             .load_secret_hex(&account_id)
-            .expect_err("load off ios");
+            .expect_err("load off apple");
         assert!(load.to_string().starts_with("vault error:"));
 
         let store = vault
             .store_secret_hex(&account_id, "deadbeef")
-            .expect_err("store off ios");
+            .expect_err("store off apple");
         assert!(store.to_string().starts_with("vault error:"));
 
         let remove = vault
             .remove_secret(&account_id)
-            .expect_err("remove off ios");
+            .expect_err("remove off apple");
         assert!(remove.to_string().starts_with("vault error:"));
     }
 }

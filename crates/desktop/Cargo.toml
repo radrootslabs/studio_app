@@ -9,6 +9,7 @@ repository.workspace = true
 homepage.workspace = true
 description = "Rad Roots desktop launcher"
 publish = false
+build = "build.rs"
 
 [lints]
 workspace = true
@@ -25,6 +26,8 @@ wgpu = { workspace = true, features = ["metal", "wgsl"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2-foundation = { workspace = true, features = ["NSProcessInfo", "NSString"] }
+radroots-app-apple-security.workspace = true
+radroots-identity.workspace = true
 
 [target.'cfg(target_os = "windows")'.dependencies]
 wgpu = { workspace = true, features = ["dx12", "wgsl"] }

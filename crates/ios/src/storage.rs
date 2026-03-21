@@ -1,7 +1,5 @@
 #[cfg(target_os = "ios")]
-use crate::security::APPLE_NOSTR_SERVICE;
-#[cfg(target_os = "ios")]
-use crate::vault::IosAppleKeychainVault;
+use radroots_studio_app_apple_security::{APPLE_NOSTR_SERVICE, RadrootsAppleKeychainVault};
 #[cfg(target_os = "ios")]
 use radroots_nostr_accounts::prelude::{
     RadrootsNostrAccountsManager, RadrootsNostrFileAccountStore,
@@ -26,7 +24,7 @@ pub(crate) fn accounts_path() -> Result<PathBuf, String> {
 #[cfg(target_os = "ios")]
 pub(crate) fn accounts_manager() -> Result<RadrootsNostrAccountsManager, String> {
     let store = Arc::new(RadrootsNostrFileAccountStore::new(accounts_path()?));
-    let vault = Arc::new(IosAppleKeychainVault::new(APPLE_NOSTR_SERVICE));
+    let vault = Arc::new(RadrootsAppleKeychainVault::new(APPLE_NOSTR_SERVICE));
     RadrootsNostrAccountsManager::new(store, vault).map_err(|source| source.to_string())
 }
 

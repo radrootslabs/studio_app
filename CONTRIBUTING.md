@@ -21,12 +21,20 @@ Install Trunk for the wasm target:
 cargo install trunk
 ```
 
+On macOS, ensure the Apple Swift toolchain is available. The desktop target links the shared Apple native security package during build.
+
 Confirm your environment:
 
 ```bash
 cargo --version
 rustc --version
 trunk --version
+```
+
+On macOS, also confirm:
+
+```bash
+swift --version
 ```
 
 ## Getting Started
@@ -105,8 +113,11 @@ swift test
 - Prefer small, reviewable commits.
 - Update tests when behavior changes.
 - Update documentation when commands, structure, or contributor workflow changes.
+- Use repo-relative paths in docs, comments, and contributor-facing text.
+- Keep documentation path references relative to this repository root.
+- Do not use absolute filesystem paths or home-directory path forms in repository docs.
 - Remove obsolete code and dependencies when they are clearly replaced.
-- Use workspace-managed dependency versions from the root [Cargo.toml](/Users/treesap/dev/radroots/radroots-platform-v1/domains/community/apps/app/Cargo.toml).
+- Use workspace-managed dependency versions from the root `Cargo.toml`.
 
 ## Reporting Issues
 
