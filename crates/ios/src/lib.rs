@@ -8,8 +8,8 @@ use radroots_studio_app_apple_security::verify_user_presence;
 use radroots_studio_app_core::IdentityGateState;
 #[cfg(target_os = "ios")]
 use radroots_studio_app_core::{
-    APP_NAME, HomeActionKind, HomeActionResult, HomeActionState, RadrootsApp, RadrootsAppBackend,
-    SetupActionState,
+    APP_NAME, HomeActionKind, HomeActionResult, HomeActionState, ImportActionState,
+    PasteActionState, RadrootsApp, RadrootsAppBackend, SetupActionState,
 };
 #[cfg(any(target_os = "ios", test))]
 use radroots_identity::RadrootsIdentity;
@@ -27,6 +27,12 @@ mod storage;
 
 #[cfg(any(target_os = "ios", test))]
 struct IosBackend;
+
+#[cfg(target_os = "ios")]
+unsafe extern "C" {
+    fn radroots_ios_clipboard_text_copy() -> *mut std::ffi::c_char;
+    fn radroots_ios_string_free(value: *mut std::ffi::c_char);
+}
 
 #[cfg(any(target_os = "ios", test))]
 impl IosBackend {
@@ -105,6 +111,50 @@ impl IosBackend {
         Ok(identity.nsec())
     }
 
+    fn import_local_identity(
+        manager: &RadrootsNostrAccountsManager,
+        secret_key: &str,
+    ) -> Result<IdentityGateState, String> {
+        let identity = RadrootsIdentity::from_secret_key_str(secret_key)
+            .map_err(|_| "invalid secret key".to_owned())?;
+
+        manager
+            .upsert_identity(&identity, None, true)
+            .map_err(|source| source.to_string())?;
+
+        Self::identity_state_from_manager(manager)
+    }
+
+    fn normalize_clipboard_secret_key_text(clipboard_text: &str) -> Result<String, String> {
+        let trimmed = clipboard_text.trim();
+        if trimmed.is_empty() {
+            return Err("clipboard does not contain text".to_owned());
+        }
+
+        Ok(match trimmed.len() == clipboard_text.len() {
+            true => clipboard_text.to_owned(),
+            false => trimmed.to_owned(),
+        })
+    }
+
+    #[cfg(target_os = "ios")]
+    fn paste_secret_key_from_clipboard() -> Result<String, String> {
+        let clipboard_text_ptr = unsafe { radroots_ios_clipboard_text_copy() };
+        if clipboard_text_ptr.is_null() {
+            return Err("clipboard does not contain text".to_owned());
+        }
+
+        let clipboard_text = unsafe {
+            let value = std::ffi::CStr::from_ptr(clipboard_text_ptr)
+                .to_string_lossy()
+                .into_owned();
+            radroots_ios_string_free(clipboard_text_ptr);
+            value
+        };
+
+        Self::normalize_clipboard_secret_key_text(&clipboard_text)
+    }
+
     #[cfg(target_os = "ios")]
     fn authorize_secret_key_export() -> Result<(), String> {
         verify_user_presence("reveal the current secret key").map_err(|source| source.to_string())
@@ -171,6 +221,31 @@ impl RadrootsAppBackend for IosBackend {
     fn request_setup_action(&self) -> Result<Option<IdentityGateState>, String> {
         let manager = Self::accounts_manager()?;
         Self::generate_local_identity(&manager).map(Some)
+    }
+
+    fn import_action_state(&self) -> Option<ImportActionState> {
+        Some(ImportActionState {
+            label: "Import Secret Key".to_owned(),
+            enabled: true,
+            pending: false,
+        })
+    }
+
+    fn request_import_action(&self, secret_key: &str) -> Result<Option<IdentityGateState>, String> {
+        let manager = Self::accounts_manager()?;
+        Self::import_local_identity(&manager, secret_key).map(Some)
+    }
+
+    fn import_paste_action_state(&self) -> Option<PasteActionState> {
+        Some(PasteActionState {
+            label: "Paste Secret Key".to_owned(),
+            enabled: true,
+            pending: false,
+        })
+    }
+
+    fn request_import_paste_action(&self) -> Result<Option<String>, String> {
+        Self::paste_secret_key_from_clipboard().map(Some)
     }
 
     fn home_action_states(&self) -> Vec<HomeActionState> {
@@ -338,6 +413,50 @@ mod tests {
 
         assert_eq!(nsec, identity.nsec());
         assert!(nsec.starts_with("nsec1"));
+    }
+
+    #[test]
+    fn import_local_identity_imports_nsec_and_selects_account() {
+        let manager = RadrootsNostrAccountsManager::new_in_memory();
+        let identity = RadrootsIdentity::generate();
+
+        let state =
+            IosBackend::import_local_identity(&manager, identity.nsec().as_str()).expect("import");
+
+        assert_eq!(
+            state,
+            IdentityGateState::Ready {
+                account_id: identity.id().to_string(),
+                npub: identity.npub(),
+            }
+        );
+        assert_eq!(
+            manager.selected_account_id().expect("selected"),
+            Some(identity.id())
+        );
+        assert_eq!(manager.list_accounts().expect("list").len(), 1);
+        assert_eq!(
+            manager
+                .export_secret_hex(&identity.id())
+                .expect("export secret"),
+            Some(identity.secret_key_hex())
+        );
+    }
+
+    #[test]
+    fn normalize_clipboard_secret_key_text_trims_wrapping_whitespace() {
+        let normalized = IosBackend::normalize_clipboard_secret_key_text("  nsec1example \n")
+            .expect("normalize secret key");
+
+        assert_eq!(normalized, "nsec1example");
+    }
+
+    #[test]
+    fn normalize_clipboard_secret_key_text_rejects_blank_text() {
+        assert_eq!(
+            IosBackend::normalize_clipboard_secret_key_text(" \n\t"),
+            Err("clipboard does not contain text".to_owned())
+        );
     }
 
     #[test]

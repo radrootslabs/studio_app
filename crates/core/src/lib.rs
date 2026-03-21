@@ -20,6 +20,13 @@ pub struct ImportActionState {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PasteActionState {
+    pub label: String,
+    pub enabled: bool,
+    pub pending: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct HomeActionState {
     pub kind: HomeActionKind,
     pub label: String,
@@ -60,6 +67,12 @@ pub trait RadrootsAppBackend {
         &self,
         _secret_key: &str,
     ) -> Result<Option<IdentityGateState>, String> {
+        Ok(None)
+    }
+    fn import_paste_action_state(&self) -> Option<PasteActionState> {
+        None
+    }
+    fn request_import_paste_action(&self) -> Result<Option<String>, String> {
         Ok(None)
     }
     fn home_action_states(&self) -> Vec<HomeActionState> {
@@ -169,6 +182,20 @@ impl RadrootsApp {
         }
     }
 
+    fn request_import_paste_action(&mut self) {
+        self.status_message = None;
+        self.revealed_secret_key = None;
+        match self.backend.request_import_paste_action() {
+            Ok(Some(secret_key)) => {
+                self.secret_key_input = Zeroizing::new(secret_key);
+            }
+            Ok(None) => {}
+            Err(err) => {
+                self.status_message = Some(err);
+            }
+        }
+    }
+
     fn request_home_action(&mut self, action: HomeActionKind) {
         self.status_message = None;
         self.revealed_secret_key = None;
@@ -252,6 +279,12 @@ impl eframe::App for RadrootsApp {
                                 ctx.request_repaint();
                             }
                         }
+                        let import_paste_action = self.backend.import_paste_action_state();
+                        if let Some(import_paste_action) = &import_paste_action {
+                            if import_paste_action.pending {
+                                ctx.request_repaint();
+                            }
+                        }
 
                         ui.label("setup");
                         ui.add_space(8.0);
@@ -279,6 +312,20 @@ impl eframe::App for RadrootsApp {
                                             .desired_width(ui.available_width()),
                                     );
                                     ui.add_space(8.0);
+                                    if let Some(import_paste_action) = &import_paste_action {
+                                        let paste_clicked = ui
+                                            .add_enabled(
+                                                import_paste_action.enabled,
+                                                egui::Button::new(
+                                                    import_paste_action.label.clone(),
+                                                ),
+                                            )
+                                            .clicked();
+                                        if paste_clicked {
+                                            self.request_import_paste_action();
+                                        }
+                                        ui.add_space(8.0);
+                                    }
                                     ui.horizontal_centered(|ui| {
                                         let confirm_clicked = ui
                                             .add_enabled(
@@ -393,9 +440,11 @@ mod tests {
         load: Result<IdentityGateState, String>,
         action_state: Rc<RefCell<SetupActionState>>,
         import_action_state: Rc<RefCell<Option<ImportActionState>>>,
+        import_paste_action_state: Rc<RefCell<Option<PasteActionState>>>,
         home_action_states: Rc<RefCell<Vec<HomeActionState>>>,
         request: Rc<RefCell<VecDeque<Result<Option<IdentityGateState>, String>>>>,
         import_request: Rc<RefCell<VecDeque<Result<Option<IdentityGateState>, String>>>>,
+        import_paste_request: Rc<RefCell<VecDeque<Result<Option<String>, String>>>>,
         home_request: Rc<RefCell<VecDeque<(HomeActionKind, Result<HomeActionResult, String>)>>>,
         home_poll: Rc<RefCell<VecDeque<Result<Option<HomeActionResult>, String>>>>,
         poll: Rc<RefCell<VecDeque<Result<Option<IdentityGateState>, String>>>>,
@@ -412,9 +461,11 @@ mod tests {
                 load,
                 action_state: Rc::new(RefCell::new(action_state)),
                 import_action_state: Rc::new(RefCell::new(None)),
+                import_paste_action_state: Rc::new(RefCell::new(None)),
                 home_action_states: Rc::new(RefCell::new(Vec::new())),
                 request: Rc::new(RefCell::new(request.into())),
                 import_request: Rc::new(RefCell::new(VecDeque::new())),
+                import_paste_request: Rc::new(RefCell::new(VecDeque::new())),
                 home_request: Rc::new(RefCell::new(VecDeque::new())),
                 home_poll: Rc::new(RefCell::new(VecDeque::new())),
                 poll: Rc::new(RefCell::new(poll.into())),
@@ -428,6 +479,16 @@ mod tests {
         ) -> Self {
             *self.import_action_state.borrow_mut() = Some(action_state);
             self.import_request.borrow_mut().extend(request);
+            self
+        }
+
+        fn with_import_paste_action(
+            self,
+            action_state: PasteActionState,
+            request: Vec<Result<Option<String>, String>>,
+        ) -> Self {
+            *self.import_paste_action_state.borrow_mut() = Some(action_state);
+            self.import_paste_request.borrow_mut().extend(request);
             self
         }
 
@@ -481,6 +542,17 @@ mod tests {
             _secret_key: &str,
         ) -> Result<Option<IdentityGateState>, String> {
             self.import_request
+                .borrow_mut()
+                .pop_front()
+                .unwrap_or(Ok(None))
+        }
+
+        fn import_paste_action_state(&self) -> Option<PasteActionState> {
+            self.import_paste_action_state.borrow().clone()
+        }
+
+        fn request_import_paste_action(&self) -> Result<Option<String>, String> {
+            self.import_paste_request
                 .borrow_mut()
                 .pop_front()
                 .unwrap_or(Ok(None))
@@ -818,6 +890,44 @@ mod tests {
         );
         assert_eq!(app.pending_import_entry, false);
         assert_eq!(app.secret_key_input.as_str(), "");
+    }
+
+    #[test]
+    fn import_paste_action_populates_secret_key_input() {
+        let mut app = RadrootsApp::new(Box::new(
+            MockBackend::new(
+                Ok(IdentityGateState::Missing),
+                vec![],
+                vec![],
+                SetupActionState {
+                    label: "Generate New Key".into(),
+                    enabled: true,
+                    pending: false,
+                },
+            )
+            .with_import_action(
+                ImportActionState {
+                    label: "Import Secret Key".into(),
+                    enabled: true,
+                    pending: false,
+                },
+                vec![],
+            )
+            .with_import_paste_action(
+                PasteActionState {
+                    label: "Paste Secret Key".into(),
+                    enabled: true,
+                    pending: false,
+                },
+                vec![Ok(Some("nsec1example".into()))],
+            ),
+        ));
+
+        app.pending_import_entry = true;
+        app.request_import_paste_action();
+
+        assert_eq!(app.secret_key_input.as_str(), "nsec1example");
+        assert_eq!(app.status_message, None);
     }
 
     #[test]
