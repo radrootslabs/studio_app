@@ -10,7 +10,8 @@ use radroots_studio_app_core::RadrootsAppBackend;
 use radroots_studio_app_core::{APP_NAME, RadrootsApp};
 #[cfg(any(target_os = "android", test))]
 use radroots_studio_app_core::{
-    HomeActionKind, HomeActionResult, HomeActionState, IdentityGateState, SetupActionState,
+    HomeActionKind, HomeActionResult, HomeActionState, IdentityGateState, ImportActionState,
+    SetupActionState,
 };
 #[cfg(any(target_os = "android", test))]
 use radroots_identity::RadrootsIdentity;
@@ -74,6 +75,36 @@ impl RadrootsAppBackend for AndroidBackend {
         #[cfg(not(target_os = "android"))]
         {
             Ok(Some(Self::unsupported_identity_state()))
+        }
+    }
+
+    fn import_action_state(&self) -> Option<ImportActionState> {
+        #[cfg(target_os = "android")]
+        {
+            return Some(ImportActionState {
+                label: "Import Secret Key".to_owned(),
+                enabled: true,
+                pending: false,
+            });
+        }
+
+        #[cfg(not(target_os = "android"))]
+        {
+            None
+        }
+    }
+
+    fn request_import_action(&self, secret_key: &str) -> Result<Option<IdentityGateState>, String> {
+        #[cfg(target_os = "android")]
+        {
+            let manager = Self::accounts_manager()?;
+            return Self::import_local_identity(&manager, secret_key).map(Some);
+        }
+
+        #[cfg(not(target_os = "android"))]
+        {
+            let _ = secret_key;
+            Ok(None)
         }
     }
 
@@ -235,6 +266,20 @@ impl AndroidBackend {
         let identity = RadrootsIdentity::from_secret_key_str(secret_key_hex.as_str())
             .map_err(|source| source.to_string())?;
         Ok(identity.nsec())
+    }
+
+    fn import_local_identity(
+        manager: &RadrootsNostrAccountsManager,
+        secret_key: &str,
+    ) -> Result<IdentityGateState, String> {
+        let identity = RadrootsIdentity::from_secret_key_str(secret_key)
+            .map_err(|_| "invalid secret key".to_owned())?;
+
+        manager
+            .upsert_identity(&identity, None, true)
+            .map_err(|source| source.to_string())?;
+
+        Self::identity_state_from_manager(manager)
     }
 
     #[cfg(target_os = "android")]
@@ -507,6 +552,34 @@ mod tests {
 
         assert_eq!(nsec, identity.nsec());
         assert!(nsec.starts_with("nsec1"));
+    }
+
+    #[test]
+    fn import_local_identity_imports_nsec_and_selects_account() {
+        let manager = RadrootsNostrAccountsManager::new_in_memory();
+        let identity = RadrootsIdentity::generate();
+
+        let state = AndroidBackend::import_local_identity(&manager, identity.nsec().as_str())
+            .expect("import");
+
+        assert_eq!(
+            state,
+            IdentityGateState::Ready {
+                account_id: identity.id().to_string(),
+                npub: identity.npub(),
+            }
+        );
+        assert_eq!(
+            manager.selected_account_id().expect("selected"),
+            Some(identity.id())
+        );
+        assert_eq!(manager.list_accounts().expect("list").len(), 1);
+        assert_eq!(
+            manager
+                .export_secret_hex(&identity.id())
+                .expect("export secret"),
+            Some(identity.secret_key_hex())
+        );
     }
 
     #[test]
