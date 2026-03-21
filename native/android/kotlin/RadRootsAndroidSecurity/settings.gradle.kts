@@ -14,9 +14,4 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "RadRootsAndroid"
-
-include(":app")
-include(":radrootsAndroidSecurity")
-
-project(":radrootsAndroidSecurity").projectDir = file("../../native/android/kotlin/RadRootsAndroidSecurity")
+rootProject.name = "RadRootsAndroidSecurity"

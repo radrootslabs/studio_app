@@ -80,4 +80,5 @@ dependencies {
     implementation("androidx.games:games-activity:2.0.2")
     implementation("androidx.appcompat:appcompat:1.7.0")
     implementation("androidx.core:core-ktx:1.13.1")
+    implementation(project(":radrootsAndroidSecurity"))
 }

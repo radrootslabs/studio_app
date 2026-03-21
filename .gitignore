@@ -4,6 +4,9 @@
 /crates/web/dist/
 /native/apple/swift/**/.build/
 /native/apple/swift/**/.swiftpm/
+/native/android/kotlin/**/.gradle/
+/native/android/kotlin/**/build/
+/native/android/kotlin/**/local.properties
 /platforms/android/.gradle/
 /platforms/android/.tooling/
 /platforms/android/app/build/
