@@ -67,6 +67,9 @@ pub trait RadrootsAppBackend {
     fn request_home_action(&self, _action: HomeActionKind) -> Result<HomeActionResult, String> {
         Ok(HomeActionResult::None)
     }
+    fn poll_home_action_result(&self) -> Result<Option<HomeActionResult>, String> {
+        Ok(None)
+    }
     fn poll_identity_state(&self) -> Result<Option<IdentityGateState>, String> {
         Ok(None)
     }
@@ -169,15 +172,21 @@ impl RadrootsApp {
         self.status_message = None;
         self.revealed_recovery_key = None;
         match self.backend.request_home_action(action) {
-            Ok(HomeActionResult::IdentityState(state)) => self.apply_identity_state(state),
-            Ok(HomeActionResult::RevealRecoveryKey { nsec }) => {
-                self.revealed_recovery_key = Some(nsec);
-                self.pending_home_confirmation = None;
-            }
-            Ok(HomeActionResult::None) => {}
+            Ok(result) => self.apply_home_action_result(result),
             Err(err) => {
                 self.status_message = Some(err);
             }
+        }
+    }
+
+    fn apply_home_action_result(&mut self, result: HomeActionResult) {
+        match result {
+            HomeActionResult::IdentityState(state) => self.apply_identity_state(state),
+            HomeActionResult::RevealRecoveryKey { nsec } => {
+                self.revealed_recovery_key = Some(nsec);
+                self.pending_home_confirmation = None;
+            }
+            HomeActionResult::None => {}
         }
     }
 
@@ -203,6 +212,13 @@ impl RadrootsApp {
     }
 
     fn sync_backend(&mut self) {
+        match self.backend.poll_home_action_result() {
+            Ok(Some(result)) => self.apply_home_action_result(result),
+            Ok(None) => {}
+            Err(err) => {
+                self.status_message = Some(err);
+            }
+        }
         match self.backend.poll_identity_state() {
             Ok(Some(state)) => self.apply_identity_state(state),
             Ok(None) => {}
@@ -380,6 +396,7 @@ mod tests {
         request: Rc<RefCell<VecDeque<Result<Option<IdentityGateState>, String>>>>,
         recovery_request: Rc<RefCell<VecDeque<Result<Option<IdentityGateState>, String>>>>,
         home_request: Rc<RefCell<VecDeque<(HomeActionKind, Result<HomeActionResult, String>)>>>,
+        home_poll: Rc<RefCell<VecDeque<Result<Option<HomeActionResult>, String>>>>,
         poll: Rc<RefCell<VecDeque<Result<Option<IdentityGateState>, String>>>>,
     }
 
@@ -398,6 +415,7 @@ mod tests {
                 request: Rc::new(RefCell::new(request.into())),
                 recovery_request: Rc::new(RefCell::new(VecDeque::new())),
                 home_request: Rc::new(RefCell::new(VecDeque::new())),
+                home_poll: Rc::new(RefCell::new(VecDeque::new())),
                 poll: Rc::new(RefCell::new(poll.into())),
             }
         }
@@ -425,6 +443,14 @@ mod tests {
                     .into_iter()
                     .map(|result| (action_state.kind, result)),
             );
+            self
+        }
+
+        fn with_home_action_poll(
+            self,
+            poll: Vec<Result<Option<HomeActionResult>, String>>,
+        ) -> Self {
+            self.home_poll.borrow_mut().extend(poll);
             self
         }
     }
@@ -475,6 +501,10 @@ mod tests {
                 ));
             }
             response
+        }
+
+        fn poll_home_action_result(&self) -> Result<Option<HomeActionResult>, String> {
+            self.home_poll.borrow_mut().pop_front().unwrap_or(Ok(None))
         }
 
         fn poll_identity_state(&self) -> Result<Option<IdentityGateState>, String> {
@@ -822,6 +852,46 @@ mod tests {
 
         assert!(matches!(app.screen, AppScreen::Home { .. }));
         assert_eq!(app.pending_home_confirmation, None);
+        assert_eq!(app.revealed_recovery_key.as_deref(), Some("nsec1example"));
+    }
+
+    #[test]
+    fn deferred_backup_home_action_reveals_recovery_key_after_poll() {
+        let mut app = RadrootsApp::new(Box::new(
+            MockBackend::new(
+                Ok(IdentityGateState::Ready {
+                    account_id: "abc".into(),
+                    npub: "npub1abc".into(),
+                }),
+                vec![],
+                vec![],
+                SetupActionState {
+                    label: "Generate New Key".into(),
+                    enabled: true,
+                    pending: false,
+                },
+            )
+            .with_home_action(
+                HomeActionState {
+                    kind: HomeActionKind::BackupRecoveryKey,
+                    label: "Back Up Recovery Key".into(),
+                    enabled: true,
+                    pending: true,
+                },
+                vec![Ok(HomeActionResult::None)],
+            )
+            .with_home_action_poll(vec![Ok(Some(
+                HomeActionResult::RevealRecoveryKey {
+                    nsec: "nsec1example".into(),
+                },
+            ))]),
+        ));
+
+        app.request_home_action(HomeActionKind::BackupRecoveryKey);
+        assert_eq!(app.revealed_recovery_key, None);
+
+        app.sync_backend();
+
         assert_eq!(app.revealed_recovery_key.as_deref(), Some("nsec1example"));
     }
 }

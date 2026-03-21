@@ -39,6 +39,34 @@ impl AndroidSecretStatus {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum AndroidUserPresenceVerificationResult {
+    Verified,
+    Failed(String),
+}
+
+#[cfg(target_os = "android")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum AndroidUserPresenceResultStatus {
+    None,
+    Success,
+    Error,
+}
+
+#[cfg(target_os = "android")]
+impl AndroidUserPresenceResultStatus {
+    fn from_raw(value: i32) -> Result<Self, RadrootsNostrAccountsError> {
+        match value {
+            0 => Ok(Self::None),
+            1 => Ok(Self::Success),
+            2 => Ok(Self::Error),
+            other => Err(RadrootsNostrAccountsError::Vault(format!(
+                "unknown android user presence status {other}"
+            ))),
+        }
+    }
+}
+
 #[cfg(target_os = "android")]
 pub(crate) fn store_secret(
     service: &str,
@@ -250,6 +278,117 @@ pub(crate) fn resolve_nostr_storage_root() -> Result<PathBuf, RadrootsNostrAccou
     let value = JString::from(value);
     let path: String = env.get_string(&value).map_err(jni_error)?.into();
     Ok(PathBuf::from(path))
+}
+
+#[cfg(target_os = "android")]
+pub(crate) fn begin_user_presence_verification(
+    reason: &str,
+) -> Result<(), RadrootsNostrAccountsError> {
+    let java_vm = android_java_vm()?;
+    let mut env = java_vm.attach_current_thread().map_err(jni_error)?;
+    let bridge_class = bridge_class(&mut env)?;
+    let reason = java_string_arg(&mut env, reason)?;
+
+    let status = env
+        .call_static_method(
+            &bridge_class,
+            "beginUserPresenceVerification",
+            "(Ljava/lang/String;)I",
+            &[JValue::Object(&reason)],
+        )
+        .and_then(|value| value.i())
+        .map_err(jni_error)?;
+
+    match AndroidSecretStatus::from_raw(status)? {
+        AndroidSecretStatus::Success => Ok(()),
+        AndroidSecretStatus::NotFound => Err(bridge_vault_error(
+            &mut env,
+            &bridge_class,
+            "android security bridge reported no user presence result",
+        )),
+        AndroidSecretStatus::InvalidInput => Err(bridge_vault_error(
+            &mut env,
+            &bridge_class,
+            "android security bridge rejected the user presence request",
+        )),
+        AndroidSecretStatus::Error => Err(bridge_vault_error(
+            &mut env,
+            &bridge_class,
+            "android user presence verification failed to start",
+        )),
+    }
+}
+
+#[cfg(not(target_os = "android"))]
+pub(crate) fn begin_user_presence_verification(
+    reason: &str,
+) -> Result<(), RadrootsNostrAccountsError> {
+    let _ = reason;
+    Err(RadrootsNostrAccountsError::Vault(
+        "android user presence verification is only available on android".to_owned(),
+    ))
+}
+
+#[cfg(target_os = "android")]
+pub(crate) fn is_user_presence_verification_pending() -> Result<bool, RadrootsNostrAccountsError> {
+    let java_vm = android_java_vm()?;
+    let mut env = java_vm.attach_current_thread().map_err(jni_error)?;
+    let bridge_class = bridge_class(&mut env)?;
+
+    env.call_static_method(
+        &bridge_class,
+        "isUserPresenceVerificationPending",
+        "()Z",
+        &[],
+    )
+    .and_then(|value| value.z())
+    .map_err(jni_error)
+}
+
+#[cfg(not(target_os = "android"))]
+pub(crate) fn is_user_presence_verification_pending() -> Result<bool, RadrootsNostrAccountsError> {
+    Err(RadrootsNostrAccountsError::Vault(
+        "android user presence verification is only available on android".to_owned(),
+    ))
+}
+
+#[cfg(target_os = "android")]
+pub(crate) fn take_user_presence_verification_result()
+-> Result<Option<AndroidUserPresenceVerificationResult>, RadrootsNostrAccountsError> {
+    let java_vm = android_java_vm()?;
+    let mut env = java_vm.attach_current_thread().map_err(jni_error)?;
+    let bridge_class = bridge_class(&mut env)?;
+
+    let status = env
+        .call_static_method(
+            &bridge_class,
+            "takeUserPresenceVerificationResult",
+            "()I",
+            &[],
+        )
+        .and_then(|value| value.i())
+        .map_err(jni_error)?;
+
+    match AndroidUserPresenceResultStatus::from_raw(status)? {
+        AndroidUserPresenceResultStatus::None => Ok(None),
+        AndroidUserPresenceResultStatus::Success => {
+            Ok(Some(AndroidUserPresenceVerificationResult::Verified))
+        }
+        AndroidUserPresenceResultStatus::Error => {
+            Ok(Some(AndroidUserPresenceVerificationResult::Failed(
+                take_last_error_message(&mut env, &bridge_class)?
+                    .unwrap_or_else(|| "android device authentication failed".to_owned()),
+            )))
+        }
+    }
+}
+
+#[cfg(not(target_os = "android"))]
+pub(crate) fn take_user_presence_verification_result()
+-> Result<Option<AndroidUserPresenceVerificationResult>, RadrootsNostrAccountsError> {
+    Err(RadrootsNostrAccountsError::Vault(
+        "android user presence verification is only available on android".to_owned(),
+    ))
 }
 
 #[cfg(not(target_os = "android"))]

@@ -80,12 +80,13 @@ impl RadrootsAppBackend for AndroidBackend {
     fn home_action_states(&self) -> Vec<HomeActionState> {
         #[cfg(target_os = "android")]
         {
+            let recovery_key_export_pending = Self::recovery_key_export_pending();
             return vec![
                 HomeActionState {
                     kind: HomeActionKind::BackupRecoveryKey,
                     label: "Back Up Recovery Key".to_owned(),
-                    enabled: true,
-                    pending: false,
+                    enabled: !recovery_key_export_pending,
+                    pending: recovery_key_export_pending,
                 },
                 HomeActionState {
                     kind: HomeActionKind::RemoveLocalKey,
@@ -111,15 +112,17 @@ impl RadrootsAppBackend for AndroidBackend {
     fn request_home_action(&self, action: HomeActionKind) -> Result<HomeActionResult, String> {
         #[cfg(target_os = "android")]
         {
-            let manager = Self::accounts_manager()?;
             return match action {
                 HomeActionKind::BackupRecoveryKey => {
-                    Self::export_selected_local_recovery_key(&manager)
-                        .map(|nsec| HomeActionResult::RevealRecoveryKey { nsec })
+                    Self::begin_recovery_key_export().map(|()| HomeActionResult::None)
                 }
-                HomeActionKind::RemoveLocalKey => Self::remove_selected_local_identity(&manager)
-                    .map(HomeActionResult::IdentityState),
+                HomeActionKind::RemoveLocalKey => {
+                    let manager = Self::accounts_manager()?;
+                    Self::remove_selected_local_identity(&manager)
+                        .map(HomeActionResult::IdentityState)
+                }
                 HomeActionKind::ResetDevice => {
+                    let manager = Self::accounts_manager()?;
                     let accounts_path = storage::accounts_path()?;
                     Self::reset_local_device_state(&manager, accounts_path.as_path())
                         .map(HomeActionResult::IdentityState)
@@ -132,6 +135,18 @@ impl RadrootsAppBackend for AndroidBackend {
         {
             let _ = action;
             Ok(HomeActionResult::None)
+        }
+    }
+
+    fn poll_home_action_result(&self) -> Result<Option<HomeActionResult>, String> {
+        #[cfg(target_os = "android")]
+        {
+            return Self::poll_recovery_key_export();
+        }
+
+        #[cfg(not(target_os = "android"))]
+        {
+            Ok(None)
         }
     }
 }
@@ -220,6 +235,47 @@ impl AndroidBackend {
         let identity = RadrootsIdentity::from_secret_key_str(secret_key_hex.as_str())
             .map_err(|source| source.to_string())?;
         Ok(identity.nsec())
+    }
+
+    #[cfg(target_os = "android")]
+    fn begin_recovery_key_export() -> Result<(), String> {
+        security::begin_user_presence_verification("reveal the current recovery key")
+            .map_err(|source| source.to_string())
+    }
+
+    #[cfg(not(target_os = "android"))]
+    fn begin_recovery_key_export() -> Result<(), String> {
+        Ok(())
+    }
+
+    #[cfg(target_os = "android")]
+    fn recovery_key_export_pending() -> bool {
+        security::is_user_presence_verification_pending().unwrap_or(false)
+    }
+
+    #[cfg(not(target_os = "android"))]
+    fn recovery_key_export_pending() -> bool {
+        false
+    }
+
+    #[cfg(target_os = "android")]
+    fn poll_recovery_key_export() -> Result<Option<HomeActionResult>, String> {
+        match security::take_user_presence_verification_result()
+            .map_err(|source| source.to_string())?
+        {
+            Some(security::AndroidUserPresenceVerificationResult::Verified) => {
+                let manager = Self::accounts_manager()?;
+                Self::export_selected_local_recovery_key(&manager)
+                    .map(|nsec| Some(HomeActionResult::RevealRecoveryKey { nsec }))
+            }
+            Some(security::AndroidUserPresenceVerificationResult::Failed(message)) => Err(message),
+            None => Ok(None),
+        }
+    }
+
+    #[cfg(not(target_os = "android"))]
+    fn poll_recovery_key_export() -> Result<Option<HomeActionResult>, String> {
+        Ok(None)
     }
 
     fn remove_selected_local_identity(

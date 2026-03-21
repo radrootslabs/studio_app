@@ -13,4 +13,11 @@ sealed class RadRootsAndroidSecurityError(
 
     class StorageFailure(message: String, cause: Throwable? = null) :
         RadRootsAndroidSecurityError(message, cause)
+
+    class UserCancelled(message: String) : RadRootsAndroidSecurityError(message)
+
+    class UserPresenceUnavailable(message: String) : RadRootsAndroidSecurityError(message)
+
+    class UserPresenceFailure(message: String, cause: Throwable? = null) :
+        RadRootsAndroidSecurityError(message, cause)
 }
