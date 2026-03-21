@@ -10,7 +10,8 @@ use radroots_studio_app_apple_security::{
 };
 use radroots_studio_app_core::{
     APP_NAME, HomeActionKind, HomeActionResult, HomeActionState, IdentityGateState,
-    ImportActionState, RadrootsApp, RadrootsAppBackend, SetupActionState,
+    ImportActionState, RadrootsApp, RadrootsAppBackend, RadrootsOfflineGeocoderState,
+    SetupActionState,
 };
 #[cfg(target_os = "macos")]
 use radroots_identity::RadrootsIdentity;
@@ -23,6 +24,10 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 #[cfg(target_os = "macos")]
 use zeroize::Zeroizing;
+
+mod offline_geocoder;
+
+use offline_geocoder::DesktopOfflineGeocoder;
 
 const RADROOTS_DESKTOP_ICON_BYTES: &[u8] = include_bytes!("../assets/icons/radroots-logo.ico");
 
@@ -50,9 +55,35 @@ fn desktop_icon() -> Option<egui::IconData> {
     })
 }
 
-struct DesktopBackend;
+struct DesktopBackend {
+    offline_geocoder: DesktopOfflineGeocoder,
+}
 
 impl DesktopBackend {
+    fn new() -> Self {
+        #[cfg(target_os = "macos")]
+        let offline_geocoder = match Self::app_data_root() {
+            Ok(app_data_root) => DesktopOfflineGeocoder::start(app_data_root),
+            Err(debug_message) => {
+                DesktopOfflineGeocoder::from_state(RadrootsOfflineGeocoderState::Unavailable {
+                    user_message: "Offline geocoder could not be initialized on this device."
+                        .to_owned(),
+                    debug_message,
+                })
+            }
+        };
+
+        #[cfg(not(target_os = "macos"))]
+        let offline_geocoder =
+            DesktopOfflineGeocoder::from_state(RadrootsOfflineGeocoderState::Unavailable {
+                user_message: "Offline geocoder is not available in this desktop build.".to_owned(),
+                debug_message: "desktop offline geocoder initialization is only wired for macos"
+                    .to_owned(),
+            });
+
+        Self { offline_geocoder }
+    }
+
     #[cfg(target_os = "macos")]
     fn radroots_root() -> Result<PathBuf, String> {
         let base_dirs =
@@ -252,6 +283,14 @@ impl RadrootsAppBackend for DesktopBackend {
         }
     }
 
+    fn offline_geocoder_state(&self) -> Option<RadrootsOfflineGeocoderState> {
+        Some(self.offline_geocoder.current_state())
+    }
+
+    fn poll_offline_geocoder_state(&self) -> Result<Option<RadrootsOfflineGeocoderState>, String> {
+        Ok(self.offline_geocoder.take_update())
+    }
+
     fn setup_action_state(&self) -> SetupActionState {
         #[cfg(target_os = "macos")]
         {
@@ -400,7 +439,7 @@ fn main() -> eframe::Result<()> {
     eframe::run_native(
         APP_NAME,
         options,
-        Box::new(|_cc| Ok(Box::new(RadrootsApp::new(Box::new(DesktopBackend))))),
+        Box::new(|_cc| Ok(Box::new(RadrootsApp::new(Box::new(DesktopBackend::new()))))),
     )
 }
 

@@ -4,6 +4,7 @@ use std::process::Command;
 
 fn main() {
     println!("cargo:rerun-if-changed=build.rs");
+    sync_optional_geocoder_asset();
 
     if env::var("CARGO_CFG_TARGET_OS").ok().as_deref() != Some("macos") {
         return;
@@ -44,6 +45,44 @@ fn main() {
         "cargo:rustc-link-arg-bin=radroots-app-desktop=-Wl,-sectcreate,__TEXT,__info_plist,{}",
         info_plist_path.display()
     );
+}
+
+fn sync_optional_geocoder_asset() {
+    let manifest_dir = PathBuf::from(env::var_os("CARGO_MANIFEST_DIR").expect("manifest dir"));
+    let source_path = manifest_dir.join("../../assets/geocoder/geonames.db");
+    println!("cargo:rerun-if-changed={}", source_path.display());
+
+    let profile_dir = target_profile_dir();
+    let target_path = profile_dir.join("geonames.db");
+
+    if source_path.is_file() {
+        std::fs::copy(&source_path, &target_path).unwrap_or_else(|err| {
+            panic!(
+                "failed to copy optional desktop geocoder asset from {} to {}: {err}",
+                source_path.display(),
+                target_path.display()
+            )
+        });
+        return;
+    }
+
+    if target_path.exists() {
+        std::fs::remove_file(&target_path).unwrap_or_else(|err| {
+            panic!(
+                "failed to remove stale desktop geocoder asset at {}: {err}",
+                target_path.display()
+            )
+        });
+    }
+}
+
+fn target_profile_dir() -> PathBuf {
+    let out_dir = PathBuf::from(env::var_os("OUT_DIR").expect("OUT_DIR"));
+    out_dir
+        .ancestors()
+        .nth(3)
+        .unwrap_or_else(|| panic!("unexpected cargo OUT_DIR layout: {}", out_dir.display()))
+        .to_path_buf()
 }
 
 fn emit_rerun_paths(package_dir: &Path) {
