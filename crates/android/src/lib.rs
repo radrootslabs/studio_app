@@ -7,7 +7,7 @@ use eframe::egui::ViewportBuilder;
 #[cfg(any(target_os = "android", test))]
 use radroots_studio_app_core::RadrootsAppBackend;
 #[cfg(any(target_os = "android", test))]
-use radroots_studio_app_core::{HomeActionState, IdentityGateState, SetupActionState};
+use radroots_studio_app_core::{HomeActionKind, HomeActionState, IdentityGateState, SetupActionState};
 #[cfg(target_os = "android")]
 use radroots_studio_app_core::{RadrootsApp, APP_NAME};
 #[cfg(test)]
@@ -73,61 +73,53 @@ impl RadrootsAppBackend for AndroidBackend {
         }
     }
 
-    fn home_remove_action_state(&self) -> Option<HomeActionState> {
+    fn home_action_states(&self) -> Vec<HomeActionState> {
         #[cfg(target_os = "android")]
         {
-            return Some(HomeActionState {
-                label: "Remove Key From This Device".to_owned(),
-                enabled: true,
-                pending: false,
-            });
+            return vec![
+                HomeActionState {
+                    kind: HomeActionKind::RemoveLocalKey,
+                    label: "Remove Key From This Device".to_owned(),
+                    enabled: true,
+                    pending: false,
+                },
+                HomeActionState {
+                    kind: HomeActionKind::ResetDevice,
+                    label: "Reset This Device".to_owned(),
+                    enabled: true,
+                    pending: false,
+                },
+            ];
         }
 
         #[cfg(not(target_os = "android"))]
         {
-            None
+            Vec::new()
         }
     }
 
-    fn request_home_remove_action(&self) -> Result<Option<IdentityGateState>, String> {
+    fn request_home_action(
+        &self,
+        action: HomeActionKind,
+    ) -> Result<Option<IdentityGateState>, String> {
         #[cfg(target_os = "android")]
         {
             let manager = Self::accounts_manager()?;
-            return Self::remove_selected_local_identity(&manager).map(Some);
+            return match action {
+                HomeActionKind::RemoveLocalKey => {
+                    Self::remove_selected_local_identity(&manager).map(Some)
+                }
+                HomeActionKind::ResetDevice => {
+                    let accounts_path = storage::accounts_path()?;
+                    Self::reset_local_device_state(&manager, accounts_path.as_path()).map(Some)
+                }
+                HomeActionKind::DisconnectSigner => Ok(None),
+            };
         }
 
         #[cfg(not(target_os = "android"))]
         {
-            Ok(None)
-        }
-    }
-
-    fn home_reset_action_state(&self) -> Option<HomeActionState> {
-        #[cfg(target_os = "android")]
-        {
-            return Some(HomeActionState {
-                label: "Reset This Device".to_owned(),
-                enabled: true,
-                pending: false,
-            });
-        }
-
-        #[cfg(not(target_os = "android"))]
-        {
-            None
-        }
-    }
-
-    fn request_home_reset_action(&self) -> Result<Option<IdentityGateState>, String> {
-        #[cfg(target_os = "android")]
-        {
-            let manager = Self::accounts_manager()?;
-            let accounts_path = storage::accounts_path()?;
-            return Self::reset_local_device_state(&manager, accounts_path.as_path()).map(Some);
-        }
-
-        #[cfg(not(target_os = "android"))]
-        {
+            let _ = action;
             Ok(None)
         }
     }
