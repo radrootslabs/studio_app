@@ -18,6 +18,8 @@ use radroots_nostr_accounts::prelude::RadrootsNostrAccountRecord;
 use radroots_nostr_accounts::prelude::RadrootsNostrAccountsManager;
 #[cfg(any(target_os = "android", test))]
 use radroots_nostr_accounts::prelude::RadrootsNostrSelectedAccountStatus;
+#[cfg(any(target_os = "android", test))]
+use std::path::Path;
 #[cfg(target_os = "android")]
 use winit::platform::android::activity::AndroidApp;
 
@@ -92,6 +94,36 @@ impl RadrootsAppBackend for AndroidBackend {
         {
             let manager = Self::accounts_manager()?;
             return Self::remove_selected_local_identity(&manager).map(Some);
+        }
+
+        #[cfg(not(target_os = "android"))]
+        {
+            Ok(None)
+        }
+    }
+
+    fn home_reset_action_state(&self) -> Option<HomeActionState> {
+        #[cfg(target_os = "android")]
+        {
+            return Some(HomeActionState {
+                label: "Reset This Device".to_owned(),
+                enabled: true,
+                pending: false,
+            });
+        }
+
+        #[cfg(not(target_os = "android"))]
+        {
+            None
+        }
+    }
+
+    fn request_home_reset_action(&self) -> Result<Option<IdentityGateState>, String> {
+        #[cfg(target_os = "android")]
+        {
+            let manager = Self::accounts_manager()?;
+            let accounts_path = storage::accounts_path()?;
+            return Self::reset_local_device_state(&manager, accounts_path.as_path()).map(Some);
         }
 
         #[cfg(not(target_os = "android"))]
@@ -178,6 +210,43 @@ impl AndroidBackend {
             .remove_account(&account_id)
             .map_err(|source| source.to_string())?;
         Self::identity_state_from_manager(manager)
+    }
+
+    fn remove_all_local_identities(
+        manager: &RadrootsNostrAccountsManager,
+    ) -> Result<IdentityGateState, String> {
+        let account_ids = manager
+            .list_accounts()
+            .map_err(|source| source.to_string())?
+            .into_iter()
+            .map(|record| record.account_id)
+            .collect::<Vec<_>>();
+
+        for account_id in account_ids {
+            manager
+                .remove_account(&account_id)
+                .map_err(|source| source.to_string())?;
+        }
+
+        Self::identity_state_from_manager(manager)
+    }
+
+    fn remove_accounts_file_if_present(accounts_path: &Path) -> Result<(), String> {
+        match std::fs::remove_file(accounts_path) {
+            Ok(()) => Ok(()),
+            Err(source) if source.kind() == std::io::ErrorKind::NotFound => Ok(()),
+            Err(source) => Err(format!("failed to remove android accounts file: {source}")),
+        }
+    }
+
+    #[cfg(target_os = "android")]
+    fn reset_local_device_state(
+        manager: &RadrootsNostrAccountsManager,
+        accounts_path: &Path,
+    ) -> Result<IdentityGateState, String> {
+        let state = Self::remove_all_local_identities(manager)?;
+        Self::remove_accounts_file_if_present(accounts_path)?;
+        Ok(state)
     }
 }
 
@@ -322,5 +391,41 @@ mod tests {
             manager.selected_account_id().expect("selected account"),
             None
         );
+    }
+
+    #[test]
+    fn remove_all_local_identities_clears_every_account() {
+        let manager = RadrootsNostrAccountsManager::new_in_memory();
+
+        manager
+            .generate_identity(Some("first".into()), true)
+            .expect("generate first");
+        manager
+            .generate_identity(Some("second".into()), false)
+            .expect("generate second");
+
+        let state = AndroidBackend::remove_all_local_identities(&manager).expect("reset state");
+
+        assert_eq!(state, IdentityGateState::Missing);
+        assert_eq!(manager.list_accounts().expect("list accounts").len(), 0);
+        assert_eq!(manager.selected_account_id().expect("selected"), None);
+    }
+
+    #[test]
+    fn remove_accounts_file_if_present_deletes_existing_file() {
+        let unique = format!(
+            "radroots-android-reset-{}-{}.json",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("system time")
+                .as_nanos()
+        );
+        let path = std::env::temp_dir().join(unique);
+        std::fs::write(&path, b"{}").expect("write accounts file");
+
+        AndroidBackend::remove_accounts_file_if_present(path.as_path()).expect("remove file");
+
+        assert!(!path.exists());
     }
 }
