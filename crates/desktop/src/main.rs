@@ -9,8 +9,8 @@ use radroots_studio_app_apple_security::{
     APPLE_NOSTR_SERVICE, RadrootsAppleKeychainVault, verify_user_presence,
 };
 use radroots_studio_app_core::{
-    APP_NAME, HomeActionKind, HomeActionResult, HomeActionState, IdentityGateState, RadrootsApp,
-    RadrootsAppBackend, SetupActionState,
+    APP_NAME, HomeActionKind, HomeActionResult, HomeActionState, IdentityGateState,
+    ImportActionState, RadrootsApp, RadrootsAppBackend, SetupActionState,
 };
 #[cfg(target_os = "macos")]
 use radroots_identity::RadrootsIdentity;
@@ -145,10 +145,10 @@ impl DesktopBackend {
     }
 
     #[cfg(target_os = "macos")]
-    fn export_selected_local_recovery_key(
+    fn export_selected_local_secret_key(
         manager: &RadrootsNostrAccountsManager,
     ) -> Result<String, String> {
-        verify_user_presence("reveal the current recovery key")
+        verify_user_presence("reveal the current secret key")
             .map_err(|source| source.to_string())?;
 
         let Some(account_id) = manager
@@ -169,6 +169,24 @@ impl DesktopBackend {
         let identity = RadrootsIdentity::from_secret_key_str(secret_key_hex.as_str())
             .map_err(|source| source.to_string())?;
         Ok(identity.nsec())
+    }
+
+    #[cfg(target_os = "macos")]
+    fn import_local_identity(
+        manager: &RadrootsNostrAccountsManager,
+        secret_key: &str,
+    ) -> Result<IdentityGateState, String> {
+        let identity = RadrootsIdentity::from_secret_key_str(secret_key)
+            .map_err(|_| "invalid secret key".to_owned())?;
+
+        manager
+            .upsert_identity(&identity, None, true)
+            .map_err(|source| source.to_string())?;
+
+        let status = manager
+            .selected_account_status()
+            .map_err(|source| source.to_string())?;
+        Ok(Self::map_status(status))
     }
 
     #[cfg(target_os = "macos")]
@@ -273,13 +291,43 @@ impl RadrootsAppBackend for DesktopBackend {
         }
     }
 
+    fn import_action_state(&self) -> Option<ImportActionState> {
+        #[cfg(target_os = "macos")]
+        {
+            return Some(ImportActionState {
+                label: "Import Secret Key".to_owned(),
+                enabled: true,
+                pending: false,
+            });
+        }
+
+        #[cfg(not(target_os = "macos"))]
+        {
+            None
+        }
+    }
+
+    fn request_import_action(&self, secret_key: &str) -> Result<Option<IdentityGateState>, String> {
+        #[cfg(target_os = "macos")]
+        {
+            let manager = Self::accounts_manager()?;
+            return Self::import_local_identity(&manager, secret_key).map(Some);
+        }
+
+        #[cfg(not(target_os = "macos"))]
+        {
+            let _ = secret_key;
+            Ok(None)
+        }
+    }
+
     fn home_action_states(&self) -> Vec<HomeActionState> {
         #[cfg(target_os = "macos")]
         {
             return vec![
                 HomeActionState {
-                    kind: HomeActionKind::BackupRecoveryKey,
-                    label: "Back Up Recovery Key".to_owned(),
+                    kind: HomeActionKind::BackupSecretKey,
+                    label: "Back Up Secret Key".to_owned(),
                     enabled: true,
                     pending: false,
                 },
@@ -309,10 +357,8 @@ impl RadrootsAppBackend for DesktopBackend {
         {
             let manager = Self::accounts_manager()?;
             return match action {
-                HomeActionKind::BackupRecoveryKey => {
-                    Self::export_selected_local_recovery_key(&manager)
-                        .map(|nsec| HomeActionResult::RevealRecoveryKey { nsec })
-                }
+                HomeActionKind::BackupSecretKey => Self::export_selected_local_secret_key(&manager)
+                    .map(|nsec| HomeActionResult::RevealSecretKey { nsec }),
                 HomeActionKind::RemoveLocalKey => Self::remove_selected_local_identity(&manager)
                     .map(HomeActionResult::IdentityState),
                 HomeActionKind::ResetDevice => {
@@ -434,7 +480,7 @@ mod tests {
     }
 
     #[test]
-    fn export_selected_local_recovery_key_returns_nsec() {
+    fn export_selected_local_secret_key_returns_nsec() {
         let manager =
             radroots_nostr_accounts::prelude::RadrootsNostrAccountsManager::new_in_memory();
         let identity = RadrootsIdentity::generate();
@@ -444,10 +490,39 @@ mod tests {
             .expect("store identity");
 
         let nsec =
-            DesktopBackend::export_selected_local_recovery_key(&manager).expect("export recovery");
+            DesktopBackend::export_selected_local_secret_key(&manager).expect("export secret");
 
         assert_eq!(nsec, identity.nsec());
         assert!(nsec.starts_with("nsec1"));
+    }
+
+    #[test]
+    fn import_local_identity_imports_nsec_and_selects_account() {
+        let manager =
+            radroots_nostr_accounts::prelude::RadrootsNostrAccountsManager::new_in_memory();
+        let identity = RadrootsIdentity::generate();
+
+        let state = DesktopBackend::import_local_identity(&manager, identity.nsec().as_str())
+            .expect("import identity");
+
+        assert_eq!(
+            state,
+            radroots_studio_app_core::IdentityGateState::Ready {
+                account_id: identity.id().to_string(),
+                npub: identity.npub(),
+            }
+        );
+        assert_eq!(
+            manager.selected_account_id().expect("selected"),
+            Some(identity.id())
+        );
+        assert_eq!(manager.list_accounts().expect("list").len(), 1);
+        assert_eq!(
+            manager
+                .export_secret_hex(&identity.id())
+                .expect("export secret"),
+            Some(identity.secret_key_hex())
+        );
     }
 
     #[test]

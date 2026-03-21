@@ -173,7 +173,7 @@ impl RadrootsAppBackend for WebBackend {
             HomeActionKind::DisconnectSigner => {
                 Ok(HomeActionResult::IdentityState(self.disconnect_signer()))
             }
-            HomeActionKind::BackupRecoveryKey
+            HomeActionKind::BackupSecretKey
             | HomeActionKind::RemoveLocalKey
             | HomeActionKind::ResetDevice => Ok(HomeActionResult::None),
         }

@@ -80,13 +80,13 @@ impl RadrootsAppBackend for AndroidBackend {
     fn home_action_states(&self) -> Vec<HomeActionState> {
         #[cfg(target_os = "android")]
         {
-            let recovery_key_export_pending = Self::recovery_key_export_pending();
+            let secret_key_export_pending = Self::secret_key_export_pending();
             return vec![
                 HomeActionState {
-                    kind: HomeActionKind::BackupRecoveryKey,
-                    label: "Back Up Recovery Key".to_owned(),
-                    enabled: !recovery_key_export_pending,
-                    pending: recovery_key_export_pending,
+                    kind: HomeActionKind::BackupSecretKey,
+                    label: "Back Up Secret Key".to_owned(),
+                    enabled: !secret_key_export_pending,
+                    pending: secret_key_export_pending,
                 },
                 HomeActionState {
                     kind: HomeActionKind::RemoveLocalKey,
@@ -113,8 +113,8 @@ impl RadrootsAppBackend for AndroidBackend {
         #[cfg(target_os = "android")]
         {
             return match action {
-                HomeActionKind::BackupRecoveryKey => {
-                    Self::begin_recovery_key_export().map(|()| HomeActionResult::None)
+                HomeActionKind::BackupSecretKey => {
+                    Self::begin_secret_key_export().map(|()| HomeActionResult::None)
                 }
                 HomeActionKind::RemoveLocalKey => {
                     let manager = Self::accounts_manager()?;
@@ -141,7 +141,7 @@ impl RadrootsAppBackend for AndroidBackend {
     fn poll_home_action_result(&self) -> Result<Option<HomeActionResult>, String> {
         #[cfg(target_os = "android")]
         {
-            return Self::poll_recovery_key_export();
+            return Self::poll_secret_key_export();
         }
 
         #[cfg(not(target_os = "android"))]
@@ -214,7 +214,7 @@ impl AndroidBackend {
         Self::identity_state_from_manager(manager)
     }
 
-    fn export_selected_local_recovery_key(
+    fn export_selected_local_secret_key(
         manager: &RadrootsNostrAccountsManager,
     ) -> Result<String, String> {
         let Some(account_id) = manager
@@ -238,35 +238,35 @@ impl AndroidBackend {
     }
 
     #[cfg(target_os = "android")]
-    fn begin_recovery_key_export() -> Result<(), String> {
-        security::begin_user_presence_verification("reveal the current recovery key")
+    fn begin_secret_key_export() -> Result<(), String> {
+        security::begin_user_presence_verification("reveal the current secret key")
             .map_err(|source| source.to_string())
     }
 
     #[cfg(not(target_os = "android"))]
-    fn begin_recovery_key_export() -> Result<(), String> {
+    fn begin_secret_key_export() -> Result<(), String> {
         Ok(())
     }
 
     #[cfg(target_os = "android")]
-    fn recovery_key_export_pending() -> bool {
+    fn secret_key_export_pending() -> bool {
         security::is_user_presence_verification_pending().unwrap_or(false)
     }
 
     #[cfg(not(target_os = "android"))]
-    fn recovery_key_export_pending() -> bool {
+    fn secret_key_export_pending() -> bool {
         false
     }
 
     #[cfg(target_os = "android")]
-    fn poll_recovery_key_export() -> Result<Option<HomeActionResult>, String> {
+    fn poll_secret_key_export() -> Result<Option<HomeActionResult>, String> {
         match security::take_user_presence_verification_result()
             .map_err(|source| source.to_string())?
         {
             Some(security::AndroidUserPresenceVerificationResult::Verified) => {
                 let manager = Self::accounts_manager()?;
-                Self::export_selected_local_recovery_key(&manager)
-                    .map(|nsec| Some(HomeActionResult::RevealRecoveryKey { nsec }))
+                Self::export_selected_local_secret_key(&manager)
+                    .map(|nsec| Some(HomeActionResult::RevealSecretKey { nsec }))
             }
             Some(security::AndroidUserPresenceVerificationResult::Failed(message)) => Err(message),
             None => Ok(None),
@@ -274,7 +274,7 @@ impl AndroidBackend {
     }
 
     #[cfg(not(target_os = "android"))]
-    fn poll_recovery_key_export() -> Result<Option<HomeActionResult>, String> {
+    fn poll_secret_key_export() -> Result<Option<HomeActionResult>, String> {
         Ok(None)
     }
 
@@ -494,7 +494,7 @@ mod tests {
     }
 
     #[test]
-    fn export_selected_local_recovery_key_returns_nsec() {
+    fn export_selected_local_secret_key_returns_nsec() {
         let manager = RadrootsNostrAccountsManager::new_in_memory();
         let identity = RadrootsIdentity::generate();
 
@@ -503,7 +503,7 @@ mod tests {
             .expect("store identity");
 
         let nsec =
-            AndroidBackend::export_selected_local_recovery_key(&manager).expect("export recovery");
+            AndroidBackend::export_selected_local_secret_key(&manager).expect("export secret");
 
         assert_eq!(nsec, identity.nsec());
         assert!(nsec.starts_with("nsec1"));

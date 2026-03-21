@@ -80,10 +80,10 @@ impl IosBackend {
         Self::identity_state_from_manager(manager)
     }
 
-    fn export_selected_local_recovery_key(
+    fn export_selected_local_secret_key(
         manager: &RadrootsNostrAccountsManager,
     ) -> Result<String, String> {
-        Self::authorize_recovery_key_export()?;
+        Self::authorize_secret_key_export()?;
 
         let Some(account_id) = manager
             .selected_account_id()
@@ -106,12 +106,12 @@ impl IosBackend {
     }
 
     #[cfg(target_os = "ios")]
-    fn authorize_recovery_key_export() -> Result<(), String> {
-        verify_user_presence("reveal the current recovery key").map_err(|source| source.to_string())
+    fn authorize_secret_key_export() -> Result<(), String> {
+        verify_user_presence("reveal the current secret key").map_err(|source| source.to_string())
     }
 
     #[cfg(not(target_os = "ios"))]
-    fn authorize_recovery_key_export() -> Result<(), String> {
+    fn authorize_secret_key_export() -> Result<(), String> {
         Ok(())
     }
 
@@ -176,8 +176,8 @@ impl RadrootsAppBackend for IosBackend {
     fn home_action_states(&self) -> Vec<HomeActionState> {
         vec![
             HomeActionState {
-                kind: HomeActionKind::BackupRecoveryKey,
-                label: "Back Up Recovery Key".to_owned(),
+                kind: HomeActionKind::BackupSecretKey,
+                label: "Back Up Secret Key".to_owned(),
                 enabled: true,
                 pending: false,
             },
@@ -199,8 +199,8 @@ impl RadrootsAppBackend for IosBackend {
     fn request_home_action(&self, action: HomeActionKind) -> Result<HomeActionResult, String> {
         let manager = Self::accounts_manager()?;
         match action {
-            HomeActionKind::BackupRecoveryKey => Self::export_selected_local_recovery_key(&manager)
-                .map(|nsec| HomeActionResult::RevealRecoveryKey { nsec }),
+            HomeActionKind::BackupSecretKey => Self::export_selected_local_secret_key(&manager)
+                .map(|nsec| HomeActionResult::RevealSecretKey { nsec }),
             HomeActionKind::RemoveLocalKey => {
                 Self::remove_selected_local_identity(&manager).map(HomeActionResult::IdentityState)
             }
@@ -326,7 +326,7 @@ mod tests {
     }
 
     #[test]
-    fn export_selected_local_recovery_key_returns_nsec() {
+    fn export_selected_local_secret_key_returns_nsec() {
         let manager = RadrootsNostrAccountsManager::new_in_memory();
         let identity = RadrootsIdentity::generate();
 
@@ -334,8 +334,7 @@ mod tests {
             .upsert_identity(&identity, Some("primary".into()), true)
             .expect("store identity");
 
-        let nsec =
-            IosBackend::export_selected_local_recovery_key(&manager).expect("export recovery");
+        let nsec = IosBackend::export_selected_local_secret_key(&manager).expect("export secret");
 
         assert_eq!(nsec, identity.nsec());
         assert!(nsec.starts_with("nsec1"));

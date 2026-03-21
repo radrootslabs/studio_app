@@ -13,7 +13,7 @@ pub struct SetupActionState {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct RecoveryActionState {
+pub struct ImportActionState {
     pub label: String,
     pub enabled: bool,
     pub pending: bool,
@@ -29,7 +29,7 @@ pub struct HomeActionState {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum HomeActionKind {
-    BackupRecoveryKey,
+    BackupSecretKey,
     RemoveLocalKey,
     ResetDevice,
     DisconnectSigner,
@@ -39,7 +39,7 @@ pub enum HomeActionKind {
 pub enum HomeActionResult {
     None,
     IdentityState(IdentityGateState),
-    RevealRecoveryKey { nsec: String },
+    RevealSecretKey { nsec: String },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -53,12 +53,12 @@ pub trait RadrootsAppBackend {
     fn load_identity_state(&self) -> Result<IdentityGateState, String>;
     fn setup_action_state(&self) -> SetupActionState;
     fn request_setup_action(&self) -> Result<Option<IdentityGateState>, String>;
-    fn recovery_action_state(&self) -> Option<RecoveryActionState> {
+    fn import_action_state(&self) -> Option<ImportActionState> {
         None
     }
-    fn request_recovery_action(
+    fn request_import_action(
         &self,
-        _recovery_key: &str,
+        _secret_key: &str,
     ) -> Result<Option<IdentityGateState>, String> {
         Ok(None)
     }
@@ -87,9 +87,9 @@ pub struct RadrootsApp {
     screen: AppScreen,
     status_message: Option<String>,
     pending_home_confirmation: Option<HomeActionKind>,
-    pending_recovery_entry: bool,
-    recovery_key_input: Zeroizing<String>,
-    revealed_recovery_key: Option<Zeroizing<String>>,
+    pending_import_entry: bool,
+    secret_key_input: Zeroizing<String>,
+    revealed_secret_key: Option<Zeroizing<String>>,
 }
 
 impl RadrootsApp {
@@ -99,9 +99,9 @@ impl RadrootsApp {
             screen: AppScreen::Setup,
             status_message: None,
             pending_home_confirmation: None,
-            pending_recovery_entry: false,
-            recovery_key_input: Zeroizing::new(String::new()),
-            revealed_recovery_key: None,
+            pending_import_entry: false,
+            secret_key_input: Zeroizing::new(String::new()),
+            revealed_secret_key: None,
         };
         match app.backend.load_identity_state() {
             Ok(state) => app.apply_identity_state(state),
@@ -119,32 +119,32 @@ impl RadrootsApp {
                 self.screen = AppScreen::Setup;
                 self.status_message = None;
                 self.pending_home_confirmation = None;
-                self.pending_recovery_entry = false;
-                self.recovery_key_input.clear();
-                self.revealed_recovery_key = None;
+                self.pending_import_entry = false;
+                self.secret_key_input.clear();
+                self.revealed_secret_key = None;
             }
             IdentityGateState::Ready { account_id, npub } => {
                 self.screen = AppScreen::Home { account_id, npub };
                 self.status_message = None;
                 self.pending_home_confirmation = None;
-                self.pending_recovery_entry = false;
-                self.recovery_key_input.clear();
-                self.revealed_recovery_key = None;
+                self.pending_import_entry = false;
+                self.secret_key_input.clear();
+                self.revealed_secret_key = None;
             }
             IdentityGateState::Unsupported { reason } => {
                 self.screen = AppScreen::Setup;
                 self.status_message = Some(reason);
                 self.pending_home_confirmation = None;
-                self.pending_recovery_entry = false;
-                self.recovery_key_input.clear();
-                self.revealed_recovery_key = None;
+                self.pending_import_entry = false;
+                self.secret_key_input.clear();
+                self.revealed_secret_key = None;
             }
         }
     }
 
     fn request_setup_action(&mut self) {
         self.status_message = None;
-        self.revealed_recovery_key = None;
+        self.revealed_secret_key = None;
         match self.backend.request_setup_action() {
             Ok(Some(state)) => self.apply_identity_state(state),
             Ok(None) => {}
@@ -154,12 +154,12 @@ impl RadrootsApp {
         }
     }
 
-    fn request_recovery_action(&mut self) {
+    fn request_import_action(&mut self) {
         self.status_message = None;
-        self.revealed_recovery_key = None;
+        self.revealed_secret_key = None;
         match self
             .backend
-            .request_recovery_action(self.recovery_key_input.trim())
+            .request_import_action(self.secret_key_input.trim())
         {
             Ok(Some(state)) => self.apply_identity_state(state),
             Ok(None) => {}
@@ -171,7 +171,7 @@ impl RadrootsApp {
 
     fn request_home_action(&mut self, action: HomeActionKind) {
         self.status_message = None;
-        self.revealed_recovery_key = None;
+        self.revealed_secret_key = None;
         match self.backend.request_home_action(action) {
             Ok(result) => self.apply_home_action_result(result),
             Err(err) => {
@@ -183,8 +183,8 @@ impl RadrootsApp {
     fn apply_home_action_result(&mut self, result: HomeActionResult) {
         match result {
             HomeActionResult::IdentityState(state) => self.apply_identity_state(state),
-            HomeActionResult::RevealRecoveryKey { nsec } => {
-                self.revealed_recovery_key = Some(Zeroizing::new(nsec));
+            HomeActionResult::RevealSecretKey { nsec } => {
+                self.revealed_secret_key = Some(Zeroizing::new(nsec));
                 self.pending_home_confirmation = None;
             }
             HomeActionResult::None => {}
@@ -192,13 +192,13 @@ impl RadrootsApp {
     }
 
     fn home_action_requires_confirmation(action: HomeActionKind) -> bool {
-        !matches!(action, HomeActionKind::BackupRecoveryKey)
+        !matches!(action, HomeActionKind::BackupSecretKey)
     }
 
     fn home_action_confirmation_message(action: HomeActionKind) -> &'static str {
         match action {
-            HomeActionKind::BackupRecoveryKey => {
-                "This reveals the current local recovery key for backup. Do not share it."
+            HomeActionKind::BackupSecretKey => {
+                "This reveals the current local secret key for backup. Do not share it."
             }
             HomeActionKind::RemoveLocalKey => {
                 "This removes the current key from this device and returns the app to setup."
@@ -246,9 +246,9 @@ impl eframe::App for RadrootsApp {
                         if action.pending {
                             ctx.request_repaint();
                         }
-                        let recovery_action = self.backend.recovery_action_state();
-                        if let Some(recovery_action) = &recovery_action {
-                            if recovery_action.pending {
+                        let import_action = self.backend.import_action_state();
+                        if let Some(import_action) = &import_action {
+                            if import_action.pending {
                                 ctx.request_repaint();
                             }
                         }
@@ -264,17 +264,17 @@ impl eframe::App for RadrootsApp {
                             self.request_setup_action();
                         }
 
-                        if let Some(recovery_action) = recovery_action {
+                        if let Some(import_action) = import_action {
                             ui.add_space(12.0);
-                            if self.pending_recovery_entry {
+                            if self.pending_import_entry {
                                 ui.vertical_centered(|ui| {
                                     ui.set_max_width(ui.available_width().min(560.0));
                                     ui.label(
-                                        "Recover an existing local identity by entering its nsec recovery key.",
+                                        "Import an existing local identity by entering its nsec secret key.",
                                     );
                                     ui.add_space(8.0);
                                     ui.add(
-                                        egui::TextEdit::singleline(&mut *self.recovery_key_input)
+                                        egui::TextEdit::singleline(&mut *self.secret_key_input)
                                             .hint_text("nsec1...")
                                             .desired_width(ui.available_width()),
                                     );
@@ -282,23 +282,23 @@ impl eframe::App for RadrootsApp {
                                     ui.horizontal_centered(|ui| {
                                         let confirm_clicked = ui
                                             .add_enabled(
-                                                recovery_action.enabled,
-                                                egui::Button::new(recovery_action.label.clone()),
+                                                import_action.enabled,
+                                                egui::Button::new(import_action.label.clone()),
                                             )
                                             .clicked();
                                         if confirm_clicked {
-                                            self.request_recovery_action();
+                                            self.request_import_action();
                                         }
 
                                         if ui.button("Cancel").clicked() {
-                                            self.pending_recovery_entry = false;
-                                            self.recovery_key_input.clear();
+                                            self.pending_import_entry = false;
+                                            self.secret_key_input.clear();
                                             self.status_message = None;
                                         }
                                     });
                                 });
-                            } else if ui.button(recovery_action.label).clicked() {
-                                self.pending_recovery_entry = true;
+                            } else if ui.button(import_action.label).clicked() {
+                                self.pending_import_entry = true;
                                 self.status_message = None;
                             }
                         }
@@ -359,14 +359,14 @@ impl eframe::App for RadrootsApp {
                             }
                         }
 
-                        if let Some(nsec) = &self.revealed_recovery_key {
+                        if let Some(nsec) = &self.revealed_secret_key {
                             ui.add_space(20.0);
-                            ui.label("Recovery key");
+                            ui.label("Secret key");
                             ui.add_space(8.0);
                             ui.monospace(nsec.as_str());
                             ui.add_space(8.0);
-                            if ui.button("Dismiss Recovery Key").clicked() {
-                                self.revealed_recovery_key = None;
+                            if ui.button("Dismiss Secret Key").clicked() {
+                                self.revealed_secret_key = None;
                             }
                         }
                     }
@@ -392,10 +392,10 @@ mod tests {
     struct MockBackend {
         load: Result<IdentityGateState, String>,
         action_state: Rc<RefCell<SetupActionState>>,
-        recovery_action_state: Rc<RefCell<Option<RecoveryActionState>>>,
+        import_action_state: Rc<RefCell<Option<ImportActionState>>>,
         home_action_states: Rc<RefCell<Vec<HomeActionState>>>,
         request: Rc<RefCell<VecDeque<Result<Option<IdentityGateState>, String>>>>,
-        recovery_request: Rc<RefCell<VecDeque<Result<Option<IdentityGateState>, String>>>>,
+        import_request: Rc<RefCell<VecDeque<Result<Option<IdentityGateState>, String>>>>,
         home_request: Rc<RefCell<VecDeque<(HomeActionKind, Result<HomeActionResult, String>)>>>,
         home_poll: Rc<RefCell<VecDeque<Result<Option<HomeActionResult>, String>>>>,
         poll: Rc<RefCell<VecDeque<Result<Option<IdentityGateState>, String>>>>,
@@ -411,23 +411,23 @@ mod tests {
             Self {
                 load,
                 action_state: Rc::new(RefCell::new(action_state)),
-                recovery_action_state: Rc::new(RefCell::new(None)),
+                import_action_state: Rc::new(RefCell::new(None)),
                 home_action_states: Rc::new(RefCell::new(Vec::new())),
                 request: Rc::new(RefCell::new(request.into())),
-                recovery_request: Rc::new(RefCell::new(VecDeque::new())),
+                import_request: Rc::new(RefCell::new(VecDeque::new())),
                 home_request: Rc::new(RefCell::new(VecDeque::new())),
                 home_poll: Rc::new(RefCell::new(VecDeque::new())),
                 poll: Rc::new(RefCell::new(poll.into())),
             }
         }
 
-        fn with_recovery_action(
+        fn with_import_action(
             self,
-            action_state: RecoveryActionState,
+            action_state: ImportActionState,
             request: Vec<Result<Option<IdentityGateState>, String>>,
         ) -> Self {
-            *self.recovery_action_state.borrow_mut() = Some(action_state);
-            self.recovery_request.borrow_mut().extend(request);
+            *self.import_action_state.borrow_mut() = Some(action_state);
+            self.import_request.borrow_mut().extend(request);
             self
         }
 
@@ -472,15 +472,15 @@ mod tests {
                 .unwrap_or_else(|| Err("missing request response".into()))
         }
 
-        fn recovery_action_state(&self) -> Option<RecoveryActionState> {
-            self.recovery_action_state.borrow().clone()
+        fn import_action_state(&self) -> Option<ImportActionState> {
+            self.import_action_state.borrow().clone()
         }
 
-        fn request_recovery_action(
+        fn request_import_action(
             &self,
-            _recovery_key: &str,
+            _secret_key: &str,
         ) -> Result<Option<IdentityGateState>, String> {
-            self.recovery_request
+            self.import_request
                 .borrow_mut()
                 .pop_front()
                 .unwrap_or(Ok(None))
@@ -780,7 +780,7 @@ mod tests {
     }
 
     #[test]
-    fn recovery_action_transitions_to_home() {
+    fn import_action_transitions_to_home() {
         let mut app = RadrootsApp::new(Box::new(
             MockBackend::new(
                 Ok(IdentityGateState::Missing),
@@ -792,9 +792,9 @@ mod tests {
                     pending: false,
                 },
             )
-            .with_recovery_action(
-                RecoveryActionState {
-                    label: "Recover Existing Key".into(),
+            .with_import_action(
+                ImportActionState {
+                    label: "Import Secret Key".into(),
                     enabled: true,
                     pending: false,
                 },
@@ -805,9 +805,9 @@ mod tests {
             ),
         ));
 
-        app.pending_recovery_entry = true;
-        app.recovery_key_input = Zeroizing::new("nsec1example".into());
-        app.request_recovery_action();
+        app.pending_import_entry = true;
+        app.secret_key_input = Zeroizing::new("nsec1example".into());
+        app.request_import_action();
 
         assert_eq!(
             app.screen,
@@ -816,12 +816,12 @@ mod tests {
                 npub: "npub1abc".into(),
             }
         );
-        assert_eq!(app.pending_recovery_entry, false);
-        assert_eq!(app.recovery_key_input.as_str(), "");
+        assert_eq!(app.pending_import_entry, false);
+        assert_eq!(app.secret_key_input.as_str(), "");
     }
 
     #[test]
-    fn backup_home_action_reveals_recovery_key_without_leaving_home() {
+    fn backup_home_action_reveals_secret_key_without_leaving_home() {
         let mut app = RadrootsApp::new(Box::new(
             MockBackend::new(
                 Ok(IdentityGateState::Ready {
@@ -838,31 +838,29 @@ mod tests {
             )
             .with_home_action(
                 HomeActionState {
-                    kind: HomeActionKind::BackupRecoveryKey,
-                    label: "Back Up Recovery Key".into(),
+                    kind: HomeActionKind::BackupSecretKey,
+                    label: "Back Up Secret Key".into(),
                     enabled: true,
                     pending: false,
                 },
-                vec![Ok(HomeActionResult::RevealRecoveryKey {
+                vec![Ok(HomeActionResult::RevealSecretKey {
                     nsec: "nsec1example".into(),
                 })],
             ),
         ));
 
-        app.request_home_action(HomeActionKind::BackupRecoveryKey);
+        app.request_home_action(HomeActionKind::BackupSecretKey);
 
         assert!(matches!(app.screen, AppScreen::Home { .. }));
         assert_eq!(app.pending_home_confirmation, None);
         assert_eq!(
-            app.revealed_recovery_key
-                .as_ref()
-                .map(|value| value.as_str()),
+            app.revealed_secret_key.as_ref().map(|value| value.as_str()),
             Some("nsec1example")
         );
     }
 
     #[test]
-    fn deferred_backup_home_action_reveals_recovery_key_after_poll() {
+    fn deferred_backup_home_action_reveals_secret_key_after_poll() {
         let mut app = RadrootsApp::new(Box::new(
             MockBackend::new(
                 Ok(IdentityGateState::Ready {
@@ -879,29 +877,25 @@ mod tests {
             )
             .with_home_action(
                 HomeActionState {
-                    kind: HomeActionKind::BackupRecoveryKey,
-                    label: "Back Up Recovery Key".into(),
+                    kind: HomeActionKind::BackupSecretKey,
+                    label: "Back Up Secret Key".into(),
                     enabled: true,
                     pending: true,
                 },
                 vec![Ok(HomeActionResult::None)],
             )
-            .with_home_action_poll(vec![Ok(Some(
-                HomeActionResult::RevealRecoveryKey {
-                    nsec: "nsec1example".into(),
-                },
-            ))]),
+            .with_home_action_poll(vec![Ok(Some(HomeActionResult::RevealSecretKey {
+                nsec: "nsec1example".into(),
+            }))]),
         ));
 
-        app.request_home_action(HomeActionKind::BackupRecoveryKey);
-        assert_eq!(app.revealed_recovery_key, None);
+        app.request_home_action(HomeActionKind::BackupSecretKey);
+        assert_eq!(app.revealed_secret_key, None);
 
         app.sync_backend();
 
         assert_eq!(
-            app.revealed_recovery_key
-                .as_ref()
-                .map(|value| value.as_str()),
+            app.revealed_secret_key.as_ref().map(|value| value.as_str()),
             Some("nsec1example")
         );
     }
