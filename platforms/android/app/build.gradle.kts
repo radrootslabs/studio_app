@@ -49,6 +49,7 @@ android {
     sourceSets {
         getByName("main") {
             jniLibs.srcDir(rustJniLibsDir)
+            assets.srcDir("../../../assets")
         }
     }
 }

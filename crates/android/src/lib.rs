@@ -11,7 +11,7 @@ use radroots_studio_app_core::{APP_NAME, RadrootsApp};
 #[cfg(any(target_os = "android", test))]
 use radroots_studio_app_core::{
     HomeActionKind, HomeActionResult, HomeActionState, IdentityGateState, ImportActionState,
-    SetupActionState,
+    RadrootsOfflineGeocoderState, SetupActionState,
 };
 #[cfg(any(target_os = "android", test))]
 use radroots_identity::RadrootsIdentity;
@@ -29,6 +29,8 @@ use winit::platform::android::activity::AndroidApp;
 use zeroize::Zeroizing;
 
 #[cfg(any(target_os = "android", test))]
+mod offline_geocoder;
+#[cfg(any(target_os = "android", test))]
 mod security;
 #[cfg(any(target_os = "android", test))]
 mod storage;
@@ -36,7 +38,10 @@ mod storage;
 mod vault;
 
 #[cfg(any(target_os = "android", test))]
-struct AndroidBackend;
+#[cfg_attr(not(target_os = "android"), allow(dead_code))]
+struct AndroidBackend {
+    offline_geocoder: offline_geocoder::AndroidOfflineGeocoder,
+}
 
 #[cfg(any(target_os = "android", test))]
 impl RadrootsAppBackend for AndroidBackend {
@@ -51,6 +56,14 @@ impl RadrootsAppBackend for AndroidBackend {
         {
             Ok(Self::unsupported_identity_state())
         }
+    }
+
+    fn offline_geocoder_state(&self) -> Option<RadrootsOfflineGeocoderState> {
+        Some(self.offline_geocoder.current_state())
+    }
+
+    fn poll_offline_geocoder_state(&self) -> Result<Option<RadrootsOfflineGeocoderState>, String> {
+        Ok(self.offline_geocoder.take_update())
     }
 
     fn setup_action_state(&self) -> SetupActionState {
@@ -183,7 +196,25 @@ impl RadrootsAppBackend for AndroidBackend {
 }
 
 #[cfg(any(target_os = "android", test))]
+#[cfg_attr(not(target_os = "android"), allow(dead_code))]
 impl AndroidBackend {
+    fn new() -> Self {
+        #[cfg(target_os = "android")]
+        let offline_geocoder = offline_geocoder::AndroidOfflineGeocoder::start();
+
+        #[cfg(not(target_os = "android"))]
+        let offline_geocoder = offline_geocoder::AndroidOfflineGeocoder::from_state(
+            RadrootsOfflineGeocoderState::Unavailable {
+                user_message: "Offline geocoder is not available in this android build.".to_owned(),
+                debug_message:
+                    "android offline geocoder initialization is only wired on android targets"
+                        .to_owned(),
+            },
+        );
+
+        Self { offline_geocoder }
+    }
+
     #[cfg(target_os = "android")]
     fn accounts_manager() -> Result<RadrootsNostrAccountsManager, String> {
         #[cfg(target_os = "android")]
@@ -397,7 +428,7 @@ fn run_android_app(android_app: AndroidApp) -> Result<(), String> {
     eframe::run_native(
         APP_NAME,
         native_options(android_app),
-        Box::new(|_cc| Ok(Box::new(RadrootsApp::new(Box::new(AndroidBackend))))),
+        Box::new(|_cc| Ok(Box::new(RadrootsApp::new(Box::new(AndroidBackend::new()))))),
     )
     .map_err(|err| err.to_string())
 }

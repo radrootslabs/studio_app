@@ -1,3 +1,5 @@
+#![cfg_attr(not(target_os = "android"), allow(dead_code))]
+
 use radroots_nostr_accounts::prelude::RadrootsNostrAccountsError;
 use std::path::PathBuf;
 

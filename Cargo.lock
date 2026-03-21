@@ -2851,6 +2851,7 @@ dependencies = [
  "log",
  "ndk-context",
  "radroots-app-core",
+ "radroots-geocoder",
  "radroots-identity",
  "radroots-nostr-accounts",
  "wgpu",
