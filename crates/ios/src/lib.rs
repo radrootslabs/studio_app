@@ -9,7 +9,8 @@ use radroots_studio_app_core::IdentityGateState;
 #[cfg(target_os = "ios")]
 use radroots_studio_app_core::{
     APP_NAME, HomeActionKind, HomeActionResult, HomeActionState, ImportActionState,
-    PasteActionState, RadrootsApp, RadrootsAppBackend, SetupActionState,
+    PasteActionState, RadrootsApp, RadrootsAppBackend, RadrootsOfflineGeocoderState,
+    SetupActionState,
 };
 #[cfg(any(target_os = "ios", test))]
 use radroots_identity::RadrootsIdentity;
@@ -23,10 +24,15 @@ use std::path::Path;
 use zeroize::Zeroizing;
 
 #[cfg(any(target_os = "ios", test))]
+mod offline_geocoder;
+#[cfg(any(target_os = "ios", test))]
 mod storage;
 
 #[cfg(any(target_os = "ios", test))]
-struct IosBackend;
+#[cfg_attr(not(target_os = "ios"), allow(dead_code))]
+struct IosBackend {
+    offline_geocoder: offline_geocoder::IosOfflineGeocoder,
+}
 
 #[cfg(target_os = "ios")]
 unsafe extern "C" {
@@ -36,6 +42,22 @@ unsafe extern "C" {
 
 #[cfg(any(target_os = "ios", test))]
 impl IosBackend {
+    #[cfg(target_os = "ios")]
+    fn new() -> Self {
+        let offline_geocoder = match storage::app_data_root() {
+            Ok(app_data_root) => offline_geocoder::IosOfflineGeocoder::start(app_data_root),
+            Err(debug_message) => offline_geocoder::IosOfflineGeocoder::from_state(
+                RadrootsOfflineGeocoderState::Unavailable {
+                    user_message: "Offline geocoder could not be initialized on this device."
+                        .to_owned(),
+                    debug_message,
+                },
+            ),
+        };
+
+        Self { offline_geocoder }
+    }
+
     #[cfg(target_os = "ios")]
     fn accounts_manager() -> Result<RadrootsNostrAccountsManager, String> {
         storage::accounts_manager()
@@ -210,6 +232,14 @@ impl RadrootsAppBackend for IosBackend {
         Self::identity_state_from_manager(&manager)
     }
 
+    fn offline_geocoder_state(&self) -> Option<RadrootsOfflineGeocoderState> {
+        Some(self.offline_geocoder.current_state())
+    }
+
+    fn poll_offline_geocoder_state(&self) -> Result<Option<RadrootsOfflineGeocoderState>, String> {
+        Ok(self.offline_geocoder.take_update())
+    }
+
     fn setup_action_state(&self) -> SetupActionState {
         SetupActionState {
             label: "Generate New Key".to_owned(),
@@ -305,7 +335,7 @@ pub fn run() -> Result<(), String> {
     eframe::run_native(
         APP_NAME,
         native_options(),
-        Box::new(|_cc| Ok(Box::new(RadrootsApp::new(Box::new(IosBackend))))),
+        Box::new(|_cc| Ok(Box::new(RadrootsApp::new(Box::new(IosBackend::new()))))),
     )
     .map_err(|err| err.to_string())
 }

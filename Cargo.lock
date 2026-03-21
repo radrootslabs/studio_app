@@ -2901,6 +2901,7 @@ dependencies = [
  "eframe",
  "radroots-app-apple-security",
  "radroots-app-core",
+ "radroots-geocoder",
  "radroots-identity",
  "radroots-nostr-accounts",
  "wgpu",

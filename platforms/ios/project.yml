@@ -61,6 +61,11 @@ targetTemplates:
         outputFiles:
           - $(SRCROOT)/../../target/$(RUST_TARGET_TRIPLE)/$(RUST_CARGO_PROFILE)/libradroots_studio_app_ios.a
           - $(SRCROOT)/../../target/x86_64-apple-ios/$(RUST_CARGO_PROFILE)/libradroots_studio_app_ios.a
+    postBuildScripts:
+      - name: Sync iOS Geocoder Asset
+        script: |
+          "$SRCROOT/Scripts/sync_geocoder_resource.sh"
+        basedOnDependencyAnalysis: false
     dependencies:
       - sdk: UIKit.framework
       - sdk: Foundation.framework

@@ -22,6 +22,16 @@ pub(crate) fn accounts_path() -> Result<PathBuf, String> {
 }
 
 #[cfg(target_os = "ios")]
+pub(crate) fn app_data_root() -> Result<PathBuf, String> {
+    let home = std::env::var_os("HOME")
+        .map(PathBuf::from)
+        .ok_or_else(|| "failed to resolve ios app container home directory".to_owned())?;
+    let root = app_data_root_from_home(home.as_path());
+    ensure_private_directory_tree(root.as_path())?;
+    Ok(root)
+}
+
+#[cfg(target_os = "ios")]
 pub(crate) fn accounts_manager() -> Result<RadrootsNostrAccountsManager, String> {
     let store = Arc::new(RadrootsNostrFileAccountStore::new(accounts_path()?));
     let vault = Arc::new(RadrootsAppleKeychainVault::new(APPLE_NOSTR_SERVICE));
@@ -29,13 +39,17 @@ pub(crate) fn accounts_manager() -> Result<RadrootsNostrAccountsManager, String>
 }
 
 fn accounts_path_from_home(home: &Path) -> PathBuf {
+    app_data_root_from_home(home)
+        .join("nostr")
+        .join("accounts.json")
+}
+
+fn app_data_root_from_home(home: &Path) -> PathBuf {
     home.join("Library")
         .join("Application Support")
         .join("RadRoots")
         .join("app")
         .join("ios")
-        .join("nostr")
-        .join("accounts.json")
 }
 
 #[cfg(target_os = "ios")]
@@ -61,6 +75,18 @@ mod tests {
             accounts_path_from_home(home.as_path()),
             PathBuf::from(
                 "/var/mobile/Containers/Data/Application/example/Library/Application Support/RadRoots/app/ios/nostr/accounts.json"
+            )
+        );
+    }
+
+    #[test]
+    fn app_data_root_uses_ios_application_support_layout() {
+        let home = PathBuf::from("/var/mobile/Containers/Data/Application/example");
+
+        assert_eq!(
+            app_data_root_from_home(home.as_path()),
+            PathBuf::from(
+                "/var/mobile/Containers/Data/Application/example/Library/Application Support/RadRoots/app/ios"
             )
         );
     }
