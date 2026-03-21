@@ -16,7 +16,7 @@ workspace = true
 
 [dependencies]
 directories.workspace = true
-eframe.workspace = true
+eframe = { workspace = true, features = ["wgpu", "wayland", "x11"] }
 egui.workspace = true
 image.workspace = true
 radroots-app-core = { path = "../core" }

@@ -5,7 +5,9 @@ use eframe::egui::ViewportBuilder;
 #[cfg(any(target_os = "ios", test))]
 use radroots_studio_app_core::IdentityGateState;
 #[cfg(target_os = "ios")]
-use radroots_studio_app_core::{APP_NAME, RadrootsApp, RadrootsAppBackend, SetupActionState};
+use radroots_studio_app_core::{
+    HomeActionState, RadrootsApp, RadrootsAppBackend, SetupActionState, APP_NAME,
+};
 #[cfg(any(target_os = "ios", test))]
 use radroots_nostr_accounts::prelude::{
     RadrootsNostrAccountsManager, RadrootsNostrSelectedAccountStatus,
@@ -52,6 +54,22 @@ impl IosBackend {
             .map_err(|source| source.to_string())?;
         Self::identity_state_from_manager(manager)
     }
+
+    fn remove_selected_local_identity(
+        manager: &RadrootsNostrAccountsManager,
+    ) -> Result<IdentityGateState, String> {
+        let Some(account_id) = manager
+            .selected_account_id()
+            .map_err(|source| source.to_string())?
+        else {
+            return Ok(IdentityGateState::Missing);
+        };
+
+        manager
+            .remove_account(&account_id)
+            .map_err(|source| source.to_string())?;
+        Self::identity_state_from_manager(manager)
+    }
 }
 
 #[cfg(target_os = "ios")]
@@ -72,6 +90,19 @@ impl RadrootsAppBackend for IosBackend {
     fn request_setup_action(&self) -> Result<Option<IdentityGateState>, String> {
         let manager = Self::accounts_manager()?;
         Self::generate_local_identity(&manager).map(Some)
+    }
+
+    fn home_remove_action_state(&self) -> Option<HomeActionState> {
+        Some(HomeActionState {
+            label: "Remove Key From This Device".to_owned(),
+            enabled: true,
+            pending: false,
+        })
+    }
+
+    fn request_home_remove_action(&self) -> Result<Option<IdentityGateState>, String> {
+        let manager = Self::accounts_manager()?;
+        Self::remove_selected_local_identity(&manager).map(Some)
     }
 }
 
@@ -151,5 +182,20 @@ mod tests {
 
         assert!(!account_id.is_empty());
         assert!(npub.starts_with("npub1"));
+    }
+
+    #[test]
+    fn local_identity_removal_transitions_back_to_missing() {
+        let manager = RadrootsNostrAccountsManager::new_in_memory();
+
+        IosBackend::generate_local_identity(&manager).expect("generate identity");
+        let state =
+            IosBackend::remove_selected_local_identity(&manager).expect("remove selected account");
+
+        assert_eq!(state, IdentityGateState::Missing);
+        assert_eq!(
+            manager.selected_account_id().expect("selected account"),
+            None
+        );
     }
 }

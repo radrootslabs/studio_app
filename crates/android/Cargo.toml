@@ -15,7 +15,7 @@ path = "src/lib.rs"
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
-eframe.workspace = true
+eframe = { workspace = true, features = ["android-game-activity", "glow"] }
 log.workspace = true
 radroots-app-core = { path = "../core" }
 radroots-identity.workspace = true
