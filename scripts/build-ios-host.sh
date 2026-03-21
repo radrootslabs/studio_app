@@ -50,7 +50,7 @@ host_arch="$(ios_sim_host_arch)"
     -destination "generic/platform=iOS Simulator" \
     -derivedDataPath "${derived_data_dir}" \
     ARCHS="${host_arch}" \
-    CODE_SIGNING_ALLOWED=NO \
+    CODE_SIGNING_ALLOWED=YES \
     ONLY_ACTIVE_ARCH=YES \
     build
 )
