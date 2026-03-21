@@ -16,3 +16,4 @@ workspace = true
 [dependencies]
 eframe.workspace = true
 egui.workspace = true
+zeroize.workspace = true

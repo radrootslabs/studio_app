@@ -1,6 +1,7 @@
 #![forbid(unsafe_code)]
 
 use eframe::egui;
+use zeroize::Zeroizing;
 
 pub const APP_NAME: &str = "Rad Roots";
 
@@ -87,8 +88,8 @@ pub struct RadrootsApp {
     status_message: Option<String>,
     pending_home_confirmation: Option<HomeActionKind>,
     pending_recovery_entry: bool,
-    recovery_key_input: String,
-    revealed_recovery_key: Option<String>,
+    recovery_key_input: Zeroizing<String>,
+    revealed_recovery_key: Option<Zeroizing<String>>,
 }
 
 impl RadrootsApp {
@@ -99,7 +100,7 @@ impl RadrootsApp {
             status_message: None,
             pending_home_confirmation: None,
             pending_recovery_entry: false,
-            recovery_key_input: String::new(),
+            recovery_key_input: Zeroizing::new(String::new()),
             revealed_recovery_key: None,
         };
         match app.backend.load_identity_state() {
@@ -183,7 +184,7 @@ impl RadrootsApp {
         match result {
             HomeActionResult::IdentityState(state) => self.apply_identity_state(state),
             HomeActionResult::RevealRecoveryKey { nsec } => {
-                self.revealed_recovery_key = Some(nsec);
+                self.revealed_recovery_key = Some(Zeroizing::new(nsec));
                 self.pending_home_confirmation = None;
             }
             HomeActionResult::None => {}
@@ -273,7 +274,7 @@ impl eframe::App for RadrootsApp {
                                     );
                                     ui.add_space(8.0);
                                     ui.add(
-                                        egui::TextEdit::singleline(&mut self.recovery_key_input)
+                                        egui::TextEdit::singleline(&mut *self.recovery_key_input)
                                             .hint_text("nsec1...")
                                             .desired_width(ui.available_width()),
                                     );
@@ -362,7 +363,7 @@ impl eframe::App for RadrootsApp {
                             ui.add_space(20.0);
                             ui.label("Recovery key");
                             ui.add_space(8.0);
-                            ui.monospace(nsec);
+                            ui.monospace(nsec.as_str());
                             ui.add_space(8.0);
                             if ui.button("Dismiss Recovery Key").clicked() {
                                 self.revealed_recovery_key = None;
@@ -805,7 +806,7 @@ mod tests {
         ));
 
         app.pending_recovery_entry = true;
-        app.recovery_key_input = "nsec1example".into();
+        app.recovery_key_input = Zeroizing::new("nsec1example".into());
         app.request_recovery_action();
 
         assert_eq!(
@@ -816,7 +817,7 @@ mod tests {
             }
         );
         assert_eq!(app.pending_recovery_entry, false);
-        assert_eq!(app.recovery_key_input, "");
+        assert_eq!(app.recovery_key_input.as_str(), "");
     }
 
     #[test]
@@ -852,7 +853,12 @@ mod tests {
 
         assert!(matches!(app.screen, AppScreen::Home { .. }));
         assert_eq!(app.pending_home_confirmation, None);
-        assert_eq!(app.revealed_recovery_key.as_deref(), Some("nsec1example"));
+        assert_eq!(
+            app.revealed_recovery_key
+                .as_ref()
+                .map(|value| value.as_str()),
+            Some("nsec1example")
+        );
     }
 
     #[test]
@@ -892,6 +898,11 @@ mod tests {
 
         app.sync_backend();
 
-        assert_eq!(app.revealed_recovery_key.as_deref(), Some("nsec1example"));
+        assert_eq!(
+            app.revealed_recovery_key
+                .as_ref()
+                .map(|value| value.as_str()),
+            Some("nsec1example")
+        );
     }
 }
