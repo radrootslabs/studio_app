@@ -5,9 +5,9 @@ use radroots_geocoder::Geocoder;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
-use std::time::UNIX_EPOCH;
 
 const GEOCODER_ASSET_FILENAME: &str = "geonames.db";
+const GEOCODER_REVISION_FILENAME: &str = "geonames.revision";
 
 #[derive(Clone)]
 pub(crate) struct IosOfflineGeocoder {
@@ -88,7 +88,7 @@ fn initialize_offline_geocoder_inner(
         ));
     }
 
-    let revision = asset_revision(source_path.as_path())?;
+    let revision = bundled_asset_revision(source_path.parent().unwrap_or_else(|| Path::new(".")))?;
     let staged_path = staged_db_path(app_data_root, revision.as_str());
     stage_bundled_asset(source_path.as_path(), staged_path.as_path()).map_err(|debug_message| {
         (
@@ -115,28 +115,34 @@ fn bundled_asset_path() -> Result<PathBuf, String> {
     Ok(parent.join(GEOCODER_ASSET_FILENAME))
 }
 
-fn asset_revision(
-    source_path: &Path,
+fn bundled_asset_revision(
+    asset_dir: &Path,
 ) -> Result<String, (RadrootsOfflineGeocoderUnavailableKind, String)> {
-    let metadata = std::fs::metadata(source_path).map_err(|source| {
+    let revision_path = asset_dir.join(GEOCODER_REVISION_FILENAME);
+    let revision = std::fs::read_to_string(revision_path.as_path()).map_err(|source| {
         (
-            RadrootsOfflineGeocoderUnavailableKind::InitializationFailed,
-            format!("failed to read ios geocoder asset metadata: {source}"),
+            RadrootsOfflineGeocoderUnavailableKind::MissingBuildAsset,
+            format!(
+                "ios bundled geocoder revision asset missing at {}: {source}",
+                revision_path.display()
+            ),
         )
     })?;
-    let modified = metadata.modified().map_err(|source| {
-        (
-            RadrootsOfflineGeocoderUnavailableKind::InitializationFailed,
-            format!("failed to read ios geocoder asset mtime: {source}"),
-        )
-    })?;
-    let modified = modified.duration_since(UNIX_EPOCH).map_err(|source| {
-        (
-            RadrootsOfflineGeocoderUnavailableKind::InitializationFailed,
-            format!("failed to normalize ios geocoder asset mtime: {source}"),
-        )
-    })?;
-    Ok(format!("{:x}-{:x}", metadata.len(), modified.as_secs()))
+    let revision = revision.trim();
+    if !is_valid_revision(revision) {
+        return Err((
+            RadrootsOfflineGeocoderUnavailableKind::MissingBuildAsset,
+            format!(
+                "ios bundled geocoder revision asset invalid at {}",
+                revision_path.display()
+            ),
+        ));
+    }
+    Ok(revision.to_owned())
+}
+
+fn is_valid_revision(revision: &str) -> bool {
+    revision.len() == 64 && revision.bytes().all(|byte| byte.is_ascii_hexdigit())
 }
 
 fn staged_geocoder_root(app_data_root: &Path) -> PathBuf {
@@ -222,6 +228,17 @@ mod tests {
     }
 
     #[test]
+    fn valid_revision_requires_sha256_hex() {
+        assert!(is_valid_revision(
+            "6ca5f1a324de02922d40b1ff33eedf3a5a133c978de921eee5130a0c7876079c"
+        ));
+        assert!(!is_valid_revision("abcd"));
+        assert!(!is_valid_revision(
+            "6ca5f1a324de02922d40b1ff33eedf3a5a133c978de921eee5130a0c7876079z"
+        ));
+    }
+
+    #[test]
     fn missing_asset_maps_to_build_unavailable_message() {
         let state = RadrootsOfflineGeocoderState::unavailable(
             RadrootsOfflineGeocoderUnavailableKind::MissingBuildAsset,
@@ -287,6 +304,29 @@ mod tests {
         assert!(active_dir.exists());
         assert!(!stale_dir.exists());
         assert!(!stale_file.exists());
+
+        std::fs::remove_dir_all(temp_root.as_path()).unwrap();
+    }
+
+    #[test]
+    fn bundled_asset_revision_reads_stamped_sidecar() {
+        let temp_root = std::env::temp_dir().join(format!(
+            "radroots-ios-geocoder-revision-test-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let revision_path = temp_root.join(GEOCODER_REVISION_FILENAME);
+        let revision = "6ca5f1a324de02922d40b1ff33eedf3a5a133c978de921eee5130a0c7876079c";
+
+        std::fs::create_dir_all(temp_root.as_path()).unwrap();
+        std::fs::write(revision_path.as_path(), format!("{revision}\n")).unwrap();
+
+        assert_eq!(
+            bundled_asset_revision(temp_root.as_path()).unwrap(),
+            revision.to_owned()
+        );
 
         std::fs::remove_dir_all(temp_root.as_path()).unwrap();
     }
