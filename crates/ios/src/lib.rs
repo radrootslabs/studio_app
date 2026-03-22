@@ -10,7 +10,7 @@ use radroots_studio_app_core::IdentityGateState;
 use radroots_studio_app_core::{
     APP_NAME, HomeActionKind, HomeActionResult, HomeActionState, ImportActionState,
     PasteActionState, RadrootsApp, RadrootsAppBackend, RadrootsOfflineGeocoderState,
-    SetupActionState,
+    RadrootsOfflineGeocoderUnavailableKind, SetupActionState,
 };
 #[cfg(any(target_os = "ios", test))]
 use radroots_identity::RadrootsIdentity;
@@ -47,11 +47,10 @@ impl IosBackend {
         let offline_geocoder = match storage::app_data_root() {
             Ok(app_data_root) => offline_geocoder::IosOfflineGeocoder::start(app_data_root),
             Err(debug_message) => offline_geocoder::IosOfflineGeocoder::from_state(
-                RadrootsOfflineGeocoderState::Unavailable {
-                    user_message: "Offline geocoder could not be initialized on this device."
-                        .to_owned(),
+                RadrootsOfflineGeocoderState::unavailable(
+                    RadrootsOfflineGeocoderUnavailableKind::InternalError,
                     debug_message,
-                },
+                ),
             ),
         };
 

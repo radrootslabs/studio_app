@@ -11,7 +11,7 @@ use radroots_studio_app_core::{APP_NAME, RadrootsApp};
 #[cfg(any(target_os = "android", test))]
 use radroots_studio_app_core::{
     HomeActionKind, HomeActionResult, HomeActionState, IdentityGateState, ImportActionState,
-    RadrootsOfflineGeocoderState, SetupActionState,
+    RadrootsOfflineGeocoderState, RadrootsOfflineGeocoderUnavailableKind, SetupActionState,
 };
 #[cfg(any(target_os = "android", test))]
 use radroots_identity::RadrootsIdentity;
@@ -204,12 +204,10 @@ impl AndroidBackend {
 
         #[cfg(not(target_os = "android"))]
         let offline_geocoder = offline_geocoder::AndroidOfflineGeocoder::from_state(
-            RadrootsOfflineGeocoderState::Unavailable {
-                user_message: "Offline geocoder is not available in this android build.".to_owned(),
-                debug_message:
-                    "android offline geocoder initialization is only wired on android targets"
-                        .to_owned(),
-            },
+            RadrootsOfflineGeocoderState::unavailable(
+                RadrootsOfflineGeocoderUnavailableKind::MissingBuildAsset,
+                "android offline geocoder initialization is only wired on android targets",
+            ),
         );
 
         Self { offline_geocoder }

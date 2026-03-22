@@ -11,7 +11,7 @@ use radroots_studio_app_apple_security::{
 use radroots_studio_app_core::{
     APP_NAME, HomeActionKind, HomeActionResult, HomeActionState, IdentityGateState,
     ImportActionState, RadrootsApp, RadrootsAppBackend, RadrootsOfflineGeocoderState,
-    SetupActionState,
+    RadrootsOfflineGeocoderUnavailableKind, SetupActionState,
 };
 #[cfg(target_os = "macos")]
 use radroots_identity::RadrootsIdentity;
@@ -64,22 +64,21 @@ impl DesktopBackend {
         #[cfg(target_os = "macos")]
         let offline_geocoder = match Self::app_data_root() {
             Ok(app_data_root) => DesktopOfflineGeocoder::start(app_data_root),
-            Err(debug_message) => {
-                DesktopOfflineGeocoder::from_state(RadrootsOfflineGeocoderState::Unavailable {
-                    user_message: "Offline geocoder could not be initialized on this device."
-                        .to_owned(),
+            Err(debug_message) => DesktopOfflineGeocoder::from_state(
+                RadrootsOfflineGeocoderState::unavailable(
+                    RadrootsOfflineGeocoderUnavailableKind::InternalError,
                     debug_message,
-                })
-            }
+                ),
+            ),
         };
 
         #[cfg(not(target_os = "macos"))]
-        let offline_geocoder =
-            DesktopOfflineGeocoder::from_state(RadrootsOfflineGeocoderState::Unavailable {
-                user_message: "Offline geocoder is not available in this desktop build.".to_owned(),
-                debug_message: "desktop offline geocoder initialization is only wired for macos"
-                    .to_owned(),
-            });
+        let offline_geocoder = DesktopOfflineGeocoder::from_state(
+            RadrootsOfflineGeocoderState::unavailable(
+                RadrootsOfflineGeocoderUnavailableKind::MissingBuildAsset,
+                "desktop offline geocoder initialization is only wired for macos",
+            ),
+        );
 
         Self { offline_geocoder }
     }

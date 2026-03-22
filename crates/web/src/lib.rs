@@ -16,7 +16,8 @@ use nostr_browser_signer::{BrowserSigner, Error as BrowserSignerError};
 #[cfg(target_arch = "wasm32")]
 use radroots_studio_app_core::{
     HomeActionKind, HomeActionResult, HomeActionState, IdentityGateState, RadrootsApp,
-    RadrootsAppBackend, RadrootsOfflineGeocoderState, SetupActionState,
+    RadrootsAppBackend, RadrootsOfflineGeocoderState, RadrootsOfflineGeocoderUnavailableKind,
+    SetupActionState,
 };
 
 #[cfg(target_arch = "wasm32")]
@@ -82,12 +83,10 @@ impl WebBackend {
     }
 
     fn offline_geocoder_unavailable_state() -> RadrootsOfflineGeocoderState {
-        RadrootsOfflineGeocoderState::Unavailable {
-            user_message: "Offline geocoder is not available in this web build.".to_owned(),
-            debug_message:
-                "radroots-geocoder currently depends on rusqlite and is not wired for wasm runtime initialization."
-                    .to_owned(),
-        }
+        RadrootsOfflineGeocoderState::unavailable(
+            RadrootsOfflineGeocoderUnavailableKind::MissingBuildAsset,
+            "radroots-geocoder currently depends on rusqlite and is not wired for wasm runtime initialization.",
+        )
     }
 }
 

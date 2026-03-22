@@ -8,7 +8,9 @@ mod offline_geocoder;
 
 pub const APP_NAME: &str = "Rad Roots";
 
-pub use offline_geocoder::RadrootsOfflineGeocoderState;
+pub use offline_geocoder::{
+    RadrootsOfflineGeocoderState, RadrootsOfflineGeocoderUnavailableKind,
+};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SetupActionState {
@@ -287,16 +289,20 @@ impl RadrootsApp {
         ui.add_space(16.0);
         ui.label(state.summary_label());
 
-        if let RadrootsOfflineGeocoderState::Unavailable {
-            user_message,
-            debug_message,
-        } = state
-        {
+        if let Some(user_message) = state.user_message() {
             ui.add_space(6.0);
             ui.label(user_message);
             ui.add_space(6.0);
-            ui.collapsing("Offline geocoder debug details", |ui| {
-                ui.monospace(debug_message);
+            ui.collapsing("Offline geocoder details", |ui| {
+                if let Some(technical_message) = state.technical_message() {
+                    ui.label(technical_message);
+                }
+                if cfg!(debug_assertions) {
+                    if let Some(debug_message) = state.debug_message() {
+                        ui.add_space(6.0);
+                        ui.monospace(debug_message);
+                    }
+                }
             });
         }
     }
@@ -1155,10 +1161,10 @@ mod tests {
             )
             .with_offline_geocoder_state(
                 RadrootsOfflineGeocoderState::Initializing,
-                vec![Ok(Some(RadrootsOfflineGeocoderState::Unavailable {
-                    user_message: "Offline geocoder is unavailable on this device.".into(),
-                    debug_message: "failed to open staged geocoder db".into(),
-                }))],
+                vec![Ok(Some(RadrootsOfflineGeocoderState::unavailable(
+                    RadrootsOfflineGeocoderUnavailableKind::InitializationFailed,
+                    "failed to open staged geocoder db",
+                )))],
             ),
         ));
 
@@ -1166,10 +1172,22 @@ mod tests {
 
         assert_eq!(
             app.offline_geocoder_state,
-            Some(RadrootsOfflineGeocoderState::Unavailable {
-                user_message: "Offline geocoder is unavailable on this device.".into(),
-                debug_message: "failed to open staged geocoder db".into(),
-            })
+            Some(RadrootsOfflineGeocoderState::unavailable(
+                RadrootsOfflineGeocoderUnavailableKind::InitializationFailed,
+                "failed to open staged geocoder db",
+            ))
+        );
+        assert_eq!(
+            app.offline_geocoder_state
+                .as_ref()
+                .and_then(RadrootsOfflineGeocoderState::user_message),
+            Some("Offline geocoder could not be initialized on this device.")
+        );
+        assert_eq!(
+            app.offline_geocoder_state
+                .as_ref()
+                .and_then(RadrootsOfflineGeocoderState::debug_message),
+            Some("failed to open staged geocoder db")
         );
     }
 }
