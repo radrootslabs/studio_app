@@ -19,6 +19,7 @@ eframe = { workspace = true, features = ["wgpu"] }
 log.workspace = true
 radroots-app-apple-security.workspace = true
 radroots-app-core = { path = "../core" }
+radroots-app-remote-signer = { path = "../remote-signer" }
 radroots-geocoder.workspace = true
 radroots-identity.workspace = true
 radroots-nostr-accounts.workspace = true

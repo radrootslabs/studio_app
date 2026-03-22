@@ -33,6 +33,8 @@ use zeroize::Zeroizing;
 mod country_lookup;
 #[cfg(any(target_os = "ios", test))]
 mod offline_geocoder;
+#[cfg(target_os = "ios")]
+mod remote_signer;
 #[cfg(any(target_os = "ios", test))]
 mod reverse_lookup;
 #[cfg(any(target_os = "ios", test))]
@@ -43,6 +45,8 @@ mod storage;
 struct IosBackend {
     country_lookup: country_lookup::IosCountryLookup,
     offline_geocoder: offline_geocoder::IosOfflineGeocoder,
+    #[cfg(target_os = "ios")]
+    remote_signer: remote_signer::IosRemoteSigner,
     reverse_lookup: reverse_lookup::IosReverseLookup,
 }
 
@@ -71,6 +75,8 @@ impl IosBackend {
         Self {
             country_lookup: country_lookup::IosCountryLookup::new(),
             offline_geocoder,
+            #[cfg(target_os = "ios")]
+            remote_signer: remote_signer::IosRemoteSigner::new(),
             reverse_lookup: reverse_lookup::IosReverseLookup::new(),
         }
     }
@@ -107,11 +113,15 @@ impl IosBackend {
             .map_err(|source| source.to_string())?
             .into_iter()
             .map(|record| {
+                #[cfg(target_os = "ios")]
+                let custody = remote_signer::custody_for_account_id(record.account_id.as_str())?;
+                #[cfg(not(target_os = "ios"))]
+                let custody = RadrootsAccountCustody::LocalManaged;
                 Ok(RadrootsAccountSummary {
                     account_id: record.account_id.to_string(),
                     npub: record.public_identity.public_key_npub,
                     label: record.label,
-                    custody: RadrootsAccountCustody::LocalManaged,
+                    custody,
                 })
             })
             .collect()
@@ -316,7 +326,10 @@ impl IosBackend {
 impl RadrootsAppBackend for IosBackend {
     fn load_identity_state(&self) -> Result<IdentityGateState, String> {
         let manager = Self::accounts_manager()?;
-        Self::identity_state_from_manager(&manager)
+        let status = manager
+            .selected_account_status()
+            .map_err(|source| source.to_string())?;
+        remote_signer::identity_state_from_status(status)
     }
 
     fn load_account_roster(&self) -> Result<Vec<RadrootsAccountSummary>, String> {
@@ -500,6 +513,43 @@ impl RadrootsAppBackend for IosBackend {
         self.load_identity_state().map(Some)
     }
 
+    fn remote_signer_action_state(&self) -> Option<SetupActionState> {
+        Some(
+            self.remote_signer
+                .action_state()
+                .unwrap_or_else(|_| SetupActionState {
+                    label: "Connect Remote Signer".to_owned(),
+                    enabled: !self.remote_signer.is_connecting(),
+                    pending: self.remote_signer.is_connecting(),
+                }),
+        )
+    }
+
+    fn preview_remote_signer_connection(
+        &self,
+        input: &str,
+    ) -> Result<radroots_studio_app_core::RadrootsRemoteSignerPreview, String> {
+        remote_signer::preview_connection(input)
+    }
+
+    fn request_remote_signer_connection(
+        &self,
+        input: &str,
+    ) -> Result<Option<IdentityGateState>, String> {
+        self.remote_signer.begin_connect(input)?;
+        Ok(None)
+    }
+
+    fn pending_remote_signer_connection(
+        &self,
+    ) -> Result<Option<radroots_studio_app_core::RadrootsPendingRemoteSignerConnection>, String> {
+        remote_signer::pending_connection()
+    }
+
+    fn request_cancel_pending_remote_signer_connection(&self) -> Result<(), String> {
+        remote_signer::cancel_pending_connection()
+    }
+
     fn import_paste_action_state(&self) -> Option<PasteActionState> {
         Some(PasteActionState {
             label: "Paste Secret Key".to_owned(),
@@ -513,32 +563,60 @@ impl RadrootsAppBackend for IosBackend {
     }
 
     fn home_action_states(&self) -> Vec<HomeActionState> {
-        vec![
-            HomeActionState {
-                kind: HomeActionKind::BackupSecretKey,
-                label: "Back Up Secret Key".to_owned(),
-                enabled: true,
-                pending: false,
-            },
-            HomeActionState {
-                kind: HomeActionKind::RevealRawSecretKey,
-                label: "Reveal Raw Secret Key".to_owned(),
-                enabled: true,
-                pending: false,
-            },
-            HomeActionState {
-                kind: HomeActionKind::RemoveLocalKey,
-                label: "Remove Key From This Device".to_owned(),
-                enabled: true,
-                pending: false,
-            },
-            HomeActionState {
-                kind: HomeActionKind::ResetDevice,
-                label: "Reset This Device".to_owned(),
-                enabled: true,
-                pending: false,
-            },
-        ]
+        let Ok(manager) = Self::accounts_manager() else {
+            return Vec::new();
+        };
+        let Ok(status) = manager
+            .selected_account_status()
+            .map_err(|source| source.to_string())
+        else {
+            return Vec::new();
+        };
+
+        match status {
+            RadrootsNostrSelectedAccountStatus::NotConfigured => Vec::new(),
+            RadrootsNostrSelectedAccountStatus::PublicOnly { account } => {
+                if matches!(
+                    remote_signer::custody_for_account_id(account.account_id.as_str()),
+                    Ok(RadrootsAccountCustody::RemoteSigner)
+                ) {
+                    vec![HomeActionState {
+                        kind: HomeActionKind::DisconnectSigner,
+                        label: "Disconnect Remote Signer".to_owned(),
+                        enabled: true,
+                        pending: false,
+                    }]
+                } else {
+                    Vec::new()
+                }
+            }
+            RadrootsNostrSelectedAccountStatus::Ready { .. } => vec![
+                HomeActionState {
+                    kind: HomeActionKind::BackupSecretKey,
+                    label: "Back Up Secret Key".to_owned(),
+                    enabled: true,
+                    pending: false,
+                },
+                HomeActionState {
+                    kind: HomeActionKind::RevealRawSecretKey,
+                    label: "Reveal Raw Secret Key".to_owned(),
+                    enabled: true,
+                    pending: false,
+                },
+                HomeActionState {
+                    kind: HomeActionKind::RemoveLocalKey,
+                    label: "Remove Key From This Device".to_owned(),
+                    enabled: true,
+                    pending: false,
+                },
+                HomeActionState {
+                    kind: HomeActionKind::ResetDevice,
+                    label: "Reset This Device".to_owned(),
+                    enabled: true,
+                    pending: false,
+                },
+            ],
+        }
     }
 
     fn request_home_action(&self, action: HomeActionKind) -> Result<HomeActionResult, String> {
@@ -557,7 +635,10 @@ impl RadrootsAppBackend for IosBackend {
                 Self::reset_local_device_state(&manager, accounts_path.as_path())
                     .map(HomeActionResult::IdentityState)
             }
-            HomeActionKind::DisconnectSigner => Ok(HomeActionResult::None),
+            HomeActionKind::DisconnectSigner => {
+                remote_signer::disconnect_selected_remote_signer(&manager)
+                    .map(HomeActionResult::IdentityState)
+            }
         }
     }
 
@@ -565,6 +646,13 @@ impl RadrootsAppBackend for IosBackend {
         let manager = Self::accounts_manager()?;
         Self::export_selected_local_encrypted_secret_key(&manager, password)
             .map(|ncryptsec| HomeActionResult::RevealEncryptedSecretKey { ncryptsec })
+    }
+
+    fn poll_identity_state(&self) -> Result<Option<IdentityGateState>, String> {
+        self.remote_signer
+            .take_update()
+            .transpose()
+            .map(|state| state.flatten())
     }
 }
 
