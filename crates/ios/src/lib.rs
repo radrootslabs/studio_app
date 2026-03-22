@@ -8,6 +8,7 @@ use radroots_studio_app_core::IdentityGateState;
 use radroots_studio_app_core::{
     APP_NAME, HomeActionKind, HomeActionResult, HomeActionState, ImportActionState,
     PasteActionState, RadrootsApp, RadrootsAppBackend, RadrootsLocationCountry,
+    RadrootsLocationCountryCenterLookupResult, RadrootsLocationCountryListResult,
     RadrootsLocationPoint, RadrootsLocationResolverError, RadrootsLocationReverseOptions,
     RadrootsOfflineGeocoderPlatform, RadrootsOfflineGeocoderState,
     RadrootsOfflineGeocoderUnavailableKind, RadrootsResolvedLocation,
@@ -25,6 +26,8 @@ use std::path::Path;
 use zeroize::Zeroizing;
 
 #[cfg(any(target_os = "ios", test))]
+mod country_lookup;
+#[cfg(any(target_os = "ios", test))]
 mod offline_geocoder;
 #[cfg(any(target_os = "ios", test))]
 mod reverse_lookup;
@@ -34,6 +37,7 @@ mod storage;
 #[cfg(any(target_os = "ios", test))]
 #[cfg_attr(not(target_os = "ios"), allow(dead_code))]
 struct IosBackend {
+    country_lookup: country_lookup::IosCountryLookup,
     offline_geocoder: offline_geocoder::IosOfflineGeocoder,
     reverse_lookup: reverse_lookup::IosReverseLookup,
 }
@@ -61,6 +65,7 @@ impl IosBackend {
         };
 
         Self {
+            country_lookup: country_lookup::IosCountryLookup::new(),
             offline_geocoder,
             reverse_lookup: reverse_lookup::IosReverseLookup::new(),
         }
@@ -292,6 +297,38 @@ impl RadrootsAppBackend for IosBackend {
         &self,
     ) -> Result<Option<RadrootsReverseLocationLookupResult>, String> {
         Ok(self.reverse_lookup.take_update())
+    }
+
+    fn request_location_country_list(&self) -> Result<(), RadrootsLocationResolverError> {
+        let app_data_root = storage::app_data_root()
+            .map_err(|message| RadrootsLocationResolverError::QueryFailed { message })?;
+        self.country_lookup
+            .begin_list(app_data_root, self.offline_geocoder.current_state())
+    }
+
+    fn poll_location_country_list_result(
+        &self,
+    ) -> Result<Option<RadrootsLocationCountryListResult>, String> {
+        Ok(self.country_lookup.take_list_update())
+    }
+
+    fn request_location_country_center_lookup(
+        &self,
+        country_id: &str,
+    ) -> Result<(), RadrootsLocationResolverError> {
+        let app_data_root = storage::app_data_root()
+            .map_err(|message| RadrootsLocationResolverError::QueryFailed { message })?;
+        self.country_lookup.begin_center(
+            app_data_root,
+            self.offline_geocoder.current_state(),
+            country_id.to_owned(),
+        )
+    }
+
+    fn poll_location_country_center_lookup_result(
+        &self,
+    ) -> Result<Option<RadrootsLocationCountryCenterLookupResult>, String> {
+        Ok(self.country_lookup.take_center_update())
     }
 
     fn list_location_countries(
