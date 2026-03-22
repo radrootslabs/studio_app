@@ -1,10 +1,9 @@
 #![cfg_attr(not(target_os = "android"), allow(dead_code))]
 
-use radroots_studio_app_core::{
-    RadrootsOfflineGeocoderState, RadrootsOfflineGeocoderUnavailableKind,
-};
+use radroots_studio_app_core::{RadrootsOfflineGeocoderState, RadrootsOfflineGeocoderUnavailableKind};
 #[cfg(target_os = "android")]
 use radroots_geocoder::Geocoder;
+use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
@@ -86,21 +85,22 @@ fn initialize_offline_geocoder() -> RadrootsOfflineGeocoderState {
 }
 
 #[cfg(target_os = "android")]
-fn initialize_offline_geocoder_inner(
-) -> Result<(), (RadrootsOfflineGeocoderUnavailableKind, String)> {
+fn initialize_offline_geocoder_inner()
+-> Result<(), (RadrootsOfflineGeocoderUnavailableKind, String)> {
     let staged_path = stage_offline_geocoder_asset()?;
-    Geocoder::open_path(staged_path.as_str())
-        .map(|_| ())
-        .map_err(|source| {
-            (
-                RadrootsOfflineGeocoderUnavailableKind::InitializationFailed,
-                format!("failed to open staged android geocoder db: {source}"),
-            )
-        })
+    Geocoder::open_path(staged_path.as_str()).map_err(|source| {
+        (
+            RadrootsOfflineGeocoderUnavailableKind::InitializationFailed,
+            format!("failed to open staged android geocoder db: {source}"),
+        )
+    })?;
+    let _ = prune_stale_revisions(staged_path.as_str());
+    Ok(())
 }
 
 #[cfg(target_os = "android")]
-fn stage_offline_geocoder_asset() -> Result<String, (RadrootsOfflineGeocoderUnavailableKind, String)> {
+fn stage_offline_geocoder_asset() -> Result<String, (RadrootsOfflineGeocoderUnavailableKind, String)>
+{
     let java_vm = android_java_vm().map_err(|source| {
         (
             RadrootsOfflineGeocoderUnavailableKind::InternalError,
@@ -249,9 +249,65 @@ fn jni_error(error: jni::errors::Error) -> RadrootsNostrAccountsError {
     RadrootsNostrAccountsError::Store(format!("android jni error: {error}"))
 }
 
+fn prune_stale_revisions(staged_path: &str) -> Result<(), String> {
+    let staged_path = Path::new(staged_path);
+    let Some(active_revision_dir) = staged_path.parent() else {
+        return Err("android staged geocoder path did not have a revision directory".to_owned());
+    };
+    let Some(staged_root) = active_revision_dir.parent() else {
+        return Err(
+            "android staged geocoder path did not have a geocoder root directory".to_owned(),
+        );
+    };
+    let Some(active_revision) = active_revision_dir.file_name() else {
+        return Err("android staged geocoder revision directory did not have a name".to_owned());
+    };
+
+    if !staged_root.is_dir() {
+        return Ok(());
+    }
+
+    for entry in std::fs::read_dir(staged_root)
+        .map_err(|source| format!("failed to list android geocoder revisions: {source}"))?
+    {
+        let entry = entry.map_err(|source| {
+            format!("failed to read android geocoder revision entry: {source}")
+        })?;
+        if entry.file_name() == active_revision {
+            continue;
+        }
+
+        let path = entry.path();
+        if entry
+            .file_type()
+            .map_err(|source| {
+                format!("failed to inspect android geocoder revision entry: {source}")
+            })?
+            .is_dir()
+        {
+            std::fs::remove_dir_all(path.as_path()).map_err(|source| {
+                format!(
+                    "failed to remove stale android geocoder revision {}: {source}",
+                    path.display()
+                )
+            })?;
+        } else {
+            std::fs::remove_file(path.as_path()).map_err(|source| {
+                format!(
+                    "failed to remove stale android geocoder revision file {}: {source}",
+                    path.display()
+                )
+            })?;
+        }
+    }
+
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::time::{SystemTime, UNIX_EPOCH};
 
     #[test]
     fn missing_asset_maps_to_build_unavailable_message() {
@@ -269,5 +325,35 @@ mod tests {
                         .to_owned(),
             }
         );
+    }
+
+    #[test]
+    fn prune_stale_revisions_keeps_active_revision_only() {
+        let temp_root = std::env::temp_dir().join(format!(
+            "radroots-android-geocoder-prune-test-{}",
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let staged_root = temp_root.join("geocoder");
+        let active_dir = staged_root.join("active");
+        let stale_dir = staged_root.join("stale");
+        let stale_file = staged_root.join("orphan.txt");
+        let staged_path = active_dir.join("geonames.db");
+
+        std::fs::create_dir_all(active_dir.as_path()).unwrap();
+        std::fs::create_dir_all(stale_dir.as_path()).unwrap();
+        std::fs::write(staged_path.as_path(), b"active").unwrap();
+        std::fs::write(stale_dir.join("geonames.db"), b"stale").unwrap();
+        std::fs::write(stale_file.as_path(), b"orphan").unwrap();
+
+        prune_stale_revisions(staged_path.to_str().unwrap()).unwrap();
+
+        assert!(active_dir.exists());
+        assert!(!stale_dir.exists());
+        assert!(!stale_file.exists());
+
+        std::fs::remove_dir_all(temp_root.as_path()).unwrap();
     }
 }
