@@ -456,6 +456,11 @@ impl eframe::App for RadrootsApp {
                         ui.add_space(12.0);
                         ui.monospace(format!("account id: {account_id}"));
                         ui.monospace(format!("npub: {npub}"));
+                        self.home_location_tools.render(
+                            ui,
+                            self.backend.as_ref(),
+                            self.offline_geocoder_state.as_ref(),
+                        );
 
                         let actions = self.backend.home_action_states();
                         for (index, action) in actions.into_iter().enumerate() {
