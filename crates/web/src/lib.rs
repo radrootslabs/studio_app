@@ -18,9 +18,10 @@ use radroots_studio_app_core::RadrootsLocationResolverError;
 #[cfg(target_arch = "wasm32")]
 use radroots_studio_app_core::{
     HomeActionKind, HomeActionResult, HomeActionState, IdentityGateState, RadrootsApp,
-    RadrootsAppBackend, RadrootsLocationCountry, RadrootsLocationPoint,
-    RadrootsLocationResolverError, RadrootsLocationReverseOptions, RadrootsResolvedLocation,
-    RadrootsReverseLocationLookupResult, SetupActionState,
+    RadrootsAppBackend, RadrootsLocationCountry, RadrootsLocationCountryCenterLookupResult,
+    RadrootsLocationCountryListResult, RadrootsLocationPoint, RadrootsLocationResolverError,
+    RadrootsLocationReverseOptions, RadrootsResolvedLocation, RadrootsReverseLocationLookupResult,
+    SetupActionState,
 };
 #[cfg(any(target_arch = "wasm32", test))]
 use radroots_studio_app_core::{
@@ -140,6 +141,29 @@ impl RadrootsAppBackend for WebBackend {
     fn poll_reverse_location_lookup_result(
         &self,
     ) -> Result<Option<RadrootsReverseLocationLookupResult>, String> {
+        Ok(None)
+    }
+
+    fn request_location_country_list(&self) -> Result<(), RadrootsLocationResolverError> {
+        Err(location_resolver_unavailable_error())
+    }
+
+    fn poll_location_country_list_result(
+        &self,
+    ) -> Result<Option<RadrootsLocationCountryListResult>, String> {
+        Ok(None)
+    }
+
+    fn request_location_country_center_lookup(
+        &self,
+        _country_id: &str,
+    ) -> Result<(), RadrootsLocationResolverError> {
+        Err(location_resolver_unavailable_error())
+    }
+
+    fn poll_location_country_center_lookup_result(
+        &self,
+    ) -> Result<Option<RadrootsLocationCountryCenterLookupResult>, String> {
         Ok(None)
     }
 
