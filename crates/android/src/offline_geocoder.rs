@@ -1,11 +1,15 @@
 #![cfg_attr(not(target_os = "android"), allow(dead_code))]
 
 use radroots_studio_app_core::{
-    RadrootsOfflineGeocoderPlatform, RadrootsOfflineGeocoderState,
-    RadrootsOfflineGeocoderUnavailableKind,
+    RadrootsLocationCountry, RadrootsLocationPoint, RadrootsLocationResolverError,
+    RadrootsLocationReverseOptions, RadrootsOfflineGeocoderPlatform, RadrootsOfflineGeocoderState,
+    RadrootsOfflineGeocoderUnavailableKind, RadrootsResolvedLocation,
 };
-#[cfg(target_os = "android")]
-use radroots_geocoder::Geocoder;
+#[cfg(any(target_os = "android", test))]
+use radroots_geocoder::{
+    Geocoder, GeocoderCountryListResult, GeocoderError, GeocoderPoint, GeocoderReverseOptions,
+    GeocoderReverseResult,
+};
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
@@ -78,6 +82,59 @@ impl AndroidOfflineGeocoder {
     }
 }
 
+#[cfg(any(target_os = "android", test))]
+pub(crate) fn reverse_location(
+    state: &RadrootsOfflineGeocoderState,
+    point: RadrootsLocationPoint,
+    options: Option<RadrootsLocationReverseOptions>,
+) -> Result<Vec<RadrootsResolvedLocation>, RadrootsLocationResolverError> {
+    let geocoder = geocoder_for_queries(state)?;
+    let options = options.map(|options| GeocoderReverseOptions {
+        limit: options.limit,
+        degree_offset: options.degree_offset,
+    });
+    geocoder
+        .reverse(
+            GeocoderPoint {
+                lat: point.lat,
+                lng: point.lng,
+            },
+            options,
+        )
+        .map(|results| results.into_iter().map(map_reverse_result).collect())
+        .map_err(|source| RadrootsLocationResolverError::QueryFailed {
+            message: source.to_string(),
+        })
+}
+
+#[cfg(any(target_os = "android", test))]
+pub(crate) fn list_countries(
+    state: &RadrootsOfflineGeocoderState,
+) -> Result<Vec<RadrootsLocationCountry>, RadrootsLocationResolverError> {
+    let geocoder = geocoder_for_queries(state)?;
+    geocoder
+        .country_list()
+        .map(|results| results.into_iter().map(map_country_result).collect())
+        .map_err(|source| RadrootsLocationResolverError::QueryFailed {
+            message: source.to_string(),
+        })
+}
+
+#[cfg(any(target_os = "android", test))]
+pub(crate) fn country_center(
+    state: &RadrootsOfflineGeocoderState,
+    country_id: &str,
+) -> Result<RadrootsLocationPoint, RadrootsLocationResolverError> {
+    let geocoder = geocoder_for_queries(state)?;
+    geocoder
+        .country_center(country_id)
+        .map(|point| RadrootsLocationPoint {
+            lat: point.lat,
+            lng: point.lng,
+        })
+        .map_err(map_country_center_error)
+}
+
 #[cfg(target_os = "android")]
 fn initialize_offline_geocoder() -> RadrootsOfflineGeocoderState {
     match initialize_offline_geocoder_inner() {
@@ -125,6 +182,40 @@ fn initialize_offline_geocoder_inner() -> Result<
     })?;
     let _ = prune_stale_revisions(staged_path.as_str());
     Ok(())
+}
+
+#[cfg(any(target_os = "android", test))]
+fn geocoder_for_queries(
+    state: &RadrootsOfflineGeocoderState,
+) -> Result<Geocoder, RadrootsLocationResolverError> {
+    match state {
+        RadrootsOfflineGeocoderState::Initializing => {
+            return Err(RadrootsLocationResolverError::Initializing);
+        }
+        RadrootsOfflineGeocoderState::Unavailable { .. } => {
+            return Err(RadrootsLocationResolverError::Unavailable);
+        }
+        RadrootsOfflineGeocoderState::Ready => {}
+    }
+
+    #[cfg(target_os = "android")]
+    {
+        let staged_path = stage_offline_geocoder_asset()
+            .map_err(|(_, message)| RadrootsLocationResolverError::QueryFailed { message })?;
+        Geocoder::open_path(staged_path.as_str()).map_err(|source| {
+            RadrootsLocationResolverError::QueryFailed {
+                message: source.to_string(),
+            }
+        })
+    }
+
+    #[cfg(not(target_os = "android"))]
+    {
+        Err(RadrootsLocationResolverError::QueryFailed {
+            message: "android location resolver queries are only available on android runtime"
+                .to_owned(),
+        })
+    }
 }
 
 #[cfg(target_os = "android")]
@@ -351,6 +442,43 @@ fn staged_asset_revision(staged_path: &str) -> Result<String, String> {
     Ok(revision.into_owned())
 }
 
+fn map_reverse_result(result: GeocoderReverseResult) -> RadrootsResolvedLocation {
+    RadrootsResolvedLocation {
+        id: result.id,
+        name: result.name,
+        admin1_id: result.admin1_id,
+        admin1_name: result.admin1_name,
+        country_id: result.country_id,
+        country_name: result.country_name,
+        point: RadrootsLocationPoint {
+            lat: result.latitude,
+            lng: result.longitude,
+        },
+    }
+}
+
+fn map_country_result(result: GeocoderCountryListResult) -> RadrootsLocationCountry {
+    RadrootsLocationCountry {
+        country_id: result.country_id,
+        country_name: result.country,
+        center: RadrootsLocationPoint {
+            lat: result.lat,
+            lng: result.lng,
+        },
+    }
+}
+
+fn map_country_center_error(source: GeocoderError) -> RadrootsLocationResolverError {
+    match source {
+        GeocoderError::CountryCenterNotFound { country_id } => {
+            RadrootsLocationResolverError::CountryCenterNotFound { country_id }
+        }
+        other => RadrootsLocationResolverError::QueryFailed {
+            message: other.to_string(),
+        },
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -416,5 +544,57 @@ mod tests {
         assert!(!stale_file.exists());
 
         std::fs::remove_dir_all(temp_root.as_path()).unwrap();
+    }
+
+    #[test]
+    fn reverse_result_mapping_preserves_location_fields() {
+        let resolved = map_reverse_result(GeocoderReverseResult {
+            id: 123,
+            name: "Lusaka".to_owned(),
+            admin1_id: Some(456),
+            admin1_name: Some("Lusaka".to_owned()),
+            country_id: "ZM".to_owned(),
+            country_name: Some("Zambia".to_owned()),
+            latitude: -15.4167,
+            longitude: 28.2833,
+        });
+
+        assert_eq!(
+            resolved,
+            RadrootsResolvedLocation {
+                id: 123,
+                name: "Lusaka".to_owned(),
+                admin1_id: Some(456),
+                admin1_name: Some("Lusaka".to_owned()),
+                country_id: "ZM".to_owned(),
+                country_name: Some("Zambia".to_owned()),
+                point: RadrootsLocationPoint {
+                    lat: -15.4167,
+                    lng: 28.2833,
+                },
+            }
+        );
+    }
+
+    #[test]
+    fn unavailable_state_blocks_queries_until_ready() {
+        let state = RadrootsOfflineGeocoderState::unavailable(
+            RadrootsOfflineGeocoderUnavailableKind::MissingBuildAsset,
+            RadrootsOfflineGeocoderPlatform::Android,
+            "missing android geocoder asset",
+        );
+
+        assert_eq!(
+            reverse_location(&state, RadrootsLocationPoint { lat: 0.0, lng: 0.0 }, None,),
+            Err(RadrootsLocationResolverError::Unavailable)
+        );
+        assert_eq!(
+            list_countries(&state),
+            Err(RadrootsLocationResolverError::Unavailable)
+        );
+        assert_eq!(
+            country_center(&state, "US"),
+            Err(RadrootsLocationResolverError::Unavailable)
+        );
     }
 }

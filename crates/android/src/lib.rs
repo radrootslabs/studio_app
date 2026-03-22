@@ -9,7 +9,9 @@ use radroots_studio_app_core::{APP_NAME, RadrootsApp};
 #[cfg(any(target_os = "android", test))]
 use radroots_studio_app_core::{
     HomeActionKind, HomeActionResult, HomeActionState, IdentityGateState, ImportActionState,
-    RadrootsOfflineGeocoderState, SetupActionState,
+    RadrootsLocationCountry, RadrootsLocationPoint, RadrootsLocationResolverError,
+    RadrootsLocationReverseOptions, RadrootsOfflineGeocoderState, RadrootsResolvedLocation,
+    SetupActionState,
 };
 #[cfg(any(target_os = "android", test))]
 use radroots_identity::RadrootsIdentity;
@@ -62,6 +64,60 @@ impl RadrootsAppBackend for AndroidBackend {
 
     fn poll_offline_geocoder_state(&self) -> Result<Option<RadrootsOfflineGeocoderState>, String> {
         Ok(self.offline_geocoder.take_update())
+    }
+
+    fn reverse_location(
+        &self,
+        point: RadrootsLocationPoint,
+        options: Option<RadrootsLocationReverseOptions>,
+    ) -> Result<Vec<RadrootsResolvedLocation>, RadrootsLocationResolverError> {
+        #[cfg(target_os = "android")]
+        {
+            return offline_geocoder::reverse_location(
+                &self.offline_geocoder.current_state(),
+                point,
+                options,
+            );
+        }
+
+        #[cfg(not(target_os = "android"))]
+        {
+            let _ = (point, options);
+            Err(RadrootsLocationResolverError::Unsupported)
+        }
+    }
+
+    fn list_location_countries(
+        &self,
+    ) -> Result<Vec<RadrootsLocationCountry>, RadrootsLocationResolverError> {
+        #[cfg(target_os = "android")]
+        {
+            return offline_geocoder::list_countries(&self.offline_geocoder.current_state());
+        }
+
+        #[cfg(not(target_os = "android"))]
+        {
+            Err(RadrootsLocationResolverError::Unsupported)
+        }
+    }
+
+    fn location_country_center(
+        &self,
+        country_id: &str,
+    ) -> Result<RadrootsLocationPoint, RadrootsLocationResolverError> {
+        #[cfg(target_os = "android")]
+        {
+            return offline_geocoder::country_center(
+                &self.offline_geocoder.current_state(),
+                country_id,
+            );
+        }
+
+        #[cfg(not(target_os = "android"))]
+        {
+            let _ = country_id;
+            Err(RadrootsLocationResolverError::Unsupported)
+        }
     }
 
     fn setup_action_state(&self) -> SetupActionState {
