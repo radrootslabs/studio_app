@@ -10,10 +10,10 @@ use radroots_studio_app_apple_security::{
 };
 use radroots_studio_app_core::{
     APP_NAME, HomeActionKind, HomeActionResult, HomeActionState, IdentityGateState,
-    ImportActionState, RadrootsApp, RadrootsAppBackend, RadrootsLocationCountry,
-    RadrootsLocationCountryCenterLookupResult, RadrootsLocationCountryListResult,
-    RadrootsLocationPoint, RadrootsLocationResolverError, RadrootsLocationReverseOptions,
-    RadrootsOfflineGeocoderPlatform, RadrootsOfflineGeocoderState,
+    ImportActionState, RadrootsAccountCustody, RadrootsAccountSummary, RadrootsApp,
+    RadrootsAppBackend, RadrootsLocationCountry, RadrootsLocationCountryCenterLookupResult,
+    RadrootsLocationCountryListResult, RadrootsLocationPoint, RadrootsLocationResolverError,
+    RadrootsLocationReverseOptions, RadrootsOfflineGeocoderPlatform, RadrootsOfflineGeocoderState,
     RadrootsOfflineGeocoderUnavailableKind, RadrootsResolvedLocation,
     RadrootsReverseLocationLookupResult, SetupActionState,
 };
@@ -164,9 +164,27 @@ impl DesktopBackend {
             RadrootsNostrSelectedAccountStatus::PublicOnly { .. } => IdentityGateState::Missing,
             RadrootsNostrSelectedAccountStatus::Ready { account } => IdentityGateState::Ready {
                 account_id: account.account_id.to_string(),
-                npub: account.public_identity.public_key_npub,
             },
         }
+    }
+
+    #[cfg(target_os = "macos")]
+    fn account_roster_from_manager(
+        manager: &RadrootsNostrAccountsManager,
+    ) -> Result<Vec<RadrootsAccountSummary>, String> {
+        manager
+            .list_accounts()
+            .map_err(|source| source.to_string())?
+            .into_iter()
+            .map(|record| {
+                Ok(RadrootsAccountSummary {
+                    account_id: record.account_id.to_string(),
+                    npub: record.public_identity.public_key_npub,
+                    label: record.label,
+                    custody: RadrootsAccountCustody::LocalManaged,
+                })
+            })
+            .collect()
     }
 
     #[cfg(target_os = "macos")]
@@ -294,6 +312,19 @@ impl RadrootsAppBackend for DesktopBackend {
                 reason: "Local secure onboarding is only implemented for macOS in this slice."
                     .to_owned(),
             })
+        }
+    }
+
+    fn load_account_roster(&self) -> Result<Vec<RadrootsAccountSummary>, String> {
+        #[cfg(target_os = "macos")]
+        {
+            let manager = Self::accounts_manager()?;
+            return Self::account_roster_from_manager(&manager);
+        }
+
+        #[cfg(not(target_os = "macos"))]
+        {
+            Ok(Vec::new())
         }
     }
 
@@ -489,6 +520,14 @@ impl RadrootsAppBackend for DesktopBackend {
         }
     }
 
+    fn home_setup_action_state(&self) -> Option<SetupActionState> {
+        Some(self.setup_action_state())
+    }
+
+    fn request_home_setup_action(&self) -> Result<Option<IdentityGateState>, String> {
+        self.request_setup_action()
+    }
+
     fn import_action_state(&self) -> Option<ImportActionState> {
         #[cfg(target_os = "macos")]
         {
@@ -515,6 +554,28 @@ impl RadrootsAppBackend for DesktopBackend {
         #[cfg(not(target_os = "macos"))]
         {
             let _ = secret_key;
+            Ok(None)
+        }
+    }
+
+    fn request_select_account(
+        &self,
+        account_id: &str,
+    ) -> Result<Option<IdentityGateState>, String> {
+        #[cfg(target_os = "macos")]
+        {
+            let manager = Self::accounts_manager()?;
+            let account_id = radroots_identity::RadrootsIdentityId::try_from(account_id)
+                .map_err(|_| "invalid account id".to_owned())?;
+            manager
+                .select_account(&account_id)
+                .map_err(|source| source.to_string())?;
+            return self.load_identity_state().map(Some);
+        }
+
+        #[cfg(not(target_os = "macos"))]
+        {
+            let _ = account_id;
             Ok(None)
         }
     }
@@ -707,7 +768,6 @@ mod tests {
             state,
             radroots_studio_app_core::IdentityGateState::Ready {
                 account_id: identity.id().to_string(),
-                npub: identity.npub(),
             }
         );
         assert_eq!(
