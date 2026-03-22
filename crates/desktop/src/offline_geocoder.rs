@@ -1,8 +1,12 @@
 use radroots_studio_app_core::{
-    RadrootsOfflineGeocoderPlatform, RadrootsOfflineGeocoderState,
-    RadrootsOfflineGeocoderUnavailableKind,
+    RadrootsLocationCountry, RadrootsLocationPoint, RadrootsLocationResolverError,
+    RadrootsLocationReverseOptions, RadrootsOfflineGeocoderPlatform, RadrootsOfflineGeocoderState,
+    RadrootsOfflineGeocoderUnavailableKind, RadrootsResolvedLocation,
 };
-use radroots_geocoder::Geocoder;
+use radroots_geocoder::{
+    Geocoder, GeocoderCountryListResult, GeocoderError, GeocoderPoint, GeocoderReverseOptions,
+    GeocoderReverseResult,
+};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
@@ -63,6 +67,59 @@ impl DesktopOfflineGeocoder {
             None
         }
     }
+}
+
+pub(crate) fn reverse_location(
+    app_data_root: &Path,
+    state: &RadrootsOfflineGeocoderState,
+    point: RadrootsLocationPoint,
+    options: Option<RadrootsLocationReverseOptions>,
+) -> Result<Vec<RadrootsResolvedLocation>, RadrootsLocationResolverError> {
+    let geocoder = geocoder_for_queries(app_data_root, state)?;
+    let options = options.map(|options| GeocoderReverseOptions {
+        limit: options.limit,
+        degree_offset: options.degree_offset,
+    });
+    geocoder
+        .reverse(
+            GeocoderPoint {
+                lat: point.lat,
+                lng: point.lng,
+            },
+            options,
+        )
+        .map(|results| results.into_iter().map(map_reverse_result).collect())
+        .map_err(|source| RadrootsLocationResolverError::QueryFailed {
+            message: source.to_string(),
+        })
+}
+
+pub(crate) fn list_countries(
+    app_data_root: &Path,
+    state: &RadrootsOfflineGeocoderState,
+) -> Result<Vec<RadrootsLocationCountry>, RadrootsLocationResolverError> {
+    let geocoder = geocoder_for_queries(app_data_root, state)?;
+    geocoder
+        .country_list()
+        .map(|results| results.into_iter().map(map_country_result).collect())
+        .map_err(|source| RadrootsLocationResolverError::QueryFailed {
+            message: source.to_string(),
+        })
+}
+
+pub(crate) fn country_center(
+    app_data_root: &Path,
+    state: &RadrootsOfflineGeocoderState,
+    country_id: &str,
+) -> Result<RadrootsLocationPoint, RadrootsLocationResolverError> {
+    let geocoder = geocoder_for_queries(app_data_root, state)?;
+    geocoder
+        .country_center(country_id)
+        .map(|point| RadrootsLocationPoint {
+            lat: point.lat,
+            lng: point.lng,
+        })
+        .map_err(map_country_center_error)
 }
 
 fn initialize_offline_geocoder(app_data_root: &Path) -> RadrootsOfflineGeocoderState {
@@ -127,6 +184,72 @@ fn runtime_asset_path() -> Result<PathBuf, String> {
         return Err("desktop executable path did not have a parent directory".to_owned());
     };
     Ok(parent.join(GEOCODER_ASSET_FILENAME))
+}
+
+fn geocoder_for_queries(
+    app_data_root: &Path,
+    state: &RadrootsOfflineGeocoderState,
+) -> Result<Geocoder, RadrootsLocationResolverError> {
+    match state {
+        RadrootsOfflineGeocoderState::Initializing => {
+            return Err(RadrootsLocationResolverError::Initializing);
+        }
+        RadrootsOfflineGeocoderState::Unavailable { .. } => {
+            return Err(RadrootsLocationResolverError::Unavailable);
+        }
+        RadrootsOfflineGeocoderState::Ready => {}
+    }
+
+    let source_path = runtime_asset_path()
+        .map_err(|message| RadrootsLocationResolverError::QueryFailed { message })?;
+    let revision =
+        runtime_asset_revision(source_path.parent().unwrap_or_else(|| Path::new(".")))
+            .map_err(|(_, message)| RadrootsLocationResolverError::QueryFailed { message })?;
+    let staged_path = staged_db_path(app_data_root, revision.as_str());
+    stage_runtime_asset(source_path.as_path(), staged_path.as_path())
+        .map_err(|message| RadrootsLocationResolverError::QueryFailed { message })?;
+    Geocoder::open_path(staged_path.as_path()).map_err(|source| {
+        RadrootsLocationResolverError::QueryFailed {
+            message: source.to_string(),
+        }
+    })
+}
+
+fn map_reverse_result(result: GeocoderReverseResult) -> RadrootsResolvedLocation {
+    RadrootsResolvedLocation {
+        id: result.id,
+        name: result.name,
+        admin1_id: result.admin1_id,
+        admin1_name: result.admin1_name,
+        country_id: result.country_id,
+        country_name: result.country_name,
+        point: RadrootsLocationPoint {
+            lat: result.latitude,
+            lng: result.longitude,
+        },
+    }
+}
+
+fn map_country_result(result: GeocoderCountryListResult) -> RadrootsLocationCountry {
+    RadrootsLocationCountry {
+        country_id: result.country_id,
+        country_name: result.country,
+        center: RadrootsLocationPoint {
+            lat: result.lat,
+            lng: result.lng,
+        },
+    }
+}
+
+fn map_country_center_error(source: GeocoderError) -> RadrootsLocationResolverError {
+    match source {
+        GeocoderError::CountryCenterNotFound { country_id } => {
+            RadrootsLocationResolverError::CountryCenterNotFound { country_id }
+        }
+        other => RadrootsLocationResolverError::QueryFailed {
+            message: other.to_string(),
+        },
+    }
 }
 
 fn runtime_asset_revision(
@@ -346,5 +469,46 @@ mod tests {
         );
 
         std::fs::remove_dir_all(temp_root.as_path()).unwrap();
+    }
+
+    #[test]
+    fn reverse_result_mapping_preserves_location_fields() {
+        let mapped = map_reverse_result(GeocoderReverseResult {
+            id: 42,
+            name: "Oslo".to_owned(),
+            admin1_id: Some(12),
+            admin1_name: Some("Oslo".to_owned()),
+            country_id: "NO".to_owned(),
+            country_name: Some("Norway".to_owned()),
+            latitude: 59.9139,
+            longitude: 10.7522,
+        });
+
+        assert_eq!(mapped.id, 42);
+        assert_eq!(mapped.name, "Oslo");
+        assert_eq!(mapped.admin1_id, Some(12));
+        assert_eq!(mapped.admin1_name.as_deref(), Some("Oslo"));
+        assert_eq!(mapped.country_id, "NO");
+        assert_eq!(mapped.country_name.as_deref(), Some("Norway"));
+        assert_eq!(mapped.point.lat, 59.9139);
+        assert_eq!(mapped.point.lng, 10.7522);
+    }
+
+    #[test]
+    fn unavailable_state_blocks_queries_until_ready() {
+        let temp_root = std::env::temp_dir().join(format!(
+            "radroots-desktop-geocoder-query-state-test-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+
+        let result = list_countries(
+            temp_root.as_path(),
+            &RadrootsOfflineGeocoderState::Initializing,
+        );
+
+        assert_eq!(result, Err(RadrootsLocationResolverError::Initializing));
     }
 }
