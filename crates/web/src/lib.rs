@@ -20,7 +20,7 @@ use radroots_studio_app_core::{
     HomeActionKind, HomeActionResult, HomeActionState, IdentityGateState, RadrootsApp,
     RadrootsAppBackend, RadrootsLocationCountry, RadrootsLocationPoint,
     RadrootsLocationResolverError, RadrootsLocationReverseOptions, RadrootsResolvedLocation,
-    SetupActionState,
+    RadrootsReverseLocationLookupResult, SetupActionState,
 };
 #[cfg(any(target_arch = "wasm32", test))]
 use radroots_studio_app_core::{
@@ -127,6 +127,20 @@ impl RadrootsAppBackend for WebBackend {
         _options: Option<RadrootsLocationReverseOptions>,
     ) -> Result<Vec<RadrootsResolvedLocation>, RadrootsLocationResolverError> {
         Err(location_resolver_unavailable_error())
+    }
+
+    fn request_reverse_location_lookup(
+        &self,
+        _point: RadrootsLocationPoint,
+        _options: Option<RadrootsLocationReverseOptions>,
+    ) -> Result<(), RadrootsLocationResolverError> {
+        Err(location_resolver_unavailable_error())
+    }
+
+    fn poll_reverse_location_lookup_result(
+        &self,
+    ) -> Result<Option<RadrootsReverseLocationLookupResult>, String> {
+        Ok(None)
     }
 
     fn list_location_countries(
