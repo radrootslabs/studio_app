@@ -11,6 +11,7 @@ use radroots_studio_app_apple_security::{
 use radroots_studio_app_core::{
     APP_NAME, HomeActionKind, HomeActionResult, HomeActionState, IdentityGateState,
     ImportActionState, RadrootsApp, RadrootsAppBackend, RadrootsLocationCountry,
+    RadrootsLocationCountryCenterLookupResult, RadrootsLocationCountryListResult,
     RadrootsLocationPoint, RadrootsLocationResolverError, RadrootsLocationReverseOptions,
     RadrootsOfflineGeocoderPlatform, RadrootsOfflineGeocoderState,
     RadrootsOfflineGeocoderUnavailableKind, RadrootsResolvedLocation,
@@ -28,9 +29,11 @@ use std::sync::Arc;
 #[cfg(target_os = "macos")]
 use zeroize::Zeroizing;
 
+mod country_lookup;
 mod offline_geocoder;
 mod reverse_lookup;
 
+use country_lookup::DesktopCountryLookup;
 use offline_geocoder::DesktopOfflineGeocoder;
 use reverse_lookup::DesktopReverseLookup;
 
@@ -61,6 +64,7 @@ fn desktop_icon() -> Option<egui::IconData> {
 }
 
 struct DesktopBackend {
+    country_lookup: DesktopCountryLookup,
     offline_geocoder: DesktopOfflineGeocoder,
     reverse_lookup: DesktopReverseLookup,
 }
@@ -88,6 +92,7 @@ impl DesktopBackend {
             ));
 
         Self {
+            country_lookup: DesktopCountryLookup::new(),
             offline_geocoder,
             reverse_lookup: DesktopReverseLookup::new(),
         }
@@ -352,6 +357,56 @@ impl RadrootsAppBackend for DesktopBackend {
         &self,
     ) -> Result<Option<RadrootsReverseLocationLookupResult>, String> {
         Ok(self.reverse_lookup.take_update())
+    }
+
+    fn request_location_country_list(&self) -> Result<(), RadrootsLocationResolverError> {
+        #[cfg(target_os = "macos")]
+        {
+            let app_data_root = Self::app_data_root()
+                .map_err(|message| RadrootsLocationResolverError::QueryFailed { message })?;
+            return self
+                .country_lookup
+                .begin_list(app_data_root, self.offline_geocoder.current_state());
+        }
+
+        #[cfg(not(target_os = "macos"))]
+        {
+            Err(RadrootsLocationResolverError::Unsupported)
+        }
+    }
+
+    fn poll_location_country_list_result(
+        &self,
+    ) -> Result<Option<RadrootsLocationCountryListResult>, String> {
+        Ok(self.country_lookup.take_list_update())
+    }
+
+    fn request_location_country_center_lookup(
+        &self,
+        country_id: &str,
+    ) -> Result<(), RadrootsLocationResolverError> {
+        #[cfg(target_os = "macos")]
+        {
+            let app_data_root = Self::app_data_root()
+                .map_err(|message| RadrootsLocationResolverError::QueryFailed { message })?;
+            return self.country_lookup.begin_center(
+                app_data_root,
+                self.offline_geocoder.current_state(),
+                country_id.to_owned(),
+            );
+        }
+
+        #[cfg(not(target_os = "macos"))]
+        {
+            let _ = country_id;
+            Err(RadrootsLocationResolverError::Unsupported)
+        }
+    }
+
+    fn poll_location_country_center_lookup_result(
+        &self,
+    ) -> Result<Option<RadrootsLocationCountryCenterLookupResult>, String> {
+        Ok(self.country_lookup.take_center_update())
     }
 
     fn list_location_countries(
