@@ -1,5 +1,3 @@
-#![allow(unsafe_code)]
-
 #[cfg(target_os = "android")]
 use android_logger::Config;
 #[cfg(target_os = "android")]
@@ -11,7 +9,7 @@ use radroots_studio_app_core::{APP_NAME, RadrootsApp};
 #[cfg(any(target_os = "android", test))]
 use radroots_studio_app_core::{
     HomeActionKind, HomeActionResult, HomeActionState, IdentityGateState, ImportActionState,
-    RadrootsOfflineGeocoderState, RadrootsOfflineGeocoderUnavailableKind, SetupActionState,
+    RadrootsOfflineGeocoderState, SetupActionState,
 };
 #[cfg(any(target_os = "android", test))]
 use radroots_identity::RadrootsIdentity;
@@ -205,7 +203,7 @@ impl AndroidBackend {
         #[cfg(not(target_os = "android"))]
         let offline_geocoder = offline_geocoder::AndroidOfflineGeocoder::from_state(
             RadrootsOfflineGeocoderState::unavailable(
-                RadrootsOfflineGeocoderUnavailableKind::MissingBuildAsset,
+                radroots_studio_app_core::RadrootsOfflineGeocoderUnavailableKind::MissingBuildAsset,
                 "android offline geocoder initialization is only wired on android targets",
             ),
         );
@@ -433,6 +431,7 @@ fn run_android_app(android_app: AndroidApp) -> Result<(), String> {
 
 #[cfg(target_os = "android")]
 #[allow(improper_ctypes_definitions)]
+#[allow(unsafe_code)]
 #[unsafe(no_mangle)]
 pub extern "C" fn android_main(android_app: AndroidApp) {
     if let Err(err) = run_android_app(android_app) {

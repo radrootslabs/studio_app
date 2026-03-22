@@ -402,6 +402,7 @@ pub(crate) fn resolve_nostr_storage_root() -> Result<PathBuf, RadrootsNostrAccou
 }
 
 #[cfg(target_os = "android")]
+#[allow(unsafe_code)]
 fn android_java_vm() -> Result<JavaVM, RadrootsNostrAccountsError> {
     let context = ndk_context::android_context();
     // SAFETY: ndk_context is initialized by the Android runtime before this code runs and
@@ -410,6 +411,7 @@ fn android_java_vm() -> Result<JavaVM, RadrootsNostrAccountsError> {
 }
 
 #[cfg(target_os = "android")]
+#[allow(unsafe_code)]
 fn bridge_class<'local>(
     env: &mut JNIEnv<'local>,
 ) -> Result<JClass<'local>, RadrootsNostrAccountsError> {

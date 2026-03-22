@@ -29,6 +29,3 @@ jni.workspace = true
 ndk-context.workspace = true
 wgpu = { workspace = true, features = ["vulkan", "gles", "wgsl"] }
 winit.workspace = true
-
-[lints.rust]
-unsafe_code = { level = "allow", priority = 1 }

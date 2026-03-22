@@ -33,7 +33,14 @@ object RadRootsAndroidAppBridge {
                 GEOCODER_ERROR_KIND_INTERNAL_ERROR,
                 "android app bridge is not initialized",
             )
-        val targetDir = File(context.noBackupFilesDir, "RadRoots/app/android/geocoder")
+        val targetDir = try {
+            stagedGeocoderDirectory(context)
+        } catch (source: Exception) {
+            return fail(
+                GEOCODER_ERROR_KIND_INTERNAL_ERROR,
+                "failed to resolve android geocoder revision: ${source.message ?: source.javaClass.simpleName}",
+            )
+        }
         if (!targetDir.exists() && !targetDir.mkdirs()) {
             return fail(
                 GEOCODER_ERROR_KIND_INITIALIZATION_FAILED,
@@ -42,6 +49,11 @@ object RadRootsAndroidAppBridge {
         }
 
         val targetFile = File(targetDir, GEOCODER_FILE_NAME)
+        if (targetFile.isFile) {
+            lastErrorMessage = null
+            lastErrorKind = 0
+            return targetFile.absolutePath
+        }
         return try {
             context.assets.open(GEOCODER_ASSET_PATH).use { input ->
                 targetFile.outputStream().use { output ->
@@ -62,6 +74,12 @@ object RadRootsAndroidAppBridge {
                 "failed to stage android geocoder asset: ${source.message ?: source.javaClass.simpleName}",
             )
         }
+    }
+
+    private fun stagedGeocoderDirectory(context: Context): File {
+        val packageInfo = context.packageManager.getPackageInfo(context.packageName, 0)
+        val revision = packageInfo.lastUpdateTime.toString()
+        return File(context.noBackupFilesDir, "RadRoots/app/android/geocoder/$revision")
     }
 
     @JvmStatic
