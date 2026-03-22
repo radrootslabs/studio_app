@@ -21,6 +21,7 @@ egui.workspace = true
 image.workspace = true
 log.workspace = true
 radroots-app-core = { path = "../core" }
+radroots-app-remote-signer = { path = "../remote-signer" }
 radroots-geocoder.workspace = true
 radroots-nostr-accounts.workspace = true
 zeroize.workspace = true

@@ -3085,6 +3085,7 @@ dependencies = [
  "objc2-foundation 0.3.2",
  "radroots-app-apple-security",
  "radroots-app-core",
+ "radroots-app-remote-signer",
  "radroots-app-test-support",
  "radroots-geocoder",
  "radroots-identity",
