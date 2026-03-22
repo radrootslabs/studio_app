@@ -26,3 +26,6 @@ zeroize.workspace = true
 
 [target.'cfg(target_os = "ios")'.dependencies]
 wgpu = { workspace = true, features = ["metal", "wgsl"] }
+
+[dev-dependencies]
+radroots-app-test-support = { path = "../test-support" }

@@ -491,6 +491,7 @@ pub extern "C" fn radroots_ios_run() -> i32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use radroots_studio_app_test_support::FIXTURE_ALICE;
     use radroots_nostr_accounts::prelude::RadrootsNostrAccountsManager;
 
     #[test]
@@ -608,10 +609,11 @@ mod tests {
 
     #[test]
     fn normalize_clipboard_secret_key_text_trims_wrapping_whitespace() {
-        let normalized = IosBackend::normalize_clipboard_secret_key_text("  nsec1example \n")
+        let clipboard_text = format!("  {} \n", FIXTURE_ALICE.nsec);
+        let normalized = IosBackend::normalize_clipboard_secret_key_text(clipboard_text.as_str())
             .expect("normalize secret key");
 
-        assert_eq!(normalized, "nsec1example");
+        assert_eq!(normalized, FIXTURE_ALICE.nsec);
     }
 
     #[test]
