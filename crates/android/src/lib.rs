@@ -9,10 +9,11 @@ use radroots_studio_app_core::{APP_NAME, RadrootsApp};
 #[cfg(any(target_os = "android", test))]
 use radroots_studio_app_core::{
     HomeActionKind, HomeActionResult, HomeActionState, IdentityGateState, ImportActionState,
-    RadrootsLocationCountry, RadrootsLocationCountryCenterLookupResult,
-    RadrootsLocationCountryListResult, RadrootsLocationPoint, RadrootsLocationResolverError,
-    RadrootsLocationReverseOptions, RadrootsOfflineGeocoderState, RadrootsResolvedLocation,
-    RadrootsReverseLocationLookupResult, SetupActionState,
+    RadrootsAccountCustody, RadrootsAccountSummary, RadrootsLocationCountry,
+    RadrootsLocationCountryCenterLookupResult, RadrootsLocationCountryListResult,
+    RadrootsLocationPoint, RadrootsLocationResolverError, RadrootsLocationReverseOptions,
+    RadrootsOfflineGeocoderState, RadrootsResolvedLocation, RadrootsReverseLocationLookupResult,
+    SetupActionState,
 };
 #[cfg(any(target_os = "android", test))]
 use radroots_identity::RadrootsIdentity;
@@ -62,6 +63,19 @@ impl RadrootsAppBackend for AndroidBackend {
         #[cfg(not(target_os = "android"))]
         {
             Ok(Self::unsupported_identity_state())
+        }
+    }
+
+    fn load_account_roster(&self) -> Result<Vec<RadrootsAccountSummary>, String> {
+        #[cfg(target_os = "android")]
+        {
+            let manager = Self::accounts_manager()?;
+            return Self::account_roster_from_manager(&manager);
+        }
+
+        #[cfg(not(target_os = "android"))]
+        {
+            Ok(Vec::new())
         }
     }
 
@@ -223,6 +237,14 @@ impl RadrootsAppBackend for AndroidBackend {
         }
     }
 
+    fn home_setup_action_state(&self) -> Option<SetupActionState> {
+        Some(self.setup_action_state())
+    }
+
+    fn request_home_setup_action(&self) -> Result<Option<IdentityGateState>, String> {
+        self.request_setup_action()
+    }
+
     fn import_action_state(&self) -> Option<ImportActionState> {
         #[cfg(target_os = "android")]
         {
@@ -249,6 +271,28 @@ impl RadrootsAppBackend for AndroidBackend {
         #[cfg(not(target_os = "android"))]
         {
             let _ = secret_key;
+            Ok(None)
+        }
+    }
+
+    fn request_select_account(
+        &self,
+        account_id: &str,
+    ) -> Result<Option<IdentityGateState>, String> {
+        #[cfg(target_os = "android")]
+        {
+            let manager = Self::accounts_manager()?;
+            let account_id = radroots_identity::RadrootsIdentityId::try_from(account_id)
+                .map_err(|_| "invalid account id".to_owned())?;
+            manager
+                .select_account(&account_id)
+                .map_err(|source| source.to_string())?;
+            return self.load_identity_state().map(Some);
+        }
+
+        #[cfg(not(target_os = "android"))]
+        {
+            let _ = account_id;
             Ok(None)
         }
     }
@@ -386,7 +430,6 @@ impl AndroidBackend {
         match status {
             RadrootsNostrSelectedAccountStatus::Ready { account } => IdentityGateState::Ready {
                 account_id: account.account_id.to_string(),
-                npub: account.public_identity.public_key_npub,
             },
             RadrootsNostrSelectedAccountStatus::NotConfigured
             | RadrootsNostrSelectedAccountStatus::PublicOnly { .. } => IdentityGateState::Missing,
@@ -400,6 +443,24 @@ impl AndroidBackend {
             .selected_account_status()
             .map_err(|source| source.to_string())?;
         Ok(Self::map_status(status))
+    }
+
+    fn account_roster_from_manager(
+        manager: &RadrootsNostrAccountsManager,
+    ) -> Result<Vec<RadrootsAccountSummary>, String> {
+        manager
+            .list_accounts()
+            .map_err(|source| source.to_string())?
+            .into_iter()
+            .map(|record| {
+                Ok(RadrootsAccountSummary {
+                    account_id: record.account_id.to_string(),
+                    npub: record.public_identity.public_key_npub,
+                    label: record.label,
+                    custody: RadrootsAccountCustody::LocalManaged,
+                })
+            })
+            .collect()
     }
 
     fn generate_local_identity(
@@ -626,7 +687,6 @@ mod tests {
             state,
             IdentityGateState::Ready {
                 account_id: account.account_id.to_string(),
-                npub: account.public_identity.public_key_npub,
             }
         );
     }
@@ -664,12 +724,11 @@ mod tests {
         let manager = RadrootsNostrAccountsManager::new_in_memory();
 
         let state = AndroidBackend::generate_local_identity(&manager).expect("generate identity");
-        let IdentityGateState::Ready { account_id, npub } = state else {
+        let IdentityGateState::Ready { account_id } = state else {
             panic!("expected ready identity state");
         };
 
         assert!(!account_id.is_empty());
-        assert!(npub.starts_with("npub1"));
     }
 
     #[test]
@@ -733,7 +792,6 @@ mod tests {
             state,
             IdentityGateState::Ready {
                 account_id: identity.id().to_string(),
-                npub: identity.npub(),
             }
         );
         assert_eq!(
