@@ -8,6 +8,7 @@ mod account_roster;
 mod home_location_tools;
 mod location_resolver;
 mod offline_geocoder;
+mod remote_signer;
 mod secret_keys;
 
 pub const APP_NAME: &str = "Rad Roots";
@@ -22,6 +23,7 @@ pub use offline_geocoder::{
     RadrootsOfflineGeocoderDiagnostic, RadrootsOfflineGeocoderPlatform,
     RadrootsOfflineGeocoderState, RadrootsOfflineGeocoderUnavailableKind,
 };
+pub use remote_signer::{RadrootsPendingRemoteSignerConnection, RadrootsRemoteSignerPreview};
 pub use secret_keys::{RadrootsSecretImportMode, RadrootsSecretImportRequest};
 
 use home_location_tools::HomeLocationTools;
@@ -112,6 +114,29 @@ pub trait RadrootsAppBackend {
     }
     fn request_import_paste_action(&self) -> Result<Option<String>, String> {
         Ok(None)
+    }
+    fn remote_signer_action_state(&self) -> Option<SetupActionState> {
+        None
+    }
+    fn preview_remote_signer_connection(
+        &self,
+        _input: &str,
+    ) -> Result<RadrootsRemoteSignerPreview, String> {
+        Err("remote signer onboarding is not available in this build".to_owned())
+    }
+    fn request_remote_signer_connection(
+        &self,
+        _input: &str,
+    ) -> Result<Option<IdentityGateState>, String> {
+        Ok(None)
+    }
+    fn pending_remote_signer_connection(
+        &self,
+    ) -> Result<Option<RadrootsPendingRemoteSignerConnection>, String> {
+        Ok(None)
+    }
+    fn request_cancel_pending_remote_signer_connection(&self) -> Result<(), String> {
+        Ok(())
     }
     fn home_action_states(&self) -> Vec<HomeActionState> {
         Vec::new()
@@ -205,6 +230,14 @@ enum RevealedSecretMaterial {
     },
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum RemoteSignerEntryState {
+    Closed,
+    Editing,
+    Review(RadrootsRemoteSignerPreview),
+    WaitingApproval(RadrootsPendingRemoteSignerConnection),
+}
+
 impl RevealedSecretMaterial {
     fn label(&self) -> &'static str {
         match self {
@@ -250,6 +283,8 @@ pub struct RadrootsApp {
     home_location_tools: HomeLocationTools,
     pending_home_confirmation: Option<HomeActionKind>,
     pending_import_mode: Option<RadrootsSecretImportMode>,
+    remote_signer_entry_state: RemoteSignerEntryState,
+    remote_signer_input: Zeroizing<String>,
     secret_key_input: Zeroizing<String>,
     import_password_input: Zeroizing<String>,
     pending_secret_key_backup_entry: bool,
@@ -275,7 +310,13 @@ impl RadrootsApp {
         self.revealed_secret_material = None;
     }
 
+    fn clear_remote_signer_entry(&mut self) {
+        self.remote_signer_entry_state = RemoteSignerEntryState::Closed;
+        self.remote_signer_input.clear();
+    }
+
     fn clear_secret_key_ui_state(&mut self) {
+        self.clear_remote_signer_entry();
         self.clear_secret_import_entry();
         self.clear_secret_key_backup_entry();
         self.clear_revealed_secret_material();
@@ -389,6 +430,8 @@ impl RadrootsApp {
             home_location_tools: HomeLocationTools::new(),
             pending_home_confirmation: None,
             pending_import_mode: None,
+            remote_signer_entry_state: RemoteSignerEntryState::Closed,
+            remote_signer_input: Zeroizing::new(String::new()),
             secret_key_input: Zeroizing::new(String::new()),
             import_password_input: Zeroizing::new(String::new()),
             pending_secret_key_backup_entry: false,
@@ -404,6 +447,7 @@ impl RadrootsApp {
                 app.status_message = Some(err);
             }
         }
+        app.sync_remote_signer_entry_from_backend();
         app
     }
 
@@ -464,6 +508,7 @@ impl RadrootsApp {
         self.status_message = None;
         self.clear_revealed_secret_material();
         self.pending_home_confirmation = None;
+        self.clear_remote_signer_entry();
         self.clear_secret_import_entry();
         match self.backend.request_home_setup_action() {
             Ok(Some(state)) => self.apply_identity_state(state),
@@ -501,6 +546,93 @@ impl RadrootsApp {
                 self.secret_key_input = Zeroizing::new(secret_key);
             }
             Ok(None) => {}
+            Err(err) => {
+                self.status_message = Some(err);
+            }
+        }
+    }
+
+    fn open_remote_signer_entry(&mut self) {
+        self.remote_signer_entry_state = RemoteSignerEntryState::Editing;
+        self.remote_signer_input.clear();
+        self.status_message = None;
+    }
+
+    fn sync_remote_signer_entry_from_backend(&mut self) {
+        match self.backend.pending_remote_signer_connection() {
+            Ok(Some(pending)) => {
+                if !matches!(
+                    self.remote_signer_entry_state,
+                    RemoteSignerEntryState::Editing | RemoteSignerEntryState::Review(_)
+                ) {
+                    self.remote_signer_entry_state =
+                        RemoteSignerEntryState::WaitingApproval(pending);
+                }
+            }
+            Ok(None) => {
+                if matches!(
+                    self.remote_signer_entry_state,
+                    RemoteSignerEntryState::WaitingApproval(_)
+                ) {
+                    self.clear_remote_signer_entry();
+                }
+            }
+            Err(err) => {
+                self.status_message = Some(err);
+            }
+        }
+    }
+
+    fn request_remote_signer_preview(&mut self) {
+        self.status_message = None;
+        self.clear_revealed_secret_material();
+        match self
+            .backend
+            .preview_remote_signer_connection(self.remote_signer_input.as_str())
+        {
+            Ok(preview) => {
+                self.remote_signer_entry_state = RemoteSignerEntryState::Review(preview);
+            }
+            Err(err) => {
+                self.status_message = Some(err);
+            }
+        }
+    }
+
+    fn request_remote_signer_connect(&mut self) {
+        self.status_message = None;
+        self.clear_revealed_secret_material();
+        let pending_summary = match &self.remote_signer_entry_state {
+            RemoteSignerEntryState::Review(preview) => preview.pending_summary(),
+            _ => {
+                self.status_message =
+                    Some("review the remote signer details before connecting".to_owned());
+                return;
+            }
+        };
+        match self
+            .backend
+            .request_remote_signer_connection(self.remote_signer_input.as_str())
+        {
+            Ok(Some(state)) => self.apply_identity_state(state),
+            Ok(None) => {
+                self.remote_signer_entry_state =
+                    RemoteSignerEntryState::WaitingApproval(pending_summary);
+                self.sync_remote_signer_entry_from_backend();
+            }
+            Err(err) => {
+                self.status_message = Some(err);
+            }
+        }
+    }
+
+    fn request_cancel_pending_remote_signer(&mut self) {
+        self.status_message = None;
+        match self
+            .backend
+            .request_cancel_pending_remote_signer_connection()
+        {
+            Ok(()) => self.clear_remote_signer_entry(),
             Err(err) => {
                 self.status_message = Some(err);
             }
@@ -571,7 +703,7 @@ impl RadrootsApp {
                 "This removes all app-managed local identity state from this device and returns the app to setup."
             }
             HomeActionKind::DisconnectSigner => {
-                "This disconnects the current browser signer from the app. It does not delete the signer key."
+                "This disconnects the current external signer from the app. It does not delete the signer key."
             }
         }
     }
@@ -623,6 +755,7 @@ impl RadrootsApp {
                 self.status_message = Some(err);
             }
         }
+        self.sync_remote_signer_entry_from_backend();
     }
 
     fn render_import_entry(
@@ -721,6 +854,92 @@ impl RadrootsApp {
         });
     }
 
+    fn render_remote_signer_entry(&mut self, ui: &mut egui::Ui, action: &SetupActionState) {
+        ui.vertical_centered(|ui| {
+            ui.set_max_width(ui.available_width().min(560.0));
+            match &self.remote_signer_entry_state {
+                RemoteSignerEntryState::Closed => {}
+                RemoteSignerEntryState::Editing => {
+                    ui.label(
+                        "Connect an approved remote signer using its bunker uri or discovery url.",
+                    );
+                    ui.add_space(8.0);
+                    ui.add(
+                        egui::TextEdit::singleline(&mut *self.remote_signer_input)
+                            .hint_text("bunker://... or http://localhost/connect?uri=...")
+                            .desired_width(ui.available_width()),
+                    );
+                    ui.add_space(8.0);
+                    ui.horizontal_centered(|ui| {
+                        if ui
+                            .add_enabled(action.enabled, egui::Button::new("Review Remote Signer"))
+                            .clicked()
+                        {
+                            self.request_remote_signer_preview();
+                        }
+                        if ui.button("Cancel").clicked() {
+                            self.clear_remote_signer_entry();
+                            self.status_message = None;
+                        }
+                    });
+                }
+                RemoteSignerEntryState::Review(preview) => {
+                    ui.label("Review the remote signer before connecting.");
+                    ui.add_space(8.0);
+                    ui.monospace(format!("source: {}", preview.source_label));
+                    ui.monospace(format!("signer: {}", preview.signer_npub));
+                    if preview.relays.is_empty() {
+                        ui.label("No relays were provided by this signer.");
+                    } else {
+                        ui.label("Relays");
+                        for relay in &preview.relays {
+                            ui.monospace(relay);
+                        }
+                    }
+                    ui.add_space(8.0);
+                    if preview.requested_permissions.is_empty() {
+                        ui.label("No additional permissions are requested in this slice.");
+                    } else {
+                        ui.label("Requested permissions");
+                        for permission in &preview.requested_permissions {
+                            ui.monospace(permission);
+                        }
+                    }
+                    ui.add_space(8.0);
+                    ui.horizontal_centered(|ui| {
+                        if ui
+                            .add_enabled(action.enabled, egui::Button::new(action.label.clone()))
+                            .clicked()
+                        {
+                            self.request_remote_signer_connect();
+                        }
+                        if ui.button("Cancel").clicked() {
+                            self.clear_remote_signer_entry();
+                            self.status_message = None;
+                        }
+                    });
+                }
+                RemoteSignerEntryState::WaitingApproval(pending) => {
+                    ui.label("Remote signer connection is waiting for signer approval.");
+                    ui.add_space(8.0);
+                    ui.monospace(format!("signer: {}", pending.signer_npub));
+                    if pending.relays.is_empty() {
+                        ui.label("No relays were provided by this signer.");
+                    } else {
+                        ui.label("Relays");
+                        for relay in &pending.relays {
+                            ui.monospace(relay);
+                        }
+                    }
+                    ui.add_space(8.0);
+                    if ui.button("Cancel Pending Remote Signer").clicked() {
+                        self.request_cancel_pending_remote_signer();
+                    }
+                }
+            }
+        });
+    }
+
     fn render_home_account_section(&mut self, ui: &mut egui::Ui) {
         let AppScreen::Home { account_id } = &self.screen else {
             return;
@@ -773,7 +992,9 @@ impl RadrootsApp {
         let home_setup_action = self.backend.home_setup_action_state();
         let import_action = self.backend.import_action_state();
         let import_paste_action = self.backend.import_paste_action_state();
-        if home_setup_action.is_some() || import_action.is_some() {
+        let remote_signer_action = self.backend.remote_signer_action_state();
+        if home_setup_action.is_some() || import_action.is_some() || remote_signer_action.is_some()
+        {
             ui.add_space(16.0);
             ui.label("Add account");
         }
@@ -808,6 +1029,29 @@ impl RadrootsApp {
                 self.render_import_entry(ui, &import_action, import_paste_action.as_ref());
             } else if ui.button(import_action.label).clicked() {
                 self.open_import_entry();
+            }
+        }
+
+        if let Some(remote_signer_action) = remote_signer_action {
+            if remote_signer_action.pending {
+                ui.ctx().request_repaint();
+            }
+            ui.add_space(8.0);
+            if matches!(
+                self.remote_signer_entry_state,
+                RemoteSignerEntryState::Closed
+            ) {
+                if ui
+                    .add_enabled(
+                        remote_signer_action.enabled,
+                        egui::Button::new(remote_signer_action.label),
+                    )
+                    .clicked()
+                {
+                    self.open_remote_signer_entry();
+                }
+            } else {
+                self.render_remote_signer_entry(ui, &remote_signer_action);
             }
         }
     }
@@ -895,6 +1139,12 @@ impl eframe::App for RadrootsApp {
                                 ctx.request_repaint();
                             }
                         }
+                        let remote_signer_action = self.backend.remote_signer_action_state();
+                        if let Some(remote_signer_action) = &remote_signer_action {
+                            if remote_signer_action.pending {
+                                ctx.request_repaint();
+                            }
+                        }
 
                         ui.label("setup");
                         ui.add_space(8.0);
@@ -917,6 +1167,24 @@ impl eframe::App for RadrootsApp {
                                 );
                             } else if ui.button(import_action.label).clicked() {
                                 self.open_import_entry();
+                            }
+                        }
+
+                        if let Some(remote_signer_action) = remote_signer_action {
+                            ui.add_space(12.0);
+                            if matches!(self.remote_signer_entry_state, RemoteSignerEntryState::Closed)
+                            {
+                                if ui
+                                    .add_enabled(
+                                        remote_signer_action.enabled,
+                                        egui::Button::new(remote_signer_action.label),
+                                    )
+                                    .clicked()
+                                {
+                                    self.open_remote_signer_entry();
+                                }
+                            } else {
+                                self.render_remote_signer_entry(ui, &remote_signer_action);
                             }
                         }
                     }
@@ -1052,6 +1320,11 @@ mod tests {
         home_setup_action_state: Rc<RefCell<Option<SetupActionState>>>,
         import_action_state: Rc<RefCell<Option<ImportActionState>>>,
         import_paste_action_state: Rc<RefCell<Option<PasteActionState>>>,
+        remote_signer_action_state: Rc<RefCell<Option<SetupActionState>>>,
+        remote_signer_preview: Rc<RefCell<VecDeque<Result<RadrootsRemoteSignerPreview, String>>>>,
+        remote_signer_request: Rc<RefCell<VecDeque<Result<Option<IdentityGateState>, String>>>>,
+        pending_remote_signer: Rc<RefCell<Option<RadrootsPendingRemoteSignerConnection>>>,
+        cancel_pending_remote_signer: Rc<RefCell<VecDeque<Result<(), String>>>>,
         home_action_states: Rc<RefCell<Vec<HomeActionState>>>,
         request: Rc<RefCell<VecDeque<Result<Option<IdentityGateState>, String>>>>,
         home_setup_request: Rc<RefCell<VecDeque<Result<Option<IdentityGateState>, String>>>>,
@@ -1084,6 +1357,11 @@ mod tests {
                 home_setup_action_state: Rc::new(RefCell::new(None)),
                 import_action_state: Rc::new(RefCell::new(None)),
                 import_paste_action_state: Rc::new(RefCell::new(None)),
+                remote_signer_action_state: Rc::new(RefCell::new(None)),
+                remote_signer_preview: Rc::new(RefCell::new(VecDeque::new())),
+                remote_signer_request: Rc::new(RefCell::new(VecDeque::new())),
+                pending_remote_signer: Rc::new(RefCell::new(None)),
+                cancel_pending_remote_signer: Rc::new(RefCell::new(VecDeque::new())),
                 home_action_states: Rc::new(RefCell::new(Vec::new())),
                 request: Rc::new(RefCell::new(request.into())),
                 home_setup_request: Rc::new(RefCell::new(VecDeque::new())),
@@ -1141,6 +1419,42 @@ mod tests {
         ) -> Self {
             *self.import_paste_action_state.borrow_mut() = Some(action_state);
             self.import_paste_request.borrow_mut().extend(request);
+            self
+        }
+
+        fn with_remote_signer_action(self, action_state: SetupActionState) -> Self {
+            *self.remote_signer_action_state.borrow_mut() = Some(action_state);
+            self
+        }
+
+        fn with_remote_signer_preview(
+            self,
+            preview: Vec<Result<RadrootsRemoteSignerPreview, String>>,
+        ) -> Self {
+            self.remote_signer_preview.borrow_mut().extend(preview);
+            self
+        }
+
+        fn with_remote_signer_request(
+            self,
+            request: Vec<Result<Option<IdentityGateState>, String>>,
+        ) -> Self {
+            self.remote_signer_request.borrow_mut().extend(request);
+            self
+        }
+
+        fn with_pending_remote_signer(
+            self,
+            pending: Option<RadrootsPendingRemoteSignerConnection>,
+        ) -> Self {
+            *self.pending_remote_signer.borrow_mut() = pending;
+            self
+        }
+
+        fn with_cancel_pending_remote_signer(self, request: Vec<Result<(), String>>) -> Self {
+            self.cancel_pending_remote_signer
+                .borrow_mut()
+                .extend(request);
             self
         }
 
@@ -1279,6 +1593,48 @@ mod tests {
                 .unwrap_or(Ok(None))
         }
 
+        fn remote_signer_action_state(&self) -> Option<SetupActionState> {
+            self.remote_signer_action_state.borrow().clone()
+        }
+
+        fn preview_remote_signer_connection(
+            &self,
+            _input: &str,
+        ) -> Result<RadrootsRemoteSignerPreview, String> {
+            self.remote_signer_preview
+                .borrow_mut()
+                .pop_front()
+                .unwrap_or_else(|| Err("missing remote signer preview".into()))
+        }
+
+        fn request_remote_signer_connection(
+            &self,
+            _input: &str,
+        ) -> Result<Option<IdentityGateState>, String> {
+            self.remote_signer_request
+                .borrow_mut()
+                .pop_front()
+                .unwrap_or(Ok(None))
+        }
+
+        fn pending_remote_signer_connection(
+            &self,
+        ) -> Result<Option<RadrootsPendingRemoteSignerConnection>, String> {
+            Ok(self.pending_remote_signer.borrow().clone())
+        }
+
+        fn request_cancel_pending_remote_signer_connection(&self) -> Result<(), String> {
+            let result = self
+                .cancel_pending_remote_signer
+                .borrow_mut()
+                .pop_front()
+                .unwrap_or(Ok(()));
+            if result.is_ok() {
+                *self.pending_remote_signer.borrow_mut() = None;
+            }
+            result
+        }
+
         fn home_action_states(&self) -> Vec<HomeActionState> {
             self.home_action_states.borrow().clone()
         }
@@ -1373,6 +1729,19 @@ mod tests {
         }
     }
 
+    fn fixture_remote_signer_preview() -> RadrootsRemoteSignerPreview {
+        RadrootsRemoteSignerPreview {
+            source_label: "discovery url".into(),
+            signer_npub: FIXTURE_BOB.npub.into(),
+            relays: vec!["ws://localhost:8080".into()],
+            requested_permissions: Vec::new(),
+        }
+    }
+
+    fn fixture_pending_remote_signer() -> RadrootsPendingRemoteSignerConnection {
+        fixture_remote_signer_preview().pending_summary()
+    }
+
     #[test]
     fn startup_missing_key_enters_setup() {
         let app = RadrootsApp::new(Box::new(MockBackend::new(
@@ -1422,6 +1791,33 @@ mod tests {
         ));
 
         assert_eq!(app.account_roster, vec![fixture_account_summary()]);
+    }
+
+    #[test]
+    fn startup_restores_pending_remote_signer_connection() {
+        let app = RadrootsApp::new(Box::new(
+            MockBackend::new(
+                Ok(IdentityGateState::Missing),
+                vec![],
+                vec![],
+                SetupActionState {
+                    label: "Generate New Key".into(),
+                    enabled: true,
+                    pending: false,
+                },
+            )
+            .with_remote_signer_action(SetupActionState {
+                label: "Connect Remote Signer".into(),
+                enabled: true,
+                pending: false,
+            })
+            .with_pending_remote_signer(Some(fixture_pending_remote_signer())),
+        ));
+
+        assert_eq!(
+            app.remote_signer_entry_state,
+            RemoteSignerEntryState::WaitingApproval(fixture_pending_remote_signer())
+        );
     }
 
     #[test]
@@ -1767,6 +2163,102 @@ mod tests {
 
         assert_eq!(app.secret_key_input.as_str(), FIXTURE_ALICE.nsec);
         assert_eq!(app.status_message, None);
+    }
+
+    #[test]
+    fn remote_signer_preview_moves_entry_into_review_state() {
+        let mut app = RadrootsApp::new(Box::new(
+            MockBackend::new(
+                Ok(IdentityGateState::Missing),
+                vec![],
+                vec![],
+                SetupActionState {
+                    label: "Generate New Key".into(),
+                    enabled: true,
+                    pending: false,
+                },
+            )
+            .with_remote_signer_action(SetupActionState {
+                label: "Connect Remote Signer".into(),
+                enabled: true,
+                pending: false,
+            })
+            .with_remote_signer_preview(vec![Ok(fixture_remote_signer_preview())]),
+        ));
+
+        app.open_remote_signer_entry();
+        app.remote_signer_input =
+            Zeroizing::new("http://localhost/connect?uri=bunker%3A%2F%2Fexample".into());
+        app.request_remote_signer_preview();
+
+        assert_eq!(
+            app.remote_signer_entry_state,
+            RemoteSignerEntryState::Review(fixture_remote_signer_preview())
+        );
+    }
+
+    #[test]
+    fn remote_signer_connect_enters_waiting_state() {
+        let mut app = RadrootsApp::new(Box::new(
+            MockBackend::new(
+                Ok(IdentityGateState::Missing),
+                vec![],
+                vec![],
+                SetupActionState {
+                    label: "Generate New Key".into(),
+                    enabled: true,
+                    pending: false,
+                },
+            )
+            .with_remote_signer_action(SetupActionState {
+                label: "Connect Remote Signer".into(),
+                enabled: true,
+                pending: false,
+            })
+            .with_remote_signer_request(vec![Ok(None)])
+            .with_pending_remote_signer(Some(fixture_pending_remote_signer())),
+        ));
+
+        app.remote_signer_entry_state =
+            RemoteSignerEntryState::Review(fixture_remote_signer_preview());
+        app.remote_signer_input =
+            Zeroizing::new("http://localhost/connect?uri=bunker%3A%2F%2Fexample".into());
+        app.request_remote_signer_connect();
+
+        assert_eq!(
+            app.remote_signer_entry_state,
+            RemoteSignerEntryState::WaitingApproval(fixture_pending_remote_signer())
+        );
+    }
+
+    #[test]
+    fn cancel_pending_remote_signer_clears_waiting_state() {
+        let mut app = RadrootsApp::new(Box::new(
+            MockBackend::new(
+                Ok(IdentityGateState::Missing),
+                vec![],
+                vec![],
+                SetupActionState {
+                    label: "Generate New Key".into(),
+                    enabled: true,
+                    pending: false,
+                },
+            )
+            .with_remote_signer_action(SetupActionState {
+                label: "Connect Remote Signer".into(),
+                enabled: true,
+                pending: false,
+            })
+            .with_pending_remote_signer(Some(fixture_pending_remote_signer()))
+            .with_cancel_pending_remote_signer(vec![Ok(())]),
+        ));
+
+        app.request_cancel_pending_remote_signer();
+
+        assert_eq!(
+            app.remote_signer_entry_state,
+            RemoteSignerEntryState::Closed
+        );
     }
 
     #[test]
