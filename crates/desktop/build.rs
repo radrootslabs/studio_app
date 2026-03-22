@@ -2,9 +2,12 @@ use std::env;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+const GEOCODER_DB_FILENAME: &str = "geonames.db";
+const GEOCODER_REVISION_FILENAME: &str = "geonames.revision";
+
 fn main() {
     println!("cargo:rerun-if-changed=build.rs");
-    sync_optional_geocoder_asset();
+    sync_optional_geocoder_assets();
 
     if env::var("CARGO_CFG_TARGET_OS").ok().as_deref() != Some("macos") {
         return;
@@ -47,30 +50,57 @@ fn main() {
     );
 }
 
-fn sync_optional_geocoder_asset() {
+fn sync_optional_geocoder_assets() {
     let manifest_dir = PathBuf::from(env::var_os("CARGO_MANIFEST_DIR").expect("manifest dir"));
-    let source_path = manifest_dir.join("../../assets/geocoder/geonames.db");
-    println!("cargo:rerun-if-changed={}", source_path.display());
+    let source_db_path = manifest_dir.join(format!("../../assets/geocoder/{GEOCODER_DB_FILENAME}"));
+    let source_revision_path = manifest_dir.join(format!(
+        "../../assets/geocoder/{GEOCODER_REVISION_FILENAME}"
+    ));
+    println!("cargo:rerun-if-changed={}", source_db_path.display());
+    println!("cargo:rerun-if-changed={}", source_revision_path.display());
 
     let profile_dir = target_profile_dir();
-    let target_path = profile_dir.join("geonames.db");
+    let target_db_path = profile_dir.join(GEOCODER_DB_FILENAME);
+    let target_revision_path = profile_dir.join(GEOCODER_REVISION_FILENAME);
 
-    if source_path.is_file() {
-        std::fs::copy(&source_path, &target_path).unwrap_or_else(|err| {
+    if source_db_path.is_file() {
+        if !source_revision_path.is_file() {
+            panic!(
+                "stamped desktop geocoder revision asset missing at {}",
+                source_revision_path.display()
+            );
+        }
+
+        std::fs::copy(&source_db_path, &target_db_path).unwrap_or_else(|err| {
             panic!(
                 "failed to copy optional desktop geocoder asset from {} to {}: {err}",
-                source_path.display(),
-                target_path.display()
+                source_db_path.display(),
+                target_db_path.display()
+            )
+        });
+        std::fs::copy(&source_revision_path, &target_revision_path).unwrap_or_else(|err| {
+            panic!(
+                "failed to copy optional desktop geocoder revision from {} to {}: {err}",
+                source_revision_path.display(),
+                target_revision_path.display()
             )
         });
         return;
     }
 
-    if target_path.exists() {
-        std::fs::remove_file(&target_path).unwrap_or_else(|err| {
+    if target_db_path.exists() {
+        std::fs::remove_file(&target_db_path).unwrap_or_else(|err| {
             panic!(
                 "failed to remove stale desktop geocoder asset at {}: {err}",
-                target_path.display()
+                target_db_path.display()
+            )
+        });
+    }
+    if target_revision_path.exists() {
+        std::fs::remove_file(&target_revision_path).unwrap_or_else(|err| {
+            panic!(
+                "failed to remove stale desktop geocoder revision at {}: {err}",
+                target_revision_path.display()
             )
         });
     }
