@@ -15,6 +15,8 @@ use radroots_studio_app_core::{
     RadrootsReverseLocationLookupResult, SetupActionState,
 };
 #[cfg(any(target_os = "ios", test))]
+use radroots_studio_app_core::{RadrootsAccountCustody, RadrootsAccountSummary};
+#[cfg(any(target_os = "ios", test))]
 use radroots_identity::RadrootsIdentity;
 #[cfg(any(target_os = "ios", test))]
 use radroots_nostr_accounts::prelude::{
@@ -82,7 +84,6 @@ impl IosBackend {
             RadrootsNostrSelectedAccountStatus::PublicOnly { .. } => IdentityGateState::Missing,
             RadrootsNostrSelectedAccountStatus::Ready { account } => IdentityGateState::Ready {
                 account_id: account.account_id.to_string(),
-                npub: account.public_identity.public_key_npub,
             },
         }
     }
@@ -94,6 +95,24 @@ impl IosBackend {
             .selected_account_status()
             .map_err(|source| source.to_string())?;
         Ok(Self::map_status(status))
+    }
+
+    fn account_roster_from_manager(
+        manager: &RadrootsNostrAccountsManager,
+    ) -> Result<Vec<RadrootsAccountSummary>, String> {
+        manager
+            .list_accounts()
+            .map_err(|source| source.to_string())?
+            .into_iter()
+            .map(|record| {
+                Ok(RadrootsAccountSummary {
+                    account_id: record.account_id.to_string(),
+                    npub: record.public_identity.public_key_npub,
+                    label: record.label,
+                    custody: RadrootsAccountCustody::LocalManaged,
+                })
+            })
+            .collect()
     }
 
     fn generate_local_identity(
@@ -246,6 +265,11 @@ impl RadrootsAppBackend for IosBackend {
         Self::identity_state_from_manager(&manager)
     }
 
+    fn load_account_roster(&self) -> Result<Vec<RadrootsAccountSummary>, String> {
+        let manager = Self::accounts_manager()?;
+        Self::account_roster_from_manager(&manager)
+    }
+
     fn offline_geocoder_state(&self) -> Option<RadrootsOfflineGeocoderState> {
         Some(self.offline_geocoder.current_state())
     }
@@ -385,6 +409,14 @@ impl RadrootsAppBackend for IosBackend {
         Self::generate_local_identity(&manager).map(Some)
     }
 
+    fn home_setup_action_state(&self) -> Option<SetupActionState> {
+        Some(self.setup_action_state())
+    }
+
+    fn request_home_setup_action(&self) -> Result<Option<IdentityGateState>, String> {
+        self.request_setup_action()
+    }
+
     fn import_action_state(&self) -> Option<ImportActionState> {
         Some(ImportActionState {
             label: "Import Secret Key".to_owned(),
@@ -396,6 +428,19 @@ impl RadrootsAppBackend for IosBackend {
     fn request_import_action(&self, secret_key: &str) -> Result<Option<IdentityGateState>, String> {
         let manager = Self::accounts_manager()?;
         Self::import_local_identity(&manager, secret_key).map(Some)
+    }
+
+    fn request_select_account(
+        &self,
+        account_id: &str,
+    ) -> Result<Option<IdentityGateState>, String> {
+        let manager = Self::accounts_manager()?;
+        let account_id = radroots_identity::RadrootsIdentityId::try_from(account_id)
+            .map_err(|_| "invalid account id".to_owned())?;
+        manager
+            .select_account(&account_id)
+            .map_err(|source| source.to_string())?;
+        self.load_identity_state().map(Some)
     }
 
     fn import_paste_action_state(&self) -> Option<PasteActionState> {
@@ -523,12 +568,11 @@ mod tests {
         let manager = RadrootsNostrAccountsManager::new_in_memory();
 
         let state = IosBackend::generate_local_identity(&manager).expect("generate identity");
-        let IdentityGateState::Ready { account_id, npub } = state else {
+        let IdentityGateState::Ready { account_id } = state else {
             panic!("expected ready identity state");
         };
 
         assert!(!account_id.is_empty());
-        assert!(npub.starts_with("npub1"));
     }
 
     #[test]
@@ -591,7 +635,6 @@ mod tests {
             state,
             IdentityGateState::Ready {
                 account_id: identity.id().to_string(),
-                npub: identity.npub(),
             }
         );
         assert_eq!(
@@ -605,6 +648,24 @@ mod tests {
                 .expect("export secret"),
             Some(identity.secret_key_hex())
         );
+    }
+
+    #[test]
+    fn account_roster_from_manager_lists_local_managed_account() {
+        let manager = RadrootsNostrAccountsManager::new_in_memory();
+        let identity = RadrootsIdentity::generate();
+
+        manager
+            .upsert_identity(&identity, Some("primary".into()), true)
+            .expect("store identity");
+
+        let roster = IosBackend::account_roster_from_manager(&manager).expect("account roster");
+
+        assert_eq!(roster.len(), 1);
+        assert_eq!(roster[0].account_id, identity.id().to_string());
+        assert_eq!(roster[0].npub, identity.npub());
+        assert_eq!(roster[0].label.as_deref(), Some("primary"));
+        assert_eq!(roster[0].custody, RadrootsAccountCustody::LocalManaged);
     }
 
     #[test]
