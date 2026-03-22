@@ -1,6 +1,4 @@
-use radroots_studio_app_core::{
-    RadrootsOfflineGeocoderState, RadrootsOfflineGeocoderUnavailableKind,
-};
+use radroots_studio_app_core::{RadrootsOfflineGeocoderState, RadrootsOfflineGeocoderUnavailableKind};
 use radroots_geocoder::Geocoder;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -88,21 +86,22 @@ fn initialize_offline_geocoder_inner(
         ));
     }
 
-    let staged_path = staged_db_path(app_data_root, asset_revision(source_path.as_path())?);
+    let revision = asset_revision(source_path.as_path())?;
+    let staged_path = staged_db_path(app_data_root, revision.as_str());
     stage_runtime_asset(source_path.as_path(), staged_path.as_path()).map_err(|debug_message| {
         (
             RadrootsOfflineGeocoderUnavailableKind::InitializationFailed,
             debug_message,
         )
     })?;
-    Geocoder::open_path(staged_path.as_path())
-        .map(|_| ())
-        .map_err(|source| {
-            (
-                RadrootsOfflineGeocoderUnavailableKind::InitializationFailed,
-                format!("failed to open staged geocoder db: {source}"),
-            )
-        })
+    Geocoder::open_path(staged_path.as_path()).map_err(|source| {
+        (
+            RadrootsOfflineGeocoderUnavailableKind::InitializationFailed,
+            format!("failed to open staged geocoder db: {source}"),
+        )
+    })?;
+    let _ = prune_stale_revisions(staged_geocoder_root(app_data_root), revision.as_str());
+    Ok(())
 }
 
 fn runtime_asset_path() -> Result<PathBuf, String> {
@@ -138,9 +137,12 @@ fn asset_revision(
     Ok(format!("{:x}-{:x}", metadata.len(), modified.as_secs()))
 }
 
-fn staged_db_path(app_data_root: &Path, revision: String) -> PathBuf {
-    app_data_root
-        .join("geocoder")
+fn staged_geocoder_root(app_data_root: &Path) -> PathBuf {
+    app_data_root.join("geocoder")
+}
+
+fn staged_db_path(app_data_root: &Path, revision: &str) -> PathBuf {
+    staged_geocoder_root(app_data_root)
         .join(revision)
         .join(GEOCODER_ASSET_FILENAME)
 }
@@ -159,6 +161,48 @@ fn stage_runtime_asset(source_path: &Path, staged_path: &Path) -> Result<bool, S
     Ok(true)
 }
 
+fn prune_stale_revisions(staged_root: PathBuf, active_revision: &str) -> Result<(), String> {
+    if !staged_root.is_dir() {
+        return Ok(());
+    }
+
+    for entry in std::fs::read_dir(staged_root.as_path())
+        .map_err(|source| format!("failed to list desktop geocoder revisions: {source}"))?
+    {
+        let entry = entry.map_err(|source| {
+            format!("failed to read desktop geocoder revision entry: {source}")
+        })?;
+        if entry.file_name() == std::ffi::OsStr::new(active_revision) {
+            continue;
+        }
+
+        let path = entry.path();
+        if entry
+            .file_type()
+            .map_err(|source| {
+                format!("failed to inspect desktop geocoder revision entry: {source}")
+            })?
+            .is_dir()
+        {
+            std::fs::remove_dir_all(path.as_path()).map_err(|source| {
+                format!(
+                    "failed to remove stale desktop geocoder revision {}: {source}",
+                    path.display()
+                )
+            })?;
+        } else {
+            std::fs::remove_file(path.as_path()).map_err(|source| {
+                format!(
+                    "failed to remove stale desktop geocoder revision file {}: {source}",
+                    path.display()
+                )
+            })?;
+        }
+    }
+
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -169,7 +213,7 @@ mod tests {
         let app_data_root = PathBuf::from("/Users/example/.radroots/app/desktop");
 
         assert_eq!(
-            staged_db_path(app_data_root.as_path(), "abcd".to_owned()),
+            staged_db_path(app_data_root.as_path(), "abcd"),
             PathBuf::from("/Users/example/.radroots/app/desktop/geocoder/abcd/geonames.db")
         );
     }
@@ -212,6 +256,35 @@ mod tests {
 
         assert!(!copied);
         assert_eq!(std::fs::read(staged_path.as_path()).unwrap(), b"existing");
+
+        std::fs::remove_dir_all(temp_root.as_path()).unwrap();
+    }
+
+    #[test]
+    fn prune_stale_revisions_keeps_active_revision_only() {
+        let temp_root = std::env::temp_dir().join(format!(
+            "radroots-desktop-geocoder-prune-test-{}",
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let staged_root = temp_root.join("geocoder");
+        let active_dir = staged_root.join("active");
+        let stale_dir = staged_root.join("stale");
+        let stale_file = staged_root.join("orphan.txt");
+
+        std::fs::create_dir_all(active_dir.as_path()).unwrap();
+        std::fs::create_dir_all(stale_dir.as_path()).unwrap();
+        std::fs::write(active_dir.join("geonames.db"), b"active").unwrap();
+        std::fs::write(stale_dir.join("geonames.db"), b"stale").unwrap();
+        std::fs::write(stale_file.as_path(), b"orphan").unwrap();
+
+        prune_stale_revisions(staged_root.clone(), "active").unwrap();
+
+        assert!(active_dir.exists());
+        assert!(!stale_dir.exists());
+        assert!(!stale_file.exists());
 
         std::fs::remove_dir_all(temp_root.as_path()).unwrap();
     }
