@@ -10,7 +10,8 @@ use radroots_studio_app_core::{
     PasteActionState, RadrootsApp, RadrootsAppBackend, RadrootsLocationCountry,
     RadrootsLocationPoint, RadrootsLocationResolverError, RadrootsLocationReverseOptions,
     RadrootsOfflineGeocoderPlatform, RadrootsOfflineGeocoderState,
-    RadrootsOfflineGeocoderUnavailableKind, RadrootsResolvedLocation, SetupActionState,
+    RadrootsOfflineGeocoderUnavailableKind, RadrootsResolvedLocation,
+    RadrootsReverseLocationLookupResult, SetupActionState,
 };
 #[cfg(any(target_os = "ios", test))]
 use radroots_identity::RadrootsIdentity;
@@ -26,12 +27,15 @@ use zeroize::Zeroizing;
 #[cfg(any(target_os = "ios", test))]
 mod offline_geocoder;
 #[cfg(any(target_os = "ios", test))]
+mod reverse_lookup;
+#[cfg(any(target_os = "ios", test))]
 mod storage;
 
 #[cfg(any(target_os = "ios", test))]
 #[cfg_attr(not(target_os = "ios"), allow(dead_code))]
 struct IosBackend {
     offline_geocoder: offline_geocoder::IosOfflineGeocoder,
+    reverse_lookup: reverse_lookup::IosReverseLookup,
 }
 
 #[cfg(target_os = "ios")]
@@ -56,7 +60,10 @@ impl IosBackend {
             ),
         };
 
-        Self { offline_geocoder }
+        Self {
+            offline_geocoder,
+            reverse_lookup: reverse_lookup::IosReverseLookup::new(),
+        }
     }
 
     #[cfg(target_os = "ios")]
@@ -264,6 +271,27 @@ impl RadrootsAppBackend for IosBackend {
             let _ = (point, options);
             Err(RadrootsLocationResolverError::Unsupported)
         }
+    }
+
+    fn request_reverse_location_lookup(
+        &self,
+        point: RadrootsLocationPoint,
+        options: Option<RadrootsLocationReverseOptions>,
+    ) -> Result<(), RadrootsLocationResolverError> {
+        let app_data_root = storage::app_data_root()
+            .map_err(|message| RadrootsLocationResolverError::QueryFailed { message })?;
+        self.reverse_lookup.begin(
+            app_data_root,
+            self.offline_geocoder.current_state(),
+            point,
+            options,
+        )
+    }
+
+    fn poll_reverse_location_lookup_result(
+        &self,
+    ) -> Result<Option<RadrootsReverseLocationLookupResult>, String> {
+        Ok(self.reverse_lookup.take_update())
     }
 
     fn list_location_countries(
