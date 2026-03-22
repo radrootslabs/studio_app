@@ -4,12 +4,14 @@ use eframe::egui;
 use std::time::Duration;
 use zeroize::Zeroizing;
 
+mod account_roster;
 mod home_location_tools;
 mod location_resolver;
 mod offline_geocoder;
 
 pub const APP_NAME: &str = "Rad Roots";
 
+pub use account_roster::{RadrootsAccountCustody, RadrootsAccountSummary};
 pub use location_resolver::{
     RadrootsLocationCountry, RadrootsLocationCountryCenterLookupResult,
     RadrootsLocationCountryListResult, RadrootsLocationPoint, RadrootsLocationResolverError,
@@ -69,12 +71,15 @@ pub enum HomeActionResult {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum IdentityGateState {
     Missing,
-    Ready { account_id: String, npub: String },
+    Ready { account_id: String },
     Unsupported { reason: String },
 }
 
 pub trait RadrootsAppBackend {
     fn load_identity_state(&self) -> Result<IdentityGateState, String>;
+    fn load_account_roster(&self) -> Result<Vec<RadrootsAccountSummary>, String> {
+        Ok(Vec::new())
+    }
     fn offline_geocoder_state(&self) -> Option<RadrootsOfflineGeocoderState> {
         None
     }
@@ -83,6 +88,12 @@ pub trait RadrootsAppBackend {
     }
     fn setup_action_state(&self) -> SetupActionState;
     fn request_setup_action(&self) -> Result<Option<IdentityGateState>, String>;
+    fn home_setup_action_state(&self) -> Option<SetupActionState> {
+        None
+    }
+    fn request_home_setup_action(&self) -> Result<Option<IdentityGateState>, String> {
+        Ok(None)
+    }
     fn import_action_state(&self) -> Option<ImportActionState> {
         None
     }
@@ -105,6 +116,12 @@ pub trait RadrootsAppBackend {
         Ok(HomeActionResult::None)
     }
     fn poll_home_action_result(&self) -> Result<Option<HomeActionResult>, String> {
+        Ok(None)
+    }
+    fn request_select_account(
+        &self,
+        _account_id: &str,
+    ) -> Result<Option<IdentityGateState>, String> {
         Ok(None)
     }
     fn poll_identity_state(&self) -> Result<Option<IdentityGateState>, String> {
@@ -164,12 +181,13 @@ pub trait RadrootsAppBackend {
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum AppScreen {
     Setup,
-    Home { account_id: String, npub: String },
+    Home { account_id: String },
 }
 
 pub struct RadrootsApp {
     backend: Box<dyn RadrootsAppBackend>,
     screen: AppScreen,
+    account_roster: Vec<RadrootsAccountSummary>,
     offline_geocoder_state: Option<RadrootsOfflineGeocoderState>,
     status_message: Option<String>,
     home_location_tools: HomeLocationTools,
@@ -184,6 +202,7 @@ impl RadrootsApp {
         let mut app = Self {
             backend,
             screen: AppScreen::Setup,
+            account_roster: Vec::new(),
             offline_geocoder_state: None,
             status_message: None,
             home_location_tools: HomeLocationTools::new(),
@@ -203,10 +222,23 @@ impl RadrootsApp {
         app
     }
 
+    fn refresh_account_roster(&mut self) {
+        match self.backend.load_account_roster() {
+            Ok(account_roster) => {
+                self.account_roster = account_roster;
+            }
+            Err(err) => {
+                self.account_roster.clear();
+                self.status_message = Some(err);
+            }
+        }
+    }
+
     fn apply_identity_state(&mut self, state: IdentityGateState) {
         match state {
             IdentityGateState::Missing => {
                 self.screen = AppScreen::Setup;
+                self.account_roster.clear();
                 self.status_message = None;
                 self.home_location_tools.clear();
                 self.pending_home_confirmation = None;
@@ -214,9 +246,10 @@ impl RadrootsApp {
                 self.secret_key_input.clear();
                 self.revealed_secret_key = None;
             }
-            IdentityGateState::Ready { account_id, npub } => {
-                self.screen = AppScreen::Home { account_id, npub };
+            IdentityGateState::Ready { account_id } => {
+                self.screen = AppScreen::Home { account_id };
                 self.status_message = None;
+                self.refresh_account_roster();
                 self.home_location_tools.clear();
                 self.pending_home_confirmation = None;
                 self.pending_import_entry = false;
@@ -225,6 +258,7 @@ impl RadrootsApp {
             }
             IdentityGateState::Unsupported { reason } => {
                 self.screen = AppScreen::Setup;
+                self.account_roster.clear();
                 self.status_message = Some(reason);
                 self.home_location_tools.clear();
                 self.pending_home_confirmation = None;
@@ -241,6 +275,21 @@ impl RadrootsApp {
         match self.backend.request_setup_action() {
             Ok(Some(state)) => self.apply_identity_state(state),
             Ok(None) => {}
+            Err(err) => {
+                self.status_message = Some(err);
+            }
+        }
+    }
+
+    fn request_home_setup_action(&mut self) {
+        self.status_message = None;
+        self.revealed_secret_key = None;
+        self.pending_home_confirmation = None;
+        self.pending_import_entry = false;
+        self.secret_key_input.clear();
+        match self.backend.request_home_setup_action() {
+            Ok(Some(state)) => self.apply_identity_state(state),
+            Ok(None) => self.refresh_account_roster(),
             Err(err) => {
                 self.status_message = Some(err);
             }
@@ -270,6 +319,21 @@ impl RadrootsApp {
                 self.secret_key_input = Zeroizing::new(secret_key);
             }
             Ok(None) => {}
+            Err(err) => {
+                self.status_message = Some(err);
+            }
+        }
+    }
+
+    fn request_select_account(&mut self, account_id: &str) {
+        self.status_message = None;
+        self.revealed_secret_key = None;
+        self.pending_home_confirmation = None;
+        self.pending_import_entry = false;
+        self.secret_key_input.clear();
+        match self.backend.request_select_account(account_id) {
+            Ok(Some(state)) => self.apply_identity_state(state),
+            Ok(None) => self.refresh_account_roster(),
             Err(err) => {
                 self.status_message = Some(err);
             }
@@ -368,6 +432,146 @@ impl RadrootsApp {
         }
     }
 
+    fn render_import_entry(
+        &mut self,
+        ui: &mut egui::Ui,
+        import_action: &ImportActionState,
+        import_paste_action: Option<&PasteActionState>,
+    ) {
+        ui.vertical_centered(|ui| {
+            ui.set_max_width(ui.available_width().min(560.0));
+            ui.label("Import an existing local identity by entering its nsec secret key.");
+            ui.add_space(8.0);
+            ui.add(
+                egui::TextEdit::singleline(&mut *self.secret_key_input)
+                    .hint_text("nsec1...")
+                    .desired_width(ui.available_width()),
+            );
+            ui.add_space(8.0);
+            if let Some(import_paste_action) = import_paste_action {
+                let paste_clicked = ui
+                    .add_enabled(
+                        import_paste_action.enabled,
+                        egui::Button::new(import_paste_action.label.clone()),
+                    )
+                    .clicked();
+                if paste_clicked {
+                    self.request_import_paste_action();
+                }
+                ui.add_space(8.0);
+            }
+            ui.horizontal_centered(|ui| {
+                let confirm_clicked = ui
+                    .add_enabled(
+                        import_action.enabled,
+                        egui::Button::new(import_action.label.clone()),
+                    )
+                    .clicked();
+                if confirm_clicked {
+                    self.request_import_action();
+                }
+
+                if ui.button("Cancel").clicked() {
+                    self.pending_import_entry = false;
+                    self.secret_key_input.clear();
+                    self.status_message = None;
+                }
+            });
+        });
+    }
+
+    fn render_home_account_section(&mut self, ui: &mut egui::Ui) {
+        let AppScreen::Home { account_id } = &self.screen else {
+            return;
+        };
+        let selected_account_id = account_id.clone();
+        let selected_summary = self
+            .account_roster
+            .iter()
+            .find(|account| account.account_id == selected_account_id)
+            .cloned();
+
+        ui.label("home");
+        ui.add_space(8.0);
+        ui.label("A signing identity is configured.");
+        ui.add_space(12.0);
+
+        if let Some(summary) = selected_summary {
+            ui.label(summary.display_label());
+            ui.monospace(format!("account id: {}", summary.account_id));
+            ui.monospace(format!("npub: {}", summary.npub));
+            ui.monospace(format!("custody: {}", summary.custody.label()));
+        } else {
+            ui.label("Selected account details are unavailable.");
+            ui.monospace(format!("account id: {selected_account_id}"));
+        }
+
+        if !self.account_roster.is_empty() {
+            ui.add_space(16.0);
+            ui.label("Accounts");
+            let mut next_selected_account_id = None;
+            for account in &self.account_roster {
+                ui.add_space(8.0);
+                ui.horizontal_wrapped(|ui| {
+                    let is_selected = account.account_id == selected_account_id;
+                    ui.label(account.display_label());
+                    ui.monospace(account.npub.as_str());
+                    ui.monospace(account.custody.label());
+                    if is_selected {
+                        ui.label("selected");
+                    } else if ui.button("Select Account").clicked() {
+                        next_selected_account_id = Some(account.account_id.clone());
+                    }
+                });
+            }
+            if let Some(account_id) = next_selected_account_id {
+                self.request_select_account(account_id.as_str());
+            }
+        }
+
+        let home_setup_action = self.backend.home_setup_action_state();
+        let import_action = self.backend.import_action_state();
+        let import_paste_action = self.backend.import_paste_action_state();
+        if home_setup_action.is_some() || import_action.is_some() {
+            ui.add_space(16.0);
+            ui.label("Add account");
+        }
+
+        if let Some(home_setup_action) = home_setup_action {
+            if home_setup_action.pending {
+                ui.ctx().request_repaint();
+            }
+            ui.add_space(8.0);
+            if ui
+                .add_enabled(
+                    home_setup_action.enabled,
+                    egui::Button::new(home_setup_action.label),
+                )
+                .clicked()
+            {
+                self.request_home_setup_action();
+            }
+        }
+
+        if let Some(import_action) = import_action {
+            if import_action.pending {
+                ui.ctx().request_repaint();
+            }
+            if let Some(import_paste_action) = &import_paste_action {
+                if import_paste_action.pending {
+                    ui.ctx().request_repaint();
+                }
+            }
+            ui.add_space(8.0);
+            if self.pending_import_entry {
+                self.render_import_entry(ui, &import_action, import_paste_action.as_ref());
+            } else if ui.button(import_action.label).clicked() {
+                self.pending_import_entry = true;
+                self.status_message = None;
+            }
+        }
+    }
+
     fn render_offline_geocoder_status(&self, ui: &mut egui::Ui) {
         let Some(state) = &self.offline_geocoder_state else {
             return;
@@ -424,7 +628,7 @@ impl eframe::App for RadrootsApp {
                 ui.heading(APP_NAME);
                 ui.add_space(12.0);
 
-                match &self.screen {
+                match self.screen.clone() {
                     AppScreen::Setup => {
                         let action = self.backend.setup_action_state();
                         if action.pending {
@@ -457,63 +661,19 @@ impl eframe::App for RadrootsApp {
                         if let Some(import_action) = import_action {
                             ui.add_space(12.0);
                             if self.pending_import_entry {
-                                ui.vertical_centered(|ui| {
-                                    ui.set_max_width(ui.available_width().min(560.0));
-                                    ui.label(
-                                        "Import an existing local identity by entering its nsec secret key.",
-                                    );
-                                    ui.add_space(8.0);
-                                    ui.add(
-                                        egui::TextEdit::singleline(&mut *self.secret_key_input)
-                                            .hint_text("nsec1...")
-                                            .desired_width(ui.available_width()),
-                                    );
-                                    ui.add_space(8.0);
-                                    if let Some(import_paste_action) = &import_paste_action {
-                                        let paste_clicked = ui
-                                            .add_enabled(
-                                                import_paste_action.enabled,
-                                                egui::Button::new(
-                                                    import_paste_action.label.clone(),
-                                                ),
-                                            )
-                                            .clicked();
-                                        if paste_clicked {
-                                            self.request_import_paste_action();
-                                        }
-                                        ui.add_space(8.0);
-                                    }
-                                    ui.horizontal_centered(|ui| {
-                                        let confirm_clicked = ui
-                                            .add_enabled(
-                                                import_action.enabled,
-                                                egui::Button::new(import_action.label.clone()),
-                                            )
-                                            .clicked();
-                                        if confirm_clicked {
-                                            self.request_import_action();
-                                        }
-
-                                        if ui.button("Cancel").clicked() {
-                                            self.pending_import_entry = false;
-                                            self.secret_key_input.clear();
-                                            self.status_message = None;
-                                        }
-                                    });
-                                });
+                                self.render_import_entry(
+                                    ui,
+                                    &import_action,
+                                    import_paste_action.as_ref(),
+                                );
                             } else if ui.button(import_action.label).clicked() {
                                 self.pending_import_entry = true;
                                 self.status_message = None;
                             }
                         }
                     }
-                    AppScreen::Home { account_id, npub } => {
-                        ui.label("home");
-                        ui.add_space(8.0);
-                        ui.label("A signing identity is configured.");
-                        ui.add_space(12.0);
-                        ui.monospace(format!("account id: {account_id}"));
-                        ui.monospace(format!("npub: {npub}"));
+                    AppScreen::Home { .. } => {
+                        self.render_home_account_section(ui);
                         self.home_location_tools.render(
                             ui,
                             self.backend.as_ref(),
@@ -595,7 +755,7 @@ impl eframe::App for RadrootsApp {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use radroots_studio_app_test_support::FIXTURE_ALICE;
+    use radroots_studio_app_test_support::{FIXTURE_ALICE, FIXTURE_BOB};
     use std::cell::RefCell;
     use std::collections::VecDeque;
     use std::rc::Rc;
@@ -603,14 +763,17 @@ mod tests {
     #[derive(Clone)]
     struct MockBackend {
         load: Result<IdentityGateState, String>,
+        account_roster: Rc<RefCell<Vec<RadrootsAccountSummary>>>,
         offline_geocoder_state: Rc<RefCell<Option<RadrootsOfflineGeocoderState>>>,
         offline_geocoder_poll:
             Rc<RefCell<VecDeque<Result<Option<RadrootsOfflineGeocoderState>, String>>>>,
         action_state: Rc<RefCell<SetupActionState>>,
+        home_setup_action_state: Rc<RefCell<Option<SetupActionState>>>,
         import_action_state: Rc<RefCell<Option<ImportActionState>>>,
         import_paste_action_state: Rc<RefCell<Option<PasteActionState>>>,
         home_action_states: Rc<RefCell<Vec<HomeActionState>>>,
         request: Rc<RefCell<VecDeque<Result<Option<IdentityGateState>, String>>>>,
+        home_setup_request: Rc<RefCell<VecDeque<Result<Option<IdentityGateState>, String>>>>,
         import_request: Rc<RefCell<VecDeque<Result<Option<IdentityGateState>, String>>>>,
         import_paste_request: Rc<RefCell<VecDeque<Result<Option<String>, String>>>>,
         home_request: Rc<RefCell<VecDeque<(HomeActionKind, Result<HomeActionResult, String>)>>>,
@@ -618,6 +781,8 @@ mod tests {
         reverse_lookup_request: Rc<RefCell<VecDeque<Result<(), RadrootsLocationResolverError>>>>,
         reverse_lookup_poll:
             Rc<RefCell<VecDeque<Result<Option<RadrootsReverseLocationLookupResult>, String>>>>,
+        select_account_request:
+            Rc<RefCell<VecDeque<(String, Result<Option<IdentityGateState>, String>)>>>,
         poll: Rc<RefCell<VecDeque<Result<Option<IdentityGateState>, String>>>>,
     }
 
@@ -630,21 +795,30 @@ mod tests {
         ) -> Self {
             Self {
                 load,
+                account_roster: Rc::new(RefCell::new(Vec::new())),
                 offline_geocoder_state: Rc::new(RefCell::new(None)),
                 offline_geocoder_poll: Rc::new(RefCell::new(VecDeque::new())),
                 action_state: Rc::new(RefCell::new(action_state)),
+                home_setup_action_state: Rc::new(RefCell::new(None)),
                 import_action_state: Rc::new(RefCell::new(None)),
                 import_paste_action_state: Rc::new(RefCell::new(None)),
                 home_action_states: Rc::new(RefCell::new(Vec::new())),
                 request: Rc::new(RefCell::new(request.into())),
+                home_setup_request: Rc::new(RefCell::new(VecDeque::new())),
                 import_request: Rc::new(RefCell::new(VecDeque::new())),
                 import_paste_request: Rc::new(RefCell::new(VecDeque::new())),
                 home_request: Rc::new(RefCell::new(VecDeque::new())),
                 home_poll: Rc::new(RefCell::new(VecDeque::new())),
                 reverse_lookup_request: Rc::new(RefCell::new(VecDeque::new())),
                 reverse_lookup_poll: Rc::new(RefCell::new(VecDeque::new())),
+                select_account_request: Rc::new(RefCell::new(VecDeque::new())),
                 poll: Rc::new(RefCell::new(poll.into())),
             }
+        }
+
+        fn with_account_roster(self, account_roster: Vec<RadrootsAccountSummary>) -> Self {
+            *self.account_roster.borrow_mut() = account_roster;
+            self
         }
 
         fn with_offline_geocoder_state(
@@ -664,6 +838,16 @@ mod tests {
         ) -> Self {
             *self.import_action_state.borrow_mut() = Some(action_state);
             self.import_request.borrow_mut().extend(request);
+            self
+        }
+
+        fn with_home_setup_action(
+            self,
+            action_state: SetupActionState,
+            request: Vec<Result<Option<IdentityGateState>, String>>,
+        ) -> Self {
+            *self.home_setup_action_state.borrow_mut() = Some(action_state);
+            self.home_setup_request.borrow_mut().extend(request);
             self
         }
 
@@ -710,11 +894,28 @@ mod tests {
             self.reverse_lookup_poll.borrow_mut().extend(poll);
             self
         }
+
+        fn with_select_account(
+            self,
+            account_id: &str,
+            request: Vec<Result<Option<IdentityGateState>, String>>,
+        ) -> Self {
+            self.select_account_request.borrow_mut().extend(
+                request
+                    .into_iter()
+                    .map(|result| (account_id.to_owned(), result)),
+            );
+            self
+        }
     }
 
     impl RadrootsAppBackend for MockBackend {
         fn load_identity_state(&self) -> Result<IdentityGateState, String> {
             self.load.clone()
+        }
+
+        fn load_account_roster(&self) -> Result<Vec<RadrootsAccountSummary>, String> {
+            Ok(self.account_roster.borrow().clone())
         }
 
         fn offline_geocoder_state(&self) -> Option<RadrootsOfflineGeocoderState> {
@@ -739,6 +940,17 @@ mod tests {
                 .borrow_mut()
                 .pop_front()
                 .unwrap_or_else(|| Err("missing request response".into()))
+        }
+
+        fn home_setup_action_state(&self) -> Option<SetupActionState> {
+            self.home_setup_action_state.borrow().clone()
+        }
+
+        fn request_home_setup_action(&self) -> Result<Option<IdentityGateState>, String> {
+            self.home_setup_request
+                .borrow_mut()
+                .pop_front()
+                .unwrap_or(Ok(None))
         }
 
         fn import_action_state(&self) -> Option<ImportActionState> {
@@ -788,6 +1000,23 @@ mod tests {
             self.home_poll.borrow_mut().pop_front().unwrap_or(Ok(None))
         }
 
+        fn request_select_account(
+            &self,
+            account_id: &str,
+        ) -> Result<Option<IdentityGateState>, String> {
+            let Some((expected_account_id, response)) =
+                self.select_account_request.borrow_mut().pop_front()
+            else {
+                return Err("missing select-account response".into());
+            };
+            if expected_account_id != account_id {
+                return Err(format!(
+                    "unexpected account selection request: expected {expected_account_id}, got {account_id}"
+                ));
+            }
+            response
+        }
+
         fn request_reverse_location_lookup(
             &self,
             _point: RadrootsLocationPoint,
@@ -813,17 +1042,33 @@ mod tests {
         }
     }
 
+    fn fixture_account_summary() -> RadrootsAccountSummary {
+        RadrootsAccountSummary {
+            account_id: FIXTURE_ALICE.account_id.into(),
+            npub: FIXTURE_ALICE.npub.into(),
+            label: Some("fixture alice".into()),
+            custody: RadrootsAccountCustody::LocalManaged,
+        }
+    }
+
+    fn fixture_bob_account_summary() -> RadrootsAccountSummary {
+        RadrootsAccountSummary {
+            account_id: FIXTURE_BOB.account_id.into(),
+            npub: FIXTURE_BOB.npub.into(),
+            label: Some("fixture bob".into()),
+            custody: RadrootsAccountCustody::LocalManaged,
+        }
+    }
+
     fn fixture_ready_state() -> IdentityGateState {
         IdentityGateState::Ready {
             account_id: FIXTURE_ALICE.account_id.into(),
-            npub: FIXTURE_ALICE.npub.into(),
         }
     }
 
     fn fixture_home_screen() -> AppScreen {
         AppScreen::Home {
             account_id: FIXTURE_ALICE.account_id.into(),
-            npub: FIXTURE_ALICE.npub.into(),
         }
     }
 
@@ -857,6 +1102,25 @@ mod tests {
         )));
         assert_eq!(app.screen, fixture_home_screen());
         assert_eq!(app.status_message, None);
+    }
+
+    #[test]
+    fn startup_ready_key_loads_account_roster() {
+        let app = RadrootsApp::new(Box::new(
+            MockBackend::new(
+                Ok(fixture_ready_state()),
+                vec![],
+                vec![],
+                SetupActionState {
+                    label: "Generate New Key".into(),
+                    enabled: true,
+                    pending: false,
+                },
+            )
+            .with_account_roster(vec![fixture_account_summary()]),
+        ));
+
+        assert_eq!(app.account_roster, vec![fixture_account_summary()]);
     }
 
     #[test]
@@ -914,6 +1178,81 @@ mod tests {
         app.request_setup_action();
 
         assert_eq!(app.screen, fixture_home_screen());
+    }
+
+    #[test]
+    fn home_setup_action_transitions_to_new_selected_account() {
+        let mut app = RadrootsApp::new(Box::new(
+            MockBackend::new(
+                Ok(fixture_ready_state()),
+                vec![],
+                vec![],
+                SetupActionState {
+                    label: "Generate New Key".into(),
+                    enabled: true,
+                    pending: false,
+                },
+            )
+            .with_account_roster(vec![
+                fixture_account_summary(),
+                fixture_bob_account_summary(),
+            ])
+            .with_home_setup_action(
+                SetupActionState {
+                    label: "Generate New Key".into(),
+                    enabled: true,
+                    pending: false,
+                },
+                vec![Ok(Some(IdentityGateState::Ready {
+                    account_id: FIXTURE_BOB.account_id.into(),
+                }))],
+            ),
+        ));
+
+        app.request_home_setup_action();
+
+        assert_eq!(
+            app.screen,
+            AppScreen::Home {
+                account_id: FIXTURE_BOB.account_id.into(),
+            }
+        );
+        assert_eq!(app.account_roster.len(), 2);
+    }
+
+    #[test]
+    fn select_account_transitions_to_requested_account() {
+        let mut app = RadrootsApp::new(Box::new(
+            MockBackend::new(
+                Ok(fixture_ready_state()),
+                vec![],
+                vec![],
+                SetupActionState {
+                    label: "Generate New Key".into(),
+                    enabled: true,
+                    pending: false,
+                },
+            )
+            .with_account_roster(vec![
+                fixture_account_summary(),
+                fixture_bob_account_summary(),
+            ])
+            .with_select_account(
+                FIXTURE_BOB.account_id,
+                vec![Ok(Some(IdentityGateState::Ready {
+                    account_id: FIXTURE_BOB.account_id.into(),
+                }))],
+            ),
+        ));
+
+        app.request_select_account(FIXTURE_BOB.account_id);
+
+        assert_eq!(
+            app.screen,
+            AppScreen::Home {
+                account_id: FIXTURE_BOB.account_id.into(),
+            }
+        );
     }
 
     #[test]
