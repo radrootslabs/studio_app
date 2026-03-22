@@ -30,6 +30,9 @@ pub struct RadrootsResolvedLocation {
     pub point: RadrootsLocationPoint,
 }
 
+pub type RadrootsReverseLocationLookupResult =
+    Result<Vec<RadrootsResolvedLocation>, RadrootsLocationResolverError>;
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct RadrootsLocationCountry {
     pub country_id: String,

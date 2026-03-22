@@ -12,7 +12,7 @@ pub const APP_NAME: &str = "Rad Roots";
 
 pub use location_resolver::{
     RadrootsLocationCountry, RadrootsLocationPoint, RadrootsLocationResolverError,
-    RadrootsLocationReverseOptions, RadrootsResolvedLocation,
+    RadrootsLocationReverseOptions, RadrootsResolvedLocation, RadrootsReverseLocationLookupResult,
 };
 pub use offline_geocoder::{
     RadrootsOfflineGeocoderDiagnostic, RadrootsOfflineGeocoderPlatform,
@@ -115,6 +115,18 @@ pub trait RadrootsAppBackend {
         _options: Option<RadrootsLocationReverseOptions>,
     ) -> Result<Vec<RadrootsResolvedLocation>, RadrootsLocationResolverError> {
         Err(RadrootsLocationResolverError::Unsupported)
+    }
+    fn request_reverse_location_lookup(
+        &self,
+        _point: RadrootsLocationPoint,
+        _options: Option<RadrootsLocationReverseOptions>,
+    ) -> Result<(), RadrootsLocationResolverError> {
+        Err(RadrootsLocationResolverError::Unsupported)
+    }
+    fn poll_reverse_location_lookup_result(
+        &self,
+    ) -> Result<Option<RadrootsReverseLocationLookupResult>, String> {
+        Ok(None)
     }
     fn list_location_countries(
         &self,
