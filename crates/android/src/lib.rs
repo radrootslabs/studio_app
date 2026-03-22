@@ -36,6 +36,8 @@ use zeroize::Zeroizing;
 mod country_lookup;
 #[cfg(any(target_os = "android", test))]
 mod offline_geocoder;
+#[cfg(target_os = "android")]
+mod remote_signer;
 #[cfg(any(target_os = "android", test))]
 mod reverse_lookup;
 #[cfg(any(target_os = "android", test))]
@@ -50,6 +52,8 @@ mod vault;
 struct AndroidBackend {
     country_lookup: country_lookup::AndroidCountryLookup,
     offline_geocoder: offline_geocoder::AndroidOfflineGeocoder,
+    #[cfg(target_os = "android")]
+    remote_signer: remote_signer::AndroidRemoteSigner,
     reverse_lookup: reverse_lookup::AndroidReverseLookup,
 }
 
@@ -70,7 +74,10 @@ impl RadrootsAppBackend for AndroidBackend {
         #[cfg(target_os = "android")]
         {
             let manager = Self::accounts_manager()?;
-            return Self::identity_state_from_manager(&manager);
+            let status = manager
+                .selected_account_status()
+                .map_err(|source| source.to_string())?;
+            return remote_signer::identity_state_from_status(status);
         }
 
         #[cfg(not(target_os = "android"))]
@@ -313,36 +320,143 @@ impl RadrootsAppBackend for AndroidBackend {
         }
     }
 
+    fn remote_signer_action_state(&self) -> Option<SetupActionState> {
+        #[cfg(target_os = "android")]
+        {
+            return Some(
+                self.remote_signer
+                    .action_state()
+                    .unwrap_or_else(|_| SetupActionState {
+                        label: "Connect Remote Signer".to_owned(),
+                        enabled: !self.remote_signer.is_connecting(),
+                        pending: self.remote_signer.is_connecting(),
+                    }),
+            );
+        }
+
+        #[cfg(not(target_os = "android"))]
+        {
+            None
+        }
+    }
+
+    fn preview_remote_signer_connection(
+        &self,
+        input: &str,
+    ) -> Result<radroots_studio_app_core::RadrootsRemoteSignerPreview, String> {
+        #[cfg(target_os = "android")]
+        {
+            return remote_signer::preview_connection(input);
+        }
+
+        #[cfg(not(target_os = "android"))]
+        {
+            let _ = input;
+            Err("remote signer onboarding is not available in this build".to_owned())
+        }
+    }
+
+    fn request_remote_signer_connection(
+        &self,
+        input: &str,
+    ) -> Result<Option<IdentityGateState>, String> {
+        #[cfg(target_os = "android")]
+        {
+            self.remote_signer.begin_connect(input)?;
+            return Ok(None);
+        }
+
+        #[cfg(not(target_os = "android"))]
+        {
+            let _ = input;
+            Ok(None)
+        }
+    }
+
+    fn pending_remote_signer_connection(
+        &self,
+    ) -> Result<Option<radroots_studio_app_core::RadrootsPendingRemoteSignerConnection>, String> {
+        #[cfg(target_os = "android")]
+        {
+            return remote_signer::pending_connection();
+        }
+
+        #[cfg(not(target_os = "android"))]
+        {
+            Ok(None)
+        }
+    }
+
+    fn request_cancel_pending_remote_signer_connection(&self) -> Result<(), String> {
+        #[cfg(target_os = "android")]
+        {
+            return remote_signer::cancel_pending_connection();
+        }
+
+        #[cfg(not(target_os = "android"))]
+        {
+            Ok(())
+        }
+    }
+
     fn home_action_states(&self) -> Vec<HomeActionState> {
         #[cfg(target_os = "android")]
         {
             let secret_key_export_pending = Self::secret_key_export_pending();
-            return vec![
-                HomeActionState {
-                    kind: HomeActionKind::BackupSecretKey,
-                    label: "Back Up Secret Key".to_owned(),
-                    enabled: !secret_key_export_pending,
-                    pending: secret_key_export_pending,
-                },
-                HomeActionState {
-                    kind: HomeActionKind::RevealRawSecretKey,
-                    label: "Reveal Raw Secret Key".to_owned(),
-                    enabled: !secret_key_export_pending,
-                    pending: secret_key_export_pending,
-                },
-                HomeActionState {
-                    kind: HomeActionKind::RemoveLocalKey,
-                    label: "Remove Key From This Device".to_owned(),
-                    enabled: true,
-                    pending: false,
-                },
-                HomeActionState {
-                    kind: HomeActionKind::ResetDevice,
-                    label: "Reset This Device".to_owned(),
-                    enabled: true,
-                    pending: false,
-                },
-            ];
+            let Ok(manager) = Self::accounts_manager() else {
+                return Vec::new();
+            };
+            let Ok(status) = manager
+                .selected_account_status()
+                .map_err(|source| source.to_string())
+            else {
+                return Vec::new();
+            };
+
+            return match status {
+                RadrootsNostrSelectedAccountStatus::NotConfigured => Vec::new(),
+                RadrootsNostrSelectedAccountStatus::PublicOnly { account } => {
+                    if matches!(
+                        remote_signer::custody_for_account_id(account.account_id.as_str()),
+                        Ok(RadrootsAccountCustody::RemoteSigner)
+                    ) {
+                        vec![HomeActionState {
+                            kind: HomeActionKind::DisconnectSigner,
+                            label: "Disconnect Remote Signer".to_owned(),
+                            enabled: true,
+                            pending: false,
+                        }]
+                    } else {
+                        Vec::new()
+                    }
+                }
+                RadrootsNostrSelectedAccountStatus::Ready { .. } => vec![
+                    HomeActionState {
+                        kind: HomeActionKind::BackupSecretKey,
+                        label: "Back Up Secret Key".to_owned(),
+                        enabled: !secret_key_export_pending,
+                        pending: secret_key_export_pending,
+                    },
+                    HomeActionState {
+                        kind: HomeActionKind::RevealRawSecretKey,
+                        label: "Reveal Raw Secret Key".to_owned(),
+                        enabled: !secret_key_export_pending,
+                        pending: secret_key_export_pending,
+                    },
+                    HomeActionState {
+                        kind: HomeActionKind::RemoveLocalKey,
+                        label: "Remove Key From This Device".to_owned(),
+                        enabled: true,
+                        pending: false,
+                    },
+                    HomeActionState {
+                        kind: HomeActionKind::ResetDevice,
+                        label: "Reset This Device".to_owned(),
+                        enabled: true,
+                        pending: false,
+                    },
+                ],
+            };
         }
 
         #[cfg(not(target_os = "android"))]
@@ -370,7 +484,11 @@ impl RadrootsAppBackend for AndroidBackend {
                     Self::reset_local_device_state(&manager, accounts_path.as_path())
                         .map(HomeActionResult::IdentityState)
                 }
-                HomeActionKind::DisconnectSigner => Ok(HomeActionResult::None),
+                HomeActionKind::DisconnectSigner => {
+                    let manager = Self::accounts_manager()?;
+                    remote_signer::disconnect_selected_remote_signer(&manager)
+                        .map(HomeActionResult::IdentityState)
+                }
             };
         }
 
@@ -406,6 +524,22 @@ impl RadrootsAppBackend for AndroidBackend {
             Ok(None)
         }
     }
+
+    fn poll_identity_state(&self) -> Result<Option<IdentityGateState>, String> {
+        #[cfg(target_os = "android")]
+        {
+            return self
+                .remote_signer
+                .take_update()
+                .transpose()
+                .map(|state| state.flatten());
+        }
+
+        #[cfg(not(target_os = "android"))]
+        {
+            Ok(None)
+        }
+    }
 }
 
 #[cfg(any(target_os = "android", test))]
@@ -427,6 +561,8 @@ impl AndroidBackend {
         Self {
             country_lookup: country_lookup::AndroidCountryLookup::new(),
             offline_geocoder,
+            #[cfg(target_os = "android")]
+            remote_signer: remote_signer::AndroidRemoteSigner::new(),
             reverse_lookup: reverse_lookup::AndroidReverseLookup::new(),
         }
     }
@@ -490,11 +626,15 @@ impl AndroidBackend {
             .map_err(|source| source.to_string())?
             .into_iter()
             .map(|record| {
+                #[cfg(target_os = "android")]
+                let custody = remote_signer::custody_for_account_id(record.account_id.as_str())?;
+                #[cfg(not(target_os = "android"))]
+                let custody = RadrootsAccountCustody::LocalManaged;
                 Ok(RadrootsAccountSummary {
                     account_id: record.account_id.to_string(),
                     npub: record.public_identity.public_key_npub,
                     label: record.label,
-                    custody: RadrootsAccountCustody::LocalManaged,
+                    custody,
                 })
             })
             .collect()
