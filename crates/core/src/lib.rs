@@ -316,6 +316,14 @@ impl RadrootsApp {
                 self.status_message = Some(err);
             }
         }
+        match self.backend.poll_reverse_location_lookup_result() {
+            Ok(Some(result)) => self.home_location_tools.apply_reverse_lookup_result(result),
+            Ok(None) => {}
+            Err(err) => {
+                self.home_location_tools
+                    .apply_reverse_lookup_poll_error(err);
+            }
+        }
         match self.backend.poll_identity_state() {
             Ok(Some(state)) => self.apply_identity_state(state),
             Ok(None) => {}
@@ -369,6 +377,9 @@ impl eframe::App for RadrootsApp {
             self.offline_geocoder_state,
             Some(RadrootsOfflineGeocoderState::Initializing)
         ) {
+            ctx.request_repaint_after(Duration::from_millis(100));
+        }
+        if self.home_location_tools.is_pending() {
             ctx.request_repaint_after(Duration::from_millis(100));
         }
 
@@ -568,6 +579,9 @@ mod tests {
         import_paste_request: Rc<RefCell<VecDeque<Result<Option<String>, String>>>>,
         home_request: Rc<RefCell<VecDeque<(HomeActionKind, Result<HomeActionResult, String>)>>>,
         home_poll: Rc<RefCell<VecDeque<Result<Option<HomeActionResult>, String>>>>,
+        reverse_lookup_request: Rc<RefCell<VecDeque<Result<(), RadrootsLocationResolverError>>>>,
+        reverse_lookup_poll:
+            Rc<RefCell<VecDeque<Result<Option<RadrootsReverseLocationLookupResult>, String>>>>,
         poll: Rc<RefCell<VecDeque<Result<Option<IdentityGateState>, String>>>>,
     }
 
@@ -591,6 +605,8 @@ mod tests {
                 import_paste_request: Rc::new(RefCell::new(VecDeque::new())),
                 home_request: Rc::new(RefCell::new(VecDeque::new())),
                 home_poll: Rc::new(RefCell::new(VecDeque::new())),
+                reverse_lookup_request: Rc::new(RefCell::new(VecDeque::new())),
+                reverse_lookup_poll: Rc::new(RefCell::new(VecDeque::new())),
                 poll: Rc::new(RefCell::new(poll.into())),
             }
         }
@@ -646,6 +662,16 @@ mod tests {
             poll: Vec<Result<Option<HomeActionResult>, String>>,
         ) -> Self {
             self.home_poll.borrow_mut().extend(poll);
+            self
+        }
+
+        fn with_reverse_lookup(
+            self,
+            request: Vec<Result<(), RadrootsLocationResolverError>>,
+            poll: Vec<Result<Option<RadrootsReverseLocationLookupResult>, String>>,
+        ) -> Self {
+            self.reverse_lookup_request.borrow_mut().extend(request);
+            self.reverse_lookup_poll.borrow_mut().extend(poll);
             self
         }
     }
@@ -724,6 +750,26 @@ mod tests {
 
         fn poll_home_action_result(&self) -> Result<Option<HomeActionResult>, String> {
             self.home_poll.borrow_mut().pop_front().unwrap_or(Ok(None))
+        }
+
+        fn request_reverse_location_lookup(
+            &self,
+            _point: RadrootsLocationPoint,
+            _options: Option<RadrootsLocationReverseOptions>,
+        ) -> Result<(), RadrootsLocationResolverError> {
+            self.reverse_lookup_request
+                .borrow_mut()
+                .pop_front()
+                .unwrap_or(Err(RadrootsLocationResolverError::Unsupported))
+        }
+
+        fn poll_reverse_location_lookup_result(
+            &self,
+        ) -> Result<Option<RadrootsReverseLocationLookupResult>, String> {
+            self.reverse_lookup_poll
+                .borrow_mut()
+                .pop_front()
+                .unwrap_or(Ok(None))
         }
 
         fn poll_identity_state(&self) -> Result<Option<IdentityGateState>, String> {
@@ -1153,6 +1199,58 @@ mod tests {
         assert_eq!(
             app.revealed_secret_key.as_ref().map(|value| value.as_str()),
             Some("nsec1example")
+        );
+    }
+
+    #[test]
+    fn deferred_home_location_lookup_updates_after_poll() {
+        let mut app = RadrootsApp::new(Box::new(
+            MockBackend::new(
+                Ok(IdentityGateState::Ready {
+                    account_id: "abc".into(),
+                    npub: "npub1abc".into(),
+                }),
+                vec![],
+                vec![],
+                SetupActionState {
+                    label: "Generate New Key".into(),
+                    enabled: true,
+                    pending: false,
+                },
+            )
+            .with_offline_geocoder_state(RadrootsOfflineGeocoderState::Ready, vec![])
+            .with_reverse_lookup(
+                vec![Ok(())],
+                vec![Ok(Some(Ok(vec![RadrootsResolvedLocation {
+                    id: 7,
+                    name: "Paris".into(),
+                    admin1_id: Some(11),
+                    admin1_name: Some("Ile-de-France".into()),
+                    country_id: "FR".into(),
+                    country_name: Some("France".into()),
+                    point: RadrootsLocationPoint {
+                        lat: 48.8566,
+                        lng: 2.3522,
+                    },
+                }])))],
+            ),
+        ));
+
+        app.home_location_tools
+            .set_query_inputs("48.8566", "2.3522");
+        app.home_location_tools
+            .begin_resolve_with_backend(app.backend.as_ref());
+        assert!(app.home_location_tools.is_pending());
+
+        app.sync_backend();
+
+        assert_eq!(app.home_location_tools.status_message(), None);
+        assert_eq!(
+            app.home_location_tools
+                .lookup_result()
+                .as_ref()
+                .map(|result| result.matches[0].name.as_str()),
+            Some("Paris")
         );
     }
 
