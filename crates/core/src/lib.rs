@@ -4,10 +4,15 @@ use eframe::egui;
 use std::time::Duration;
 use zeroize::Zeroizing;
 
+mod location_resolver;
 mod offline_geocoder;
 
 pub const APP_NAME: &str = "Rad Roots";
 
+pub use location_resolver::{
+    RadrootsLocationCountry, RadrootsLocationPoint, RadrootsLocationResolverError,
+    RadrootsLocationReverseOptions, RadrootsResolvedLocation,
+};
 pub use offline_geocoder::{
     RadrootsOfflineGeocoderDiagnostic, RadrootsOfflineGeocoderPlatform,
     RadrootsOfflineGeocoderState, RadrootsOfflineGeocoderUnavailableKind,
@@ -100,6 +105,24 @@ pub trait RadrootsAppBackend {
     }
     fn poll_identity_state(&self) -> Result<Option<IdentityGateState>, String> {
         Ok(None)
+    }
+    fn reverse_location(
+        &self,
+        _point: RadrootsLocationPoint,
+        _options: Option<RadrootsLocationReverseOptions>,
+    ) -> Result<Vec<RadrootsResolvedLocation>, RadrootsLocationResolverError> {
+        Err(RadrootsLocationResolverError::Unsupported)
+    }
+    fn list_location_countries(
+        &self,
+    ) -> Result<Vec<RadrootsLocationCountry>, RadrootsLocationResolverError> {
+        Err(RadrootsLocationResolverError::Unsupported)
+    }
+    fn location_country_center(
+        &self,
+        _country_id: &str,
+    ) -> Result<RadrootsLocationPoint, RadrootsLocationResolverError> {
+        Err(RadrootsLocationResolverError::Unsupported)
     }
 }
 
