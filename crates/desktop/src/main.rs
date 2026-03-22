@@ -13,7 +13,8 @@ use radroots_studio_app_core::{
     ImportActionState, RadrootsApp, RadrootsAppBackend, RadrootsLocationCountry,
     RadrootsLocationPoint, RadrootsLocationResolverError, RadrootsLocationReverseOptions,
     RadrootsOfflineGeocoderPlatform, RadrootsOfflineGeocoderState,
-    RadrootsOfflineGeocoderUnavailableKind, RadrootsResolvedLocation, SetupActionState,
+    RadrootsOfflineGeocoderUnavailableKind, RadrootsResolvedLocation,
+    RadrootsReverseLocationLookupResult, SetupActionState,
 };
 #[cfg(target_os = "macos")]
 use radroots_identity::RadrootsIdentity;
@@ -28,8 +29,10 @@ use std::sync::Arc;
 use zeroize::Zeroizing;
 
 mod offline_geocoder;
+mod reverse_lookup;
 
 use offline_geocoder::DesktopOfflineGeocoder;
+use reverse_lookup::DesktopReverseLookup;
 
 const RADROOTS_DESKTOP_ICON_BYTES: &[u8] = include_bytes!("../assets/icons/radroots-logo.ico");
 
@@ -59,6 +62,7 @@ fn desktop_icon() -> Option<egui::IconData> {
 
 struct DesktopBackend {
     offline_geocoder: DesktopOfflineGeocoder,
+    reverse_lookup: DesktopReverseLookup,
 }
 
 impl DesktopBackend {
@@ -83,7 +87,10 @@ impl DesktopBackend {
                 "desktop offline geocoder initialization is only wired for macos",
             ));
 
-        Self { offline_geocoder }
+        Self {
+            offline_geocoder,
+            reverse_lookup: DesktopReverseLookup::new(),
+        }
     }
 
     #[cfg(target_os = "macos")]
@@ -315,6 +322,36 @@ impl RadrootsAppBackend for DesktopBackend {
             let _ = (point, options);
             Err(RadrootsLocationResolverError::Unsupported)
         }
+    }
+
+    fn request_reverse_location_lookup(
+        &self,
+        point: RadrootsLocationPoint,
+        options: Option<RadrootsLocationReverseOptions>,
+    ) -> Result<(), RadrootsLocationResolverError> {
+        #[cfg(target_os = "macos")]
+        {
+            let app_data_root = Self::app_data_root()
+                .map_err(|message| RadrootsLocationResolverError::QueryFailed { message })?;
+            return self.reverse_lookup.begin(
+                app_data_root,
+                self.offline_geocoder.current_state(),
+                point,
+                options,
+            );
+        }
+
+        #[cfg(not(target_os = "macos"))]
+        {
+            let _ = (point, options);
+            Err(RadrootsLocationResolverError::Unsupported)
+        }
+    }
+
+    fn poll_reverse_location_lookup_result(
+        &self,
+    ) -> Result<Option<RadrootsReverseLocationLookupResult>, String> {
+        Ok(self.reverse_lookup.take_update())
     }
 
     fn list_location_countries(
