@@ -9,7 +9,8 @@ use radroots_studio_app_core::{APP_NAME, RadrootsApp};
 #[cfg(any(target_os = "android", test))]
 use radroots_studio_app_core::{
     HomeActionKind, HomeActionResult, HomeActionState, IdentityGateState, ImportActionState,
-    RadrootsLocationCountry, RadrootsLocationPoint, RadrootsLocationResolverError,
+    RadrootsLocationCountry, RadrootsLocationCountryCenterLookupResult,
+    RadrootsLocationCountryListResult, RadrootsLocationPoint, RadrootsLocationResolverError,
     RadrootsLocationReverseOptions, RadrootsOfflineGeocoderState, RadrootsResolvedLocation,
     RadrootsReverseLocationLookupResult, SetupActionState,
 };
@@ -29,6 +30,8 @@ use winit::platform::android::activity::AndroidApp;
 use zeroize::Zeroizing;
 
 #[cfg(any(target_os = "android", test))]
+mod country_lookup;
+#[cfg(any(target_os = "android", test))]
 mod offline_geocoder;
 #[cfg(any(target_os = "android", test))]
 mod reverse_lookup;
@@ -42,6 +45,7 @@ mod vault;
 #[cfg(any(target_os = "android", test))]
 #[cfg_attr(not(target_os = "android"), allow(dead_code))]
 struct AndroidBackend {
+    country_lookup: country_lookup::AndroidCountryLookup,
     offline_geocoder: offline_geocoder::AndroidOfflineGeocoder,
     reverse_lookup: reverse_lookup::AndroidReverseLookup,
 }
@@ -115,6 +119,50 @@ impl RadrootsAppBackend for AndroidBackend {
         &self,
     ) -> Result<Option<RadrootsReverseLocationLookupResult>, String> {
         Ok(self.reverse_lookup.take_update())
+    }
+
+    fn request_location_country_list(&self) -> Result<(), RadrootsLocationResolverError> {
+        #[cfg(target_os = "android")]
+        {
+            return self
+                .country_lookup
+                .begin_list(self.offline_geocoder.current_state());
+        }
+
+        #[cfg(not(target_os = "android"))]
+        {
+            Err(RadrootsLocationResolverError::Unsupported)
+        }
+    }
+
+    fn poll_location_country_list_result(
+        &self,
+    ) -> Result<Option<RadrootsLocationCountryListResult>, String> {
+        Ok(self.country_lookup.take_list_update())
+    }
+
+    fn request_location_country_center_lookup(
+        &self,
+        country_id: &str,
+    ) -> Result<(), RadrootsLocationResolverError> {
+        #[cfg(target_os = "android")]
+        {
+            return self
+                .country_lookup
+                .begin_center(self.offline_geocoder.current_state(), country_id.to_owned());
+        }
+
+        #[cfg(not(target_os = "android"))]
+        {
+            let _ = country_id;
+            Err(RadrootsLocationResolverError::Unsupported)
+        }
+    }
+
+    fn poll_location_country_center_lookup_result(
+        &self,
+    ) -> Result<Option<RadrootsLocationCountryCenterLookupResult>, String> {
+        Ok(self.country_lookup.take_center_update())
     }
 
     fn list_location_countries(
@@ -296,6 +344,7 @@ impl AndroidBackend {
         );
 
         Self {
+            country_lookup: country_lookup::AndroidCountryLookup::new(),
             offline_geocoder,
             reverse_lookup: reverse_lookup::AndroidReverseLookup::new(),
         }
