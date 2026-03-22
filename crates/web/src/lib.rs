@@ -13,10 +13,14 @@ use nostr::nips::nip19::ToBech32;
 use nostr::signer::NostrSigner;
 #[cfg(target_arch = "wasm32")]
 use nostr_browser_signer::{BrowserSigner, Error as BrowserSignerError};
+#[cfg(test)]
+use radroots_studio_app_core::RadrootsLocationResolverError;
 #[cfg(target_arch = "wasm32")]
 use radroots_studio_app_core::{
     HomeActionKind, HomeActionResult, HomeActionState, IdentityGateState, RadrootsApp,
-    RadrootsAppBackend, SetupActionState,
+    RadrootsAppBackend, RadrootsLocationCountry, RadrootsLocationPoint,
+    RadrootsLocationResolverError, RadrootsLocationReverseOptions, RadrootsResolvedLocation,
+    SetupActionState,
 };
 #[cfg(any(target_arch = "wasm32", test))]
 use radroots_studio_app_core::{
@@ -31,6 +35,11 @@ fn offline_geocoder_unavailable_state() -> RadrootsOfflineGeocoderState {
         RadrootsOfflineGeocoderPlatform::Web,
         "radroots-geocoder currently depends on rusqlite and is not wired for wasm runtime initialization.",
     )
+}
+
+#[cfg(any(target_arch = "wasm32", test))]
+fn location_resolver_unavailable_error() -> RadrootsLocationResolverError {
+    RadrootsLocationResolverError::Unavailable
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -110,6 +119,27 @@ impl RadrootsAppBackend for WebBackend {
 
     fn offline_geocoder_state(&self) -> Option<RadrootsOfflineGeocoderState> {
         Some(offline_geocoder_unavailable_state())
+    }
+
+    fn reverse_location(
+        &self,
+        _point: RadrootsLocationPoint,
+        _options: Option<RadrootsLocationReverseOptions>,
+    ) -> Result<Vec<RadrootsResolvedLocation>, RadrootsLocationResolverError> {
+        Err(location_resolver_unavailable_error())
+    }
+
+    fn list_location_countries(
+        &self,
+    ) -> Result<Vec<RadrootsLocationCountry>, RadrootsLocationResolverError> {
+        Err(location_resolver_unavailable_error())
+    }
+
+    fn location_country_center(
+        &self,
+        _country_id: &str,
+    ) -> Result<RadrootsLocationPoint, RadrootsLocationResolverError> {
+        Err(location_resolver_unavailable_error())
     }
 
     fn setup_action_state(&self) -> SetupActionState {
@@ -303,6 +333,14 @@ mod tests {
             Some(
                 "radroots-geocoder currently depends on rusqlite and is not wired for wasm runtime initialization.",
             )
+        );
+    }
+
+    #[test]
+    fn location_resolver_reports_unavailable_instead_of_unsupported() {
+        assert_eq!(
+            location_resolver_unavailable_error(),
+            RadrootsLocationResolverError::Unavailable
         );
     }
 }
