@@ -1,0 +1,17 @@
+[package]
+name = "radroots-app-test-support"
+authors.workspace = true
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+homepage.workspace = true
+description = "Rad Roots app test support"
+publish = false
+
+[lints]
+workspace = true
+
+[dependencies]
+radroots-identity.workspace = true
