@@ -13,12 +13,23 @@ use nostr::nips::nip19::ToBech32;
 use nostr::signer::NostrSigner;
 #[cfg(target_arch = "wasm32")]
 use nostr_browser_signer::{BrowserSigner, Error as BrowserSignerError};
+#[cfg(any(target_arch = "wasm32", test))]
+use radroots_studio_app_core::{
+    RadrootsOfflineGeocoderState, RadrootsOfflineGeocoderUnavailableKind,
+};
 #[cfg(target_arch = "wasm32")]
 use radroots_studio_app_core::{
     HomeActionKind, HomeActionResult, HomeActionState, IdentityGateState, RadrootsApp,
-    RadrootsAppBackend, RadrootsOfflineGeocoderState, RadrootsOfflineGeocoderUnavailableKind,
-    SetupActionState,
+    RadrootsAppBackend, SetupActionState,
 };
+
+#[cfg(any(target_arch = "wasm32", test))]
+fn offline_geocoder_unavailable_state() -> RadrootsOfflineGeocoderState {
+    RadrootsOfflineGeocoderState::unavailable(
+        RadrootsOfflineGeocoderUnavailableKind::MissingBuildAsset,
+        "radroots-geocoder currently depends on rusqlite and is not wired for wasm runtime initialization.",
+    )
+}
 
 #[cfg(target_arch = "wasm32")]
 #[derive(Clone)]
@@ -82,12 +93,6 @@ impl WebBackend {
         IdentityGateState::Missing
     }
 
-    fn offline_geocoder_unavailable_state() -> RadrootsOfflineGeocoderState {
-        RadrootsOfflineGeocoderState::unavailable(
-            RadrootsOfflineGeocoderUnavailableKind::MissingBuildAsset,
-            "radroots-geocoder currently depends on rusqlite and is not wired for wasm runtime initialization.",
-        )
-    }
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -103,7 +108,7 @@ impl RadrootsAppBackend for WebBackend {
     }
 
     fn offline_geocoder_state(&self) -> Option<RadrootsOfflineGeocoderState> {
-        Some(Self::offline_geocoder_unavailable_state())
+        Some(offline_geocoder_unavailable_state())
     }
 
     fn setup_action_state(&self) -> SetupActionState {
@@ -273,6 +278,32 @@ pub fn launch() {
             }
         }
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn offline_geocoder_unavailable_state_is_stable() {
+        let state = offline_geocoder_unavailable_state();
+
+        assert_eq!(state.summary_label(), "Offline geocoder unavailable");
+        assert_eq!(
+            state.user_message(),
+            Some("Offline geocoder is not available in this build.")
+        );
+        assert_eq!(
+            state.technical_message(),
+            Some("The offline geocoder data file is missing from this app build.")
+        );
+        assert_eq!(
+            state.debug_message(),
+            Some(
+                "radroots-geocoder currently depends on rusqlite and is not wired for wasm runtime initialization.",
+            )
+        );
+    }
 }
 
 #[cfg(not(target_arch = "wasm32"))]
