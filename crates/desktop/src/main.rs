@@ -4,10 +4,10 @@
 use directories::BaseDirs;
 use eframe::egui;
 use image::ImageFormat;
+#[cfg(all(target_os = "macos", not(test)))]
+use radroots_studio_app_apple_security::verify_user_presence;
 #[cfg(target_os = "macos")]
-use radroots_studio_app_apple_security::{
-    APPLE_NOSTR_SERVICE, RadrootsAppleKeychainVault, verify_user_presence,
-};
+use radroots_studio_app_apple_security::{APPLE_NOSTR_SERVICE, RadrootsAppleKeychainVault};
 use radroots_studio_app_core::{
     APP_NAME, HomeActionKind, HomeActionResult, HomeActionState, IdentityGateState,
     ImportActionState, RadrootsAccountCustody, RadrootsAccountSummary, RadrootsApp,
@@ -15,7 +15,8 @@ use radroots_studio_app_core::{
     RadrootsLocationCountryListResult, RadrootsLocationPoint, RadrootsLocationResolverError,
     RadrootsLocationReverseOptions, RadrootsOfflineGeocoderPlatform, RadrootsOfflineGeocoderState,
     RadrootsOfflineGeocoderUnavailableKind, RadrootsResolvedLocation,
-    RadrootsReverseLocationLookupResult, SetupActionState,
+    RadrootsReverseLocationLookupResult, RadrootsSecretImportMode, RadrootsSecretImportRequest,
+    SetupActionState,
 };
 #[cfg(target_os = "macos")]
 use radroots_identity::RadrootsIdentity;
@@ -208,11 +209,39 @@ impl DesktopBackend {
     }
 
     #[cfg(target_os = "macos")]
-    fn export_selected_local_secret_key(
+    fn export_selected_local_encrypted_secret_key(
+        manager: &RadrootsNostrAccountsManager,
+        password: &str,
+    ) -> Result<String, String> {
+        Self::authorize_secret_key_backup()?;
+
+        let Some(account_id) = manager
+            .selected_account_id()
+            .map_err(|source| source.to_string())?
+        else {
+            return Err("no selected local identity is available to back up".to_owned());
+        };
+
+        let Some(secret_key_hex) = manager
+            .export_secret_hex(&account_id)
+            .map_err(|source| source.to_string())?
+        else {
+            return Err("selected local identity does not have an exportable secret".to_owned());
+        };
+
+        let secret_key_hex = Zeroizing::new(secret_key_hex);
+        let identity = RadrootsIdentity::from_secret_key_str(secret_key_hex.as_str())
+            .map_err(|source| source.to_string())?;
+        identity
+            .encrypt_secret_key_ncryptsec(password)
+            .map_err(|source| source.to_string())
+    }
+
+    #[cfg(target_os = "macos")]
+    fn export_selected_local_raw_secret_key(
         manager: &RadrootsNostrAccountsManager,
     ) -> Result<String, String> {
-        verify_user_presence("reveal the current secret key")
-            .map_err(|source| source.to_string())?;
+        Self::authorize_secret_key_reveal()?;
 
         let Some(account_id) = manager
             .selected_account_id()
@@ -234,13 +263,47 @@ impl DesktopBackend {
         Ok(identity.nsec())
     }
 
+    #[cfg(all(target_os = "macos", not(test)))]
+    fn authorize_secret_key_reveal() -> Result<(), String> {
+        verify_user_presence("reveal the current secret key").map_err(|source| source.to_string())
+    }
+
+    #[cfg(any(not(target_os = "macos"), test))]
+    fn authorize_secret_key_reveal() -> Result<(), String> {
+        Ok(())
+    }
+
+    #[cfg(all(target_os = "macos", not(test)))]
+    fn authorize_secret_key_backup() -> Result<(), String> {
+        verify_user_presence("back up the current secret key").map_err(|source| source.to_string())
+    }
+
+    #[cfg(any(not(target_os = "macos"), test))]
+    fn authorize_secret_key_backup() -> Result<(), String> {
+        Ok(())
+    }
+
     #[cfg(target_os = "macos")]
     fn import_local_identity(
         manager: &RadrootsNostrAccountsManager,
-        secret_key: &str,
+        request: &RadrootsSecretImportRequest,
     ) -> Result<IdentityGateState, String> {
-        let identity = RadrootsIdentity::from_secret_key_str(secret_key)
-            .map_err(|_| "invalid secret key".to_owned())?;
+        let identity = match request.mode {
+            RadrootsSecretImportMode::EncryptedSecretKey => {
+                let Some(password) = request.password.as_deref() else {
+                    return Err("password is required to import an encrypted secret key".to_owned());
+                };
+                RadrootsIdentity::from_encrypted_secret_key_str(
+                    request.secret_text.as_str(),
+                    password,
+                )
+                .map_err(|_| "invalid encrypted secret key or password".to_owned())?
+            }
+            RadrootsSecretImportMode::RawSecretKey => {
+                RadrootsIdentity::from_secret_key_str(request.secret_text.as_str())
+                    .map_err(|_| "invalid raw secret key".to_owned())?
+            }
+        };
 
         manager
             .upsert_identity(&identity, None, true)
@@ -544,16 +607,19 @@ impl RadrootsAppBackend for DesktopBackend {
         }
     }
 
-    fn request_import_action(&self, secret_key: &str) -> Result<Option<IdentityGateState>, String> {
+    fn request_import_action(
+        &self,
+        request: &RadrootsSecretImportRequest,
+    ) -> Result<Option<IdentityGateState>, String> {
         #[cfg(target_os = "macos")]
         {
             let manager = Self::accounts_manager()?;
-            return Self::import_local_identity(&manager, secret_key).map(Some);
+            return Self::import_local_identity(&manager, request).map(Some);
         }
 
         #[cfg(not(target_os = "macos"))]
         {
-            let _ = secret_key;
+            let _ = request;
             Ok(None)
         }
     }
@@ -591,6 +657,12 @@ impl RadrootsAppBackend for DesktopBackend {
                     pending: false,
                 },
                 HomeActionState {
+                    kind: HomeActionKind::RevealRawSecretKey,
+                    label: "Reveal Raw Secret Key".to_owned(),
+                    enabled: true,
+                    pending: false,
+                },
+                HomeActionState {
                     kind: HomeActionKind::RemoveLocalKey,
                     label: "Remove Key From This Device".to_owned(),
                     enabled: true,
@@ -616,8 +688,11 @@ impl RadrootsAppBackend for DesktopBackend {
         {
             let manager = Self::accounts_manager()?;
             return match action {
-                HomeActionKind::BackupSecretKey => Self::export_selected_local_secret_key(&manager)
-                    .map(|nsec| HomeActionResult::RevealSecretKey { nsec }),
+                HomeActionKind::BackupSecretKey => Ok(HomeActionResult::None),
+                HomeActionKind::RevealRawSecretKey => {
+                    Self::export_selected_local_raw_secret_key(&manager)
+                        .map(|nsec| HomeActionResult::RevealRawSecretKey { nsec })
+                }
                 HomeActionKind::RemoveLocalKey => Self::remove_selected_local_identity(&manager)
                     .map(HomeActionResult::IdentityState),
                 HomeActionKind::ResetDevice => {
@@ -632,6 +707,21 @@ impl RadrootsAppBackend for DesktopBackend {
         #[cfg(not(target_os = "macos"))]
         {
             let _ = action;
+            Ok(HomeActionResult::None)
+        }
+    }
+
+    fn request_secret_key_backup_action(&self, password: &str) -> Result<HomeActionResult, String> {
+        #[cfg(target_os = "macos")]
+        {
+            let manager = Self::accounts_manager()?;
+            return Self::export_selected_local_encrypted_secret_key(&manager, password)
+                .map(|ncryptsec| HomeActionResult::RevealEncryptedSecretKey { ncryptsec });
+        }
+
+        #[cfg(not(target_os = "macos"))]
+        {
+            let _ = password;
             Ok(HomeActionResult::None)
         }
     }
@@ -667,8 +757,13 @@ fn main() -> eframe::Result<()> {
 mod tests {
     use super::DesktopBackend;
     use radroots_studio_app_apple_security::RadrootsAppleKeychainVault;
-    use radroots_identity::RadrootsIdentity;
-    use radroots_identity::RadrootsIdentityId;
+    use radroots_studio_app_core::{
+        IdentityGateState, RadrootsSecretImportMode, RadrootsSecretImportRequest,
+    };
+    use radroots_studio_app_test_support::{
+        FIXTURE_ALICE, FIXTURE_BACKUP_PASSWORD, fixture_identity_ncryptsec,
+    };
+    use radroots_identity::{RadrootsIdentity, RadrootsIdentityId};
     use radroots_nostr_accounts::prelude::RadrootsNostrSecretVault;
     use std::path::PathBuf;
 
@@ -733,13 +828,13 @@ mod tests {
 
         let state = DesktopBackend::remove_all_local_identities(&manager).expect("reset state");
 
-        assert_eq!(state, radroots_studio_app_core::IdentityGateState::Missing);
+        assert_eq!(state, IdentityGateState::Missing);
         assert_eq!(manager.list_accounts().expect("list accounts").len(), 0);
         assert_eq!(manager.selected_account_id().expect("selected"), None);
     }
 
     #[test]
-    fn export_selected_local_secret_key_returns_nsec() {
+    fn export_selected_local_raw_secret_key_returns_nsec() {
         let manager =
             radroots_nostr_accounts::prelude::RadrootsNostrAccountsManager::new_in_memory();
         let identity = RadrootsIdentity::generate();
@@ -749,24 +844,57 @@ mod tests {
             .expect("store identity");
 
         let nsec =
-            DesktopBackend::export_selected_local_secret_key(&manager).expect("export secret");
+            DesktopBackend::export_selected_local_raw_secret_key(&manager).expect("export secret");
 
         assert_eq!(nsec, identity.nsec());
         assert!(nsec.starts_with("nsec1"));
     }
 
     #[test]
-    fn import_local_identity_imports_nsec_and_selects_account() {
+    fn export_selected_local_encrypted_secret_key_returns_ncryptsec() {
+        let manager =
+            radroots_nostr_accounts::prelude::RadrootsNostrAccountsManager::new_in_memory();
+        let fixture_identity =
+            RadrootsIdentity::from_secret_key_str(FIXTURE_ALICE.secret_key_hex).expect("fixture");
+
+        manager
+            .upsert_identity(&fixture_identity, Some("primary".into()), true)
+            .expect("store identity");
+
+        let ncryptsec = DesktopBackend::export_selected_local_encrypted_secret_key(
+            &manager,
+            FIXTURE_BACKUP_PASSWORD,
+        )
+        .expect("export encrypted secret");
+
+        let restored = RadrootsIdentity::from_encrypted_secret_key_str(
+            ncryptsec.as_str(),
+            FIXTURE_BACKUP_PASSWORD,
+        )
+        .expect("restore encrypted secret");
+
+        assert_eq!(restored.secret_key_hex(), FIXTURE_ALICE.secret_key_hex);
+    }
+
+    #[test]
+    fn import_local_identity_imports_raw_secret_key_and_selects_account() {
         let manager =
             radroots_nostr_accounts::prelude::RadrootsNostrAccountsManager::new_in_memory();
         let identity = RadrootsIdentity::generate();
 
-        let state = DesktopBackend::import_local_identity(&manager, identity.nsec().as_str())
-            .expect("import identity");
+        let state = DesktopBackend::import_local_identity(
+            &manager,
+            &RadrootsSecretImportRequest {
+                mode: RadrootsSecretImportMode::RawSecretKey,
+                secret_text: identity.nsec(),
+                password: None,
+            },
+        )
+        .expect("import identity");
 
         assert_eq!(
             state,
-            radroots_studio_app_core::IdentityGateState::Ready {
+            IdentityGateState::Ready {
                 account_id: identity.id().to_string(),
             }
         );
@@ -780,6 +908,45 @@ mod tests {
                 .export_secret_hex(&identity.id())
                 .expect("export secret"),
             Some(identity.secret_key_hex())
+        );
+    }
+
+    #[test]
+    fn import_local_identity_imports_encrypted_secret_key_and_selects_account() {
+        let manager =
+            radroots_nostr_accounts::prelude::RadrootsNostrAccountsManager::new_in_memory();
+        let encrypted_secret_key =
+            fixture_identity_ncryptsec(&FIXTURE_ALICE, FIXTURE_BACKUP_PASSWORD)
+                .expect("fixture encrypted secret key");
+        let fixture_identity =
+            RadrootsIdentity::from_secret_key_str(FIXTURE_ALICE.secret_key_hex).expect("fixture");
+        let fixture_account_id = fixture_identity.id();
+
+        let state = DesktopBackend::import_local_identity(
+            &manager,
+            &RadrootsSecretImportRequest {
+                mode: RadrootsSecretImportMode::EncryptedSecretKey,
+                secret_text: encrypted_secret_key,
+                password: Some(FIXTURE_BACKUP_PASSWORD.to_owned()),
+            },
+        )
+        .expect("import identity");
+
+        assert_eq!(
+            state,
+            IdentityGateState::Ready {
+                account_id: fixture_account_id.to_string(),
+            }
+        );
+        assert_eq!(
+            manager.selected_account_id().expect("selected"),
+            Some(fixture_account_id.clone())
+        );
+        assert_eq!(
+            manager
+                .export_secret_hex(&fixture_account_id)
+                .expect("export secret"),
+            Some(FIXTURE_ALICE.secret_key_hex.to_owned())
         );
     }
 

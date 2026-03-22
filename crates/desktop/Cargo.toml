@@ -38,3 +38,6 @@ wgpu = { workspace = true, features = ["dx12", "wgsl"] }
 
 [target.'cfg(any(target_os = "linux", target_os = "android"))'.dependencies]
 wgpu = { workspace = true, features = ["vulkan", "gles", "wgsl"] }
+
+[dev-dependencies]
+radroots-app-test-support = { path = "../test-support" }
