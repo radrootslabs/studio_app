@@ -1,6 +1,9 @@
 #![cfg_attr(not(target_os = "android"), allow(dead_code))]
 
-use radroots_studio_app_core::{RadrootsOfflineGeocoderState, RadrootsOfflineGeocoderUnavailableKind};
+use radroots_studio_app_core::{
+    RadrootsOfflineGeocoderPlatform, RadrootsOfflineGeocoderState,
+    RadrootsOfflineGeocoderUnavailableKind,
+};
 #[cfg(target_os = "android")]
 use radroots_geocoder::Geocoder;
 use std::path::Path;
@@ -60,6 +63,7 @@ impl AndroidOfflineGeocoder {
             .unwrap_or_else(|_| {
                 RadrootsOfflineGeocoderState::unavailable(
                     RadrootsOfflineGeocoderUnavailableKind::InternalError,
+                    RadrootsOfflineGeocoderPlatform::Android,
                     "android offline geocoder state lock poisoned",
                 )
             })
@@ -78,19 +82,44 @@ impl AndroidOfflineGeocoder {
 fn initialize_offline_geocoder() -> RadrootsOfflineGeocoderState {
     match initialize_offline_geocoder_inner() {
         Ok(()) => RadrootsOfflineGeocoderState::Ready,
-        Err((kind, debug_message)) => {
-            RadrootsOfflineGeocoderState::unavailable(kind, debug_message)
-        }
+        Err((kind, asset_revision, debug_message)) => match asset_revision {
+            Some(asset_revision) => RadrootsOfflineGeocoderState::unavailable_with_revision(
+                kind,
+                RadrootsOfflineGeocoderPlatform::Android,
+                asset_revision,
+                debug_message,
+            ),
+            None => RadrootsOfflineGeocoderState::unavailable(
+                kind,
+                RadrootsOfflineGeocoderPlatform::Android,
+                debug_message,
+            ),
+        },
     }
 }
 
 #[cfg(target_os = "android")]
-fn initialize_offline_geocoder_inner()
--> Result<(), (RadrootsOfflineGeocoderUnavailableKind, String)> {
-    let staged_path = stage_offline_geocoder_asset()?;
+fn initialize_offline_geocoder_inner() -> Result<
+    (),
+    (
+        RadrootsOfflineGeocoderUnavailableKind,
+        Option<String>,
+        String,
+    ),
+> {
+    let staged_path = stage_offline_geocoder_asset()
+        .map_err(|(kind, debug_message)| (kind, None, debug_message))?;
+    let asset_revision = staged_asset_revision(staged_path.as_str()).map_err(|debug_message| {
+        (
+            RadrootsOfflineGeocoderUnavailableKind::InternalError,
+            None,
+            debug_message,
+        )
+    })?;
     Geocoder::open_path(staged_path.as_str()).map_err(|source| {
         (
             RadrootsOfflineGeocoderUnavailableKind::InitializationFailed,
+            Some(asset_revision.clone()),
             format!("failed to open staged android geocoder db: {source}"),
         )
     })?;
@@ -304,6 +333,24 @@ fn prune_stale_revisions(staged_path: &str) -> Result<(), String> {
     Ok(())
 }
 
+fn staged_asset_revision(staged_path: &str) -> Result<String, String> {
+    let staged_path = Path::new(staged_path);
+    let Some(active_revision_dir) = staged_path.parent() else {
+        return Err("android staged geocoder path did not have a revision directory".to_owned());
+    };
+    let Some(active_revision) = active_revision_dir.file_name() else {
+        return Err("android staged geocoder revision directory did not have a name".to_owned());
+    };
+    let revision = active_revision.to_string_lossy();
+    if revision.len() != 64 || !revision.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+        return Err(
+            "android staged geocoder revision directory name was not a sha256 hex revision"
+                .to_owned(),
+        );
+    }
+    Ok(revision.into_owned())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -313,6 +360,7 @@ mod tests {
     fn missing_asset_maps_to_build_unavailable_message() {
         let state = RadrootsOfflineGeocoderState::unavailable(
             RadrootsOfflineGeocoderUnavailableKind::MissingBuildAsset,
+            RadrootsOfflineGeocoderPlatform::Android,
             "android bundled geocoder asset missing at assets/geocoder/geonames.db",
         );
 
@@ -320,10 +368,23 @@ mod tests {
             state,
             RadrootsOfflineGeocoderState::Unavailable {
                 kind: RadrootsOfflineGeocoderUnavailableKind::MissingBuildAsset,
+                platform: RadrootsOfflineGeocoderPlatform::Android,
+                asset_revision: None,
                 debug_message:
                     "android bundled geocoder asset missing at assets/geocoder/geonames.db"
                         .to_owned(),
             }
+        );
+    }
+
+    #[test]
+    fn staged_asset_revision_reads_sha256_directory_name() {
+        let revision = "6ca5f1a324de02922d40b1ff33eedf3a5a133c978de921eee5130a0c7876079c";
+        let staged_path = format!("/tmp/radroots/android/geocoder/{revision}/geonames.db");
+
+        assert_eq!(
+            staged_asset_revision(staged_path.as_str()).unwrap(),
+            revision
         );
     }
 

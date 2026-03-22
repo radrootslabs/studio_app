@@ -16,6 +16,7 @@ crate-type = ["staticlib", "rlib"]
 
 [dependencies]
 eframe = { workspace = true, features = ["wgpu"] }
+log.workspace = true
 radroots-app-apple-security.workspace = true
 radroots-app-core = { path = "../core" }
 radroots-geocoder.workspace = true

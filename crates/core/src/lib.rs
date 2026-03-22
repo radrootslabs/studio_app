@@ -9,8 +9,8 @@ mod offline_geocoder;
 pub const APP_NAME: &str = "Rad Roots";
 
 pub use offline_geocoder::{
-    RadrootsOfflineGeocoderDiagnostic, RadrootsOfflineGeocoderState,
-    RadrootsOfflineGeocoderUnavailableKind,
+    RadrootsOfflineGeocoderDiagnostic, RadrootsOfflineGeocoderPlatform,
+    RadrootsOfflineGeocoderState, RadrootsOfflineGeocoderUnavailableKind,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -298,6 +298,11 @@ impl RadrootsApp {
                 if let Some(diagnostic) = state.diagnostic() {
                     ui.label(diagnostic.technical_message);
                     ui.add_space(6.0);
+                    ui.monospace(format!("platform: {}", diagnostic.platform_code));
+                    ui.monospace(format!(
+                        "asset revision: {}",
+                        diagnostic.asset_revision.as_deref().unwrap_or("unknown")
+                    ));
                     ui.monospace(format!("diagnostic code: {}", diagnostic.code));
                     if ui.button("Copy Offline Geocoder Diagnostic").clicked() {
                         ui.ctx().copy_text(diagnostic.export_text());
@@ -1169,6 +1174,7 @@ mod tests {
                 RadrootsOfflineGeocoderState::Initializing,
                 vec![Ok(Some(RadrootsOfflineGeocoderState::unavailable(
                     RadrootsOfflineGeocoderUnavailableKind::InitializationFailed,
+                    RadrootsOfflineGeocoderPlatform::Desktop,
                     "failed to open staged geocoder db",
                 )))],
             ),
@@ -1180,6 +1186,7 @@ mod tests {
             app.offline_geocoder_state,
             Some(RadrootsOfflineGeocoderState::unavailable(
                 RadrootsOfflineGeocoderUnavailableKind::InitializationFailed,
+                RadrootsOfflineGeocoderPlatform::Desktop,
                 "failed to open staged geocoder db",
             ))
         );
@@ -1200,6 +1207,8 @@ mod tests {
             .as_ref()
             .and_then(RadrootsOfflineGeocoderState::diagnostic)
             .unwrap();
+        assert_eq!(diagnostic.platform_code, "desktop");
+        assert_eq!(diagnostic.asset_revision, None);
         assert_eq!(diagnostic.code, "initialization_failed");
         assert!(
             !diagnostic

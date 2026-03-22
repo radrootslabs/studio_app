@@ -2885,6 +2885,7 @@ dependencies = [
  "eframe",
  "egui",
  "image",
+ "log",
  "objc2-foundation 0.3.2",
  "radroots-app-apple-security",
  "radroots-app-core",
@@ -2900,6 +2901,7 @@ name = "radroots-app-ios"
 version = "0.1.0"
 dependencies = [
  "eframe",
+ "log",
  "radroots-app-apple-security",
  "radroots-app-core",
  "radroots-geocoder",

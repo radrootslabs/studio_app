@@ -7,8 +7,8 @@ use radroots_studio_app_core::IdentityGateState;
 #[cfg(target_os = "ios")]
 use radroots_studio_app_core::{
     APP_NAME, HomeActionKind, HomeActionResult, HomeActionState, ImportActionState,
-    PasteActionState, RadrootsApp, RadrootsAppBackend, RadrootsOfflineGeocoderState,
-    RadrootsOfflineGeocoderUnavailableKind, SetupActionState,
+    PasteActionState, RadrootsApp, RadrootsAppBackend, RadrootsOfflineGeocoderPlatform,
+    RadrootsOfflineGeocoderState, RadrootsOfflineGeocoderUnavailableKind, SetupActionState,
 };
 #[cfg(any(target_os = "ios", test))]
 use radroots_identity::RadrootsIdentity;
@@ -48,6 +48,7 @@ impl IosBackend {
             Err(debug_message) => offline_geocoder::IosOfflineGeocoder::from_state(
                 RadrootsOfflineGeocoderState::unavailable(
                     RadrootsOfflineGeocoderUnavailableKind::InternalError,
+                    RadrootsOfflineGeocoderPlatform::Ios,
                     debug_message,
                 ),
             ),

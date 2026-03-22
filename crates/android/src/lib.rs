@@ -204,6 +204,7 @@ impl AndroidBackend {
         let offline_geocoder = offline_geocoder::AndroidOfflineGeocoder::from_state(
             RadrootsOfflineGeocoderState::unavailable(
                 radroots_studio_app_core::RadrootsOfflineGeocoderUnavailableKind::MissingBuildAsset,
+                radroots_studio_app_core::RadrootsOfflineGeocoderPlatform::Android,
                 "android offline geocoder initialization is only wired on android targets",
             ),
         );

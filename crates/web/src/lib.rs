@@ -13,20 +13,22 @@ use nostr::nips::nip19::ToBech32;
 use nostr::signer::NostrSigner;
 #[cfg(target_arch = "wasm32")]
 use nostr_browser_signer::{BrowserSigner, Error as BrowserSignerError};
-#[cfg(any(target_arch = "wasm32", test))]
-use radroots_studio_app_core::{
-    RadrootsOfflineGeocoderState, RadrootsOfflineGeocoderUnavailableKind,
-};
 #[cfg(target_arch = "wasm32")]
 use radroots_studio_app_core::{
     HomeActionKind, HomeActionResult, HomeActionState, IdentityGateState, RadrootsApp,
     RadrootsAppBackend, SetupActionState,
+};
+#[cfg(any(target_arch = "wasm32", test))]
+use radroots_studio_app_core::{
+    RadrootsOfflineGeocoderPlatform, RadrootsOfflineGeocoderState,
+    RadrootsOfflineGeocoderUnavailableKind,
 };
 
 #[cfg(any(target_arch = "wasm32", test))]
 fn offline_geocoder_unavailable_state() -> RadrootsOfflineGeocoderState {
     RadrootsOfflineGeocoderState::unavailable(
         RadrootsOfflineGeocoderUnavailableKind::MissingBuildAsset,
+        RadrootsOfflineGeocoderPlatform::Web,
         "radroots-geocoder currently depends on rusqlite and is not wired for wasm runtime initialization.",
     )
 }
@@ -92,7 +94,6 @@ impl WebBackend {
         state.pending_result = None;
         IdentityGateState::Missing
     }
-
 }
 
 #[cfg(target_arch = "wasm32")]

@@ -1,6 +1,9 @@
 #![cfg_attr(not(target_os = "ios"), allow(dead_code))]
 
-use radroots_studio_app_core::{RadrootsOfflineGeocoderState, RadrootsOfflineGeocoderUnavailableKind};
+use radroots_studio_app_core::{
+    RadrootsOfflineGeocoderPlatform, RadrootsOfflineGeocoderState,
+    RadrootsOfflineGeocoderUnavailableKind,
+};
 use radroots_geocoder::Geocoder;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -30,6 +33,9 @@ impl IosOfflineGeocoder {
 
         std::thread::spawn(move || {
             let state = initialize_offline_geocoder(app_data_root.as_path());
+            if let RadrootsOfflineGeocoderState::Unavailable { debug_message, .. } = &state {
+                log::warn!("ios offline geocoder unavailable: {debug_message}");
+            }
             if let Ok(mut slot) = current.lock() {
                 *slot = state;
                 changed.store(true, Ordering::Release);
@@ -46,6 +52,7 @@ impl IosOfflineGeocoder {
             .unwrap_or_else(|_| {
                 RadrootsOfflineGeocoderState::unavailable(
                     RadrootsOfflineGeocoderUnavailableKind::InternalError,
+                    RadrootsOfflineGeocoderPlatform::Ios,
                     "ios offline geocoder state lock poisoned",
                 )
             })
@@ -61,49 +68,58 @@ impl IosOfflineGeocoder {
 }
 
 fn initialize_offline_geocoder(app_data_root: &Path) -> RadrootsOfflineGeocoderState {
-    match initialize_offline_geocoder_inner(app_data_root) {
-        Ok(()) => RadrootsOfflineGeocoderState::Ready,
-        Err((kind, debug_message)) => {
-            RadrootsOfflineGeocoderState::unavailable(kind, debug_message)
-        }
-    }
-}
-
-fn initialize_offline_geocoder_inner(
-    app_data_root: &Path,
-) -> Result<(), (RadrootsOfflineGeocoderUnavailableKind, String)> {
     let source_path = bundled_asset_path().map_err(|debug_message| {
-        (
+        RadrootsOfflineGeocoderState::unavailable(
             RadrootsOfflineGeocoderUnavailableKind::InternalError,
+            RadrootsOfflineGeocoderPlatform::Ios,
             debug_message,
         )
-    })?;
+    });
+    let source_path = match source_path {
+        Ok(source_path) => source_path,
+        Err(state) => return state,
+    };
     if !source_path.is_file() {
-        return Err((
+        return RadrootsOfflineGeocoderState::unavailable(
             RadrootsOfflineGeocoderUnavailableKind::MissingBuildAsset,
+            RadrootsOfflineGeocoderPlatform::Ios,
             format!(
                 "ios bundled geocoder asset missing at {}",
                 source_path.display()
             ),
-        ));
+        );
     }
 
-    let revision = bundled_asset_revision(source_path.parent().unwrap_or_else(|| Path::new(".")))?;
+    let revision =
+        match bundled_asset_revision(source_path.parent().unwrap_or_else(|| Path::new("."))) {
+            Ok(revision) => revision,
+            Err((kind, debug_message)) => {
+                return RadrootsOfflineGeocoderState::unavailable(
+                    kind,
+                    RadrootsOfflineGeocoderPlatform::Ios,
+                    debug_message,
+                );
+            }
+        };
     let staged_path = staged_db_path(app_data_root, revision.as_str());
-    stage_bundled_asset(source_path.as_path(), staged_path.as_path()).map_err(|debug_message| {
-        (
+    if let Err(debug_message) = stage_bundled_asset(source_path.as_path(), staged_path.as_path()) {
+        return RadrootsOfflineGeocoderState::unavailable_with_revision(
             RadrootsOfflineGeocoderUnavailableKind::InitializationFailed,
+            RadrootsOfflineGeocoderPlatform::Ios,
+            revision,
             debug_message,
-        )
-    })?;
-    Geocoder::open_path(staged_path.as_path()).map_err(|source| {
-        (
+        );
+    }
+    if let Err(source) = Geocoder::open_path(staged_path.as_path()) {
+        return RadrootsOfflineGeocoderState::unavailable_with_revision(
             RadrootsOfflineGeocoderUnavailableKind::InitializationFailed,
+            RadrootsOfflineGeocoderPlatform::Ios,
+            revision,
             format!("failed to open staged ios geocoder db: {source}"),
-        )
-    })?;
+        );
+    }
     let _ = prune_stale_revisions(staged_geocoder_root(app_data_root), revision.as_str());
-    Ok(())
+    RadrootsOfflineGeocoderState::Ready
 }
 
 fn bundled_asset_path() -> Result<PathBuf, String> {
@@ -242,6 +258,7 @@ mod tests {
     fn missing_asset_maps_to_build_unavailable_message() {
         let state = RadrootsOfflineGeocoderState::unavailable(
             RadrootsOfflineGeocoderUnavailableKind::MissingBuildAsset,
+            RadrootsOfflineGeocoderPlatform::Ios,
             "ios bundled geocoder asset missing at /tmp/geonames.db",
         );
 
@@ -249,6 +266,8 @@ mod tests {
             state,
             RadrootsOfflineGeocoderState::Unavailable {
                 kind: RadrootsOfflineGeocoderUnavailableKind::MissingBuildAsset,
+                platform: RadrootsOfflineGeocoderPlatform::Ios,
+                asset_revision: None,
                 debug_message: "ios bundled geocoder asset missing at /tmp/geonames.db".to_owned(),
             }
         );

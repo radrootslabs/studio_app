@@ -19,6 +19,7 @@ directories.workspace = true
 eframe = { workspace = true, features = ["wgpu", "wayland", "x11"] }
 egui.workspace = true
 image.workspace = true
+log.workspace = true
 radroots-app-core = { path = "../core" }
 radroots-geocoder.workspace = true
 radroots-nostr-accounts.workspace = true
