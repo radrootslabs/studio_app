@@ -9,7 +9,8 @@ mod offline_geocoder;
 pub const APP_NAME: &str = "Rad Roots";
 
 pub use offline_geocoder::{
-    RadrootsOfflineGeocoderState, RadrootsOfflineGeocoderUnavailableKind,
+    RadrootsOfflineGeocoderDiagnostic, RadrootsOfflineGeocoderState,
+    RadrootsOfflineGeocoderUnavailableKind,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -294,8 +295,13 @@ impl RadrootsApp {
             ui.label(user_message);
             ui.add_space(6.0);
             ui.collapsing("Offline geocoder details", |ui| {
-                if let Some(technical_message) = state.technical_message() {
-                    ui.label(technical_message);
+                if let Some(diagnostic) = state.diagnostic() {
+                    ui.label(diagnostic.technical_message);
+                    ui.add_space(6.0);
+                    ui.monospace(format!("diagnostic code: {}", diagnostic.code));
+                    if ui.button("Copy Offline Geocoder Diagnostic").clicked() {
+                        ui.ctx().copy_text(diagnostic.export_text());
+                    }
                 }
                 if cfg!(debug_assertions) {
                     if let Some(debug_message) = state.debug_message() {
@@ -1188,6 +1194,17 @@ mod tests {
                 .as_ref()
                 .and_then(RadrootsOfflineGeocoderState::debug_message),
             Some("failed to open staged geocoder db")
+        );
+        let diagnostic = app
+            .offline_geocoder_state
+            .as_ref()
+            .and_then(RadrootsOfflineGeocoderState::diagnostic)
+            .unwrap();
+        assert_eq!(diagnostic.code, "initialization_failed");
+        assert!(
+            !diagnostic
+                .export_text()
+                .contains("failed to open staged geocoder db")
         );
     }
 }

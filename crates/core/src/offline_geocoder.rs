@@ -6,6 +6,14 @@ pub enum RadrootsOfflineGeocoderUnavailableKind {
 }
 
 impl RadrootsOfflineGeocoderUnavailableKind {
+    pub fn code(self) -> &'static str {
+        match self {
+            Self::MissingBuildAsset => "missing_build_asset",
+            Self::InitializationFailed => "initialization_failed",
+            Self::InternalError => "internal_error",
+        }
+    }
+
     pub fn technical_message(self) -> &'static str {
         match self {
             Self::MissingBuildAsset => {
@@ -27,6 +35,23 @@ impl RadrootsOfflineGeocoderUnavailableKind {
                 "Offline geocoder could not be initialized on this device."
             }
         }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RadrootsOfflineGeocoderDiagnostic {
+    pub code: &'static str,
+    pub summary_label: &'static str,
+    pub user_message: &'static str,
+    pub technical_message: &'static str,
+}
+
+impl RadrootsOfflineGeocoderDiagnostic {
+    pub fn export_text(&self) -> String {
+        format!(
+            "offline geocoder diagnostic\ncode: {}\nstatus: {}\nuser: {}\ntechnical: {}",
+            self.code, self.summary_label, self.user_message, self.technical_message
+        )
     }
 }
 
@@ -58,6 +83,18 @@ impl RadrootsOfflineGeocoderState {
         }
     }
 
+    pub fn diagnostic(&self) -> Option<RadrootsOfflineGeocoderDiagnostic> {
+        match self {
+            Self::Unavailable { kind, .. } => Some(RadrootsOfflineGeocoderDiagnostic {
+                code: kind.code(),
+                summary_label: self.summary_label(),
+                user_message: kind.user_message(),
+                technical_message: kind.technical_message(),
+            }),
+            Self::Initializing | Self::Ready => None,
+        }
+    }
+
     pub fn summary_label(&self) -> &'static str {
         match self {
             Self::Initializing => "Offline geocoder: initializing",
@@ -78,5 +115,31 @@ impl RadrootsOfflineGeocoderState {
             Self::Unavailable { kind, .. } => Some(kind.user_message()),
             Self::Initializing | Self::Ready => None,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn unavailable_state_exposes_release_safe_diagnostic() {
+        let state = RadrootsOfflineGeocoderState::unavailable(
+            RadrootsOfflineGeocoderUnavailableKind::InitializationFailed,
+            "failed to open staged geocoder db: /tmp/geonames.db",
+        );
+        let diagnostic = state.diagnostic().unwrap();
+
+        assert_eq!(diagnostic.code, "initialization_failed");
+        assert_eq!(diagnostic.summary_label, "Offline geocoder unavailable");
+        assert_eq!(
+            diagnostic.user_message,
+            "Offline geocoder could not be initialized on this device."
+        );
+        assert_eq!(
+            diagnostic.technical_message,
+            "The offline geocoder data file could not be prepared on this device."
+        );
+        assert!(!diagnostic.export_text().contains("/tmp/geonames.db"));
     }
 }
