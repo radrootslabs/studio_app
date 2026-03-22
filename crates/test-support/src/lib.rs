@@ -1,6 +1,9 @@
 #![forbid(unsafe_code)]
 
-use radroots_identity::RadrootsIdentity;
+use radroots_identity::{
+    RadrootsIdentity, RadrootsIdentityEncryptedSecretKeyOptions,
+    RadrootsIdentityEncryptedSecretKeySecurity,
+};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct RadrootsAppApprovedFixtureIdentity {
@@ -60,11 +63,25 @@ pub const RELAY_TERTIARY_WSS: &str = "wss://relay-3.example.com";
 pub const APP_PRIMARY_URL: &str = "https://app.example.com";
 pub const API_PRIMARY_URL: &str = "https://api.example.com";
 pub const CDN_PRIMARY_URL: &str = "https://cdn.example.com";
+pub const FIXTURE_BACKUP_PASSWORD: &str = "fixture-backup-password";
 
 pub fn fixture_identity(
     fixture: &RadrootsAppApprovedFixtureIdentity,
 ) -> Result<RadrootsIdentity, radroots_identity::IdentityError> {
     RadrootsIdentity::from_secret_key_str(fixture.secret_key_hex)
+}
+
+pub fn fixture_identity_ncryptsec(
+    fixture: &RadrootsAppApprovedFixtureIdentity,
+    password: &str,
+) -> Result<String, radroots_identity::IdentityError> {
+    fixture_identity(fixture)?.encrypt_secret_key_ncryptsec_with_options(
+        password,
+        RadrootsIdentityEncryptedSecretKeyOptions {
+            log_n: 10,
+            key_security: RadrootsIdentityEncryptedSecretKeySecurity::Weak,
+        },
+    )
 }
 
 #[cfg(test)]

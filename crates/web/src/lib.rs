@@ -588,6 +588,7 @@ impl RadrootsAppBackend for WebBackend {
                 Ok(HomeActionResult::IdentityState(self.disconnect_signer()))
             }
             HomeActionKind::BackupSecretKey
+            | HomeActionKind::RevealRawSecretKey
             | HomeActionKind::RemoveLocalKey
             | HomeActionKind::ResetDevice => Ok(HomeActionResult::None),
         }

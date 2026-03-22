@@ -1,13 +1,14 @@
 #![forbid(unsafe_code)]
 
 use eframe::egui;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use zeroize::Zeroizing;
 
 mod account_roster;
 mod home_location_tools;
 mod location_resolver;
 mod offline_geocoder;
+mod secret_keys;
 
 pub const APP_NAME: &str = "Rad Roots";
 
@@ -21,6 +22,7 @@ pub use offline_geocoder::{
     RadrootsOfflineGeocoderDiagnostic, RadrootsOfflineGeocoderPlatform,
     RadrootsOfflineGeocoderState, RadrootsOfflineGeocoderUnavailableKind,
 };
+pub use secret_keys::{RadrootsSecretImportMode, RadrootsSecretImportRequest};
 
 use home_location_tools::HomeLocationTools;
 
@@ -56,6 +58,7 @@ pub struct HomeActionState {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum HomeActionKind {
     BackupSecretKey,
+    RevealRawSecretKey,
     RemoveLocalKey,
     ResetDevice,
     DisconnectSigner,
@@ -65,7 +68,8 @@ pub enum HomeActionKind {
 pub enum HomeActionResult {
     None,
     IdentityState(IdentityGateState),
-    RevealSecretKey { nsec: String },
+    RevealEncryptedSecretKey { ncryptsec: String },
+    RevealRawSecretKey { nsec: String },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -99,7 +103,7 @@ pub trait RadrootsAppBackend {
     }
     fn request_import_action(
         &self,
-        _secret_key: &str,
+        _request: &RadrootsSecretImportRequest,
     ) -> Result<Option<IdentityGateState>, String> {
         Ok(None)
     }
@@ -113,6 +117,12 @@ pub trait RadrootsAppBackend {
         Vec::new()
     }
     fn request_home_action(&self, _action: HomeActionKind) -> Result<HomeActionResult, String> {
+        Ok(HomeActionResult::None)
+    }
+    fn request_secret_key_backup_action(
+        &self,
+        _password: &str,
+    ) -> Result<HomeActionResult, String> {
         Ok(HomeActionResult::None)
     }
     fn poll_home_action_result(&self) -> Result<Option<HomeActionResult>, String> {
@@ -184,6 +194,53 @@ enum AppScreen {
     Home { account_id: String },
 }
 
+const RAW_SECRET_REVEAL_TIMEOUT: Duration = Duration::from_secs(30);
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum RevealedSecretMaterial {
+    EncryptedSecretKey(Zeroizing<String>),
+    RawSecretKey {
+        nsec: Zeroizing<String>,
+        revealed_at: Instant,
+    },
+}
+
+impl RevealedSecretMaterial {
+    fn label(&self) -> &'static str {
+        match self {
+            Self::EncryptedSecretKey(_) => "Encrypted Secret Key",
+            Self::RawSecretKey { .. } => "Raw Secret Key",
+        }
+    }
+
+    fn value(&self) -> &str {
+        match self {
+            Self::EncryptedSecretKey(ncryptsec) => ncryptsec.as_str(),
+            Self::RawSecretKey { nsec, .. } => nsec.as_str(),
+        }
+    }
+
+    fn dismiss_label(&self) -> &'static str {
+        match self {
+            Self::EncryptedSecretKey(_) => "Dismiss Encrypted Secret Key",
+            Self::RawSecretKey { .. } => "Dismiss Raw Secret Key",
+        }
+    }
+
+    fn is_raw(&self) -> bool {
+        matches!(self, Self::RawSecretKey { .. })
+    }
+
+    fn raw_secret_expired(&self) -> bool {
+        match self {
+            Self::RawSecretKey { revealed_at, .. } => {
+                revealed_at.elapsed() >= RAW_SECRET_REVEAL_TIMEOUT
+            }
+            Self::EncryptedSecretKey(_) => false,
+        }
+    }
+}
+
 pub struct RadrootsApp {
     backend: Box<dyn RadrootsAppBackend>,
     screen: AppScreen,
@@ -192,12 +249,136 @@ pub struct RadrootsApp {
     status_message: Option<String>,
     home_location_tools: HomeLocationTools,
     pending_home_confirmation: Option<HomeActionKind>,
-    pending_import_entry: bool,
+    pending_import_mode: Option<RadrootsSecretImportMode>,
     secret_key_input: Zeroizing<String>,
-    revealed_secret_key: Option<Zeroizing<String>>,
+    import_password_input: Zeroizing<String>,
+    pending_secret_key_backup_entry: bool,
+    secret_key_backup_password_input: Zeroizing<String>,
+    secret_key_backup_password_confirm_input: Zeroizing<String>,
+    revealed_secret_material: Option<RevealedSecretMaterial>,
 }
 
 impl RadrootsApp {
+    fn clear_secret_import_entry(&mut self) {
+        self.pending_import_mode = None;
+        self.secret_key_input.clear();
+        self.import_password_input.clear();
+    }
+
+    fn clear_secret_key_backup_entry(&mut self) {
+        self.pending_secret_key_backup_entry = false;
+        self.secret_key_backup_password_input.clear();
+        self.secret_key_backup_password_confirm_input.clear();
+    }
+
+    fn clear_revealed_secret_material(&mut self) {
+        self.revealed_secret_material = None;
+    }
+
+    fn clear_secret_key_ui_state(&mut self) {
+        self.clear_secret_import_entry();
+        self.clear_secret_key_backup_entry();
+        self.clear_revealed_secret_material();
+    }
+
+    fn open_import_entry(&mut self) {
+        self.pending_import_mode = Some(RadrootsSecretImportMode::EncryptedSecretKey);
+        self.secret_key_input.clear();
+        self.import_password_input.clear();
+        self.status_message = None;
+    }
+
+    fn import_mode(&self) -> RadrootsSecretImportMode {
+        self.pending_import_mode.unwrap_or_default()
+    }
+
+    fn set_import_mode(&mut self, mode: RadrootsSecretImportMode) {
+        self.pending_import_mode = Some(mode);
+        self.secret_key_input.clear();
+        self.import_password_input.clear();
+        self.status_message = None;
+    }
+
+    fn secret_import_request(&self) -> Result<RadrootsSecretImportRequest, String> {
+        let mode = self.import_mode();
+        let secret_text = self.secret_key_input.trim().to_owned();
+        if secret_text.is_empty() {
+            return Err(match mode {
+                RadrootsSecretImportMode::EncryptedSecretKey => {
+                    "enter an encrypted secret key to continue".to_owned()
+                }
+                RadrootsSecretImportMode::RawSecretKey => {
+                    "enter a raw secret key to continue".to_owned()
+                }
+            });
+        }
+
+        let password = if mode.requires_password() {
+            if self.import_password_input.is_empty() {
+                return Err("enter a password to import the encrypted secret key".to_owned());
+            }
+            Some(self.import_password_input.to_string())
+        } else {
+            None
+        };
+
+        Ok(RadrootsSecretImportRequest {
+            mode,
+            secret_text,
+            password,
+        })
+    }
+
+    fn request_secret_key_backup_action(&mut self) {
+        self.status_message = None;
+        self.clear_revealed_secret_material();
+
+        if self.secret_key_backup_password_input.is_empty() {
+            self.status_message =
+                Some("enter a password to create an encrypted secret key backup".to_owned());
+            return;
+        }
+
+        if self.secret_key_backup_password_input != self.secret_key_backup_password_confirm_input {
+            self.status_message = Some("backup passwords do not match".to_owned());
+            return;
+        }
+
+        match self
+            .backend
+            .request_secret_key_backup_action(self.secret_key_backup_password_input.as_str())
+        {
+            Ok(result) => {
+                self.clear_secret_key_backup_entry();
+                self.apply_home_action_result(result);
+            }
+            Err(err) => {
+                self.status_message = Some(err);
+            }
+        }
+    }
+
+    fn sync_revealed_secret_material_lifetime(&mut self) {
+        if self
+            .revealed_secret_material
+            .as_ref()
+            .is_some_and(RevealedSecretMaterial::raw_secret_expired)
+        {
+            self.clear_revealed_secret_material();
+        }
+    }
+
+    fn clear_raw_secret_when_app_unfocused(&mut self, ctx: &egui::Context) {
+        if self
+            .revealed_secret_material
+            .as_ref()
+            .is_some_and(RevealedSecretMaterial::is_raw)
+            && ctx.input(|input| input.viewport().focused == Some(false))
+        {
+            self.clear_revealed_secret_material();
+        }
+    }
+
     pub fn new(backend: Box<dyn RadrootsAppBackend>) -> Self {
         let mut app = Self {
             backend,
@@ -207,9 +388,13 @@ impl RadrootsApp {
             status_message: None,
             home_location_tools: HomeLocationTools::new(),
             pending_home_confirmation: None,
-            pending_import_entry: false,
+            pending_import_mode: None,
             secret_key_input: Zeroizing::new(String::new()),
-            revealed_secret_key: None,
+            import_password_input: Zeroizing::new(String::new()),
+            pending_secret_key_backup_entry: false,
+            secret_key_backup_password_input: Zeroizing::new(String::new()),
+            secret_key_backup_password_confirm_input: Zeroizing::new(String::new()),
+            revealed_secret_material: None,
         };
         app.offline_geocoder_state = app.backend.offline_geocoder_state();
         match app.backend.load_identity_state() {
@@ -242,9 +427,7 @@ impl RadrootsApp {
                 self.status_message = None;
                 self.home_location_tools.clear();
                 self.pending_home_confirmation = None;
-                self.pending_import_entry = false;
-                self.secret_key_input.clear();
-                self.revealed_secret_key = None;
+                self.clear_secret_key_ui_state();
             }
             IdentityGateState::Ready { account_id } => {
                 self.screen = AppScreen::Home { account_id };
@@ -252,9 +435,7 @@ impl RadrootsApp {
                 self.refresh_account_roster();
                 self.home_location_tools.clear();
                 self.pending_home_confirmation = None;
-                self.pending_import_entry = false;
-                self.secret_key_input.clear();
-                self.revealed_secret_key = None;
+                self.clear_secret_key_ui_state();
             }
             IdentityGateState::Unsupported { reason } => {
                 self.screen = AppScreen::Setup;
@@ -262,16 +443,14 @@ impl RadrootsApp {
                 self.status_message = Some(reason);
                 self.home_location_tools.clear();
                 self.pending_home_confirmation = None;
-                self.pending_import_entry = false;
-                self.secret_key_input.clear();
-                self.revealed_secret_key = None;
+                self.clear_secret_key_ui_state();
             }
         }
     }
 
     fn request_setup_action(&mut self) {
         self.status_message = None;
-        self.revealed_secret_key = None;
+        self.clear_revealed_secret_material();
         match self.backend.request_setup_action() {
             Ok(Some(state)) => self.apply_identity_state(state),
             Ok(None) => {}
@@ -283,10 +462,9 @@ impl RadrootsApp {
 
     fn request_home_setup_action(&mut self) {
         self.status_message = None;
-        self.revealed_secret_key = None;
+        self.clear_revealed_secret_material();
         self.pending_home_confirmation = None;
-        self.pending_import_entry = false;
-        self.secret_key_input.clear();
+        self.clear_secret_import_entry();
         match self.backend.request_home_setup_action() {
             Ok(Some(state)) => self.apply_identity_state(state),
             Ok(None) => self.refresh_account_roster(),
@@ -298,11 +476,15 @@ impl RadrootsApp {
 
     fn request_import_action(&mut self) {
         self.status_message = None;
-        self.revealed_secret_key = None;
-        match self
-            .backend
-            .request_import_action(self.secret_key_input.trim())
-        {
+        self.clear_revealed_secret_material();
+        let request = match self.secret_import_request() {
+            Ok(request) => request,
+            Err(err) => {
+                self.status_message = Some(err);
+                return;
+            }
+        };
+        match self.backend.request_import_action(&request) {
             Ok(Some(state)) => self.apply_identity_state(state),
             Ok(None) => {}
             Err(err) => {
@@ -313,7 +495,7 @@ impl RadrootsApp {
 
     fn request_import_paste_action(&mut self) {
         self.status_message = None;
-        self.revealed_secret_key = None;
+        self.clear_revealed_secret_material();
         match self.backend.request_import_paste_action() {
             Ok(Some(secret_key)) => {
                 self.secret_key_input = Zeroizing::new(secret_key);
@@ -327,10 +509,9 @@ impl RadrootsApp {
 
     fn request_select_account(&mut self, account_id: &str) {
         self.status_message = None;
-        self.revealed_secret_key = None;
+        self.clear_revealed_secret_material();
         self.pending_home_confirmation = None;
-        self.pending_import_entry = false;
-        self.secret_key_input.clear();
+        self.clear_secret_key_ui_state();
         match self.backend.request_select_account(account_id) {
             Ok(Some(state)) => self.apply_identity_state(state),
             Ok(None) => self.refresh_account_roster(),
@@ -342,7 +523,7 @@ impl RadrootsApp {
 
     fn request_home_action(&mut self, action: HomeActionKind) {
         self.status_message = None;
-        self.revealed_secret_key = None;
+        self.clear_revealed_secret_material();
         match self.backend.request_home_action(action) {
             Ok(result) => self.apply_home_action_result(result),
             Err(err) => {
@@ -354,8 +535,17 @@ impl RadrootsApp {
     fn apply_home_action_result(&mut self, result: HomeActionResult) {
         match result {
             HomeActionResult::IdentityState(state) => self.apply_identity_state(state),
-            HomeActionResult::RevealSecretKey { nsec } => {
-                self.revealed_secret_key = Some(Zeroizing::new(nsec));
+            HomeActionResult::RevealEncryptedSecretKey { ncryptsec } => {
+                self.revealed_secret_material = Some(RevealedSecretMaterial::EncryptedSecretKey(
+                    Zeroizing::new(ncryptsec),
+                ));
+                self.pending_home_confirmation = None;
+            }
+            HomeActionResult::RevealRawSecretKey { nsec } => {
+                self.revealed_secret_material = Some(RevealedSecretMaterial::RawSecretKey {
+                    nsec: Zeroizing::new(nsec),
+                    revealed_at: Instant::now(),
+                });
                 self.pending_home_confirmation = None;
             }
             HomeActionResult::None => {}
@@ -369,7 +559,10 @@ impl RadrootsApp {
     fn home_action_confirmation_message(action: HomeActionKind) -> &'static str {
         match action {
             HomeActionKind::BackupSecretKey => {
-                "This reveals the current local secret key for backup. Do not share it."
+                "This exports the current local secret key in encrypted form for backup."
+            }
+            HomeActionKind::RevealRawSecretKey => {
+                "This reveals the current local secret key in plaintext. Use encrypted backup instead when possible."
             }
             HomeActionKind::RemoveLocalKey => {
                 "This removes the current key from this device and returns the app to setup."
@@ -438,15 +631,29 @@ impl RadrootsApp {
         import_action: &ImportActionState,
         import_paste_action: Option<&PasteActionState>,
     ) {
+        let import_mode = self.import_mode();
         ui.vertical_centered(|ui| {
             ui.set_max_width(ui.available_width().min(560.0));
-            ui.label("Import an existing local identity by entering its nsec secret key.");
+            ui.label(import_mode.helper_text());
+            ui.add_space(8.0);
+            if ui.button(import_mode.switch_label()).clicked() {
+                self.set_import_mode(import_mode.toggle());
+            }
             ui.add_space(8.0);
             ui.add(
                 egui::TextEdit::singleline(&mut *self.secret_key_input)
-                    .hint_text("nsec1...")
+                    .hint_text(import_mode.hint_text())
                     .desired_width(ui.available_width()),
             );
+            if import_mode.requires_password() {
+                ui.add_space(8.0);
+                ui.add(
+                    egui::TextEdit::singleline(&mut *self.import_password_input)
+                        .password(true)
+                        .hint_text("Enter Backup Password")
+                        .desired_width(ui.available_width()),
+                );
+            }
             ui.add_space(8.0);
             if let Some(import_paste_action) = import_paste_action {
                 let paste_clicked = ui
@@ -472,8 +679,42 @@ impl RadrootsApp {
                 }
 
                 if ui.button("Cancel").clicked() {
-                    self.pending_import_entry = false;
-                    self.secret_key_input.clear();
+                    self.clear_secret_import_entry();
+                    self.status_message = None;
+                }
+            });
+        });
+    }
+
+    fn render_secret_key_backup_entry(&mut self, ui: &mut egui::Ui, action: &HomeActionState) {
+        ui.vertical_centered(|ui| {
+            ui.set_max_width(ui.available_width().min(560.0));
+            ui.label("Create an encrypted backup of the current local secret key.");
+            ui.add_space(8.0);
+            ui.add(
+                egui::TextEdit::singleline(&mut *self.secret_key_backup_password_input)
+                    .password(true)
+                    .hint_text("Enter Backup Password")
+                    .desired_width(ui.available_width()),
+            );
+            ui.add_space(8.0);
+            ui.add(
+                egui::TextEdit::singleline(&mut *self.secret_key_backup_password_confirm_input)
+                    .password(true)
+                    .hint_text("Confirm Backup Password")
+                    .desired_width(ui.available_width()),
+            );
+            ui.add_space(8.0);
+            ui.horizontal_centered(|ui| {
+                let confirm_clicked = ui
+                    .add_enabled(action.enabled, egui::Button::new(action.label.clone()))
+                    .clicked();
+                if confirm_clicked {
+                    self.request_secret_key_backup_action();
+                }
+
+                if ui.button("Cancel").clicked() {
+                    self.clear_secret_key_backup_entry();
                     self.status_message = None;
                 }
             });
@@ -563,11 +804,10 @@ impl RadrootsApp {
                 }
             }
             ui.add_space(8.0);
-            if self.pending_import_entry {
+            if self.pending_import_mode.is_some() {
                 self.render_import_entry(ui, &import_action, import_paste_action.as_ref());
             } else if ui.button(import_action.label).clicked() {
-                self.pending_import_entry = true;
-                self.status_message = None;
+                self.open_import_entry();
             }
         }
     }
@@ -612,6 +852,8 @@ impl RadrootsApp {
 impl eframe::App for RadrootsApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         self.sync_backend();
+        self.sync_revealed_secret_material_lifetime();
+        self.clear_raw_secret_when_app_unfocused(ctx);
         if matches!(
             self.offline_geocoder_state,
             Some(RadrootsOfflineGeocoderState::Initializing)
@@ -620,6 +862,13 @@ impl eframe::App for RadrootsApp {
         }
         if self.home_location_tools.is_pending() {
             ctx.request_repaint_after(Duration::from_millis(100));
+        }
+        if self
+            .revealed_secret_material
+            .as_ref()
+            .is_some_and(RevealedSecretMaterial::is_raw)
+        {
+            ctx.request_repaint_after(Duration::from_millis(200));
         }
 
         egui::CentralPanel::default().show(ctx, |ui| {
@@ -660,15 +909,14 @@ impl eframe::App for RadrootsApp {
 
                         if let Some(import_action) = import_action {
                             ui.add_space(12.0);
-                            if self.pending_import_entry {
+                            if self.pending_import_mode.is_some() {
                                 self.render_import_entry(
                                     ui,
                                     &import_action,
                                     import_paste_action.as_ref(),
                                 );
                             } else if ui.button(import_action.label).clicked() {
-                                self.pending_import_entry = true;
-                                self.status_message = None;
+                                self.open_import_entry();
                             }
                         }
                     }
@@ -687,7 +935,23 @@ impl eframe::App for RadrootsApp {
                                 ctx.request_repaint();
                             }
 
-                            if Self::home_action_requires_confirmation(action.kind)
+                            if action.kind == HomeActionKind::BackupSecretKey
+                                && self.pending_secret_key_backup_entry
+                            {
+                                self.render_secret_key_backup_entry(ui, &action);
+                            } else if action.kind == HomeActionKind::BackupSecretKey
+                                && ui
+                                    .add_enabled(
+                                        action.enabled,
+                                        egui::Button::new(action.label.clone()),
+                                    )
+                                    .clicked()
+                            {
+                                self.pending_secret_key_backup_entry = true;
+                                self.secret_key_backup_password_input.clear();
+                                self.secret_key_backup_password_confirm_input.clear();
+                                self.status_message = None;
+                            } else if Self::home_action_requires_confirmation(action.kind)
                                 && self.pending_home_confirmation == Some(action.kind)
                             {
                                 ui.vertical_centered(|ui| {
@@ -728,14 +992,29 @@ impl eframe::App for RadrootsApp {
                             }
                         }
 
-                        if let Some(nsec) = &self.revealed_secret_key {
+                        if let Some((label, value, dismiss_label, is_raw)) =
+                            self.revealed_secret_material.as_ref().map(|material| {
+                                (
+                                    material.label(),
+                                    material.value().to_owned(),
+                                    material.dismiss_label(),
+                                    material.is_raw(),
+                                )
+                            })
+                        {
                             ui.add_space(20.0);
-                            ui.label("Secret key");
+                            ui.label(label);
                             ui.add_space(8.0);
-                            ui.monospace(nsec.as_str());
+                            ui.monospace(value);
+                            if is_raw {
+                                ui.add_space(8.0);
+                                ui.label(
+                                    "Raw secret reveal clears automatically after 30 seconds or when the app loses focus.",
+                                );
+                            }
                             ui.add_space(8.0);
-                            if ui.button("Dismiss Secret Key").clicked() {
-                                self.revealed_secret_key = None;
+                            if ui.button(dismiss_label).clicked() {
+                                self.clear_revealed_secret_material();
                             }
                         }
                     }
@@ -755,7 +1034,9 @@ impl eframe::App for RadrootsApp {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use radroots_studio_app_test_support::{FIXTURE_ALICE, FIXTURE_BOB};
+    use radroots_studio_app_test_support::{
+        FIXTURE_ALICE, FIXTURE_BACKUP_PASSWORD, FIXTURE_BOB, fixture_identity_ncryptsec,
+    };
     use std::cell::RefCell;
     use std::collections::VecDeque;
     use std::rc::Rc;
@@ -776,6 +1057,7 @@ mod tests {
         home_setup_request: Rc<RefCell<VecDeque<Result<Option<IdentityGateState>, String>>>>,
         import_request: Rc<RefCell<VecDeque<Result<Option<IdentityGateState>, String>>>>,
         import_paste_request: Rc<RefCell<VecDeque<Result<Option<String>, String>>>>,
+        secret_key_backup_request: Rc<RefCell<VecDeque<Result<HomeActionResult, String>>>>,
         home_request: Rc<RefCell<VecDeque<(HomeActionKind, Result<HomeActionResult, String>)>>>,
         home_poll: Rc<RefCell<VecDeque<Result<Option<HomeActionResult>, String>>>>,
         reverse_lookup_request: Rc<RefCell<VecDeque<Result<(), RadrootsLocationResolverError>>>>,
@@ -807,6 +1089,7 @@ mod tests {
                 home_setup_request: Rc::new(RefCell::new(VecDeque::new())),
                 import_request: Rc::new(RefCell::new(VecDeque::new())),
                 import_paste_request: Rc::new(RefCell::new(VecDeque::new())),
+                secret_key_backup_request: Rc::new(RefCell::new(VecDeque::new())),
                 home_request: Rc::new(RefCell::new(VecDeque::new())),
                 home_poll: Rc::new(RefCell::new(VecDeque::new())),
                 reverse_lookup_request: Rc::new(RefCell::new(VecDeque::new())),
@@ -874,6 +1157,14 @@ mod tests {
                     .into_iter()
                     .map(|result| (action_state.kind, result)),
             );
+            self
+        }
+
+        fn with_secret_key_backup_request(
+            self,
+            request: Vec<Result<HomeActionResult, String>>,
+        ) -> Self {
+            self.secret_key_backup_request.borrow_mut().extend(request);
             self
         }
 
@@ -959,12 +1250,22 @@ mod tests {
 
         fn request_import_action(
             &self,
-            _secret_key: &str,
+            _request: &RadrootsSecretImportRequest,
         ) -> Result<Option<IdentityGateState>, String> {
             self.import_request
                 .borrow_mut()
                 .pop_front()
                 .unwrap_or(Ok(None))
+        }
+
+        fn request_secret_key_backup_action(
+            &self,
+            _password: &str,
+        ) -> Result<HomeActionResult, String> {
+            self.secret_key_backup_request
+                .borrow_mut()
+                .pop_front()
+                .unwrap_or(Ok(HomeActionResult::None))
         }
 
         fn import_paste_action_state(&self) -> Option<PasteActionState> {
@@ -1395,6 +1696,9 @@ mod tests {
 
     #[test]
     fn import_action_transitions_to_home() {
+        let encrypted_secret_key =
+            fixture_identity_ncryptsec(&FIXTURE_ALICE, FIXTURE_BACKUP_PASSWORD)
+                .expect("fixture encrypted secret key");
         let mut app = RadrootsApp::new(Box::new(
             MockBackend::new(
                 Ok(IdentityGateState::Missing),
@@ -1416,13 +1720,15 @@ mod tests {
             ),
         ));
 
-        app.pending_import_entry = true;
-        app.secret_key_input = Zeroizing::new(FIXTURE_ALICE.nsec.into());
+        app.pending_import_mode = Some(RadrootsSecretImportMode::EncryptedSecretKey);
+        app.secret_key_input = Zeroizing::new(encrypted_secret_key);
+        app.import_password_input = Zeroizing::new(FIXTURE_BACKUP_PASSWORD.into());
         app.request_import_action();
 
         assert_eq!(app.screen, fixture_home_screen());
-        assert_eq!(app.pending_import_entry, false);
+        assert_eq!(app.pending_import_mode, None);
         assert_eq!(app.secret_key_input.as_str(), "");
+        assert_eq!(app.import_password_input.as_str(), "");
     }
 
     #[test]
@@ -1456,7 +1762,7 @@ mod tests {
             ),
         ));
 
-        app.pending_import_entry = true;
+        app.pending_import_mode = Some(RadrootsSecretImportMode::EncryptedSecretKey);
         app.request_import_paste_action();
 
         assert_eq!(app.secret_key_input.as_str(), FIXTURE_ALICE.nsec);
@@ -1464,7 +1770,10 @@ mod tests {
     }
 
     #[test]
-    fn backup_home_action_reveals_secret_key_without_leaving_home() {
+    fn encrypted_backup_home_action_reveals_secret_key_without_leaving_home() {
+        let encrypted_secret_key =
+            fixture_identity_ncryptsec(&FIXTURE_ALICE, FIXTURE_BACKUP_PASSWORD)
+                .expect("fixture encrypted secret key");
         let mut app = RadrootsApp::new(Box::new(
             MockBackend::new(
                 Ok(fixture_ready_state()),
@@ -1483,24 +1792,37 @@ mod tests {
                     enabled: true,
                     pending: false,
                 },
-                vec![Ok(HomeActionResult::RevealSecretKey {
-                    nsec: FIXTURE_ALICE.nsec.into(),
-                })],
-            ),
+                vec![],
+            )
+            .with_secret_key_backup_request(vec![Ok(
+                HomeActionResult::RevealEncryptedSecretKey {
+                    ncryptsec: encrypted_secret_key.clone(),
+                },
+            )]),
         ));
 
-        app.request_home_action(HomeActionKind::BackupSecretKey);
+        app.pending_secret_key_backup_entry = true;
+        app.secret_key_backup_password_input = Zeroizing::new(FIXTURE_BACKUP_PASSWORD.into());
+        app.secret_key_backup_password_confirm_input =
+            Zeroizing::new(FIXTURE_BACKUP_PASSWORD.into());
+        app.request_secret_key_backup_action();
 
         assert!(matches!(app.screen, AppScreen::Home { .. }));
         assert_eq!(app.pending_home_confirmation, None);
-        assert_eq!(
-            app.revealed_secret_key.as_ref().map(|value| value.as_str()),
-            Some(FIXTURE_ALICE.nsec)
-        );
+        assert_eq!(app.pending_secret_key_backup_entry, false);
+        let Some(RevealedSecretMaterial::EncryptedSecretKey(value)) =
+            app.revealed_secret_material.as_ref()
+        else {
+            panic!("expected encrypted secret backup");
+        };
+        assert_eq!(value.as_str(), encrypted_secret_key);
     }
 
     #[test]
-    fn deferred_backup_home_action_reveals_secret_key_after_poll() {
+    fn deferred_encrypted_backup_home_action_reveals_secret_key_after_poll() {
+        let encrypted_secret_key =
+            fixture_identity_ncryptsec(&FIXTURE_ALICE, FIXTURE_BACKUP_PASSWORD)
+                .expect("fixture encrypted secret key");
         let mut app = RadrootsApp::new(Box::new(
             MockBackend::new(
                 Ok(fixture_ready_state()),
@@ -1519,22 +1841,121 @@ mod tests {
                     enabled: true,
                     pending: true,
                 },
-                vec![Ok(HomeActionResult::None)],
+                vec![],
             )
-            .with_home_action_poll(vec![Ok(Some(HomeActionResult::RevealSecretKey {
-                nsec: FIXTURE_ALICE.nsec.into(),
-            }))]),
+            .with_secret_key_backup_request(vec![Ok(HomeActionResult::None)])
+            .with_home_action_poll(vec![Ok(Some(
+                HomeActionResult::RevealEncryptedSecretKey {
+                    ncryptsec: encrypted_secret_key.clone(),
+                },
+            ))]),
         ));
 
-        app.request_home_action(HomeActionKind::BackupSecretKey);
-        assert_eq!(app.revealed_secret_key, None);
+        app.pending_secret_key_backup_entry = true;
+        app.secret_key_backup_password_input = Zeroizing::new(FIXTURE_BACKUP_PASSWORD.into());
+        app.secret_key_backup_password_confirm_input =
+            Zeroizing::new(FIXTURE_BACKUP_PASSWORD.into());
+        app.request_secret_key_backup_action();
+        assert_eq!(app.revealed_secret_material, None);
 
         app.sync_backend();
 
-        assert_eq!(
-            app.revealed_secret_key.as_ref().map(|value| value.as_str()),
-            Some(FIXTURE_ALICE.nsec)
-        );
+        let Some(RevealedSecretMaterial::EncryptedSecretKey(value)) =
+            app.revealed_secret_material.as_ref()
+        else {
+            panic!("expected encrypted secret backup");
+        };
+        assert_eq!(value.as_str(), encrypted_secret_key);
+    }
+
+    #[test]
+    fn raw_secret_reveal_home_action_uses_advanced_path() {
+        let mut app = RadrootsApp::new(Box::new(
+            MockBackend::new(
+                Ok(fixture_ready_state()),
+                vec![],
+                vec![],
+                SetupActionState {
+                    label: "Generate New Key".into(),
+                    enabled: true,
+                    pending: false,
+                },
+            )
+            .with_home_action(
+                HomeActionState {
+                    kind: HomeActionKind::RevealRawSecretKey,
+                    label: "Reveal Raw Secret Key".into(),
+                    enabled: true,
+                    pending: false,
+                },
+                vec![Ok(HomeActionResult::RevealRawSecretKey {
+                    nsec: FIXTURE_ALICE.nsec.into(),
+                })],
+            ),
+        ));
+
+        app.pending_home_confirmation = Some(HomeActionKind::RevealRawSecretKey);
+        app.request_home_action(HomeActionKind::RevealRawSecretKey);
+
+        let Some(RevealedSecretMaterial::RawSecretKey { nsec, .. }) =
+            app.revealed_secret_material.as_ref()
+        else {
+            panic!("expected raw secret reveal");
+        };
+        assert_eq!(nsec.as_str(), FIXTURE_ALICE.nsec);
+    }
+
+    #[test]
+    fn raw_secret_reveal_expires_after_timeout() {
+        let mut app = RadrootsApp::new(Box::new(MockBackend::new(
+            Ok(fixture_ready_state()),
+            vec![],
+            vec![],
+            SetupActionState {
+                label: "Generate New Key".into(),
+                enabled: true,
+                pending: false,
+            },
+        )));
+        app.revealed_secret_material = Some(RevealedSecretMaterial::RawSecretKey {
+            nsec: Zeroizing::new(FIXTURE_ALICE.nsec.into()),
+            revealed_at: Instant::now() - RAW_SECRET_REVEAL_TIMEOUT - Duration::from_secs(1),
+        });
+
+        app.sync_revealed_secret_material_lifetime();
+
+        assert_eq!(app.revealed_secret_material, None);
+    }
+
+    #[test]
+    fn raw_secret_reveal_clears_when_app_loses_focus() {
+        let mut app = RadrootsApp::new(Box::new(MockBackend::new(
+            Ok(fixture_ready_state()),
+            vec![],
+            vec![],
+            SetupActionState {
+                label: "Generate New Key".into(),
+                enabled: true,
+                pending: false,
+            },
+        )));
+        app.revealed_secret_material = Some(RevealedSecretMaterial::RawSecretKey {
+            nsec: Zeroizing::new(FIXTURE_ALICE.nsec.into()),
+            revealed_at: Instant::now(),
+        });
+
+        let ctx = egui::Context::default();
+        ctx.input_mut(|input| {
+            input
+                .raw
+                .viewports
+                .entry(egui::ViewportId::ROOT)
+                .or_default()
+                .focused = Some(false);
+        });
+        app.clear_raw_secret_when_app_unfocused(&ctx);
+
+        assert_eq!(app.revealed_secret_material, None);
     }
 
     #[test]
