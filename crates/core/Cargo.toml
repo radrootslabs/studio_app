@@ -17,3 +17,6 @@ workspace = true
 eframe.workspace = true
 egui.workspace = true
 zeroize.workspace = true
+
+[dev-dependencies]
+radroots-app-test-support = { path = "../test-support" }

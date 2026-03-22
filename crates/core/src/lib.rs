@@ -595,6 +595,7 @@ impl eframe::App for RadrootsApp {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use radroots_studio_app_test_support::FIXTURE_ALICE;
     use std::cell::RefCell;
     use std::collections::VecDeque;
     use std::rc::Rc;
@@ -812,6 +813,20 @@ mod tests {
         }
     }
 
+    fn fixture_ready_state() -> IdentityGateState {
+        IdentityGateState::Ready {
+            account_id: FIXTURE_ALICE.account_id.into(),
+            npub: FIXTURE_ALICE.npub.into(),
+        }
+    }
+
+    fn fixture_home_screen() -> AppScreen {
+        AppScreen::Home {
+            account_id: FIXTURE_ALICE.account_id.into(),
+            npub: FIXTURE_ALICE.npub.into(),
+        }
+    }
+
     #[test]
     fn startup_missing_key_enters_setup() {
         let app = RadrootsApp::new(Box::new(MockBackend::new(
@@ -831,10 +846,7 @@ mod tests {
     #[test]
     fn startup_ready_key_enters_home() {
         let app = RadrootsApp::new(Box::new(MockBackend::new(
-            Ok(IdentityGateState::Ready {
-                account_id: "abc".into(),
-                npub: "npub1abc".into(),
-            }),
+            Ok(fixture_ready_state()),
             vec![],
             vec![],
             SetupActionState {
@@ -843,13 +855,7 @@ mod tests {
                 pending: false,
             },
         )));
-        assert_eq!(
-            app.screen,
-            AppScreen::Home {
-                account_id: "abc".into(),
-                npub: "npub1abc".into(),
-            }
-        );
+        assert_eq!(app.screen, fixture_home_screen());
         assert_eq!(app.status_message, None);
     }
 
@@ -876,10 +882,7 @@ mod tests {
         let mut app = RadrootsApp::new(Box::new(MockBackend::new(
             Ok(IdentityGateState::Missing),
             vec![Ok(None)],
-            vec![Ok(Some(IdentityGateState::Ready {
-                account_id: "abc".into(),
-                npub: "npub1abc".into(),
-            }))],
+            vec![Ok(Some(fixture_ready_state()))],
             SetupActionState {
                 label: "Connect Browser Signer".into(),
                 enabled: true,
@@ -892,23 +895,14 @@ mod tests {
 
         app.sync_backend();
 
-        assert_eq!(
-            app.screen,
-            AppScreen::Home {
-                account_id: "abc".into(),
-                npub: "npub1abc".into(),
-            }
-        );
+        assert_eq!(app.screen, fixture_home_screen());
     }
 
     #[test]
     fn immediate_setup_action_transitions_to_home() {
         let mut app = RadrootsApp::new(Box::new(MockBackend::new(
             Ok(IdentityGateState::Missing),
-            vec![Ok(Some(IdentityGateState::Ready {
-                account_id: "abc".into(),
-                npub: "npub1abc".into(),
-            }))],
+            vec![Ok(Some(fixture_ready_state()))],
             vec![],
             SetupActionState {
                 label: "Generate New Key".into(),
@@ -919,23 +913,14 @@ mod tests {
 
         app.request_setup_action();
 
-        assert_eq!(
-            app.screen,
-            AppScreen::Home {
-                account_id: "abc".into(),
-                npub: "npub1abc".into(),
-            }
-        );
+        assert_eq!(app.screen, fixture_home_screen());
     }
 
     #[test]
     fn home_remove_action_transitions_to_setup() {
         let mut app = RadrootsApp::new(Box::new(
             MockBackend::new(
-                Ok(IdentityGateState::Ready {
-                    account_id: "abc".into(),
-                    npub: "npub1abc".into(),
-                }),
+                Ok(fixture_ready_state()),
                 vec![],
                 vec![],
                 SetupActionState {
@@ -969,10 +954,7 @@ mod tests {
     fn failed_home_remove_action_keeps_home_screen_and_message() {
         let mut app = RadrootsApp::new(Box::new(
             MockBackend::new(
-                Ok(IdentityGateState::Ready {
-                    account_id: "abc".into(),
-                    npub: "npub1abc".into(),
-                }),
+                Ok(fixture_ready_state()),
                 vec![],
                 vec![],
                 SetupActionState {
@@ -1007,10 +989,7 @@ mod tests {
     fn home_reset_action_transitions_to_setup() {
         let mut app = RadrootsApp::new(Box::new(
             MockBackend::new(
-                Ok(IdentityGateState::Ready {
-                    account_id: "abc".into(),
-                    npub: "npub1abc".into(),
-                }),
+                Ok(fixture_ready_state()),
                 vec![],
                 vec![],
                 SetupActionState {
@@ -1044,10 +1023,7 @@ mod tests {
     fn failed_home_reset_action_keeps_home_screen_and_message() {
         let mut app = RadrootsApp::new(Box::new(
             MockBackend::new(
-                Ok(IdentityGateState::Ready {
-                    account_id: "abc".into(),
-                    npub: "npub1abc".into(),
-                }),
+                Ok(fixture_ready_state()),
                 vec![],
                 vec![],
                 SetupActionState {
@@ -1097,24 +1073,15 @@ mod tests {
                     enabled: true,
                     pending: false,
                 },
-                vec![Ok(Some(IdentityGateState::Ready {
-                    account_id: "abc".into(),
-                    npub: "npub1abc".into(),
-                }))],
+                vec![Ok(Some(fixture_ready_state()))],
             ),
         ));
 
         app.pending_import_entry = true;
-        app.secret_key_input = Zeroizing::new("nsec1example".into());
+        app.secret_key_input = Zeroizing::new(FIXTURE_ALICE.nsec.into());
         app.request_import_action();
 
-        assert_eq!(
-            app.screen,
-            AppScreen::Home {
-                account_id: "abc".into(),
-                npub: "npub1abc".into(),
-            }
-        );
+        assert_eq!(app.screen, fixture_home_screen());
         assert_eq!(app.pending_import_entry, false);
         assert_eq!(app.secret_key_input.as_str(), "");
     }
@@ -1146,14 +1113,14 @@ mod tests {
                     enabled: true,
                     pending: false,
                 },
-                vec![Ok(Some("nsec1example".into()))],
+                vec![Ok(Some(FIXTURE_ALICE.nsec.into()))],
             ),
         ));
 
         app.pending_import_entry = true;
         app.request_import_paste_action();
 
-        assert_eq!(app.secret_key_input.as_str(), "nsec1example");
+        assert_eq!(app.secret_key_input.as_str(), FIXTURE_ALICE.nsec);
         assert_eq!(app.status_message, None);
     }
 
@@ -1161,10 +1128,7 @@ mod tests {
     fn backup_home_action_reveals_secret_key_without_leaving_home() {
         let mut app = RadrootsApp::new(Box::new(
             MockBackend::new(
-                Ok(IdentityGateState::Ready {
-                    account_id: "abc".into(),
-                    npub: "npub1abc".into(),
-                }),
+                Ok(fixture_ready_state()),
                 vec![],
                 vec![],
                 SetupActionState {
@@ -1181,7 +1145,7 @@ mod tests {
                     pending: false,
                 },
                 vec![Ok(HomeActionResult::RevealSecretKey {
-                    nsec: "nsec1example".into(),
+                    nsec: FIXTURE_ALICE.nsec.into(),
                 })],
             ),
         ));
@@ -1192,7 +1156,7 @@ mod tests {
         assert_eq!(app.pending_home_confirmation, None);
         assert_eq!(
             app.revealed_secret_key.as_ref().map(|value| value.as_str()),
-            Some("nsec1example")
+            Some(FIXTURE_ALICE.nsec)
         );
     }
 
@@ -1200,10 +1164,7 @@ mod tests {
     fn deferred_backup_home_action_reveals_secret_key_after_poll() {
         let mut app = RadrootsApp::new(Box::new(
             MockBackend::new(
-                Ok(IdentityGateState::Ready {
-                    account_id: "abc".into(),
-                    npub: "npub1abc".into(),
-                }),
+                Ok(fixture_ready_state()),
                 vec![],
                 vec![],
                 SetupActionState {
@@ -1222,7 +1183,7 @@ mod tests {
                 vec![Ok(HomeActionResult::None)],
             )
             .with_home_action_poll(vec![Ok(Some(HomeActionResult::RevealSecretKey {
-                nsec: "nsec1example".into(),
+                nsec: FIXTURE_ALICE.nsec.into(),
             }))]),
         ));
 
@@ -1233,7 +1194,7 @@ mod tests {
 
         assert_eq!(
             app.revealed_secret_key.as_ref().map(|value| value.as_str()),
-            Some("nsec1example")
+            Some(FIXTURE_ALICE.nsec)
         );
     }
 
@@ -1241,10 +1202,7 @@ mod tests {
     fn deferred_home_location_lookup_updates_after_poll() {
         let mut app = RadrootsApp::new(Box::new(
             MockBackend::new(
-                Ok(IdentityGateState::Ready {
-                    account_id: "abc".into(),
-                    npub: "npub1abc".into(),
-                }),
+                Ok(fixture_ready_state()),
                 vec![],
                 vec![],
                 SetupActionState {

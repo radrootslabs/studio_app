@@ -2874,6 +2874,7 @@ version = "0.1.0"
 dependencies = [
  "eframe",
  "egui",
+ "radroots-app-test-support",
  "zeroize",
 ]
 
@@ -2909,6 +2910,13 @@ dependencies = [
  "radroots-nostr-accounts",
  "wgpu",
  "zeroize",
+]
+
+[[package]]
+name = "radroots-app-test-support"
+version = "0.1.0"
+dependencies = [
+ "radroots-identity",
 ]
 
 [[package]]
