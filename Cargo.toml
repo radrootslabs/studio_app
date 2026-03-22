@@ -5,6 +5,7 @@ members = [
     "crates/core",
     "crates/desktop",
     "crates/ios",
+    "crates/remote-signer",
     "crates/test-support",
     "crates/web",
 ]
@@ -35,7 +36,13 @@ objc2-foundation = { version = "0.3.2", default-features = false, features = ["s
 radroots-app-apple-security = { path = "crates/apple/security" }
 radroots-geocoder = { path = "../lib/crates/geocoder" }
 radroots-identity = { path = "../lib/crates/identity", default-features = false, features = ["std", "nip49"] }
+radroots-nostr = { path = "../lib/crates/nostr", default-features = false, features = ["std", "client"] }
 radroots-nostr-accounts = { path = "../lib/crates/nostr-accounts", default-features = false, features = ["std", "file-store", "os-keyring"] }
+radroots-nostr-connect = { path = "../lib/crates/nostr-connect" }
+serde = { version = "1.0.228", features = ["derive"] }
+serde_json = "1.0.145"
+tokio = { version = "1.48.0", features = ["rt", "sync", "time"] }
+url = "2.5.7"
 wasm-bindgen-futures = "0.4.50"
 web-sys = { version = "0.3.91", features = ["Document", "HtmlCanvasElement", "Window"] }
 wgpu = { version = "27.0.1", default-features = false }
