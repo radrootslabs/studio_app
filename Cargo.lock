@@ -2916,10 +2916,12 @@ name = "radroots-app-web"
 version = "0.1.0"
 dependencies = [
  "eframe",
+ "js-sys",
  "log",
  "nostr",
  "nostr-browser-signer",
  "radroots-app-core",
+ "radroots-geocoder",
  "wasm-bindgen-futures",
  "web-sys",
  "wgpu",
