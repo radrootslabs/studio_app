@@ -11,7 +11,7 @@ use radroots_studio_app_core::{
     HomeActionKind, HomeActionResult, HomeActionState, IdentityGateState, ImportActionState,
     RadrootsLocationCountry, RadrootsLocationPoint, RadrootsLocationResolverError,
     RadrootsLocationReverseOptions, RadrootsOfflineGeocoderState, RadrootsResolvedLocation,
-    SetupActionState,
+    RadrootsReverseLocationLookupResult, SetupActionState,
 };
 #[cfg(any(target_os = "android", test))]
 use radroots_identity::RadrootsIdentity;
@@ -31,6 +31,8 @@ use zeroize::Zeroizing;
 #[cfg(any(target_os = "android", test))]
 mod offline_geocoder;
 #[cfg(any(target_os = "android", test))]
+mod reverse_lookup;
+#[cfg(any(target_os = "android", test))]
 mod security;
 #[cfg(any(target_os = "android", test))]
 mod storage;
@@ -41,6 +43,7 @@ mod vault;
 #[cfg_attr(not(target_os = "android"), allow(dead_code))]
 struct AndroidBackend {
     offline_geocoder: offline_geocoder::AndroidOfflineGeocoder,
+    reverse_lookup: reverse_lookup::AndroidReverseLookup,
 }
 
 #[cfg(any(target_os = "android", test))]
@@ -85,6 +88,33 @@ impl RadrootsAppBackend for AndroidBackend {
             let _ = (point, options);
             Err(RadrootsLocationResolverError::Unsupported)
         }
+    }
+
+    fn request_reverse_location_lookup(
+        &self,
+        point: RadrootsLocationPoint,
+        options: Option<RadrootsLocationReverseOptions>,
+    ) -> Result<(), RadrootsLocationResolverError> {
+        #[cfg(target_os = "android")]
+        {
+            return self.reverse_lookup.begin(
+                self.offline_geocoder.current_state(),
+                point,
+                options,
+            );
+        }
+
+        #[cfg(not(target_os = "android"))]
+        {
+            let _ = (point, options);
+            Err(RadrootsLocationResolverError::Unsupported)
+        }
+    }
+
+    fn poll_reverse_location_lookup_result(
+        &self,
+    ) -> Result<Option<RadrootsReverseLocationLookupResult>, String> {
+        Ok(self.reverse_lookup.take_update())
     }
 
     fn list_location_countries(
@@ -265,7 +295,10 @@ impl AndroidBackend {
             ),
         );
 
-        Self { offline_geocoder }
+        Self {
+            offline_geocoder,
+            reverse_lookup: reverse_lookup::AndroidReverseLookup::new(),
+        }
     }
 
     #[cfg(target_os = "android")]
