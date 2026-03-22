@@ -2905,6 +2905,7 @@ dependencies = [
  "log",
  "radroots-app-apple-security",
  "radroots-app-core",
+ "radroots-app-test-support",
  "radroots-geocoder",
  "radroots-identity",
  "radroots-nostr-accounts",
