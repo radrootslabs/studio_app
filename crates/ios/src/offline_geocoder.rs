@@ -7,6 +7,7 @@ use radroots_geocoder::Geocoder;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
+use std::time::UNIX_EPOCH;
 
 const GEOCODER_ASSET_FILENAME: &str = "geonames.db";
 
@@ -86,7 +87,7 @@ fn initialize_offline_geocoder_inner(
         ));
     }
 
-    let staged_path = staged_db_path(app_data_root);
+    let staged_path = staged_db_path(app_data_root, asset_revision(source_path.as_path())?);
     stage_bundled_asset(source_path.as_path(), staged_path.as_path()).map_err(|debug_message| {
         (
             RadrootsOfflineGeocoderUnavailableKind::InitializationFailed,
@@ -112,24 +113,55 @@ fn bundled_asset_path() -> Result<PathBuf, String> {
     Ok(parent.join(GEOCODER_ASSET_FILENAME))
 }
 
-fn staged_db_path(app_data_root: &Path) -> PathBuf {
-    app_data_root.join("geocoder").join(GEOCODER_ASSET_FILENAME)
+fn asset_revision(
+    source_path: &Path,
+) -> Result<String, (RadrootsOfflineGeocoderUnavailableKind, String)> {
+    let metadata = std::fs::metadata(source_path).map_err(|source| {
+        (
+            RadrootsOfflineGeocoderUnavailableKind::InitializationFailed,
+            format!("failed to read ios geocoder asset metadata: {source}"),
+        )
+    })?;
+    let modified = metadata.modified().map_err(|source| {
+        (
+            RadrootsOfflineGeocoderUnavailableKind::InitializationFailed,
+            format!("failed to read ios geocoder asset mtime: {source}"),
+        )
+    })?;
+    let modified = modified.duration_since(UNIX_EPOCH).map_err(|source| {
+        (
+            RadrootsOfflineGeocoderUnavailableKind::InitializationFailed,
+            format!("failed to normalize ios geocoder asset mtime: {source}"),
+        )
+    })?;
+    Ok(format!("{:x}-{:x}", metadata.len(), modified.as_secs()))
 }
 
-fn stage_bundled_asset(source_path: &Path, staged_path: &Path) -> Result<(), String> {
+fn staged_db_path(app_data_root: &Path, revision: String) -> PathBuf {
+    app_data_root
+        .join("geocoder")
+        .join(revision)
+        .join(GEOCODER_ASSET_FILENAME)
+}
+
+fn stage_bundled_asset(source_path: &Path, staged_path: &Path) -> Result<bool, String> {
     let Some(parent) = staged_path.parent() else {
         return Err("staged ios geocoder path did not have a parent directory".to_owned());
     };
     std::fs::create_dir_all(parent)
         .map_err(|source| format!("failed to create ios geocoder directory: {source}"))?;
+    if staged_path.is_file() {
+        return Ok(false);
+    }
     std::fs::copy(source_path, staged_path)
         .map_err(|source| format!("failed to stage ios geocoder asset: {source}"))?;
-    Ok(())
+    Ok(true)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::time::{SystemTime, UNIX_EPOCH};
 
     #[test]
     fn staged_db_path_uses_ios_geocoder_directory() {
@@ -138,9 +170,9 @@ mod tests {
         );
 
         assert_eq!(
-            staged_db_path(app_data_root.as_path()),
+            staged_db_path(app_data_root.as_path(), "abcd".to_owned()),
             PathBuf::from(
-                "/var/mobile/Containers/Data/Application/example/Library/Application Support/RadRoots/app/ios/geocoder/geonames.db"
+                "/var/mobile/Containers/Data/Application/example/Library/Application Support/RadRoots/app/ios/geocoder/abcd/geonames.db"
             )
         );
     }
@@ -160,5 +192,30 @@ mod tests {
                     .to_owned(),
             }
         );
+    }
+
+    #[test]
+    fn stage_bundled_asset_reuses_existing_staged_copy() {
+        let temp_root = std::env::temp_dir().join(format!(
+            "radroots-ios-geocoder-test-{}",
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let source_path = temp_root.join("source.db");
+        let staged_path = temp_root.join("staged").join("geonames.db");
+
+        std::fs::create_dir_all(temp_root.as_path()).unwrap();
+        std::fs::write(source_path.as_path(), b"source").unwrap();
+        std::fs::create_dir_all(staged_path.parent().unwrap()).unwrap();
+        std::fs::write(staged_path.as_path(), b"existing").unwrap();
+
+        let copied = stage_bundled_asset(source_path.as_path(), staged_path.as_path()).unwrap();
+
+        assert!(!copied);
+        assert_eq!(std::fs::read(staged_path.as_path()).unwrap(), b"existing");
+
+        std::fs::remove_dir_all(temp_root.as_path()).unwrap();
     }
 }

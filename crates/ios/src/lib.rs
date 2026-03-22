@@ -1,5 +1,3 @@
-#![allow(unsafe_code)]
-
 #[cfg(target_os = "ios")]
 use eframe::egui::ViewportBuilder;
 #[cfg(target_os = "ios")]
@@ -35,6 +33,7 @@ struct IosBackend {
 }
 
 #[cfg(target_os = "ios")]
+#[allow(unsafe_code)]
 unsafe extern "C" {
     fn radroots_ios_clipboard_text_copy() -> *mut std::ffi::c_char;
     fn radroots_ios_string_free(value: *mut std::ffi::c_char);
@@ -159,6 +158,7 @@ impl IosBackend {
     }
 
     #[cfg(target_os = "ios")]
+    #[allow(unsafe_code)]
     fn paste_secret_key_from_clipboard() -> Result<String, String> {
         let clipboard_text_ptr = unsafe { radroots_ios_clipboard_text_copy() };
         if clipboard_text_ptr.is_null() {
@@ -346,6 +346,7 @@ pub fn run() -> Result<(), String> {
 
 pub const ENTRYPOINT_SYMBOL: &str = "radroots_ios_run";
 
+#[allow(unsafe_code)]
 #[unsafe(no_mangle)]
 pub extern "C" fn radroots_ios_run() -> i32 {
     match run() {

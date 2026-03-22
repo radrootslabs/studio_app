@@ -25,6 +25,3 @@ zeroize.workspace = true
 
 [target.'cfg(target_os = "ios")'.dependencies]
 wgpu = { workspace = true, features = ["metal", "wgsl"] }
-
-[lints.rust]
-unsafe_code = { level = "allow", priority = 1 }
