@@ -17,11 +17,11 @@ use nostr::signer::NostrSigner;
 use nostr_browser_signer::{BrowserSigner, Error as BrowserSignerError};
 #[cfg(target_arch = "wasm32")]
 use radroots_studio_app_core::{
-    HomeActionKind, HomeActionResult, HomeActionState, IdentityGateState, RadrootsApp,
-    RadrootsAppBackend, RadrootsLocationCountry, RadrootsLocationCountryCenterLookupResult,
-    RadrootsLocationCountryListResult, RadrootsLocationPoint, RadrootsLocationResolverError,
-    RadrootsLocationReverseOptions, RadrootsResolvedLocation, RadrootsReverseLocationLookupResult,
-    SetupActionState,
+    HomeActionKind, HomeActionResult, HomeActionState, IdentityGateState, RadrootsAccountCustody,
+    RadrootsAccountSummary, RadrootsApp, RadrootsAppBackend, RadrootsLocationCountry,
+    RadrootsLocationCountryCenterLookupResult, RadrootsLocationCountryListResult,
+    RadrootsLocationPoint, RadrootsLocationResolverError, RadrootsLocationReverseOptions,
+    RadrootsResolvedLocation, RadrootsReverseLocationLookupResult, SetupActionState,
 };
 #[cfg(any(target_arch = "wasm32", test))]
 use radroots_studio_app_core::{
@@ -260,7 +260,15 @@ impl WebBackend {
         let _ = &connected.signer;
         IdentityGateState::Ready {
             account_id: connected.account_id.clone(),
+        }
+    }
+
+    fn account_summary_for_ready(connected: &ConnectedSigner) -> RadrootsAccountSummary {
+        RadrootsAccountSummary {
+            account_id: connected.account_id.clone(),
             npub: connected.npub.clone(),
+            label: Some("browser signer".to_owned()),
+            custody: RadrootsAccountCustody::BrowserSigner,
         }
     }
 
@@ -331,6 +339,16 @@ impl RadrootsAppBackend for WebBackend {
             WebConnectionState::Disconnected | WebConnectionState::Connecting => {
                 Ok(IdentityGateState::Missing)
             }
+        }
+    }
+
+    fn load_account_roster(&self) -> Result<Vec<RadrootsAccountSummary>, String> {
+        let state = self.state.borrow();
+        match &state.connection {
+            WebConnectionState::Ready(connected) => {
+                Ok(vec![Self::account_summary_for_ready(connected)])
+            }
+            WebConnectionState::Disconnected | WebConnectionState::Connecting => Ok(Vec::new()),
         }
     }
 
@@ -572,6 +590,20 @@ impl RadrootsAppBackend for WebBackend {
             HomeActionKind::BackupSecretKey
             | HomeActionKind::RemoveLocalKey
             | HomeActionKind::ResetDevice => Ok(HomeActionResult::None),
+        }
+    }
+
+    fn request_select_account(
+        &self,
+        account_id: &str,
+    ) -> Result<Option<IdentityGateState>, String> {
+        let state = self.state.borrow();
+        match &state.connection {
+            WebConnectionState::Ready(connected) if connected.account_id == account_id => {
+                Ok(Some(Self::identity_state_for_ready(connected)))
+            }
+            WebConnectionState::Ready(_) => Err("unknown browser signer account".to_owned()),
+            WebConnectionState::Disconnected | WebConnectionState::Connecting => Ok(None),
         }
     }
 
