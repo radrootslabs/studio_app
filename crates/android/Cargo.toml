@@ -29,3 +29,6 @@ jni.workspace = true
 ndk-context.workspace = true
 wgpu = { workspace = true, features = ["vulkan", "gles", "wgsl"] }
 winit.workspace = true
+
+[dev-dependencies]
+radroots-app-test-support = { path = "../test-support" }

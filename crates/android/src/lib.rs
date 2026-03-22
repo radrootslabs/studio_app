@@ -13,7 +13,7 @@ use radroots_studio_app_core::{
     RadrootsLocationCountryCenterLookupResult, RadrootsLocationCountryListResult,
     RadrootsLocationPoint, RadrootsLocationResolverError, RadrootsLocationReverseOptions,
     RadrootsOfflineGeocoderState, RadrootsResolvedLocation, RadrootsReverseLocationLookupResult,
-    SetupActionState,
+    RadrootsSecretImportMode, RadrootsSecretImportRequest, SetupActionState,
 };
 #[cfg(any(target_os = "android", test))]
 use radroots_identity::RadrootsIdentity;
@@ -25,6 +25,8 @@ use radroots_nostr_accounts::prelude::RadrootsNostrAccountsManager;
 use radroots_nostr_accounts::prelude::RadrootsNostrSelectedAccountStatus;
 #[cfg(any(target_os = "android", test))]
 use std::path::Path;
+#[cfg(any(target_os = "android", test))]
+use std::sync::Mutex;
 #[cfg(target_os = "android")]
 use winit::platform::android::activity::AndroidApp;
 #[cfg(any(target_os = "android", test))]
@@ -50,6 +52,17 @@ struct AndroidBackend {
     offline_geocoder: offline_geocoder::AndroidOfflineGeocoder,
     reverse_lookup: reverse_lookup::AndroidReverseLookup,
 }
+
+#[cfg(any(target_os = "android", test))]
+#[cfg_attr(not(target_os = "android"), allow(dead_code))]
+enum PendingSecretKeyExport {
+    EncryptedBackup { password: Zeroizing<String> },
+    RawReveal,
+}
+
+#[cfg(any(target_os = "android", test))]
+#[cfg_attr(not(target_os = "android"), allow(dead_code))]
+static PENDING_SECRET_KEY_EXPORT: Mutex<Option<PendingSecretKeyExport>> = Mutex::new(None);
 
 #[cfg(any(target_os = "android", test))]
 impl RadrootsAppBackend for AndroidBackend {
@@ -261,16 +274,19 @@ impl RadrootsAppBackend for AndroidBackend {
         }
     }
 
-    fn request_import_action(&self, secret_key: &str) -> Result<Option<IdentityGateState>, String> {
+    fn request_import_action(
+        &self,
+        request: &RadrootsSecretImportRequest,
+    ) -> Result<Option<IdentityGateState>, String> {
         #[cfg(target_os = "android")]
         {
             let manager = Self::accounts_manager()?;
-            return Self::import_local_identity(&manager, secret_key).map(Some);
+            return Self::import_local_identity(&manager, request).map(Some);
         }
 
         #[cfg(not(target_os = "android"))]
         {
-            let _ = secret_key;
+            let _ = request;
             Ok(None)
         }
     }
@@ -309,6 +325,12 @@ impl RadrootsAppBackend for AndroidBackend {
                     pending: secret_key_export_pending,
                 },
                 HomeActionState {
+                    kind: HomeActionKind::RevealRawSecretKey,
+                    label: "Reveal Raw Secret Key".to_owned(),
+                    enabled: !secret_key_export_pending,
+                    pending: secret_key_export_pending,
+                },
+                HomeActionState {
                     kind: HomeActionKind::RemoveLocalKey,
                     label: "Remove Key From This Device".to_owned(),
                     enabled: true,
@@ -333,8 +355,9 @@ impl RadrootsAppBackend for AndroidBackend {
         #[cfg(target_os = "android")]
         {
             return match action {
-                HomeActionKind::BackupSecretKey => {
-                    Self::begin_secret_key_export().map(|()| HomeActionResult::None)
+                HomeActionKind::BackupSecretKey => Ok(HomeActionResult::None),
+                HomeActionKind::RevealRawSecretKey => {
+                    Self::begin_raw_secret_key_reveal().map(|()| HomeActionResult::None)
                 }
                 HomeActionKind::RemoveLocalKey => {
                     let manager = Self::accounts_manager()?;
@@ -354,6 +377,20 @@ impl RadrootsAppBackend for AndroidBackend {
         #[cfg(not(target_os = "android"))]
         {
             let _ = action;
+            Ok(HomeActionResult::None)
+        }
+    }
+
+    fn request_secret_key_backup_action(&self, password: &str) -> Result<HomeActionResult, String> {
+        #[cfg(target_os = "android")]
+        {
+            return Self::begin_encrypted_secret_key_backup(password)
+                .map(|()| HomeActionResult::None);
+        }
+
+        #[cfg(not(target_os = "android"))]
+        {
+            let _ = password;
             Ok(HomeActionResult::None)
         }
     }
@@ -472,7 +509,33 @@ impl AndroidBackend {
         Self::identity_state_from_manager(manager)
     }
 
-    fn export_selected_local_secret_key(
+    fn export_selected_local_encrypted_secret_key(
+        manager: &RadrootsNostrAccountsManager,
+        password: &str,
+    ) -> Result<String, String> {
+        let Some(account_id) = manager
+            .selected_account_id()
+            .map_err(|source| source.to_string())?
+        else {
+            return Err("no selected local identity is available to back up".to_owned());
+        };
+
+        let Some(secret_key_hex) = manager
+            .export_secret_hex(&account_id)
+            .map_err(|source| source.to_string())?
+        else {
+            return Err("selected local identity does not have an exportable secret".to_owned());
+        };
+
+        let secret_key_hex = Zeroizing::new(secret_key_hex);
+        let identity = RadrootsIdentity::from_secret_key_str(secret_key_hex.as_str())
+            .map_err(|source| source.to_string())?;
+        identity
+            .encrypt_secret_key_ncryptsec(password)
+            .map_err(|source| source.to_string())
+    }
+
+    fn export_selected_local_raw_secret_key(
         manager: &RadrootsNostrAccountsManager,
     ) -> Result<String, String> {
         let Some(account_id) = manager
@@ -497,10 +560,24 @@ impl AndroidBackend {
 
     fn import_local_identity(
         manager: &RadrootsNostrAccountsManager,
-        secret_key: &str,
+        request: &RadrootsSecretImportRequest,
     ) -> Result<IdentityGateState, String> {
-        let identity = RadrootsIdentity::from_secret_key_str(secret_key)
-            .map_err(|_| "invalid secret key".to_owned())?;
+        let identity = match request.mode {
+            RadrootsSecretImportMode::EncryptedSecretKey => {
+                let Some(password) = request.password.as_deref() else {
+                    return Err("password is required to import an encrypted secret key".to_owned());
+                };
+                RadrootsIdentity::from_encrypted_secret_key_str(
+                    request.secret_text.as_str(),
+                    password,
+                )
+                .map_err(|_| "invalid encrypted secret key or password".to_owned())?
+            }
+            RadrootsSecretImportMode::RawSecretKey => {
+                RadrootsIdentity::from_secret_key_str(request.secret_text.as_str())
+                    .map_err(|_| "invalid raw secret key".to_owned())?
+            }
+        };
 
         manager
             .upsert_identity(&identity, None, true)
@@ -510,13 +587,50 @@ impl AndroidBackend {
     }
 
     #[cfg(target_os = "android")]
-    fn begin_secret_key_export() -> Result<(), String> {
-        security::begin_user_presence_verification("reveal the current secret key")
-            .map_err(|source| source.to_string())
+    fn begin_encrypted_secret_key_backup(password: &str) -> Result<(), String> {
+        *PENDING_SECRET_KEY_EXPORT
+            .lock()
+            .map_err(|_| "failed to store pending encrypted secret key backup".to_owned())? =
+            Some(PendingSecretKeyExport::EncryptedBackup {
+                password: Zeroizing::new(password.to_owned()),
+            });
+        if let Err(source) =
+            security::begin_user_presence_verification("back up the current secret key")
+        {
+            *PENDING_SECRET_KEY_EXPORT
+                .lock()
+                .map_err(|_| "failed to clear pending encrypted secret key backup".to_owned())? =
+                None;
+            return Err(source.to_string());
+        }
+        Ok(())
     }
 
     #[cfg(not(target_os = "android"))]
-    fn begin_secret_key_export() -> Result<(), String> {
+    fn begin_encrypted_secret_key_backup(password: &str) -> Result<(), String> {
+        let _ = password;
+        Ok(())
+    }
+
+    #[cfg(target_os = "android")]
+    fn begin_raw_secret_key_reveal() -> Result<(), String> {
+        *PENDING_SECRET_KEY_EXPORT
+            .lock()
+            .map_err(|_| "failed to store pending raw secret key reveal".to_owned())? =
+            Some(PendingSecretKeyExport::RawReveal);
+        if let Err(source) =
+            security::begin_user_presence_verification("reveal the current secret key")
+        {
+            *PENDING_SECRET_KEY_EXPORT
+                .lock()
+                .map_err(|_| "failed to clear pending raw secret key reveal".to_owned())? = None;
+            return Err(source.to_string());
+        }
+        Ok(())
+    }
+
+    #[cfg(not(target_os = "android"))]
+    fn begin_raw_secret_key_reveal() -> Result<(), String> {
         Ok(())
     }
 
@@ -537,10 +651,33 @@ impl AndroidBackend {
         {
             Some(security::AndroidUserPresenceVerificationResult::Verified) => {
                 let manager = Self::accounts_manager()?;
-                Self::export_selected_local_secret_key(&manager)
-                    .map(|nsec| Some(HomeActionResult::RevealSecretKey { nsec }))
+                let pending_export = PENDING_SECRET_KEY_EXPORT
+                    .lock()
+                    .map_err(|_| "failed to take pending secret key export".to_owned())?
+                    .take();
+                match pending_export {
+                    Some(PendingSecretKeyExport::EncryptedBackup { password }) => {
+                        Self::export_selected_local_encrypted_secret_key(
+                            &manager,
+                            password.as_str(),
+                        )
+                        .map(|ncryptsec| {
+                            Some(HomeActionResult::RevealEncryptedSecretKey { ncryptsec })
+                        })
+                    }
+                    Some(PendingSecretKeyExport::RawReveal) => {
+                        Self::export_selected_local_raw_secret_key(&manager)
+                            .map(|nsec| Some(HomeActionResult::RevealRawSecretKey { nsec }))
+                    }
+                    None => Err("missing pending secret key export request".to_owned()),
+                }
             }
-            Some(security::AndroidUserPresenceVerificationResult::Failed(message)) => Err(message),
+            Some(security::AndroidUserPresenceVerificationResult::Failed(message)) => {
+                *PENDING_SECRET_KEY_EXPORT
+                    .lock()
+                    .map_err(|_| "failed to clear pending secret key export".to_owned())? = None;
+                Err(message)
+            }
             None => Ok(None),
         }
     }
@@ -642,6 +779,9 @@ pub extern "C" fn android_main(android_app: AndroidApp) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use radroots_studio_app_test_support::{
+        FIXTURE_ALICE, FIXTURE_BACKUP_PASSWORD, fixture_identity_ncryptsec,
+    };
 
     #[test]
     fn android_backend_reports_android_disabled_state_off_target() {
@@ -765,7 +905,7 @@ mod tests {
     }
 
     #[test]
-    fn export_selected_local_secret_key_returns_nsec() {
+    fn export_selected_local_raw_secret_key_returns_nsec() {
         let manager = RadrootsNostrAccountsManager::new_in_memory();
         let identity = RadrootsIdentity::generate();
 
@@ -774,19 +914,51 @@ mod tests {
             .expect("store identity");
 
         let nsec =
-            AndroidBackend::export_selected_local_secret_key(&manager).expect("export secret");
+            AndroidBackend::export_selected_local_raw_secret_key(&manager).expect("export secret");
 
         assert_eq!(nsec, identity.nsec());
         assert!(nsec.starts_with("nsec1"));
     }
 
     #[test]
-    fn import_local_identity_imports_nsec_and_selects_account() {
+    fn export_selected_local_encrypted_secret_key_returns_ncryptsec() {
+        let manager = RadrootsNostrAccountsManager::new_in_memory();
+        let fixture_identity =
+            RadrootsIdentity::from_secret_key_str(FIXTURE_ALICE.secret_key_hex).expect("fixture");
+
+        manager
+            .upsert_identity(&fixture_identity, Some("primary".into()), true)
+            .expect("store identity");
+
+        let ncryptsec = AndroidBackend::export_selected_local_encrypted_secret_key(
+            &manager,
+            FIXTURE_BACKUP_PASSWORD,
+        )
+        .expect("export encrypted secret");
+
+        let restored = RadrootsIdentity::from_encrypted_secret_key_str(
+            ncryptsec.as_str(),
+            FIXTURE_BACKUP_PASSWORD,
+        )
+        .expect("restore encrypted secret");
+
+        assert_eq!(restored.secret_key_hex(), FIXTURE_ALICE.secret_key_hex);
+    }
+
+    #[test]
+    fn import_local_identity_imports_raw_secret_key_and_selects_account() {
         let manager = RadrootsNostrAccountsManager::new_in_memory();
         let identity = RadrootsIdentity::generate();
 
-        let state = AndroidBackend::import_local_identity(&manager, identity.nsec().as_str())
-            .expect("import");
+        let state = AndroidBackend::import_local_identity(
+            &manager,
+            &RadrootsSecretImportRequest {
+                mode: RadrootsSecretImportMode::RawSecretKey,
+                secret_text: identity.nsec(),
+                password: None,
+            },
+        )
+        .expect("import");
 
         assert_eq!(
             state,
@@ -804,6 +976,45 @@ mod tests {
                 .export_secret_hex(&identity.id())
                 .expect("export secret"),
             Some(identity.secret_key_hex())
+        );
+    }
+
+    #[test]
+    fn import_local_identity_imports_encrypted_secret_key_and_selects_account() {
+        let manager = RadrootsNostrAccountsManager::new_in_memory();
+        let encrypted_secret_key =
+            fixture_identity_ncryptsec(&FIXTURE_ALICE, FIXTURE_BACKUP_PASSWORD)
+                .expect("fixture encrypted secret key");
+        let fixture_identity =
+            RadrootsIdentity::from_secret_key_str(FIXTURE_ALICE.secret_key_hex).expect("fixture");
+        let fixture_account_id = fixture_identity.id();
+
+        let state = AndroidBackend::import_local_identity(
+            &manager,
+            &RadrootsSecretImportRequest {
+                mode: RadrootsSecretImportMode::EncryptedSecretKey,
+                secret_text: encrypted_secret_key,
+                password: Some(FIXTURE_BACKUP_PASSWORD.to_owned()),
+            },
+        )
+        .expect("import");
+
+        assert_eq!(
+            state,
+            IdentityGateState::Ready {
+                account_id: fixture_account_id.to_string(),
+            }
+        );
+        assert_eq!(
+            manager.selected_account_id().expect("selected"),
+            Some(fixture_account_id.clone())
+        );
+        assert_eq!(manager.list_accounts().expect("list").len(), 1);
+        assert_eq!(
+            manager
+                .export_secret_hex(&fixture_account_id)
+                .expect("export secret"),
+            Some(FIXTURE_ALICE.secret_key_hex.to_owned())
         );
     }
 
