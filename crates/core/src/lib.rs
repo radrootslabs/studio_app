@@ -4,6 +4,7 @@ use eframe::egui;
 use std::time::Duration;
 use zeroize::Zeroizing;
 
+mod home_location_tools;
 mod location_resolver;
 mod offline_geocoder;
 
@@ -17,6 +18,8 @@ pub use offline_geocoder::{
     RadrootsOfflineGeocoderDiagnostic, RadrootsOfflineGeocoderPlatform,
     RadrootsOfflineGeocoderState, RadrootsOfflineGeocoderUnavailableKind,
 };
+
+use home_location_tools::HomeLocationTools;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SetupActionState {
@@ -137,6 +140,7 @@ pub struct RadrootsApp {
     screen: AppScreen,
     offline_geocoder_state: Option<RadrootsOfflineGeocoderState>,
     status_message: Option<String>,
+    home_location_tools: HomeLocationTools,
     pending_home_confirmation: Option<HomeActionKind>,
     pending_import_entry: bool,
     secret_key_input: Zeroizing<String>,
@@ -150,6 +154,7 @@ impl RadrootsApp {
             screen: AppScreen::Setup,
             offline_geocoder_state: None,
             status_message: None,
+            home_location_tools: HomeLocationTools::new(),
             pending_home_confirmation: None,
             pending_import_entry: false,
             secret_key_input: Zeroizing::new(String::new()),
@@ -171,6 +176,7 @@ impl RadrootsApp {
             IdentityGateState::Missing => {
                 self.screen = AppScreen::Setup;
                 self.status_message = None;
+                self.home_location_tools.clear();
                 self.pending_home_confirmation = None;
                 self.pending_import_entry = false;
                 self.secret_key_input.clear();
@@ -179,6 +185,7 @@ impl RadrootsApp {
             IdentityGateState::Ready { account_id, npub } => {
                 self.screen = AppScreen::Home { account_id, npub };
                 self.status_message = None;
+                self.home_location_tools.clear();
                 self.pending_home_confirmation = None;
                 self.pending_import_entry = false;
                 self.secret_key_input.clear();
@@ -187,6 +194,7 @@ impl RadrootsApp {
             IdentityGateState::Unsupported { reason } => {
                 self.screen = AppScreen::Setup;
                 self.status_message = Some(reason);
+                self.home_location_tools.clear();
                 self.pending_home_confirmation = None;
                 self.pending_import_entry = false;
                 self.secret_key_input.clear();
