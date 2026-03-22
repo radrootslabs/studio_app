@@ -40,6 +40,12 @@ pub struct RadrootsLocationCountry {
     pub center: RadrootsLocationPoint,
 }
 
+pub type RadrootsLocationCountryListResult =
+    Result<Vec<RadrootsLocationCountry>, RadrootsLocationResolverError>;
+
+pub type RadrootsLocationCountryCenterLookupResult =
+    Result<RadrootsLocationPoint, RadrootsLocationResolverError>;
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RadrootsLocationResolverError {
     Unsupported,

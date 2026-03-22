@@ -11,7 +11,8 @@ mod offline_geocoder;
 pub const APP_NAME: &str = "Rad Roots";
 
 pub use location_resolver::{
-    RadrootsLocationCountry, RadrootsLocationPoint, RadrootsLocationResolverError,
+    RadrootsLocationCountry, RadrootsLocationCountryCenterLookupResult,
+    RadrootsLocationCountryListResult, RadrootsLocationPoint, RadrootsLocationResolverError,
     RadrootsLocationReverseOptions, RadrootsResolvedLocation, RadrootsReverseLocationLookupResult,
 };
 pub use offline_geocoder::{
@@ -126,6 +127,25 @@ pub trait RadrootsAppBackend {
     fn poll_reverse_location_lookup_result(
         &self,
     ) -> Result<Option<RadrootsReverseLocationLookupResult>, String> {
+        Ok(None)
+    }
+    fn request_location_country_list(&self) -> Result<(), RadrootsLocationResolverError> {
+        Err(RadrootsLocationResolverError::Unsupported)
+    }
+    fn poll_location_country_list_result(
+        &self,
+    ) -> Result<Option<RadrootsLocationCountryListResult>, String> {
+        Ok(None)
+    }
+    fn request_location_country_center_lookup(
+        &self,
+        _country_id: &str,
+    ) -> Result<(), RadrootsLocationResolverError> {
+        Err(RadrootsLocationResolverError::Unsupported)
+    }
+    fn poll_location_country_center_lookup_result(
+        &self,
+    ) -> Result<Option<RadrootsLocationCountryCenterLookupResult>, String> {
         Ok(None)
     }
     fn list_location_countries(
@@ -322,6 +342,21 @@ impl RadrootsApp {
             Err(err) => {
                 self.home_location_tools
                     .apply_reverse_lookup_poll_error(err);
+            }
+        }
+        match self.backend.poll_location_country_list_result() {
+            Ok(Some(result)) => self.home_location_tools.apply_country_list_result(result),
+            Ok(None) => {}
+            Err(err) => {
+                self.home_location_tools.apply_country_list_poll_error(err);
+            }
+        }
+        match self.backend.poll_location_country_center_lookup_result() {
+            Ok(Some(result)) => self.home_location_tools.apply_country_center_result(result),
+            Ok(None) => {}
+            Err(err) => {
+                self.home_location_tools
+                    .apply_country_center_poll_error(err);
             }
         }
         match self.backend.poll_identity_state() {
