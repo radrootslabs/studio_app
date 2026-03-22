@@ -1,6 +1,7 @@
 /target/
 /.trunk/
 /assets/geocoder/geonames.db
+/assets/geocoder/geonames.revision
 /crates/web/.trunk/
 /crates/web/dist/
 /native/apple/swift/**/.build/
