@@ -228,11 +228,23 @@ fn activate_remote_session(
         )
         .map_err(|source| source.to_string())?;
     let store_path = sessions_path()?;
-    let mut state = load_sessions(store_path.as_path())?;
-    state
-        .activate_session(client_account_id, user_identity.clone())
-        .ok_or_else(|| "pending remote signer session disappeared before activation".to_owned())?;
-    save_sessions(store_path.as_path(), &state)?;
+    let activation_result = (|| -> Result<(), String> {
+        let mut state = load_sessions(store_path.as_path())?;
+        state
+            .activate_session(client_account_id, user_identity.clone())
+            .ok_or_else(|| {
+                "pending remote signer session disappeared before activation".to_owned()
+            })?;
+        save_sessions(store_path.as_path(), &state)
+    })();
+    if let Err(error) = activation_result {
+        if let Err(rollback_error) = manager.remove_account(&user_identity.id) {
+            return Err(format!(
+                "{error}. remote signer account rollback needs retry: {rollback_error}"
+            ));
+        }
+        return Err(error);
+    }
     Ok(IdentityGateState::Ready {
         account_id: user_identity.id.to_string(),
     })
