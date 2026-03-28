@@ -42,25 +42,28 @@ pub fn radroots_studio_app_remote_signer_disconnect_selected(
         return Ok(RadrootsNostrSelectedAccountStatus::NotConfigured);
     };
 
-    manager
-        .remove_account(&account_id)
-        .map_err(|source| source.to_string())?;
+    let mut next_state = state.clone();
+    let removed = next_state.remove_active_session_for_account_id(account_id.as_str());
+    if removed.is_none() {
+        return Err("remote signer session record cleanup could not complete".to_owned());
+    }
+    save_sessions(path, &next_state)?;
+
+    if let Err(error) = manager.remove_account(&account_id) {
+        if let Err(rollback_error) = save_sessions(path, &state) {
+            return Err(format!(
+                "failed to remove remote signer account: {error}. session rollback also failed: {rollback_error}"
+            ));
+        }
+        return Err(error.to_string());
+    }
 
     if let Err(error) = remove_client_secret(session.client_account_id()) {
         return Err(format!(
-            "remote signer account was removed but session secret cleanup failed: {error}"
+            "remote signer account and session were removed but session secret cleanup needs retry: {error}"
         ));
     }
 
-    let mut state = load_sessions(path)?;
-    let removed = state.remove_active_session_for_account_id(account_id.as_str());
-    if removed.is_none() {
-        return Err(
-            "remote signer account was removed but session record cleanup could not complete"
-                .to_owned(),
-        );
-    }
-    save_sessions(path, &state)?;
     manager
         .selected_account_status()
         .map_err(|source| source.to_string())
@@ -84,15 +87,24 @@ pub fn radroots_studio_app_remote_signer_reconcile_startup(
         .iter()
         .map(|record| record.account_id.to_string())
         .collect::<HashSet<_>>();
+    let active_session_account_ids = state
+        .sessions
+        .iter()
+        .filter(|record| record.status == RadrootsAppRemoteSignerSessionStatus::Active)
+        .filter_map(|record| record.account_id().map(ToOwned::to_owned))
+        .collect::<HashSet<_>>();
 
     if load.recovered_from_corruption {
         purge_client_secret_namespace()?;
-        for account in remote_signer_public_only_accounts(manager, &accounts, remote_signer_label)?
-        {
-            manager
-                .remove_account(&account.account_id)
-                .map_err(|source| source.to_string())?;
-        }
+    }
+
+    for account in remote_signer_public_only_accounts(manager, &accounts, remote_signer_label)?
+        .into_iter()
+        .filter(|account| !active_session_account_ids.contains(account.account_id.as_str()))
+    {
+        manager
+            .remove_account(&account.account_id)
+            .map_err(|source| source.to_string())?;
     }
 
     if let Some(record) = state.pending_session().cloned() {
@@ -338,7 +350,7 @@ mod tests {
         )
         .expect_err("cleanup failure");
 
-        assert!(error.contains("session secret cleanup failed"));
+        assert!(error.contains("session secret cleanup needs retry"));
         assert!(matches!(
             manager.selected_account_status().expect("status"),
             RadrootsNostrSelectedAccountStatus::NotConfigured
@@ -351,7 +363,7 @@ mod tests {
                         .account_id()
                         .expect("account id after disconnect failure")
                 )
-                .is_some()
+                .is_none()
         );
     }
 
@@ -389,6 +401,39 @@ mod tests {
                 .expect("load")
                 .sessions
                 .is_empty()
+        );
+    }
+
+    #[test]
+    fn reconcile_startup_removes_orphan_remote_signer_public_only_accounts_without_corruption() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let path = temp.path().join("sessions.json");
+        RadrootsAppRemoteSignerSessionStoreState::default()
+            .save(path.as_path())
+            .expect("save empty");
+        let manager = RadrootsNostrAccountsManager::new_in_memory();
+        let public = fixture_public(&FIXTURE_CAROL);
+        let account_id = public.id.clone();
+        manager
+            .upsert_public_identity(public, Some(REMOTE_SIGNER_LABEL.to_owned()), true)
+            .expect("upsert");
+
+        radroots_studio_app_remote_signer_reconcile_startup(
+            &manager,
+            path.as_path(),
+            REMOTE_SIGNER_LABEL,
+            secret_loader(RadrootsNostrSecretVaultMemory::new()),
+            secret_remover(RadrootsNostrSecretVaultMemory::new()),
+            secret_namespace_purger(RadrootsNostrSecretVaultMemory::new(), Vec::new()),
+        )
+        .expect("reconcile orphan account");
+
+        assert!(
+            manager
+                .list_accounts()
+                .expect("accounts")
+                .iter()
+                .all(|record| record.account_id != account_id)
         );
     }
 
