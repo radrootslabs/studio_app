@@ -7,6 +7,8 @@ mod input;
 mod protocol;
 mod session;
 
+pub const RADROOTS_APP_REMOTE_SIGNER_SECRET_NAMESPACE: &str = "remote-signer";
+
 pub use controller::{RadrootsAppRemoteSignerController, RadrootsAppRemoteSignerControllerHooks};
 pub use custody::{
     radroots_studio_app_remote_signer_clear_pending_session,

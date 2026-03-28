@@ -72,6 +72,7 @@ pub fn radroots_studio_app_remote_signer_reconcile_startup(
     remote_signer_label: &str,
     load_client_secret: impl Fn(&str) -> Result<String, String>,
     remove_client_secret: impl Fn(&str) -> Result<(), String>,
+    purge_client_secret_namespace: impl Fn() -> Result<(), String>,
 ) -> Result<(), String> {
     let load = load_sessions_with_recovery(path)?;
     let mut state = load.state;
@@ -85,6 +86,7 @@ pub fn radroots_studio_app_remote_signer_reconcile_startup(
         .collect::<HashSet<_>>();
 
     if load.recovered_from_corruption {
+        purge_client_secret_namespace()?;
         for account in remote_signer_public_only_accounts(manager, &accounts, remote_signer_label)?
         {
             manager
@@ -129,11 +131,13 @@ pub fn radroots_studio_app_remote_signer_reconcile_startup(
 pub fn radroots_studio_app_remote_signer_purge_all_custody_state(
     path: &Path,
     remove_client_secret: impl Fn(&str) -> Result<(), String>,
+    purge_client_secret_namespace: impl Fn() -> Result<(), String>,
 ) -> Result<(), String> {
     let load = load_sessions_with_recovery(path)?;
     for record in &load.state.sessions {
         remove_client_secret(record.client_account_id())?;
     }
+    purge_client_secret_namespace()?;
     remove_sessions_file_if_present(path)?;
     Ok(())
 }
@@ -237,6 +241,20 @@ mod tests {
             vault
                 .remove_secret(&fixture_account_id(client_account_id))
                 .map_err(|source| source.to_string())
+        }
+    }
+
+    fn secret_namespace_purger(
+        vault: RadrootsNostrSecretVaultMemory,
+        client_account_ids: Vec<String>,
+    ) -> impl Fn() -> Result<(), String> {
+        move || {
+            for client_account_id in &client_account_ids {
+                vault
+                    .remove_secret(&fixture_account_id(client_account_id))
+                    .map_err(|source| source.to_string())?;
+            }
+            Ok(())
         }
     }
 
@@ -355,6 +373,7 @@ mod tests {
             REMOTE_SIGNER_LABEL,
             secret_loader(RadrootsNostrSecretVaultMemory::new()),
             secret_remover(RadrootsNostrSecretVaultMemory::new()),
+            secret_namespace_purger(RadrootsNostrSecretVaultMemory::new(), Vec::new()),
         )
         .expect("reconcile");
 
@@ -392,6 +411,13 @@ mod tests {
         radroots_studio_app_remote_signer_purge_all_custody_state(
             path.as_path(),
             secret_remover(vault.clone()),
+            secret_namespace_purger(
+                vault.clone(),
+                vec![
+                    pending.client_account_id().to_owned(),
+                    active.client_account_id().to_owned(),
+                ],
+            ),
         )
         .expect("purge");
 
@@ -406,6 +432,48 @@ mod tests {
             vault
                 .load_secret_hex(&fixture_account_id(active.client_account_id()))
                 .expect("active removed")
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn reconcile_startup_purges_namespace_after_store_quarantine() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let path = temp.path().join("sessions.json");
+        std::fs::write(path.as_path(), "{invalid").expect("write invalid");
+        let manager = RadrootsNostrAccountsManager::new_in_memory();
+        let public = fixture_public(&FIXTURE_CAROL);
+        manager
+            .upsert_public_identity(public, Some(REMOTE_SIGNER_LABEL.to_owned()), true)
+            .expect("upsert");
+
+        let vault = RadrootsNostrSecretVaultMemory::new();
+        secret_store_secret(&vault, FIXTURE_ALICE.id, "pending");
+        secret_store_secret(&vault, FIXTURE_BOB.id, "active");
+
+        radroots_studio_app_remote_signer_reconcile_startup(
+            &manager,
+            path.as_path(),
+            REMOTE_SIGNER_LABEL,
+            secret_loader(vault.clone()),
+            secret_remover(vault.clone()),
+            secret_namespace_purger(
+                vault.clone(),
+                vec![FIXTURE_ALICE.id.to_owned(), FIXTURE_BOB.id.to_owned()],
+            ),
+        )
+        .expect("reconcile after quarantine");
+
+        assert!(
+            vault
+                .load_secret_hex(&fixture_account_id(FIXTURE_ALICE.id))
+                .expect("pending removed by namespace purge")
+                .is_none()
+        );
+        assert!(
+            vault
+                .load_secret_hex(&fixture_account_id(FIXTURE_BOB.id))
+                .expect("active removed by namespace purge")
                 .is_none()
         );
     }

@@ -255,6 +255,53 @@ pub(crate) fn remove_secret(
 }
 
 #[cfg(target_os = "android")]
+pub(crate) fn remove_secret_namespace(
+    service: &str,
+    namespace: &str,
+) -> Result<(), RadrootsNostrAccountsError> {
+    let java_vm = android_java_vm()?;
+    let mut env = java_vm.attach_current_thread().map_err(jni_error)?;
+    let bridge_class = bridge_class(&mut env)?;
+    let service = java_string_arg(&mut env, service)?;
+    let namespace = java_string_arg(&mut env, namespace)?;
+
+    let status = env
+        .call_static_method(
+            &bridge_class,
+            "deleteSecretNamespace",
+            "(Ljava/lang/String;Ljava/lang/String;)I",
+            &[JValue::Object(&service), JValue::Object(&namespace)],
+        )
+        .and_then(|value| value.i())
+        .map_err(jni_error)?;
+
+    match AndroidSecretStatus::from_raw(status)? {
+        AndroidSecretStatus::Success | AndroidSecretStatus::NotFound => Ok(()),
+        AndroidSecretStatus::InvalidInput => Err(bridge_vault_error(
+            &mut env,
+            &bridge_class,
+            "android security bridge rejected the namespace delete request",
+        )),
+        AndroidSecretStatus::Error => Err(bridge_vault_error(
+            &mut env,
+            &bridge_class,
+            "android keystore namespace delete failed",
+        )),
+    }
+}
+
+#[cfg(not(target_os = "android"))]
+pub(crate) fn remove_secret_namespace(
+    service: &str,
+    namespace: &str,
+) -> Result<(), RadrootsNostrAccountsError> {
+    let _ = (service, namespace);
+    Err(RadrootsNostrAccountsError::Vault(
+        "android keystore storage is only available on android".to_owned(),
+    ))
+}
+
+#[cfg(target_os = "android")]
 pub(crate) fn resolve_nostr_storage_root() -> Result<PathBuf, RadrootsNostrAccountsError> {
     let java_vm = android_java_vm()?;
     let mut env = java_vm.attach_current_thread().map_err(jni_error)?;

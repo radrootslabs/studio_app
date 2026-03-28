@@ -114,6 +114,23 @@ public func radroots_studio_apple_secret_store_delete(
     }
 }
 
+@_cdecl("radroots_studio_apple_secret_store_delete_namespace")
+public func radroots_studio_apple_secret_store_delete_namespace(
+    _ servicePrefix: UnsafePointer<CChar>?,
+    _ namespace: UnsafePointer<CChar>?,
+    _ errorOut: UnsafeMutablePointer<UnsafeMutablePointer<CChar>?>?
+) -> Int32 {
+    do {
+        let store = try makeStore(servicePrefix: servicePrefix)
+        let namespace = try makeNamespace(namespace)
+        try store.deleteNamespace(namespace)
+        return RadRootsAppleFFIStatus.success.rawValue
+    } catch {
+        setError(error, into: errorOut)
+        return statusForError(error)
+    }
+}
+
 @_cdecl("radroots_studio_apple_user_presence_verify")
 public func radroots_studio_apple_user_presence_verify(
     _ reason: UnsafePointer<CChar>?,
@@ -170,13 +187,27 @@ private func makeKey(
     namespace: UnsafePointer<CChar>?,
     name: UnsafePointer<CChar>?
 ) throws -> RadRootsAppleSecretKey {
-    guard let namespace, let name else {
+    let namespaceValue = try makeNamespace(namespace)
+    guard let name else {
         throw RadRootsAppleSecurityError.invalidRequest("secret namespace and name are required")
     }
     return try RadRootsAppleSecretKey(
-        namespace: String(cString: namespace),
+        namespace: namespaceValue,
         name: String(cString: name)
     )
+}
+
+private func makeNamespace(
+    _ namespace: UnsafePointer<CChar>?
+) throws -> String {
+    guard let namespace else {
+        throw RadRootsAppleSecurityError.invalidRequest("secret namespace is required")
+    }
+    let value = String(cString: namespace)
+    guard !value.isEmpty else {
+        throw RadRootsAppleSecurityError.invalidRequest("secret namespace cannot be empty")
+    }
+    return value
 }
 
 private func makePolicy(

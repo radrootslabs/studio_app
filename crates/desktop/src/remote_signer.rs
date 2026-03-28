@@ -5,9 +5,10 @@ use radroots_studio_app_core::{
     RadrootsRemoteSignerPreview, SetupActionState,
 };
 use radroots_studio_app_remote_signer::{
-    RadrootsAppRemoteSignerController, RadrootsAppRemoteSignerControllerHooks,
-    RadrootsAppRemoteSignerPendingSession, RadrootsAppRemoteSignerSessionRecord,
-    RadrootsAppRemoteSignerSessionStoreState, radroots_studio_app_remote_signer_clear_pending_session,
+    RADROOTS_APP_REMOTE_SIGNER_SECRET_NAMESPACE, RadrootsAppRemoteSignerController,
+    RadrootsAppRemoteSignerControllerHooks, RadrootsAppRemoteSignerPendingSession,
+    RadrootsAppRemoteSignerSessionRecord, RadrootsAppRemoteSignerSessionStoreState,
+    radroots_studio_app_remote_signer_clear_pending_session,
     radroots_studio_app_remote_signer_disconnect_selected, radroots_studio_app_remote_signer_preview,
     radroots_studio_app_remote_signer_purge_all_custody_state,
     radroots_studio_app_remote_signer_reconcile_startup,
@@ -34,6 +35,7 @@ impl RadrootsAppRemoteSignerControllerHooks for DesktopRemoteSignerHooks {
             REMOTE_SIGNER_LABEL,
             load_client_secret,
             remove_client_secret,
+            purge_client_secret_namespace,
         )
     }
 
@@ -205,7 +207,11 @@ pub(crate) fn cancel_pending_connection() -> Result<(), String> {
 
 pub(crate) fn purge_all_custody_state() -> Result<(), String> {
     let store_path = sessions_path()?;
-    radroots_studio_app_remote_signer_purge_all_custody_state(store_path.as_path(), remove_client_secret)
+    radroots_studio_app_remote_signer_purge_all_custody_state(
+        store_path.as_path(),
+        remove_client_secret,
+        purge_client_secret_namespace,
+    )
 }
 
 fn activate_remote_session(
@@ -263,6 +269,13 @@ fn sessions_path() -> Result<PathBuf, String> {
 }
 
 fn client_secret_vault() -> RadrootsAppleKeychainVault {
+    RadrootsAppleKeychainVault::new_with_namespace(
+        APPLE_NOSTR_SERVICE,
+        RADROOTS_APP_REMOTE_SIGNER_SECRET_NAMESPACE,
+    )
+}
+
+fn legacy_client_secret_vault() -> RadrootsAppleKeychainVault {
     RadrootsAppleKeychainVault::new(APPLE_NOSTR_SERVICE)
 }
 
@@ -277,10 +290,20 @@ fn store_client_secret(client_account_id: &str, secret_key_hex: &str) -> Result<
 fn load_client_secret(client_account_id: &str) -> Result<String, String> {
     let account_id = radroots_identity::RadrootsIdentityId::try_from(client_account_id)
         .map_err(|_| "invalid remote signer client account id".to_owned())?;
-    client_secret_vault()
+    if let Some(secret) = client_secret_vault()
         .load_secret_hex(&account_id)
         .map_err(|source| source.to_string())?
-        .ok_or_else(|| "remote signer session secret is missing".to_owned())
+    {
+        return Ok(secret);
+    }
+
+    let secret = legacy_client_secret_vault()
+        .load_secret_hex(&account_id)
+        .map_err(|source| source.to_string())?
+        .ok_or_else(|| "remote signer session secret is missing".to_owned())?;
+    let _ = client_secret_vault().store_secret_hex(&account_id, secret.as_str());
+    let _ = legacy_client_secret_vault().remove_secret(&account_id);
+    Ok(secret)
 }
 
 fn remove_client_secret(client_account_id: &str) -> Result<(), String> {
@@ -288,6 +311,15 @@ fn remove_client_secret(client_account_id: &str) -> Result<(), String> {
         .map_err(|_| "invalid remote signer client account id".to_owned())?;
     client_secret_vault()
         .remove_secret(&account_id)
+        .map_err(|source| source.to_string())?;
+    legacy_client_secret_vault()
+        .remove_secret(&account_id)
+        .map_err(|source| source.to_string())
+}
+
+fn purge_client_secret_namespace() -> Result<(), String> {
+    client_secret_vault()
+        .purge_namespace()
         .map_err(|source| source.to_string())
 }
 

@@ -1,4 +1,6 @@
-use crate::security::{ANDROID_NOSTR_NAMESPACE, load_secret, remove_secret, store_secret};
+use crate::security::{
+    ANDROID_NOSTR_NAMESPACE, load_secret, remove_secret, remove_secret_namespace, store_secret,
+};
 use radroots_identity::RadrootsIdentityId;
 use radroots_nostr_accounts::prelude::{RadrootsNostrAccountsError, RadrootsNostrSecretVault};
 use zeroize::Zeroizing;
@@ -6,17 +8,30 @@ use zeroize::Zeroizing;
 #[derive(Debug, Clone)]
 pub(crate) struct RadrootsAndroidKeystoreVault {
     service_name: String,
+    namespace: String,
 }
 
 impl RadrootsAndroidKeystoreVault {
     pub(crate) fn new(service_name: impl Into<String>) -> Self {
+        Self::new_with_namespace(service_name, ANDROID_NOSTR_NAMESPACE)
+    }
+
+    pub(crate) fn new_with_namespace(
+        service_name: impl Into<String>,
+        namespace: impl Into<String>,
+    ) -> Self {
         Self {
             service_name: service_name.into(),
+            namespace: namespace.into(),
         }
     }
 
     fn account_name(account_id: &RadrootsIdentityId) -> &str {
         account_id.as_str()
+    }
+
+    pub(crate) fn purge_namespace(&self) -> Result<(), RadrootsNostrAccountsError> {
+        remove_secret_namespace(self.service_name.as_str(), self.namespace.as_str())
     }
 }
 
@@ -29,7 +44,7 @@ impl RadrootsNostrSecretVault for RadrootsAndroidKeystoreVault {
         let secret_key_hex = Zeroizing::new(secret_key_hex.to_owned());
         store_secret(
             self.service_name.as_str(),
-            ANDROID_NOSTR_NAMESPACE,
+            self.namespace.as_str(),
             Self::account_name(account_id),
             secret_key_hex.as_bytes(),
             true,
@@ -44,7 +59,7 @@ impl RadrootsNostrSecretVault for RadrootsAndroidKeystoreVault {
     ) -> Result<Option<String>, RadrootsNostrAccountsError> {
         let Some(secret) = load_secret(
             self.service_name.as_str(),
-            ANDROID_NOSTR_NAMESPACE,
+            self.namespace.as_str(),
             Self::account_name(account_id),
         )?
         else {
@@ -66,7 +81,7 @@ impl RadrootsNostrSecretVault for RadrootsAndroidKeystoreVault {
     ) -> Result<(), RadrootsNostrAccountsError> {
         remove_secret(
             self.service_name.as_str(),
-            ANDROID_NOSTR_NAMESPACE,
+            self.namespace.as_str(),
             Self::account_name(account_id),
         )
     }

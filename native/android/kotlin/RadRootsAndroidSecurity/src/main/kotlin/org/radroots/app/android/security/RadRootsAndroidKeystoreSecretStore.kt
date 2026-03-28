@@ -47,10 +47,21 @@ class RadRootsAndroidKeystoreSecretStore(
     ): ByteArray? {
         validateIdentifiers(servicePrefix, namespace, name)
         val target = RadRootsAndroidStoragePaths.secretFile(context, servicePrefix, namespace, name)
-        if (!target.exists()) {
+        val legacyTarget = RadRootsAndroidStoragePaths.legacySecretFile(
+            context.noBackupFilesDir,
+            servicePrefix,
+            namespace,
+            name,
+        )
+        val source = when {
+            target.exists() -> target
+            legacyTarget.exists() -> legacyTarget
+            else -> null
+        }
+        if (source == null) {
             return null
         }
-        val secretBlob = readSecretFile(target)
+        val secretBlob = readSecretFile(source)
         val (iv, ciphertext) = decodeSecretBlob(secretBlob)
         val cipher = Cipher.getInstance(cipherTransformation)
         cipher.init(
@@ -77,13 +88,36 @@ class RadRootsAndroidKeystoreSecretStore(
         name: String,
     ) {
         validateIdentifiers(servicePrefix, namespace, name)
-        val target = RadRootsAndroidStoragePaths.secretFile(context, servicePrefix, namespace, name)
-        if (!target.exists()) {
-            return
+        val current = RadRootsAndroidStoragePaths.secretFile(context, servicePrefix, namespace, name)
+        val legacy = RadRootsAndroidStoragePaths.legacySecretFile(
+            context.noBackupFilesDir,
+            servicePrefix,
+            namespace,
+            name,
+        )
+        deleteSecretFileIfPresent(current)
+        deleteSecretFileIfPresent(legacy)
+    }
+
+    fun deleteNamespace(
+        servicePrefix: String,
+        namespace: String,
+    ) {
+        validateNamespace(servicePrefix, namespace)
+        val secretsDir = RadRootsAndroidStoragePaths.secretsDir(context)
+        val prefix = RadRootsAndroidStoragePaths.namespaceFilePrefix(servicePrefix, namespace)
+        val children = secretsDir.listFiles().orEmpty()
+        for (child in children) {
+            if (!child.isFile || !child.name.startsWith(prefix) || !child.name.endsWith(".bin")) {
+                continue
+            }
+            if (!child.delete()) {
+                throw RadRootsAndroidSecurityError.StorageFailure(
+                    "failed to delete encrypted secret namespace file",
+                )
+            }
         }
-        if (!target.delete()) {
-            throw RadRootsAndroidSecurityError.StorageFailure("failed to delete encrypted secret file")
-        }
+        deleteKey(masterKeyAlias(servicePrefix, namespace))
     }
 
     fun resolveNostrStorageRoot(): File = RadRootsAndroidStoragePaths.nostrRoot(context)
@@ -97,6 +131,15 @@ class RadRootsAndroidKeystoreSecretStore(
         }
         if (name.isBlank()) {
             throw RadRootsAndroidSecurityError.InvalidInput("name must not be blank")
+        }
+    }
+
+    private fun validateNamespace(servicePrefix: String, namespace: String) {
+        if (servicePrefix.isBlank()) {
+            throw RadRootsAndroidSecurityError.InvalidInput("service prefix must not be blank")
+        }
+        if (namespace.isBlank()) {
+            throw RadRootsAndroidSecurityError.InvalidInput("namespace must not be blank")
         }
     }
 
@@ -292,6 +335,15 @@ class RadRootsAndroidKeystoreSecretStore(
         val keyStore = KeyStore.getInstance(androidKeystoreProvider).apply { load(null) }
         if (keyStore.containsAlias(alias)) {
             keyStore.deleteEntry(alias)
+        }
+    }
+
+    private fun deleteSecretFileIfPresent(target: File) {
+        if (!target.exists()) {
+            return
+        }
+        if (!target.delete()) {
+            throw RadRootsAndroidSecurityError.StorageFailure("failed to delete encrypted secret file")
         }
     }
 

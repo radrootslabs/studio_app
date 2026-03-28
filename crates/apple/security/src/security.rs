@@ -65,6 +65,12 @@ unsafe extern "C" {
         error_out: *mut *mut c_char,
     ) -> i32;
 
+    fn radroots_studio_apple_secret_store_delete_namespace(
+        service_prefix: *const c_char,
+        namespace: *const c_char,
+        error_out: *mut *mut c_char,
+    ) -> i32;
+
     fn radroots_studio_apple_user_presence_verify(
         reason: *const c_char,
         error_out: *mut *mut c_char,
@@ -318,6 +324,46 @@ pub fn remove_secret(
     #[cfg(not(any(target_os = "ios", target_os = "macos")))]
     {
         let _ = (service, namespace, name);
+        Err(RadrootsNostrAccountsError::Vault(
+            "apple keychain storage is only available on ios and macos".to_owned(),
+        ))
+    }
+}
+
+pub fn remove_secret_namespace(
+    service: &str,
+    namespace: &str,
+) -> Result<(), RadrootsNostrAccountsError> {
+    #[cfg(any(target_os = "ios", target_os = "macos"))]
+    {
+        let service = c_string(service)?;
+        let namespace = c_string(namespace)?;
+        let mut ffi_error = FfiErrorString::new();
+        let status = unsafe {
+            // SAFETY: all pointers are backed by live CString values for the duration
+            // of the call.
+            radroots_studio_apple_secret_store_delete_namespace(
+                service.as_ptr(),
+                namespace.as_ptr(),
+                ffi_error.as_mut_ptr(),
+            )
+        };
+        return match AppleSecretStatus::from_raw(status)? {
+            AppleSecretStatus::Success | AppleSecretStatus::NotFound => Ok(()),
+            AppleSecretStatus::InvalidInput => Err(vault_error(
+                ffi_error,
+                "apple security ffi rejected the namespace delete request",
+            )),
+            AppleSecretStatus::Error => Err(vault_error(
+                ffi_error,
+                "apple keychain namespace delete failed",
+            )),
+        };
+    }
+
+    #[cfg(not(any(target_os = "ios", target_os = "macos")))]
+    {
+        let _ = (service, namespace);
         Err(RadrootsNostrAccountsError::Vault(
             "apple keychain storage is only available on ios and macos".to_owned(),
         ))

@@ -50,6 +50,24 @@ class RadRootsAndroidSecurityTests {
     }
 
     @Test
+    fun secretFileNamesCarryNamespacePrefix() {
+        val baseDir = File("/data/user/0/org.radroots.app.android/no_backup")
+        val path = RadRootsAndroidStoragePaths.secretFile(
+            baseDir = baseDir,
+            servicePrefix = "org.radroots.app.nostr",
+            namespace = "remote-signer",
+            name = "client-1",
+        )
+
+        assertTrue(path.name.endsWith(".bin"))
+        assertTrue(
+            path.name.startsWith(
+                "${RadRootsAndroidStoragePaths.secretNamespaceId("org.radroots.app.nostr", "remote-signer")}.",
+            ),
+        )
+    }
+
+    @Test
     fun strongBoxIsRequestedOnlyWhenSupported() {
         val policy = RadRootsAndroidSecretAccessPolicy.SECURE_LOCAL_SECRET
 

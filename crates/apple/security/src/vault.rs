@@ -1,5 +1,6 @@
 use crate::security::{
-    APPLE_NOSTR_NAMESPACE, AppleSecretAccessPolicy, load_secret, remove_secret, store_secret,
+    APPLE_NOSTR_NAMESPACE, AppleSecretAccessPolicy, load_secret, remove_secret,
+    remove_secret_namespace, store_secret,
 };
 use radroots_identity::RadrootsIdentityId;
 use radroots_nostr_accounts::prelude::{RadrootsNostrAccountsError, RadrootsNostrSecretVault};
@@ -8,17 +9,30 @@ use zeroize::Zeroizing;
 #[derive(Debug, Clone)]
 pub struct RadrootsAppleKeychainVault {
     service_name: String,
+    namespace: String,
 }
 
 impl RadrootsAppleKeychainVault {
     pub fn new(service_name: impl Into<String>) -> Self {
+        Self::new_with_namespace(service_name, APPLE_NOSTR_NAMESPACE)
+    }
+
+    pub fn new_with_namespace(
+        service_name: impl Into<String>,
+        namespace: impl Into<String>,
+    ) -> Self {
         Self {
             service_name: service_name.into(),
+            namespace: namespace.into(),
         }
     }
 
     fn account_name(account_id: &RadrootsIdentityId) -> &str {
         account_id.as_str()
+    }
+
+    pub fn purge_namespace(&self) -> Result<(), RadrootsNostrAccountsError> {
+        remove_secret_namespace(self.service_name.as_str(), self.namespace.as_str())
     }
 }
 
@@ -31,7 +45,7 @@ impl RadrootsNostrSecretVault for RadrootsAppleKeychainVault {
         let secret_key_hex = Zeroizing::new(secret_key_hex.to_owned());
         store_secret(
             self.service_name.as_str(),
-            APPLE_NOSTR_NAMESPACE,
+            self.namespace.as_str(),
             Self::account_name(account_id),
             secret_key_hex.as_bytes(),
             AppleSecretAccessPolicy::SECURE_LOCAL_SECRET,
@@ -44,7 +58,7 @@ impl RadrootsNostrSecretVault for RadrootsAppleKeychainVault {
     ) -> Result<Option<String>, RadrootsNostrAccountsError> {
         let Some(secret) = load_secret(
             self.service_name.as_str(),
-            APPLE_NOSTR_NAMESPACE,
+            self.namespace.as_str(),
             Self::account_name(account_id),
         )?
         else {
@@ -66,7 +80,7 @@ impl RadrootsNostrSecretVault for RadrootsAppleKeychainVault {
     ) -> Result<(), RadrootsNostrAccountsError> {
         remove_secret(
             self.service_name.as_str(),
-            APPLE_NOSTR_NAMESPACE,
+            self.namespace.as_str(),
             Self::account_name(account_id),
         )
     }

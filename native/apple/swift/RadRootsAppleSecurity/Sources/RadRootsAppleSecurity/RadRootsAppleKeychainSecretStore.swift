@@ -54,11 +54,28 @@ public final class RadRootsAppleKeychainSecretStore: @unchecked Sendable {
         }
     }
 
+    public func deleteNamespace(_ namespace: String) throws {
+        guard !namespace.isEmpty else {
+            throw RadRootsAppleSecurityError.invalidRequest("secret namespace cannot be empty")
+        }
+        let status = SecItemDelete(namespaceQuery(namespace) as CFDictionary)
+        guard status == errSecSuccess || status == errSecItemNotFound else {
+            throw Self.mapSecurityStatus(status, defaultMessage: "keychain namespace delete failed")
+        }
+    }
+
     func baseQuery(for key: RadRootsAppleSecretKey) -> [String: Any] {
         [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: key.serviceName(servicePrefix: servicePrefix),
             kSecAttrAccount as String: key.name
+        ]
+    }
+
+    func namespaceQuery(_ namespace: String) -> [String: Any] {
+        [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: "\(servicePrefix).\(namespace)"
         ]
     }
 

@@ -96,6 +96,20 @@ object RadRootsAndroidSecurityBridge {
     }
 
     @JvmStatic
+    fun deleteSecretNamespace(
+        servicePrefix: String,
+        namespace: String,
+    ): Int {
+        return try {
+            secretStore().deleteNamespace(servicePrefix, namespace)
+            clearError()
+            STATUS_SUCCESS
+        } catch (cause: Throwable) {
+            captureError(cause)
+        }
+    }
+
+    @JvmStatic
     fun resolveNostrStorageRoot(): String? {
         return try {
             val path = secretStore().resolveNostrStorageRoot().absolutePath
