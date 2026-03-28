@@ -94,7 +94,9 @@ pub fn radroots_studio_app_remote_signer_reconcile_startup(
         .filter_map(|record| record.account_id().map(ToOwned::to_owned))
         .collect::<HashSet<_>>();
 
-    if load.recovered_from_corruption {
+    let should_purge_namespace = load.recovered_from_corruption || state.sessions.is_empty();
+
+    if should_purge_namespace {
         purge_client_secret_namespace()?;
     }
 
@@ -519,6 +521,36 @@ mod tests {
             vault
                 .load_secret_hex(&fixture_account_id(FIXTURE_BOB.id))
                 .expect("active removed by namespace purge")
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn reconcile_startup_purges_namespace_when_session_store_is_empty() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let path = temp.path().join("sessions.json");
+        RadrootsAppRemoteSignerSessionStoreState::default()
+            .save(path.as_path())
+            .expect("save empty");
+        let manager = RadrootsNostrAccountsManager::new_in_memory();
+
+        let vault = RadrootsNostrSecretVaultMemory::new();
+        secret_store_secret(&vault, FIXTURE_ALICE.id, "pending");
+
+        radroots_studio_app_remote_signer_reconcile_startup(
+            &manager,
+            path.as_path(),
+            REMOTE_SIGNER_LABEL,
+            secret_loader(vault.clone()),
+            secret_remover(vault.clone()),
+            secret_namespace_purger(vault.clone(), vec![FIXTURE_ALICE.id.to_owned()]),
+        )
+        .expect("reconcile empty store");
+
+        assert!(
+            vault
+                .load_secret_hex(&fixture_account_id(FIXTURE_ALICE.id))
+                .expect("pending removed by empty-store namespace purge")
                 .is_none()
         );
     }
