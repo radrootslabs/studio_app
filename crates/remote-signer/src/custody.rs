@@ -126,6 +126,18 @@ pub fn radroots_studio_app_remote_signer_reconcile_startup(
     Ok(())
 }
 
+pub fn radroots_studio_app_remote_signer_purge_all_custody_state(
+    path: &Path,
+    remove_client_secret: impl Fn(&str) -> Result<(), String>,
+) -> Result<(), String> {
+    let load = load_sessions_with_recovery(path)?;
+    for record in &load.state.sessions {
+        remove_client_secret(record.client_account_id())?;
+    }
+    remove_sessions_file_if_present(path)?;
+    Ok(())
+}
+
 fn remote_signer_public_only_accounts(
     manager: &RadrootsNostrAccountsManager,
     accounts: &[RadrootsNostrAccountRecord],
@@ -163,6 +175,16 @@ fn save_sessions(
     state: &RadrootsAppRemoteSignerSessionStoreState,
 ) -> Result<(), String> {
     state.save(path).map_err(|error| error.to_string())
+}
+
+fn remove_sessions_file_if_present(path: &Path) -> Result<(), String> {
+    match std::fs::remove_file(path) {
+        Ok(()) => Ok(()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(format!(
+            "failed to remove remote signer session store: {error}"
+        )),
+    }
 }
 
 #[cfg(test)]
@@ -348,6 +370,43 @@ mod tests {
                 .expect("load")
                 .sessions
                 .is_empty()
+        );
+    }
+
+    #[test]
+    fn purge_all_custody_state_removes_all_tracked_client_secrets_and_session_file() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let path = temp.path().join("sessions.json");
+        let pending = write_pending_state(path.as_path());
+        let mut active = write_active_state(path.as_path());
+        active.client_identity = fixture_public(&FIXTURE_BOB);
+        let mut state =
+            RadrootsAppRemoteSignerSessionStoreState::load(path.as_path()).expect("load");
+        state.sessions.push(active.clone());
+        state.save(path.as_path()).expect("save");
+
+        let vault = RadrootsNostrSecretVaultMemory::new();
+        secret_store_secret(&vault, pending.client_account_id(), "pending");
+        secret_store_secret(&vault, active.client_account_id(), "active");
+
+        radroots_studio_app_remote_signer_purge_all_custody_state(
+            path.as_path(),
+            secret_remover(vault.clone()),
+        )
+        .expect("purge");
+
+        assert!(!path.exists());
+        assert!(
+            vault
+                .load_secret_hex(&fixture_account_id(pending.client_account_id()))
+                .expect("pending removed")
+                .is_none()
+        );
+        assert!(
+            vault
+                .load_secret_hex(&fixture_account_id(active.client_account_id()))
+                .expect("active removed")
+                .is_none()
         );
     }
 }

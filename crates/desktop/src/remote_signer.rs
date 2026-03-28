@@ -9,6 +9,7 @@ use radroots_studio_app_remote_signer::{
     RadrootsAppRemoteSignerPendingSession, RadrootsAppRemoteSignerSessionRecord,
     RadrootsAppRemoteSignerSessionStoreState, radroots_studio_app_remote_signer_clear_pending_session,
     radroots_studio_app_remote_signer_disconnect_selected, radroots_studio_app_remote_signer_preview,
+    radroots_studio_app_remote_signer_purge_all_custody_state,
     radroots_studio_app_remote_signer_reconcile_startup,
 };
 use radroots_nostr_accounts::prelude::{
@@ -200,6 +201,11 @@ pub(crate) fn cancel_pending_connection() -> Result<(), String> {
         remove_client_secret,
     )?;
     Ok(())
+}
+
+pub(crate) fn purge_all_custody_state() -> Result<(), String> {
+    let store_path = sessions_path()?;
+    radroots_studio_app_remote_signer_purge_all_custody_state(store_path.as_path(), remove_client_secret)
 }
 
 fn activate_remote_session(

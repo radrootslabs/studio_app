@@ -316,6 +316,7 @@ impl IosBackend {
         manager: &RadrootsNostrAccountsManager,
         accounts_path: &Path,
     ) -> Result<IdentityGateState, String> {
+        remote_signer::purge_all_custody_state()?;
         let state = Self::remove_all_local_identities(manager)?;
         Self::remove_accounts_file_if_present(accounts_path)?;
         Ok(state)

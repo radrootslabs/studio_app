@@ -10,7 +10,9 @@ mod session;
 pub use controller::{RadrootsAppRemoteSignerController, RadrootsAppRemoteSignerControllerHooks};
 pub use custody::{
     radroots_studio_app_remote_signer_clear_pending_session,
-    radroots_studio_app_remote_signer_disconnect_selected, radroots_studio_app_remote_signer_reconcile_startup,
+    radroots_studio_app_remote_signer_disconnect_selected,
+    radroots_studio_app_remote_signer_purge_all_custody_state,
+    radroots_studio_app_remote_signer_reconcile_startup,
 };
 pub use error::RadrootsAppRemoteSignerError;
 pub use input::{
