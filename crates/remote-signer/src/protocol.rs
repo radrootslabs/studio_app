@@ -11,8 +11,9 @@ use radroots_nostr::prelude::{
 };
 use radroots_nostr_connect::message::RADROOTS_NOSTR_CONNECT_RPC_KIND;
 use radroots_nostr_connect::prelude::{
-    RadrootsNostrConnectMethod, RadrootsNostrConnectRequest, RadrootsNostrConnectRequestMessage,
-    RadrootsNostrConnectResponse, RadrootsNostrConnectResponseEnvelope,
+    RadrootsNostrConnectMethod, RadrootsNostrConnectPendingConnectionPollOutcome,
+    RadrootsNostrConnectRequest, RadrootsNostrConnectRequestMessage, RadrootsNostrConnectResponse,
+    RadrootsNostrConnectResponseEnvelope,
 };
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
@@ -22,8 +23,6 @@ use tokio::time::timeout;
 
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 const GET_PUBLIC_KEY_TIMEOUT: Duration = Duration::from_secs(10);
-const REMOTE_SIGNER_PENDING_APPROVAL_ERROR: &str = "connection is pending";
-
 static REQUEST_COUNTER: AtomicU64 = AtomicU64::new(1);
 
 #[derive(Debug, Clone)]
@@ -275,29 +274,30 @@ fn parse_response_event(
 fn classify_pending_poll_response(
     response: RadrootsNostrConnectResponse,
 ) -> RadrootsAppRemoteSignerPendingPollOutcome {
-    match response {
-        RadrootsNostrConnectResponse::UserPublicKey(public_key) => {
+    match response.into_pending_connection_poll_outcome() {
+        RadrootsNostrConnectPendingConnectionPollOutcome::Approved(public_key) => {
             RadrootsAppRemoteSignerPendingPollOutcome::Approved(RadrootsIdentityPublic::new(
                 public_key,
             ))
         }
-        RadrootsNostrConnectResponse::Error { result, error } => {
-            if result.is_none() && error == REMOTE_SIGNER_PENDING_APPROVAL_ERROR {
-                RadrootsAppRemoteSignerPendingPollOutcome::PendingApproval
-            } else {
-                RadrootsAppRemoteSignerPendingPollOutcome::Rejected { message: error }
-            }
+        RadrootsNostrConnectPendingConnectionPollOutcome::PendingApproval => {
+            RadrootsAppRemoteSignerPendingPollOutcome::PendingApproval
         }
-        RadrootsNostrConnectResponse::AuthUrl(url) => {
+        RadrootsNostrConnectPendingConnectionPollOutcome::Rejected { message } => {
+            RadrootsAppRemoteSignerPendingPollOutcome::Rejected { message }
+        }
+        RadrootsNostrConnectPendingConnectionPollOutcome::AuthChallenge { url } => {
             RadrootsAppRemoteSignerPendingPollOutcome::FatalError {
                 message: format!(
                     "remote signer requires an unsupported authorization challenge: {url}"
                 ),
             }
         }
-        other => RadrootsAppRemoteSignerPendingPollOutcome::FatalError {
-            message: format!("unexpected remote signer response: {other:?}"),
-        },
+        RadrootsNostrConnectPendingConnectionPollOutcome::UnexpectedResponse { response } => {
+            RadrootsAppRemoteSignerPendingPollOutcome::FatalError {
+                message: format!("unexpected remote signer response: {response}"),
+            }
+        }
     }
 }
 
@@ -351,7 +351,8 @@ mod tests {
     fn pending_error_response_is_classified_as_pending_approval() {
         let outcome = classify_pending_poll_response(RadrootsNostrConnectResponse::Error {
             result: None,
-            error: REMOTE_SIGNER_PENDING_APPROVAL_ERROR.to_owned(),
+            error: radroots_nostr_connect::prelude::RADROOTS_NOSTR_CONNECT_PENDING_CONNECTION_ERROR
+                .to_owned(),
         });
 
         assert_eq!(
