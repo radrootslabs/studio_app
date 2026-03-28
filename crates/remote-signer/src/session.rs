@@ -31,6 +31,12 @@ pub struct RadrootsAppRemoteSignerSessionStoreState {
     pub sessions: Vec<RadrootsAppRemoteSignerSessionRecord>,
 }
 
+#[derive(Debug, Clone)]
+pub struct RadrootsAppRemoteSignerSessionStoreLoadResult {
+    pub state: RadrootsAppRemoteSignerSessionStoreState,
+    pub recovered_from_corruption: bool,
+}
+
 impl Default for RadrootsAppRemoteSignerSessionStoreState {
     fn default() -> Self {
         Self {
@@ -71,9 +77,20 @@ impl RadrootsAppRemoteSignerSessionRecord {
 
 impl RadrootsAppRemoteSignerSessionStoreState {
     pub fn load(path: &Path) -> Result<Self, RadrootsAppRemoteSignerError> {
+        Ok(Self::load_with_recovery(path)?.state)
+    }
+
+    pub fn load_with_recovery(
+        path: &Path,
+    ) -> Result<RadrootsAppRemoteSignerSessionStoreLoadResult, RadrootsAppRemoteSignerError> {
         match std::fs::read(path) {
             Ok(contents) => Self::load_bytes(path, contents),
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(Self::default()),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                Ok(RadrootsAppRemoteSignerSessionStoreLoadResult {
+                    state: Self::default(),
+                    recovered_from_corruption: false,
+                })
+            }
             Err(error) => Err(RadrootsAppRemoteSignerError::SessionStoreIo(
                 error.to_string(),
             )),
@@ -181,7 +198,10 @@ impl RadrootsAppRemoteSignerSessionStoreState {
         Some(self.sessions.remove(index))
     }
 
-    fn load_bytes(path: &Path, contents: Vec<u8>) -> Result<Self, RadrootsAppRemoteSignerError> {
+    fn load_bytes(
+        path: &Path,
+        contents: Vec<u8>,
+    ) -> Result<RadrootsAppRemoteSignerSessionStoreLoadResult, RadrootsAppRemoteSignerError> {
         let contents = String::from_utf8(contents).map_err(|error| {
             RadrootsAppRemoteSignerError::InvalidSessionStore(format!(
                 "session store was not valid utf-8: {error}"
@@ -193,7 +213,10 @@ impl RadrootsAppRemoteSignerSessionStoreState {
             Err(error) => {
                 quarantine_invalid_store(path)?;
                 let _ = error;
-                return Ok(Self::default());
+                return Ok(RadrootsAppRemoteSignerSessionStoreLoadResult {
+                    state: Self::default(),
+                    recovered_from_corruption: true,
+                });
             }
         };
 
@@ -205,16 +228,25 @@ impl RadrootsAppRemoteSignerSessionStoreState {
             Err(error) => {
                 quarantine_invalid_store(path)?;
                 let _ = error;
-                return Ok(Self::default());
+                return Ok(RadrootsAppRemoteSignerSessionStoreLoadResult {
+                    state: Self::default(),
+                    recovered_from_corruption: true,
+                });
             }
         };
 
         if state.version != RADROOTS_APP_REMOTE_SIGNER_SESSION_STORE_VERSION {
             quarantine_invalid_store(path)?;
-            return Ok(Self::default());
+            return Ok(RadrootsAppRemoteSignerSessionStoreLoadResult {
+                state: Self::default(),
+                recovered_from_corruption: true,
+            });
         }
 
-        Ok(state)
+        Ok(RadrootsAppRemoteSignerSessionStoreLoadResult {
+            state,
+            recovered_from_corruption: false,
+        })
     }
 }
 

@@ -7,7 +7,9 @@ use radroots_studio_app_core::{
 use radroots_studio_app_remote_signer::{
     RadrootsAppRemoteSignerController, RadrootsAppRemoteSignerControllerHooks,
     RadrootsAppRemoteSignerPendingSession, RadrootsAppRemoteSignerSessionRecord,
-    RadrootsAppRemoteSignerSessionStoreState, radroots_studio_app_remote_signer_preview,
+    RadrootsAppRemoteSignerSessionStoreState, radroots_studio_app_remote_signer_clear_pending_session,
+    radroots_studio_app_remote_signer_disconnect_selected, radroots_studio_app_remote_signer_preview,
+    radroots_studio_app_remote_signer_reconcile_startup,
 };
 use radroots_identity::RadrootsIdentityId;
 use radroots_nostr_accounts::prelude::{
@@ -22,6 +24,18 @@ struct IosRemoteSignerHooks;
 
 impl RadrootsAppRemoteSignerControllerHooks for IosRemoteSignerHooks {
     type ReadyState = IdentityGateState;
+
+    fn reconcile_startup_state(&self) -> Result<(), String> {
+        let manager = storage::accounts_manager()?;
+        let store_path = sessions_path()?;
+        radroots_studio_app_remote_signer_reconcile_startup(
+            &manager,
+            store_path.as_path(),
+            REMOTE_SIGNER_LABEL,
+            load_client_secret,
+            remove_client_secret,
+        )
+    }
 
     fn store_pending_session(
         &self,
@@ -66,12 +80,8 @@ impl RadrootsAppRemoteSignerControllerHooks for IosRemoteSignerHooks {
     fn clear_pending_session(
         &self,
     ) -> Result<Option<RadrootsAppRemoteSignerSessionRecord>, String> {
-        if let Some(session) = remove_pending_session()? {
-            remove_client_secret(session.client_account_id())?;
-            Ok(Some(session))
-        } else {
-            Ok(None)
-        }
+        let store_path = sessions_path()?;
+        radroots_studio_app_remote_signer_clear_pending_session(store_path.as_path(), remove_client_secret)
     }
 }
 
@@ -175,27 +185,21 @@ pub(crate) fn custody_for_account_id(account_id: &str) -> Result<RadrootsAccount
 pub(crate) fn disconnect_selected_remote_signer(
     manager: &RadrootsNostrAccountsManager,
 ) -> Result<IdentityGateState, String> {
-    let Some(account_id) = manager
-        .selected_account_id()
-        .map_err(|source| source.to_string())?
-    else {
-        return Ok(IdentityGateState::Missing);
-    };
-    let Some(session) = remove_active_session(account_id.as_str())? else {
-        return Ok(IdentityGateState::Missing);
-    };
-    remove_client_secret(session.client_account_id())?;
-    manager
-        .remove_account(&account_id)
-        .map_err(|source| source.to_string())?;
-    let status = manager
-        .selected_account_status()
-        .map_err(|source| source.to_string())?;
+    let store_path = sessions_path()?;
+    let status = radroots_studio_app_remote_signer_disconnect_selected(
+        manager,
+        store_path.as_path(),
+        remove_client_secret,
+    )?;
     identity_state_from_status(status)
 }
 
 pub(crate) fn cancel_pending_connection() -> Result<(), String> {
-    let _ = IosRemoteSignerHooks.clear_pending_session()?;
+    let store_path = sessions_path()?;
+    let _ = radroots_studio_app_remote_signer_clear_pending_session(
+        store_path.as_path(),
+        remove_client_secret,
+    )?;
     Ok(())
 }
 
@@ -234,24 +238,6 @@ fn active_session_for_account_id(
     let store_path = sessions_path()?;
     let state = load_sessions(store_path.as_path())?;
     Ok(state.active_session_for_account_id(account_id).cloned())
-}
-
-fn remove_pending_session() -> Result<Option<RadrootsAppRemoteSignerSessionRecord>, String> {
-    let store_path = sessions_path()?;
-    let mut state = load_sessions(store_path.as_path())?;
-    let removed = state.remove_pending_session();
-    save_sessions(store_path.as_path(), &state)?;
-    Ok(removed)
-}
-
-fn remove_active_session(
-    account_id: &str,
-) -> Result<Option<RadrootsAppRemoteSignerSessionRecord>, String> {
-    let store_path = sessions_path()?;
-    let mut state = load_sessions(store_path.as_path())?;
-    let removed = state.remove_active_session_for_account_id(account_id);
-    save_sessions(store_path.as_path(), &state)?;
-    Ok(removed)
 }
 
 fn load_sessions(path: &Path) -> Result<RadrootsAppRemoteSignerSessionStoreState, String> {

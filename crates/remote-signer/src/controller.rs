@@ -11,6 +11,10 @@ use std::time::Duration;
 pub trait RadrootsAppRemoteSignerControllerHooks: Clone + Send + Sync + 'static {
     type ReadyState: Send + 'static;
 
+    fn reconcile_startup_state(&self) -> Result<(), String> {
+        Ok(())
+    }
+
     fn store_pending_session(
         &self,
         pending: &RadrootsAppRemoteSignerPendingSession,
@@ -73,7 +77,9 @@ where
             polling: Arc::new(AtomicBool::new(false)),
             _ready_state: PhantomData,
         };
-        if let Err(error) = controller.resume_pending() {
+        if let Err(error) = controller.reconcile_startup_state() {
+            controller.push_update(Err(error));
+        } else if let Err(error) = controller.resume_pending() {
             controller.push_update(Err(error));
         }
         controller
@@ -131,6 +137,10 @@ where
         &self,
     ) -> Result<Option<RadrootsAppRemoteSignerSessionRecord>, String> {
         self.hooks.pending_session_record()
+    }
+
+    fn reconcile_startup_state(&self) -> Result<(), String> {
+        self.hooks.reconcile_startup_state()
     }
 
     fn resume_pending(&self) -> Result<(), String> {
@@ -193,8 +203,18 @@ where
                     }
                     Ok(RadrootsAppRemoteSignerPendingPollOutcome::Rejected { message })
                     | Ok(RadrootsAppRemoteSignerPendingPollOutcome::FatalError { message }) => {
-                        let _ = tracker.hooks.clear_pending_session();
-                        tracker.push_update(Err(message));
+                        let outcome = tracker
+                            .hooks
+                            .clear_pending_session()
+                            .map(|_| None)
+                            .unwrap_or_else(|cleanup_error| Some(cleanup_error));
+                        let error = match outcome {
+                            Some(cleanup_error) => format!(
+                                "{message}. remote signer cleanup needs retry: {cleanup_error}"
+                            ),
+                            None => message,
+                        };
+                        tracker.push_update(Err(error));
                         tracker.polling.store(false, Ordering::Release);
                         return;
                     }
