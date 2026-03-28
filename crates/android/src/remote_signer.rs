@@ -5,48 +5,94 @@ use radroots_studio_app_core::{
     RadrootsRemoteSignerPreview, SetupActionState,
 };
 use radroots_studio_app_remote_signer::{
-    RadrootsAppRemoteSignerPendingPollOutcome, RadrootsAppRemoteSignerSessionStoreState,
-    radroots_studio_app_remote_signer_connect_pending, radroots_studio_app_remote_signer_poll_pending_session,
-    radroots_studio_app_remote_signer_preview,
+    RadrootsAppRemoteSignerController, RadrootsAppRemoteSignerControllerHooks,
+    RadrootsAppRemoteSignerPendingSession, RadrootsAppRemoteSignerSessionRecord,
+    RadrootsAppRemoteSignerSessionStoreState, radroots_studio_app_remote_signer_preview,
 };
 use radroots_identity::RadrootsIdentityId;
 use radroots_nostr_accounts::prelude::{
     RadrootsNostrAccountsManager, RadrootsNostrSecretVault, RadrootsNostrSelectedAccountStatus,
 };
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex};
-use std::time::Duration;
 
 const REMOTE_SIGNER_LABEL: &str = "remote signer";
 
-#[derive(Clone, Default)]
+#[derive(Clone, Copy)]
+struct AndroidRemoteSignerHooks;
+
+impl RadrootsAppRemoteSignerControllerHooks for AndroidRemoteSignerHooks {
+    type ReadyState = IdentityGateState;
+
+    fn store_pending_session(
+        &self,
+        pending: &RadrootsAppRemoteSignerPendingSession,
+    ) -> Result<(), String> {
+        let client_account_id = pending.record.client_account_id().to_owned();
+        store_client_secret(
+            client_account_id.as_str(),
+            pending.client_secret_key_hex.as_str(),
+        )?;
+        let store_path = sessions_path()?;
+        let mut state = load_sessions(store_path.as_path())?;
+        if let Err(error) = state.upsert_pending(pending.record.clone()) {
+            let _ = remove_client_secret(client_account_id.as_str());
+            return Err(error.to_string());
+        }
+        if let Err(error) = save_sessions(store_path.as_path(), &state) {
+            let _ = remove_client_secret(client_account_id.as_str());
+            return Err(error);
+        }
+        Ok(())
+    }
+
+    fn pending_session_record(
+        &self,
+    ) -> Result<Option<RadrootsAppRemoteSignerSessionRecord>, String> {
+        pending_session_record()
+    }
+
+    fn load_pending_client_secret(&self, client_account_id: &str) -> Result<String, String> {
+        load_client_secret(client_account_id)
+    }
+
+    fn activate_pending_session(
+        &self,
+        client_account_id: &str,
+        user_identity: radroots_identity::RadrootsIdentityPublic,
+    ) -> Result<Self::ReadyState, String> {
+        activate_remote_session(client_account_id, user_identity)
+    }
+
+    fn clear_pending_session(
+        &self,
+    ) -> Result<Option<RadrootsAppRemoteSignerSessionRecord>, String> {
+        if let Some(session) = remove_pending_session()? {
+            remove_client_secret(session.client_account_id())?;
+            Ok(Some(session))
+        } else {
+            Ok(None)
+        }
+    }
+}
+
+#[derive(Clone)]
 pub(crate) struct AndroidRemoteSigner {
-    update: Arc<Mutex<Option<Result<Option<IdentityGateState>, String>>>>,
-    changed: Arc<AtomicBool>,
-    connecting: Arc<AtomicBool>,
-    polling: Arc<AtomicBool>,
+    controller: RadrootsAppRemoteSignerController<AndroidRemoteSignerHooks>,
 }
 
 impl AndroidRemoteSigner {
     pub(crate) fn new() -> Self {
-        let tracker = Self::default();
-        if let Err(error) = tracker.resume_pending() {
-            tracker.push_update(Err(error));
+        Self {
+            controller: RadrootsAppRemoteSignerController::new(AndroidRemoteSignerHooks),
         }
-        tracker
     }
 
     pub(crate) fn take_update(&self) -> Option<Result<Option<IdentityGateState>, String>> {
-        if !self.changed.swap(false, Ordering::AcqRel) {
-            return None;
-        }
-
-        self.update.lock().ok().and_then(|mut slot| slot.take())
+        self.controller.take_update()
     }
 
     pub(crate) fn is_connecting(&self) -> bool {
-        self.connecting.load(Ordering::Acquire)
+        self.controller.is_connecting()
     }
 
     pub(crate) fn action_state(&self) -> Result<SetupActionState, String> {
@@ -74,137 +120,7 @@ impl AndroidRemoteSigner {
     }
 
     pub(crate) fn begin_connect(&self, input: &str) -> Result<(), String> {
-        if self.connecting.swap(true, Ordering::AcqRel) {
-            return Err("remote signer connection is already starting".to_owned());
-        }
-
-        if pending_connection()?.is_some() {
-            self.connecting.store(false, Ordering::Release);
-            return Err("a remote signer connection is already pending approval".to_owned());
-        }
-
-        if let Ok(mut slot) = self.update.lock() {
-            *slot = None;
-        }
-
-        let tracker = self.clone();
-        let input = input.to_owned();
-        std::thread::spawn(move || {
-            let outcome = (|| -> Result<(), String> {
-                let pending = radroots_studio_app_remote_signer_connect_pending(input.as_str())
-                    .map_err(|error| error.to_string())?;
-                let client_account_id = pending.record.client_account_id().to_owned();
-                store_client_secret(
-                    client_account_id.as_str(),
-                    pending.client_secret_key_hex.as_str(),
-                )?;
-                let store_path = sessions_path()?;
-                let mut state = load_sessions(store_path.as_path())?;
-                state
-                    .upsert_pending(pending.record.clone())
-                    .map_err(|error| error.to_string())?;
-                save_sessions(store_path.as_path(), &state)?;
-                tracker.start_polling(
-                    pending.record.client_account_id().to_owned(),
-                    pending.client_secret_key_hex,
-                );
-                Ok(())
-            })();
-
-            if let Err(error) = outcome {
-                tracker.push_update(Err(error));
-            }
-            tracker.connecting.store(false, Ordering::Release);
-        });
-
-        Ok(())
-    }
-
-    pub(crate) fn resume_pending(&self) -> Result<(), String> {
-        let Some(record) = pending_session_record()? else {
-            return Ok(());
-        };
-        let client_secret_key_hex = load_client_secret(record.client_account_id())?;
-        self.start_polling(record.client_account_id().to_owned(), client_secret_key_hex);
-        Ok(())
-    }
-
-    fn start_polling(&self, client_account_id: String, client_secret_key_hex: String) {
-        if self.polling.swap(true, Ordering::AcqRel) {
-            return;
-        }
-
-        let tracker = self.clone();
-        std::thread::spawn(move || {
-            loop {
-                let pending_record = match pending_session_record() {
-                    Ok(Some(record)) if record.client_account_id() == client_account_id => record,
-                    Ok(Some(_)) | Ok(None) => {
-                        tracker.polling.store(false, Ordering::Release);
-                        return;
-                    }
-                    Err(error) => {
-                        tracker.push_update(Err(error));
-                        tracker.polling.store(false, Ordering::Release);
-                        return;
-                    }
-                };
-
-                match radroots_studio_app_remote_signer_poll_pending_session(
-                    &pending_record,
-                    client_secret_key_hex.as_str(),
-                )
-                .map_err(|error| error.to_string())
-                {
-                    Ok(RadrootsAppRemoteSignerPendingPollOutcome::PendingApproval)
-                    | Ok(RadrootsAppRemoteSignerPendingPollOutcome::TransportFailure { .. }) => {
-                        std::thread::sleep(Duration::from_secs(1));
-                    }
-                    Ok(RadrootsAppRemoteSignerPendingPollOutcome::Approved(user_identity)) => {
-                        let ready_state = match activate_remote_session(
-                            pending_record.client_account_id(),
-                            user_identity,
-                        ) {
-                            Ok(state) => state,
-                            Err(error) => {
-                                tracker.push_update(Err(error));
-                                tracker.polling.store(false, Ordering::Release);
-                                return;
-                            }
-                        };
-                        tracker.push_update(Ok(Some(ready_state)));
-                        tracker.polling.store(false, Ordering::Release);
-                        return;
-                    }
-                    Ok(RadrootsAppRemoteSignerPendingPollOutcome::Rejected { message }) => {
-                        let _ = remove_pending_session();
-                        let _ = remove_client_secret(client_account_id.as_str());
-                        tracker.push_update(Err(message));
-                        tracker.polling.store(false, Ordering::Release);
-                        return;
-                    }
-                    Ok(RadrootsAppRemoteSignerPendingPollOutcome::FatalError { message }) => {
-                        let _ = remove_pending_session();
-                        let _ = remove_client_secret(client_account_id.as_str());
-                        tracker.push_update(Err(message));
-                        tracker.polling.store(false, Ordering::Release);
-                        return;
-                    }
-                    Err(error) => {
-                        tracker.push_update(Err(error));
-                        tracker.polling.store(false, Ordering::Release);
-                        return;
-                    }
-                }
-            }
-        });
-    }
-
-    fn push_update(&self, result: Result<Option<IdentityGateState>, String>) {
-        if let Ok(mut slot) = self.update.lock() {
-            *slot = Some(result);
-            self.changed.store(true, Ordering::Release);
-        }
+        self.controller.begin_connect(input)
     }
 }
 
@@ -220,12 +136,12 @@ pub(crate) fn preview_connection(input: &str) -> Result<RadrootsRemoteSignerPrev
 
 pub(crate) fn pending_connection() -> Result<Option<RadrootsPendingRemoteSignerConnection>, String>
 {
-    Ok(
-        pending_session_record()?.map(|record| RadrootsPendingRemoteSignerConnection {
+    Ok(AndroidRemoteSignerHooks
+        .pending_session_record()?
+        .map(|record| RadrootsPendingRemoteSignerConnection {
             signer_npub: record.signer_identity.public_key_npub,
             relays: record.relays,
-        }),
-    )
+        }))
 }
 
 pub(crate) fn identity_state_from_status(
@@ -279,9 +195,7 @@ pub(crate) fn disconnect_selected_remote_signer(
 }
 
 pub(crate) fn cancel_pending_connection() -> Result<(), String> {
-    if let Some(session) = remove_pending_session()? {
-        remove_client_secret(session.client_account_id())?;
-    }
+    let _ = AndroidRemoteSignerHooks.clear_pending_session()?;
     Ok(())
 }
 
@@ -308,8 +222,7 @@ fn activate_remote_session(
     })
 }
 
-fn pending_session_record()
--> Result<Option<radroots_studio_app_remote_signer::RadrootsAppRemoteSignerSessionRecord>, String> {
+fn pending_session_record() -> Result<Option<RadrootsAppRemoteSignerSessionRecord>, String> {
     let store_path = sessions_path()?;
     let state = load_sessions(store_path.as_path())?;
     Ok(state.pending_session().cloned())
@@ -317,14 +230,13 @@ fn pending_session_record()
 
 fn active_session_for_account_id(
     account_id: &str,
-) -> Result<Option<radroots_studio_app_remote_signer::RadrootsAppRemoteSignerSessionRecord>, String> {
+) -> Result<Option<RadrootsAppRemoteSignerSessionRecord>, String> {
     let store_path = sessions_path()?;
     let state = load_sessions(store_path.as_path())?;
     Ok(state.active_session_for_account_id(account_id).cloned())
 }
 
-fn remove_pending_session()
--> Result<Option<radroots_studio_app_remote_signer::RadrootsAppRemoteSignerSessionRecord>, String> {
+fn remove_pending_session() -> Result<Option<RadrootsAppRemoteSignerSessionRecord>, String> {
     let store_path = sessions_path()?;
     let mut state = load_sessions(store_path.as_path())?;
     let removed = state.remove_pending_session();
@@ -334,7 +246,7 @@ fn remove_pending_session()
 
 fn remove_active_session(
     account_id: &str,
-) -> Result<Option<radroots_studio_app_remote_signer::RadrootsAppRemoteSignerSessionRecord>, String> {
+) -> Result<Option<RadrootsAppRemoteSignerSessionRecord>, String> {
     let store_path = sessions_path()?;
     let mut state = load_sessions(store_path.as_path())?;
     let removed = state.remove_active_session_for_account_id(account_id);

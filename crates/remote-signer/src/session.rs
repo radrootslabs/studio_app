@@ -1,6 +1,7 @@
 use crate::error::RadrootsAppRemoteSignerError;
 use radroots_identity::RadrootsIdentityPublic;
 use serde::{Deserialize, Serialize};
+use std::io::Write;
 use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -70,19 +71,8 @@ impl RadrootsAppRemoteSignerSessionRecord {
 
 impl RadrootsAppRemoteSignerSessionStoreState {
     pub fn load(path: &Path) -> Result<Self, RadrootsAppRemoteSignerError> {
-        match std::fs::read_to_string(path) {
-            Ok(contents) => {
-                let state: Self = serde_json::from_str(&contents).map_err(|error| {
-                    RadrootsAppRemoteSignerError::InvalidSessionStore(error.to_string())
-                })?;
-                if state.version != RADROOTS_APP_REMOTE_SIGNER_SESSION_STORE_VERSION {
-                    return Err(RadrootsAppRemoteSignerError::InvalidSessionStore(format!(
-                        "unsupported schema version {}",
-                        state.version
-                    )));
-                }
-                Ok(state)
-            }
+        match std::fs::read(path) {
+            Ok(contents) => Self::load_bytes(path, contents),
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(Self::default()),
             Err(error) => Err(RadrootsAppRemoteSignerError::SessionStoreIo(
                 error.to_string(),
@@ -97,7 +87,30 @@ impl RadrootsAppRemoteSignerSessionStoreState {
         }
         let json = serde_json::to_string_pretty(self)
             .map_err(|error| RadrootsAppRemoteSignerError::SessionStoreIo(error.to_string()))?;
-        std::fs::write(path, json)
+        let temp_path = temporary_store_path(path);
+        let mut file = std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(temp_path.as_path())
+            .map_err(|error| RadrootsAppRemoteSignerError::SessionStoreIo(error.to_string()))?;
+        if let Err(error) = (|| -> Result<(), std::io::Error> {
+            file.write_all(json.as_bytes())?;
+            file.flush()?;
+            file.sync_all()
+        })() {
+            let _ = std::fs::remove_file(temp_path.as_path());
+            return Err(RadrootsAppRemoteSignerError::SessionStoreIo(
+                error.to_string(),
+            ));
+        }
+
+        #[cfg(windows)]
+        if path.exists() {
+            std::fs::remove_file(path)
+                .map_err(|error| RadrootsAppRemoteSignerError::SessionStoreIo(error.to_string()))?;
+        }
+
+        std::fs::rename(temp_path.as_path(), path)
             .map_err(|error| RadrootsAppRemoteSignerError::SessionStoreIo(error.to_string()))
     }
 
@@ -167,6 +180,42 @@ impl RadrootsAppRemoteSignerSessionStoreState {
         })?;
         Some(self.sessions.remove(index))
     }
+
+    fn load_bytes(path: &Path, contents: Vec<u8>) -> Result<Self, RadrootsAppRemoteSignerError> {
+        let contents = String::from_utf8(contents).map_err(|error| {
+            RadrootsAppRemoteSignerError::InvalidSessionStore(format!(
+                "session store was not valid utf-8: {error}"
+            ))
+        });
+
+        let contents = match contents {
+            Ok(contents) => contents,
+            Err(error) => {
+                quarantine_invalid_store(path)?;
+                let _ = error;
+                return Ok(Self::default());
+            }
+        };
+
+        let state: Self = serde_json::from_str(&contents)
+            .map_err(|error| RadrootsAppRemoteSignerError::InvalidSessionStore(error.to_string()));
+
+        let state = match state {
+            Ok(state) => state,
+            Err(error) => {
+                quarantine_invalid_store(path)?;
+                let _ = error;
+                return Ok(Self::default());
+            }
+        };
+
+        if state.version != RADROOTS_APP_REMOTE_SIGNER_SESSION_STORE_VERSION {
+            quarantine_invalid_store(path)?;
+            return Ok(Self::default());
+        }
+
+        Ok(state)
+    }
 }
 
 fn now_unix_secs() -> u64 {
@@ -174,6 +223,31 @@ fn now_unix_secs() -> u64 {
         .duration_since(UNIX_EPOCH)
         .map(|duration| duration.as_secs())
         .unwrap_or(0)
+}
+
+fn temporary_store_path(path: &Path) -> std::path::PathBuf {
+    let process_id = std::process::id();
+    let timestamp = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_nanos())
+        .unwrap_or(0);
+    path.with_extension(format!("json.tmp-{process_id}-{timestamp}"))
+}
+
+fn quarantine_invalid_store(path: &Path) -> Result<(), RadrootsAppRemoteSignerError> {
+    let process_id = std::process::id();
+    let timestamp = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_secs())
+        .unwrap_or(0);
+    let file_name = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("remote-signer-sessions.json");
+    let quarantine_path =
+        path.with_file_name(format!("{file_name}.corrupt-{timestamp}-{process_id}"));
+    std::fs::rename(path, quarantine_path.as_path())
+        .map_err(|error| RadrootsAppRemoteSignerError::SessionStoreIo(error.to_string()))
 }
 
 #[cfg(test)]
@@ -244,5 +318,38 @@ mod tests {
 
         assert_eq!(removed.account_id(), Some(alice_public.id.as_str()));
         assert!(state.sessions.is_empty());
+    }
+
+    #[test]
+    fn load_recovers_from_invalid_json_by_quarantining_store() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let path = temp.path().join("sessions.json");
+        std::fs::write(path.as_path(), "{invalid").expect("write invalid");
+
+        let loaded = RadrootsAppRemoteSignerSessionStoreState::load(path.as_path()).expect("load");
+
+        assert!(loaded.sessions.is_empty());
+        assert!(!path.exists());
+        let quarantined = std::fs::read_dir(temp.path())
+            .expect("read dir")
+            .filter_map(|entry| entry.ok())
+            .any(|entry| entry.file_name().to_string_lossy().contains("corrupt"));
+        assert!(quarantined);
+    }
+
+    #[test]
+    fn load_recovers_from_unsupported_schema_version() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let path = temp.path().join("sessions.json");
+        std::fs::write(path.as_path(), r#"{"version":999,"sessions":[]}"#).expect("write invalid");
+
+        let loaded = RadrootsAppRemoteSignerSessionStoreState::load(path.as_path()).expect("load");
+
+        assert_eq!(
+            loaded.version,
+            RADROOTS_APP_REMOTE_SIGNER_SESSION_STORE_VERSION
+        );
+        assert!(loaded.sessions.is_empty());
+        assert!(!path.exists());
     }
 }

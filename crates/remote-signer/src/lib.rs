@@ -1,10 +1,12 @@
 #![forbid(unsafe_code)]
 
+mod controller;
 mod error;
 mod input;
 mod protocol;
 mod session;
 
+pub use controller::{RadrootsAppRemoteSignerController, RadrootsAppRemoteSignerControllerHooks};
 pub use error::RadrootsAppRemoteSignerError;
 pub use input::{
     RadrootsAppRemoteSignerSource, RadrootsAppRemoteSignerTarget,
