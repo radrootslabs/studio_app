@@ -7,8 +7,8 @@ use radroots_studio_app_core::{
 use radroots_studio_app_remote_signer::{
     RADROOTS_APP_REMOTE_SIGNER_SECRET_NAMESPACE, RadrootsAppRemoteSignerController,
     RadrootsAppRemoteSignerControllerHooks, RadrootsAppRemoteSignerPendingSession,
-    RadrootsAppRemoteSignerSessionRecord, RadrootsAppRemoteSignerSessionStoreState,
-    radroots_studio_app_remote_signer_clear_pending_session,
+    RadrootsAppRemoteSignerPendingState, RadrootsAppRemoteSignerSessionRecord,
+    RadrootsAppRemoteSignerSessionStoreState, radroots_studio_app_remote_signer_clear_pending_session,
     radroots_studio_app_remote_signer_disconnect_selected, radroots_studio_app_remote_signer_preview,
     radroots_studio_app_remote_signer_purge_all_custody_state,
     radroots_studio_app_remote_signer_reconcile_startup,
@@ -118,10 +118,18 @@ impl AndroidRemoteSigner {
         }
 
         if pending_connection()?.is_some() {
-            return Ok(SetupActionState {
-                label: "Remote Signer Waiting for Approval".to_owned(),
-                enabled: false,
-                pending: false,
+            return Ok(match self.controller.pending_state() {
+                RadrootsAppRemoteSignerPendingState::TransportFailure { .. } => SetupActionState {
+                    label: "Remote Signer Approval Check Retrying".to_owned(),
+                    enabled: false,
+                    pending: false,
+                },
+                RadrootsAppRemoteSignerPendingState::Idle
+                | RadrootsAppRemoteSignerPendingState::WaitingApproval => SetupActionState {
+                    label: "Remote Signer Waiting for Approval".to_owned(),
+                    enabled: false,
+                    pending: false,
+                },
             });
         }
 

@@ -920,7 +920,16 @@ impl RadrootsApp {
                     });
                 }
                 RemoteSignerEntryState::WaitingApproval(pending) => {
-                    ui.label("Remote signer connection is waiting for signer approval.");
+                    ui.label(action.label.as_str());
+                    if action.label == "Remote Signer Approval Check Retrying" {
+                        ui.add_space(8.0);
+                        ui.label(
+                            "The app is retrying approval checks after a relay or network failure.",
+                        );
+                    } else {
+                        ui.add_space(8.0);
+                        ui.label("Remote signer connection is waiting for signer approval.");
+                    }
                     ui.add_space(8.0);
                     ui.monospace(format!("signer: {}", pending.signer_npub));
                     if pending.relays.is_empty() {

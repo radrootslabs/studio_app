@@ -8,6 +8,13 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RadrootsAppRemoteSignerPendingState {
+    Idle,
+    WaitingApproval,
+    TransportFailure { message: String },
+}
+
 pub trait RadrootsAppRemoteSignerControllerHooks: Clone + Send + Sync + 'static {
     type ReadyState: Send + 'static;
 
@@ -45,6 +52,7 @@ where
     changed: Arc<AtomicBool>,
     connecting: Arc<AtomicBool>,
     polling: Arc<AtomicBool>,
+    pending_state: Arc<Mutex<RadrootsAppRemoteSignerPendingState>>,
     _ready_state: PhantomData<H::ReadyState>,
 }
 
@@ -59,6 +67,7 @@ where
             changed: Arc::clone(&self.changed),
             connecting: Arc::clone(&self.connecting),
             polling: Arc::clone(&self.polling),
+            pending_state: Arc::clone(&self.pending_state),
             _ready_state: PhantomData,
         }
     }
@@ -75,6 +84,7 @@ where
             changed: Arc::new(AtomicBool::new(false)),
             connecting: Arc::new(AtomicBool::new(false)),
             polling: Arc::new(AtomicBool::new(false)),
+            pending_state: Arc::new(Mutex::new(RadrootsAppRemoteSignerPendingState::Idle)),
             _ready_state: PhantomData,
         };
         if let Err(error) = controller.reconcile_startup_state() {
@@ -97,6 +107,13 @@ where
         self.connecting.load(Ordering::Acquire)
     }
 
+    pub fn pending_state(&self) -> RadrootsAppRemoteSignerPendingState {
+        self.pending_state
+            .lock()
+            .map(|state| state.clone())
+            .unwrap_or(RadrootsAppRemoteSignerPendingState::Idle)
+    }
+
     pub fn begin_connect(&self, input: &str) -> Result<(), String> {
         if self.connecting.swap(true, Ordering::AcqRel) {
             return Err("remote signer connection is already starting".to_owned());
@@ -110,6 +127,7 @@ where
         if let Ok(mut slot) = self.update.lock() {
             *slot = None;
         }
+        self.set_pending_state(RadrootsAppRemoteSignerPendingState::Idle);
 
         let tracker = self.clone();
         let input = input.to_owned();
@@ -117,10 +135,8 @@ where
             let outcome = (|| -> Result<(), String> {
                 let pending = radroots_studio_app_remote_signer_connect_pending(input.as_str())
                     .map_err(|error| error.to_string())?;
-                let client_account_id = pending.record.client_account_id().to_owned();
-                let client_secret_key_hex = pending.client_secret_key_hex.clone();
                 tracker.hooks.store_pending_session(&pending)?;
-                tracker.start_polling(client_account_id, client_secret_key_hex);
+                tracker.start_polling();
                 Ok(())
             })();
 
@@ -147,14 +163,13 @@ where
         let Some(record) = self.pending_session_record()? else {
             return Ok(());
         };
-        let client_secret_key_hex = self
-            .hooks
+        self.hooks
             .load_pending_client_secret(record.client_account_id())?;
-        self.start_polling(record.client_account_id().to_owned(), client_secret_key_hex);
+        self.start_polling();
         Ok(())
     }
 
-    fn start_polling(&self, client_account_id: String, client_secret_key_hex: String) {
+    fn start_polling(&self) {
         if self.polling.swap(true, Ordering::AcqRel) {
             return;
         }
@@ -163,12 +178,26 @@ where
         std::thread::spawn(move || {
             loop {
                 let pending_record = match tracker.hooks.pending_session_record() {
-                    Ok(Some(record)) if record.client_account_id() == client_account_id => record,
-                    Ok(Some(_)) | Ok(None) => {
+                    Ok(Some(record)) => record,
+                    Ok(None) => {
+                        tracker.set_pending_state(RadrootsAppRemoteSignerPendingState::Idle);
                         tracker.polling.store(false, Ordering::Release);
                         return;
                     }
                     Err(error) => {
+                        tracker.set_pending_state(RadrootsAppRemoteSignerPendingState::Idle);
+                        tracker.push_update(Err(error));
+                        tracker.polling.store(false, Ordering::Release);
+                        return;
+                    }
+                };
+                let client_secret_key_hex = match tracker
+                    .hooks
+                    .load_pending_client_secret(pending_record.client_account_id())
+                {
+                    Ok(secret) => secret,
+                    Err(error) => {
+                        tracker.set_pending_state(RadrootsAppRemoteSignerPendingState::Idle);
                         tracker.push_update(Err(error));
                         tracker.polling.store(false, Ordering::Release);
                         return;
@@ -181,17 +210,35 @@ where
                 )
                 .map_err(|error| error.to_string())
                 {
-                    Ok(RadrootsAppRemoteSignerPendingPollOutcome::PendingApproval)
-                    | Ok(RadrootsAppRemoteSignerPendingPollOutcome::TransportFailure { .. }) => {
+                    Ok(RadrootsAppRemoteSignerPendingPollOutcome::PendingApproval) => {
+                        tracker.set_pending_state(
+                            RadrootsAppRemoteSignerPendingState::WaitingApproval,
+                        );
+                        std::thread::sleep(Duration::from_secs(1));
+                    }
+                    Ok(RadrootsAppRemoteSignerPendingPollOutcome::TransportFailure { message }) => {
+                        let changed = tracker.set_pending_state(
+                            RadrootsAppRemoteSignerPendingState::TransportFailure {
+                                message: message.clone(),
+                            },
+                        );
+                        if changed {
+                            tracker.push_update(Err(format!(
+                                "remote signer approval check failed: {message}"
+                            )));
+                        }
                         std::thread::sleep(Duration::from_secs(1));
                     }
                     Ok(RadrootsAppRemoteSignerPendingPollOutcome::Approved(user_identity)) => {
+                        tracker.set_pending_state(RadrootsAppRemoteSignerPendingState::Idle);
                         let ready_state = match tracker.hooks.activate_pending_session(
                             pending_record.client_account_id(),
                             user_identity,
                         ) {
                             Ok(state) => state,
                             Err(error) => {
+                                tracker
+                                    .set_pending_state(RadrootsAppRemoteSignerPendingState::Idle);
                                 tracker.push_update(Err(error));
                                 tracker.polling.store(false, Ordering::Release);
                                 return;
@@ -203,6 +250,7 @@ where
                     }
                     Ok(RadrootsAppRemoteSignerPendingPollOutcome::Rejected { message })
                     | Ok(RadrootsAppRemoteSignerPendingPollOutcome::FatalError { message }) => {
+                        tracker.set_pending_state(RadrootsAppRemoteSignerPendingState::Idle);
                         let outcome = tracker
                             .hooks
                             .clear_pending_session()
@@ -219,6 +267,7 @@ where
                         return;
                     }
                     Err(error) => {
+                        tracker.set_pending_state(RadrootsAppRemoteSignerPendingState::Idle);
                         tracker.push_update(Err(error));
                         tracker.polling.store(false, Ordering::Release);
                         return;
@@ -233,5 +282,16 @@ where
             *slot = Some(result);
             self.changed.store(true, Ordering::Release);
         }
+    }
+
+    fn set_pending_state(&self, next: RadrootsAppRemoteSignerPendingState) -> bool {
+        if let Ok(mut state) = self.pending_state.lock() {
+            if *state == next {
+                return false;
+            }
+            *state = next;
+            return true;
+        }
+        false
     }
 }
