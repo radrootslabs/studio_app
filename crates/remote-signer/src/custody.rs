@@ -12,13 +12,23 @@ pub fn radroots_studio_app_remote_signer_clear_pending_session(
     path: &Path,
     remove_client_secret: impl Fn(&str) -> Result<(), String>,
 ) -> Result<Option<RadrootsAppRemoteSignerSessionRecord>, String> {
-    let mut state = load_sessions(path)?;
+    let state = load_sessions(path)?;
     let Some(record) = state.pending_session().cloned() else {
         return Ok(None);
     };
-    remove_client_secret(record.client_account_id())?;
-    let removed = state.remove_pending_session();
-    save_sessions(path, &state)?;
+    let mut next_state = state.clone();
+    let removed = next_state.remove_pending_session();
+    if removed.is_none() {
+        return Err("remote signer pending session record cleanup could not complete".to_owned());
+    }
+    save_sessions(path, &next_state)?;
+
+    if let Err(error) = remove_client_secret(record.client_account_id()) {
+        return Err(format!(
+            "remote signer pending session record was removed but session secret cleanup needs retry: {error}"
+        ));
+    }
+
     Ok(removed)
 }
 
@@ -328,6 +338,36 @@ mod tests {
                 .expect("load")
                 .sessions
                 .is_empty()
+        );
+    }
+
+    #[test]
+    fn clear_pending_session_leaves_secret_for_retry_when_secret_cleanup_fails() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let path = temp.path().join("sessions.json");
+        let record = write_pending_state(path.as_path());
+        let vault = RadrootsNostrSecretVaultMemory::new();
+        secret_store_secret(&vault, record.client_account_id(), "deadbeef");
+
+        let error = radroots_studio_app_remote_signer_clear_pending_session(
+            path.as_path(),
+            |_client_account_id| Err("vault unavailable".to_owned()),
+        )
+        .expect_err("cleanup retry");
+
+        assert!(error.contains("session secret cleanup needs retry"));
+        assert!(
+            RadrootsAppRemoteSignerSessionStoreState::load(path.as_path())
+                .expect("load")
+                .sessions
+                .is_empty()
+        );
+        assert_eq!(
+            vault
+                .load_secret_hex(&fixture_account_id(record.client_account_id()))
+                .expect("load retained secret")
+                .as_deref(),
+            Some("deadbeef")
         );
     }
 
