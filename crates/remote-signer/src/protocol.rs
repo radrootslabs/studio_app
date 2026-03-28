@@ -22,6 +22,7 @@ use tokio::time::timeout;
 
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 const GET_PUBLIC_KEY_TIMEOUT: Duration = Duration::from_secs(10);
+const REMOTE_SIGNER_PENDING_APPROVAL_ERROR: &str = "connection is pending";
 
 static REQUEST_COUNTER: AtomicU64 = AtomicU64::new(1);
 
@@ -35,7 +36,8 @@ pub struct RadrootsAppRemoteSignerPendingSession {
 pub enum RadrootsAppRemoteSignerPendingPollOutcome {
     PendingApproval,
     Approved(RadrootsIdentityPublic),
-    RetryableError { message: String },
+    TransportFailure { message: String },
+    Rejected { message: String },
     FatalError { message: String },
 }
 
@@ -121,29 +123,8 @@ async fn poll_pending_session(
     )
     .await
     {
-        Ok(RadrootsNostrConnectResponse::UserPublicKey(public_key)) => {
-            Ok(RadrootsAppRemoteSignerPendingPollOutcome::Approved(
-                RadrootsIdentityPublic::new(public_key),
-            ))
-        }
-        Ok(RadrootsNostrConnectResponse::Error { error, .. }) => {
-            if error.contains("pending") {
-                Ok(RadrootsAppRemoteSignerPendingPollOutcome::PendingApproval)
-            } else {
-                Ok(RadrootsAppRemoteSignerPendingPollOutcome::FatalError { message: error })
-            }
-        }
-        Ok(other) => Ok(RadrootsAppRemoteSignerPendingPollOutcome::FatalError {
-            message: format!("unexpected remote signer response: {other:?}"),
-        }),
-        Err(RadrootsAppRemoteSignerError::RequestTimedOut { .. }) => {
-            Ok(RadrootsAppRemoteSignerPendingPollOutcome::RetryableError {
-                message: "remote signer did not respond yet".to_owned(),
-            })
-        }
-        Err(error) => Ok(RadrootsAppRemoteSignerPendingPollOutcome::RetryableError {
-            message: error.to_string(),
-        }),
+        Ok(response) => Ok(classify_pending_poll_response(response)),
+        Err(error) => Ok(classify_pending_poll_error(error)),
     }
 }
 
@@ -267,15 +248,80 @@ fn parse_response_event(
         &event.pubkey,
         &event.content,
     )
-    .map_err(|error| RadrootsAppRemoteSignerError::ConnectFailed(error.to_string()))?;
-    let envelope: RadrootsNostrConnectResponseEnvelope = serde_json::from_str(&decrypted)
-        .map_err(|error| RadrootsAppRemoteSignerError::ConnectFailed(error.to_string()))?;
+    .map_err(|error| RadrootsAppRemoteSignerError::UnexpectedResponse {
+        method: method.clone(),
+        response: format!("failed to decrypt signer response: {error}"),
+    })?;
+    let envelope: RadrootsNostrConnectResponseEnvelope =
+        serde_json::from_str(&decrypted).map_err(|error| {
+            RadrootsAppRemoteSignerError::UnexpectedResponse {
+                method: method.clone(),
+                response: format!("failed to decode signer response envelope: {error}"),
+            }
+        })?;
     if envelope.id != request_id {
         return Ok(None);
     }
-    let response = RadrootsNostrConnectResponse::from_envelope(method, envelope)
-        .map_err(|error| RadrootsAppRemoteSignerError::ConnectFailed(error.to_string()))?;
+    let response =
+        RadrootsNostrConnectResponse::from_envelope(method, envelope).map_err(|error| {
+            RadrootsAppRemoteSignerError::UnexpectedResponse {
+                method: method.clone(),
+                response: format!("failed to decode signer response payload: {error}"),
+            }
+        })?;
     Ok(Some(response))
+}
+
+fn classify_pending_poll_response(
+    response: RadrootsNostrConnectResponse,
+) -> RadrootsAppRemoteSignerPendingPollOutcome {
+    match response {
+        RadrootsNostrConnectResponse::UserPublicKey(public_key) => {
+            RadrootsAppRemoteSignerPendingPollOutcome::Approved(RadrootsIdentityPublic::new(
+                public_key,
+            ))
+        }
+        RadrootsNostrConnectResponse::Error { result, error } => {
+            if result.is_none() && error == REMOTE_SIGNER_PENDING_APPROVAL_ERROR {
+                RadrootsAppRemoteSignerPendingPollOutcome::PendingApproval
+            } else {
+                RadrootsAppRemoteSignerPendingPollOutcome::Rejected { message: error }
+            }
+        }
+        RadrootsNostrConnectResponse::AuthUrl(url) => {
+            RadrootsAppRemoteSignerPendingPollOutcome::FatalError {
+                message: format!(
+                    "remote signer requires an unsupported authorization challenge: {url}"
+                ),
+            }
+        }
+        other => RadrootsAppRemoteSignerPendingPollOutcome::FatalError {
+            message: format!("unexpected remote signer response: {other:?}"),
+        },
+    }
+}
+
+fn classify_pending_poll_error(
+    error: RadrootsAppRemoteSignerError,
+) -> RadrootsAppRemoteSignerPendingPollOutcome {
+    match error {
+        RadrootsAppRemoteSignerError::RequestTimedOut { .. } => {
+            RadrootsAppRemoteSignerPendingPollOutcome::TransportFailure {
+                message: "remote signer did not respond yet".to_owned(),
+            }
+        }
+        RadrootsAppRemoteSignerError::ConnectFailed(message) => {
+            RadrootsAppRemoteSignerPendingPollOutcome::TransportFailure { message }
+        }
+        RadrootsAppRemoteSignerError::UnexpectedResponse { .. } => {
+            RadrootsAppRemoteSignerPendingPollOutcome::FatalError {
+                message: error.to_string(),
+            }
+        }
+        other => RadrootsAppRemoteSignerPendingPollOutcome::FatalError {
+            message: other.to_string(),
+        },
+    }
 }
 
 fn next_request_id(prefix: &str) -> String {
@@ -287,4 +333,87 @@ fn parse_public_key_hex(value: &str) -> Result<nostr::PublicKey, RadrootsAppRemo
     nostr::PublicKey::parse(value)
         .or_else(|_| nostr::PublicKey::from_hex(value))
         .map_err(|error| RadrootsAppRemoteSignerError::ConnectFailed(error.to_string()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use nostr::PublicKey;
+    use radroots_studio_app_test_support::{FIXTURE_ALICE, fixture_identity};
+
+    fn fixture_public_key() -> PublicKey {
+        fixture_identity(&FIXTURE_ALICE)
+            .expect("identity")
+            .public_key()
+    }
+
+    #[test]
+    fn pending_error_response_is_classified_as_pending_approval() {
+        let outcome = classify_pending_poll_response(RadrootsNostrConnectResponse::Error {
+            result: None,
+            error: REMOTE_SIGNER_PENDING_APPROVAL_ERROR.to_owned(),
+        });
+
+        assert_eq!(
+            outcome,
+            RadrootsAppRemoteSignerPendingPollOutcome::PendingApproval
+        );
+    }
+
+    #[test]
+    fn signer_error_response_is_classified_as_rejected() {
+        let outcome = classify_pending_poll_response(RadrootsNostrConnectResponse::Error {
+            result: None,
+            error: "unauthorized".to_owned(),
+        });
+
+        assert_eq!(
+            outcome,
+            RadrootsAppRemoteSignerPendingPollOutcome::Rejected {
+                message: "unauthorized".to_owned(),
+            }
+        );
+    }
+
+    #[test]
+    fn get_public_key_success_is_classified_as_approved() {
+        let outcome = classify_pending_poll_response(RadrootsNostrConnectResponse::UserPublicKey(
+            fixture_public_key(),
+        ));
+
+        assert!(matches!(
+            outcome,
+            RadrootsAppRemoteSignerPendingPollOutcome::Approved(identity)
+                if identity.public_key_hex == fixture_public_key().to_hex()
+        ));
+    }
+
+    #[test]
+    fn timeout_error_is_classified_as_transport_failure() {
+        let outcome = classify_pending_poll_error(RadrootsAppRemoteSignerError::RequestTimedOut {
+            method: RadrootsNostrConnectMethod::GetPublicKey,
+        });
+
+        assert_eq!(
+            outcome,
+            RadrootsAppRemoteSignerPendingPollOutcome::TransportFailure {
+                message: "remote signer did not respond yet".to_owned(),
+            }
+        );
+    }
+
+    #[test]
+    fn unexpected_response_error_is_fatal() {
+        let outcome =
+            classify_pending_poll_error(RadrootsAppRemoteSignerError::UnexpectedResponse {
+                method: RadrootsNostrConnectMethod::GetPublicKey,
+                response: "failed to decode signer response envelope: bad".to_owned(),
+            });
+
+        assert!(matches!(
+            outcome,
+            RadrootsAppRemoteSignerPendingPollOutcome::FatalError { message }
+                if message.contains("unexpected `get_public_key` response")
+        ));
+    }
 }

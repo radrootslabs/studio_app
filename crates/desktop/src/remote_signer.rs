@@ -160,7 +160,7 @@ impl DesktopRemoteSigner {
                 .map_err(|error| error.to_string())
                 {
                     Ok(RadrootsAppRemoteSignerPendingPollOutcome::PendingApproval)
-                    | Ok(RadrootsAppRemoteSignerPendingPollOutcome::RetryableError { .. }) => {
+                    | Ok(RadrootsAppRemoteSignerPendingPollOutcome::TransportFailure { .. }) => {
                         std::thread::sleep(Duration::from_secs(1));
                     }
                     Ok(RadrootsAppRemoteSignerPendingPollOutcome::Approved(user_identity)) => {
@@ -176,6 +176,13 @@ impl DesktopRemoteSigner {
                             }
                         };
                         tracker.push_update(Ok(Some(ready_state)));
+                        tracker.polling.store(false, Ordering::Release);
+                        return;
+                    }
+                    Ok(RadrootsAppRemoteSignerPendingPollOutcome::Rejected { message }) => {
+                        let _ = remove_pending_session();
+                        let _ = remove_client_secret(client_account_id.as_str());
+                        tracker.push_update(Err(message));
                         tracker.polling.store(false, Ordering::Release);
                         return;
                     }
