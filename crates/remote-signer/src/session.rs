@@ -220,10 +220,7 @@ impl RadrootsAppRemoteSignerSessionStoreState {
             }
         };
 
-        let state: Self = serde_json::from_str(&contents)
-            .map_err(|error| RadrootsAppRemoteSignerError::InvalidSessionStore(error.to_string()));
-
-        let state = match state {
+        let state = match serde_json::from_str::<Self>(&contents) {
             Ok(state) => state,
             Err(error) => {
                 quarantine_invalid_store(path)?;

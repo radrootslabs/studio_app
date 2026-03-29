@@ -529,14 +529,16 @@ mod tests {
         let path = temp.path().join("sessions.json");
         std::fs::write(path.as_path(), "{invalid").expect("write invalid");
         let manager = RadrootsNostrAccountsManager::new_in_memory();
+        let alice_client_account_id = fixture_public(&FIXTURE_ALICE).id;
+        let bob_client_account_id = fixture_public(&FIXTURE_BOB).id;
         let public = fixture_public(&FIXTURE_CAROL);
         manager
             .upsert_public_identity(public, Some(REMOTE_SIGNER_LABEL.to_owned()), true)
             .expect("upsert");
 
         let vault = RadrootsNostrSecretVaultMemory::new();
-        secret_store_secret(&vault, FIXTURE_ALICE.id, "pending");
-        secret_store_secret(&vault, FIXTURE_BOB.id, "active");
+        secret_store_secret(&vault, alice_client_account_id.as_str(), "pending");
+        secret_store_secret(&vault, bob_client_account_id.as_str(), "active");
 
         radroots_studio_app_remote_signer_reconcile_startup(
             &manager,
@@ -546,20 +548,23 @@ mod tests {
             secret_remover(vault.clone()),
             secret_namespace_purger(
                 vault.clone(),
-                vec![FIXTURE_ALICE.id.to_owned(), FIXTURE_BOB.id.to_owned()],
+                vec![
+                    alice_client_account_id.to_string(),
+                    bob_client_account_id.to_string(),
+                ],
             ),
         )
         .expect("reconcile after quarantine");
 
         assert!(
             vault
-                .load_secret_hex(&fixture_account_id(FIXTURE_ALICE.id))
+                .load_secret_hex(&fixture_account_id(alice_client_account_id.as_str()))
                 .expect("pending removed by namespace purge")
                 .is_none()
         );
         assert!(
             vault
-                .load_secret_hex(&fixture_account_id(FIXTURE_BOB.id))
+                .load_secret_hex(&fixture_account_id(bob_client_account_id.as_str()))
                 .expect("active removed by namespace purge")
                 .is_none()
         );
@@ -573,9 +578,10 @@ mod tests {
             .save(path.as_path())
             .expect("save empty");
         let manager = RadrootsNostrAccountsManager::new_in_memory();
+        let alice_client_account_id = fixture_public(&FIXTURE_ALICE).id;
 
         let vault = RadrootsNostrSecretVaultMemory::new();
-        secret_store_secret(&vault, FIXTURE_ALICE.id, "pending");
+        secret_store_secret(&vault, alice_client_account_id.as_str(), "pending");
 
         radroots_studio_app_remote_signer_reconcile_startup(
             &manager,
@@ -583,13 +589,13 @@ mod tests {
             REMOTE_SIGNER_LABEL,
             secret_loader(vault.clone()),
             secret_remover(vault.clone()),
-            secret_namespace_purger(vault.clone(), vec![FIXTURE_ALICE.id.to_owned()]),
+            secret_namespace_purger(vault.clone(), vec![alice_client_account_id.to_string()]),
         )
         .expect("reconcile empty store");
 
         assert!(
             vault
-                .load_secret_hex(&fixture_account_id(FIXTURE_ALICE.id))
+                .load_secret_hex(&fixture_account_id(alice_client_account_id.as_str()))
                 .expect("pending removed by empty-store namespace purge")
                 .is_none()
         );

@@ -348,17 +348,14 @@ mod tests {
     }
 
     #[test]
-    fn pending_error_response_is_classified_as_pending_approval() {
-        let outcome = classify_pending_poll_response(RadrootsNostrConnectResponse::Error {
-            result: None,
-            error: radroots_nostr_connect::prelude::RADROOTS_NOSTR_CONNECT_PENDING_CONNECTION_ERROR
-                .to_owned(),
-        });
+    fn pending_connection_response_is_classified_as_pending_approval() {
+        let outcome =
+            classify_pending_poll_response(RadrootsNostrConnectResponse::PendingConnection);
 
-        assert_eq!(
+        assert!(matches!(
             outcome,
             RadrootsAppRemoteSignerPendingPollOutcome::PendingApproval
-        );
+        ));
     }
 
     #[test]
@@ -368,12 +365,11 @@ mod tests {
             error: "unauthorized".to_owned(),
         });
 
-        assert_eq!(
+        assert!(matches!(
             outcome,
-            RadrootsAppRemoteSignerPendingPollOutcome::Rejected {
-                message: "unauthorized".to_owned(),
-            }
-        );
+            RadrootsAppRemoteSignerPendingPollOutcome::Rejected { message }
+                if message == "unauthorized"
+        ));
     }
 
     #[test]
@@ -395,12 +391,11 @@ mod tests {
             method: RadrootsNostrConnectMethod::GetPublicKey,
         });
 
-        assert_eq!(
+        assert!(matches!(
             outcome,
-            RadrootsAppRemoteSignerPendingPollOutcome::TransportFailure {
-                message: "remote signer did not respond yet".to_owned(),
-            }
-        );
+            RadrootsAppRemoteSignerPendingPollOutcome::TransportFailure { message }
+                if message == "remote signer did not respond yet"
+        ));
     }
 
     #[test]
