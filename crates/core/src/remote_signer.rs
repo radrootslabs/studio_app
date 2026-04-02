@@ -11,6 +11,7 @@ impl RadrootsRemoteSignerPreview {
         RadrootsPendingRemoteSignerConnection {
             signer_npub: self.signer_npub.clone(),
             relays: self.relays.clone(),
+            auth_url: None,
         }
     }
 }
@@ -19,4 +20,10 @@ impl RadrootsRemoteSignerPreview {
 pub struct RadrootsPendingRemoteSignerConnection {
     pub signer_npub: String,
     pub relays: Vec<String>,
+    pub auth_url: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RadrootsRemoteSignerSignedNote {
+    pub event_id_hex: String,
 }

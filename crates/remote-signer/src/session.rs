@@ -164,6 +164,7 @@ impl RadrootsAppRemoteSignerSessionStoreState {
         &mut self,
         client_account_id: &str,
         user_identity: RadrootsIdentityPublic,
+        relays: Vec<String>,
     ) -> Option<RadrootsAppRemoteSignerSessionRecord> {
         let now = now_unix_secs();
         self.sessions.retain(|record| {
@@ -175,6 +176,7 @@ impl RadrootsAppRemoteSignerSessionStoreState {
             .iter_mut()
             .find(|record| record.client_account_id() == client_account_id)?;
         record.user_identity = Some(user_identity);
+        record.relays = relays;
         record.status = RadrootsAppRemoteSignerSessionStatus::Active;
         record.updated_at_unix = now;
         Some(record.clone())
@@ -324,11 +326,19 @@ mod tests {
 
         let alice_public = fixture_public(&FIXTURE_ALICE);
         let active = state
-            .activate_session(client_account_id.as_str(), alice_public.clone())
+            .activate_session(
+                client_account_id.as_str(),
+                alice_public.clone(),
+                vec!["wss://relay.updated.example".to_owned()],
+            )
             .expect("active");
 
         assert_eq!(active.status, RadrootsAppRemoteSignerSessionStatus::Active);
         assert_eq!(active.account_id(), Some(alice_public.id.as_str()));
+        assert_eq!(
+            active.relays,
+            vec!["wss://relay.updated.example".to_owned()]
+        );
         assert!(state.pending_session().is_none());
     }
 
@@ -339,7 +349,11 @@ mod tests {
         let client_account_id = pending.client_account_id().to_owned();
         state.upsert_pending(pending).expect("pending");
         let alice_public = fixture_public(&FIXTURE_ALICE);
-        state.activate_session(client_account_id.as_str(), alice_public.clone());
+        state.activate_session(
+            client_account_id.as_str(),
+            alice_public.clone(),
+            vec!["wss://relay.updated.example".to_owned()],
+        );
 
         let removed = state
             .remove_active_session_for_account_id(alice_public.id.as_str())

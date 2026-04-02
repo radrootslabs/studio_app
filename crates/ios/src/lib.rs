@@ -544,11 +544,36 @@ impl RadrootsAppBackend for IosBackend {
     fn pending_remote_signer_connection(
         &self,
     ) -> Result<Option<radroots_studio_app_core::RadrootsPendingRemoteSignerConnection>, String> {
-        remote_signer::pending_connection()
+        self.remote_signer.pending_connection()
     }
 
     fn request_cancel_pending_remote_signer_connection(&self) -> Result<(), String> {
         remote_signer::cancel_pending_connection()
+    }
+
+    fn remote_signer_note_action_state(&self) -> Option<SetupActionState> {
+        Some(
+            self.remote_signer
+                .note_action_state()
+                .unwrap_or(SetupActionState {
+                    label: "Sign Remote Kind 1 Note".to_owned(),
+                    enabled: false,
+                    pending: false,
+                }),
+        )
+    }
+
+    fn request_remote_signer_note_action(&self, content: &str) -> Result<(), String> {
+        self.remote_signer.begin_sign_kind1_note_selected(content)
+    }
+
+    fn poll_remote_signer_note_action_result(
+        &self,
+    ) -> Result<Option<radroots_studio_app_core::RadrootsRemoteSignerSignedNote>, String> {
+        self.remote_signer
+            .take_note_update()
+            .transpose()
+            .map(|result| result.flatten())
     }
 
     fn import_paste_action_state(&self) -> Option<PasteActionState> {

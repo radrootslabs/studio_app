@@ -2,13 +2,15 @@ use super::DesktopBackend;
 use radroots_studio_app_apple_security::{APPLE_NOSTR_SERVICE, RadrootsAppleKeychainVault};
 use radroots_studio_app_core::{
     IdentityGateState, RadrootsAccountCustody, RadrootsPendingRemoteSignerConnection,
-    RadrootsRemoteSignerPreview, SetupActionState,
+    RadrootsRemoteSignerPreview, RadrootsRemoteSignerSignedNote, SetupActionState,
 };
 use radroots_studio_app_remote_signer::{
-    RADROOTS_APP_REMOTE_SIGNER_SECRET_NAMESPACE, RadrootsAppRemoteSignerController,
-    RadrootsAppRemoteSignerControllerHooks, RadrootsAppRemoteSignerPendingSession,
-    RadrootsAppRemoteSignerPendingState, RadrootsAppRemoteSignerSessionRecord,
-    RadrootsAppRemoteSignerSessionStoreState, radroots_studio_app_remote_signer_clear_pending_session,
+    RADROOTS_APP_REMOTE_SIGNER_SECRET_NAMESPACE, RadrootsAppRemoteSignerActionController,
+    RadrootsAppRemoteSignerActionControllerHooks, RadrootsAppRemoteSignerActionState,
+    RadrootsAppRemoteSignerController, RadrootsAppRemoteSignerControllerHooks,
+    RadrootsAppRemoteSignerPendingSession, RadrootsAppRemoteSignerPendingState,
+    RadrootsAppRemoteSignerSessionRecord, RadrootsAppRemoteSignerSessionStoreState,
+    RadrootsAppRemoteSignerSignedEvent, radroots_studio_app_remote_signer_clear_pending_session,
     radroots_studio_app_remote_signer_disconnect_selected, radroots_studio_app_remote_signer_preview,
     radroots_studio_app_remote_signer_purge_all_custody_state,
     radroots_studio_app_remote_signer_reconcile_startup,
@@ -74,9 +76,9 @@ impl RadrootsAppRemoteSignerControllerHooks for DesktopRemoteSignerHooks {
     fn activate_pending_session(
         &self,
         client_account_id: &str,
-        user_identity: radroots_identity::RadrootsIdentityPublic,
+        approved: radroots_studio_app_remote_signer::RadrootsAppRemoteSignerApprovedSession,
     ) -> Result<Self::ReadyState, String> {
-        activate_remote_session(client_account_id, user_identity)
+        activate_remote_session(client_account_id, approved)
     }
 
     fn clear_pending_session(
@@ -90,12 +92,16 @@ impl RadrootsAppRemoteSignerControllerHooks for DesktopRemoteSignerHooks {
 #[derive(Clone)]
 pub(crate) struct DesktopRemoteSigner {
     controller: RadrootsAppRemoteSignerController<DesktopRemoteSignerHooks>,
+    action_controller: RadrootsAppRemoteSignerActionController<DesktopRemoteSignerHooks>,
 }
 
 impl DesktopRemoteSigner {
     pub(crate) fn new() -> Self {
         Self {
             controller: RadrootsAppRemoteSignerController::new(DesktopRemoteSignerHooks),
+            action_controller: RadrootsAppRemoteSignerActionController::new(
+                DesktopRemoteSignerHooks,
+            ),
         }
     }
 
@@ -116,13 +122,20 @@ impl DesktopRemoteSigner {
             });
         }
 
-        if pending_connection()?.is_some() {
+        if self.pending_connection()?.is_some() {
             return Ok(match self.controller.pending_state() {
                 RadrootsAppRemoteSignerPendingState::TransportFailure { .. } => SetupActionState {
                     label: "Remote Signer Approval Check Retrying".to_owned(),
                     enabled: false,
                     pending: false,
                 },
+                RadrootsAppRemoteSignerPendingState::AwaitingAuthorization { .. } => {
+                    SetupActionState {
+                        label: "Authorize Remote Signer to Continue".to_owned(),
+                        enabled: false,
+                        pending: false,
+                    }
+                }
                 RadrootsAppRemoteSignerPendingState::Idle
                 | RadrootsAppRemoteSignerPendingState::WaitingApproval => SetupActionState {
                     label: "Remote Signer Waiting for Approval".to_owned(),
@@ -142,6 +155,59 @@ impl DesktopRemoteSigner {
     pub(crate) fn begin_connect(&self, input: &str) -> Result<(), String> {
         self.controller.begin_connect(input)
     }
+
+    pub(crate) fn pending_connection(
+        &self,
+    ) -> Result<Option<RadrootsPendingRemoteSignerConnection>, String> {
+        Ok(
+            pending_session_record()?.map(|record| RadrootsPendingRemoteSignerConnection {
+                signer_npub: record.signer_identity.public_key_npub,
+                relays: record.relays,
+                auth_url: match self.controller.pending_state() {
+                    RadrootsAppRemoteSignerPendingState::AwaitingAuthorization { url } => Some(url),
+                    _ => None,
+                },
+            }),
+        )
+    }
+
+    pub(crate) fn note_action_state(&self) -> Result<SetupActionState, String> {
+        if !selected_remote_signer_account()?.is_some() {
+            return Ok(SetupActionState {
+                label: "Sign Remote Kind 1 Note".to_owned(),
+                enabled: false,
+                pending: false,
+            });
+        }
+
+        Ok(match self.action_controller.state() {
+            RadrootsAppRemoteSignerActionState::Idle => SetupActionState {
+                label: "Sign Remote Kind 1 Note".to_owned(),
+                enabled: true,
+                pending: false,
+            },
+            RadrootsAppRemoteSignerActionState::Signing => SetupActionState {
+                label: "Signing Remote Kind 1 Note...".to_owned(),
+                enabled: false,
+                pending: true,
+            },
+            RadrootsAppRemoteSignerActionState::AwaitingAuthorization { .. } => SetupActionState {
+                label: "Authorize Remote Signer to Continue".to_owned(),
+                enabled: false,
+                pending: false,
+            },
+        })
+    }
+
+    pub(crate) fn begin_sign_kind1_note_selected(&self, content: &str) -> Result<(), String> {
+        self.action_controller.begin_sign_kind1_note(content)
+    }
+
+    pub(crate) fn take_note_update(
+        &self,
+    ) -> Option<Result<Option<RadrootsRemoteSignerSignedNote>, String>> {
+        self.action_controller.take_update()
+    }
 }
 
 pub(crate) fn preview_connection(input: &str) -> Result<RadrootsRemoteSignerPreview, String> {
@@ -153,16 +219,6 @@ pub(crate) fn preview_connection(input: &str) -> Result<RadrootsRemoteSignerPrev
         relays: preview.relays,
         requested_permissions,
     })
-}
-
-pub(crate) fn pending_connection() -> Result<Option<RadrootsPendingRemoteSignerConnection>, String>
-{
-    Ok(DesktopRemoteSignerHooks
-        .pending_session_record()?
-        .map(|record| RadrootsPendingRemoteSignerConnection {
-            signer_npub: record.signer_identity.public_key_npub,
-            relays: record.relays,
-        }))
 }
 
 pub(crate) fn identity_state_from_status(
@@ -225,12 +281,12 @@ pub(crate) fn purge_all_custody_state() -> Result<(), String> {
 
 fn activate_remote_session(
     client_account_id: &str,
-    user_identity: radroots_identity::RadrootsIdentityPublic,
+    approved: radroots_studio_app_remote_signer::RadrootsAppRemoteSignerApprovedSession,
 ) -> Result<IdentityGateState, String> {
     let manager = DesktopBackend::accounts_manager()?;
     manager
         .upsert_public_identity(
-            user_identity.clone(),
+            approved.user_identity.clone(),
             Some(REMOTE_SIGNER_LABEL.to_owned()),
             true,
         )
@@ -239,14 +295,18 @@ fn activate_remote_session(
     let activation_result = (|| -> Result<(), String> {
         let mut state = load_sessions(store_path.as_path())?;
         state
-            .activate_session(client_account_id, user_identity.clone())
+            .activate_session(
+                client_account_id,
+                approved.user_identity.clone(),
+                approved.relays.clone(),
+            )
             .ok_or_else(|| {
                 "pending remote signer session disappeared before activation".to_owned()
             })?;
         save_sessions(store_path.as_path(), &state)
     })();
     if let Err(error) = activation_result {
-        if let Err(rollback_error) = manager.remove_account(&user_identity.id) {
+        if let Err(rollback_error) = manager.remove_account(&approved.user_identity.id) {
             return Err(format!(
                 "{error}. remote signer account rollback needs retry: {rollback_error}"
             ));
@@ -254,8 +314,68 @@ fn activate_remote_session(
         return Err(error);
     }
     Ok(IdentityGateState::Ready {
-        account_id: user_identity.id.to_string(),
+        account_id: approved.user_identity.id.to_string(),
     })
+}
+
+fn selected_remote_signer_account() -> Result<Option<String>, String> {
+    let manager = DesktopBackend::accounts_manager()?;
+    let Some(account_id) = manager
+        .selected_account_id()
+        .map_err(|source| source.to_string())?
+    else {
+        return Ok(None);
+    };
+    if active_session_for_account_id(account_id.as_str())?.is_some() {
+        Ok(Some(account_id.to_string()))
+    } else {
+        Ok(None)
+    }
+}
+
+fn update_active_session_relays(account_id: &str, relays: Vec<String>) -> Result<(), String> {
+    let store_path = sessions_path()?;
+    let mut state = load_sessions(store_path.as_path())?;
+    let Some(mut session) = state.active_session_for_account_id(account_id).cloned() else {
+        return Err("active remote signer session disappeared before relay update".to_owned());
+    };
+    if session.relays == relays {
+        return Ok(());
+    }
+    session.relays = relays;
+    state.remove_active_session_for_account_id(account_id);
+    state.sessions.push(session);
+    save_sessions(store_path.as_path(), &state)
+}
+
+impl RadrootsAppRemoteSignerActionControllerHooks for DesktopRemoteSignerHooks {
+    type ReadyState = RadrootsRemoteSignerSignedNote;
+
+    fn selected_active_session(
+        &self,
+    ) -> Result<Option<(RadrootsAppRemoteSignerSessionRecord, String)>, String> {
+        let Some(account_id) = selected_remote_signer_account()? else {
+            return Ok(None);
+        };
+        let Some(record) = active_session_for_account_id(account_id.as_str())? else {
+            return Ok(None);
+        };
+        let secret = load_client_secret(record.client_account_id())?;
+        Ok(Some((record, secret)))
+    }
+
+    fn complete_sign_event(
+        &self,
+        signed_event: RadrootsAppRemoteSignerSignedEvent,
+    ) -> Result<Self::ReadyState, String> {
+        let Some(account_id) = selected_remote_signer_account()? else {
+            return Err("remote signer account is no longer selected".to_owned());
+        };
+        update_active_session_relays(account_id.as_str(), signed_event.relays.clone())?;
+        Ok(RadrootsRemoteSignerSignedNote {
+            event_id_hex: signed_event.event_id_hex,
+        })
+    }
 }
 
 fn pending_session_record() -> Result<Option<RadrootsAppRemoteSignerSessionRecord>, String> {
@@ -361,7 +481,7 @@ mod tests {
         assert_eq!(preview.relays, vec!["ws://localhost:8080".to_owned()]);
         assert_eq!(
             preview.requested_permissions,
-            vec!["sign_event:kind:1".to_owned()]
+            vec!["sign_event:kind:1".to_owned(), "switch_relays".to_owned(),]
         );
     }
 }

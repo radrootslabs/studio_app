@@ -23,7 +23,10 @@ pub use offline_geocoder::{
     RadrootsOfflineGeocoderDiagnostic, RadrootsOfflineGeocoderPlatform,
     RadrootsOfflineGeocoderState, RadrootsOfflineGeocoderUnavailableKind,
 };
-pub use remote_signer::{RadrootsPendingRemoteSignerConnection, RadrootsRemoteSignerPreview};
+pub use remote_signer::{
+    RadrootsPendingRemoteSignerConnection, RadrootsRemoteSignerPreview,
+    RadrootsRemoteSignerSignedNote,
+};
 pub use secret_keys::{RadrootsSecretImportMode, RadrootsSecretImportRequest};
 
 use home_location_tools::HomeLocationTools;
@@ -137,6 +140,17 @@ pub trait RadrootsAppBackend {
     }
     fn request_cancel_pending_remote_signer_connection(&self) -> Result<(), String> {
         Ok(())
+    }
+    fn remote_signer_note_action_state(&self) -> Option<SetupActionState> {
+        None
+    }
+    fn request_remote_signer_note_action(&self, _content: &str) -> Result<(), String> {
+        Ok(())
+    }
+    fn poll_remote_signer_note_action_result(
+        &self,
+    ) -> Result<Option<RadrootsRemoteSignerSignedNote>, String> {
+        Ok(None)
     }
     fn home_action_states(&self) -> Vec<HomeActionState> {
         Vec::new()
@@ -290,6 +304,7 @@ pub struct RadrootsApp {
     pending_secret_key_backup_entry: bool,
     secret_key_backup_password_input: Zeroizing<String>,
     secret_key_backup_password_confirm_input: Zeroizing<String>,
+    remote_signer_note_input: Zeroizing<String>,
     revealed_secret_material: Option<RevealedSecretMaterial>,
 }
 
@@ -437,6 +452,7 @@ impl RadrootsApp {
             pending_secret_key_backup_entry: false,
             secret_key_backup_password_input: Zeroizing::new(String::new()),
             secret_key_backup_password_confirm_input: Zeroizing::new(String::new()),
+            remote_signer_note_input: Zeroizing::new(String::new()),
             revealed_secret_material: None,
         };
         app.offline_geocoder_state = app.backend.offline_geocoder_state();
@@ -639,6 +655,19 @@ impl RadrootsApp {
         }
     }
 
+    fn request_remote_signer_note_action(&mut self) {
+        self.status_message = None;
+        match self
+            .backend
+            .request_remote_signer_note_action(self.remote_signer_note_input.as_str())
+        {
+            Ok(()) => {}
+            Err(err) => {
+                self.status_message = Some(err);
+            }
+        }
+    }
+
     fn request_select_account(&mut self, account_id: &str) {
         self.status_message = None;
         self.clear_revealed_secret_material();
@@ -720,6 +749,19 @@ impl RadrootsApp {
         }
         match self.backend.poll_home_action_result() {
             Ok(Some(result)) => self.apply_home_action_result(result),
+            Ok(None) => {}
+            Err(err) => {
+                self.status_message = Some(err);
+            }
+        }
+        match self.backend.poll_remote_signer_note_action_result() {
+            Ok(Some(result)) => {
+                self.remote_signer_note_input.clear();
+                self.status_message = Some(format!(
+                    "Signed remote kind 1 note: {}",
+                    result.event_id_hex
+                ));
+            }
             Ok(None) => {}
             Err(err) => {
                 self.status_message = Some(err);
@@ -921,7 +963,12 @@ impl RadrootsApp {
                 }
                 RemoteSignerEntryState::WaitingApproval(pending) => {
                     ui.label(action.label.as_str());
-                    if action.label == "Remote Signer Approval Check Retrying" {
+                    if pending.auth_url.is_some() {
+                        ui.add_space(8.0);
+                        ui.label(
+                            "Authorize the remote signer in the browser, then keep this screen open while the app waits for the replayed response.",
+                        );
+                    } else if action.label == "Remote Signer Approval Check Retrying" {
                         ui.add_space(8.0);
                         ui.label(
                             "The app is retrying approval checks after a relay or network failure.",
@@ -939,6 +986,11 @@ impl RadrootsApp {
                         for relay in &pending.relays {
                             ui.monospace(relay);
                         }
+                    }
+                    if let Some(auth_url) = &pending.auth_url {
+                        ui.add_space(8.0);
+                        ui.label("Authorization url");
+                        ui.monospace(auth_url);
                     }
                     ui.add_space(8.0);
                     if ui.button("Cancel Pending Remote Signer").clicked() {
@@ -970,6 +1022,29 @@ impl RadrootsApp {
             ui.monospace(format!("account id: {}", summary.account_id));
             ui.monospace(format!("npub: {}", summary.npub));
             ui.monospace(format!("custody: {}", summary.custody.label()));
+            if summary.custody == RadrootsAccountCustody::RemoteSigner {
+                if let Some(note_action) = self.backend.remote_signer_note_action_state() {
+                    if note_action.pending {
+                        ui.ctx().request_repaint();
+                    }
+                    ui.add_space(16.0);
+                    ui.label("Remote signer note");
+                    ui.add_space(8.0);
+                    ui.add(
+                        egui::TextEdit::multiline(&mut *self.remote_signer_note_input)
+                            .hint_text("Write a kind 1 note to sign through the remote signer")
+                            .desired_rows(3)
+                            .desired_width(ui.available_width().min(560.0)),
+                    );
+                    ui.add_space(8.0);
+                    if ui
+                        .add_enabled(note_action.enabled, egui::Button::new(note_action.label))
+                        .clicked()
+                    {
+                        self.request_remote_signer_note_action();
+                    }
+                }
+            }
         } else {
             ui.label("Selected account details are unavailable.");
             ui.monospace(format!("account id: {selected_account_id}"));
@@ -1334,6 +1409,10 @@ mod tests {
         remote_signer_request: Rc<RefCell<VecDeque<Result<Option<IdentityGateState>, String>>>>,
         pending_remote_signer: Rc<RefCell<Option<RadrootsPendingRemoteSignerConnection>>>,
         cancel_pending_remote_signer: Rc<RefCell<VecDeque<Result<(), String>>>>,
+        remote_signer_note_action_state: Rc<RefCell<Option<SetupActionState>>>,
+        remote_signer_note_request: Rc<RefCell<VecDeque<Result<(), String>>>>,
+        remote_signer_note_poll:
+            Rc<RefCell<VecDeque<Result<Option<RadrootsRemoteSignerSignedNote>, String>>>>,
         home_action_states: Rc<RefCell<Vec<HomeActionState>>>,
         request: Rc<RefCell<VecDeque<Result<Option<IdentityGateState>, String>>>>,
         home_setup_request: Rc<RefCell<VecDeque<Result<Option<IdentityGateState>, String>>>>,
@@ -1371,6 +1450,9 @@ mod tests {
                 remote_signer_request: Rc::new(RefCell::new(VecDeque::new())),
                 pending_remote_signer: Rc::new(RefCell::new(None)),
                 cancel_pending_remote_signer: Rc::new(RefCell::new(VecDeque::new())),
+                remote_signer_note_action_state: Rc::new(RefCell::new(None)),
+                remote_signer_note_request: Rc::new(RefCell::new(VecDeque::new())),
+                remote_signer_note_poll: Rc::new(RefCell::new(VecDeque::new())),
                 home_action_states: Rc::new(RefCell::new(Vec::new())),
                 request: Rc::new(RefCell::new(request.into())),
                 home_setup_request: Rc::new(RefCell::new(VecDeque::new())),
@@ -1644,6 +1726,26 @@ mod tests {
             result
         }
 
+        fn remote_signer_note_action_state(&self) -> Option<SetupActionState> {
+            self.remote_signer_note_action_state.borrow().clone()
+        }
+
+        fn request_remote_signer_note_action(&self, _content: &str) -> Result<(), String> {
+            self.remote_signer_note_request
+                .borrow_mut()
+                .pop_front()
+                .unwrap_or(Ok(()))
+        }
+
+        fn poll_remote_signer_note_action_result(
+            &self,
+        ) -> Result<Option<RadrootsRemoteSignerSignedNote>, String> {
+            self.remote_signer_note_poll
+                .borrow_mut()
+                .pop_front()
+                .unwrap_or(Ok(None))
+        }
+
         fn home_action_states(&self) -> Vec<HomeActionState> {
             self.home_action_states.borrow().clone()
         }
@@ -1743,7 +1845,7 @@ mod tests {
             source_label: "discovery url".into(),
             signer_npub: FIXTURE_BOB.npub.into(),
             relays: vec!["ws://localhost:8080".into()],
-            requested_permissions: vec!["sign_event:kind:1".into()],
+            requested_permissions: vec!["sign_event:kind:1".into(), "switch_relays".into()],
         }
     }
 

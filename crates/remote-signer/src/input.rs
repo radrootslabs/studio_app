@@ -40,10 +40,13 @@ impl RadrootsAppRemoteSignerTarget {
 }
 
 pub fn radroots_studio_app_remote_signer_requested_permissions() -> RadrootsNostrConnectPermissions {
-    vec![RadrootsNostrConnectPermission::with_parameter(
-        RadrootsNostrConnectMethod::SignEvent,
-        "kind:1",
-    )]
+    vec![
+        RadrootsNostrConnectPermission::with_parameter(
+            RadrootsNostrConnectMethod::SignEvent,
+            "kind:1",
+        ),
+        RadrootsNostrConnectPermission::new(RadrootsNostrConnectMethod::SwitchRelays),
+    ]
     .into()
 }
 
@@ -135,7 +138,7 @@ mod tests {
         assert_eq!(preview.connect_secret, None);
         assert_eq!(
             preview.requested_permission_labels(),
-            vec!["sign_event:kind:1".to_owned()]
+            vec!["sign_event:kind:1".to_owned(), "switch_relays".to_owned()]
         );
     }
 
@@ -149,7 +152,7 @@ mod tests {
         assert_eq!(preview.relays, vec![RELAY_PRIMARY_WSS.to_owned()]);
         assert_eq!(
             preview.requested_permission_labels(),
-            vec!["sign_event:kind:1".to_owned()]
+            vec!["sign_event:kind:1".to_owned(), "switch_relays".to_owned()]
         );
     }
 

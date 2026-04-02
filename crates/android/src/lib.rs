@@ -378,7 +378,7 @@ impl RadrootsAppBackend for AndroidBackend {
     ) -> Result<Option<radroots_studio_app_core::RadrootsPendingRemoteSignerConnection>, String> {
         #[cfg(target_os = "android")]
         {
-            return remote_signer::pending_connection();
+            return self.remote_signer.pending_connection();
         }
 
         #[cfg(not(target_os = "android"))]
@@ -396,6 +396,57 @@ impl RadrootsAppBackend for AndroidBackend {
         #[cfg(not(target_os = "android"))]
         {
             Ok(())
+        }
+    }
+
+    fn remote_signer_note_action_state(&self) -> Option<SetupActionState> {
+        #[cfg(target_os = "android")]
+        {
+            return Some(
+                self.remote_signer
+                    .note_action_state()
+                    .unwrap_or(SetupActionState {
+                        label: "Sign Remote Kind 1 Note".to_owned(),
+                        enabled: false,
+                        pending: false,
+                    }),
+            );
+        }
+
+        #[cfg(not(target_os = "android"))]
+        {
+            None
+        }
+    }
+
+    fn request_remote_signer_note_action(&self, content: &str) -> Result<(), String> {
+        #[cfg(target_os = "android")]
+        {
+            return self.remote_signer.begin_sign_kind1_note_selected(content);
+        }
+
+        #[cfg(not(target_os = "android"))]
+        {
+            let _ = content;
+            Ok(())
+        }
+    }
+
+    fn poll_remote_signer_note_action_result(
+        &self,
+    ) -> Result<Option<radroots_studio_app_core::RadrootsRemoteSignerSignedNote>, String> {
+        #[cfg(target_os = "android")]
+        {
+            return self
+                .remote_signer
+                .take_note_update()
+                .transpose()
+                .map(|result| result.flatten());
+        }
+
+        #[cfg(not(target_os = "android"))]
+        {
+            Ok(None)
         }
     }
 

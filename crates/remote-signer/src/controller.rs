@@ -1,6 +1,8 @@
 use crate::protocol::{
-    RadrootsAppRemoteSignerPendingPollOutcome, RadrootsAppRemoteSignerPendingSession,
-    radroots_studio_app_remote_signer_connect_pending, radroots_studio_app_remote_signer_poll_pending_session,
+    RadrootsAppRemoteSignerApprovedSession, RadrootsAppRemoteSignerPendingPollOutcome,
+    RadrootsAppRemoteSignerPendingSession, RadrootsAppRemoteSignerProgressUpdate,
+    radroots_studio_app_remote_signer_connect_pending,
+    radroots_studio_app_remote_signer_poll_pending_session_with_progress,
 };
 use crate::session::RadrootsAppRemoteSignerSessionRecord;
 use std::marker::PhantomData;
@@ -14,6 +16,7 @@ type RadrootsAppRemoteSignerPollPendingFn = Arc<
     dyn Fn(
             &RadrootsAppRemoteSignerSessionRecord,
             &str,
+            Arc<dyn Fn(RadrootsAppRemoteSignerProgressUpdate) + Send + Sync>,
         ) -> Result<RadrootsAppRemoteSignerPendingPollOutcome, String>
         + Send
         + Sync,
@@ -24,11 +27,12 @@ type RadrootsAppRemoteSignerSleepFn = Arc<dyn Fn(Duration) + Send + Sync>;
 pub enum RadrootsAppRemoteSignerPendingState {
     Idle,
     WaitingApproval,
+    AwaitingAuthorization { url: String },
     TransportFailure { message: String },
 }
 
 pub trait RadrootsAppRemoteSignerControllerHooks: Clone + Send + Sync + 'static {
-    type ReadyState: Send + 'static;
+    type ReadyState: Send + Sync + 'static;
 
     fn reconcile_startup_state(&self) -> Result<(), String> {
         Ok(())
@@ -48,7 +52,7 @@ pub trait RadrootsAppRemoteSignerControllerHooks: Clone + Send + Sync + 'static 
     fn activate_pending_session(
         &self,
         client_account_id: &str,
-        user_identity: radroots_identity::RadrootsIdentityPublic,
+        approved: RadrootsAppRemoteSignerApprovedSession,
     ) -> Result<Self::ReadyState, String>;
 
     fn clear_pending_session(&self)
@@ -242,7 +246,15 @@ where
                     }
                 };
 
-                match (tracker.poll_pending)(&pending_record, client_secret_key_hex.as_str()) {
+                let progress_tracker = tracker.clone();
+                let progress: Arc<dyn Fn(RadrootsAppRemoteSignerProgressUpdate) + Send + Sync> =
+                    Arc::new(move |update| progress_tracker.apply_progress(update));
+
+                match (tracker.poll_pending)(
+                    &pending_record,
+                    client_secret_key_hex.as_str(),
+                    progress,
+                ) {
                     Ok(RadrootsAppRemoteSignerPendingPollOutcome::PendingApproval) => {
                         tracker.set_pending_state(
                             RadrootsAppRemoteSignerPendingState::WaitingApproval,
@@ -262,12 +274,12 @@ where
                         }
                         (tracker.sleep)(Duration::from_secs(1));
                     }
-                    Ok(RadrootsAppRemoteSignerPendingPollOutcome::Approved(user_identity)) => {
+                    Ok(RadrootsAppRemoteSignerPendingPollOutcome::Approved(approved)) => {
                         tracker.set_pending_state(RadrootsAppRemoteSignerPendingState::Idle);
-                        let ready_state = match tracker.hooks.activate_pending_session(
-                            pending_record.client_account_id(),
-                            user_identity,
-                        ) {
+                        let ready_state = match tracker
+                            .hooks
+                            .activate_pending_session(pending_record.client_account_id(), approved)
+                        {
                             Ok(state) => state,
                             Err(error) => {
                                 tracker
@@ -317,6 +329,20 @@ where
         }
     }
 
+    fn apply_progress(&self, update: RadrootsAppRemoteSignerProgressUpdate) {
+        match update {
+            RadrootsAppRemoteSignerProgressUpdate::AuthChallenge { url } => {
+                let next =
+                    RadrootsAppRemoteSignerPendingState::AwaitingAuthorization { url: url.clone() };
+                if self.set_pending_state(next) {
+                    self.push_update(Err(format!(
+                        "authorize the remote signer to continue: {url}"
+                    )));
+                }
+            }
+        }
+    }
+
     fn set_pending_state(&self, next: RadrootsAppRemoteSignerPendingState) -> bool {
         if let Ok(mut state) = self.pending_state.lock() {
             if *state == next {
@@ -343,9 +369,14 @@ fn default_connect_pending(input: &str) -> Result<RadrootsAppRemoteSignerPending
 fn default_poll_pending(
     record: &RadrootsAppRemoteSignerSessionRecord,
     client_secret_key_hex: &str,
+    progress: Arc<dyn Fn(RadrootsAppRemoteSignerProgressUpdate) + Send + Sync>,
 ) -> Result<RadrootsAppRemoteSignerPendingPollOutcome, String> {
-    radroots_studio_app_remote_signer_poll_pending_session(record, client_secret_key_hex)
-        .map_err(|error| error.to_string())
+    radroots_studio_app_remote_signer_poll_pending_session_with_progress(
+        record,
+        client_secret_key_hex,
+        move |update| progress(update),
+    )
+    .map_err(|error| error.to_string())
 }
 
 #[cfg(test)]
@@ -475,17 +506,18 @@ mod tests {
         fn activate_pending_session(
             &self,
             client_account_id: &str,
-            user_identity: radroots_identity::RadrootsIdentityPublic,
+            approved: RadrootsAppRemoteSignerApprovedSession,
         ) -> Result<Self::ReadyState, String> {
             let mut state = self
                 .state
                 .lock()
                 .map_err(|_| "hooks lock poisoned".to_owned())?;
             state.pending = None;
-            state
-                .active
-                .insert(client_account_id.to_owned(), user_identity.id.to_string());
-            Ok(user_identity.id.to_string())
+            state.active.insert(
+                client_account_id.to_owned(),
+                approved.user_identity.id.to_string(),
+            );
+            Ok(approved.user_identity.id.to_string())
         }
 
         fn clear_pending_session(
@@ -588,7 +620,7 @@ mod tests {
         let controller = RadrootsAppRemoteSignerController::new_with_ops(
             hooks.clone(),
             Arc::new(pending_session_for_input),
-            Arc::new(move |record, _| {
+            Arc::new(move |record, _, _progress| {
                 poll_tx
                     .send(record.client_account_id().to_owned())
                     .expect("send poll id");
@@ -629,7 +661,7 @@ mod tests {
         let controller = RadrootsAppRemoteSignerController::new_with_ops(
             hooks.clone(),
             Arc::new(pending_session_for_input),
-            Arc::new(move |record, _| {
+            Arc::new(move |record, _, _progress| {
                 poll_tx
                     .send(record.client_account_id().to_owned())
                     .expect("send poll id");
@@ -672,7 +704,7 @@ mod tests {
         let controller = RadrootsAppRemoteSignerController::new_with_ops(
             hooks.clone(),
             Arc::new(pending_session_for_input),
-            Arc::new(move |record, _| {
+            Arc::new(move |record, _, _progress| {
                 poll_tx
                     .send(record.client_account_id().to_owned())
                     .expect("send poll id");
@@ -734,7 +766,7 @@ mod tests {
         let controller = RadrootsAppRemoteSignerController::new_with_ops(
             hooks.clone(),
             Arc::new(pending_session_for_input),
-            Arc::new(move |_, _| {
+            Arc::new(move |_, _, _progress| {
                 let next = outcomes
                     .lock()
                     .expect("outcomes lock")
