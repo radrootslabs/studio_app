@@ -66,17 +66,12 @@ async fn connect_pending_session(
     target: RadrootsAppRemoteSignerTarget,
 ) -> Result<RadrootsAppRemoteSignerPendingSession, RadrootsAppRemoteSignerError> {
     let client_identity = RadrootsIdentity::generate();
+    let connect_request = connect_request_for_target(&target)?;
     let response = execute_request(
         &client_identity,
         &target,
         RadrootsNostrConnectMethod::Connect,
-        RadrootsNostrConnectRequest::Connect {
-            remote_signer_public_key: parse_public_key_hex(
-                target.signer_identity.public_key_hex.as_str(),
-            )?,
-            secret: target.connect_secret.clone(),
-            requested_permissions: Default::default(),
-        },
+        connect_request,
         CONNECT_TIMEOUT,
     )
     .await?;
@@ -100,6 +95,18 @@ async fn connect_pending_session(
     }
 }
 
+fn connect_request_for_target(
+    target: &RadrootsAppRemoteSignerTarget,
+) -> Result<RadrootsNostrConnectRequest, RadrootsAppRemoteSignerError> {
+    Ok(RadrootsNostrConnectRequest::Connect {
+        remote_signer_public_key: parse_public_key_hex(
+            target.signer_identity.public_key_hex.as_str(),
+        )?,
+        secret: target.connect_secret.clone(),
+        requested_permissions: target.requested_permissions.clone(),
+    })
+}
+
 async fn poll_pending_session(
     record: &RadrootsAppRemoteSignerSessionRecord,
     client_secret_key_hex: &str,
@@ -111,6 +118,7 @@ async fn poll_pending_session(
         signer_identity: record.signer_identity.clone(),
         relays: record.relays.clone(),
         connect_secret: None,
+        requested_permissions: crate::radroots_studio_app_remote_signer_requested_permissions(),
     };
 
     match execute_request(
@@ -338,13 +346,24 @@ fn parse_public_key_hex(value: &str) -> Result<nostr::PublicKey, RadrootsAppRemo
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::radroots_studio_app_remote_signer_preview;
     use nostr::PublicKey;
-    use radroots_studio_app_test_support::{FIXTURE_ALICE, fixture_identity};
+    use radroots_studio_app_test_support::{FIXTURE_ALICE, RELAY_PRIMARY_WSS, fixture_identity};
 
     fn fixture_public_key() -> PublicKey {
         fixture_identity(&FIXTURE_ALICE)
             .expect("identity")
             .public_key()
+    }
+
+    fn fixture_discovery_url() -> String {
+        format!(
+            "http://localhost/connect?uri={}",
+            url::form_urlencoded::byte_serialize(
+                format!("bunker://{}?relay={RELAY_PRIMARY_WSS}", FIXTURE_ALICE.npub).as_bytes()
+            )
+            .collect::<String>()
+        )
     }
 
     #[test]
@@ -411,5 +430,21 @@ mod tests {
             RadrootsAppRemoteSignerPendingPollOutcome::FatalError { message }
                 if message.contains("unexpected `get_public_key` response")
         ));
+    }
+
+    #[test]
+    fn connect_request_uses_explicit_requested_permissions() {
+        let target =
+            radroots_studio_app_remote_signer_preview(fixture_discovery_url().as_str()).expect("preview");
+
+        let request = connect_request_for_target(&target).expect("request");
+
+        match request {
+            RadrootsNostrConnectRequest::Connect {
+                requested_permissions,
+                ..
+            } => assert_eq!(requested_permissions.to_string(), "sign_event:kind:1"),
+            other => panic!("unexpected request: {other:?}"),
+        }
     }
 }

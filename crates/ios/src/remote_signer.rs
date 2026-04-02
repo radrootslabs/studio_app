@@ -147,11 +147,12 @@ impl IosRemoteSigner {
 
 pub(crate) fn preview_connection(input: &str) -> Result<RadrootsRemoteSignerPreview, String> {
     let preview = radroots_studio_app_remote_signer_preview(input).map_err(|error| error.to_string())?;
+    let requested_permissions = preview.requested_permission_labels();
     Ok(RadrootsRemoteSignerPreview {
         source_label: preview.source_label().to_owned(),
         signer_npub: preview.signer_identity.public_key_npub,
         relays: preview.relays,
-        requested_permissions: Vec::new(),
+        requested_permissions,
     })
 }
 

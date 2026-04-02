@@ -1743,7 +1743,7 @@ mod tests {
             source_label: "discovery url".into(),
             signer_npub: FIXTURE_BOB.npub.into(),
             relays: vec!["ws://localhost:8080".into()],
-            requested_permissions: Vec::new(),
+            requested_permissions: vec!["sign_event:kind:1".into()],
         }
     }
 

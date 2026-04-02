@@ -1,6 +1,9 @@
 use crate::error::RadrootsAppRemoteSignerError;
 use radroots_identity::RadrootsIdentityPublic;
-use radroots_nostr_connect::prelude::RadrootsNostrConnectUri;
+use radroots_nostr_connect::prelude::{
+    RadrootsNostrConnectMethod, RadrootsNostrConnectPermission, RadrootsNostrConnectPermissions,
+    RadrootsNostrConnectUri,
+};
 use radroots_nostr_connect::uri::RADROOTS_NOSTR_CONNECT_BUNKER_URI_SCHEME;
 use url::Url;
 
@@ -16,6 +19,7 @@ pub struct RadrootsAppRemoteSignerTarget {
     pub signer_identity: RadrootsIdentityPublic,
     pub relays: Vec<String>,
     pub connect_secret: Option<String>,
+    pub requested_permissions: RadrootsNostrConnectPermissions,
 }
 
 impl RadrootsAppRemoteSignerTarget {
@@ -25,6 +29,22 @@ impl RadrootsAppRemoteSignerTarget {
             RadrootsAppRemoteSignerSource::DiscoveryUrl => "discovery url",
         }
     }
+
+    pub fn requested_permission_labels(&self) -> Vec<String> {
+        self.requested_permissions
+            .as_slice()
+            .iter()
+            .map(ToString::to_string)
+            .collect()
+    }
+}
+
+pub fn radroots_studio_app_remote_signer_requested_permissions() -> RadrootsNostrConnectPermissions {
+    vec![RadrootsNostrConnectPermission::with_parameter(
+        RadrootsNostrConnectMethod::SignEvent,
+        "kind:1",
+    )]
+    .into()
 }
 
 pub fn radroots_studio_app_remote_signer_preview(
@@ -77,6 +97,7 @@ fn parse_bunker_uri(
             .map(|relay| relay.to_string())
             .collect(),
         connect_secret: bunker_uri.secret,
+        requested_permissions: radroots_studio_app_remote_signer_requested_permissions(),
     })
 }
 
@@ -112,6 +133,10 @@ mod tests {
         assert_eq!(preview.signer_identity.public_key_npub, FIXTURE_ALICE.npub);
         assert_eq!(preview.relays, vec![RELAY_PRIMARY_WSS.to_owned()]);
         assert_eq!(preview.connect_secret, None);
+        assert_eq!(
+            preview.requested_permission_labels(),
+            vec!["sign_event:kind:1".to_owned()]
+        );
     }
 
     #[test]
@@ -122,6 +147,10 @@ mod tests {
         assert_eq!(preview.source, RadrootsAppRemoteSignerSource::DiscoveryUrl);
         assert_eq!(preview.signer_identity.public_key_npub, FIXTURE_ALICE.npub);
         assert_eq!(preview.relays, vec![RELAY_PRIMARY_WSS.to_owned()]);
+        assert_eq!(
+            preview.requested_permission_labels(),
+            vec!["sign_event:kind:1".to_owned()]
+        );
     }
 
     #[test]
