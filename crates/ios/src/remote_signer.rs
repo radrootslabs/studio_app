@@ -298,6 +298,7 @@ fn activate_remote_session(
                 client_account_id,
                 approved.user_identity.clone(),
                 approved.relays.clone(),
+                approved.approved_permissions.clone(),
             )
             .ok_or_else(|| {
                 "pending remote signer session disappeared before activation".to_owned()

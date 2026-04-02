@@ -1,8 +1,9 @@
 use crate::protocol::{
     RadrootsAppRemoteSignerApprovedSession, RadrootsAppRemoteSignerPendingPollOutcome,
-    RadrootsAppRemoteSignerPendingSession, RadrootsAppRemoteSignerProgressUpdate,
-    radroots_studio_app_remote_signer_connect_pending,
-    radroots_studio_app_remote_signer_poll_pending_session_with_progress,
+    RadrootsAppRemoteSignerPendingPoller, RadrootsAppRemoteSignerPendingSession,
+    RadrootsAppRemoteSignerProgressUpdate, radroots_studio_app_remote_signer_connect_pending,
+    radroots_studio_app_remote_signer_open_pending_poller,
+    radroots_studio_app_remote_signer_poll_pending_poller_with_progress,
 };
 use crate::session::RadrootsAppRemoteSignerSessionRecord;
 use std::marker::PhantomData;
@@ -105,7 +106,7 @@ where
         Self::new_with_ops(
             hooks,
             Arc::new(default_connect_pending),
-            Arc::new(default_poll_pending),
+            default_poll_pending(),
             Arc::new(std::thread::sleep),
         )
     }
@@ -366,17 +367,44 @@ fn default_connect_pending(input: &str) -> Result<RadrootsAppRemoteSignerPending
     radroots_studio_app_remote_signer_connect_pending(input).map_err(|error| error.to_string())
 }
 
-fn default_poll_pending(
-    record: &RadrootsAppRemoteSignerSessionRecord,
-    client_secret_key_hex: &str,
-    progress: Arc<dyn Fn(RadrootsAppRemoteSignerProgressUpdate) + Send + Sync>,
-) -> Result<RadrootsAppRemoteSignerPendingPollOutcome, String> {
-    radroots_studio_app_remote_signer_poll_pending_session_with_progress(
-        record,
-        client_secret_key_hex,
-        move |update| progress(update),
+fn default_poll_pending() -> RadrootsAppRemoteSignerPollPendingFn {
+    let cache: Arc<Mutex<Option<(String, RadrootsAppRemoteSignerPendingPoller)>>> =
+        Arc::new(Mutex::new(None));
+    Arc::new(
+        move |record, client_secret_key_hex, progress| -> Result<_, String> {
+            let client_account_id = record.client_account_id().to_owned();
+            let mut cache = cache
+                .lock()
+                .map_err(|_| "pending poller cache lock poisoned".to_owned())?;
+            let poller = match cache.as_mut() {
+                Some((cached_account_id, poller)) if *cached_account_id == client_account_id => {
+                    poller
+                }
+                _ => {
+                    let poller = radroots_studio_app_remote_signer_open_pending_poller(
+                        record,
+                        client_secret_key_hex,
+                    )
+                    .map_err(|error| error.to_string())?;
+                    *cache = Some((client_account_id.clone(), poller));
+                    &mut cache.as_mut().expect("cache initialized").1
+                }
+            };
+            let outcome = radroots_studio_app_remote_signer_poll_pending_poller_with_progress(
+                poller,
+                &mut |update| progress(update),
+            )
+            .map_err(|error| error.to_string())?;
+            if !matches!(
+                outcome,
+                RadrootsAppRemoteSignerPendingPollOutcome::PendingApproval
+                    | RadrootsAppRemoteSignerPendingPollOutcome::TransportFailure { .. }
+            ) {
+                *cache = None;
+            }
+            Ok(outcome)
+        },
     )
-    .map_err(|error| error.to_string())
 }
 
 #[cfg(test)]

@@ -733,6 +733,18 @@ impl RadrootsAppBackend for DesktopBackend {
         }
     }
 
+    fn selected_remote_signer_approved_permissions(&self) -> Option<Vec<String>> {
+        #[cfg(target_os = "macos")]
+        {
+            return remote_signer::selected_approved_permission_labels().unwrap_or(None);
+        }
+
+        #[cfg(not(target_os = "macos"))]
+        {
+            None
+        }
+    }
+
     fn request_remote_signer_note_action(&self, content: &str) -> Result<(), String> {
         #[cfg(target_os = "macos")]
         {

@@ -172,9 +172,23 @@ impl DesktopRemoteSigner {
     }
 
     pub(crate) fn note_action_state(&self) -> Result<SetupActionState, String> {
-        if !selected_remote_signer_account()?.is_some() {
+        let Some(account_id) = selected_remote_signer_account()? else {
             return Ok(SetupActionState {
                 label: "Sign Remote Kind 1 Note".to_owned(),
+                enabled: false,
+                pending: false,
+            });
+        };
+        let Some(record) = active_session_for_account_id(account_id.as_str())? else {
+            return Ok(SetupActionState {
+                label: "Sign Remote Kind 1 Note".to_owned(),
+                enabled: false,
+                pending: false,
+            });
+        };
+        if !record.allows_sign_event_kind1() {
+            return Ok(SetupActionState {
+                label: "Remote Signer Missing sign_event:kind:1".to_owned(),
                 enabled: false,
                 pending: false,
             });
@@ -299,6 +313,7 @@ fn activate_remote_session(
                 client_account_id,
                 approved.user_identity.clone(),
                 approved.relays.clone(),
+                approved.approved_permissions.clone(),
             )
             .ok_or_else(|| {
                 "pending remote signer session disappeared before activation".to_owned()
@@ -360,6 +375,9 @@ impl RadrootsAppRemoteSignerActionControllerHooks for DesktopRemoteSignerHooks {
         let Some(record) = active_session_for_account_id(account_id.as_str())? else {
             return Ok(None);
         };
+        if !record.allows_sign_event_kind1() {
+            return Err("remote signer has not approved sign_event:kind:1".to_owned());
+        }
         let secret = load_client_secret(record.client_account_id())?;
         Ok(Some((record, secret)))
     }
@@ -390,6 +408,14 @@ fn active_session_for_account_id(
     let store_path = sessions_path()?;
     let state = load_sessions(store_path.as_path())?;
     Ok(state.active_session_for_account_id(account_id).cloned())
+}
+
+pub(crate) fn selected_approved_permission_labels() -> Result<Option<Vec<String>>, String> {
+    let Some(account_id) = selected_remote_signer_account()? else {
+        return Ok(None);
+    };
+    Ok(active_session_for_account_id(account_id.as_str())?
+        .map(|record| record.approved_permission_labels()))
 }
 
 fn load_sessions(path: &Path) -> Result<RadrootsAppRemoteSignerSessionStoreState, String> {

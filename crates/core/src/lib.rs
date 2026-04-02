@@ -144,6 +144,9 @@ pub trait RadrootsAppBackend {
     fn remote_signer_note_action_state(&self) -> Option<SetupActionState> {
         None
     }
+    fn selected_remote_signer_approved_permissions(&self) -> Option<Vec<String>> {
+        None
+    }
     fn request_remote_signer_note_action(&self, _content: &str) -> Result<(), String> {
         Ok(())
     }
@@ -1029,6 +1032,19 @@ impl RadrootsApp {
                     }
                     ui.add_space(16.0);
                     ui.label("Remote signer note");
+                    if let Some(permissions) =
+                        self.backend.selected_remote_signer_approved_permissions()
+                    {
+                        ui.add_space(8.0);
+                        if permissions.is_empty() {
+                            ui.label("Approved permissions: none");
+                        } else {
+                            ui.label("Approved permissions");
+                            for permission in permissions {
+                                ui.monospace(permission);
+                            }
+                        }
+                    }
                     ui.add_space(8.0);
                     ui.add(
                         egui::TextEdit::multiline(&mut *self.remote_signer_note_input)

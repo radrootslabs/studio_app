@@ -1,5 +1,8 @@
 use crate::error::RadrootsAppRemoteSignerError;
 use radroots_identity::RadrootsIdentityPublic;
+use radroots_nostr_connect::prelude::{
+    RadrootsNostrConnectMethod, RadrootsNostrConnectPermission, RadrootsNostrConnectPermissions,
+};
 use serde::{Deserialize, Serialize};
 use std::io::Write;
 use std::path::Path;
@@ -20,6 +23,8 @@ pub struct RadrootsAppRemoteSignerSessionRecord {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub user_identity: Option<RadrootsIdentityPublic>,
     pub relays: Vec<String>,
+    #[serde(default)]
+    pub approved_permissions: RadrootsNostrConnectPermissions,
     pub status: RadrootsAppRemoteSignerSessionStatus,
     pub created_at_unix: u64,
     pub updated_at_unix: u64,
@@ -58,6 +63,7 @@ impl RadrootsAppRemoteSignerSessionRecord {
             signer_identity,
             user_identity: None,
             relays,
+            approved_permissions: RadrootsNostrConnectPermissions::default(),
             status: RadrootsAppRemoteSignerSessionStatus::PendingApproval,
             created_at_unix: now,
             updated_at_unix: now,
@@ -72,6 +78,41 @@ impl RadrootsAppRemoteSignerSessionRecord {
 
     pub fn client_account_id(&self) -> &str {
         self.client_identity.id.as_str()
+    }
+
+    pub fn approved_permission_labels(&self) -> Vec<String> {
+        self.approved_permissions
+            .as_slice()
+            .iter()
+            .map(ToString::to_string)
+            .collect()
+    }
+
+    pub fn allows_sign_event_kind1(&self) -> bool {
+        self.approved_permissions
+            .as_slice()
+            .iter()
+            .any(|permission| {
+                permission_matches(
+                    permission,
+                    &RadrootsNostrConnectPermission::with_parameter(
+                        RadrootsNostrConnectMethod::SignEvent,
+                        "kind:1",
+                    ),
+                )
+            })
+    }
+
+    pub fn allows_switch_relays(&self) -> bool {
+        self.approved_permissions
+            .as_slice()
+            .iter()
+            .any(|permission| {
+                permission_matches(
+                    permission,
+                    &RadrootsNostrConnectPermission::new(RadrootsNostrConnectMethod::SwitchRelays),
+                )
+            })
     }
 }
 
@@ -165,6 +206,7 @@ impl RadrootsAppRemoteSignerSessionStoreState {
         client_account_id: &str,
         user_identity: RadrootsIdentityPublic,
         relays: Vec<String>,
+        approved_permissions: RadrootsNostrConnectPermissions,
     ) -> Option<RadrootsAppRemoteSignerSessionRecord> {
         let now = now_unix_secs();
         self.sessions.retain(|record| {
@@ -177,6 +219,7 @@ impl RadrootsAppRemoteSignerSessionStoreState {
             .find(|record| record.client_account_id() == client_account_id)?;
         record.user_identity = Some(user_identity);
         record.relays = relays;
+        record.approved_permissions = approved_permissions;
         record.status = RadrootsAppRemoteSignerSessionStatus::Active;
         record.updated_at_unix = now;
         Some(record.clone())
@@ -249,6 +292,33 @@ impl RadrootsAppRemoteSignerSessionStoreState {
     }
 }
 
+fn permission_matches(
+    granted_permission: &RadrootsNostrConnectPermission,
+    required_permission: &RadrootsNostrConnectPermission,
+) -> bool {
+    if granted_permission.method != required_permission.method {
+        return false;
+    }
+
+    match (
+        &granted_permission.method,
+        granted_permission.parameter.as_deref(),
+        required_permission.parameter.as_deref(),
+    ) {
+        (RadrootsNostrConnectMethod::SignEvent, None, _) => true,
+        (RadrootsNostrConnectMethod::SignEvent, Some(parameter), Some(required)) => {
+            parameter == required || parameter == sign_event_kind_suffix(required)
+        }
+        (_, None, _) => true,
+        (_, Some(parameter), Some(required)) => parameter == required,
+        (_, Some(_), None) => false,
+    }
+}
+
+fn sign_event_kind_suffix(value: &str) -> &str {
+    value.strip_prefix("kind:").unwrap_or(value)
+}
+
 fn now_unix_secs() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -285,6 +355,9 @@ fn quarantine_invalid_store(path: &Path) -> Result<(), RadrootsAppRemoteSignerEr
 mod tests {
     use super::*;
     use radroots_studio_app_test_support::{FIXTURE_ALICE, FIXTURE_BOB, fixture_identity};
+    use radroots_nostr_connect::prelude::{
+        RadrootsNostrConnectMethod, RadrootsNostrConnectPermission,
+    };
 
     fn fixture_public(
         label: &radroots_studio_app_test_support::RadrootsAppApprovedFixtureIdentity,
@@ -330,6 +403,14 @@ mod tests {
                 client_account_id.as_str(),
                 alice_public.clone(),
                 vec!["wss://relay.updated.example".to_owned()],
+                vec![
+                    RadrootsNostrConnectPermission::with_parameter(
+                        RadrootsNostrConnectMethod::SignEvent,
+                        "kind:1",
+                    ),
+                    RadrootsNostrConnectPermission::new(RadrootsNostrConnectMethod::SwitchRelays),
+                ]
+                .into(),
             )
             .expect("active");
 
@@ -339,6 +420,12 @@ mod tests {
             active.relays,
             vec!["wss://relay.updated.example".to_owned()]
         );
+        assert_eq!(
+            active.approved_permission_labels(),
+            vec!["sign_event:kind:1".to_owned(), "switch_relays".to_owned()]
+        );
+        assert!(active.allows_sign_event_kind1());
+        assert!(active.allows_switch_relays());
         assert!(state.pending_session().is_none());
     }
 
@@ -353,6 +440,7 @@ mod tests {
             client_account_id.as_str(),
             alice_public.clone(),
             vec!["wss://relay.updated.example".to_owned()],
+            RadrootsNostrConnectPermissions::default(),
         );
 
         let removed = state
@@ -394,5 +482,20 @@ mod tests {
         );
         assert!(loaded.sessions.is_empty());
         assert!(!path.exists());
+    }
+
+    #[test]
+    fn active_session_permission_helpers_respect_sign_event_and_switch_relays() {
+        let mut record = pending_record();
+        record.user_identity = Some(fixture_public(&FIXTURE_ALICE));
+        record.status = RadrootsAppRemoteSignerSessionStatus::Active;
+        record.approved_permissions = vec![RadrootsNostrConnectPermission::with_parameter(
+            RadrootsNostrConnectMethod::SignEvent,
+            "1",
+        )]
+        .into();
+
+        assert!(record.allows_sign_event_kind1());
+        assert!(!record.allows_switch_relays());
     }
 }

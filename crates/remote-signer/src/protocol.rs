@@ -14,7 +14,8 @@ use radroots_nostr::prelude::{
 use radroots_nostr_connect::message::RADROOTS_NOSTR_CONNECT_RPC_KIND;
 use radroots_nostr_connect::prelude::{
     RadrootsNostrConnectMethod, RadrootsNostrConnectPendingConnectionPollOutcome,
-    RadrootsNostrConnectRequest, RadrootsNostrConnectRequestMessage, RadrootsNostrConnectResponse,
+    RadrootsNostrConnectPermissions, RadrootsNostrConnectRequest,
+    RadrootsNostrConnectRequestMessage, RadrootsNostrConnectResponse,
     RadrootsNostrConnectResponseEnvelope,
 };
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -24,7 +25,7 @@ use tokio::sync::broadcast;
 use tokio::time::timeout;
 
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
-const GET_PUBLIC_KEY_TIMEOUT: Duration = Duration::from_secs(60);
+const GET_SESSION_CAPABILITY_TIMEOUT: Duration = Duration::from_secs(60);
 const SWITCH_RELAYS_TIMEOUT: Duration = Duration::from_secs(30);
 const SIGN_EVENT_TIMEOUT: Duration = Duration::from_secs(60);
 static REQUEST_COUNTER: AtomicU64 = AtomicU64::new(1);
@@ -39,6 +40,7 @@ pub struct RadrootsAppRemoteSignerPendingSession {
 pub struct RadrootsAppRemoteSignerApprovedSession {
     pub user_identity: RadrootsIdentityPublic,
     pub relays: Vec<String>,
+    pub approved_permissions: RadrootsNostrConnectPermissions,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -60,6 +62,18 @@ pub enum RadrootsAppRemoteSignerPendingPollOutcome {
     TransportFailure { message: String },
     Rejected { message: String },
     FatalError { message: String },
+}
+
+pub(crate) struct RadrootsAppRemoteSignerPendingPoller {
+    client: ConnectedRemoteSignerSessionClient,
+}
+
+struct ConnectedRemoteSignerSessionClient {
+    runtime: tokio::runtime::Runtime,
+    client_identity: RadrootsIdentity,
+    target: RadrootsAppRemoteSignerTarget,
+    client: RadrootsNostrClient,
+    notifications: broadcast::Receiver<RadrootsNostrRelayPoolNotification>,
 }
 
 pub fn radroots_studio_app_remote_signer_connect_pending(
@@ -92,15 +106,29 @@ pub fn radroots_studio_app_remote_signer_poll_pending_session_with_progress<F>(
 where
     F: FnMut(RadrootsAppRemoteSignerProgressUpdate),
 {
-    let runtime = Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .map_err(|error| RadrootsAppRemoteSignerError::ConnectFailed(error.to_string()))?;
-    runtime.block_on(poll_pending_session(
-        record,
-        client_secret_key_hex,
-        &mut progress,
-    ))
+    let mut poller = radroots_studio_app_remote_signer_open_pending_poller(record, client_secret_key_hex)?;
+    radroots_studio_app_remote_signer_poll_pending_poller_with_progress(&mut poller, &mut progress)
+}
+
+pub(crate) fn radroots_studio_app_remote_signer_open_pending_poller(
+    record: &RadrootsAppRemoteSignerSessionRecord,
+    client_secret_key_hex: &str,
+) -> Result<RadrootsAppRemoteSignerPendingPoller, RadrootsAppRemoteSignerError> {
+    let client_identity = load_client_identity(client_secret_key_hex)?;
+    let target = target_for_record(record);
+    Ok(RadrootsAppRemoteSignerPendingPoller {
+        client: ConnectedRemoteSignerSessionClient::connect(client_identity, target)?,
+    })
+}
+
+pub(crate) fn radroots_studio_app_remote_signer_poll_pending_poller_with_progress<F>(
+    poller: &mut RadrootsAppRemoteSignerPendingPoller,
+    progress: &mut F,
+) -> Result<RadrootsAppRemoteSignerPendingPollOutcome, RadrootsAppRemoteSignerError>
+where
+    F: FnMut(RadrootsAppRemoteSignerProgressUpdate),
+{
+    poller.poll_with_progress(progress)
 }
 
 pub fn radroots_studio_app_remote_signer_sign_kind1_note(
@@ -216,41 +244,6 @@ fn connect_request_for_target(
     })
 }
 
-async fn poll_pending_session<F>(
-    record: &RadrootsAppRemoteSignerSessionRecord,
-    client_secret_key_hex: &str,
-    progress: &mut F,
-) -> Result<RadrootsAppRemoteSignerPendingPollOutcome, RadrootsAppRemoteSignerError>
-where
-    F: FnMut(RadrootsAppRemoteSignerProgressUpdate),
-{
-    let client_identity = load_client_identity(client_secret_key_hex)?;
-    let mut target = target_for_record(record);
-
-    match execute_request_with_progress(
-        &client_identity,
-        &target,
-        RadrootsNostrConnectMethod::GetPublicKey,
-        RadrootsNostrConnectRequest::GetPublicKey,
-        GET_PUBLIC_KEY_TIMEOUT,
-        progress,
-    )
-    .await
-    {
-        Ok(RadrootsNostrConnectResponse::UserPublicKey(public_key)) => {
-            target.relays = sync_relays(&client_identity, &target, progress).await?;
-            Ok(RadrootsAppRemoteSignerPendingPollOutcome::Approved(
-                RadrootsAppRemoteSignerApprovedSession {
-                    user_identity: RadrootsIdentityPublic::new(public_key),
-                    relays: target.relays,
-                },
-            ))
-        }
-        Ok(response) => Ok(classify_pending_poll_response(response)),
-        Err(error) => Ok(classify_pending_poll_error(error)),
-    }
-}
-
 async fn sign_kind1_note<F>(
     record: &RadrootsAppRemoteSignerSessionRecord,
     client_secret_key_hex: &str,
@@ -260,6 +253,11 @@ async fn sign_kind1_note<F>(
 where
     F: FnMut(RadrootsAppRemoteSignerProgressUpdate),
 {
+    if !record.allows_sign_event_kind1() {
+        return Err(RadrootsAppRemoteSignerError::ConnectFailed(
+            "remote signer has not approved sign_event:kind:1".to_owned(),
+        ));
+    }
     let user_identity = record.user_identity.as_ref().ok_or_else(|| {
         RadrootsAppRemoteSignerError::ConnectFailed(
             "remote signer session is missing the approved user identity".to_owned(),
@@ -280,24 +278,22 @@ where
     F: FnMut(RadrootsAppRemoteSignerProgressUpdate),
 {
     let client_identity = load_client_identity(client_secret_key_hex)?;
-    let mut target = target_for_record(record);
-    target.relays = sync_relays(&client_identity, &target, progress).await?;
-    let response = execute_request_with_progress(
-        &client_identity,
-        &target,
+    let target = target_for_record(record);
+    let mut client = ConnectedRemoteSignerSessionClient::connect(client_identity, target)?;
+    let relays = client.sync_relays_if_allowed(record, progress)?;
+    let response = client.execute_request_with_progress(
         RadrootsNostrConnectMethod::SignEvent,
         RadrootsNostrConnectRequest::SignEvent(unsigned_event),
         SIGN_EVENT_TIMEOUT,
         progress,
-    )
-    .await?;
+    )?;
 
     match response {
         RadrootsNostrConnectResponse::SignedEvent(event) => {
             Ok(RadrootsAppRemoteSignerSignedEvent {
                 event_id_hex: event.id.to_hex(),
                 event_json: event.as_json(),
-                relays: target.relays,
+                relays,
             })
         }
         RadrootsNostrConnectResponse::Error { error, .. } => {
@@ -310,41 +306,6 @@ where
     }
 }
 
-async fn sync_relays<F>(
-    client_identity: &RadrootsIdentity,
-    target: &RadrootsAppRemoteSignerTarget,
-    progress: &mut F,
-) -> Result<Vec<String>, RadrootsAppRemoteSignerError>
-where
-    F: FnMut(RadrootsAppRemoteSignerProgressUpdate),
-{
-    let response = execute_request_with_progress(
-        client_identity,
-        target,
-        RadrootsNostrConnectMethod::SwitchRelays,
-        RadrootsNostrConnectRequest::SwitchRelays,
-        SWITCH_RELAYS_TIMEOUT,
-        progress,
-    )
-    .await?;
-
-    match response {
-        RadrootsNostrConnectResponse::RelayList(relays) => {
-            Ok(relays.into_iter().map(|relay| relay.to_string()).collect())
-        }
-        RadrootsNostrConnectResponse::RelayListUnchanged => Ok(target.relays.clone()),
-        RadrootsNostrConnectResponse::Error { error, .. } => {
-            Err(RadrootsAppRemoteSignerError::ConnectFailed(format!(
-                "remote signer rejected relay update: {error}"
-            )))
-        }
-        other => Err(RadrootsAppRemoteSignerError::UnexpectedResponse {
-            method: RadrootsNostrConnectMethod::SwitchRelays,
-            response: format!("{other:?}"),
-        }),
-    }
-}
-
 async fn execute_request(
     client_identity: &RadrootsIdentity,
     target: &RadrootsAppRemoteSignerTarget,
@@ -352,105 +313,176 @@ async fn execute_request(
     request: RadrootsNostrConnectRequest,
     request_timeout: Duration,
 ) -> Result<RadrootsNostrConnectResponse, RadrootsAppRemoteSignerError> {
-    execute_request_with_progress(
-        client_identity,
-        target,
-        method,
-        request,
-        request_timeout,
-        &mut |_| {},
-    )
-    .await
+    let mut client =
+        ConnectedRemoteSignerSessionClient::connect(client_identity.clone(), target.clone())?;
+    client.execute_request_with_progress(method, request, request_timeout, &mut |_| {})
 }
 
-async fn execute_request_with_progress<F>(
-    client_identity: &RadrootsIdentity,
-    target: &RadrootsAppRemoteSignerTarget,
-    method: RadrootsNostrConnectMethod,
-    request: RadrootsNostrConnectRequest,
-    request_timeout: Duration,
-    progress: &mut F,
-) -> Result<RadrootsNostrConnectResponse, RadrootsAppRemoteSignerError>
-where
-    F: FnMut(RadrootsAppRemoteSignerProgressUpdate),
-{
-    let client = RadrootsNostrClient::from_identity(client_identity);
-    for relay in &target.relays {
-        client
-            .add_relay(relay)
-            .await
-            .map_err(|error| RadrootsAppRemoteSignerError::ConnectFailed(error.to_string()))?;
-    }
-    client.connect().await;
-
-    let filter = radroots_nostr_filter_tag(
-        RadrootsNostrFilter::new()
-            .kind(RadrootsNostrKind::Custom(RADROOTS_NOSTR_CONNECT_RPC_KIND))
-            .since(RadrootsNostrTimestamp::now()),
-        "p",
-        vec![client_identity.public_key_hex()],
-    )
-    .map_err(|error| RadrootsAppRemoteSignerError::ConnectFailed(error.to_string()))?;
-    let mut notifications = client.notifications();
-    client
-        .subscribe(filter, None)
-        .await
-        .map_err(|error| RadrootsAppRemoteSignerError::ConnectFailed(error.to_string()))?;
-
-    let request_id = next_request_id(method.to_string().as_str());
-    let event_builder = build_request_event(
-        client_identity,
-        &target.signer_identity,
-        request_id.as_str(),
-        request.clone(),
-    )?;
-    client
-        .send_event_builder(event_builder)
-        .await
-        .map_err(|error| RadrootsAppRemoteSignerError::ConnectFailed(error.to_string()))?;
-
-    let response_method = method.clone();
-    let response = timeout(request_timeout, async {
-        loop {
-            let notification = match notifications.recv().await {
-                Ok(notification) => notification,
-                Err(broadcast::error::RecvError::Lagged(_)) => continue,
-                Err(broadcast::error::RecvError::Closed) => {
-                    return Err(RadrootsAppRemoteSignerError::ConnectFailed(
-                        "remote signer notification stream closed".to_owned(),
-                    ));
-                }
-            };
-            let RadrootsNostrRelayPoolNotification::Event { event, .. } = notification else {
-                continue;
-            };
-            let event = *event;
-            if event.kind != RadrootsNostrKind::Custom(RADROOTS_NOSTR_CONNECT_RPC_KIND) {
-                continue;
-            }
-            if event.pubkey.to_hex() != target.signer_identity.public_key_hex {
-                continue;
-            }
-            match parse_response_event(
-                client_identity,
-                &event,
-                &response_method,
-                request_id.as_str(),
-            )? {
-                Some(RadrootsNostrConnectResponse::AuthUrl(url)) => {
-                    progress(RadrootsAppRemoteSignerProgressUpdate::AuthChallenge { url });
-                }
-                Some(response) => return Ok(response),
-                None => continue,
-            }
+impl RadrootsAppRemoteSignerPendingPoller {
+    fn poll_with_progress<F>(
+        &mut self,
+        progress: &mut F,
+    ) -> Result<RadrootsAppRemoteSignerPendingPollOutcome, RadrootsAppRemoteSignerError>
+    where
+        F: FnMut(RadrootsAppRemoteSignerProgressUpdate),
+    {
+        match self.client.execute_request_with_progress(
+            RadrootsNostrConnectMethod::GetSessionCapability,
+            RadrootsNostrConnectRequest::GetSessionCapability,
+            GET_SESSION_CAPABILITY_TIMEOUT,
+            progress,
+        ) {
+            Ok(response) => Ok(classify_pending_poll_response(response)),
+            Err(error) => Ok(classify_pending_poll_error(error)),
         }
-    })
-    .await
-    .map_err(|_| RadrootsAppRemoteSignerError::RequestTimedOut {
-        method: method.clone(),
-    })??;
+    }
+}
 
-    Ok(response)
+impl ConnectedRemoteSignerSessionClient {
+    fn connect(
+        client_identity: RadrootsIdentity,
+        target: RadrootsAppRemoteSignerTarget,
+    ) -> Result<Self, RadrootsAppRemoteSignerError> {
+        let runtime = Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .map_err(|error| RadrootsAppRemoteSignerError::ConnectFailed(error.to_string()))?;
+        let client = RadrootsNostrClient::from_identity(&client_identity);
+        let notifications = runtime.block_on(async {
+            for relay in &target.relays {
+                client.add_relay(relay).await.map_err(|error| {
+                    RadrootsAppRemoteSignerError::ConnectFailed(error.to_string())
+                })?;
+            }
+            client.connect().await;
+            let filter = radroots_nostr_filter_tag(
+                RadrootsNostrFilter::new()
+                    .kind(RadrootsNostrKind::Custom(RADROOTS_NOSTR_CONNECT_RPC_KIND))
+                    .since(RadrootsNostrTimestamp::now()),
+                "p",
+                vec![client_identity.public_key_hex()],
+            )
+            .map_err(|error| RadrootsAppRemoteSignerError::ConnectFailed(error.to_string()))?;
+            let notifications = client.notifications();
+            client
+                .subscribe(filter, None)
+                .await
+                .map_err(|error| RadrootsAppRemoteSignerError::ConnectFailed(error.to_string()))?;
+            Ok::<_, RadrootsAppRemoteSignerError>(notifications)
+        })?;
+
+        Ok(Self {
+            runtime,
+            client_identity,
+            target,
+            client,
+            notifications,
+        })
+    }
+
+    fn sync_relays_if_allowed<F>(
+        &mut self,
+        record: &RadrootsAppRemoteSignerSessionRecord,
+        progress: &mut F,
+    ) -> Result<Vec<String>, RadrootsAppRemoteSignerError>
+    where
+        F: FnMut(RadrootsAppRemoteSignerProgressUpdate),
+    {
+        if !record.allows_switch_relays() {
+            return Ok(self.target.relays.clone());
+        }
+
+        match self.execute_request_with_progress(
+            RadrootsNostrConnectMethod::SwitchRelays,
+            RadrootsNostrConnectRequest::SwitchRelays,
+            SWITCH_RELAYS_TIMEOUT,
+            progress,
+        )? {
+            RadrootsNostrConnectResponse::RelayList(relays) => {
+                let relays: Vec<String> =
+                    relays.into_iter().map(|relay| relay.to_string()).collect();
+                self.target.relays = relays.clone();
+                Ok(relays)
+            }
+            RadrootsNostrConnectResponse::RelayListUnchanged => Ok(self.target.relays.clone()),
+            RadrootsNostrConnectResponse::Error { error, .. } => {
+                Err(RadrootsAppRemoteSignerError::ConnectFailed(format!(
+                    "remote signer rejected relay update: {error}"
+                )))
+            }
+            other => Err(RadrootsAppRemoteSignerError::UnexpectedResponse {
+                method: RadrootsNostrConnectMethod::SwitchRelays,
+                response: format!("{other:?}"),
+            }),
+        }
+    }
+
+    fn execute_request_with_progress<F>(
+        &mut self,
+        method: RadrootsNostrConnectMethod,
+        request: RadrootsNostrConnectRequest,
+        request_timeout: Duration,
+        progress: &mut F,
+    ) -> Result<RadrootsNostrConnectResponse, RadrootsAppRemoteSignerError>
+    where
+        F: FnMut(RadrootsAppRemoteSignerProgressUpdate),
+    {
+        let request_id = next_request_id(method.to_string().as_str());
+        let response_method = method.clone();
+        self.runtime.block_on(async {
+            let event_builder = build_request_event(
+                &self.client_identity,
+                &self.target.signer_identity,
+                request_id.as_str(),
+                request,
+            )?;
+            self.client
+                .send_event_builder(event_builder)
+                .await
+                .map_err(|error| RadrootsAppRemoteSignerError::ConnectFailed(error.to_string()))?;
+
+            timeout(request_timeout, async {
+                loop {
+                    let notification = match self.notifications.recv().await {
+                        Ok(notification) => notification,
+                        Err(broadcast::error::RecvError::Lagged(_)) => continue,
+                        Err(broadcast::error::RecvError::Closed) => {
+                            return Err(RadrootsAppRemoteSignerError::ConnectFailed(
+                                "remote signer notification stream closed".to_owned(),
+                            ));
+                        }
+                    };
+                    let RadrootsNostrRelayPoolNotification::Event { event, .. } = notification
+                    else {
+                        continue;
+                    };
+                    let event = *event;
+                    if event.kind != RadrootsNostrKind::Custom(RADROOTS_NOSTR_CONNECT_RPC_KIND) {
+                        continue;
+                    }
+                    if event.pubkey.to_hex() != self.target.signer_identity.public_key_hex {
+                        continue;
+                    }
+                    match parse_response_event(
+                        &self.client_identity,
+                        &event,
+                        &response_method,
+                        request_id.as_str(),
+                    )? {
+                        Some(RadrootsNostrConnectResponse::AuthUrl(url)) => {
+                            progress(RadrootsAppRemoteSignerProgressUpdate::AuthChallenge { url });
+                        }
+                        Some(response) => return Ok(response),
+                        None => continue,
+                    }
+                }
+            })
+            .await
+            .map_err(|_| RadrootsAppRemoteSignerError::RequestTimedOut {
+                method: response_method.clone(),
+            })?
+        })
+    }
 }
 
 fn build_request_event(
@@ -523,6 +555,20 @@ fn classify_pending_poll_response(
                 RadrootsAppRemoteSignerApprovedSession {
                     user_identity: RadrootsIdentityPublic::new(public_key),
                     relays: Vec::new(),
+                    approved_permissions: RadrootsNostrConnectPermissions::default(),
+                },
+            )
+        }
+        RadrootsNostrConnectPendingConnectionPollOutcome::ApprovedCapability(capability) => {
+            RadrootsAppRemoteSignerPendingPollOutcome::Approved(
+                RadrootsAppRemoteSignerApprovedSession {
+                    user_identity: RadrootsIdentityPublic::new(capability.user_public_key),
+                    relays: capability
+                        .relays
+                        .into_iter()
+                        .map(|relay| relay.to_string())
+                        .collect(),
+                    approved_permissions: capability.permissions,
                 },
             )
         }
@@ -594,7 +640,11 @@ fn target_for_record(
         signer_identity: record.signer_identity.clone(),
         relays: record.relays.clone(),
         connect_secret: None,
-        requested_permissions: crate::radroots_studio_app_remote_signer_requested_permissions(),
+        requested_permissions: if record.approved_permissions.is_empty() {
+            crate::radroots_studio_app_remote_signer_requested_permissions()
+        } else {
+            record.approved_permissions.clone()
+        },
     }
 }
 
@@ -604,6 +654,9 @@ mod tests {
     use crate::radroots_studio_app_remote_signer_preview;
     use nostr::PublicKey;
     use radroots_studio_app_test_support::{FIXTURE_ALICE, RELAY_PRIMARY_WSS, fixture_identity};
+    use radroots_nostr_connect::prelude::{
+        RadrootsNostrConnectPermission, RadrootsNostrConnectRemoteSessionCapability,
+    };
 
     fn fixture_public_key() -> PublicKey {
         fixture_identity(&FIXTURE_ALICE)
@@ -647,23 +700,38 @@ mod tests {
     }
 
     #[test]
-    fn get_public_key_success_is_classified_as_approved() {
-        let outcome = classify_pending_poll_response(RadrootsNostrConnectResponse::UserPublicKey(
-            fixture_public_key(),
-        ));
+    fn session_capability_success_is_classified_as_approved() {
+        let outcome =
+            classify_pending_poll_response(RadrootsNostrConnectResponse::RemoteSessionCapability(
+                RadrootsNostrConnectRemoteSessionCapability {
+                    user_public_key: fixture_public_key(),
+                    relays: vec![nostr::RelayUrl::parse(RELAY_PRIMARY_WSS).expect("relay")],
+                    permissions: vec![
+                        RadrootsNostrConnectPermission::with_parameter(
+                            RadrootsNostrConnectMethod::SignEvent,
+                            "kind:1",
+                        ),
+                        RadrootsNostrConnectPermission::new(
+                            RadrootsNostrConnectMethod::SwitchRelays,
+                        ),
+                    ]
+                    .into(),
+                },
+            ));
 
         assert!(matches!(
             outcome,
             RadrootsAppRemoteSignerPendingPollOutcome::Approved(
-                RadrootsAppRemoteSignerApprovedSession { user_identity, .. }
+                RadrootsAppRemoteSignerApprovedSession { user_identity, approved_permissions, .. }
             ) if user_identity.public_key_hex == fixture_public_key().to_hex()
+                && approved_permissions.to_string() == "sign_event:kind:1,switch_relays"
         ));
     }
 
     #[test]
     fn timeout_error_is_classified_as_transport_failure() {
         let outcome = classify_pending_poll_error(RadrootsAppRemoteSignerError::RequestTimedOut {
-            method: RadrootsNostrConnectMethod::GetPublicKey,
+            method: RadrootsNostrConnectMethod::GetSessionCapability,
         });
 
         assert!(matches!(
@@ -677,14 +745,14 @@ mod tests {
     fn unexpected_response_error_is_fatal() {
         let outcome =
             classify_pending_poll_error(RadrootsAppRemoteSignerError::UnexpectedResponse {
-                method: RadrootsNostrConnectMethod::GetPublicKey,
+                method: RadrootsNostrConnectMethod::GetSessionCapability,
                 response: "failed to decode signer response envelope: bad".to_owned(),
             });
 
         assert!(matches!(
             outcome,
             RadrootsAppRemoteSignerPendingPollOutcome::FatalError { message }
-                if message.contains("unexpected `get_public_key` response")
+                if message.contains("unexpected `get_session_capability` response")
         ));
     }
 
@@ -717,5 +785,28 @@ mod tests {
 
         assert_eq!(signed_event.event_id_hex, "deadbeef");
         assert_eq!(signed_event.relays, vec!["ws://localhost:8080".to_owned()]);
+    }
+
+    #[test]
+    fn target_for_record_uses_approved_permissions_when_available() {
+        let client_identity = fixture_identity(&FIXTURE_ALICE)
+            .expect("client")
+            .to_public();
+        let signer_identity = fixture_identity(&FIXTURE_ALICE)
+            .expect("signer")
+            .to_public();
+        let mut record = RadrootsAppRemoteSignerSessionRecord::pending(
+            client_identity,
+            signer_identity,
+            vec![RELAY_PRIMARY_WSS.to_owned()],
+        );
+        record.approved_permissions = vec![RadrootsNostrConnectPermission::new(
+            RadrootsNostrConnectMethod::SwitchRelays,
+        )]
+        .into();
+
+        let target = target_for_record(&record);
+
+        assert_eq!(target.requested_permissions.to_string(), "switch_relays");
     }
 }
