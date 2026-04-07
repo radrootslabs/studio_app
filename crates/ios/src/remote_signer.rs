@@ -17,7 +17,8 @@ use radroots_studio_app_remote_signer::{
 };
 use radroots_identity::RadrootsIdentityId;
 use radroots_nostr_accounts::prelude::{
-    RadrootsNostrAccountsManager, RadrootsNostrSecretVault, RadrootsNostrSelectedAccountStatus,
+    RadrootsNostrAccountsManager, RadrootsNostrSelectedAccountStatus, RadrootsSecretVault,
+    account_secret_slot,
 };
 use std::path::{Path, PathBuf};
 
@@ -420,41 +421,44 @@ fn legacy_client_secret_vault() -> RadrootsAppleKeychainVault {
     RadrootsAppleKeychainVault::new(APPLE_NOSTR_SERVICE)
 }
 
-fn store_client_secret(client_account_id: &str, secret_key_hex: &str) -> Result<(), String> {
+fn client_secret_slot(client_account_id: &str) -> Result<String, String> {
     let account_id = RadrootsIdentityId::try_from(client_account_id)
         .map_err(|_| "invalid remote signer client account id".to_owned())?;
+    Ok(account_secret_slot(&account_id))
+}
+
+fn store_client_secret(client_account_id: &str, secret_key_hex: &str) -> Result<(), String> {
+    let slot = client_secret_slot(client_account_id)?;
     client_secret_vault()
-        .store_secret_hex(&account_id, secret_key_hex)
+        .store_secret(slot.as_str(), secret_key_hex)
         .map_err(|source| source.to_string())
 }
 
 fn load_client_secret(client_account_id: &str) -> Result<String, String> {
-    let account_id = RadrootsIdentityId::try_from(client_account_id)
-        .map_err(|_| "invalid remote signer client account id".to_owned())?;
+    let slot = client_secret_slot(client_account_id)?;
     if let Some(secret) = client_secret_vault()
-        .load_secret_hex(&account_id)
+        .load_secret(slot.as_str())
         .map_err(|source| source.to_string())?
     {
         return Ok(secret);
     }
 
     let secret = legacy_client_secret_vault()
-        .load_secret_hex(&account_id)
+        .load_secret(slot.as_str())
         .map_err(|source| source.to_string())?
         .ok_or_else(|| "remote signer session secret is missing".to_owned())?;
-    let _ = client_secret_vault().store_secret_hex(&account_id, secret.as_str());
-    let _ = legacy_client_secret_vault().remove_secret(&account_id);
+    let _ = client_secret_vault().store_secret(slot.as_str(), secret.as_str());
+    let _ = legacy_client_secret_vault().remove_secret(slot.as_str());
     Ok(secret)
 }
 
 fn remove_client_secret(client_account_id: &str) -> Result<(), String> {
-    let account_id = RadrootsIdentityId::try_from(client_account_id)
-        .map_err(|_| "invalid remote signer client account id".to_owned())?;
+    let slot = client_secret_slot(client_account_id)?;
     client_secret_vault()
-        .remove_secret(&account_id)
+        .remove_secret(slot.as_str())
         .map_err(|source| source.to_string())?;
     legacy_client_secret_vault()
-        .remove_secret(&account_id)
+        .remove_secret(slot.as_str())
         .map_err(|source| source.to_string())
 }
 

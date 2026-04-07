@@ -1,9 +1,12 @@
 use crate::security::{
-    APPLE_NOSTR_NAMESPACE, AppleSecretAccessPolicy, load_secret, remove_secret,
-    remove_secret_namespace, store_secret,
+    APPLE_NOSTR_NAMESPACE, AppleSecretAccessPolicy, AppleSecretAccessibility, load_secret,
+    remove_secret, remove_secret_namespace, store_secret,
 };
-use radroots_identity::RadrootsIdentityId;
-use radroots_nostr_accounts::prelude::{RadrootsNostrAccountsError, RadrootsNostrSecretVault};
+use radroots_secret_vault::{
+    RadrootsHostVaultCapabilities, RadrootsHostVaultHardwarePolicy, RadrootsHostVaultPolicy,
+    RadrootsHostVaultResidency, RadrootsHostVaultUserPresencePolicy, RadrootsSecretVault,
+    RadrootsSecretVaultAccessError,
+};
 use zeroize::Zeroizing;
 
 #[derive(Debug, Clone)]
@@ -13,10 +16,12 @@ pub struct RadrootsAppleKeychainVault {
 }
 
 impl RadrootsAppleKeychainVault {
+    #[must_use]
     pub fn new(service_name: impl Into<String>) -> Self {
         Self::new_with_namespace(service_name, APPLE_NOSTR_NAMESPACE)
     }
 
+    #[must_use]
     pub fn new_with_namespace(
         service_name: impl Into<String>,
         namespace: impl Into<String>,
@@ -27,79 +32,123 @@ impl RadrootsAppleKeychainVault {
         }
     }
 
-    fn account_name(account_id: &RadrootsIdentityId) -> &str {
-        account_id.as_str()
+    #[must_use]
+    pub const fn secure_local_policy() -> RadrootsHostVaultPolicy {
+        RadrootsHostVaultPolicy {
+            residency: RadrootsHostVaultResidency::DeviceLocalOnly,
+            user_presence: RadrootsHostVaultUserPresencePolicy::NotRequired,
+            hardware: RadrootsHostVaultHardwarePolicy::Any,
+        }
     }
 
-    pub fn purge_namespace(&self) -> Result<(), RadrootsNostrAccountsError> {
-        remove_secret_namespace(self.service_name.as_str(), self.namespace.as_str())
-    }
-}
+    fn capabilities() -> RadrootsHostVaultCapabilities {
+        #[cfg(any(target_os = "ios", target_os = "macos"))]
+        {
+            RadrootsHostVaultCapabilities {
+                available: true,
+                supports_device_local_only: true,
+                supports_user_presence: true,
+                supports_hardware_backed: false,
+            }
+        }
 
-impl RadrootsNostrSecretVault for RadrootsAppleKeychainVault {
-    fn store_secret_hex(
+        #[cfg(not(any(target_os = "ios", target_os = "macos")))]
+        {
+            RadrootsHostVaultCapabilities::unavailable()
+        }
+    }
+
+    fn validate_policy(
+        policy: RadrootsHostVaultPolicy,
+    ) -> Result<(), RadrootsSecretVaultAccessError> {
+        Self::capabilities()
+            .validate(policy)
+            .map_err(|source| RadrootsSecretVaultAccessError::Backend(source.to_string()))
+    }
+
+    fn access_policy(policy: RadrootsHostVaultPolicy) -> AppleSecretAccessPolicy {
+        AppleSecretAccessPolicy {
+            accessibility: AppleSecretAccessibility::WhenUnlocked,
+            device_local_only: matches!(
+                policy.residency,
+                RadrootsHostVaultResidency::DeviceLocalOnly
+            ),
+            user_presence_required: matches!(
+                policy.user_presence,
+                RadrootsHostVaultUserPresencePolicy::Required
+            ),
+        }
+    }
+
+    pub fn store_secret_with_policy(
         &self,
-        account_id: &RadrootsIdentityId,
-        secret_key_hex: &str,
-    ) -> Result<(), RadrootsNostrAccountsError> {
-        let secret_key_hex = Zeroizing::new(secret_key_hex.to_owned());
+        slot: &str,
+        secret: &str,
+        policy: RadrootsHostVaultPolicy,
+    ) -> Result<(), RadrootsSecretVaultAccessError> {
+        Self::validate_policy(policy)?;
+        let secret = Zeroizing::new(secret.to_owned());
         store_secret(
             self.service_name.as_str(),
             self.namespace.as_str(),
-            Self::account_name(account_id),
-            secret_key_hex.as_bytes(),
-            AppleSecretAccessPolicy::SECURE_LOCAL_SECRET,
+            slot,
+            secret.as_bytes(),
+            Self::access_policy(policy),
         )
+        .map_err(|source| RadrootsSecretVaultAccessError::Backend(source.to_string()))
     }
 
-    fn load_secret_hex(
-        &self,
-        account_id: &RadrootsIdentityId,
-    ) -> Result<Option<String>, RadrootsNostrAccountsError> {
-        let Some(secret) = load_secret(
-            self.service_name.as_str(),
-            self.namespace.as_str(),
-            Self::account_name(account_id),
-        )?
+    pub fn purge_namespace(&self) -> Result<(), RadrootsSecretVaultAccessError> {
+        remove_secret_namespace(self.service_name.as_str(), self.namespace.as_str())
+            .map_err(|source| RadrootsSecretVaultAccessError::Backend(source.to_string()))
+    }
+}
+
+impl RadrootsSecretVault for RadrootsAppleKeychainVault {
+    fn store_secret(&self, slot: &str, secret: &str) -> Result<(), RadrootsSecretVaultAccessError> {
+        self.store_secret_with_policy(slot, secret, Self::secure_local_policy())
+    }
+
+    fn load_secret(&self, slot: &str) -> Result<Option<String>, RadrootsSecretVaultAccessError> {
+        let Some(secret) =
+            load_secret(self.service_name.as_str(), self.namespace.as_str(), slot)
+                .map_err(|source| RadrootsSecretVaultAccessError::Backend(source.to_string()))?
         else {
             return Ok(None);
         };
 
         let secret = Zeroizing::new(secret);
         let secret = std::str::from_utf8(secret.as_slice()).map_err(|source| {
-            RadrootsNostrAccountsError::Vault(format!(
+            RadrootsSecretVaultAccessError::Backend(format!(
                 "apple keychain secret was not valid utf-8: {source}"
             ))
         })?;
         Ok(Some(secret.to_owned()))
     }
 
-    fn remove_secret(
-        &self,
-        account_id: &RadrootsIdentityId,
-    ) -> Result<(), RadrootsNostrAccountsError> {
-        remove_secret(
-            self.service_name.as_str(),
-            self.namespace.as_str(),
-            Self::account_name(account_id),
-        )
+    fn remove_secret(&self, slot: &str) -> Result<(), RadrootsSecretVaultAccessError> {
+        remove_secret(self.service_name.as_str(), self.namespace.as_str(), slot)
+            .map_err(|source| RadrootsSecretVaultAccessError::Backend(source.to_string()))
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use radroots_secret_vault::{
+        RadrootsHostVaultHardwarePolicy, RadrootsHostVaultPolicy, RadrootsHostVaultResidency,
+        RadrootsHostVaultUserPresencePolicy,
+    };
 
     #[test]
-    fn account_name_uses_account_id_string() {
-        let account_id = RadrootsIdentityId::parse(
-            "3bf0c63f0f4478a288f6b67f0429dbf7f5119d4fa7218a4c40ef1378f80f7606",
-        )
-        .expect("account id");
-
+    fn secure_local_policy_is_device_local_without_user_presence() {
         assert_eq!(
-            RadrootsAppleKeychainVault::account_name(&account_id),
-            "3bf0c63f0f4478a288f6b67f0429dbf7f5119d4fa7218a4c40ef1378f80f7606"
+            RadrootsAppleKeychainVault::secure_local_policy(),
+            RadrootsHostVaultPolicy {
+                residency: RadrootsHostVaultResidency::DeviceLocalOnly,
+                user_presence: RadrootsHostVaultUserPresencePolicy::NotRequired,
+                hardware: RadrootsHostVaultHardwarePolicy::Any,
+            }
         );
     }
 
@@ -107,24 +156,35 @@ mod tests {
     #[test]
     fn vault_operations_report_unavailable_off_apple() {
         let vault = RadrootsAppleKeychainVault::new(crate::APPLE_NOSTR_SERVICE);
-        let account_id = RadrootsIdentityId::parse(
-            "3bf0c63f0f4478a288f6b67f0429dbf7f5119d4fa7218a4c40ef1378f80f7606",
-        )
-        .expect("account id");
 
-        let load = vault
-            .load_secret_hex(&account_id)
-            .expect_err("load off apple");
-        assert!(load.to_string().starts_with("vault error:"));
+        let load = vault.load_secret("alice").expect_err("load off apple");
+        assert!(load.to_string().starts_with("secret vault access error:"));
 
         let store = vault
-            .store_secret_hex(&account_id, "deadbeef")
+            .store_secret("alice", "deadbeef")
             .expect_err("store off apple");
-        assert!(store.to_string().starts_with("vault error:"));
+        assert!(store.to_string().starts_with("secret vault access error:"));
 
-        let remove = vault
-            .remove_secret(&account_id)
-            .expect_err("remove off apple");
-        assert!(remove.to_string().starts_with("vault error:"));
+        let remove = vault.remove_secret("alice").expect_err("remove off apple");
+        assert!(remove.to_string().starts_with("secret vault access error:"));
+    }
+
+    #[cfg(any(target_os = "ios", target_os = "macos"))]
+    #[test]
+    fn hardware_backed_requirement_reports_unsupported() {
+        let vault = RadrootsAppleKeychainVault::new(crate::APPLE_NOSTR_SERVICE);
+        let error = vault
+            .store_secret_with_policy(
+                "alice",
+                "deadbeef",
+                RadrootsHostVaultPolicy {
+                    residency: RadrootsHostVaultResidency::DeviceLocalOnly,
+                    user_presence: RadrootsHostVaultUserPresencePolicy::Required,
+                    hardware: RadrootsHostVaultHardwarePolicy::RequireHardwareBacked,
+                },
+            )
+            .expect_err("apple adapter should reject hardware-backed requirement");
+
+        assert!(error.to_string().contains("hardware_backed"));
     }
 }

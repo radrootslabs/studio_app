@@ -1,8 +1,11 @@
 use crate::security::{
     ANDROID_NOSTR_NAMESPACE, load_secret, remove_secret, remove_secret_namespace, store_secret,
 };
-use radroots_identity::RadrootsIdentityId;
-use radroots_nostr_accounts::prelude::{RadrootsNostrAccountsError, RadrootsNostrSecretVault};
+use radroots_secret_vault::{
+    RadrootsHostVaultCapabilities, RadrootsHostVaultHardwarePolicy, RadrootsHostVaultPolicy,
+    RadrootsHostVaultResidency, RadrootsHostVaultUserPresencePolicy, RadrootsSecretVault,
+    RadrootsSecretVaultAccessError,
+};
 use zeroize::Zeroizing;
 
 #[derive(Debug, Clone)]
@@ -12,10 +15,12 @@ pub(crate) struct RadrootsAndroidKeystoreVault {
 }
 
 impl RadrootsAndroidKeystoreVault {
+    #[must_use]
     pub(crate) fn new(service_name: impl Into<String>) -> Self {
         Self::new_with_namespace(service_name, ANDROID_NOSTR_NAMESPACE)
     }
 
+    #[must_use]
     pub(crate) fn new_with_namespace(
         service_name: impl Into<String>,
         namespace: impl Into<String>,
@@ -26,81 +31,148 @@ impl RadrootsAndroidKeystoreVault {
         }
     }
 
-    fn account_name(account_id: &RadrootsIdentityId) -> &str {
-        account_id.as_str()
+    #[must_use]
+    pub(crate) const fn secure_local_policy() -> RadrootsHostVaultPolicy {
+        RadrootsHostVaultPolicy {
+            residency: RadrootsHostVaultResidency::DeviceLocalOnly,
+            user_presence: RadrootsHostVaultUserPresencePolicy::NotRequired,
+            hardware: RadrootsHostVaultHardwarePolicy::PreferHardwareBacked,
+        }
     }
 
-    pub(crate) fn purge_namespace(&self) -> Result<(), RadrootsNostrAccountsError> {
-        remove_secret_namespace(self.service_name.as_str(), self.namespace.as_str())
-    }
-}
+    fn capabilities() -> RadrootsHostVaultCapabilities {
+        #[cfg(target_os = "android")]
+        {
+            RadrootsHostVaultCapabilities {
+                available: true,
+                supports_device_local_only: true,
+                supports_user_presence: true,
+                supports_hardware_backed: true,
+            }
+        }
 
-impl RadrootsNostrSecretVault for RadrootsAndroidKeystoreVault {
-    fn store_secret_hex(
-        &self,
-        account_id: &RadrootsIdentityId,
-        secret_key_hex: &str,
-    ) -> Result<(), RadrootsNostrAccountsError> {
-        let secret_key_hex = Zeroizing::new(secret_key_hex.to_owned());
-        store_secret(
-            self.service_name.as_str(),
-            self.namespace.as_str(),
-            Self::account_name(account_id),
-            secret_key_hex.as_bytes(),
-            true,
-            false,
-            true,
+        #[cfg(not(target_os = "android"))]
+        {
+            RadrootsHostVaultCapabilities::unavailable()
+        }
+    }
+
+    fn validate_policy(
+        policy: RadrootsHostVaultPolicy,
+    ) -> Result<(), RadrootsSecretVaultAccessError> {
+        Self::capabilities()
+            .validate(policy)
+            .map_err(|source| RadrootsSecretVaultAccessError::Backend(source.to_string()))
+    }
+
+    fn security_flags(policy: RadrootsHostVaultPolicy) -> (bool, bool, bool) {
+        (
+            matches!(
+                policy.residency,
+                RadrootsHostVaultResidency::DeviceLocalOnly
+            ),
+            matches!(
+                policy.user_presence,
+                RadrootsHostVaultUserPresencePolicy::Required
+            ),
+            !matches!(policy.hardware, RadrootsHostVaultHardwarePolicy::Any),
         )
     }
 
-    fn load_secret_hex(
+    pub(crate) fn store_secret_with_policy(
         &self,
-        account_id: &RadrootsIdentityId,
-    ) -> Result<Option<String>, RadrootsNostrAccountsError> {
-        let Some(secret) = load_secret(
+        slot: &str,
+        secret: &str,
+        policy: RadrootsHostVaultPolicy,
+    ) -> Result<(), RadrootsSecretVaultAccessError> {
+        Self::validate_policy(policy)?;
+        let secret = Zeroizing::new(secret.to_owned());
+        let (device_local_only, user_presence_required, prefer_strong_box) =
+            Self::security_flags(policy);
+        store_secret(
             self.service_name.as_str(),
             self.namespace.as_str(),
-            Self::account_name(account_id),
-        )?
+            slot,
+            secret.as_bytes(),
+            device_local_only,
+            user_presence_required,
+            prefer_strong_box,
+        )
+        .map_err(|source| RadrootsSecretVaultAccessError::Backend(source.to_string()))
+    }
+
+    #[cfg_attr(not(target_os = "android"), allow(dead_code))]
+    pub(crate) fn purge_namespace(&self) -> Result<(), RadrootsSecretVaultAccessError> {
+        remove_secret_namespace(self.service_name.as_str(), self.namespace.as_str())
+            .map_err(|source| RadrootsSecretVaultAccessError::Backend(source.to_string()))
+    }
+}
+
+impl RadrootsSecretVault for RadrootsAndroidKeystoreVault {
+    fn store_secret(&self, slot: &str, secret: &str) -> Result<(), RadrootsSecretVaultAccessError> {
+        self.store_secret_with_policy(slot, secret, Self::secure_local_policy())
+    }
+
+    fn load_secret(&self, slot: &str) -> Result<Option<String>, RadrootsSecretVaultAccessError> {
+        let Some(secret) =
+            load_secret(self.service_name.as_str(), self.namespace.as_str(), slot)
+                .map_err(|source| RadrootsSecretVaultAccessError::Backend(source.to_string()))?
         else {
             return Ok(None);
         };
 
         let secret = Zeroizing::new(secret);
         let secret = std::str::from_utf8(secret.as_slice()).map_err(|source| {
-            RadrootsNostrAccountsError::Vault(format!(
+            RadrootsSecretVaultAccessError::Backend(format!(
                 "android keystore secret was not valid utf-8: {source}"
             ))
         })?;
         Ok(Some(secret.to_owned()))
     }
 
-    fn remove_secret(
-        &self,
-        account_id: &RadrootsIdentityId,
-    ) -> Result<(), RadrootsNostrAccountsError> {
-        remove_secret(
-            self.service_name.as_str(),
-            self.namespace.as_str(),
-            Self::account_name(account_id),
-        )
+    fn remove_secret(&self, slot: &str) -> Result<(), RadrootsSecretVaultAccessError> {
+        remove_secret(self.service_name.as_str(), self.namespace.as_str(), slot)
+            .map_err(|source| RadrootsSecretVaultAccessError::Backend(source.to_string()))
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use radroots_secret_vault::{
+        RadrootsHostVaultHardwarePolicy, RadrootsHostVaultPolicy, RadrootsHostVaultResidency,
+        RadrootsHostVaultUserPresencePolicy,
+    };
 
     #[test]
-    fn account_name_uses_account_id_string() {
-        let account_id = RadrootsIdentityId::parse(
-            "3bf0c63f0f4478a288f6b67f0429dbf7f5119d4fa7218a4c40ef1378f80f7606",
-        )
-        .expect("account id");
-
+    fn secure_local_policy_prefers_device_local_hardware_backed_storage() {
         assert_eq!(
-            RadrootsAndroidKeystoreVault::account_name(&account_id),
-            "3bf0c63f0f4478a288f6b67f0429dbf7f5119d4fa7218a4c40ef1378f80f7606"
+            RadrootsAndroidKeystoreVault::secure_local_policy(),
+            RadrootsHostVaultPolicy {
+                residency: RadrootsHostVaultResidency::DeviceLocalOnly,
+                user_presence: RadrootsHostVaultUserPresencePolicy::NotRequired,
+                hardware: RadrootsHostVaultHardwarePolicy::PreferHardwareBacked,
+            }
+        );
+    }
+
+    #[test]
+    fn security_flags_request_strong_box_for_hardware_backed_policies() {
+        assert_eq!(
+            RadrootsAndroidKeystoreVault::security_flags(RadrootsHostVaultPolicy {
+                residency: RadrootsHostVaultResidency::UserProfile,
+                user_presence: RadrootsHostVaultUserPresencePolicy::Required,
+                hardware: RadrootsHostVaultHardwarePolicy::Any,
+            }),
+            (false, true, false)
+        );
+        assert_eq!(
+            RadrootsAndroidKeystoreVault::security_flags(RadrootsHostVaultPolicy {
+                residency: RadrootsHostVaultResidency::DeviceLocalOnly,
+                user_presence: RadrootsHostVaultUserPresencePolicy::Required,
+                hardware: RadrootsHostVaultHardwarePolicy::RequireHardwareBacked,
+            }),
+            (true, true, true)
         );
     }
 
@@ -108,24 +180,18 @@ mod tests {
     #[test]
     fn vault_operations_report_unavailable_off_android() {
         let vault = RadrootsAndroidKeystoreVault::new(crate::security::ANDROID_NOSTR_SERVICE);
-        let account_id = RadrootsIdentityId::parse(
-            "3bf0c63f0f4478a288f6b67f0429dbf7f5119d4fa7218a4c40ef1378f80f7606",
-        )
-        .expect("account id");
 
-        let load = vault
-            .load_secret_hex(&account_id)
-            .expect_err("load off android");
-        assert!(load.to_string().starts_with("vault error:"));
+        let load = vault.load_secret("alice").expect_err("load off android");
+        assert!(load.to_string().starts_with("secret vault access error:"));
 
         let store = vault
-            .store_secret_hex(&account_id, "deadbeef")
+            .store_secret("alice", "deadbeef")
             .expect_err("store off android");
-        assert!(store.to_string().starts_with("vault error:"));
+        assert!(store.to_string().starts_with("secret vault access error:"));
 
         let remove = vault
-            .remove_secret(&account_id)
+            .remove_secret("alice")
             .expect_err("remove off android");
-        assert!(remove.to_string().starts_with("vault error:"));
+        assert!(remove.to_string().starts_with("secret vault access error:"));
     }
 }

@@ -16,7 +16,7 @@ workspace = true
 [dependencies]
 nostr = { workspace = true, features = ["nip44"] }
 radroots-identity.workspace = true
-radroots-nostr-accounts.workspace = true
+radroots-nostr-accounts = { workspace = true, features = ["memory-vault"] }
 radroots-nostr.workspace = true
 radroots-nostr-connect.workspace = true
 serde.workspace = true

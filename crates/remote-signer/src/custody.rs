@@ -221,8 +221,8 @@ mod tests {
     use radroots_studio_app_test_support::{FIXTURE_ALICE, FIXTURE_BOB, FIXTURE_CAROL, fixture_identity};
     use radroots_identity::RadrootsIdentityId;
     use radroots_nostr_accounts::prelude::{
-        RadrootsNostrAccountsManager, RadrootsNostrSecretVault, RadrootsNostrSecretVaultMemory,
-        RadrootsNostrSelectedAccountStatus,
+        RadrootsNostrAccountsManager, RadrootsNostrSecretVaultMemory,
+        RadrootsNostrSelectedAccountStatus, RadrootsSecretVault, account_secret_slot,
     };
 
     const REMOTE_SIGNER_LABEL: &str = "remote signer";
@@ -242,8 +242,9 @@ mod tests {
         client_account_id: &str,
         secret: &str,
     ) {
+        let slot = account_secret_slot(&fixture_account_id(client_account_id));
         vault
-            .store_secret_hex(&fixture_account_id(client_account_id), secret)
+            .store_secret(slot.as_str(), secret)
             .expect("store secret");
     }
 
@@ -251,8 +252,9 @@ mod tests {
         vault: RadrootsNostrSecretVaultMemory,
     ) -> impl Fn(&str) -> Result<String, String> {
         move |client_account_id| {
+            let slot = account_secret_slot(&fixture_account_id(client_account_id));
             vault
-                .load_secret_hex(&fixture_account_id(client_account_id))
+                .load_secret(slot.as_str())
                 .map_err(|source| source.to_string())?
                 .ok_or_else(|| "missing secret".to_owned())
         }
@@ -262,8 +264,9 @@ mod tests {
         vault: RadrootsNostrSecretVaultMemory,
     ) -> impl Fn(&str) -> Result<(), String> {
         move |client_account_id| {
+            let slot = account_secret_slot(&fixture_account_id(client_account_id));
             vault
-                .remove_secret(&fixture_account_id(client_account_id))
+                .remove_secret(slot.as_str())
                 .map_err(|source| source.to_string())
         }
     }
@@ -274,8 +277,9 @@ mod tests {
     ) -> impl Fn() -> Result<(), String> {
         move || {
             for client_account_id in &client_account_ids {
+                let slot = account_secret_slot(&fixture_account_id(client_account_id));
                 vault
-                    .remove_secret(&fixture_account_id(client_account_id))
+                    .remove_secret(slot.as_str())
                     .map_err(|source| source.to_string())?;
             }
             Ok(())
@@ -329,7 +333,9 @@ mod tests {
         );
         assert!(
             vault
-                .load_secret_hex(&fixture_account_id(record.client_account_id()))
+                .load_secret(
+                    account_secret_slot(&fixture_account_id(record.client_account_id())).as_str()
+                )
                 .expect("load")
                 .is_none()
         );
@@ -364,7 +370,9 @@ mod tests {
         );
         assert_eq!(
             vault
-                .load_secret_hex(&fixture_account_id(record.client_account_id()))
+                .load_secret(
+                    account_secret_slot(&fixture_account_id(record.client_account_id())).as_str()
+                )
                 .expect("load retained secret")
                 .as_deref(),
             Some("deadbeef")
@@ -511,13 +519,17 @@ mod tests {
         assert!(!path.exists());
         assert!(
             vault
-                .load_secret_hex(&fixture_account_id(pending.client_account_id()))
+                .load_secret(
+                    account_secret_slot(&fixture_account_id(pending.client_account_id())).as_str()
+                )
                 .expect("pending removed")
                 .is_none()
         );
         assert!(
             vault
-                .load_secret_hex(&fixture_account_id(active.client_account_id()))
+                .load_secret(
+                    account_secret_slot(&fixture_account_id(active.client_account_id())).as_str()
+                )
                 .expect("active removed")
                 .is_none()
         );
@@ -558,13 +570,19 @@ mod tests {
 
         assert!(
             vault
-                .load_secret_hex(&fixture_account_id(alice_client_account_id.as_str()))
+                .load_secret(
+                    account_secret_slot(&fixture_account_id(alice_client_account_id.as_str()))
+                        .as_str()
+                )
                 .expect("pending removed by namespace purge")
                 .is_none()
         );
         assert!(
             vault
-                .load_secret_hex(&fixture_account_id(bob_client_account_id.as_str()))
+                .load_secret(
+                    account_secret_slot(&fixture_account_id(bob_client_account_id.as_str()))
+                        .as_str()
+                )
                 .expect("active removed by namespace purge")
                 .is_none()
         );
@@ -595,7 +613,10 @@ mod tests {
 
         assert!(
             vault
-                .load_secret_hex(&fixture_account_id(alice_client_account_id.as_str()))
+                .load_secret(
+                    account_secret_slot(&fixture_account_id(alice_client_account_id.as_str()))
+                        .as_str()
+                )
                 .expect("pending removed by empty-store namespace purge")
                 .is_none()
         );

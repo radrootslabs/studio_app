@@ -21,7 +21,8 @@ radroots-app-core = { path = "../core" }
 radroots-app-remote-signer = { path = "../remote-signer" }
 radroots-geocoder.workspace = true
 radroots-identity.workspace = true
-radroots-nostr-accounts.workspace = true
+radroots-nostr-accounts = { workspace = true, features = ["memory-vault"] }
+radroots-secret-vault.workspace = true
 zeroize.workspace = true
 
 [target.'cfg(target_os = "android")'.dependencies]

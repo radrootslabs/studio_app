@@ -39,6 +39,7 @@ radroots-identity = { path = "../lib/crates/identity", default-features = false,
 radroots-nostr = { path = "../lib/crates/nostr", default-features = false, features = ["std", "client"] }
 radroots-nostr-accounts = { path = "../lib/crates/nostr-accounts", default-features = false, features = ["std", "file-store", "os-keyring"] }
 radroots-nostr-connect = { path = "../lib/crates/nostr-connect" }
+radroots-secret-vault = { path = "../lib/crates/secret-vault", default-features = false, features = ["std"] }
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.145"
 tokio = { version = "1.48.0", features = ["rt", "sync", "time"] }

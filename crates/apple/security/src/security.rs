@@ -189,6 +189,7 @@ pub struct AppleSecretAccessPolicy {
 }
 
 impl AppleSecretAccessPolicy {
+    #[cfg_attr(not(test), allow(dead_code))]
     pub const SECURE_LOCAL_SECRET: Self = Self {
         accessibility: AppleSecretAccessibility::WhenUnlocked,
         device_local_only: true,

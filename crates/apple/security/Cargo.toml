@@ -11,8 +11,8 @@ description = "Rad Roots Apple security bridge"
 publish = false
 
 [dependencies]
-radroots-identity.workspace = true
 radroots-nostr-accounts.workspace = true
+radroots-secret-vault.workspace = true
 zeroize.workspace = true
 
 [lints.rust]
