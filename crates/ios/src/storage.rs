@@ -63,7 +63,9 @@ pub(crate) fn app_data_root() -> Result<PathBuf, String> {
 #[cfg(target_os = "ios")]
 pub(crate) fn accounts_manager() -> Result<RadrootsNostrAccountsManager, String> {
     let store = Arc::new(RadrootsNostrFileAccountStore::new(accounts_path()?));
-    let vault = Arc::new(RadrootsAppleKeychainVault::new(APPLE_NOSTR_SERVICE));
+    let vault = Arc::new(RadrootsAppleKeychainVault::new_device_local(
+        APPLE_NOSTR_SERVICE,
+    ));
     RadrootsNostrAccountsManager::new(store, vault).map_err(|source| source.to_string())
 }
 

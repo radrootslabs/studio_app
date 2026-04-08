@@ -438,14 +438,14 @@ fn sessions_path() -> Result<PathBuf, String> {
 }
 
 fn client_secret_vault() -> RadrootsAppleKeychainVault {
-    RadrootsAppleKeychainVault::new_with_namespace(
+    RadrootsAppleKeychainVault::new_with_namespace_desktop(
         APPLE_NOSTR_SERVICE,
         RADROOTS_APP_REMOTE_SIGNER_SECRET_NAMESPACE,
     )
 }
 
 fn legacy_client_secret_vault() -> RadrootsAppleKeychainVault {
-    RadrootsAppleKeychainVault::new(APPLE_NOSTR_SERVICE)
+    RadrootsAppleKeychainVault::new_desktop(APPLE_NOSTR_SERVICE)
 }
 
 fn client_secret_slot(client_account_id: &str) -> Result<String, String> {

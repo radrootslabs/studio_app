@@ -184,7 +184,7 @@ impl DesktopBackend {
         }
 
         let store = Arc::new(RadrootsNostrFileAccountStore::new(accounts_path));
-        let vault = Arc::new(RadrootsAppleKeychainVault::new(APPLE_NOSTR_SERVICE));
+        let vault = Arc::new(RadrootsAppleKeychainVault::new_desktop(APPLE_NOSTR_SERVICE));
         RadrootsNostrAccountsManager::new(store, vault).map_err(|source| source.to_string())
     }
 
@@ -1115,7 +1115,8 @@ mod tests {
 
     #[test]
     fn apple_keychain_vault_round_trips_secret_hex() {
-        let vault = RadrootsAppleKeychainVault::new("org.radroots.app.tests.desktop.roundtrip");
+        let vault =
+            RadrootsAppleKeychainVault::new_desktop("org.radroots.app.tests.desktop.roundtrip");
         let account_id = RadrootsIdentityId::parse(
             "3bf0c63f0f4478a288f6b67f0429dbf7f5119d4fa7218a4c40ef1378f80f7606",
         )

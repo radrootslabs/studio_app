@@ -3,9 +3,8 @@ use crate::security::{
     remove_secret, remove_secret_namespace, store_secret,
 };
 use radroots_secret_vault::{
-    RadrootsHostVaultCapabilities, RadrootsHostVaultHardwarePolicy, RadrootsHostVaultPolicy,
-    RadrootsHostVaultResidency, RadrootsHostVaultUserPresencePolicy, RadrootsSecretVault,
-    RadrootsSecretVaultAccessError,
+    RadrootsHostVaultCapabilities, RadrootsHostVaultPolicy, RadrootsHostVaultResidency,
+    RadrootsHostVaultUserPresencePolicy, RadrootsSecretVault, RadrootsSecretVaultAccessError,
 };
 use zeroize::Zeroizing;
 
@@ -13,32 +12,56 @@ use zeroize::Zeroizing;
 pub struct RadrootsAppleKeychainVault {
     service_name: String,
     namespace: String,
+    default_policy: RadrootsHostVaultPolicy,
 }
 
 impl RadrootsAppleKeychainVault {
     #[must_use]
-    pub fn new(service_name: impl Into<String>) -> Self {
-        Self::new_with_namespace(service_name, APPLE_NOSTR_NAMESPACE)
+    pub fn new_desktop(service_name: impl Into<String>) -> Self {
+        Self::new_with_namespace_desktop(service_name, APPLE_NOSTR_NAMESPACE)
     }
 
     #[must_use]
-    pub fn new_with_namespace(
+    pub fn new_device_local(service_name: impl Into<String>) -> Self {
+        Self::new_with_namespace_device_local(service_name, APPLE_NOSTR_NAMESPACE)
+    }
+
+    #[must_use]
+    pub fn new_with_namespace_desktop(
         service_name: impl Into<String>,
         namespace: impl Into<String>,
+    ) -> Self {
+        Self::new_with_namespace_and_policy(service_name, namespace, Self::desktop_policy())
+    }
+
+    #[must_use]
+    pub fn new_with_namespace_device_local(
+        service_name: impl Into<String>,
+        namespace: impl Into<String>,
+    ) -> Self {
+        Self::new_with_namespace_and_policy(service_name, namespace, Self::device_local_policy())
+    }
+
+    fn new_with_namespace_and_policy(
+        service_name: impl Into<String>,
+        namespace: impl Into<String>,
+        default_policy: RadrootsHostVaultPolicy,
     ) -> Self {
         Self {
             service_name: service_name.into(),
             namespace: namespace.into(),
+            default_policy,
         }
     }
 
     #[must_use]
-    pub const fn secure_local_policy() -> RadrootsHostVaultPolicy {
-        RadrootsHostVaultPolicy {
-            residency: RadrootsHostVaultResidency::DeviceLocalOnly,
-            user_presence: RadrootsHostVaultUserPresencePolicy::NotRequired,
-            hardware: RadrootsHostVaultHardwarePolicy::Any,
-        }
+    pub const fn desktop_policy() -> RadrootsHostVaultPolicy {
+        RadrootsHostVaultPolicy::desktop()
+    }
+
+    #[must_use]
+    pub const fn device_local_policy() -> RadrootsHostVaultPolicy {
+        RadrootsHostVaultPolicy::device_local()
     }
 
     fn capabilities() -> RadrootsHostVaultCapabilities {
@@ -106,7 +129,7 @@ impl RadrootsAppleKeychainVault {
 
 impl RadrootsSecretVault for RadrootsAppleKeychainVault {
     fn store_secret(&self, slot: &str, secret: &str) -> Result<(), RadrootsSecretVaultAccessError> {
-        self.store_secret_with_policy(slot, secret, Self::secure_local_policy())
+        self.store_secret_with_policy(slot, secret, self.default_policy)
     }
 
     fn load_secret(&self, slot: &str) -> Result<Option<String>, RadrootsSecretVaultAccessError> {
@@ -141,9 +164,21 @@ mod tests {
     };
 
     #[test]
-    fn secure_local_policy_is_device_local_without_user_presence() {
+    fn desktop_policy_matches_shared_desktop_contract() {
         assert_eq!(
-            RadrootsAppleKeychainVault::secure_local_policy(),
+            RadrootsAppleKeychainVault::desktop_policy(),
+            RadrootsHostVaultPolicy {
+                residency: RadrootsHostVaultResidency::UserProfile,
+                user_presence: RadrootsHostVaultUserPresencePolicy::NotRequired,
+                hardware: RadrootsHostVaultHardwarePolicy::Any,
+            }
+        );
+    }
+
+    #[test]
+    fn device_local_policy_matches_shared_mobile_contract() {
+        assert_eq!(
+            RadrootsAppleKeychainVault::device_local_policy(),
             RadrootsHostVaultPolicy {
                 residency: RadrootsHostVaultResidency::DeviceLocalOnly,
                 user_presence: RadrootsHostVaultUserPresencePolicy::NotRequired,
@@ -155,7 +190,7 @@ mod tests {
     #[cfg(not(any(target_os = "ios", target_os = "macos")))]
     #[test]
     fn vault_operations_report_unavailable_off_apple() {
-        let vault = RadrootsAppleKeychainVault::new(crate::APPLE_NOSTR_SERVICE);
+        let vault = RadrootsAppleKeychainVault::new_desktop(crate::APPLE_NOSTR_SERVICE);
 
         let load = vault.load_secret("alice").expect_err("load off apple");
         assert!(load.to_string().starts_with("secret vault access error:"));
@@ -172,7 +207,7 @@ mod tests {
     #[cfg(any(target_os = "ios", target_os = "macos"))]
     #[test]
     fn hardware_backed_requirement_reports_unsupported() {
-        let vault = RadrootsAppleKeychainVault::new(crate::APPLE_NOSTR_SERVICE);
+        let vault = RadrootsAppleKeychainVault::new_device_local(crate::APPLE_NOSTR_SERVICE);
         let error = vault
             .store_secret_with_policy(
                 "alice",
