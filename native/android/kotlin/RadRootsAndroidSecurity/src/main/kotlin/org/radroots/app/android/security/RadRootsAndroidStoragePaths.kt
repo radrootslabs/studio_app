@@ -6,29 +6,43 @@ import java.security.MessageDigest
 
 object RadRootsAndroidStoragePaths {
     private const val rootDirName = "RadRoots"
-    private const val productDirName = "app"
-    private const val platformDirName = "android"
+    private const val configDirName = "config"
+    private const val dataDirName = "data"
+    private const val secretsRootDirName = "secrets"
+    private const val appsDirName = "apps"
+    private const val appRuntimeDirName = "app"
     private const val nostrDirName = "nostr"
-    private const val secretsDirName = "secrets"
     private const val accountsFileName = "accounts.json"
+
+    fun baseRoot(context: Context): File = baseRoot(context.noBackupFilesDir)
+
+    fun baseRoot(baseDir: File): File = File(baseDir, rootDirName)
+
+    fun appDataRoot(context: Context): File = appDataRoot(context.noBackupFilesDir)
+
+    fun appDataRoot(baseDir: File): File =
+        File(
+            File(
+                File(baseRoot(baseDir), dataDirName),
+                appsDirName,
+            ),
+            appRuntimeDirName,
+        )
 
     fun nostrRoot(context: Context): File = nostrRoot(context.noBackupFilesDir)
 
-    fun nostrRoot(baseDir: File): File =
-        File(
-            File(
-                File(
-                    File(baseDir, rootDirName),
-                    productDirName,
-                ),
-                platformDirName,
-            ),
-            nostrDirName,
-        )
+    fun nostrRoot(baseDir: File): File = File(appDataRoot(baseDir), nostrDirName)
 
     fun secretsDir(context: Context): File = secretsDir(context.noBackupFilesDir)
 
-    fun secretsDir(baseDir: File): File = File(nostrRoot(baseDir), secretsDirName)
+    fun secretsDir(baseDir: File): File =
+        File(
+            File(
+                File(baseRoot(baseDir), secretsRootDirName),
+                appsDirName,
+            ),
+            appRuntimeDirName,
+        )
 
     fun accountsFile(context: Context): File = accountsFile(context.noBackupFilesDir)
 

@@ -19,15 +19,23 @@ class RadRootsAndroidSecurityTests {
     }
 
     @Test
-    fun nostrRootUsesNoBackupLayout() {
+    fun mobileNativeRootsUseNoBackupLayout() {
         val baseDir = File("/data/user/0/org.radroots.app.android/no_backup")
 
         assertEquals(
-            File("/data/user/0/org.radroots.app.android/no_backup/RadRoots/app/android/nostr"),
+            File("/data/user/0/org.radroots.app.android/no_backup/RadRoots"),
+            RadRootsAndroidStoragePaths.baseRoot(baseDir),
+        )
+        assertEquals(
+            File("/data/user/0/org.radroots.app.android/no_backup/RadRoots/data/apps/app"),
+            RadRootsAndroidStoragePaths.appDataRoot(baseDir),
+        )
+        assertEquals(
+            File("/data/user/0/org.radroots.app.android/no_backup/RadRoots/data/apps/app/nostr"),
             RadRootsAndroidStoragePaths.nostrRoot(baseDir),
         )
         assertEquals(
-            File("/data/user/0/org.radroots.app.android/no_backup/RadRoots/app/android/nostr/accounts.json"),
+            File("/data/user/0/org.radroots.app.android/no_backup/RadRoots/data/apps/app/nostr/accounts.json"),
             RadRootsAndroidStoragePaths.accountsFile(baseDir),
         )
     }

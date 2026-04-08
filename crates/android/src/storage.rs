@@ -1,20 +1,51 @@
 #[cfg(target_os = "android")]
-use crate::security::{ANDROID_NOSTR_SERVICE, resolve_nostr_storage_root};
+use crate::security::{ANDROID_NOSTR_SERVICE, resolve_radroots_base_root};
 #[cfg(target_os = "android")]
 use crate::vault::RadrootsAndroidKeystoreVault;
 #[cfg(target_os = "android")]
 use radroots_nostr_accounts::prelude::{
     RadrootsNostrAccountsManager, RadrootsNostrFileAccountStore,
 };
-use std::path::Path;
-use std::path::PathBuf;
+use radroots_runtime_paths::{
+    RadrootsHostEnvironment, RadrootsPathOverrides, RadrootsPathProfile, RadrootsPathResolver,
+    RadrootsPaths, RadrootsPlatform, RadrootsRuntimeNamespace,
+};
+use std::path::{Path, PathBuf};
 #[cfg(target_os = "android")]
 use std::sync::Arc;
 
+fn app_namespace() -> Result<RadrootsRuntimeNamespace, String> {
+    RadrootsRuntimeNamespace::app("app")
+        .map_err(|source| format!("failed to resolve android app namespace: {source}"))
+}
+
+fn app_paths_from_base_root(base_root: &Path) -> Result<RadrootsPaths, String> {
+    let resolver = RadrootsPathResolver::new(
+        RadrootsPlatform::Android,
+        RadrootsHostEnvironment::default(),
+    );
+    let namespace = app_namespace()?;
+    resolver
+        .resolve(
+            RadrootsPathProfile::MobileNative,
+            &RadrootsPathOverrides::mobile(RadrootsPaths::from_base_root(base_root)),
+        )
+        .map(|roots| roots.namespaced(&namespace))
+        .map_err(|source| format!("failed to resolve android mobile-native roots: {source}"))
+}
+
+#[cfg(target_os = "android")]
+pub(crate) fn app_data_root() -> Result<PathBuf, String> {
+    let base_root = resolve_radroots_base_root().map_err(|source| source.to_string())?;
+    let root = app_data_root_from_base_root(base_root.as_path())?;
+    ensure_directory_tree(root.as_path())?;
+    Ok(root)
+}
+
 #[cfg(target_os = "android")]
 pub(crate) fn accounts_path() -> Result<PathBuf, String> {
-    let root = resolve_nostr_storage_root().map_err(|source| source.to_string())?;
-    let accounts_path = accounts_path_from_root(root.as_path());
+    let base_root = resolve_radroots_base_root().map_err(|source| source.to_string())?;
+    let accounts_path = accounts_path_from_base_root(base_root.as_path())?;
     if let Some(parent) = accounts_path.parent() {
         ensure_directory_tree(parent)?;
     }
@@ -28,14 +59,20 @@ pub(crate) fn accounts_manager() -> Result<RadrootsNostrAccountsManager, String>
     RadrootsNostrAccountsManager::new(store, vault).map_err(|source| source.to_string())
 }
 
-pub(crate) fn accounts_path_from_root(root: &Path) -> PathBuf {
-    root.join("accounts.json")
+pub(crate) fn app_data_root_from_base_root(base_root: &Path) -> Result<PathBuf, String> {
+    Ok(app_paths_from_base_root(base_root)?.data)
+}
+
+pub(crate) fn accounts_path_from_base_root(base_root: &Path) -> Result<PathBuf, String> {
+    Ok(app_data_root_from_base_root(base_root)?
+        .join("nostr")
+        .join("accounts.json"))
 }
 
 #[cfg(target_os = "android")]
 fn ensure_directory_tree(path: &Path) -> Result<(), String> {
     std::fs::create_dir_all(path)
-        .map_err(|source| format!("failed to create android accounts directory: {source}"))?;
+        .map_err(|source| format!("failed to create android app data directory: {source}"))?;
     Ok(())
 }
 
@@ -44,15 +81,46 @@ mod tests {
     use super::*;
 
     #[test]
-    fn accounts_path_uses_android_no_backup_layout() {
-        let root = PathBuf::from(
-            "/data/user/0/org.radroots.app.android/no_backup/RadRoots/app/android/nostr",
-        );
+    fn accounts_path_uses_android_mobile_native_layout() {
+        let base_root = PathBuf::from("/data/user/0/org.radroots.app.android/no_backup/RadRoots");
 
         assert_eq!(
-            accounts_path_from_root(root.as_path()),
+            accounts_path_from_base_root(base_root.as_path()).expect("accounts path"),
             PathBuf::from(
-                "/data/user/0/org.radroots.app.android/no_backup/RadRoots/app/android/nostr/accounts.json"
+                "/data/user/0/org.radroots.app.android/no_backup/RadRoots/data/apps/app/nostr/accounts.json"
+            )
+        );
+    }
+
+    #[test]
+    fn app_data_root_uses_android_mobile_native_layout() {
+        let base_root = PathBuf::from("/data/user/0/org.radroots.app.android/no_backup/RadRoots");
+
+        assert_eq!(
+            app_data_root_from_base_root(base_root.as_path()).expect("app data root"),
+            PathBuf::from("/data/user/0/org.radroots.app.android/no_backup/RadRoots/data/apps/app")
+        );
+    }
+
+    #[test]
+    fn mobile_paths_follow_shared_logical_root_model() {
+        let base_root = PathBuf::from("/data/user/0/org.radroots.app.android/no_backup/RadRoots");
+        let paths = app_paths_from_base_root(base_root.as_path()).expect("mobile paths");
+
+        assert_eq!(
+            paths.config,
+            PathBuf::from(
+                "/data/user/0/org.radroots.app.android/no_backup/RadRoots/config/apps/app"
+            )
+        );
+        assert_eq!(
+            paths.data,
+            PathBuf::from("/data/user/0/org.radroots.app.android/no_backup/RadRoots/data/apps/app")
+        );
+        assert_eq!(
+            paths.secrets,
+            PathBuf::from(
+                "/data/user/0/org.radroots.app.android/no_backup/RadRoots/secrets/apps/app"
             )
         );
     }

@@ -302,14 +302,14 @@ pub(crate) fn remove_secret_namespace(
 }
 
 #[cfg(target_os = "android")]
-pub(crate) fn resolve_nostr_storage_root() -> Result<PathBuf, RadrootsNostrAccountsError> {
+pub(crate) fn resolve_radroots_base_root() -> Result<PathBuf, RadrootsNostrAccountsError> {
     let java_vm = android_java_vm()?;
     let mut env = java_vm.attach_current_thread().map_err(jni_error)?;
     let bridge_class = bridge_class(&mut env)?;
     let value = env
         .call_static_method(
             &bridge_class,
-            "resolveNostrStorageRoot",
+            "resolveRadrootsBaseRoot",
             "()Ljava/lang/String;",
             &[],
         )
@@ -442,9 +442,9 @@ pub(crate) fn take_user_presence_verification_result()
 
 #[cfg(not(target_os = "android"))]
 #[allow(dead_code)]
-pub(crate) fn resolve_nostr_storage_root() -> Result<PathBuf, RadrootsNostrAccountsError> {
+pub(crate) fn resolve_radroots_base_root() -> Result<PathBuf, RadrootsNostrAccountsError> {
     Err(RadrootsNostrAccountsError::Store(
-        "android no-backup storage is only available on android".to_owned(),
+        "android mobile base storage root is only available on android".to_owned(),
     ))
 }
 

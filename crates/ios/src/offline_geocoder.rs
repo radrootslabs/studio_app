@@ -355,13 +355,13 @@ mod tests {
     #[test]
     fn staged_db_path_uses_ios_geocoder_directory() {
         let app_data_root = PathBuf::from(
-            "/var/mobile/Containers/Data/Application/example/Library/Application Support/RadRoots/app/ios",
+            "/var/mobile/Containers/Data/Application/example/Library/Application Support/RadRoots/data/apps/app",
         );
 
         assert_eq!(
             staged_db_path(app_data_root.as_path(), "abcd"),
             PathBuf::from(
-                "/var/mobile/Containers/Data/Application/example/Library/Application Support/RadRoots/app/ios/geocoder/abcd/geonames.db"
+                "/var/mobile/Containers/Data/Application/example/Library/Application Support/RadRoots/data/apps/app/geocoder/abcd/geonames.db"
             )
         );
     }

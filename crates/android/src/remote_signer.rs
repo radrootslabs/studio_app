@@ -1,4 +1,5 @@
-use crate::security::{ANDROID_NOSTR_SERVICE, resolve_nostr_storage_root};
+use crate::security::ANDROID_NOSTR_SERVICE;
+use crate::storage;
 use crate::vault::RadrootsAndroidKeystoreVault;
 use radroots_studio_app_core::{
     IdentityGateState, RadrootsAccountCustody, RadrootsPendingRemoteSignerConnection,
@@ -407,8 +408,9 @@ fn save_sessions(
 }
 
 fn sessions_path() -> Result<PathBuf, String> {
-    let root = resolve_nostr_storage_root().map_err(|source| source.to_string())?;
-    Ok(root.join("remote-signer-sessions.json"))
+    Ok(storage::app_data_root()?
+        .join("nostr")
+        .join("remote-signer-sessions.json"))
 }
 
 fn client_secret_vault() -> RadrootsAndroidKeystoreVault {

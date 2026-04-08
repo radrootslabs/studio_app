@@ -1,7 +1,6 @@
 #![forbid(unsafe_code)]
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
-use directories::BaseDirs;
 use eframe::egui;
 use image::ImageFormat;
 #[cfg(all(target_os = "macos", not(test)))]
@@ -24,7 +23,10 @@ use radroots_identity::RadrootsIdentity;
 use radroots_nostr_accounts::prelude::{
     RadrootsNostrAccountsManager, RadrootsNostrFileAccountStore, RadrootsNostrSelectedAccountStatus,
 };
-#[cfg(target_os = "macos")]
+use radroots_runtime_paths::{
+    RadrootsPathOverrides, RadrootsPathProfile, RadrootsPathResolver, RadrootsPaths,
+    RadrootsRuntimeNamespace,
+};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 #[cfg(target_os = "macos")]
@@ -77,6 +79,27 @@ struct DesktopBackend {
 }
 
 impl DesktopBackend {
+    fn app_namespace() -> Result<RadrootsRuntimeNamespace, String> {
+        RadrootsRuntimeNamespace::app("app")
+            .map_err(|source| format!("failed to resolve desktop app namespace: {source}"))
+    }
+
+    fn interactive_user_roots_with_resolver(
+        resolver: &RadrootsPathResolver,
+    ) -> Result<RadrootsPaths, String> {
+        resolver
+            .resolve(
+                RadrootsPathProfile::InteractiveUser,
+                &RadrootsPathOverrides::default(),
+            )
+            .map_err(|source| format!("failed to resolve desktop interactive-user roots: {source}"))
+    }
+
+    fn app_paths_with_resolver(resolver: &RadrootsPathResolver) -> Result<RadrootsPaths, String> {
+        let namespace = Self::app_namespace()?;
+        Ok(Self::interactive_user_roots_with_resolver(resolver)?.namespaced(&namespace))
+    }
+
     fn new() -> Self {
         #[cfg(target_os = "macos")]
         let offline_geocoder = match Self::app_data_root() {
@@ -107,19 +130,19 @@ impl DesktopBackend {
         }
     }
 
-    #[cfg(target_os = "macos")]
     fn radroots_root() -> Result<PathBuf, String> {
-        let base_dirs =
-            BaseDirs::new().ok_or_else(|| "failed to resolve home directory".to_owned())?;
-        Ok(base_dirs.home_dir().join(".radroots"))
+        let roots = Self::interactive_user_roots_with_resolver(&RadrootsPathResolver::current())?;
+        roots
+            .config
+            .parent()
+            .map(Path::to_path_buf)
+            .ok_or_else(|| "desktop interactive-user config root had no parent".to_owned())
     }
 
-    #[cfg(target_os = "macos")]
     fn app_data_root() -> Result<PathBuf, String> {
-        Ok(Self::radroots_root()?.join("app").join("desktop"))
+        Ok(Self::app_paths_with_resolver(&RadrootsPathResolver::current())?.data)
     }
 
-    #[cfg(target_os = "macos")]
     fn private_directory_chain(root: &Path, leaf: &Path) -> Result<Vec<PathBuf>, String> {
         let relative = leaf
             .strip_prefix(root)
@@ -149,7 +172,6 @@ impl DesktopBackend {
         Ok(())
     }
 
-    #[cfg(target_os = "macos")]
     fn accounts_path() -> Result<PathBuf, String> {
         Ok(Self::app_data_root()?.join("nostr").join("accounts.json"))
     }
@@ -952,6 +974,112 @@ fn main() -> eframe::Result<()> {
     )
 }
 
+#[cfg(test)]
+mod path_contract_tests {
+    use super::DesktopBackend;
+    use radroots_runtime_paths::{RadrootsHostEnvironment, RadrootsPathResolver, RadrootsPlatform};
+    use std::path::PathBuf;
+
+    #[test]
+    fn desktop_app_paths_follow_linux_interactive_user_contract() {
+        let resolver = RadrootsPathResolver::new(
+            RadrootsPlatform::Linux,
+            RadrootsHostEnvironment {
+                home_dir: Some(PathBuf::from("/home/treesap")),
+                ..RadrootsHostEnvironment::default()
+            },
+        );
+
+        let paths = DesktopBackend::app_paths_with_resolver(&resolver).expect("desktop app paths");
+
+        assert_eq!(
+            paths.data,
+            PathBuf::from("/home/treesap/.radroots/data/apps/app")
+        );
+        assert_eq!(
+            paths.logs,
+            PathBuf::from("/home/treesap/.radroots/logs/apps/app")
+        );
+        assert_eq!(
+            paths.secrets,
+            PathBuf::from("/home/treesap/.radroots/secrets/apps/app")
+        );
+    }
+
+    #[test]
+    fn desktop_app_paths_follow_macos_interactive_user_contract() {
+        let resolver = RadrootsPathResolver::new(
+            RadrootsPlatform::Macos,
+            RadrootsHostEnvironment {
+                home_dir: Some(PathBuf::from("/Users/treesap")),
+                ..RadrootsHostEnvironment::default()
+            },
+        );
+
+        let paths = DesktopBackend::app_paths_with_resolver(&resolver).expect("desktop app paths");
+
+        assert_eq!(
+            paths.data,
+            PathBuf::from("/Users/treesap/.radroots/data/apps/app")
+        );
+        assert_eq!(
+            paths.logs,
+            PathBuf::from("/Users/treesap/.radroots/logs/apps/app")
+        );
+        assert_eq!(
+            paths.secrets,
+            PathBuf::from("/Users/treesap/.radroots/secrets/apps/app")
+        );
+    }
+
+    #[test]
+    fn desktop_app_paths_follow_windows_interactive_user_contract() {
+        let resolver = RadrootsPathResolver::new(
+            RadrootsPlatform::Windows,
+            RadrootsHostEnvironment {
+                appdata_dir: Some(PathBuf::from(r"C:\Users\treesap\AppData\Roaming")),
+                localappdata_dir: Some(PathBuf::from(r"C:\Users\treesap\AppData\Local")),
+                ..RadrootsHostEnvironment::default()
+            },
+        );
+
+        let paths = DesktopBackend::app_paths_with_resolver(&resolver).expect("desktop app paths");
+
+        assert_eq!(
+            paths.config,
+            PathBuf::from(r"C:\Users\treesap\AppData\Roaming")
+                .join("Radroots")
+                .join("config")
+                .join("apps")
+                .join("app")
+        );
+        assert_eq!(
+            paths.data,
+            PathBuf::from(r"C:\Users\treesap\AppData\Local")
+                .join("Radroots")
+                .join("data")
+                .join("apps")
+                .join("app")
+        );
+        assert_eq!(
+            paths.logs,
+            PathBuf::from(r"C:\Users\treesap\AppData\Local")
+                .join("Radroots")
+                .join("logs")
+                .join("apps")
+                .join("app")
+        );
+        assert_eq!(
+            paths.secrets,
+            PathBuf::from(r"C:\Users\treesap\AppData\Roaming")
+                .join("Radroots")
+                .join("secrets")
+                .join("apps")
+                .join("app")
+        );
+    }
+}
+
 #[cfg(all(test, target_os = "macos"))]
 mod tests {
     use super::DesktopBackend;
@@ -969,7 +1097,7 @@ mod tests {
     #[test]
     fn private_directory_chain_covers_only_radroots_subtree() {
         let root = PathBuf::from("/tmp/example/.radroots");
-        let leaf = root.join("app").join("desktop").join("nostr");
+        let leaf = root.join("data").join("apps").join("app").join("nostr");
 
         let chain = DesktopBackend::private_directory_chain(&root, &leaf).unwrap();
 
@@ -977,9 +1105,10 @@ mod tests {
             chain,
             vec![
                 PathBuf::from("/tmp/example/.radroots"),
-                PathBuf::from("/tmp/example/.radroots/app"),
-                PathBuf::from("/tmp/example/.radroots/app/desktop"),
-                PathBuf::from("/tmp/example/.radroots/app/desktop/nostr"),
+                PathBuf::from("/tmp/example/.radroots/data"),
+                PathBuf::from("/tmp/example/.radroots/data/apps"),
+                PathBuf::from("/tmp/example/.radroots/data/apps/app"),
+                PathBuf::from("/tmp/example/.radroots/data/apps/app/nostr"),
             ]
         );
     }

@@ -23,6 +23,7 @@ radroots-app-remote-signer = { path = "../remote-signer" }
 radroots-geocoder.workspace = true
 radroots-identity.workspace = true
 radroots-nostr-accounts = { workspace = true, features = ["memory-vault"] }
+radroots-runtime-paths.workspace = true
 zeroize.workspace = true
 
 [target.'cfg(target_os = "ios")'.dependencies]

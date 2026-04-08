@@ -120,7 +120,7 @@ class RadRootsAndroidKeystoreSecretStore(
         deleteKey(masterKeyAlias(servicePrefix, namespace))
     }
 
-    fun resolveNostrStorageRoot(): File = RadRootsAndroidStoragePaths.nostrRoot(context)
+    fun resolveRadrootsBaseRoot(): File = RadRootsAndroidStoragePaths.baseRoot(context)
 
     private fun validateIdentifiers(servicePrefix: String, namespace: String, name: String) {
         if (servicePrefix.isBlank()) {

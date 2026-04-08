@@ -110,9 +110,9 @@ object RadRootsAndroidSecurityBridge {
     }
 
     @JvmStatic
-    fun resolveNostrStorageRoot(): String? {
+    fun resolveRadrootsBaseRoot(): String? {
         return try {
-            val path = secretStore().resolveNostrStorageRoot().absolutePath
+            val path = secretStore().resolveRadrootsBaseRoot().absolutePath
             clearError()
             path
         } catch (cause: Throwable) {

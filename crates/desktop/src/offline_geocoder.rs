@@ -355,11 +355,11 @@ mod tests {
 
     #[test]
     fn staged_db_path_uses_app_geocoder_directory() {
-        let app_data_root = PathBuf::from("/Users/example/.radroots/app/desktop");
+        let app_data_root = PathBuf::from("/Users/example/.radroots/data/apps/app");
 
         assert_eq!(
             staged_db_path(app_data_root.as_path(), "abcd"),
-            PathBuf::from("/Users/example/.radroots/app/desktop/geocoder/abcd/geonames.db")
+            PathBuf::from("/Users/example/.radroots/data/apps/app/geocoder/abcd/geonames.db")
         );
     }
 

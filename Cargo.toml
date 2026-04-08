@@ -23,7 +23,6 @@ readme = "README.md"
 
 [workspace.dependencies]
 android_logger = "0.15.1"
-directories = "6"
 eframe = { version = "0.33.3", default-features = false, features = ["default_fonts"] }
 egui = { version = "0.33.3", features = ["serde"] }
 image = { version = "0.25.10", default-features = false, features = ["ico", "png"] }
@@ -39,6 +38,7 @@ radroots-identity = { path = "../lib/crates/identity", default-features = false,
 radroots-nostr = { path = "../lib/crates/nostr", default-features = false, features = ["std", "client"] }
 radroots-nostr-accounts = { path = "../lib/crates/nostr-accounts", default-features = false, features = ["std", "file-store", "os-keyring"] }
 radroots-nostr-connect = { path = "../lib/crates/nostr-connect" }
+radroots-runtime-paths = { path = "../lib/crates/runtime-paths" }
 radroots-secret-vault = { path = "../lib/crates/secret-vault", default-features = false, features = ["std"] }
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.145"
