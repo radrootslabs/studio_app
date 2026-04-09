@@ -16,6 +16,7 @@ workspace = true
 [dependencies]
 eframe.workspace = true
 egui.workspace = true
+radroots-runtime-paths.workspace = true
 zeroize.workspace = true
 
 [dev-dependencies]

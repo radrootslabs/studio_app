@@ -10,6 +10,7 @@ mod location_resolver;
 mod offline_geocoder;
 mod remote_signer;
 mod secret_keys;
+mod storage_paths;
 
 pub const APP_NAME: &str = "Rad Roots";
 
@@ -28,6 +29,10 @@ pub use remote_signer::{
     RadrootsRemoteSignerSignedNote,
 };
 pub use secret_keys::{RadrootsSecretImportMode, RadrootsSecretImportRequest};
+pub use storage_paths::{
+    RadrootsAppStorageLayout, interactive_user_app_storage_layout_with_resolver,
+    mobile_native_app_storage_layout,
+};
 
 use home_location_tools::HomeLocationTools;
 

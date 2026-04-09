@@ -2,36 +2,18 @@
 use crate::security::{ANDROID_NOSTR_SERVICE, resolve_radroots_base_root};
 #[cfg(target_os = "android")]
 use crate::vault::RadrootsAndroidKeystoreVault;
+use radroots_studio_app_core::mobile_native_app_storage_layout;
 #[cfg(target_os = "android")]
 use radroots_nostr_accounts::prelude::{
     RadrootsNostrAccountsManager, RadrootsNostrFileAccountStore,
 };
-use radroots_runtime_paths::{
-    RadrootsHostEnvironment, RadrootsPathOverrides, RadrootsPathProfile, RadrootsPathResolver,
-    RadrootsPaths, RadrootsPlatform, RadrootsRuntimeNamespace,
-};
+use radroots_runtime_paths::{RadrootsPaths, RadrootsPlatform};
 use std::path::{Path, PathBuf};
 #[cfg(target_os = "android")]
 use std::sync::Arc;
 
-fn app_namespace() -> Result<RadrootsRuntimeNamespace, String> {
-    RadrootsRuntimeNamespace::app("app")
-        .map_err(|source| format!("failed to resolve android app namespace: {source}"))
-}
-
 fn app_paths_from_base_root(base_root: &Path) -> Result<RadrootsPaths, String> {
-    let resolver = RadrootsPathResolver::new(
-        RadrootsPlatform::Android,
-        RadrootsHostEnvironment::default(),
-    );
-    let namespace = app_namespace()?;
-    resolver
-        .resolve(
-            RadrootsPathProfile::MobileNative,
-            &RadrootsPathOverrides::mobile(RadrootsPaths::from_base_root(base_root)),
-        )
-        .map(|roots| roots.namespaced(&namespace))
-        .map_err(|source| format!("failed to resolve android mobile-native roots: {source}"))
+    Ok(mobile_native_app_storage_layout(RadrootsPlatform::Android, base_root)?.app_paths)
 }
 
 #[cfg(target_os = "android")]

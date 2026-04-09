@@ -1,21 +1,14 @@
 #[cfg(target_os = "ios")]
 use radroots_studio_app_apple_security::{APPLE_NOSTR_SERVICE, RadrootsAppleKeychainVault};
+use radroots_studio_app_core::mobile_native_app_storage_layout;
 #[cfg(target_os = "ios")]
 use radroots_nostr_accounts::prelude::{
     RadrootsNostrAccountsManager, RadrootsNostrFileAccountStore,
 };
-use radroots_runtime_paths::{
-    RadrootsHostEnvironment, RadrootsPathOverrides, RadrootsPathProfile, RadrootsPathResolver,
-    RadrootsPaths, RadrootsPlatform, RadrootsRuntimeNamespace,
-};
+use radroots_runtime_paths::{RadrootsPaths, RadrootsPlatform};
 use std::path::{Path, PathBuf};
 #[cfg(target_os = "ios")]
 use std::sync::Arc;
-
-fn app_namespace() -> Result<RadrootsRuntimeNamespace, String> {
-    RadrootsRuntimeNamespace::app("app")
-        .map_err(|source| format!("failed to resolve ios app namespace: {source}"))
-}
 
 fn mobile_base_root_from_home(home: &Path) -> PathBuf {
     home.join("Library")
@@ -24,18 +17,8 @@ fn mobile_base_root_from_home(home: &Path) -> PathBuf {
 }
 
 fn app_paths_from_home(home: &Path) -> Result<RadrootsPaths, String> {
-    let resolver =
-        RadrootsPathResolver::new(RadrootsPlatform::Ios, RadrootsHostEnvironment::default());
-    let namespace = app_namespace()?;
-    resolver
-        .resolve(
-            RadrootsPathProfile::MobileNative,
-            &RadrootsPathOverrides::mobile(RadrootsPaths::from_base_root(
-                mobile_base_root_from_home(home),
-            )),
-        )
-        .map(|roots| roots.namespaced(&namespace))
-        .map_err(|source| format!("failed to resolve ios mobile-native roots: {source}"))
+    let base_root = mobile_base_root_from_home(home);
+    Ok(mobile_native_app_storage_layout(RadrootsPlatform::Ios, base_root.as_path())?.app_paths)
 }
 
 #[cfg(target_os = "ios")]

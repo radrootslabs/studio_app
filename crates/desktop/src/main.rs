@@ -15,7 +15,7 @@ use radroots_studio_app_core::{
     RadrootsLocationReverseOptions, RadrootsOfflineGeocoderPlatform, RadrootsOfflineGeocoderState,
     RadrootsOfflineGeocoderUnavailableKind, RadrootsResolvedLocation,
     RadrootsReverseLocationLookupResult, RadrootsSecretImportMode, RadrootsSecretImportRequest,
-    SetupActionState,
+    SetupActionState, interactive_user_app_storage_layout_with_resolver,
 };
 #[cfg(target_os = "macos")]
 use radroots_identity::RadrootsIdentity;
@@ -23,10 +23,7 @@ use radroots_identity::RadrootsIdentity;
 use radroots_nostr_accounts::prelude::{
     RadrootsNostrAccountsManager, RadrootsNostrFileAccountStore, RadrootsNostrSelectedAccountStatus,
 };
-use radroots_runtime_paths::{
-    RadrootsPathOverrides, RadrootsPathProfile, RadrootsPathResolver, RadrootsPaths,
-    RadrootsRuntimeNamespace,
-};
+use radroots_runtime_paths::{RadrootsPathResolver, RadrootsPaths};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 #[cfg(target_os = "macos")]
@@ -79,25 +76,8 @@ struct DesktopBackend {
 }
 
 impl DesktopBackend {
-    fn app_namespace() -> Result<RadrootsRuntimeNamespace, String> {
-        RadrootsRuntimeNamespace::app("app")
-            .map_err(|source| format!("failed to resolve desktop app namespace: {source}"))
-    }
-
-    fn interactive_user_roots_with_resolver(
-        resolver: &RadrootsPathResolver,
-    ) -> Result<RadrootsPaths, String> {
-        resolver
-            .resolve(
-                RadrootsPathProfile::InteractiveUser,
-                &RadrootsPathOverrides::default(),
-            )
-            .map_err(|source| format!("failed to resolve desktop interactive-user roots: {source}"))
-    }
-
     fn app_paths_with_resolver(resolver: &RadrootsPathResolver) -> Result<RadrootsPaths, String> {
-        let namespace = Self::app_namespace()?;
-        Ok(Self::interactive_user_roots_with_resolver(resolver)?.namespaced(&namespace))
+        Ok(interactive_user_app_storage_layout_with_resolver(resolver)?.app_paths)
     }
 
     fn new() -> Self {
@@ -131,12 +111,10 @@ impl DesktopBackend {
     }
 
     fn radroots_root() -> Result<PathBuf, String> {
-        let roots = Self::interactive_user_roots_with_resolver(&RadrootsPathResolver::current())?;
-        roots
-            .config
-            .parent()
-            .map(Path::to_path_buf)
-            .ok_or_else(|| "desktop interactive-user config root had no parent".to_owned())
+        Ok(
+            interactive_user_app_storage_layout_with_resolver(&RadrootsPathResolver::current())?
+                .runtime_root,
+        )
     }
 
     fn app_data_root() -> Result<PathBuf, String> {
