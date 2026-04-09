@@ -80,11 +80,7 @@ pub fn radroots_studio_app_remote_signer_connect_pending(
     input: &str,
 ) -> Result<RadrootsAppRemoteSignerPendingSession, RadrootsAppRemoteSignerError> {
     let target = radroots_studio_app_remote_signer_preview(input)?;
-    let runtime = Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .map_err(|error| RadrootsAppRemoteSignerError::ConnectFailed(error.to_string()))?;
-    runtime.block_on(connect_pending_session(target))
+    connect_pending_session(target)
 }
 
 pub fn radroots_studio_app_remote_signer_poll_pending_session(
@@ -153,16 +149,7 @@ pub fn radroots_studio_app_remote_signer_sign_kind1_note_with_progress<F>(
 where
     F: FnMut(RadrootsAppRemoteSignerProgressUpdate),
 {
-    let runtime = Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .map_err(|error| RadrootsAppRemoteSignerError::ConnectFailed(error.to_string()))?;
-    runtime.block_on(sign_kind1_note(
-        record,
-        client_secret_key_hex,
-        content,
-        &mut progress,
-    ))
+    sign_kind1_note(record, client_secret_key_hex, content, &mut progress)
 }
 
 pub fn radroots_studio_app_remote_signer_sign_unsigned_event(
@@ -187,19 +174,10 @@ pub fn radroots_studio_app_remote_signer_sign_unsigned_event_with_progress<F>(
 where
     F: FnMut(RadrootsAppRemoteSignerProgressUpdate),
 {
-    let runtime = Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .map_err(|error| RadrootsAppRemoteSignerError::ConnectFailed(error.to_string()))?;
-    runtime.block_on(sign_unsigned_event(
-        record,
-        client_secret_key_hex,
-        unsigned_event,
-        &mut progress,
-    ))
+    sign_unsigned_event(record, client_secret_key_hex, unsigned_event, &mut progress)
 }
 
-async fn connect_pending_session(
+fn connect_pending_session(
     target: RadrootsAppRemoteSignerTarget,
 ) -> Result<RadrootsAppRemoteSignerPendingSession, RadrootsAppRemoteSignerError> {
     let client_identity = RadrootsIdentity::generate();
@@ -210,8 +188,7 @@ async fn connect_pending_session(
         RadrootsNostrConnectMethod::Connect,
         connect_request,
         CONNECT_TIMEOUT,
-    )
-    .await?;
+    )?;
 
     match response {
         RadrootsNostrConnectResponse::ConnectAcknowledged
@@ -244,7 +221,7 @@ fn connect_request_for_target(
     })
 }
 
-async fn sign_kind1_note<F>(
+fn sign_kind1_note<F>(
     record: &RadrootsAppRemoteSignerSessionRecord,
     client_secret_key_hex: &str,
     content: &str,
@@ -265,10 +242,10 @@ where
     })?;
     let unsigned_event = EventBuilder::text_note(content.trim())
         .build(parse_public_key_hex(user_identity.public_key_hex.as_str())?);
-    sign_unsigned_event(record, client_secret_key_hex, unsigned_event, progress).await
+    sign_unsigned_event(record, client_secret_key_hex, unsigned_event, progress)
 }
 
-async fn sign_unsigned_event<F>(
+fn sign_unsigned_event<F>(
     record: &RadrootsAppRemoteSignerSessionRecord,
     client_secret_key_hex: &str,
     unsigned_event: UnsignedEvent,
@@ -306,7 +283,7 @@ where
     }
 }
 
-async fn execute_request(
+fn execute_request(
     client_identity: &RadrootsIdentity,
     target: &RadrootsAppRemoteSignerTarget,
     method: RadrootsNostrConnectMethod,
