@@ -21,9 +21,9 @@ image.workspace = true
 log.workspace = true
 radroots-app-core = { path = "../core" }
 radroots-app-remote-signer = { path = "../remote-signer" }
-radroots-geocoder.workspace = true
-radroots-nostr-accounts = { workspace = true, features = ["memory-vault"] }
-radroots-runtime-paths.workspace = true
+radroots_geocoder.workspace = true
+radroots_nostr_accounts = { workspace = true, features = ["memory-vault"] }
+radroots_runtime_paths.workspace = true
 zeroize.workspace = true
 
 [target.'cfg(any(target_os = "macos", target_os = "ios"))'.dependencies]
@@ -32,7 +32,7 @@ wgpu = { workspace = true, features = ["metal", "wgsl"] }
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2-foundation = { workspace = true, features = ["NSProcessInfo", "NSString"] }
 radroots-app-apple-security.workspace = true
-radroots-identity.workspace = true
+radroots_identity.workspace = true
 
 [target.'cfg(target_os = "windows")'.dependencies]
 wgpu = { workspace = true, features = ["dx12", "wgsl"] }

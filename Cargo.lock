@@ -3057,11 +3057,11 @@ dependencies = [
  "radroots-app-core",
  "radroots-app-remote-signer",
  "radroots-app-test-support",
- "radroots-geocoder",
- "radroots-identity",
- "radroots-nostr-accounts",
- "radroots-runtime-paths",
- "radroots-secret-vault",
+ "radroots_geocoder",
+ "radroots_identity",
+ "radroots_nostr_accounts",
+ "radroots_runtime_paths",
+ "radroots_secret_vault",
  "wgpu",
  "winit",
  "zeroize",
@@ -3071,8 +3071,8 @@ dependencies = [
 name = "radroots-app-apple-security"
 version = "0.1.0"
 dependencies = [
- "radroots-nostr-accounts",
- "radroots-secret-vault",
+ "radroots_nostr_accounts",
+ "radroots_secret_vault",
  "zeroize",
 ]
 
@@ -3083,7 +3083,7 @@ dependencies = [
  "eframe",
  "egui",
  "radroots-app-test-support",
- "radroots-runtime-paths",
+ "radroots_runtime_paths",
  "zeroize",
 ]
 
@@ -3100,10 +3100,10 @@ dependencies = [
  "radroots-app-core",
  "radroots-app-remote-signer",
  "radroots-app-test-support",
- "radroots-geocoder",
- "radroots-identity",
- "radroots-nostr-accounts",
- "radroots-runtime-paths",
+ "radroots_geocoder",
+ "radroots_identity",
+ "radroots_nostr_accounts",
+ "radroots_runtime_paths",
  "wgpu",
  "zeroize",
 ]
@@ -3118,10 +3118,10 @@ dependencies = [
  "radroots-app-core",
  "radroots-app-remote-signer",
  "radroots-app-test-support",
- "radroots-geocoder",
- "radroots-identity",
- "radroots-nostr-accounts",
- "radroots-runtime-paths",
+ "radroots_geocoder",
+ "radroots_identity",
+ "radroots_nostr_accounts",
+ "radroots_runtime_paths",
  "wgpu",
  "zeroize",
 ]
@@ -3132,10 +3132,10 @@ version = "0.1.0"
 dependencies = [
  "nostr",
  "radroots-app-test-support",
- "radroots-identity",
- "radroots-nostr",
- "radroots-nostr-accounts",
- "radroots-nostr-connect",
+ "radroots_identity",
+ "radroots_nostr",
+ "radroots_nostr_accounts",
+ "radroots_nostr_connect",
  "serde",
  "serde_json",
  "tempfile",
@@ -3147,7 +3147,7 @@ dependencies = [
 name = "radroots-app-test-support"
 version = "0.1.0"
 dependencies = [
- "radroots-identity",
+ "radroots_identity",
 ]
 
 [[package]]
@@ -3160,14 +3160,14 @@ dependencies = [
  "nostr",
  "nostr-browser-signer",
  "radroots-app-core",
- "radroots-geocoder",
+ "radroots_geocoder",
  "wasm-bindgen-futures",
  "web-sys",
  "wgpu",
 ]
 
 [[package]]
-name = "radroots-core"
+name = "radroots_core"
 version = "0.1.0-alpha.1"
 dependencies = [
  "rust_decimal",
@@ -3176,15 +3176,15 @@ dependencies = [
 ]
 
 [[package]]
-name = "radroots-events"
+name = "radroots_events"
 version = "0.1.0-alpha.1"
 dependencies = [
- "radroots-core",
+ "radroots_core",
  "serde",
 ]
 
 [[package]]
-name = "radroots-geocoder"
+name = "radroots_geocoder"
 version = "0.1.0-alpha.1"
 dependencies = [
  "rusqlite",
@@ -3193,13 +3193,13 @@ dependencies = [
 ]
 
 [[package]]
-name = "radroots-identity"
+name = "radroots_identity"
 version = "0.1.0-alpha.1"
 dependencies = [
  "nostr",
- "radroots-events",
- "radroots-runtime",
- "radroots-runtime-paths",
+ "radroots_events",
+ "radroots_runtime",
+ "radroots_runtime_paths",
  "serde",
  "serde_json",
  "thiserror 1.0.69",
@@ -3207,7 +3207,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "radroots-log"
+name = "radroots_log"
 version = "0.1.0-alpha.1"
 dependencies = [
  "chrono",
@@ -3218,25 +3218,25 @@ dependencies = [
 ]
 
 [[package]]
-name = "radroots-nostr"
+name = "radroots_nostr"
 version = "0.1.0-alpha.1"
 dependencies = [
  "nostr",
  "nostr-sdk",
- "radroots-identity",
+ "radroots_identity",
  "serde",
  "serde_json",
  "thiserror 1.0.69",
 ]
 
 [[package]]
-name = "radroots-nostr-accounts"
+name = "radroots_nostr_accounts"
 version = "0.1.0-alpha.1"
 dependencies = [
- "radroots-identity",
- "radroots-nostr-signer",
- "radroots-runtime",
- "radroots-secret-vault",
+ "radroots_identity",
+ "radroots_nostr_signer",
+ "radroots_runtime",
+ "radroots_secret_vault",
  "serde",
  "serde_json",
  "thiserror 1.0.69",
@@ -3244,7 +3244,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "radroots-nostr-connect"
+name = "radroots_nostr_connect"
 version = "0.1.0-alpha.1"
 dependencies = [
  "nostr",
@@ -3255,14 +3255,14 @@ dependencies = [
 ]
 
 [[package]]
-name = "radroots-nostr-signer"
+name = "radroots_nostr_signer"
 version = "0.1.0-alpha.1"
 dependencies = [
  "hex",
  "nostr",
- "radroots-identity",
- "radroots-nostr-connect",
- "radroots-runtime",
+ "radroots_identity",
+ "radroots_nostr_connect",
+ "radroots_runtime",
  "serde",
  "serde_json",
  "sha2",
@@ -3272,29 +3272,29 @@ dependencies = [
 ]
 
 [[package]]
-name = "radroots-protected-store"
+name = "radroots_protected_store"
 version = "0.1.0-alpha.1"
 dependencies = [
  "chacha20poly1305",
  "getrandom 0.2.17",
- "radroots-secret-vault",
+ "radroots_secret_vault",
  "serde",
  "serde_json",
  "zeroize",
 ]
 
 [[package]]
-name = "radroots-runtime"
+name = "radroots_runtime"
 version = "0.1.0-alpha.1"
 dependencies = [
  "anyhow",
  "chacha20poly1305",
  "config",
  "getrandom 0.2.17",
- "radroots-log",
- "radroots-protected-store",
- "radroots-runtime-paths",
- "radroots-secret-vault",
+ "radroots_log",
+ "radroots_protected_store",
+ "radroots_runtime_paths",
+ "radroots_secret_vault",
  "serde",
  "serde_json",
  "tempfile",
@@ -3306,14 +3306,14 @@ dependencies = [
 ]
 
 [[package]]
-name = "radroots-runtime-paths"
+name = "radroots_runtime_paths"
 version = "0.1.0-alpha.1"
 dependencies = [
  "thiserror 1.0.69",
 ]
 
 [[package]]
-name = "radroots-secret-vault"
+name = "radroots_secret_vault"
 version = "0.1.0-alpha.1"
 dependencies = [
  "keyring",

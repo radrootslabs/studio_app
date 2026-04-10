@@ -19,7 +19,7 @@ eframe = { workspace = true, features = ["wgpu"] }
 js-sys = "0.3.91"
 log.workspace = true
 radroots-app-core = { path = "../core" }
-radroots-geocoder.workspace = true
+radroots_geocoder.workspace = true
 wasm-bindgen-futures.workspace = true
 web-sys = { workspace = true, features = ["Document", "Element", "HtmlCanvasElement", "Response", "Window"] }
 

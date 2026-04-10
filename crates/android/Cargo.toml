@@ -19,11 +19,11 @@ eframe = { workspace = true, features = ["android-game-activity", "glow"] }
 log.workspace = true
 radroots-app-core = { path = "../core" }
 radroots-app-remote-signer = { path = "../remote-signer" }
-radroots-geocoder.workspace = true
-radroots-identity.workspace = true
-radroots-nostr-accounts = { workspace = true, features = ["memory-vault"] }
-radroots-runtime-paths.workspace = true
-radroots-secret-vault.workspace = true
+radroots_geocoder.workspace = true
+radroots_identity.workspace = true
+radroots_nostr_accounts = { workspace = true, features = ["memory-vault"] }
+radroots_runtime_paths.workspace = true
+radroots_secret_vault.workspace = true
 zeroize.workspace = true
 
 [target.'cfg(target_os = "android")'.dependencies]

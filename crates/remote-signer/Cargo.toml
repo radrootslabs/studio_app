@@ -15,10 +15,10 @@ workspace = true
 
 [dependencies]
 nostr = { workspace = true, features = ["nip44"] }
-radroots-identity.workspace = true
-radroots-nostr-accounts = { workspace = true, features = ["memory-vault"] }
-radroots-nostr.workspace = true
-radroots-nostr-connect.workspace = true
+radroots_identity.workspace = true
+radroots_nostr_accounts = { workspace = true, features = ["memory-vault"] }
+radroots_nostr.workspace = true
+radroots_nostr_connect.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 tokio.workspace = true
