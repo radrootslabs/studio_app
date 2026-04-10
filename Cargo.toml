@@ -5,8 +5,8 @@ members = [
     "crates/core",
     "crates/desktop",
     "crates/ios",
-    "crates/remote-signer",
-    "crates/test-support",
+    "crates/remote_signer",
+    "crates/test_support",
     "crates/web",
 ]
 resolver = "2"

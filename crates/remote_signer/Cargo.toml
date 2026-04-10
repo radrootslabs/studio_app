@@ -25,5 +25,5 @@ tokio.workspace = true
 url.workspace = true
 
 [dev-dependencies]
-radroots_studio_app_test_support = { path = "../test-support" }
+radroots_studio_app_test_support = { path = "../test_support" }
 tempfile = "3.23.0"
