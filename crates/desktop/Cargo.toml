@@ -1,5 +1,5 @@
 [package]
-name = "radroots-app-desktop"
+name = "radroots_studio_app_desktop"
 authors.workspace = true
 version.workspace = true
 edition.workspace = true
@@ -19,8 +19,8 @@ eframe = { workspace = true, features = ["wgpu", "wayland", "x11"] }
 egui.workspace = true
 image.workspace = true
 log.workspace = true
-radroots-app-core = { path = "../core" }
-radroots-app-remote-signer = { path = "../remote-signer" }
+radroots_studio_app_core = { path = "../core" }
+radroots_studio_app_remote_signer = { path = "../remote-signer" }
 radroots_geocoder.workspace = true
 radroots_nostr_accounts = { workspace = true, features = ["memory-vault"] }
 radroots_runtime_paths.workspace = true
@@ -31,7 +31,7 @@ wgpu = { workspace = true, features = ["metal", "wgsl"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2-foundation = { workspace = true, features = ["NSProcessInfo", "NSString"] }
-radroots-app-apple-security.workspace = true
+radroots_studio_app_apple_security.workspace = true
 radroots_identity.workspace = true
 
 [target.'cfg(target_os = "windows")'.dependencies]
@@ -41,4 +41,4 @@ wgpu = { workspace = true, features = ["dx12", "wgsl"] }
 wgpu = { workspace = true, features = ["vulkan", "gles", "wgsl"] }
 
 [dev-dependencies]
-radroots-app-test-support = { path = "../test-support" }
+radroots_studio_app_test_support = { path = "../test-support" }

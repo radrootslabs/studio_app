@@ -40,7 +40,7 @@ build_target() {
   local cargo_args=(
     build
     --manifest-path "${app_root}/Cargo.toml"
-    -p radroots-app-ios
+    -p radroots_studio_app_ios
     --target "${target}"
   )
   if [[ "${profile}" == "release" ]]; then

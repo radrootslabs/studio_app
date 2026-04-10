@@ -80,7 +80,7 @@ cargo test
 Run the native application:
 
 ```bash
-cargo run -p radroots-app-desktop
+cargo run -p radroots_studio_app_desktop
 ```
 
 Check the Android target:
@@ -104,7 +104,7 @@ Run the Android app in the emulator:
 Check the wasm application:
 
 ```bash
-./scripts/with-wasm-toolchain.sh env -u NO_COLOR cargo check -p radroots-app-web --target wasm32-unknown-unknown
+./scripts/with-wasm-toolchain.sh env -u NO_COLOR cargo check -p radroots_studio_app_web --target wasm32-unknown-unknown
 ```
 
 Build the wasm application:

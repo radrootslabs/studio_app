@@ -54,5 +54,5 @@ fi
 for target in "${targets[@]}"; do
   require_rust_target "${target}"
   CARGO_TARGET_DIR="${ios_target_dir}" \
-    cargo check --manifest-path "${app_root}/Cargo.toml" -p radroots-app-ios --target "${target}"
+    cargo check --manifest-path "${app_root}/Cargo.toml" -p radroots_studio_app_ios --target "${target}"
 done

@@ -32,7 +32,7 @@ ndk-context = "0.1.1"
 nostr = { version = "0.44.1", default-features = false, features = ["std"] }
 nostr-browser-signer = "0.44.1"
 objc2-foundation = { version = "0.3.2", default-features = false, features = ["std"] }
-radroots-app-apple-security = { path = "crates/apple/security" }
+radroots_studio_app_apple_security = { path = "crates/apple/security" }
 radroots_geocoder = { path = "../lib/crates/geocoder" }
 radroots_identity = { path = "../lib/crates/identity", default-features = false, features = ["std", "nip49"] }
 radroots_nostr = { path = "../lib/crates/nostr", default-features = false, features = ["std", "client"] }

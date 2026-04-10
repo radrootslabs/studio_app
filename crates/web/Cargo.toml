@@ -1,5 +1,5 @@
 [package]
-name = "radroots-app-web"
+name = "radroots_studio_app_web"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -18,7 +18,7 @@ crate-type = ["cdylib", "rlib"]
 eframe = { workspace = true, features = ["wgpu"] }
 js-sys = "0.3.91"
 log.workspace = true
-radroots-app-core = { path = "../core" }
+radroots_studio_app_core = { path = "../core" }
 radroots_geocoder.workspace = true
 wasm-bindgen-futures.workspace = true
 web-sys = { workspace = true, features = ["Document", "Element", "HtmlCanvasElement", "Response", "Window"] }

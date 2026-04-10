@@ -55,7 +55,7 @@ cargo_args=(
   -o "${app_root}/target/android/jniLibs"
   build
   --manifest-path "${app_root}/Cargo.toml"
-  -p radroots-app-android
+  -p radroots_studio_app_android
 )
 
 if [[ "${profile}" == "release" ]]; then

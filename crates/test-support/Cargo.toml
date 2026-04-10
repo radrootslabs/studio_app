@@ -1,5 +1,5 @@
 [package]
-name = "radroots-app-test-support"
+name = "radroots_studio_app_test_support"
 authors.workspace = true
 version.workspace = true
 edition.workspace = true

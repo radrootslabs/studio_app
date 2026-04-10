@@ -41,7 +41,7 @@ Before making substantial changes:
   - `cargo metadata --format-version 1 --no-deps`
   - `cargo check`
   - targeted `cargo test`
-  - targeted `cargo run -p radroots-app-desktop`
+  - targeted `cargo run -p radroots_studio_app_desktop`
 - If validation cannot be run, report the blocker clearly.
 
 ## 6. Workspace structure

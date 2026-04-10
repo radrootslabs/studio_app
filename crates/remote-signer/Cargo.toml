@@ -1,5 +1,5 @@
 [package]
-name = "radroots-app-remote-signer"
+name = "radroots_studio_app_remote_signer"
 authors.workspace = true
 version.workspace = true
 edition.workspace = true
@@ -25,5 +25,5 @@ tokio.workspace = true
 url.workspace = true
 
 [dev-dependencies]
-radroots-app-test-support = { path = "../test-support" }
+radroots_studio_app_test_support = { path = "../test-support" }
 tempfile = "3.23.0"

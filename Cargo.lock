@@ -3046,7 +3046,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f8dcc9c7d52a811697d2151c701e0d08956f92b0e24136cf4cf27b57a6a0d9bf"
 
 [[package]]
-name = "radroots-app-android"
+name = "radroots_studio_app_android"
 version = "0.1.0"
 dependencies = [
  "android_logger",
@@ -3054,9 +3054,9 @@ dependencies = [
  "jni 0.21.1",
  "log",
  "ndk-context",
- "radroots-app-core",
- "radroots-app-remote-signer",
- "radroots-app-test-support",
+ "radroots_studio_app_core",
+ "radroots_studio_app_remote_signer",
+ "radroots_studio_app_test_support",
  "radroots_geocoder",
  "radroots_identity",
  "radroots_nostr_accounts",
@@ -3068,7 +3068,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "radroots-app-apple-security"
+name = "radroots_studio_app_apple_security"
 version = "0.1.0"
 dependencies = [
  "radroots_nostr_accounts",
@@ -3077,18 +3077,18 @@ dependencies = [
 ]
 
 [[package]]
-name = "radroots-app-core"
+name = "radroots_studio_app_core"
 version = "0.1.0"
 dependencies = [
  "eframe",
  "egui",
- "radroots-app-test-support",
+ "radroots_studio_app_test_support",
  "radroots_runtime_paths",
  "zeroize",
 ]
 
 [[package]]
-name = "radroots-app-desktop"
+name = "radroots_studio_app_desktop"
 version = "0.1.0"
 dependencies = [
  "eframe",
@@ -3096,10 +3096,10 @@ dependencies = [
  "image",
  "log",
  "objc2-foundation 0.3.2",
- "radroots-app-apple-security",
- "radroots-app-core",
- "radroots-app-remote-signer",
- "radroots-app-test-support",
+ "radroots_studio_app_apple_security",
+ "radroots_studio_app_core",
+ "radroots_studio_app_remote_signer",
+ "radroots_studio_app_test_support",
  "radroots_geocoder",
  "radroots_identity",
  "radroots_nostr_accounts",
@@ -3109,15 +3109,15 @@ dependencies = [
 ]
 
 [[package]]
-name = "radroots-app-ios"
+name = "radroots_studio_app_ios"
 version = "0.1.0"
 dependencies = [
  "eframe",
  "log",
- "radroots-app-apple-security",
- "radroots-app-core",
- "radroots-app-remote-signer",
- "radroots-app-test-support",
+ "radroots_studio_app_apple_security",
+ "radroots_studio_app_core",
+ "radroots_studio_app_remote_signer",
+ "radroots_studio_app_test_support",
  "radroots_geocoder",
  "radroots_identity",
  "radroots_nostr_accounts",
@@ -3127,11 +3127,11 @@ dependencies = [
 ]
 
 [[package]]
-name = "radroots-app-remote-signer"
+name = "radroots_studio_app_remote_signer"
 version = "0.1.0"
 dependencies = [
  "nostr",
- "radroots-app-test-support",
+ "radroots_studio_app_test_support",
  "radroots_identity",
  "radroots_nostr",
  "radroots_nostr_accounts",
@@ -3144,14 +3144,14 @@ dependencies = [
 ]
 
 [[package]]
-name = "radroots-app-test-support"
+name = "radroots_studio_app_test_support"
 version = "0.1.0"
 dependencies = [
  "radroots_identity",
 ]
 
 [[package]]
-name = "radroots-app-web"
+name = "radroots_studio_app_web"
 version = "0.1.0"
 dependencies = [
  "eframe",
@@ -3159,7 +3159,7 @@ dependencies = [
  "log",
  "nostr",
  "nostr-browser-signer",
- "radroots-app-core",
+ "radroots_studio_app_core",
  "radroots_geocoder",
  "wasm-bindgen-futures",
  "web-sys",

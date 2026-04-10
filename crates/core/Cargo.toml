@@ -1,5 +1,5 @@
 [package]
-name = "radroots-app-core"
+name = "radroots_studio_app_core"
 authors.workspace = true
 version.workspace = true
 edition.workspace = true
@@ -20,4 +20,4 @@ radroots_runtime_paths.workspace = true
 zeroize.workspace = true
 
 [dev-dependencies]
-radroots-app-test-support = { path = "../test-support" }
+radroots_studio_app_test_support = { path = "../test-support" }

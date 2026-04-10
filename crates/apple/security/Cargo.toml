@@ -1,5 +1,5 @@
 [package]
-name = "radroots-app-apple-security"
+name = "radroots_studio_app_apple_security"
 authors.workspace = true
 version.workspace = true
 edition.workspace = true

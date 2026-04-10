@@ -705,7 +705,7 @@ pub fn run() -> Result<(), String> {
 
 #[cfg(not(target_os = "ios"))]
 pub fn run() -> Result<(), String> {
-    Err("radroots-app-ios can only launch on an ios target".to_owned())
+    Err("radroots_studio_app_ios can only launch on an ios target".to_owned())
 }
 
 pub const ENTRYPOINT_SYMBOL: &str = "radroots_ios_run";
@@ -732,7 +732,7 @@ mod tests {
         #[cfg(not(target_os = "ios"))]
         assert_eq!(
             run(),
-            Err("radroots-app-ios can only launch on an ios target".to_owned())
+            Err("radroots_studio_app_ios can only launch on an ios target".to_owned())
         );
     }
 

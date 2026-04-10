@@ -1,5 +1,5 @@
 [package]
-name = "radroots-app-ios"
+name = "radroots_studio_app_ios"
 authors.workspace = true
 version.workspace = true
 edition.workspace = true
@@ -17,9 +17,9 @@ crate-type = ["staticlib", "rlib"]
 [dependencies]
 eframe = { workspace = true, features = ["wgpu"] }
 log.workspace = true
-radroots-app-apple-security.workspace = true
-radroots-app-core = { path = "../core" }
-radroots-app-remote-signer = { path = "../remote-signer" }
+radroots_studio_app_apple_security.workspace = true
+radroots_studio_app_core = { path = "../core" }
+radroots_studio_app_remote_signer = { path = "../remote-signer" }
 radroots_geocoder.workspace = true
 radroots_identity.workspace = true
 radroots_nostr_accounts = { workspace = true, features = ["memory-vault"] }
@@ -30,4 +30,4 @@ zeroize.workspace = true
 wgpu = { workspace = true, features = ["metal", "wgsl"] }
 
 [dev-dependencies]
-radroots-app-test-support = { path = "../test-support" }
+radroots_studio_app_test_support = { path = "../test-support" }

@@ -45,7 +45,7 @@ fn main() {
     println!("cargo:rustc-link-lib=framework=LocalAuthentication");
     println!("cargo:rustc-link-arg=-Wl,-rpath,{}", bin_path.display());
     println!(
-        "cargo:rustc-link-arg-bin=radroots-app-desktop=-Wl,-sectcreate,__TEXT,__info_plist,{}",
+        "cargo:rustc-link-arg-bin=radroots_studio_app_desktop=-Wl,-sectcreate,__TEXT,__info_plist,{}",
         info_plist_path.display()
     );
 }

@@ -17,4 +17,4 @@ export ANDROID_NDK_ROOT="${android_ndk_dir}"
 export ANDROID_USER_HOME="${android_user_home}"
 
 CARGO_TARGET_DIR="${app_root}/target" \
-  cargo ndk -t "${android_abi}" check --manifest-path "${app_root}/Cargo.toml" -p radroots-app-android
+  cargo ndk -t "${android_abi}" check --manifest-path "${app_root}/Cargo.toml" -p radroots_studio_app_android
