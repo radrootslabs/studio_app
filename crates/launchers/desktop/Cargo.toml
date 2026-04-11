@@ -19,8 +19,8 @@ eframe = { workspace = true, features = ["wgpu", "wayland", "x11"] }
 egui.workspace = true
 image.workspace = true
 log.workspace = true
-radroots_studio_app_core = { path = "../core" }
-radroots_studio_app_remote_signer = { path = "../remote_signer" }
+radroots_studio_app_core = { path = "../../shared/core" }
+radroots_studio_app_remote_signer = { path = "../../shared/remote_signer" }
 radroots_geocoder.workspace = true
 radroots_nostr_accounts = { workspace = true, features = ["memory-vault"] }
 radroots_runtime_paths.workspace = true
@@ -41,4 +41,4 @@ wgpu = { workspace = true, features = ["dx12", "wgsl"] }
 wgpu = { workspace = true, features = ["vulkan", "gles", "wgsl"] }
 
 [dev-dependencies]
-radroots_studio_app_test_support = { path = "../test_support" }
+radroots_studio_app_test_support = { path = "../../shared/test_support" }

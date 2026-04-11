@@ -1,4 +1,5 @@
 use std::env;
+use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -14,7 +15,8 @@ fn main() {
     }
 
     let manifest_dir = PathBuf::from(env::var_os("CARGO_MANIFEST_DIR").expect("manifest dir"));
-    let package_dir = manifest_dir.join("../../native/apple/swift/RadRootsAppleSecurity");
+    let package_dir =
+        manifest_dir.join("../../../native/bridges/apple/security/swift/RadRootsAppleSecurity");
     let info_plist_path = manifest_dir.join("macos/Info.plist");
 
     emit_rerun_paths(&package_dir);
@@ -38,12 +40,31 @@ fn main() {
         );
     }
 
-    println!("cargo:rustc-link-search=native={}", bin_path.display());
+    let copied_library_dir = target_profile_dir();
+    fs::copy(
+        &dylib_path,
+        copied_library_dir.join("libRadRootsAppleSecurityFFIDynamic.dylib"),
+    )
+    .unwrap_or_else(|err| {
+        panic!(
+            "failed to copy swift ffi library from {} into {}: {err}",
+            dylib_path.display(),
+            copied_library_dir.display()
+        )
+    });
+
+    println!(
+        "cargo:rustc-link-search=native={}",
+        copied_library_dir.display()
+    );
     println!("cargo:rustc-link-lib=dylib=RadRootsAppleSecurityFFIDynamic");
     println!("cargo:rustc-link-lib=framework=Foundation");
     println!("cargo:rustc-link-lib=framework=Security");
     println!("cargo:rustc-link-lib=framework=LocalAuthentication");
-    println!("cargo:rustc-link-arg=-Wl,-rpath,{}", bin_path.display());
+    println!(
+        "cargo:rustc-link-arg=-Wl,-rpath,{}",
+        copied_library_dir.display()
+    );
     println!(
         "cargo:rustc-link-arg-bin=radroots_studio_app_desktop=-Wl,-sectcreate,__TEXT,__info_plist,{}",
         info_plist_path.display()
@@ -52,9 +73,10 @@ fn main() {
 
 fn sync_optional_geocoder_assets() {
     let manifest_dir = PathBuf::from(env::var_os("CARGO_MANIFEST_DIR").expect("manifest dir"));
-    let source_db_path = manifest_dir.join(format!("../../assets/geocoder/{GEOCODER_DB_FILENAME}"));
+    let source_db_path =
+        manifest_dir.join(format!("../../../assets/geocoder/{GEOCODER_DB_FILENAME}"));
     let source_revision_path = manifest_dir.join(format!(
-        "../../assets/geocoder/{GEOCODER_REVISION_FILENAME}"
+        "../../../assets/geocoder/{GEOCODER_REVISION_FILENAME}"
     ));
     println!("cargo:rerun-if-changed={}", source_db_path.display());
     println!("cargo:rerun-if-changed={}", source_revision_path.display());

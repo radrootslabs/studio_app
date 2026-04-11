@@ -4,7 +4,7 @@ Rad Roots is an open-source application. Contributions are welcome, including bu
 
 ## Scope
 
-This repository is the standalone Rad Roots application repository. Shared Rust application code is organized under `crates/`. Reusable native libraries are organized under `native/`, and native host projects are organized under `platforms/`.
+This repository is the standalone Rad Roots application repository. Reusable Rust application logic is organized under `crates/shared/`, Rust host bridges under `crates/bridges/`, runnable Rust targets under `crates/launchers/`, native bridge implementations under `native/bridges/`, and native host projects under `platforms/`.
 
 ## Prerequisites
 
@@ -110,21 +110,21 @@ Check the wasm application:
 Build the wasm application:
 
 ```bash
-cd crates/web
-../../scripts/with-wasm-toolchain.sh env -u NO_COLOR trunk build
+cd crates/launchers/web
+../../../scripts/with-wasm-toolchain.sh env -u NO_COLOR trunk build
 ```
 
 Run the wasm application:
 
 ```bash
-cd crates/web
-../../scripts/with-wasm-toolchain.sh env -u NO_COLOR trunk serve --open
+cd crates/launchers/web
+../../../scripts/with-wasm-toolchain.sh env -u NO_COLOR trunk serve --open
 ```
 
 Test the Apple native security package:
 
 ```bash
-cd native/apple/swift/RadRootsAppleSecurity
+cd native/bridges/apple/security/swift/RadRootsAppleSecurity
 swift test
 ```
 

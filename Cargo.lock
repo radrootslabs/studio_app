@@ -3051,9 +3051,8 @@ version = "0.1.0"
 dependencies = [
  "android_logger",
  "eframe",
- "jni 0.21.1",
  "log",
- "ndk-context",
+ "radroots_studio_app_android_security",
  "radroots_studio_app_core",
  "radroots_studio_app_remote_signer",
  "radroots_studio_app_test_support",
@@ -3061,9 +3060,19 @@ dependencies = [
  "radroots_identity",
  "radroots_nostr_accounts",
  "radroots_runtime_paths",
- "radroots_secret_vault",
  "wgpu",
  "winit",
+ "zeroize",
+]
+
+[[package]]
+name = "radroots_studio_app_android_security"
+version = "0.1.0"
+dependencies = [
+ "jni 0.21.1",
+ "ndk-context",
+ "radroots_nostr_accounts",
+ "radroots_secret_vault",
  "zeroize",
 ]
 

@@ -47,9 +47,10 @@ Before making substantial changes:
 ## 6. Workspace structure
 
 - Keep the repository root as the workspace root.
-- Keep shared application code under `crates/core`.
-- Keep target launchers and bridge crates under `crates/`.
-- Keep reusable platform-native libraries under `native/`.
+- Keep reusable Rust application logic under `crates/shared/`.
+- Keep Rust host-integration adapters under `crates/bridges/`.
+- Keep runnable Rust targets under `crates/launchers/`.
+- Keep reusable platform-native bridge libraries under `native/bridges/`.
 - Keep native host projects under `platforms/`.
 - Add new crates only when they represent a durable architectural boundary.
 - Keep manifests, paths, and crate boundaries simple and intentional.

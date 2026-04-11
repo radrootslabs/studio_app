@@ -19,7 +19,7 @@ configs:
 
 packages:
   RadRootsAppleSecurity:
-    path: ../../native/apple/swift/RadRootsAppleSecurity
+    path: ../../native/bridges/apple/security/swift/RadRootsAppleSecurity
     group: Native/Apple/Swift
 
 targetTemplates:
@@ -53,10 +53,14 @@ targetTemplates:
         inputFiles:
           - $(SRCROOT)/../../Cargo.toml
           - $(SRCROOT)/../../Cargo.lock
-          - $(SRCROOT)/../../crates/core/Cargo.toml
-          - $(SRCROOT)/../../crates/core/src/lib.rs
-          - $(SRCROOT)/../../crates/ios/Cargo.toml
-          - $(SRCROOT)/../../crates/ios/src/lib.rs
+          - $(SRCROOT)/../../crates/shared/core/Cargo.toml
+          - $(SRCROOT)/../../crates/shared/core/src/lib.rs
+          - $(SRCROOT)/../../crates/shared/remote_signer/Cargo.toml
+          - $(SRCROOT)/../../crates/shared/remote_signer/src/lib.rs
+          - $(SRCROOT)/../../crates/bridges/apple/security/Cargo.toml
+          - $(SRCROOT)/../../crates/bridges/apple/security/src/lib.rs
+          - $(SRCROOT)/../../crates/launchers/ios/Cargo.toml
+          - $(SRCROOT)/../../crates/launchers/ios/src/lib.rs
           - $(SRCROOT)/Scripts/build_rust_ios.sh
         outputFiles:
           - $(SRCROOT)/../../target/$(RUST_TARGET_TRIPLE)/$(RUST_CARGO_PROFILE)/libradroots_studio_app_ios.a

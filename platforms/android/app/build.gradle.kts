@@ -9,8 +9,10 @@ val rustInputs = files(
     "../../../Cargo.toml",
     "../../../Cargo.lock",
     rustBuildScript,
-    fileTree("../../../crates/core"),
-    fileTree("../../../crates/android"),
+    fileTree("../../../crates/shared/core"),
+    fileTree("../../../crates/shared/remote_signer"),
+    fileTree("../../../crates/bridges/android/security"),
+    fileTree("../../../crates/launchers/android"),
 )
 
 android {

@@ -19,4 +19,4 @@ rootProject.name = "RadRootsAndroid"
 include(":app")
 include(":radrootsAndroidSecurity")
 
-project(":radrootsAndroidSecurity").projectDir = file("../../native/android/kotlin/RadRootsAndroidSecurity")
+project(":radrootsAndroidSecurity").projectDir = file("../../native/bridges/android/security/kotlin/RadRootsAndroidSecurity")

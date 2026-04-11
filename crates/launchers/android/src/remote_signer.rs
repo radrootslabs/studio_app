@@ -1,6 +1,5 @@
-use crate::security::ANDROID_NOSTR_SERVICE;
 use crate::storage;
-use crate::vault::RadrootsAndroidKeystoreVault;
+use radroots_studio_app_android_security::{ANDROID_NOSTR_SERVICE, RadrootsAndroidKeystoreVault};
 use radroots_studio_app_core::{
     IdentityGateState, RadrootsAccountCustody, RadrootsPendingRemoteSignerConnection,
     RadrootsRemoteSignerPreview, RadrootsRemoteSignerSignedNote, SetupActionState,

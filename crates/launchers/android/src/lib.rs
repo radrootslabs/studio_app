@@ -2,6 +2,8 @@
 use android_logger::Config;
 #[cfg(target_os = "android")]
 use eframe::egui::ViewportBuilder;
+#[cfg(target_os = "android")]
+use radroots_studio_app_android_security as android_security;
 #[cfg(any(target_os = "android", test))]
 use radroots_studio_app_core::RadrootsAppBackend;
 #[cfg(target_os = "android")]
@@ -41,11 +43,7 @@ mod remote_signer;
 #[cfg(any(target_os = "android", test))]
 mod reverse_lookup;
 #[cfg(any(target_os = "android", test))]
-mod security;
-#[cfg(any(target_os = "android", test))]
 mod storage;
-#[cfg(any(target_os = "android", test))]
-mod vault;
 
 #[cfg(any(target_os = "android", test))]
 #[cfg_attr(not(target_os = "android"), allow(dead_code))]
@@ -786,7 +784,7 @@ impl AndroidBackend {
                 password: Zeroizing::new(password.to_owned()),
             });
         if let Err(source) =
-            security::begin_user_presence_verification("back up the current secret key")
+            android_security::begin_user_presence_verification("back up the current secret key")
         {
             *PENDING_SECRET_KEY_EXPORT
                 .lock()
@@ -810,7 +808,7 @@ impl AndroidBackend {
             .map_err(|_| "failed to store pending raw secret key reveal".to_owned())? =
             Some(PendingSecretKeyExport::RawReveal);
         if let Err(source) =
-            security::begin_user_presence_verification("reveal the current secret key")
+            android_security::begin_user_presence_verification("reveal the current secret key")
         {
             *PENDING_SECRET_KEY_EXPORT
                 .lock()
@@ -827,7 +825,7 @@ impl AndroidBackend {
 
     #[cfg(target_os = "android")]
     fn secret_key_export_pending() -> bool {
-        security::is_user_presence_verification_pending().unwrap_or(false)
+        android_security::is_user_presence_verification_pending().unwrap_or(false)
     }
 
     #[cfg(not(target_os = "android"))]
@@ -837,10 +835,10 @@ impl AndroidBackend {
 
     #[cfg(target_os = "android")]
     fn poll_secret_key_export() -> Result<Option<HomeActionResult>, String> {
-        match security::take_user_presence_verification_result()
+        match android_security::take_user_presence_verification_result()
             .map_err(|source| source.to_string())?
         {
-            Some(security::AndroidUserPresenceVerificationResult::Verified) => {
+            Some(android_security::AndroidUserPresenceVerificationResult::Verified) => {
                 let manager = Self::accounts_manager()?;
                 let pending_export = PENDING_SECRET_KEY_EXPORT
                     .lock()
@@ -863,7 +861,7 @@ impl AndroidBackend {
                     None => Err("missing pending secret key export request".to_owned()),
                 }
             }
-            Some(security::AndroidUserPresenceVerificationResult::Failed(message)) => {
+            Some(android_security::AndroidUserPresenceVerificationResult::Failed(message)) => {
                 *PENDING_SECRET_KEY_EXPORT
                     .lock()
                     .map_err(|_| "failed to clear pending secret key export".to_owned())? = None;

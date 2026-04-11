@@ -1,4 +1,5 @@
 use std::env;
+use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -29,13 +30,26 @@ fn main() {
 
     let build_dir = find_library_dir(package_dir.join(".build"), ffi_library)
         .expect("swift ffi library dir");
+    let copied_library_dir = target_profile_dir();
+    fs::create_dir_all(&copied_library_dir).expect("create target profile dir");
+    fs::copy(
+        build_dir.join(ffi_library),
+        copied_library_dir.join(ffi_library),
+    )
+    .expect("copy swift ffi library into cargo target dir");
     let swift_runtime_dir = swift_runtime_dir(target_os.as_str());
-    println!("cargo:rustc-link-search=native={}", build_dir.display());
+    println!(
+        "cargo:rustc-link-search=native={}",
+        copied_library_dir.display()
+    );
     println!(
         "cargo:rustc-link-search=native={}",
         swift_runtime_dir.display()
     );
-    println!("cargo:rustc-link-arg=-Wl,-rpath,{}", build_dir.display());
+    println!(
+        "cargo:rustc-link-arg=-Wl,-rpath,{}",
+        copied_library_dir.display()
+    );
     println!(
         "cargo:rustc-link-arg=-Wl,-rpath,{}",
         swift_runtime_dir.display()
@@ -50,7 +64,7 @@ fn main() {
 
 fn swift_package_dir() -> PathBuf {
     PathBuf::from(env::var("CARGO_MANIFEST_DIR").expect("manifest dir"))
-        .join("../../../native/apple/swift/RadRootsAppleSecurity")
+        .join("../../../../native/bridges/apple/security/swift/RadRootsAppleSecurity")
 }
 
 fn swift_runtime_dir(target_os: &str) -> PathBuf {
@@ -107,6 +121,15 @@ fn find_library_dir(root: PathBuf, library_name: &str) -> Option<PathBuf> {
         }
     }
     None
+}
+
+fn target_profile_dir() -> PathBuf {
+    let out_dir = PathBuf::from(env::var_os("OUT_DIR").expect("OUT_DIR"));
+    out_dir
+        .ancestors()
+        .nth(3)
+        .unwrap_or_else(|| panic!("unexpected cargo OUT_DIR layout: {}", out_dir.display()))
+        .to_path_buf()
 }
 
 fn run_swift_build(package_dir: &Path, product: &str) {

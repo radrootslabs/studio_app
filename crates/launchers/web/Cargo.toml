@@ -18,7 +18,7 @@ crate-type = ["cdylib", "rlib"]
 eframe = { workspace = true, features = ["wgpu"] }
 js-sys = "0.3.91"
 log.workspace = true
-radroots_studio_app_core = { path = "../core" }
+radroots_studio_app_core = { path = "../../shared/core" }
 radroots_geocoder.workspace = true
 wasm-bindgen-futures.workspace = true
 web-sys = { workspace = true, features = ["Document", "Element", "HtmlCanvasElement", "Response", "Window"] }

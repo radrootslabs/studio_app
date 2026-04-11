@@ -1,8 +1,8 @@
-#[cfg(target_os = "android")]
-use crate::security::{ANDROID_NOSTR_SERVICE, resolve_radroots_base_root};
-#[cfg(target_os = "android")]
-use crate::vault::RadrootsAndroidKeystoreVault;
 use radroots_studio_app_core::mobile_native_app_storage_layout;
+#[cfg(target_os = "android")]
+use radroots_studio_app_android_security::{
+    ANDROID_NOSTR_SERVICE, RadrootsAndroidKeystoreVault, resolve_radroots_base_root,
+};
 #[cfg(target_os = "android")]
 use radroots_nostr_accounts::prelude::{
     RadrootsNostrAccountsManager, RadrootsNostrFileAccountStore,

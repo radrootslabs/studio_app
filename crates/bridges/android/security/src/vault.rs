@@ -9,19 +9,19 @@ use radroots_secret_vault::{
 use zeroize::Zeroizing;
 
 #[derive(Debug, Clone)]
-pub(crate) struct RadrootsAndroidKeystoreVault {
+pub struct RadrootsAndroidKeystoreVault {
     service_name: String,
     namespace: String,
 }
 
 impl RadrootsAndroidKeystoreVault {
     #[must_use]
-    pub(crate) fn new(service_name: impl Into<String>) -> Self {
+    pub fn new(service_name: impl Into<String>) -> Self {
         Self::new_with_namespace(service_name, ANDROID_NOSTR_NAMESPACE)
     }
 
     #[must_use]
-    pub(crate) fn new_with_namespace(
+    pub fn new_with_namespace(
         service_name: impl Into<String>,
         namespace: impl Into<String>,
     ) -> Self {
@@ -32,7 +32,7 @@ impl RadrootsAndroidKeystoreVault {
     }
 
     #[must_use]
-    pub(crate) const fn secure_local_policy() -> RadrootsHostVaultPolicy {
+    pub const fn secure_local_policy() -> RadrootsHostVaultPolicy {
         RadrootsHostVaultPolicy {
             residency: RadrootsHostVaultResidency::DeviceLocalOnly,
             user_presence: RadrootsHostVaultUserPresencePolicy::NotRequired,
@@ -79,7 +79,7 @@ impl RadrootsAndroidKeystoreVault {
         )
     }
 
-    pub(crate) fn store_secret_with_policy(
+    pub fn store_secret_with_policy(
         &self,
         slot: &str,
         secret: &str,
@@ -102,7 +102,7 @@ impl RadrootsAndroidKeystoreVault {
     }
 
     #[cfg_attr(not(target_os = "android"), allow(dead_code))]
-    pub(crate) fn purge_namespace(&self) -> Result<(), RadrootsSecretVaultAccessError> {
+    pub fn purge_namespace(&self) -> Result<(), RadrootsSecretVaultAccessError> {
         remove_secret_namespace(self.service_name.as_str(), self.namespace.as_str())
             .map_err(|source| RadrootsSecretVaultAccessError::Backend(source.to_string()))
     }

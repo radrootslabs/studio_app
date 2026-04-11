@@ -3,7 +3,7 @@
 use radroots_nostr_accounts::prelude::RadrootsNostrAccountsError;
 use std::path::PathBuf;
 
-pub(crate) const ANDROID_NOSTR_SERVICE: &str = "org.radroots.app.nostr";
+pub const ANDROID_NOSTR_SERVICE: &str = "org.radroots.app.nostr";
 pub(crate) const ANDROID_NOSTR_NAMESPACE: &str = "nostr";
 
 #[cfg(target_os = "android")]
@@ -42,7 +42,7 @@ impl AndroidSecretStatus {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) enum AndroidUserPresenceVerificationResult {
+pub enum AndroidUserPresenceVerificationResult {
     Verified,
     Failed(String),
 }
@@ -302,7 +302,7 @@ pub(crate) fn remove_secret_namespace(
 }
 
 #[cfg(target_os = "android")]
-pub(crate) fn resolve_radroots_base_root() -> Result<PathBuf, RadrootsNostrAccountsError> {
+pub fn resolve_radroots_base_root() -> Result<PathBuf, RadrootsNostrAccountsError> {
     let java_vm = android_java_vm()?;
     let mut env = java_vm.attach_current_thread().map_err(jni_error)?;
     let bridge_class = bridge_class(&mut env)?;
@@ -330,7 +330,7 @@ pub(crate) fn resolve_radroots_base_root() -> Result<PathBuf, RadrootsNostrAccou
 }
 
 #[cfg(target_os = "android")]
-pub(crate) fn begin_user_presence_verification(
+pub fn begin_user_presence_verification(
     reason: &str,
 ) -> Result<(), RadrootsNostrAccountsError> {
     let java_vm = android_java_vm()?;
@@ -369,7 +369,7 @@ pub(crate) fn begin_user_presence_verification(
 }
 
 #[cfg(not(target_os = "android"))]
-pub(crate) fn begin_user_presence_verification(
+pub fn begin_user_presence_verification(
     reason: &str,
 ) -> Result<(), RadrootsNostrAccountsError> {
     let _ = reason;
@@ -379,7 +379,7 @@ pub(crate) fn begin_user_presence_verification(
 }
 
 #[cfg(target_os = "android")]
-pub(crate) fn is_user_presence_verification_pending() -> Result<bool, RadrootsNostrAccountsError> {
+pub fn is_user_presence_verification_pending() -> Result<bool, RadrootsNostrAccountsError> {
     let java_vm = android_java_vm()?;
     let mut env = java_vm.attach_current_thread().map_err(jni_error)?;
     let bridge_class = bridge_class(&mut env)?;
@@ -395,14 +395,14 @@ pub(crate) fn is_user_presence_verification_pending() -> Result<bool, RadrootsNo
 }
 
 #[cfg(not(target_os = "android"))]
-pub(crate) fn is_user_presence_verification_pending() -> Result<bool, RadrootsNostrAccountsError> {
+pub fn is_user_presence_verification_pending() -> Result<bool, RadrootsNostrAccountsError> {
     Err(RadrootsNostrAccountsError::Vault(
         "android user presence verification is only available on android".to_owned(),
     ))
 }
 
 #[cfg(target_os = "android")]
-pub(crate) fn take_user_presence_verification_result()
+pub fn take_user_presence_verification_result()
 -> Result<Option<AndroidUserPresenceVerificationResult>, RadrootsNostrAccountsError> {
     let java_vm = android_java_vm()?;
     let mut env = java_vm.attach_current_thread().map_err(jni_error)?;
@@ -433,7 +433,7 @@ pub(crate) fn take_user_presence_verification_result()
 }
 
 #[cfg(not(target_os = "android"))]
-pub(crate) fn take_user_presence_verification_result()
+pub fn take_user_presence_verification_result()
 -> Result<Option<AndroidUserPresenceVerificationResult>, RadrootsNostrAccountsError> {
     Err(RadrootsNostrAccountsError::Vault(
         "android user presence verification is only available on android".to_owned(),
@@ -442,7 +442,7 @@ pub(crate) fn take_user_presence_verification_result()
 
 #[cfg(not(target_os = "android"))]
 #[allow(dead_code)]
-pub(crate) fn resolve_radroots_base_root() -> Result<PathBuf, RadrootsNostrAccountsError> {
+pub fn resolve_radroots_base_root() -> Result<PathBuf, RadrootsNostrAccountsError> {
     Err(RadrootsNostrAccountsError::Store(
         "android mobile base storage root is only available on android".to_owned(),
     ))
