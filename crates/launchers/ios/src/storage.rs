@@ -2,13 +2,9 @@
 use radroots_studio_app_apple_security::{APPLE_NOSTR_SERVICE, RadrootsAppleKeychainVault};
 use radroots_studio_app_core::mobile_native_app_storage_layout;
 #[cfg(target_os = "ios")]
-use radroots_nostr_accounts::prelude::{
-    RadrootsNostrAccountsManager, RadrootsNostrFileAccountStore,
-};
+use radroots_nostr_accounts::prelude::RadrootsNostrAccountsManager;
 use radroots_runtime_paths::{RadrootsPaths, RadrootsPlatform};
 use std::path::{Path, PathBuf};
-#[cfg(target_os = "ios")]
-use std::sync::Arc;
 
 fn mobile_base_root_from_home(home: &Path) -> PathBuf {
     home.join("Library")
@@ -45,11 +41,11 @@ pub(crate) fn app_data_root() -> Result<PathBuf, String> {
 
 #[cfg(target_os = "ios")]
 pub(crate) fn accounts_manager() -> Result<RadrootsNostrAccountsManager, String> {
-    let store = Arc::new(RadrootsNostrFileAccountStore::new(accounts_path()?));
-    let vault = Arc::new(RadrootsAppleKeychainVault::new_device_local(
-        APPLE_NOSTR_SERVICE,
-    ));
-    RadrootsNostrAccountsManager::new(store, vault).map_err(|source| source.to_string())
+    RadrootsNostrAccountsManager::new_file_backed_with_vault(
+        accounts_path()?,
+        RadrootsAppleKeychainVault::new_device_local(APPLE_NOSTR_SERVICE),
+    )
+    .map_err(|source| source.to_string())
 }
 
 fn accounts_path_from_home(home: &Path) -> Result<PathBuf, String> {

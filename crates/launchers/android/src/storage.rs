@@ -1,16 +1,12 @@
-use radroots_studio_app_core::mobile_native_app_storage_layout;
 #[cfg(target_os = "android")]
 use radroots_studio_app_android_security::{
     ANDROID_NOSTR_SERVICE, RadrootsAndroidKeystoreVault, resolve_radroots_base_root,
 };
+use radroots_studio_app_core::mobile_native_app_storage_layout;
 #[cfg(target_os = "android")]
-use radroots_nostr_accounts::prelude::{
-    RadrootsNostrAccountsManager, RadrootsNostrFileAccountStore,
-};
+use radroots_nostr_accounts::prelude::RadrootsNostrAccountsManager;
 use radroots_runtime_paths::{RadrootsPaths, RadrootsPlatform};
 use std::path::{Path, PathBuf};
-#[cfg(target_os = "android")]
-use std::sync::Arc;
 
 fn app_paths_from_base_root(base_root: &Path) -> Result<RadrootsPaths, String> {
     Ok(mobile_native_app_storage_layout(RadrootsPlatform::Android, base_root)?.app_paths)
@@ -36,9 +32,11 @@ pub(crate) fn accounts_path() -> Result<PathBuf, String> {
 
 #[cfg(target_os = "android")]
 pub(crate) fn accounts_manager() -> Result<RadrootsNostrAccountsManager, String> {
-    let store = Arc::new(RadrootsNostrFileAccountStore::new(accounts_path()?));
-    let vault = Arc::new(RadrootsAndroidKeystoreVault::new(ANDROID_NOSTR_SERVICE));
-    RadrootsNostrAccountsManager::new(store, vault).map_err(|source| source.to_string())
+    RadrootsNostrAccountsManager::new_file_backed_with_vault(
+        accounts_path()?,
+        RadrootsAndroidKeystoreVault::new(ANDROID_NOSTR_SERVICE),
+    )
+    .map_err(|source| source.to_string())
 }
 
 pub(crate) fn app_data_root_from_base_root(base_root: &Path) -> Result<PathBuf, String> {

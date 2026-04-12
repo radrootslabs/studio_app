@@ -21,11 +21,10 @@ use radroots_studio_app_core::{
 use radroots_identity::RadrootsIdentity;
 #[cfg(target_os = "macos")]
 use radroots_nostr_accounts::prelude::{
-    RadrootsNostrAccountsManager, RadrootsNostrFileAccountStore, RadrootsNostrSelectedAccountStatus,
+    RadrootsNostrAccountsManager, RadrootsNostrSelectedAccountStatus,
 };
 use radroots_runtime_paths::{RadrootsPathResolver, RadrootsPaths};
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
 #[cfg(target_os = "macos")]
 use zeroize::Zeroizing;
 
@@ -161,9 +160,11 @@ impl DesktopBackend {
             Self::ensure_private_directory_tree(parent)?;
         }
 
-        let store = Arc::new(RadrootsNostrFileAccountStore::new(accounts_path));
-        let vault = Arc::new(RadrootsAppleKeychainVault::new_desktop(APPLE_NOSTR_SERVICE));
-        RadrootsNostrAccountsManager::new(store, vault).map_err(|source| source.to_string())
+        RadrootsNostrAccountsManager::new_file_backed_with_vault(
+            accounts_path,
+            RadrootsAppleKeychainVault::new_desktop(APPLE_NOSTR_SERVICE),
+        )
+        .map_err(|source| source.to_string())
     }
 
     #[cfg(target_os = "macos")]
