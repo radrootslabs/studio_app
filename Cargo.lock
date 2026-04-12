@@ -3177,7 +3177,7 @@ dependencies = [
 
 [[package]]
 name = "radroots_core"
-version = "0.1.0-alpha.1"
+version = "0.1.0-alpha.2"
 dependencies = [
  "rust_decimal",
  "rust_decimal_macros",
@@ -3186,7 +3186,7 @@ dependencies = [
 
 [[package]]
 name = "radroots_events"
-version = "0.1.0-alpha.1"
+version = "0.1.0-alpha.2"
 dependencies = [
  "radroots_core",
  "serde",
@@ -3194,7 +3194,7 @@ dependencies = [
 
 [[package]]
 name = "radroots_geocoder"
-version = "0.1.0-alpha.1"
+version = "0.1.0-alpha.2"
 dependencies = [
  "rusqlite",
  "serde",
@@ -3203,7 +3203,7 @@ dependencies = [
 
 [[package]]
 name = "radroots_identity"
-version = "0.1.0-alpha.1"
+version = "0.1.0-alpha.2"
 dependencies = [
  "nostr",
  "radroots_events",
@@ -3217,7 +3217,7 @@ dependencies = [
 
 [[package]]
 name = "radroots_log"
-version = "0.1.0-alpha.1"
+version = "0.1.0-alpha.2"
 dependencies = [
  "chrono",
  "thiserror 1.0.69",
@@ -3228,7 +3228,7 @@ dependencies = [
 
 [[package]]
 name = "radroots_nostr"
-version = "0.1.0-alpha.1"
+version = "0.1.0-alpha.2"
 dependencies = [
  "nostr",
  "nostr-sdk",
@@ -3240,7 +3240,7 @@ dependencies = [
 
 [[package]]
 name = "radroots_nostr_accounts"
-version = "0.1.0-alpha.1"
+version = "0.1.0-alpha.2"
 dependencies = [
  "radroots_identity",
  "radroots_nostr_signer",
@@ -3254,7 +3254,7 @@ dependencies = [
 
 [[package]]
 name = "radroots_nostr_connect"
-version = "0.1.0-alpha.1"
+version = "0.1.0-alpha.2"
 dependencies = [
  "nostr",
  "serde",
@@ -3265,11 +3265,12 @@ dependencies = [
 
 [[package]]
 name = "radroots_nostr_signer"
-version = "0.1.0-alpha.1"
+version = "0.1.0-alpha.2"
 dependencies = [
  "hex",
  "nostr",
  "radroots_identity",
+ "radroots_nostr",
  "radroots_nostr_connect",
  "radroots_runtime",
  "serde",
@@ -3282,7 +3283,7 @@ dependencies = [
 
 [[package]]
 name = "radroots_protected_store"
-version = "0.1.0-alpha.1"
+version = "0.1.0-alpha.2"
 dependencies = [
  "chacha20poly1305",
  "getrandom 0.2.17",
@@ -3294,7 +3295,7 @@ dependencies = [
 
 [[package]]
 name = "radroots_runtime"
-version = "0.1.0-alpha.1"
+version = "0.1.0-alpha.2"
 dependencies = [
  "anyhow",
  "chacha20poly1305",
@@ -3316,14 +3317,14 @@ dependencies = [
 
 [[package]]
 name = "radroots_runtime_paths"
-version = "0.1.0-alpha.1"
+version = "0.1.0-alpha.2"
 dependencies = [
  "thiserror 1.0.69",
 ]
 
 [[package]]
 name = "radroots_secret_vault"
-version = "0.1.0-alpha.1"
+version = "0.1.0-alpha.2"
 dependencies = [
  "keyring",
 ]
