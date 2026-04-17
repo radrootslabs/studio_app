@@ -1,15 +1,9 @@
 use gpui::{AppContext, Application, WindowOptions, px, size};
 use radroots_studio_app_core::{APP_PROJECTION_SOURCE, AppBuildIdentity, AppRuntimeSnapshot};
 use radroots_studio_app_i18n::select_locale_from_host;
-use radroots_studio_app_ui::{APP_UI_THEME, PlaceholderView};
+use radroots_studio_app_ui::APP_UI_THEME;
 
-fn titlebar_options() -> gpui::TitlebarOptions {
-    gpui::TitlebarOptions {
-        title: None,
-        appears_transparent: true,
-        ..Default::default()
-    }
-}
+use crate::window::{HomeView, home_titlebar_options};
 
 pub fn launch() {
     let snapshot = AppRuntimeSnapshot::capture(build_identity());
@@ -34,10 +28,10 @@ pub fn launch() {
                         px(APP_UI_THEME.windows.home_min_width_px),
                         px(APP_UI_THEME.windows.home_min_height_px),
                     )),
-                    titlebar: Some(titlebar_options()),
+                    titlebar: Some(home_titlebar_options()),
                     ..Default::default()
                 },
-                |_, cx| cx.new(|_| PlaceholderView),
+                |_, cx| cx.new(|_| HomeView::new(snapshot.clone())),
             )
             .expect("main radroots app window should open");
 

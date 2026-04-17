@@ -43,6 +43,7 @@ pub struct AppTypographyTokens {
 pub struct AppLayoutTokens {
     pub divider_thickness_px: f32,
     pub home_window_padding_px: f32,
+    pub home_sidebar_width_px: f32,
     pub home_card_max_width_px: f32,
     pub home_card_padding_px: f32,
     pub home_stack_gap_px: f32,
@@ -83,6 +84,7 @@ pub const APP_UI_THEME: AppUiTheme = AppUiTheme {
     layout: AppLayoutTokens {
         divider_thickness_px: 1.0,
         home_window_padding_px: 24.0,
+        home_sidebar_width_px: 240.0,
         home_card_max_width_px: 960.0,
         home_card_padding_px: 24.0,
         home_stack_gap_px: 12.0,
