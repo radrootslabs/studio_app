@@ -7,10 +7,7 @@ use gpui_component::IconName;
 use radroots_studio_app_core::AppRuntimeSnapshot;
 use radroots_studio_app_i18n::{AppTextKey, app_text};
 pub use radroots_studio_app_models::SettingsSection as SettingsPanelViewKey;
-use radroots_studio_app_state::{
-    AppShellCommand, AppShellProjection, AppStateStore, InMemoryAppStateRepository,
-    SettingsPreference,
-};
+use radroots_studio_app_state::SettingsPreference;
 use radroots_studio_app_sync::{AppSyncRunStatus, SyncCheckpointState};
 use radroots_studio_app_ui::{
     APP_UI_THEME, AppCheckboxFieldSpec, IconSegmentButtonSpec, LabelValueRow, action_button,
@@ -19,7 +16,7 @@ use radroots_studio_app_ui::{
     runtime_metadata_rows, section_divider, status_indicator, utility_title_row,
 };
 
-use crate::substrate::DesktopAppSubstrateSummary;
+use crate::runtime::{DesktopAppRuntime, DesktopAppRuntimeSummary};
 
 pub fn home_titlebar_options() -> gpui::TitlebarOptions {
     gpui::TitlebarOptions {
@@ -37,7 +34,11 @@ pub fn settings_titlebar_options() -> gpui::TitlebarOptions {
     }
 }
 
-pub fn open_settings_window(cx: &mut App, initial_view: SettingsPanelViewKey) {
+pub fn open_settings_window(
+    cx: &mut App,
+    runtime: DesktopAppRuntime,
+    initial_view: SettingsPanelViewKey,
+) {
     let bounds = Bounds::centered(
         None,
         size(
@@ -46,6 +47,7 @@ pub fn open_settings_window(cx: &mut App, initial_view: SettingsPanelViewKey) {
         ),
         cx,
     );
+    let _ = runtime.select_settings_section(initial_view);
 
     cx.open_window(
         WindowOptions {
@@ -57,25 +59,27 @@ pub fn open_settings_window(cx: &mut App, initial_view: SettingsPanelViewKey) {
             titlebar: Some(settings_titlebar_options()),
             ..Default::default()
         },
-        |_, cx| cx.new(|_| SettingsWindowView::new(initial_view)),
+        |_, cx| cx.new(|_| SettingsWindowView::new(runtime.clone())),
     )
     .expect("settings window should open");
 }
 
 pub struct HomeView {
-    metadata_rows: Vec<LabelValueRow>,
+    snapshot: AppRuntimeSnapshot,
+    runtime: DesktopAppRuntime,
 }
 
 impl HomeView {
-    pub fn new(snapshot: AppRuntimeSnapshot, substrate: DesktopAppSubstrateSummary) -> Self {
-        let metadata_rows = home_metadata_rows(&snapshot, &substrate);
-
-        Self { metadata_rows }
+    pub fn new(snapshot: AppRuntimeSnapshot, runtime: DesktopAppRuntime) -> Self {
+        Self { snapshot, runtime }
     }
 }
 
 impl Render for HomeView {
     fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+        let runtime_summary = self.runtime.summary();
+        let metadata_rows = home_metadata_rows(&self.snapshot, &runtime_summary);
+
         app_window_shell(
             APP_UI_THEME.surfaces.window_background,
             div()
@@ -120,7 +124,7 @@ impl Render for HomeView {
                                         .id("home-metadata-scroll")
                                         .size_full()
                                         .overflow_y_scroll()
-                                        .child(label_value_list(self.metadata_rows.clone())),
+                                        .child(label_value_list(metadata_rows)),
                                 ),
                         ),
                 ),
@@ -129,25 +133,20 @@ impl Render for HomeView {
 }
 
 pub struct SettingsWindowView {
-    store: AppStateStore<InMemoryAppStateRepository>,
+    runtime: DesktopAppRuntime,
 }
 
 impl SettingsWindowView {
-    pub fn new(initial_view: SettingsPanelViewKey) -> Self {
-        Self {
-            store: AppStateStore::in_memory(AppShellProjection::for_settings(initial_view)),
-        }
+    pub fn new(runtime: DesktopAppRuntime) -> Self {
+        Self { runtime }
     }
 
     fn selected_view(&self) -> SettingsPanelViewKey {
-        self.store.projection().settings.selected_section
+        self.runtime.selected_settings_section()
     }
 
     fn select_view(&mut self, view: SettingsPanelViewKey, cx: &mut Context<Self>) {
-        if self
-            .store
-            .apply_in_memory(AppShellCommand::select_settings_section(view))
-        {
+        if self.runtime.select_settings_section(view) {
             cx.notify();
         }
     }
@@ -158,13 +157,7 @@ impl SettingsWindowView {
         enabled: bool,
         cx: &mut Context<Self>,
     ) {
-        if self
-            .store
-            .apply_in_memory(AppShellCommand::SetSettingsPreference {
-                preference,
-                enabled,
-            })
-        {
+        if self.runtime.set_settings_preference(preference, enabled) {
             cx.notify();
         }
     }
@@ -510,15 +503,12 @@ impl SettingsWindowView {
     fn settings_panel(&mut self, cx: &mut Context<Self>) -> impl IntoElement {
         let section_label_width_px = 72.0;
         let form_max_width_px = 420.0;
-        let general_allow_relay_connections = self
-            .store
-            .projection()
-            .settings
-            .general
-            .allow_relay_connections;
-        let general_use_media_servers = self.store.projection().settings.general.use_media_servers;
-        let general_use_nip05 = self.store.projection().settings.general.use_nip05;
-        let general_launch_at_login = self.store.projection().settings.general.launch_at_login;
+        let runtime_summary = self.runtime.summary();
+        let general_settings = runtime_summary.shell_projection.settings.general;
+        let general_allow_relay_connections = general_settings.allow_relay_connections;
+        let general_use_media_servers = general_settings.use_media_servers;
+        let general_use_nip05 = general_settings.use_nip05;
+        let general_launch_at_login = general_settings.launch_at_login;
 
         div()
             .size_full()
@@ -742,33 +732,33 @@ fn settings_panel_spec(view: SettingsPanelViewKey) -> (&'static str, IconName) {
 
 fn home_metadata_rows(
     snapshot: &AppRuntimeSnapshot,
-    substrate: &DesktopAppSubstrateSummary,
+    runtime: &DesktopAppRuntimeSummary,
 ) -> Vec<LabelValueRow> {
     let mut rows = runtime_metadata_rows(snapshot);
 
     rows.push(metadata_row(
         AppTextKey::MetadataDataRoot,
-        path_or_none(substrate.data_dir.as_ref()),
+        path_or_none(runtime.data_dir.as_ref()),
     ));
     rows.push(metadata_row(
         AppTextKey::MetadataLogsRoot,
-        path_or_none(substrate.logs_dir.as_ref()),
+        path_or_none(runtime.logs_dir.as_ref()),
     ));
     rows.push(metadata_row(
         AppTextKey::MetadataDatabasePath,
-        path_or_none(substrate.database_path.as_ref()),
+        path_or_none(runtime.database_path.as_ref()),
     ));
     rows.push(metadata_row(
         AppTextKey::MetadataDatabaseSchemaVersion,
         optional_text(
-            substrate
+            runtime
                 .sqlite_schema_version
                 .map(|version| version.to_string()),
         ),
     ));
     rows.push(metadata_row(
         AppTextKey::MetadataShellSection,
-        substrate
+        runtime
             .shell_projection
             .selected_section
             .storage_key()
@@ -776,22 +766,22 @@ fn home_metadata_rows(
     ));
     rows.push(metadata_row(
         AppTextKey::MetadataSyncRunStatus,
-        sync_run_status_text(substrate.sync_projection.run_status),
+        sync_run_status_text(runtime.sync_projection.run_status),
     ));
     rows.push(metadata_row(
         AppTextKey::MetadataSyncCheckpointState,
-        sync_checkpoint_state_text(substrate.sync_projection.checkpoint.state),
+        sync_checkpoint_state_text(runtime.sync_projection.checkpoint.state),
     ));
     rows.push(metadata_row(
         AppTextKey::MetadataSyncConflictCount,
-        substrate
+        runtime
             .sync_projection
             .conflict_status
             .unresolved_count
             .to_string(),
     ));
 
-    if let Some(issue) = substrate.startup_issue.as_ref() {
+    if let Some(issue) = runtime.startup_issue.as_ref() {
         rows.push(metadata_row(
             AppTextKey::MetadataStartupIssue,
             issue.clone(),

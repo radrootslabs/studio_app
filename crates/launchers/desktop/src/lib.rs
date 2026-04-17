@@ -2,9 +2,9 @@
 
 mod app;
 mod menus;
+mod runtime;
 #[cfg(test)]
 mod source_guards;
-mod substrate;
 mod window;
 
 pub fn run() {

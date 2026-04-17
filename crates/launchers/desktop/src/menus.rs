@@ -1,13 +1,16 @@
 use gpui::{App, KeyBinding, Menu, MenuItem, SystemMenuType, actions};
 use radroots_studio_app_i18n::{AppTextKey, app_text};
 
-use crate::window::{SettingsPanelViewKey, open_settings_window};
+use crate::{
+    runtime::DesktopAppRuntime,
+    window::{SettingsPanelViewKey, open_settings_window},
+};
 
 actions!(radroots_studio_app, [OpenAboutWindow, QuitApp]);
 
-pub fn install_native_app_menu(cx: &mut App) {
-    cx.on_action(|_: &OpenAboutWindow, cx| {
-        open_settings_window(cx, SettingsPanelViewKey::default());
+pub fn install_native_app_menu(runtime: DesktopAppRuntime, cx: &mut App) {
+    cx.on_action(move |_: &OpenAboutWindow, cx| {
+        open_settings_window(cx, runtime.clone(), SettingsPanelViewKey::default());
     });
     cx.on_action(|_: &QuitApp, cx| cx.quit());
     cx.bind_keys([KeyBinding::new("cmd-q", QuitApp, None)]);
