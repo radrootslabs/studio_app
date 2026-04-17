@@ -13,6 +13,7 @@ resources_root="${contents_root}/Resources"
 plist_template="${platform_root}/App/Resources/Info.plist"
 plist_path="${contents_root}/Info.plist"
 binary_target="${executable_root}/Radroots"
+app_icon_path="${resources_root}/AppIcon.icns"
 
 require_command() {
   if command -v "$1" >/dev/null 2>&1; then
@@ -65,6 +66,7 @@ mkdir -p "${executable_root}" "${resources_root}"
 cp "${plist_template}" "${plist_path}"
 cp "${binary_source}" "${binary_target}"
 chmod +x "${binary_target}"
+"${script_dir}/generate-macos-app-icon.sh" "${app_icon_path}"
 
 /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $(workspace_version)" "${plist_path}"
 /usr/libexec/PlistBuddy -c "Set :CFBundleVersion ${RADROOTS_APP_BUILD:-1}" "${plist_path}"

@@ -24,6 +24,9 @@ bundle_name="$(
 bundle_id="$(
   /usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "${plist_path}"
 )"
+icon_name="$(
+  /usr/libexec/PlistBuddy -c 'Print :CFBundleIconFile' "${plist_path}"
+)"
 
 [[ "${bundle_name}" == "Radroots" ]] || {
   echo "unexpected CFBundleName: ${bundle_name}" >&2
@@ -37,5 +40,10 @@ bundle_id="$(
 
 [[ -x "${app_path}/Contents/MacOS/${executable_name}" ]] || {
   echo "missing bundle executable: ${app_path}/Contents/MacOS/${executable_name}" >&2
+  exit 1
+}
+
+[[ -f "${app_path}/Contents/Resources/${icon_name}.icns" ]] || {
+  echo "missing bundle icon: ${app_path}/Contents/Resources/${icon_name}.icns" >&2
   exit 1
 }
