@@ -8,9 +8,13 @@ use crate::{
 
 actions!(radroots_studio_app, [OpenAboutWindow, QuitApp]);
 
+const fn about_menu_settings_view() -> SettingsPanelViewKey {
+    SettingsPanelViewKey::About
+}
+
 pub fn install_native_app_menu(runtime: DesktopAppRuntime, cx: &mut App) {
     cx.on_action(move |_: &OpenAboutWindow, cx| {
-        open_settings_window(cx, runtime.clone(), SettingsPanelViewKey::default());
+        open_settings_window(cx, runtime.clone(), about_menu_settings_view());
     });
     cx.on_action(|_: &QuitApp, cx| cx.quit());
     cx.bind_keys([KeyBinding::new("cmd-q", QuitApp, None)]);
@@ -26,4 +30,15 @@ pub fn install_native_app_menu(runtime: DesktopAppRuntime, cx: &mut App) {
             MenuItem::action(app_text(AppTextKey::MenuQuit), QuitApp),
         ],
     }]);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::about_menu_settings_view;
+    use crate::window::SettingsPanelViewKey;
+
+    #[test]
+    fn about_menu_targets_the_about_settings_panel() {
+        assert_eq!(about_menu_settings_view(), SettingsPanelViewKey::About);
+    }
 }
