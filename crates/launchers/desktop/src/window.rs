@@ -6,12 +6,9 @@ use radroots_studio_app_core::AppRuntimeSnapshot;
 use radroots_studio_app_i18n::AppTextKey;
 use radroots_studio_app_ui::{
     APP_UI_THEME, LabelValueRow, app_card, app_shared_text, app_window_shell, label_value_list,
-    runtime_metadata_rows, section_divider, settings_about_build_rows, settings_about_status_rows,
-    settings_account_profile_rows, settings_account_runtime_rows, settings_preferences_device_rows,
-    settings_preferences_general_rows, utility_title_row,
+    runtime_metadata_rows, section_divider, settings_about_status_rows,
+    settings_account_profile_rows, settings_preferences_general_rows, utility_title_row,
 };
-
-use crate::menus::OpenSettingsWindow;
 
 pub fn home_titlebar_options() -> gpui::TitlebarOptions {
     gpui::TitlebarOptions {
@@ -32,7 +29,7 @@ pub fn settings_titlebar_options() -> gpui::TitlebarOptions {
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub enum SettingsPanelViewKey {
     #[default]
-    Accounts,
+    Account,
     Settings,
     About,
 }
@@ -40,23 +37,14 @@ pub enum SettingsPanelViewKey {
 impl SettingsPanelViewKey {
     fn label_key(self) -> AppTextKey {
         match self {
-            Self::Accounts => AppTextKey::SettingsNavAccounts,
+            Self::Account => AppTextKey::SettingsNavAccounts,
             Self::Settings => AppTextKey::SettingsNavSettings,
             Self::About => AppTextKey::SettingsNavAbout,
-        }
-    }
-
-    fn summary_key(self) -> AppTextKey {
-        match self {
-            Self::Accounts => AppTextKey::SettingsAccountsSummary,
-            Self::Settings => AppTextKey::SettingsPreferencesSummary,
-            Self::About => AppTextKey::SettingsAboutSummary,
         }
     }
 }
 
 pub struct HomeView {
-    snapshot: AppRuntimeSnapshot,
     metadata_rows: Vec<LabelValueRow>,
 }
 
@@ -64,10 +52,7 @@ impl HomeView {
     pub fn new(snapshot: AppRuntimeSnapshot) -> Self {
         let metadata_rows = runtime_metadata_rows(&snapshot);
 
-        Self {
-            snapshot,
-            metadata_rows,
-        }
+        Self { metadata_rows }
     }
 }
 
@@ -87,60 +72,14 @@ impl Render for HomeView {
                         .p(px(APP_UI_THEME.layout.home_window_padding_px))
                         .flex()
                         .flex_col()
-                        .justify_between()
                         .child(
-                            div()
-                                .flex()
-                                .flex_col()
-                                .gap(px(APP_UI_THEME.layout.home_stack_gap_px))
-                                .child(
-                                    div()
-                                        .text_size(px(APP_UI_THEME.typography.brand_text_px))
-                                        .font_weight(gpui::FontWeight::SEMIBOLD)
-                                        .text_color(rgb(APP_UI_THEME.text.primary))
-                                        .child(app_shared_text(AppTextKey::HomeBrand)),
-                                )
-                                .child(
-                                    div()
-                                        .text_size(px(APP_UI_THEME.typography.body_text_px))
-                                        .text_color(rgb(APP_UI_THEME.text.secondary))
-                                        .child(app_shared_text(AppTextKey::HomeTitle)),
-                                ),
-                        )
-                        .child(
-                            div()
-                                .flex()
-                                .flex_col()
-                                .gap(px(APP_UI_THEME.layout.home_stack_gap_px))
-                                .child(
-                                    div()
-                                        .text_size(px(APP_UI_THEME
-                                            .typography
-                                            .utility_title_text_px))
-                                        .text_color(rgb(APP_UI_THEME.text.secondary))
-                                        .child(format!("v{}", self.snapshot.host.app_version)),
-                                )
-                                .child(
-                                    div()
-                                        .id("home-open-settings")
-                                        .w_full()
-                                        .px(px(APP_UI_THEME
-                                            .layout
-                                            .settings_navigation_row_padding_px))
-                                        .py(px(APP_UI_THEME
-                                            .layout
-                                            .settings_navigation_row_padding_px))
-                                        .bg(rgb(APP_UI_THEME.surfaces.card_background))
-                                        .rounded(px(8.0))
-                                        .cursor_pointer()
-                                        .text_size(px(APP_UI_THEME.typography.body_text_px))
-                                        .text_color(rgb(APP_UI_THEME.text.primary))
-                                        .child(app_shared_text(AppTextKey::SettingsTitle))
-                                        .on_click(|_, window, cx| {
-                                            window
-                                                .dispatch_action(Box::new(OpenSettingsWindow), cx);
-                                        }),
-                                ),
+                            div().flex().child(
+                                div()
+                                    .text_size(px(APP_UI_THEME.typography.brand_text_px))
+                                    .font_weight(gpui::FontWeight::SEMIBOLD)
+                                    .text_color(rgb(APP_UI_THEME.text.primary))
+                                    .child(app_shared_text(AppTextKey::HomeBrand)),
+                            ),
                         ),
                 )
                 .child(
@@ -166,11 +105,6 @@ impl Render for HomeView {
                                         .w_full()
                                         .flex()
                                         .flex_col()
-                                        .gap(px(APP_UI_THEME.layout.home_stack_gap_px))
-                                        .child(utility_title_row(app_shared_text(
-                                            AppTextKey::HomeMetadataTitle,
-                                        )))
-                                        .child(section_divider())
                                         .child(label_value_list(self.metadata_rows.clone())),
                                 )),
                         ),
@@ -225,32 +159,13 @@ impl SettingsWindowView {
             .text_color(rgb(foreground))
             .child(app_shared_text(view.label_key()))
             .id(match view {
-                SettingsPanelViewKey::Accounts => "settings-nav-accounts",
+                SettingsPanelViewKey::Account => "settings-nav-accounts",
                 SettingsPanelViewKey::Settings => "settings-nav-settings",
                 SettingsPanelViewKey::About => "settings-nav-about",
             })
             .on_click(cx.listener(move |this, _, _, cx| {
                 this.select_view(view, cx);
             }))
-    }
-
-    fn summary_card(&self, view: SettingsPanelViewKey) -> impl IntoElement {
-        app_card(
-            div()
-                .w_full()
-                .flex()
-                .flex_col()
-                .gap(px(APP_UI_THEME.layout.home_stack_gap_px))
-                .child(utility_title_row(app_shared_text(view.label_key())))
-                .child(section_divider())
-                .child(
-                    div()
-                        .w_full()
-                        .text_size(px(APP_UI_THEME.typography.body_text_px))
-                        .text_color(rgb(APP_UI_THEME.text.secondary))
-                        .child(app_shared_text(view.summary_key())),
-                ),
-        )
     }
 
     fn detail_card(&self, title: AppTextKey, rows: Vec<LabelValueRow>) -> impl IntoElement {
@@ -278,14 +193,9 @@ impl SettingsWindowView {
                     .flex()
                     .flex_col()
                     .gap(px(APP_UI_THEME.layout.home_stack_gap_px))
-                    .child(self.summary_card(SettingsPanelViewKey::Accounts))
                     .child(self.detail_card(
-                        AppTextKey::SettingsAccountsProfileTitle,
+                        AppTextKey::SettingsNavAccounts,
                         settings_account_profile_rows(),
-                    ))
-                    .child(self.detail_card(
-                        AppTextKey::SettingsAccountsRuntimeTitle,
-                        settings_account_runtime_rows(),
                     )),
             )
     }
@@ -302,14 +212,9 @@ impl SettingsWindowView {
                     .flex()
                     .flex_col()
                     .gap(px(APP_UI_THEME.layout.home_stack_gap_px))
-                    .child(self.summary_card(SettingsPanelViewKey::Settings))
                     .child(self.detail_card(
-                        AppTextKey::SettingsPreferencesGeneralTitle,
+                        AppTextKey::SettingsGeneralSectionLabel,
                         settings_preferences_general_rows(),
-                    ))
-                    .child(self.detail_card(
-                        AppTextKey::SettingsPreferencesDeviceTitle,
-                        settings_preferences_device_rows(),
                     )),
             )
     }
@@ -326,21 +231,18 @@ impl SettingsWindowView {
                     .flex()
                     .flex_col()
                     .gap(px(APP_UI_THEME.layout.home_stack_gap_px))
-                    .child(self.summary_card(SettingsPanelViewKey::About))
-                    .child(self.detail_card(
-                        AppTextKey::SettingsAboutBuildTitle,
-                        settings_about_build_rows(),
-                    ))
-                    .child(self.detail_card(
-                        AppTextKey::SettingsAboutStatusTitle,
-                        settings_about_status_rows(),
-                    )),
+                    .child(
+                        self.detail_card(
+                            AppTextKey::SettingsNavAbout,
+                            settings_about_status_rows(),
+                        ),
+                    ),
             )
     }
 
     fn settings_panel_content(&self) -> AnyElement {
         match self.selected_view {
-            SettingsPanelViewKey::Accounts => self.accounts_panel().into_any_element(),
+            SettingsPanelViewKey::Account => self.accounts_panel().into_any_element(),
             SettingsPanelViewKey::Settings => self.settings_panel().into_any_element(),
             SettingsPanelViewKey::About => self.about_panel().into_any_element(),
         }
@@ -408,7 +310,7 @@ impl Render for SettingsWindowView {
                                 .flex_col()
                                 .gap(px(APP_UI_THEME.layout.settings_navigation_row_gap_px))
                                 .bg(rgb(APP_UI_THEME.surfaces.panel_background))
-                                .child(self.navigation_button(SettingsPanelViewKey::Accounts, cx))
+                                .child(self.navigation_button(SettingsPanelViewKey::Account, cx))
                                 .child(self.navigation_button(SettingsPanelViewKey::Settings, cx))
                                 .child(self.navigation_button(SettingsPanelViewKey::About, cx)),
                         )

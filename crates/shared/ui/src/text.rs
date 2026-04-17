@@ -8,6 +8,10 @@ pub fn app_shared_text(key: AppTextKey) -> SharedString {
     app_text(key).into()
 }
 
+pub fn app_shared_label_text(key: AppTextKey) -> SharedString {
+    format!("{}:", app_text(key)).into()
+}
+
 pub fn runtime_metadata_rows(snapshot: &AppRuntimeSnapshot) -> Vec<LabelValueRow> {
     vec![
         metadata_row(
@@ -90,25 +94,12 @@ pub fn runtime_metadata_rows(snapshot: &AppRuntimeSnapshot) -> Vec<LabelValueRow
 pub fn settings_account_profile_rows() -> Vec<LabelValueRow> {
     vec![
         text_row(
-            AppTextKey::SettingsAccountsIdentityLabel,
-            AppTextKey::SettingsAccountsIdentityValue,
+            AppTextKey::SettingsAccountProfileLabel,
+            AppTextKey::SettingsAccountPlaceholderHandle,
         ),
         text_row(
-            AppTextKey::SettingsAccountsStatusLabel,
-            AppTextKey::SettingsAccountsStatusValue,
-        ),
-    ]
-}
-
-pub fn settings_account_runtime_rows() -> Vec<LabelValueRow> {
-    vec![
-        text_row(
-            AppTextKey::SettingsAccountsSyncLabel,
-            AppTextKey::SettingsAccountsSyncValue,
-        ),
-        text_row(
-            AppTextKey::SettingsAccountsRecoveryLabel,
-            AppTextKey::SettingsAccountsRecoveryValue,
+            AppTextKey::SettingsAccountStatusLabel,
+            AppTextKey::SettingsAccountStatusLoggedIn,
         ),
     ]
 }
@@ -116,38 +107,20 @@ pub fn settings_account_runtime_rows() -> Vec<LabelValueRow> {
 pub fn settings_preferences_general_rows() -> Vec<LabelValueRow> {
     vec![
         text_row(
-            AppTextKey::SettingsPreferencesLaunchLabel,
-            AppTextKey::SettingsPreferencesLaunchValue,
+            AppTextKey::SettingsGeneralAllowRelayConnections,
+            AppTextKey::ValueEnabled,
         ),
         text_row(
-            AppTextKey::SettingsPreferencesNetworkLabel,
-            AppTextKey::SettingsPreferencesNetworkValue,
-        ),
-    ]
-}
-
-pub fn settings_preferences_device_rows() -> Vec<LabelValueRow> {
-    vec![
-        text_row(
-            AppTextKey::SettingsPreferencesNotificationsLabel,
-            AppTextKey::SettingsPreferencesNotificationsValue,
+            AppTextKey::SettingsGeneralUseMediaServers,
+            AppTextKey::ValueEnabled,
         ),
         text_row(
-            AppTextKey::SettingsPreferencesDiagnosticsLabel,
-            AppTextKey::SettingsPreferencesDiagnosticsValue,
-        ),
-    ]
-}
-
-pub fn settings_about_build_rows() -> Vec<LabelValueRow> {
-    vec![
-        text_row(
-            AppTextKey::SettingsAboutShellLabel,
-            AppTextKey::SettingsAboutShellValue,
+            AppTextKey::SettingsGeneralUseNip05,
+            AppTextKey::ValueEnabled,
         ),
         text_row(
-            AppTextKey::SettingsAboutLicenseLabel,
-            AppTextKey::SettingsAboutLicenseValue,
+            AppTextKey::SettingsGeneralLaunchAtLogin,
+            AppTextKey::ValueDisabled,
         ),
     ]
 }
@@ -155,12 +128,16 @@ pub fn settings_about_build_rows() -> Vec<LabelValueRow> {
 pub fn settings_about_status_rows() -> Vec<LabelValueRow> {
     vec![
         text_row(
-            AppTextKey::SettingsAboutPostureLabel,
-            AppTextKey::SettingsAboutPostureValue,
+            AppTextKey::SettingsViewAbout,
+            AppTextKey::SettingsAboutPlaceholderTopPrimary,
         ),
         text_row(
-            AppTextKey::SettingsAboutMilestoneLabel,
-            AppTextKey::SettingsAboutMilestoneValue,
+            AppTextKey::SettingsGeneralSectionLabel,
+            AppTextKey::SettingsAboutPlaceholderMiddle,
+        ),
+        text_row(
+            AppTextKey::SettingsAccountProfileLabel,
+            AppTextKey::SettingsAboutPlaceholderBottom,
         ),
     ]
 }
@@ -231,10 +208,12 @@ mod tests {
         assert!(
             general_rows
                 .iter()
-                .any(|row| row.label == "launch behavior" && row.value == "manual launch only")
+                .any(|row| row.label == "allow relay connections" && row.value == "enabled")
         );
-        assert!(about_rows.iter().any(|row| {
-            row.label == "next milestone" && row.value == "interactive account flows"
-        }));
+        assert!(
+            about_rows
+                .iter()
+                .any(|row| { row.label == "about" && row.value == "About placeholder primary" })
+        );
     }
 }

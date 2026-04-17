@@ -302,7 +302,12 @@ mod tests {
         assert_eq!(APP_UI_THEME.layout.settings_chrome_height_px, 88.0);
         assert_eq!(APP_UI_THEME.layout.settings_content_padding_px, 24.0);
         assert_eq!(APP_UI_THEME.layout.settings_account_sidebar_width_px, 200.0);
-        assert_eq!(APP_UI_THEME.layout.settings_account_sidebar_button_height_px, 42.0);
+        assert_eq!(
+            APP_UI_THEME
+                .layout
+                .settings_account_sidebar_button_height_px,
+            42.0
+        );
     }
 
     #[test]

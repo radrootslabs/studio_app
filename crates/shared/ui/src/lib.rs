@@ -11,9 +11,8 @@ pub use primitives::{
     status_indicator, utility_title_row,
 };
 pub use text::{
-    app_shared_text, runtime_metadata_rows, settings_about_build_rows, settings_about_status_rows,
-    settings_account_profile_rows, settings_account_runtime_rows, settings_preferences_device_rows,
-    settings_preferences_general_rows,
+    app_shared_label_text, app_shared_text, runtime_metadata_rows, settings_about_status_rows,
+    settings_account_profile_rows, settings_preferences_general_rows,
 };
 pub use theme::{
     APP_UI_THEME, ActionButtonColors, ActionButtonSizing, ActionButtonTokens, AppControlTokens,

@@ -431,6 +431,9 @@ mod tests {
 
         assert_eq!(spec.id, "launch");
         assert_eq!(spec.label.as_ref(), "Launch at login");
-        assert_eq!(spec.note.as_ref().map(|note| note.as_ref()), Some("Optional note"));
+        assert_eq!(
+            spec.note.as_ref().map(|note| note.as_ref()),
+            Some("Optional note")
+        );
     }
 }

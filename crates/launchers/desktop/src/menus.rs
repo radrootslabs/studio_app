@@ -1,19 +1,19 @@
 use gpui::{
-    App, AppContext, Bounds, KeyBinding, Menu, MenuItem, WindowBounds, WindowOptions, actions, px,
-    size,
+    App, AppContext, Bounds, KeyBinding, Menu, MenuItem, SystemMenuType, WindowBounds,
+    WindowOptions, actions, px, size,
 };
 use radroots_studio_app_i18n::{AppTextKey, app_text};
 use radroots_studio_app_ui::APP_UI_THEME;
 
 use crate::window::{SettingsPanelViewKey, SettingsWindowView, settings_titlebar_options};
 
-actions!(radroots_studio_app, [OpenSettingsWindow, QuitApp]);
+actions!(radroots_studio_app, [OpenAboutWindow, QuitApp]);
 
 pub fn install_native_app_menu(cx: &mut App) {
-    cx.on_action(|_: &OpenSettingsWindow, cx| open_settings_window(cx));
+    cx.on_action(|_: &OpenAboutWindow, cx| open_settings_window(cx));
     cx.on_action(|_: &QuitApp, cx| cx.quit());
     cx.bind_keys([
-        KeyBinding::new("cmd-,", OpenSettingsWindow, None),
+        KeyBinding::new("cmd-,", OpenAboutWindow, None),
         KeyBinding::new("cmd-q", QuitApp, None),
     ]);
 
@@ -21,7 +21,9 @@ pub fn install_native_app_menu(cx: &mut App) {
     cx.set_menus(vec![Menu {
         name: app_name.into(),
         items: vec![
-            MenuItem::action(app_text(AppTextKey::MenuSettings), OpenSettingsWindow),
+            MenuItem::action(app_text(AppTextKey::MenuAbout), OpenAboutWindow),
+            MenuItem::separator(),
+            MenuItem::os_submenu(app_text(AppTextKey::MenuServices), SystemMenuType::Services),
             MenuItem::separator(),
             MenuItem::action(app_text(AppTextKey::MenuQuit), QuitApp),
         ],
