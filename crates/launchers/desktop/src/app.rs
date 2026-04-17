@@ -3,6 +3,7 @@ use radroots_studio_app_core::{APP_PROJECTION_SOURCE, AppBuildIdentity, AppRunti
 use radroots_studio_app_i18n::select_locale_from_host;
 use radroots_studio_app_ui::APP_UI_THEME;
 
+use crate::menus::install_native_app_menu;
 use crate::window::{HomeView, home_titlebar_options};
 
 pub fn launch() {
@@ -11,6 +12,7 @@ pub fn launch() {
 
     app.run(move |cx| {
         select_locale_from_host(&snapshot.host.host_locale);
+        install_native_app_menu(cx);
 
         cx.on_window_closed(|cx| {
             if cx.windows().is_empty() {
