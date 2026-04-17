@@ -19,6 +19,8 @@ readme = "README.md"
 
 [workspace.dependencies]
 gpui = "0.2.2"
+gpui-component = "0.5.1"
+gpui-component-assets = "0.5.1"
 hex = "0.4"
 mf2-i18n-build = { path = "../../../../vendor/triesap/mf2-i18n/crates/mf2-i18n-build", version = "0.1.0" }
 mf2-i18n-core = { path = "../../../../vendor/triesap/mf2-i18n/crates/mf2-i18n-core", version = "0.1.0" }
