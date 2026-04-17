@@ -68,15 +68,14 @@ impl Render for HomeView {
                     div()
                         .h_full()
                         .w(px(APP_UI_THEME.layout.home_sidebar_width_px))
-                        .bg(rgb(APP_UI_THEME.surfaces.panel_background))
+                        .bg(rgb(APP_UI_THEME.surfaces.card_background))
                         .p(px(APP_UI_THEME.layout.home_window_padding_px))
                         .flex()
                         .flex_col()
                         .child(
-                            div().flex().child(
+                            div().child(
                                 div()
-                                    .text_size(px(APP_UI_THEME.typography.brand_text_px))
-                                    .font_weight(gpui::FontWeight::SEMIBOLD)
+                                    .text_size(px(APP_UI_THEME.typography.body_text_px))
                                     .text_color(rgb(APP_UI_THEME.text.primary))
                                     .child(app_shared_text(AppTextKey::HomeBrand)),
                             ),
@@ -96,17 +95,15 @@ impl Render for HomeView {
                         .overflow_hidden()
                         .child(
                             div()
-                                .id("home-shell-scroll")
                                 .size_full()
-                                .overflow_y_scroll()
                                 .p(px(APP_UI_THEME.layout.home_window_padding_px))
-                                .child(app_card(
+                                .child(
                                     div()
-                                        .w_full()
-                                        .flex()
-                                        .flex_col()
+                                        .id("home-metadata-scroll")
+                                        .size_full()
+                                        .overflow_y_scroll()
                                         .child(label_value_list(self.metadata_rows.clone())),
-                                )),
+                                ),
                         ),
                 ),
         )
