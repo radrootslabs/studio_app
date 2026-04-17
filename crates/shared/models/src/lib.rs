@@ -238,6 +238,14 @@ pub struct FarmSummary {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct FulfillmentWindowSummary {
+    pub fulfillment_window_id: FulfillmentWindowId,
+    pub farm_id: FarmId,
+    pub starts_at: String,
+    pub ends_at: String,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct TodaySummary {
     pub farm_id: FarmId,
     pub orders_needing_action: u32,
@@ -257,21 +265,64 @@ pub struct ProductListRow {
     pub farm_id: FarmId,
     pub title: String,
     pub status: ProductStatus,
+    pub stock_count: u32,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct OrderListRow {
     pub order_id: OrderId,
     pub farm_id: FarmId,
+    pub fulfillment_window_id: Option<FulfillmentWindowId>,
     pub order_number: String,
     pub customer_display_name: String,
     pub status: OrderStatus,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TodaySetupTaskKind {
+    AddFulfillmentWindow,
+    PublishProduct,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct TodaySetupTask {
+    pub kind: TodaySetupTaskKind,
+    pub is_complete: bool,
+}
+
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+pub struct TodayAgendaProjection {
+    pub farm: Option<FarmSummary>,
+    pub summary: Option<TodaySummary>,
+    pub orders_needing_action: Vec<OrderListRow>,
+    pub low_stock_products: Vec<ProductListRow>,
+    pub draft_products: Vec<ProductListRow>,
+    pub next_fulfillment_window: Option<FulfillmentWindowSummary>,
+    pub setup_checklist: Vec<TodaySetupTask>,
+}
+
+impl TodayAgendaProjection {
+    pub fn has_attention_items(&self) -> bool {
+        self.summary
+            .as_ref()
+            .is_some_and(TodaySummary::has_attention_items)
+            || !self.orders_needing_action.is_empty()
+            || !self.low_stock_products.is_empty()
+            || !self.draft_products.is_empty()
+    }
+
+    pub fn needs_setup(&self) -> bool {
+        self.setup_checklist.iter().any(|item| !item.is_complete)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
-        AppMode, BuyerSection, FarmId, FarmerSection, SettingsSection, ShellSection, TodaySummary,
+        AppMode, BuyerSection, FarmId, FarmerSection, OrderListRow, ProductListRow,
+        SettingsSection, ShellSection, TodayAgendaProjection, TodaySetupTask, TodaySetupTaskKind,
+        TodaySummary,
     };
     use std::{collections::BTreeSet, str::FromStr};
     use uuid::Uuid;
@@ -352,5 +403,60 @@ mod tests {
 
         assert!(!quiet.has_attention_items());
         assert!(busy.has_attention_items());
+    }
+
+    #[test]
+    fn today_agenda_projection_tracks_attention_and_setup_independently() {
+        let calm = TodayAgendaProjection::default();
+        let with_attention = TodayAgendaProjection {
+            draft_products: vec![ProductListRow {
+                product_id: super::ProductId::new(),
+                farm_id: FarmId::new(),
+                title: "Spring onions".to_owned(),
+                status: super::ProductStatus::Draft,
+                stock_count: 0,
+            }],
+            ..TodayAgendaProjection::default()
+        };
+        let with_setup = TodayAgendaProjection {
+            setup_checklist: vec![TodaySetupTask {
+                kind: TodaySetupTaskKind::AddFulfillmentWindow,
+                is_complete: false,
+            }],
+            ..TodayAgendaProjection::default()
+        };
+
+        assert!(!calm.has_attention_items());
+        assert!(!calm.needs_setup());
+        assert!(with_attention.has_attention_items());
+        assert!(!with_attention.needs_setup());
+        assert!(!with_setup.has_attention_items());
+        assert!(with_setup.needs_setup());
+    }
+
+    #[test]
+    fn today_agenda_projection_can_hold_truthful_lists() {
+        let projection = TodayAgendaProjection {
+            orders_needing_action: vec![OrderListRow {
+                order_id: super::OrderId::new(),
+                farm_id: FarmId::new(),
+                fulfillment_window_id: Some(super::FulfillmentWindowId::new()),
+                order_number: "R-1001".to_owned(),
+                customer_display_name: "Casey".to_owned(),
+                status: super::OrderStatus::NeedsAction,
+            }],
+            low_stock_products: vec![ProductListRow {
+                product_id: super::ProductId::new(),
+                farm_id: FarmId::new(),
+                title: "Carrots".to_owned(),
+                status: super::ProductStatus::Published,
+                stock_count: 2,
+            }],
+            ..TodayAgendaProjection::default()
+        };
+
+        assert_eq!(projection.orders_needing_action.len(), 1);
+        assert_eq!(projection.low_stock_products[0].stock_count, 2);
+        assert!(projection.has_attention_items());
     }
 }

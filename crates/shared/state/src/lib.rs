@@ -1,6 +1,6 @@
 #![forbid(unsafe_code)]
 
-use radroots_studio_app_models::{AppMode, SettingsSection, ShellSection};
+use radroots_studio_app_models::{AppMode, SettingsSection, ShellSection, TodayAgendaProjection};
 use thiserror::Error;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -101,6 +101,26 @@ impl AppShellProjection {
             self.settings.selected_section = settings_section;
         }
     }
+
+    fn select_settings_section(&mut self, selected_section: SettingsSection) {
+        self.settings.selected_section = selected_section;
+
+        if matches!(self.selected_section, ShellSection::Settings(_)) {
+            self.selected_section = ShellSection::Settings(selected_section);
+        }
+    }
+}
+
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct AppProjection {
+    pub shell: AppShellProjection,
+    pub today: TodayAgendaProjection,
+}
+
+impl AppProjection {
+    pub fn new(shell: AppShellProjection, today: TodayAgendaProjection) -> Self {
+        Self { shell, today }
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -111,18 +131,24 @@ pub enum SettingsPreference {
     LaunchAtLogin,
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum AppShellCommand {
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum AppStateCommand {
     SelectSection(ShellSection),
+    SelectSettingsSection(SettingsSection),
     SetSettingsPreference {
         preference: SettingsPreference,
         enabled: bool,
     },
+    ReplaceTodayAgenda(TodayAgendaProjection),
 }
 
-impl AppShellCommand {
+impl AppStateCommand {
     pub const fn select_settings_section(section: SettingsSection) -> Self {
-        Self::SelectSection(ShellSection::Settings(section))
+        Self::SelectSettingsSection(section)
+    }
+
+    pub fn replace_today_agenda(projection: TodayAgendaProjection) -> Self {
+        Self::ReplaceTodayAgenda(projection)
     }
 }
 
@@ -205,12 +231,15 @@ pub enum AppStateStoreError {
 #[derive(Clone, Debug)]
 pub struct AppStateStore<R> {
     repository: R,
-    projection: AppShellProjection,
+    projection: AppProjection,
 }
 
 impl<R: AppStateRepository> AppStateStore<R> {
     pub fn load(repository: R) -> Result<Self, AppStateStoreError> {
-        let projection = repository.load_shell_projection()?;
+        let projection = AppProjection::new(
+            repository.load_shell_projection()?,
+            TodayAgendaProjection::default(),
+        );
 
         Ok(Self {
             repository,
@@ -218,25 +247,40 @@ impl<R: AppStateRepository> AppStateStore<R> {
         })
     }
 
-    pub fn projection(&self) -> &AppShellProjection {
+    pub fn projection(&self) -> &AppProjection {
         &self.projection
+    }
+
+    pub fn shell_projection(&self) -> &AppShellProjection {
+        &self.projection.shell
+    }
+
+    pub fn today_projection(&self) -> &TodayAgendaProjection {
+        &self.projection.today
     }
 
     pub fn repository(&self) -> &R {
         &self.repository
     }
 
-    pub fn apply(&mut self, command: AppShellCommand) -> Result<bool, AppStateStoreError> {
+    pub fn apply(&mut self, command: AppStateCommand) -> Result<bool, AppStateStoreError> {
         let mut next_projection = self.projection.clone();
 
-        if !apply_command(&mut next_projection, command) {
-            return Ok(false);
+        match apply_command(&mut next_projection, command) {
+            AppStateMutation::NoChange => Ok(false),
+            AppStateMutation::ShellChanged => {
+                self.repository
+                    .save_shell_projection(&next_projection.shell)?;
+                self.projection = next_projection;
+
+                Ok(true)
+            }
+            AppStateMutation::TodayChanged => {
+                self.projection = next_projection;
+
+                Ok(true)
+            }
         }
-
-        self.repository.save_shell_projection(&next_projection)?;
-        self.projection = next_projection;
-
-        Ok(true)
     }
 }
 
@@ -244,52 +288,82 @@ impl AppStateStore<InMemoryAppStateRepository> {
     pub fn in_memory(projection: AppShellProjection) -> Self {
         Self {
             repository: InMemoryAppStateRepository::new(projection.clone()),
-            projection,
+            projection: AppProjection::new(projection, TodayAgendaProjection::default()),
         }
     }
 
-    pub fn apply_in_memory(&mut self, command: AppShellCommand) -> bool {
+    pub fn apply_in_memory(&mut self, command: AppStateCommand) -> bool {
         let mut next_projection = self.projection.clone();
 
-        if !apply_command(&mut next_projection, command) {
-            return false;
+        match apply_command(&mut next_projection, command) {
+            AppStateMutation::NoChange => false,
+            AppStateMutation::ShellChanged => {
+                self.repository.overwrite(next_projection.shell.clone());
+                self.projection = next_projection;
+
+                true
+            }
+            AppStateMutation::TodayChanged => {
+                self.projection = next_projection;
+
+                true
+            }
         }
-
-        self.repository.overwrite(next_projection.clone());
-        self.projection = next_projection;
-
-        true
     }
 }
 
-fn apply_command(projection: &mut AppShellProjection, command: AppShellCommand) -> bool {
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum AppStateMutation {
+    NoChange,
+    ShellChanged,
+    TodayChanged,
+}
+
+fn apply_command(projection: &mut AppProjection, command: AppStateCommand) -> AppStateMutation {
     let before = projection.clone();
 
     match command {
-        AppShellCommand::SelectSection(selected_section) => {
-            projection.select_section(selected_section);
+        AppStateCommand::SelectSection(selected_section) => {
+            projection.shell.select_section(selected_section);
         }
-        AppShellCommand::SetSettingsPreference {
+        AppStateCommand::SelectSettingsSection(selected_section) => {
+            projection.shell.select_settings_section(selected_section);
+        }
+        AppStateCommand::SetSettingsPreference {
             preference,
             enabled,
         } => {
             projection
+                .shell
                 .settings
                 .general
                 .set_preference(preference, enabled);
         }
+        AppStateCommand::ReplaceTodayAgenda(today_projection) => {
+            projection.today = today_projection;
+        }
     }
 
-    *projection != before
+    if *projection == before {
+        AppStateMutation::NoChange
+    } else if projection.shell != before.shell {
+        AppStateMutation::ShellChanged
+    } else {
+        AppStateMutation::TodayChanged
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::{
-        AppShellCommand, AppShellProjection, AppStateRepository, AppStateRepositoryError,
-        AppStateStore, AppStateStoreError, InMemoryAppStateRepository, SettingsPreference,
+        AppProjection, AppShellProjection, AppStateCommand, AppStateRepository,
+        AppStateRepositoryError, AppStateStore, AppStateStoreError, InMemoryAppStateRepository,
+        SettingsPreference,
     };
-    use radroots_studio_app_models::{AppMode, SettingsSection, ShellSection};
+    use radroots_studio_app_models::{
+        AppMode, FarmerSection, SettingsSection, ShellSection, TodayAgendaProjection,
+        TodaySetupTask, TodaySetupTaskKind,
+    };
 
     struct FailingRepository;
 
@@ -308,18 +382,19 @@ mod tests {
 
     #[test]
     fn default_projection_starts_on_farmer_home() {
-        let projection = AppShellProjection::default();
+        let projection = AppProjection::default();
 
-        assert_eq!(projection.app_mode, AppMode::Farmer);
-        assert_eq!(projection.selected_section, ShellSection::Home);
+        assert_eq!(projection.shell.app_mode, AppMode::Farmer);
+        assert_eq!(projection.shell.selected_section, ShellSection::Home);
         assert_eq!(
-            projection.settings.selected_section,
+            projection.shell.settings.selected_section,
             SettingsSection::Account
         );
-        assert!(projection.settings.general.allow_relay_connections);
-        assert!(projection.settings.general.use_media_servers);
-        assert!(projection.settings.general.use_nip05);
-        assert!(!projection.settings.general.launch_at_login);
+        assert!(projection.shell.settings.general.allow_relay_connections);
+        assert!(projection.shell.settings.general.use_media_servers);
+        assert!(projection.shell.settings.general.use_nip05);
+        assert!(!projection.shell.settings.general.launch_at_login);
+        assert_eq!(projection.today, TodayAgendaProjection::default());
     }
 
     #[test]
@@ -329,39 +404,64 @@ mod tests {
         ));
         let store = AppStateStore::load(repository).expect("in-memory repository should load");
 
-        assert_eq!(store.projection().app_mode, AppMode::Farmer);
+        assert_eq!(store.projection().shell.app_mode, AppMode::Farmer);
         assert_eq!(
-            store.projection().selected_section,
+            store.projection().shell.selected_section,
             ShellSection::Settings(SettingsSection::About)
         );
         assert_eq!(
-            store.projection().settings.selected_section,
+            store.projection().shell.settings.selected_section,
             SettingsSection::About
         );
+        assert_eq!(store.projection().today, TodayAgendaProjection::default());
     }
 
     #[test]
-    fn select_settings_section_updates_projection_and_repository() {
+    fn select_settings_section_updates_shared_settings_without_clobbering_home() {
         let mut store = AppStateStore::load(InMemoryAppStateRepository::default())
             .expect("in-memory repository should load");
 
-        let changed = store.apply(AppShellCommand::select_settings_section(
+        let changed = store.apply(AppStateCommand::select_settings_section(
             SettingsSection::Settings,
         ));
 
         assert_eq!(changed, Ok(true));
-        assert_eq!(store.projection().app_mode, AppMode::Farmer);
+        assert_eq!(store.projection().shell.app_mode, AppMode::Farmer);
         assert_eq!(
-            store.projection().selected_section,
-            ShellSection::Settings(SettingsSection::Settings)
+            store.projection().shell.selected_section,
+            ShellSection::Home
         );
         assert_eq!(
-            store.projection().settings.selected_section,
+            store.projection().shell.settings.selected_section,
             SettingsSection::Settings
         );
         assert_eq!(
             store.repository().projection().selected_section,
-            ShellSection::Settings(SettingsSection::Settings)
+            ShellSection::Home
+        );
+        assert_eq!(
+            store.repository().projection().settings.selected_section,
+            SettingsSection::Settings
+        );
+    }
+
+    #[test]
+    fn select_section_still_updates_the_root_shell() {
+        let mut store = AppStateStore::load(InMemoryAppStateRepository::default())
+            .expect("in-memory repository should load");
+
+        let changed = store.apply(AppStateCommand::SelectSection(ShellSection::Farmer(
+            FarmerSection::Products,
+        )));
+
+        assert_eq!(changed, Ok(true));
+        assert_eq!(
+            store.projection().shell.selected_section,
+            ShellSection::Farmer(FarmerSection::Products)
+        );
+        assert_eq!(
+            store.repository().projection().selected_section,
+            ShellSection::Farmer(FarmerSection::Products)
         );
     }
 
@@ -370,13 +470,13 @@ mod tests {
         let mut store = AppStateStore::load(InMemoryAppStateRepository::default())
             .expect("in-memory repository should load");
 
-        let changed = store.apply(AppShellCommand::SetSettingsPreference {
+        let changed = store.apply(AppStateCommand::SetSettingsPreference {
             preference: SettingsPreference::UseNip05,
             enabled: true,
         });
 
         assert_eq!(changed, Ok(false));
-        assert!(store.projection().settings.general.use_nip05);
+        assert!(store.projection().shell.settings.general.use_nip05);
     }
 
     #[test]
@@ -384,13 +484,13 @@ mod tests {
         let mut store = AppStateStore::load(InMemoryAppStateRepository::default())
             .expect("in-memory repository should load");
 
-        let changed = store.apply(AppShellCommand::SetSettingsPreference {
+        let changed = store.apply(AppStateCommand::SetSettingsPreference {
             preference: SettingsPreference::LaunchAtLogin,
             enabled: true,
         });
 
         assert_eq!(changed, Ok(true));
-        assert!(store.projection().settings.general.launch_at_login);
+        assert!(store.projection().shell.settings.general.launch_at_login);
         assert!(
             store
                 .repository()
@@ -407,7 +507,7 @@ mod tests {
             AppStateStore::load(FailingRepository).expect("failing repository should still load");
 
         let error = store
-            .apply(AppShellCommand::select_settings_section(
+            .apply(AppStateCommand::select_settings_section(
                 SettingsSection::About,
             ))
             .expect_err("save should fail");
@@ -419,17 +519,42 @@ mod tests {
     }
 
     #[test]
+    fn replace_today_agenda_updates_in_memory_state_without_touching_repository() {
+        let mut store =
+            AppStateStore::load(FailingRepository).expect("failing repository should still load");
+        let today = TodayAgendaProjection {
+            setup_checklist: vec![TodaySetupTask {
+                kind: TodaySetupTaskKind::AddFulfillmentWindow,
+                is_complete: false,
+            }],
+            ..TodayAgendaProjection::default()
+        };
+
+        let changed = store.apply(AppStateCommand::replace_today_agenda(today.clone()));
+
+        assert_eq!(changed, Ok(true));
+        assert_eq!(store.projection().today, today);
+    }
+
+    #[test]
     fn in_memory_store_construction_and_updates_are_infallible() {
         let mut store =
             AppStateStore::in_memory(AppShellProjection::for_settings(SettingsSection::Account));
 
-        let changed = store.apply_in_memory(AppShellCommand::SetSettingsPreference {
+        let changed = store.apply_in_memory(AppStateCommand::SetSettingsPreference {
             preference: SettingsPreference::AllowRelayConnections,
             enabled: false,
         });
 
         assert!(changed);
-        assert!(!store.projection().settings.general.allow_relay_connections);
+        assert!(
+            !store
+                .projection()
+                .shell
+                .settings
+                .general
+                .allow_relay_connections
+        );
         assert!(
             !store
                 .repository()
