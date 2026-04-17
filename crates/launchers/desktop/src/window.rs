@@ -1,19 +1,21 @@
 use gpui::{
     AnyElement, App, AppContext, Bounds, Context, InteractiveElement, IntoElement, ParentElement,
-    Render, StatefulInteractiveElement, Styled, Window, WindowBounds, WindowOptions, div,
-    prelude::FluentBuilder, px, rgb, size,
+    Render, SharedString, StatefulInteractiveElement, Styled, Window, WindowBounds, WindowOptions,
+    div, prelude::FluentBuilder, px, relative, rgb, size,
 };
 use gpui_component::IconName;
-use radroots_studio_app_core::AppRuntimeSnapshot;
-use radroots_studio_app_i18n::{AppTextKey, app_text};
+use radroots_studio_app_i18n::AppTextKey;
 pub use radroots_studio_app_models::SettingsSection as SettingsPanelViewKey;
+use radroots_studio_app_models::{
+    FulfillmentWindowSummary, OrderListRow, ProductListRow, TodayAgendaProjection,
+    TodaySetupTaskKind,
+};
 use radroots_studio_app_state::SettingsPreference;
-use radroots_studio_app_sync::{AppSyncRunStatus, SyncCheckpointState};
 use radroots_studio_app_ui::{
     APP_UI_THEME, AppCheckboxFieldSpec, IconSegmentButtonSpec, LabelValueRow, action_button,
     action_button_compact, action_icon_button, app_checkbox_field, app_shared_label_text,
-    app_shared_text, app_window_shell, icon_segment_button, label_value_list,
-    runtime_metadata_rows, section_divider, status_indicator, utility_title_row,
+    app_shared_text, app_window_shell, icon_segment_button, label_value_list, section_divider,
+    status_indicator, utility_title_row,
 };
 
 use crate::runtime::{DesktopAppRuntime, DesktopAppRuntimeSummary};
@@ -65,20 +67,19 @@ pub fn open_settings_window(
 }
 
 pub struct HomeView {
-    snapshot: AppRuntimeSnapshot,
     runtime: DesktopAppRuntime,
 }
 
 impl HomeView {
-    pub fn new(snapshot: AppRuntimeSnapshot, runtime: DesktopAppRuntime) -> Self {
-        Self { snapshot, runtime }
+    pub fn new(runtime: DesktopAppRuntime) -> Self {
+        Self { runtime }
     }
 }
 
 impl Render for HomeView {
     fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
         let runtime_summary = self.runtime.summary();
-        let metadata_rows = home_metadata_rows(&self.snapshot, &runtime_summary);
+        let home_status = home_status_presentation(&runtime_summary);
 
         app_window_shell(
             APP_UI_THEME.surfaces.window_background,
@@ -94,12 +95,37 @@ impl Render for HomeView {
                         .p(px(APP_UI_THEME.layout.home_window_padding_px))
                         .flex()
                         .flex_col()
+                        .justify_between()
+                        .child(
+                            div()
+                                .flex()
+                                .flex_col()
+                                .gap(px(APP_UI_THEME.layout.home_stack_gap_px))
+                                .child(
+                                    div()
+                                        .text_size(px(APP_UI_THEME.typography.brand_text_px))
+                                        .text_color(rgb(APP_UI_THEME.text.primary))
+                                        .child(app_shared_text(AppTextKey::HomeBrand)),
+                                )
+                                .child(
+                                    div()
+                                        .text_size(px(APP_UI_THEME.typography.body_text_px * 2.0))
+                                        .font_weight(gpui::FontWeight::BOLD)
+                                        .text_color(rgb(APP_UI_THEME.text.primary))
+                                        .child(app_shared_text(AppTextKey::HomeTodayTitle)),
+                                )
+                                .child(home_status_row(&home_status)),
+                        )
                         .child(
                             div().child(
                                 div()
                                     .text_size(px(APP_UI_THEME.typography.body_text_px))
-                                    .text_color(rgb(APP_UI_THEME.text.primary))
-                                    .child(app_shared_text(AppTextKey::HomeBrand)),
+                                    .line_height(relative(1.2))
+                                    .text_color(rgb(APP_UI_THEME.text.secondary))
+                                    .when_some(
+                                        runtime_summary.today_projection.farm.as_ref(),
+                                        |this, farm| this.child(farm.display_name.clone()),
+                                    ),
                             ),
                         ),
                 )
@@ -124,7 +150,7 @@ impl Render for HomeView {
                                         .id("home-metadata-scroll")
                                         .size_full()
                                         .overflow_y_scroll()
-                                        .child(label_value_list(metadata_rows)),
+                                        .child(home_view_content(&runtime_summary)),
                                 ),
                         ),
                 ),
@@ -730,98 +756,461 @@ fn settings_panel_spec(view: SettingsPanelViewKey) -> (&'static str, IconName) {
     }
 }
 
-fn home_metadata_rows(
-    snapshot: &AppRuntimeSnapshot,
-    runtime: &DesktopAppRuntimeSummary,
-) -> Vec<LabelValueRow> {
-    let mut rows = runtime_metadata_rows(snapshot);
+#[derive(Clone, Copy)]
+struct HomeStatusPresentation {
+    indicator_color: u32,
+    label_key: AppTextKey,
+}
 
-    rows.push(metadata_row(
-        AppTextKey::MetadataDataRoot,
-        path_or_none(runtime.data_dir.as_ref()),
-    ));
-    rows.push(metadata_row(
-        AppTextKey::MetadataLogsRoot,
-        path_or_none(runtime.logs_dir.as_ref()),
-    ));
-    rows.push(metadata_row(
-        AppTextKey::MetadataDatabasePath,
-        path_or_none(runtime.database_path.as_ref()),
-    ));
-    rows.push(metadata_row(
-        AppTextKey::MetadataDatabaseSchemaVersion,
-        optional_text(
-            runtime
-                .sqlite_schema_version
-                .map(|version| version.to_string()),
-        ),
-    ));
-    rows.push(metadata_row(
-        AppTextKey::MetadataShellSection,
-        runtime
-            .shell_projection
-            .selected_section
-            .storage_key()
-            .to_owned(),
-    ));
-    rows.push(metadata_row(
-        AppTextKey::MetadataSyncRunStatus,
-        sync_run_status_text(runtime.sync_projection.run_status),
-    ));
-    rows.push(metadata_row(
-        AppTextKey::MetadataSyncCheckpointState,
-        sync_checkpoint_state_text(runtime.sync_projection.checkpoint.state),
-    ));
-    rows.push(metadata_row(
-        AppTextKey::MetadataSyncConflictCount,
-        runtime
-            .sync_projection
-            .conflict_status
-            .unresolved_count
-            .to_string(),
-    ));
+fn home_view_content(runtime: &DesktopAppRuntimeSummary) -> impl IntoElement {
+    let projection = &runtime.today_projection;
+    let home_status = home_status_presentation(runtime);
+    let mut sections = Vec::<AnyElement>::new();
 
-    if let Some(issue) = runtime.startup_issue.as_ref() {
-        rows.push(metadata_row(
-            AppTextKey::MetadataStartupIssue,
-            issue.clone(),
-        ));
+    if let Some(summary) = projection.summary.as_ref() {
+        sections.push(home_summary_card(summary).into_any_element());
     }
 
-    rows
+    if let Some(issue) = runtime.startup_issue.as_ref() {
+        sections.push(
+            home_card(
+                app_shared_text(AppTextKey::MetadataStartupIssue),
+                home_body_text(issue.clone()),
+            )
+            .into_any_element(),
+        );
+    }
+
+    if projection.needs_setup() {
+        sections.push(home_setup_card(projection).into_any_element());
+    }
+
+    if let Some(next_window) = projection.next_fulfillment_window.as_ref() {
+        sections.push(home_next_fulfillment_window_card(next_window).into_any_element());
+    }
+
+    if !projection.orders_needing_action.is_empty() {
+        sections.push(
+            home_list_card(
+                AppTextKey::HomeTodayOrdersNeedingAction,
+                projection
+                    .orders_needing_action
+                    .iter()
+                    .map(home_order_row)
+                    .collect::<Vec<_>>(),
+            )
+            .into_any_element(),
+        );
+    }
+
+    if !projection.low_stock_products.is_empty() {
+        sections.push(
+            home_list_card(
+                AppTextKey::HomeTodayLowStock,
+                projection
+                    .low_stock_products
+                    .iter()
+                    .map(home_low_stock_row)
+                    .collect::<Vec<_>>(),
+            )
+            .into_any_element(),
+        );
+    }
+
+    if !projection.draft_products.is_empty() {
+        sections.push(
+            home_list_card(
+                AppTextKey::HomeTodayDraftProducts,
+                projection
+                    .draft_products
+                    .iter()
+                    .map(home_draft_row)
+                    .collect::<Vec<_>>(),
+            )
+            .into_any_element(),
+        );
+    }
+
+    if runtime.startup_issue.is_none() && projection.farm.is_none() {
+        sections.push(
+            home_empty_state_card(
+                AppTextKey::HomeTodayEmptyNoFarmTitle,
+                AppTextKey::HomeTodayEmptyNoFarmBody,
+            )
+            .into_any_element(),
+        );
+    } else if runtime.startup_issue.is_none()
+        && projection.farm.is_some()
+        && !projection.needs_setup()
+        && projection.next_fulfillment_window.is_none()
+        && !projection.has_attention_items()
+    {
+        sections.push(
+            home_empty_state_card(
+                AppTextKey::HomeTodayEmptyQuietTitle,
+                AppTextKey::HomeTodayEmptyQuietBody,
+            )
+            .into_any_element(),
+        );
+    }
+
+    div()
+        .w_full()
+        .max_w(px(APP_UI_THEME.layout.home_card_max_width_px))
+        .mx_auto()
+        .flex()
+        .flex_col()
+        .gap(px(APP_UI_THEME.layout.home_stack_gap_px))
+        .child(
+            div()
+                .w_full()
+                .flex()
+                .flex_col()
+                .gap(px(4.0))
+                .child(
+                    div()
+                        .text_size(px(APP_UI_THEME.typography.body_text_px * 2.0))
+                        .font_weight(gpui::FontWeight::BOLD)
+                        .text_color(rgb(APP_UI_THEME.text.primary))
+                        .child(app_shared_text(AppTextKey::HomeTodayTitle)),
+                )
+                .child(
+                    div()
+                        .text_size(px(APP_UI_THEME.typography.body_text_px))
+                        .font_weight(gpui::FontWeight::MEDIUM)
+                        .line_height(relative(1.2))
+                        .text_color(rgb(APP_UI_THEME.text.primary))
+                        .when_some(projection.farm.as_ref(), |this, farm| {
+                            this.child(farm.display_name.clone())
+                        })
+                        .when(projection.farm.is_none(), |this| {
+                            this.child(app_shared_text(home_status.label_key))
+                        }),
+                )
+                .child(home_status_row(&home_status)),
+        )
+        .children(sections)
 }
 
-fn metadata_row(label: AppTextKey, value: impl Into<String>) -> LabelValueRow {
-    LabelValueRow::new(app_shared_text(label), value.into())
+fn home_card(title: impl Into<SharedString>, body: impl IntoElement) -> impl IntoElement {
+    div()
+        .w_full()
+        .bg(rgb(APP_UI_THEME.surfaces.card_background))
+        .rounded(px(APP_UI_THEME
+            .controls
+            .action_button
+            .sizing
+            .corner_radius_px))
+        .child(
+            div()
+                .w_full()
+                .p(px(APP_UI_THEME.layout.home_card_padding_px))
+                .flex()
+                .flex_col()
+                .gap(px(APP_UI_THEME.layout.home_stack_gap_px))
+                .child(
+                    div()
+                        .text_size(px(APP_UI_THEME.typography.body_text_px))
+                        .font_weight(gpui::FontWeight::SEMIBOLD)
+                        .text_color(rgb(APP_UI_THEME.text.primary))
+                        .child(title.into()),
+                )
+                .child(body),
+        )
 }
 
-fn path_or_none(path: Option<&std::path::PathBuf>) -> String {
-    optional_text(path.map(|path| path.display().to_string()))
+fn home_body_text(body: impl Into<SharedString>) -> impl IntoElement {
+    div()
+        .w_full()
+        .text_size(px(APP_UI_THEME.typography.body_text_px))
+        .line_height(relative(1.2))
+        .text_color(rgb(APP_UI_THEME.text.secondary))
+        .child(body.into())
 }
 
-fn optional_text(value: Option<String>) -> String {
-    value.unwrap_or_else(|| app_text(AppTextKey::ValueNone))
+fn home_status_row(status: &HomeStatusPresentation) -> impl IntoElement {
+    div()
+        .flex()
+        .items_center()
+        .gap(px(APP_UI_THEME.layout.settings_account_status_gap_px))
+        .child(status_indicator(status.indicator_color))
+        .child(
+            div()
+                .text_size(px(APP_UI_THEME.typography.body_text_px))
+                .text_color(rgb(APP_UI_THEME.text.secondary))
+                .child(app_shared_text(status.label_key)),
+        )
 }
 
-fn sync_run_status_text(status: AppSyncRunStatus) -> String {
-    let key = match status {
-        AppSyncRunStatus::Idle => AppTextKey::ValueSyncRunStatusIdle,
-        AppSyncRunStatus::Syncing => AppTextKey::ValueSyncRunStatusSyncing,
-        AppSyncRunStatus::Succeeded => AppTextKey::ValueSyncRunStatusSucceeded,
-        AppSyncRunStatus::Conflicted => AppTextKey::ValueSyncRunStatusConflicted,
-        AppSyncRunStatus::Failed => AppTextKey::ValueSyncRunStatusFailed,
-    };
-
-    app_text(key)
+fn home_summary_card(summary: &radroots_studio_app_models::TodaySummary) -> impl IntoElement {
+    home_card(
+        app_shared_text(AppTextKey::HomeTodayTitle),
+        div()
+            .w_full()
+            .flex()
+            .gap(px(APP_UI_THEME.layout.home_stack_gap_px))
+            .child(home_summary_metric(
+                AppTextKey::HomeTodayOrdersNeedingAction,
+                summary.orders_needing_action,
+            ))
+            .child(home_summary_metric(
+                AppTextKey::HomeTodayLowStock,
+                summary.low_stock_products,
+            ))
+            .child(home_summary_metric(
+                AppTextKey::HomeTodayDraftProducts,
+                summary.draft_products,
+            )),
+    )
 }
 
-fn sync_checkpoint_state_text(state: SyncCheckpointState) -> String {
-    let key = match state {
-        SyncCheckpointState::NeverSynced => AppTextKey::ValueSyncCheckpointNeverSynced,
-        SyncCheckpointState::Syncing => AppTextKey::ValueSyncCheckpointSyncing,
-        SyncCheckpointState::Current => AppTextKey::ValueSyncCheckpointCurrent,
-        SyncCheckpointState::Failed => AppTextKey::ValueSyncCheckpointFailed,
-    };
+fn home_summary_metric(label_key: AppTextKey, value: u32) -> impl IntoElement {
+    div()
+        .flex_1()
+        .min_w_0()
+        .bg(rgb(APP_UI_THEME.surfaces.window_background))
+        .rounded(px(APP_UI_THEME
+            .controls
+            .action_button
+            .sizing
+            .corner_radius_px))
+        .p(px(16.0))
+        .flex()
+        .flex_col()
+        .gap(px(4.0))
+        .child(
+            div()
+                .text_size(px(APP_UI_THEME.typography.body_text_px * 2.0))
+                .font_weight(gpui::FontWeight::BOLD)
+                .text_color(rgb(APP_UI_THEME.text.primary))
+                .child(value.to_string()),
+        )
+        .child(
+            div()
+                .text_size(px(APP_UI_THEME.typography.utility_title_text_px))
+                .line_height(relative(1.2))
+                .text_color(rgb(APP_UI_THEME.text.secondary))
+                .child(app_shared_text(label_key)),
+        )
+}
 
-    app_text(key)
+fn home_setup_card(projection: &TodayAgendaProjection) -> impl IntoElement {
+    home_list_card(
+        AppTextKey::HomeTodaySetupChecklist,
+        projection
+            .setup_checklist
+            .iter()
+            .map(home_setup_task_row)
+            .collect::<Vec<_>>(),
+    )
+}
+
+fn home_next_fulfillment_window_card(next_window: &FulfillmentWindowSummary) -> impl IntoElement {
+    home_card(
+        app_shared_text(AppTextKey::HomeTodayNextFulfillmentWindow),
+        label_value_list(vec![
+            LabelValueRow::new(
+                app_shared_text(AppTextKey::HomeTodayWindowStartsLabel),
+                next_window.starts_at.clone(),
+            ),
+            LabelValueRow::new(
+                app_shared_text(AppTextKey::HomeTodayWindowEndsLabel),
+                next_window.ends_at.clone(),
+            ),
+        ]),
+    )
+}
+
+fn home_list_card(title_key: AppTextKey, rows: Vec<AnyElement>) -> impl IntoElement {
+    home_card(
+        app_shared_text(title_key),
+        div()
+            .w_full()
+            .flex()
+            .flex_col()
+            .gap(px(APP_UI_THEME.layout.home_stack_gap_px))
+            .children(rows),
+    )
+}
+
+fn home_order_row(order: &OrderListRow) -> AnyElement {
+    div()
+        .w_full()
+        .min_w_0()
+        .flex()
+        .items_center()
+        .justify_between()
+        .gap(px(APP_UI_THEME.layout.home_stack_gap_px))
+        .child(
+            div()
+                .min_w_0()
+                .flex()
+                .flex_col()
+                .gap(px(2.0))
+                .child(
+                    div()
+                        .text_size(px(APP_UI_THEME.typography.body_text_px))
+                        .font_weight(gpui::FontWeight::SEMIBOLD)
+                        .text_color(rgb(APP_UI_THEME.text.primary))
+                        .child(order.order_number.clone()),
+                )
+                .child(
+                    div()
+                        .text_size(px(APP_UI_THEME.typography.utility_title_text_px))
+                        .text_color(rgb(APP_UI_THEME.text.secondary))
+                        .child(order.customer_display_name.clone()),
+                ),
+        )
+        .child(status_indicator(
+            APP_UI_THEME.controls.status_indicator.attention,
+        ))
+        .into_any_element()
+}
+
+fn home_low_stock_row(product: &ProductListRow) -> AnyElement {
+    div()
+        .w_full()
+        .min_w_0()
+        .flex()
+        .items_center()
+        .justify_between()
+        .gap(px(APP_UI_THEME.layout.home_stack_gap_px))
+        .child(
+            div()
+                .min_w_0()
+                .text_size(px(APP_UI_THEME.typography.body_text_px))
+                .font_weight(gpui::FontWeight::SEMIBOLD)
+                .text_color(rgb(APP_UI_THEME.text.primary))
+                .child(product.title.clone()),
+        )
+        .child(
+            div()
+                .flex()
+                .items_center()
+                .gap(px(APP_UI_THEME.layout.settings_account_status_gap_px))
+                .child(status_indicator(
+                    APP_UI_THEME.controls.status_indicator.attention,
+                ))
+                .child(
+                    div()
+                        .flex()
+                        .items_center()
+                        .gap(px(4.0))
+                        .child(
+                            div()
+                                .text_size(px(APP_UI_THEME.typography.utility_title_text_px))
+                                .text_color(rgb(APP_UI_THEME.text.secondary))
+                                .child(app_shared_label_text(AppTextKey::HomeTodayStockCountLabel)),
+                        )
+                        .child(
+                            div()
+                                .text_size(px(APP_UI_THEME.typography.body_text_px))
+                                .font_weight(gpui::FontWeight::SEMIBOLD)
+                                .text_color(rgb(APP_UI_THEME.text.primary))
+                                .child(product.stock_count.to_string()),
+                        ),
+                ),
+        )
+        .into_any_element()
+}
+
+fn home_draft_row(product: &ProductListRow) -> AnyElement {
+    div()
+        .w_full()
+        .min_w_0()
+        .flex()
+        .items_center()
+        .justify_between()
+        .gap(px(APP_UI_THEME.layout.home_stack_gap_px))
+        .child(
+            div()
+                .min_w_0()
+                .text_size(px(APP_UI_THEME.typography.body_text_px))
+                .font_weight(gpui::FontWeight::SEMIBOLD)
+                .text_color(rgb(APP_UI_THEME.text.primary))
+                .child(product.title.clone()),
+        )
+        .child(status_indicator(
+            APP_UI_THEME.controls.status_indicator.offline,
+        ))
+        .into_any_element()
+}
+
+fn home_setup_task_row(task: &radroots_studio_app_models::TodaySetupTask) -> AnyElement {
+    let is_complete = task.is_complete;
+
+    div()
+        .w_full()
+        .min_w_0()
+        .flex()
+        .items_center()
+        .gap(px(APP_UI_THEME.layout.settings_account_status_gap_px))
+        .child(status_indicator(if is_complete {
+            APP_UI_THEME.controls.status_indicator.online
+        } else {
+            APP_UI_THEME.controls.status_indicator.offline
+        }))
+        .child(
+            div()
+                .min_w_0()
+                .text_size(px(APP_UI_THEME.typography.body_text_px))
+                .font_weight(gpui::FontWeight::MEDIUM)
+                .line_height(relative(1.2))
+                .text_color(rgb(if is_complete {
+                    APP_UI_THEME.text.secondary
+                } else {
+                    APP_UI_THEME.text.primary
+                }))
+                .child(app_shared_text(home_setup_task_label_key(task.kind))),
+        )
+        .into_any_element()
+}
+
+fn home_empty_state_card(title_key: AppTextKey, body_key: AppTextKey) -> impl IntoElement {
+    home_card(
+        app_shared_text(title_key),
+        home_body_text(app_shared_text(body_key)),
+    )
+}
+
+fn home_status_presentation(runtime: &DesktopAppRuntimeSummary) -> HomeStatusPresentation {
+    if runtime.startup_issue.is_some() {
+        return HomeStatusPresentation {
+            indicator_color: APP_UI_THEME.controls.status_indicator.attention,
+            label_key: AppTextKey::HomeTodayStatusStartupIssue,
+        };
+    }
+
+    if runtime.today_projection.farm.is_none() {
+        return HomeStatusPresentation {
+            indicator_color: APP_UI_THEME.controls.status_indicator.offline,
+            label_key: AppTextKey::HomeTodayStatusNoFarm,
+        };
+    }
+
+    if runtime.today_projection.needs_setup() {
+        return HomeStatusPresentation {
+            indicator_color: APP_UI_THEME.controls.status_indicator.offline,
+            label_key: AppTextKey::HomeTodayStatusSetup,
+        };
+    }
+
+    if runtime.today_projection.has_attention_items() {
+        return HomeStatusPresentation {
+            indicator_color: APP_UI_THEME.controls.status_indicator.attention,
+            label_key: AppTextKey::HomeTodayStatusAttention,
+        };
+    }
+
+    HomeStatusPresentation {
+        indicator_color: APP_UI_THEME.controls.status_indicator.online,
+        label_key: AppTextKey::HomeTodayStatusReady,
+    }
+}
+
+fn home_setup_task_label_key(kind: TodaySetupTaskKind) -> AppTextKey {
+    match kind {
+        TodaySetupTaskKind::AddFulfillmentWindow => AppTextKey::HomeTodaySetupAddFulfillmentWindow,
+        TodaySetupTaskKind::PublishProduct => AppTextKey::HomeTodaySetupPublishProduct,
+    }
 }

@@ -1,7 +1,4 @@
-use std::{
-    path::PathBuf,
-    sync::{Arc, Mutex, MutexGuard, PoisonError},
-};
+use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
 use radroots_studio_app_core::{AppRuntimePathsError, AppRuntimeRoots};
 use radroots_studio_app_models::{AppMode, SettingsSection, TodayAgendaProjection};
@@ -10,7 +7,6 @@ use radroots_studio_app_state::{
     AppShellProjection, AppStateCommand, AppStateStore, AppStateStoreError,
     InMemoryAppStateRepository, SettingsPreference,
 };
-use radroots_studio_app_sync::{AppSyncProjection, SyncCheckpointStatus, SyncConflictStatus};
 use thiserror::Error;
 
 const APP_DATABASE_FILE_NAME: &str = "app.sqlite3";
@@ -34,13 +30,8 @@ impl DesktopAppRuntime {
         let state = self.lock_state();
 
         DesktopAppRuntimeSummary {
-            data_dir: state.data_dir.clone(),
-            logs_dir: state.logs_dir.clone(),
-            database_path: state.database_path.clone(),
-            sqlite_schema_version: state.sqlite_schema_version,
             shell_projection: state.state_store.shell_projection().clone(),
             today_projection: state.state_store.today_projection().clone(),
-            sync_projection: state.sync_projection.clone(),
             startup_issue: state.startup_issue.clone(),
         }
     }
@@ -92,25 +83,14 @@ impl DesktopAppRuntime {
 
 #[derive(Clone, Debug)]
 pub struct DesktopAppRuntimeSummary {
-    pub data_dir: Option<PathBuf>,
-    pub logs_dir: Option<PathBuf>,
-    pub database_path: Option<PathBuf>,
-    pub sqlite_schema_version: Option<u32>,
     pub shell_projection: AppShellProjection,
-    #[allow(dead_code)]
     pub today_projection: TodayAgendaProjection,
-    pub sync_projection: AppSyncProjection,
     pub startup_issue: Option<String>,
 }
 
 #[derive(Debug)]
 struct DesktopAppRuntimeState {
-    data_dir: Option<PathBuf>,
-    logs_dir: Option<PathBuf>,
-    database_path: Option<PathBuf>,
-    sqlite_schema_version: Option<u32>,
     state_store: AppStateStore<InMemoryAppStateRepository>,
-    sync_projection: AppSyncProjection,
     startup_issue: Option<String>,
 }
 
@@ -121,36 +101,21 @@ impl DesktopAppRuntimeState {
         let sqlite_store = AppSqliteStore::open(DatabaseTarget::Path(database_path.clone()))?;
         let mut state_store = AppStateStore::load(InMemoryAppStateRepository::default())?;
         let today_projection = sqlite_store.load_today_agenda(None)?;
-        let sync_projection = AppSyncProjection {
-            checkpoint: SyncCheckpointStatus::never_synced(),
-            conflict_status: SyncConflictStatus::clear(),
-            ..AppSyncProjection::default()
-        };
         let _ =
             state_store.apply_in_memory(AppStateCommand::replace_today_agenda(today_projection));
 
         Ok(Self {
-            data_dir: Some(roots.data),
-            logs_dir: Some(roots.logs),
-            database_path: Some(database_path),
-            sqlite_schema_version: Some(sqlite_store.schema_version()?),
             state_store,
-            sync_projection,
             startup_issue: None,
         })
     }
 
     fn degraded(error: DesktopAppRuntimeBootstrapError) -> Self {
         Self {
-            data_dir: None,
-            logs_dir: None,
-            database_path: None,
-            sqlite_schema_version: None,
             state_store: AppStateStore::in_memory(AppShellProjection {
                 app_mode: AppMode::Farmer,
                 ..AppShellProjection::default()
             }),
-            sync_projection: AppSyncProjection::default(),
             startup_issue: Some(error.to_string()),
         }
     }
@@ -173,7 +138,6 @@ mod tests {
     use radroots_studio_app_core::{AppRuntimeHostEnvironment, AppRuntimePlatform, AppRuntimeRoots};
     use radroots_studio_app_models::TodayAgendaProjection;
     use radroots_studio_app_state::{AppStateStore, InMemoryAppStateRepository, SettingsPreference};
-    use radroots_studio_app_sync::AppSyncProjection;
 
     use super::{
         APP_DATABASE_FILE_NAME, DesktopAppRuntime, DesktopAppRuntimeState, SettingsSection,
@@ -207,13 +171,8 @@ mod tests {
     #[test]
     fn cloned_runtime_handles_share_shell_state() {
         let runtime = DesktopAppRuntime::from_state(DesktopAppRuntimeState {
-            data_dir: None,
-            logs_dir: None,
-            database_path: None,
-            sqlite_schema_version: None,
             state_store: AppStateStore::load(InMemoryAppStateRepository::default())
                 .expect("in-memory state store should load"),
-            sync_projection: AppSyncProjection::default(),
             startup_issue: None,
         });
         let cloned_runtime = runtime.clone();

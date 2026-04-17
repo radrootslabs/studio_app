@@ -36,7 +36,7 @@ pub fn launch() {
                     titlebar: Some(home_titlebar_options()),
                     ..Default::default()
                 },
-                |_, cx| cx.new(|_| HomeView::new(snapshot.clone(), runtime.clone())),
+                |_, cx| cx.new(|_| HomeView::new(runtime.clone())),
             )
             .expect("main radroots app window should open");
 
