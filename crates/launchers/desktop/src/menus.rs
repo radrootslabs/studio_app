@@ -1,6 +1,6 @@
 use gpui::{
     App, Bounds, KeyBinding, Menu, MenuItem, SystemMenuType, WindowBounds, WindowOptions,
-    actions, px, size,
+    WindowBackgroundAppearance, actions, px, size,
 };
 use radroots_studio_app_i18n::{AppTextKey, app_text};
 use radroots_studio_app_ui::APP_UI_THEME;
@@ -35,6 +35,7 @@ pub fn install_native_app_menu(runtime: DesktopAppRuntime, cx: &mut App) {
                     px(APP_UI_THEME.windows.settings_height_px),
                 )),
                 titlebar: Some(settings_titlebar_options()),
+                window_background: WindowBackgroundAppearance::Transparent,
                 ..Default::default()
             },
             |window, cx| {
