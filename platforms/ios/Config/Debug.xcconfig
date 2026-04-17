@@ -1,3 +1,0 @@
-#include "Base.xcconfig"
-
-RUST_CARGO_PROFILE = debug

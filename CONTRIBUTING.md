@@ -1,131 +1,40 @@
 # Contributing
 
-Rad Roots is an open-source application. Contributions are welcome, including bug fixes, usability improvements, documentation updates, tests, and new features.
+Rad Roots is an open-source application repository.
+Contributions are welcome, including bug fixes, UI improvements, tests, and documentation updates.
 
 ## Scope
 
-This repository is the standalone Rad Roots application repository. Reusable Rust application logic is organized under `crates/shared/`, Rust host bridges under `crates/bridges/`, runnable Rust targets under `crates/launchers/`, native bridge implementations under `native/bridges/`, and native host projects under `platforms/`.
+This repository currently ships a single-package GPUI bootstrap application named `radroots_studio_app`.
+Keep the filetree small and direct until a larger application boundary is justified.
 
 ## Prerequisites
 
-Install the Rust toolchain used by this repository:
+Install the pinned Rust toolchain:
 
 ```bash
 rustup toolchain install 1.92.0
-rustup target add wasm32-unknown-unknown
+rustup override set 1.92.0
 ```
-
-Install Trunk for the wasm target:
-
-```bash
-cargo install trunk
-```
-
-On hosts that will build or run the Android shell, ensure Java 17 or newer is available. The Android scripts bootstrap the local Gradle, SDK, NDK, `cargo-ndk`, and emulator resources into `platforms/android/.tooling` on demand.
-
-On macOS, ensure the Apple Swift toolchain is available. The desktop target links the shared Apple native security package during build.
 
 Confirm your environment:
 
 ```bash
 cargo --version
 rustc --version
-trunk --version
-java --version
-```
-
-On macOS, also confirm:
-
-```bash
-swift --version
-```
-
-## Getting Started
-
-Clone your fork and enter the repository root:
-
-```bash
-git clone https://github.com/<YOUR-USERNAME>/app.git
-cd app
-```
-
-To use the repository-pinned toolchain:
-
-```bash
-rustup override set 1.92.0
 ```
 
 ## Development Commands
 
 Run these commands from the repository root.
 
-Inspect workspace metadata:
-
 ```bash
 cargo metadata --format-version 1 --no-deps
-```
-
-Check the application:
-
-```bash
-cargo check
-```
-
-Run tests:
-
-```bash
+cargo check -p radroots_studio_app
 cargo test
-```
-
-Run the native application:
-
-```bash
-cargo run -p radroots_studio_app_desktop
-```
-
-Check the Android target:
-
-```bash
-./scripts/check-android-target.sh
-```
-
-Build the Android host:
-
-```bash
-./scripts/build-android-host.sh
-```
-
-Run the Android app in the emulator:
-
-```bash
-./scripts/run-android-emulator.sh
-```
-
-Check the wasm application:
-
-```bash
-./scripts/with-wasm-toolchain.sh env -u NO_COLOR cargo check -p radroots_studio_app_web --target wasm32-unknown-unknown
-```
-
-Build the wasm application:
-
-```bash
-cd crates/launchers/web
-../../../scripts/with-wasm-toolchain.sh env -u NO_COLOR trunk build
-```
-
-Run the wasm application:
-
-```bash
-cd crates/launchers/web
-../../../scripts/with-wasm-toolchain.sh env -u NO_COLOR trunk serve --open
-```
-
-Test the Apple native security package:
-
-```bash
-cd native/bridges/apple/security/swift/RadRootsAppleSecurity
-swift test
+cargo run -p radroots_studio_app
+./scripts/check.sh
+./scripts/run.sh
 ```
 
 ## Contribution Guidelines
@@ -133,12 +42,9 @@ swift test
 - Keep changes scoped to a single coherent change.
 - Prefer small, reviewable commits.
 - Update tests when behavior changes.
-- Update documentation when commands, structure, or contributor workflow changes.
-- Use repo-relative paths in docs, comments, and contributor-facing text.
-- Keep documentation path references relative to this repository root.
-- Do not use absolute filesystem paths or home-directory path forms in repository docs.
+- Update documentation when commands or structure change.
+- Use repository-relative paths in contributor-facing text.
 - Remove obsolete code and dependencies when they are clearly replaced.
-- Use workspace-managed dependency versions from the root `Cargo.toml`.
 
 ## Reporting Issues
 
@@ -149,7 +55,6 @@ When reporting a bug, include:
 - the command you ran
 - the observed behavior
 - the expected behavior
-- logs, screenshots, or backtraces if available
 
 ## Submitting Changes
 
@@ -157,11 +62,3 @@ When reporting a bug, include:
 2. Make the smallest coherent update that solves the issue.
 3. Run the relevant validation commands from this document.
 4. Open a pull request with a clear summary of what changed and how it was verified.
-
-## Code of Conduct
-
-Be respectful, direct, and constructive in issues and reviews.
-
-## License
-
-By contributing to this repository, you agree that your contributions will be distributed under the repository's license. See [LICENSE](LICENSE).
