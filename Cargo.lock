@@ -4653,6 +4653,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "radroots_studio_app_sync"
+version = "0.1.0"
+dependencies = [
+ "radroots_studio_app_models",
+ "serde",
+ "thiserror 2.0.18",
+]
+
+[[package]]
 name = "radroots_studio_app_ui"
 version = "0.1.0"
 dependencies = [
