@@ -107,6 +107,13 @@ mod tests {
     }
 
     #[test]
+    fn english_identity_copy_matches_the_macos_menu_contract() {
+        assert_eq!(app_text(AppTextKey::AppName), "Radroots");
+        assert_eq!(app_text(AppTextKey::MenuAbout), "About Radroots");
+        assert_eq!(app_text(AppTextKey::MenuQuit), "Quit Radroots");
+    }
+
+    #[test]
     fn host_locale_negotiation_reduces_to_supported_base_locale() {
         assert_eq!(resolve_locale_from_host("en_US.UTF-8"), "en");
         assert_eq!(resolve_locale_from_host("en-GB"), "en");

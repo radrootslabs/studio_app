@@ -1,7 +1,7 @@
 use std::time::{SystemTime, UNIX_EPOCH};
 
 pub const APP_ID: &str = "org.radroots.app";
-pub const APP_NAME: &str = "radroots";
+pub const APP_NAME: &str = "Radroots";
 pub const APP_PLATFORM_RUNTIME: &str = "app-desktop-gpui";
 pub const APP_PROJECTION_SOURCE: &str = "gpui-native";
 pub const APP_RUNTIME_ORIGIN: &str = "gpui://localhost";

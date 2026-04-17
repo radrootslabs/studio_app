@@ -63,7 +63,7 @@ mod tests {
         assert_eq!(event.category, "bootstrap");
         assert_eq!(event.name, "runtime.launch");
         assert_eq!(event.message, "app launch");
-        assert_eq!(event.metadata.home_screen, "radroots");
+        assert_eq!(event.metadata.home_screen, "Radroots");
         assert_eq!(event.metadata.core_package, "radroots_studio_app_core");
         assert_eq!(event.metadata.host_surface, "desktop");
         assert_eq!(event.metadata.runtime_mode, "development");
