@@ -4,10 +4,12 @@ use radroots_studio_app_i18n::select_locale_from_host;
 use radroots_studio_app_ui::APP_UI_THEME;
 
 use crate::menus::install_native_app_menu;
+use crate::substrate::DesktopAppSubstrateSummary;
 use crate::window::{HomeView, home_titlebar_options};
 
 pub fn launch() {
     let snapshot = AppRuntimeSnapshot::capture(build_identity());
+    let substrate = DesktopAppSubstrateSummary::bootstrap();
     let app = Application::new();
 
     app.run(move |cx| {
@@ -22,6 +24,7 @@ pub fn launch() {
         .detach();
 
         let snapshot = snapshot.clone();
+        let substrate = substrate.clone();
         cx.spawn(async move |cx| {
             cx.open_window(
                 WindowOptions {
@@ -33,7 +36,7 @@ pub fn launch() {
                     titlebar: Some(home_titlebar_options()),
                     ..Default::default()
                 },
-                |_, cx| cx.new(|_| HomeView::new(snapshot.clone())),
+                |_, cx| cx.new(|_| HomeView::new(snapshot.clone(), substrate.clone())),
             )
             .expect("main radroots app window should open");
 

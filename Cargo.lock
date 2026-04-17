@@ -4607,8 +4607,12 @@ dependencies = [
  "radroots_studio_app_core",
  "radroots_studio_app_i18n",
  "radroots_studio_app_models",
+ "radroots_studio_app_sqlite",
  "radroots_studio_app_state",
+ "radroots_studio_app_sync",
  "radroots_studio_app_ui",
+ "radroots_runtime_paths",
+ "thiserror 2.0.18",
 ]
 
 [[package]]
@@ -4669,6 +4673,14 @@ dependencies = [
  "gpui-component",
  "radroots_studio_app_core",
  "radroots_studio_app_i18n",
+]
+
+[[package]]
+name = "radroots_runtime_paths"
+version = "0.1.0-alpha.2"
+dependencies = [
+ "serde",
+ "thiserror 1.0.69",
 ]
 
 [[package]]

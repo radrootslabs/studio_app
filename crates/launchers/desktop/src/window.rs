@@ -5,18 +5,21 @@ use gpui::{
 };
 use gpui_component::IconName;
 use radroots_studio_app_core::AppRuntimeSnapshot;
-use radroots_studio_app_i18n::AppTextKey;
+use radroots_studio_app_i18n::{AppTextKey, app_text};
 pub use radroots_studio_app_models::SettingsSection as SettingsPanelViewKey;
 use radroots_studio_app_state::{
     AppShellCommand, AppShellProjection, AppStateStore, InMemoryAppStateRepository,
     SettingsPreference,
 };
+use radroots_studio_app_sync::{AppSyncRunStatus, SyncCheckpointState};
 use radroots_studio_app_ui::{
     APP_UI_THEME, AppCheckboxFieldSpec, IconSegmentButtonSpec, LabelValueRow, action_button,
     action_button_compact, action_icon_button, app_checkbox_field, app_shared_label_text,
     app_shared_text, app_window_shell, icon_segment_button, label_value_list,
     runtime_metadata_rows, section_divider, status_indicator, utility_title_row,
 };
+
+use crate::substrate::DesktopAppSubstrateSummary;
 
 pub fn home_titlebar_options() -> gpui::TitlebarOptions {
     gpui::TitlebarOptions {
@@ -64,8 +67,8 @@ pub struct HomeView {
 }
 
 impl HomeView {
-    pub fn new(snapshot: AppRuntimeSnapshot) -> Self {
-        let metadata_rows = runtime_metadata_rows(&snapshot);
+    pub fn new(snapshot: AppRuntimeSnapshot, substrate: DesktopAppSubstrateSummary) -> Self {
+        let metadata_rows = home_metadata_rows(&snapshot, &substrate);
 
         Self { metadata_rows }
     }
@@ -735,4 +738,100 @@ fn settings_panel_spec(view: SettingsPanelViewKey) -> (&'static str, IconName) {
         SettingsPanelViewKey::Settings => ("settings-nav-settings", IconName::Settings2),
         SettingsPanelViewKey::About => ("settings-nav-about", IconName::Info),
     }
+}
+
+fn home_metadata_rows(
+    snapshot: &AppRuntimeSnapshot,
+    substrate: &DesktopAppSubstrateSummary,
+) -> Vec<LabelValueRow> {
+    let mut rows = runtime_metadata_rows(snapshot);
+
+    rows.push(metadata_row(
+        AppTextKey::MetadataDataRoot,
+        path_or_none(substrate.data_dir.as_ref()),
+    ));
+    rows.push(metadata_row(
+        AppTextKey::MetadataLogsRoot,
+        path_or_none(substrate.logs_dir.as_ref()),
+    ));
+    rows.push(metadata_row(
+        AppTextKey::MetadataDatabasePath,
+        path_or_none(substrate.database_path.as_ref()),
+    ));
+    rows.push(metadata_row(
+        AppTextKey::MetadataDatabaseSchemaVersion,
+        optional_text(
+            substrate
+                .sqlite_schema_version
+                .map(|version| version.to_string()),
+        ),
+    ));
+    rows.push(metadata_row(
+        AppTextKey::MetadataShellSection,
+        substrate
+            .shell_projection
+            .selected_section
+            .storage_key()
+            .to_owned(),
+    ));
+    rows.push(metadata_row(
+        AppTextKey::MetadataSyncRunStatus,
+        sync_run_status_text(substrate.sync_projection.run_status),
+    ));
+    rows.push(metadata_row(
+        AppTextKey::MetadataSyncCheckpointState,
+        sync_checkpoint_state_text(substrate.sync_projection.checkpoint.state),
+    ));
+    rows.push(metadata_row(
+        AppTextKey::MetadataSyncConflictCount,
+        substrate
+            .sync_projection
+            .conflict_status
+            .unresolved_count
+            .to_string(),
+    ));
+
+    if let Some(issue) = substrate.startup_issue.as_ref() {
+        rows.push(metadata_row(
+            AppTextKey::MetadataStartupIssue,
+            issue.clone(),
+        ));
+    }
+
+    rows
+}
+
+fn metadata_row(label: AppTextKey, value: impl Into<String>) -> LabelValueRow {
+    LabelValueRow::new(app_shared_text(label), value.into())
+}
+
+fn path_or_none(path: Option<&std::path::PathBuf>) -> String {
+    optional_text(path.map(|path| path.display().to_string()))
+}
+
+fn optional_text(value: Option<String>) -> String {
+    value.unwrap_or_else(|| app_text(AppTextKey::ValueNone))
+}
+
+fn sync_run_status_text(status: AppSyncRunStatus) -> String {
+    let key = match status {
+        AppSyncRunStatus::Idle => AppTextKey::ValueSyncRunStatusIdle,
+        AppSyncRunStatus::Syncing => AppTextKey::ValueSyncRunStatusSyncing,
+        AppSyncRunStatus::Succeeded => AppTextKey::ValueSyncRunStatusSucceeded,
+        AppSyncRunStatus::Conflicted => AppTextKey::ValueSyncRunStatusConflicted,
+        AppSyncRunStatus::Failed => AppTextKey::ValueSyncRunStatusFailed,
+    };
+
+    app_text(key)
+}
+
+fn sync_checkpoint_state_text(state: SyncCheckpointState) -> String {
+    let key = match state {
+        SyncCheckpointState::NeverSynced => AppTextKey::ValueSyncCheckpointNeverSynced,
+        SyncCheckpointState::Syncing => AppTextKey::ValueSyncCheckpointSyncing,
+        SyncCheckpointState::Current => AppTextKey::ValueSyncCheckpointCurrent,
+        SyncCheckpointState::Failed => AppTextKey::ValueSyncCheckpointFailed,
+    };
+
+    app_text(key)
 }
