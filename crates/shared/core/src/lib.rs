@@ -1,4 +1,11 @@
 #![forbid(unsafe_code)]
 
-pub const APP_ID: &str = "org.radroots.app";
-pub const APP_NAME: &str = "radroots";
+mod runtime;
+mod startup;
+
+pub use runtime::{
+    APP_ID, APP_NAME, APP_PLATFORM_RUNTIME, APP_PROJECTION_SOURCE, APP_RUNTIME_ORIGIN,
+    AppBuildIdentity, AppCoreRuntimeMetadata, AppHostRuntimeMetadata, AppRuntimeCapture,
+    AppRuntimeMode, AppRuntimeSnapshot, runtime_mode_label,
+};
+pub use startup::{AppStartupEvent, AppStartupEventMetadata, launch_startup_event};

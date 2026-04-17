@@ -46,21 +46,6 @@ pub fn select_locale_from_host(host_locale: &str) -> String {
     generated::set_locale(&locale).unwrap_or_else(|_| DEFAULT_LOCALE_ID.to_owned())
 }
 
-pub fn select_locale_for_process() -> String {
-    let host_locale = [
-        std::env::var("LC_ALL").ok(),
-        std::env::var("LC_MESSAGES").ok(),
-        std::env::var("LANGUAGE").ok(),
-        std::env::var("LANG").ok(),
-    ]
-    .into_iter()
-    .flatten()
-    .find(|value| !value.trim().is_empty())
-    .unwrap_or_else(|| DEFAULT_LOCALE_ID.to_owned());
-
-    select_locale_from_host(&host_locale)
-}
-
 fn normalize_host_locale(host_locale: &str) -> String {
     let trimmed = host_locale.trim();
     if trimmed.is_empty() {
