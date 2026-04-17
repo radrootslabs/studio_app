@@ -1,13 +1,16 @@
 use gpui::{
-    AnyElement, Context, InteractiveElement, IntoElement, ParentElement, Render,
-    StatefulInteractiveElement, Styled, Window, div, px, rgb,
+    AnyElement, App, AppContext, Bounds, Context, InteractiveElement, IntoElement, ParentElement,
+    Render, StatefulInteractiveElement, Styled, Window, WindowBounds, WindowOptions, div, px, rgb,
+    size,
 };
+use gpui_component::IconName;
 use radroots_studio_app_core::AppRuntimeSnapshot;
 use radroots_studio_app_i18n::AppTextKey;
 use radroots_studio_app_ui::{
-    APP_UI_THEME, LabelValueRow, app_card, app_shared_text, app_window_shell, label_value_list,
-    runtime_metadata_rows, section_divider, settings_about_status_rows,
-    settings_account_profile_rows, settings_preferences_general_rows, utility_title_row,
+    APP_UI_THEME, IconSegmentButtonSpec, LabelValueRow, app_card, app_shared_text,
+    app_window_shell, icon_segment_button, label_value_list, runtime_metadata_rows,
+    section_divider, settings_about_status_rows, settings_account_profile_rows,
+    settings_preferences_general_rows, utility_title_row,
 };
 
 pub fn home_titlebar_options() -> gpui::TitlebarOptions {
@@ -26,6 +29,31 @@ pub fn settings_titlebar_options() -> gpui::TitlebarOptions {
     }
 }
 
+pub fn open_settings_window(cx: &mut App, initial_view: SettingsPanelViewKey) {
+    let bounds = Bounds::centered(
+        None,
+        size(
+            px(APP_UI_THEME.windows.settings_width_px),
+            px(APP_UI_THEME.windows.settings_height_px),
+        ),
+        cx,
+    );
+
+    cx.open_window(
+        WindowOptions {
+            window_bounds: Some(WindowBounds::Windowed(bounds)),
+            window_min_size: Some(size(
+                px(APP_UI_THEME.windows.settings_width_px),
+                px(APP_UI_THEME.windows.settings_height_px),
+            )),
+            titlebar: Some(settings_titlebar_options()),
+            ..Default::default()
+        },
+        |_, cx| cx.new(|_| SettingsWindowView::new(initial_view)),
+    )
+    .expect("settings window should open");
+}
+
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub enum SettingsPanelViewKey {
     #[default]
@@ -40,6 +68,14 @@ impl SettingsPanelViewKey {
             Self::Account => AppTextKey::SettingsNavAccounts,
             Self::Settings => AppTextKey::SettingsNavSettings,
             Self::About => AppTextKey::SettingsNavAbout,
+        }
+    }
+
+    fn spec(self) -> (&'static str, IconName) {
+        match self {
+            Self::Account => ("settings-nav-accounts", IconName::CircleUser),
+            Self::Settings => ("settings-nav-settings", IconName::Settings2),
+            Self::About => ("settings-nav-about", IconName::Info),
         }
     }
 }
@@ -133,36 +169,17 @@ impl SettingsWindowView {
         view: SettingsPanelViewKey,
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
-        let is_selected = self.selected_view == view;
-        let background = if is_selected {
-            APP_UI_THEME.surfaces.card_background
-        } else {
-            APP_UI_THEME.surfaces.panel_background
-        };
-        let foreground = if is_selected {
-            APP_UI_THEME.text.primary
-        } else {
-            APP_UI_THEME.text.secondary
-        };
-
-        div()
-            .w_full()
-            .px(px(APP_UI_THEME.layout.settings_navigation_row_padding_px))
-            .py(px(APP_UI_THEME.layout.settings_navigation_row_padding_px))
-            .bg(rgb(background))
-            .rounded(px(8.0))
-            .cursor_pointer()
-            .text_size(px(APP_UI_THEME.typography.body_text_px))
-            .text_color(rgb(foreground))
-            .child(app_shared_text(view.label_key()))
-            .id(match view {
-                SettingsPanelViewKey::Account => "settings-nav-accounts",
-                SettingsPanelViewKey::Settings => "settings-nav-settings",
-                SettingsPanelViewKey::About => "settings-nav-about",
-            })
-            .on_click(cx.listener(move |this, _, _, cx| {
-                this.select_view(view, cx);
-            }))
+        let (navigation_id, navigation_icon) = view.spec();
+        icon_segment_button(
+            IconSegmentButtonSpec::new(
+                navigation_id,
+                app_shared_text(view.label_key()),
+                navigation_icon,
+            ),
+            self.selected_view == view,
+            cx.listener(move |this, _, _, cx| this.select_view(view, cx)),
+            cx,
+        )
     }
 
     fn detail_card(&self, title: AppTextKey, rows: Vec<LabelValueRow>) -> impl IntoElement {
@@ -262,34 +279,21 @@ impl Render for SettingsWindowView {
                         .bg(rgb(APP_UI_THEME.surfaces.chrome_background))
                         .p(px(APP_UI_THEME.layout.settings_content_padding_px))
                         .flex()
-                        .items_center()
-                        .justify_between()
+                        .flex_col()
+                        .gap(px(APP_UI_THEME.layout.settings_section_gap_px))
+                        .child(utility_title_row(app_shared_text(
+                            AppTextKey::SettingsTitle,
+                        )))
                         .child(
                             div()
+                                .w_full()
                                 .flex()
-                                .flex_col()
-                                .gap(px(APP_UI_THEME.layout.settings_section_gap_px))
-                                .child(
-                                    div()
-                                        .text_size(px(APP_UI_THEME.typography.brand_text_px))
-                                        .font_weight(gpui::FontWeight::SEMIBOLD)
-                                        .text_color(rgb(APP_UI_THEME.text.primary))
-                                        .child(app_shared_text(AppTextKey::SettingsTitle)),
-                                )
-                                .child(
-                                    div()
-                                        .text_size(px(APP_UI_THEME
-                                            .typography
-                                            .utility_title_text_px))
-                                        .text_color(rgb(APP_UI_THEME.text.secondary))
-                                        .child(app_shared_text(self.selected_view.label_key())),
-                                ),
-                        )
-                        .child(
-                            div()
-                                .text_size(px(APP_UI_THEME.typography.utility_title_text_px))
-                                .text_color(rgb(APP_UI_THEME.text.secondary))
-                                .child(app_shared_text(AppTextKey::AppName)),
+                                .justify_center()
+                                .items_center()
+                                .gap(px(APP_UI_THEME.layout.settings_navigation_row_gap_px))
+                                .child(self.navigation_button(SettingsPanelViewKey::Account, cx))
+                                .child(self.navigation_button(SettingsPanelViewKey::Settings, cx))
+                                .child(self.navigation_button(SettingsPanelViewKey::About, cx)),
                         ),
                 )
                 .child(section_divider())
@@ -297,27 +301,7 @@ impl Render for SettingsWindowView {
                     div()
                         .flex_1()
                         .overflow_hidden()
-                        .flex()
-                        .child(
-                            div()
-                                .h_full()
-                                .w(px(APP_UI_THEME.layout.settings_navigation_width_px))
-                                .p(px(APP_UI_THEME.layout.settings_content_padding_px))
-                                .flex()
-                                .flex_col()
-                                .gap(px(APP_UI_THEME.layout.settings_navigation_row_gap_px))
-                                .bg(rgb(APP_UI_THEME.surfaces.panel_background))
-                                .child(self.navigation_button(SettingsPanelViewKey::Account, cx))
-                                .child(self.navigation_button(SettingsPanelViewKey::Settings, cx))
-                                .child(self.navigation_button(SettingsPanelViewKey::About, cx)),
-                        )
-                        .child(
-                            div()
-                                .h_full()
-                                .w(px(APP_UI_THEME.layout.divider_thickness_px))
-                                .bg(rgb(APP_UI_THEME.surfaces.divider)),
-                        )
-                        .child(div().flex_1().h_full().child(self.settings_panel_content())),
+                        .child(self.settings_panel_content()),
                 ),
         )
     }
