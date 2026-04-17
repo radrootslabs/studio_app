@@ -1,16 +1,16 @@
 use gpui::{
     AnyElement, App, AppContext, Bounds, Context, InteractiveElement, IntoElement, ParentElement,
-    Render, StatefulInteractiveElement, Styled, Window, WindowBounds, WindowOptions, div, px, rgb,
-    size,
+    Render, StatefulInteractiveElement, Styled, Window, WindowBounds, WindowOptions, div,
+    prelude::FluentBuilder, px, rgb, size,
 };
 use gpui_component::IconName;
 use radroots_studio_app_core::AppRuntimeSnapshot;
 use radroots_studio_app_i18n::AppTextKey;
 use radroots_studio_app_ui::{
-    APP_UI_THEME, IconSegmentButtonSpec, LabelValueRow, app_card, app_shared_text,
-    app_window_shell, icon_segment_button, label_value_list, runtime_metadata_rows,
-    section_divider, settings_about_status_rows, settings_account_profile_rows,
-    settings_preferences_general_rows, utility_title_row,
+    APP_UI_THEME, AppCheckboxFieldSpec, IconSegmentButtonSpec, LabelValueRow, action_button,
+    action_button_compact, action_icon_button, app_checkbox_field, app_shared_label_text,
+    app_shared_text, app_window_shell, icon_segment_button, label_value_list,
+    runtime_metadata_rows, section_divider, status_indicator, utility_title_row,
 };
 
 pub fn home_titlebar_options() -> gpui::TitlebarOptions {
@@ -148,12 +148,20 @@ impl Render for HomeView {
 
 pub struct SettingsWindowView {
     selected_view: SettingsPanelViewKey,
+    general_allow_relay_connections: bool,
+    general_use_media_servers: bool,
+    general_use_nip05: bool,
+    general_launch_at_login: bool,
 }
 
 impl SettingsWindowView {
     pub fn new(initial_view: SettingsPanelViewKey) -> Self {
         Self {
             selected_view: initial_view,
+            general_allow_relay_connections: true,
+            general_use_media_servers: true,
+            general_use_nip05: true,
+            general_launch_at_login: false,
         }
     }
 
@@ -182,54 +190,414 @@ impl SettingsWindowView {
         )
     }
 
-    fn detail_card(&self, title: AppTextKey, rows: Vec<LabelValueRow>) -> impl IntoElement {
-        app_card(
-            div()
-                .w_full()
-                .flex()
-                .flex_col()
-                .gap(px(APP_UI_THEME.layout.home_stack_gap_px))
-                .child(utility_title_row(app_shared_text(title)))
-                .child(section_divider())
-                .child(label_value_list(rows)),
-        )
-    }
+    fn account_panel(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let detail_text_px = APP_UI_THEME.typography.settings_account_detail_text_px;
+        let account_status_color = APP_UI_THEME.controls.status_indicator.online;
 
-    fn accounts_panel(&self) -> impl IntoElement {
         div()
-            .id("settings-panel-scroll")
             .size_full()
-            .overflow_y_scroll()
+            .flex()
             .child(
                 div()
-                    .w_full()
-                    .p(px(APP_UI_THEME.layout.settings_content_padding_px))
+                    .h_full()
+                    .w(px(APP_UI_THEME.layout.settings_account_sidebar_width_px))
+                    .p(px(APP_UI_THEME.layout.settings_account_sidebar_padding_px))
                     .flex()
                     .flex_col()
-                    .gap(px(APP_UI_THEME.layout.home_stack_gap_px))
-                    .child(self.detail_card(
-                        AppTextKey::SettingsNavAccounts,
-                        settings_account_profile_rows(),
-                    )),
+                    .justify_between()
+                    .child(
+                        div()
+                            .w_full()
+                            .h(px(APP_UI_THEME.layout.settings_account_sidebar_button_height_px))
+                            .bg(rgb(APP_UI_THEME.surfaces.chrome_background))
+                            .rounded(px(
+                                APP_UI_THEME
+                                    .layout
+                                    .settings_account_sidebar_button_corner_radius_px,
+                            ))
+                            .p(px(
+                                APP_UI_THEME.layout.settings_account_sidebar_button_padding_px,
+                            ))
+                            .flex()
+                            .flex_row()
+                            .justify_start()
+                            .items_center()
+                            .gap(px(APP_UI_THEME.layout.settings_account_sidebar_button_gap_px))
+                            .child(
+                                div()
+                                    .size(px(APP_UI_THEME.layout.settings_account_sidebar_avatar_size_px))
+                                    .bg(rgb(APP_UI_THEME.surfaces.card_background))
+                                    .rounded(px(
+                                        APP_UI_THEME.layout.settings_account_sidebar_avatar_size_px
+                                            / 2.0,
+                                    )),
+                            )
+                            .child(
+                                div()
+                                    .flex()
+                                    .flex_col()
+                                    .gap(px(APP_UI_THEME.layout.settings_account_identity_text_gap_px))
+                                    .justify_center()
+                                    .child(
+                                        div()
+                                            .text_size(px(
+                                                APP_UI_THEME
+                                                    .typography
+                                                    .settings_account_identity_text_px,
+                                            ))
+                                            .font_weight(gpui::FontWeight::MEDIUM)
+                                            .text_color(rgb(APP_UI_THEME.text.primary))
+                                            .child(app_shared_text(
+                                                AppTextKey::SettingsAccountPlaceholderName,
+                                            )),
+                                    )
+                                    .child(
+                                        div()
+                                            .text_size(px(
+                                                APP_UI_THEME
+                                                    .typography
+                                                    .settings_account_identity_text_px,
+                                            ))
+                                            .font_weight(gpui::FontWeight::MEDIUM)
+                                            .text_color(rgb(APP_UI_THEME.text.secondary))
+                                            .child(app_shared_text(
+                                                AppTextKey::SettingsAccountPlaceholderHandle,
+                                            )),
+                                    ),
+                            ),
+                    )
+                    .child(
+                        div()
+                            .w_full()
+                            .pt(px(
+                                APP_UI_THEME
+                                    .layout
+                                    .settings_account_sidebar_footer_padding_top_px,
+                            ))
+                            .flex()
+                            .flex_col()
+                            .gap(px(
+                                APP_UI_THEME.layout.settings_account_sidebar_footer_row_gap_px,
+                            ))
+                            .child(section_divider())
+                            .child(
+                                div()
+                                    .w_full()
+                                    .flex()
+                                    .items_center()
+                                    .justify_between()
+                                    .gap(px(
+                                        APP_UI_THEME
+                                            .layout
+                                            .settings_account_sidebar_footer_button_gap_px,
+                                    ))
+                                    .child(action_button(
+                                        "account-add",
+                                        app_shared_text(AppTextKey::SettingsAccountAddAction),
+                                        |_, _, _| {},
+                                        cx,
+                                    ))
+                                    .child(action_icon_button(
+                                        "account-more",
+                                        IconName::ChevronDown,
+                                        |_, _, _| {},
+                                        cx,
+                                    )),
+                            ),
+                    ),
+            )
+            .child(
+                div()
+                    .h_full()
+                    .w(px(APP_UI_THEME.layout.divider_thickness_px))
+                    .bg(rgb(APP_UI_THEME.surfaces.divider)),
+            )
+            .child(
+                div()
+                    .flex_1()
+                    .h_full()
+                    .p(px(APP_UI_THEME.layout.settings_account_main_padding_px))
+                    .flex()
+                    .flex_col()
+                    .items_center()
+                    .justify_start()
+                    .child(
+                        div()
+                            .w_full()
+                            .max_w(px(APP_UI_THEME.layout.settings_account_content_max_width_px))
+                            .flex()
+                            .flex_col()
+                            .items_start()
+                            .gap(px(APP_UI_THEME.layout.settings_account_main_stack_gap_px))
+                            .child(
+                                div()
+                                    .w_full()
+                                    .flex()
+                                    .flex_col()
+                                    .items_center()
+                                    .gap(px(APP_UI_THEME.layout.settings_account_main_stack_gap_px))
+                                    .child(
+                                        div()
+                                            .size(px(
+                                                APP_UI_THEME
+                                                    .layout
+                                                    .settings_account_profile_avatar_size_px,
+                                            ))
+                                            .bg(rgb(APP_UI_THEME.surfaces.card_background))
+                                            .rounded(px(
+                                                APP_UI_THEME
+                                                    .layout
+                                                    .settings_account_profile_avatar_size_px
+                                                    / 2.0,
+                                            )),
+                                    )
+                                    .child(
+                                        div()
+                                            .text_size(px(detail_text_px))
+                                            .font_weight(gpui::FontWeight::MEDIUM)
+                                            .text_color(rgb(APP_UI_THEME.text.primary))
+                                            .child(app_shared_text(
+                                                AppTextKey::SettingsAccountPlaceholderName,
+                                            )),
+                                    ),
+                            )
+                            .child(
+                                div()
+                                    .w_full()
+                                    .flex()
+                                    .flex_col()
+                                    .gap(px(APP_UI_THEME.layout.settings_account_detail_row_gap_px))
+                                    .child(
+                                        div()
+                                            .w_full()
+                                            .flex()
+                                            .items_center()
+                                            .gap(px(
+                                                APP_UI_THEME
+                                                    .layout
+                                                    .settings_account_detail_value_gap_px,
+                                            ))
+                                            .child(
+                                                div()
+                                                    .text_size(px(detail_text_px))
+                                                    .font_weight(gpui::FontWeight::SEMIBOLD)
+                                                    .text_color(rgb(APP_UI_THEME.text.secondary))
+                                                    .child(app_shared_label_text(
+                                                        AppTextKey::SettingsAccountProfileLabel,
+                                                    )),
+                                            )
+                                            .child(
+                                                div()
+                                                    .text_size(px(detail_text_px))
+                                                    .text_color(rgb(APP_UI_THEME.text.primary))
+                                                    .child(app_shared_text(
+                                                        AppTextKey::SettingsAccountPlaceholderHandle,
+                                                    )),
+                                            ),
+                                    )
+                                    .child(
+                                        div()
+                                            .w_full()
+                                            .flex()
+                                            .items_center()
+                                            .gap(px(
+                                                APP_UI_THEME
+                                                    .layout
+                                                    .settings_account_detail_value_gap_px,
+                                            ))
+                                            .child(
+                                                div()
+                                                    .text_size(px(detail_text_px))
+                                                    .font_weight(gpui::FontWeight::SEMIBOLD)
+                                                    .text_color(rgb(APP_UI_THEME.text.secondary))
+                                                    .child(app_shared_label_text(
+                                                        AppTextKey::SettingsAccountStatusLabel,
+                                                    )),
+                                            )
+                                            .child(
+                                                div()
+                                                    .flex()
+                                                    .items_center()
+                                                    .gap(px(
+                                                        APP_UI_THEME
+                                                            .layout
+                                                            .settings_account_status_gap_px,
+                                                    ))
+                                                    .child(status_indicator(account_status_color))
+                                                    .child(
+                                                        div()
+                                                            .text_size(px(detail_text_px))
+                                                            .text_color(rgb(APP_UI_THEME.text.primary))
+                                                            .child(app_shared_text(
+                                                                AppTextKey::SettingsAccountStatusLoggedIn,
+                                                            )),
+                                                    ),
+                                            ),
+                                    )
+                                    .child(
+                                        div()
+                                            .w_full()
+                                            .flex()
+                                            .min_w_0()
+                                            .items_center()
+                                            .gap(px(
+                                                APP_UI_THEME
+                                                    .layout
+                                                    .settings_account_action_row_gap_px,
+                                            ))
+                                            .child(
+                                                div().child(action_button(
+                                                    "account-log-out",
+                                                    app_shared_text(
+                                                        AppTextKey::SettingsAccountLogOutAction,
+                                                    ),
+                                                    |_, _, _| {},
+                                                    cx,
+                                                )),
+                                            )
+                                            .child(
+                                                div().child(action_button(
+                                                    "account-admin-console",
+                                                    app_shared_text(
+                                                        AppTextKey::SettingsAccountAdminConsoleAction,
+                                                    ),
+                                                    |_, _, _| {},
+                                                    cx,
+                                                )),
+                                            ),
+                                    ),
+                            ),
+                    ),
             )
     }
 
-    fn settings_panel(&self) -> impl IntoElement {
+    fn settings_checkbox_row(
+        &mut self,
+        id: &'static str,
+        checked: bool,
+        label_key: AppTextKey,
+        trailing_button_id: Option<&'static str>,
+        trailing_button_key: Option<AppTextKey>,
+        note_key: Option<AppTextKey>,
+        on_toggle: impl Fn(&bool, &mut Window, &mut gpui::App) + 'static,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement {
+        let note_text = note_key.map(app_shared_text);
+
+        div().w_full().child(
+            div()
+                .w_full()
+                .flex()
+                .items_start()
+                .gap(px(APP_UI_THEME.layout.settings_account_detail_value_gap_px))
+                .child(app_checkbox_field(
+                    AppCheckboxFieldSpec::new(id, app_shared_text(label_key), note_text),
+                    checked,
+                    cx,
+                    move |checked, window, cx| on_toggle(&checked, window, cx),
+                ))
+                .when_some(
+                    trailing_button_id.zip(trailing_button_key),
+                    |this, (button_id, button_key)| {
+                        this.child(div().flex_none().child(action_button_compact(
+                            button_id,
+                            app_shared_text(button_key),
+                            |_, _, _| {},
+                            cx,
+                        )))
+                    },
+                ),
+        )
+    }
+
+    fn settings_panel(&mut self, cx: &mut Context<Self>) -> impl IntoElement {
+        let section_label_width_px = 72.0;
+        let form_max_width_px = 420.0;
+
         div()
-            .id("settings-panel-scroll")
             .size_full()
-            .overflow_y_scroll()
+            .p(px(APP_UI_THEME.layout.settings_content_padding_px))
+            .flex()
+            .flex_col()
+            .items_center()
             .child(
                 div()
+                    .h_full()
                     .w_full()
-                    .p(px(APP_UI_THEME.layout.settings_content_padding_px))
+                    .max_w(px(form_max_width_px))
                     .flex()
-                    .flex_col()
-                    .gap(px(APP_UI_THEME.layout.home_stack_gap_px))
-                    .child(self.detail_card(
-                        AppTextKey::SettingsGeneralSectionLabel,
-                        settings_preferences_general_rows(),
-                    )),
+                    .items_start()
+                    .gap(px(APP_UI_THEME.layout.settings_section_gap_px))
+                    .child(
+                        div()
+                            .w(px(section_label_width_px))
+                            .text_size(px(APP_UI_THEME.typography.body_text_px))
+                            .font_weight(gpui::FontWeight::MEDIUM)
+                            .text_color(rgb(APP_UI_THEME.text.secondary))
+                            .child(app_shared_label_text(
+                                AppTextKey::SettingsGeneralSectionLabel,
+                            )),
+                    )
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w_0()
+                            .flex()
+                            .flex_col()
+                            .gap(px(16.0))
+                            .child(self.settings_checkbox_row(
+                                "settings-allow-relay-connections",
+                                self.general_allow_relay_connections,
+                                AppTextKey::SettingsGeneralAllowRelayConnections,
+                                None,
+                                None,
+                                None,
+                                cx.listener(|this, checked: &bool, _, cx| {
+                                    this.general_allow_relay_connections = *checked;
+                                    cx.notify();
+                                }),
+                                cx,
+                            ))
+                            .child(self.settings_checkbox_row(
+                                "settings-use-media-servers",
+                                self.general_use_media_servers,
+                                AppTextKey::SettingsGeneralUseMediaServers,
+                                Some("settings-manage-media-servers"),
+                                Some(AppTextKey::SettingsGeneralManageAction),
+                                None,
+                                cx.listener(|this, checked: &bool, _, cx| {
+                                    this.general_use_media_servers = *checked;
+                                    cx.notify();
+                                }),
+                                cx,
+                            ))
+                            .child(self.settings_checkbox_row(
+                                "settings-use-nip05",
+                                self.general_use_nip05,
+                                AppTextKey::SettingsGeneralUseNip05,
+                                None,
+                                None,
+                                Some(AppTextKey::SettingsGeneralUseNip05Note),
+                                cx.listener(|this, checked: &bool, _, cx| {
+                                    this.general_use_nip05 = *checked;
+                                    cx.notify();
+                                }),
+                                cx,
+                            ))
+                            .child(self.settings_checkbox_row(
+                                "settings-launch-at-login",
+                                self.general_launch_at_login,
+                                AppTextKey::SettingsGeneralLaunchAtLogin,
+                                None,
+                                None,
+                                None,
+                                cx.listener(|this, checked: &bool, _, cx| {
+                                    this.general_launch_at_login = *checked;
+                                    cx.notify();
+                                }),
+                                cx,
+                            )),
+                    ),
             )
     }
 
@@ -240,24 +608,55 @@ impl SettingsWindowView {
             .overflow_y_scroll()
             .child(
                 div()
-                    .w_full()
                     .p(px(APP_UI_THEME.layout.settings_content_padding_px))
+                    .size_full()
                     .flex()
                     .flex_col()
-                    .gap(px(APP_UI_THEME.layout.home_stack_gap_px))
+                    .py_12()
                     .child(
-                        self.detail_card(
-                            AppTextKey::SettingsNavAbout,
-                            settings_about_status_rows(),
-                        ),
+                        div()
+                            .w_full()
+                            .flex()
+                            .flex_col()
+                            .justify_between()
+                            .gap(px(APP_UI_THEME.layout.settings_account_main_stack_gap_px))
+                            .text_size(px(APP_UI_THEME.typography.body_text_px))
+                            .text_color(rgb(APP_UI_THEME.text.secondary))
+                            .child(app_shared_text(
+                                AppTextKey::SettingsAboutPlaceholderTopPrimary,
+                            ))
+                            .child(app_shared_text(
+                                AppTextKey::SettingsAboutPlaceholderTopSecondary,
+                            ))
+                            .child(app_shared_text(
+                                AppTextKey::SettingsAboutPlaceholderTopTertiary,
+                            )),
+                    )
+                    .child(section_divider())
+                    .child(
+                        div()
+                            .w_full()
+                            .py_12()
+                            .text_size(px(APP_UI_THEME.typography.body_text_px))
+                            .text_color(rgb(APP_UI_THEME.text.secondary))
+                            .child(app_shared_text(AppTextKey::SettingsAboutPlaceholderMiddle)),
+                    )
+                    .child(section_divider())
+                    .child(
+                        div()
+                            .w_full()
+                            .py_12()
+                            .text_size(px(APP_UI_THEME.typography.body_text_px))
+                            .text_color(rgb(APP_UI_THEME.text.secondary))
+                            .child(app_shared_text(AppTextKey::SettingsAboutPlaceholderBottom)),
                     ),
             )
     }
 
-    fn settings_panel_content(&self) -> AnyElement {
+    fn settings_panel_content(&mut self, cx: &mut Context<Self>) -> AnyElement {
         match self.selected_view {
-            SettingsPanelViewKey::Account => self.accounts_panel().into_any_element(),
-            SettingsPanelViewKey::Settings => self.settings_panel().into_any_element(),
+            SettingsPanelViewKey::Account => self.account_panel(cx).into_any_element(),
+            SettingsPanelViewKey::Settings => self.settings_panel(cx).into_any_element(),
             SettingsPanelViewKey::About => self.about_panel().into_any_element(),
         }
     }
@@ -266,9 +665,10 @@ impl SettingsWindowView {
 impl Render for SettingsWindowView {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         app_window_shell(
-            APP_UI_THEME.surfaces.window_background,
+            APP_UI_THEME.surfaces.panel_background,
             div()
                 .size_full()
+                .bg(rgb(APP_UI_THEME.surfaces.panel_background))
                 .overflow_hidden()
                 .flex()
                 .flex_col()
@@ -277,10 +677,8 @@ impl Render for SettingsWindowView {
                         .w_full()
                         .h(px(APP_UI_THEME.layout.settings_chrome_height_px))
                         .bg(rgb(APP_UI_THEME.surfaces.chrome_background))
-                        .p(px(APP_UI_THEME.layout.settings_content_padding_px))
                         .flex()
                         .flex_col()
-                        .gap(px(APP_UI_THEME.layout.settings_section_gap_px))
                         .child(utility_title_row(app_shared_text(
                             AppTextKey::SettingsTitle,
                         )))
@@ -289,7 +687,8 @@ impl Render for SettingsWindowView {
                                 .w_full()
                                 .flex()
                                 .justify_center()
-                                .items_center()
+                                .pt(px(APP_UI_THEME.layout.settings_navigation_row_padding_px))
+                                .pb(px(APP_UI_THEME.layout.settings_navigation_row_padding_px))
                                 .gap(px(APP_UI_THEME.layout.settings_navigation_row_gap_px))
                                 .child(self.navigation_button(SettingsPanelViewKey::Account, cx))
                                 .child(self.navigation_button(SettingsPanelViewKey::Settings, cx))
@@ -301,7 +700,7 @@ impl Render for SettingsWindowView {
                     div()
                         .flex_1()
                         .overflow_hidden()
-                        .child(self.settings_panel_content()),
+                        .child(self.settings_panel_content(cx)),
                 ),
         )
     }

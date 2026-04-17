@@ -164,6 +164,7 @@ mod tests {
         APP_PROJECTION_SOURCE, AppBuildIdentity, AppRuntimeCapture, AppRuntimeMode,
         AppRuntimeSnapshot,
     };
+    use radroots_studio_app_i18n::{AppTextKey, app_text};
 
     use super::{
         runtime_metadata_rows, settings_about_status_rows, settings_preferences_general_rows,
@@ -205,15 +206,20 @@ mod tests {
         let general_rows = settings_preferences_general_rows();
         let about_rows = settings_about_status_rows();
 
+        let allow_relay_label = app_text(AppTextKey::SettingsGeneralAllowRelayConnections);
+        let enabled_value = app_text(AppTextKey::ValueEnabled);
+        let about_label = app_text(AppTextKey::SettingsViewAbout);
+        let about_primary = app_text(AppTextKey::SettingsAboutPlaceholderTopPrimary);
+
         assert!(
             general_rows
                 .iter()
-                .any(|row| row.label == "allow relay connections" && row.value == "enabled")
+                .any(|row| row.label == allow_relay_label && row.value == enabled_value)
         );
         assert!(
             about_rows
                 .iter()
-                .any(|row| { row.label == "about" && row.value == "About placeholder primary" })
+                .any(|row| row.label == about_label && row.value == about_primary)
         );
     }
 }
