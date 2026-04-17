@@ -119,12 +119,15 @@ impl DesktopAppRuntimeState {
         let roots = AppRuntimeRoots::current_desktop()?;
         let database_path = roots.data.join(APP_DATABASE_FILE_NAME);
         let sqlite_store = AppSqliteStore::open(DatabaseTarget::Path(database_path.clone()))?;
-        let state_store = AppStateStore::load(InMemoryAppStateRepository::default())?;
+        let mut state_store = AppStateStore::load(InMemoryAppStateRepository::default())?;
+        let today_projection = sqlite_store.load_today_agenda(None)?;
         let sync_projection = AppSyncProjection {
             checkpoint: SyncCheckpointStatus::never_synced(),
             conflict_status: SyncConflictStatus::clear(),
             ..AppSyncProjection::default()
         };
+        let _ =
+            state_store.apply_in_memory(AppStateCommand::replace_today_agenda(today_projection));
 
         Ok(Self {
             data_dir: Some(roots.data),

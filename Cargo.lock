@@ -4649,6 +4649,7 @@ dependencies = [
 name = "radroots_studio_app_sqlite"
 version = "0.1.0"
 dependencies = [
+ "radroots_studio_app_models",
  "rusqlite",
  "thiserror 2.0.18",
 ]

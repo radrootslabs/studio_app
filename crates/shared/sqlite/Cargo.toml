@@ -9,6 +9,7 @@ license.workspace = true
 publish = false
 
 [dependencies]
+radroots_studio_app_models.workspace = true
 rusqlite.workspace = true
 thiserror.workspace = true
 

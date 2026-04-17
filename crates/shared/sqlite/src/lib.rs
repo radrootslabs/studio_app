@@ -2,13 +2,18 @@
 
 mod error;
 mod migrations;
+mod today;
 
 use std::{fs, path::PathBuf, time::Duration};
 
+use radroots_studio_app_models::{FarmId, TodayAgendaProjection};
 use rusqlite::Connection;
 
 pub use error::AppSqliteError;
 pub use migrations::latest_schema_version;
+pub use today::{
+    AppTodayAgendaRepository, TODAY_AGENDA_LIST_LIMIT, TODAY_AGENDA_LOW_STOCK_THRESHOLD,
+};
 
 const SQLITE_BUSY_TIMEOUT_MS: u64 = 5_000;
 
@@ -40,6 +45,17 @@ impl AppSqliteStore {
 
     pub fn schema_version(&self) -> Result<u32, AppSqliteError> {
         schema_version(&self.connection)
+    }
+
+    pub fn today_agenda_repository(&self) -> AppTodayAgendaRepository<'_> {
+        AppTodayAgendaRepository::new(&self.connection)
+    }
+
+    pub fn load_today_agenda(
+        &self,
+        farm_id: Option<FarmId>,
+    ) -> Result<TodayAgendaProjection, AppSqliteError> {
+        self.today_agenda_repository().load(farm_id)
     }
 }
 

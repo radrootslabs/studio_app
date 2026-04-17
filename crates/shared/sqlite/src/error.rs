@@ -65,4 +65,14 @@ pub enum AppSqliteError {
         #[source]
         source: rusqlite::Error,
     },
+    #[error("failed to execute sqlite query for {operation}")]
+    Query {
+        operation: &'static str,
+        #[source]
+        source: rusqlite::Error,
+    },
+    #[error("invalid sqlite id in `{field}`: `{value}`")]
+    DecodeId { field: &'static str, value: String },
+    #[error("invalid sqlite enum value in `{field}`: `{value}`")]
+    DecodeEnum { field: &'static str, value: String },
 }
