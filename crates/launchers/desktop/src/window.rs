@@ -7,6 +7,10 @@ use gpui_component::IconName;
 use radroots_studio_app_core::AppRuntimeSnapshot;
 use radroots_studio_app_i18n::AppTextKey;
 pub use radroots_studio_app_models::SettingsSection as SettingsPanelViewKey;
+use radroots_studio_app_state::{
+    AppShellCommand, AppShellProjection, AppStateStore, InMemoryAppStateRepository,
+    SettingsPreference,
+};
 use radroots_studio_app_ui::{
     APP_UI_THEME, AppCheckboxFieldSpec, IconSegmentButtonSpec, LabelValueRow, action_button,
     action_button_compact, action_icon_button, app_checkbox_field, app_shared_label_text,
@@ -122,27 +126,42 @@ impl Render for HomeView {
 }
 
 pub struct SettingsWindowView {
-    selected_view: SettingsPanelViewKey,
-    general_allow_relay_connections: bool,
-    general_use_media_servers: bool,
-    general_use_nip05: bool,
-    general_launch_at_login: bool,
+    store: AppStateStore<InMemoryAppStateRepository>,
 }
 
 impl SettingsWindowView {
     pub fn new(initial_view: SettingsPanelViewKey) -> Self {
         Self {
-            selected_view: initial_view,
-            general_allow_relay_connections: true,
-            general_use_media_servers: true,
-            general_use_nip05: true,
-            general_launch_at_login: false,
+            store: AppStateStore::in_memory(AppShellProjection::for_settings(initial_view)),
         }
     }
 
+    fn selected_view(&self) -> SettingsPanelViewKey {
+        self.store.projection().settings.selected_section
+    }
+
     fn select_view(&mut self, view: SettingsPanelViewKey, cx: &mut Context<Self>) {
-        if self.selected_view != view {
-            self.selected_view = view;
+        if self
+            .store
+            .apply_in_memory(AppShellCommand::select_settings_section(view))
+        {
+            cx.notify();
+        }
+    }
+
+    fn set_settings_preference(
+        &mut self,
+        preference: SettingsPreference,
+        enabled: bool,
+        cx: &mut Context<Self>,
+    ) {
+        if self
+            .store
+            .apply_in_memory(AppShellCommand::SetSettingsPreference {
+                preference,
+                enabled,
+            })
+        {
             cx.notify();
         }
     }
@@ -159,7 +178,7 @@ impl SettingsWindowView {
                 app_shared_text(settings_panel_label_key(view)),
                 navigation_icon,
             ),
-            self.selected_view == view,
+            self.selected_view() == view,
             cx.listener(move |this, _, _, cx| this.select_view(view, cx)),
             cx,
         )
@@ -488,6 +507,15 @@ impl SettingsWindowView {
     fn settings_panel(&mut self, cx: &mut Context<Self>) -> impl IntoElement {
         let section_label_width_px = 72.0;
         let form_max_width_px = 420.0;
+        let general_allow_relay_connections = self
+            .store
+            .projection()
+            .settings
+            .general
+            .allow_relay_connections;
+        let general_use_media_servers = self.store.projection().settings.general.use_media_servers;
+        let general_use_nip05 = self.store.projection().settings.general.use_nip05;
+        let general_launch_at_login = self.store.projection().settings.general.launch_at_login;
 
         div()
             .size_full()
@@ -522,53 +550,65 @@ impl SettingsWindowView {
                             .gap(px(16.0))
                             .child(self.settings_checkbox_row(
                                 "settings-allow-relay-connections",
-                                self.general_allow_relay_connections,
+                                general_allow_relay_connections,
                                 AppTextKey::SettingsGeneralAllowRelayConnections,
                                 None,
                                 None,
                                 None,
                                 cx.listener(|this, checked: &bool, _, cx| {
-                                    this.general_allow_relay_connections = *checked;
-                                    cx.notify();
+                                    this.set_settings_preference(
+                                        SettingsPreference::AllowRelayConnections,
+                                        *checked,
+                                        cx,
+                                    );
                                 }),
                                 cx,
                             ))
                             .child(self.settings_checkbox_row(
                                 "settings-use-media-servers",
-                                self.general_use_media_servers,
+                                general_use_media_servers,
                                 AppTextKey::SettingsGeneralUseMediaServers,
                                 Some("settings-manage-media-servers"),
                                 Some(AppTextKey::SettingsGeneralManageAction),
                                 None,
                                 cx.listener(|this, checked: &bool, _, cx| {
-                                    this.general_use_media_servers = *checked;
-                                    cx.notify();
+                                    this.set_settings_preference(
+                                        SettingsPreference::UseMediaServers,
+                                        *checked,
+                                        cx,
+                                    );
                                 }),
                                 cx,
                             ))
                             .child(self.settings_checkbox_row(
                                 "settings-use-nip05",
-                                self.general_use_nip05,
+                                general_use_nip05,
                                 AppTextKey::SettingsGeneralUseNip05,
                                 None,
                                 None,
                                 Some(AppTextKey::SettingsGeneralUseNip05Note),
                                 cx.listener(|this, checked: &bool, _, cx| {
-                                    this.general_use_nip05 = *checked;
-                                    cx.notify();
+                                    this.set_settings_preference(
+                                        SettingsPreference::UseNip05,
+                                        *checked,
+                                        cx,
+                                    );
                                 }),
                                 cx,
                             ))
                             .child(self.settings_checkbox_row(
                                 "settings-launch-at-login",
-                                self.general_launch_at_login,
+                                general_launch_at_login,
                                 AppTextKey::SettingsGeneralLaunchAtLogin,
                                 None,
                                 None,
                                 None,
                                 cx.listener(|this, checked: &bool, _, cx| {
-                                    this.general_launch_at_login = *checked;
-                                    cx.notify();
+                                    this.set_settings_preference(
+                                        SettingsPreference::LaunchAtLogin,
+                                        *checked,
+                                        cx,
+                                    );
                                 }),
                                 cx,
                             )),
@@ -629,7 +669,7 @@ impl SettingsWindowView {
     }
 
     fn settings_panel_content(&mut self, cx: &mut Context<Self>) -> AnyElement {
-        match self.selected_view {
+        match self.selected_view() {
             SettingsPanelViewKey::Account => self.account_panel(cx).into_any_element(),
             SettingsPanelViewKey::Settings => self.settings_panel(cx).into_any_element(),
             SettingsPanelViewKey::About => self.about_panel().into_any_element(),

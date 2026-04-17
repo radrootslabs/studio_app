@@ -4607,6 +4607,7 @@ dependencies = [
  "radroots_studio_app_core",
  "radroots_studio_app_i18n",
  "radroots_studio_app_models",
+ "radroots_studio_app_state",
  "radroots_studio_app_ui",
 ]
 
@@ -4640,6 +4641,14 @@ name = "radroots_studio_app_sqlite"
 version = "0.1.0"
 dependencies = [
  "rusqlite",
+ "thiserror 2.0.18",
+]
+
+[[package]]
+name = "radroots_studio_app_state"
+version = "0.1.0"
+dependencies = [
+ "radroots_studio_app_models",
  "thiserror 2.0.18",
 ]
 
