@@ -1,6 +1,6 @@
 use std::collections::BTreeSet;
 
-const ALLOWED_MENU_LITERALS: &[&str] = &["cmd-q"];
+const ALLOWED_MENU_LITERALS: &[&str] = &["cmd-q", "settings window should open"];
 
 const ALLOWED_WINDOW_LITERALS: &[&str] = &[
     "account-add",
@@ -8,7 +8,6 @@ const ALLOWED_WINDOW_LITERALS: &[&str] = &[
     "account-log-out",
     "account-more",
     "home-today-scroll",
-    "settings window should open",
     "settings-allow-relay-connections",
     "settings-launch-at-login",
     "settings-manage-media-servers",

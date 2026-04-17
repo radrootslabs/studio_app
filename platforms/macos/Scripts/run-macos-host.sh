@@ -20,4 +20,5 @@ executable_name="$(
 )"
 executable_path="${app_path}/Contents/MacOS/${executable_name}"
 
-exec "${executable_path}" "$@"
+"${executable_path}" "$@" &
+disown

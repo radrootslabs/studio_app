@@ -1,18 +1,19 @@
-use gpui::{AppContext, Application, WindowOptions, px, size};
+use gpui::{Application, WindowOptions, px, size};
 use radroots_studio_app_core::{APP_PROJECTION_SOURCE, AppBuildIdentity, AppRuntimeSnapshot};
 use radroots_studio_app_i18n::select_locale_from_host;
 use radroots_studio_app_ui::APP_UI_THEME;
 
 use crate::menus::install_native_app_menu;
 use crate::runtime::DesktopAppRuntime;
-use crate::window::{HomeView, home_titlebar_options};
+use crate::window::{home_titlebar_options, open_home_window};
 
 pub fn launch() {
     let snapshot = AppRuntimeSnapshot::capture(build_identity());
     let runtime = DesktopAppRuntime::bootstrap();
-    let app = Application::new();
+    let app = Application::new().with_assets(gpui_component_assets::Assets);
 
     app.run(move |cx| {
+        gpui_component::init(cx);
         select_locale_from_host(&snapshot.host.host_locale);
         install_native_app_menu(runtime.clone(), cx);
 
@@ -36,7 +37,10 @@ pub fn launch() {
                     titlebar: Some(home_titlebar_options()),
                     ..Default::default()
                 },
-                |_, cx| cx.new(|_| HomeView::new(runtime.clone())),
+                |window, cx| {
+                    window.activate_window();
+                    open_home_window(window, cx, runtime.clone())
+                },
             )
             .expect("main radroots app window should open");
 

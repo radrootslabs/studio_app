@@ -1,9 +1,9 @@
 use gpui::{
-    AnyElement, App, AppContext, Bounds, Context, InteractiveElement, IntoElement, ParentElement,
-    Render, SharedString, StatefulInteractiveElement, Styled, Window, WindowBounds, WindowOptions,
-    div, prelude::FluentBuilder, px, relative, rgb, size,
+    AnyElement, App, AppContext, Context, InteractiveElement, IntoElement, ParentElement, Render,
+    SharedString, StatefulInteractiveElement, Styled, Window, div, prelude::FluentBuilder, px,
+    relative, rgb,
 };
-use gpui_component::IconName;
+use gpui_component::{IconName, Root};
 use radroots_studio_app_i18n::AppTextKey;
 pub use radroots_studio_app_models::SettingsSection as SettingsPanelViewKey;
 use radroots_studio_app_models::{
@@ -36,34 +36,24 @@ pub fn settings_titlebar_options() -> gpui::TitlebarOptions {
     }
 }
 
+pub fn open_home_window(
+    window: &mut Window,
+    cx: &mut App,
+    runtime: DesktopAppRuntime,
+) -> gpui::Entity<Root> {
+    let view = cx.new(|_| HomeView::new(runtime));
+    cx.new(|cx| Root::new(view, window, cx))
+}
+
 pub fn open_settings_window(
+    window: &mut Window,
     cx: &mut App,
     runtime: DesktopAppRuntime,
     initial_view: SettingsPanelViewKey,
-) {
-    let bounds = Bounds::centered(
-        None,
-        size(
-            px(APP_UI_THEME.windows.settings_width_px),
-            px(APP_UI_THEME.windows.settings_height_px),
-        ),
-        cx,
-    );
+) -> gpui::Entity<Root> {
     let _ = runtime.select_settings_section(initial_view);
-
-    cx.open_window(
-        WindowOptions {
-            window_bounds: Some(WindowBounds::Windowed(bounds)),
-            window_min_size: Some(size(
-                px(APP_UI_THEME.windows.settings_width_px),
-                px(APP_UI_THEME.windows.settings_height_px),
-            )),
-            titlebar: Some(settings_titlebar_options()),
-            ..Default::default()
-        },
-        |_, cx| cx.new(|_| SettingsWindowView::new(runtime.clone())),
-    )
-    .expect("settings window should open");
+    let view = cx.new(|_| SettingsWindowView::new(runtime));
+    cx.new(|cx| Root::new(view, window, cx))
 }
 
 pub struct HomeView {

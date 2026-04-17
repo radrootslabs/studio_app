@@ -1,9 +1,13 @@
-use gpui::{App, KeyBinding, Menu, MenuItem, SystemMenuType, actions};
+use gpui::{
+    App, Bounds, KeyBinding, Menu, MenuItem, SystemMenuType, WindowBounds, WindowOptions,
+    actions, px, size,
+};
 use radroots_studio_app_i18n::{AppTextKey, app_text};
+use radroots_studio_app_ui::APP_UI_THEME;
 
 use crate::{
     runtime::DesktopAppRuntime,
-    window::{SettingsPanelViewKey, open_settings_window},
+    window::{SettingsPanelViewKey, open_settings_window, settings_titlebar_options},
 };
 
 actions!(radroots_studio_app, [OpenAboutWindow, QuitApp]);
@@ -14,7 +18,30 @@ const fn about_menu_settings_view() -> SettingsPanelViewKey {
 
 pub fn install_native_app_menu(runtime: DesktopAppRuntime, cx: &mut App) {
     cx.on_action(move |_: &OpenAboutWindow, cx| {
-        open_settings_window(cx, runtime.clone(), about_menu_settings_view());
+        let bounds = Bounds::centered(
+            None,
+            size(
+                px(APP_UI_THEME.windows.settings_width_px),
+                px(APP_UI_THEME.windows.settings_height_px),
+            ),
+            cx,
+        );
+
+        cx.open_window(
+            WindowOptions {
+                window_bounds: Some(WindowBounds::Windowed(bounds)),
+                window_min_size: Some(size(
+                    px(APP_UI_THEME.windows.settings_width_px),
+                    px(APP_UI_THEME.windows.settings_height_px),
+                )),
+                titlebar: Some(settings_titlebar_options()),
+                ..Default::default()
+            },
+            |window, cx| {
+                open_settings_window(window, cx, runtime.clone(), about_menu_settings_view())
+            },
+        )
+        .expect("settings window should open");
     });
     cx.on_action(|_: &QuitApp, cx| cx.quit());
     cx.bind_keys([KeyBinding::new("cmd-q", QuitApp, None)]);
