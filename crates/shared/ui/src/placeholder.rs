@@ -14,7 +14,7 @@ impl Render for PlaceholderView {
                     .text_size(px(APP_UI_THEME.typography.brand_text_px))
                     .font_weight(FontWeight::SEMIBOLD)
                     .text_color(rgb(APP_UI_THEME.text.primary))
-                    .child(app_text(AppTextKey::Brand)),
+                    .child(app_text(AppTextKey::HomeBrand)),
             ),
         )
     }

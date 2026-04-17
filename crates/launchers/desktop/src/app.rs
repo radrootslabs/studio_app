@@ -1,5 +1,6 @@
 use gpui::{AppContext, Application, WindowOptions, px, size};
 use radroots_studio_app_core::APP_ID;
+use radroots_studio_app_i18n::select_locale_for_process;
 use radroots_studio_app_ui::{APP_UI_THEME, PlaceholderView};
 
 fn titlebar_options() -> gpui::TitlebarOptions {
@@ -14,6 +15,8 @@ pub fn launch() {
     let app = Application::new();
 
     app.run(|cx| {
+        select_locale_for_process();
+
         cx.on_window_closed(|cx| {
             if cx.windows().is_empty() {
                 cx.quit();

@@ -1,12 +1,132 @@
 #![forbid(unsafe_code)]
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum AppTextKey {
-    Brand,
+use mf2_i18n_core::{LanguageTag, negotiate_lookup};
+
+mod keys;
+
+pub use keys::AppTextKey;
+
+include!(concat!(env!("OUT_DIR"), "/app_i18n/generated_module.rs"));
+include!(concat!(env!("OUT_DIR"), "/app_i18n/generated_catalog.rs"));
+
+pub fn app_text(key: AppTextKey) -> String {
+    generated::tr(key.id())
+        .unwrap_or_else(|error| panic!("missing localized app text for key {}: {error}", key.id()))
 }
 
-pub fn app_text(key: AppTextKey) -> &'static str {
-    match key {
-        AppTextKey::Brand => "radroots",
+pub fn default_locale() -> &'static str {
+    DEFAULT_LOCALE_ID
+}
+
+pub fn supported_locales() -> &'static [&'static str] {
+    SUPPORTED_LOCALE_IDS
+}
+
+pub fn resolve_locale_from_host(host_locale: &str) -> String {
+    let normalized = normalize_host_locale(host_locale);
+    let requested_locale = match LanguageTag::parse(&normalized) {
+        Ok(locale) => locale,
+        Err(_) => return DEFAULT_LOCALE_ID.to_owned(),
+    };
+    let supported = SUPPORTED_LOCALE_IDS
+        .iter()
+        .map(|locale| LanguageTag::parse(locale).expect("supported locale should parse"))
+        .collect::<Vec<_>>();
+    let default_locale =
+        LanguageTag::parse(DEFAULT_LOCALE_ID).expect("default locale should parse");
+
+    negotiate_lookup(&[requested_locale], &supported, &default_locale)
+        .selected
+        .normalized()
+        .to_owned()
+}
+
+pub fn select_locale_from_host(host_locale: &str) -> String {
+    let locale = resolve_locale_from_host(host_locale);
+    generated::set_locale(&locale).unwrap_or_else(|_| DEFAULT_LOCALE_ID.to_owned())
+}
+
+pub fn select_locale_for_process() -> String {
+    let host_locale = [
+        std::env::var("LC_ALL").ok(),
+        std::env::var("LC_MESSAGES").ok(),
+        std::env::var("LANGUAGE").ok(),
+        std::env::var("LANG").ok(),
+    ]
+    .into_iter()
+    .flatten()
+    .find(|value| !value.trim().is_empty())
+    .unwrap_or_else(|| DEFAULT_LOCALE_ID.to_owned());
+
+    select_locale_from_host(&host_locale)
+}
+
+fn normalize_host_locale(host_locale: &str) -> String {
+    let trimmed = host_locale.trim();
+    if trimmed.is_empty() {
+        return DEFAULT_LOCALE_ID.to_owned();
+    }
+
+    let without_fallbacks = trimmed.split(':').next().unwrap_or(DEFAULT_LOCALE_ID);
+    let without_encoding = without_fallbacks
+        .split('.')
+        .next()
+        .unwrap_or(DEFAULT_LOCALE_ID)
+        .split('@')
+        .next()
+        .unwrap_or(DEFAULT_LOCALE_ID)
+        .trim();
+    if without_encoding.is_empty() {
+        return DEFAULT_LOCALE_ID.to_owned();
+    }
+
+    without_encoding.replace('_', "-")
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::BTreeSet;
+
+    use super::{
+        AppTextKey, app_text, default_locale, resolve_locale_from_host, supported_locales,
+    };
+
+    #[test]
+    fn generated_catalog_matches_typed_key_registry() {
+        let catalog_keys = super::DEFAULT_CATALOG_KEY_IDS
+            .iter()
+            .copied()
+            .collect::<BTreeSet<_>>();
+        let typed_keys = AppTextKey::ALL
+            .iter()
+            .map(|key| key.id())
+            .collect::<BTreeSet<_>>();
+
+        assert_eq!(typed_keys, catalog_keys);
+    }
+
+    #[test]
+    fn english_catalog_covers_all_defined_text_keys() {
+        assert_eq!(super::generated::default_locale(), default_locale());
+        assert_eq!(
+            super::generated::supported_locales(),
+            supported_locales()
+                .iter()
+                .map(|locale| (*locale).to_owned())
+                .collect::<Vec<_>>()
+        );
+
+        for key in AppTextKey::ALL {
+            assert!(!app_text(*key).trim().is_empty());
+        }
+    }
+
+    #[test]
+    fn host_locale_negotiation_reduces_to_supported_base_locale() {
+        assert_eq!(resolve_locale_from_host("en_US.UTF-8"), "en");
+        assert_eq!(resolve_locale_from_host("en-GB"), "en");
+        assert_eq!(resolve_locale_from_host("en:fr"), "en");
+        assert_eq!(resolve_locale_from_host(""), "en");
+        assert_eq!(resolve_locale_from_host("C.UTF-8"), "en");
     }
 }
