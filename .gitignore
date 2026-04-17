@@ -16,6 +16,7 @@
 /platforms/android/local.properties
 /platforms/ios/.derived-data*/
 /platforms/ios/*.xcodeproj/
+/platforms/macos/.derived-data*/
 
 # Local environment files
 .env
