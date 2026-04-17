@@ -87,8 +87,90 @@ pub fn runtime_metadata_rows(snapshot: &AppRuntimeSnapshot) -> Vec<LabelValueRow
     ]
 }
 
+pub fn settings_account_profile_rows() -> Vec<LabelValueRow> {
+    vec![
+        text_row(
+            AppTextKey::SettingsAccountsIdentityLabel,
+            AppTextKey::SettingsAccountsIdentityValue,
+        ),
+        text_row(
+            AppTextKey::SettingsAccountsStatusLabel,
+            AppTextKey::SettingsAccountsStatusValue,
+        ),
+    ]
+}
+
+pub fn settings_account_runtime_rows() -> Vec<LabelValueRow> {
+    vec![
+        text_row(
+            AppTextKey::SettingsAccountsSyncLabel,
+            AppTextKey::SettingsAccountsSyncValue,
+        ),
+        text_row(
+            AppTextKey::SettingsAccountsRecoveryLabel,
+            AppTextKey::SettingsAccountsRecoveryValue,
+        ),
+    ]
+}
+
+pub fn settings_preferences_general_rows() -> Vec<LabelValueRow> {
+    vec![
+        text_row(
+            AppTextKey::SettingsPreferencesLaunchLabel,
+            AppTextKey::SettingsPreferencesLaunchValue,
+        ),
+        text_row(
+            AppTextKey::SettingsPreferencesNetworkLabel,
+            AppTextKey::SettingsPreferencesNetworkValue,
+        ),
+    ]
+}
+
+pub fn settings_preferences_device_rows() -> Vec<LabelValueRow> {
+    vec![
+        text_row(
+            AppTextKey::SettingsPreferencesNotificationsLabel,
+            AppTextKey::SettingsPreferencesNotificationsValue,
+        ),
+        text_row(
+            AppTextKey::SettingsPreferencesDiagnosticsLabel,
+            AppTextKey::SettingsPreferencesDiagnosticsValue,
+        ),
+    ]
+}
+
+pub fn settings_about_build_rows() -> Vec<LabelValueRow> {
+    vec![
+        text_row(
+            AppTextKey::SettingsAboutShellLabel,
+            AppTextKey::SettingsAboutShellValue,
+        ),
+        text_row(
+            AppTextKey::SettingsAboutLicenseLabel,
+            AppTextKey::SettingsAboutLicenseValue,
+        ),
+    ]
+}
+
+pub fn settings_about_status_rows() -> Vec<LabelValueRow> {
+    vec![
+        text_row(
+            AppTextKey::SettingsAboutPostureLabel,
+            AppTextKey::SettingsAboutPostureValue,
+        ),
+        text_row(
+            AppTextKey::SettingsAboutMilestoneLabel,
+            AppTextKey::SettingsAboutMilestoneValue,
+        ),
+    ]
+}
+
 fn metadata_row(label: AppTextKey, value: impl Into<String>) -> LabelValueRow {
     LabelValueRow::new(app_shared_text(label), value.into())
+}
+
+fn text_row(label: AppTextKey, value: AppTextKey) -> LabelValueRow {
+    metadata_row(label, app_text(value))
 }
 
 fn runtime_mode_text(mode: &AppRuntimeMode) -> String {
@@ -106,7 +188,9 @@ mod tests {
         AppRuntimeSnapshot,
     };
 
-    use super::runtime_metadata_rows;
+    use super::{
+        runtime_metadata_rows, settings_about_status_rows, settings_preferences_general_rows,
+    };
 
     #[test]
     fn runtime_metadata_rows_use_localized_labels() {
@@ -137,5 +221,20 @@ mod tests {
             rows.iter()
                 .any(|row| row.label == "app id" && row.value == "org.radroots.app")
         );
+    }
+
+    #[test]
+    fn settings_placeholder_rows_use_localized_copy() {
+        let general_rows = settings_preferences_general_rows();
+        let about_rows = settings_about_status_rows();
+
+        assert!(
+            general_rows
+                .iter()
+                .any(|row| row.label == "launch behavior" && row.value == "manual launch only")
+        );
+        assert!(about_rows.iter().any(|row| {
+            row.label == "next milestone" && row.value == "interactive account flows"
+        }));
     }
 }

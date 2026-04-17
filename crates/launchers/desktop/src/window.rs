@@ -1,12 +1,14 @@
 use gpui::{
-    Context, InteractiveElement, IntoElement, ParentElement, Render, StatefulInteractiveElement,
-    Styled, Window, div, px, rgb,
+    AnyElement, Context, InteractiveElement, IntoElement, ParentElement, Render,
+    StatefulInteractiveElement, Styled, Window, div, px, rgb,
 };
 use radroots_studio_app_core::AppRuntimeSnapshot;
 use radroots_studio_app_i18n::AppTextKey;
 use radroots_studio_app_ui::{
     APP_UI_THEME, LabelValueRow, app_card, app_shared_text, app_window_shell, label_value_list,
-    runtime_metadata_rows, section_divider, utility_title_row,
+    runtime_metadata_rows, section_divider, settings_about_build_rows, settings_about_status_rows,
+    settings_account_profile_rows, settings_account_runtime_rows, settings_preferences_device_rows,
+    settings_preferences_general_rows, utility_title_row,
 };
 
 use crate::menus::OpenSettingsWindow;
@@ -41,6 +43,14 @@ impl SettingsPanelViewKey {
             Self::Accounts => AppTextKey::SettingsNavAccounts,
             Self::Settings => AppTextKey::SettingsNavSettings,
             Self::About => AppTextKey::SettingsNavAbout,
+        }
+    }
+
+    fn summary_key(self) -> AppTextKey {
+        match self {
+            Self::Accounts => AppTextKey::SettingsAccountsSummary,
+            Self::Settings => AppTextKey::SettingsPreferencesSummary,
+            Self::About => AppTextKey::SettingsAboutSummary,
         }
     }
 }
@@ -223,6 +233,118 @@ impl SettingsWindowView {
                 this.select_view(view, cx);
             }))
     }
+
+    fn summary_card(&self, view: SettingsPanelViewKey) -> impl IntoElement {
+        app_card(
+            div()
+                .w_full()
+                .flex()
+                .flex_col()
+                .gap(px(APP_UI_THEME.layout.home_stack_gap_px))
+                .child(utility_title_row(app_shared_text(view.label_key())))
+                .child(section_divider())
+                .child(
+                    div()
+                        .w_full()
+                        .text_size(px(APP_UI_THEME.typography.body_text_px))
+                        .text_color(rgb(APP_UI_THEME.text.secondary))
+                        .child(app_shared_text(view.summary_key())),
+                ),
+        )
+    }
+
+    fn detail_card(&self, title: AppTextKey, rows: Vec<LabelValueRow>) -> impl IntoElement {
+        app_card(
+            div()
+                .w_full()
+                .flex()
+                .flex_col()
+                .gap(px(APP_UI_THEME.layout.home_stack_gap_px))
+                .child(utility_title_row(app_shared_text(title)))
+                .child(section_divider())
+                .child(label_value_list(rows)),
+        )
+    }
+
+    fn accounts_panel(&self) -> impl IntoElement {
+        div()
+            .id("settings-panel-scroll")
+            .size_full()
+            .overflow_y_scroll()
+            .child(
+                div()
+                    .w_full()
+                    .p(px(APP_UI_THEME.layout.settings_content_padding_px))
+                    .flex()
+                    .flex_col()
+                    .gap(px(APP_UI_THEME.layout.home_stack_gap_px))
+                    .child(self.summary_card(SettingsPanelViewKey::Accounts))
+                    .child(self.detail_card(
+                        AppTextKey::SettingsAccountsProfileTitle,
+                        settings_account_profile_rows(),
+                    ))
+                    .child(self.detail_card(
+                        AppTextKey::SettingsAccountsRuntimeTitle,
+                        settings_account_runtime_rows(),
+                    )),
+            )
+    }
+
+    fn settings_panel(&self) -> impl IntoElement {
+        div()
+            .id("settings-panel-scroll")
+            .size_full()
+            .overflow_y_scroll()
+            .child(
+                div()
+                    .w_full()
+                    .p(px(APP_UI_THEME.layout.settings_content_padding_px))
+                    .flex()
+                    .flex_col()
+                    .gap(px(APP_UI_THEME.layout.home_stack_gap_px))
+                    .child(self.summary_card(SettingsPanelViewKey::Settings))
+                    .child(self.detail_card(
+                        AppTextKey::SettingsPreferencesGeneralTitle,
+                        settings_preferences_general_rows(),
+                    ))
+                    .child(self.detail_card(
+                        AppTextKey::SettingsPreferencesDeviceTitle,
+                        settings_preferences_device_rows(),
+                    )),
+            )
+    }
+
+    fn about_panel(&self) -> impl IntoElement {
+        div()
+            .id("settings-panel-scroll")
+            .size_full()
+            .overflow_y_scroll()
+            .child(
+                div()
+                    .w_full()
+                    .p(px(APP_UI_THEME.layout.settings_content_padding_px))
+                    .flex()
+                    .flex_col()
+                    .gap(px(APP_UI_THEME.layout.home_stack_gap_px))
+                    .child(self.summary_card(SettingsPanelViewKey::About))
+                    .child(self.detail_card(
+                        AppTextKey::SettingsAboutBuildTitle,
+                        settings_about_build_rows(),
+                    ))
+                    .child(self.detail_card(
+                        AppTextKey::SettingsAboutStatusTitle,
+                        settings_about_status_rows(),
+                    )),
+            )
+    }
+
+    fn settings_panel_content(&self) -> AnyElement {
+        match self.selected_view {
+            SettingsPanelViewKey::Accounts => self.accounts_panel().into_any_element(),
+            SettingsPanelViewKey::Settings => self.settings_panel().into_any_element(),
+            SettingsPanelViewKey::About => self.about_panel().into_any_element(),
+        }
+    }
 }
 
 impl Render for SettingsWindowView {
@@ -296,30 +418,7 @@ impl Render for SettingsWindowView {
                                 .w(px(APP_UI_THEME.layout.divider_thickness_px))
                                 .bg(rgb(APP_UI_THEME.surfaces.divider)),
                         )
-                        .child(
-                            div()
-                                .flex_1()
-                                .h_full()
-                                .p(px(APP_UI_THEME.layout.settings_content_padding_px))
-                                .child(
-                                    div()
-                                        .size_full()
-                                        .bg(rgb(APP_UI_THEME.surfaces.panel_background))
-                                        .rounded(px(12.0))
-                                        .child(
-                                            div()
-                                                .size_full()
-                                                .flex()
-                                                .items_center()
-                                                .justify_center()
-                                                .text_size(px(APP_UI_THEME.typography.body_text_px))
-                                                .text_color(rgb(APP_UI_THEME.text.secondary))
-                                                .child(app_shared_text(
-                                                    self.selected_view.label_key(),
-                                                )),
-                                        ),
-                                ),
-                        ),
+                        .child(div().flex_1().h_full().child(self.settings_panel_content())),
                 ),
         )
     }
