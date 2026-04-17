@@ -2,8 +2,8 @@
 set -euo pipefail
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
-repo_root="$(git -C "${script_dir}" rev-parse --show-toplevel)"
-superproject_root="$(git -C "${script_dir}" rev-parse --show-superproject-working-tree || true)"
+platform_root="$(cd "${script_dir}/.." && pwd -P)"
+source_artwork="${platform_root}/App/Resources/logo.png"
 output_path="${1:-}"
 
 require_command() {
@@ -14,15 +14,8 @@ require_command() {
   exit 1
 }
 
-require_command git
 require_command sips
 require_command iconutil
-
-if [[ -n "${superproject_root}" && -f "${superproject_root}/logo.png" ]]; then
-  source_artwork="${superproject_root}/logo.png"
-else
-  source_artwork="${repo_root}/logo.png"
-fi
 
 if [[ -z "${output_path}" ]]; then
   echo "usage: $0 <output-icns-path>" >&2
