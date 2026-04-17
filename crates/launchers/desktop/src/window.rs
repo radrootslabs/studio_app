@@ -6,6 +6,7 @@ use gpui::{
 use gpui_component::IconName;
 use radroots_studio_app_core::AppRuntimeSnapshot;
 use radroots_studio_app_i18n::AppTextKey;
+pub use radroots_studio_app_models::SettingsSection as SettingsPanelViewKey;
 use radroots_studio_app_ui::{
     APP_UI_THEME, AppCheckboxFieldSpec, IconSegmentButtonSpec, LabelValueRow, action_button,
     action_button_compact, action_icon_button, app_checkbox_field, app_shared_label_text,
@@ -52,32 +53,6 @@ pub fn open_settings_window(cx: &mut App, initial_view: SettingsPanelViewKey) {
         |_, cx| cx.new(|_| SettingsWindowView::new(initial_view)),
     )
     .expect("settings window should open");
-}
-
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
-pub enum SettingsPanelViewKey {
-    #[default]
-    Account,
-    Settings,
-    About,
-}
-
-impl SettingsPanelViewKey {
-    fn label_key(self) -> AppTextKey {
-        match self {
-            Self::Account => AppTextKey::SettingsNavAccounts,
-            Self::Settings => AppTextKey::SettingsNavSettings,
-            Self::About => AppTextKey::SettingsNavAbout,
-        }
-    }
-
-    fn spec(self) -> (&'static str, IconName) {
-        match self {
-            Self::Account => ("settings-nav-accounts", IconName::CircleUser),
-            Self::Settings => ("settings-nav-settings", IconName::Settings2),
-            Self::About => ("settings-nav-about", IconName::Info),
-        }
-    }
 }
 
 pub struct HomeView {
@@ -177,11 +152,11 @@ impl SettingsWindowView {
         view: SettingsPanelViewKey,
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
-        let (navigation_id, navigation_icon) = view.spec();
+        let (navigation_id, navigation_icon) = settings_panel_spec(view);
         icon_segment_button(
             IconSegmentButtonSpec::new(
                 navigation_id,
-                app_shared_text(view.label_key()),
+                app_shared_text(settings_panel_label_key(view)),
                 navigation_icon,
             ),
             self.selected_view == view,
@@ -703,5 +678,21 @@ impl Render for SettingsWindowView {
                         .child(self.settings_panel_content(cx)),
                 ),
         )
+    }
+}
+
+fn settings_panel_label_key(view: SettingsPanelViewKey) -> AppTextKey {
+    match view {
+        SettingsPanelViewKey::Account => AppTextKey::SettingsNavAccounts,
+        SettingsPanelViewKey::Settings => AppTextKey::SettingsNavSettings,
+        SettingsPanelViewKey::About => AppTextKey::SettingsNavAbout,
+    }
+}
+
+fn settings_panel_spec(view: SettingsPanelViewKey) -> (&'static str, IconName) {
+    match view {
+        SettingsPanelViewKey::Account => ("settings-nav-accounts", IconName::CircleUser),
+        SettingsPanelViewKey::Settings => ("settings-nav-settings", IconName::Settings2),
+        SettingsPanelViewKey::About => ("settings-nav-about", IconName::Info),
     }
 }

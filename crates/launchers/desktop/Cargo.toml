@@ -14,6 +14,7 @@ gpui-component.workspace = true
 gpui-component-assets.workspace = true
 radroots_studio_app_core.workspace = true
 radroots_studio_app_i18n.workspace = true
+radroots_studio_app_models.workspace = true
 radroots_studio_app_ui.workspace = true
 
 [lints]

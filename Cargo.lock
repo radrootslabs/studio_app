@@ -4571,6 +4571,7 @@ dependencies = [
  "gpui-component-assets",
  "radroots_studio_app_core",
  "radroots_studio_app_i18n",
+ "radroots_studio_app_models",
  "radroots_studio_app_ui",
 ]
 
@@ -4589,6 +4590,14 @@ dependencies = [
  "serde",
  "serde_json",
  "toml 0.8.23",
+]
+
+[[package]]
+name = "radroots_studio_app_models"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "uuid",
 ]
 
 [[package]]

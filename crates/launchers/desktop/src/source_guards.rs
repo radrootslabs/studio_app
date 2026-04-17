@@ -24,7 +24,10 @@ const ALLOWED_WINDOW_LITERALS: &[&str] = &[
 fn desktop_menu_source_uses_localized_copy_paths() {
     assert_eq!(
         extract_string_literals(include_str!("menus.rs")),
-        ALLOWED_MENU_LITERALS.iter().copied().collect::<BTreeSet<_>>()
+        ALLOWED_MENU_LITERALS
+            .iter()
+            .copied()
+            .collect::<BTreeSet<_>>()
     );
 }
 
