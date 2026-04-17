@@ -1,6 +1,6 @@
 use gpui::{AppContext, Application, WindowOptions, px, size};
-use radroots_studio_app_core::{APP_ID, HOME_WINDOW_METRICS};
-use radroots_studio_app_ui::{HOME_WINDOW_MIN_HEIGHT_PX, HOME_WINDOW_MIN_WIDTH_PX, PlaceholderView};
+use radroots_studio_app_core::APP_ID;
+use radroots_studio_app_ui::{APP_UI_THEME, PlaceholderView};
 
 fn titlebar_options() -> gpui::TitlebarOptions {
     gpui::TitlebarOptions {
@@ -26,8 +26,8 @@ pub fn launch() {
                 WindowOptions {
                     app_id: Some(APP_ID.to_owned()),
                     window_min_size: Some(size(
-                        px(HOME_WINDOW_METRICS.min_width_px.max(HOME_WINDOW_MIN_WIDTH_PX)),
-                        px(HOME_WINDOW_METRICS.min_height_px.max(HOME_WINDOW_MIN_HEIGHT_PX)),
+                        px(APP_UI_THEME.windows.home_min_width_px),
+                        px(APP_UI_THEME.windows.home_min_height_px),
                     )),
                     titlebar: Some(titlebar_options()),
                     ..Default::default()
