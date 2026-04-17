@@ -1,0 +1,16 @@
+[package]
+name = "radroots_studio_app_ui"
+description = "GPUI component library for Radroots Studio"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+
+[dependencies]
+gpui.workspace = true
+radroots_studio_app_i18n.workspace = true
+
+[lints]
+workspace = true

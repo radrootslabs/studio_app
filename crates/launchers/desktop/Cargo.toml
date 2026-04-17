@@ -1,0 +1,17 @@
+[package]
+name = "radroots_studio_app"
+description = "GPUI desktop client for Radroots"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+
+[dependencies]
+gpui.workspace = true
+radroots_studio_app_core.workspace = true
+radroots_studio_app_ui.workspace = true
+
+[lints]
+workspace = true

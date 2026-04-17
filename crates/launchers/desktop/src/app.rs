@@ -1,4 +1,6 @@
 use gpui::{AppContext, Application, WindowOptions, px, size};
+use radroots_studio_app_core::{APP_ID, HOME_WINDOW_METRICS};
+use radroots_studio_app_ui::{HOME_WINDOW_MIN_HEIGHT_PX, HOME_WINDOW_MIN_WIDTH_PX, PlaceholderView};
 
 fn titlebar_options() -> gpui::TitlebarOptions {
     gpui::TitlebarOptions {
@@ -22,12 +24,15 @@ pub fn launch() {
         cx.spawn(async move |cx| {
             cx.open_window(
                 WindowOptions {
-                    app_id: Some("org.radroots.app".to_owned()),
-                    window_min_size: Some(size(px(640.0), px(480.0))),
+                    app_id: Some(APP_ID.to_owned()),
+                    window_min_size: Some(size(
+                        px(HOME_WINDOW_METRICS.min_width_px.max(HOME_WINDOW_MIN_WIDTH_PX)),
+                        px(HOME_WINDOW_METRICS.min_height_px.max(HOME_WINDOW_MIN_HEIGHT_PX)),
+                    )),
                     titlebar: Some(titlebar_options()),
                     ..Default::default()
                 },
-                |_, cx| cx.new(|_| crate::window::PlaceholderView),
+                |_, cx| cx.new(|_| PlaceholderView),
             )
             .expect("main radroots app window should open");
 
@@ -36,5 +41,4 @@ pub fn launch() {
         })
         .detach();
     });
-
 }
