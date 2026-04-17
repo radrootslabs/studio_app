@@ -1,15 +1,12 @@
 use std::path::PathBuf;
 
+use radroots_studio_app_core::{AppRuntimePathsError, AppRuntimeRoots};
 use radroots_studio_app_models::AppMode;
 use radroots_studio_app_sqlite::{AppSqliteError, AppSqliteStore, DatabaseTarget};
 use radroots_studio_app_state::{
     AppShellProjection, AppStateStore, AppStateStoreError, InMemoryAppStateRepository,
 };
 use radroots_studio_app_sync::{AppSyncProjection, SyncCheckpointStatus, SyncConflictStatus};
-use radroots_runtime_paths::{
-    RadrootsPathOverrides, RadrootsPathProfile, RadrootsPathResolver, RadrootsRuntimeNamespace,
-    RadrootsRuntimePathsError,
-};
 use thiserror::Error;
 
 const APP_DATABASE_FILE_NAME: &str = "app.sqlite3";
@@ -34,13 +31,7 @@ impl DesktopAppSubstrateSummary {
     }
 
     fn try_bootstrap() -> Result<Self, DesktopAppSubstrateError> {
-        let namespace = RadrootsRuntimeNamespace::app("app")?;
-        let roots = RadrootsPathResolver::current()
-            .resolve(
-                RadrootsPathProfile::InteractiveUser,
-                &RadrootsPathOverrides::default(),
-            )?
-            .namespaced(&namespace);
+        let roots = AppRuntimeRoots::current_desktop()?;
         let database_path = roots.data.join(APP_DATABASE_FILE_NAME);
         let sqlite_store = AppSqliteStore::open(DatabaseTarget::Path(database_path.clone()))?;
         let shell_store = AppStateStore::load(InMemoryAppStateRepository::default())?;
@@ -80,7 +71,7 @@ impl DesktopAppSubstrateSummary {
 #[derive(Debug, Error)]
 enum DesktopAppSubstrateError {
     #[error(transparent)]
-    RuntimePaths(#[from] RadrootsRuntimePathsError),
+    RuntimePaths(#[from] AppRuntimePathsError),
     #[error(transparent)]
     Sqlite(#[from] AppSqliteError),
     #[error(transparent)]
@@ -91,41 +82,31 @@ enum DesktopAppSubstrateError {
 mod tests {
     use std::path::PathBuf;
 
-    use radroots_runtime_paths::{
-        RadrootsHostEnvironment, RadrootsPathOverrides, RadrootsPathProfile, RadrootsPathResolver,
-        RadrootsPlatform, RadrootsRuntimeNamespace,
-    };
+    use radroots_studio_app_core::{AppRuntimeHostEnvironment, AppRuntimePlatform, AppRuntimeRoots};
 
     use super::APP_DATABASE_FILE_NAME;
 
     #[test]
     fn desktop_namespace_uses_canonical_app_data_root() {
-        let namespace = RadrootsRuntimeNamespace::app("app").expect("app namespace should parse");
-        let resolver = RadrootsPathResolver::new(
-            RadrootsPlatform::Macos,
-            RadrootsHostEnvironment {
+        let roots = AppRuntimeRoots::for_desktop(
+            AppRuntimePlatform::Macos,
+            AppRuntimeHostEnvironment {
                 home_dir: Some(PathBuf::from("/Users/treesap")),
-                ..RadrootsHostEnvironment::default()
+                ..AppRuntimeHostEnvironment::default()
             },
-        );
-        let namespaced = resolver
-            .resolve(
-                RadrootsPathProfile::InteractiveUser,
-                &RadrootsPathOverrides::default(),
-            )
-            .expect("interactive user roots should resolve")
-            .namespaced(&namespace);
+        )
+        .expect("interactive user roots should resolve");
 
         assert_eq!(
-            namespaced.data,
+            roots.data,
             PathBuf::from("/Users/treesap/.radroots/data/apps/app")
         );
         assert_eq!(
-            namespaced.logs,
+            roots.logs,
             PathBuf::from("/Users/treesap/.radroots/logs/apps/app")
         );
         assert_eq!(
-            namespaced.data.join(APP_DATABASE_FILE_NAME),
+            roots.data.join(APP_DATABASE_FILE_NAME),
             PathBuf::from("/Users/treesap/.radroots/data/apps/app/app.sqlite3")
         );
     }

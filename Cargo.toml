@@ -26,9 +26,9 @@ gpui = "0.2.2"
 gpui-component = "0.5.1"
 gpui-component-assets = "0.5.1"
 hex = "0.4"
-mf2-i18n-build = { path = "../../../../vendor/triesap/mf2-i18n/crates/mf2-i18n-build", version = "0.1.0" }
-mf2-i18n-core = { path = "../../../../vendor/triesap/mf2-i18n/crates/mf2-i18n-core", version = "0.1.0" }
-mf2-i18n-native = { path = "../../../../vendor/triesap/mf2-i18n/crates/mf2-i18n-native", version = "0.1.0" }
+mf2-i18n-build = { git = "https://github.com/triesap/mf2-i18n.git", rev = "0c3ba2729b309f27aed3e27ae4e753b0147a75ec" }
+mf2-i18n-core = { git = "https://github.com/triesap/mf2-i18n.git", rev = "0c3ba2729b309f27aed3e27ae4e753b0147a75ec" }
+mf2-i18n-native = { git = "https://github.com/triesap/mf2-i18n.git", rev = "0c3ba2729b309f27aed3e27ae4e753b0147a75ec" }
 radroots_studio_app_core = { path = "crates/shared/core", version = "0.1.0" }
 radroots_studio_app_i18n = { path = "crates/shared/i18n", version = "0.1.0" }
 radroots_studio_app_models = { path = "crates/shared/models", version = "0.1.0" }
@@ -36,7 +36,6 @@ radroots_studio_app_sqlite = { path = "crates/shared/sqlite", version = "0.1.0" 
 radroots_studio_app_state = { path = "crates/shared/state", version = "0.1.0" }
 radroots_studio_app_sync = { path = "crates/shared/sync", version = "0.1.0" }
 radroots_studio_app_ui = { path = "crates/shared/ui", version = "0.1.0" }
-radroots_runtime_paths = { path = "../lib/crates/runtime_paths", version = "0.1.0-alpha.2" }
 rusqlite = { version = "0.32", features = ["bundled"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"

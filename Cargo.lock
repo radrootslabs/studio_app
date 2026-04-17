@@ -3523,6 +3523,7 @@ dependencies = [
 [[package]]
 name = "mf2-i18n-build"
 version = "0.1.0"
+source = "git+https://github.com/triesap/mf2-i18n.git?rev=0c3ba2729b309f27aed3e27ae4e753b0147a75ec#0c3ba2729b309f27aed3e27ae4e753b0147a75ec"
 dependencies = [
  "blake3",
  "hex",
@@ -3537,10 +3538,12 @@ dependencies = [
 [[package]]
 name = "mf2-i18n-core"
 version = "0.1.0"
+source = "git+https://github.com/triesap/mf2-i18n.git?rev=0c3ba2729b309f27aed3e27ae4e753b0147a75ec#0c3ba2729b309f27aed3e27ae4e753b0147a75ec"
 
 [[package]]
 name = "mf2-i18n-embedded"
 version = "0.1.0"
+source = "git+https://github.com/triesap/mf2-i18n.git?rev=0c3ba2729b309f27aed3e27ae4e753b0147a75ec#0c3ba2729b309f27aed3e27ae4e753b0147a75ec"
 dependencies = [
  "mf2-i18n-core",
 ]
@@ -3548,6 +3551,7 @@ dependencies = [
 [[package]]
 name = "mf2-i18n-native"
 version = "0.1.0"
+source = "git+https://github.com/triesap/mf2-i18n.git?rev=0c3ba2729b309f27aed3e27ae4e753b0147a75ec#0c3ba2729b309f27aed3e27ae4e753b0147a75ec"
 dependencies = [
  "mf2-i18n-core",
  "mf2-i18n-embedded",
@@ -3559,6 +3563,7 @@ dependencies = [
 [[package]]
 name = "mf2-i18n-runtime"
 version = "0.1.0"
+source = "git+https://github.com/triesap/mf2-i18n.git?rev=0c3ba2729b309f27aed3e27ae4e753b0147a75ec#0c3ba2729b309f27aed3e27ae4e753b0147a75ec"
 dependencies = [
  "ed25519-dalek",
  "hex",
@@ -3573,6 +3578,7 @@ dependencies = [
 [[package]]
 name = "mf2-i18n-std"
 version = "0.1.0"
+source = "git+https://github.com/triesap/mf2-i18n.git?rev=0c3ba2729b309f27aed3e27ae4e753b0147a75ec#0c3ba2729b309f27aed3e27ae4e753b0147a75ec"
 dependencies = [
  "chrono",
  "intl_pluralrules",
@@ -4611,7 +4617,6 @@ dependencies = [
  "radroots_studio_app_state",
  "radroots_studio_app_sync",
  "radroots_studio_app_ui",
- "radroots_runtime_paths",
  "thiserror 2.0.18",
 ]
 
@@ -4673,14 +4678,6 @@ dependencies = [
  "gpui-component",
  "radroots_studio_app_core",
  "radroots_studio_app_i18n",
-]
-
-[[package]]
-name = "radroots_runtime_paths"
-version = "0.1.0-alpha.2"
-dependencies = [
- "serde",
- "thiserror 1.0.69",
 ]
 
 [[package]]
