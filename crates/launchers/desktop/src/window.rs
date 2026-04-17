@@ -147,7 +147,7 @@ impl Render for HomeView {
                                 .p(px(APP_UI_THEME.layout.home_window_padding_px))
                                 .child(
                                     div()
-                                        .id("home-metadata-scroll")
+                                        .id("home-today-scroll")
                                         .size_full()
                                         .overflow_y_scroll()
                                         .child(home_view_content(&runtime_summary)),

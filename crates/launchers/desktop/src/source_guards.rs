@@ -7,7 +7,7 @@ const ALLOWED_WINDOW_LITERALS: &[&str] = &[
     "account-admin-console",
     "account-log-out",
     "account-more",
-    "home-metadata-scroll",
+    "home-today-scroll",
     "settings window should open",
     "settings-allow-relay-connections",
     "settings-launch-at-login",

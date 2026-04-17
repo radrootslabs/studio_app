@@ -136,12 +136,16 @@ mod tests {
     use std::path::PathBuf;
 
     use radroots_studio_app_core::{AppRuntimeHostEnvironment, AppRuntimePlatform, AppRuntimeRoots};
-    use radroots_studio_app_models::TodayAgendaProjection;
-    use radroots_studio_app_state::{AppStateStore, InMemoryAppStateRepository, SettingsPreference};
-
-    use super::{
-        APP_DATABASE_FILE_NAME, DesktopAppRuntime, DesktopAppRuntimeState, SettingsSection,
+    use radroots_studio_app_models::{
+        AppMode, FarmReadiness, FarmSummary, SettingsSection, ShellSection, TodayAgendaProjection,
+        TodaySetupTask, TodaySetupTaskKind, TodaySummary,
     };
+    use radroots_studio_app_state::{
+        AppStateRepositoryError, AppStateStore, AppStateStoreError, InMemoryAppStateRepository,
+        SettingsPreference,
+    };
+
+    use super::{APP_DATABASE_FILE_NAME, DesktopAppRuntime, DesktopAppRuntimeState};
 
     #[test]
     fn desktop_namespace_uses_canonical_app_data_root() {
@@ -169,7 +173,7 @@ mod tests {
     }
 
     #[test]
-    fn cloned_runtime_handles_share_shell_state() {
+    fn cloned_runtime_handles_shared_settings_state() {
         let runtime = DesktopAppRuntime::from_state(DesktopAppRuntimeState {
             state_store: AppStateStore::load(InMemoryAppStateRepository::default())
                 .expect("in-memory state store should load"),
@@ -179,28 +183,92 @@ mod tests {
 
         assert!(runtime.select_settings_section(SettingsSection::About));
         assert!(cloned_runtime.set_settings_preference(SettingsPreference::LaunchAtLogin, true));
-        assert!(cloned_runtime.replace_today_agenda(TodayAgendaProjection {
-            setup_checklist: vec![radroots_studio_app_models::TodaySetupTask {
-                kind: radroots_studio_app_models::TodaySetupTaskKind::AddFulfillmentWindow,
-                is_complete: false,
-            }],
-            ..TodayAgendaProjection::default()
-        }));
 
         let summary = runtime.summary();
+
         assert_eq!(
             summary.shell_projection.selected_section,
-            radroots_studio_app_models::ShellSection::Home
+            ShellSection::Home
         );
         assert_eq!(
             summary.shell_projection.settings.selected_section,
             SettingsSection::About
         );
         assert!(summary.shell_projection.settings.general.launch_at_login);
-        assert!(summary.today_projection.needs_setup());
         assert_eq!(
             cloned_runtime.selected_settings_section(),
             SettingsSection::About
+        );
+    }
+
+    #[test]
+    fn replacing_today_agenda_is_shared_without_clobbering_home_shell() {
+        let runtime = DesktopAppRuntime::from_state(DesktopAppRuntimeState {
+            state_store: AppStateStore::load(InMemoryAppStateRepository::default())
+                .expect("in-memory state store should load"),
+            startup_issue: None,
+        });
+        let cloned_runtime = runtime.clone();
+        let today_agenda = TodayAgendaProjection {
+            farm: Some(FarmSummary {
+                farm_id: radroots_studio_app_models::FarmId::new(),
+                display_name: "North field farm".to_owned(),
+                readiness: FarmReadiness::Incomplete,
+            }),
+            summary: Some(TodaySummary {
+                farm_id: radroots_studio_app_models::FarmId::new(),
+                orders_needing_action: 2,
+                low_stock_products: 1,
+                draft_products: 3,
+            }),
+            setup_checklist: vec![TodaySetupTask {
+                kind: TodaySetupTaskKind::AddFulfillmentWindow,
+                is_complete: false,
+            }],
+            ..TodayAgendaProjection::default()
+        };
+
+        assert!(runtime.select_settings_section(SettingsSection::About));
+        assert!(cloned_runtime.replace_today_agenda(today_agenda.clone()));
+
+        let summary = runtime.summary();
+
+        assert_eq!(summary.today_projection, today_agenda);
+        assert_eq!(summary.shell_projection.app_mode, AppMode::Farmer);
+        assert_eq!(
+            summary.shell_projection.selected_section,
+            ShellSection::Home
+        );
+        assert_eq!(
+            summary.shell_projection.settings.selected_section,
+            SettingsSection::About
+        );
+        assert!(summary.today_projection.needs_setup());
+    }
+
+    #[test]
+    fn degraded_runtime_surfaces_startup_issue_with_default_today_projection() {
+        let runtime = DesktopAppRuntime::from_state(DesktopAppRuntimeState::degraded(
+            super::DesktopAppRuntimeBootstrapError::State(AppStateStoreError::Repository(
+                AppStateRepositoryError::load("state unavailable"),
+            )),
+        ));
+
+        let summary = runtime.summary();
+
+        assert_eq!(summary.shell_projection.app_mode, AppMode::Farmer);
+        assert_eq!(
+            summary.shell_projection.selected_section,
+            ShellSection::Home
+        );
+        assert_eq!(
+            summary.shell_projection.settings.selected_section,
+            SettingsSection::Account
+        );
+        assert_eq!(summary.today_projection, TodayAgendaProjection::default());
+        assert_eq!(
+            summary.startup_issue.as_deref(),
+            Some("app state repository load failed: state unavailable")
         );
     }
 }
