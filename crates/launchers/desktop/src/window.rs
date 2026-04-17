@@ -93,12 +93,6 @@ impl Render for HomeView {
                                 .gap(px(APP_UI_THEME.layout.home_stack_gap_px))
                                 .child(
                                     div()
-                                        .text_size(px(APP_UI_THEME.typography.brand_text_px))
-                                        .text_color(rgb(APP_UI_THEME.text.primary))
-                                        .child(app_shared_text(AppTextKey::HomeBrand)),
-                                )
-                                .child(
-                                    div()
                                         .text_size(px(APP_UI_THEME.typography.body_text_px * 2.0))
                                         .font_weight(gpui::FontWeight::BOLD)
                                         .text_color(rgb(APP_UI_THEME.text.primary))
