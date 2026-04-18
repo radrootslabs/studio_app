@@ -4,16 +4,9 @@ set -euo pipefail
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 platform_root="$(cd "${script_dir}/.." && pwd -P)"
 repo_root="$(git -C "${script_dir}" rev-parse --show-toplevel)"
-configuration="${CONFIGURATION:-Debug}"
+requested_configuration="${CONFIGURATION:-Debug}"
 bundle_name="Radroots.app"
-bundle_root="${platform_root}/.derived-data/Build/Products/${configuration}/${bundle_name}"
-contents_root="${bundle_root}/Contents"
-executable_root="${contents_root}/MacOS"
-resources_root="${contents_root}/Resources"
 plist_template="${platform_root}/App/Resources/Info.plist"
-plist_path="${contents_root}/Info.plist"
-binary_target="${executable_root}/Radroots"
-app_icon_path="${resources_root}/AppIcon.icns"
 
 require_command() {
   if command -v "$1" >/dev/null 2>&1; then
@@ -41,7 +34,27 @@ PY
 }
 
 cargo_target_dir() {
-  cargo metadata --format-version 1 --no-deps | python3 -c 'import json, sys; print(json.load(sys.stdin)["target_directory"], end="")'
+  (
+    cd "${repo_root}"
+    cargo metadata --format-version 1 --no-deps | python3 -c 'import json, sys; print(json.load(sys.stdin)["target_directory"], end="")'
+  )
+}
+
+configure_build_lane() {
+  case "${requested_configuration}" in
+    Debug|debug)
+      bundle_configuration="Debug"
+      cargo_profile="debug"
+      ;;
+    Release|release)
+      bundle_configuration="Release"
+      cargo_profile="release"
+      ;;
+    *)
+      echo "unsupported CONFIGURATION: ${requested_configuration}" >&2
+      exit 1
+      ;;
+  esac
 }
 
 require_command cargo
@@ -49,12 +62,26 @@ require_command git
 require_command python3
 require_command /usr/libexec/PlistBuddy
 
+configure_build_lane
+
+bundle_root="${platform_root}/.derived-data/Build/Products/${bundle_configuration}/${bundle_name}"
+contents_root="${bundle_root}/Contents"
+executable_root="${contents_root}/MacOS"
+resources_root="${contents_root}/Resources"
+plist_path="${contents_root}/Info.plist"
+binary_target="${executable_root}/Radroots"
+app_icon_path="${resources_root}/AppIcon.icns"
+
 (
   cd "${repo_root}"
-  cargo build -p radroots_studio_app
+  if [[ "${cargo_profile}" == "release" ]]; then
+    cargo build -p radroots_studio_app --release
+  else
+    cargo build -p radroots_studio_app
+  fi
 )
 
-binary_source="$(cargo_target_dir)/debug/radroots_studio_app"
+binary_source="$(cargo_target_dir)/${cargo_profile}/radroots_studio_app"
 
 if [[ ! -x "${binary_source}" ]]; then
   echo "missing desktop launcher binary: ${binary_source}" >&2
