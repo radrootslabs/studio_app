@@ -264,6 +264,7 @@ mod tests {
             settings_account_projection: SettingsAccountProjection::default(),
             startup_gate: AppStartupGate::SetupRequired,
             home_route: HomeRoute::SetupRequired,
+            farm_setup_projection: Default::default(),
             today_projection: TodayAgendaProjection::default(),
             startup_issue: Some("desktop runtime roots require HOME for macos".to_owned()),
         };
@@ -296,6 +297,7 @@ mod tests {
             settings_account_projection: SettingsAccountProjection::default(),
             startup_gate: AppStartupGate::Blocked,
             home_route: HomeRoute::Blocked,
+            farm_setup_projection: Default::default(),
             today_projection: TodayAgendaProjection::default(),
             startup_issue: None,
         };
@@ -304,6 +306,7 @@ mod tests {
             settings_account_projection: SettingsAccountProjection::default(),
             startup_gate: AppStartupGate::SetupRequired,
             home_route: HomeRoute::SetupRequired,
+            farm_setup_projection: Default::default(),
             today_projection: TodayAgendaProjection::default(),
             startup_issue: None,
         };
@@ -319,6 +322,7 @@ mod tests {
             settings_account_projection: SettingsAccountProjection::default(),
             startup_gate: AppStartupGate::Personal,
             home_route: HomeRoute::Personal,
+            farm_setup_projection: Default::default(),
             today_projection: TodayAgendaProjection::default(),
             startup_issue: None,
         };
@@ -327,6 +331,7 @@ mod tests {
             settings_account_projection: SettingsAccountProjection::default(),
             startup_gate: AppStartupGate::Farmer,
             home_route: HomeRoute::FarmSetupOnboarding,
+            farm_setup_projection: Default::default(),
             today_projection: TodayAgendaProjection::default(),
             startup_issue: None,
         };
@@ -342,6 +347,7 @@ mod tests {
             settings_account_projection: SettingsAccountProjection::default(),
             startup_gate: AppStartupGate::Personal,
             home_route: HomeRoute::Personal,
+            farm_setup_projection: Default::default(),
             today_projection: TodayAgendaProjection::default(),
             startup_issue: Some("runtime unavailable".to_owned()),
         };
@@ -356,6 +362,7 @@ mod tests {
             settings_account_projection: SettingsAccountProjection::default(),
             startup_gate: AppStartupGate::SetupRequired,
             home_route: HomeRoute::SetupRequired,
+            farm_setup_projection: Default::default(),
             today_projection: TodayAgendaProjection::default(),
             startup_issue: None,
         };
@@ -364,6 +371,7 @@ mod tests {
             settings_account_projection: SettingsAccountProjection::default(),
             startup_gate: AppStartupGate::Personal,
             home_route: HomeRoute::Personal,
+            farm_setup_projection: Default::default(),
             today_projection: TodayAgendaProjection::default(),
             startup_issue: None,
         };
@@ -372,6 +380,7 @@ mod tests {
             settings_account_projection: SettingsAccountProjection::default(),
             startup_gate: AppStartupGate::Farmer,
             home_route: HomeRoute::FarmSetupOnboarding,
+            farm_setup_projection: Default::default(),
             today_projection: TodayAgendaProjection::default(),
             startup_issue: None,
         };
@@ -380,6 +389,7 @@ mod tests {
             settings_account_projection: SettingsAccountProjection::default(),
             startup_gate: AppStartupGate::Farmer,
             home_route: HomeRoute::FarmSetupOnboarding,
+            farm_setup_projection: Default::default(),
             today_projection: TodayAgendaProjection::default(),
             startup_issue: Some("runtime unavailable".to_owned()),
         };

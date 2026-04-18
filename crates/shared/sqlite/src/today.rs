@@ -35,6 +35,35 @@ impl<'a> AppTodayAgendaRepository<'a> {
         })
     }
 
+    pub fn save_farm_summary(&self, farm: &FarmSummary) -> Result<(), AppSqliteError> {
+        self.connection
+            .execute(
+                "insert into farms (id, display_name, readiness, created_at, updated_at)
+                 values (
+                    ?1,
+                    ?2,
+                    ?3,
+                    strftime('%Y-%m-%dT%H:%M:%fZ', 'now'),
+                    strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+                 )
+                 on conflict(id) do update set
+                    display_name = excluded.display_name,
+                    readiness = excluded.readiness,
+                    updated_at = excluded.updated_at",
+                params![
+                    farm.farm_id.to_string(),
+                    farm.display_name,
+                    farm_readiness_storage_key(farm.readiness),
+                ],
+            )
+            .map_err(|source| AppSqliteError::Query {
+                operation: "save today farm summary",
+                source,
+            })?;
+
+        Ok(())
+    }
+
     fn load_farm_summary(
         &self,
         farm_id: Option<FarmId>,
@@ -393,6 +422,13 @@ fn parse_farm_readiness(
     }
 }
 
+fn farm_readiness_storage_key(readiness: FarmReadiness) -> &'static str {
+    match readiness {
+        FarmReadiness::Incomplete => "incomplete",
+        FarmReadiness::Ready => "ready",
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use radroots_studio_app_models::{FarmId, FulfillmentWindowId, ProductId, TodaySetupTaskKind};
@@ -630,6 +666,31 @@ mod tests {
         );
         assert!(!projection.setup_checklist[1].is_complete);
         assert!(projection.next_fulfillment_window.is_none());
+    }
+
+    #[test]
+    fn saved_farm_summary_round_trips_into_today_projection() {
+        let store = AppSqliteStore::open(DatabaseTarget::InMemory).expect("store should open");
+        let farm = radroots_studio_app_models::FarmSummary {
+            farm_id: FarmId::new(),
+            display_name: "North field farm".to_owned(),
+            readiness: radroots_studio_app_models::FarmReadiness::Incomplete,
+        };
+
+        store
+            .save_farm_summary(&farm)
+            .expect("farm summary should save");
+
+        let projection = store
+            .load_today_agenda(Some(farm.farm_id))
+            .expect("today agenda should load");
+
+        assert_eq!(projection.farm, Some(farm));
+        assert_eq!(
+            projection.summary.expect("summary").orders_needing_action,
+            0
+        );
+        assert_eq!(projection.setup_checklist.len(), 2);
     }
 
     fn insert_farm(

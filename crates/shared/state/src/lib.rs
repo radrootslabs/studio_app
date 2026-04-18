@@ -204,17 +204,14 @@ impl AppProjection {
             AppStartupGate::Blocked => HomeRoute::Blocked,
             AppStartupGate::SetupRequired => HomeRoute::SetupRequired,
             AppStartupGate::Personal => HomeRoute::Personal,
-            AppStartupGate::Farmer => match self.farm_setup.readiness {
-                FarmSetupReadiness::Ready => HomeRoute::Today,
-                FarmSetupReadiness::NotStarted
-                    if self.farm_setup_flow_stage == FarmSetupFlowStage::Onboarding =>
-                {
-                    HomeRoute::FarmSetupOnboarding
-                }
-                FarmSetupReadiness::NotStarted | FarmSetupReadiness::InProgress => {
-                    HomeRoute::FarmSetupForm
-                }
-            },
+            AppStartupGate::Farmer if self.farm_setup.has_saved_farm() => HomeRoute::Today,
+            AppStartupGate::Farmer
+                if self.farm_setup.readiness == FarmSetupReadiness::NotStarted
+                    && self.farm_setup_flow_stage == FarmSetupFlowStage::Onboarding =>
+            {
+                HomeRoute::FarmSetupOnboarding
+            }
+            AppStartupGate::Farmer => HomeRoute::FarmSetupForm,
         }
     }
 }
@@ -541,7 +538,7 @@ fn sync_projection(projection: &mut AppProjection) {
     sync_farm_setup_flow_stage(
         &mut projection.farm_setup_flow_stage,
         projection.startup_gate,
-        projection.farm_setup.readiness,
+        projection.farm_setup.has_saved_farm(),
     );
 }
 
@@ -573,9 +570,9 @@ fn sync_farm_setup_to_today(farm_setup: &mut FarmSetupProjection, today: &TodayA
 fn sync_farm_setup_flow_stage(
     flow_stage: &mut FarmSetupFlowStage,
     startup_gate: AppStartupGate,
-    readiness: FarmSetupReadiness,
+    has_saved_farm: bool,
 ) {
-    if startup_gate != AppStartupGate::Farmer || readiness == FarmSetupReadiness::Ready {
+    if startup_gate != AppStartupGate::Farmer || has_saved_farm {
         *flow_stage = FarmSetupFlowStage::Onboarding;
     }
 }
@@ -954,6 +951,34 @@ mod tests {
 
         assert_eq!(changed, Ok(true));
         assert_eq!(store.home_route(), HomeRoute::FarmSetupForm);
+    }
+
+    #[test]
+    fn complete_draft_without_saved_farm_stays_on_farm_setup_form() {
+        let mut store = AppStateStore::load(InMemoryAppStateRepository::default())
+            .expect("in-memory repository should load");
+
+        assert_eq!(
+            store.apply(AppStateCommand::replace_identity_projection(
+                ready_identity(ActiveSurface::Farmer),
+            )),
+            Ok(true)
+        );
+
+        let changed = store.apply(AppStateCommand::replace_farm_setup_projection(
+            FarmSetupProjection::from_draft(FarmSetupDraft::new(
+                "North field farm",
+                "Stockholm County",
+                [FarmOrderMethod::Pickup],
+            )),
+        ));
+
+        assert_eq!(changed, Ok(true));
+        assert_eq!(store.home_route(), HomeRoute::FarmSetupForm);
+        assert_eq!(
+            store.projection().farm_setup_flow_stage,
+            FarmSetupFlowStage::Onboarding
+        );
     }
 
     #[test]

@@ -3,8 +3,9 @@ use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
 use radroots_studio_app_core::{AppDesktopRuntimePaths, AppRuntimePathsError, AppSharedAccountsPaths};
 use radroots_studio_app_models::{
-    ActiveSurface, AppActivityContext, AppActivityKind, AppStartupGate, SettingsAccountProjection,
-    SettingsPreference, SettingsSection, TodayAgendaProjection,
+    ActiveSurface, AppActivityContext, AppActivityKind, AppIdentityProjection, AppStartupGate,
+    FarmId, FarmReadiness, FarmSetupDraft, FarmSetupProjection, FarmSummary,
+    SettingsAccountProjection, SettingsPreference, SettingsSection, TodayAgendaProjection,
 };
 use radroots_studio_app_sqlite::{
     APP_ACTIVITY_CONTEXT_LIMIT, AppSqliteError, AppSqliteStore, DatabaseTarget,
@@ -49,6 +50,7 @@ impl DesktopAppRuntime {
             settings_account_projection: state.state_store.settings_account_projection(),
             startup_gate: state.state_store.startup_gate(),
             home_route: state.state_store.home_route(),
+            farm_setup_projection: state.state_store.farm_setup_projection().clone(),
             today_projection: state.state_store.today_projection().clone(),
             startup_issue: state.startup_issue.clone(),
         }
@@ -146,6 +148,19 @@ impl DesktopAppRuntime {
             .apply_in_memory(AppStateCommand::select_farm_setup_flow_stage(stage))
     }
 
+    pub fn save_farm_setup_draft(
+        &self,
+        draft: FarmSetupDraft,
+    ) -> Result<FarmSetupProjection, DesktopAppRuntimeFarmSetupError> {
+        self.lock_state_mut().save_farm_setup_draft(draft)
+    }
+
+    pub fn finish_farm_setup(
+        &self,
+    ) -> Result<FarmSetupProjection, DesktopAppRuntimeFarmSetupError> {
+        self.lock_state_mut().finish_farm_setup()
+    }
+
     pub fn record_home_opened(&self) -> bool {
         self.record_activity(AppActivityKind::HomeOpened)
     }
@@ -200,8 +215,15 @@ pub struct DesktopAppRuntimeSummary {
     pub settings_account_projection: SettingsAccountProjection,
     pub startup_gate: AppStartupGate,
     pub home_route: HomeRoute,
+    pub farm_setup_projection: FarmSetupProjection,
     pub today_projection: TodayAgendaProjection,
     pub startup_issue: Option<String>,
+}
+
+#[derive(Clone, Debug, Default)]
+struct DesktopSelectedAccountContext {
+    farm_setup_projection: FarmSetupProjection,
+    today_projection: TodayAgendaProjection,
 }
 
 struct DesktopAppRuntimeState {
@@ -244,11 +266,16 @@ impl DesktopAppRuntimeState {
         let sqlite_store = AppSqliteStore::open(DatabaseTarget::Path(database_path.clone()))?;
         let mut state_store = AppStateStore::load(InMemoryAppStateRepository::default())?;
         let accounts_bootstrap = bootstrap_desktop_accounts(&paths.shared_accounts, &sqlite_store)?;
-        let today_projection = sqlite_store.load_today_agenda(None)?;
-        let _ =
-            state_store.apply_in_memory(AppStateCommand::replace_today_agenda(today_projection));
+        let selected_account_context =
+            load_selected_account_context(&sqlite_store, &accounts_bootstrap.identity_projection)?;
         let _ = state_store.apply_in_memory(AppStateCommand::replace_identity_projection(
             accounts_bootstrap.identity_projection,
+        ));
+        let _ = state_store.apply_in_memory(AppStateCommand::replace_farm_setup_projection(
+            selected_account_context.farm_setup_projection,
+        ));
+        let _ = state_store.apply_in_memory(AppStateCommand::replace_today_agenda(
+            selected_account_context.today_projection,
         ));
 
         Ok(Self {
@@ -282,7 +309,7 @@ impl DesktopAppRuntimeState {
             generate_local_account(accounts_manager, sqlite_store, label)?
         };
 
-        Ok(self.replace_identity_projection(projection))
+        self.replace_identity_projection(projection)
     }
 
     fn import_local_account(
@@ -295,7 +322,7 @@ impl DesktopAppRuntimeState {
             import_local_account(accounts_manager, sqlite_store, request)?
         };
 
-        Ok(self.replace_identity_projection(projection))
+        self.replace_identity_projection(projection)
     }
 
     fn select_local_account(
@@ -308,7 +335,7 @@ impl DesktopAppRuntimeState {
             select_local_account(accounts_manager, sqlite_store, account_id)?
         };
 
-        Ok(self.replace_identity_projection(projection))
+        self.replace_identity_projection(projection)
     }
 
     fn select_active_surface(
@@ -321,7 +348,7 @@ impl DesktopAppRuntimeState {
             select_active_surface(accounts_manager, sqlite_store, active_surface)?
         };
 
-        Ok(self.replace_identity_projection(projection))
+        self.replace_identity_projection(projection)
     }
 
     fn remove_selected_local_key(&mut self) -> Result<bool, DesktopAppRuntimeCommandError> {
@@ -331,7 +358,7 @@ impl DesktopAppRuntimeState {
             remove_selected_local_key(accounts_manager, sqlite_store)?
         };
 
-        Ok(self.replace_identity_projection(projection))
+        self.replace_identity_projection(projection)
     }
 
     fn reset_local_device_state(&mut self) -> Result<bool, DesktopAppRuntimeCommandError> {
@@ -342,7 +369,7 @@ impl DesktopAppRuntimeState {
             reset_local_device_state(accounts_manager, sqlite_store, shared_accounts_paths)?
         };
 
-        Ok(self.replace_identity_projection(projection))
+        self.replace_identity_projection(projection)
     }
 
     fn record_activity(&self, kind: AppActivityKind) -> Result<(), AppSqliteError> {
@@ -352,12 +379,103 @@ impl DesktopAppRuntimeState {
         }
     }
 
+    fn save_farm_setup_draft(
+        &mut self,
+        draft: FarmSetupDraft,
+    ) -> Result<FarmSetupProjection, DesktopAppRuntimeFarmSetupError> {
+        let account_id = self.selected_account_id()?;
+        let sqlite_store = self.sqlite_store_for_farm_setup()?;
+        let projection = FarmSetupProjection::from_draft(draft);
+        sqlite_store.save_farm_setup(account_id.as_str(), &projection)?;
+
+        let selected_account_context = self.refresh_selected_account_context()?;
+        self.apply_selected_account_context(&selected_account_context);
+
+        Ok(selected_account_context.farm_setup_projection)
+    }
+
+    fn finish_farm_setup(
+        &mut self,
+    ) -> Result<FarmSetupProjection, DesktopAppRuntimeFarmSetupError> {
+        let account = self.selected_account_for_farm_setup()?;
+        let sqlite_store = self.sqlite_store_for_farm_setup()?;
+        let draft = self.state_store.farm_setup_projection().draft.clone();
+
+        if !draft.blockers().is_empty() {
+            return Err(DesktopAppRuntimeFarmSetupError::IncompleteDraft);
+        }
+
+        let saved_farm = FarmSummary {
+            farm_id: account
+                .farmer_activation
+                .farm_id
+                .unwrap_or_else(FarmId::new),
+            display_name: draft.farm_name.trim().to_owned(),
+            readiness: FarmReadiness::Incomplete,
+        };
+        let projection = FarmSetupProjection::new(draft, Some(saved_farm.clone()));
+
+        sqlite_store.save_farm_summary(&saved_farm)?;
+        sqlite_store.save_farm_setup(account.account.account_id.as_str(), &projection)?;
+
+        let selected_account_context = self.refresh_selected_account_context()?;
+        self.apply_selected_account_context(&selected_account_context);
+
+        Ok(selected_account_context.farm_setup_projection)
+    }
+
     fn replace_identity_projection(
         &mut self,
-        projection: radroots_studio_app_models::AppIdentityProjection,
-    ) -> bool {
+        projection: AppIdentityProjection,
+    ) -> Result<bool, DesktopAppRuntimeCommandError> {
+        let selected_account_context =
+            load_selected_account_context(self.sqlite_store()?, &projection)?;
+        let identity_changed = self
+            .state_store
+            .apply_in_memory(AppStateCommand::replace_identity_projection(projection));
+        let context_changed = self.apply_selected_account_context(&selected_account_context);
+
+        Ok(identity_changed || context_changed)
+    }
+
+    fn refresh_selected_account_context(
+        &self,
+    ) -> Result<DesktopSelectedAccountContext, DesktopAppRuntimeFarmSetupError> {
+        Ok(load_selected_account_context(
+            self.sqlite_store_for_farm_setup()?,
+            self.state_store.identity_projection(),
+        )?)
+    }
+
+    fn apply_selected_account_context(&mut self, context: &DesktopSelectedAccountContext) -> bool {
+        let farm_setup_changed =
+            self.state_store
+                .apply_in_memory(AppStateCommand::replace_farm_setup_projection(
+                    context.farm_setup_projection.clone(),
+                ));
+        let today_changed =
+            self.state_store
+                .apply_in_memory(AppStateCommand::replace_today_agenda(
+                    context.today_projection.clone(),
+                ));
+
+        farm_setup_changed || today_changed
+    }
+
+    fn selected_account_id(&self) -> Result<String, DesktopAppRuntimeFarmSetupError> {
+        self.selected_account_for_farm_setup()
+            .map(|account| account.account.account_id.clone())
+    }
+
+    fn selected_account_for_farm_setup(
+        &self,
+    ) -> Result<&radroots_studio_app_models::SelectedAccountProjection, DesktopAppRuntimeFarmSetupError>
+    {
         self.state_store
-            .apply_in_memory(AppStateCommand::replace_identity_projection(projection))
+            .identity_projection()
+            .selected_account
+            .as_ref()
+            .ok_or(DesktopAppRuntimeFarmSetupError::AccountRequired)
     }
 
     fn accounts_manager(
@@ -372,6 +490,14 @@ impl DesktopAppRuntimeState {
         self.sqlite_store
             .as_ref()
             .ok_or(DesktopAppRuntimeCommandError::RuntimeUnavailable)
+    }
+
+    fn sqlite_store_for_farm_setup(
+        &self,
+    ) -> Result<&AppSqliteStore, DesktopAppRuntimeFarmSetupError> {
+        self.sqlite_store
+            .as_ref()
+            .ok_or(DesktopAppRuntimeFarmSetupError::RuntimeUnavailable)
     }
 
     fn shared_accounts_paths(
@@ -394,6 +520,20 @@ pub enum DesktopAppRuntimeCommandError {
     RuntimeUnavailable,
     #[error(transparent)]
     Accounts(#[from] DesktopAccountsCommandError),
+    #[error(transparent)]
+    Sqlite(#[from] AppSqliteError),
+}
+
+#[derive(Debug, Error)]
+pub enum DesktopAppRuntimeFarmSetupError {
+    #[error("desktop runtime commands are unavailable while the runtime is degraded")]
+    RuntimeUnavailable,
+    #[error("farm setup requires a selected account")]
+    AccountRequired,
+    #[error("farm setup is incomplete")]
+    IncompleteDraft,
+    #[error(transparent)]
+    Sqlite(#[from] AppSqliteError),
 }
 
 #[derive(Debug, Error)]
@@ -406,6 +546,33 @@ enum DesktopAppRuntimeBootstrapError {
     Sqlite(#[from] AppSqliteError),
     #[error(transparent)]
     State(#[from] AppStateStoreError),
+}
+
+fn load_selected_account_context(
+    sqlite_store: &AppSqliteStore,
+    identity_projection: &AppIdentityProjection,
+) -> Result<DesktopSelectedAccountContext, AppSqliteError> {
+    let Some(selected_account) = identity_projection.selected_account.as_ref() else {
+        return Ok(DesktopSelectedAccountContext::default());
+    };
+    let farm_setup_projection =
+        sqlite_store.load_farm_setup(&selected_account.account.account_id)?;
+    let today_farm_id = selected_account
+        .farmer_activation
+        .farm_id
+        .or(farm_setup_projection
+            .saved_farm
+            .as_ref()
+            .map(|farm| farm.farm_id));
+    let today_projection = match today_farm_id {
+        Some(farm_id) => sqlite_store.load_today_agenda(Some(farm_id))?,
+        None => TodayAgendaProjection::default(),
+    };
+
+    Ok(DesktopSelectedAccountContext {
+        farm_setup_projection,
+        today_projection,
+    })
 }
 
 #[cfg(test)]
@@ -423,9 +590,9 @@ mod tests {
     };
     use radroots_studio_app_models::{
         AccountSurfaceActivationProjection, ActiveSurface, AppActivityKind, AppStartupGate, FarmId,
-        FarmReadiness, FarmSummary, FarmerActivationProjection, SelectedSurfaceProjection,
-        SettingsPreference, SettingsSection, ShellSection, TodayAgendaProjection, TodaySetupTask,
-        TodaySetupTaskKind, TodaySummary,
+        FarmOrderMethod, FarmReadiness, FarmSetupDraft, FarmSetupProjection, FarmSummary,
+        FarmerActivationProjection, SelectedSurfaceProjection, SettingsPreference, SettingsSection,
+        ShellSection, TodayAgendaProjection, TodaySetupTask, TodaySetupTaskKind, TodaySummary,
     };
     use radroots_studio_app_sqlite::{AppSqliteStore, DatabaseTarget};
     use radroots_studio_app_state::{
@@ -864,6 +1031,133 @@ mod tests {
     }
 
     #[test]
+    fn selecting_farmer_account_loads_persisted_farm_setup_draft() {
+        let runtime = memory_runtime();
+
+        assert!(
+            runtime
+                .generate_local_account(Some("Farmer".to_owned()))
+                .expect("account should generate")
+        );
+        let account_id = runtime
+            .summary()
+            .settings_account_projection
+            .selected_account
+            .as_ref()
+            .expect("selected account")
+            .account
+            .account_id
+            .clone();
+        let projection = FarmSetupProjection::from_draft(FarmSetupDraft::new(
+            "North field farm",
+            "Stockholm County",
+            [FarmOrderMethod::Pickup],
+        ));
+        runtime
+            .lock_state()
+            .sqlite_store
+            .as_ref()
+            .expect("sqlite store")
+            .save_farm_setup(account_id.as_str(), &projection)
+            .expect("farm setup should save");
+        save_surface_activation(&runtime, account_id.as_str(), ActiveSurface::Farmer, true);
+
+        assert!(
+            runtime
+                .select_local_account(account_id.as_str())
+                .expect("account should select")
+        );
+        let summary = runtime.summary();
+
+        assert_eq!(summary.startup_gate, AppStartupGate::Farmer);
+        assert_eq!(summary.home_route, HomeRoute::FarmSetupForm);
+        assert_eq!(summary.farm_setup_projection, projection);
+    }
+
+    #[test]
+    fn finishing_farm_setup_persists_saved_farm_and_today_projection() {
+        let runtime = memory_runtime();
+
+        assert!(
+            runtime
+                .generate_local_account(Some("Farmer".to_owned()))
+                .expect("account should generate")
+        );
+        let account_id = runtime
+            .summary()
+            .settings_account_projection
+            .selected_account
+            .as_ref()
+            .expect("selected account")
+            .account
+            .account_id
+            .clone();
+        let farm_id =
+            save_farmer_surface_activation(&runtime, account_id.as_str(), ActiveSurface::Farmer);
+        assert!(
+            runtime
+                .select_local_account(account_id.as_str())
+                .expect("account should select")
+        );
+        assert_eq!(runtime.summary().home_route, HomeRoute::FarmSetupOnboarding);
+
+        let draft = FarmSetupDraft::new(
+            "North field farm",
+            "Stockholm County",
+            [FarmOrderMethod::Pickup, FarmOrderMethod::Delivery],
+        );
+        assert_eq!(
+            runtime
+                .save_farm_setup_draft(draft.clone())
+                .expect("draft should save")
+                .draft,
+            draft
+        );
+        assert_eq!(runtime.summary().home_route, HomeRoute::FarmSetupForm);
+
+        let finished_projection = runtime
+            .finish_farm_setup()
+            .expect("farm setup should finish");
+        let summary = runtime.summary();
+
+        assert_eq!(summary.home_route, HomeRoute::Today);
+        assert_eq!(
+            finished_projection.saved_farm,
+            Some(FarmSummary {
+                farm_id,
+                display_name: "North field farm".to_owned(),
+                readiness: FarmReadiness::Incomplete,
+            })
+        );
+        assert_eq!(
+            summary.today_projection.farm,
+            finished_projection.saved_farm.clone()
+        );
+        assert_eq!(summary.today_projection.setup_checklist.len(), 2);
+        assert_eq!(
+            runtime
+                .lock_state()
+                .sqlite_store
+                .as_ref()
+                .expect("sqlite store")
+                .load_farm_setup(account_id.as_str())
+                .expect("farm setup should load"),
+            finished_projection
+        );
+        assert_eq!(
+            runtime
+                .lock_state()
+                .sqlite_store
+                .as_ref()
+                .expect("sqlite store")
+                .load_today_agenda(Some(farm_id))
+                .expect("today agenda should load")
+                .farm,
+            finished_projection.saved_farm
+        );
+    }
+
+    #[test]
     fn runtime_reset_local_device_state_clears_store_file_and_projection() {
         let (runtime, paths) = file_backed_runtime("reset");
 
@@ -1062,6 +1356,27 @@ mod tests {
             .expect("sqlite store")
             .save_surface_activation(&activation)
             .expect("surface activation should save");
+    }
+
+    fn save_farmer_surface_activation(
+        runtime: &DesktopAppRuntime,
+        account_id: &str,
+        active_surface: ActiveSurface,
+    ) -> FarmId {
+        let farm_id = FarmId::new();
+        let activation = AccountSurfaceActivationProjection::new(
+            account_id,
+            SelectedSurfaceProjection::new(active_surface),
+            FarmerActivationProjection::active(farm_id),
+        );
+        runtime
+            .lock_state()
+            .sqlite_store
+            .as_ref()
+            .expect("sqlite store")
+            .save_surface_activation(&activation)
+            .expect("surface activation should save");
+        farm_id
     }
 
     fn cleanup_paths(paths: &AppSharedAccountsPaths) {

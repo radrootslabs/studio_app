@@ -11,7 +11,7 @@ use std::{fs, path::PathBuf, time::Duration};
 
 use radroots_studio_app_models::{
     AccountSurfaceActivationProjection, AppActivityContext, AppActivityEvent, AppActivityKind,
-    FarmId, FarmSetupProjection, TodayAgendaProjection,
+    FarmId, FarmSetupProjection, FarmSummary, TodayAgendaProjection,
 };
 use rusqlite::Connection;
 
@@ -79,6 +79,10 @@ impl AppSqliteStore {
         farm_id: Option<FarmId>,
     ) -> Result<TodayAgendaProjection, AppSqliteError> {
         self.today_agenda_repository().load(farm_id)
+    }
+
+    pub fn save_farm_summary(&self, farm: &FarmSummary) -> Result<(), AppSqliteError> {
+        self.today_agenda_repository().save_farm_summary(farm)
     }
 
     pub fn record_activity_event(&self, kind: &AppActivityKind) -> Result<(), AppSqliteError> {

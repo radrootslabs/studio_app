@@ -1,15 +1,18 @@
 use gpui::{
-    Animation, AnimationExt, AnyElement, App, AppContext, Bounds, ClickEvent, Context,
+    Animation, AnimationExt, AnyElement, App, AppContext, Bounds, ClickEvent, Context, Entity,
     InteractiveElement, IntoElement, ParentElement, Render, SharedString,
-    StatefulInteractiveElement, Styled, Timer, Window, WindowBackgroundAppearance, WindowBounds,
-    WindowOptions, div, prelude::FluentBuilder, px, relative, rgb, size,
+    StatefulInteractiveElement, Styled, Subscription, Timer, Window, WindowBackgroundAppearance,
+    WindowBounds, WindowOptions, div, prelude::FluentBuilder, px, relative, rgb, size,
 };
-use gpui_component::{IconName, Root};
+use gpui_component::{
+    IconName, Root, Sizable, Size as ComponentSize,
+    input::{Input, InputEvent, InputState},
+};
 use radroots_studio_app_i18n::AppTextKey;
 pub use radroots_studio_app_models::SettingsSection as SettingsPanelViewKey;
 use radroots_studio_app_models::{
-    AppStartupGate, FulfillmentWindowSummary, OrderListRow, ProductListRow, TodayAgendaProjection,
-    TodaySetupTaskKind,
+    AppStartupGate, FarmOrderMethod, FarmSetupBlocker, FarmSetupDraft, FulfillmentWindowSummary,
+    OrderListRow, ProductListRow, TodayAgendaProjection, TodaySetupTaskKind,
 };
 use radroots_studio_app_state::{FarmSetupFlowStage, HomeRoute};
 use radroots_studio_app_ui::{
@@ -140,6 +143,7 @@ pub struct HomeView {
     runtime: DesktopAppRuntime,
     startup_view: StartupHomeView,
     logged_in_view: LoggedInHomeView,
+    farm_setup_form: Option<FarmSetupFormState>,
     relay_client: Option<RadrootsNostrClient>,
 }
 
@@ -149,6 +153,7 @@ impl HomeView {
             runtime,
             startup_view: StartupHomeView::new(),
             logged_in_view: LoggedInHomeView::new(),
+            farm_setup_form: None,
             relay_client: None,
         }
     }
@@ -207,11 +212,132 @@ impl HomeView {
             cx.notify();
         }
     }
+
+    fn sync_farm_setup_form(
+        &mut self,
+        runtime_summary: &DesktopAppRuntimeSummary,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(account_id) = runtime_summary
+            .settings_account_projection
+            .selected_account
+            .as_ref()
+            .map(|account| account.account.account_id.clone())
+        else {
+            self.farm_setup_form = None;
+            return;
+        };
+
+        if runtime_summary.home_route != HomeRoute::FarmSetupForm {
+            self.farm_setup_form = None;
+            return;
+        }
+
+        let draft = runtime_summary.farm_setup_projection.draft.clone();
+        let should_reset = self
+            .farm_setup_form
+            .as_ref()
+            .map(|form| form.account_id != account_id)
+            .unwrap_or(true);
+
+        if should_reset {
+            self.farm_setup_form = Some(FarmSetupFormState::new(account_id, draft, window, cx));
+        }
+    }
+
+    fn handle_farm_name_input_event(
+        &mut self,
+        state: &Entity<InputState>,
+        event: &InputEvent,
+        _: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if matches!(event, InputEvent::Change) {
+            let value = state.read(cx).value().to_string();
+            self.update_farm_setup_draft(cx, |draft| {
+                draft.farm_name = value;
+            });
+        }
+    }
+
+    fn handle_location_input_event(
+        &mut self,
+        state: &Entity<InputState>,
+        event: &InputEvent,
+        _: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if matches!(event, InputEvent::Change) {
+            let value = state.read(cx).value().to_string();
+            self.update_farm_setup_draft(cx, |draft| {
+                draft.location_or_service_area = value;
+            });
+        }
+    }
+
+    fn toggle_farm_order_method(
+        &mut self,
+        method: FarmOrderMethod,
+        enabled: bool,
+        cx: &mut Context<Self>,
+    ) {
+        self.update_farm_setup_draft(cx, |draft| {
+            if enabled {
+                draft.order_methods.insert(method);
+            } else {
+                draft.order_methods.remove(&method);
+            }
+        });
+    }
+
+    fn update_farm_setup_draft(
+        &mut self,
+        cx: &mut Context<Self>,
+        update: impl FnOnce(&mut FarmSetupDraft),
+    ) {
+        let Some(form) = self.farm_setup_form.as_mut() else {
+            return;
+        };
+
+        update(&mut form.draft);
+
+        match self.runtime.save_farm_setup_draft(form.draft.clone()) {
+            Ok(projection) => {
+                form.draft = projection.draft;
+                form.save_state = FarmSetupSaveState::SavedLocally;
+            }
+            Err(_) => {
+                form.save_state = FarmSetupSaveState::SaveFailed;
+            }
+        }
+
+        cx.notify();
+    }
+
+    fn finish_farm_setup(&mut self, cx: &mut Context<Self>) {
+        let Some(form) = self.farm_setup_form.as_mut() else {
+            return;
+        };
+
+        match self.runtime.finish_farm_setup() {
+            Ok(_) => {
+                form.save_state = FarmSetupSaveState::SavedLocally;
+                self.farm_setup_form = None;
+            }
+            Err(_) => {
+                form.save_state = FarmSetupSaveState::SaveFailed;
+            }
+        }
+
+        cx.notify();
+    }
 }
 
 impl Render for HomeView {
-    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let runtime_summary = self.runtime.summary();
+        self.sync_farm_setup_form(&runtime_summary, window, cx);
         match home_stage(&runtime_summary) {
             HomeStage::Setup => self
                 .startup_view
@@ -231,10 +357,92 @@ impl Render for HomeView {
                 .logged_in_view
                 .render_farmer(
                     &runtime_summary,
+                    self.farm_setup_form.as_ref().map(|form| {
+                        home_farm_setup_form_card(
+                            form,
+                            cx.listener(|this, checked: &bool, _, cx| {
+                                this.toggle_farm_order_method(FarmOrderMethod::Pickup, *checked, cx)
+                            }),
+                            cx.listener(|this, checked: &bool, _, cx| {
+                                this.toggle_farm_order_method(
+                                    FarmOrderMethod::Delivery,
+                                    *checked,
+                                    cx,
+                                )
+                            }),
+                            cx.listener(|this, checked: &bool, _, cx| {
+                                this.toggle_farm_order_method(
+                                    FarmOrderMethod::Shipping,
+                                    *checked,
+                                    cx,
+                                )
+                            }),
+                            cx.listener(|this, _, _, cx| this.finish_farm_setup(cx)),
+                            cx,
+                        )
+                        .into_any_element()
+                    }),
                     cx.listener(|this, _, _, cx| this.open_farm_setup(cx)),
                     cx,
                 )
                 .into_any_element(),
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum FarmSetupSaveState {
+    AutosavesLocally,
+    SavedLocally,
+    SaveFailed,
+}
+
+struct FarmSetupFormState {
+    account_id: String,
+    draft: FarmSetupDraft,
+    farm_name_input: Entity<InputState>,
+    location_input: Entity<InputState>,
+    _farm_name_subscription: Subscription,
+    _location_subscription: Subscription,
+    save_state: FarmSetupSaveState,
+}
+
+impl FarmSetupFormState {
+    fn new(
+        account_id: String,
+        draft: FarmSetupDraft,
+        window: &mut Window,
+        cx: &mut Context<HomeView>,
+    ) -> Self {
+        let farm_name_input =
+            cx.new(|cx| InputState::new(window, cx).default_value(draft.farm_name.clone()));
+        let location_input = cx.new(|cx| {
+            InputState::new(window, cx).default_value(draft.location_or_service_area.clone())
+        });
+        let farm_name_subscription = cx.subscribe_in(
+            &farm_name_input,
+            window,
+            HomeView::handle_farm_name_input_event,
+        );
+        let location_subscription = cx.subscribe_in(
+            &location_input,
+            window,
+            HomeView::handle_location_input_event,
+        );
+        let save_state = if draft.is_empty() {
+            FarmSetupSaveState::AutosavesLocally
+        } else {
+            FarmSetupSaveState::SavedLocally
+        };
+
+        Self {
+            account_id,
+            draft,
+            farm_name_input,
+            location_input,
+            _farm_name_subscription: farm_name_subscription,
+            _location_subscription: location_subscription,
+            save_state,
         }
     }
 }
@@ -313,10 +521,11 @@ impl LoggedInHomeView {
     fn render_farmer(
         &self,
         runtime: &DesktopAppRuntimeSummary,
+        farm_setup_form: Option<AnyElement>,
         on_open_farm_setup: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
         cx: &App,
     ) -> AnyElement {
-        farmer_home_shell(runtime, on_open_farm_setup, cx).into_any_element()
+        farmer_home_shell(runtime, farm_setup_form, on_open_farm_setup, cx).into_any_element()
     }
 }
 
@@ -896,6 +1105,7 @@ struct FarmSetupOnboardingCardSpec {
 
 fn farmer_home_shell(
     runtime: &DesktopAppRuntimeSummary,
+    farm_setup_form: Option<AnyElement>,
     on_open_farm_setup: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
     cx: &App,
 ) -> impl IntoElement {
@@ -905,7 +1115,12 @@ fn farmer_home_shell(
             .id("home-today-scroll")
             .size_full()
             .overflow_y_scroll()
-            .child(home_view_content(runtime, on_open_farm_setup, cx))
+            .child(home_view_content(
+                runtime,
+                farm_setup_form,
+                on_open_farm_setup,
+                cx,
+            ))
             .into_any_element(),
     )
 }
@@ -1210,6 +1425,7 @@ fn home_sidebar(runtime: &DesktopAppRuntimeSummary) -> impl IntoElement {
 
 fn home_view_content(
     runtime: &DesktopAppRuntimeSummary,
+    farm_setup_form: Option<AnyElement>,
     on_open_farm_setup: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
     cx: &App,
 ) -> impl IntoElement {
@@ -1232,7 +1448,11 @@ fn home_view_content(
         );
     }
 
-    if let Some(spec) = setup_onboarding {
+    if runtime.home_route == HomeRoute::FarmSetupForm {
+        if let Some(farm_setup_form) = farm_setup_form {
+            sections.push(farm_setup_form);
+        }
+    } else if let Some(spec) = setup_onboarding {
         sections
             .push(home_farm_setup_onboarding_card(spec, on_open_farm_setup, cx).into_any_element());
     } else if projection.needs_setup() {
@@ -1380,6 +1600,205 @@ fn home_farm_setup_onboarding_card(
                 )))
             }),
     )
+}
+
+fn home_farm_setup_form_card(
+    form: &FarmSetupFormState,
+    on_pickup_change: impl Fn(&bool, &mut Window, &mut App) + 'static,
+    on_delivery_change: impl Fn(&bool, &mut Window, &mut App) + 'static,
+    on_shipping_change: impl Fn(&bool, &mut Window, &mut App) + 'static,
+    on_finish_setup: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+    cx: &App,
+) -> impl IntoElement {
+    let blockers = form.draft.blockers();
+    let finish_ready = blockers.is_empty();
+
+    home_card(
+        app_shared_text(AppTextKey::HomeFarmSetupOnboardingTitle),
+        div()
+            .w_full()
+            .flex()
+            .flex_col()
+            .items_start()
+            .gap(px(APP_UI_THEME.layout.home_stack_gap_px))
+            .child(home_body_text(app_shared_text(
+                AppTextKey::HomeFarmSetupOnboardingBody,
+            )))
+            .child(home_farm_setup_text_field(
+                AppTextKey::HomeFarmSetupSectionFarm,
+                AppTextKey::HomeFarmSetupFieldFarmName,
+                &form.farm_name_input,
+                blockers
+                    .contains(&FarmSetupBlocker::AddFarmName)
+                    .then_some(AppTextKey::HomeFarmSetupBlockerAddFarmName),
+            ))
+            .child(home_farm_setup_text_field(
+                AppTextKey::HomeFarmSetupSectionLocation,
+                AppTextKey::HomeFarmSetupFieldLocationOrServiceArea,
+                &form.location_input,
+                blockers
+                    .contains(&FarmSetupBlocker::AddLocationOrServiceArea)
+                    .then_some(AppTextKey::HomeFarmSetupBlockerAddLocationOrServiceArea),
+            ))
+            .child(home_farm_setup_order_method_section(
+                form,
+                blockers
+                    .contains(&FarmSetupBlocker::ChooseOrderMethod)
+                    .then_some(AppTextKey::HomeFarmSetupBlockerChooseOrderMethod),
+                on_pickup_change,
+                on_delivery_change,
+                on_shipping_change,
+                cx,
+            ))
+            .child(
+                div()
+                    .w_full()
+                    .flex()
+                    .flex_col()
+                    .items_start()
+                    .gap(px(APP_UI_THEME.layout.home_stack_gap_px))
+                    .child(home_body_text(app_shared_text(farm_setup_save_state_key(
+                        form.save_state,
+                    ))))
+                    .child(div().child(if finish_ready {
+                        action_button_primary(
+                            "home-farm-setup-finish",
+                            app_shared_text(AppTextKey::HomeFarmSetupFinishAction),
+                            on_finish_setup,
+                            cx,
+                        )
+                        .into_any_element()
+                    } else {
+                        action_button_primary_disabled(
+                            "home-farm-setup-finish",
+                            app_shared_text(AppTextKey::HomeFarmSetupFinishAction),
+                            cx,
+                        )
+                        .into_any_element()
+                    })),
+            ),
+    )
+}
+
+fn home_farm_setup_text_field(
+    section_key: AppTextKey,
+    field_label_key: AppTextKey,
+    input: &Entity<InputState>,
+    blocker_key: Option<AppTextKey>,
+) -> impl IntoElement {
+    div()
+        .w_full()
+        .flex()
+        .flex_col()
+        .items_start()
+        .gap(px(8.0))
+        .child(home_farm_setup_section_label(section_key))
+        .child(
+            div()
+                .w_full()
+                .flex()
+                .flex_col()
+                .items_start()
+                .gap(px(6.0))
+                .child(home_farm_setup_field_label(field_label_key))
+                .child(
+                    Input::new(input)
+                        .with_size(ComponentSize::Large)
+                        .w_full()
+                        .into_any_element(),
+                )
+                .when_some(blocker_key, |this, blocker_key| {
+                    this.child(home_farm_setup_blocker(blocker_key))
+                }),
+        )
+}
+
+fn home_farm_setup_order_method_section(
+    form: &FarmSetupFormState,
+    blocker_key: Option<AppTextKey>,
+    on_pickup_change: impl Fn(&bool, &mut Window, &mut App) + 'static,
+    on_delivery_change: impl Fn(&bool, &mut Window, &mut App) + 'static,
+    on_shipping_change: impl Fn(&bool, &mut Window, &mut App) + 'static,
+    cx: &App,
+) -> impl IntoElement {
+    div()
+        .w_full()
+        .flex()
+        .flex_col()
+        .items_start()
+        .gap(px(8.0))
+        .child(home_farm_setup_section_label(
+            AppTextKey::HomeFarmSetupSectionOrderMethods,
+        ))
+        .child(
+            div()
+                .w_full()
+                .flex()
+                .flex_col()
+                .items_start()
+                .gap(px(8.0))
+                .child(app_checkbox_field(
+                    AppCheckboxFieldSpec::new(
+                        "home-farm-setup-pickup",
+                        app_shared_text(AppTextKey::HomeFarmSetupOrderMethodPickup),
+                        Option::<SharedString>::None,
+                    ),
+                    form.draft.order_methods.contains(&FarmOrderMethod::Pickup),
+                    cx,
+                    move |checked, window, cx| on_pickup_change(&checked, window, cx),
+                ))
+                .child(app_checkbox_field(
+                    AppCheckboxFieldSpec::new(
+                        "home-farm-setup-delivery",
+                        app_shared_text(AppTextKey::HomeFarmSetupOrderMethodDelivery),
+                        Option::<SharedString>::None,
+                    ),
+                    form.draft
+                        .order_methods
+                        .contains(&FarmOrderMethod::Delivery),
+                    cx,
+                    move |checked, window, cx| on_delivery_change(&checked, window, cx),
+                ))
+                .child(app_checkbox_field(
+                    AppCheckboxFieldSpec::new(
+                        "home-farm-setup-shipping",
+                        app_shared_text(AppTextKey::HomeFarmSetupOrderMethodShipping),
+                        Option::<SharedString>::None,
+                    ),
+                    form.draft
+                        .order_methods
+                        .contains(&FarmOrderMethod::Shipping),
+                    cx,
+                    move |checked, window, cx| on_shipping_change(&checked, window, cx),
+                ))
+                .when_some(blocker_key, |this, blocker_key| {
+                    this.child(home_farm_setup_blocker(blocker_key))
+                }),
+        )
+}
+
+fn home_farm_setup_section_label(key: AppTextKey) -> impl IntoElement {
+    div()
+        .text_size(px(APP_UI_THEME.typography.utility_title_text_px))
+        .font_weight(gpui::FontWeight::SEMIBOLD)
+        .text_color(rgb(APP_UI_THEME.text.secondary))
+        .child(app_shared_text(key))
+}
+
+fn home_farm_setup_field_label(key: AppTextKey) -> impl IntoElement {
+    div()
+        .text_size(px(APP_UI_THEME.typography.body_text_px))
+        .font_weight(gpui::FontWeight::MEDIUM)
+        .text_color(rgb(APP_UI_THEME.text.primary))
+        .child(app_shared_text(key))
+}
+
+fn home_farm_setup_blocker(key: AppTextKey) -> impl IntoElement {
+    div()
+        .text_size(px(APP_UI_THEME.typography.utility_title_text_px))
+        .line_height(relative(1.2))
+        .text_color(rgb(APP_UI_THEME.text.secondary))
+        .child(app_shared_text(key))
 }
 
 fn home_card(title: impl Into<SharedString>, body: impl IntoElement) -> impl IntoElement {
@@ -1676,6 +2095,14 @@ fn farm_setup_onboarding_card_spec(home_route: HomeRoute) -> Option<FarmSetupOnb
             action_key: None,
         }),
         _ => None,
+    }
+}
+
+fn farm_setup_save_state_key(state: FarmSetupSaveState) -> AppTextKey {
+    match state {
+        FarmSetupSaveState::AutosavesLocally => AppTextKey::HomeFarmSetupSaveAutosavesLocally,
+        FarmSetupSaveState::SavedLocally => AppTextKey::HomeFarmSetupSaveSavedLocally,
+        FarmSetupSaveState::SaveFailed => AppTextKey::HomeFarmSetupSaveFailedLocally,
     }
 }
 
