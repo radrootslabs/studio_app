@@ -10,8 +10,8 @@ use radroots_studio_app_sqlite::{
     APP_ACTIVITY_CONTEXT_LIMIT, AppSqliteError, AppSqliteStore, DatabaseTarget,
 };
 use radroots_studio_app_state::{
-    AppShellProjection, AppStateCommand, AppStateStore, AppStateStoreError,
-    InMemoryAppStateRepository,
+    AppShellProjection, AppStateCommand, AppStateStore, AppStateStoreError, FarmSetupFlowStage,
+    HomeRoute, InMemoryAppStateRepository,
 };
 use radroots_nostr_accounts::prelude::RadrootsNostrAccountsManager;
 use thiserror::Error;
@@ -32,8 +32,8 @@ pub struct DesktopAppRuntime {
 }
 
 impl DesktopAppRuntime {
-    pub fn bootstrap() -> Self {
-        let state = match DesktopAppRuntimeState::try_bootstrap() {
+    pub fn bootstrap(default_nostr_relay_url: String) -> Self {
+        let state = match DesktopAppRuntimeState::try_bootstrap(default_nostr_relay_url) {
             Ok(state) => state,
             Err(error) => DesktopAppRuntimeState::degraded(error),
         };
@@ -48,9 +48,14 @@ impl DesktopAppRuntime {
             shell_projection: state.state_store.shell_projection().clone(),
             settings_account_projection: state.state_store.settings_account_projection(),
             startup_gate: state.state_store.startup_gate(),
+            home_route: state.state_store.home_route(),
             today_projection: state.state_store.today_projection().clone(),
             startup_issue: state.startup_issue.clone(),
         }
+    }
+
+    pub fn default_nostr_relay_url(&self) -> String {
+        self.lock_state().default_nostr_relay_url.clone()
     }
 
     pub fn selected_settings_section(&self) -> SettingsSection {
@@ -135,6 +140,12 @@ impl DesktopAppRuntime {
             .apply_in_memory(AppStateCommand::replace_today_agenda(projection))
     }
 
+    pub fn select_farm_setup_flow_stage(&self, stage: FarmSetupFlowStage) -> bool {
+        self.lock_state_mut()
+            .state_store
+            .apply_in_memory(AppStateCommand::select_farm_setup_flow_stage(stage))
+    }
+
     pub fn record_home_opened(&self) -> bool {
         self.record_activity(AppActivityKind::HomeOpened)
     }
@@ -188,12 +199,14 @@ pub struct DesktopAppRuntimeSummary {
     pub shell_projection: AppShellProjection,
     pub settings_account_projection: SettingsAccountProjection,
     pub startup_gate: AppStartupGate,
+    pub home_route: HomeRoute,
     pub today_projection: TodayAgendaProjection,
     pub startup_issue: Option<String>,
 }
 
 struct DesktopAppRuntimeState {
     state_store: AppStateStore<InMemoryAppStateRepository>,
+    default_nostr_relay_url: String,
     shared_accounts_paths: Option<AppSharedAccountsPaths>,
     accounts_manager: Option<RadrootsNostrAccountsManager>,
     sqlite_store: Option<AppSqliteStore>,
@@ -223,7 +236,9 @@ impl fmt::Debug for DesktopAppRuntimeState {
 }
 
 impl DesktopAppRuntimeState {
-    fn try_bootstrap() -> Result<Self, DesktopAppRuntimeBootstrapError> {
+    fn try_bootstrap(
+        default_nostr_relay_url: String,
+    ) -> Result<Self, DesktopAppRuntimeBootstrapError> {
         let paths = AppDesktopRuntimePaths::current_desktop()?;
         let database_path = paths.app.data.join(APP_DATABASE_FILE_NAME);
         let sqlite_store = AppSqliteStore::open(DatabaseTarget::Path(database_path.clone()))?;
@@ -238,6 +253,7 @@ impl DesktopAppRuntimeState {
 
         Ok(Self {
             state_store,
+            default_nostr_relay_url,
             shared_accounts_paths: Some(paths.shared_accounts.clone()),
             accounts_manager: accounts_bootstrap.accounts_manager,
             sqlite_store: Some(sqlite_store),
@@ -248,6 +264,7 @@ impl DesktopAppRuntimeState {
     fn degraded(error: DesktopAppRuntimeBootstrapError) -> Self {
         Self {
             state_store: AppStateStore::in_memory(AppShellProjection::default()),
+            default_nostr_relay_url: String::new(),
             shared_accounts_paths: None,
             accounts_manager: None,
             sqlite_store: None,
@@ -366,11 +383,8 @@ impl DesktopAppRuntimeState {
     }
 
     fn command_unavailable_error(&self) -> DesktopAppRuntimeCommandError {
-        if self.startup_issue.is_some() || self.sqlite_store.is_none() {
-            DesktopAppRuntimeCommandError::RuntimeUnavailable
-        } else {
-            DesktopAppRuntimeCommandError::HostVaultUnavailable
-        }
+        let _ = self;
+        DesktopAppRuntimeCommandError::RuntimeUnavailable
     }
 }
 
@@ -378,8 +392,6 @@ impl DesktopAppRuntimeState {
 pub enum DesktopAppRuntimeCommandError {
     #[error("desktop runtime commands are unavailable while the runtime is degraded")]
     RuntimeUnavailable,
-    #[error("desktop runtime commands require an available host vault")]
-    HostVaultUnavailable,
     #[error(transparent)]
     Accounts(#[from] DesktopAccountsCommandError),
 }
@@ -417,7 +429,8 @@ mod tests {
     };
     use radroots_studio_app_sqlite::{AppSqliteStore, DatabaseTarget};
     use radroots_studio_app_state::{
-        AppStateRepositoryError, AppStateStore, AppStateStoreError, InMemoryAppStateRepository,
+        AppStateRepositoryError, AppStateStore, AppStateStoreError, HomeRoute,
+        InMemoryAppStateRepository,
     };
     use radroots_identity::RadrootsIdentity;
     use radroots_nostr_accounts::prelude::{
@@ -480,6 +493,7 @@ mod tests {
         let runtime = DesktopAppRuntime::from_state(DesktopAppRuntimeState {
             state_store: AppStateStore::load(InMemoryAppStateRepository::default())
                 .expect("in-memory state store should load"),
+            default_nostr_relay_url: "ws://127.0.0.1:8080".to_owned(),
             shared_accounts_paths: None,
             accounts_manager: None,
             sqlite_store: Some(
@@ -509,6 +523,7 @@ mod tests {
             SettingsSection::About
         );
         assert_eq!(summary.startup_gate, AppStartupGate::SetupRequired);
+        assert_eq!(summary.home_route, HomeRoute::SetupRequired);
         assert!(summary.settings_account_projection.roster.is_empty());
         assert!(
             summary
@@ -523,6 +538,7 @@ mod tests {
         let runtime = DesktopAppRuntime::from_state(DesktopAppRuntimeState {
             state_store: AppStateStore::load(InMemoryAppStateRepository::default())
                 .expect("in-memory state store should load"),
+            default_nostr_relay_url: "ws://127.0.0.1:8080".to_owned(),
             shared_accounts_paths: None,
             accounts_manager: None,
             sqlite_store: Some(
@@ -557,6 +573,7 @@ mod tests {
         let summary = runtime.summary();
 
         assert_eq!(summary.today_projection, today_agenda);
+        assert_eq!(summary.home_route, HomeRoute::SetupRequired);
         assert_eq!(
             summary.shell_projection.active_surface,
             radroots_studio_app_models::ActiveSurface::Personal
@@ -596,6 +613,7 @@ mod tests {
         );
         assert_eq!(summary.startup_gate, AppStartupGate::SetupRequired);
         assert!(summary.settings_account_projection.roster.is_empty());
+        assert_eq!(summary.home_route, HomeRoute::SetupRequired);
         assert_eq!(summary.today_projection, TodayAgendaProjection::default());
         assert_eq!(
             summary.startup_issue.as_deref(),
@@ -608,6 +626,7 @@ mod tests {
         let runtime = DesktopAppRuntime::from_state(DesktopAppRuntimeState {
             state_store: AppStateStore::load(InMemoryAppStateRepository::default())
                 .expect("in-memory state store should load"),
+            default_nostr_relay_url: "ws://127.0.0.1:8080".to_owned(),
             shared_accounts_paths: None,
             accounts_manager: None,
             sqlite_store: Some(
@@ -705,6 +724,7 @@ mod tests {
         );
         let selected_summary = runtime.summary();
         assert_eq!(selected_summary.startup_gate, AppStartupGate::Farmer);
+        assert_eq!(selected_summary.home_route, HomeRoute::FarmSetupOnboarding);
         assert_eq!(
             selected_summary
                 .settings_account_projection
@@ -930,11 +950,12 @@ mod tests {
     }
 
     #[test]
-    fn runtime_account_commands_fail_closed_without_host_vault_manager() {
+    fn runtime_account_commands_fail_closed_without_accounts_manager() {
         let paths = temp_shared_accounts_paths("blocked");
         let runtime = DesktopAppRuntime::from_state(DesktopAppRuntimeState {
             state_store: AppStateStore::load(InMemoryAppStateRepository::default())
                 .expect("in-memory state store should load"),
+            default_nostr_relay_url: "ws://127.0.0.1:8080".to_owned(),
             shared_accounts_paths: Some(paths),
             accounts_manager: None,
             sqlite_store: Some(
@@ -950,7 +971,7 @@ mod tests {
 
         assert!(matches!(
             error,
-            DesktopAppRuntimeCommandError::HostVaultUnavailable
+            DesktopAppRuntimeCommandError::RuntimeUnavailable
         ));
     }
 
@@ -958,6 +979,7 @@ mod tests {
         DesktopAppRuntime::from_state(DesktopAppRuntimeState {
             state_store: AppStateStore::load(InMemoryAppStateRepository::default())
                 .expect("in-memory state store should load"),
+            default_nostr_relay_url: "ws://127.0.0.1:8080".to_owned(),
             shared_accounts_paths: None,
             accounts_manager: Some(
                 RadrootsNostrAccountsManager::new(
@@ -983,6 +1005,7 @@ mod tests {
             DesktopAppRuntime::from_state(DesktopAppRuntimeState {
                 state_store: AppStateStore::load(InMemoryAppStateRepository::default())
                     .expect("in-memory state store should load"),
+                default_nostr_relay_url: "ws://127.0.0.1:8080".to_owned(),
                 shared_accounts_paths: Some(paths.clone()),
                 accounts_manager: Some(
                     RadrootsNostrAccountsManager::new(

@@ -7,7 +7,9 @@ const ALLOWED_WINDOW_LITERALS: &[&str] = &[
     "account-open-workspace",
     "account-log-out",
     "account-more",
+    "failed to add relay `{relay_url}`: {error}",
     "home-create-account",
+    "home-farm-setup-start",
     "home-today-scroll",
     "settings-allow-relay-connections",
     "settings-launch-at-login",
@@ -18,10 +20,15 @@ const ALLOWED_WINDOW_LITERALS: &[&str] = &[
     "settings-panel-scroll",
     "settings-use-media-servers",
     "settings-use-nip05",
+    "startup-title-radroots",
+    "startup-title-starting",
 ];
 
 const REQUIRED_WINDOW_COPY_KEYS: &[&str] = &[
     "AppTextKey::HomeSetupCreateAccountAction",
+    "AppTextKey::HomeFarmSetupOnboardingTitle",
+    "AppTextKey::HomeFarmSetupOnboardingBody",
+    "AppTextKey::HomeFarmSetupOnboardingAction",
     "AppTextKey::SettingsAccountNoSelectionTitle",
     "AppTextKey::SettingsAccountNoSelectionBody",
     "AppTextKey::SettingsAccountStatusLoggedOut",

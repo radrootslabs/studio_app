@@ -1,8 +1,8 @@
 use gpui::{
-    AnyElement, App, AppContext, Bounds, ClickEvent, Context, InteractiveElement, IntoElement,
-    ParentElement, Render, SharedString, StatefulInteractiveElement, Styled, Window,
-    WindowBackgroundAppearance, WindowBounds, WindowOptions, div, prelude::FluentBuilder, px,
-    relative, rgb, size,
+    Animation, AnimationExt, AnyElement, App, AppContext, Bounds, ClickEvent, Context,
+    InteractiveElement, IntoElement, ParentElement, Render, SharedString,
+    StatefulInteractiveElement, Styled, Timer, Window, WindowBackgroundAppearance, WindowBounds,
+    WindowOptions, div, prelude::FluentBuilder, px, relative, rgb, size,
 };
 use gpui_component::{IconName, Root};
 use radroots_studio_app_i18n::AppTextKey;
@@ -11,12 +11,16 @@ use radroots_studio_app_models::{
     AppStartupGate, FulfillmentWindowSummary, OrderListRow, ProductListRow, TodayAgendaProjection,
     TodaySetupTaskKind,
 };
+use radroots_studio_app_state::{FarmSetupFlowStage, HomeRoute};
 use radroots_studio_app_ui::{
     APP_UI_THEME, AppCheckboxFieldSpec, IconSegmentButtonSpec, LabelValueRow, action_button,
-    action_button_compact, action_icon_button, app_center_stage, app_checkbox_field,
-    app_shared_label_text, app_shared_text, app_window_shell, icon_segment_button,
-    label_value_list, section_divider, status_indicator, utility_title_row,
+    action_button_compact, action_button_primary, action_button_primary_disabled,
+    action_icon_button, app_checkbox_field, app_shared_label_text, app_shared_text,
+    app_window_shell, icon_segment_button, label_value_list, section_divider, status_indicator,
+    utility_title_row,
 };
+use radroots_nostr::prelude::RadrootsNostrClient;
+use std::time::Duration;
 
 use crate::runtime::{DesktopAppRuntime, DesktopAppRuntimeSummary};
 
@@ -134,16 +138,72 @@ pub fn open_settings_window(
 
 pub struct HomeView {
     runtime: DesktopAppRuntime,
+    startup_view: StartupHomeView,
+    logged_in_view: LoggedInHomeView,
+    relay_client: Option<RadrootsNostrClient>,
 }
 
 impl HomeView {
     pub fn new(runtime: DesktopAppRuntime) -> Self {
-        Self { runtime }
+        Self {
+            runtime,
+            startup_view: StartupHomeView::new(),
+            logged_in_view: LoggedInHomeView::new(),
+            relay_client: None,
+        }
     }
 
     fn generate_local_account(&mut self, cx: &mut Context<Self>) {
         if self.runtime.generate_local_account(None).unwrap_or(false) {
             cx.refresh_windows();
+            cx.notify();
+        }
+    }
+
+    fn start_create_account(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if !self.startup_view.begin_starting() {
+            return;
+        }
+
+        let relay_url = self.runtime.default_nostr_relay_url();
+        cx.notify();
+        cx.spawn_in(window, async move |this, cx| {
+            let startup_task = cx
+                .background_executor()
+                .spawn(run_startup_app_init(relay_url));
+            Timer::after(Duration::from_secs(1)).await;
+            let startup_result = startup_task.await;
+            let _ = this.update(cx, |this, cx| {
+                this.finish_create_account(startup_result, cx);
+            });
+        })
+        .detach();
+    }
+
+    fn finish_create_account(
+        &mut self,
+        startup_result: Result<StartupAppInitResult, String>,
+        cx: &mut Context<Self>,
+    ) {
+        match startup_result {
+            Ok(result) => {
+                self.relay_client = Some(result.relay_client);
+                self.startup_view.clear_error();
+                self.startup_view.finish_starting();
+                self.generate_local_account(cx);
+            }
+            Err(error) => {
+                self.startup_view.fail_starting(error);
+                cx.notify();
+            }
+        }
+    }
+
+    fn open_farm_setup(&mut self, cx: &mut Context<Self>) {
+        if self
+            .runtime
+            .select_farm_setup_flow_stage(FarmSetupFlowStage::Editing)
+        {
             cx.notify();
         }
     }
@@ -153,22 +213,110 @@ impl Render for HomeView {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let runtime_summary = self.runtime.summary();
         match home_stage(&runtime_summary) {
-            HomeStage::FarmerWorkspace => farmer_home_shell(&runtime_summary).into_any_element(),
-            HomeStage::Setup
-                if runtime_summary.startup_issue.is_none()
-                    && runtime_summary.startup_gate == AppStartupGate::SetupRequired =>
-            {
-                setup_home_shell(
+            HomeStage::Setup => self
+                .startup_view
+                .render(
                     &runtime_summary,
-                    cx.listener(|this, _, _, cx| this.generate_local_account(cx)),
+                    runtime_summary.startup_issue.is_none()
+                        && runtime_summary.startup_gate == AppStartupGate::SetupRequired,
+                    cx.listener(|this, _, window, cx| this.start_create_account(window, cx)),
                     cx,
                 )
-                .into_any_element()
-            }
-            HomeStage::Setup | HomeStage::PersonalHolding => {
-                holding_home_shell(&runtime_summary).into_any_element()
-            }
+                .into_any_element(),
+            HomeStage::PersonalHolding => self
+                .logged_in_view
+                .render_holding(&runtime_summary)
+                .into_any_element(),
+            HomeStage::FarmerWorkspace => self
+                .logged_in_view
+                .render_farmer(
+                    &runtime_summary,
+                    cx.listener(|this, _, _, cx| this.open_farm_setup(cx)),
+                    cx,
+                )
+                .into_any_element(),
         }
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+enum StartupPhase {
+    Idle,
+    Starting,
+}
+
+struct StartupHomeView {
+    phase: StartupPhase,
+    relay_error: Option<String>,
+}
+
+impl StartupHomeView {
+    fn new() -> Self {
+        Self {
+            phase: StartupPhase::Idle,
+            relay_error: None,
+        }
+    }
+
+    fn begin_starting(&mut self) -> bool {
+        if self.phase == StartupPhase::Starting {
+            return false;
+        }
+
+        self.phase = StartupPhase::Starting;
+        self.relay_error = None;
+        true
+    }
+
+    fn finish_starting(&mut self) {
+        self.phase = StartupPhase::Idle;
+    }
+
+    fn fail_starting(&mut self, error: String) {
+        self.phase = StartupPhase::Idle;
+        self.relay_error = Some(error);
+    }
+
+    fn clear_error(&mut self) {
+        self.relay_error = None;
+    }
+
+    fn render(
+        &self,
+        runtime: &DesktopAppRuntimeSummary,
+        allow_create_account: bool,
+        on_create_account: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+        cx: &App,
+    ) -> impl IntoElement {
+        startup_home_shell(
+            runtime,
+            self.phase == StartupPhase::Starting,
+            self.relay_error.as_deref(),
+            allow_create_account,
+            on_create_account,
+            cx,
+        )
+    }
+}
+
+struct LoggedInHomeView;
+
+impl LoggedInHomeView {
+    fn new() -> Self {
+        Self
+    }
+
+    fn render_holding(&self, runtime: &DesktopAppRuntimeSummary) -> AnyElement {
+        holding_home_shell(runtime).into_any_element()
+    }
+
+    fn render_farmer(
+        &self,
+        runtime: &DesktopAppRuntimeSummary,
+        on_open_farm_setup: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+        cx: &App,
+    ) -> AnyElement {
+        farmer_home_shell(runtime, on_open_farm_setup, cx).into_any_element()
     }
 }
 
@@ -739,14 +887,25 @@ struct HomeStatusPresentation {
     label_key: AppTextKey,
 }
 
-fn farmer_home_shell(runtime: &DesktopAppRuntimeSummary) -> impl IntoElement {
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct FarmSetupOnboardingCardSpec {
+    title_key: AppTextKey,
+    body_key: AppTextKey,
+    action_key: Option<AppTextKey>,
+}
+
+fn farmer_home_shell(
+    runtime: &DesktopAppRuntimeSummary,
+    on_open_farm_setup: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+    cx: &App,
+) -> impl IntoElement {
     home_shell_frame(
         runtime,
         div()
             .id("home-today-scroll")
             .size_full()
             .overflow_y_scroll()
-            .child(home_view_content(runtime))
+            .child(home_view_content(runtime, on_open_farm_setup, cx))
             .into_any_element(),
     )
 }
@@ -783,37 +942,199 @@ fn holding_home_shell(runtime: &DesktopAppRuntimeSummary) -> impl IntoElement {
         runtime,
         div()
             .size_full()
-            .child(app_center_stage(
+            .child(
                 div()
                     .w_full()
                     .max_w(px(APP_UI_THEME.layout.home_card_max_width_px))
+                    .mx_auto()
                     .flex()
                     .flex_col()
                     .gap(px(APP_UI_THEME.layout.home_stack_gap_px))
                     .child(home_status_row(&home_status))
                     .children(sections),
-            ))
+            )
             .into_any_element(),
     )
 }
 
-fn setup_home_shell(
+fn startup_home_shell(
     runtime: &DesktopAppRuntimeSummary,
+    is_starting: bool,
+    relay_error: Option<&str>,
+    allow_create_account: bool,
     on_create_account: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
     cx: &App,
 ) -> impl IntoElement {
-    home_shell_frame(
-        runtime,
+    app_window_shell(
+        APP_UI_THEME.surfaces.window_background,
         div()
             .size_full()
-            .child(app_center_stage(action_button(
-                "home-create-account",
-                app_shared_text(AppTextKey::HomeSetupCreateAccountAction),
-                on_create_account,
-                cx,
-            )))
-            .into_any_element(),
+            .bg(rgb(APP_UI_THEME.surfaces.window_background))
+            .child(
+                div()
+                    .size_full()
+                    .p(px(APP_UI_THEME.layout.home_window_padding_px))
+                    .child(
+                        div()
+                            .size_full()
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .child(
+                                div()
+                                    .w_full()
+                                    .max_w(px(APP_UI_THEME.layout.home_card_max_width_px))
+                                    .mx_auto()
+                                    .flex()
+                                    .flex_col()
+                                    .items_center()
+                                    .gap(px(APP_UI_THEME.layout.startup_stack_gap_px))
+                                    .child(startup_home_title(is_starting))
+                                    .child(startup_home_tagline())
+                                    .when(allow_create_account, |this| {
+                                        this.child(
+                                            div()
+                                                .flex()
+                                                .flex_col()
+                                                .items_center()
+                                                .gap(px(APP_UI_THEME.layout.startup_stack_gap_px))
+                                                .child(if is_starting {
+                                                    action_button_primary_disabled(
+                                                    "home-create-account",
+                                                    app_shared_text(
+                                                        AppTextKey::HomeSetupCreateAccountAction,
+                                                    ),
+                                                    cx,
+                                                )
+                                                .into_any_element()
+                                                } else {
+                                                    action_button_primary(
+                                                    "home-create-account",
+                                                    app_shared_text(
+                                                        AppTextKey::HomeSetupCreateAccountAction,
+                                                    ),
+                                                    on_create_account,
+                                                    cx,
+                                                )
+                                                .into_any_element()
+                                                })
+                                                .when_some(relay_error, |this, error| {
+                                                    this.child(startup_home_support_text(
+                                                        error.to_owned(),
+                                                    ))
+                                                }),
+                                        )
+                                    })
+                                    .when(!allow_create_account, |this| {
+                                        this.child(startup_home_card(
+                                            app_shared_text(AppTextKey::MetadataStartupIssue),
+                                            startup_home_body(runtime),
+                                        ))
+                                    }),
+                            ),
+                    ),
+            ),
     )
+}
+
+fn startup_home_title(is_starting: bool) -> impl IntoElement {
+    let (animation_id, title_key) = if is_starting {
+        ("startup-title-starting", AppTextKey::HomeSetupStarting)
+    } else {
+        ("startup-title-radroots", AppTextKey::HomeSetupTitle)
+    };
+
+    div()
+        .text_size(px(APP_UI_THEME.typography.startup_title_text_px))
+        .font_weight(gpui::FontWeight::NORMAL)
+        .text_color(rgb(APP_UI_THEME.text.primary))
+        .text_center()
+        .child(app_shared_text(title_key))
+        .with_animation(
+            animation_id,
+            Animation::new(Duration::from_millis(180)),
+            |this, delta| this.opacity(delta),
+        )
+}
+
+fn startup_home_tagline() -> impl IntoElement {
+    div()
+        .text_size(px(APP_UI_THEME.typography.startup_tagline_text_px))
+        .font_weight(gpui::FontWeight::SEMIBOLD)
+        .text_color(rgb(APP_UI_THEME.text.primary))
+        .text_center()
+        .child(app_shared_text(AppTextKey::HomeSetupTagline))
+}
+
+fn startup_home_support_text(body: impl Into<SharedString>) -> impl IntoElement {
+    div()
+        .text_size(px(APP_UI_THEME.typography.body_text_px))
+        .line_height(relative(1.2))
+        .text_color(rgb(APP_UI_THEME.text.secondary))
+        .text_center()
+        .child(body.into())
+}
+
+fn startup_home_card(title: impl Into<SharedString>, body: impl IntoElement) -> impl IntoElement {
+    div()
+        .w_full()
+        .bg(rgb(APP_UI_THEME.surfaces.card_background))
+        .rounded(px(APP_UI_THEME
+            .controls
+            .action_button
+            .sizing
+            .corner_radius_px))
+        .child(
+            div()
+                .w_full()
+                .p(px(APP_UI_THEME.layout.home_card_padding_px))
+                .flex()
+                .flex_col()
+                .items_center()
+                .gap(px(APP_UI_THEME.layout.home_stack_gap_px))
+                .child(
+                    div()
+                        .text_size(px(APP_UI_THEME.typography.body_text_px))
+                        .font_weight(gpui::FontWeight::SEMIBOLD)
+                        .text_color(rgb(APP_UI_THEME.text.primary))
+                        .child(title.into()),
+                )
+                .child(body),
+        )
+}
+
+fn startup_home_body(runtime: &DesktopAppRuntimeSummary) -> impl IntoElement {
+    let body = runtime
+        .startup_issue
+        .clone()
+        .unwrap_or_else(|| app_shared_text(AppTextKey::HomeTodayEmptySetupBody).to_string());
+
+    div()
+        .w_full()
+        .text_size(px(APP_UI_THEME.typography.body_text_px))
+        .line_height(relative(1.2))
+        .text_color(rgb(APP_UI_THEME.text.secondary))
+        .text_center()
+        .child(body)
+}
+
+async fn connect_default_relay(relay_url: String) -> Result<RadrootsNostrClient, String> {
+    let client = RadrootsNostrClient::new_signerless();
+    client
+        .add_relay(relay_url.as_str())
+        .await
+        .map_err(|error| format!("failed to add relay `{relay_url}`: {error}"))?;
+    client.connect().await;
+    Ok(client)
+}
+
+struct StartupAppInitResult {
+    relay_client: RadrootsNostrClient,
+}
+
+async fn run_startup_app_init(relay_url: String) -> Result<StartupAppInitResult, String> {
+    let relay_client = connect_default_relay(relay_url).await?;
+    Ok(StartupAppInitResult { relay_client })
 }
 
 fn home_shell_frame(
@@ -887,9 +1208,14 @@ fn home_sidebar(runtime: &DesktopAppRuntimeSummary) -> impl IntoElement {
         )
 }
 
-fn home_view_content(runtime: &DesktopAppRuntimeSummary) -> impl IntoElement {
+fn home_view_content(
+    runtime: &DesktopAppRuntimeSummary,
+    on_open_farm_setup: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+    cx: &App,
+) -> impl IntoElement {
     let projection = &runtime.today_projection;
     let home_status = home_status_presentation(runtime);
+    let setup_onboarding = farm_setup_onboarding_card_spec(runtime.home_route);
     let mut sections = Vec::<AnyElement>::new();
 
     if let Some(summary) = projection.summary.as_ref() {
@@ -906,7 +1232,10 @@ fn home_view_content(runtime: &DesktopAppRuntimeSummary) -> impl IntoElement {
         );
     }
 
-    if projection.needs_setup() {
+    if let Some(spec) = setup_onboarding {
+        sections
+            .push(home_farm_setup_onboarding_card(spec, on_open_farm_setup, cx).into_any_element());
+    } else if projection.needs_setup() {
         sections.push(home_setup_card(projection).into_any_element());
     }
 
@@ -964,7 +1293,10 @@ fn home_view_content(runtime: &DesktopAppRuntimeSummary) -> impl IntoElement {
             )
             .into_any_element(),
         );
-    } else if runtime.startup_issue.is_none() && projection.farm.is_none() {
+    } else if runtime.startup_issue.is_none()
+        && projection.farm.is_none()
+        && setup_onboarding.is_none()
+    {
         sections.push(
             home_empty_state_card(
                 AppTextKey::HomeTodayEmptyNoFarmTitle,
@@ -1023,6 +1355,31 @@ fn home_view_content(runtime: &DesktopAppRuntimeSummary) -> impl IntoElement {
                 .child(home_status_row(&home_status)),
         )
         .children(sections)
+}
+
+fn home_farm_setup_onboarding_card(
+    spec: FarmSetupOnboardingCardSpec,
+    on_open_farm_setup: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+    cx: &App,
+) -> impl IntoElement {
+    home_card(
+        app_shared_text(spec.title_key),
+        div()
+            .w_full()
+            .flex()
+            .flex_col()
+            .items_start()
+            .gap(px(APP_UI_THEME.layout.home_stack_gap_px))
+            .child(home_body_text(app_shared_text(spec.body_key)))
+            .when_some(spec.action_key, |this, action_key| {
+                this.child(div().child(action_button_primary(
+                    "home-farm-setup-start",
+                    app_shared_text(action_key),
+                    on_open_farm_setup,
+                    cx,
+                )))
+            }),
+    )
 }
 
 fn home_card(title: impl Into<SharedString>, body: impl IntoElement) -> impl IntoElement {
@@ -1306,6 +1663,22 @@ fn home_empty_state_card(title_key: AppTextKey, body_key: AppTextKey) -> impl In
     )
 }
 
+fn farm_setup_onboarding_card_spec(home_route: HomeRoute) -> Option<FarmSetupOnboardingCardSpec> {
+    match home_route {
+        HomeRoute::FarmSetupOnboarding => Some(FarmSetupOnboardingCardSpec {
+            title_key: AppTextKey::HomeFarmSetupOnboardingTitle,
+            body_key: AppTextKey::HomeFarmSetupOnboardingBody,
+            action_key: Some(AppTextKey::HomeFarmSetupOnboardingAction),
+        }),
+        HomeRoute::FarmSetupForm => Some(FarmSetupOnboardingCardSpec {
+            title_key: AppTextKey::HomeFarmSetupOnboardingTitle,
+            body_key: AppTextKey::HomeFarmSetupOnboardingBody,
+            action_key: None,
+        }),
+        _ => None,
+    }
+}
+
 fn home_status_presentation(runtime: &DesktopAppRuntimeSummary) -> HomeStatusPresentation {
     if runtime.startup_issue.is_some() || runtime.startup_gate == AppStartupGate::Blocked {
         return HomeStatusPresentation {
@@ -1321,7 +1694,11 @@ fn home_status_presentation(runtime: &DesktopAppRuntimeSummary) -> HomeStatusPre
         };
     }
 
-    if runtime.today_projection.farm.is_none() {
+    if matches!(
+        runtime.home_route,
+        HomeRoute::FarmSetupOnboarding | HomeRoute::FarmSetupForm
+    ) || runtime.today_projection.farm.is_none()
+    {
         return HomeStatusPresentation {
             indicator_color: APP_UI_THEME.controls.status_indicator.offline,
             label_key: AppTextKey::HomeTodayStatusNoFarm,
@@ -1352,5 +1729,37 @@ fn home_setup_task_label_key(kind: TodaySetupTaskKind) -> AppTextKey {
     match kind {
         TodaySetupTaskKind::AddFulfillmentWindow => AppTextKey::HomeTodaySetupAddFulfillmentWindow,
         TodaySetupTaskKind::PublishProduct => AppTextKey::HomeTodaySetupPublishProduct,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{AppTextKey, farm_setup_onboarding_card_spec};
+    use radroots_studio_app_state::HomeRoute;
+
+    #[test]
+    fn farm_setup_onboarding_uses_frozen_copy_and_primary_action() {
+        let spec = farm_setup_onboarding_card_spec(HomeRoute::FarmSetupOnboarding).unwrap();
+
+        assert_eq!(spec.title_key, AppTextKey::HomeFarmSetupOnboardingTitle);
+        assert_eq!(spec.body_key, AppTextKey::HomeFarmSetupOnboardingBody);
+        assert_eq!(
+            spec.action_key,
+            Some(AppTextKey::HomeFarmSetupOnboardingAction)
+        );
+    }
+
+    #[test]
+    fn farm_setup_form_route_keeps_onboarding_copy_without_no_farm_empty_state() {
+        let spec = farm_setup_onboarding_card_spec(HomeRoute::FarmSetupForm).unwrap();
+
+        assert_eq!(spec.title_key, AppTextKey::HomeFarmSetupOnboardingTitle);
+        assert_eq!(spec.body_key, AppTextKey::HomeFarmSetupOnboardingBody);
+        assert_eq!(spec.action_key, None);
+    }
+
+    #[test]
+    fn today_route_has_no_setup_onboarding_card() {
+        assert!(farm_setup_onboarding_card_spec(HomeRoute::Today).is_none());
     }
 }

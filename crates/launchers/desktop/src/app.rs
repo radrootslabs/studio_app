@@ -29,7 +29,7 @@ pub fn launch() -> Result<(), AppLaunchError> {
     bootstrap_logging(&snapshot, runtime_config.local_log_root.as_path())?;
     install_panic_hook();
 
-    let runtime = DesktopAppRuntime::bootstrap();
+    let runtime = DesktopAppRuntime::bootstrap(runtime_config.default_nostr_relay_url.clone());
     let runtime_summary = runtime.summary();
     emit_runtime_events(&snapshot, &runtime_summary);
     let launch_target = primary_window_target(&runtime_summary);
@@ -161,7 +161,7 @@ mod tests {
         AppRuntimeSnapshot,
     };
     use radroots_studio_app_models::{AppStartupGate, SettingsAccountProjection, TodayAgendaProjection};
-    use radroots_studio_app_state::AppShellProjection;
+    use radroots_studio_app_state::{AppShellProjection, HomeRoute};
     use tracing::{
         Event, Level, Subscriber,
         field::{Field, Visit},
@@ -263,6 +263,7 @@ mod tests {
             shell_projection: AppShellProjection::default(),
             settings_account_projection: SettingsAccountProjection::default(),
             startup_gate: AppStartupGate::SetupRequired,
+            home_route: HomeRoute::SetupRequired,
             today_projection: TodayAgendaProjection::default(),
             startup_issue: Some("desktop runtime roots require HOME for macos".to_owned()),
         };
@@ -294,6 +295,7 @@ mod tests {
             shell_projection: AppShellProjection::default(),
             settings_account_projection: SettingsAccountProjection::default(),
             startup_gate: AppStartupGate::Blocked,
+            home_route: HomeRoute::Blocked,
             today_projection: TodayAgendaProjection::default(),
             startup_issue: None,
         };
@@ -301,6 +303,7 @@ mod tests {
             shell_projection: AppShellProjection::default(),
             settings_account_projection: SettingsAccountProjection::default(),
             startup_gate: AppStartupGate::SetupRequired,
+            home_route: HomeRoute::SetupRequired,
             today_projection: TodayAgendaProjection::default(),
             startup_issue: None,
         };
@@ -315,6 +318,7 @@ mod tests {
             shell_projection: AppShellProjection::default(),
             settings_account_projection: SettingsAccountProjection::default(),
             startup_gate: AppStartupGate::Personal,
+            home_route: HomeRoute::Personal,
             today_projection: TodayAgendaProjection::default(),
             startup_issue: None,
         };
@@ -322,6 +326,7 @@ mod tests {
             shell_projection: AppShellProjection::default(),
             settings_account_projection: SettingsAccountProjection::default(),
             startup_gate: AppStartupGate::Farmer,
+            home_route: HomeRoute::FarmSetupOnboarding,
             today_projection: TodayAgendaProjection::default(),
             startup_issue: None,
         };
@@ -336,6 +341,7 @@ mod tests {
             shell_projection: AppShellProjection::default(),
             settings_account_projection: SettingsAccountProjection::default(),
             startup_gate: AppStartupGate::Personal,
+            home_route: HomeRoute::Personal,
             today_projection: TodayAgendaProjection::default(),
             startup_issue: Some("runtime unavailable".to_owned()),
         };
@@ -349,6 +355,7 @@ mod tests {
             shell_projection: AppShellProjection::default(),
             settings_account_projection: SettingsAccountProjection::default(),
             startup_gate: AppStartupGate::SetupRequired,
+            home_route: HomeRoute::SetupRequired,
             today_projection: TodayAgendaProjection::default(),
             startup_issue: None,
         };
@@ -356,6 +363,7 @@ mod tests {
             shell_projection: AppShellProjection::default(),
             settings_account_projection: SettingsAccountProjection::default(),
             startup_gate: AppStartupGate::Personal,
+            home_route: HomeRoute::Personal,
             today_projection: TodayAgendaProjection::default(),
             startup_issue: None,
         };
@@ -363,6 +371,7 @@ mod tests {
             shell_projection: AppShellProjection::default(),
             settings_account_projection: SettingsAccountProjection::default(),
             startup_gate: AppStartupGate::Farmer,
+            home_route: HomeRoute::FarmSetupOnboarding,
             today_projection: TodayAgendaProjection::default(),
             startup_issue: None,
         };
@@ -370,6 +379,7 @@ mod tests {
             shell_projection: AppShellProjection::default(),
             settings_account_projection: SettingsAccountProjection::default(),
             startup_gate: AppStartupGate::Farmer,
+            home_route: HomeRoute::FarmSetupOnboarding,
             today_projection: TodayAgendaProjection::default(),
             startup_issue: Some("runtime unavailable".to_owned()),
         };
