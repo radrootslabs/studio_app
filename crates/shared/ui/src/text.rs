@@ -91,19 +91,6 @@ pub fn runtime_metadata_rows(snapshot: &AppRuntimeSnapshot) -> Vec<LabelValueRow
     ]
 }
 
-pub fn settings_account_profile_rows() -> Vec<LabelValueRow> {
-    vec![
-        text_row(
-            AppTextKey::SettingsAccountProfileLabel,
-            AppTextKey::SettingsAccountPlaceholderHandle,
-        ),
-        text_row(
-            AppTextKey::SettingsAccountStatusLabel,
-            AppTextKey::SettingsAccountStatusLoggedIn,
-        ),
-    ]
-}
-
 pub fn settings_preferences_general_rows() -> Vec<LabelValueRow> {
     vec![
         text_row(

@@ -12,7 +12,7 @@ pub use primitives::{
 };
 pub use text::{
     app_shared_label_text, app_shared_text, runtime_metadata_rows, settings_about_status_rows,
-    settings_account_profile_rows, settings_preferences_general_rows,
+    settings_preferences_general_rows,
 };
 pub use theme::{
     APP_UI_THEME, ActionButtonColors, ActionButtonSizing, ActionButtonTokens, AppControlTokens,

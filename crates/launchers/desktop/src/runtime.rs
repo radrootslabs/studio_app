@@ -3,8 +3,8 @@ use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
 use radroots_studio_app_core::{AppRuntimePathsError, AppRuntimeRoots};
 use radroots_studio_app_models::{
-    ActiveSurface, AppActivityContext, AppActivityKind, SettingsPreference, SettingsSection,
-    TodayAgendaProjection,
+    AppActivityContext, AppActivityKind, AppStartupGate, SettingsAccountProjection,
+    SettingsPreference, SettingsSection, TodayAgendaProjection,
 };
 use radroots_studio_app_sqlite::{
     APP_ACTIVITY_CONTEXT_LIMIT, AppSqliteError, AppSqliteStore, DatabaseTarget,
@@ -38,6 +38,8 @@ impl DesktopAppRuntime {
 
         DesktopAppRuntimeSummary {
             shell_projection: state.state_store.shell_projection().clone(),
+            settings_account_projection: state.state_store.settings_account_projection(),
+            startup_gate: state.state_store.startup_gate(),
             today_projection: state.state_store.today_projection().clone(),
             startup_issue: state.startup_issue.clone(),
         }
@@ -140,6 +142,8 @@ impl DesktopAppRuntime {
 #[derive(Clone, Debug)]
 pub struct DesktopAppRuntimeSummary {
     pub shell_projection: AppShellProjection,
+    pub settings_account_projection: SettingsAccountProjection,
+    pub startup_gate: AppStartupGate,
     pub today_projection: TodayAgendaProjection,
     pub startup_issue: Option<String>,
 }
@@ -183,10 +187,7 @@ impl DesktopAppRuntimeState {
 
     fn degraded(error: DesktopAppRuntimeBootstrapError) -> Self {
         Self {
-            state_store: AppStateStore::in_memory(AppShellProjection {
-                active_surface: ActiveSurface::Farmer,
-                ..AppShellProjection::default()
-            }),
+            state_store: AppStateStore::in_memory(AppShellProjection::default()),
             sqlite_store: None,
             startup_issue: Some(error.to_string()),
         }
@@ -216,7 +217,7 @@ mod tests {
 
     use radroots_studio_app_core::{AppRuntimeHostEnvironment, AppRuntimePlatform, AppRuntimeRoots};
     use radroots_studio_app_models::{
-        ActiveSurface, AppActivityKind, FarmReadiness, FarmSummary, SettingsPreference,
+        AppActivityKind, AppStartupGate, FarmReadiness, FarmSummary, SettingsPreference,
         SettingsSection, ShellSection, TodayAgendaProjection, TodaySetupTask, TodaySetupTaskKind,
         TodaySummary,
     };
@@ -283,6 +284,14 @@ mod tests {
             cloned_runtime.selected_settings_section(),
             SettingsSection::About
         );
+        assert_eq!(summary.startup_gate, AppStartupGate::SetupRequired);
+        assert!(summary.settings_account_projection.roster.is_empty());
+        assert!(
+            summary
+                .settings_account_projection
+                .selected_account
+                .is_none()
+        );
     }
 
     #[test]
@@ -324,7 +333,7 @@ mod tests {
         assert_eq!(summary.today_projection, today_agenda);
         assert_eq!(
             summary.shell_projection.active_surface,
-            ActiveSurface::Farmer
+            radroots_studio_app_models::ActiveSurface::Personal
         );
         assert_eq!(
             summary.shell_projection.selected_section,
@@ -349,7 +358,7 @@ mod tests {
 
         assert_eq!(
             summary.shell_projection.active_surface,
-            ActiveSurface::Farmer
+            radroots_studio_app_models::ActiveSurface::Personal
         );
         assert_eq!(
             summary.shell_projection.selected_section,
@@ -359,6 +368,8 @@ mod tests {
             summary.shell_projection.settings.selected_section,
             SettingsSection::Account
         );
+        assert_eq!(summary.startup_gate, AppStartupGate::SetupRequired);
+        assert!(summary.settings_account_projection.roster.is_empty());
         assert_eq!(summary.today_projection, TodayAgendaProjection::default());
         assert_eq!(
             summary.startup_issue.as_deref(),

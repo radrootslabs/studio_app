@@ -208,6 +208,228 @@ typed_id!(ActivityEventId);
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
+pub enum AccountCustody {
+    LocalManaged,
+    BrowserSigner,
+    RemoteSigner,
+}
+
+impl AccountCustody {
+    pub const fn storage_key(self) -> &'static str {
+        match self {
+            Self::LocalManaged => "local_managed",
+            Self::BrowserSigner => "browser_signer",
+            Self::RemoteSigner => "remote_signer",
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum IdentityBlockedReason {
+    RuntimeUnavailable,
+    HostVaultUnavailable,
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "status", content = "reason", rename_all = "snake_case")]
+pub enum IdentityReadiness {
+    #[default]
+    MissingAccount,
+    Ready,
+    Blocked(IdentityBlockedReason),
+}
+
+impl IdentityReadiness {
+    pub const fn storage_key(self) -> &'static str {
+        match self {
+            Self::MissingAccount => "missing_account",
+            Self::Ready => "ready",
+            Self::Blocked(IdentityBlockedReason::RuntimeUnavailable) => "runtime_unavailable",
+            Self::Blocked(IdentityBlockedReason::HostVaultUnavailable) => "host_vault_unavailable",
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct SelectedSurfaceProjection {
+    pub active_surface: ActiveSurface,
+}
+
+impl Default for SelectedSurfaceProjection {
+    fn default() -> Self {
+        Self::new(ActiveSurface::Personal)
+    }
+}
+
+impl SelectedSurfaceProjection {
+    pub const fn new(active_surface: ActiveSurface) -> Self {
+        Self { active_surface }
+    }
+}
+
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+pub struct FarmerActivationProjection {
+    pub farm_id: Option<FarmId>,
+}
+
+impl FarmerActivationProjection {
+    pub const fn inactive() -> Self {
+        Self { farm_id: None }
+    }
+
+    pub fn active(farm_id: FarmId) -> Self {
+        Self {
+            farm_id: Some(farm_id),
+        }
+    }
+
+    pub const fn is_active(&self) -> bool {
+        self.farm_id.is_some()
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct AccountSummary {
+    pub account_id: String,
+    pub npub: String,
+    pub label: Option<String>,
+    pub custody: AccountCustody,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct SelectedAccountProjection {
+    pub account: AccountSummary,
+    pub selected_surface: SelectedSurfaceProjection,
+    pub farmer_activation: FarmerActivationProjection,
+}
+
+impl SelectedAccountProjection {
+    pub fn new(
+        account: AccountSummary,
+        selected_surface: SelectedSurfaceProjection,
+        farmer_activation: FarmerActivationProjection,
+    ) -> Self {
+        let active_surface = if farmer_activation.is_active() {
+            selected_surface.active_surface
+        } else {
+            ActiveSurface::Personal
+        };
+
+        Self {
+            account,
+            selected_surface: SelectedSurfaceProjection::new(active_surface),
+            farmer_activation,
+        }
+    }
+
+    pub const fn active_surface(&self) -> ActiveSurface {
+        self.selected_surface.active_surface
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AppStartupGate {
+    Blocked,
+    #[default]
+    SetupRequired,
+    Personal,
+    Farmer,
+}
+
+impl AppStartupGate {
+    pub const fn storage_key(self) -> &'static str {
+        match self {
+            Self::Blocked => "blocked",
+            Self::SetupRequired => "setup_required",
+            Self::Personal => "personal",
+            Self::Farmer => "farmer",
+        }
+    }
+}
+
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+pub struct AppIdentityProjection {
+    pub readiness: IdentityReadiness,
+    pub roster: Vec<AccountSummary>,
+    pub selected_account: Option<SelectedAccountProjection>,
+}
+
+impl AppIdentityProjection {
+    pub fn missing() -> Self {
+        Self::default()
+    }
+
+    pub fn blocked(reason: IdentityBlockedReason) -> Self {
+        Self {
+            readiness: IdentityReadiness::Blocked(reason),
+            ..Self::default()
+        }
+    }
+
+    pub fn ready(
+        mut roster: Vec<AccountSummary>,
+        selected_account: SelectedAccountProjection,
+    ) -> Self {
+        if !roster
+            .iter()
+            .any(|account| account.account_id == selected_account.account.account_id)
+        {
+            roster.insert(0, selected_account.account.clone());
+        }
+
+        Self {
+            readiness: IdentityReadiness::Ready,
+            roster,
+            selected_account: Some(selected_account),
+        }
+    }
+
+    pub fn startup_gate(&self) -> AppStartupGate {
+        match self.readiness {
+            IdentityReadiness::MissingAccount => AppStartupGate::SetupRequired,
+            IdentityReadiness::Blocked(_) => AppStartupGate::Blocked,
+            IdentityReadiness::Ready => self
+                .selected_account
+                .as_ref()
+                .map(|account| {
+                    if account.farmer_activation.is_active()
+                        && account.active_surface() == ActiveSurface::Farmer
+                    {
+                        AppStartupGate::Farmer
+                    } else {
+                        AppStartupGate::Personal
+                    }
+                })
+                .unwrap_or(AppStartupGate::SetupRequired),
+        }
+    }
+
+    pub fn settings_account(&self) -> SettingsAccountProjection {
+        self.into()
+    }
+}
+
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+pub struct SettingsAccountProjection {
+    pub readiness: IdentityReadiness,
+    pub roster: Vec<AccountSummary>,
+    pub selected_account: Option<SelectedAccountProjection>,
+}
+
+impl From<&AppIdentityProjection> for SettingsAccountProjection {
+    fn from(value: &AppIdentityProjection) -> Self {
+        Self {
+            readiness: value.readiness,
+            roster: value.roster.clone(),
+            selected_account: value.selected_account.clone(),
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum FarmReadiness {
     Incomplete,
     Ready,
@@ -365,9 +587,12 @@ impl TodayAgendaProjection {
 #[cfg(test)]
 mod tests {
     use super::{
-        ActiveSurface, ActivityEventId, AppActivityContext, AppActivityEvent, AppActivityKind,
-        FarmId, FarmerSection, OrderListRow, ProductListRow, SettingsPreference, SettingsSection,
-        ShellSection, TodayAgendaProjection, TodaySetupTask, TodaySetupTaskKind, TodaySummary,
+        AccountCustody, AccountSummary, ActiveSurface, ActivityEventId, AppActivityContext,
+        AppActivityEvent, AppActivityKind, AppIdentityProjection, AppStartupGate, FarmId,
+        FarmerActivationProjection, FarmerSection, IdentityBlockedReason, OrderListRow,
+        ProductListRow, SelectedAccountProjection, SelectedSurfaceProjection, SettingsPreference,
+        SettingsSection, ShellSection, TodayAgendaProjection, TodaySetupTask, TodaySetupTaskKind,
+        TodaySummary,
     };
     use std::{collections::BTreeSet, str::FromStr};
     use uuid::Uuid;
@@ -422,6 +647,93 @@ mod tests {
             ShellSection::default_for_surface(ActiveSurface::Farmer),
             ShellSection::Farmer(FarmerSection::Today)
         );
+    }
+
+    #[test]
+    fn selected_surface_defaults_to_personal() {
+        assert_eq!(
+            SelectedSurfaceProjection::default().active_surface,
+            ActiveSurface::Personal
+        );
+    }
+
+    #[test]
+    fn selected_account_without_farmer_activation_falls_back_to_personal_surface() {
+        let projection = SelectedAccountProjection::new(
+            AccountSummary {
+                account_id: "acct_01".to_owned(),
+                npub: "npub1example".to_owned(),
+                label: Some("North field".to_owned()),
+                custody: AccountCustody::LocalManaged,
+            },
+            SelectedSurfaceProjection::new(ActiveSurface::Farmer),
+            FarmerActivationProjection::inactive(),
+        );
+
+        assert_eq!(projection.active_surface(), ActiveSurface::Personal);
+        assert!(!projection.farmer_activation.is_active());
+    }
+
+    #[test]
+    fn startup_gate_tracks_setup_personal_farmer_and_blocked_states() {
+        let farmer_identity = AppIdentityProjection::ready(
+            Vec::new(),
+            SelectedAccountProjection::new(
+                AccountSummary {
+                    account_id: "acct_02".to_owned(),
+                    npub: "npub1farmer".to_owned(),
+                    label: None,
+                    custody: AccountCustody::LocalManaged,
+                },
+                SelectedSurfaceProjection::new(ActiveSurface::Farmer),
+                FarmerActivationProjection::active(FarmId::new()),
+            ),
+        );
+        let personal_identity = AppIdentityProjection::ready(
+            Vec::new(),
+            SelectedAccountProjection::new(
+                AccountSummary {
+                    account_id: "acct_03".to_owned(),
+                    npub: "npub1personal".to_owned(),
+                    label: None,
+                    custody: AccountCustody::LocalManaged,
+                },
+                SelectedSurfaceProjection::new(ActiveSurface::Personal),
+                FarmerActivationProjection::inactive(),
+            ),
+        );
+
+        assert_eq!(
+            AppIdentityProjection::missing().startup_gate(),
+            AppStartupGate::SetupRequired
+        );
+        assert_eq!(personal_identity.startup_gate(), AppStartupGate::Personal);
+        assert_eq!(farmer_identity.startup_gate(), AppStartupGate::Farmer);
+        assert_eq!(
+            AppIdentityProjection::blocked(IdentityBlockedReason::HostVaultUnavailable)
+                .startup_gate(),
+            AppStartupGate::Blocked
+        );
+    }
+
+    #[test]
+    fn ready_identity_keeps_selected_account_visible_in_roster() {
+        let selected_account = SelectedAccountProjection::new(
+            AccountSummary {
+                account_id: "acct_selected".to_owned(),
+                npub: "npub1selected".to_owned(),
+                label: None,
+                custody: AccountCustody::RemoteSigner,
+            },
+            SelectedSurfaceProjection::new(ActiveSurface::Personal),
+            FarmerActivationProjection::inactive(),
+        );
+        let projection = AppIdentityProjection::ready(Vec::new(), selected_account.clone());
+
+        assert_eq!(projection.readiness.storage_key(), "ready");
+        assert_eq!(projection.roster.len(), 1);
+        assert_eq!(projection.roster[0], selected_account.account);
+        assert_eq!(projection.selected_account, Some(selected_account));
     }
 
     #[test]

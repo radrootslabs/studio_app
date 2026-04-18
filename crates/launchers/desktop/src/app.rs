@@ -153,7 +153,7 @@ mod tests {
         APP_PROJECTION_SOURCE, AppBuildIdentity, AppRuntimeCapture, AppRuntimeMode,
         AppRuntimeSnapshot,
     };
-    use radroots_studio_app_models::TodayAgendaProjection;
+    use radroots_studio_app_models::{AppStartupGate, SettingsAccountProjection, TodayAgendaProjection};
     use radroots_studio_app_state::AppShellProjection;
     use tracing::{
         Event, Level, Subscriber,
@@ -253,6 +253,8 @@ mod tests {
         });
         let summary = DesktopAppRuntimeSummary {
             shell_projection: AppShellProjection::default(),
+            settings_account_projection: SettingsAccountProjection::default(),
+            startup_gate: AppStartupGate::SetupRequired,
             today_projection: TodayAgendaProjection::default(),
             startup_issue: Some("desktop runtime roots require HOME for macos".to_owned()),
         };

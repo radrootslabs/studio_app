@@ -1,7 +1,9 @@
 #![forbid(unsafe_code)]
 
 use radroots_studio_app_models::{
-    ActiveSurface, SettingsPreference, SettingsSection, ShellSection, TodayAgendaProjection,
+    ActiveSurface, AppIdentityProjection, AppStartupGate, SelectedSurfaceProjection,
+    SettingsAccountProjection, SettingsPreference, SettingsSection, ShellSection,
+    TodayAgendaProjection,
 };
 use thiserror::Error;
 
@@ -73,7 +75,7 @@ pub struct AppShellProjection {
 
 impl Default for AppShellProjection {
     fn default() -> Self {
-        Self::new(ActiveSurface::Farmer, ShellSection::Home)
+        Self::new(ActiveSurface::Personal, ShellSection::Home)
     }
 }
 
@@ -92,7 +94,10 @@ impl AppShellProjection {
     }
 
     pub fn for_surface(active_surface: ActiveSurface) -> Self {
-        Self::new(active_surface, ShellSection::default_for_surface(active_surface))
+        Self::new(
+            active_surface,
+            ShellSection::default_for_surface(active_surface),
+        )
     }
 
     pub fn for_settings(active_surface: ActiveSurface, selected_section: SettingsSection) -> Self {
@@ -139,15 +144,39 @@ impl AppShellProjection {
     }
 }
 
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct AppProjection {
     pub shell: AppShellProjection,
+    pub identity: AppIdentityProjection,
+    pub startup_gate: AppStartupGate,
     pub today: TodayAgendaProjection,
 }
 
 impl AppProjection {
-    pub fn new(shell: AppShellProjection, today: TodayAgendaProjection) -> Self {
-        Self { shell, today }
+    pub fn new(
+        mut shell: AppShellProjection,
+        identity: AppIdentityProjection,
+        today: TodayAgendaProjection,
+    ) -> Self {
+        sync_shell_to_identity(&mut shell, &identity);
+        let startup_gate = identity.startup_gate();
+
+        Self {
+            shell,
+            identity,
+            startup_gate,
+            today,
+        }
+    }
+}
+
+impl Default for AppProjection {
+    fn default() -> Self {
+        Self::new(
+            AppShellProjection::default(),
+            AppIdentityProjection::default(),
+            TodayAgendaProjection::default(),
+        )
     }
 }
 
@@ -156,6 +185,7 @@ pub enum AppStateCommand {
     SelectActiveSurface(ActiveSurface),
     SelectSection(ShellSection),
     SelectSettingsSection(SettingsSection),
+    ReplaceIdentityProjection(AppIdentityProjection),
     SetSettingsPreference {
         preference: SettingsPreference,
         enabled: bool,
@@ -170,6 +200,10 @@ impl AppStateCommand {
 
     pub const fn select_settings_section(section: SettingsSection) -> Self {
         Self::SelectSettingsSection(section)
+    }
+
+    pub fn replace_identity_projection(projection: AppIdentityProjection) -> Self {
+        Self::ReplaceIdentityProjection(projection)
     }
 
     pub fn replace_today_agenda(projection: TodayAgendaProjection) -> Self {
@@ -263,6 +297,7 @@ impl<R: AppStateRepository> AppStateStore<R> {
     pub fn load(repository: R) -> Result<Self, AppStateStoreError> {
         let projection = AppProjection::new(
             repository.load_shell_projection()?,
+            AppIdentityProjection::default(),
             TodayAgendaProjection::default(),
         );
 
@@ -282,6 +317,18 @@ impl<R: AppStateRepository> AppStateStore<R> {
 
     pub fn today_projection(&self) -> &TodayAgendaProjection {
         &self.projection.today
+    }
+
+    pub fn identity_projection(&self) -> &AppIdentityProjection {
+        &self.projection.identity
+    }
+
+    pub fn settings_account_projection(&self) -> SettingsAccountProjection {
+        self.projection.identity.settings_account()
+    }
+
+    pub fn startup_gate(&self) -> AppStartupGate {
+        self.projection.startup_gate
     }
 
     pub fn repository(&self) -> &R {
@@ -313,7 +360,11 @@ impl AppStateStore<InMemoryAppStateRepository> {
     pub fn in_memory(projection: AppShellProjection) -> Self {
         Self {
             repository: InMemoryAppStateRepository::new(projection.clone()),
-            projection: AppProjection::new(projection, TodayAgendaProjection::default()),
+            projection: AppProjection::new(
+                projection,
+                AppIdentityProjection::default(),
+                TodayAgendaProjection::default(),
+            ),
         }
     }
 
@@ -350,12 +401,24 @@ fn apply_command(projection: &mut AppProjection, command: AppStateCommand) -> Ap
     match command {
         AppStateCommand::SelectActiveSurface(active_surface) => {
             projection.shell.select_active_surface(active_surface);
+            if let Some(selected_account) = projection.identity.selected_account.as_mut() {
+                let selected_surface = if selected_account.farmer_activation.is_active() {
+                    active_surface
+                } else {
+                    ActiveSurface::Personal
+                };
+                selected_account.selected_surface =
+                    SelectedSurfaceProjection::new(selected_surface);
+            }
         }
         AppStateCommand::SelectSection(selected_section) => {
             projection.shell.select_section(selected_section);
         }
         AppStateCommand::SelectSettingsSection(selected_section) => {
             projection.shell.select_settings_section(selected_section);
+        }
+        AppStateCommand::ReplaceIdentityProjection(identity_projection) => {
+            projection.identity = identity_projection;
         }
         AppStateCommand::SetSettingsPreference {
             preference,
@@ -372,12 +435,36 @@ fn apply_command(projection: &mut AppProjection, command: AppStateCommand) -> Ap
         }
     }
 
+    sync_projection(projection);
+
     if *projection == before {
         AppStateMutation::NoChange
     } else if projection.shell != before.shell {
         AppStateMutation::ShellChanged
     } else {
         AppStateMutation::TodayChanged
+    }
+}
+
+fn sync_projection(projection: &mut AppProjection) {
+    sync_shell_to_identity(&mut projection.shell, &projection.identity);
+    projection.startup_gate = projection.identity.startup_gate();
+}
+
+fn sync_shell_to_identity(shell: &mut AppShellProjection, identity: &AppIdentityProjection) {
+    match identity.startup_gate() {
+        AppStartupGate::Blocked | AppStartupGate::SetupRequired | AppStartupGate::Personal => {
+            shell.active_surface = ActiveSurface::Personal;
+            if matches!(shell.selected_section, ShellSection::Farmer(_)) {
+                shell.selected_section = ShellSection::Home;
+            }
+        }
+        AppStartupGate::Farmer => {
+            shell.active_surface = ActiveSurface::Farmer;
+            if matches!(shell.selected_section, ShellSection::Home) {
+                shell.selected_section = ShellSection::default_for_surface(ActiveSurface::Farmer);
+            }
+        }
     }
 }
 
@@ -389,7 +476,9 @@ mod tests {
         SettingsPreference,
     };
     use radroots_studio_app_models::{
-        ActiveSurface, FarmerSection, SettingsSection, ShellSection, TodayAgendaProjection,
+        AccountCustody, AccountSummary, ActiveSurface, AppIdentityProjection, AppStartupGate,
+        FarmId, FarmerActivationProjection, FarmerSection, SelectedAccountProjection,
+        SelectedSurfaceProjection, SettingsSection, ShellSection, TodayAgendaProjection,
         TodaySetupTask, TodaySetupTaskKind,
     };
 
@@ -408,12 +497,30 @@ mod tests {
         }
     }
 
+    fn ready_identity(surface: ActiveSurface) -> AppIdentityProjection {
+        AppIdentityProjection::ready(
+            Vec::new(),
+            SelectedAccountProjection::new(
+                AccountSummary {
+                    account_id: "acct_surface".to_owned(),
+                    npub: "npub1surface".to_owned(),
+                    label: Some("North field".to_owned()),
+                    custody: AccountCustody::LocalManaged,
+                },
+                SelectedSurfaceProjection::new(surface),
+                FarmerActivationProjection::active(FarmId::new()),
+            ),
+        )
+    }
+
     #[test]
-    fn default_projection_starts_on_farmer_home() {
+    fn default_projection_starts_on_personal_setup_gate() {
         let projection = AppProjection::default();
 
-        assert_eq!(projection.shell.active_surface, ActiveSurface::Farmer);
+        assert_eq!(projection.shell.active_surface, ActiveSurface::Personal);
         assert_eq!(projection.shell.selected_section, ShellSection::Home);
+        assert_eq!(projection.identity, AppIdentityProjection::default());
+        assert_eq!(projection.startup_gate, AppStartupGate::SetupRequired);
         assert_eq!(
             projection.shell.settings.selected_section,
             SettingsSection::Account
@@ -433,7 +540,10 @@ mod tests {
         ));
         let store = AppStateStore::load(repository).expect("in-memory repository should load");
 
-        assert_eq!(store.projection().shell.active_surface, ActiveSurface::Farmer);
+        assert_eq!(
+            store.projection().shell.active_surface,
+            ActiveSurface::Personal
+        );
         assert_eq!(
             store.projection().shell.selected_section,
             ShellSection::Settings(SettingsSection::About)
@@ -442,6 +552,7 @@ mod tests {
             store.projection().shell.settings.selected_section,
             SettingsSection::About
         );
+        assert_eq!(store.startup_gate(), AppStartupGate::SetupRequired);
         assert_eq!(store.projection().today, TodayAgendaProjection::default());
     }
 
@@ -455,7 +566,10 @@ mod tests {
         ));
 
         assert_eq!(changed, Ok(true));
-        assert_eq!(store.projection().shell.active_surface, ActiveSurface::Farmer);
+        assert_eq!(
+            store.projection().shell.active_surface,
+            ActiveSurface::Personal
+        );
         assert_eq!(
             store.projection().shell.selected_section,
             ShellSection::Home
@@ -475,7 +589,7 @@ mod tests {
     }
 
     #[test]
-    fn select_section_still_updates_the_root_shell() {
+    fn select_farmer_section_without_identity_gate_is_rejected() {
         let mut store = AppStateStore::load(InMemoryAppStateRepository::default())
             .expect("in-memory repository should load");
 
@@ -483,16 +597,36 @@ mod tests {
             FarmerSection::Products,
         )));
 
-        assert_eq!(changed, Ok(true));
+        assert_eq!(changed, Ok(false));
         assert_eq!(
             store.projection().shell.selected_section,
-            ShellSection::Farmer(FarmerSection::Products)
+            ShellSection::Home
         );
         assert_eq!(
-            store.repository().projection().selected_section,
-            ShellSection::Farmer(FarmerSection::Products)
+            store.projection().shell.active_surface,
+            ActiveSurface::Personal
         );
-        assert_eq!(store.projection().shell.active_surface, ActiveSurface::Farmer);
+    }
+
+    #[test]
+    fn replacing_identity_projection_with_farmer_activation_moves_home_to_farmer_today() {
+        let mut store = AppStateStore::load(InMemoryAppStateRepository::default())
+            .expect("in-memory repository should load");
+
+        let changed = store.apply(AppStateCommand::replace_identity_projection(
+            ready_identity(ActiveSurface::Farmer),
+        ));
+
+        assert_eq!(changed, Ok(true));
+        assert_eq!(store.startup_gate(), AppStartupGate::Farmer);
+        assert_eq!(
+            store.projection().shell.active_surface,
+            ActiveSurface::Farmer
+        );
+        assert_eq!(
+            store.projection().shell.selected_section,
+            ShellSection::Farmer(FarmerSection::Today)
+        );
     }
 
     #[test]
@@ -501,16 +635,34 @@ mod tests {
             ActiveSurface::Personal,
         ));
         let mut store = AppStateStore::load(repository).expect("in-memory repository should load");
+        assert_eq!(
+            store.apply(AppStateCommand::replace_identity_projection(
+                ready_identity(ActiveSurface::Personal,)
+            )),
+            Ok(true)
+        );
 
         let changed = store.apply(AppStateCommand::select_active_surface(
             ActiveSurface::Farmer,
         ));
 
         assert_eq!(changed, Ok(true));
-        assert_eq!(store.projection().shell.active_surface, ActiveSurface::Farmer);
+        assert_eq!(
+            store.projection().shell.active_surface,
+            ActiveSurface::Farmer
+        );
         assert_eq!(
             store.projection().shell.selected_section,
             ShellSection::Farmer(FarmerSection::Today)
+        );
+        assert_eq!(
+            store
+                .identity_projection()
+                .selected_account
+                .as_ref()
+                .expect("selected account")
+                .active_surface(),
+            ActiveSurface::Farmer
         );
     }
 
@@ -521,14 +673,27 @@ mod tests {
             ShellSection::Farmer(FarmerSection::Products),
         ));
         let mut store = AppStateStore::load(repository).expect("in-memory repository should load");
+        assert_eq!(
+            store.apply(AppStateCommand::replace_identity_projection(
+                ready_identity(ActiveSurface::Farmer,)
+            )),
+            Ok(true)
+        );
 
         let changed = store.apply(AppStateCommand::select_active_surface(
             ActiveSurface::Personal,
         ));
 
         assert_eq!(changed, Ok(true));
-        assert_eq!(store.projection().shell.active_surface, ActiveSurface::Personal);
-        assert_eq!(store.projection().shell.selected_section, ShellSection::Home);
+        assert_eq!(
+            store.projection().shell.active_surface,
+            ActiveSurface::Personal
+        );
+        assert_eq!(
+            store.projection().shell.selected_section,
+            ShellSection::Home
+        );
+        assert_eq!(store.startup_gate(), AppStartupGate::Personal);
     }
 
     #[test]
@@ -538,13 +703,22 @@ mod tests {
             SettingsSection::About,
         ));
         let mut store = AppStateStore::load(repository).expect("in-memory repository should load");
+        assert_eq!(
+            store.apply(AppStateCommand::replace_identity_projection(
+                ready_identity(ActiveSurface::Personal,)
+            )),
+            Ok(true)
+        );
 
         let changed = store.apply(AppStateCommand::select_active_surface(
             ActiveSurface::Farmer,
         ));
 
         assert_eq!(changed, Ok(true));
-        assert_eq!(store.projection().shell.active_surface, ActiveSurface::Farmer);
+        assert_eq!(
+            store.projection().shell.active_surface,
+            ActiveSurface::Farmer
+        );
         assert_eq!(
             store.projection().shell.selected_section,
             ShellSection::Settings(SettingsSection::About)
@@ -620,6 +794,30 @@ mod tests {
 
         assert_eq!(changed, Ok(true));
         assert_eq!(store.projection().today, today);
+    }
+
+    #[test]
+    fn replacing_identity_projection_surfaces_settings_account_state_without_touching_repository() {
+        let mut store =
+            AppStateStore::load(FailingRepository).expect("failing repository should still load");
+
+        let changed = store.apply(AppStateCommand::replace_identity_projection(
+            ready_identity(ActiveSurface::Personal),
+        ));
+
+        assert_eq!(changed, Ok(true));
+        assert_eq!(store.startup_gate(), AppStartupGate::Personal);
+        assert_eq!(store.settings_account_projection().roster.len(), 1);
+        assert_eq!(
+            store
+                .settings_account_projection()
+                .selected_account
+                .as_ref()
+                .expect("selected account")
+                .account
+                .account_id,
+            "acct_surface"
+        );
     }
 
     #[test]
