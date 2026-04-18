@@ -12,6 +12,7 @@ publish = false
 gpui.workspace = true
 gpui-component.workspace = true
 gpui-component-assets.workspace = true
+radroots_identity.workspace = true
 radroots_nostr_accounts.workspace = true
 radroots_secret_vault.workspace = true
 radroots_studio_app_core.workspace = true

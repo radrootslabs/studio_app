@@ -1,4 +1,7 @@
-use std::{env, fs, path::PathBuf};
+use std::{
+    env, fs,
+    path::{Path, PathBuf},
+};
 
 use radroots_studio_app_core::AppSharedAccountsPaths;
 use radroots_studio_app_models::{
@@ -6,6 +9,7 @@ use radroots_studio_app_models::{
     SelectedAccountProjection, SelectedSurfaceProjection,
 };
 use radroots_studio_app_sqlite::{AppSqliteError, AppSqliteStore};
+use radroots_identity::{IdentityError, RadrootsIdentity, RadrootsIdentityId};
 use radroots_nostr_accounts::prelude::{
     RadrootsNostrAccountRecord, RadrootsNostrAccountStore, RadrootsNostrAccountStoreState,
     RadrootsNostrAccountsError, RadrootsNostrAccountsManager, RadrootsNostrFileAccountStore,
@@ -27,6 +31,52 @@ pub struct DesktopAccountsBootstrap {
     pub identity_projection: AppIdentityProjection,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum DesktopLocalIdentityImportMode {
+    RawSecretKey,
+    EncryptedSecretKey,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct DesktopLocalIdentityImportRequest {
+    pub mode: DesktopLocalIdentityImportMode,
+    pub secret_text: String,
+    pub password: Option<String>,
+}
+
+impl DesktopLocalIdentityImportRequest {
+    pub fn new(
+        mode: DesktopLocalIdentityImportMode,
+        secret_text: impl Into<String>,
+        password: Option<String>,
+    ) -> Self {
+        Self {
+            mode,
+            secret_text: secret_text.into(),
+            password,
+        }
+    }
+
+    pub fn raw_secret_key(secret_text: impl Into<String>) -> Self {
+        Self::new(
+            DesktopLocalIdentityImportMode::RawSecretKey,
+            secret_text,
+            None,
+        )
+    }
+
+    pub fn encrypted_secret_key(
+        secret_text: impl Into<String>,
+        password: impl Into<String>,
+    ) -> Self {
+        Self::new(
+            DesktopLocalIdentityImportMode::EncryptedSecretKey,
+            secret_text,
+            Some(password.into()),
+        )
+    }
+}
+
 pub fn bootstrap_desktop_accounts(
     paths: &AppSharedAccountsPaths,
     sqlite_store: &AppSqliteStore,
@@ -36,6 +86,72 @@ pub fn bootstrap_desktop_accounts(
         sqlite_store,
         secret_backend_availability()?,
     )
+}
+
+pub fn generate_local_account(
+    manager: &RadrootsNostrAccountsManager,
+    sqlite_store: &AppSqliteStore,
+    label: Option<String>,
+) -> Result<AppIdentityProjection, DesktopAccountsCommandError> {
+    manager.generate_identity(label, true)?;
+    Ok(identity_projection_from_manager(manager, sqlite_store)?)
+}
+
+pub fn import_local_account(
+    manager: &RadrootsNostrAccountsManager,
+    sqlite_store: &AppSqliteStore,
+    request: &DesktopLocalIdentityImportRequest,
+) -> Result<AppIdentityProjection, DesktopAccountsCommandError> {
+    let identity = import_identity(request)?;
+    manager.upsert_identity(&identity, None, true)?;
+    Ok(identity_projection_from_manager(manager, sqlite_store)?)
+}
+
+pub fn select_local_account(
+    manager: &RadrootsNostrAccountsManager,
+    sqlite_store: &AppSqliteStore,
+    account_id: &str,
+) -> Result<AppIdentityProjection, DesktopAccountsCommandError> {
+    let account_id = RadrootsIdentityId::parse(account_id.trim())?;
+    manager.select_account(&account_id)?;
+    Ok(identity_projection_from_manager(manager, sqlite_store)?)
+}
+
+pub fn remove_selected_local_key(
+    manager: &RadrootsNostrAccountsManager,
+    sqlite_store: &AppSqliteStore,
+) -> Result<AppIdentityProjection, DesktopAccountsCommandError> {
+    let Some(selected_account) = manager.selected_account()? else {
+        return Ok(identity_projection_from_manager(manager, sqlite_store)?);
+    };
+    let account_id = selected_account.account_id.to_string();
+
+    sqlite_store.clear_surface_activation(account_id.as_str())?;
+    manager.remove_account(&selected_account.account_id)?;
+
+    Ok(identity_projection_from_manager(manager, sqlite_store)?)
+}
+
+pub fn reset_local_device_state(
+    manager: &RadrootsNostrAccountsManager,
+    sqlite_store: &AppSqliteStore,
+    accounts_paths: &AppSharedAccountsPaths,
+) -> Result<AppIdentityProjection, DesktopAccountsCommandError> {
+    let account_ids = manager
+        .list_accounts()?
+        .into_iter()
+        .map(|record| record.account_id)
+        .collect::<Vec<_>>();
+
+    for account_id in &account_ids {
+        sqlite_store.clear_surface_activation(account_id.as_str())?;
+    }
+    for account_id in account_ids {
+        manager.remove_account(&account_id)?;
+    }
+
+    remove_accounts_file_if_present(accounts_paths.store_path.as_path())?;
+    Ok(identity_projection_from_manager(manager, sqlite_store)?)
 }
 
 fn bootstrap_desktop_accounts_with_availability(
@@ -81,7 +197,7 @@ fn bootstrap_desktop_accounts_with_availability(
     }
 }
 
-fn ensure_directory(path: &std::path::Path) -> Result<(), DesktopAccountsBootstrapError> {
+fn ensure_directory(path: &Path) -> Result<(), DesktopAccountsBootstrapError> {
     fs::create_dir_all(path).map_err(|source| DesktopAccountsBootstrapError::CreateDirectory {
         path: path.to_path_buf(),
         source,
@@ -139,10 +255,40 @@ fn parse_bool_value(key: &str, value: &str) -> Result<bool, DesktopAccountsBoots
     }
 }
 
+fn import_identity(
+    request: &DesktopLocalIdentityImportRequest,
+) -> Result<RadrootsIdentity, DesktopAccountsCommandError> {
+    match request.mode {
+        DesktopLocalIdentityImportMode::RawSecretKey => Ok(RadrootsIdentity::from_secret_key_str(
+            request.secret_text.trim(),
+        )?),
+        DesktopLocalIdentityImportMode::EncryptedSecretKey => {
+            let Some(password) = request.password.as_deref() else {
+                return Err(DesktopAccountsCommandError::EncryptedImportPasswordRequired);
+            };
+            Ok(RadrootsIdentity::from_encrypted_secret_key_str(
+                request.secret_text.trim(),
+                password,
+            )?)
+        }
+    }
+}
+
+fn remove_accounts_file_if_present(path: &Path) -> Result<(), DesktopAccountsCommandError> {
+    match fs::remove_file(path) {
+        Ok(()) => Ok(()),
+        Err(source) if source.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(source) => Err(DesktopAccountsCommandError::RemoveAccountStore {
+            path: path.to_path_buf(),
+            source,
+        }),
+    }
+}
+
 fn blocked_identity_projection_from_store_state(
     state: RadrootsNostrAccountStoreState,
     sqlite_store: &AppSqliteStore,
-) -> Result<AppIdentityProjection, DesktopAccountsBootstrapError> {
+) -> Result<AppIdentityProjection, DesktopAccountsProjectionError> {
     let selected_account = selected_account_from_store_state(&state, sqlite_store)?;
 
     Ok(AppIdentityProjection::blocked_with_selection(
@@ -155,7 +301,7 @@ fn blocked_identity_projection_from_store_state(
 fn identity_projection_from_manager(
     manager: &RadrootsNostrAccountsManager,
     sqlite_store: &AppSqliteStore,
-) -> Result<AppIdentityProjection, DesktopAccountsBootstrapError> {
+) -> Result<AppIdentityProjection, DesktopAccountsProjectionError> {
     let roster_records = manager.list_accounts()?;
     let roster = account_roster_from_records(roster_records.as_slice());
 
@@ -176,7 +322,7 @@ fn identity_projection_from_manager(
 fn selected_account_from_store_state(
     state: &RadrootsNostrAccountStoreState,
     sqlite_store: &AppSqliteStore,
-) -> Result<Option<SelectedAccountProjection>, DesktopAccountsBootstrapError> {
+) -> Result<Option<SelectedAccountProjection>, DesktopAccountsProjectionError> {
     let Some(selected_account_id) = state.selected_account_id.as_ref() else {
         return Ok(None);
     };
@@ -194,7 +340,7 @@ fn selected_account_from_store_state(
 fn selected_account_projection_from_record(
     record: &RadrootsNostrAccountRecord,
     sqlite_store: &AppSqliteStore,
-) -> Result<SelectedAccountProjection, DesktopAccountsBootstrapError> {
+) -> Result<SelectedAccountProjection, DesktopAccountsProjectionError> {
     let account = account_summary_from_record(record);
 
     Ok(
@@ -225,6 +371,33 @@ fn account_summary_from_record(record: &RadrootsNostrAccountRecord) -> AccountSu
 }
 
 #[derive(Debug, Error)]
+pub enum DesktopAccountsProjectionError {
+    #[error(transparent)]
+    Accounts(#[from] RadrootsNostrAccountsError),
+    #[error(transparent)]
+    Sqlite(#[from] AppSqliteError),
+}
+
+#[derive(Debug, Error)]
+pub enum DesktopAccountsCommandError {
+    #[error(transparent)]
+    Accounts(#[from] RadrootsNostrAccountsError),
+    #[error(transparent)]
+    Identity(#[from] IdentityError),
+    #[error(transparent)]
+    Sqlite(#[from] AppSqliteError),
+    #[error(transparent)]
+    Projection(#[from] DesktopAccountsProjectionError),
+    #[error("encrypted secret key import requires a password")]
+    EncryptedImportPasswordRequired,
+    #[error("failed to remove account store {path}: {source}")]
+    RemoveAccountStore {
+        path: PathBuf,
+        source: std::io::Error,
+    },
+}
+
+#[derive(Debug, Error)]
 pub enum DesktopAccountsBootstrapError {
     #[error("failed to create runtime directory {path}: {source}")]
     CreateDirectory {
@@ -232,9 +405,9 @@ pub enum DesktopAccountsBootstrapError {
         source: std::io::Error,
     },
     #[error(transparent)]
-    Sqlite(#[from] AppSqliteError),
-    #[error(transparent)]
     Accounts(#[from] RadrootsNostrAccountsError),
+    #[error(transparent)]
+    Projection(#[from] DesktopAccountsProjectionError),
     #[error(transparent)]
     SecretVault(#[from] RadrootsSecretVaultError),
     #[error("{0}")]
@@ -252,10 +425,11 @@ mod tests {
 
     use radroots_studio_app_core::AppSharedAccountsPaths;
     use radroots_studio_app_models::{
-        ActiveSurface, AppStartupGate, IdentityBlockedReason, IdentityReadiness,
-        SelectedSurfaceProjection,
+        AccountSurfaceActivationProjection, ActiveSurface, AppStartupGate, IdentityBlockedReason,
+        IdentityReadiness, SelectedSurfaceProjection,
     };
     use radroots_studio_app_sqlite::{AppSqliteStore, DatabaseTarget};
+    use radroots_identity::RadrootsIdentity;
     use radroots_nostr_accounts::prelude::{
         RadrootsNostrAccountsManager, RadrootsNostrFileAccountStore,
         RadrootsNostrMemoryAccountStore, RadrootsNostrSecretVaultMemory,
@@ -263,8 +437,10 @@ mod tests {
     use radroots_secret_vault::RadrootsHostVaultCapabilities;
 
     use super::{
-        account_summary_from_record, blocked_identity_projection_from_store_state,
-        bootstrap_desktop_accounts_with_availability, identity_projection_from_manager,
+        DesktopLocalIdentityImportRequest, account_summary_from_record,
+        blocked_identity_projection_from_store_state, bootstrap_desktop_accounts_with_availability,
+        generate_local_account, identity_projection_from_manager, import_local_account,
+        remove_selected_local_key, reset_local_device_state, select_local_account,
         selected_account_projection_from_record,
     };
 
@@ -382,7 +558,7 @@ mod tests {
             SelectedSurfaceProjection::default()
         );
 
-        let activation = radroots_studio_app_models::AccountSurfaceActivationProjection::new(
+        let activation = AccountSurfaceActivationProjection::new(
             account_id.as_str(),
             SelectedSurfaceProjection::new(ActiveSurface::Farmer),
             radroots_studio_app_models::FarmerActivationProjection::active(
@@ -459,6 +635,257 @@ mod tests {
         assert!(projection.selected_account.is_none());
         assert_eq!(projection.roster.len(), 1);
         assert_eq!(projection.roster[0].account_id, account_id.as_str());
+    }
+
+    #[test]
+    fn command_generate_and_select_support_multiple_local_accounts() {
+        let sqlite_store = AppSqliteStore::open(DatabaseTarget::InMemory).expect("sqlite store");
+        let manager = RadrootsNostrAccountsManager::new(
+            Arc::new(RadrootsNostrMemoryAccountStore::new()),
+            Arc::new(RadrootsNostrSecretVaultMemory::new()),
+        )
+        .expect("memory manager should build");
+
+        let first_projection =
+            generate_local_account(&manager, &sqlite_store, Some("First".to_owned()))
+                .expect("first account should generate");
+        let first_account_id = first_projection
+            .selected_account
+            .as_ref()
+            .expect("first selected account")
+            .account
+            .account_id
+            .clone();
+
+        let second_projection =
+            generate_local_account(&manager, &sqlite_store, Some("Second".to_owned()))
+                .expect("second account should generate");
+        let second_account_id = second_projection
+            .selected_account
+            .as_ref()
+            .expect("second selected account")
+            .account
+            .account_id
+            .clone();
+
+        assert_eq!(first_projection.roster.len(), 1);
+        assert_eq!(second_projection.roster.len(), 2);
+        assert_ne!(first_account_id, second_account_id);
+        assert_eq!(
+            second_projection
+                .selected_account
+                .as_ref()
+                .map(|account| account.account.label.as_deref()),
+            Some(Some("Second"))
+        );
+        assert_eq!(second_projection.startup_gate(), AppStartupGate::Personal);
+    }
+
+    #[test]
+    fn command_import_supports_raw_and_encrypted_secret_keys() {
+        let sqlite_store = AppSqliteStore::open(DatabaseTarget::InMemory).expect("sqlite store");
+        let manager = RadrootsNostrAccountsManager::new(
+            Arc::new(RadrootsNostrMemoryAccountStore::new()),
+            Arc::new(RadrootsNostrSecretVaultMemory::new()),
+        )
+        .expect("memory manager should build");
+        let raw_identity = RadrootsIdentity::generate();
+        let encrypted_identity = RadrootsIdentity::generate();
+        let encrypted_secret = encrypted_identity
+            .encrypt_secret_key_ncryptsec("radroots-password")
+            .expect("encrypted secret should export");
+
+        let raw_projection = import_local_account(
+            &manager,
+            &sqlite_store,
+            &DesktopLocalIdentityImportRequest::raw_secret_key(raw_identity.nsec()),
+        )
+        .expect("raw import should succeed");
+        let encrypted_projection = import_local_account(
+            &manager,
+            &sqlite_store,
+            &DesktopLocalIdentityImportRequest::encrypted_secret_key(
+                encrypted_secret,
+                "radroots-password",
+            ),
+        )
+        .expect("encrypted import should succeed");
+
+        assert_eq!(raw_projection.roster.len(), 1);
+        assert_eq!(encrypted_projection.roster.len(), 2);
+        assert_eq!(
+            encrypted_projection
+                .selected_account
+                .as_ref()
+                .map(|account| account.account.account_id.as_str()),
+            Some(encrypted_identity.id().as_str())
+        );
+    }
+
+    #[test]
+    fn command_select_refreshes_selected_account_activation() {
+        let sqlite_store = AppSqliteStore::open(DatabaseTarget::InMemory).expect("sqlite store");
+        let manager = RadrootsNostrAccountsManager::new(
+            Arc::new(RadrootsNostrMemoryAccountStore::new()),
+            Arc::new(RadrootsNostrSecretVaultMemory::new()),
+        )
+        .expect("memory manager should build");
+        let first_account_id = manager
+            .generate_identity(Some("First".to_owned()), true)
+            .expect("first account should generate");
+        let second_account_id = manager
+            .generate_identity(Some("Second".to_owned()), false)
+            .expect("second account should generate");
+        let activation = AccountSurfaceActivationProjection::new(
+            second_account_id.as_str(),
+            SelectedSurfaceProjection::new(ActiveSurface::Farmer),
+            radroots_studio_app_models::FarmerActivationProjection::active(
+                radroots_studio_app_models::FarmId::new(),
+            ),
+        );
+        sqlite_store
+            .save_surface_activation(&activation)
+            .expect("surface activation should save");
+
+        let projection = select_local_account(&manager, &sqlite_store, second_account_id.as_str())
+            .expect("selection should refresh");
+
+        assert_eq!(
+            projection
+                .selected_account
+                .as_ref()
+                .map(|account| account.account.account_id.as_str()),
+            Some(second_account_id.as_str())
+        );
+        assert_eq!(projection.startup_gate(), AppStartupGate::Farmer);
+        assert_eq!(
+            projection
+                .selected_account
+                .as_ref()
+                .map(|account| account.active_surface()),
+            Some(ActiveSurface::Farmer)
+        );
+        assert_eq!(
+            manager.selected_account_id().expect("selected account id"),
+            Some(second_account_id)
+        );
+        assert_ne!(
+            first_account_id,
+            manager
+                .selected_account_id()
+                .expect("selected account id")
+                .expect("selected")
+        );
+    }
+
+    #[test]
+    fn command_remove_selected_local_key_clears_activation_and_selects_next_account() {
+        let sqlite_store = AppSqliteStore::open(DatabaseTarget::InMemory).expect("sqlite store");
+        let manager = RadrootsNostrAccountsManager::new(
+            Arc::new(RadrootsNostrMemoryAccountStore::new()),
+            Arc::new(RadrootsNostrSecretVaultMemory::new()),
+        )
+        .expect("memory manager should build");
+        let first_account_id = manager
+            .generate_identity(Some("First".to_owned()), true)
+            .expect("first account should generate");
+        let second_account_id = manager
+            .generate_identity(Some("Second".to_owned()), false)
+            .expect("second account should generate");
+        manager
+            .select_account(&first_account_id)
+            .expect("first account should remain selected");
+        let activation = AccountSurfaceActivationProjection::new(
+            first_account_id.as_str(),
+            SelectedSurfaceProjection::new(ActiveSurface::Farmer),
+            radroots_studio_app_models::FarmerActivationProjection::active(
+                radroots_studio_app_models::FarmId::new(),
+            ),
+        );
+        sqlite_store
+            .save_surface_activation(&activation)
+            .expect("surface activation should save");
+
+        let projection = remove_selected_local_key(&manager, &sqlite_store)
+            .expect("selected local key should remove");
+
+        assert_eq!(projection.roster.len(), 1);
+        assert_eq!(
+            projection
+                .selected_account
+                .as_ref()
+                .map(|account| account.account.account_id.as_str()),
+            Some(second_account_id.as_str())
+        );
+        assert_eq!(
+            sqlite_store
+                .load_surface_activation(first_account_id.as_str())
+                .expect("removed activation should load"),
+            None
+        );
+    }
+
+    #[test]
+    fn command_reset_local_device_state_removes_store_file_and_all_activations() {
+        let paths = temp_shared_accounts_paths("reset");
+        fs::create_dir_all(paths.data_root.as_path()).expect("data root should create");
+        fs::create_dir_all(paths.secrets_root.as_path()).expect("secrets root should create");
+        let manager = RadrootsNostrAccountsManager::new(
+            Arc::new(RadrootsNostrFileAccountStore::new(
+                paths.store_path.as_path(),
+            )),
+            Arc::new(RadrootsNostrSecretVaultMemory::new()),
+        )
+        .expect("file-backed manager should build");
+        let sqlite_store = AppSqliteStore::open(DatabaseTarget::InMemory).expect("sqlite store");
+        let first_account_id = manager
+            .generate_identity(Some("First".to_owned()), true)
+            .expect("first account should generate");
+        let second_account_id = manager
+            .generate_identity(Some("Second".to_owned()), false)
+            .expect("second account should generate");
+        sqlite_store
+            .save_surface_activation(&AccountSurfaceActivationProjection::new(
+                first_account_id.as_str(),
+                SelectedSurfaceProjection::new(ActiveSurface::Farmer),
+                radroots_studio_app_models::FarmerActivationProjection::active(
+                    radroots_studio_app_models::FarmId::new(),
+                ),
+            ))
+            .expect("first activation should save");
+        sqlite_store
+            .save_surface_activation(&AccountSurfaceActivationProjection::new(
+                second_account_id.as_str(),
+                SelectedSurfaceProjection::new(ActiveSurface::Farmer),
+                radroots_studio_app_models::FarmerActivationProjection::active(
+                    radroots_studio_app_models::FarmId::new(),
+                ),
+            ))
+            .expect("second activation should save");
+        assert!(paths.store_path.exists());
+
+        let projection = reset_local_device_state(&manager, &sqlite_store, &paths)
+            .expect("device state should reset");
+
+        assert_eq!(projection.readiness, IdentityReadiness::MissingAccount);
+        assert_eq!(projection.startup_gate(), AppStartupGate::SetupRequired);
+        assert!(projection.roster.is_empty());
+        assert!(projection.selected_account.is_none());
+        assert!(!paths.store_path.exists());
+        assert_eq!(
+            sqlite_store
+                .load_surface_activation(first_account_id.as_str())
+                .expect("first activation should load"),
+            None
+        );
+        assert_eq!(
+            sqlite_store
+                .load_surface_activation(second_account_id.as_str())
+                .expect("second activation should load"),
+            None
+        );
+
+        cleanup_paths(&paths);
     }
 
     fn cleanup_paths(paths: &AppSharedAccountsPaths) {

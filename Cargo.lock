@@ -5052,6 +5052,7 @@ dependencies = [
  "radroots_studio_app_state",
  "radroots_studio_app_sync",
  "radroots_studio_app_ui",
+ "radroots_identity",
  "radroots_nostr_accounts",
  "radroots_secret_vault",
  "thiserror 2.0.18",
