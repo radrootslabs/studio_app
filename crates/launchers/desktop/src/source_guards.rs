@@ -3,12 +3,14 @@ use std::collections::BTreeSet;
 const ALLOWED_MENU_LITERALS: &[&str] = &["cmd-q", "settings window should open"];
 
 const ALLOWED_WINDOW_LITERALS: &[&str] = &[
+    ", ",
     "account-add",
     "account-open-workspace",
     "account-log-out",
     "account-more",
     "failed to add relay `{relay_url}`: {error}",
     "home-create-account",
+    "home-farm-setup-continue",
     "home-farm-setup-delivery",
     "home-farm-setup-finish",
     "home-farm-setup-pickup",
@@ -48,6 +50,7 @@ const REQUIRED_WINDOW_COPY_KEYS: &[&str] = &[
     "AppTextKey::HomeFarmSetupSaveSavedLocally",
     "AppTextKey::HomeFarmSetupSaveFailedLocally",
     "AppTextKey::HomeFarmSetupFinishAction",
+    "AppTextKey::HomeFarmSetupContinueAction",
     "AppTextKey::SettingsAccountNoSelectionTitle",
     "AppTextKey::SettingsAccountNoSelectionBody",
     "AppTextKey::SettingsAccountStatusLoggedOut",

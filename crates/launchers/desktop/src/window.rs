@@ -11,8 +11,9 @@ use gpui_component::{
 use radroots_studio_app_i18n::AppTextKey;
 pub use radroots_studio_app_models::SettingsSection as SettingsPanelViewKey;
 use radroots_studio_app_models::{
-    AppStartupGate, FarmOrderMethod, FarmSetupBlocker, FarmSetupDraft, FulfillmentWindowSummary,
-    OrderListRow, ProductListRow, TodayAgendaProjection, TodaySetupTaskKind,
+    AppStartupGate, FarmOrderMethod, FarmReadiness, FarmSetupBlocker, FarmSetupDraft, FarmSummary,
+    FulfillmentWindowSummary, OrderListRow, ProductListRow, TodayAgendaProjection,
+    TodaySetupTaskKind,
 };
 use radroots_studio_app_state::{FarmSetupFlowStage, HomeRoute};
 use radroots_studio_app_ui::{
@@ -204,7 +205,29 @@ impl HomeView {
         }
     }
 
-    fn open_farm_setup(&mut self, cx: &mut Context<Self>) {
+    fn open_farm_setup(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let runtime_summary = self.runtime.summary();
+
+        if runtime_summary.farm_setup_projection.has_saved_farm() {
+            let Some(account_id) = runtime_summary
+                .settings_account_projection
+                .selected_account
+                .as_ref()
+                .map(|account| account.account.account_id.clone())
+            else {
+                return;
+            };
+
+            self.farm_setup_form = Some(FarmSetupFormState::new(
+                account_id,
+                runtime_summary.farm_setup_projection.draft,
+                window,
+                cx,
+            ));
+            cx.notify();
+            return;
+        }
+
         if self
             .runtime
             .select_farm_setup_flow_stage(FarmSetupFlowStage::Editing)
@@ -229,7 +252,8 @@ impl HomeView {
             return;
         };
 
-        if runtime_summary.home_route != HomeRoute::FarmSetupForm {
+        if runtime_summary.home_route != HomeRoute::FarmSetupForm && self.farm_setup_form.is_none()
+        {
             self.farm_setup_form = None;
             return;
         }
@@ -382,7 +406,8 @@ impl Render for HomeView {
                         )
                         .into_any_element()
                     }),
-                    cx.listener(|this, _, _, cx| this.open_farm_setup(cx)),
+                    cx.listener(|this, _, window, cx| this.open_farm_setup(window, cx)),
+                    cx.listener(|this, _, window, cx| this.open_farm_setup(window, cx)),
                     cx,
                 )
                 .into_any_element(),
@@ -522,10 +547,18 @@ impl LoggedInHomeView {
         &self,
         runtime: &DesktopAppRuntimeSummary,
         farm_setup_form: Option<AnyElement>,
-        on_open_farm_setup: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+        on_start_farm_setup: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+        on_continue_farm_setup: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
         cx: &App,
     ) -> AnyElement {
-        farmer_home_shell(runtime, farm_setup_form, on_open_farm_setup, cx).into_any_element()
+        farmer_home_shell(
+            runtime,
+            farm_setup_form,
+            on_start_farm_setup,
+            on_continue_farm_setup,
+            cx,
+        )
+        .into_any_element()
     }
 }
 
@@ -1106,7 +1139,8 @@ struct FarmSetupOnboardingCardSpec {
 fn farmer_home_shell(
     runtime: &DesktopAppRuntimeSummary,
     farm_setup_form: Option<AnyElement>,
-    on_open_farm_setup: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+    on_start_farm_setup: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+    on_continue_farm_setup: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
     cx: &App,
 ) -> impl IntoElement {
     home_shell_frame(
@@ -1118,7 +1152,8 @@ fn farmer_home_shell(
             .child(home_view_content(
                 runtime,
                 farm_setup_form,
-                on_open_farm_setup,
+                on_start_farm_setup,
+                on_continue_farm_setup,
                 cx,
             ))
             .into_any_element(),
@@ -1416,7 +1451,7 @@ fn home_sidebar(runtime: &DesktopAppRuntimeSummary) -> impl IntoElement {
                     .text_size(px(APP_UI_THEME.typography.body_text_px))
                     .line_height(relative(1.2))
                     .text_color(rgb(APP_UI_THEME.text.secondary))
-                    .when_some(runtime.today_projection.farm.as_ref(), |this, farm| {
+                    .when_some(home_saved_farm(runtime), |this, farm| {
                         this.child(farm.display_name.clone())
                     }),
             ),
@@ -1426,12 +1461,14 @@ fn home_sidebar(runtime: &DesktopAppRuntimeSummary) -> impl IntoElement {
 fn home_view_content(
     runtime: &DesktopAppRuntimeSummary,
     farm_setup_form: Option<AnyElement>,
-    on_open_farm_setup: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+    on_start_farm_setup: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+    on_continue_farm_setup: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
     cx: &App,
 ) -> impl IntoElement {
     let projection = &runtime.today_projection;
     let home_status = home_status_presentation(runtime);
     let setup_onboarding = farm_setup_onboarding_card_spec(runtime.home_route);
+    let farm_state = farmer_home_farm_state(runtime);
     let mut sections = Vec::<AnyElement>::new();
 
     if let Some(summary) = projection.summary.as_ref() {
@@ -1453,10 +1490,29 @@ fn home_view_content(
             sections.push(farm_setup_form);
         }
     } else if let Some(spec) = setup_onboarding {
-        sections
-            .push(home_farm_setup_onboarding_card(spec, on_open_farm_setup, cx).into_any_element());
+        sections.push(
+            home_farm_setup_onboarding_card(spec, on_start_farm_setup, cx).into_any_element(),
+        );
     } else if projection.needs_setup() {
-        sections.push(home_setup_card(projection).into_any_element());
+        sections.push(
+            home_setup_card(
+                projection,
+                matches!(farm_state, FarmerHomeFarmState::IncompleteFarm).then_some(
+                    action_button_primary(
+                        "home-farm-setup-continue",
+                        app_shared_text(AppTextKey::HomeFarmSetupContinueAction),
+                        on_continue_farm_setup,
+                        cx,
+                    )
+                    .into_any_element(),
+                ),
+            )
+            .into_any_element(),
+        );
+    }
+
+    if let Some(saved_farm_summary_card) = home_saved_farm_summary_card(runtime) {
+        sections.push(saved_farm_summary_card);
     }
 
     if let Some(next_window) = projection.next_fulfillment_window.as_ref() {
@@ -1472,6 +1528,7 @@ fn home_view_content(
                     .iter()
                     .map(home_order_row)
                     .collect::<Vec<_>>(),
+                None,
             )
             .into_any_element(),
         );
@@ -1486,6 +1543,7 @@ fn home_view_content(
                     .iter()
                     .map(home_low_stock_row)
                     .collect::<Vec<_>>(),
+                None,
             )
             .into_any_element(),
         );
@@ -1500,6 +1558,7 @@ fn home_view_content(
                     .iter()
                     .map(home_draft_row)
                     .collect::<Vec<_>>(),
+                None,
             )
             .into_any_element(),
         );
@@ -1514,7 +1573,7 @@ fn home_view_content(
             .into_any_element(),
         );
     } else if runtime.startup_issue.is_none()
-        && projection.farm.is_none()
+        && farm_state == FarmerHomeFarmState::NoFarm
         && setup_onboarding.is_none()
     {
         sections.push(
@@ -1525,7 +1584,7 @@ fn home_view_content(
             .into_any_element(),
         );
     } else if runtime.startup_issue.is_none()
-        && projection.farm.is_some()
+        && farm_state == FarmerHomeFarmState::ConfiguredFarm
         && !projection.needs_setup()
         && projection.next_fulfillment_window.is_none()
         && !projection.has_attention_items()
@@ -1565,10 +1624,10 @@ fn home_view_content(
                         .font_weight(gpui::FontWeight::MEDIUM)
                         .line_height(relative(1.2))
                         .text_color(rgb(APP_UI_THEME.text.primary))
-                        .when_some(projection.farm.as_ref(), |this, farm| {
+                        .when_some(home_saved_farm(runtime), |this, farm| {
                             this.child(farm.display_name.clone())
                         })
-                        .when(projection.farm.is_none(), |this| {
+                        .when(home_saved_farm(runtime).is_none(), |this| {
                             this.child(app_shared_text(home_status.label_key))
                         }),
                 )
@@ -1801,6 +1860,42 @@ fn home_farm_setup_blocker(key: AppTextKey) -> impl IntoElement {
         .child(app_shared_text(key))
 }
 
+fn home_saved_farm_summary_card(runtime: &DesktopAppRuntimeSummary) -> Option<AnyElement> {
+    let saved_farm = home_saved_farm(runtime)?;
+    let location_or_service_area = if runtime
+        .farm_setup_projection
+        .draft
+        .location_or_service_area
+        .trim()
+        .is_empty()
+    {
+        app_shared_text(AppTextKey::ValueNone).to_string()
+    } else {
+        runtime
+            .farm_setup_projection
+            .draft
+            .location_or_service_area
+            .clone()
+    };
+
+    Some(
+        home_card(
+            saved_farm.display_name.clone(),
+            label_value_list(vec![
+                LabelValueRow::new(
+                    app_shared_text(AppTextKey::HomeFarmSetupFieldLocationOrServiceArea),
+                    location_or_service_area,
+                ),
+                LabelValueRow::new(
+                    app_shared_text(AppTextKey::HomeFarmSetupSectionOrderMethods),
+                    home_farm_order_methods_summary(&runtime.farm_setup_projection.draft),
+                ),
+            ]),
+        )
+        .into_any_element(),
+    )
+}
+
 fn home_card(title: impl Into<SharedString>, body: impl IntoElement) -> impl IntoElement {
     div()
         .w_full()
@@ -1903,7 +1998,10 @@ fn home_summary_metric(label_key: AppTextKey, value: u32) -> impl IntoElement {
         )
 }
 
-fn home_setup_card(projection: &TodayAgendaProjection) -> impl IntoElement {
+fn home_setup_card(
+    projection: &TodayAgendaProjection,
+    continue_action: Option<AnyElement>,
+) -> impl IntoElement {
     home_list_card(
         AppTextKey::HomeTodaySetupChecklist,
         projection
@@ -1911,6 +2009,7 @@ fn home_setup_card(projection: &TodayAgendaProjection) -> impl IntoElement {
             .iter()
             .map(home_setup_task_row)
             .collect::<Vec<_>>(),
+        continue_action,
     )
 }
 
@@ -1930,7 +2029,11 @@ fn home_next_fulfillment_window_card(next_window: &FulfillmentWindowSummary) -> 
     )
 }
 
-fn home_list_card(title_key: AppTextKey, rows: Vec<AnyElement>) -> impl IntoElement {
+fn home_list_card(
+    title_key: AppTextKey,
+    rows: Vec<AnyElement>,
+    action: Option<AnyElement>,
+) -> impl IntoElement {
     home_card(
         app_shared_text(title_key),
         div()
@@ -1938,7 +2041,8 @@ fn home_list_card(title_key: AppTextKey, rows: Vec<AnyElement>) -> impl IntoElem
             .flex()
             .flex_col()
             .gap(px(APP_UI_THEME.layout.home_stack_gap_px))
-            .children(rows),
+            .children(rows)
+            .when_some(action, |this, action| this.child(div().child(action))),
     )
 }
 
@@ -2106,6 +2210,49 @@ fn farm_setup_save_state_key(state: FarmSetupSaveState) -> AppTextKey {
     }
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum FarmerHomeFarmState {
+    NoFarm,
+    IncompleteFarm,
+    ConfiguredFarm,
+}
+
+fn home_saved_farm(runtime: &DesktopAppRuntimeSummary) -> Option<&FarmSummary> {
+    runtime
+        .today_projection
+        .farm
+        .as_ref()
+        .or(runtime.farm_setup_projection.saved_farm.as_ref())
+}
+
+fn farmer_home_farm_state(runtime: &DesktopAppRuntimeSummary) -> FarmerHomeFarmState {
+    let Some(saved_farm) = home_saved_farm(runtime) else {
+        return FarmerHomeFarmState::NoFarm;
+    };
+
+    if runtime.today_projection.needs_setup() || saved_farm.readiness == FarmReadiness::Incomplete {
+        FarmerHomeFarmState::IncompleteFarm
+    } else {
+        FarmerHomeFarmState::ConfiguredFarm
+    }
+}
+
+fn home_farm_order_methods_summary(draft: &FarmSetupDraft) -> String {
+    if draft.order_methods.is_empty() {
+        return app_shared_text(AppTextKey::ValueNone).to_string();
+    }
+
+    draft
+        .order_methods
+        .iter()
+        .copied()
+        .map(home_farm_order_method_label_key)
+        .map(app_shared_text)
+        .map(|label| label.to_string())
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
 fn home_status_presentation(runtime: &DesktopAppRuntimeSummary) -> HomeStatusPresentation {
     if runtime.startup_issue.is_some() || runtime.startup_gate == AppStartupGate::Blocked {
         return HomeStatusPresentation {
@@ -2121,22 +2268,20 @@ fn home_status_presentation(runtime: &DesktopAppRuntimeSummary) -> HomeStatusPre
         };
     }
 
-    if matches!(
-        runtime.home_route,
-        HomeRoute::FarmSetupOnboarding | HomeRoute::FarmSetupForm
-    ) || runtime.today_projection.farm.is_none()
-    {
-        return HomeStatusPresentation {
-            indicator_color: APP_UI_THEME.controls.status_indicator.offline,
-            label_key: AppTextKey::HomeTodayStatusNoFarm,
-        };
-    }
-
-    if runtime.today_projection.needs_setup() {
-        return HomeStatusPresentation {
-            indicator_color: APP_UI_THEME.controls.status_indicator.offline,
-            label_key: AppTextKey::HomeTodayStatusSetup,
-        };
+    match farmer_home_farm_state(runtime) {
+        FarmerHomeFarmState::NoFarm => {
+            return HomeStatusPresentation {
+                indicator_color: APP_UI_THEME.controls.status_indicator.offline,
+                label_key: AppTextKey::HomeTodayStatusNoFarm,
+            };
+        }
+        FarmerHomeFarmState::IncompleteFarm => {
+            return HomeStatusPresentation {
+                indicator_color: APP_UI_THEME.controls.status_indicator.offline,
+                label_key: AppTextKey::HomeTodayStatusSetup,
+            };
+        }
+        FarmerHomeFarmState::ConfiguredFarm => {}
     }
 
     if runtime.today_projection.has_attention_items() {
@@ -2159,9 +2304,28 @@ fn home_setup_task_label_key(kind: TodaySetupTaskKind) -> AppTextKey {
     }
 }
 
+fn home_farm_order_method_label_key(method: FarmOrderMethod) -> AppTextKey {
+    match method {
+        FarmOrderMethod::Pickup => AppTextKey::HomeFarmSetupOrderMethodPickup,
+        FarmOrderMethod::Delivery => AppTextKey::HomeFarmSetupOrderMethodDelivery,
+        FarmOrderMethod::Shipping => AppTextKey::HomeFarmSetupOrderMethodShipping,
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{AppTextKey, farm_setup_onboarding_card_spec};
+    use super::{
+        AppTextKey, FarmerHomeFarmState, farm_setup_onboarding_card_spec, farmer_home_farm_state,
+        home_saved_farm,
+    };
+    use crate::runtime::DesktopAppRuntimeSummary;
+    use radroots_studio_app_models::SettingsAccountProjection;
+    use radroots_studio_app_models::{
+        AppStartupGate, FarmId, FarmOrderMethod, FarmReadiness, FarmSetupDraft,
+        FarmSetupProjection, FarmSummary, TodayAgendaProjection, TodaySetupTask,
+        TodaySetupTaskKind,
+    };
+    use radroots_studio_app_state::AppShellProjection;
     use radroots_studio_app_state::HomeRoute;
 
     #[test]
@@ -2188,5 +2352,100 @@ mod tests {
     #[test]
     fn today_route_has_no_setup_onboarding_card() {
         assert!(farm_setup_onboarding_card_spec(HomeRoute::Today).is_none());
+    }
+
+    #[test]
+    fn farmer_home_farm_state_distinguishes_no_farm_incomplete_and_configured() {
+        let farm_id = FarmId::new();
+        let incomplete_farm = FarmSummary {
+            farm_id,
+            display_name: String::new(),
+            readiness: FarmReadiness::Incomplete,
+        };
+        let configured_farm = FarmSummary {
+            farm_id: FarmId::new(),
+            display_name: String::new(),
+            readiness: FarmReadiness::Ready,
+        };
+
+        assert_eq!(
+            farmer_home_farm_state(&summary(
+                HomeRoute::FarmSetupOnboarding,
+                TodayAgendaProjection::default(),
+                FarmSetupProjection::default(),
+            )),
+            FarmerHomeFarmState::NoFarm
+        );
+        assert_eq!(
+            farmer_home_farm_state(&summary(
+                HomeRoute::Today,
+                TodayAgendaProjection {
+                    farm: Some(incomplete_farm.clone()),
+                    setup_checklist: vec![TodaySetupTask {
+                        kind: TodaySetupTaskKind::AddFulfillmentWindow,
+                        is_complete: false,
+                    }],
+                    ..TodayAgendaProjection::default()
+                },
+                FarmSetupProjection::new(
+                    FarmSetupDraft::new(String::new(), String::new(), [FarmOrderMethod::Pickup]),
+                    Some(incomplete_farm),
+                ),
+            )),
+            FarmerHomeFarmState::IncompleteFarm
+        );
+        assert_eq!(
+            farmer_home_farm_state(&summary(
+                HomeRoute::Today,
+                TodayAgendaProjection {
+                    farm: Some(configured_farm.clone()),
+                    ..TodayAgendaProjection::default()
+                },
+                FarmSetupProjection::new(
+                    FarmSetupDraft::new(
+                        String::new(),
+                        String::new(),
+                        [FarmOrderMethod::Pickup, FarmOrderMethod::Delivery],
+                    ),
+                    Some(configured_farm),
+                ),
+            )),
+            FarmerHomeFarmState::ConfiguredFarm
+        );
+    }
+
+    #[test]
+    fn saved_farm_falls_back_to_local_projection_when_today_is_empty() {
+        let saved_farm = FarmSummary {
+            farm_id: FarmId::new(),
+            display_name: String::new(),
+            readiness: FarmReadiness::Ready,
+        };
+        let runtime = summary(
+            HomeRoute::Today,
+            TodayAgendaProjection::default(),
+            FarmSetupProjection::new(
+                FarmSetupDraft::new(String::new(), String::new(), [FarmOrderMethod::Shipping]),
+                Some(saved_farm.clone()),
+            ),
+        );
+
+        assert_eq!(home_saved_farm(&runtime), Some(&saved_farm));
+    }
+
+    fn summary(
+        home_route: HomeRoute,
+        today_projection: TodayAgendaProjection,
+        farm_setup_projection: FarmSetupProjection,
+    ) -> DesktopAppRuntimeSummary {
+        DesktopAppRuntimeSummary {
+            shell_projection: AppShellProjection::default(),
+            settings_account_projection: SettingsAccountProjection::default(),
+            startup_gate: AppStartupGate::Farmer,
+            home_route,
+            farm_setup_projection,
+            today_projection,
+            startup_issue: None,
+        }
     }
 }

@@ -60,6 +60,7 @@ define_app_text_keys! {
     HomeFarmSetupSaveSavedLocally => "home.farm_setup.save.saved_locally",
     HomeFarmSetupSaveFailedLocally => "home.farm_setup.save.failed_locally",
     HomeFarmSetupFinishAction => "home.farm_setup.finish_action",
+    HomeFarmSetupContinueAction => "home.farm_setup.continue_action",
     HomeTodayEmptySetupTitle => "home.today.empty.setup.title",
     HomeTodayEmptySetupBody => "home.today.empty.setup.body",
     HomeTodayEmptyNoFarmTitle => "home.today.empty.no_farm.title",

@@ -39,6 +39,7 @@
   "home.farm_setup.save.saved_locally": "Saved locally.",
   "home.farm_setup.save.failed_locally": "Couldn't save locally. Try again.",
   "home.farm_setup.finish_action": "Finish setup",
+  "home.farm_setup.continue_action": "Continue setup",
   "home.today.empty.setup.title": "Account setup required",
   "home.today.empty.setup.body": "Add a local account to start using Radroots on this device.",
   "home.today.empty.no_farm.title": "No farm yet",
