@@ -158,8 +158,8 @@ pub struct StatusIndicatorTokens {
 
 pub const APP_UI_THEME: AppUiTheme = AppUiTheme {
     windows: AppWindowTokens {
-        home_min_width_px: 980.0,
-        home_min_height_px: 720.0,
+        home_min_width_px: 1284.0,
+        home_min_height_px: 795.0,
         settings_width_px: 600.0,
         settings_height_px: 540.0,
     },
@@ -289,8 +289,8 @@ mod tests {
 
     #[test]
     fn home_window_minimums_match_the_upgraded_shell_budget() {
-        assert_eq!(APP_UI_THEME.windows.home_min_width_px, 980.0);
-        assert_eq!(APP_UI_THEME.windows.home_min_height_px, 720.0);
+        assert_eq!(APP_UI_THEME.windows.home_min_width_px, 1284.0);
+        assert_eq!(APP_UI_THEME.windows.home_min_height_px, 795.0);
         assert_eq!(APP_UI_THEME.layout.home_sidebar_width_px, 240.0);
         assert_eq!(APP_UI_THEME.layout.home_window_padding_px, 24.0);
     }

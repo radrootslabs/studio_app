@@ -1,4 +1,4 @@
-use gpui::{Application, WindowOptions, px, size};
+use gpui::{Application, Bounds, WindowBounds, WindowOptions, px, size};
 use radroots_studio_app_core::{
     APP_PROJECTION_SOURCE, AppBuildIdentity, AppRuntimeConfig, AppRuntimeConfigError,
     AppRuntimeSnapshot, bootstrap_logging, install_panic_hook, launch_startup_event,
@@ -46,10 +46,19 @@ pub fn launch() -> Result<(), AppLaunchError> {
 
         let snapshot = snapshot.clone();
         let runtime = runtime.clone();
+        let home_bounds = Bounds::centered(
+            None,
+            size(
+                px(APP_UI_THEME.windows.home_min_width_px),
+                px(APP_UI_THEME.windows.home_min_height_px),
+            ),
+            cx,
+        );
         cx.spawn(async move |cx| {
             if let Err(error) = cx.open_window(
                 WindowOptions {
                     app_id: Some(snapshot.host.app_identifier.clone()),
+                    window_bounds: Some(WindowBounds::Windowed(home_bounds)),
                     window_min_size: Some(size(
                         px(APP_UI_THEME.windows.home_min_width_px),
                         px(APP_UI_THEME.windows.home_min_height_px),
