@@ -6,17 +6,17 @@ use uuid::Uuid;
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub enum AppMode {
+pub enum ActiveSurface {
     #[default]
     Farmer,
-    Buyer,
+    Personal,
 }
 
-impl AppMode {
+impl ActiveSurface {
     pub const fn storage_key(self) -> &'static str {
         match self {
             Self::Farmer => "farmer",
-            Self::Buyer => "buyer",
+            Self::Personal => "personal",
         }
     }
 }
@@ -40,27 +40,6 @@ impl FarmerSection {
             Self::Orders => "farmer.orders",
             Self::PackDay => "farmer.pack_day",
             Self::Farm => "farmer.farm",
-        }
-    }
-}
-
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum BuyerSection {
-    #[default]
-    Marketplace,
-    Search,
-    Cart,
-    Orders,
-}
-
-impl BuyerSection {
-    pub const fn storage_key(self) -> &'static str {
-        match self {
-            Self::Marketplace => "buyer.marketplace",
-            Self::Search => "buyer.search",
-            Self::Cart => "buyer.cart",
-            Self::Orders => "buyer.orders",
         }
     }
 }
@@ -110,15 +89,21 @@ pub enum ShellSection {
     #[default]
     Home,
     Farmer(FarmerSection),
-    Buyer(BuyerSection),
     Settings(SettingsSection),
 }
 
 impl ShellSection {
-    pub const fn mode(self) -> AppMode {
+    pub const fn surface(self) -> Option<ActiveSurface> {
         match self {
-            Self::Buyer(_) => AppMode::Buyer,
-            Self::Home | Self::Farmer(_) | Self::Settings(_) => AppMode::Farmer,
+            Self::Home | Self::Settings(_) => None,
+            Self::Farmer(_) => Some(ActiveSurface::Farmer),
+        }
+    }
+
+    pub const fn default_for_surface(surface: ActiveSurface) -> Self {
+        match surface {
+            ActiveSurface::Personal => Self::Home,
+            ActiveSurface::Farmer => Self::Farmer(FarmerSection::Today),
         }
     }
 
@@ -126,7 +111,6 @@ impl ShellSection {
         match self {
             Self::Home => "home",
             Self::Farmer(section) => section.storage_key(),
-            Self::Buyer(section) => section.storage_key(),
             Self::Settings(section) => section.storage_key(),
         }
     }
@@ -154,10 +138,6 @@ impl FromStr for ShellSection {
             "farmer.orders" => Ok(Self::Farmer(FarmerSection::Orders)),
             "farmer.pack_day" => Ok(Self::Farmer(FarmerSection::PackDay)),
             "farmer.farm" => Ok(Self::Farmer(FarmerSection::Farm)),
-            "buyer.marketplace" => Ok(Self::Buyer(BuyerSection::Marketplace)),
-            "buyer.search" => Ok(Self::Buyer(BuyerSection::Search)),
-            "buyer.cart" => Ok(Self::Buyer(BuyerSection::Cart)),
-            "buyer.orders" => Ok(Self::Buyer(BuyerSection::Orders)),
             "settings.account" => Ok(Self::Settings(SettingsSection::Account)),
             "settings.settings" => Ok(Self::Settings(SettingsSection::Settings)),
             "settings.about" => Ok(Self::Settings(SettingsSection::About)),
@@ -385,10 +365,9 @@ impl TodayAgendaProjection {
 #[cfg(test)]
 mod tests {
     use super::{
-        ActivityEventId, AppActivityContext, AppActivityEvent, AppActivityKind, AppMode,
-        BuyerSection, FarmId, FarmerSection, OrderListRow, ProductListRow, SettingsPreference,
-        SettingsSection, ShellSection, TodayAgendaProjection, TodaySetupTask, TodaySetupTaskKind,
-        TodaySummary,
+        ActiveSurface, ActivityEventId, AppActivityContext, AppActivityEvent, AppActivityKind,
+        FarmId, FarmerSection, OrderListRow, ProductListRow, SettingsPreference, SettingsSection,
+        ShellSection, TodayAgendaProjection, TodaySetupTask, TodaySetupTaskKind, TodaySummary,
     };
     use std::{collections::BTreeSet, str::FromStr};
     use uuid::Uuid;
@@ -402,10 +381,6 @@ mod tests {
             ShellSection::Farmer(FarmerSection::Orders),
             ShellSection::Farmer(FarmerSection::PackDay),
             ShellSection::Farmer(FarmerSection::Farm),
-            ShellSection::Buyer(BuyerSection::Marketplace),
-            ShellSection::Buyer(BuyerSection::Search),
-            ShellSection::Buyer(BuyerSection::Cart),
-            ShellSection::Buyer(BuyerSection::Orders),
             ShellSection::Settings(SettingsSection::Account),
             ShellSection::Settings(SettingsSection::Settings),
             ShellSection::Settings(SettingsSection::About),
@@ -425,19 +400,27 @@ mod tests {
     }
 
     #[test]
-    fn shell_section_mode_tracks_farmer_and_buyer_surfaces() {
-        assert_eq!(ShellSection::Home.mode(), AppMode::Farmer);
+    fn shell_section_surface_is_explicit_only_for_farmer_routes() {
+        assert_eq!(ShellSection::Home.surface(), None);
         assert_eq!(
-            ShellSection::Farmer(FarmerSection::Today).mode(),
-            AppMode::Farmer
+            ShellSection::Farmer(FarmerSection::Today).surface(),
+            Some(ActiveSurface::Farmer)
         );
         assert_eq!(
-            ShellSection::Buyer(BuyerSection::Marketplace).mode(),
-            AppMode::Buyer
+            ShellSection::Settings(SettingsSection::Settings).surface(),
+            None
+        );
+    }
+
+    #[test]
+    fn shell_section_default_for_surface_preserves_current_farmer_entry() {
+        assert_eq!(
+            ShellSection::default_for_surface(ActiveSurface::Personal),
+            ShellSection::Home
         );
         assert_eq!(
-            ShellSection::Settings(SettingsSection::Settings).mode(),
-            AppMode::Farmer
+            ShellSection::default_for_surface(ActiveSurface::Farmer),
+            ShellSection::Farmer(FarmerSection::Today)
         );
     }
 

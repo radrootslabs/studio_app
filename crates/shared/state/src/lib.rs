@@ -1,7 +1,7 @@
 #![forbid(unsafe_code)]
 
 use radroots_studio_app_models::{
-    AppMode, SettingsPreference, SettingsSection, ShellSection, TodayAgendaProjection,
+    ActiveSurface, SettingsPreference, SettingsSection, ShellSection, TodayAgendaProjection,
 };
 use thiserror::Error;
 
@@ -66,41 +66,67 @@ impl SettingsShellProjection {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct AppShellProjection {
-    pub app_mode: AppMode,
+    pub active_surface: ActiveSurface,
     pub selected_section: ShellSection,
     pub settings: SettingsShellProjection,
 }
 
 impl Default for AppShellProjection {
     fn default() -> Self {
-        Self::new(ShellSection::default())
+        Self::new(ActiveSurface::Farmer, ShellSection::Home)
     }
 }
 
 impl AppShellProjection {
-    pub fn new(selected_section: ShellSection) -> Self {
+    pub fn new(active_surface: ActiveSurface, selected_section: ShellSection) -> Self {
         let settings = match selected_section {
             ShellSection::Settings(section) => SettingsShellProjection::new(section),
             _ => SettingsShellProjection::default(),
         };
 
         Self {
-            app_mode: selected_section.mode(),
+            active_surface: selected_section.surface().unwrap_or(active_surface),
             selected_section,
             settings,
         }
     }
 
-    pub fn for_settings(selected_section: SettingsSection) -> Self {
-        Self::new(ShellSection::Settings(selected_section))
+    pub fn for_surface(active_surface: ActiveSurface) -> Self {
+        Self::new(active_surface, ShellSection::default_for_surface(active_surface))
+    }
+
+    pub fn for_settings(active_surface: ActiveSurface, selected_section: SettingsSection) -> Self {
+        Self::new(active_surface, ShellSection::Settings(selected_section))
     }
 
     fn select_section(&mut self, selected_section: ShellSection) {
-        self.app_mode = selected_section.mode();
+        if let Some(active_surface) = selected_section.surface() {
+            self.active_surface = active_surface;
+        }
         self.selected_section = selected_section;
 
         if let ShellSection::Settings(settings_section) = selected_section {
             self.settings.selected_section = settings_section;
+        }
+    }
+
+    fn select_active_surface(&mut self, active_surface: ActiveSurface) {
+        if self.active_surface == active_surface {
+            return;
+        }
+
+        self.active_surface = active_surface;
+        match active_surface {
+            ActiveSurface::Personal => {
+                if matches!(self.selected_section, ShellSection::Farmer(_)) {
+                    self.selected_section = ShellSection::default_for_surface(active_surface);
+                }
+            }
+            ActiveSurface::Farmer => {
+                if matches!(self.selected_section, ShellSection::Home) {
+                    self.selected_section = ShellSection::default_for_surface(active_surface);
+                }
+            }
         }
     }
 
@@ -127,6 +153,7 @@ impl AppProjection {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum AppStateCommand {
+    SelectActiveSurface(ActiveSurface),
     SelectSection(ShellSection),
     SelectSettingsSection(SettingsSection),
     SetSettingsPreference {
@@ -137,6 +164,10 @@ pub enum AppStateCommand {
 }
 
 impl AppStateCommand {
+    pub const fn select_active_surface(surface: ActiveSurface) -> Self {
+        Self::SelectActiveSurface(surface)
+    }
+
     pub const fn select_settings_section(section: SettingsSection) -> Self {
         Self::SelectSettingsSection(section)
     }
@@ -317,6 +348,9 @@ fn apply_command(projection: &mut AppProjection, command: AppStateCommand) -> Ap
     let before = projection.clone();
 
     match command {
+        AppStateCommand::SelectActiveSurface(active_surface) => {
+            projection.shell.select_active_surface(active_surface);
+        }
         AppStateCommand::SelectSection(selected_section) => {
             projection.shell.select_section(selected_section);
         }
@@ -355,7 +389,7 @@ mod tests {
         SettingsPreference,
     };
     use radroots_studio_app_models::{
-        AppMode, FarmerSection, SettingsSection, ShellSection, TodayAgendaProjection,
+        ActiveSurface, FarmerSection, SettingsSection, ShellSection, TodayAgendaProjection,
         TodaySetupTask, TodaySetupTaskKind,
     };
 
@@ -378,7 +412,7 @@ mod tests {
     fn default_projection_starts_on_farmer_home() {
         let projection = AppProjection::default();
 
-        assert_eq!(projection.shell.app_mode, AppMode::Farmer);
+        assert_eq!(projection.shell.active_surface, ActiveSurface::Farmer);
         assert_eq!(projection.shell.selected_section, ShellSection::Home);
         assert_eq!(
             projection.shell.settings.selected_section,
@@ -394,11 +428,12 @@ mod tests {
     #[test]
     fn load_uses_repository_projection() {
         let repository = InMemoryAppStateRepository::new(AppShellProjection::for_settings(
+            ActiveSurface::Farmer,
             SettingsSection::About,
         ));
         let store = AppStateStore::load(repository).expect("in-memory repository should load");
 
-        assert_eq!(store.projection().shell.app_mode, AppMode::Farmer);
+        assert_eq!(store.projection().shell.active_surface, ActiveSurface::Farmer);
         assert_eq!(
             store.projection().shell.selected_section,
             ShellSection::Settings(SettingsSection::About)
@@ -420,7 +455,7 @@ mod tests {
         ));
 
         assert_eq!(changed, Ok(true));
-        assert_eq!(store.projection().shell.app_mode, AppMode::Farmer);
+        assert_eq!(store.projection().shell.active_surface, ActiveSurface::Farmer);
         assert_eq!(
             store.projection().shell.selected_section,
             ShellSection::Home
@@ -456,6 +491,63 @@ mod tests {
         assert_eq!(
             store.repository().projection().selected_section,
             ShellSection::Farmer(FarmerSection::Products)
+        );
+        assert_eq!(store.projection().shell.active_surface, ActiveSurface::Farmer);
+    }
+
+    #[test]
+    fn select_active_surface_moves_personal_home_to_farmer_today() {
+        let repository = InMemoryAppStateRepository::new(AppShellProjection::for_surface(
+            ActiveSurface::Personal,
+        ));
+        let mut store = AppStateStore::load(repository).expect("in-memory repository should load");
+
+        let changed = store.apply(AppStateCommand::select_active_surface(
+            ActiveSurface::Farmer,
+        ));
+
+        assert_eq!(changed, Ok(true));
+        assert_eq!(store.projection().shell.active_surface, ActiveSurface::Farmer);
+        assert_eq!(
+            store.projection().shell.selected_section,
+            ShellSection::Farmer(FarmerSection::Today)
+        );
+    }
+
+    #[test]
+    fn select_active_surface_moves_farmer_routes_back_to_home_for_personal() {
+        let repository = InMemoryAppStateRepository::new(AppShellProjection::new(
+            ActiveSurface::Farmer,
+            ShellSection::Farmer(FarmerSection::Products),
+        ));
+        let mut store = AppStateStore::load(repository).expect("in-memory repository should load");
+
+        let changed = store.apply(AppStateCommand::select_active_surface(
+            ActiveSurface::Personal,
+        ));
+
+        assert_eq!(changed, Ok(true));
+        assert_eq!(store.projection().shell.active_surface, ActiveSurface::Personal);
+        assert_eq!(store.projection().shell.selected_section, ShellSection::Home);
+    }
+
+    #[test]
+    fn select_active_surface_preserves_settings_route() {
+        let repository = InMemoryAppStateRepository::new(AppShellProjection::for_settings(
+            ActiveSurface::Personal,
+            SettingsSection::About,
+        ));
+        let mut store = AppStateStore::load(repository).expect("in-memory repository should load");
+
+        let changed = store.apply(AppStateCommand::select_active_surface(
+            ActiveSurface::Farmer,
+        ));
+
+        assert_eq!(changed, Ok(true));
+        assert_eq!(store.projection().shell.active_surface, ActiveSurface::Farmer);
+        assert_eq!(
+            store.projection().shell.selected_section,
+            ShellSection::Settings(SettingsSection::About)
         );
     }
 
@@ -532,8 +624,10 @@ mod tests {
 
     #[test]
     fn in_memory_store_construction_and_updates_are_infallible() {
-        let mut store =
-            AppStateStore::in_memory(AppShellProjection::for_settings(SettingsSection::Account));
+        let mut store = AppStateStore::in_memory(AppShellProjection::for_settings(
+            ActiveSurface::Farmer,
+            SettingsSection::Account,
+        ));
 
         let changed = store.apply_in_memory(AppStateCommand::SetSettingsPreference {
             preference: SettingsPreference::AllowRelayConnections,

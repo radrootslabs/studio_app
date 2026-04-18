@@ -3,7 +3,7 @@ use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
 use radroots_studio_app_core::{AppRuntimePathsError, AppRuntimeRoots};
 use radroots_studio_app_models::{
-    AppActivityContext, AppActivityKind, AppMode, SettingsPreference, SettingsSection,
+    ActiveSurface, AppActivityContext, AppActivityKind, SettingsPreference, SettingsSection,
     TodayAgendaProjection,
 };
 use radroots_studio_app_sqlite::{
@@ -184,7 +184,7 @@ impl DesktopAppRuntimeState {
     fn degraded(error: DesktopAppRuntimeBootstrapError) -> Self {
         Self {
             state_store: AppStateStore::in_memory(AppShellProjection {
-                app_mode: AppMode::Farmer,
+                active_surface: ActiveSurface::Farmer,
                 ..AppShellProjection::default()
             }),
             sqlite_store: None,
@@ -216,8 +216,9 @@ mod tests {
 
     use radroots_studio_app_core::{AppRuntimeHostEnvironment, AppRuntimePlatform, AppRuntimeRoots};
     use radroots_studio_app_models::{
-        AppActivityKind, AppMode, FarmReadiness, FarmSummary, SettingsPreference, SettingsSection,
-        ShellSection, TodayAgendaProjection, TodaySetupTask, TodaySetupTaskKind, TodaySummary,
+        ActiveSurface, AppActivityKind, FarmReadiness, FarmSummary, SettingsPreference,
+        SettingsSection, ShellSection, TodayAgendaProjection, TodaySetupTask, TodaySetupTaskKind,
+        TodaySummary,
     };
     use radroots_studio_app_sqlite::{AppSqliteStore, DatabaseTarget};
     use radroots_studio_app_state::{
@@ -321,7 +322,10 @@ mod tests {
         let summary = runtime.summary();
 
         assert_eq!(summary.today_projection, today_agenda);
-        assert_eq!(summary.shell_projection.app_mode, AppMode::Farmer);
+        assert_eq!(
+            summary.shell_projection.active_surface,
+            ActiveSurface::Farmer
+        );
         assert_eq!(
             summary.shell_projection.selected_section,
             ShellSection::Home
@@ -343,7 +347,10 @@ mod tests {
 
         let summary = runtime.summary();
 
-        assert_eq!(summary.shell_projection.app_mode, AppMode::Farmer);
+        assert_eq!(
+            summary.shell_projection.active_surface,
+            ActiveSurface::Farmer
+        );
         assert_eq!(
             summary.shell_projection.selected_section,
             ShellSection::Home
