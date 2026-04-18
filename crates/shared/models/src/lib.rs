@@ -1,7 +1,7 @@
 #![forbid(unsafe_code)]
 
 use serde::{Deserialize, Serialize};
-use std::{error::Error, fmt, str::FromStr};
+use std::{collections::BTreeSet, error::Error, fmt, str::FromStr};
 use uuid::Uuid;
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
@@ -527,6 +527,196 @@ pub struct FarmSummary {
     pub readiness: FarmReadiness,
 }
 
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum FarmSetupReadiness {
+    #[default]
+    NotStarted,
+    InProgress,
+    Ready,
+}
+
+impl FarmSetupReadiness {
+    pub const fn storage_key(self) -> &'static str {
+        match self {
+            Self::NotStarted => "not_started",
+            Self::InProgress => "in_progress",
+            Self::Ready => "ready",
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum FarmOrderMethod {
+    Pickup,
+    Delivery,
+    Shipping,
+}
+
+impl FarmOrderMethod {
+    pub const fn storage_key(self) -> &'static str {
+        match self {
+            Self::Pickup => "pickup",
+            Self::Delivery => "delivery",
+            Self::Shipping => "shipping",
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum FarmSetupSection {
+    Farm,
+    Location,
+    OrderMethods,
+}
+
+impl FarmSetupSection {
+    pub const fn ordered() -> [Self; 3] {
+        [Self::Farm, Self::Location, Self::OrderMethods]
+    }
+
+    pub const fn storage_key(self) -> &'static str {
+        match self {
+            Self::Farm => "farm",
+            Self::Location => "location",
+            Self::OrderMethods => "order_methods",
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum FarmSetupBlocker {
+    AddFarmName,
+    AddLocationOrServiceArea,
+    ChooseOrderMethod,
+}
+
+impl FarmSetupBlocker {
+    pub const fn storage_key(self) -> &'static str {
+        match self {
+            Self::AddFarmName => "add_farm_name",
+            Self::AddLocationOrServiceArea => "add_location_or_service_area",
+            Self::ChooseOrderMethod => "choose_order_method",
+        }
+    }
+}
+
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+pub struct FarmSetupDraft {
+    pub farm_name: String,
+    pub location_or_service_area: String,
+    pub order_methods: BTreeSet<FarmOrderMethod>,
+}
+
+impl FarmSetupDraft {
+    pub fn new(
+        farm_name: impl Into<String>,
+        location_or_service_area: impl Into<String>,
+        order_methods: impl IntoIterator<Item = FarmOrderMethod>,
+    ) -> Self {
+        Self {
+            farm_name: farm_name.into(),
+            location_or_service_area: location_or_service_area.into(),
+            order_methods: order_methods.into_iter().collect(),
+        }
+    }
+
+    pub fn blockers(&self) -> Vec<FarmSetupBlocker> {
+        let mut blockers = Vec::new();
+
+        if self.farm_name.trim().is_empty() {
+            blockers.push(FarmSetupBlocker::AddFarmName);
+        }
+
+        if self.location_or_service_area.trim().is_empty() {
+            blockers.push(FarmSetupBlocker::AddLocationOrServiceArea);
+        }
+
+        if self.order_methods.is_empty() {
+            blockers.push(FarmSetupBlocker::ChooseOrderMethod);
+        }
+
+        blockers
+    }
+
+    pub fn readiness(&self) -> FarmSetupReadiness {
+        let blockers = self.blockers();
+        if blockers.is_empty() {
+            FarmSetupReadiness::Ready
+        } else if self.is_empty() {
+            FarmSetupReadiness::NotStarted
+        } else {
+            FarmSetupReadiness::InProgress
+        }
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.farm_name.trim().is_empty()
+            && self.location_or_service_area.trim().is_empty()
+            && self.order_methods.is_empty()
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct FarmSetupProjection {
+    pub draft: FarmSetupDraft,
+    pub saved_farm: Option<FarmSummary>,
+    pub readiness: FarmSetupReadiness,
+    pub blockers: Vec<FarmSetupBlocker>,
+}
+
+impl Default for FarmSetupProjection {
+    fn default() -> Self {
+        Self::not_started()
+    }
+}
+
+impl FarmSetupProjection {
+    pub fn new(draft: FarmSetupDraft, saved_farm: Option<FarmSummary>) -> Self {
+        match saved_farm {
+            Some(saved_farm) => Self {
+                draft,
+                saved_farm: Some(saved_farm),
+                readiness: FarmSetupReadiness::Ready,
+                blockers: Vec::new(),
+            },
+            None => Self::from_draft(draft),
+        }
+    }
+
+    pub fn not_started() -> Self {
+        Self::from_draft(FarmSetupDraft::default())
+    }
+
+    pub fn from_draft(draft: FarmSetupDraft) -> Self {
+        let readiness = draft.readiness();
+        let blockers = draft.blockers();
+
+        Self {
+            draft,
+            saved_farm: None,
+            readiness,
+            blockers,
+        }
+    }
+
+    pub fn from_saved_farm(saved_farm: FarmSummary) -> Self {
+        Self {
+            draft: FarmSetupDraft::default(),
+            saved_farm: Some(saved_farm),
+            readiness: FarmSetupReadiness::Ready,
+            blockers: Vec::new(),
+        }
+    }
+
+    pub const fn has_saved_farm(&self) -> bool {
+        self.saved_farm.is_some()
+    }
+}
+
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct FulfillmentWindowSummary {
     pub fulfillment_window_id: FulfillmentWindowId,
@@ -656,10 +846,12 @@ mod tests {
     use super::{
         AccountCustody, AccountSummary, AccountSurfaceActivationProjection, ActiveSurface,
         ActivityEventId, AppActivityContext, AppActivityEvent, AppActivityKind,
-        AppIdentityProjection, AppStartupGate, FarmId, FarmerActivationProjection, FarmerSection,
-        IdentityBlockedReason, IdentityReadiness, OrderListRow, ProductListRow,
-        SelectedAccountProjection, SelectedSurfaceProjection, SettingsPreference, SettingsSection,
-        ShellSection, TodayAgendaProjection, TodaySetupTask, TodaySetupTaskKind, TodaySummary,
+        AppIdentityProjection, AppStartupGate, FarmId, FarmOrderMethod, FarmSetupBlocker,
+        FarmSetupDraft, FarmSetupProjection, FarmSetupReadiness, FarmSetupSection,
+        FarmerActivationProjection, FarmerSection, IdentityBlockedReason, IdentityReadiness,
+        OrderListRow, ProductListRow, SelectedAccountProjection, SelectedSurfaceProjection,
+        SettingsPreference, SettingsSection, ShellSection, TodayAgendaProjection, TodaySetupTask,
+        TodaySetupTaskKind, TodaySummary,
     };
     use std::{collections::BTreeSet, str::FromStr};
     use uuid::Uuid;
@@ -963,6 +1155,80 @@ mod tests {
         assert_eq!(projection.orders_needing_action.len(), 1);
         assert_eq!(projection.low_stock_products[0].stock_count, 2);
         assert!(projection.has_attention_items());
+    }
+
+    #[test]
+    fn farm_setup_section_order_is_frozen() {
+        assert_eq!(
+            FarmSetupSection::ordered(),
+            [
+                FarmSetupSection::Farm,
+                FarmSetupSection::Location,
+                FarmSetupSection::OrderMethods,
+            ]
+        );
+    }
+
+    #[test]
+    fn empty_farm_setup_draft_is_not_started_with_all_blockers() {
+        let draft = FarmSetupDraft::default();
+
+        assert!(draft.is_empty());
+        assert_eq!(draft.readiness(), FarmSetupReadiness::NotStarted);
+        assert_eq!(
+            draft.blockers(),
+            vec![
+                FarmSetupBlocker::AddFarmName,
+                FarmSetupBlocker::AddLocationOrServiceArea,
+                FarmSetupBlocker::ChooseOrderMethod,
+            ]
+        );
+    }
+
+    #[test]
+    fn partial_farm_setup_draft_is_in_progress() {
+        let draft = FarmSetupDraft::new("North field farm", "", [FarmOrderMethod::Pickup]);
+
+        assert_eq!(draft.readiness(), FarmSetupReadiness::InProgress);
+        assert_eq!(
+            draft.blockers(),
+            vec![FarmSetupBlocker::AddLocationOrServiceArea]
+        );
+    }
+
+    #[test]
+    fn complete_farm_setup_draft_is_ready_and_deduplicates_order_methods() {
+        let draft = FarmSetupDraft::new(
+            "North field farm",
+            "Asheville, NC",
+            [
+                FarmOrderMethod::Shipping,
+                FarmOrderMethod::Pickup,
+                FarmOrderMethod::Shipping,
+            ],
+        );
+
+        assert_eq!(draft.readiness(), FarmSetupReadiness::Ready);
+        assert_eq!(draft.blockers(), Vec::<FarmSetupBlocker>::new());
+        assert_eq!(
+            draft.order_methods,
+            BTreeSet::from([FarmOrderMethod::Pickup, FarmOrderMethod::Shipping])
+        );
+    }
+
+    #[test]
+    fn saved_farm_projection_is_always_ready() {
+        let saved_farm = super::FarmSummary {
+            farm_id: FarmId::new(),
+            display_name: "North field farm".to_owned(),
+            readiness: super::FarmReadiness::Ready,
+        };
+        let projection = FarmSetupProjection::from_saved_farm(saved_farm.clone());
+
+        assert_eq!(projection.saved_farm, Some(saved_farm));
+        assert_eq!(projection.readiness, FarmSetupReadiness::Ready);
+        assert!(projection.blockers.is_empty());
+        assert!(projection.has_saved_farm());
     }
 
     #[test]

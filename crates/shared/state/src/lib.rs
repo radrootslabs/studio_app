@@ -1,9 +1,9 @@
 #![forbid(unsafe_code)]
 
 use radroots_studio_app_models::{
-    ActiveSurface, AppIdentityProjection, AppStartupGate, SelectedSurfaceProjection,
-    SettingsAccountProjection, SettingsPreference, SettingsSection, ShellSection,
-    TodayAgendaProjection,
+    ActiveSurface, AppIdentityProjection, AppStartupGate, FarmSetupProjection, FarmSetupReadiness,
+    SelectedSurfaceProjection, SettingsAccountProjection, SettingsPreference, SettingsSection,
+    ShellSection, TodayAgendaProjection,
 };
 use thiserror::Error;
 
@@ -64,6 +64,23 @@ impl SettingsShellProjection {
             general: GeneralSettingsProjection::default(),
         }
     }
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum FarmSetupFlowStage {
+    #[default]
+    Onboarding,
+    Editing,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum HomeRoute {
+    Blocked,
+    SetupRequired,
+    Personal,
+    FarmSetupOnboarding,
+    FarmSetupForm,
+    Today,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -150,22 +167,54 @@ pub struct AppProjection {
     pub identity: AppIdentityProjection,
     pub startup_gate: AppStartupGate,
     pub today: TodayAgendaProjection,
+    pub farm_setup: FarmSetupProjection,
+    pub farm_setup_flow_stage: FarmSetupFlowStage,
 }
 
 impl AppProjection {
     pub fn new(
-        mut shell: AppShellProjection,
+        shell: AppShellProjection,
         identity: AppIdentityProjection,
         today: TodayAgendaProjection,
     ) -> Self {
-        sync_shell_to_identity(&mut shell, &identity);
-        let startup_gate = identity.startup_gate();
+        Self::with_farm_setup(shell, identity, today, FarmSetupProjection::default())
+    }
 
-        Self {
+    pub fn with_farm_setup(
+        shell: AppShellProjection,
+        identity: AppIdentityProjection,
+        today: TodayAgendaProjection,
+        farm_setup: FarmSetupProjection,
+    ) -> Self {
+        let mut projection = Self {
             shell,
             identity,
-            startup_gate,
+            startup_gate: AppStartupGate::default(),
             today,
+            farm_setup,
+            farm_setup_flow_stage: FarmSetupFlowStage::default(),
+        };
+        sync_projection(&mut projection);
+
+        projection
+    }
+
+    pub fn home_route(&self) -> HomeRoute {
+        match self.startup_gate {
+            AppStartupGate::Blocked => HomeRoute::Blocked,
+            AppStartupGate::SetupRequired => HomeRoute::SetupRequired,
+            AppStartupGate::Personal => HomeRoute::Personal,
+            AppStartupGate::Farmer => match self.farm_setup.readiness {
+                FarmSetupReadiness::Ready => HomeRoute::Today,
+                FarmSetupReadiness::NotStarted
+                    if self.farm_setup_flow_stage == FarmSetupFlowStage::Onboarding =>
+                {
+                    HomeRoute::FarmSetupOnboarding
+                }
+                FarmSetupReadiness::NotStarted | FarmSetupReadiness::InProgress => {
+                    HomeRoute::FarmSetupForm
+                }
+            },
         }
     }
 }
@@ -186,6 +235,8 @@ pub enum AppStateCommand {
     SelectSection(ShellSection),
     SelectSettingsSection(SettingsSection),
     ReplaceIdentityProjection(AppIdentityProjection),
+    ReplaceFarmSetupProjection(FarmSetupProjection),
+    SelectFarmSetupFlowStage(FarmSetupFlowStage),
     SetSettingsPreference {
         preference: SettingsPreference,
         enabled: bool,
@@ -204,6 +255,14 @@ impl AppStateCommand {
 
     pub fn replace_identity_projection(projection: AppIdentityProjection) -> Self {
         Self::ReplaceIdentityProjection(projection)
+    }
+
+    pub fn replace_farm_setup_projection(projection: FarmSetupProjection) -> Self {
+        Self::ReplaceFarmSetupProjection(projection)
+    }
+
+    pub const fn select_farm_setup_flow_stage(stage: FarmSetupFlowStage) -> Self {
+        Self::SelectFarmSetupFlowStage(stage)
     }
 
     pub fn replace_today_agenda(projection: TodayAgendaProjection) -> Self {
@@ -323,6 +382,14 @@ impl<R: AppStateRepository> AppStateStore<R> {
         &self.projection.identity
     }
 
+    pub fn farm_setup_projection(&self) -> &FarmSetupProjection {
+        &self.projection.farm_setup
+    }
+
+    pub fn home_route(&self) -> HomeRoute {
+        self.projection.home_route()
+    }
+
     pub fn settings_account_projection(&self) -> SettingsAccountProjection {
         self.projection.identity.settings_account()
     }
@@ -343,6 +410,11 @@ impl<R: AppStateRepository> AppStateStore<R> {
             AppStateMutation::ShellChanged => {
                 self.repository
                     .save_shell_projection(&next_projection.shell)?;
+                self.projection = next_projection;
+
+                Ok(true)
+            }
+            AppStateMutation::FarmSetupChanged => {
                 self.projection = next_projection;
 
                 Ok(true)
@@ -379,6 +451,11 @@ impl AppStateStore<InMemoryAppStateRepository> {
 
                 true
             }
+            AppStateMutation::FarmSetupChanged => {
+                self.projection = next_projection;
+
+                true
+            }
             AppStateMutation::TodayChanged => {
                 self.projection = next_projection;
 
@@ -392,6 +469,7 @@ impl AppStateStore<InMemoryAppStateRepository> {
 enum AppStateMutation {
     NoChange,
     ShellChanged,
+    FarmSetupChanged,
     TodayChanged,
 }
 
@@ -420,6 +498,12 @@ fn apply_command(projection: &mut AppProjection, command: AppStateCommand) -> Ap
         AppStateCommand::ReplaceIdentityProjection(identity_projection) => {
             projection.identity = identity_projection;
         }
+        AppStateCommand::ReplaceFarmSetupProjection(farm_setup_projection) => {
+            projection.farm_setup = farm_setup_projection;
+        }
+        AppStateCommand::SelectFarmSetupFlowStage(flow_stage) => {
+            projection.farm_setup_flow_stage = flow_stage;
+        }
         AppStateCommand::SetSettingsPreference {
             preference,
             enabled,
@@ -441,6 +525,10 @@ fn apply_command(projection: &mut AppProjection, command: AppStateCommand) -> Ap
         AppStateMutation::NoChange
     } else if projection.shell != before.shell {
         AppStateMutation::ShellChanged
+    } else if projection.farm_setup != before.farm_setup
+        || projection.farm_setup_flow_stage != before.farm_setup_flow_stage
+    {
+        AppStateMutation::FarmSetupChanged
     } else {
         AppStateMutation::TodayChanged
     }
@@ -448,7 +536,13 @@ fn apply_command(projection: &mut AppProjection, command: AppStateCommand) -> Ap
 
 fn sync_projection(projection: &mut AppProjection) {
     sync_shell_to_identity(&mut projection.shell, &projection.identity);
+    sync_farm_setup_to_today(&mut projection.farm_setup, &projection.today);
     projection.startup_gate = projection.identity.startup_gate();
+    sync_farm_setup_flow_stage(
+        &mut projection.farm_setup_flow_stage,
+        projection.startup_gate,
+        projection.farm_setup.readiness,
+    );
 }
 
 fn sync_shell_to_identity(shell: &mut AppShellProjection, identity: &AppIdentityProjection) {
@@ -468,16 +562,35 @@ fn sync_shell_to_identity(shell: &mut AppShellProjection, identity: &AppIdentity
     }
 }
 
+fn sync_farm_setup_to_today(farm_setup: &mut FarmSetupProjection, today: &TodayAgendaProjection) {
+    if let Some(saved_farm) = today.farm.clone()
+        && !farm_setup.has_saved_farm()
+    {
+        *farm_setup = FarmSetupProjection::from_saved_farm(saved_farm);
+    }
+}
+
+fn sync_farm_setup_flow_stage(
+    flow_stage: &mut FarmSetupFlowStage,
+    startup_gate: AppStartupGate,
+    readiness: FarmSetupReadiness,
+) {
+    if startup_gate != AppStartupGate::Farmer || readiness == FarmSetupReadiness::Ready {
+        *flow_stage = FarmSetupFlowStage::Onboarding;
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
         AppProjection, AppShellProjection, AppStateCommand, AppStateRepository,
-        AppStateRepositoryError, AppStateStore, AppStateStoreError, InMemoryAppStateRepository,
-        SettingsPreference,
+        AppStateRepositoryError, AppStateStore, AppStateStoreError, FarmSetupFlowStage, HomeRoute,
+        InMemoryAppStateRepository, SettingsPreference,
     };
     use radroots_studio_app_models::{
         AccountCustody, AccountSummary, ActiveSurface, AppIdentityProjection, AppStartupGate,
-        FarmId, FarmerActivationProjection, FarmerSection, SelectedAccountProjection,
+        FarmId, FarmOrderMethod, FarmReadiness, FarmSetupDraft, FarmSetupProjection,
+        FarmerActivationProjection, FarmerSection, SelectedAccountProjection,
         SelectedSurfaceProjection, SettingsSection, ShellSection, TodayAgendaProjection,
         TodaySetupTask, TodaySetupTaskKind,
     };
@@ -530,6 +643,12 @@ mod tests {
         assert!(projection.shell.settings.general.use_nip05);
         assert!(!projection.shell.settings.general.launch_at_login);
         assert_eq!(projection.today, TodayAgendaProjection::default());
+        assert_eq!(projection.farm_setup, FarmSetupProjection::default());
+        assert_eq!(
+            projection.farm_setup_flow_stage,
+            FarmSetupFlowStage::Onboarding
+        );
+        assert_eq!(projection.home_route(), HomeRoute::SetupRequired);
     }
 
     #[test]
@@ -554,6 +673,7 @@ mod tests {
         );
         assert_eq!(store.startup_gate(), AppStartupGate::SetupRequired);
         assert_eq!(store.projection().today, TodayAgendaProjection::default());
+        assert_eq!(store.home_route(), HomeRoute::SetupRequired);
     }
 
     #[test]
@@ -627,6 +747,7 @@ mod tests {
             store.projection().shell.selected_section,
             ShellSection::Farmer(FarmerSection::Today)
         );
+        assert_eq!(store.home_route(), HomeRoute::FarmSetupOnboarding);
     }
 
     #[test]
@@ -794,6 +915,82 @@ mod tests {
 
         assert_eq!(changed, Ok(true));
         assert_eq!(store.projection().today, today);
+    }
+
+    #[test]
+    fn replace_farm_setup_projection_updates_in_memory_state_without_touching_repository() {
+        let mut store =
+            AppStateStore::load(FailingRepository).expect("failing repository should still load");
+        let farm_setup = FarmSetupProjection::from_draft(FarmSetupDraft::new(
+            "North field farm",
+            "",
+            [FarmOrderMethod::Pickup],
+        ));
+
+        let changed = store.apply(AppStateCommand::replace_farm_setup_projection(
+            farm_setup.clone(),
+        ));
+
+        assert_eq!(changed, Ok(true));
+        assert_eq!(store.farm_setup_projection(), &farm_setup);
+    }
+
+    #[test]
+    fn select_farm_setup_flow_stage_switches_farmer_home_into_form_route() {
+        let mut store = AppStateStore::load(InMemoryAppStateRepository::default())
+            .expect("in-memory repository should load");
+
+        assert_eq!(
+            store.apply(AppStateCommand::replace_identity_projection(
+                ready_identity(ActiveSurface::Farmer),
+            )),
+            Ok(true)
+        );
+        assert_eq!(store.home_route(), HomeRoute::FarmSetupOnboarding);
+
+        let changed = store.apply(AppStateCommand::select_farm_setup_flow_stage(
+            FarmSetupFlowStage::Editing,
+        ));
+
+        assert_eq!(changed, Ok(true));
+        assert_eq!(store.home_route(), HomeRoute::FarmSetupForm);
+    }
+
+    #[test]
+    fn saved_farm_in_today_projection_synchronizes_ready_home_route() {
+        let mut store = AppStateStore::load(InMemoryAppStateRepository::default())
+            .expect("in-memory repository should load");
+        let farm_id = FarmId::new();
+
+        assert_eq!(
+            store.apply(AppStateCommand::replace_identity_projection(
+                ready_identity(ActiveSurface::Farmer),
+            )),
+            Ok(true)
+        );
+
+        let changed = store.apply(AppStateCommand::replace_today_agenda(
+            TodayAgendaProjection {
+                farm: Some(radroots_studio_app_models::FarmSummary {
+                    farm_id,
+                    display_name: "North field farm".to_owned(),
+                    readiness: FarmReadiness::Ready,
+                }),
+                ..TodayAgendaProjection::default()
+            },
+        ));
+
+        assert_eq!(changed, Ok(true));
+        assert_eq!(store.home_route(), HomeRoute::Today);
+        assert_eq!(
+            store
+                .farm_setup_projection()
+                .saved_farm
+                .as_ref()
+                .expect("saved farm")
+                .farm_id,
+            farm_id
+        );
     }
 
     #[test]
