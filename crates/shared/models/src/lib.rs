@@ -502,12 +502,297 @@ pub enum FarmReadiness {
     Ready,
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ProductStatus {
+    #[default]
     Draft,
     Published,
     Paused,
+    Archived,
+}
+
+impl ProductStatus {
+    pub const fn storage_key(self) -> &'static str {
+        match self {
+            Self::Draft => "draft",
+            Self::Published => "published",
+            Self::Paused => "paused",
+            Self::Archived => "archived",
+        }
+    }
+
+    pub const fn is_live(self) -> bool {
+        matches!(self, Self::Published)
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ProductsFilter {
+    #[default]
+    All,
+    Live,
+    Drafts,
+    NeedAttention,
+    Paused,
+    Archived,
+}
+
+impl ProductsFilter {
+    pub const fn storage_key(self) -> &'static str {
+        match self {
+            Self::All => "all",
+            Self::Live => "live",
+            Self::Drafts => "drafts",
+            Self::NeedAttention => "need_attention",
+            Self::Paused => "paused",
+            Self::Archived => "archived",
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ProductsSort {
+    #[default]
+    Updated,
+    Name,
+    Availability,
+    Stock,
+    Price,
+}
+
+impl ProductsSort {
+    pub const fn storage_key(self) -> &'static str {
+        match self {
+            Self::Updated => "updated",
+            Self::Name => "name",
+            Self::Availability => "availability",
+            Self::Stock => "stock",
+            Self::Price => "price",
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ProductAttentionState {
+    #[default]
+    Healthy,
+    LowStock,
+    SoldOut,
+    MissingAvailability,
+    NoFutureAvailability,
+    MissingDetails,
+}
+
+impl ProductAttentionState {
+    pub const fn storage_key(self) -> &'static str {
+        match self {
+            Self::Healthy => "healthy",
+            Self::LowStock => "low_stock",
+            Self::SoldOut => "sold_out",
+            Self::MissingAvailability => "missing_availability",
+            Self::NoFutureAvailability => "no_future_availability",
+            Self::MissingDetails => "missing_details",
+        }
+    }
+
+    pub const fn requires_attention(self) -> bool {
+        !matches!(self, Self::Healthy)
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ProductAvailabilityState {
+    Scheduled,
+    Open,
+    MissingWindow,
+    NoFutureWindow,
+}
+
+impl ProductAvailabilityState {
+    pub const fn storage_key(self) -> &'static str {
+        match self {
+            Self::Scheduled => "scheduled",
+            Self::Open => "open",
+            Self::MissingWindow => "missing_window",
+            Self::NoFutureWindow => "no_future_window",
+        }
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct ProductAvailabilitySummary {
+    pub state: ProductAvailabilityState,
+    pub label: String,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ProductStockState {
+    Unset,
+    InStock,
+    LowStock,
+    SoldOut,
+}
+
+impl ProductStockState {
+    pub const fn storage_key(self) -> &'static str {
+        match self {
+            Self::Unset => "unset",
+            Self::InStock => "in_stock",
+            Self::LowStock => "low_stock",
+            Self::SoldOut => "sold_out",
+        }
+    }
+
+    pub const fn requires_attention(self) -> bool {
+        matches!(self, Self::LowStock | Self::SoldOut)
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct ProductStockSummary {
+    pub quantity: Option<u32>,
+    pub unit_label: Option<String>,
+    pub state: ProductStockState,
+}
+
+impl ProductStockSummary {
+    pub const fn requires_attention(&self) -> bool {
+        self.state.requires_attention()
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct ProductPricePresentation {
+    pub amount_minor_units: u32,
+    pub currency_code: String,
+    pub unit_label: String,
+}
+
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+pub struct ProductsListSummary {
+    pub total_products: u32,
+    pub live_products: u32,
+    pub draft_products: u32,
+    pub need_attention_products: u32,
+}
+
+impl ProductsListSummary {
+    pub const fn has_products(&self) -> bool {
+        self.total_products > 0
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct ProductsListRow {
+    pub product_id: ProductId,
+    pub farm_id: FarmId,
+    pub title: String,
+    pub subtitle: Option<String>,
+    pub status: ProductStatus,
+    pub attention_state: ProductAttentionState,
+    pub availability: ProductAvailabilitySummary,
+    pub stock: ProductStockSummary,
+    pub price: Option<ProductPricePresentation>,
+    pub updated_at: String,
+}
+
+impl ProductsListRow {
+    pub const fn requires_attention(&self) -> bool {
+        self.attention_state.requires_attention() || self.stock.requires_attention()
+    }
+}
+
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+pub struct ProductsListProjection {
+    pub summary: ProductsListSummary,
+    pub rows: Vec<ProductsListRow>,
+}
+
+impl ProductsListProjection {
+    pub fn is_empty(&self) -> bool {
+        self.rows.is_empty()
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ProductPublishBlocker {
+    AddProductName,
+    ChooseUnit,
+    SetPrice,
+    AttachAvailability,
+}
+
+impl ProductPublishBlocker {
+    pub const fn storage_key(self) -> &'static str {
+        match self {
+            Self::AddProductName => "add_product_name",
+            Self::ChooseUnit => "choose_unit",
+            Self::SetPrice => "set_price",
+            Self::AttachAvailability => "attach_availability",
+        }
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct ProductEditorDraft {
+    pub title: String,
+    pub subtitle: String,
+    pub unit_label: String,
+    pub price_minor_units: Option<u32>,
+    pub price_currency: String,
+    pub stock_quantity: Option<u32>,
+    pub availability_window_id: Option<FulfillmentWindowId>,
+    pub status: ProductStatus,
+}
+
+impl Default for ProductEditorDraft {
+    fn default() -> Self {
+        Self {
+            title: String::new(),
+            subtitle: String::new(),
+            unit_label: String::new(),
+            price_minor_units: None,
+            price_currency: "USD".to_owned(),
+            stock_quantity: None,
+            availability_window_id: None,
+            status: ProductStatus::Draft,
+        }
+    }
+}
+
+impl ProductEditorDraft {
+    pub fn publish_blockers(&self) -> Vec<ProductPublishBlocker> {
+        let mut blockers = Vec::new();
+
+        if self.title.trim().is_empty() {
+            blockers.push(ProductPublishBlocker::AddProductName);
+        }
+
+        if self.unit_label.trim().is_empty() {
+            blockers.push(ProductPublishBlocker::ChooseUnit);
+        }
+
+        if self.price_minor_units.is_none_or(|value| value == 0) {
+            blockers.push(ProductPublishBlocker::SetPrice);
+        }
+
+        if self.availability_window_id.is_none() {
+            blockers.push(ProductPublishBlocker::AttachAvailability);
+        }
+
+        blockers
+    }
+
+    pub fn is_publish_ready(&self) -> bool {
+        self.publish_blockers().is_empty()
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -849,9 +1134,12 @@ mod tests {
         AppIdentityProjection, AppStartupGate, FarmId, FarmOrderMethod, FarmSetupBlocker,
         FarmSetupDraft, FarmSetupProjection, FarmSetupReadiness, FarmSetupSection,
         FarmerActivationProjection, FarmerSection, IdentityBlockedReason, IdentityReadiness,
-        OrderListRow, ProductListRow, SelectedAccountProjection, SelectedSurfaceProjection,
-        SettingsPreference, SettingsSection, ShellSection, TodayAgendaProjection, TodaySetupTask,
-        TodaySetupTaskKind, TodaySummary,
+        OrderListRow, ProductAttentionState, ProductAvailabilityState, ProductAvailabilitySummary,
+        ProductEditorDraft, ProductListRow, ProductPricePresentation, ProductPublishBlocker,
+        ProductStatus, ProductStockState, ProductStockSummary, ProductsFilter,
+        ProductsListProjection, ProductsListRow, ProductsListSummary, ProductsSort,
+        SelectedAccountProjection, SelectedSurfaceProjection, SettingsPreference, SettingsSection,
+        ShellSection, TodayAgendaProjection, TodaySetupTask, TodaySetupTaskKind, TodaySummary,
     };
     use std::{collections::BTreeSet, str::FromStr};
     use uuid::Uuid;
@@ -1081,6 +1369,119 @@ mod tests {
 
         assert_eq!(parsed, farm_id);
         assert_eq!(parsed.as_uuid(), uuid);
+    }
+
+    #[test]
+    fn product_status_filter_and_sort_storage_keys_are_stable() {
+        assert_eq!(ProductStatus::Draft.storage_key(), "draft");
+        assert_eq!(ProductStatus::Published.storage_key(), "published");
+        assert_eq!(ProductStatus::Paused.storage_key(), "paused");
+        assert_eq!(ProductStatus::Archived.storage_key(), "archived");
+        assert!(ProductStatus::Published.is_live());
+        assert!(!ProductStatus::Draft.is_live());
+
+        assert_eq!(ProductsFilter::default(), ProductsFilter::All);
+        assert_eq!(ProductsFilter::All.storage_key(), "all");
+        assert_eq!(ProductsFilter::Live.storage_key(), "live");
+        assert_eq!(ProductsFilter::Drafts.storage_key(), "drafts");
+        assert_eq!(
+            ProductsFilter::NeedAttention.storage_key(),
+            "need_attention"
+        );
+        assert_eq!(ProductsFilter::Paused.storage_key(), "paused");
+        assert_eq!(ProductsFilter::Archived.storage_key(), "archived");
+
+        assert_eq!(ProductsSort::default(), ProductsSort::Updated);
+        assert_eq!(ProductsSort::Updated.storage_key(), "updated");
+        assert_eq!(ProductsSort::Name.storage_key(), "name");
+        assert_eq!(ProductsSort::Availability.storage_key(), "availability");
+        assert_eq!(ProductsSort::Stock.storage_key(), "stock");
+        assert_eq!(ProductsSort::Price.storage_key(), "price");
+    }
+
+    #[test]
+    fn product_attention_stock_and_projection_states_are_explicit() {
+        let row = ProductsListRow {
+            product_id: super::ProductId::new(),
+            farm_id: FarmId::new(),
+            title: "Pea shoots".to_owned(),
+            subtitle: Some("Tray-grown".to_owned()),
+            status: ProductStatus::Draft,
+            attention_state: ProductAttentionState::MissingAvailability,
+            availability: ProductAvailabilitySummary {
+                state: ProductAvailabilityState::MissingWindow,
+                label: "Missing window".to_owned(),
+            },
+            stock: ProductStockSummary {
+                quantity: None,
+                unit_label: None,
+                state: ProductStockState::Unset,
+            },
+            price: Some(ProductPricePresentation {
+                amount_minor_units: 300,
+                currency_code: "USD".to_owned(),
+                unit_label: "bag".to_owned(),
+            }),
+            updated_at: "2026-04-18T10:00:00Z".to_owned(),
+        };
+        let summary = ProductsListSummary {
+            total_products: 1,
+            live_products: 0,
+            draft_products: 1,
+            need_attention_products: 1,
+        };
+        let projection = ProductsListProjection {
+            summary: summary.clone(),
+            rows: vec![row.clone()],
+        };
+
+        assert_eq!(ProductAttentionState::LowStock.storage_key(), "low_stock");
+        assert!(ProductAttentionState::LowStock.requires_attention());
+        assert!(!ProductAttentionState::Healthy.requires_attention());
+        assert_eq!(
+            ProductAvailabilityState::MissingWindow.storage_key(),
+            "missing_window"
+        );
+        assert_eq!(ProductStockState::SoldOut.storage_key(), "sold_out");
+        assert!(ProductStockState::SoldOut.requires_attention());
+        assert!(!ProductStockState::InStock.requires_attention());
+        assert!(row.requires_attention());
+        assert!(summary.has_products());
+        assert!(!projection.is_empty());
+        assert_eq!(projection.rows[0].availability.label, "Missing window");
+    }
+
+    #[test]
+    fn product_editor_publish_blockers_are_explicit_and_minimal() {
+        let empty_draft = ProductEditorDraft::default();
+        let ready_draft = ProductEditorDraft {
+            title: "Heirloom tomatoes".to_owned(),
+            subtitle: "Brandywine".to_owned(),
+            unit_label: "lb".to_owned(),
+            price_minor_units: Some(450),
+            price_currency: "USD".to_owned(),
+            stock_quantity: Some(12),
+            availability_window_id: Some(super::FulfillmentWindowId::new()),
+            status: ProductStatus::Draft,
+        };
+
+        assert_eq!(
+            empty_draft.publish_blockers(),
+            vec![
+                ProductPublishBlocker::AddProductName,
+                ProductPublishBlocker::ChooseUnit,
+                ProductPublishBlocker::SetPrice,
+                ProductPublishBlocker::AttachAvailability,
+            ]
+        );
+        assert_eq!(
+            ProductPublishBlocker::AttachAvailability.storage_key(),
+            "attach_availability"
+        );
+        assert_eq!(empty_draft.price_currency, "USD");
+        assert!(!empty_draft.is_publish_ready());
+        assert!(ready_draft.is_publish_ready());
+        assert!(ready_draft.publish_blockers().is_empty());
     }
 
     #[test]

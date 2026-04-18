@@ -2,8 +2,9 @@
 
 use radroots_studio_app_models::{
     ActiveSurface, AppIdentityProjection, AppStartupGate, FarmSetupProjection, FarmSetupReadiness,
-    SelectedSurfaceProjection, SettingsAccountProjection, SettingsPreference, SettingsSection,
-    ShellSection, TodayAgendaProjection,
+    ProductEditorDraft, ProductId, ProductPublishBlocker, ProductsFilter, ProductsListProjection,
+    ProductsSort, SelectedSurfaceProjection, SettingsAccountProjection, SettingsPreference,
+    SettingsSection, ShellSection, TodayAgendaProjection,
 };
 use thiserror::Error;
 
@@ -64,6 +65,120 @@ impl SettingsShellProjection {
             general: GeneralSettingsProjection::default(),
         }
     }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ProductsScreenQueryState {
+    pub search_query: String,
+    pub filter: ProductsFilter,
+    pub sort: ProductsSort,
+}
+
+impl Default for ProductsScreenQueryState {
+    fn default() -> Self {
+        Self {
+            search_query: String::new(),
+            filter: ProductsFilter::default(),
+            sort: ProductsSort::default(),
+        }
+    }
+}
+
+impl ProductsScreenQueryState {
+    pub fn new(
+        search_query: impl Into<String>,
+        filter: ProductsFilter,
+        sort: ProductsSort,
+    ) -> Self {
+        Self {
+            search_query: search_query.into(),
+            filter,
+            sort,
+        }
+    }
+
+    fn set_search_query(&mut self, search_query: impl Into<String>) {
+        self.search_query = search_query.into();
+    }
+
+    fn select_filter(&mut self, filter: ProductsFilter) {
+        self.filter = filter;
+    }
+
+    fn select_sort(&mut self, sort: ProductsSort) {
+        self.sort = sort;
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ProductEditorSession {
+    pub selected_product_id: Option<ProductId>,
+    pub draft: ProductEditorDraft,
+    pub publish_blockers: Vec<ProductPublishBlocker>,
+}
+
+impl ProductEditorSession {
+    fn new_draft() -> Self {
+        Self::from_selection(None, ProductEditorDraft::default())
+    }
+
+    fn existing(product_id: ProductId, draft: ProductEditorDraft) -> Self {
+        Self::from_selection(Some(product_id), draft)
+    }
+
+    fn from_selection(selected_product_id: Option<ProductId>, draft: ProductEditorDraft) -> Self {
+        let publish_blockers = draft.publish_blockers();
+
+        Self {
+            selected_product_id,
+            draft,
+            publish_blockers,
+        }
+    }
+
+    fn replace_draft(&mut self, draft: ProductEditorDraft) {
+        self.publish_blockers = draft.publish_blockers();
+        self.draft = draft;
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum ProductEditorState {
+    Closed,
+    Open(ProductEditorSession),
+}
+
+impl Default for ProductEditorState {
+    fn default() -> Self {
+        Self::Closed
+    }
+}
+
+impl ProductEditorState {
+    fn open_new_draft(&mut self) {
+        *self = Self::Open(ProductEditorSession::new_draft());
+    }
+
+    fn open_existing(&mut self, product_id: ProductId, draft: ProductEditorDraft) {
+        *self = Self::Open(ProductEditorSession::existing(product_id, draft));
+    }
+
+    fn replace_draft(&mut self, draft: ProductEditorDraft) {
+        if let Self::Open(session) = self {
+            session.replace_draft(draft);
+        }
+    }
+
+    fn close(&mut self) {
+        *self = Self::Closed;
+    }
+}
+
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct ProductsScreenProjection {
+    pub list: ProductsListProjection,
+    pub query: ProductsScreenQueryState,
+    pub editor: ProductEditorState,
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -167,6 +282,7 @@ pub struct AppProjection {
     pub identity: AppIdentityProjection,
     pub startup_gate: AppStartupGate,
     pub today: TodayAgendaProjection,
+    pub products: ProductsScreenProjection,
     pub farm_setup: FarmSetupProjection,
     pub farm_setup_flow_stage: FarmSetupFlowStage,
 }
@@ -191,6 +307,7 @@ impl AppProjection {
             identity,
             startup_gate: AppStartupGate::default(),
             today,
+            products: ProductsScreenProjection::default(),
             farm_setup,
             farm_setup_flow_stage: FarmSetupFlowStage::default(),
         };
@@ -239,6 +356,17 @@ pub enum AppStateCommand {
         enabled: bool,
     },
     ReplaceTodayAgenda(TodayAgendaProjection),
+    SetProductsSearchQuery(String),
+    SelectProductsFilter(ProductsFilter),
+    SelectProductsSort(ProductsSort),
+    ReplaceProductsList(ProductsListProjection),
+    OpenNewProductEditor,
+    OpenExistingProductEditor {
+        product_id: ProductId,
+        draft: ProductEditorDraft,
+    },
+    ReplaceProductEditorDraft(ProductEditorDraft),
+    CloseProductEditor,
 }
 
 impl AppStateCommand {
@@ -264,6 +392,38 @@ impl AppStateCommand {
 
     pub fn replace_today_agenda(projection: TodayAgendaProjection) -> Self {
         Self::ReplaceTodayAgenda(projection)
+    }
+
+    pub fn set_products_search_query(search_query: impl Into<String>) -> Self {
+        Self::SetProductsSearchQuery(search_query.into())
+    }
+
+    pub const fn select_products_filter(filter: ProductsFilter) -> Self {
+        Self::SelectProductsFilter(filter)
+    }
+
+    pub const fn select_products_sort(sort: ProductsSort) -> Self {
+        Self::SelectProductsSort(sort)
+    }
+
+    pub fn replace_products_list(projection: ProductsListProjection) -> Self {
+        Self::ReplaceProductsList(projection)
+    }
+
+    pub const fn open_new_product_editor() -> Self {
+        Self::OpenNewProductEditor
+    }
+
+    pub fn open_existing_product_editor(product_id: ProductId, draft: ProductEditorDraft) -> Self {
+        Self::OpenExistingProductEditor { product_id, draft }
+    }
+
+    pub fn replace_product_editor_draft(draft: ProductEditorDraft) -> Self {
+        Self::ReplaceProductEditorDraft(draft)
+    }
+
+    pub const fn close_product_editor() -> Self {
+        Self::CloseProductEditor
     }
 }
 
@@ -383,6 +543,10 @@ impl<R: AppStateRepository> AppStateStore<R> {
         &self.projection.farm_setup
     }
 
+    pub fn products_projection(&self) -> &ProductsScreenProjection {
+        &self.projection.products
+    }
+
     pub fn home_route(&self) -> HomeRoute {
         self.projection.home_route()
     }
@@ -417,6 +581,11 @@ impl<R: AppStateRepository> AppStateStore<R> {
                 Ok(true)
             }
             AppStateMutation::TodayChanged => {
+                self.projection = next_projection;
+
+                Ok(true)
+            }
+            AppStateMutation::ProductsChanged => {
                 self.projection = next_projection;
 
                 Ok(true)
@@ -458,6 +627,11 @@ impl AppStateStore<InMemoryAppStateRepository> {
 
                 true
             }
+            AppStateMutation::ProductsChanged => {
+                self.projection = next_projection;
+
+                true
+            }
         }
     }
 }
@@ -468,6 +642,7 @@ enum AppStateMutation {
     ShellChanged,
     FarmSetupChanged,
     TodayChanged,
+    ProductsChanged,
 }
 
 fn apply_command(projection: &mut AppProjection, command: AppStateCommand) -> AppStateMutation {
@@ -514,6 +689,30 @@ fn apply_command(projection: &mut AppProjection, command: AppStateCommand) -> Ap
         AppStateCommand::ReplaceTodayAgenda(today_projection) => {
             projection.today = today_projection;
         }
+        AppStateCommand::SetProductsSearchQuery(search_query) => {
+            projection.products.query.set_search_query(search_query);
+        }
+        AppStateCommand::SelectProductsFilter(filter) => {
+            projection.products.query.select_filter(filter);
+        }
+        AppStateCommand::SelectProductsSort(sort) => {
+            projection.products.query.select_sort(sort);
+        }
+        AppStateCommand::ReplaceProductsList(products_projection) => {
+            projection.products.list = products_projection;
+        }
+        AppStateCommand::OpenNewProductEditor => {
+            projection.products.editor.open_new_draft();
+        }
+        AppStateCommand::OpenExistingProductEditor { product_id, draft } => {
+            projection.products.editor.open_existing(product_id, draft);
+        }
+        AppStateCommand::ReplaceProductEditorDraft(draft) => {
+            projection.products.editor.replace_draft(draft);
+        }
+        AppStateCommand::CloseProductEditor => {
+            projection.products.editor.close();
+        }
     }
 
     sync_projection(projection);
@@ -526,6 +725,8 @@ fn apply_command(projection: &mut AppProjection, command: AppStateCommand) -> Ap
         || projection.farm_setup_flow_stage != before.farm_setup_flow_stage
     {
         AppStateMutation::FarmSetupChanged
+    } else if projection.products != before.products {
+        AppStateMutation::ProductsChanged
     } else {
         AppStateMutation::TodayChanged
     }
@@ -582,14 +783,16 @@ mod tests {
     use super::{
         AppProjection, AppShellProjection, AppStateCommand, AppStateRepository,
         AppStateRepositoryError, AppStateStore, AppStateStoreError, FarmSetupFlowStage, HomeRoute,
-        InMemoryAppStateRepository, SettingsPreference,
+        InMemoryAppStateRepository, ProductEditorState, ProductsScreenProjection,
+        ProductsScreenQueryState, SettingsPreference,
     };
     use radroots_studio_app_models::{
         AccountCustody, AccountSummary, ActiveSurface, AppIdentityProjection, AppStartupGate,
         FarmId, FarmOrderMethod, FarmReadiness, FarmSetupDraft, FarmSetupProjection,
-        FarmerActivationProjection, FarmerSection, SelectedAccountProjection,
-        SelectedSurfaceProjection, SettingsSection, ShellSection, TodayAgendaProjection,
-        TodaySetupTask, TodaySetupTaskKind,
+        FarmerActivationProjection, FarmerSection, FulfillmentWindowId, ProductEditorDraft,
+        ProductId, ProductPublishBlocker, ProductsFilter, ProductsListProjection, ProductsSort,
+        SelectedAccountProjection, SelectedSurfaceProjection, SettingsSection, ShellSection,
+        TodayAgendaProjection, TodaySetupTask, TodaySetupTaskKind,
     };
 
     struct FailingRepository;
@@ -640,6 +843,7 @@ mod tests {
         assert!(projection.shell.settings.general.use_nip05);
         assert!(!projection.shell.settings.general.launch_at_login);
         assert_eq!(projection.today, TodayAgendaProjection::default());
+        assert_eq!(projection.products, ProductsScreenProjection::default());
         assert_eq!(projection.farm_setup, FarmSetupProjection::default());
         assert_eq!(
             projection.farm_setup_flow_stage,
@@ -670,7 +874,142 @@ mod tests {
         );
         assert_eq!(store.startup_gate(), AppStartupGate::SetupRequired);
         assert_eq!(store.projection().today, TodayAgendaProjection::default());
+        assert_eq!(
+            store.projection().products,
+            ProductsScreenProjection::default()
+        );
         assert_eq!(store.home_route(), HomeRoute::SetupRequired);
+    }
+
+    #[test]
+    fn products_query_defaults_and_refreshes_are_local_app_state() {
+        let mut store = AppStateStore::load(InMemoryAppStateRepository::default())
+            .expect("in-memory repository should load");
+        let products_list = ProductsListProjection {
+            summary: radroots_studio_app_models::ProductsListSummary {
+                total_products: 2,
+                live_products: 1,
+                draft_products: 1,
+                need_attention_products: 1,
+            },
+            rows: Vec::new(),
+        };
+
+        assert_eq!(
+            store.projection().products.query,
+            ProductsScreenQueryState::default()
+        );
+
+        assert_eq!(
+            store.apply(AppStateCommand::set_products_search_query("pea")),
+            Ok(true)
+        );
+        assert_eq!(
+            store.apply(AppStateCommand::select_products_filter(
+                ProductsFilter::NeedAttention,
+            )),
+            Ok(true)
+        );
+        assert_eq!(
+            store.apply(AppStateCommand::select_products_sort(ProductsSort::Name)),
+            Ok(true)
+        );
+        assert_eq!(
+            store.apply(AppStateCommand::replace_products_list(
+                products_list.clone()
+            )),
+            Ok(true)
+        );
+        assert_eq!(
+            store.projection().products.query,
+            ProductsScreenQueryState::new("pea", ProductsFilter::NeedAttention, ProductsSort::Name)
+        );
+        assert_eq!(store.projection().products.list, products_list);
+        assert_eq!(
+            store.repository().projection(),
+            &AppShellProjection::default()
+        );
+    }
+
+    #[test]
+    fn product_editor_state_transitions_are_explicit() {
+        let mut store = AppStateStore::load(InMemoryAppStateRepository::default())
+            .expect("in-memory repository should load");
+        let product_id = ProductId::new();
+        let ready_draft = ProductEditorDraft {
+            title: "Heirloom tomatoes".to_owned(),
+            subtitle: "Brandywine".to_owned(),
+            unit_label: "lb".to_owned(),
+            price_minor_units: Some(450),
+            price_currency: "USD".to_owned(),
+            stock_quantity: Some(12),
+            availability_window_id: Some(FulfillmentWindowId::new()),
+            status: radroots_studio_app_models::ProductStatus::Draft,
+        };
+
+        assert_eq!(
+            store.apply(AppStateCommand::open_new_product_editor()),
+            Ok(true)
+        );
+        assert_eq!(
+            store.projection().products.editor,
+            ProductEditorState::Open(super::ProductEditorSession {
+                selected_product_id: None,
+                draft: ProductEditorDraft::default(),
+                publish_blockers: vec![
+                    ProductPublishBlocker::AddProductName,
+                    ProductPublishBlocker::ChooseUnit,
+                    ProductPublishBlocker::SetPrice,
+                    ProductPublishBlocker::AttachAvailability,
+                ],
+            })
+        );
+
+        assert_eq!(
+            store.apply(AppStateCommand::replace_product_editor_draft(
+                ready_draft.clone(),
+            )),
+            Ok(true)
+        );
+        assert_eq!(
+            store.projection().products.editor,
+            ProductEditorState::Open(super::ProductEditorSession {
+                selected_product_id: None,
+                draft: ready_draft.clone(),
+                publish_blockers: Vec::new(),
+            })
+        );
+
+        assert_eq!(
+            store.apply(AppStateCommand::open_existing_product_editor(
+                product_id,
+                ready_draft.clone(),
+            )),
+            Ok(true)
+        );
+        assert_eq!(
+            store.projection().products.editor,
+            ProductEditorState::Open(super::ProductEditorSession {
+                selected_product_id: Some(product_id),
+                draft: ready_draft,
+                publish_blockers: Vec::new(),
+            })
+        );
+
+        assert_eq!(
+            store.apply(AppStateCommand::close_product_editor()),
+            Ok(true)
+        );
+        assert_eq!(
+            store.projection().products.editor,
+            ProductEditorState::Closed
+        );
+        assert_eq!(
+            store.apply(AppStateCommand::replace_product_editor_draft(
+                ProductEditorDraft::default(),
+            )),
+            Ok(false)
+        );
     }
 
     #[test]
