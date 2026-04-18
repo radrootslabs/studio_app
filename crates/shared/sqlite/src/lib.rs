@@ -5,13 +5,15 @@ mod activity;
 mod error;
 mod farm_setup;
 mod migrations;
+mod products;
 mod today;
 
 use std::{fs, path::PathBuf, time::Duration};
 
 use radroots_studio_app_models::{
     AccountSurfaceActivationProjection, AppActivityContext, AppActivityEvent, AppActivityKind,
-    FarmId, FarmSetupProjection, FarmSummary, TodayAgendaProjection,
+    FarmId, FarmSetupProjection, FarmSummary, ProductEditorDraft, ProductId, ProductPublishBlocker,
+    ProductsFilter, ProductsListProjection, ProductsSort, TodayAgendaProjection,
 };
 use rusqlite::Connection;
 
@@ -22,6 +24,7 @@ pub use activity::{
 pub use error::AppSqliteError;
 pub use farm_setup::AppFarmSetupRepository;
 pub use migrations::latest_schema_version;
+pub use products::AppProductsRepository;
 pub use today::{
     AppTodayAgendaRepository, TODAY_AGENDA_LIST_LIMIT, TODAY_AGENDA_LOW_STOCK_THRESHOLD,
 };
@@ -72,6 +75,10 @@ impl AppSqliteStore {
 
     pub fn farm_setup_repository(&self) -> AppFarmSetupRepository<'_> {
         AppFarmSetupRepository::new(&self.connection)
+    }
+
+    pub fn products_repository(&self) -> AppProductsRepository<'_> {
+        AppProductsRepository::new(&self.connection)
     }
 
     pub fn load_today_agenda(
@@ -139,6 +146,55 @@ impl AppSqliteStore {
 
     pub fn clear_farm_setup(&self, account_id: &str) -> Result<(), AppSqliteError> {
         self.farm_setup_repository().clear_farm_setup(account_id)
+    }
+
+    pub fn load_products(
+        &self,
+        farm_id: FarmId,
+        search_query: &str,
+        filter: ProductsFilter,
+        sort: ProductsSort,
+    ) -> Result<ProductsListProjection, AppSqliteError> {
+        self.products_repository()
+            .load_products(farm_id, search_query, filter, sort)
+    }
+
+    pub fn load_product_editor_draft(
+        &self,
+        product_id: ProductId,
+    ) -> Result<Option<ProductEditorDraft>, AppSqliteError> {
+        self.products_repository()
+            .load_product_editor_draft(product_id)
+    }
+
+    pub fn create_product_draft(&self, farm_id: FarmId) -> Result<ProductId, AppSqliteError> {
+        self.products_repository().create_product_draft(farm_id)
+    }
+
+    pub fn save_product_editor_draft(
+        &self,
+        product_id: ProductId,
+        draft: &ProductEditorDraft,
+    ) -> Result<bool, AppSqliteError> {
+        self.products_repository()
+            .save_product_editor_draft(product_id, draft)
+    }
+
+    pub fn update_product_stock(
+        &self,
+        product_id: ProductId,
+        stock_quantity: u32,
+    ) -> Result<bool, AppSqliteError> {
+        self.products_repository()
+            .update_product_stock(product_id, stock_quantity)
+    }
+
+    pub fn evaluate_product_publish_blockers(
+        &self,
+        product_id: ProductId,
+    ) -> Result<Option<Vec<ProductPublishBlocker>>, AppSqliteError> {
+        self.products_repository()
+            .evaluate_product_publish_blockers(product_id)
     }
 }
 

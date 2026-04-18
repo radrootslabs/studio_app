@@ -203,7 +203,7 @@ impl<'a> AppTodayAgendaRepository<'a> {
         let mut statement = self
             .connection
             .prepare(
-                "select id, title, stock_count \
+                "select id, title, coalesce(stock_count, 0) \
                  from products \
                  where farm_id = ?1 and status = 'published' and stock_count <= ?2 \
                  order by stock_count asc, updated_at desc, id desc \
@@ -256,7 +256,7 @@ impl<'a> AppTodayAgendaRepository<'a> {
         let mut statement = self
             .connection
             .prepare(
-                "select id, title, stock_count \
+                "select id, title, coalesce(stock_count, 0) \
                  from products \
                  where farm_id = ?1 and status = 'draft' \
                  order by updated_at desc, id desc \
