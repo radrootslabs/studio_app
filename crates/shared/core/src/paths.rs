@@ -8,6 +8,14 @@ use std::{
 pub const APP_RUNTIME_NAMESPACE_KIND: &str = "apps";
 pub const APP_RUNTIME_NAMESPACE_VALUE: &str = "app";
 pub const APP_RUNTIME_NAMESPACE: &str = "apps/app";
+pub const SHARED_ACCOUNTS_NAMESPACE_KIND: &str = "shared";
+pub const SHARED_ACCOUNTS_NAMESPACE_VALUE: &str = "accounts";
+pub const SHARED_ACCOUNTS_NAMESPACE: &str = "shared/accounts";
+pub const SHARED_ACCOUNTS_STORE_FILE_NAME: &str = "store.json";
+pub const SHARED_IDENTITIES_NAMESPACE_KIND: &str = "shared";
+pub const SHARED_IDENTITIES_NAMESPACE_VALUE: &str = "identities";
+pub const SHARED_IDENTITIES_NAMESPACE: &str = "shared/identities";
+pub const SHARED_IDENTITY_FILE_NAME: &str = "default.json";
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum AppRuntimePlatform {
@@ -64,49 +72,35 @@ pub struct AppRuntimeRoots {
     pub secrets: PathBuf,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct AppSharedAccountsPaths {
+    pub data_root: PathBuf,
+    pub secrets_root: PathBuf,
+    pub store_path: PathBuf,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct AppSharedIdentityPaths {
+    pub default_identity_path: PathBuf,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct AppDesktopRuntimePaths {
+    pub app: AppRuntimeRoots,
+    pub shared_accounts: AppSharedAccountsPaths,
+    pub shared_identity: AppSharedIdentityPaths,
+}
+
 impl AppRuntimeRoots {
     pub fn current_desktop() -> Result<Self, AppRuntimePathsError> {
-        Self::for_desktop(
-            AppRuntimePlatform::current(),
-            AppRuntimeHostEnvironment::from_current_process(),
-        )
+        AppDesktopRuntimePaths::current_desktop().map(|paths| paths.app)
     }
 
     pub fn for_desktop(
         platform: AppRuntimePlatform,
         host_environment: AppRuntimeHostEnvironment,
     ) -> Result<Self, AppRuntimePathsError> {
-        let roots = match platform {
-            AppRuntimePlatform::Linux | AppRuntimePlatform::Macos => {
-                let home_dir = host_environment
-                    .home_dir
-                    .ok_or(AppRuntimePathsError::MissingHomeDir { platform })?;
-                Self::from_base_root(home_dir.join(".radroots"))
-            }
-            AppRuntimePlatform::Windows => {
-                let appdata_dir = host_environment
-                    .appdata_dir
-                    .ok_or(AppRuntimePathsError::MissingWindowsUserDirs)?;
-                let localappdata_dir = host_environment
-                    .localappdata_dir
-                    .ok_or(AppRuntimePathsError::MissingWindowsUserDirs)?;
-                let config_root = appdata_dir.join("Radroots");
-                let local_root = localappdata_dir.join("Radroots");
-                Self {
-                    config: config_root.join("config"),
-                    data: local_root.join("data"),
-                    cache: local_root.join("cache"),
-                    logs: local_root.join("logs"),
-                    run: local_root.join("run"),
-                    secrets: config_root.join("secrets"),
-                }
-            }
-            AppRuntimePlatform::Other(_) => {
-                return Err(AppRuntimePathsError::UnsupportedPlatform { platform });
-            }
-        };
-
-        Ok(roots.namespaced_app())
+        Ok(resolve_desktop_base_roots(platform, host_environment)?.namespaced_app())
     }
 
     pub fn from_base_root(base_root: impl AsRef<Path>) -> Self {
@@ -122,7 +116,15 @@ impl AppRuntimeRoots {
     }
 
     pub fn namespaced_app(&self) -> Self {
-        let namespace = PathBuf::from(APP_RUNTIME_NAMESPACE_KIND).join(APP_RUNTIME_NAMESPACE_VALUE);
+        self.namespaced(APP_RUNTIME_NAMESPACE_KIND, APP_RUNTIME_NAMESPACE_VALUE)
+    }
+
+    fn namespaced_shared(&self, value: &str) -> Self {
+        self.namespaced(SHARED_ACCOUNTS_NAMESPACE_KIND, value)
+    }
+
+    fn namespaced(&self, kind: &str, value: &str) -> Self {
+        let namespace = PathBuf::from(kind).join(value);
         Self {
             config: self.config.join(&namespace),
             data: self.data.join(&namespace),
@@ -132,6 +134,73 @@ impl AppRuntimeRoots {
             secrets: self.secrets.join(namespace),
         }
     }
+}
+
+impl AppDesktopRuntimePaths {
+    pub fn current_desktop() -> Result<Self, AppRuntimePathsError> {
+        Self::for_desktop(
+            AppRuntimePlatform::current(),
+            AppRuntimeHostEnvironment::from_current_process(),
+        )
+    }
+
+    pub fn for_desktop(
+        platform: AppRuntimePlatform,
+        host_environment: AppRuntimeHostEnvironment,
+    ) -> Result<Self, AppRuntimePathsError> {
+        let base_roots = resolve_desktop_base_roots(platform, host_environment)?;
+        let shared_accounts = base_roots.namespaced_shared(SHARED_ACCOUNTS_NAMESPACE_VALUE);
+        let shared_identity = base_roots.namespaced_shared(SHARED_IDENTITIES_NAMESPACE_VALUE);
+
+        Ok(Self {
+            app: base_roots.namespaced_app(),
+            shared_accounts: AppSharedAccountsPaths {
+                data_root: shared_accounts.data.clone(),
+                secrets_root: shared_accounts.secrets.clone(),
+                store_path: shared_accounts.data.join(SHARED_ACCOUNTS_STORE_FILE_NAME),
+            },
+            shared_identity: AppSharedIdentityPaths {
+                default_identity_path: shared_identity.secrets.join(SHARED_IDENTITY_FILE_NAME),
+            },
+        })
+    }
+}
+
+fn resolve_desktop_base_roots(
+    platform: AppRuntimePlatform,
+    host_environment: AppRuntimeHostEnvironment,
+) -> Result<AppRuntimeRoots, AppRuntimePathsError> {
+    let roots = match platform {
+        AppRuntimePlatform::Linux | AppRuntimePlatform::Macos => {
+            let home_dir = host_environment
+                .home_dir
+                .ok_or(AppRuntimePathsError::MissingHomeDir { platform })?;
+            AppRuntimeRoots::from_base_root(home_dir.join(".radroots"))
+        }
+        AppRuntimePlatform::Windows => {
+            let appdata_dir = host_environment
+                .appdata_dir
+                .ok_or(AppRuntimePathsError::MissingWindowsUserDirs)?;
+            let localappdata_dir = host_environment
+                .localappdata_dir
+                .ok_or(AppRuntimePathsError::MissingWindowsUserDirs)?;
+            let config_root = appdata_dir.join("Radroots");
+            let local_root = localappdata_dir.join("Radroots");
+            AppRuntimeRoots {
+                config: config_root.join("config"),
+                data: local_root.join("data"),
+                cache: local_root.join("cache"),
+                logs: local_root.join("logs"),
+                run: local_root.join("run"),
+                secrets: config_root.join("secrets"),
+            }
+        }
+        AppRuntimePlatform::Other(_) => {
+            return Err(AppRuntimePathsError::UnsupportedPlatform { platform });
+        }
+    };
+
+    Ok(roots)
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -169,13 +238,14 @@ mod tests {
     use std::path::PathBuf;
 
     use super::{
-        APP_RUNTIME_NAMESPACE, AppRuntimeHostEnvironment, AppRuntimePathsError, AppRuntimePlatform,
-        AppRuntimeRoots,
+        APP_RUNTIME_NAMESPACE, AppDesktopRuntimePaths, AppRuntimeHostEnvironment,
+        AppRuntimePathsError, AppRuntimePlatform, AppRuntimeRoots, SHARED_ACCOUNTS_NAMESPACE,
+        SHARED_ACCOUNTS_STORE_FILE_NAME, SHARED_IDENTITIES_NAMESPACE, SHARED_IDENTITY_FILE_NAME,
     };
 
     #[test]
     fn desktop_runtime_roots_use_canonical_macos_namespace() {
-        let roots = AppRuntimeRoots::for_desktop(
+        let paths = AppDesktopRuntimePaths::for_desktop(
             AppRuntimePlatform::Macos,
             AppRuntimeHostEnvironment {
                 home_dir: Some(PathBuf::from("/Users/treesap")),
@@ -185,12 +255,32 @@ mod tests {
         .expect("macos roots should resolve");
 
         assert_eq!(
-            roots.data,
+            paths.app.data,
             PathBuf::from("/Users/treesap/.radroots/data").join(APP_RUNTIME_NAMESPACE)
         );
         assert_eq!(
-            roots.logs,
+            paths.app.logs,
             PathBuf::from("/Users/treesap/.radroots/logs").join(APP_RUNTIME_NAMESPACE)
+        );
+        assert_eq!(
+            paths.shared_accounts.data_root,
+            PathBuf::from("/Users/treesap/.radroots/data").join(SHARED_ACCOUNTS_NAMESPACE)
+        );
+        assert_eq!(
+            paths.shared_accounts.secrets_root,
+            PathBuf::from("/Users/treesap/.radroots/secrets").join(SHARED_ACCOUNTS_NAMESPACE)
+        );
+        assert_eq!(
+            paths.shared_accounts.store_path,
+            PathBuf::from("/Users/treesap/.radroots/data")
+                .join(SHARED_ACCOUNTS_NAMESPACE)
+                .join(SHARED_ACCOUNTS_STORE_FILE_NAME)
+        );
+        assert_eq!(
+            paths.shared_identity.default_identity_path,
+            PathBuf::from("/Users/treesap/.radroots/secrets")
+                .join(SHARED_IDENTITIES_NAMESPACE)
+                .join(SHARED_IDENTITY_FILE_NAME)
         );
     }
 

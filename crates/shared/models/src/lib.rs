@@ -298,6 +298,37 @@ pub struct AccountSummary {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct AccountSurfaceActivationProjection {
+    pub account_id: String,
+    pub selected_surface: SelectedSurfaceProjection,
+    pub farmer_activation: FarmerActivationProjection,
+}
+
+impl AccountSurfaceActivationProjection {
+    pub fn new(
+        account_id: impl Into<String>,
+        selected_surface: SelectedSurfaceProjection,
+        farmer_activation: FarmerActivationProjection,
+    ) -> Self {
+        let active_surface = if farmer_activation.is_active() {
+            selected_surface.active_surface
+        } else {
+            ActiveSurface::Personal
+        };
+
+        Self {
+            account_id: account_id.into(),
+            selected_surface: SelectedSurfaceProjection::new(active_surface),
+            farmer_activation,
+        }
+    }
+
+    pub const fn active_surface(&self) -> ActiveSurface {
+        self.selected_surface.active_surface
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct SelectedAccountProjection {
     pub account: AccountSummary,
     pub selected_surface: SelectedSurfaceProjection,
@@ -323,8 +354,29 @@ impl SelectedAccountProjection {
         }
     }
 
+    pub fn from_surface_activation(
+        account: AccountSummary,
+        activation: AccountSurfaceActivationProjection,
+    ) -> Self {
+        Self::new(
+            account,
+            activation.selected_surface,
+            activation.farmer_activation,
+        )
+    }
+
     pub const fn active_surface(&self) -> ActiveSurface {
         self.selected_surface.active_surface
+    }
+}
+
+impl From<&SelectedAccountProjection> for AccountSurfaceActivationProjection {
+    fn from(value: &SelectedAccountProjection) -> Self {
+        Self::new(
+            value.account.account_id.clone(),
+            value.selected_surface,
+            value.farmer_activation.clone(),
+        )
     }
 }
 
@@ -587,12 +639,12 @@ impl TodayAgendaProjection {
 #[cfg(test)]
 mod tests {
     use super::{
-        AccountCustody, AccountSummary, ActiveSurface, ActivityEventId, AppActivityContext,
-        AppActivityEvent, AppActivityKind, AppIdentityProjection, AppStartupGate, FarmId,
-        FarmerActivationProjection, FarmerSection, IdentityBlockedReason, OrderListRow,
-        ProductListRow, SelectedAccountProjection, SelectedSurfaceProjection, SettingsPreference,
-        SettingsSection, ShellSection, TodayAgendaProjection, TodaySetupTask, TodaySetupTaskKind,
-        TodaySummary,
+        AccountCustody, AccountSummary, AccountSurfaceActivationProjection, ActiveSurface,
+        ActivityEventId, AppActivityContext, AppActivityEvent, AppActivityKind,
+        AppIdentityProjection, AppStartupGate, FarmId, FarmerActivationProjection, FarmerSection,
+        IdentityBlockedReason, OrderListRow, ProductListRow, SelectedAccountProjection,
+        SelectedSurfaceProjection, SettingsPreference, SettingsSection, ShellSection,
+        TodayAgendaProjection, TodaySetupTask, TodaySetupTaskKind, TodaySummary,
     };
     use std::{collections::BTreeSet, str::FromStr};
     use uuid::Uuid;
@@ -672,6 +724,40 @@ mod tests {
 
         assert_eq!(projection.active_surface(), ActiveSurface::Personal);
         assert!(!projection.farmer_activation.is_active());
+    }
+
+    #[test]
+    fn account_surface_activation_projection_normalizes_to_personal_without_farm_binding() {
+        let projection = AccountSurfaceActivationProjection::new(
+            "acct_04",
+            SelectedSurfaceProjection::new(ActiveSurface::Farmer),
+            FarmerActivationProjection::inactive(),
+        );
+
+        assert_eq!(projection.account_id, "acct_04");
+        assert_eq!(projection.active_surface(), ActiveSurface::Personal);
+        assert!(!projection.farmer_activation.is_active());
+    }
+
+    #[test]
+    fn selected_account_projection_round_trips_through_surface_activation_state() {
+        let selected_account = SelectedAccountProjection::new(
+            AccountSummary {
+                account_id: "acct_roundtrip".to_owned(),
+                npub: "npub1roundtrip".to_owned(),
+                label: Some("Roundtrip".to_owned()),
+                custody: AccountCustody::LocalManaged,
+            },
+            SelectedSurfaceProjection::new(ActiveSurface::Farmer),
+            FarmerActivationProjection::active(FarmId::new()),
+        );
+        let activation = AccountSurfaceActivationProjection::from(&selected_account);
+        let restored = SelectedAccountProjection::from_surface_activation(
+            selected_account.account.clone(),
+            activation,
+        );
+
+        assert_eq!(restored, selected_account);
     }
 
     #[test]

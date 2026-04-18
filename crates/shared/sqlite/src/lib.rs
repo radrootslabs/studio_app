@@ -1,5 +1,6 @@
 #![forbid(unsafe_code)]
 
+mod activation;
 mod activity;
 mod error;
 mod migrations;
@@ -8,10 +9,12 @@ mod today;
 use std::{fs, path::PathBuf, time::Duration};
 
 use radroots_studio_app_models::{
-    AppActivityContext, AppActivityEvent, AppActivityKind, FarmId, TodayAgendaProjection,
+    AccountSurfaceActivationProjection, AppActivityContext, AppActivityEvent, AppActivityKind,
+    FarmId, TodayAgendaProjection,
 };
 use rusqlite::Connection;
 
+pub use activation::AppActivationRepository;
 pub use activity::{
     APP_ACTIVITY_CONTEXT_LIMIT, APP_ACTIVITY_RETENTION_LIMIT, AppActivityRepository,
 };
@@ -61,6 +64,10 @@ impl AppSqliteStore {
         AppActivityRepository::new(&self.connection)
     }
 
+    pub fn activation_repository(&self) -> AppActivationRepository<'_> {
+        AppActivationRepository::new(&self.connection)
+    }
+
     pub fn load_today_agenda(
         &self,
         farm_id: Option<FarmId>,
@@ -84,6 +91,27 @@ impl AppSqliteStore {
         limit: usize,
     ) -> Result<AppActivityContext, AppSqliteError> {
         self.activity_repository().load_context(limit)
+    }
+
+    pub fn load_surface_activation(
+        &self,
+        account_id: &str,
+    ) -> Result<Option<AccountSurfaceActivationProjection>, AppSqliteError> {
+        self.activation_repository()
+            .load_surface_activation(account_id)
+    }
+
+    pub fn save_surface_activation(
+        &self,
+        projection: &AccountSurfaceActivationProjection,
+    ) -> Result<(), AppSqliteError> {
+        self.activation_repository()
+            .save_surface_activation(projection)
+    }
+
+    pub fn clear_surface_activation(&self, account_id: &str) -> Result<(), AppSqliteError> {
+        self.activation_repository()
+            .clear_surface_activation(account_id)
     }
 }
 
@@ -214,6 +242,7 @@ mod tests {
         assert!(table_exists(connection, "local_conflicts"));
         assert!(table_exists(connection, "sync_checkpoints"));
         assert!(table_exists(connection, "activity_events"));
+        assert!(table_exists(connection, "account_surface_activations"));
         assert_eq!(row_count(connection, "sync_checkpoints"), 1);
 
         drop(store);

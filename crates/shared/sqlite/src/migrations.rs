@@ -12,6 +12,10 @@ const MIGRATIONS: &[Migration] = &[
         version: 2,
         sql: include_str!("../migrations/0002_activity_journal.sql"),
     },
+    Migration {
+        version: 3,
+        sql: include_str!("../migrations/0003_account_surface_activation.sql"),
+    },
 ];
 
 pub fn latest_schema_version() -> u32 {

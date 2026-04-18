@@ -1,7 +1,7 @@
 use std::fmt;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
-use radroots_studio_app_core::{AppRuntimePathsError, AppRuntimeRoots};
+use radroots_studio_app_core::{AppDesktopRuntimePaths, AppRuntimePathsError};
 use radroots_studio_app_models::{
     AppActivityContext, AppActivityKind, AppStartupGate, SettingsAccountProjection,
     SettingsPreference, SettingsSection, TodayAgendaProjection,
@@ -170,8 +170,8 @@ impl fmt::Debug for DesktopAppRuntimeState {
 
 impl DesktopAppRuntimeState {
     fn try_bootstrap() -> Result<Self, DesktopAppRuntimeBootstrapError> {
-        let roots = AppRuntimeRoots::current_desktop()?;
-        let database_path = roots.data.join(APP_DATABASE_FILE_NAME);
+        let paths = AppDesktopRuntimePaths::current_desktop()?;
+        let database_path = paths.app.data.join(APP_DATABASE_FILE_NAME);
         let sqlite_store = AppSqliteStore::open(DatabaseTarget::Path(database_path.clone()))?;
         let mut state_store = AppStateStore::load(InMemoryAppStateRepository::default())?;
         let today_projection = sqlite_store.load_today_agenda(None)?;
@@ -215,7 +215,10 @@ enum DesktopAppRuntimeBootstrapError {
 mod tests {
     use std::path::PathBuf;
 
-    use radroots_studio_app_core::{AppRuntimeHostEnvironment, AppRuntimePlatform, AppRuntimeRoots};
+    use radroots_studio_app_core::{
+        AppDesktopRuntimePaths, AppRuntimeHostEnvironment, AppRuntimePlatform,
+        SHARED_ACCOUNTS_STORE_FILE_NAME, SHARED_IDENTITY_FILE_NAME,
+    };
     use radroots_studio_app_models::{
         AppActivityKind, AppStartupGate, FarmReadiness, FarmSummary, SettingsPreference,
         SettingsSection, ShellSection, TodayAgendaProjection, TodaySetupTask, TodaySetupTaskKind,
@@ -229,8 +232,8 @@ mod tests {
     use super::{APP_DATABASE_FILE_NAME, DesktopAppRuntime, DesktopAppRuntimeState};
 
     #[test]
-    fn desktop_namespace_uses_canonical_app_data_root() {
-        let roots = AppRuntimeRoots::for_desktop(
+    fn desktop_namespace_uses_canonical_app_and_shared_runtime_roots() {
+        let paths = AppDesktopRuntimePaths::for_desktop(
             AppRuntimePlatform::Macos,
             AppRuntimeHostEnvironment {
                 home_dir: Some(PathBuf::from("/Users/treesap")),
@@ -240,16 +243,34 @@ mod tests {
         .expect("interactive user roots should resolve");
 
         assert_eq!(
-            roots.data,
+            paths.app.data,
             PathBuf::from("/Users/treesap/.radroots/data/apps/app")
         );
         assert_eq!(
-            roots.logs,
+            paths.app.logs,
             PathBuf::from("/Users/treesap/.radroots/logs/apps/app")
         );
         assert_eq!(
-            roots.data.join(APP_DATABASE_FILE_NAME),
+            paths.app.data.join(APP_DATABASE_FILE_NAME),
             PathBuf::from("/Users/treesap/.radroots/data/apps/app/app.sqlite3")
+        );
+        assert_eq!(
+            paths.shared_accounts.data_root,
+            PathBuf::from("/Users/treesap/.radroots/data/shared/accounts")
+        );
+        assert_eq!(
+            paths.shared_accounts.secrets_root,
+            PathBuf::from("/Users/treesap/.radroots/secrets/shared/accounts")
+        );
+        assert_eq!(
+            paths.shared_accounts.store_path,
+            PathBuf::from("/Users/treesap/.radroots/data/shared/accounts")
+                .join(SHARED_ACCOUNTS_STORE_FILE_NAME)
+        );
+        assert_eq!(
+            paths.shared_identity.default_identity_path,
+            PathBuf::from("/Users/treesap/.radroots/secrets/shared/identities")
+                .join(SHARED_IDENTITY_FILE_NAME)
         );
     }
 
