@@ -289,7 +289,7 @@ mod tests {
     }
 
     #[test]
-    fn blocked_and_setup_runtime_target_the_settings_account_window() {
+    fn blocked_and_setup_runtime_target_the_home_window() {
         let blocked = DesktopAppRuntimeSummary {
             shell_projection: AppShellProjection::default(),
             settings_account_projection: SettingsAccountProjection::default(),
@@ -305,14 +305,8 @@ mod tests {
             startup_issue: None,
         };
 
-        assert_eq!(
-            primary_window_target(&blocked),
-            PrimaryWindowTarget::SettingsAccount
-        );
-        assert_eq!(
-            primary_window_target(&setup),
-            PrimaryWindowTarget::SettingsAccount
-        );
+        assert_eq!(primary_window_target(&blocked), PrimaryWindowTarget::Home);
+        assert_eq!(primary_window_target(&setup), PrimaryWindowTarget::Home);
     }
 
     #[test]
@@ -337,7 +331,7 @@ mod tests {
     }
 
     #[test]
-    fn degraded_runtime_targets_the_settings_account_window() {
+    fn degraded_runtime_targets_the_home_window() {
         let degraded = DesktopAppRuntimeSummary {
             shell_projection: AppShellProjection::default(),
             settings_account_projection: SettingsAccountProjection::default(),
@@ -346,10 +340,7 @@ mod tests {
             startup_issue: Some("runtime unavailable".to_owned()),
         };
 
-        assert_eq!(
-            primary_window_target(&degraded),
-            PrimaryWindowTarget::SettingsAccount
-        );
+        assert_eq!(primary_window_target(&degraded), PrimaryWindowTarget::Home);
     }
 
     #[test]

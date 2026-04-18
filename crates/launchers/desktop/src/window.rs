@@ -53,17 +53,8 @@ pub enum HomeStage {
     FarmerWorkspace,
 }
 
-pub fn primary_window_target(summary: &DesktopAppRuntimeSummary) -> PrimaryWindowTarget {
-    if summary.startup_issue.is_some()
-        || matches!(
-            summary.startup_gate,
-            AppStartupGate::Blocked | AppStartupGate::SetupRequired
-        )
-    {
-        PrimaryWindowTarget::SettingsAccount
-    } else {
-        PrimaryWindowTarget::Home
-    }
+pub fn primary_window_target(_: &DesktopAppRuntimeSummary) -> PrimaryWindowTarget {
+    PrimaryWindowTarget::Home
 }
 
 pub fn home_stage(summary: &DesktopAppRuntimeSummary) -> HomeStage {
@@ -1083,74 +1074,14 @@ struct HomeStatusPresentation {
 }
 
 fn farmer_home_shell(runtime: &DesktopAppRuntimeSummary) -> impl IntoElement {
-    let home_status = home_status_presentation(runtime);
-
-    app_window_shell(
-        APP_UI_THEME.surfaces.window_background,
+    home_shell_frame(
+        runtime,
         div()
+            .id("home-today-scroll")
             .size_full()
-            .overflow_hidden()
-            .flex()
-            .child(
-                div()
-                    .h_full()
-                    .w(px(APP_UI_THEME.layout.home_sidebar_width_px))
-                    .bg(rgb(APP_UI_THEME.surfaces.card_background))
-                    .p(px(APP_UI_THEME.layout.home_window_padding_px))
-                    .flex()
-                    .flex_col()
-                    .justify_between()
-                    .child(
-                        div()
-                            .flex()
-                            .flex_col()
-                            .gap(px(APP_UI_THEME.layout.home_stack_gap_px))
-                            .child(
-                                div()
-                                    .text_size(px(APP_UI_THEME.typography.body_text_px * 2.0))
-                                    .font_weight(gpui::FontWeight::BOLD)
-                                    .text_color(rgb(APP_UI_THEME.text.primary))
-                                    .child(app_shared_text(AppTextKey::HomeTodayTitle)),
-                            )
-                            .child(home_status_row(&home_status)),
-                    )
-                    .child(
-                        div().child(
-                            div()
-                                .text_size(px(APP_UI_THEME.typography.body_text_px))
-                                .line_height(relative(1.2))
-                                .text_color(rgb(APP_UI_THEME.text.secondary))
-                                .when_some(runtime.today_projection.farm.as_ref(), |this, farm| {
-                                    this.child(farm.display_name.clone())
-                                }),
-                        ),
-                    ),
-            )
-            .child(
-                div()
-                    .h_full()
-                    .w(px(APP_UI_THEME.layout.divider_thickness_px))
-                    .bg(rgb(APP_UI_THEME.surfaces.divider)),
-            )
-            .child(
-                div()
-                    .flex_1()
-                    .h_full()
-                    .bg(rgb(APP_UI_THEME.surfaces.window_background))
-                    .overflow_hidden()
-                    .child(
-                        div()
-                            .size_full()
-                            .p(px(APP_UI_THEME.layout.home_window_padding_px))
-                            .child(
-                                div()
-                                    .id("home-today-scroll")
-                                    .size_full()
-                                    .overflow_y_scroll()
-                                    .child(home_view_content(runtime)),
-                            ),
-                    ),
-            ),
+            .overflow_y_scroll()
+            .child(home_view_content(runtime))
+            .into_any_element(),
     )
 }
 
@@ -1182,19 +1113,93 @@ fn holding_home_shell(runtime: &DesktopAppRuntimeSummary) -> impl IntoElement {
         );
     }
 
+    home_shell_frame(
+        runtime,
+        div()
+            .size_full()
+            .child(app_center_stage(
+                div()
+                    .w_full()
+                    .max_w(px(APP_UI_THEME.layout.home_card_max_width_px))
+                    .flex()
+                    .flex_col()
+                    .gap(px(APP_UI_THEME.layout.home_stack_gap_px))
+                    .child(home_status_row(&home_status))
+                    .children(sections),
+            ))
+            .into_any_element(),
+    )
+}
+
+fn home_shell_frame(
+    runtime: &DesktopAppRuntimeSummary,
+    main_content: AnyElement,
+) -> impl IntoElement {
     app_window_shell(
         APP_UI_THEME.surfaces.window_background,
-        app_center_stage(
+        div()
+            .size_full()
+            .overflow_hidden()
+            .flex()
+            .child(home_sidebar(runtime))
+            .child(
+                div()
+                    .h_full()
+                    .w(px(APP_UI_THEME.layout.divider_thickness_px))
+                    .bg(rgb(APP_UI_THEME.surfaces.divider)),
+            )
+            .child(
+                div()
+                    .flex_1()
+                    .h_full()
+                    .bg(rgb(APP_UI_THEME.surfaces.window_background))
+                    .overflow_hidden()
+                    .child(
+                        div()
+                            .size_full()
+                            .p(px(APP_UI_THEME.layout.home_window_padding_px))
+                            .child(main_content),
+                    ),
+            ),
+    )
+}
+
+fn home_sidebar(runtime: &DesktopAppRuntimeSummary) -> impl IntoElement {
+    let home_status = home_status_presentation(runtime);
+
+    div()
+        .h_full()
+        .w(px(APP_UI_THEME.layout.home_sidebar_width_px))
+        .bg(rgb(APP_UI_THEME.surfaces.card_background))
+        .p(px(APP_UI_THEME.layout.home_window_padding_px))
+        .flex()
+        .flex_col()
+        .justify_between()
+        .child(
             div()
-                .w_full()
-                .max_w(px(APP_UI_THEME.layout.home_card_max_width_px))
                 .flex()
                 .flex_col()
                 .gap(px(APP_UI_THEME.layout.home_stack_gap_px))
-                .child(home_status_row(&home_status))
-                .children(sections),
-        ),
-    )
+                .child(
+                    div()
+                        .text_size(px(APP_UI_THEME.typography.body_text_px * 2.0))
+                        .font_weight(gpui::FontWeight::BOLD)
+                        .text_color(rgb(APP_UI_THEME.text.primary))
+                        .child(app_shared_text(AppTextKey::HomeTodayTitle)),
+                )
+                .child(home_status_row(&home_status)),
+        )
+        .child(
+            div().child(
+                div()
+                    .text_size(px(APP_UI_THEME.typography.body_text_px))
+                    .line_height(relative(1.2))
+                    .text_color(rgb(APP_UI_THEME.text.secondary))
+                    .when_some(runtime.today_projection.farm.as_ref(), |this, farm| {
+                        this.child(farm.display_name.clone())
+                    }),
+            ),
+        )
 }
 
 fn home_view_content(runtime: &DesktopAppRuntimeSummary) -> impl IntoElement {
