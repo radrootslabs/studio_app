@@ -7,6 +7,7 @@ const ALLOWED_WINDOW_LITERALS: &[&str] = &[
     "account-open-workspace",
     "account-log-out",
     "account-more",
+    "home-create-account",
     "home-today-scroll",
     "settings-allow-relay-connections",
     "settings-launch-at-login",

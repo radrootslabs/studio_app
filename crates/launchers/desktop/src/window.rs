@@ -145,13 +145,31 @@ impl HomeView {
     pub fn new(runtime: DesktopAppRuntime) -> Self {
         Self { runtime }
     }
+
+    fn generate_local_account(&mut self, cx: &mut Context<Self>) {
+        if self.runtime.generate_local_account(None).unwrap_or(false) {
+            cx.refresh_windows();
+            cx.notify();
+        }
+    }
 }
 
 impl Render for HomeView {
-    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let runtime_summary = self.runtime.summary();
         match home_stage(&runtime_summary) {
             HomeStage::FarmerWorkspace => farmer_home_shell(&runtime_summary).into_any_element(),
+            HomeStage::Setup
+                if runtime_summary.startup_issue.is_none()
+                    && runtime_summary.startup_gate == AppStartupGate::SetupRequired =>
+            {
+                setup_home_shell(
+                    &runtime_summary,
+                    cx.listener(|this, _, _, cx| this.generate_local_account(cx)),
+                    cx,
+                )
+                .into_any_element()
+            }
             HomeStage::Setup | HomeStage::PersonalHolding => {
                 holding_home_shell(&runtime_summary).into_any_element()
             }
@@ -1127,6 +1145,25 @@ fn holding_home_shell(runtime: &DesktopAppRuntimeSummary) -> impl IntoElement {
                     .child(home_status_row(&home_status))
                     .children(sections),
             ))
+            .into_any_element(),
+    )
+}
+
+fn setup_home_shell(
+    runtime: &DesktopAppRuntimeSummary,
+    on_create_account: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+    cx: &App,
+) -> impl IntoElement {
+    home_shell_frame(
+        runtime,
+        div()
+            .size_full()
+            .child(app_center_stage(action_button(
+                "home-create-account",
+                app_shared_text(AppTextKey::HomeSetupCreateAccountAction),
+                on_create_account,
+                cx,
+            )))
             .into_any_element(),
     )
 }

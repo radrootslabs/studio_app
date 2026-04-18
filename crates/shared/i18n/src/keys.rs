@@ -38,6 +38,7 @@ define_app_text_keys! {
     HomeTodayStockCountLabel => "home.today.stock_count.label",
     HomeTodaySetupAddFulfillmentWindow => "home.today.setup.add_fulfillment_window",
     HomeTodaySetupPublishProduct => "home.today.setup.publish_product",
+    HomeSetupCreateAccountAction => "home.setup.create_account",
     HomeTodayEmptySetupTitle => "home.today.empty.setup.title",
     HomeTodayEmptySetupBody => "home.today.empty.setup.body",
     HomeTodayEmptyNoFarmTitle => "home.today.empty.no_farm.title",

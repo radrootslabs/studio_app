@@ -17,6 +17,7 @@
   "home.today.stock_count.label": "Stock",
   "home.today.setup.add_fulfillment_window": "Add a fulfillment window",
   "home.today.setup.publish_product": "Publish a product",
+  "home.setup.create_account": "Create account",
   "home.today.empty.setup.title": "Account setup required",
   "home.today.empty.setup.body": "Add a local account to start using Radroots on this device.",
   "home.today.empty.no_farm.title": "No farm yet",
