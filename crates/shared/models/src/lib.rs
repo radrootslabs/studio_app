@@ -202,6 +202,8 @@ macro_rules! typed_id {
 }
 
 typed_id!(FarmId);
+typed_id!(PickupLocationId);
+typed_id!(BlackoutPeriodId);
 typed_id!(ProductId);
 typed_id!(OrderId);
 typed_id!(FulfillmentWindowId);
@@ -645,6 +647,165 @@ impl From<&AppIdentityProjection> for SettingsAccountProjection {
 pub enum FarmReadiness {
     Incomplete,
     Ready,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct FarmProfileRecord {
+    pub farm_id: FarmId,
+    pub display_name: String,
+    pub timezone: String,
+    pub currency_code: String,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct FarmOperatingRulesRecord {
+    pub farm_id: FarmId,
+    pub promise_lead_hours: u16,
+    pub substitution_policy: String,
+    pub missed_pickup_policy: String,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct PickupLocationRecord {
+    pub pickup_location_id: PickupLocationId,
+    pub farm_id: FarmId,
+    pub label: String,
+    pub address_line: String,
+    pub directions: Option<String>,
+    pub is_default: bool,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct FulfillmentWindowRecord {
+    pub fulfillment_window_id: FulfillmentWindowId,
+    pub farm_id: FarmId,
+    pub pickup_location_id: PickupLocationId,
+    pub label: String,
+    pub starts_at: String,
+    pub ends_at: String,
+    pub order_cutoff_at: String,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct BlackoutPeriodRecord {
+    pub blackout_period_id: BlackoutPeriodId,
+    pub farm_id: FarmId,
+    pub label: String,
+    pub starts_at: String,
+    pub ends_at: String,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum FarmReadinessBlocker {
+    MissingProfileBasics,
+    MissingPickupLocation,
+    MissingFulfillmentWindow,
+    MissingOperatingRules,
+}
+
+impl FarmReadinessBlocker {
+    pub const fn storage_key(self) -> &'static str {
+        match self {
+            Self::MissingProfileBasics => "missing_profile_basics",
+            Self::MissingPickupLocation => "missing_pickup_location",
+            Self::MissingFulfillmentWindow => "missing_fulfillment_window",
+            Self::MissingOperatingRules => "missing_operating_rules",
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum FarmTimingConflictKind {
+    FulfillmentWindowEndsBeforeStart,
+    FulfillmentWindowCutoffAfterStart,
+    BlackoutPeriodEndsBeforeStart,
+    BlackoutOverlapsFulfillmentWindow,
+}
+
+impl FarmTimingConflictKind {
+    pub const fn storage_key(self) -> &'static str {
+        match self {
+            Self::FulfillmentWindowEndsBeforeStart => "fulfillment_window_ends_before_start",
+            Self::FulfillmentWindowCutoffAfterStart => "fulfillment_window_cutoff_after_start",
+            Self::BlackoutPeriodEndsBeforeStart => "blackout_period_ends_before_start",
+            Self::BlackoutOverlapsFulfillmentWindow => "blackout_overlaps_fulfillment_window",
+        }
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct FarmTimingConflict {
+    pub kind: FarmTimingConflictKind,
+    pub fulfillment_window_id: Option<FulfillmentWindowId>,
+    pub blackout_period_id: Option<BlackoutPeriodId>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct FarmRulesReadiness {
+    pub blockers: Vec<FarmReadinessBlocker>,
+    pub timing_conflicts: Vec<FarmTimingConflict>,
+}
+
+impl FarmRulesReadiness {
+    pub fn ready() -> Self {
+        Self {
+            blockers: Vec::new(),
+            timing_conflicts: Vec::new(),
+        }
+    }
+
+    pub fn missing_v1_basics() -> Self {
+        Self {
+            blockers: vec![
+                FarmReadinessBlocker::MissingProfileBasics,
+                FarmReadinessBlocker::MissingPickupLocation,
+                FarmReadinessBlocker::MissingFulfillmentWindow,
+                FarmReadinessBlocker::MissingOperatingRules,
+            ],
+            timing_conflicts: Vec::new(),
+        }
+    }
+
+    pub fn is_ready(&self) -> bool {
+        self.blockers.is_empty() && self.timing_conflicts.is_empty()
+    }
+}
+
+impl Default for FarmRulesReadiness {
+    fn default() -> Self {
+        Self::ready()
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct FarmRulesProjection {
+    pub farm_profile: Option<FarmProfileRecord>,
+    pub pickup_locations: Vec<PickupLocationRecord>,
+    pub operating_rules: Option<FarmOperatingRulesRecord>,
+    pub fulfillment_windows: Vec<FulfillmentWindowRecord>,
+    pub blackout_periods: Vec<BlackoutPeriodRecord>,
+    pub readiness: FarmRulesReadiness,
+}
+
+impl Default for FarmRulesProjection {
+    fn default() -> Self {
+        Self {
+            farm_profile: None,
+            pickup_locations: Vec::new(),
+            operating_rules: None,
+            fulfillment_windows: Vec::new(),
+            blackout_periods: Vec::new(),
+            readiness: FarmRulesReadiness::missing_v1_basics(),
+        }
+    }
+}
+
+impl FarmRulesProjection {
+    pub fn is_ready(&self) -> bool {
+        self.readiness.is_ready()
+    }
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
@@ -1276,16 +1437,19 @@ mod tests {
     use super::{
         AccountCustody, AccountSummary, AccountSurfaceActivationProjection, ActiveSurface,
         ActivityEventId, AppActivityContext, AppActivityEvent, AppActivityKind,
-        AppIdentityProjection, AppStartupGate, FarmId, FarmOrderMethod, FarmSetupBlocker,
-        FarmSetupDraft, FarmSetupProjection, FarmSetupReadiness, FarmSetupSection,
+        AppIdentityProjection, AppStartupGate, BlackoutPeriodId, FarmId,
+        FarmOrderMethod, FarmReadinessBlocker, FarmRulesProjection, FarmRulesReadiness,
+        FarmSetupBlocker, FarmSetupDraft, FarmSetupProjection, FarmSetupReadiness,
+        FarmSetupSection, FarmTimingConflict, FarmTimingConflictKind,
         FarmerActivationProjection, FarmerSection, IdentityBlockedReason, IdentityReadiness,
         LoggedOutStartupPhase, LoggedOutStartupProjection, OrderListRow,
-        ParseStartupSignerSourceError, ProductAttentionState, ProductAvailabilityState,
-        ProductAvailabilitySummary, ProductEditorDraft, ProductListRow, ProductPricePresentation,
-        ProductPublishBlocker, ProductStatus, ProductStockState, ProductStockSummary,
-        ProductsFilter, ProductsListProjection, ProductsListRow, ProductsListSummary, ProductsSort,
-        SelectedAccountProjection, SelectedSurfaceProjection, SettingsPreference, SettingsSection,
-        ShellSection, StartupSignerEntryProjection, StartupSignerSource, StartupSignerSourceKind,
+        ParseStartupSignerSourceError, PickupLocationId, ProductAttentionState,
+        ProductAvailabilityState, ProductAvailabilitySummary, ProductEditorDraft, ProductListRow,
+        ProductPricePresentation, ProductPublishBlocker, ProductStatus, ProductStockState,
+        ProductStockSummary, ProductsFilter, ProductsListProjection, ProductsListRow,
+        ProductsListSummary, ProductsSort, SelectedAccountProjection,
+        SelectedSurfaceProjection, SettingsPreference, SettingsSection, ShellSection,
+        StartupSignerEntryProjection, StartupSignerSource, StartupSignerSourceKind,
         TodayAgendaProjection, TodaySetupTask, TodaySetupTaskKind, TodaySummary,
     };
     use std::{collections::BTreeSet, str::FromStr};
@@ -1890,6 +2054,140 @@ mod tests {
         assert_eq!(projection.readiness, FarmSetupReadiness::Ready);
         assert!(projection.blockers.is_empty());
         assert!(projection.has_saved_farm());
+    }
+
+    #[test]
+    fn farm_rules_projection_defaults_to_missing_v1_requirements() {
+        let projection = FarmRulesProjection::default();
+
+        assert!(projection.farm_profile.is_none());
+        assert!(projection.pickup_locations.is_empty());
+        assert!(projection.operating_rules.is_none());
+        assert!(projection.fulfillment_windows.is_empty());
+        assert!(projection.blackout_periods.is_empty());
+        assert_eq!(
+            projection.readiness,
+            FarmRulesReadiness::missing_v1_basics()
+        );
+        assert!(!projection.is_ready());
+    }
+
+    #[test]
+    fn farm_rules_readiness_and_timing_conflicts_are_explicit() {
+        let readiness = FarmRulesReadiness {
+            blockers: vec![FarmReadinessBlocker::MissingOperatingRules],
+            timing_conflicts: vec![FarmTimingConflict {
+                kind: FarmTimingConflictKind::BlackoutOverlapsFulfillmentWindow,
+                fulfillment_window_id: Some(super::FulfillmentWindowId::new()),
+                blackout_period_id: Some(BlackoutPeriodId::new()),
+            }],
+        };
+
+        assert_eq!(
+            FarmReadinessBlocker::MissingProfileBasics.storage_key(),
+            "missing_profile_basics"
+        );
+        assert_eq!(
+            FarmReadinessBlocker::MissingPickupLocation.storage_key(),
+            "missing_pickup_location"
+        );
+        assert_eq!(
+            FarmReadinessBlocker::MissingFulfillmentWindow.storage_key(),
+            "missing_fulfillment_window"
+        );
+        assert_eq!(
+            FarmReadinessBlocker::MissingOperatingRules.storage_key(),
+            "missing_operating_rules"
+        );
+        assert_eq!(
+            FarmTimingConflictKind::FulfillmentWindowEndsBeforeStart.storage_key(),
+            "fulfillment_window_ends_before_start"
+        );
+        assert_eq!(
+            FarmTimingConflictKind::FulfillmentWindowCutoffAfterStart.storage_key(),
+            "fulfillment_window_cutoff_after_start"
+        );
+        assert_eq!(
+            FarmTimingConflictKind::BlackoutPeriodEndsBeforeStart.storage_key(),
+            "blackout_period_ends_before_start"
+        );
+        assert_eq!(
+            FarmTimingConflictKind::BlackoutOverlapsFulfillmentWindow.storage_key(),
+            "blackout_overlaps_fulfillment_window"
+        );
+        assert!(!readiness.is_ready());
+        assert!(FarmRulesReadiness::ready().is_ready());
+    }
+
+    #[test]
+    fn farm_rules_projection_represents_full_v1_inventory() {
+        let farm_id = FarmId::new();
+        let pickup_location_id = PickupLocationId::new();
+        let fulfillment_window_id = super::FulfillmentWindowId::new();
+        let blackout_period_id = BlackoutPeriodId::new();
+        let projection = super::FarmRulesProjection {
+            farm_profile: Some(super::FarmProfileRecord {
+                farm_id,
+                display_name: "North field farm".to_owned(),
+                timezone: "UTC".to_owned(),
+                currency_code: "USD".to_owned(),
+            }),
+            pickup_locations: vec![super::PickupLocationRecord {
+                pickup_location_id,
+                farm_id,
+                label: "Barn pickup".to_owned(),
+                address_line: "14 Orchard Lane".to_owned(),
+                directions: Some("Drive to the red barn.".to_owned()),
+                is_default: true,
+            }],
+            operating_rules: Some(super::FarmOperatingRulesRecord {
+                farm_id,
+                promise_lead_hours: 24,
+                substitution_policy: "ask_customer".to_owned(),
+                missed_pickup_policy: "hold_next_window".to_owned(),
+            }),
+            fulfillment_windows: vec![super::FulfillmentWindowRecord {
+                fulfillment_window_id,
+                farm_id,
+                pickup_location_id,
+                label: "Friday pickup".to_owned(),
+                starts_at: "2026-04-25T14:00:00Z".to_owned(),
+                ends_at: "2026-04-25T18:00:00Z".to_owned(),
+                order_cutoff_at: "2026-04-24T18:00:00Z".to_owned(),
+            }],
+            blackout_periods: vec![super::BlackoutPeriodRecord {
+                blackout_period_id,
+                farm_id,
+                label: "Spring break".to_owned(),
+                starts_at: "2026-05-01T00:00:00Z".to_owned(),
+                ends_at: "2026-05-03T23:59:59Z".to_owned(),
+            }],
+            readiness: FarmRulesReadiness::ready(),
+        };
+        let saved_farm = super::FarmSummary {
+            farm_id,
+            display_name: "North field farm".to_owned(),
+            readiness: super::FarmReadiness::Ready,
+        };
+
+        assert!(projection.is_ready());
+        assert_eq!(
+            projection
+                .farm_profile
+                .as_ref()
+                .map(|profile| profile.display_name.as_str()),
+            Some(saved_farm.display_name.as_str())
+        );
+        assert_eq!(projection.pickup_locations[0].pickup_location_id, pickup_location_id);
+        assert_eq!(
+            projection.fulfillment_windows[0].pickup_location_id,
+            pickup_location_id
+        );
+        assert_eq!(
+            projection.blackout_periods[0].blackout_period_id,
+            blackout_period_id
+        );
+        assert_eq!(saved_farm.readiness, super::FarmReadiness::Ready);
     }
 
     #[test]
