@@ -28,6 +28,9 @@ use std::time::Duration;
 
 use crate::runtime::{DesktopAppRuntime, DesktopAppRuntimeSummary};
 
+const HOME_WINDOW_MIN_WIDTH_PX: f32 = 1080.0;
+const HOME_WINDOW_MIN_HEIGHT_PX: f32 = 720.0;
+
 pub fn home_titlebar_options() -> gpui::TitlebarOptions {
     gpui::TitlebarOptions {
         title: None,
@@ -77,24 +80,27 @@ pub fn home_stage(summary: &DesktopAppRuntimeSummary) -> HomeStage {
 }
 
 pub fn home_window_options(cx: &mut App) -> WindowOptions {
-    let bounds = Bounds::centered(
-        None,
-        size(
-            px(APP_UI_THEME.windows.home_min_width_px),
-            px(APP_UI_THEME.windows.home_min_height_px),
-        ),
-        cx,
-    );
+    let (launch_width_px, launch_height_px) = home_window_launch_size_px();
+    let (minimum_width_px, minimum_height_px) = home_window_minimum_size_px();
+    let bounds = Bounds::centered(None, size(px(launch_width_px), px(launch_height_px)), cx);
 
     WindowOptions {
         window_bounds: Some(WindowBounds::Windowed(bounds)),
-        window_min_size: Some(size(
-            px(APP_UI_THEME.windows.home_min_width_px),
-            px(APP_UI_THEME.windows.home_min_height_px),
-        )),
+        window_min_size: Some(size(px(minimum_width_px), px(minimum_height_px))),
         titlebar: Some(home_titlebar_options()),
         ..Default::default()
     }
+}
+
+fn home_window_launch_size_px() -> (f32, f32) {
+    (
+        APP_UI_THEME.windows.home_min_width_px,
+        APP_UI_THEME.windows.home_min_height_px,
+    )
+}
+
+fn home_window_minimum_size_px() -> (f32, f32) {
+    (HOME_WINDOW_MIN_WIDTH_PX, HOME_WINDOW_MIN_HEIGHT_PX)
 }
 
 pub fn settings_window_options(cx: &mut App) -> WindowOptions {
@@ -135,6 +141,7 @@ pub fn open_settings_window(
     runtime: DesktopAppRuntime,
     initial_view: SettingsPanelViewKey,
 ) -> gpui::Entity<Root> {
+    let _ = runtime.sync_settings_section(initial_view);
     let _ = runtime.record_settings_opened(initial_view);
     let view = cx.new(|_| SettingsWindowView::new(runtime, initial_view));
     cx.new(|cx| Root::new(view, window, cx))
@@ -564,22 +571,22 @@ impl LoggedInHomeView {
 
 pub struct SettingsWindowView {
     runtime: DesktopAppRuntime,
-    selected_view: SettingsPanelViewKey,
 }
 
 impl SettingsWindowView {
     pub fn new(runtime: DesktopAppRuntime, initial_view: SettingsPanelViewKey) -> Self {
-        Self {
-            runtime,
-            selected_view: initial_view,
-        }
+        let _ = initial_view;
+        Self { runtime }
     }
 
     fn select_view(&mut self, view: SettingsPanelViewKey, cx: &mut Context<Self>) {
-        if self.selected_view != view {
-            self.selected_view = view;
+        if self.runtime.select_settings_section(view) {
             cx.notify();
         }
+    }
+
+    fn selected_view(&self) -> SettingsPanelViewKey {
+        self.runtime.selected_settings_section()
     }
 
     fn navigation_button(
@@ -594,7 +601,7 @@ impl SettingsWindowView {
                 app_shared_text(settings_panel_label_key(view)),
                 navigation_icon,
             ),
-            self.selected_view == view,
+            self.selected_view() == view,
             cx.listener(move |this, _, _, cx| this.select_view(view, cx)),
             cx,
         )
@@ -1055,7 +1062,7 @@ impl SettingsWindowView {
     }
 
     fn settings_panel_content(&mut self, cx: &mut Context<Self>) -> AnyElement {
-        match self.selected_view {
+        match self.selected_view() {
             SettingsPanelViewKey::Account => self.account_panel(cx).into_any_element(),
             SettingsPanelViewKey::Settings => self.settings_panel(cx).into_any_element(),
             SettingsPanelViewKey::About => self.about_panel().into_any_element(),
@@ -2316,7 +2323,7 @@ fn home_farm_order_method_label_key(method: FarmOrderMethod) -> AppTextKey {
 mod tests {
     use super::{
         AppTextKey, FarmerHomeFarmState, farm_setup_onboarding_card_spec, farmer_home_farm_state,
-        home_saved_farm,
+        home_saved_farm, home_window_launch_size_px, home_window_minimum_size_px,
     };
     use crate::runtime::DesktopAppRuntimeSummary;
     use radroots_studio_app_models::SettingsAccountProjection;
@@ -2352,6 +2359,12 @@ mod tests {
     #[test]
     fn today_route_has_no_setup_onboarding_card() {
         assert!(farm_setup_onboarding_card_spec(HomeRoute::Today).is_none());
+    }
+
+    #[test]
+    fn home_window_launch_frame_and_minimum_size_are_split() {
+        assert_eq!(home_window_launch_size_px(), (1284.0, 795.0));
+        assert_eq!(home_window_minimum_size_px(), (1080.0, 720.0));
     }
 
     #[test]

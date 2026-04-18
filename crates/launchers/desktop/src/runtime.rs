@@ -4,8 +4,9 @@ use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use radroots_studio_app_core::{AppDesktopRuntimePaths, AppRuntimePathsError, AppSharedAccountsPaths};
 use radroots_studio_app_models::{
     ActiveSurface, AppActivityContext, AppActivityKind, AppIdentityProjection, AppStartupGate,
-    FarmId, FarmReadiness, FarmSetupDraft, FarmSetupProjection, FarmSummary,
-    SettingsAccountProjection, SettingsPreference, SettingsSection, TodayAgendaProjection,
+    FarmId, FarmReadiness, FarmSetupDraft, FarmSetupProjection, FarmSummary, FarmerSection,
+    SettingsAccountProjection, SettingsPreference, SettingsSection, ShellSection,
+    TodayAgendaProjection,
 };
 use radroots_studio_app_sqlite::{
     APP_ACTIVITY_CONTEXT_LIMIT, AppSqliteError, AppSqliteStore, DatabaseTarget,
@@ -68,17 +69,42 @@ impl DesktopAppRuntime {
             .selected_section
     }
 
-    pub fn select_settings_section(&self, section: SettingsSection) -> bool {
-        let changed = self
-            .lock_state_mut()
+    pub fn sync_settings_section(&self, section: SettingsSection) -> bool {
+        self.lock_state_mut()
             .state_store
-            .apply_in_memory(AppStateCommand::select_settings_section(section));
+            .apply_in_memory(AppStateCommand::select_settings_section(section))
+    }
+
+    pub fn select_settings_section(&self, section: SettingsSection) -> bool {
+        let changed = self.sync_settings_section(section);
 
         if changed {
             let _ = self.record_activity(AppActivityKind::SettingsSectionSelected { section });
         }
 
         changed
+    }
+
+    pub fn select_home(&self) -> bool {
+        let mut state = self.lock_state_mut();
+        let selected_section = match state.state_store.startup_gate() {
+            AppStartupGate::Farmer => ShellSection::Farmer(FarmerSection::Today),
+            AppStartupGate::Blocked | AppStartupGate::SetupRequired | AppStartupGate::Personal => {
+                ShellSection::Home
+            }
+        };
+
+        state
+            .state_store
+            .apply_in_memory(AppStateCommand::SelectSection(selected_section))
+    }
+
+    pub fn select_farmer_section(&self, section: FarmerSection) -> bool {
+        self.lock_state_mut()
+            .state_store
+            .apply_in_memory(AppStateCommand::SelectSection(ShellSection::Farmer(
+                section,
+            )))
     }
 
     pub fn set_settings_preference(&self, preference: SettingsPreference, enabled: bool) -> bool {
@@ -169,13 +195,19 @@ impl DesktopAppRuntime {
         self.record_activity(AppActivityKind::SettingsOpened { section })
     }
 
-    #[allow(dead_code)]
-    pub fn activity_context(&self, limit: Option<usize>) -> Option<AppActivityContext> {
-        self.lock_state().sqlite_store.as_ref().and_then(|store| {
-            store
-                .load_activity_context(limit.unwrap_or(APP_ACTIVITY_CONTEXT_LIMIT))
-                .ok()
-        })
+    pub fn activity_context(
+        &self,
+        limit: Option<usize>,
+    ) -> Result<AppActivityContext, DesktopAppRuntimeActivityContextError> {
+        let state = self.lock_state();
+        let store = state
+            .sqlite_store
+            .as_ref()
+            .ok_or(DesktopAppRuntimeActivityContextError::RuntimeUnavailable)?;
+
+        store
+            .load_activity_context(limit.unwrap_or(APP_ACTIVITY_CONTEXT_LIMIT))
+            .map_err(DesktopAppRuntimeActivityContextError::from)
     }
 
     fn from_state(state: DesktopAppRuntimeState) -> Self {
@@ -218,6 +250,14 @@ pub struct DesktopAppRuntimeSummary {
     pub farm_setup_projection: FarmSetupProjection,
     pub today_projection: TodayAgendaProjection,
     pub startup_issue: Option<String>,
+}
+
+#[derive(Debug, Error)]
+pub enum DesktopAppRuntimeActivityContextError {
+    #[error("desktop runtime activity context is unavailable while the runtime is degraded")]
+    RuntimeUnavailable,
+    #[error(transparent)]
+    Sqlite(#[from] AppSqliteError),
 }
 
 #[derive(Clone, Debug, Default)]
@@ -591,8 +631,9 @@ mod tests {
     use radroots_studio_app_models::{
         AccountSurfaceActivationProjection, ActiveSurface, AppActivityKind, AppStartupGate, FarmId,
         FarmOrderMethod, FarmReadiness, FarmSetupDraft, FarmSetupProjection, FarmSummary,
-        FarmerActivationProjection, SelectedSurfaceProjection, SettingsPreference, SettingsSection,
-        ShellSection, TodayAgendaProjection, TodaySetupTask, TodaySetupTaskKind, TodaySummary,
+        FarmerActivationProjection, FarmerSection, SelectedSurfaceProjection, SettingsPreference,
+        SettingsSection, ShellSection, TodayAgendaProjection, TodaySetupTask, TodaySetupTaskKind,
+        TodaySummary,
     };
     use radroots_studio_app_sqlite::{AppSqliteStore, DatabaseTarget};
     use radroots_studio_app_state::{
@@ -608,8 +649,8 @@ mod tests {
     use crate::accounts::DesktopLocalIdentityImportRequest;
 
     use super::{
-        APP_DATABASE_FILE_NAME, DesktopAppRuntime, DesktopAppRuntimeCommandError,
-        DesktopAppRuntimeState,
+        APP_DATABASE_FILE_NAME, DesktopAppRuntime, DesktopAppRuntimeActivityContextError,
+        DesktopAppRuntimeCommandError, DesktopAppRuntimeState,
     };
 
     #[test]
@@ -671,7 +712,7 @@ mod tests {
         });
         let cloned_runtime = runtime.clone();
 
-        assert!(runtime.select_settings_section(SettingsSection::About));
+        assert!(runtime.sync_settings_section(SettingsSection::About));
         assert!(cloned_runtime.set_settings_preference(SettingsPreference::LaunchAtLogin, true));
 
         let summary = runtime.summary();
@@ -804,6 +845,7 @@ mod tests {
         });
 
         assert!(runtime.record_home_opened());
+        assert!(runtime.sync_settings_section(SettingsSection::About));
         assert!(runtime.record_settings_opened(SettingsSection::About));
         assert!(runtime.select_settings_section(SettingsSection::Settings));
         assert!(runtime.set_settings_preference(SettingsPreference::LaunchAtLogin, true));
@@ -833,6 +875,128 @@ mod tests {
             }
         );
         assert_eq!(context.recent_events[3].kind, AppActivityKind::HomeOpened);
+    }
+
+    #[test]
+    fn activity_context_distinguishes_empty_history_from_runtime_unavailable() {
+        let runtime = DesktopAppRuntime::from_state(DesktopAppRuntimeState {
+            state_store: AppStateStore::load(InMemoryAppStateRepository::default())
+                .expect("in-memory state store should load"),
+            default_nostr_relay_url: "ws://127.0.0.1:8080".to_owned(),
+            shared_accounts_paths: None,
+            accounts_manager: None,
+            sqlite_store: Some(
+                AppSqliteStore::open(DatabaseTarget::InMemory)
+                    .expect("in-memory sqlite store should open"),
+            ),
+            startup_issue: None,
+        });
+
+        let empty_context = runtime
+            .activity_context(Some(8))
+            .expect("empty activity history should still load");
+        assert!(empty_context.recent_events.is_empty());
+
+        let degraded = DesktopAppRuntime::from_state(DesktopAppRuntimeState::degraded(
+            super::DesktopAppRuntimeBootstrapError::State(AppStateStoreError::Repository(
+                AppStateRepositoryError::load("state unavailable"),
+            )),
+        ));
+
+        assert!(matches!(
+            degraded.activity_context(Some(8)),
+            Err(DesktopAppRuntimeActivityContextError::RuntimeUnavailable)
+        ));
+    }
+
+    #[test]
+    fn activity_context_surfaces_store_load_failure() {
+        let runtime = DesktopAppRuntime::from_state(DesktopAppRuntimeState {
+            state_store: AppStateStore::load(InMemoryAppStateRepository::default())
+                .expect("in-memory state store should load"),
+            default_nostr_relay_url: "ws://127.0.0.1:8080".to_owned(),
+            shared_accounts_paths: None,
+            accounts_manager: None,
+            sqlite_store: Some(
+                AppSqliteStore::open(DatabaseTarget::InMemory)
+                    .expect("in-memory sqlite store should open"),
+            ),
+            startup_issue: None,
+        });
+
+        runtime
+            .lock_state()
+            .sqlite_store
+            .as_ref()
+            .expect("sqlite store")
+            .connection()
+            .execute_batch("DROP TABLE activity_events")
+            .expect("activity table should drop");
+
+        assert!(matches!(
+            runtime.activity_context(Some(8)),
+            Err(DesktopAppRuntimeActivityContextError::Sqlite(_))
+        ));
+    }
+
+    #[test]
+    fn selecting_farmer_section_requires_farmer_identity_gate() {
+        let runtime = DesktopAppRuntime::from_state(DesktopAppRuntimeState {
+            state_store: AppStateStore::load(InMemoryAppStateRepository::default())
+                .expect("in-memory state store should load"),
+            default_nostr_relay_url: "ws://127.0.0.1:8080".to_owned(),
+            shared_accounts_paths: None,
+            accounts_manager: None,
+            sqlite_store: Some(
+                AppSqliteStore::open(DatabaseTarget::InMemory)
+                    .expect("in-memory sqlite store should open"),
+            ),
+            startup_issue: None,
+        });
+
+        assert!(!runtime.select_farmer_section(FarmerSection::Products));
+        assert_eq!(
+            runtime.summary().shell_projection.selected_section,
+            ShellSection::Home
+        );
+    }
+
+    #[test]
+    fn runtime_routes_between_farmer_home_and_products_through_explicit_methods() {
+        let runtime = memory_runtime();
+
+        assert!(
+            runtime
+                .generate_local_account(Some("Farmer".to_owned()))
+                .expect("account should generate")
+        );
+        let account_id = runtime
+            .summary()
+            .settings_account_projection
+            .selected_account
+            .as_ref()
+            .expect("selected account")
+            .account
+            .account_id
+            .clone();
+        save_surface_activation(&runtime, account_id.as_str(), ActiveSurface::Farmer, true);
+        assert!(
+            runtime
+                .select_local_account(account_id.as_str())
+                .expect("account should select")
+        );
+
+        assert!(runtime.select_farmer_section(FarmerSection::Products));
+        assert_eq!(
+            runtime.summary().shell_projection.selected_section,
+            ShellSection::Farmer(FarmerSection::Products)
+        );
+
+        assert!(runtime.select_home());
+        assert_eq!(
+            runtime.summary().shell_projection.selected_section,
+            ShellSection::Farmer(FarmerSection::Today)
+        );
     }
 
     #[test]
