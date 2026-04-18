@@ -4667,6 +4667,7 @@ dependencies = [
  "radroots_studio_app_ui",
  "thiserror 2.0.18",
  "tracing",
+ "tracing-subscriber",
 ]
 
 [[package]]

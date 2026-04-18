@@ -18,6 +18,7 @@ require_command() {
 
 require_command /usr/libexec/PlistBuddy
 require_command mktemp
+require_command readlink
 
 app_path="$("${script_dir}/build-macos-host.sh")"
 plist_path="${app_path}/Contents/Info.plist"
@@ -67,10 +68,89 @@ release_app_path="$(
 }
 
 tmp_root="$(mktemp -d)"
+runner_pid=""
+degraded_runner_pid=""
+
+wait_for_log_event() {
+  local structured_log_file="$1"
+  local expected_event="$2"
+  local runner_pid="$3"
+  local event_verified=false
+
+  for _ in $(seq 1 150); do
+    if [[ -f "${structured_log_file}" ]] && grep -q "\"event\":\"${expected_event}\"" "${structured_log_file}" 2>/dev/null; then
+      event_verified=true
+      break
+    fi
+
+    if ! kill -0 "${runner_pid}" 2>/dev/null; then
+      wait "${runner_pid}"
+      exit $?
+    fi
+
+    sleep 0.1
+  done
+
+  [[ "${event_verified}" == "true" ]] || {
+    echo "${expected_event} was not recorded by run-macos-host.sh" >&2
+    exit 1
+  }
+}
+
+assert_latest_alias() {
+  local latest_log_path="$1"
+
+  [[ -e "${latest_log_path}" ]] || {
+    echo "missing latest structured log alias: ${latest_log_path}" >&2
+    exit 1
+  }
+
+  [[ "$(readlink "${latest_log_path}")" == "${date_utc}.jsonl" ]] || {
+    echo "latest structured log alias does not point at ${date_utc}.jsonl" >&2
+    exit 1
+  }
+}
+
+assert_raw_logs_exist() {
+  local stdout_file="$1"
+  local stderr_file="$2"
+
+  [[ -f "${stdout_file}" ]] || {
+    echo "missing raw stdout log: ${stdout_file}" >&2
+    exit 1
+  }
+
+  [[ -f "${stderr_file}" ]] || {
+    echo "missing raw stderr log: ${stderr_file}" >&2
+    exit 1
+  }
+}
+
+terminate_runner() {
+  local runner_pid="$1"
+
+  if [[ -n "${runner_pid}" ]] && kill -0 "${runner_pid}" 2>/dev/null; then
+    kill "${runner_pid}" 2>/dev/null || true
+  fi
+
+  set +e
+  wait "${runner_pid}"
+  local exit_code="$?"
+  set -e
+  [[ "${exit_code}" == "0" ]] || [[ "${exit_code}" == "143" ]] || [[ "${exit_code}" == "130" ]] || {
+    echo "unexpected runner exit code after termination: ${exit_code}" >&2
+    exit 1
+  }
+}
+
 cleanup() {
   if [[ -n "${runner_pid:-}" ]] && kill -0 "${runner_pid}" 2>/dev/null; then
     kill "${runner_pid}" 2>/dev/null || true
     wait "${runner_pid}" || true
+  fi
+  if [[ -n "${degraded_runner_pid:-}" ]] && kill -0 "${degraded_runner_pid}" 2>/dev/null; then
+    kill "${degraded_runner_pid}" 2>/dev/null || true
+    wait "${degraded_runner_pid}" || true
   fi
   rm -rf "${tmp_root}"
 }
@@ -100,48 +180,42 @@ RADROOTS_APP_RUNTIME_CONFIG_JSON="$(
 "${script_dir}/run-macos-host.sh" &
 runner_pid="$!"
 
-launch_verified=false
-for _ in $(seq 1 150); do
-  if [[ -f "${structured_log_file}" ]] && grep -q '"event":"runtime.launch"' "${structured_log_file}" 2>/dev/null; then
-    launch_verified=true
-    break
-  fi
-
-  if ! kill -0 "${runner_pid}" 2>/dev/null; then
-    wait "${runner_pid}"
-    exit $?
-  fi
-
-  sleep 0.1
-done
-
-[[ "${launch_verified}" == "true" ]] || {
-  echo "runtime.launch was not recorded by run-macos-host.sh" >&2
-  exit 1
-}
-
-[[ -e "${latest_log_path}" ]] || {
-  echo "missing latest structured log alias: ${latest_log_path}" >&2
-  exit 1
-}
-
-[[ -f "${stdout_file}" ]] || {
-  echo "missing raw stdout log: ${stdout_file}" >&2
-  exit 1
-}
-
-[[ -f "${stderr_file}" ]] || {
-  echo "missing raw stderr log: ${stderr_file}" >&2
-  exit 1
-}
-
-kill "${runner_pid}" 2>/dev/null || true
-set +e
-wait "${runner_pid}"
-exit_code="$?"
-set -e
-[[ "${exit_code}" == "0" ]] || [[ "${exit_code}" == "143" ]] || [[ "${exit_code}" == "130" ]] || {
-  echo "unexpected runner exit code after termination: ${exit_code}" >&2
-  exit 1
-}
+wait_for_log_event "${structured_log_file}" "runtime.launch" "${runner_pid}"
+assert_latest_alias "${latest_log_path}"
+assert_raw_logs_exist "${stdout_file}" "${stderr_file}"
+terminate_runner "${runner_pid}"
 runner_pid=""
+
+degraded_run_id="$(radroots_studio_app_run_id "${runtime_mode}")"
+degraded_log_root="${tmp_root}/degraded-logs"
+degraded_structured_log_file="${degraded_log_root}/apps/local/app/app-macos-native/${date_utc}.jsonl"
+degraded_latest_log_path="${degraded_log_root}/apps/local/app/app-macos-native/latest.jsonl"
+degraded_stdout_file="${degraded_log_root}/apps/local/app/app-macos-native/raw/stdout.${date_utc}.log"
+degraded_stderr_file="${degraded_log_root}/apps/local/app/app-macos-native/raw/stderr.${date_utc}.log"
+degraded_runtime_config_json="$(
+  radroots_studio_app_build_runtime_config_json \
+    "${repo_root}" \
+    "${runtime_mode}" \
+    "${degraded_run_id}" \
+    "${bundle_identifier}" \
+    "${platform_name}" \
+    "${degraded_log_root}"
+)"
+
+env -u HOME \
+  RADROOTS_APP_RUN_ID="${degraded_run_id}" \
+  RADROOTS_APP_LOCAL_LOG_ROOT="${degraded_log_root}" \
+  RADROOTS_APP_RUNTIME_CONFIG_JSON="${degraded_runtime_config_json}" \
+  "${script_dir}/run-macos-host.sh" &
+degraded_runner_pid="$!"
+
+wait_for_log_event "${degraded_structured_log_file}" "runtime.launch" "${degraded_runner_pid}"
+wait_for_log_event "${degraded_structured_log_file}" "runtime.degraded" "${degraded_runner_pid}"
+assert_latest_alias "${degraded_latest_log_path}"
+assert_raw_logs_exist "${degraded_stdout_file}" "${degraded_stderr_file}"
+grep -q '"startup_issue":"desktop runtime roots require HOME for macos"' "${degraded_structured_log_file}" || {
+  echo "runtime.degraded did not record the expected startup issue" >&2
+  exit 1
+}
+terminate_runner "${degraded_runner_pid}"
+degraded_runner_pid=""

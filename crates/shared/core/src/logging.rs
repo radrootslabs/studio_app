@@ -238,7 +238,7 @@ pub fn init_logging(options: AppLoggingOptions) -> Result<(), AppLoggingError> {
     info!(
         target: "runtime",
         event = "logging.initialized",
-        file = %options.log_dir.join(format!("{}.jsonl", current_utc_day())).display(),
+        file = %current_day_log_path(&options.log_dir).display(),
         stdout = options.stdout,
         "logging initialized"
     );
@@ -271,6 +271,10 @@ fn build_file_appender(log_dir: &Path) -> Result<RollingFileAppender, AppLogging
         .build(log_dir)?)
 }
 
+fn current_day_log_path(log_dir: &Path) -> PathBuf {
+    log_dir.join(format!("{}.jsonl", current_utc_day()))
+}
+
 fn current_utc_day() -> String {
     Utc::now().format("%Y-%m-%d").to_string()
 }
@@ -298,7 +302,13 @@ fn prepare_latest_alias(log_dir: &Path) -> Result<(), AppLoggingError> {
     }
 
     #[cfg(unix)]
-    std::os::unix::fs::symlink(format!("{}.jsonl", current_utc_day()), &latest_path)?;
+    std::os::unix::fs::symlink(
+        current_day_log_path(log_dir)
+            .file_name()
+            .map(|value| value.to_owned())
+            .unwrap_or_default(),
+        &latest_path,
+    )?;
 
     #[cfg(not(unix))]
     fs::write(&latest_path, [])?;
@@ -356,6 +366,7 @@ fn target_category(target: &str) -> String {
 mod tests {
     use std::{
         fs,
+        io::Write,
         path::{Path, PathBuf},
         time::{SystemTime, UNIX_EPOCH},
     };
@@ -369,7 +380,8 @@ mod tests {
     };
 
     use super::{
-        APP_LOG_PRODUCT, APP_LOG_SCHEMA_VERSION, app_runtime_log_dir, prepare_latest_alias,
+        APP_LOG_PRODUCT, APP_LOG_SCHEMA_VERSION, app_runtime_log_dir, build_file_appender,
+        current_day_log_path, prepare_latest_alias,
     };
 
     fn temp_dir(name: &str) -> PathBuf {
@@ -428,6 +440,24 @@ mod tests {
             target,
             PathBuf::from(format!("{}.jsonl", Utc::now().format("%Y-%m-%d")))
         );
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn rolling_file_appender_writes_to_active_day_log_file() {
+        let dir = temp_dir("rolling-file");
+        fs::create_dir_all(&dir).expect("create dir");
+
+        let mut appender = build_file_appender(&dir).expect("build file appender");
+        writeln!(appender, "{{\"event\":\"runtime.launch\"}}").expect("write structured record");
+        appender.flush().expect("flush structured record");
+
+        let log_path = current_day_log_path(&dir);
+        let payload = fs::read_to_string(&log_path).expect("read current day log");
+
+        assert!(log_path.ends_with(format!("{}.jsonl", Utc::now().format("%Y-%m-%d"))));
+        assert!(payload.contains("\"event\":\"runtime.launch\""));
+
         let _ = fs::remove_dir_all(&dir);
     }
 

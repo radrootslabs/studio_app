@@ -9,7 +9,7 @@ use thiserror::Error;
 use tracing::{error, info};
 
 use crate::menus::install_native_app_menu;
-use crate::runtime::DesktopAppRuntime;
+use crate::runtime::{DesktopAppRuntime, DesktopAppRuntimeSummary};
 use crate::window::{home_titlebar_options, open_home_window};
 
 #[derive(Debug, Error)]
@@ -26,17 +26,9 @@ pub fn launch() -> Result<(), AppLaunchError> {
     let snapshot = AppRuntimeSnapshot::from_config(build, &runtime_config);
     bootstrap_logging(&snapshot, runtime_config.local_log_root.as_path())?;
     install_panic_hook();
-    emit_launch_event(&snapshot);
 
     let runtime = DesktopAppRuntime::bootstrap();
-    if let Some(startup_issue) = runtime.summary().startup_issue {
-        error!(
-            target: "runtime",
-            event = "runtime.degraded",
-            startup_issue = %startup_issue,
-            "desktop runtime degraded"
-        );
-    }
+    emit_runtime_events(&snapshot, &runtime.summary());
 
     let app = Application::new().with_assets(gpui_component_assets::Assets);
 
@@ -125,4 +117,155 @@ fn emit_launch_event(snapshot: &AppRuntimeSnapshot) {
         "{}",
         launch_event.message
     );
+}
+
+fn emit_runtime_events(snapshot: &AppRuntimeSnapshot, runtime: &DesktopAppRuntimeSummary) {
+    emit_launch_event(snapshot);
+
+    if let Some(startup_issue) = runtime.startup_issue.as_deref() {
+        emit_degraded_runtime_event(startup_issue);
+    }
+}
+
+fn emit_degraded_runtime_event(startup_issue: &str) {
+    error!(
+        target: "runtime",
+        event = "runtime.degraded",
+        startup_issue = %startup_issue,
+        "desktop runtime degraded"
+    );
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::{Arc, Mutex};
+
+    use radroots_studio_app_core::{
+        APP_PROJECTION_SOURCE, AppBuildIdentity, AppRuntimeCapture, AppRuntimeMode,
+        AppRuntimeSnapshot,
+    };
+    use radroots_studio_app_models::TodayAgendaProjection;
+    use radroots_studio_app_state::AppShellProjection;
+    use tracing::{
+        Event, Level, Subscriber,
+        field::{Field, Visit},
+    };
+    use tracing_subscriber::{Layer, layer::Context, prelude::*, registry::LookupSpan};
+
+    use crate::runtime::DesktopAppRuntimeSummary;
+
+    use super::emit_runtime_events;
+
+    #[derive(Clone, Debug, Eq, PartialEq)]
+    struct CapturedEvent {
+        level: Level,
+        target: String,
+        event: Option<String>,
+        message: Option<String>,
+        startup_issue: Option<String>,
+    }
+
+    #[derive(Default)]
+    struct EventFieldVisitor {
+        event: Option<String>,
+        message: Option<String>,
+        startup_issue: Option<String>,
+    }
+
+    struct CaptureLayer {
+        events: Arc<Mutex<Vec<CapturedEvent>>>,
+    }
+
+    impl EventFieldVisitor {
+        fn record_value(&mut self, field: &Field, value: String) {
+            match field.name() {
+                "event" => self.event = Some(value),
+                "message" => self.message = Some(value),
+                "startup_issue" => self.startup_issue = Some(value),
+                _ => {}
+            }
+        }
+    }
+
+    impl Visit for EventFieldVisitor {
+        fn record_str(&mut self, field: &Field, value: &str) {
+            self.record_value(field, value.to_owned());
+        }
+
+        fn record_debug(&mut self, field: &Field, value: &dyn std::fmt::Debug) {
+            self.record_value(field, format!("{value:?}").trim_matches('"').to_owned());
+        }
+    }
+
+    impl<S> Layer<S> for CaptureLayer
+    where
+        S: Subscriber + for<'lookup> LookupSpan<'lookup>,
+    {
+        fn on_event(&self, event: &Event<'_>, _ctx: Context<'_, S>) {
+            let mut visitor = EventFieldVisitor::default();
+            event.record(&mut visitor);
+            self.events
+                .lock()
+                .expect("capture lock")
+                .push(CapturedEvent {
+                    level: *event.metadata().level(),
+                    target: event.metadata().target().to_owned(),
+                    event: visitor.event,
+                    message: visitor.message,
+                    startup_issue: visitor.startup_issue,
+                });
+        }
+    }
+
+    fn test_snapshot() -> AppRuntimeSnapshot {
+        AppRuntimeSnapshot::from_capture(
+            AppBuildIdentity {
+                package_name: "radroots_studio_app".to_owned(),
+                package_version: "0.1.0".to_owned(),
+                build_profile: "debug".to_owned(),
+                target_triple: "aarch64-apple-darwin".to_owned(),
+                projection_source: APP_PROJECTION_SOURCE.to_owned(),
+                git_commit: None,
+            },
+            AppRuntimeMode::LocalhostDev,
+            AppRuntimeCapture {
+                host_locale: "en_US.UTF-8".to_owned(),
+                operating_system: "macos".to_owned(),
+                run_id: "app-localhost-dev-20260418T000000Z-deadbeefcafefeed".to_owned(),
+            },
+        )
+    }
+
+    #[test]
+    fn degraded_runtime_emits_launch_and_degraded_events() {
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let subscriber = tracing_subscriber::registry().with(CaptureLayer {
+            events: Arc::clone(&events),
+        });
+        let summary = DesktopAppRuntimeSummary {
+            shell_projection: AppShellProjection::default(),
+            today_projection: TodayAgendaProjection::default(),
+            startup_issue: Some("desktop runtime roots require HOME for macos".to_owned()),
+        };
+
+        tracing::subscriber::with_default(subscriber, || {
+            emit_runtime_events(&test_snapshot(), &summary);
+        });
+
+        let events = events.lock().expect("events lock");
+        assert_eq!(events.len(), 2);
+        assert_eq!(events[0].event.as_deref(), Some("runtime.launch"));
+        assert_eq!(events[0].target, "bootstrap");
+        assert_eq!(events[1].event.as_deref(), Some("runtime.degraded"));
+        assert_eq!(events[1].level, Level::ERROR);
+        assert_eq!(events[1].target, "runtime");
+        assert_eq!(
+            events[1].startup_issue.as_deref(),
+            Some("desktop runtime roots require HOME for macos")
+        );
+        assert_eq!(
+            events[1].message.as_deref(),
+            Some("desktop runtime degraded")
+        );
+    }
 }
