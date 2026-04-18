@@ -168,6 +168,58 @@ mod tests {
     }
 
     #[test]
+    fn english_products_workflow_copy_matches_the_editor_contract() {
+        assert_eq!(app_text(AppTextKey::ProductsAddAction), "Add product");
+        assert_eq!(app_text(AppTextKey::ProductsEditorTitle), "Product details");
+        assert_eq!(
+            app_text(AppTextKey::ProductsEditorBody),
+            "Saved locally on this device."
+        );
+        assert_eq!(app_text(AppTextKey::ProductsEditorFieldTitle), "Name");
+        assert_eq!(app_text(AppTextKey::ProductsEditorFieldSubtitle), "Details");
+        assert_eq!(app_text(AppTextKey::ProductsEditorFieldUnit), "Unit");
+        assert_eq!(
+            app_text(AppTextKey::ProductsEditorFieldPrice),
+            "Price (USD)"
+        );
+        assert_eq!(app_text(AppTextKey::ProductsEditorFieldStock), "Stock");
+        assert_eq!(app_text(AppTextKey::ProductsEditorFieldStatus), "Status");
+        assert_eq!(app_text(AppTextKey::ProductsEditorCloseAction), "Close");
+        assert_eq!(
+            app_text(AppTextKey::ProductsEditorSaveAction),
+            "Save changes"
+        );
+        assert_eq!(
+            app_text(AppTextKey::ProductsEditorPublishReadinessTitle),
+            "Publish readiness"
+        );
+        assert_eq!(
+            app_text(AppTextKey::ProductsEditorReady),
+            "This product is ready to publish."
+        );
+        assert_eq!(
+            app_text(AppTextKey::ProductsEditorBlockerAddProductName),
+            "Add a product name."
+        );
+        assert_eq!(
+            app_text(AppTextKey::ProductsEditorBlockerChooseUnit),
+            "Choose a unit."
+        );
+        assert_eq!(
+            app_text(AppTextKey::ProductsEditorBlockerSetPrice),
+            "Set a price."
+        );
+        assert_eq!(
+            app_text(AppTextKey::ProductsEditorBlockerAttachAvailability),
+            "Attach an availability window."
+        );
+        assert_eq!(
+            app_text(AppTextKey::ProductsUntitledDraft),
+            "Untitled draft"
+        );
+    }
+
+    #[test]
     fn host_locale_negotiation_reduces_to_supported_base_locale() {
         assert_eq!(resolve_locale_from_host("en_US.UTF-8"), "en");
         assert_eq!(resolve_locale_from_host("en-GB"), "en");
