@@ -2,18 +2,14 @@ use gpui::{
     AnyElement, App, AppContext, Bounds, ClickEvent, Context, InteractiveElement, IntoElement,
     ParentElement, Render, SharedString, StatefulInteractiveElement, Styled, Window,
     WindowBackgroundAppearance, WindowBounds, WindowOptions, div, prelude::FluentBuilder, px,
-    relative, rgb, size, transparent_black,
+    relative, rgb, size,
 };
-use gpui_component::{
-    IconName, Root,
-    button::{Button, ButtonCustomVariant, ButtonRounded, ButtonVariants},
-};
+use gpui_component::{IconName, Root};
 use radroots_studio_app_i18n::AppTextKey;
 pub use radroots_studio_app_models::SettingsSection as SettingsPanelViewKey;
 use radroots_studio_app_models::{
-    AccountCustody, AccountSummary, ActiveSurface, AppStartupGate, FulfillmentWindowSummary,
-    IdentityReadiness, OrderListRow, ProductListRow, SelectedAccountProjection,
-    SettingsAccountProjection, SettingsPreference, TodayAgendaProjection, TodaySetupTaskKind,
+    AppStartupGate, FulfillmentWindowSummary, OrderListRow, ProductListRow, TodayAgendaProjection,
+    TodaySetupTaskKind,
 };
 use radroots_studio_app_ui::{
     APP_UI_THEME, AppCheckboxFieldSpec, IconSegmentButtonSpec, LabelValueRow, action_button,
@@ -132,8 +128,7 @@ pub fn open_settings_window(
     initial_view: SettingsPanelViewKey,
 ) -> gpui::Entity<Root> {
     let _ = runtime.record_settings_opened(initial_view);
-    let _ = runtime.select_settings_section(initial_view);
-    let view = cx.new(|_| SettingsWindowView::new(runtime));
+    let view = cx.new(|_| SettingsWindowView::new(runtime, initial_view));
     cx.new(|cx| Root::new(view, window, cx))
 }
 
@@ -179,115 +174,22 @@ impl Render for HomeView {
 
 pub struct SettingsWindowView {
     runtime: DesktopAppRuntime,
+    selected_view: SettingsPanelViewKey,
 }
 
 impl SettingsWindowView {
-    pub fn new(runtime: DesktopAppRuntime) -> Self {
-        Self { runtime }
-    }
-
-    fn selected_view(&self) -> SettingsPanelViewKey {
-        self.runtime.selected_settings_section()
+    pub fn new(runtime: DesktopAppRuntime, initial_view: SettingsPanelViewKey) -> Self {
+        Self {
+            runtime,
+            selected_view: initial_view,
+        }
     }
 
     fn select_view(&mut self, view: SettingsPanelViewKey, cx: &mut Context<Self>) {
-        if self.runtime.select_settings_section(view) {
+        if self.selected_view != view {
+            self.selected_view = view;
             cx.notify();
         }
-    }
-
-    fn set_settings_preference(
-        &mut self,
-        preference: SettingsPreference,
-        enabled: bool,
-        cx: &mut Context<Self>,
-    ) {
-        if self.runtime.set_settings_preference(preference, enabled) {
-            cx.notify();
-        }
-    }
-
-    fn finish_account_runtime_change(
-        &mut self,
-        changed: bool,
-        previous_target: PrimaryWindowTarget,
-        cx: &mut Context<Self>,
-    ) {
-        if changed {
-            cx.refresh_windows();
-            cx.notify();
-        }
-
-        if previous_target == PrimaryWindowTarget::SettingsAccount
-            && primary_window_target(&self.runtime.summary()) == PrimaryWindowTarget::Home
-        {
-            self.ensure_home_window_if_ready(cx);
-        }
-    }
-
-    fn ensure_home_window_if_ready(&self, cx: &mut Context<Self>) {
-        if primary_window_target(&self.runtime.summary()) != PrimaryWindowTarget::Home {
-            return;
-        }
-
-        if cx.windows().len() > 1 {
-            cx.refresh_windows();
-            return;
-        }
-
-        let runtime = self.runtime.clone();
-        let options = home_window_options(cx);
-        let _ = cx.open_window(options, |window, cx| {
-            window.activate_window();
-            open_home_window(window, cx, runtime.clone())
-        });
-    }
-
-    fn generate_local_account(&mut self, cx: &mut Context<Self>) {
-        let previous_target = primary_window_target(&self.runtime.summary());
-        let changed = self.runtime.generate_local_account(None).unwrap_or(false);
-        self.finish_account_runtime_change(changed, previous_target, cx);
-    }
-
-    fn select_local_account(&mut self, account_id: &str, cx: &mut Context<Self>) {
-        let previous_target = primary_window_target(&self.runtime.summary());
-        let changed = self
-            .runtime
-            .select_local_account(account_id)
-            .unwrap_or(false);
-        self.finish_account_runtime_change(changed, previous_target, cx);
-    }
-
-    fn remove_selected_local_key(&mut self, cx: &mut Context<Self>) {
-        let previous_target = primary_window_target(&self.runtime.summary());
-        let changed = self.runtime.remove_selected_local_key().unwrap_or(false);
-        self.finish_account_runtime_change(changed, previous_target, cx);
-    }
-
-    fn open_selected_workspace(&mut self, cx: &mut Context<Self>) {
-        let runtime_summary = self.runtime.summary();
-        let previous_target = primary_window_target(&runtime_summary);
-        let Some(target_surface) = runtime_summary
-            .settings_account_projection
-            .selected_account
-            .as_ref()
-            .map(|account| {
-                if account.farmer_activation.is_active() {
-                    ActiveSurface::Farmer
-                } else {
-                    ActiveSurface::Personal
-                }
-            })
-        else {
-            return;
-        };
-
-        let changed = self
-            .runtime
-            .select_active_surface(target_surface)
-            .unwrap_or(false);
-        self.finish_account_runtime_change(changed, previous_target, cx);
-        self.ensure_home_window_if_ready(cx);
     }
 
     fn navigation_button(
@@ -302,20 +204,15 @@ impl SettingsWindowView {
                 app_shared_text(settings_panel_label_key(view)),
                 navigation_icon,
             ),
-            self.selected_view() == view,
+            self.selected_view == view,
             cx.listener(move |this, _, _, cx| this.select_view(view, cx)),
             cx,
         )
     }
 
-    fn account_panel(&mut self, cx: &mut Context<Self>) -> impl IntoElement {
+    fn account_panel(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let detail_text_px = APP_UI_THEME.typography.settings_account_detail_text_px;
-        let runtime_summary = self.runtime.summary();
-        let account_projection = &runtime_summary.settings_account_projection;
-        let selected_account = account_projection.selected_account.as_ref();
-        let selected_account_id =
-            selected_account.map(|account| account.account.account_id.as_str());
-        let account_status_color = settings_account_status_color(account_projection);
+        let account_status_color = APP_UI_THEME.controls.status_indicator.offline;
 
         div()
             .size_full()
@@ -331,77 +228,47 @@ impl SettingsWindowView {
                     .child(
                         div()
                             .w_full()
-                            .flex()
-                            .flex_col()
-                            .gap(px(APP_UI_THEME.layout.settings_account_sidebar_button_gap_px))
-                            .when(account_projection.roster.is_empty(), |this| {
-                                this.child(
-                                    div()
-                                        .w_full()
-                                        .bg(rgb(APP_UI_THEME.surfaces.chrome_background))
-                                        .rounded(px(
-                                            APP_UI_THEME
-                                                .layout
-                                                .settings_account_sidebar_button_corner_radius_px,
-                                        ))
-                                        .p(px(
-                                            APP_UI_THEME
-                                                .layout
-                                                .settings_account_sidebar_button_padding_px,
-                                        ))
-                                        .child(
-                                            div()
-                                                .flex()
-                                                .flex_col()
-                                                .gap(px(2.0))
-                                                .child(
-                                                    div()
-                                                        .text_size(px(
-                                                            APP_UI_THEME
-                                                                .typography
-                                                                .settings_account_identity_text_px,
-                                                        ))
-                                                        .font_weight(gpui::FontWeight::MEDIUM)
-                                                        .text_color(rgb(APP_UI_THEME.text.primary))
-                                                        .child(app_shared_text(
-                                                            AppTextKey::SettingsAccountNoSelectionTitle,
-                                                        )),
-                                                )
-                                                .child(
-                                                    div()
-                                                        .text_size(px(
-                                                            APP_UI_THEME
-                                                                .typography
-                                                                .settings_account_identity_text_px,
-                                                        ))
-                                                        .text_color(rgb(APP_UI_THEME.text.secondary))
-                                                        .line_height(relative(1.2))
-                                                        .child(app_shared_text(
-                                                            AppTextKey::SettingsAccountNoSelectionBody,
-                                                        )),
-                                                ),
-                                        ),
-                                )
-                            })
-                            .when(!account_projection.roster.is_empty(), |this| {
-                                this.children(
-                                    account_projection
-                                        .roster
-                                        .iter()
-                                        .map(|account| {
-                                            let account_id = account.account_id.clone();
-                                            settings_account_sidebar_row(
-                                                account,
-                                                selected_account_id,
-                                                cx.listener(move |this, _, _, cx| {
-                                                    this.select_local_account(account_id.as_str(), cx);
-                                                }),
-                                                cx,
-                                            )
-                                        })
-                                        .collect::<Vec<_>>(),
-                                )
-                            }),
+                            .bg(rgb(APP_UI_THEME.surfaces.chrome_background))
+                            .rounded(px(
+                                APP_UI_THEME
+                                    .layout
+                                    .settings_account_sidebar_button_corner_radius_px,
+                            ))
+                            .p(px(
+                                APP_UI_THEME.layout.settings_account_sidebar_button_padding_px,
+                            ))
+                            .child(
+                                div()
+                                    .flex()
+                                    .flex_col()
+                                    .gap(px(2.0))
+                                    .child(
+                                        div()
+                                            .text_size(px(
+                                                APP_UI_THEME
+                                                    .typography
+                                                    .settings_account_identity_text_px,
+                                            ))
+                                            .font_weight(gpui::FontWeight::MEDIUM)
+                                            .text_color(rgb(APP_UI_THEME.text.primary))
+                                            .child(app_shared_text(
+                                                AppTextKey::SettingsAccountNoSelectionTitle,
+                                            )),
+                                    )
+                                    .child(
+                                        div()
+                                            .text_size(px(
+                                                APP_UI_THEME
+                                                    .typography
+                                                    .settings_account_identity_text_px,
+                                            ))
+                                            .text_color(rgb(APP_UI_THEME.text.secondary))
+                                            .line_height(relative(1.2))
+                                            .child(app_shared_text(
+                                                AppTextKey::SettingsAccountNoSelectionBody,
+                                            )),
+                                    ),
+                            ),
                     )
                     .child(
                         div()
@@ -431,9 +298,7 @@ impl SettingsWindowView {
                                     .child(action_button(
                                         "account-add",
                                         app_shared_text(AppTextKey::SettingsAccountAddAction),
-                                        cx.listener(|this, _, _, cx| {
-                                            this.generate_local_account(cx);
-                                        }),
+                                        |_, _, _| {},
                                         cx,
                                     ))
                                     .child(action_icon_button(
@@ -495,19 +360,9 @@ impl SettingsWindowView {
                                             .text_size(px(detail_text_px))
                                             .font_weight(gpui::FontWeight::MEDIUM)
                                             .text_color(rgb(APP_UI_THEME.text.primary))
-                                            .child(
-                                                selected_account
-                                                    .map(|account| {
-                                                        settings_account_display_name(
-                                                            &account.account,
-                                                        )
-                                                    })
-                                                    .unwrap_or_else(|| {
-                                                        app_shared_text(
-                                                            AppTextKey::SettingsAccountNoSelectionTitle,
-                                                        )
-                                                    }),
-                                            ),
+                                            .child(app_shared_text(
+                                                AppTextKey::SettingsAccountNoSelectionTitle,
+                                            )),
                                     ),
                             )
                             .child(
@@ -521,13 +376,7 @@ impl SettingsWindowView {
                                         div()
                                             .text_size(px(detail_text_px))
                                             .text_color(rgb(APP_UI_THEME.text.primary))
-                                            .child(
-                                                selected_account
-                                                    .map(|account| account.account.npub.clone().into())
-                                                    .unwrap_or_else(|| {
-                                                        app_shared_text(AppTextKey::ValueNone)
-                                                    }),
-                                            ),
+                                            .child(app_shared_text(AppTextKey::ValueNone)),
                                     ))
                                     .child(self.settings_account_detail_row(
                                         AppTextKey::SettingsAccountStatusLabel,
@@ -545,9 +394,7 @@ impl SettingsWindowView {
                                                     .text_size(px(detail_text_px))
                                                     .text_color(rgb(APP_UI_THEME.text.primary))
                                                     .child(app_shared_text(
-                                                        settings_account_status_key(
-                                                            account_projection,
-                                                        ),
+                                                        AppTextKey::SettingsAccountStatusLoggedOut,
                                                     )),
                                             ),
                                     ))
@@ -556,108 +403,66 @@ impl SettingsWindowView {
                                         div()
                                             .text_size(px(detail_text_px))
                                             .text_color(rgb(APP_UI_THEME.text.primary))
-                                            .child(
-                                                selected_account
-                                                    .map(|account| {
-                                                        app_shared_text(
-                                                            settings_account_custody_key(
-                                                                account.account.custody,
-                                                            ),
-                                                        )
-                                                    })
-                                                    .unwrap_or_else(|| {
-                                                        app_shared_text(AppTextKey::ValueNone)
-                                                    }),
-                                            ),
+                                            .child(app_shared_text(AppTextKey::ValueNone)),
                                     ))
                                     .child(self.settings_account_detail_row(
                                         AppTextKey::SettingsAccountSurfaceLabel,
                                         div()
                                             .text_size(px(detail_text_px))
                                             .text_color(rgb(APP_UI_THEME.text.primary))
-                                            .child(
-                                                selected_account
-                                                    .map(|account| {
-                                                        app_shared_text(
-                                                            settings_account_surface_key(
-                                                                account.active_surface(),
-                                                            ),
-                                                        )
-                                                    })
-                                                    .unwrap_or_else(|| {
-                                                        app_shared_text(AppTextKey::ValueNone)
-                                                    }),
-                                            ),
+                                            .child(app_shared_text(AppTextKey::ValueNone)),
                                     ))
                                     .child(self.settings_account_detail_row(
                                         AppTextKey::SettingsAccountActivationLabel,
                                         div()
                                             .text_size(px(detail_text_px))
                                             .text_color(rgb(APP_UI_THEME.text.primary))
-                                            .child(
-                                                selected_account
-                                                    .map(|account| {
-                                                        app_shared_text(
-                                                            settings_account_activation_key(
-                                                                account,
-                                                            ),
-                                                        )
-                                                    })
-                                                    .unwrap_or_else(|| {
-                                                        app_shared_text(AppTextKey::ValueNone)
-                                                    }),
-                                            ),
+                                            .child(app_shared_text(
+                                                AppTextKey::SettingsAccountActivationInactive,
+                                            )),
                                     ))
-                                    .when(selected_account.is_none(), |this| {
-                                        this.child(
-                                            div()
-                                                .w_full()
-                                                .text_size(px(detail_text_px))
-                                                .line_height(relative(1.2))
-                                                .text_color(rgb(APP_UI_THEME.text.secondary))
-                                                .child(app_shared_text(
-                                                    AppTextKey::SettingsAccountNoSelectionBody,
+                                    .child(
+                                        div()
+                                            .w_full()
+                                            .text_size(px(detail_text_px))
+                                            .line_height(relative(1.2))
+                                            .text_color(rgb(APP_UI_THEME.text.secondary))
+                                            .child(app_shared_text(
+                                                AppTextKey::SettingsAccountNoSelectionBody,
+                                            )),
+                                    )
+                                    .child(
+                                        div()
+                                            .w_full()
+                                            .flex()
+                                            .min_w_0()
+                                            .items_center()
+                                            .gap(px(
+                                                APP_UI_THEME
+                                                    .layout
+                                                    .settings_account_action_row_gap_px,
+                                            ))
+                                            .child(
+                                                div().child(action_button(
+                                                    "account-log-out",
+                                                    app_shared_text(
+                                                        AppTextKey::SettingsAccountLogOutAction,
+                                                    ),
+                                                    |_, _, _| {},
+                                                    cx,
                                                 )),
-                                        )
-                                    })
-                                    .when(selected_account.is_some(), |this| {
-                                        this.child(
-                                            div()
-                                                .w_full()
-                                                .flex()
-                                                .min_w_0()
-                                                .items_center()
-                                                .gap(px(
-                                                    APP_UI_THEME
-                                                        .layout
-                                                        .settings_account_action_row_gap_px,
-                                                ))
-                                                .child(
-                                                    div().child(action_button(
-                                                        "account-log-out",
-                                                        app_shared_text(
-                                                            AppTextKey::SettingsAccountLogOutAction,
-                                                        ),
-                                                        cx.listener(|this, _, _, cx| {
-                                                            this.remove_selected_local_key(cx);
-                                                        }),
-                                                        cx,
-                                                    )),
-                                                )
-                                                .child(
-                                                    div().child(action_button(
-                                                        "account-open-workspace",
-                                                        app_shared_text(
-                                                            AppTextKey::SettingsAccountOpenWorkspaceAction,
-                                                        ),
-                                                        cx.listener(|this, _, _, cx| {
-                                                            this.open_selected_workspace(cx);
-                                                        }),
-                                                        cx,
-                                                    )),
-                                                ),
-                                        )
-                                    }),
+                                            )
+                                            .child(
+                                                div().child(action_button(
+                                                    "account-open-workspace",
+                                                    app_shared_text(
+                                                        AppTextKey::SettingsAccountOpenWorkspaceAction,
+                                                    ),
+                                                    |_, _, _| {},
+                                                    cx,
+                                                )),
+                                            ),
+                                    ),
                             ),
                     ),
             )
@@ -770,13 +575,7 @@ impl SettingsWindowView {
                                 None,
                                 None,
                                 None,
-                                cx.listener(|this, checked: &bool, _, cx| {
-                                    this.set_settings_preference(
-                                        SettingsPreference::AllowRelayConnections,
-                                        *checked,
-                                        cx,
-                                    );
-                                }),
+                                |_, _, _| {},
                                 cx,
                             ))
                             .child(self.settings_checkbox_row(
@@ -786,13 +585,7 @@ impl SettingsWindowView {
                                 Some("settings-manage-media-servers"),
                                 Some(AppTextKey::SettingsGeneralManageAction),
                                 None,
-                                cx.listener(|this, checked: &bool, _, cx| {
-                                    this.set_settings_preference(
-                                        SettingsPreference::UseMediaServers,
-                                        *checked,
-                                        cx,
-                                    );
-                                }),
+                                |_, _, _| {},
                                 cx,
                             ))
                             .child(self.settings_checkbox_row(
@@ -802,13 +595,7 @@ impl SettingsWindowView {
                                 None,
                                 None,
                                 Some(AppTextKey::SettingsGeneralUseNip05Note),
-                                cx.listener(|this, checked: &bool, _, cx| {
-                                    this.set_settings_preference(
-                                        SettingsPreference::UseNip05,
-                                        *checked,
-                                        cx,
-                                    );
-                                }),
+                                |_, _, _| {},
                                 cx,
                             ))
                             .child(self.settings_checkbox_row(
@@ -818,13 +605,7 @@ impl SettingsWindowView {
                                 None,
                                 None,
                                 None,
-                                cx.listener(|this, checked: &bool, _, cx| {
-                                    this.set_settings_preference(
-                                        SettingsPreference::LaunchAtLogin,
-                                        *checked,
-                                        cx,
-                                    );
-                                }),
+                                |_, _, _| {},
                                 cx,
                             )),
                     ),
@@ -884,7 +665,7 @@ impl SettingsWindowView {
     }
 
     fn settings_panel_content(&mut self, cx: &mut Context<Self>) -> AnyElement {
-        match self.selected_view() {
+        match self.selected_view {
             SettingsPanelViewKey::Account => self.account_panel(cx).into_any_element(),
             SettingsPanelViewKey::Settings => self.settings_panel(cx).into_any_element(),
             SettingsPanelViewKey::About => self.about_panel().into_any_element(),
@@ -934,139 +715,6 @@ impl Render for SettingsWindowView {
                 ),
         )
     }
-}
-
-fn settings_account_display_name(account: &AccountSummary) -> SharedString {
-    match account.label.as_deref() {
-        Some(label) if !label.trim().is_empty() => label.to_owned().into(),
-        _ => app_shared_text(settings_account_custody_key(account.custody)),
-    }
-}
-
-fn settings_account_status_color(account_projection: &SettingsAccountProjection) -> u32 {
-    match account_projection.readiness {
-        IdentityReadiness::Ready => APP_UI_THEME.controls.status_indicator.online,
-        IdentityReadiness::MissingAccount => APP_UI_THEME.controls.status_indicator.offline,
-        IdentityReadiness::Blocked(_) => APP_UI_THEME.controls.status_indicator.attention,
-    }
-}
-
-fn settings_account_status_key(account_projection: &SettingsAccountProjection) -> AppTextKey {
-    match account_projection.readiness {
-        IdentityReadiness::Ready => AppTextKey::SettingsAccountStatusLoggedIn,
-        IdentityReadiness::MissingAccount => AppTextKey::SettingsAccountStatusLoggedOut,
-        IdentityReadiness::Blocked(_) => AppTextKey::SettingsAccountStatusBlocked,
-    }
-}
-
-fn settings_account_custody_key(custody: AccountCustody) -> AppTextKey {
-    match custody {
-        AccountCustody::LocalManaged => AppTextKey::SettingsAccountCustodyLocalManaged,
-        AccountCustody::BrowserSigner => AppTextKey::SettingsAccountCustodyBrowserSigner,
-        AccountCustody::RemoteSigner => AppTextKey::SettingsAccountCustodyRemoteSigner,
-    }
-}
-
-fn settings_account_surface_key(surface: ActiveSurface) -> AppTextKey {
-    match surface {
-        ActiveSurface::Personal => AppTextKey::SettingsAccountSurfacePersonal,
-        ActiveSurface::Farmer => AppTextKey::SettingsAccountSurfaceFarmer,
-    }
-}
-
-fn settings_account_activation_key(account: &SelectedAccountProjection) -> AppTextKey {
-    if account.farmer_activation.is_active() {
-        AppTextKey::SettingsAccountActivationActive
-    } else {
-        AppTextKey::SettingsAccountActivationInactive
-    }
-}
-
-fn settings_account_sidebar_row(
-    account: &AccountSummary,
-    selected_account_id: Option<&str>,
-    on_click: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
-    cx: &App,
-) -> AnyElement {
-    let is_selected = selected_account_id
-        .map(|account_id| account_id == account.account_id.as_str())
-        .unwrap_or(false);
-    let background = if is_selected {
-        APP_UI_THEME.surfaces.card_background
-    } else {
-        APP_UI_THEME.surfaces.chrome_background
-    };
-
-    Button::new(SharedString::from(account.account_id.clone()))
-        .custom(
-            ButtonCustomVariant::new(cx)
-                .color(rgb(background).into())
-                .foreground(rgb(APP_UI_THEME.text.primary).into())
-                .border(transparent_black())
-                .hover(rgb(APP_UI_THEME.surfaces.card_background).into())
-                .active(rgb(APP_UI_THEME.surfaces.card_background).into()),
-        )
-        .rounded(ButtonRounded::Size(px(APP_UI_THEME
-            .layout
-            .settings_account_sidebar_button_corner_radius_px)))
-        .h(px(APP_UI_THEME
-            .layout
-            .settings_account_sidebar_button_height_px))
-        .w_full()
-        .on_click(on_click)
-        .child(
-            div()
-                .size_full()
-                .p(px(APP_UI_THEME
-                    .layout
-                    .settings_account_sidebar_button_padding_px))
-                .flex()
-                .flex_row()
-                .justify_start()
-                .items_center()
-                .gap(px(APP_UI_THEME
-                    .layout
-                    .settings_account_sidebar_button_gap_px))
-                .child(
-                    div()
-                        .size(px(APP_UI_THEME
-                            .layout
-                            .settings_account_sidebar_avatar_size_px))
-                        .bg(rgb(APP_UI_THEME.surfaces.window_background))
-                        .rounded(px(APP_UI_THEME
-                            .layout
-                            .settings_account_sidebar_avatar_size_px
-                            / 2.0)),
-                )
-                .child(
-                    div()
-                        .min_w_0()
-                        .flex()
-                        .flex_col()
-                        .gap(px(APP_UI_THEME
-                            .layout
-                            .settings_account_identity_text_gap_px))
-                        .justify_center()
-                        .child(
-                            div()
-                                .text_size(px(APP_UI_THEME
-                                    .typography
-                                    .settings_account_identity_text_px))
-                                .font_weight(gpui::FontWeight::MEDIUM)
-                                .text_color(rgb(APP_UI_THEME.text.primary))
-                                .child(settings_account_display_name(account)),
-                        )
-                        .child(
-                            div()
-                                .text_size(px(APP_UI_THEME
-                                    .typography
-                                    .settings_account_identity_text_px))
-                                .text_color(rgb(APP_UI_THEME.text.secondary))
-                                .child(account.npub.clone()),
-                        ),
-                ),
-        )
-        .into_any_element()
 }
 
 fn settings_panel_label_key(view: SettingsPanelViewKey) -> AppTextKey {
