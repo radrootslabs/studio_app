@@ -1,9 +1,13 @@
 use gpui::{
-    AnyElement, App, AppContext, Context, InteractiveElement, IntoElement, ParentElement, Render,
-    SharedString, StatefulInteractiveElement, Styled, Window, div, prelude::FluentBuilder, px,
-    relative, rgb,
+    AnyElement, App, AppContext, Bounds, ClickEvent, Context, InteractiveElement, IntoElement,
+    ParentElement, Render, SharedString, StatefulInteractiveElement, Styled, Window,
+    WindowBackgroundAppearance, WindowBounds, WindowOptions, div, prelude::FluentBuilder, px,
+    relative, rgb, size, transparent_black,
 };
-use gpui_component::{IconName, Root};
+use gpui_component::{
+    IconName, Root,
+    button::{Button, ButtonCustomVariant, ButtonRounded, ButtonVariants},
+};
 use radroots_studio_app_i18n::AppTextKey;
 pub use radroots_studio_app_models::SettingsSection as SettingsPanelViewKey;
 use radroots_studio_app_models::{
@@ -13,9 +17,9 @@ use radroots_studio_app_models::{
 };
 use radroots_studio_app_ui::{
     APP_UI_THEME, AppCheckboxFieldSpec, IconSegmentButtonSpec, LabelValueRow, action_button,
-    action_button_compact, action_icon_button, app_checkbox_field, app_shared_label_text,
-    app_shared_text, app_window_shell, icon_segment_button, label_value_list, section_divider,
-    status_indicator, utility_title_row,
+    action_button_compact, action_icon_button, app_center_stage, app_checkbox_field,
+    app_shared_label_text, app_shared_text, app_window_shell, icon_segment_button,
+    label_value_list, section_divider, status_indicator, utility_title_row,
 };
 
 use crate::runtime::{DesktopAppRuntime, DesktopAppRuntimeSummary};
@@ -32,6 +36,90 @@ pub fn settings_titlebar_options() -> gpui::TitlebarOptions {
     gpui::TitlebarOptions {
         title: None,
         appears_transparent: true,
+        ..Default::default()
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum PrimaryWindowTarget {
+    Home,
+    SettingsAccount,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum HomeStage {
+    Setup,
+    PersonalHolding,
+    FarmerWorkspace,
+}
+
+pub fn primary_window_target(summary: &DesktopAppRuntimeSummary) -> PrimaryWindowTarget {
+    if summary.startup_issue.is_some()
+        || matches!(
+            summary.startup_gate,
+            AppStartupGate::Blocked | AppStartupGate::SetupRequired
+        )
+    {
+        PrimaryWindowTarget::SettingsAccount
+    } else {
+        PrimaryWindowTarget::Home
+    }
+}
+
+pub fn home_stage(summary: &DesktopAppRuntimeSummary) -> HomeStage {
+    if summary.startup_issue.is_some()
+        || matches!(
+            summary.startup_gate,
+            AppStartupGate::Blocked | AppStartupGate::SetupRequired
+        )
+    {
+        HomeStage::Setup
+    } else if summary.startup_gate == AppStartupGate::Farmer {
+        HomeStage::FarmerWorkspace
+    } else {
+        HomeStage::PersonalHolding
+    }
+}
+
+pub fn home_window_options(cx: &mut App) -> WindowOptions {
+    let bounds = Bounds::centered(
+        None,
+        size(
+            px(APP_UI_THEME.windows.home_min_width_px),
+            px(APP_UI_THEME.windows.home_min_height_px),
+        ),
+        cx,
+    );
+
+    WindowOptions {
+        window_bounds: Some(WindowBounds::Windowed(bounds)),
+        window_min_size: Some(size(
+            px(APP_UI_THEME.windows.home_min_width_px),
+            px(APP_UI_THEME.windows.home_min_height_px),
+        )),
+        titlebar: Some(home_titlebar_options()),
+        ..Default::default()
+    }
+}
+
+pub fn settings_window_options(cx: &mut App) -> WindowOptions {
+    let bounds = Bounds::centered(
+        None,
+        size(
+            px(APP_UI_THEME.windows.settings_width_px),
+            px(APP_UI_THEME.windows.settings_height_px),
+        ),
+        cx,
+    );
+
+    WindowOptions {
+        window_bounds: Some(WindowBounds::Windowed(bounds)),
+        window_min_size: Some(size(
+            px(APP_UI_THEME.windows.settings_width_px),
+            px(APP_UI_THEME.windows.settings_height_px),
+        )),
+        titlebar: Some(settings_titlebar_options()),
+        window_background: WindowBackgroundAppearance::Transparent,
         ..Default::default()
     }
 }
@@ -71,76 +159,12 @@ impl HomeView {
 impl Render for HomeView {
     fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
         let runtime_summary = self.runtime.summary();
-        let home_status = home_status_presentation(&runtime_summary);
-
-        app_window_shell(
-            APP_UI_THEME.surfaces.window_background,
-            div()
-                .size_full()
-                .overflow_hidden()
-                .flex()
-                .child(
-                    div()
-                        .h_full()
-                        .w(px(APP_UI_THEME.layout.home_sidebar_width_px))
-                        .bg(rgb(APP_UI_THEME.surfaces.card_background))
-                        .p(px(APP_UI_THEME.layout.home_window_padding_px))
-                        .flex()
-                        .flex_col()
-                        .justify_between()
-                        .child(
-                            div()
-                                .flex()
-                                .flex_col()
-                                .gap(px(APP_UI_THEME.layout.home_stack_gap_px))
-                                .child(
-                                    div()
-                                        .text_size(px(APP_UI_THEME.typography.body_text_px * 2.0))
-                                        .font_weight(gpui::FontWeight::BOLD)
-                                        .text_color(rgb(APP_UI_THEME.text.primary))
-                                        .child(app_shared_text(AppTextKey::HomeTodayTitle)),
-                                )
-                                .child(home_status_row(&home_status)),
-                        )
-                        .child(
-                            div().child(
-                                div()
-                                    .text_size(px(APP_UI_THEME.typography.body_text_px))
-                                    .line_height(relative(1.2))
-                                    .text_color(rgb(APP_UI_THEME.text.secondary))
-                                    .when_some(
-                                        runtime_summary.today_projection.farm.as_ref(),
-                                        |this, farm| this.child(farm.display_name.clone()),
-                                    ),
-                            ),
-                        ),
-                )
-                .child(
-                    div()
-                        .h_full()
-                        .w(px(APP_UI_THEME.layout.divider_thickness_px))
-                        .bg(rgb(APP_UI_THEME.surfaces.divider)),
-                )
-                .child(
-                    div()
-                        .flex_1()
-                        .h_full()
-                        .bg(rgb(APP_UI_THEME.surfaces.window_background))
-                        .overflow_hidden()
-                        .child(
-                            div()
-                                .size_full()
-                                .p(px(APP_UI_THEME.layout.home_window_padding_px))
-                                .child(
-                                    div()
-                                        .id("home-today-scroll")
-                                        .size_full()
-                                        .overflow_y_scroll()
-                                        .child(home_view_content(&runtime_summary)),
-                                ),
-                        ),
-                ),
-        )
+        match home_stage(&runtime_summary) {
+            HomeStage::FarmerWorkspace => farmer_home_shell(&runtime_summary).into_any_element(),
+            HomeStage::Setup | HomeStage::PersonalHolding => {
+                holding_home_shell(&runtime_summary).into_any_element()
+            }
+        }
     }
 }
 
@@ -174,6 +198,89 @@ impl SettingsWindowView {
         }
     }
 
+    fn finish_account_runtime_change(
+        &mut self,
+        changed: bool,
+        previous_target: PrimaryWindowTarget,
+        cx: &mut Context<Self>,
+    ) {
+        if changed {
+            cx.refresh_windows();
+            cx.notify();
+        }
+
+        if previous_target == PrimaryWindowTarget::SettingsAccount
+            && primary_window_target(&self.runtime.summary()) == PrimaryWindowTarget::Home
+        {
+            self.ensure_home_window_if_ready(cx);
+        }
+    }
+
+    fn ensure_home_window_if_ready(&self, cx: &mut Context<Self>) {
+        if primary_window_target(&self.runtime.summary()) != PrimaryWindowTarget::Home {
+            return;
+        }
+
+        if cx.windows().len() > 1 {
+            cx.refresh_windows();
+            return;
+        }
+
+        let runtime = self.runtime.clone();
+        let options = home_window_options(cx);
+        let _ = cx.open_window(options, |window, cx| {
+            window.activate_window();
+            open_home_window(window, cx, runtime.clone())
+        });
+    }
+
+    fn generate_local_account(&mut self, cx: &mut Context<Self>) {
+        let previous_target = primary_window_target(&self.runtime.summary());
+        let changed = self.runtime.generate_local_account(None).unwrap_or(false);
+        self.finish_account_runtime_change(changed, previous_target, cx);
+    }
+
+    fn select_local_account(&mut self, account_id: &str, cx: &mut Context<Self>) {
+        let previous_target = primary_window_target(&self.runtime.summary());
+        let changed = self
+            .runtime
+            .select_local_account(account_id)
+            .unwrap_or(false);
+        self.finish_account_runtime_change(changed, previous_target, cx);
+    }
+
+    fn remove_selected_local_key(&mut self, cx: &mut Context<Self>) {
+        let previous_target = primary_window_target(&self.runtime.summary());
+        let changed = self.runtime.remove_selected_local_key().unwrap_or(false);
+        self.finish_account_runtime_change(changed, previous_target, cx);
+    }
+
+    fn open_selected_workspace(&mut self, cx: &mut Context<Self>) {
+        let runtime_summary = self.runtime.summary();
+        let previous_target = primary_window_target(&runtime_summary);
+        let Some(target_surface) = runtime_summary
+            .settings_account_projection
+            .selected_account
+            .as_ref()
+            .map(|account| {
+                if account.farmer_activation.is_active() {
+                    ActiveSurface::Farmer
+                } else {
+                    ActiveSurface::Personal
+                }
+            })
+        else {
+            return;
+        };
+
+        let changed = self
+            .runtime
+            .select_active_surface(target_surface)
+            .unwrap_or(false);
+        self.finish_account_runtime_change(changed, previous_target, cx);
+        self.ensure_home_window_if_ready(cx);
+    }
+
     fn navigation_button(
         &mut self,
         view: SettingsPanelViewKey,
@@ -192,7 +299,7 @@ impl SettingsWindowView {
         )
     }
 
-    fn account_panel(&self, cx: &mut Context<Self>) -> impl IntoElement {
+    fn account_panel(&mut self, cx: &mut Context<Self>) -> impl IntoElement {
         let detail_text_px = APP_UI_THEME.typography.settings_account_detail_text_px;
         let runtime_summary = self.runtime.summary();
         let account_projection = &runtime_summary.settings_account_projection;
@@ -273,9 +380,14 @@ impl SettingsWindowView {
                                         .roster
                                         .iter()
                                         .map(|account| {
+                                            let account_id = account.account_id.clone();
                                             settings_account_sidebar_row(
                                                 account,
                                                 selected_account_id,
+                                                cx.listener(move |this, _, _, cx| {
+                                                    this.select_local_account(account_id.as_str(), cx);
+                                                }),
+                                                cx,
                                             )
                                         })
                                         .collect::<Vec<_>>(),
@@ -310,7 +422,9 @@ impl SettingsWindowView {
                                     .child(action_button(
                                         "account-add",
                                         app_shared_text(AppTextKey::SettingsAccountAddAction),
-                                        |_, _, _| {},
+                                        cx.listener(|this, _, _, cx| {
+                                            this.generate_local_account(cx);
+                                        }),
                                         cx,
                                     ))
                                     .child(action_icon_button(
@@ -515,7 +629,9 @@ impl SettingsWindowView {
                                                         app_shared_text(
                                                             AppTextKey::SettingsAccountLogOutAction,
                                                         ),
-                                                        |_, _, _| {},
+                                                        cx.listener(|this, _, _, cx| {
+                                                            this.remove_selected_local_key(cx);
+                                                        }),
                                                         cx,
                                                     )),
                                                 )
@@ -525,7 +641,9 @@ impl SettingsWindowView {
                                                         app_shared_text(
                                                             AppTextKey::SettingsAccountAdminConsoleAction,
                                                         ),
-                                                        |_, _, _| {},
+                                                        cx.listener(|this, _, _, cx| {
+                                                            this.open_selected_workspace(cx);
+                                                        }),
                                                         cx,
                                                     )),
                                                 ),
@@ -858,70 +976,85 @@ fn settings_account_activation_key(account: &SelectedAccountProjection) -> AppTe
 fn settings_account_sidebar_row(
     account: &AccountSummary,
     selected_account_id: Option<&str>,
+    on_click: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+    cx: &App,
 ) -> AnyElement {
     let is_selected = selected_account_id
         .map(|account_id| account_id == account.account_id.as_str())
         .unwrap_or(false);
+    let background = if is_selected {
+        APP_UI_THEME.surfaces.card_background
+    } else {
+        APP_UI_THEME.surfaces.chrome_background
+    };
 
-    div()
-        .w_full()
+    Button::new(SharedString::from(account.account_id.clone()))
+        .custom(
+            ButtonCustomVariant::new(cx)
+                .color(rgb(background).into())
+                .foreground(rgb(APP_UI_THEME.text.primary).into())
+                .border(transparent_black())
+                .hover(rgb(APP_UI_THEME.surfaces.card_background).into())
+                .active(rgb(APP_UI_THEME.surfaces.card_background).into()),
+        )
+        .rounded(ButtonRounded::Size(px(APP_UI_THEME
+            .layout
+            .settings_account_sidebar_button_corner_radius_px)))
         .h(px(APP_UI_THEME
             .layout
             .settings_account_sidebar_button_height_px))
-        .bg(rgb(if is_selected {
-            APP_UI_THEME.surfaces.card_background
-        } else {
-            APP_UI_THEME.surfaces.chrome_background
-        }))
-        .rounded(px(APP_UI_THEME
-            .layout
-            .settings_account_sidebar_button_corner_radius_px))
-        .p(px(APP_UI_THEME
-            .layout
-            .settings_account_sidebar_button_padding_px))
-        .flex()
-        .flex_row()
-        .justify_start()
-        .items_center()
-        .gap(px(APP_UI_THEME
-            .layout
-            .settings_account_sidebar_button_gap_px))
+        .w_full()
+        .on_click(on_click)
         .child(
             div()
-                .size(px(APP_UI_THEME
+                .size_full()
+                .p(px(APP_UI_THEME
                     .layout
-                    .settings_account_sidebar_avatar_size_px))
-                .bg(rgb(APP_UI_THEME.surfaces.window_background))
-                .rounded(px(APP_UI_THEME
-                    .layout
-                    .settings_account_sidebar_avatar_size_px
-                    / 2.0)),
-        )
-        .child(
-            div()
-                .min_w_0()
+                    .settings_account_sidebar_button_padding_px))
                 .flex()
-                .flex_col()
+                .flex_row()
+                .justify_start()
+                .items_center()
                 .gap(px(APP_UI_THEME
                     .layout
-                    .settings_account_identity_text_gap_px))
-                .justify_center()
+                    .settings_account_sidebar_button_gap_px))
                 .child(
                     div()
-                        .text_size(px(APP_UI_THEME
-                            .typography
-                            .settings_account_identity_text_px))
-                        .font_weight(gpui::FontWeight::MEDIUM)
-                        .text_color(rgb(APP_UI_THEME.text.primary))
-                        .child(settings_account_display_name(account)),
+                        .size(px(APP_UI_THEME
+                            .layout
+                            .settings_account_sidebar_avatar_size_px))
+                        .bg(rgb(APP_UI_THEME.surfaces.window_background))
+                        .rounded(px(APP_UI_THEME
+                            .layout
+                            .settings_account_sidebar_avatar_size_px
+                            / 2.0)),
                 )
                 .child(
                     div()
-                        .text_size(px(APP_UI_THEME
-                            .typography
-                            .settings_account_identity_text_px))
-                        .text_color(rgb(APP_UI_THEME.text.secondary))
-                        .child(account.npub.clone()),
+                        .min_w_0()
+                        .flex()
+                        .flex_col()
+                        .gap(px(APP_UI_THEME
+                            .layout
+                            .settings_account_identity_text_gap_px))
+                        .justify_center()
+                        .child(
+                            div()
+                                .text_size(px(APP_UI_THEME
+                                    .typography
+                                    .settings_account_identity_text_px))
+                                .font_weight(gpui::FontWeight::MEDIUM)
+                                .text_color(rgb(APP_UI_THEME.text.primary))
+                                .child(settings_account_display_name(account)),
+                        )
+                        .child(
+                            div()
+                                .text_size(px(APP_UI_THEME
+                                    .typography
+                                    .settings_account_identity_text_px))
+                                .text_color(rgb(APP_UI_THEME.text.secondary))
+                                .child(account.npub.clone()),
+                        ),
                 ),
         )
         .into_any_element()
@@ -947,6 +1080,121 @@ fn settings_panel_spec(view: SettingsPanelViewKey) -> (&'static str, IconName) {
 struct HomeStatusPresentation {
     indicator_color: u32,
     label_key: AppTextKey,
+}
+
+fn farmer_home_shell(runtime: &DesktopAppRuntimeSummary) -> impl IntoElement {
+    let home_status = home_status_presentation(runtime);
+
+    app_window_shell(
+        APP_UI_THEME.surfaces.window_background,
+        div()
+            .size_full()
+            .overflow_hidden()
+            .flex()
+            .child(
+                div()
+                    .h_full()
+                    .w(px(APP_UI_THEME.layout.home_sidebar_width_px))
+                    .bg(rgb(APP_UI_THEME.surfaces.card_background))
+                    .p(px(APP_UI_THEME.layout.home_window_padding_px))
+                    .flex()
+                    .flex_col()
+                    .justify_between()
+                    .child(
+                        div()
+                            .flex()
+                            .flex_col()
+                            .gap(px(APP_UI_THEME.layout.home_stack_gap_px))
+                            .child(
+                                div()
+                                    .text_size(px(APP_UI_THEME.typography.body_text_px * 2.0))
+                                    .font_weight(gpui::FontWeight::BOLD)
+                                    .text_color(rgb(APP_UI_THEME.text.primary))
+                                    .child(app_shared_text(AppTextKey::HomeTodayTitle)),
+                            )
+                            .child(home_status_row(&home_status)),
+                    )
+                    .child(
+                        div().child(
+                            div()
+                                .text_size(px(APP_UI_THEME.typography.body_text_px))
+                                .line_height(relative(1.2))
+                                .text_color(rgb(APP_UI_THEME.text.secondary))
+                                .when_some(runtime.today_projection.farm.as_ref(), |this, farm| {
+                                    this.child(farm.display_name.clone())
+                                }),
+                        ),
+                    ),
+            )
+            .child(
+                div()
+                    .h_full()
+                    .w(px(APP_UI_THEME.layout.divider_thickness_px))
+                    .bg(rgb(APP_UI_THEME.surfaces.divider)),
+            )
+            .child(
+                div()
+                    .flex_1()
+                    .h_full()
+                    .bg(rgb(APP_UI_THEME.surfaces.window_background))
+                    .overflow_hidden()
+                    .child(
+                        div()
+                            .size_full()
+                            .p(px(APP_UI_THEME.layout.home_window_padding_px))
+                            .child(
+                                div()
+                                    .id("home-today-scroll")
+                                    .size_full()
+                                    .overflow_y_scroll()
+                                    .child(home_view_content(runtime)),
+                            ),
+                    ),
+            ),
+    )
+}
+
+fn holding_home_shell(runtime: &DesktopAppRuntimeSummary) -> impl IntoElement {
+    let home_status = home_status_presentation(runtime);
+    let (title_key, body_key) = match home_stage(runtime) {
+        HomeStage::Setup => (
+            AppTextKey::HomeTodayEmptySetupTitle,
+            AppTextKey::HomeTodayEmptySetupBody,
+        ),
+        HomeStage::PersonalHolding => (
+            AppTextKey::HomeTodayEmptyNoFarmTitle,
+            AppTextKey::HomeTodayEmptyNoFarmBody,
+        ),
+        HomeStage::FarmerWorkspace => (
+            AppTextKey::HomeTodayEmptyQuietTitle,
+            AppTextKey::HomeTodayEmptyQuietBody,
+        ),
+    };
+    let mut sections = vec![home_empty_state_card(title_key, body_key).into_any_element()];
+
+    if let Some(issue) = runtime.startup_issue.as_ref() {
+        sections.push(
+            home_card(
+                app_shared_text(AppTextKey::MetadataStartupIssue),
+                home_body_text(issue.clone()),
+            )
+            .into_any_element(),
+        );
+    }
+
+    app_window_shell(
+        APP_UI_THEME.surfaces.window_background,
+        app_center_stage(
+            div()
+                .w_full()
+                .max_w(px(APP_UI_THEME.layout.home_card_max_width_px))
+                .flex()
+                .flex_col()
+                .gap(px(APP_UI_THEME.layout.home_stack_gap_px))
+                .child(home_status_row(&home_status))
+                .children(sections),
+        ),
+    )
 }
 
 fn home_view_content(runtime: &DesktopAppRuntimeSummary) -> impl IntoElement {

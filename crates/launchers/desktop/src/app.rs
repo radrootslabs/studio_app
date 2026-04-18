@@ -1,16 +1,18 @@
-use gpui::{Application, Bounds, WindowBounds, WindowOptions, px, size};
+use gpui::Application;
 use radroots_studio_app_core::{
     APP_PROJECTION_SOURCE, AppBuildIdentity, AppRuntimeConfig, AppRuntimeConfigError,
     AppRuntimeSnapshot, bootstrap_logging, install_panic_hook, launch_startup_event,
 };
 use radroots_studio_app_i18n::select_locale_from_host;
-use radroots_studio_app_ui::APP_UI_THEME;
 use thiserror::Error;
 use tracing::{error, info};
 
 use crate::menus::install_native_app_menu;
 use crate::runtime::{DesktopAppRuntime, DesktopAppRuntimeSummary};
-use crate::window::{home_titlebar_options, open_home_window};
+use crate::window::{
+    PrimaryWindowTarget, SettingsPanelViewKey, home_window_options, open_home_window,
+    open_settings_window, primary_window_target, settings_window_options,
+};
 
 #[derive(Debug, Error)]
 pub enum AppLaunchError {
@@ -28,7 +30,9 @@ pub fn launch() -> Result<(), AppLaunchError> {
     install_panic_hook();
 
     let runtime = DesktopAppRuntime::bootstrap();
-    emit_runtime_events(&snapshot, &runtime.summary());
+    let runtime_summary = runtime.summary();
+    emit_runtime_events(&snapshot, &runtime_summary);
+    let launch_target = primary_window_target(&runtime_summary);
 
     let app = Application::new().with_assets(gpui_component_assets::Assets);
 
@@ -46,36 +50,39 @@ pub fn launch() -> Result<(), AppLaunchError> {
 
         let snapshot = snapshot.clone();
         let runtime = runtime.clone();
-        let home_bounds = Bounds::centered(
-            None,
-            size(
-                px(APP_UI_THEME.windows.home_min_width_px),
-                px(APP_UI_THEME.windows.home_min_height_px),
-            ),
-            cx,
-        );
+        let launch_target = launch_target;
+        let mut primary_window_options = match launch_target {
+            PrimaryWindowTarget::Home => home_window_options(cx),
+            PrimaryWindowTarget::SettingsAccount => settings_window_options(cx),
+        };
+        primary_window_options.app_id = Some(snapshot.host.app_identifier.clone());
         cx.spawn(async move |cx| {
-            if let Err(error) = cx.open_window(
-                WindowOptions {
-                    app_id: Some(snapshot.host.app_identifier.clone()),
-                    window_bounds: Some(WindowBounds::Windowed(home_bounds)),
-                    window_min_size: Some(size(
-                        px(APP_UI_THEME.windows.home_min_width_px),
-                        px(APP_UI_THEME.windows.home_min_height_px),
-                    )),
-                    titlebar: Some(home_titlebar_options()),
-                    ..Default::default()
-                },
-                |window, cx| {
-                    window.activate_window();
-                    open_home_window(window, cx, runtime.clone())
-                },
-            ) {
+            let open_result = match launch_target {
+                PrimaryWindowTarget::Home => {
+                    cx.open_window(primary_window_options, |window, cx| {
+                        window.activate_window();
+                        open_home_window(window, cx, runtime.clone())
+                    })
+                }
+                PrimaryWindowTarget::SettingsAccount => {
+                    cx.open_window(primary_window_options, |window, cx| {
+                        window.activate_window();
+                        open_settings_window(
+                            window,
+                            cx,
+                            runtime.clone(),
+                            SettingsPanelViewKey::Account,
+                        )
+                    })
+                }
+            };
+
+            if let Err(error) = open_result {
                 error!(
                     target: "window",
-                    event = "window.home_open_failed",
+                    event = "window.primary_open_failed",
                     error = %error,
-                    "failed to open home window"
+                    "failed to open primary window"
                 );
                 let _ = cx.update(|cx| cx.quit());
                 return;
@@ -83,9 +90,9 @@ pub fn launch() -> Result<(), AppLaunchError> {
 
             info!(
                 target: "window",
-                event = "window.home_opened",
+                event = "window.primary_opened",
                 app_id = %snapshot.host.app_identifier,
-                "home window opened"
+                "primary window opened"
             );
 
             if let Err(error) = cx.update(|cx| cx.activate(true)) {
@@ -164,6 +171,7 @@ mod tests {
     use crate::runtime::DesktopAppRuntimeSummary;
 
     use super::emit_runtime_events;
+    use crate::window::{HomeStage, PrimaryWindowTarget, home_stage, primary_window_target};
 
     #[derive(Clone, Debug, Eq, PartialEq)]
     struct CapturedEvent {
@@ -278,5 +286,106 @@ mod tests {
             events[1].message.as_deref(),
             Some("desktop runtime degraded")
         );
+    }
+
+    #[test]
+    fn blocked_and_setup_runtime_target_the_settings_account_window() {
+        let blocked = DesktopAppRuntimeSummary {
+            shell_projection: AppShellProjection::default(),
+            settings_account_projection: SettingsAccountProjection::default(),
+            startup_gate: AppStartupGate::Blocked,
+            today_projection: TodayAgendaProjection::default(),
+            startup_issue: None,
+        };
+        let setup = DesktopAppRuntimeSummary {
+            shell_projection: AppShellProjection::default(),
+            settings_account_projection: SettingsAccountProjection::default(),
+            startup_gate: AppStartupGate::SetupRequired,
+            today_projection: TodayAgendaProjection::default(),
+            startup_issue: None,
+        };
+
+        assert_eq!(
+            primary_window_target(&blocked),
+            PrimaryWindowTarget::SettingsAccount
+        );
+        assert_eq!(
+            primary_window_target(&setup),
+            PrimaryWindowTarget::SettingsAccount
+        );
+    }
+
+    #[test]
+    fn ready_runtime_targets_the_home_window() {
+        let personal = DesktopAppRuntimeSummary {
+            shell_projection: AppShellProjection::default(),
+            settings_account_projection: SettingsAccountProjection::default(),
+            startup_gate: AppStartupGate::Personal,
+            today_projection: TodayAgendaProjection::default(),
+            startup_issue: None,
+        };
+        let farmer = DesktopAppRuntimeSummary {
+            shell_projection: AppShellProjection::default(),
+            settings_account_projection: SettingsAccountProjection::default(),
+            startup_gate: AppStartupGate::Farmer,
+            today_projection: TodayAgendaProjection::default(),
+            startup_issue: None,
+        };
+
+        assert_eq!(primary_window_target(&personal), PrimaryWindowTarget::Home);
+        assert_eq!(primary_window_target(&farmer), PrimaryWindowTarget::Home);
+    }
+
+    #[test]
+    fn degraded_runtime_targets_the_settings_account_window() {
+        let degraded = DesktopAppRuntimeSummary {
+            shell_projection: AppShellProjection::default(),
+            settings_account_projection: SettingsAccountProjection::default(),
+            startup_gate: AppStartupGate::Personal,
+            today_projection: TodayAgendaProjection::default(),
+            startup_issue: Some("runtime unavailable".to_owned()),
+        };
+
+        assert_eq!(
+            primary_window_target(&degraded),
+            PrimaryWindowTarget::SettingsAccount
+        );
+    }
+
+    #[test]
+    fn home_stage_tracks_setup_personal_and_farmer_states() {
+        let setup = DesktopAppRuntimeSummary {
+            shell_projection: AppShellProjection::default(),
+            settings_account_projection: SettingsAccountProjection::default(),
+            startup_gate: AppStartupGate::SetupRequired,
+            today_projection: TodayAgendaProjection::default(),
+            startup_issue: None,
+        };
+        let personal = DesktopAppRuntimeSummary {
+            shell_projection: AppShellProjection::default(),
+            settings_account_projection: SettingsAccountProjection::default(),
+            startup_gate: AppStartupGate::Personal,
+            today_projection: TodayAgendaProjection::default(),
+            startup_issue: None,
+        };
+        let farmer = DesktopAppRuntimeSummary {
+            shell_projection: AppShellProjection::default(),
+            settings_account_projection: SettingsAccountProjection::default(),
+            startup_gate: AppStartupGate::Farmer,
+            today_projection: TodayAgendaProjection::default(),
+            startup_issue: None,
+        };
+        let blocked = DesktopAppRuntimeSummary {
+            shell_projection: AppShellProjection::default(),
+            settings_account_projection: SettingsAccountProjection::default(),
+            startup_gate: AppStartupGate::Farmer,
+            today_projection: TodayAgendaProjection::default(),
+            startup_issue: Some("runtime unavailable".to_owned()),
+        };
+
+        assert_eq!(home_stage(&setup), HomeStage::Setup);
+        assert_eq!(home_stage(&personal), HomeStage::PersonalHolding);
+        assert_eq!(home_stage(&farmer), HomeStage::FarmerWorkspace);
+        assert_eq!(home_stage(&blocked), HomeStage::Setup);
     }
 }

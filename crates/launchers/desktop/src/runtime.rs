@@ -3,7 +3,7 @@ use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
 use radroots_studio_app_core::{AppDesktopRuntimePaths, AppRuntimePathsError, AppSharedAccountsPaths};
 use radroots_studio_app_models::{
-    AppActivityContext, AppActivityKind, AppStartupGate, SettingsAccountProjection,
+    ActiveSurface, AppActivityContext, AppActivityKind, AppStartupGate, SettingsAccountProjection,
     SettingsPreference, SettingsSection, TodayAgendaProjection,
 };
 use radroots_studio_app_sqlite::{
@@ -20,7 +20,8 @@ use tracing::error;
 use crate::accounts::{
     DesktopAccountsBootstrapError, DesktopAccountsCommandError, DesktopLocalIdentityImportRequest,
     bootstrap_desktop_accounts, generate_local_account, import_local_account,
-    remove_selected_local_key, reset_local_device_state, select_local_account,
+    remove_selected_local_key, reset_local_device_state, select_active_surface,
+    select_local_account,
 };
 
 const APP_DATABASE_FILE_NAME: &str = "app.sqlite3";
@@ -110,6 +111,13 @@ impl DesktopAppRuntime {
         account_id: &str,
     ) -> Result<bool, DesktopAppRuntimeCommandError> {
         self.lock_state_mut().select_local_account(account_id)
+    }
+
+    pub fn select_active_surface(
+        &self,
+        active_surface: ActiveSurface,
+    ) -> Result<bool, DesktopAppRuntimeCommandError> {
+        self.lock_state_mut().select_active_surface(active_surface)
     }
 
     pub fn remove_selected_local_key(&self) -> Result<bool, DesktopAppRuntimeCommandError> {
@@ -281,6 +289,19 @@ impl DesktopAppRuntimeState {
             let accounts_manager = self.accounts_manager()?;
             let sqlite_store = self.sqlite_store()?;
             select_local_account(accounts_manager, sqlite_store, account_id)?
+        };
+
+        Ok(self.replace_identity_projection(projection))
+    }
+
+    fn select_active_surface(
+        &mut self,
+        active_surface: ActiveSurface,
+    ) -> Result<bool, DesktopAppRuntimeCommandError> {
+        let projection = {
+            let accounts_manager = self.accounts_manager()?;
+            let sqlite_store = self.sqlite_store()?;
+            select_active_surface(accounts_manager, sqlite_store, active_surface)?
         };
 
         Ok(self.replace_identity_projection(projection))
@@ -736,6 +757,89 @@ mod tests {
                 .as_ref()
                 .map(|account| account.account.account_id.as_str()),
             Some(imported_identity.id().as_str())
+        );
+    }
+
+    #[test]
+    fn runtime_select_active_surface_persists_selected_surface() {
+        let runtime = memory_runtime();
+
+        assert!(
+            runtime
+                .generate_local_account(Some("Farmer".to_owned()))
+                .expect("account should generate")
+        );
+        let account_id = runtime
+            .summary()
+            .settings_account_projection
+            .selected_account
+            .as_ref()
+            .expect("selected account")
+            .account
+            .account_id
+            .clone();
+        save_surface_activation(&runtime, account_id.as_str(), ActiveSurface::Farmer, true);
+        assert!(
+            runtime
+                .select_local_account(account_id.as_str())
+                .expect("account should select")
+        );
+        assert_eq!(runtime.summary().startup_gate, AppStartupGate::Farmer);
+
+        assert!(
+            runtime
+                .select_active_surface(ActiveSurface::Personal)
+                .expect("surface should select")
+        );
+        let personal_summary = runtime.summary();
+        assert_eq!(personal_summary.startup_gate, AppStartupGate::Personal);
+        assert_eq!(
+            personal_summary
+                .settings_account_projection
+                .selected_account
+                .as_ref()
+                .map(|account| account.active_surface()),
+            Some(ActiveSurface::Personal)
+        );
+        assert_eq!(
+            runtime
+                .lock_state()
+                .sqlite_store
+                .as_ref()
+                .expect("sqlite store")
+                .load_surface_activation(account_id.as_str())
+                .expect("surface activation should load")
+                .expect("surface activation should exist")
+                .active_surface(),
+            ActiveSurface::Personal
+        );
+
+        assert!(
+            runtime
+                .select_active_surface(ActiveSurface::Farmer)
+                .expect("surface should reselect")
+        );
+        let farmer_summary = runtime.summary();
+        assert_eq!(farmer_summary.startup_gate, AppStartupGate::Farmer);
+        assert_eq!(
+            farmer_summary
+                .settings_account_projection
+                .selected_account
+                .as_ref()
+                .map(|account| account.active_surface()),
+            Some(ActiveSurface::Farmer)
+        );
+        assert_eq!(
+            runtime
+                .lock_state()
+                .sqlite_store
+                .as_ref()
+                .expect("sqlite store")
+                .load_surface_activation(account_id.as_str())
+                .expect("surface activation should load")
+                .expect("surface activation should exist")
+                .active_surface(),
+            ActiveSurface::Farmer
         );
     }
 

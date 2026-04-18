@@ -5,8 +5,9 @@ use std::{
 
 use radroots_studio_app_core::AppSharedAccountsPaths;
 use radroots_studio_app_models::{
-    AccountSummary, AppIdentityProjection, FarmerActivationProjection, IdentityBlockedReason,
-    SelectedAccountProjection, SelectedSurfaceProjection,
+    AccountSummary, AccountSurfaceActivationProjection, ActiveSurface, AppIdentityProjection,
+    FarmerActivationProjection, IdentityBlockedReason, SelectedAccountProjection,
+    SelectedSurfaceProjection,
 };
 use radroots_studio_app_sqlite::{AppSqliteError, AppSqliteStore};
 use radroots_identity::{IdentityError, RadrootsIdentity, RadrootsIdentityId};
@@ -114,6 +115,26 @@ pub fn select_local_account(
 ) -> Result<AppIdentityProjection, DesktopAccountsCommandError> {
     let account_id = RadrootsIdentityId::parse(account_id.trim())?;
     manager.select_account(&account_id)?;
+    Ok(identity_projection_from_manager(manager, sqlite_store)?)
+}
+
+pub fn select_active_surface(
+    manager: &RadrootsNostrAccountsManager,
+    sqlite_store: &AppSqliteStore,
+    active_surface: ActiveSurface,
+) -> Result<AppIdentityProjection, DesktopAccountsCommandError> {
+    let Some(selected_account) = manager.selected_account()? else {
+        return Ok(identity_projection_from_manager(manager, sqlite_store)?);
+    };
+    let selected_projection =
+        selected_account_projection_from_record(&selected_account, sqlite_store)?;
+    let activation = AccountSurfaceActivationProjection::new(
+        selected_projection.account.account_id.clone(),
+        SelectedSurfaceProjection::new(active_surface),
+        selected_projection.farmer_activation.clone(),
+    );
+
+    sqlite_store.save_surface_activation(&activation)?;
     Ok(identity_projection_from_manager(manager, sqlite_store)?)
 }
 

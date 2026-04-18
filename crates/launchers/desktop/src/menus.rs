@@ -1,13 +1,9 @@
-use gpui::{
-    App, Bounds, KeyBinding, Menu, MenuItem, SystemMenuType, WindowBackgroundAppearance,
-    WindowBounds, WindowOptions, actions, px, size,
-};
+use gpui::{App, KeyBinding, Menu, MenuItem, SystemMenuType, actions};
 use radroots_studio_app_i18n::{AppTextKey, app_text};
-use radroots_studio_app_ui::APP_UI_THEME;
 
 use crate::{
     runtime::DesktopAppRuntime,
-    window::{SettingsPanelViewKey, open_settings_window, settings_titlebar_options},
+    window::{SettingsPanelViewKey, open_settings_window, settings_window_options},
 };
 
 actions!(radroots_studio_app, [OpenAboutWindow, QuitApp]);
@@ -18,30 +14,10 @@ const fn about_menu_settings_view() -> SettingsPanelViewKey {
 
 pub fn install_native_app_menu(runtime: DesktopAppRuntime, cx: &mut App) {
     cx.on_action(move |_: &OpenAboutWindow, cx| {
-        let bounds = Bounds::centered(
-            None,
-            size(
-                px(APP_UI_THEME.windows.settings_width_px),
-                px(APP_UI_THEME.windows.settings_height_px),
-            ),
-            cx,
-        );
-
-        cx.open_window(
-            WindowOptions {
-                window_bounds: Some(WindowBounds::Windowed(bounds)),
-                window_min_size: Some(size(
-                    px(APP_UI_THEME.windows.settings_width_px),
-                    px(APP_UI_THEME.windows.settings_height_px),
-                )),
-                titlebar: Some(settings_titlebar_options()),
-                window_background: WindowBackgroundAppearance::Transparent,
-                ..Default::default()
-            },
-            |window, cx| {
-                open_settings_window(window, cx, runtime.clone(), about_menu_settings_view())
-            },
-        )
+        let options = settings_window_options(cx);
+        cx.open_window(options, |window, cx| {
+            open_settings_window(window, cx, runtime.clone(), about_menu_settings_view())
+        })
         .expect("settings window should open");
     });
     cx.on_action(|_: &QuitApp, cx| cx.quit());
