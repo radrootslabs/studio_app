@@ -5303,7 +5303,7 @@ mod tests {
     fn startup_signer_preview_summary_prefers_pending_session_details_once_connect_starts() {
         let pending_session = fixture_pending_session();
         let preview = startup_signer_preview_summary_for_connect_state(
-            "bunker://466d7fcae563e5cb09a0d1870bb580344804617879a14949cf22285f1bae3f27?relay=wss%3A%2F%2Frelay.changed.example",
+            "bunker://466d7fcae563e5cb09a0d1870bb580344804617879a14949cf22285f1bae3f27?relay=wss%3A%2F%2Frelay.radroots.example",
             &StartupSignerConnectState::PendingApproval {
                 pending_session: pending_session.clone(),
                 auth_challenge_url: None,
