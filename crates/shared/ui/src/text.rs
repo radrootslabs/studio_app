@@ -1,5 +1,5 @@
 use gpui::SharedString;
-use radroots_studio_app_core::{AppRuntimeMode, AppRuntimeSnapshot};
+use radroots_studio_app_core::{AppRuntimeMode, AppRuntimeSnapshot, runtime_mode_label};
 use radroots_studio_app_i18n::{AppTextKey, app_text};
 
 use crate::LabelValueRow;
@@ -151,11 +151,10 @@ fn text_row(label: AppTextKey, value: AppTextKey) -> LabelValueRow {
 }
 
 fn runtime_mode_text(mode: &AppRuntimeMode) -> String {
-    let key = match mode {
-        AppRuntimeMode::Development => AppTextKey::ValueRuntimeModeDevelopment,
-        AppRuntimeMode::Production => AppTextKey::ValueRuntimeModeProduction,
-    };
-    app_text(key)
+    match mode {
+        AppRuntimeMode::Production => app_text(AppTextKey::ValueRuntimeModeProduction),
+        _ => runtime_mode_label(mode).to_owned(),
+    }
 }
 
 #[cfg(test)]

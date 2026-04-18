@@ -1,6 +1,6 @@
 use gpui::{
-    App, Bounds, KeyBinding, Menu, MenuItem, SystemMenuType, WindowBounds, WindowOptions,
-    WindowBackgroundAppearance, actions, px, size,
+    App, Bounds, KeyBinding, Menu, MenuItem, SystemMenuType, WindowBackgroundAppearance,
+    WindowBounds, WindowOptions, actions, px, size,
 };
 use radroots_studio_app_i18n::{AppTextKey, app_text};
 use radroots_studio_app_ui::APP_UI_THEME;

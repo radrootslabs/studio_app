@@ -7,6 +7,8 @@ mod runtime;
 mod source_guards;
 mod window;
 
-pub fn run() {
-    app::launch();
+pub use app::AppLaunchError;
+
+pub fn run() -> Result<(), AppLaunchError> {
+    app::launch()
 }
