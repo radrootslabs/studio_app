@@ -1187,6 +1187,9 @@ mod tests {
         SettingsSection, ShellSection, TodayAgendaProjection, TodaySetupTask, TodaySetupTaskKind,
         TodaySummary,
     };
+    use radroots_studio_app_remote_signer::{
+        RadrootsAppRemoteSignerPendingSession, RadrootsAppRemoteSignerSessionRecord,
+    };
     use radroots_studio_app_sqlite::{AppSqliteStore, DatabaseTarget};
     use radroots_studio_app_state::{
         AppStateRepositoryError, AppStateStore, AppStateStoreError, HomeRoute,
@@ -1359,6 +1362,103 @@ mod tests {
         );
 
         cleanup_remote_signer_paths(&paths);
+    }
+
+    #[test]
+    fn clean_startup_cleanup_allows_generate_key_phase_transition() {
+        let paths = temp_remote_signer_paths("generate_key_after_clean_cleanup");
+        let runtime = DesktopAppRuntime::from_state(DesktopAppRuntimeState {
+            state_store: AppStateStore::load(InMemoryAppStateRepository::default())
+                .expect("in-memory state store should load"),
+            default_nostr_relay_url: "ws://127.0.0.1:8080".to_owned(),
+            shared_accounts_paths: None,
+            remote_signer_paths: Some(paths.clone()),
+            accounts_manager: None,
+            sqlite_store: Some(
+                AppSqliteStore::open(DatabaseTarget::InMemory)
+                    .expect("in-memory sqlite store should open"),
+            ),
+            startup_issue: None,
+        });
+
+        assert!(
+            runtime
+                .clear_startup_pending_remote_signer_session()
+                .expect("clear pending should succeed")
+        );
+        assert!(runtime.begin_generate_key_startup());
+        assert_eq!(
+            runtime.summary().logged_out_startup.phase,
+            radroots_studio_app_models::LoggedOutStartupPhase::GenerateKeyStarting
+        );
+
+        cleanup_remote_signer_paths(&paths);
+    }
+
+    #[test]
+    fn pending_startup_signer_session_recovers_after_runtime_restart() {
+        let (runtime, paths) = bootstrapped_runtime("restart_pending_recovery");
+        let pending_session = fixture_pending_session();
+
+        assert!(
+            runtime
+                .store_startup_pending_remote_signer_session(&pending_session)
+                .expect("store pending should succeed")
+        );
+
+        let restarted = restart_runtime(paths.clone());
+        let restored = restarted
+            .load_startup_pending_remote_signer_session()
+            .expect("load pending should succeed")
+            .expect("pending session should recover after restart");
+
+        assert_eq!(
+            restarted.summary().logged_out_startup.phase,
+            radroots_studio_app_models::LoggedOutStartupPhase::SignerEntry
+        );
+        assert_eq!(
+            restored.record.client_account_id(),
+            pending_session.record.client_account_id()
+        );
+        assert_eq!(
+            restored.record.signer_identity.id,
+            pending_session.record.signer_identity.id
+        );
+
+        cleanup_bootstrapped_runtime_paths(&paths);
+    }
+
+    #[test]
+    fn clearing_pending_startup_signer_session_prevents_restart_recovery() {
+        let (runtime, paths) = bootstrapped_runtime("restart_after_explicit_cancel");
+        let pending_session = fixture_pending_session();
+
+        assert!(
+            runtime
+                .store_startup_pending_remote_signer_session(&pending_session)
+                .expect("store pending should succeed")
+        );
+        assert!(
+            runtime
+                .clear_startup_pending_remote_signer_session()
+                .expect("clear pending should succeed")
+        );
+
+        let restarted = restart_runtime(paths.clone());
+
+        assert_eq!(
+            restarted.summary().logged_out_startup.phase,
+            radroots_studio_app_models::LoggedOutStartupPhase::ContinuePrompt
+        );
+        assert!(
+            restarted
+                .load_startup_pending_remote_signer_session()
+                .expect("load pending should succeed")
+                .is_none(),
+            "explicit cancel should leave no pending startup session to recover"
+        );
+
+        cleanup_bootstrapped_runtime_paths(&paths);
     }
 
     #[test]
@@ -2594,6 +2694,19 @@ mod tests {
         )
     }
 
+    fn bootstrapped_runtime(label: &str) -> (DesktopAppRuntime, AppDesktopRuntimePaths) {
+        let paths = temp_desktop_runtime_paths(label);
+        let runtime = restart_runtime(paths.clone());
+        (runtime, paths)
+    }
+
+    fn restart_runtime(paths: AppDesktopRuntimePaths) -> DesktopAppRuntime {
+        DesktopAppRuntime::from_state(
+            DesktopAppRuntimeState::bootstrap_from_paths(paths, "ws://127.0.0.1:8080".to_owned())
+                .expect("runtime bootstrap should succeed"),
+        )
+    }
+
     fn temp_shared_accounts_paths(label: &str) -> AppSharedAccountsPaths {
         let suffix = SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -2606,6 +2719,22 @@ mod tests {
             secrets_root: base.join("secrets/shared/accounts"),
             store_path: base.join("data/shared/accounts/store.json"),
         }
+    }
+
+    fn temp_desktop_runtime_paths(label: &str) -> AppDesktopRuntimePaths {
+        let suffix = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("clock")
+            .as_nanos();
+        let home_dir = std::env::temp_dir().join(format!("radroots_runtime_home_{label}_{suffix}"));
+        AppDesktopRuntimePaths::for_desktop(
+            AppRuntimePlatform::Macos,
+            AppRuntimeHostEnvironment {
+                home_dir: Some(home_dir),
+                ..AppRuntimeHostEnvironment::default()
+            },
+        )
+        .expect("desktop runtime paths should resolve")
     }
 
     fn temp_remote_signer_paths(label: &str) -> DesktopRemoteSignerPaths {
@@ -2624,6 +2753,32 @@ mod tests {
     fn cleanup_remote_signer_paths(paths: &DesktopRemoteSignerPaths) {
         if let Some(base) = paths.sessions_path.ancestors().nth(5) {
             let _ = fs::remove_dir_all(base);
+        }
+    }
+
+    fn cleanup_bootstrapped_runtime_paths(paths: &AppDesktopRuntimePaths) {
+        if let Some(home_dir) = paths.app.data.ancestors().nth(4) {
+            let _ = fs::remove_dir_all(home_dir);
+        }
+    }
+
+    fn fixture_pending_session() -> RadrootsAppRemoteSignerPendingSession {
+        let signer_identity = RadrootsIdentity::from_secret_key_str(
+            "1111111111111111111111111111111111111111111111111111111111111111",
+        )
+        .expect("signer identity");
+        let client_identity = RadrootsIdentity::from_secret_key_str(
+            "3333333333333333333333333333333333333333333333333333333333333333",
+        )
+        .expect("client identity");
+
+        RadrootsAppRemoteSignerPendingSession {
+            record: RadrootsAppRemoteSignerSessionRecord::pending(
+                client_identity.to_public(),
+                signer_identity.to_public(),
+                vec!["ws://127.0.0.1:8080".to_owned()],
+            ),
+            client_secret_key_hex: client_identity.secret_key_hex(),
         }
     }
 

@@ -5003,8 +5003,8 @@ mod tests {
         home_window_launch_size_px, home_window_minimum_size_px,
         parse_optional_product_editor_stock_input, parse_product_editor_price_input,
         product_display_title, startup_home_surface, startup_signer_preview_summary,
-        startup_signer_source_input_is_editable, startup_signer_status_spec,
-        startup_signer_transport_failure_requires_notice,
+        startup_signer_preview_summary_for_connect_state, startup_signer_source_input_is_editable,
+        startup_signer_status_spec, startup_signer_transport_failure_requires_notice,
     };
     use crate::runtime::DesktopAppRuntimeSummary;
     use radroots_studio_app_models::SettingsAccountProjection;
@@ -5297,6 +5297,29 @@ mod tests {
                 auth_challenge_url: None,
             }
         ));
+    }
+
+    #[test]
+    fn startup_signer_preview_summary_prefers_pending_session_details_once_connect_starts() {
+        let pending_session = fixture_pending_session();
+        let preview = startup_signer_preview_summary_for_connect_state(
+            "bunker://466d7fcae563e5cb09a0d1870bb580344804617879a14949cf22285f1bae3f27?relay=wss%3A%2F%2Frelay.changed.example",
+            &StartupSignerConnectState::PendingApproval {
+                pending_session: pending_session.clone(),
+                auth_challenge_url: None,
+            },
+        )
+        .expect("preview");
+
+        assert_eq!(
+            preview.signer_npub,
+            pending_session.record.signer_identity.public_key_npub
+        );
+        assert_eq!(preview.relays_label, "wss://relay.radroots.example");
+        assert_eq!(
+            preview.permissions_label,
+            "sign_event:kind:1, switch_relays"
+        );
     }
 
     #[test]
