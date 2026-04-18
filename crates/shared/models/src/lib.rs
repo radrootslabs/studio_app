@@ -84,6 +84,26 @@ impl SettingsSection {
     }
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SettingsPreference {
+    AllowRelayConnections,
+    UseMediaServers,
+    UseNip05,
+    LaunchAtLogin,
+}
+
+impl SettingsPreference {
+    pub const fn storage_key(self) -> &'static str {
+        match self {
+            Self::AllowRelayConnections => "allow_relay_connections",
+            Self::UseMediaServers => "use_media_servers",
+            Self::UseNip05 => "use_nip05",
+            Self::LaunchAtLogin => "launch_at_login",
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "surface", content = "section", rename_all = "snake_case")]
 pub enum ShellSection {
@@ -204,6 +224,7 @@ typed_id!(FarmId);
 typed_id!(ProductId);
 typed_id!(OrderId);
 typed_id!(FulfillmentWindowId);
+typed_id!(ActivityEventId);
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -256,6 +277,50 @@ pub struct TodaySummary {
 impl TodaySummary {
     pub const fn has_attention_items(&self) -> bool {
         self.orders_needing_action > 0 || self.low_stock_products > 0 || self.draft_products > 0
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub enum AppActivityKind {
+    HomeOpened,
+    SettingsOpened {
+        section: SettingsSection,
+    },
+    SettingsSectionSelected {
+        section: SettingsSection,
+    },
+    SettingsPreferenceUpdated {
+        preference: SettingsPreference,
+        enabled: bool,
+    },
+}
+
+impl AppActivityKind {
+    pub const fn storage_key(&self) -> &'static str {
+        match self {
+            Self::HomeOpened => "home_opened",
+            Self::SettingsOpened { .. } => "settings_opened",
+            Self::SettingsSectionSelected { .. } => "settings_section_selected",
+            Self::SettingsPreferenceUpdated { .. } => "settings_preference_updated",
+        }
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct AppActivityEvent {
+    pub activity_event_id: ActivityEventId,
+    pub recorded_at: String,
+    pub kind: AppActivityKind,
+}
+
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+pub struct AppActivityContext {
+    pub recent_events: Vec<AppActivityEvent>,
+}
+
+impl AppActivityContext {
+    pub fn from_recent_events(recent_events: Vec<AppActivityEvent>) -> Self {
+        Self { recent_events }
     }
 }
 
@@ -320,7 +385,8 @@ impl TodayAgendaProjection {
 #[cfg(test)]
 mod tests {
     use super::{
-        AppMode, BuyerSection, FarmId, FarmerSection, OrderListRow, ProductListRow,
+        ActivityEventId, AppActivityContext, AppActivityEvent, AppActivityKind, AppMode,
+        BuyerSection, FarmId, FarmerSection, OrderListRow, ProductListRow, SettingsPreference,
         SettingsSection, ShellSection, TodayAgendaProjection, TodaySetupTask, TodaySetupTaskKind,
         TodaySummary,
     };
@@ -458,5 +524,68 @@ mod tests {
         assert_eq!(projection.orders_needing_action.len(), 1);
         assert_eq!(projection.low_stock_products[0].stock_count, 2);
         assert!(projection.has_attention_items());
+    }
+
+    #[test]
+    fn settings_preference_storage_keys_are_stable() {
+        assert_eq!(
+            SettingsPreference::AllowRelayConnections.storage_key(),
+            "allow_relay_connections"
+        );
+        assert_eq!(
+            SettingsPreference::UseMediaServers.storage_key(),
+            "use_media_servers"
+        );
+        assert_eq!(SettingsPreference::UseNip05.storage_key(), "use_nip05");
+        assert_eq!(
+            SettingsPreference::LaunchAtLogin.storage_key(),
+            "launch_at_login"
+        );
+    }
+
+    #[test]
+    fn activity_kind_storage_keys_are_stable() {
+        assert_eq!(AppActivityKind::HomeOpened.storage_key(), "home_opened");
+        assert_eq!(
+            AppActivityKind::SettingsOpened {
+                section: SettingsSection::About,
+            }
+            .storage_key(),
+            "settings_opened"
+        );
+        assert_eq!(
+            AppActivityKind::SettingsSectionSelected {
+                section: SettingsSection::Settings,
+            }
+            .storage_key(),
+            "settings_section_selected"
+        );
+        assert_eq!(
+            AppActivityKind::SettingsPreferenceUpdated {
+                preference: SettingsPreference::LaunchAtLogin,
+                enabled: true,
+            }
+            .storage_key(),
+            "settings_preference_updated"
+        );
+    }
+
+    #[test]
+    fn activity_context_preserves_recent_event_order() {
+        let first = AppActivityEvent {
+            activity_event_id: ActivityEventId::new(),
+            recorded_at: "2026-04-18T00:00:00.000Z".to_owned(),
+            kind: AppActivityKind::HomeOpened,
+        };
+        let second = AppActivityEvent {
+            activity_event_id: ActivityEventId::new(),
+            recorded_at: "2026-04-18T00:01:00.000Z".to_owned(),
+            kind: AppActivityKind::SettingsOpened {
+                section: SettingsSection::About,
+            },
+        };
+        let context = AppActivityContext::from_recent_events(vec![second.clone(), first.clone()]);
+
+        assert_eq!(context.recent_events, vec![second, first]);
     }
 }

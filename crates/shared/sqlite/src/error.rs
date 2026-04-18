@@ -73,6 +73,8 @@ pub enum AppSqliteError {
     },
     #[error("invalid sqlite id in `{field}`: `{value}`")]
     DecodeId { field: &'static str, value: String },
+    #[error("missing required sqlite column `{field}`")]
+    MissingColumn { field: &'static str },
     #[error("invalid sqlite enum value in `{field}`: `{value}`")]
     DecodeEnum { field: &'static str, value: String },
 }

@@ -7,10 +7,9 @@ use gpui_component::{IconName, Root};
 use radroots_studio_app_i18n::AppTextKey;
 pub use radroots_studio_app_models::SettingsSection as SettingsPanelViewKey;
 use radroots_studio_app_models::{
-    FulfillmentWindowSummary, OrderListRow, ProductListRow, TodayAgendaProjection,
-    TodaySetupTaskKind,
+    FulfillmentWindowSummary, OrderListRow, ProductListRow, SettingsPreference,
+    TodayAgendaProjection, TodaySetupTaskKind,
 };
-use radroots_studio_app_state::SettingsPreference;
 use radroots_studio_app_ui::{
     APP_UI_THEME, AppCheckboxFieldSpec, IconSegmentButtonSpec, LabelValueRow, action_button,
     action_button_compact, action_icon_button, app_checkbox_field, app_shared_label_text,
@@ -41,6 +40,7 @@ pub fn open_home_window(
     cx: &mut App,
     runtime: DesktopAppRuntime,
 ) -> gpui::Entity<Root> {
+    let _ = runtime.record_home_opened();
     let view = cx.new(|_| HomeView::new(runtime));
     cx.new(|cx| Root::new(view, window, cx))
 }
@@ -51,6 +51,7 @@ pub fn open_settings_window(
     runtime: DesktopAppRuntime,
     initial_view: SettingsPanelViewKey,
 ) -> gpui::Entity<Root> {
+    let _ = runtime.record_settings_opened(initial_view);
     let _ = runtime.select_settings_section(initial_view);
     let view = cx.new(|_| SettingsWindowView::new(runtime));
     cx.new(|cx| Root::new(view, window, cx))

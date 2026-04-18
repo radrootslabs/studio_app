@@ -1,14 +1,20 @@
 #![forbid(unsafe_code)]
 
+mod activity;
 mod error;
 mod migrations;
 mod today;
 
 use std::{fs, path::PathBuf, time::Duration};
 
-use radroots_studio_app_models::{FarmId, TodayAgendaProjection};
+use radroots_studio_app_models::{
+    AppActivityContext, AppActivityEvent, AppActivityKind, FarmId, TodayAgendaProjection,
+};
 use rusqlite::Connection;
 
+pub use activity::{
+    APP_ACTIVITY_CONTEXT_LIMIT, APP_ACTIVITY_RETENTION_LIMIT, AppActivityRepository,
+};
 pub use error::AppSqliteError;
 pub use migrations::latest_schema_version;
 pub use today::{
@@ -51,11 +57,33 @@ impl AppSqliteStore {
         AppTodayAgendaRepository::new(&self.connection)
     }
 
+    pub fn activity_repository(&self) -> AppActivityRepository<'_> {
+        AppActivityRepository::new(&self.connection)
+    }
+
     pub fn load_today_agenda(
         &self,
         farm_id: Option<FarmId>,
     ) -> Result<TodayAgendaProjection, AppSqliteError> {
         self.today_agenda_repository().load(farm_id)
+    }
+
+    pub fn record_activity_event(&self, kind: &AppActivityKind) -> Result<(), AppSqliteError> {
+        self.activity_repository().record(kind)
+    }
+
+    pub fn load_recent_activity_events(
+        &self,
+        limit: usize,
+    ) -> Result<Vec<AppActivityEvent>, AppSqliteError> {
+        self.activity_repository().load_recent(limit)
+    }
+
+    pub fn load_activity_context(
+        &self,
+        limit: usize,
+    ) -> Result<AppActivityContext, AppSqliteError> {
+        self.activity_repository().load_context(limit)
     }
 }
 
@@ -185,6 +213,7 @@ mod tests {
         assert!(table_exists(connection, "local_outbox"));
         assert!(table_exists(connection, "local_conflicts"));
         assert!(table_exists(connection, "sync_checkpoints"));
+        assert!(table_exists(connection, "activity_events"));
         assert_eq!(row_count(connection, "sync_checkpoints"), 1);
 
         drop(store);

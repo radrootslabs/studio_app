@@ -1,6 +1,8 @@
 #![forbid(unsafe_code)]
 
-use radroots_studio_app_models::{AppMode, SettingsSection, ShellSection, TodayAgendaProjection};
+use radroots_studio_app_models::{
+    AppMode, SettingsPreference, SettingsSection, ShellSection, TodayAgendaProjection,
+};
 use thiserror::Error;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -121,14 +123,6 @@ impl AppProjection {
     pub fn new(shell: AppShellProjection, today: TodayAgendaProjection) -> Self {
         Self { shell, today }
     }
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum SettingsPreference {
-    AllowRelayConnections,
-    UseMediaServers,
-    UseNip05,
-    LaunchAtLogin,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
