@@ -245,16 +245,30 @@ impl HomeView {
     }
 
     fn show_startup_identity_choice(&mut self, cx: &mut Context<Self>) {
-        if !matches!(
-            self.startup_signer_connect_state,
-            StartupSignerConnectState::Idle
-        ) && !self.clear_startup_pending_remote_signer_session(cx)
-        {
-            return;
-        }
         self.startup_view.clear_notice();
         self.reset_startup_signer_flow();
         self.startup_signer_recovery_attempted = false;
+        if self.runtime.show_startup_identity_choice() {
+            cx.notify();
+        }
+    }
+
+    fn cancel_startup_signer_flow(&mut self, cx: &mut Context<Self>) -> bool {
+        self.reset_startup_signer_flow();
+        if !self.clear_startup_pending_remote_signer_session(cx) {
+            return false;
+        }
+
+        self.startup_signer_recovery_attempted = false;
+        true
+    }
+
+    fn back_out_of_startup_signer_entry(&mut self, cx: &mut Context<Self>) {
+        if !self.cancel_startup_signer_flow(cx) {
+            return;
+        }
+
+        self.startup_view.clear_notice();
         if self.runtime.show_startup_identity_choice() {
             cx.notify();
         }
@@ -270,7 +284,7 @@ impl HomeView {
     }
 
     fn start_generate_key(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if !self.clear_startup_pending_remote_signer_session(cx) {
+        if !self.cancel_startup_signer_flow(cx) {
             return;
         }
         if !self.runtime.begin_generate_key_startup() {
@@ -278,8 +292,6 @@ impl HomeView {
         }
 
         self.startup_view.clear_notice();
-        self.reset_startup_signer_flow();
-        self.startup_signer_recovery_attempted = false;
         let relay_url = self.runtime.default_nostr_relay_url();
         cx.notify();
         cx.spawn_in(window, async move |this, cx| {
@@ -800,6 +812,9 @@ impl HomeView {
             return;
         };
         if entry.input != *state {
+            return;
+        }
+        if !startup_signer_source_input_is_editable(&self.startup_signer_connect_state) {
             return;
         }
 
@@ -1492,7 +1507,7 @@ impl Render for HomeView {
                     cx.listener(|this, _, window, cx| this.start_generate_key(window, cx)),
                     cx.listener(|this, _, _, cx| this.show_startup_signer_entry(cx)),
                     cx.listener(|this, _, window, cx| this.submit_startup_signer(window, cx)),
-                    cx.listener(|this, _, _, cx| this.show_startup_identity_choice(cx)),
+                    cx.listener(|this, _, _, cx| this.back_out_of_startup_signer_entry(cx)),
                     cx,
                 )
                 .into_any_element(),
@@ -2688,6 +2703,7 @@ fn startup_signer_entry_surface(
     };
     let submit_enabled =
         preview.is_ok() && matches!(connect_state, StartupSignerConnectState::Idle);
+    let source_input_is_editable = startup_signer_source_input_is_editable(connect_state);
 
     div()
         .w_full()
@@ -2704,6 +2720,7 @@ fn startup_signer_entry_surface(
                     .child(
                         Input::new(&signer_entry.input)
                             .with_size(ComponentSize::Large)
+                            .disabled(!source_input_is_editable)
                             .w_full(),
                     ),
             )
@@ -2825,6 +2842,10 @@ fn startup_signer_preview_summary_for_connect_state(
     }
 
     Ok(preview)
+}
+
+fn startup_signer_source_input_is_editable(connect_state: &StartupSignerConnectState) -> bool {
+    matches!(connect_state, StartupSignerConnectState::Idle)
 }
 
 fn startup_signer_csv_or_none(values: &[String]) -> String {
@@ -4982,7 +5003,8 @@ mod tests {
         home_window_launch_size_px, home_window_minimum_size_px,
         parse_optional_product_editor_stock_input, parse_product_editor_price_input,
         product_display_title, startup_home_surface, startup_signer_preview_summary,
-        startup_signer_status_spec, startup_signer_transport_failure_requires_notice,
+        startup_signer_source_input_is_editable, startup_signer_status_spec,
+        startup_signer_transport_failure_requires_notice,
     };
     use crate::runtime::DesktopAppRuntimeSummary;
     use radroots_studio_app_models::SettingsAccountProjection;
@@ -5243,6 +5265,38 @@ mod tests {
             }),
             Some((AppTextKey::HomeSetupSignerApprovedTitle, None))
         );
+    }
+
+    #[test]
+    fn startup_signer_source_input_is_editable_only_while_idle() {
+        let pending_session = fixture_pending_session();
+
+        assert!(startup_signer_source_input_is_editable(
+            &StartupSignerConnectState::Idle
+        ));
+        assert!(!startup_signer_source_input_is_editable(
+            &StartupSignerConnectState::Connecting
+        ));
+        assert!(!startup_signer_source_input_is_editable(
+            &StartupSignerConnectState::PendingApproval {
+                pending_session: pending_session.clone(),
+                auth_challenge_url: None,
+            }
+        ));
+        assert!(!startup_signer_source_input_is_editable(
+            &StartupSignerConnectState::Approved {
+                pending_session,
+                approved_session: RadrootsAppRemoteSignerApprovedSession {
+                    user_identity: fixture_identity(
+                        "2222222222222222222222222222222222222222222222222222222222222222",
+                    )
+                    .to_public(),
+                    relays: vec!["wss://relay.radroots.example".to_owned()],
+                    approved_permissions: Default::default(),
+                },
+                auth_challenge_url: None,
+            }
+        ));
     }
 
     #[test]
