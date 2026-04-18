@@ -1041,7 +1041,8 @@ impl DesktopAppRuntimeState {
         let Some(paths) = self.remote_signer_paths() else {
             return Ok(false);
         };
-        Ok(clear_pending_session(paths)?.is_some())
+        clear_pending_session(paths)?;
+        Ok(true)
     }
 
     fn activate_startup_approved_remote_signer_session(
@@ -1201,7 +1202,7 @@ mod tests {
 
     use super::{
         APP_DATABASE_FILE_NAME, DesktopAppRuntime, DesktopAppRuntimeActivityContextError,
-        DesktopAppRuntimeCommandError, DesktopAppRuntimeState,
+        DesktopAppRuntimeCommandError, DesktopAppRuntimeState, DesktopRemoteSignerPaths,
     };
 
     #[test]
@@ -1331,6 +1332,33 @@ mod tests {
             summary.logged_out_startup.signer_entry.source_input,
             "bunker://npub1signer?relay=wss%3A%2F%2Frelay.radroots.example"
         );
+    }
+
+    #[test]
+    fn clearing_startup_pending_remote_signer_session_is_idempotent_without_record() {
+        let paths = temp_remote_signer_paths("clear_pending_none");
+        let runtime = DesktopAppRuntime::from_state(DesktopAppRuntimeState {
+            state_store: AppStateStore::load(InMemoryAppStateRepository::default())
+                .expect("in-memory state store should load"),
+            default_nostr_relay_url: "ws://127.0.0.1:8080".to_owned(),
+            shared_accounts_paths: None,
+            remote_signer_paths: Some(paths.clone()),
+            accounts_manager: None,
+            sqlite_store: Some(
+                AppSqliteStore::open(DatabaseTarget::InMemory)
+                    .expect("in-memory sqlite store should open"),
+            ),
+            startup_issue: None,
+        });
+
+        assert!(
+            runtime
+                .clear_startup_pending_remote_signer_session()
+                .expect("clear pending should succeed"),
+            "missing pending startup session should count as a successful cleanup"
+        );
+
+        cleanup_remote_signer_paths(&paths);
     }
 
     #[test]
@@ -2577,6 +2605,25 @@ mod tests {
             data_root: base.join("data/shared/accounts"),
             secrets_root: base.join("secrets/shared/accounts"),
             store_path: base.join("data/shared/accounts/store.json"),
+        }
+    }
+
+    fn temp_remote_signer_paths(label: &str) -> DesktopRemoteSignerPaths {
+        let suffix = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("clock")
+            .as_nanos();
+        let base =
+            std::env::temp_dir().join(format!("radroots_runtime_remote_signer_{label}_{suffix}"));
+        DesktopRemoteSignerPaths {
+            sessions_path: base.join("data/apps/app/nostr/remote-signer-sessions.json"),
+            client_secret_root: base.join("secrets/shared/accounts/remote_signer"),
+        }
+    }
+
+    fn cleanup_remote_signer_paths(paths: &DesktopRemoteSignerPaths) {
+        if let Some(base) = paths.sessions_path.ancestors().nth(5) {
+            let _ = fs::remove_dir_all(base);
         }
     }
 
