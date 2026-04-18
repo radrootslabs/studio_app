@@ -637,9 +637,9 @@ impl SettingsWindowView {
                                                 )
                                                 .child(
                                                     div().child(action_button(
-                                                        "account-admin-console",
+                                                        "account-open-workspace",
                                                         app_shared_text(
-                                                            AppTextKey::SettingsAccountAdminConsoleAction,
+                                                            AppTextKey::SettingsAccountOpenWorkspaceAction,
                                                         ),
                                                         cx.listener(|this, _, _, cx| {
                                                             this.open_selected_workspace(cx);

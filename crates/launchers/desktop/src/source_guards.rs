@@ -4,7 +4,7 @@ const ALLOWED_MENU_LITERALS: &[&str] = &["cmd-q", "settings window should open"]
 
 const ALLOWED_WINDOW_LITERALS: &[&str] = &[
     "account-add",
-    "account-admin-console",
+    "account-open-workspace",
     "account-log-out",
     "account-more",
     "home-today-scroll",

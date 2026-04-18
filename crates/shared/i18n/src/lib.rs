@@ -114,6 +114,26 @@ mod tests {
     }
 
     #[test]
+    fn english_auth_copy_matches_the_local_account_workflow_contract() {
+        assert_eq!(
+            app_text(AppTextKey::HomeTodayEmptySetupBody),
+            "Add a local account to start using Radroots on this device."
+        );
+        assert_eq!(
+            app_text(AppTextKey::SettingsAccountNoSelectionBody),
+            "Add a local account to start using Radroots on this device."
+        );
+        assert_eq!(
+            app_text(AppTextKey::SettingsAccountActivationLabel),
+            "Farmer Activation"
+        );
+        assert_eq!(
+            app_text(AppTextKey::SettingsAccountOpenWorkspaceAction),
+            "Open Workspace..."
+        );
+    }
+
+    #[test]
     fn host_locale_negotiation_reduces_to_supported_base_locale() {
         assert_eq!(resolve_locale_from_host("en_US.UTF-8"), "en");
         assert_eq!(resolve_locale_from_host("en-GB"), "en");

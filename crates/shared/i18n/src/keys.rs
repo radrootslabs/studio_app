@@ -70,7 +70,7 @@ define_app_text_keys! {
     SettingsAccountActivationActive => "settings.account.activation.active",
     SettingsAccountAddAction => "settings.account.action.add_account",
     SettingsAccountLogOutAction => "settings.account.action.log_out",
-    SettingsAccountAdminConsoleAction => "settings.account.action.admin_console",
+    SettingsAccountOpenWorkspaceAction => "settings.account.action.open_workspace",
     SettingsViewAccount => "settings.view.account",
     SettingsViewSettings => "settings.view.settings",
     SettingsViewAbout => "settings.view.about",

@@ -657,9 +657,9 @@ mod tests {
         AccountCustody, AccountSummary, AccountSurfaceActivationProjection, ActiveSurface,
         ActivityEventId, AppActivityContext, AppActivityEvent, AppActivityKind,
         AppIdentityProjection, AppStartupGate, FarmId, FarmerActivationProjection, FarmerSection,
-        IdentityBlockedReason, OrderListRow, ProductListRow, SelectedAccountProjection,
-        SelectedSurfaceProjection, SettingsPreference, SettingsSection, ShellSection,
-        TodayAgendaProjection, TodaySetupTask, TodaySetupTaskKind, TodaySummary,
+        IdentityBlockedReason, IdentityReadiness, OrderListRow, ProductListRow,
+        SelectedAccountProjection, SelectedSurfaceProjection, SettingsPreference, SettingsSection,
+        ShellSection, TodayAgendaProjection, TodaySetupTask, TodaySetupTaskKind, TodaySummary,
     };
     use std::{collections::BTreeSet, str::FromStr};
     use uuid::Uuid;
