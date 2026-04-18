@@ -3,6 +3,7 @@
 mod activation;
 mod activity;
 mod error;
+mod farm_setup;
 mod migrations;
 mod today;
 
@@ -10,7 +11,7 @@ use std::{fs, path::PathBuf, time::Duration};
 
 use radroots_studio_app_models::{
     AccountSurfaceActivationProjection, AppActivityContext, AppActivityEvent, AppActivityKind,
-    FarmId, TodayAgendaProjection,
+    FarmId, FarmSetupProjection, TodayAgendaProjection,
 };
 use rusqlite::Connection;
 
@@ -19,6 +20,7 @@ pub use activity::{
     APP_ACTIVITY_CONTEXT_LIMIT, APP_ACTIVITY_RETENTION_LIMIT, AppActivityRepository,
 };
 pub use error::AppSqliteError;
+pub use farm_setup::AppFarmSetupRepository;
 pub use migrations::latest_schema_version;
 pub use today::{
     AppTodayAgendaRepository, TODAY_AGENDA_LIST_LIMIT, TODAY_AGENDA_LOW_STOCK_THRESHOLD,
@@ -68,6 +70,10 @@ impl AppSqliteStore {
         AppActivationRepository::new(&self.connection)
     }
 
+    pub fn farm_setup_repository(&self) -> AppFarmSetupRepository<'_> {
+        AppFarmSetupRepository::new(&self.connection)
+    }
+
     pub fn load_today_agenda(
         &self,
         farm_id: Option<FarmId>,
@@ -112,6 +118,23 @@ impl AppSqliteStore {
     pub fn clear_surface_activation(&self, account_id: &str) -> Result<(), AppSqliteError> {
         self.activation_repository()
             .clear_surface_activation(account_id)
+    }
+
+    pub fn load_farm_setup(&self, account_id: &str) -> Result<FarmSetupProjection, AppSqliteError> {
+        self.farm_setup_repository().load_farm_setup(account_id)
+    }
+
+    pub fn save_farm_setup(
+        &self,
+        account_id: &str,
+        projection: &FarmSetupProjection,
+    ) -> Result<(), AppSqliteError> {
+        self.farm_setup_repository()
+            .save_farm_setup(account_id, projection)
+    }
+
+    pub fn clear_farm_setup(&self, account_id: &str) -> Result<(), AppSqliteError> {
+        self.farm_setup_repository().clear_farm_setup(account_id)
     }
 }
 
@@ -243,6 +266,7 @@ mod tests {
         assert!(table_exists(connection, "sync_checkpoints"));
         assert!(table_exists(connection, "activity_events"));
         assert!(table_exists(connection, "account_surface_activations"));
+        assert!(table_exists(connection, "account_farm_setups"));
         assert_eq!(row_count(connection, "sync_checkpoints"), 1);
 
         drop(store);
