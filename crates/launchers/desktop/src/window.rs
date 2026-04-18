@@ -12,8 +12,9 @@ use radroots_studio_app_i18n::AppTextKey;
 pub use radroots_studio_app_models::SettingsSection as SettingsPanelViewKey;
 use radroots_studio_app_models::{
     AppStartupGate, FarmOrderMethod, FarmReadiness, FarmSetupBlocker, FarmSetupDraft, FarmSummary,
-    FulfillmentWindowSummary, OrderListRow, ProductListRow, TodayAgendaProjection,
-    TodaySetupTaskKind,
+    FarmerSection, FulfillmentWindowSummary, OrderListRow, ProductAttentionState, ProductListRow,
+    ProductStatus, ProductsFilter, ProductsListRow, ProductsSort, ShellSection,
+    TodayAgendaProjection, TodaySetupTaskKind,
 };
 use radroots_studio_app_state::{FarmSetupFlowStage, HomeRoute};
 use radroots_studio_app_ui::{
@@ -25,6 +26,7 @@ use radroots_studio_app_ui::{
 };
 use radroots_nostr::prelude::RadrootsNostrClient;
 use std::time::Duration;
+use tracing::error;
 
 use crate::runtime::{DesktopAppRuntime, DesktopAppRuntimeSummary};
 
@@ -152,6 +154,7 @@ pub struct HomeView {
     startup_view: StartupHomeView,
     logged_in_view: LoggedInHomeView,
     farm_setup_form: Option<FarmSetupFormState>,
+    products_search: Option<ProductsSearchState>,
     relay_client: Option<RadrootsNostrClient>,
 }
 
@@ -162,6 +165,7 @@ impl HomeView {
             startup_view: StartupHomeView::new(),
             logged_in_view: LoggedInHomeView::new(),
             farm_setup_form: None,
+            products_search: None,
             relay_client: None,
         }
     }
@@ -277,6 +281,117 @@ impl HomeView {
         }
     }
 
+    fn sync_products_search(
+        &mut self,
+        runtime_summary: &DesktopAppRuntimeSummary,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(account_id) = runtime_summary
+            .settings_account_projection
+            .selected_account
+            .as_ref()
+            .map(|account| account.account.account_id.clone())
+        else {
+            self.products_search = None;
+            return;
+        };
+
+        if !runtime_summary.farm_setup_projection.has_saved_farm() {
+            self.products_search = None;
+            return;
+        }
+
+        let search_query = runtime_summary
+            .products_projection
+            .query
+            .search_query
+            .as_str();
+        let should_reset = self
+            .products_search
+            .as_ref()
+            .map(|state| state.account_id != account_id)
+            .unwrap_or(true);
+
+        if should_reset {
+            self.products_search = Some(ProductsSearchState::new(
+                account_id,
+                search_query,
+                window,
+                cx,
+            ));
+            return;
+        }
+
+        if let Some(products_search) = self.products_search.as_mut() {
+            products_search.sync(search_query, window, cx);
+        }
+    }
+
+    fn select_farmer_section(&mut self, section: FarmerSection, cx: &mut Context<Self>) {
+        if self.runtime.select_farmer_section(section) {
+            cx.notify();
+        }
+    }
+
+    fn handle_products_search_input_event(
+        &mut self,
+        state: &Entity<InputState>,
+        event: &InputEvent,
+        _: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if !matches!(event, InputEvent::Change) {
+            return;
+        }
+
+        let value = state.read(cx).value().to_string();
+        match self.runtime.set_products_search_query(value.as_str()) {
+            Ok(true) => cx.notify(),
+            Ok(false) => {}
+            Err(runtime_error) => {
+                error!(
+                    target: "products",
+                    event = "products.search_query_update_failed",
+                    error = %runtime_error,
+                    "failed to update products search query"
+                );
+            }
+        }
+    }
+
+    fn select_products_filter(&mut self, filter: ProductsFilter, cx: &mut Context<Self>) {
+        match self.runtime.select_products_filter(filter) {
+            Ok(true) => cx.notify(),
+            Ok(false) => {}
+            Err(runtime_error) => {
+                error!(
+                    target: "products",
+                    event = "products.filter_update_failed",
+                    error = %runtime_error,
+                    filter = filter.storage_key(),
+                    "failed to update products filter"
+                );
+            }
+        }
+    }
+
+    fn select_products_sort(&mut self, sort: ProductsSort, cx: &mut Context<Self>) {
+        match self.runtime.select_products_sort(sort) {
+            Ok(true) => cx.notify(),
+            Ok(false) => {}
+            Err(runtime_error) => {
+                error!(
+                    target: "products",
+                    event = "products.sort_update_failed",
+                    error = %runtime_error,
+                    sort = sort.storage_key(),
+                    "failed to update products sort"
+                );
+            }
+        }
+    }
+
     fn handle_farm_name_input_event(
         &mut self,
         state: &Entity<InputState>,
@@ -369,6 +484,7 @@ impl Render for HomeView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let runtime_summary = self.runtime.summary();
         self.sync_farm_setup_form(&runtime_summary, window, cx);
+        self.sync_products_search(&runtime_summary, window, cx);
         match home_stage(&runtime_summary) {
             HomeStage::Setup => self
                 .startup_view
@@ -413,8 +529,46 @@ impl Render for HomeView {
                         )
                         .into_any_element()
                     }),
+                    self.products_search.as_ref(),
+                    cx.listener(|this, _, _, cx| {
+                        this.select_farmer_section(FarmerSection::Today, cx)
+                    }),
+                    cx.listener(|this, _, _, cx| {
+                        this.select_farmer_section(FarmerSection::Products, cx)
+                    }),
                     cx.listener(|this, _, window, cx| this.open_farm_setup(window, cx)),
                     cx.listener(|this, _, window, cx| this.open_farm_setup(window, cx)),
+                    cx.listener(|this, _, _, cx| {
+                        this.select_products_filter(ProductsFilter::All, cx)
+                    }),
+                    cx.listener(|this, _, _, cx| {
+                        this.select_products_filter(ProductsFilter::Live, cx)
+                    }),
+                    cx.listener(|this, _, _, cx| {
+                        this.select_products_filter(ProductsFilter::Drafts, cx)
+                    }),
+                    cx.listener(|this, _, _, cx| {
+                        this.select_products_filter(ProductsFilter::NeedAttention, cx)
+                    }),
+                    cx.listener(|this, _, _, cx| {
+                        this.select_products_filter(ProductsFilter::Paused, cx)
+                    }),
+                    cx.listener(|this, _, _, cx| {
+                        this.select_products_filter(ProductsFilter::Archived, cx)
+                    }),
+                    cx.listener(|this, _, _, cx| {
+                        this.select_products_sort(ProductsSort::Updated, cx)
+                    }),
+                    cx.listener(|this, _, _, cx| this.select_products_sort(ProductsSort::Name, cx)),
+                    cx.listener(|this, _, _, cx| {
+                        this.select_products_sort(ProductsSort::Availability, cx)
+                    }),
+                    cx.listener(|this, _, _, cx| {
+                        this.select_products_sort(ProductsSort::Stock, cx)
+                    }),
+                    cx.listener(|this, _, _, cx| {
+                        this.select_products_sort(ProductsSort::Price, cx)
+                    }),
                     cx,
                 )
                 .into_any_element(),
@@ -476,6 +630,45 @@ impl FarmSetupFormState {
             _location_subscription: location_subscription,
             save_state,
         }
+    }
+}
+
+struct ProductsSearchState {
+    account_id: String,
+    input: Entity<InputState>,
+    _input_subscription: Subscription,
+}
+
+impl ProductsSearchState {
+    fn new(
+        account_id: String,
+        search_query: &str,
+        window: &mut Window,
+        cx: &mut Context<HomeView>,
+    ) -> Self {
+        let input = cx.new(|cx| {
+            InputState::new(window, cx)
+                .placeholder(app_shared_text(AppTextKey::ProductsSearchPlaceholder))
+                .default_value(search_query.to_owned())
+        });
+        let input_subscription =
+            cx.subscribe_in(&input, window, HomeView::handle_products_search_input_event);
+
+        Self {
+            account_id,
+            input,
+            _input_subscription: input_subscription,
+        }
+    }
+
+    fn sync(&mut self, search_query: &str, window: &mut Window, cx: &mut Context<HomeView>) {
+        if self.input.read(cx).value().as_ref() == search_query {
+            return;
+        }
+
+        self.input.update(cx, |input, cx| {
+            input.set_value(search_query.to_owned(), window, cx);
+        });
     }
 }
 
@@ -554,15 +747,43 @@ impl LoggedInHomeView {
         &self,
         runtime: &DesktopAppRuntimeSummary,
         farm_setup_form: Option<AnyElement>,
+        products_search: Option<&ProductsSearchState>,
+        on_select_today: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+        on_select_products: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
         on_start_farm_setup: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
         on_continue_farm_setup: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+        on_select_all_products: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+        on_select_live_products: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+        on_select_draft_products: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+        on_select_products_needing_attention: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+        on_select_paused_products: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+        on_select_archived_products: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+        on_sort_products_by_updated: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+        on_sort_products_by_name: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+        on_sort_products_by_availability: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+        on_sort_products_by_stock: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+        on_sort_products_by_price: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
         cx: &App,
     ) -> AnyElement {
         farmer_home_shell(
             runtime,
             farm_setup_form,
+            products_search,
+            on_select_today,
+            on_select_products,
             on_start_farm_setup,
             on_continue_farm_setup,
+            on_select_all_products,
+            on_select_live_products,
+            on_select_draft_products,
+            on_select_products_needing_attention,
+            on_select_paused_products,
+            on_select_archived_products,
+            on_sort_products_by_updated,
+            on_sort_products_by_name,
+            on_sort_products_by_availability,
+            on_sort_products_by_stock,
+            on_sort_products_by_price,
             cx,
         )
         .into_any_element()
@@ -1146,21 +1367,49 @@ struct FarmSetupOnboardingCardSpec {
 fn farmer_home_shell(
     runtime: &DesktopAppRuntimeSummary,
     farm_setup_form: Option<AnyElement>,
+    products_search: Option<&ProductsSearchState>,
+    on_select_today: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+    on_select_products: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
     on_start_farm_setup: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
     on_continue_farm_setup: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+    on_select_all_products: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+    on_select_live_products: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+    on_select_draft_products: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+    on_select_products_needing_attention: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+    on_select_paused_products: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+    on_select_archived_products: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+    on_sort_products_by_updated: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+    on_sort_products_by_name: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+    on_sort_products_by_availability: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+    on_sort_products_by_stock: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+    on_sort_products_by_price: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
     cx: &App,
 ) -> impl IntoElement {
+    let selected_farmer_section = selected_farmer_section(runtime);
+
     home_shell_frame(
-        runtime,
+        home_sidebar(runtime, on_select_today, on_select_products, cx).into_any_element(),
         div()
-            .id("home-today-scroll")
+            .id(home_content_scroll_id(selected_farmer_section))
             .size_full()
             .overflow_y_scroll()
             .child(home_view_content(
                 runtime,
                 farm_setup_form,
+                products_search,
                 on_start_farm_setup,
                 on_continue_farm_setup,
+                on_select_all_products,
+                on_select_live_products,
+                on_select_draft_products,
+                on_select_products_needing_attention,
+                on_select_paused_products,
+                on_select_archived_products,
+                on_sort_products_by_updated,
+                on_sort_products_by_name,
+                on_sort_products_by_availability,
+                on_sort_products_by_stock,
+                on_sort_products_by_price,
                 cx,
             ))
             .into_any_element(),
@@ -1196,7 +1445,7 @@ fn holding_home_shell(runtime: &DesktopAppRuntimeSummary) -> impl IntoElement {
     }
 
     home_shell_frame(
-        runtime,
+        holding_home_sidebar(runtime).into_any_element(),
         div()
             .size_full()
             .child(
@@ -1394,17 +1643,14 @@ async fn run_startup_app_init(relay_url: String) -> Result<StartupAppInitResult,
     Ok(StartupAppInitResult { relay_client })
 }
 
-fn home_shell_frame(
-    runtime: &DesktopAppRuntimeSummary,
-    main_content: AnyElement,
-) -> impl IntoElement {
+fn home_shell_frame(sidebar: AnyElement, main_content: AnyElement) -> impl IntoElement {
     app_window_shell(
         APP_UI_THEME.surfaces.window_background,
         div()
             .size_full()
             .overflow_hidden()
             .flex()
-            .child(home_sidebar(runtime))
+            .child(sidebar)
             .child(
                 div()
                     .h_full()
@@ -1427,7 +1673,76 @@ fn home_shell_frame(
     )
 }
 
-fn home_sidebar(runtime: &DesktopAppRuntimeSummary) -> impl IntoElement {
+fn home_sidebar(
+    runtime: &DesktopAppRuntimeSummary,
+    on_select_today: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+    on_select_products: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+    cx: &App,
+) -> impl IntoElement {
+    let home_status = home_status_presentation(runtime);
+    let selected_section = selected_farmer_section(runtime);
+    let products_available = farmer_products_available(runtime);
+
+    div()
+        .h_full()
+        .w(px(APP_UI_THEME.layout.home_sidebar_width_px))
+        .bg(rgb(APP_UI_THEME.surfaces.card_background))
+        .p(px(APP_UI_THEME.layout.home_window_padding_px))
+        .flex()
+        .flex_col()
+        .justify_between()
+        .child(
+            div()
+                .flex()
+                .flex_col()
+                .gap(px(APP_UI_THEME.layout.home_stack_gap_px))
+                .child(
+                    div()
+                        .text_size(px(APP_UI_THEME.typography.body_text_px * 2.0))
+                        .font_weight(gpui::FontWeight::BOLD)
+                        .text_color(rgb(APP_UI_THEME.text.primary))
+                        .child(app_shared_text(AppTextKey::AppName)),
+                )
+                .child(home_status_row(&home_status)),
+        )
+        .child(
+            div()
+                .flex_1()
+                .flex()
+                .flex_col()
+                .justify_start()
+                .gap(px(APP_UI_THEME.layout.home_stack_gap_px))
+                .child(home_sidebar_nav_button(
+                    "home-nav-today",
+                    AppTextKey::HomeNavToday,
+                    selected_section == FarmerSection::Today,
+                    on_select_today,
+                    cx,
+                ))
+                .when(products_available, |this| {
+                    this.child(home_sidebar_nav_button(
+                        "home-nav-products",
+                        AppTextKey::HomeNavProducts,
+                        selected_section == FarmerSection::Products,
+                        on_select_products,
+                        cx,
+                    ))
+                }),
+        )
+        .child(
+            div().child(
+                div()
+                    .text_size(px(APP_UI_THEME.typography.body_text_px))
+                    .line_height(relative(1.2))
+                    .text_color(rgb(APP_UI_THEME.text.secondary))
+                    .when_some(home_saved_farm(runtime), |this, farm| {
+                        this.child(farm.display_name.clone())
+                    }),
+            ),
+        )
+}
+
+fn holding_home_sidebar(runtime: &DesktopAppRuntimeSummary) -> impl IntoElement {
     let home_status = home_status_presentation(runtime);
 
     div()
@@ -1448,7 +1763,7 @@ fn home_sidebar(runtime: &DesktopAppRuntimeSummary) -> impl IntoElement {
                         .text_size(px(APP_UI_THEME.typography.body_text_px * 2.0))
                         .font_weight(gpui::FontWeight::BOLD)
                         .text_color(rgb(APP_UI_THEME.text.primary))
-                        .child(app_shared_text(AppTextKey::HomeTodayTitle)),
+                        .child(app_shared_text(AppTextKey::AppName)),
                 )
                 .child(home_status_row(&home_status)),
         )
@@ -1466,6 +1781,58 @@ fn home_sidebar(runtime: &DesktopAppRuntimeSummary) -> impl IntoElement {
 }
 
 fn home_view_content(
+    runtime: &DesktopAppRuntimeSummary,
+    farm_setup_form: Option<AnyElement>,
+    products_search: Option<&ProductsSearchState>,
+    on_start_farm_setup: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+    on_continue_farm_setup: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+    on_select_all_products: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+    on_select_live_products: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+    on_select_draft_products: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+    on_select_products_needing_attention: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+    on_select_paused_products: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+    on_select_archived_products: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+    on_sort_products_by_updated: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+    on_sort_products_by_name: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+    on_sort_products_by_availability: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+    on_sort_products_by_stock: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+    on_sort_products_by_price: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+    cx: &App,
+) -> impl IntoElement {
+    match selected_farmer_section(runtime) {
+        FarmerSection::Products if farmer_products_available(runtime) => home_products_content(
+            runtime,
+            products_search,
+            on_select_all_products,
+            on_select_live_products,
+            on_select_draft_products,
+            on_select_products_needing_attention,
+            on_select_paused_products,
+            on_select_archived_products,
+            on_sort_products_by_updated,
+            on_sort_products_by_name,
+            on_sort_products_by_availability,
+            on_sort_products_by_stock,
+            on_sort_products_by_price,
+            cx,
+        )
+        .into_any_element(),
+        FarmerSection::Today
+        | FarmerSection::Products
+        | FarmerSection::Orders
+        | FarmerSection::PackDay
+        | FarmerSection::Farm => home_today_content(
+            runtime,
+            farm_setup_form,
+            on_start_farm_setup,
+            on_continue_farm_setup,
+            cx,
+        )
+        .into_any_element(),
+    }
+}
+
+fn home_today_content(
     runtime: &DesktopAppRuntimeSummary,
     farm_setup_form: Option<AnyElement>,
     on_start_farm_setup: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
@@ -1641,6 +2008,507 @@ fn home_view_content(
                 .child(home_status_row(&home_status)),
         )
         .children(sections)
+}
+
+fn home_products_content(
+    runtime: &DesktopAppRuntimeSummary,
+    products_search: Option<&ProductsSearchState>,
+    on_select_all_products: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+    on_select_live_products: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+    on_select_draft_products: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+    on_select_products_needing_attention: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+    on_select_paused_products: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+    on_select_archived_products: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+    on_sort_products_by_updated: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+    on_sort_products_by_name: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+    on_sort_products_by_availability: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+    on_sort_products_by_stock: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+    on_sort_products_by_price: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+    cx: &App,
+) -> impl IntoElement {
+    let projection = &runtime.products_projection;
+    let summary = &projection.list.summary;
+
+    div()
+        .w_full()
+        .max_w(px(APP_UI_THEME.layout.home_card_max_width_px))
+        .mx_auto()
+        .flex()
+        .flex_col()
+        .gap(px(APP_UI_THEME.layout.home_stack_gap_px))
+        .child(products_title_row(runtime))
+        .child(
+            div()
+                .w_full()
+                .flex()
+                .gap(px(APP_UI_THEME.layout.home_stack_gap_px))
+                .child(home_summary_metric(
+                    AppTextKey::ProductsSummaryTotal,
+                    summary.total_products,
+                ))
+                .child(home_summary_metric(
+                    AppTextKey::ProductsSummaryLive,
+                    summary.live_products,
+                ))
+                .child(home_summary_metric(
+                    AppTextKey::ProductsSummaryNeedAttention,
+                    summary.need_attention_products,
+                ))
+                .child(home_summary_metric(
+                    AppTextKey::ProductsSummaryDrafts,
+                    summary.draft_products,
+                )),
+        )
+        .child(products_controls_card(
+            runtime,
+            products_search,
+            on_select_all_products,
+            on_select_live_products,
+            on_select_draft_products,
+            on_select_products_needing_attention,
+            on_select_paused_products,
+            on_select_archived_products,
+            on_sort_products_by_updated,
+            on_sort_products_by_name,
+            on_sort_products_by_availability,
+            on_sort_products_by_stock,
+            on_sort_products_by_price,
+            cx,
+        ))
+        .child(if projection.list.is_empty() {
+            products_empty_state_card(projection.query.filter).into_any_element()
+        } else {
+            products_table_card(&projection.list.rows).into_any_element()
+        })
+}
+
+fn selected_farmer_section(runtime: &DesktopAppRuntimeSummary) -> FarmerSection {
+    match runtime.shell_projection.selected_section {
+        ShellSection::Farmer(section) => section,
+        ShellSection::Home | ShellSection::Settings(_) => FarmerSection::Today,
+    }
+}
+
+fn farmer_products_available(runtime: &DesktopAppRuntimeSummary) -> bool {
+    runtime.farm_setup_projection.has_saved_farm()
+}
+
+fn home_content_scroll_id(section: FarmerSection) -> &'static str {
+    match section {
+        FarmerSection::Products => "home-products-scroll",
+        FarmerSection::Today
+        | FarmerSection::Orders
+        | FarmerSection::PackDay
+        | FarmerSection::Farm => "home-today-scroll",
+    }
+}
+
+fn home_sidebar_nav_button(
+    id: &'static str,
+    key: AppTextKey,
+    is_active: bool,
+    on_click: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+    cx: &App,
+) -> impl IntoElement {
+    if is_active {
+        action_button_primary(id, app_shared_text(key), on_click, cx).into_any_element()
+    } else {
+        action_button(id, app_shared_text(key), on_click, cx).into_any_element()
+    }
+}
+
+fn products_title_row(runtime: &DesktopAppRuntimeSummary) -> impl IntoElement {
+    div()
+        .w_full()
+        .flex()
+        .flex_col()
+        .gap(px(4.0))
+        .child(
+            div()
+                .text_size(px(APP_UI_THEME.typography.body_text_px * 2.0))
+                .font_weight(gpui::FontWeight::BOLD)
+                .text_color(rgb(APP_UI_THEME.text.primary))
+                .child(app_shared_text(AppTextKey::ProductsTitle)),
+        )
+        .child(
+            div()
+                .text_size(px(APP_UI_THEME.typography.body_text_px))
+                .font_weight(gpui::FontWeight::MEDIUM)
+                .line_height(relative(1.2))
+                .text_color(rgb(APP_UI_THEME.text.primary))
+                .when_some(home_saved_farm(runtime), |this, farm| {
+                    this.child(farm.display_name.clone())
+                }),
+        )
+}
+
+fn products_controls_card(
+    runtime: &DesktopAppRuntimeSummary,
+    products_search: Option<&ProductsSearchState>,
+    on_select_all_products: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+    on_select_live_products: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+    on_select_draft_products: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+    on_select_products_needing_attention: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+    on_select_paused_products: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+    on_select_archived_products: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+    on_sort_products_by_updated: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+    on_sort_products_by_name: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+    on_sort_products_by_availability: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+    on_sort_products_by_stock: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+    on_sort_products_by_price: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+    cx: &App,
+) -> impl IntoElement {
+    let selected_filter = runtime.products_projection.query.filter;
+    let selected_sort = runtime.products_projection.query.sort;
+
+    home_card(
+        app_shared_text(AppTextKey::ProductsFiltersTitle),
+        div()
+            .w_full()
+            .flex()
+            .flex_col()
+            .gap(px(APP_UI_THEME.layout.home_stack_gap_px))
+            .when_some(products_search, |this, products_search| {
+                this.child(
+                    Input::new(&products_search.input)
+                        .with_size(ComponentSize::Large)
+                        .cleanable(true)
+                        .w_full(),
+                )
+            })
+            .child(
+                div()
+                    .w_full()
+                    .flex()
+                    .items_center()
+                    .gap(px(8.0))
+                    .child(products_filter_button(
+                        "products-filter-all",
+                        AppTextKey::ProductsFilterAll,
+                        selected_filter == ProductsFilter::All,
+                        on_select_all_products,
+                        cx,
+                    ))
+                    .child(products_filter_button(
+                        "products-filter-live",
+                        AppTextKey::ProductsFilterLive,
+                        selected_filter == ProductsFilter::Live,
+                        on_select_live_products,
+                        cx,
+                    ))
+                    .child(products_filter_button(
+                        "products-filter-drafts",
+                        AppTextKey::ProductsFilterDrafts,
+                        selected_filter == ProductsFilter::Drafts,
+                        on_select_draft_products,
+                        cx,
+                    ))
+                    .child(products_filter_button(
+                        "products-filter-need-attention",
+                        AppTextKey::ProductsFilterNeedAttention,
+                        selected_filter == ProductsFilter::NeedAttention,
+                        on_select_products_needing_attention,
+                        cx,
+                    ))
+                    .child(products_filter_button(
+                        "products-filter-paused",
+                        AppTextKey::ProductsFilterPaused,
+                        selected_filter == ProductsFilter::Paused,
+                        on_select_paused_products,
+                        cx,
+                    ))
+                    .child(products_filter_button(
+                        "products-filter-archived",
+                        AppTextKey::ProductsFilterArchived,
+                        selected_filter == ProductsFilter::Archived,
+                        on_select_archived_products,
+                        cx,
+                    )),
+            )
+            .child(
+                div()
+                    .w_full()
+                    .flex()
+                    .items_center()
+                    .justify_between()
+                    .gap(px(APP_UI_THEME.layout.home_stack_gap_px))
+                    .child(
+                        div()
+                            .text_size(px(APP_UI_THEME.typography.utility_title_text_px))
+                            .font_weight(gpui::FontWeight::SEMIBOLD)
+                            .text_color(rgb(APP_UI_THEME.text.secondary))
+                            .child(app_shared_text(AppTextKey::ProductsSortTitle)),
+                    )
+                    .child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .gap(px(8.0))
+                            .child(products_filter_button(
+                                "products-sort-updated",
+                                AppTextKey::ProductsSortUpdated,
+                                selected_sort == ProductsSort::Updated,
+                                on_sort_products_by_updated,
+                                cx,
+                            ))
+                            .child(products_filter_button(
+                                "products-sort-name",
+                                AppTextKey::ProductsSortName,
+                                selected_sort == ProductsSort::Name,
+                                on_sort_products_by_name,
+                                cx,
+                            ))
+                            .child(products_filter_button(
+                                "products-sort-availability",
+                                AppTextKey::ProductsSortAvailability,
+                                selected_sort == ProductsSort::Availability,
+                                on_sort_products_by_availability,
+                                cx,
+                            ))
+                            .child(products_filter_button(
+                                "products-sort-stock",
+                                AppTextKey::ProductsSortStock,
+                                selected_sort == ProductsSort::Stock,
+                                on_sort_products_by_stock,
+                                cx,
+                            ))
+                            .child(products_filter_button(
+                                "products-sort-price",
+                                AppTextKey::ProductsSortPrice,
+                                selected_sort == ProductsSort::Price,
+                                on_sort_products_by_price,
+                                cx,
+                            )),
+                    ),
+            ),
+    )
+}
+
+fn products_filter_button(
+    id: &'static str,
+    key: AppTextKey,
+    is_active: bool,
+    on_click: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+    cx: &App,
+) -> impl IntoElement {
+    if is_active {
+        action_button_primary(id, app_shared_text(key), on_click, cx).into_any_element()
+    } else {
+        action_button_compact(id, app_shared_text(key), on_click, cx).into_any_element()
+    }
+}
+
+fn products_table_card(rows: &[ProductsListRow]) -> impl IntoElement {
+    home_card(
+        app_shared_text(AppTextKey::ProductsTableTitle),
+        div()
+            .w_full()
+            .flex()
+            .flex_col()
+            .gap(px(12.0))
+            .child(products_table_header())
+            .child(section_divider())
+            .children(
+                rows.iter()
+                    .enumerate()
+                    .flat_map(|(index, row)| {
+                        let mut items = vec![products_table_row(row).into_any_element()];
+                        if index + 1 < rows.len() {
+                            items.push(section_divider().into_any_element());
+                        }
+                        items
+                    })
+                    .collect::<Vec<_>>(),
+            ),
+    )
+}
+
+fn products_table_header() -> impl IntoElement {
+    div()
+        .w_full()
+        .flex()
+        .items_center()
+        .gap(px(APP_UI_THEME.layout.home_stack_gap_px))
+        .child(products_table_header_column(
+            AppTextKey::ProductsColumnProduct,
+            None,
+            true,
+        ))
+        .child(products_table_header_column(
+            AppTextKey::ProductsColumnStatus,
+            Some(112.0),
+            false,
+        ))
+        .child(products_table_header_column(
+            AppTextKey::ProductsColumnAvailability,
+            Some(192.0),
+            false,
+        ))
+        .child(products_table_header_column(
+            AppTextKey::ProductsColumnStock,
+            Some(128.0),
+            false,
+        ))
+        .child(products_table_header_column(
+            AppTextKey::ProductsColumnPrice,
+            Some(128.0),
+            false,
+        ))
+        .child(products_table_header_column(
+            AppTextKey::ProductsColumnUpdated,
+            Some(164.0),
+            false,
+        ))
+}
+
+fn products_table_header_column(
+    key: AppTextKey,
+    width_px: Option<f32>,
+    grows: bool,
+) -> impl IntoElement {
+    div()
+        .when_some(width_px, |this, width_px| this.w(px(width_px)))
+        .when(grows, |this| this.flex_1().min_w_0())
+        .text_size(px(APP_UI_THEME.typography.utility_title_text_px))
+        .font_weight(gpui::FontWeight::SEMIBOLD)
+        .text_color(rgb(APP_UI_THEME.text.secondary))
+        .child(app_shared_text(key))
+}
+
+fn products_table_row(row: &ProductsListRow) -> impl IntoElement {
+    div()
+        .w_full()
+        .flex()
+        .items_center()
+        .gap(px(APP_UI_THEME.layout.home_stack_gap_px))
+        .child(
+            div()
+                .flex_1()
+                .min_w_0()
+                .flex()
+                .flex_col()
+                .gap(px(4.0))
+                .child(
+                    div()
+                        .text_size(px(APP_UI_THEME.typography.body_text_px))
+                        .font_weight(gpui::FontWeight::MEDIUM)
+                        .text_color(rgb(APP_UI_THEME.text.primary))
+                        .child(row.title.clone()),
+                )
+                .when_some(row.subtitle.as_ref(), |this, subtitle| {
+                    this.child(
+                        div()
+                            .text_size(px(APP_UI_THEME.typography.utility_title_text_px))
+                            .line_height(relative(1.2))
+                            .text_color(rgb(APP_UI_THEME.text.secondary))
+                            .child(subtitle.clone()),
+                    )
+                }),
+        )
+        .child(
+            div()
+                .w(px(112.0))
+                .flex()
+                .items_center()
+                .gap(px(6.0))
+                .child(status_indicator(products_row_status_color(row)))
+                .child(
+                    div()
+                        .text_size(px(APP_UI_THEME.typography.utility_title_text_px))
+                        .text_color(rgb(APP_UI_THEME.text.primary))
+                        .child(app_shared_text(products_status_key(row.status))),
+                ),
+        )
+        .child(
+            div()
+                .w(px(192.0))
+                .text_size(px(APP_UI_THEME.typography.utility_title_text_px))
+                .line_height(relative(1.2))
+                .text_color(rgb(APP_UI_THEME.text.primary))
+                .child(row.availability.label.clone()),
+        )
+        .child(
+            div()
+                .w(px(128.0))
+                .text_size(px(APP_UI_THEME.typography.utility_title_text_px))
+                .line_height(relative(1.2))
+                .text_color(rgb(APP_UI_THEME.text.primary))
+                .child(products_stock_text(row)),
+        )
+        .child(
+            div()
+                .w(px(128.0))
+                .text_size(px(APP_UI_THEME.typography.utility_title_text_px))
+                .line_height(relative(1.2))
+                .text_color(rgb(APP_UI_THEME.text.primary))
+                .child(products_price_text(row)),
+        )
+        .child(
+            div()
+                .w(px(164.0))
+                .text_size(px(APP_UI_THEME.typography.utility_title_text_px))
+                .line_height(relative(1.2))
+                .text_color(rgb(APP_UI_THEME.text.secondary))
+                .child(row.updated_at.clone()),
+        )
+}
+
+fn products_empty_state_card(filter: ProductsFilter) -> impl IntoElement {
+    let (title_key, body_key) = if filter == ProductsFilter::NeedAttention {
+        (
+            AppTextKey::ProductsEmptyNeedAttentionTitle,
+            AppTextKey::ProductsEmptyNeedAttentionBody,
+        )
+    } else {
+        (
+            AppTextKey::ProductsEmptyTitle,
+            AppTextKey::ProductsEmptyBody,
+        )
+    };
+
+    home_empty_state_card(title_key, body_key)
+}
+
+fn products_status_key(status: ProductStatus) -> AppTextKey {
+    match status {
+        ProductStatus::Draft => AppTextKey::ProductsStatusDraft,
+        ProductStatus::Published => AppTextKey::ProductsStatusLive,
+        ProductStatus::Paused => AppTextKey::ProductsStatusPaused,
+        ProductStatus::Archived => AppTextKey::ProductsStatusArchived,
+    }
+}
+
+fn products_row_status_color(row: &ProductsListRow) -> u32 {
+    if row.attention_state != ProductAttentionState::Healthy {
+        APP_UI_THEME.controls.status_indicator.attention
+    } else {
+        match row.status {
+            ProductStatus::Published => APP_UI_THEME.controls.status_indicator.online,
+            ProductStatus::Draft | ProductStatus::Paused | ProductStatus::Archived => {
+                APP_UI_THEME.controls.status_indicator.offline
+            }
+        }
+    }
+}
+
+fn products_stock_text(row: &ProductsListRow) -> String {
+    match row.stock.quantity {
+        Some(quantity) => match row.stock.unit_label.as_ref() {
+            Some(unit_label) => format!("{quantity} {unit_label}"),
+            None => quantity.to_string(),
+        },
+        None => app_shared_text(AppTextKey::ValueNone).to_string(),
+    }
+}
+
+fn products_price_text(row: &ProductsListRow) -> String {
+    let Some(price) = row.price.as_ref() else {
+        return app_shared_text(AppTextKey::ValueNone).to_string();
+    };
+    let dollars = price.amount_minor_units / 100;
+    let cents = price.amount_minor_units % 100;
+
+    format!("${dollars}.{cents:02} / {}", price.unit_label)
 }
 
 fn home_farm_setup_onboarding_card(
@@ -2458,6 +3326,7 @@ mod tests {
             home_route,
             farm_setup_projection,
             today_projection,
+            products_projection: Default::default(),
             startup_issue: None,
         }
     }

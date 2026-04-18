@@ -266,6 +266,7 @@ mod tests {
             home_route: HomeRoute::SetupRequired,
             farm_setup_projection: Default::default(),
             today_projection: TodayAgendaProjection::default(),
+            products_projection: Default::default(),
             startup_issue: Some("desktop runtime roots require HOME for macos".to_owned()),
         };
 
@@ -299,6 +300,7 @@ mod tests {
             home_route: HomeRoute::Blocked,
             farm_setup_projection: Default::default(),
             today_projection: TodayAgendaProjection::default(),
+            products_projection: Default::default(),
             startup_issue: None,
         };
         let setup = DesktopAppRuntimeSummary {
@@ -308,6 +310,7 @@ mod tests {
             home_route: HomeRoute::SetupRequired,
             farm_setup_projection: Default::default(),
             today_projection: TodayAgendaProjection::default(),
+            products_projection: Default::default(),
             startup_issue: None,
         };
 
@@ -324,6 +327,7 @@ mod tests {
             home_route: HomeRoute::Personal,
             farm_setup_projection: Default::default(),
             today_projection: TodayAgendaProjection::default(),
+            products_projection: Default::default(),
             startup_issue: None,
         };
         let farmer = DesktopAppRuntimeSummary {
@@ -333,6 +337,7 @@ mod tests {
             home_route: HomeRoute::FarmSetupOnboarding,
             farm_setup_projection: Default::default(),
             today_projection: TodayAgendaProjection::default(),
+            products_projection: Default::default(),
             startup_issue: None,
         };
 
@@ -349,6 +354,7 @@ mod tests {
             home_route: HomeRoute::Personal,
             farm_setup_projection: Default::default(),
             today_projection: TodayAgendaProjection::default(),
+            products_projection: Default::default(),
             startup_issue: Some("runtime unavailable".to_owned()),
         };
 
@@ -364,6 +370,7 @@ mod tests {
             home_route: HomeRoute::SetupRequired,
             farm_setup_projection: Default::default(),
             today_projection: TodayAgendaProjection::default(),
+            products_projection: Default::default(),
             startup_issue: None,
         };
         let personal = DesktopAppRuntimeSummary {
@@ -373,6 +380,7 @@ mod tests {
             home_route: HomeRoute::Personal,
             farm_setup_projection: Default::default(),
             today_projection: TodayAgendaProjection::default(),
+            products_projection: Default::default(),
             startup_issue: None,
         };
         let farmer = DesktopAppRuntimeSummary {
@@ -382,6 +390,7 @@ mod tests {
             home_route: HomeRoute::FarmSetupOnboarding,
             farm_setup_projection: Default::default(),
             today_projection: TodayAgendaProjection::default(),
+            products_projection: Default::default(),
             startup_issue: None,
         };
         let blocked = DesktopAppRuntimeSummary {
@@ -391,6 +400,7 @@ mod tests {
             home_route: HomeRoute::FarmSetupOnboarding,
             farm_setup_projection: Default::default(),
             today_projection: TodayAgendaProjection::default(),
+            products_projection: Default::default(),
             startup_issue: Some("runtime unavailable".to_owned()),
         };
 
