@@ -3,6 +3,7 @@ members = [
     "crates/shared/core",
     "crates/shared/i18n",
     "crates/shared/models",
+    "crates/shared/remote_signer",
     "crates/shared/sqlite",
     "crates/shared/state",
     "crates/shared/sync",
