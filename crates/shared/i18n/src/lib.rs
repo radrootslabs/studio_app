@@ -134,6 +134,40 @@ mod tests {
     }
 
     #[test]
+    fn english_shell_reset_copy_matches_setup_and_utility_contract() {
+        assert_eq!(
+            app_text(AppTextKey::HomeSetupCreateAccountAction),
+            "Create account"
+        );
+        assert_eq!(app_text(AppTextKey::SettingsTitle), "Radroots Settings");
+        assert_eq!(
+            app_text(AppTextKey::SettingsAccountNoSelectionTitle),
+            "No account selected"
+        );
+        assert_eq!(
+            app_text(AppTextKey::SettingsAccountNoSelectionBody),
+            "Add a local account to start using Radroots on this device."
+        );
+        assert_eq!(
+            app_text(AppTextKey::SettingsAccountStatusLoggedOut),
+            "Logged Out"
+        );
+        assert_eq!(
+            app_text(AppTextKey::SettingsAccountActivationInactive),
+            "Not activated"
+        );
+        assert_eq!(
+            app_text(AppTextKey::SettingsAccountAddAction),
+            "Add Account..."
+        );
+        assert_eq!(app_text(AppTextKey::SettingsAccountLogOutAction), "Log Out");
+        assert_eq!(
+            app_text(AppTextKey::SettingsAccountOpenWorkspaceAction),
+            "Open Workspace..."
+        );
+    }
+
+    #[test]
     fn host_locale_negotiation_reduces_to_supported_base_locale() {
         assert_eq!(resolve_locale_from_host("en_US.UTF-8"), "en");
         assert_eq!(resolve_locale_from_host("en-GB"), "en");

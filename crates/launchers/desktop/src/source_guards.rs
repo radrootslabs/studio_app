@@ -20,6 +20,17 @@ const ALLOWED_WINDOW_LITERALS: &[&str] = &[
     "settings-use-nip05",
 ];
 
+const REQUIRED_WINDOW_COPY_KEYS: &[&str] = &[
+    "AppTextKey::HomeSetupCreateAccountAction",
+    "AppTextKey::SettingsAccountNoSelectionTitle",
+    "AppTextKey::SettingsAccountNoSelectionBody",
+    "AppTextKey::SettingsAccountStatusLoggedOut",
+    "AppTextKey::SettingsAccountActivationInactive",
+    "AppTextKey::SettingsAccountAddAction",
+    "AppTextKey::SettingsAccountLogOutAction",
+    "AppTextKey::SettingsAccountOpenWorkspaceAction",
+];
+
 #[test]
 fn desktop_menu_source_uses_localized_copy_paths() {
     assert_eq!(
@@ -40,6 +51,18 @@ fn desktop_window_source_uses_localized_copy_paths() {
             .copied()
             .collect::<BTreeSet<_>>()
     );
+}
+
+#[test]
+fn desktop_window_source_keeps_shell_reset_copy_keyed() {
+    let source = include_str!("window.rs");
+
+    for copy_key in REQUIRED_WINDOW_COPY_KEYS {
+        assert!(
+            source.contains(copy_key),
+            "desktop window is missing localized copy key {copy_key}"
+        );
+    }
 }
 
 fn extract_string_literals(source: &str) -> BTreeSet<&str> {
