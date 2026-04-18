@@ -28,6 +28,10 @@ const MIGRATIONS: &[Migration] = &[
         version: 6,
         sql: include_str!("../migrations/0006_farm_rules_workspace.sql"),
     },
+    Migration {
+        version: 7,
+        sql: include_str!("../migrations/0007_activity_farm_settings_section.sql"),
+    },
 ];
 
 pub fn latest_schema_version() -> u32 {

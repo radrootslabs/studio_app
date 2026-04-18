@@ -50,6 +50,7 @@ impl FarmerSection {
 pub enum SettingsSection {
     #[default]
     Account,
+    Farm,
     Settings,
     About,
 }
@@ -58,6 +59,7 @@ impl SettingsSection {
     pub const fn storage_key(self) -> &'static str {
         match self {
             Self::Account => "settings.account",
+            Self::Farm => "settings.farm",
             Self::Settings => "settings.settings",
             Self::About => "settings.about",
         }
@@ -140,6 +142,7 @@ impl FromStr for ShellSection {
             "farmer.pack_day" => Ok(Self::Farmer(FarmerSection::PackDay)),
             "farmer.farm" => Ok(Self::Farmer(FarmerSection::Farm)),
             "settings.account" => Ok(Self::Settings(SettingsSection::Account)),
+            "settings.farm" => Ok(Self::Settings(SettingsSection::Farm)),
             "settings.settings" => Ok(Self::Settings(SettingsSection::Settings)),
             "settings.about" => Ok(Self::Settings(SettingsSection::About)),
             _ => Err(ParseShellSectionError),
@@ -1437,19 +1440,18 @@ mod tests {
     use super::{
         AccountCustody, AccountSummary, AccountSurfaceActivationProjection, ActiveSurface,
         ActivityEventId, AppActivityContext, AppActivityEvent, AppActivityKind,
-        AppIdentityProjection, AppStartupGate, BlackoutPeriodId, FarmId,
-        FarmOrderMethod, FarmReadinessBlocker, FarmRulesProjection, FarmRulesReadiness,
-        FarmSetupBlocker, FarmSetupDraft, FarmSetupProjection, FarmSetupReadiness,
-        FarmSetupSection, FarmTimingConflict, FarmTimingConflictKind,
-        FarmerActivationProjection, FarmerSection, IdentityBlockedReason, IdentityReadiness,
-        LoggedOutStartupPhase, LoggedOutStartupProjection, OrderListRow,
-        ParseStartupSignerSourceError, PickupLocationId, ProductAttentionState,
-        ProductAvailabilityState, ProductAvailabilitySummary, ProductEditorDraft, ProductListRow,
-        ProductPricePresentation, ProductPublishBlocker, ProductStatus, ProductStockState,
-        ProductStockSummary, ProductsFilter, ProductsListProjection, ProductsListRow,
-        ProductsListSummary, ProductsSort, SelectedAccountProjection,
-        SelectedSurfaceProjection, SettingsPreference, SettingsSection, ShellSection,
-        StartupSignerEntryProjection, StartupSignerSource, StartupSignerSourceKind,
+        AppIdentityProjection, AppStartupGate, BlackoutPeriodId, FarmId, FarmOrderMethod,
+        FarmReadinessBlocker, FarmRulesProjection, FarmRulesReadiness, FarmSetupBlocker,
+        FarmSetupDraft, FarmSetupProjection, FarmSetupReadiness, FarmSetupSection,
+        FarmTimingConflict, FarmTimingConflictKind, FarmerActivationProjection, FarmerSection,
+        IdentityBlockedReason, IdentityReadiness, LoggedOutStartupPhase,
+        LoggedOutStartupProjection, OrderListRow, ParseStartupSignerSourceError, PickupLocationId,
+        ProductAttentionState, ProductAvailabilityState, ProductAvailabilitySummary,
+        ProductEditorDraft, ProductListRow, ProductPricePresentation, ProductPublishBlocker,
+        ProductStatus, ProductStockState, ProductStockSummary, ProductsFilter,
+        ProductsListProjection, ProductsListRow, ProductsListSummary, ProductsSort,
+        SelectedAccountProjection, SelectedSurfaceProjection, SettingsPreference, SettingsSection,
+        ShellSection, StartupSignerEntryProjection, StartupSignerSource, StartupSignerSourceKind,
         TodayAgendaProjection, TodaySetupTask, TodaySetupTaskKind, TodaySummary,
     };
     use std::{collections::BTreeSet, str::FromStr};
@@ -1465,6 +1467,7 @@ mod tests {
             ShellSection::Farmer(FarmerSection::PackDay),
             ShellSection::Farmer(FarmerSection::Farm),
             ShellSection::Settings(SettingsSection::Account),
+            ShellSection::Settings(SettingsSection::Farm),
             ShellSection::Settings(SettingsSection::Settings),
             ShellSection::Settings(SettingsSection::About),
         ];
@@ -2178,7 +2181,10 @@ mod tests {
                 .map(|profile| profile.display_name.as_str()),
             Some(saved_farm.display_name.as_str())
         );
-        assert_eq!(projection.pickup_locations[0].pickup_location_id, pickup_location_id);
+        assert_eq!(
+            projection.pickup_locations[0].pickup_location_id,
+            pickup_location_id
+        );
         assert_eq!(
             projection.fulfillment_windows[0].pickup_location_id,
             pickup_location_id

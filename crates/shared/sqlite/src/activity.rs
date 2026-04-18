@@ -192,6 +192,7 @@ fn decode_settings_section(
 ) -> Result<SettingsSection, AppSqliteError> {
     match value.as_deref() {
         Some("account") => Ok(SettingsSection::Account),
+        Some("farm") => Ok(SettingsSection::Farm),
         Some("settings") => Ok(SettingsSection::Settings),
         Some("about") => Ok(SettingsSection::About),
         Some(other) => Err(AppSqliteError::DecodeEnum {
@@ -238,6 +239,7 @@ fn settings_section_value(kind: &AppActivityKind) -> Option<&'static str> {
         AppActivityKind::SettingsOpened { section }
         | AppActivityKind::SettingsSectionSelected { section } => Some(match section {
             SettingsSection::Account => "account",
+            SettingsSection::Farm => "farm",
             SettingsSection::Settings => "settings",
             SettingsSection::About => "about",
         }),
@@ -280,7 +282,7 @@ mod tests {
             .expect("record home opened");
         repository
             .record(&AppActivityKind::SettingsOpened {
-                section: SettingsSection::About,
+                section: SettingsSection::Farm,
             })
             .expect("record settings opened");
         repository
@@ -303,7 +305,7 @@ mod tests {
         assert_eq!(
             recent[1].kind,
             AppActivityKind::SettingsOpened {
-                section: SettingsSection::About,
+                section: SettingsSection::Farm,
             }
         );
         assert_eq!(recent[2].kind, AppActivityKind::HomeOpened);

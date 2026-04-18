@@ -2233,8 +2233,6 @@ impl SettingsWindowView {
     }
 
     fn settings_panel(&mut self, cx: &mut Context<Self>) -> impl IntoElement {
-        let section_label_width_px = 72.0;
-        let form_max_width_px = 420.0;
         let runtime_summary = self.runtime.summary();
         let general_settings = runtime_summary.shell_projection.settings.general;
         let general_allow_relay_connections = general_settings.allow_relay_connections;
@@ -2242,79 +2240,78 @@ impl SettingsWindowView {
         let general_use_nip05 = general_settings.use_nip05;
         let general_launch_at_login = general_settings.launch_at_login;
 
-        div()
-            .size_full()
-            .p(px(APP_UI_THEME.layout.settings_content_padding_px))
-            .flex()
-            .flex_col()
-            .items_center()
-            .child(
+        let mut cards = SETTINGS_OPERATIONS_PANEL_SECTIONS
+            .iter()
+            .copied()
+            .map(settings_inventory_card)
+            .map(IntoElement::into_any_element)
+            .collect::<Vec<_>>();
+
+        cards.push(
+            home_card(
+                app_shared_text(AppTextKey::SettingsGeneralSectionLabel),
                 div()
-                    .h_full()
                     .w_full()
-                    .max_w(px(form_max_width_px))
                     .flex()
-                    .items_start()
-                    .gap(px(APP_UI_THEME.layout.settings_section_gap_px))
-                    .child(
-                        div()
-                            .w(px(section_label_width_px))
-                            .text_size(px(APP_UI_THEME.typography.body_text_px))
-                            .font_weight(gpui::FontWeight::MEDIUM)
-                            .text_color(rgb(APP_UI_THEME.text.secondary))
-                            .child(app_shared_label_text(
-                                AppTextKey::SettingsGeneralSectionLabel,
-                            )),
-                    )
-                    .child(
-                        div()
-                            .flex_1()
-                            .min_w_0()
-                            .flex()
-                            .flex_col()
-                            .gap(px(16.0))
-                            .child(self.settings_checkbox_row(
-                                "settings-allow-relay-connections",
-                                general_allow_relay_connections,
-                                AppTextKey::SettingsGeneralAllowRelayConnections,
-                                None,
-                                None,
-                                None,
-                                |_, _, _| {},
-                                cx,
-                            ))
-                            .child(self.settings_checkbox_row(
-                                "settings-use-media-servers",
-                                general_use_media_servers,
-                                AppTextKey::SettingsGeneralUseMediaServers,
-                                Some("settings-manage-media-servers"),
-                                Some(AppTextKey::SettingsGeneralManageAction),
-                                None,
-                                |_, _, _| {},
-                                cx,
-                            ))
-                            .child(self.settings_checkbox_row(
-                                "settings-use-nip05",
-                                general_use_nip05,
-                                AppTextKey::SettingsGeneralUseNip05,
-                                None,
-                                None,
-                                Some(AppTextKey::SettingsGeneralUseNip05Note),
-                                |_, _, _| {},
-                                cx,
-                            ))
-                            .child(self.settings_checkbox_row(
-                                "settings-launch-at-login",
-                                general_launch_at_login,
-                                AppTextKey::SettingsGeneralLaunchAtLogin,
-                                None,
-                                None,
-                                None,
-                                |_, _, _| {},
-                                cx,
-                            )),
-                    ),
+                    .flex_col()
+                    .gap(px(16.0))
+                    .child(self.settings_checkbox_row(
+                        "settings-allow-relay-connections",
+                        general_allow_relay_connections,
+                        AppTextKey::SettingsGeneralAllowRelayConnections,
+                        None,
+                        None,
+                        None,
+                        |_, _, _| {},
+                        cx,
+                    ))
+                    .child(self.settings_checkbox_row(
+                        "settings-use-media-servers",
+                        general_use_media_servers,
+                        AppTextKey::SettingsGeneralUseMediaServers,
+                        Some("settings-manage-media-servers"),
+                        Some(AppTextKey::SettingsGeneralManageAction),
+                        None,
+                        |_, _, _| {},
+                        cx,
+                    ))
+                    .child(self.settings_checkbox_row(
+                        "settings-use-nip05",
+                        general_use_nip05,
+                        AppTextKey::SettingsGeneralUseNip05,
+                        None,
+                        None,
+                        Some(AppTextKey::SettingsGeneralUseNip05Note),
+                        |_, _, _| {},
+                        cx,
+                    ))
+                    .child(self.settings_checkbox_row(
+                        "settings-launch-at-login",
+                        general_launch_at_login,
+                        AppTextKey::SettingsGeneralLaunchAtLogin,
+                        None,
+                        None,
+                        None,
+                        |_, _, _| {},
+                        cx,
+                    )),
             )
+            .into_any_element(),
+        );
+
+        settings_inventory_panel(AppTextKey::SettingsSettingsPanelBody, cards)
+    }
+
+    fn farm_panel(&self) -> impl IntoElement {
+        settings_inventory_panel(
+            AppTextKey::SettingsFarmPanelBody,
+            SETTINGS_FARM_PANEL_SECTIONS
+                .iter()
+                .copied()
+                .map(settings_inventory_card)
+                .map(IntoElement::into_any_element)
+                .collect(),
+        )
     }
 
     fn about_panel(&self) -> impl IntoElement {
@@ -2372,6 +2369,7 @@ impl SettingsWindowView {
     fn settings_panel_content(&mut self, cx: &mut Context<Self>) -> AnyElement {
         match self.selected_view() {
             SettingsPanelViewKey::Account => self.account_panel(cx).into_any_element(),
+            SettingsPanelViewKey::Farm => self.farm_panel().into_any_element(),
             SettingsPanelViewKey::Settings => self.settings_panel(cx).into_any_element(),
             SettingsPanelViewKey::About => self.about_panel().into_any_element(),
         }
@@ -2380,6 +2378,12 @@ impl SettingsWindowView {
 
 impl Render for SettingsWindowView {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let navigation_buttons = SETTINGS_NAVIGATION_ORDER
+            .iter()
+            .copied()
+            .map(|view| self.navigation_button(view, cx).into_any_element())
+            .collect::<Vec<_>>();
+
         app_window_shell(
             APP_UI_THEME.surfaces.panel_background,
             div()
@@ -2406,9 +2410,7 @@ impl Render for SettingsWindowView {
                                 .pt(px(APP_UI_THEME.layout.settings_navigation_row_padding_px))
                                 .pb(px(APP_UI_THEME.layout.settings_navigation_row_padding_px))
                                 .gap(px(APP_UI_THEME.layout.settings_navigation_row_gap_px))
-                                .child(self.navigation_button(SettingsPanelViewKey::Account, cx))
-                                .child(self.navigation_button(SettingsPanelViewKey::Settings, cx))
-                                .child(self.navigation_button(SettingsPanelViewKey::About, cx)),
+                                .children(navigation_buttons),
                         ),
                 )
                 .child(section_divider())
@@ -2425,6 +2427,7 @@ impl Render for SettingsWindowView {
 fn settings_panel_label_key(view: SettingsPanelViewKey) -> AppTextKey {
     match view {
         SettingsPanelViewKey::Account => AppTextKey::SettingsNavAccounts,
+        SettingsPanelViewKey::Farm => AppTextKey::SettingsNavFarm,
         SettingsPanelViewKey::Settings => AppTextKey::SettingsNavSettings,
         SettingsPanelViewKey::About => AppTextKey::SettingsNavAbout,
     }
@@ -2433,6 +2436,7 @@ fn settings_panel_label_key(view: SettingsPanelViewKey) -> AppTextKey {
 fn settings_panel_spec(view: SettingsPanelViewKey) -> (&'static str, IconName) {
     match view {
         SettingsPanelViewKey::Account => ("settings-nav-accounts", IconName::CircleUser),
+        SettingsPanelViewKey::Farm => ("settings-nav-farm", IconName::Map),
         SettingsPanelViewKey::Settings => ("settings-nav-settings", IconName::Settings2),
         SettingsPanelViewKey::About => ("settings-nav-about", IconName::Info),
     }
@@ -2450,6 +2454,90 @@ struct FarmSetupOnboardingCardSpec {
     body_key: AppTextKey,
     action_key: Option<AppTextKey>,
 }
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct SettingsInventorySectionSpec {
+    title_key: AppTextKey,
+    field_keys: &'static [AppTextKey],
+}
+
+const SETTINGS_NAVIGATION_ORDER: &[SettingsPanelViewKey] = &[
+    SettingsPanelViewKey::Account,
+    SettingsPanelViewKey::Farm,
+    SettingsPanelViewKey::Settings,
+    SettingsPanelViewKey::About,
+];
+
+const SETTINGS_FARM_SECTION_FIELDS: &[AppTextKey] = &[
+    AppTextKey::HomeFarmSetupFieldFarmName,
+    AppTextKey::SettingsFarmFieldTimezone,
+    AppTextKey::SettingsFarmFieldCurrency,
+];
+
+const SETTINGS_PICKUP_LOCATIONS_SECTION_FIELDS: &[AppTextKey] = &[
+    AppTextKey::SettingsPickupLocationsFieldLabel,
+    AppTextKey::SettingsPickupLocationsFieldAddress,
+    AppTextKey::SettingsPickupLocationsFieldDirections,
+    AppTextKey::SettingsPickupLocationsFieldDefault,
+];
+
+const SETTINGS_OPERATING_RULES_SECTION_FIELDS: &[AppTextKey] = &[
+    AppTextKey::SettingsOperatingRulesFieldPromiseLeadTime,
+    AppTextKey::SettingsOperatingRulesFieldSubstitutionPolicy,
+    AppTextKey::SettingsOperatingRulesFieldMissedPickupPolicy,
+];
+
+const SETTINGS_FULFILLMENT_WINDOWS_SECTION_FIELDS: &[AppTextKey] = &[
+    AppTextKey::SettingsFulfillmentWindowsFieldLabel,
+    AppTextKey::SettingsFulfillmentWindowsFieldPickupLocation,
+    AppTextKey::SettingsFulfillmentWindowsFieldStartsAt,
+    AppTextKey::SettingsFulfillmentWindowsFieldEndsAt,
+    AppTextKey::SettingsFulfillmentWindowsFieldOrderCutoff,
+];
+
+const SETTINGS_BLACKOUT_PERIODS_SECTION_FIELDS: &[AppTextKey] = &[
+    AppTextKey::SettingsBlackoutPeriodsFieldLabel,
+    AppTextKey::SettingsBlackoutPeriodsFieldStartsAt,
+    AppTextKey::SettingsBlackoutPeriodsFieldEndsAt,
+];
+
+const SETTINGS_READINESS_SECTION_FIELDS: &[AppTextKey] = &[
+    AppTextKey::SettingsReadinessFieldMissingProfileBasics,
+    AppTextKey::SettingsReadinessFieldMissingPickupLocation,
+    AppTextKey::SettingsReadinessFieldMissingFulfillmentWindow,
+    AppTextKey::SettingsReadinessFieldMissingOperatingRules,
+    AppTextKey::SettingsReadinessFieldInvalidTimingConflicts,
+];
+
+const SETTINGS_FARM_PANEL_SECTIONS: &[SettingsInventorySectionSpec] = &[
+    SettingsInventorySectionSpec {
+        title_key: AppTextKey::HomeFarmSetupSectionFarm,
+        field_keys: SETTINGS_FARM_SECTION_FIELDS,
+    },
+    SettingsInventorySectionSpec {
+        title_key: AppTextKey::SettingsPickupLocationsSectionLabel,
+        field_keys: SETTINGS_PICKUP_LOCATIONS_SECTION_FIELDS,
+    },
+];
+
+const SETTINGS_OPERATIONS_PANEL_SECTIONS: &[SettingsInventorySectionSpec] = &[
+    SettingsInventorySectionSpec {
+        title_key: AppTextKey::SettingsOperatingRulesSectionLabel,
+        field_keys: SETTINGS_OPERATING_RULES_SECTION_FIELDS,
+    },
+    SettingsInventorySectionSpec {
+        title_key: AppTextKey::SettingsFulfillmentWindowsSectionLabel,
+        field_keys: SETTINGS_FULFILLMENT_WINDOWS_SECTION_FIELDS,
+    },
+    SettingsInventorySectionSpec {
+        title_key: AppTextKey::SettingsBlackoutPeriodsSectionLabel,
+        field_keys: SETTINGS_BLACKOUT_PERIODS_SECTION_FIELDS,
+    },
+    SettingsInventorySectionSpec {
+        title_key: AppTextKey::SettingsReadinessSectionLabel,
+        field_keys: SETTINGS_READINESS_SECTION_FIELDS,
+    },
+];
 
 fn holding_home_shell(runtime: &DesktopAppRuntimeSummary) -> impl IntoElement {
     let home_status = home_status_presentation(runtime);
@@ -4543,6 +4631,61 @@ fn home_farm_setup_blocker(key: AppTextKey) -> impl IntoElement {
         .child(app_shared_text(key))
 }
 
+fn settings_inventory_panel(intro_key: AppTextKey, cards: Vec<AnyElement>) -> impl IntoElement {
+    let content_max_width_px = 560.0;
+
+    div()
+        .id("settings-panel-scroll")
+        .size_full()
+        .overflow_y_scroll()
+        .child(
+            div()
+                .w_full()
+                .p(px(APP_UI_THEME.layout.settings_content_padding_px))
+                .flex()
+                .flex_col()
+                .items_center()
+                .child(
+                    div()
+                        .w_full()
+                        .max_w(px(content_max_width_px))
+                        .flex()
+                        .flex_col()
+                        .gap(px(APP_UI_THEME.layout.home_stack_gap_px))
+                        .child(home_body_text(app_shared_text(intro_key)))
+                        .children(cards),
+                ),
+        )
+}
+
+fn settings_inventory_card(spec: SettingsInventorySectionSpec) -> impl IntoElement {
+    home_card(
+        app_shared_text(spec.title_key),
+        div().w_full().flex().flex_col().gap(px(8.0)).children(
+            spec.field_keys
+                .iter()
+                .copied()
+                .map(settings_inventory_field_row)
+                .map(IntoElement::into_any_element)
+                .collect::<Vec<_>>(),
+        ),
+    )
+}
+
+fn settings_inventory_field_row(key: AppTextKey) -> impl IntoElement {
+    div()
+        .w_full()
+        .bg(rgb(APP_UI_THEME.surfaces.chrome_background))
+        .rounded(px(APP_UI_THEME
+            .controls
+            .action_button
+            .sizing
+            .corner_radius_px))
+        .px(px(12.0))
+        .py(px(10.0))
+        .child(home_farm_setup_field_label(key))
+}
+
 fn home_saved_farm_summary_card(runtime: &DesktopAppRuntimeSummary) -> Option<AnyElement> {
     let saved_farm = home_saved_farm(runtime)?;
     let location_or_service_area = if runtime
@@ -4998,13 +5141,15 @@ fn home_farm_order_method_label_key(method: FarmOrderMethod) -> AppTextKey {
 #[cfg(test)]
 mod tests {
     use super::{
-        AppTextKey, FarmerHomeFarmState, StartupHomeSurface, StartupSignerConnectState,
-        farm_setup_onboarding_card_spec, farmer_home_farm_state, home_saved_farm,
-        home_window_launch_size_px, home_window_minimum_size_px,
-        parse_optional_product_editor_stock_input, parse_product_editor_price_input,
-        product_display_title, startup_home_surface, startup_signer_preview_summary,
-        startup_signer_preview_summary_for_connect_state, startup_signer_source_input_is_editable,
-        startup_signer_status_spec, startup_signer_transport_failure_requires_notice,
+        AppTextKey, FarmerHomeFarmState, SETTINGS_FARM_PANEL_SECTIONS, SETTINGS_NAVIGATION_ORDER,
+        SETTINGS_OPERATIONS_PANEL_SECTIONS, SettingsInventorySectionSpec, SettingsPanelViewKey,
+        StartupHomeSurface, StartupSignerConnectState, farm_setup_onboarding_card_spec,
+        farmer_home_farm_state, home_saved_farm, home_window_launch_size_px,
+        home_window_minimum_size_px, parse_optional_product_editor_stock_input,
+        parse_product_editor_price_input, product_display_title, startup_home_surface,
+        startup_signer_preview_summary, startup_signer_preview_summary_for_connect_state,
+        startup_signer_source_input_is_editable, startup_signer_status_spec,
+        startup_signer_transport_failure_requires_notice,
     };
     use crate::runtime::DesktopAppRuntimeSummary;
     use radroots_studio_app_models::SettingsAccountProjection;
@@ -5040,6 +5185,86 @@ mod tests {
         assert_eq!(spec.title_key, AppTextKey::HomeFarmSetupOnboardingTitle);
         assert_eq!(spec.body_key, AppTextKey::HomeFarmSetupOnboardingBody);
         assert_eq!(spec.action_key, None);
+    }
+
+    #[test]
+    fn settings_navigation_order_keeps_farm_between_account_and_settings() {
+        assert_eq!(
+            SETTINGS_NAVIGATION_ORDER,
+            &[
+                SettingsPanelViewKey::Account,
+                SettingsPanelViewKey::Farm,
+                SettingsPanelViewKey::Settings,
+                SettingsPanelViewKey::About,
+            ]
+        );
+    }
+
+    #[test]
+    fn settings_inventory_sections_follow_the_frozen_farm_rules_order() {
+        assert_eq!(
+            SETTINGS_FARM_PANEL_SECTIONS,
+            &[
+                SettingsInventorySectionSpec {
+                    title_key: AppTextKey::HomeFarmSetupSectionFarm,
+                    field_keys: &[
+                        AppTextKey::HomeFarmSetupFieldFarmName,
+                        AppTextKey::SettingsFarmFieldTimezone,
+                        AppTextKey::SettingsFarmFieldCurrency,
+                    ],
+                },
+                SettingsInventorySectionSpec {
+                    title_key: AppTextKey::SettingsPickupLocationsSectionLabel,
+                    field_keys: &[
+                        AppTextKey::SettingsPickupLocationsFieldLabel,
+                        AppTextKey::SettingsPickupLocationsFieldAddress,
+                        AppTextKey::SettingsPickupLocationsFieldDirections,
+                        AppTextKey::SettingsPickupLocationsFieldDefault,
+                    ],
+                },
+            ]
+        );
+        assert_eq!(
+            SETTINGS_OPERATIONS_PANEL_SECTIONS,
+            &[
+                SettingsInventorySectionSpec {
+                    title_key: AppTextKey::SettingsOperatingRulesSectionLabel,
+                    field_keys: &[
+                        AppTextKey::SettingsOperatingRulesFieldPromiseLeadTime,
+                        AppTextKey::SettingsOperatingRulesFieldSubstitutionPolicy,
+                        AppTextKey::SettingsOperatingRulesFieldMissedPickupPolicy,
+                    ],
+                },
+                SettingsInventorySectionSpec {
+                    title_key: AppTextKey::SettingsFulfillmentWindowsSectionLabel,
+                    field_keys: &[
+                        AppTextKey::SettingsFulfillmentWindowsFieldLabel,
+                        AppTextKey::SettingsFulfillmentWindowsFieldPickupLocation,
+                        AppTextKey::SettingsFulfillmentWindowsFieldStartsAt,
+                        AppTextKey::SettingsFulfillmentWindowsFieldEndsAt,
+                        AppTextKey::SettingsFulfillmentWindowsFieldOrderCutoff,
+                    ],
+                },
+                SettingsInventorySectionSpec {
+                    title_key: AppTextKey::SettingsBlackoutPeriodsSectionLabel,
+                    field_keys: &[
+                        AppTextKey::SettingsBlackoutPeriodsFieldLabel,
+                        AppTextKey::SettingsBlackoutPeriodsFieldStartsAt,
+                        AppTextKey::SettingsBlackoutPeriodsFieldEndsAt,
+                    ],
+                },
+                SettingsInventorySectionSpec {
+                    title_key: AppTextKey::SettingsReadinessSectionLabel,
+                    field_keys: &[
+                        AppTextKey::SettingsReadinessFieldMissingProfileBasics,
+                        AppTextKey::SettingsReadinessFieldMissingPickupLocation,
+                        AppTextKey::SettingsReadinessFieldMissingFulfillmentWindow,
+                        AppTextKey::SettingsReadinessFieldMissingOperatingRules,
+                        AppTextKey::SettingsReadinessFieldInvalidTimingConflicts,
+                    ],
+                },
+            ]
+        );
     }
 
     #[test]

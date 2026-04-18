@@ -168,6 +168,39 @@ mod tests {
     }
 
     #[test]
+    fn english_farm_rules_host_copy_matches_the_frozen_utility_window_inventory() {
+        assert_eq!(app_text(AppTextKey::SettingsNavFarm), "Farm");
+        assert_eq!(
+            app_text(AppTextKey::SettingsFarmPanelBody),
+            "Farm profile and pickup details stay local on this device."
+        );
+        assert_eq!(
+            app_text(AppTextKey::SettingsPickupLocationsSectionLabel),
+            "Pickup locations"
+        );
+        assert_eq!(
+            app_text(AppTextKey::SettingsOperatingRulesSectionLabel),
+            "Operating rules"
+        );
+        assert_eq!(
+            app_text(AppTextKey::SettingsFulfillmentWindowsSectionLabel),
+            "Fulfillment windows"
+        );
+        assert_eq!(
+            app_text(AppTextKey::SettingsBlackoutPeriodsSectionLabel),
+            "Blackout periods"
+        );
+        assert_eq!(
+            app_text(AppTextKey::SettingsReadinessSectionLabel),
+            "Readiness"
+        );
+        assert_eq!(
+            app_text(AppTextKey::SettingsReadinessFieldInvalidTimingConflicts),
+            "Invalid timing conflicts"
+        );
+    }
+
+    #[test]
     fn startup_identity_choice_keys_remain_defined_in_the_typed_registry_source() {
         let source = include_str!("keys.rs");
 
