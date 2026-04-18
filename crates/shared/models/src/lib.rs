@@ -410,31 +410,46 @@ pub struct AppIdentityProjection {
 
 impl AppIdentityProjection {
     pub fn missing() -> Self {
-        Self::default()
+        Self::with_readiness(IdentityReadiness::MissingAccount, Vec::new(), None)
+    }
+
+    pub fn missing_with_roster(roster: Vec<AccountSummary>) -> Self {
+        Self::with_readiness(IdentityReadiness::MissingAccount, roster, None)
     }
 
     pub fn blocked(reason: IdentityBlockedReason) -> Self {
-        Self {
-            readiness: IdentityReadiness::Blocked(reason),
-            ..Self::default()
-        }
+        Self::with_readiness(IdentityReadiness::Blocked(reason), Vec::new(), None)
     }
 
-    pub fn ready(
-        mut roster: Vec<AccountSummary>,
-        selected_account: SelectedAccountProjection,
+    pub fn blocked_with_selection(
+        reason: IdentityBlockedReason,
+        roster: Vec<AccountSummary>,
+        selected_account: Option<SelectedAccountProjection>,
     ) -> Self {
-        if !roster
-            .iter()
-            .any(|account| account.account_id == selected_account.account.account_id)
+        Self::with_readiness(IdentityReadiness::Blocked(reason), roster, selected_account)
+    }
+
+    pub fn ready(roster: Vec<AccountSummary>, selected_account: SelectedAccountProjection) -> Self {
+        Self::with_readiness(IdentityReadiness::Ready, roster, Some(selected_account))
+    }
+
+    pub fn with_readiness(
+        readiness: IdentityReadiness,
+        mut roster: Vec<AccountSummary>,
+        selected_account: Option<SelectedAccountProjection>,
+    ) -> Self {
+        if let Some(selected_account) = selected_account.as_ref()
+            && !roster
+                .iter()
+                .any(|account| account.account_id == selected_account.account.account_id)
         {
             roster.insert(0, selected_account.account.clone());
         }
 
         Self {
-            readiness: IdentityReadiness::Ready,
+            readiness,
             roster,
-            selected_account: Some(selected_account),
+            selected_account,
         }
     }
 
@@ -820,6 +835,49 @@ mod tests {
         assert_eq!(projection.roster.len(), 1);
         assert_eq!(projection.roster[0], selected_account.account);
         assert_eq!(projection.selected_account, Some(selected_account));
+    }
+
+    #[test]
+    fn blocked_identity_keeps_selected_account_visible_in_roster() {
+        let selected_account = SelectedAccountProjection::new(
+            AccountSummary {
+                account_id: "acct_blocked".to_owned(),
+                npub: "npub1blocked".to_owned(),
+                label: Some("Blocked account".to_owned()),
+                custody: AccountCustody::LocalManaged,
+            },
+            SelectedSurfaceProjection::new(ActiveSurface::Personal),
+            FarmerActivationProjection::inactive(),
+        );
+        let projection = AppIdentityProjection::blocked_with_selection(
+            IdentityBlockedReason::HostVaultUnavailable,
+            Vec::new(),
+            Some(selected_account.clone()),
+        );
+
+        assert_eq!(
+            projection.readiness,
+            IdentityReadiness::Blocked(IdentityBlockedReason::HostVaultUnavailable)
+        );
+        assert_eq!(projection.roster, vec![selected_account.account.clone()]);
+        assert_eq!(projection.selected_account, Some(selected_account));
+        assert_eq!(projection.startup_gate(), AppStartupGate::Blocked);
+    }
+
+    #[test]
+    fn missing_identity_can_keep_roster_visible_without_selected_account() {
+        let roster = vec![AccountSummary {
+            account_id: "acct_waiting".to_owned(),
+            npub: "npub1waiting".to_owned(),
+            label: Some("Waiting".to_owned()),
+            custody: AccountCustody::LocalManaged,
+        }];
+        let projection = AppIdentityProjection::missing_with_roster(roster.clone());
+
+        assert_eq!(projection.readiness, IdentityReadiness::MissingAccount);
+        assert_eq!(projection.roster, roster);
+        assert!(projection.selected_account.is_none());
+        assert_eq!(projection.startup_gate(), AppStartupGate::SetupRequired);
     }
 
     #[test]

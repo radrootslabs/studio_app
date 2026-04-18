@@ -13,8 +13,11 @@ use radroots_studio_app_state::{
     AppShellProjection, AppStateCommand, AppStateStore, AppStateStoreError,
     InMemoryAppStateRepository,
 };
+use radroots_nostr_accounts::prelude::RadrootsNostrAccountsManager;
 use thiserror::Error;
 use tracing::error;
+
+use crate::accounts::{DesktopAccountsBootstrapError, bootstrap_desktop_accounts};
 
 const APP_DATABASE_FILE_NAME: &str = "app.sqlite3";
 
@@ -150,6 +153,7 @@ pub struct DesktopAppRuntimeSummary {
 
 struct DesktopAppRuntimeState {
     state_store: AppStateStore<InMemoryAppStateRepository>,
+    accounts_manager: Option<RadrootsNostrAccountsManager>,
     sqlite_store: Option<AppSqliteStore>,
     startup_issue: Option<String>,
 }
@@ -159,6 +163,10 @@ impl fmt::Debug for DesktopAppRuntimeState {
         formatter
             .debug_struct("DesktopAppRuntimeState")
             .field("state_store", &self.state_store)
+            .field(
+                "accounts_manager",
+                &self.accounts_manager.as_ref().map(|_| "available"),
+            )
             .field(
                 "sqlite_store",
                 &self.sqlite_store.as_ref().map(|_| "available"),
@@ -174,12 +182,17 @@ impl DesktopAppRuntimeState {
         let database_path = paths.app.data.join(APP_DATABASE_FILE_NAME);
         let sqlite_store = AppSqliteStore::open(DatabaseTarget::Path(database_path.clone()))?;
         let mut state_store = AppStateStore::load(InMemoryAppStateRepository::default())?;
+        let accounts_bootstrap = bootstrap_desktop_accounts(&paths.shared_accounts, &sqlite_store)?;
         let today_projection = sqlite_store.load_today_agenda(None)?;
         let _ =
             state_store.apply_in_memory(AppStateCommand::replace_today_agenda(today_projection));
+        let _ = state_store.apply_in_memory(AppStateCommand::replace_identity_projection(
+            accounts_bootstrap.identity_projection,
+        ));
 
         Ok(Self {
             state_store,
+            accounts_manager: accounts_bootstrap.accounts_manager,
             sqlite_store: Some(sqlite_store),
             startup_issue: None,
         })
@@ -188,6 +201,7 @@ impl DesktopAppRuntimeState {
     fn degraded(error: DesktopAppRuntimeBootstrapError) -> Self {
         Self {
             state_store: AppStateStore::in_memory(AppShellProjection::default()),
+            accounts_manager: None,
             sqlite_store: None,
             startup_issue: Some(error.to_string()),
         }
@@ -205,6 +219,8 @@ impl DesktopAppRuntimeState {
 enum DesktopAppRuntimeBootstrapError {
     #[error(transparent)]
     RuntimePaths(#[from] AppRuntimePathsError),
+    #[error(transparent)]
+    Accounts(#[from] DesktopAccountsBootstrapError),
     #[error(transparent)]
     Sqlite(#[from] AppSqliteError),
     #[error(transparent)]
@@ -279,6 +295,7 @@ mod tests {
         let runtime = DesktopAppRuntime::from_state(DesktopAppRuntimeState {
             state_store: AppStateStore::load(InMemoryAppStateRepository::default())
                 .expect("in-memory state store should load"),
+            accounts_manager: None,
             sqlite_store: Some(
                 AppSqliteStore::open(DatabaseTarget::InMemory)
                     .expect("in-memory sqlite store should open"),
@@ -320,6 +337,7 @@ mod tests {
         let runtime = DesktopAppRuntime::from_state(DesktopAppRuntimeState {
             state_store: AppStateStore::load(InMemoryAppStateRepository::default())
                 .expect("in-memory state store should load"),
+            accounts_manager: None,
             sqlite_store: Some(
                 AppSqliteStore::open(DatabaseTarget::InMemory)
                     .expect("in-memory sqlite store should open"),
@@ -403,6 +421,7 @@ mod tests {
         let runtime = DesktopAppRuntime::from_state(DesktopAppRuntimeState {
             state_store: AppStateStore::load(InMemoryAppStateRepository::default())
                 .expect("in-memory state store should load"),
+            accounts_manager: None,
             sqlite_store: Some(
                 AppSqliteStore::open(DatabaseTarget::InMemory)
                     .expect("in-memory sqlite store should open"),

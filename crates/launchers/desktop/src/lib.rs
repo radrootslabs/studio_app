@@ -1,5 +1,6 @@
 #![forbid(unsafe_code)]
 
+mod accounts;
 mod app;
 mod menus;
 mod runtime;
