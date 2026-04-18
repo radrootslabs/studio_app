@@ -5,7 +5,7 @@ use radroots_studio_app_core::{AppDesktopRuntimePaths, AppRuntimePathsError, App
 use radroots_studio_app_models::{
     ActiveSurface, AppActivityContext, AppActivityKind, AppIdentityProjection, AppStartupGate,
     FarmId, FarmReadiness, FarmSetupDraft, FarmSetupProjection, FarmSummary, FarmerSection,
-    ProductsFilter, ProductsListProjection, ProductsSort, SettingsAccountProjection,
+    ProductId, ProductsFilter, ProductsListProjection, ProductsSort, SettingsAccountProjection,
     SettingsPreference, SettingsSection, ShellSection, TodayAgendaProjection,
 };
 use radroots_studio_app_sqlite::{
@@ -115,6 +115,19 @@ impl DesktopAppRuntime {
 
     pub fn select_products_sort(&self, sort: ProductsSort) -> Result<bool, AppSqliteError> {
         self.lock_state_mut().select_products_sort(sort)
+    }
+
+    pub fn open_products_filter(&self, filter: ProductsFilter) -> Result<bool, AppSqliteError> {
+        self.lock_state_mut().open_products_filter(filter)
+    }
+
+    pub fn update_product_stock(
+        &self,
+        product_id: ProductId,
+        stock_quantity: u32,
+    ) -> Result<bool, AppSqliteError> {
+        self.lock_state_mut()
+            .update_product_stock(product_id, stock_quantity)
     }
 
     pub fn set_settings_preference(&self, preference: SettingsPreference, enabled: bool) -> bool {
@@ -497,6 +510,49 @@ impl DesktopAppRuntimeState {
             query.filter,
             sort,
         ))
+    }
+
+    fn open_products_filter(&mut self, filter: ProductsFilter) -> Result<bool, AppSqliteError> {
+        if !self.state_store.farm_setup_projection().has_saved_farm() {
+            return Ok(false);
+        }
+
+        let filter_changed = self.select_products_filter(filter)?;
+        let section_changed = self.select_farmer_section(FarmerSection::Products);
+
+        Ok(filter_changed || section_changed)
+    }
+
+    fn update_product_stock(
+        &mut self,
+        product_id: ProductId,
+        stock_quantity: u32,
+    ) -> Result<bool, AppSqliteError> {
+        let Some(sqlite_store) = self.sqlite_store.as_ref() else {
+            return Ok(false);
+        };
+        if self
+            .state_store
+            .identity_projection()
+            .selected_account
+            .is_none()
+        {
+            return Ok(false);
+        }
+
+        let updated = sqlite_store.update_product_stock(product_id, stock_quantity)?;
+        if !updated {
+            return Ok(false);
+        }
+
+        let selected_account_context = load_selected_account_context(
+            sqlite_store,
+            self.state_store.identity_projection(),
+            self.state_store.products_projection().query.clone(),
+        )?;
+        let context_changed = self.apply_selected_account_context(&selected_account_context);
+
+        Ok(updated || context_changed)
     }
 
     fn save_farm_setup_draft(
@@ -1306,6 +1362,157 @@ mod tests {
             runtime.summary().products_projection.query.sort,
             ProductsSort::Name
         );
+    }
+
+    #[test]
+    fn runtime_open_products_filter_routes_today_follow_ons_into_products() {
+        let runtime = memory_runtime();
+
+        assert!(
+            runtime
+                .generate_local_account(Some("Farmer".to_owned()))
+                .expect("account should generate")
+        );
+        let account_id = runtime
+            .summary()
+            .settings_account_projection
+            .selected_account
+            .as_ref()
+            .expect("selected account")
+            .account
+            .account_id
+            .clone();
+        let farm_id =
+            save_farmer_surface_activation(&runtime, account_id.as_str(), ActiveSurface::Farmer);
+        let farm_setup_projection = FarmSetupProjection::from_saved_farm(FarmSummary {
+            farm_id,
+            display_name: "North field farm".to_owned(),
+            readiness: FarmReadiness::Ready,
+        });
+        runtime
+            .lock_state()
+            .sqlite_store
+            .as_ref()
+            .expect("sqlite store")
+            .save_farm_summary(
+                farm_setup_projection
+                    .saved_farm
+                    .as_ref()
+                    .expect("saved farm should exist"),
+            )
+            .expect("farm summary should save");
+        runtime
+            .lock_state()
+            .sqlite_store
+            .as_ref()
+            .expect("sqlite store")
+            .save_farm_setup(account_id.as_str(), &farm_setup_projection)
+            .expect("farm setup should save");
+
+        assert!(
+            runtime
+                .select_local_account(account_id.as_str())
+                .expect("account should select")
+        );
+        assert_eq!(
+            runtime.summary().shell_projection.selected_section,
+            ShellSection::Farmer(FarmerSection::Today)
+        );
+
+        assert!(
+            runtime
+                .open_products_filter(ProductsFilter::Drafts)
+                .expect("products follow-on should route")
+        );
+        let summary = runtime.summary();
+
+        assert_eq!(
+            summary.shell_projection.selected_section,
+            ShellSection::Farmer(FarmerSection::Products)
+        );
+        assert_eq!(
+            summary.products_projection.query.filter,
+            ProductsFilter::Drafts
+        );
+    }
+
+    #[test]
+    fn runtime_stock_updates_refresh_today_and_products_projections() {
+        let runtime = memory_runtime();
+
+        assert!(
+            runtime
+                .generate_local_account(Some("Farmer".to_owned()))
+                .expect("account should generate")
+        );
+        let account_id = runtime
+            .summary()
+            .settings_account_projection
+            .selected_account
+            .as_ref()
+            .expect("selected account")
+            .account
+            .account_id
+            .clone();
+        let farm_id =
+            save_farmer_surface_activation(&runtime, account_id.as_str(), ActiveSurface::Farmer);
+        let farm_setup_projection = FarmSetupProjection::from_saved_farm(FarmSummary {
+            farm_id,
+            display_name: "North field farm".to_owned(),
+            readiness: FarmReadiness::Ready,
+        });
+        runtime
+            .lock_state()
+            .sqlite_store
+            .as_ref()
+            .expect("sqlite store")
+            .save_farm_summary(
+                farm_setup_projection
+                    .saved_farm
+                    .as_ref()
+                    .expect("saved farm should exist"),
+            )
+            .expect("farm summary should save");
+        runtime
+            .lock_state()
+            .sqlite_store
+            .as_ref()
+            .expect("sqlite store")
+            .save_farm_setup(account_id.as_str(), &farm_setup_projection)
+            .expect("farm setup should save");
+        seed_product(
+            &runtime,
+            farm_id,
+            "Salad mix",
+            "Spring blend",
+            "published",
+            Some(2),
+            "2026-04-18T10:00:00Z",
+        );
+
+        assert!(
+            runtime
+                .select_local_account(account_id.as_str())
+                .expect("account should select")
+        );
+        let product_id = runtime.summary().products_projection.list.rows[0].product_id;
+
+        assert_eq!(
+            runtime.summary().today_projection.low_stock_products.len(),
+            1
+        );
+        assert!(
+            runtime
+                .update_product_stock(product_id, 12)
+                .expect("stock update should succeed")
+        );
+
+        let summary = runtime.summary();
+        assert_eq!(
+            summary.products_projection.list.rows[0].stock.quantity,
+            Some(12)
+        );
+        assert!(summary.today_projection.low_stock_products.is_empty());
     }
 
     #[test]

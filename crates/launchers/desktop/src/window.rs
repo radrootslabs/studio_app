@@ -3,17 +3,19 @@ use gpui::{
     InteractiveElement, IntoElement, ParentElement, Render, SharedString,
     StatefulInteractiveElement, Styled, Subscription, Timer, Window, WindowBackgroundAppearance,
     WindowBounds, WindowOptions, div, prelude::FluentBuilder, px, relative, rgb, size,
+    transparent_black,
 };
 use gpui_component::{
     IconName, Root, Sizable, Size as ComponentSize,
+    button::{Button, ButtonCustomVariant, ButtonRounded, ButtonVariants},
     input::{Input, InputEvent, InputState},
 };
 use radroots_studio_app_i18n::AppTextKey;
 pub use radroots_studio_app_models::SettingsSection as SettingsPanelViewKey;
 use radroots_studio_app_models::{
     AppStartupGate, FarmOrderMethod, FarmReadiness, FarmSetupBlocker, FarmSetupDraft, FarmSummary,
-    FarmerSection, FulfillmentWindowSummary, OrderListRow, ProductAttentionState, ProductListRow,
-    ProductStatus, ProductsFilter, ProductsListRow, ProductsSort, ShellSection,
+    FarmerSection, FulfillmentWindowSummary, OrderListRow, ProductAttentionState, ProductId,
+    ProductListRow, ProductStatus, ProductsFilter, ProductsListRow, ProductsSort, ShellSection,
     TodayAgendaProjection, TodaySetupTaskKind,
 };
 use radroots_studio_app_state::{FarmSetupFlowStage, HomeRoute};
@@ -155,6 +157,7 @@ pub struct HomeView {
     logged_in_view: LoggedInHomeView,
     farm_setup_form: Option<FarmSetupFormState>,
     products_search: Option<ProductsSearchState>,
+    products_stock_editor: Option<ProductsStockEditorState>,
     relay_client: Option<RadrootsNostrClient>,
 }
 
@@ -166,6 +169,7 @@ impl HomeView {
             logged_in_view: LoggedInHomeView::new(),
             farm_setup_form: None,
             products_search: None,
+            products_stock_editor: None,
             relay_client: None,
         }
     }
@@ -328,8 +332,38 @@ impl HomeView {
         }
     }
 
+    fn sync_products_stock_editor(&mut self, runtime_summary: &DesktopAppRuntimeSummary) {
+        let Some(editor) = self.products_stock_editor.as_ref() else {
+            return;
+        };
+        let Some(account_id) = runtime_summary
+            .settings_account_projection
+            .selected_account
+            .as_ref()
+            .map(|account| account.account.account_id.as_str())
+        else {
+            self.products_stock_editor = None;
+            return;
+        };
+
+        let should_clear = editor.account_id != account_id
+            || selected_farmer_section(runtime_summary) != FarmerSection::Products
+            || !runtime_summary.farm_setup_projection.has_saved_farm()
+            || !runtime_summary
+                .products_projection
+                .list
+                .rows
+                .iter()
+                .any(|row| row.product_id == editor.product_id);
+
+        if should_clear {
+            self.products_stock_editor = None;
+        }
+    }
+
     fn select_farmer_section(&mut self, section: FarmerSection, cx: &mut Context<Self>) {
         if self.runtime.select_farmer_section(section) {
+            self.products_stock_editor = None;
             cx.notify();
         }
     }
@@ -362,7 +396,10 @@ impl HomeView {
 
     fn select_products_filter(&mut self, filter: ProductsFilter, cx: &mut Context<Self>) {
         match self.runtime.select_products_filter(filter) {
-            Ok(true) => cx.notify(),
+            Ok(true) => {
+                self.products_stock_editor = None;
+                cx.notify();
+            }
             Ok(false) => {}
             Err(runtime_error) => {
                 error!(
@@ -378,7 +415,10 @@ impl HomeView {
 
     fn select_products_sort(&mut self, sort: ProductsSort, cx: &mut Context<Self>) {
         match self.runtime.select_products_sort(sort) {
-            Ok(true) => cx.notify(),
+            Ok(true) => {
+                self.products_stock_editor = None;
+                cx.notify();
+            }
             Ok(false) => {}
             Err(runtime_error) => {
                 error!(
@@ -388,6 +428,131 @@ impl HomeView {
                     sort = sort.storage_key(),
                     "failed to update products sort"
                 );
+            }
+        }
+    }
+
+    fn open_products_filter(&mut self, filter: ProductsFilter, cx: &mut Context<Self>) {
+        match self.runtime.open_products_filter(filter) {
+            Ok(true) => {
+                self.products_stock_editor = None;
+                cx.notify();
+            }
+            Ok(false) => {}
+            Err(runtime_error) => {
+                error!(
+                    target: "products",
+                    event = "products.route_failed",
+                    error = %runtime_error,
+                    filter = filter.storage_key(),
+                    "failed to route into products view"
+                );
+            }
+        }
+    }
+
+    fn open_products_stock_editor(
+        &mut self,
+        product_id: ProductId,
+        stock_quantity: Option<u32>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(account_id) = self
+            .runtime
+            .summary()
+            .settings_account_projection
+            .selected_account
+            .as_ref()
+            .map(|account| account.account.account_id.clone())
+        else {
+            return;
+        };
+
+        if self
+            .products_stock_editor
+            .as_ref()
+            .map(|editor| editor.product_id == product_id)
+            .unwrap_or(false)
+        {
+            self.products_stock_editor = None;
+            cx.notify();
+            return;
+        }
+
+        self.products_stock_editor = Some(ProductsStockEditorState::new(
+            account_id,
+            product_id,
+            stock_quantity,
+            window,
+            cx,
+        ));
+        cx.notify();
+    }
+
+    fn close_products_stock_editor(&mut self, cx: &mut Context<Self>) {
+        if self.products_stock_editor.take().is_some() {
+            cx.notify();
+        }
+    }
+
+    fn handle_products_stock_input_event(
+        &mut self,
+        state: &Entity<InputState>,
+        event: &InputEvent,
+        _: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if !matches!(event, InputEvent::Change) {
+            return;
+        }
+
+        let Some(editor) = self.products_stock_editor.as_mut() else {
+            return;
+        };
+
+        if editor.input != *state || !editor.save_failed {
+            return;
+        }
+
+        editor.save_failed = false;
+        cx.notify();
+    }
+
+    fn save_products_stock_editor(&mut self, cx: &mut Context<Self>) {
+        let Some((product_id, stock_quantity)) =
+            self.products_stock_editor.as_ref().and_then(|editor| {
+                editor
+                    .parsed_stock_quantity(cx)
+                    .map(|stock_quantity| (editor.product_id, stock_quantity))
+            })
+        else {
+            return;
+        };
+
+        match self
+            .runtime
+            .update_product_stock(product_id, stock_quantity)
+        {
+            Ok(true) => {
+                self.products_stock_editor = None;
+                cx.notify();
+            }
+            Ok(false) => {}
+            Err(runtime_error) => {
+                error!(
+                    target: "products",
+                    event = "products.stock_update_failed",
+                    error = %runtime_error,
+                    product_id = %product_id,
+                    stock_quantity,
+                    "failed to update product stock"
+                );
+
+                if let Some(editor) = self.products_stock_editor.as_mut() {
+                    editor.save_failed = true;
+                }
+                cx.notify();
             }
         }
     }
@@ -478,6 +643,224 @@ impl HomeView {
 
         cx.notify();
     }
+
+    fn render_farmer_workspace(
+        &mut self,
+        runtime: &DesktopAppRuntimeSummary,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let selected_farmer_section = selected_farmer_section(runtime);
+        let main_content = match selected_farmer_section {
+            FarmerSection::Products if farmer_products_available(runtime) => {
+                self.render_products_content(runtime, cx)
+            }
+            FarmerSection::Today
+            | FarmerSection::Products
+            | FarmerSection::Orders
+            | FarmerSection::PackDay
+            | FarmerSection::Farm => home_today_content(
+                runtime,
+                self.farm_setup_form.as_ref().map(|form| {
+                    home_farm_setup_form_card(
+                        form,
+                        cx.listener(|this, checked: &bool, _, cx| {
+                            this.toggle_farm_order_method(FarmOrderMethod::Pickup, *checked, cx)
+                        }),
+                        cx.listener(|this, checked: &bool, _, cx| {
+                            this.toggle_farm_order_method(FarmOrderMethod::Delivery, *checked, cx)
+                        }),
+                        cx.listener(|this, checked: &bool, _, cx| {
+                            this.toggle_farm_order_method(FarmOrderMethod::Shipping, *checked, cx)
+                        }),
+                        cx.listener(|this, _, _, cx| this.finish_farm_setup(cx)),
+                        cx,
+                    )
+                    .into_any_element()
+                }),
+                cx.listener(|this, _, window, cx| this.open_farm_setup(window, cx)),
+                cx.listener(|this, _, window, cx| this.open_farm_setup(window, cx)),
+                cx.listener(|this, _, _, cx| {
+                    this.open_products_filter(ProductsFilter::NeedAttention, cx)
+                }),
+                cx.listener(|this, _, _, cx| this.open_products_filter(ProductsFilter::Drafts, cx)),
+                cx,
+            )
+            .into_any_element(),
+        };
+
+        home_shell_frame(
+            home_sidebar(
+                runtime,
+                cx.listener(|this, _, _, cx| this.select_farmer_section(FarmerSection::Today, cx)),
+                cx.listener(|this, _, _, cx| {
+                    this.select_farmer_section(FarmerSection::Products, cx)
+                }),
+                cx,
+            )
+            .into_any_element(),
+            div()
+                .id(home_content_scroll_id(selected_farmer_section))
+                .size_full()
+                .overflow_y_scroll()
+                .child(main_content)
+                .into_any_element(),
+        )
+        .into_any_element()
+    }
+
+    fn render_products_content(
+        &mut self,
+        runtime: &DesktopAppRuntimeSummary,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let projection = &runtime.products_projection;
+        let summary = &projection.list.summary;
+
+        div()
+            .w_full()
+            .max_w(px(APP_UI_THEME.layout.home_card_max_width_px))
+            .mx_auto()
+            .flex()
+            .flex_col()
+            .gap(px(APP_UI_THEME.layout.home_stack_gap_px))
+            .child(products_title_row(runtime))
+            .child(
+                div()
+                    .w_full()
+                    .flex()
+                    .gap(px(APP_UI_THEME.layout.home_stack_gap_px))
+                    .child(home_summary_metric(
+                        AppTextKey::ProductsSummaryTotal,
+                        summary.total_products,
+                    ))
+                    .child(home_summary_metric(
+                        AppTextKey::ProductsSummaryLive,
+                        summary.live_products,
+                    ))
+                    .child(home_summary_metric(
+                        AppTextKey::ProductsSummaryNeedAttention,
+                        summary.need_attention_products,
+                    ))
+                    .child(home_summary_metric(
+                        AppTextKey::ProductsSummaryDrafts,
+                        summary.draft_products,
+                    )),
+            )
+            .child(products_controls_card(
+                runtime,
+                self.products_search.as_ref(),
+                cx.listener(|this, _, _, cx| this.select_products_filter(ProductsFilter::All, cx)),
+                cx.listener(|this, _, _, cx| this.select_products_filter(ProductsFilter::Live, cx)),
+                cx.listener(|this, _, _, cx| {
+                    this.select_products_filter(ProductsFilter::Drafts, cx)
+                }),
+                cx.listener(|this, _, _, cx| {
+                    this.select_products_filter(ProductsFilter::NeedAttention, cx)
+                }),
+                cx.listener(|this, _, _, cx| {
+                    this.select_products_filter(ProductsFilter::Paused, cx)
+                }),
+                cx.listener(|this, _, _, cx| {
+                    this.select_products_filter(ProductsFilter::Archived, cx)
+                }),
+                cx.listener(|this, _, _, cx| this.select_products_sort(ProductsSort::Updated, cx)),
+                cx.listener(|this, _, _, cx| this.select_products_sort(ProductsSort::Name, cx)),
+                cx.listener(|this, _, _, cx| {
+                    this.select_products_sort(ProductsSort::Availability, cx)
+                }),
+                cx.listener(|this, _, _, cx| this.select_products_sort(ProductsSort::Stock, cx)),
+                cx.listener(|this, _, _, cx| this.select_products_sort(ProductsSort::Price, cx)),
+                cx,
+            ))
+            .child(if projection.list.is_empty() {
+                products_empty_state_card(projection.query.filter).into_any_element()
+            } else {
+                self.render_products_table_card(&projection.list.rows, cx)
+            })
+            .into_any_element()
+    }
+
+    fn render_products_table_card(
+        &mut self,
+        rows: &[ProductsListRow],
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let mut items = Vec::with_capacity(rows.len().saturating_mul(2));
+        for (index, row) in rows.iter().enumerate() {
+            items.push(self.render_products_table_entry(index, row, cx));
+            if index + 1 < rows.len() {
+                items.push(section_divider().into_any_element());
+            }
+        }
+
+        home_card(
+            app_shared_text(AppTextKey::ProductsTableTitle),
+            div()
+                .w_full()
+                .flex()
+                .flex_col()
+                .gap(px(12.0))
+                .child(products_table_header())
+                .child(section_divider())
+                .children(items),
+        )
+        .into_any_element()
+    }
+
+    fn render_products_table_entry(
+        &mut self,
+        index: usize,
+        row: &ProductsListRow,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let is_editing = self
+            .products_stock_editor
+            .as_ref()
+            .map(|editor| editor.product_id == row.product_id)
+            .unwrap_or(false);
+        let action = if is_editing {
+            action_button_compact(
+                "products-stock-editor-cancel",
+                app_shared_text(AppTextKey::ProductsStockEditorCancelAction),
+                cx.listener(|this, _, _, cx| this.close_products_stock_editor(cx)),
+                cx,
+            )
+            .into_any_element()
+        } else {
+            products_row_action_button(
+                ("products-row-stock-action", index),
+                app_shared_text(AppTextKey::ProductsUpdateStockAction),
+                cx.listener({
+                    let product_id = row.product_id;
+                    let stock_quantity = row.stock.quantity;
+                    move |this, _, window, cx| {
+                        this.open_products_stock_editor(product_id, stock_quantity, window, cx)
+                    }
+                }),
+                cx,
+            )
+            .into_any_element()
+        };
+
+        div()
+            .w_full()
+            .flex()
+            .flex_col()
+            .gap(px(APP_UI_THEME.layout.home_stack_gap_px))
+            .child(products_table_row(row, action))
+            .when(is_editing, |this| {
+                this.when_some(self.products_stock_editor.as_ref(), |this, editor| {
+                    this.child(products_stock_editor_card(
+                        row,
+                        editor,
+                        cx.listener(|this, _, _, cx| this.save_products_stock_editor(cx)),
+                        cx.listener(|this, _, _, cx| this.close_products_stock_editor(cx)),
+                        cx,
+                    ))
+                })
+            })
+            .into_any_element()
+    }
 }
 
 impl Render for HomeView {
@@ -485,6 +868,7 @@ impl Render for HomeView {
         let runtime_summary = self.runtime.summary();
         self.sync_farm_setup_form(&runtime_summary, window, cx);
         self.sync_products_search(&runtime_summary, window, cx);
+        self.sync_products_stock_editor(&runtime_summary);
         match home_stage(&runtime_summary) {
             HomeStage::Setup => self
                 .startup_view
@@ -500,78 +884,7 @@ impl Render for HomeView {
                 .logged_in_view
                 .render_holding(&runtime_summary)
                 .into_any_element(),
-            HomeStage::FarmerWorkspace => self
-                .logged_in_view
-                .render_farmer(
-                    &runtime_summary,
-                    self.farm_setup_form.as_ref().map(|form| {
-                        home_farm_setup_form_card(
-                            form,
-                            cx.listener(|this, checked: &bool, _, cx| {
-                                this.toggle_farm_order_method(FarmOrderMethod::Pickup, *checked, cx)
-                            }),
-                            cx.listener(|this, checked: &bool, _, cx| {
-                                this.toggle_farm_order_method(
-                                    FarmOrderMethod::Delivery,
-                                    *checked,
-                                    cx,
-                                )
-                            }),
-                            cx.listener(|this, checked: &bool, _, cx| {
-                                this.toggle_farm_order_method(
-                                    FarmOrderMethod::Shipping,
-                                    *checked,
-                                    cx,
-                                )
-                            }),
-                            cx.listener(|this, _, _, cx| this.finish_farm_setup(cx)),
-                            cx,
-                        )
-                        .into_any_element()
-                    }),
-                    self.products_search.as_ref(),
-                    cx.listener(|this, _, _, cx| {
-                        this.select_farmer_section(FarmerSection::Today, cx)
-                    }),
-                    cx.listener(|this, _, _, cx| {
-                        this.select_farmer_section(FarmerSection::Products, cx)
-                    }),
-                    cx.listener(|this, _, window, cx| this.open_farm_setup(window, cx)),
-                    cx.listener(|this, _, window, cx| this.open_farm_setup(window, cx)),
-                    cx.listener(|this, _, _, cx| {
-                        this.select_products_filter(ProductsFilter::All, cx)
-                    }),
-                    cx.listener(|this, _, _, cx| {
-                        this.select_products_filter(ProductsFilter::Live, cx)
-                    }),
-                    cx.listener(|this, _, _, cx| {
-                        this.select_products_filter(ProductsFilter::Drafts, cx)
-                    }),
-                    cx.listener(|this, _, _, cx| {
-                        this.select_products_filter(ProductsFilter::NeedAttention, cx)
-                    }),
-                    cx.listener(|this, _, _, cx| {
-                        this.select_products_filter(ProductsFilter::Paused, cx)
-                    }),
-                    cx.listener(|this, _, _, cx| {
-                        this.select_products_filter(ProductsFilter::Archived, cx)
-                    }),
-                    cx.listener(|this, _, _, cx| {
-                        this.select_products_sort(ProductsSort::Updated, cx)
-                    }),
-                    cx.listener(|this, _, _, cx| this.select_products_sort(ProductsSort::Name, cx)),
-                    cx.listener(|this, _, _, cx| {
-                        this.select_products_sort(ProductsSort::Availability, cx)
-                    }),
-                    cx.listener(|this, _, _, cx| {
-                        this.select_products_sort(ProductsSort::Stock, cx)
-                    }),
-                    cx.listener(|this, _, _, cx| {
-                        this.select_products_sort(ProductsSort::Price, cx)
-                    }),
-                    cx,
-                )
-                .into_any_element(),
+            HomeStage::FarmerWorkspace => self.render_farmer_workspace(&runtime_summary, cx),
         }
     }
 }
@@ -672,6 +985,56 @@ impl ProductsSearchState {
     }
 }
 
+struct ProductsStockEditorState {
+    account_id: String,
+    product_id: ProductId,
+    initial_stock_quantity: Option<u32>,
+    input: Entity<InputState>,
+    _input_subscription: Subscription,
+    save_failed: bool,
+}
+
+impl ProductsStockEditorState {
+    fn new(
+        account_id: String,
+        product_id: ProductId,
+        stock_quantity: Option<u32>,
+        window: &mut Window,
+        cx: &mut Context<HomeView>,
+    ) -> Self {
+        let input = cx.new(|cx| {
+            InputState::new(window, cx)
+                .placeholder(app_shared_text(AppTextKey::ProductsStockEditorFieldLabel))
+                .default_value(
+                    stock_quantity
+                        .map(|quantity| quantity.to_string())
+                        .unwrap_or_else(|| "0".to_owned()),
+                )
+        });
+        let input_subscription =
+            cx.subscribe_in(&input, window, HomeView::handle_products_stock_input_event);
+
+        Self {
+            account_id,
+            product_id,
+            initial_stock_quantity: stock_quantity,
+            input,
+            _input_subscription: input_subscription,
+            save_failed: false,
+        }
+    }
+
+    fn parsed_stock_quantity(&self, cx: &App) -> Option<u32> {
+        parse_products_stock_quantity(self.input.read(cx).value().as_ref())
+    }
+
+    fn has_changes(&self, cx: &App) -> bool {
+        self.parsed_stock_quantity(cx)
+            .map(|stock_quantity| Some(stock_quantity) != self.initial_stock_quantity)
+            .unwrap_or(false)
+    }
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 enum StartupPhase {
     Idle,
@@ -741,52 +1104,6 @@ impl LoggedInHomeView {
 
     fn render_holding(&self, runtime: &DesktopAppRuntimeSummary) -> AnyElement {
         holding_home_shell(runtime).into_any_element()
-    }
-
-    fn render_farmer(
-        &self,
-        runtime: &DesktopAppRuntimeSummary,
-        farm_setup_form: Option<AnyElement>,
-        products_search: Option<&ProductsSearchState>,
-        on_select_today: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
-        on_select_products: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
-        on_start_farm_setup: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
-        on_continue_farm_setup: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
-        on_select_all_products: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
-        on_select_live_products: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
-        on_select_draft_products: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
-        on_select_products_needing_attention: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
-        on_select_paused_products: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
-        on_select_archived_products: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
-        on_sort_products_by_updated: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
-        on_sort_products_by_name: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
-        on_sort_products_by_availability: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
-        on_sort_products_by_stock: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
-        on_sort_products_by_price: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
-        cx: &App,
-    ) -> AnyElement {
-        farmer_home_shell(
-            runtime,
-            farm_setup_form,
-            products_search,
-            on_select_today,
-            on_select_products,
-            on_start_farm_setup,
-            on_continue_farm_setup,
-            on_select_all_products,
-            on_select_live_products,
-            on_select_draft_products,
-            on_select_products_needing_attention,
-            on_select_paused_products,
-            on_select_archived_products,
-            on_sort_products_by_updated,
-            on_sort_products_by_name,
-            on_sort_products_by_availability,
-            on_sort_products_by_stock,
-            on_sort_products_by_price,
-            cx,
-        )
-        .into_any_element()
     }
 }
 
@@ -1364,58 +1681,6 @@ struct FarmSetupOnboardingCardSpec {
     action_key: Option<AppTextKey>,
 }
 
-fn farmer_home_shell(
-    runtime: &DesktopAppRuntimeSummary,
-    farm_setup_form: Option<AnyElement>,
-    products_search: Option<&ProductsSearchState>,
-    on_select_today: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
-    on_select_products: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
-    on_start_farm_setup: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
-    on_continue_farm_setup: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
-    on_select_all_products: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
-    on_select_live_products: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
-    on_select_draft_products: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
-    on_select_products_needing_attention: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
-    on_select_paused_products: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
-    on_select_archived_products: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
-    on_sort_products_by_updated: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
-    on_sort_products_by_name: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
-    on_sort_products_by_availability: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
-    on_sort_products_by_stock: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
-    on_sort_products_by_price: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
-    cx: &App,
-) -> impl IntoElement {
-    let selected_farmer_section = selected_farmer_section(runtime);
-
-    home_shell_frame(
-        home_sidebar(runtime, on_select_today, on_select_products, cx).into_any_element(),
-        div()
-            .id(home_content_scroll_id(selected_farmer_section))
-            .size_full()
-            .overflow_y_scroll()
-            .child(home_view_content(
-                runtime,
-                farm_setup_form,
-                products_search,
-                on_start_farm_setup,
-                on_continue_farm_setup,
-                on_select_all_products,
-                on_select_live_products,
-                on_select_draft_products,
-                on_select_products_needing_attention,
-                on_select_paused_products,
-                on_select_archived_products,
-                on_sort_products_by_updated,
-                on_sort_products_by_name,
-                on_sort_products_by_availability,
-                on_sort_products_by_stock,
-                on_sort_products_by_price,
-                cx,
-            ))
-            .into_any_element(),
-    )
-}
-
 fn holding_home_shell(runtime: &DesktopAppRuntimeSummary) -> impl IntoElement {
     let home_status = home_status_presentation(runtime);
     let (title_key, body_key) = match home_stage(runtime) {
@@ -1780,63 +2045,13 @@ fn holding_home_sidebar(runtime: &DesktopAppRuntimeSummary) -> impl IntoElement 
         )
 }
 
-fn home_view_content(
-    runtime: &DesktopAppRuntimeSummary,
-    farm_setup_form: Option<AnyElement>,
-    products_search: Option<&ProductsSearchState>,
-    on_start_farm_setup: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
-    on_continue_farm_setup: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
-    on_select_all_products: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
-    on_select_live_products: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
-    on_select_draft_products: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
-    on_select_products_needing_attention: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
-    on_select_paused_products: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
-    on_select_archived_products: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
-    on_sort_products_by_updated: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
-    on_sort_products_by_name: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
-    on_sort_products_by_availability: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
-    on_sort_products_by_stock: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
-    on_sort_products_by_price: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
-    cx: &App,
-) -> impl IntoElement {
-    match selected_farmer_section(runtime) {
-        FarmerSection::Products if farmer_products_available(runtime) => home_products_content(
-            runtime,
-            products_search,
-            on_select_all_products,
-            on_select_live_products,
-            on_select_draft_products,
-            on_select_products_needing_attention,
-            on_select_paused_products,
-            on_select_archived_products,
-            on_sort_products_by_updated,
-            on_sort_products_by_name,
-            on_sort_products_by_availability,
-            on_sort_products_by_stock,
-            on_sort_products_by_price,
-            cx,
-        )
-        .into_any_element(),
-        FarmerSection::Today
-        | FarmerSection::Products
-        | FarmerSection::Orders
-        | FarmerSection::PackDay
-        | FarmerSection::Farm => home_today_content(
-            runtime,
-            farm_setup_form,
-            on_start_farm_setup,
-            on_continue_farm_setup,
-            cx,
-        )
-        .into_any_element(),
-    }
-}
-
 fn home_today_content(
     runtime: &DesktopAppRuntimeSummary,
     farm_setup_form: Option<AnyElement>,
     on_start_farm_setup: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
     on_continue_farm_setup: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+    on_open_low_stock_products: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+    on_open_draft_products: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
     cx: &App,
 ) -> impl IntoElement {
     let projection = &runtime.today_projection;
@@ -1917,7 +2132,15 @@ fn home_today_content(
                     .iter()
                     .map(home_low_stock_row)
                     .collect::<Vec<_>>(),
-                None,
+                Some(
+                    action_button_compact(
+                        "home-today-open-products-low-stock",
+                        app_shared_text(AppTextKey::HomeTodayOpenInProductsAction),
+                        on_open_low_stock_products,
+                        cx,
+                    )
+                    .into_any_element(),
+                ),
             )
             .into_any_element(),
         );
@@ -1932,7 +2155,15 @@ fn home_today_content(
                     .iter()
                     .map(home_draft_row)
                     .collect::<Vec<_>>(),
-                None,
+                Some(
+                    action_button_compact(
+                        "home-today-open-products-drafts",
+                        app_shared_text(AppTextKey::HomeTodayOpenInProductsAction),
+                        on_open_draft_products,
+                        cx,
+                    )
+                    .into_any_element(),
+                ),
             )
             .into_any_element(),
         );
@@ -2008,78 +2239,6 @@ fn home_today_content(
                 .child(home_status_row(&home_status)),
         )
         .children(sections)
-}
-
-fn home_products_content(
-    runtime: &DesktopAppRuntimeSummary,
-    products_search: Option<&ProductsSearchState>,
-    on_select_all_products: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
-    on_select_live_products: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
-    on_select_draft_products: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
-    on_select_products_needing_attention: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
-    on_select_paused_products: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
-    on_select_archived_products: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
-    on_sort_products_by_updated: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
-    on_sort_products_by_name: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
-    on_sort_products_by_availability: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
-    on_sort_products_by_stock: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
-    on_sort_products_by_price: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
-    cx: &App,
-) -> impl IntoElement {
-    let projection = &runtime.products_projection;
-    let summary = &projection.list.summary;
-
-    div()
-        .w_full()
-        .max_w(px(APP_UI_THEME.layout.home_card_max_width_px))
-        .mx_auto()
-        .flex()
-        .flex_col()
-        .gap(px(APP_UI_THEME.layout.home_stack_gap_px))
-        .child(products_title_row(runtime))
-        .child(
-            div()
-                .w_full()
-                .flex()
-                .gap(px(APP_UI_THEME.layout.home_stack_gap_px))
-                .child(home_summary_metric(
-                    AppTextKey::ProductsSummaryTotal,
-                    summary.total_products,
-                ))
-                .child(home_summary_metric(
-                    AppTextKey::ProductsSummaryLive,
-                    summary.live_products,
-                ))
-                .child(home_summary_metric(
-                    AppTextKey::ProductsSummaryNeedAttention,
-                    summary.need_attention_products,
-                ))
-                .child(home_summary_metric(
-                    AppTextKey::ProductsSummaryDrafts,
-                    summary.draft_products,
-                )),
-        )
-        .child(products_controls_card(
-            runtime,
-            products_search,
-            on_select_all_products,
-            on_select_live_products,
-            on_select_draft_products,
-            on_select_products_needing_attention,
-            on_select_paused_products,
-            on_select_archived_products,
-            on_sort_products_by_updated,
-            on_sort_products_by_name,
-            on_sort_products_by_availability,
-            on_sort_products_by_stock,
-            on_sort_products_by_price,
-            cx,
-        ))
-        .child(if projection.list.is_empty() {
-            products_empty_state_card(projection.query.filter).into_any_element()
-        } else {
-            products_table_card(&projection.list.rows).into_any_element()
-        })
 }
 
 fn selected_farmer_section(runtime: &DesktopAppRuntimeSummary) -> FarmerSection {
@@ -2298,31 +2457,6 @@ fn products_filter_button(
     }
 }
 
-fn products_table_card(rows: &[ProductsListRow]) -> impl IntoElement {
-    home_card(
-        app_shared_text(AppTextKey::ProductsTableTitle),
-        div()
-            .w_full()
-            .flex()
-            .flex_col()
-            .gap(px(12.0))
-            .child(products_table_header())
-            .child(section_divider())
-            .children(
-                rows.iter()
-                    .enumerate()
-                    .flat_map(|(index, row)| {
-                        let mut items = vec![products_table_row(row).into_any_element()];
-                        if index + 1 < rows.len() {
-                            items.push(section_divider().into_any_element());
-                        }
-                        items
-                    })
-                    .collect::<Vec<_>>(),
-            ),
-    )
-}
-
 fn products_table_header() -> impl IntoElement {
     div()
         .w_full()
@@ -2359,6 +2493,11 @@ fn products_table_header() -> impl IntoElement {
             Some(164.0),
             false,
         ))
+        .child(products_table_header_column(
+            AppTextKey::ProductsColumnAction,
+            Some(120.0),
+            false,
+        ))
 }
 
 fn products_table_header_column(
@@ -2375,7 +2514,7 @@ fn products_table_header_column(
         .child(app_shared_text(key))
 }
 
-fn products_table_row(row: &ProductsListRow) -> impl IntoElement {
+fn products_table_row(row: &ProductsListRow, action: AnyElement) -> impl IntoElement {
     div()
         .w_full()
         .flex()
@@ -2451,6 +2590,7 @@ fn products_table_row(row: &ProductsListRow) -> impl IntoElement {
                 .text_color(rgb(APP_UI_THEME.text.secondary))
                 .child(row.updated_at.clone()),
         )
+        .child(div().w(px(120.0)).flex().justify_end().child(action))
 }
 
 fn products_empty_state_card(filter: ProductsFilter) -> impl IntoElement {
@@ -2509,6 +2649,175 @@ fn products_price_text(row: &ProductsListRow) -> String {
     let cents = price.amount_minor_units % 100;
 
     format!("${dollars}.{cents:02} / {}", price.unit_label)
+}
+
+fn products_row_action_button(
+    id: (&'static str, usize),
+    label: impl Into<SharedString>,
+    on_click: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+    cx: &App,
+) -> impl IntoElement {
+    let sizing = APP_UI_THEME.controls.action_button.sizing;
+    let colors = APP_UI_THEME.controls.action_button.colors;
+
+    Button::new(id)
+        .custom(
+            ButtonCustomVariant::new(cx)
+                .color(rgb(colors.background).into())
+                .foreground(rgb(colors.foreground).into())
+                .border(transparent_black())
+                .hover(rgb(colors.background).into())
+                .active(rgb(colors.active_background).into()),
+        )
+        .rounded(ButtonRounded::Size(px(sizing.corner_radius_px)))
+        .h(px(sizing.height_px))
+        .on_click(on_click)
+        .child(
+            div()
+                .h_full()
+                .flex()
+                .items_center()
+                .justify_center()
+                .px(px(sizing.compact_horizontal_padding_px))
+                .text_size(px(sizing.label_size_px))
+                .text_color(rgb(colors.foreground))
+                .child(label.into()),
+        )
+}
+
+fn products_stock_editor_card(
+    row: &ProductsListRow,
+    editor: &ProductsStockEditorState,
+    on_save: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+    on_cancel: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+    cx: &App,
+) -> impl IntoElement {
+    let validation_key = products_stock_editor_validation_key(editor, cx);
+    let save_ready = editor.has_changes(cx) && editor.parsed_stock_quantity(cx).is_some();
+
+    div()
+        .w_full()
+        .bg(rgb(APP_UI_THEME.surfaces.window_background))
+        .rounded(px(APP_UI_THEME
+            .controls
+            .action_button
+            .sizing
+            .corner_radius_px))
+        .p(px(16.0))
+        .flex()
+        .flex_col()
+        .gap(px(8.0))
+        .child(
+            div()
+                .w_full()
+                .flex()
+                .flex_col()
+                .gap(px(2.0))
+                .child(
+                    div()
+                        .text_size(px(APP_UI_THEME.typography.body_text_px))
+                        .font_weight(gpui::FontWeight::SEMIBOLD)
+                        .text_color(rgb(APP_UI_THEME.text.primary))
+                        .child(app_shared_text(AppTextKey::ProductsStockEditorTitle)),
+                )
+                .child(
+                    div()
+                        .text_size(px(APP_UI_THEME.typography.utility_title_text_px))
+                        .line_height(relative(1.2))
+                        .text_color(rgb(APP_UI_THEME.text.secondary))
+                        .child(row.title.clone()),
+                ),
+        )
+        .child(
+            div()
+                .w_full()
+                .flex()
+                .items_end()
+                .gap(px(APP_UI_THEME.layout.home_stack_gap_px))
+                .child(
+                    div()
+                        .flex_1()
+                        .min_w_0()
+                        .flex()
+                        .flex_col()
+                        .gap(px(6.0))
+                        .child(
+                            div()
+                                .text_size(px(APP_UI_THEME.typography.utility_title_text_px))
+                                .font_weight(gpui::FontWeight::SEMIBOLD)
+                                .text_color(rgb(APP_UI_THEME.text.secondary))
+                                .child(app_shared_text(AppTextKey::ProductsStockEditorFieldLabel)),
+                        )
+                        .child(
+                            Input::new(&editor.input)
+                                .with_size(ComponentSize::Large)
+                                .w_full(),
+                        )
+                        .when_some(validation_key, |this, key| {
+                            this.child(
+                                div()
+                                    .text_size(px(APP_UI_THEME.typography.utility_title_text_px))
+                                    .line_height(relative(1.2))
+                                    .text_color(rgb(APP_UI_THEME.text.secondary))
+                                    .child(app_shared_text(key)),
+                            )
+                        })
+                        .when(editor.save_failed, |this| {
+                            this.child(
+                                div()
+                                    .text_size(px(APP_UI_THEME.typography.utility_title_text_px))
+                                    .line_height(relative(1.2))
+                                    .text_color(rgb(APP_UI_THEME.text.secondary))
+                                    .child(app_shared_text(
+                                        AppTextKey::ProductsStockEditorSaveFailed,
+                                    )),
+                            )
+                        }),
+                )
+                .child(
+                    div()
+                        .flex()
+                        .items_center()
+                        .gap(px(8.0))
+                        .child(action_button_compact(
+                            "products-stock-editor-close",
+                            app_shared_text(AppTextKey::ProductsStockEditorCancelAction),
+                            on_cancel,
+                            cx,
+                        ))
+                        .child(if save_ready {
+                            action_button_primary(
+                                "products-stock-editor-save",
+                                app_shared_text(AppTextKey::ProductsStockEditorSaveAction),
+                                on_save,
+                                cx,
+                            )
+                            .into_any_element()
+                        } else {
+                            action_button_primary_disabled(
+                                "products-stock-editor-save",
+                                app_shared_text(AppTextKey::ProductsStockEditorSaveAction),
+                                cx,
+                            )
+                            .into_any_element()
+                        }),
+                ),
+        )
+}
+
+fn products_stock_editor_validation_key(
+    editor: &ProductsStockEditorState,
+    cx: &App,
+) -> Option<AppTextKey> {
+    if editor.parsed_stock_quantity(cx).is_some() {
+        return None;
+    }
+
+    Some(AppTextKey::ProductsStockEditorInvalidQuantity)
+}
+
+fn parse_products_stock_quantity(input: &str) -> Option<u32> {
+    input.trim().parse().ok()
 }
 
 fn home_farm_setup_onboarding_card(
