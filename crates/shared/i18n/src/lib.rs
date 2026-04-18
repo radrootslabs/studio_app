@@ -178,6 +178,15 @@ mod tests {
             "HomeSetupSignerSourcePlaceholder => \"home.setup.signer_source.placeholder\"",
             "HomeSetupSignerConnectAction => \"home.setup.signer_connect_action\"",
             "HomeSetupBackAction => \"home.setup.back_action\"",
+            "HomeSetupSignerReviewTitle => \"home.setup.signer.review_title\"",
+            "HomeSetupSignerSourceLabel => \"home.setup.signer.source_label\"",
+            "HomeSetupSignerSignerLabel => \"home.setup.signer.signer_label\"",
+            "HomeSetupSignerRelaysLabel => \"home.setup.signer.relays_label\"",
+            "HomeSetupSignerPermissionsLabel => \"home.setup.signer.permissions_label\"",
+            "HomeSetupSignerConnectingTitle => \"home.setup.signer.connecting_title\"",
+            "HomeSetupSignerPendingTitle => \"home.setup.signer.pending_title\"",
+            "HomeSetupSignerAuthChallengeTitle => \"home.setup.signer.auth_challenge_title\"",
+            "HomeSetupSignerApprovedTitle => \"home.setup.signer.approved_title\"",
         ] {
             assert!(
                 source.contains(entry),
@@ -206,6 +215,33 @@ mod tests {
             "Connect signer"
         );
         assert_eq!(app_text(AppTextKey::HomeSetupBackAction), "Back");
+        assert_eq!(
+            app_text(AppTextKey::HomeSetupSignerReviewTitle),
+            "Review signer details"
+        );
+        assert_eq!(app_text(AppTextKey::HomeSetupSignerSourceLabel), "Source");
+        assert_eq!(app_text(AppTextKey::HomeSetupSignerSignerLabel), "Signer");
+        assert_eq!(app_text(AppTextKey::HomeSetupSignerRelaysLabel), "Relays");
+        assert_eq!(
+            app_text(AppTextKey::HomeSetupSignerPermissionsLabel),
+            "Permissions"
+        );
+        assert_eq!(
+            app_text(AppTextKey::HomeSetupSignerConnectingTitle),
+            "Connecting to signer"
+        );
+        assert_eq!(
+            app_text(AppTextKey::HomeSetupSignerPendingTitle),
+            "Waiting for signer approval"
+        );
+        assert_eq!(
+            app_text(AppTextKey::HomeSetupSignerAuthChallengeTitle),
+            "Continue in your signer"
+        );
+        assert_eq!(
+            app_text(AppTextKey::HomeSetupSignerApprovedTitle),
+            "Signer approved"
+        );
     }
 
     #[test]

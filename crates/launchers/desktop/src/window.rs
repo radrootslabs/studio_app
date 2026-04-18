@@ -19,6 +19,12 @@ use radroots_studio_app_models::{
     ProductStatus, ProductsFilter, ProductsListRow, ProductsSort, ShellSection,
     TodayAgendaProjection, TodaySetupTaskKind,
 };
+use radroots_studio_app_remote_signer::{
+    RadrootsAppRemoteSignerApprovedSession, RadrootsAppRemoteSignerPendingPollOutcome,
+    RadrootsAppRemoteSignerPendingSession, radroots_studio_app_remote_signer_connect_pending,
+    radroots_studio_app_remote_signer_poll_pending_session_with_progress,
+    radroots_studio_app_remote_signer_preview, radroots_studio_app_remote_signer_requested_permissions,
+};
 use radroots_studio_app_state::{FarmSetupFlowStage, HomeRoute};
 use radroots_studio_app_ui::{
     APP_UI_THEME, AppCheckboxFieldSpec, IconSegmentButtonSpec, LabelValueRow, action_button,
@@ -156,6 +162,8 @@ pub struct HomeView {
     runtime: DesktopAppRuntime,
     startup_view: StartupHomeView,
     startup_signer_entry: Option<StartupSignerEntryState>,
+    startup_signer_connect_state: StartupSignerConnectState,
+    startup_signer_task_token: u64,
     logged_in_view: LoggedInHomeView,
     farm_setup_form: Option<FarmSetupFormState>,
     products_search: Option<ProductsSearchState>,
@@ -164,12 +172,43 @@ pub struct HomeView {
     relay_client: Option<RadrootsNostrClient>,
 }
 
+#[derive(Clone, Debug)]
+enum StartupSignerConnectState {
+    Idle,
+    Connecting,
+    PendingApproval {
+        pending_session: RadrootsAppRemoteSignerPendingSession,
+        auth_challenge_url: Option<String>,
+    },
+    Approved {
+        pending_session: RadrootsAppRemoteSignerPendingSession,
+        approved_session: RadrootsAppRemoteSignerApprovedSession,
+        auth_challenge_url: Option<String>,
+    },
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct StartupSignerPreviewSummary {
+    source_label: String,
+    signer_npub: String,
+    relays_label: String,
+    permissions_label: String,
+}
+
+#[derive(Clone, Debug)]
+struct StartupSignerPollCycleResult {
+    auth_challenge_url: Option<String>,
+    outcome: Result<RadrootsAppRemoteSignerPendingPollOutcome, String>,
+}
+
 impl HomeView {
     pub fn new(runtime: DesktopAppRuntime) -> Self {
         Self {
             runtime,
             startup_view: StartupHomeView::new(),
             startup_signer_entry: None,
+            startup_signer_connect_state: StartupSignerConnectState::Idle,
+            startup_signer_task_token: 0,
             logged_in_view: LoggedInHomeView::new(),
             farm_setup_form: None,
             products_search: None,
@@ -189,15 +228,31 @@ impl HomeView {
         false
     }
 
+    fn reset_startup_signer_flow(&mut self) {
+        self.startup_signer_task_token = self.startup_signer_task_token.wrapping_add(1);
+        self.startup_signer_connect_state = StartupSignerConnectState::Idle;
+    }
+
+    fn next_startup_signer_task_token(&mut self) -> u64 {
+        self.startup_signer_task_token = self.startup_signer_task_token.wrapping_add(1);
+        self.startup_signer_task_token
+    }
+
+    fn startup_signer_task_is_current(&self, task_token: u64) -> bool {
+        self.startup_signer_task_token == task_token
+    }
+
     fn show_startup_identity_choice(&mut self, cx: &mut Context<Self>) {
-        self.startup_view.clear_error();
+        self.startup_view.clear_notice();
+        self.reset_startup_signer_flow();
         if self.runtime.show_startup_identity_choice() {
             cx.notify();
         }
     }
 
     fn show_startup_signer_entry(&mut self, cx: &mut Context<Self>) {
-        self.startup_view.clear_error();
+        self.startup_view.clear_notice();
+        self.reset_startup_signer_flow();
         if self.runtime.show_startup_signer_entry() {
             cx.notify();
         }
@@ -208,7 +263,8 @@ impl HomeView {
             return;
         }
 
-        self.startup_view.clear_error();
+        self.startup_view.clear_notice();
+        self.reset_startup_signer_flow();
         let relay_url = self.runtime.default_nostr_relay_url();
         cx.notify();
         cx.spawn_in(window, async move |this, cx| {
@@ -232,14 +288,14 @@ impl HomeView {
         match startup_result {
             Ok(result) => {
                 self.relay_client = Some(result.relay_client);
-                self.startup_view.clear_error();
+                self.startup_view.clear_notice();
                 if !self.generate_local_account(cx) {
                     self.show_startup_identity_choice(cx);
                 }
             }
             Err(error) => {
                 self.runtime.show_startup_identity_choice();
-                self.startup_view.fail_starting(error);
+                self.startup_view.set_notice(error);
                 cx.notify();
             }
         }
@@ -254,6 +310,14 @@ impl HomeView {
         if runtime_summary.startup_gate != AppStartupGate::SetupRequired
             || runtime_summary.logged_out_startup.phase != LoggedOutStartupPhase::SignerEntry
         {
+            if self.startup_signer_entry.is_some()
+                || !matches!(
+                    self.startup_signer_connect_state,
+                    StartupSignerConnectState::Idle
+                )
+            {
+                self.reset_startup_signer_flow();
+            }
             self.startup_signer_entry = None;
             return;
         }
@@ -269,6 +333,155 @@ impl HomeView {
             None => {
                 self.startup_signer_entry =
                     Some(StartupSignerEntryState::new(source_input, window, cx));
+            }
+        }
+    }
+
+    fn submit_startup_signer(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(entry) = self.startup_signer_entry.as_ref() else {
+            return;
+        };
+
+        let source_input = entry.input.read(cx).value().to_string();
+        match startup_signer_preview_summary(source_input.as_str()) {
+            Ok(_) => {}
+            Err(error) => {
+                self.startup_view.set_notice(error);
+                cx.notify();
+                return;
+            }
+        }
+
+        self.startup_view.clear_notice();
+        let task_token = self.next_startup_signer_task_token();
+        self.startup_signer_connect_state = StartupSignerConnectState::Connecting;
+        cx.notify();
+
+        cx.spawn_in(window, async move |this, cx| {
+            let connect_result = cx
+                .background_executor()
+                .spawn(run_startup_signer_connect(source_input))
+                .await;
+            let Some(pending_session) = this
+                .update(cx, |this, cx| {
+                    this.finish_startup_signer_connect(task_token, connect_result, cx)
+                })
+                .ok()
+                .flatten()
+            else {
+                return;
+            };
+
+            loop {
+                let poll_result = cx
+                    .background_executor()
+                    .spawn(run_startup_signer_pending_poll(
+                        pending_session.record.clone(),
+                        pending_session.client_secret_key_hex.clone(),
+                    ))
+                    .await;
+                let should_continue = this
+                    .update(cx, |this, cx| {
+                        this.apply_startup_signer_poll_result(
+                            task_token,
+                            pending_session.clone(),
+                            poll_result,
+                            cx,
+                        )
+                    })
+                    .ok()
+                    .unwrap_or(false);
+                if !should_continue {
+                    return;
+                }
+
+                Timer::after(Duration::from_secs(1)).await;
+            }
+        })
+        .detach();
+    }
+
+    fn finish_startup_signer_connect(
+        &mut self,
+        task_token: u64,
+        connect_result: Result<RadrootsAppRemoteSignerPendingSession, String>,
+        cx: &mut Context<Self>,
+    ) -> Option<RadrootsAppRemoteSignerPendingSession> {
+        if !self.startup_signer_task_is_current(task_token) {
+            return None;
+        }
+
+        match connect_result {
+            Ok(pending_session) => {
+                self.startup_view.clear_notice();
+                self.startup_signer_connect_state = StartupSignerConnectState::PendingApproval {
+                    pending_session: pending_session.clone(),
+                    auth_challenge_url: None,
+                };
+                cx.notify();
+                Some(pending_session)
+            }
+            Err(error) => {
+                self.startup_signer_connect_state = StartupSignerConnectState::Idle;
+                self.startup_view.set_notice(error);
+                cx.notify();
+                None
+            }
+        }
+    }
+
+    fn apply_startup_signer_poll_result(
+        &mut self,
+        task_token: u64,
+        pending_session: RadrootsAppRemoteSignerPendingSession,
+        poll_result: StartupSignerPollCycleResult,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        if !self.startup_signer_task_is_current(task_token) {
+            return false;
+        }
+
+        let auth_challenge_url = poll_result.auth_challenge_url;
+        match poll_result.outcome {
+            Ok(RadrootsAppRemoteSignerPendingPollOutcome::PendingApproval) => {
+                self.startup_view.clear_notice();
+                self.startup_signer_connect_state = StartupSignerConnectState::PendingApproval {
+                    pending_session,
+                    auth_challenge_url,
+                };
+                cx.notify();
+                true
+            }
+            Ok(RadrootsAppRemoteSignerPendingPollOutcome::TransportFailure { message }) => {
+                if startup_signer_transport_failure_requires_notice(message.as_str()) {
+                    self.startup_view.set_notice(message);
+                } else {
+                    self.startup_view.clear_notice();
+                }
+                self.startup_signer_connect_state = StartupSignerConnectState::PendingApproval {
+                    pending_session,
+                    auth_challenge_url,
+                };
+                cx.notify();
+                true
+            }
+            Ok(RadrootsAppRemoteSignerPendingPollOutcome::Approved(approved_session)) => {
+                self.startup_view.clear_notice();
+                self.startup_signer_connect_state = StartupSignerConnectState::Approved {
+                    pending_session,
+                    approved_session,
+                    auth_challenge_url,
+                };
+                cx.notify();
+                false
+            }
+            Ok(RadrootsAppRemoteSignerPendingPollOutcome::Rejected { message })
+            | Ok(RadrootsAppRemoteSignerPendingPollOutcome::FatalError { message })
+            | Err(message) => {
+                self.startup_signer_connect_state = StartupSignerConnectState::Idle;
+                self.startup_view.set_notice(message);
+                cx.notify();
+                false
             }
         }
     }
@@ -494,6 +707,8 @@ impl HomeView {
 
         let value = state.read(cx).value().to_string();
         if self.runtime.set_startup_signer_source_input(value.as_str()) {
+            self.startup_view.clear_notice();
+            self.reset_startup_signer_flow();
             cx.notify();
         }
     }
@@ -1174,10 +1389,11 @@ impl Render for HomeView {
                 .render(
                     &runtime_summary,
                     self.startup_signer_entry.as_ref(),
+                    &self.startup_signer_connect_state,
                     cx.listener(|this, _, _, cx| this.show_startup_identity_choice(cx)),
                     cx.listener(|this, _, window, cx| this.start_generate_key(window, cx)),
                     cx.listener(|this, _, _, cx| this.show_startup_signer_entry(cx)),
-                    cx.listener(|_, _, _, _| {}),
+                    cx.listener(|this, _, window, cx| this.submit_startup_signer(window, cx)),
                     cx.listener(|this, _, _, cx| this.show_startup_identity_choice(cx)),
                     cx,
                 )
@@ -1491,26 +1707,29 @@ impl ProductEditorFormState {
 }
 
 struct StartupHomeView {
-    relay_error: Option<String>,
+    startup_notice: Option<String>,
 }
 
 impl StartupHomeView {
     fn new() -> Self {
-        Self { relay_error: None }
+        Self {
+            startup_notice: None,
+        }
     }
 
-    fn fail_starting(&mut self, error: String) {
-        self.relay_error = Some(error);
+    fn set_notice(&mut self, notice: String) {
+        self.startup_notice = Some(notice);
     }
 
-    fn clear_error(&mut self) {
-        self.relay_error = None;
+    fn clear_notice(&mut self) {
+        self.startup_notice = None;
     }
 
     fn render(
         &self,
         runtime: &DesktopAppRuntimeSummary,
         signer_entry: Option<&StartupSignerEntryState>,
+        connect_state: &StartupSignerConnectState,
         on_continue: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
         on_generate_key: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
         on_connect_signer: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
@@ -1520,8 +1739,9 @@ impl StartupHomeView {
     ) -> impl IntoElement {
         startup_home_shell(
             runtime,
-            self.relay_error.as_deref(),
+            self.startup_notice.as_deref(),
             signer_entry,
+            connect_state,
             on_continue,
             on_generate_key,
             on_connect_signer,
@@ -2189,8 +2409,9 @@ fn startup_home_surface(runtime: &DesktopAppRuntimeSummary) -> StartupHomeSurfac
 
 fn startup_home_shell(
     runtime: &DesktopAppRuntimeSummary,
-    relay_error: Option<&str>,
+    startup_notice: Option<&str>,
     signer_entry: Option<&StartupSignerEntryState>,
+    connect_state: &StartupSignerConnectState,
     on_continue: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
     on_generate_key: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
     on_connect_signer: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
@@ -2240,7 +2461,7 @@ fn startup_home_shell(
                                                 on_continue,
                                                 cx,
                                             ))
-                                            .when_some(relay_error, |this, error| {
+                                            .when_some(startup_notice, |this, error| {
                                                 this.child(startup_home_support_text(
                                                     error.to_owned(),
                                                 ))
@@ -2267,7 +2488,7 @@ fn startup_home_shell(
                                                 on_connect_signer,
                                                 cx,
                                             ))
-                                            .when_some(relay_error, |this, error| {
+                                            .when_some(startup_notice, |this, error| {
                                                 this.child(startup_home_support_text(
                                                     error.to_owned(),
                                                 ))
@@ -2289,7 +2510,8 @@ fn startup_home_shell(
                                         StartupHomeSurface::SignerEntry => {
                                             startup_signer_entry_surface(
                                                 signer_entry,
-                                                relay_error,
+                                                connect_state,
+                                                startup_notice,
                                                 on_submit_signer,
                                                 on_back,
                                                 cx,
@@ -2348,11 +2570,27 @@ fn startup_home_support_text(body: impl Into<SharedString>) -> impl IntoElement 
 
 fn startup_signer_entry_surface(
     signer_entry: Option<&StartupSignerEntryState>,
-    relay_error: Option<&str>,
+    connect_state: &StartupSignerConnectState,
+    startup_notice: Option<&str>,
     on_submit_signer: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
     on_back: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
     cx: &App,
 ) -> impl IntoElement {
+    let source_input = signer_entry
+        .map(|signer_entry| signer_entry.input.read(cx).value().to_string())
+        .unwrap_or_default();
+    let preview =
+        startup_signer_preview_summary_for_connect_state(source_input.as_str(), connect_state);
+    let parse_error = if source_input.trim().is_empty()
+        || !matches!(connect_state, StartupSignerConnectState::Idle)
+    {
+        None
+    } else {
+        preview.as_ref().err().cloned()
+    };
+    let submit_enabled =
+        preview.is_ok() && matches!(connect_state, StartupSignerConnectState::Idle);
+
     div()
         .w_full()
         .flex()
@@ -2372,21 +2610,175 @@ fn startup_signer_entry_surface(
                     ),
             )
         })
-        .child(action_button_primary(
-            "home-connect-signer-submit",
-            app_shared_text(AppTextKey::HomeSetupSignerConnectAction),
-            on_submit_signer,
-            cx,
-        ))
+        .when_some(preview.as_ref().ok(), |this, preview| {
+            this.child(startup_home_card(
+                app_shared_text(AppTextKey::HomeSetupSignerReviewTitle),
+                label_value_list([
+                    LabelValueRow::new(
+                        app_shared_text(AppTextKey::HomeSetupSignerSourceLabel),
+                        preview.source_label.clone(),
+                    ),
+                    LabelValueRow::new(
+                        app_shared_text(AppTextKey::HomeSetupSignerSignerLabel),
+                        preview.signer_npub.clone(),
+                    ),
+                    LabelValueRow::new(
+                        app_shared_text(AppTextKey::HomeSetupSignerRelaysLabel),
+                        preview.relays_label.clone(),
+                    ),
+                    LabelValueRow::new(
+                        app_shared_text(AppTextKey::HomeSetupSignerPermissionsLabel),
+                        preview.permissions_label.clone(),
+                    ),
+                ]),
+            ))
+        })
+        .when_some(startup_signer_status_spec(connect_state), |this, status| {
+            this.child(startup_home_card(
+                app_shared_text(status.0),
+                status
+                    .1
+                    .map(|body| startup_home_support_text(body).into_any_element())
+                    .unwrap_or_else(|| div().into_any_element()),
+            ))
+        })
+        .when_some(parse_error, |this, error| {
+            this.child(startup_home_support_text(error))
+        })
+        .child(if submit_enabled {
+            action_button_primary(
+                "home-connect-signer-submit",
+                app_shared_text(AppTextKey::HomeSetupSignerConnectAction),
+                on_submit_signer,
+                cx,
+            )
+            .into_any_element()
+        } else {
+            action_button_primary_disabled(
+                "home-connect-signer-submit",
+                app_shared_text(AppTextKey::HomeSetupSignerConnectAction),
+                cx,
+            )
+            .into_any_element()
+        })
         .child(startup_text_button(
             "home-signer-back",
             AppTextKey::HomeSetupBackAction,
             on_back,
             cx,
         ))
-        .when_some(relay_error, |this, error| {
-            this.child(startup_home_support_text(error.to_owned()))
+        .when_some(startup_notice, |this, notice| {
+            this.child(startup_home_support_text(notice.to_owned()))
         })
+}
+
+fn startup_signer_preview_summary(input: &str) -> Result<StartupSignerPreviewSummary, String> {
+    let target = radroots_studio_app_remote_signer_preview(input).map_err(|error| error.to_string())?;
+    let requested_permissions = target.requested_permission_labels();
+
+    Ok(StartupSignerPreviewSummary {
+        source_label: target.source_label().to_owned(),
+        signer_npub: target.signer_identity.public_key_npub.clone(),
+        relays_label: startup_signer_csv_or_none(target.relays.as_slice()),
+        permissions_label: startup_signer_csv_or_none(requested_permissions.as_slice()),
+    })
+}
+
+fn startup_signer_preview_summary_for_connect_state(
+    input: &str,
+    connect_state: &StartupSignerConnectState,
+) -> Result<StartupSignerPreviewSummary, String> {
+    let mut preview = startup_signer_preview_summary(input)?;
+
+    match connect_state {
+        StartupSignerConnectState::Idle | StartupSignerConnectState::Connecting => {}
+        StartupSignerConnectState::PendingApproval {
+            pending_session, ..
+        } => {
+            preview.signer_npub = pending_session
+                .record
+                .signer_identity
+                .public_key_npub
+                .clone();
+            preview.relays_label =
+                startup_signer_csv_or_none(pending_session.record.relays.as_slice());
+            preview.permissions_label = startup_signer_requested_permissions_label();
+        }
+        StartupSignerConnectState::Approved {
+            pending_session,
+            approved_session,
+            ..
+        } => {
+            preview.signer_npub = pending_session
+                .record
+                .signer_identity
+                .public_key_npub
+                .clone();
+            preview.relays_label = startup_signer_csv_or_none(approved_session.relays.as_slice());
+            preview.permissions_label = startup_signer_permissions_label(
+                approved_session
+                    .approved_permissions
+                    .as_slice()
+                    .iter()
+                    .map(ToString::to_string)
+                    .collect(),
+            );
+        }
+    }
+
+    Ok(preview)
+}
+
+fn startup_signer_csv_or_none(values: &[String]) -> String {
+    if values.is_empty() {
+        return "none".to_owned();
+    }
+
+    values.join(", ")
+}
+
+fn startup_signer_requested_permissions_label() -> String {
+    startup_signer_permissions_label(
+        radroots_studio_app_remote_signer_requested_permissions()
+            .as_slice()
+            .iter()
+            .map(ToString::to_string)
+            .collect(),
+    )
+}
+
+fn startup_signer_permissions_label(permissions: Vec<String>) -> String {
+    startup_signer_csv_or_none(permissions.as_slice())
+}
+
+fn startup_signer_status_spec(
+    connect_state: &StartupSignerConnectState,
+) -> Option<(AppTextKey, Option<String>)> {
+    match connect_state {
+        StartupSignerConnectState::Idle => None,
+        StartupSignerConnectState::Connecting => {
+            Some((AppTextKey::HomeSetupSignerConnectingTitle, None))
+        }
+        StartupSignerConnectState::PendingApproval {
+            auth_challenge_url, ..
+        } => Some(match auth_challenge_url {
+            Some(url) => (
+                AppTextKey::HomeSetupSignerAuthChallengeTitle,
+                Some(url.clone()),
+            ),
+            None => (AppTextKey::HomeSetupSignerPendingTitle, None),
+        }),
+        StartupSignerConnectState::Approved {
+            auth_challenge_url, ..
+        } => Some((
+            AppTextKey::HomeSetupSignerApprovedTitle,
+            auth_challenge_url.clone(),
+        )),
+    }
+}
+
+fn startup_signer_transport_failure_requires_notice(message: &str) -> bool {
+    message != "remote signer did not respond yet"
 }
 
 fn startup_text_button(
@@ -2475,6 +2867,35 @@ struct StartupAppInitResult {
 async fn run_startup_app_init(relay_url: String) -> Result<StartupAppInitResult, String> {
     let relay_client = connect_default_relay(relay_url).await?;
     Ok(StartupAppInitResult { relay_client })
+}
+
+async fn run_startup_signer_connect(
+    source_input: String,
+) -> Result<RadrootsAppRemoteSignerPendingSession, String> {
+    radroots_studio_app_remote_signer_connect_pending(source_input.as_str())
+        .map_err(|error| error.to_string())
+}
+
+async fn run_startup_signer_pending_poll(
+    record: radroots_studio_app_remote_signer::RadrootsAppRemoteSignerSessionRecord,
+    client_secret_key_hex: String,
+) -> StartupSignerPollCycleResult {
+    let mut auth_challenge_url = None;
+    let outcome = radroots_studio_app_remote_signer_poll_pending_session_with_progress(
+        &record,
+        client_secret_key_hex.as_str(),
+        |progress| match progress {
+            radroots_studio_app_remote_signer::RadrootsAppRemoteSignerProgressUpdate::AuthChallenge {
+                url,
+            } => auth_challenge_url = Some(url),
+        },
+    )
+    .map_err(|error| error.to_string());
+
+    StartupSignerPollCycleResult {
+        auth_challenge_url,
+        outcome,
+    }
 }
 
 fn home_shell_frame(sidebar: AnyElement, main_content: AnyElement) -> impl IntoElement {
@@ -4458,10 +4879,12 @@ fn home_farm_order_method_label_key(method: FarmOrderMethod) -> AppTextKey {
 #[cfg(test)]
 mod tests {
     use super::{
-        AppTextKey, FarmerHomeFarmState, StartupHomeSurface, farm_setup_onboarding_card_spec,
-        farmer_home_farm_state, home_saved_farm, home_window_launch_size_px,
-        home_window_minimum_size_px, parse_optional_product_editor_stock_input,
-        parse_product_editor_price_input, product_display_title, startup_home_surface,
+        AppTextKey, FarmerHomeFarmState, StartupHomeSurface, StartupSignerConnectState,
+        farm_setup_onboarding_card_spec, farmer_home_farm_state, home_saved_farm,
+        home_window_launch_size_px, home_window_minimum_size_px,
+        parse_optional_product_editor_stock_input, parse_product_editor_price_input,
+        product_display_title, startup_home_surface, startup_signer_preview_summary,
+        startup_signer_status_spec, startup_signer_transport_failure_requires_notice,
     };
     use crate::runtime::DesktopAppRuntimeSummary;
     use radroots_studio_app_models::SettingsAccountProjection;
@@ -4470,8 +4893,13 @@ mod tests {
         FarmSetupProjection, FarmSummary, LoggedOutStartupPhase, LoggedOutStartupProjection,
         TodayAgendaProjection, TodaySetupTask, TodaySetupTaskKind,
     };
+    use radroots_studio_app_remote_signer::{
+        RadrootsAppRemoteSignerApprovedSession, RadrootsAppRemoteSignerPendingSession,
+        RadrootsAppRemoteSignerSessionRecord,
+    };
     use radroots_studio_app_state::AppShellProjection;
     use radroots_studio_app_state::HomeRoute;
+    use radroots_identity::RadrootsIdentity;
 
     #[test]
     fn farm_setup_onboarding_uses_frozen_copy_and_primary_action() {
@@ -4661,6 +5089,74 @@ mod tests {
         assert_eq!(product_display_title("Salad mix"), "Salad mix");
     }
 
+    #[test]
+    fn startup_signer_preview_summary_surfaces_parsed_signer_details() {
+        let preview = startup_signer_preview_summary(
+            "bunker://466d7fcae563e5cb09a0d1870bb580344804617879a14949cf22285f1bae3f27?relay=wss%3A%2F%2Frelay.radroots.example",
+        )
+        .expect("preview");
+
+        assert_eq!(preview.source_label, "bunker uri");
+        assert!(preview.signer_npub.starts_with("npub1"));
+        assert_eq!(preview.relays_label, "wss://relay.radroots.example");
+        assert_eq!(
+            preview.permissions_label,
+            "sign_event:kind:1, switch_relays"
+        );
+    }
+
+    #[test]
+    fn startup_signer_status_prefers_auth_challenge_until_approval_is_complete() {
+        let pending_session = fixture_pending_session();
+
+        assert_eq!(
+            startup_signer_status_spec(&StartupSignerConnectState::Connecting),
+            Some((AppTextKey::HomeSetupSignerConnectingTitle, None))
+        );
+        assert_eq!(
+            startup_signer_status_spec(&StartupSignerConnectState::PendingApproval {
+                pending_session: pending_session.clone(),
+                auth_challenge_url: None,
+            }),
+            Some((AppTextKey::HomeSetupSignerPendingTitle, None))
+        );
+        assert_eq!(
+            startup_signer_status_spec(&StartupSignerConnectState::PendingApproval {
+                pending_session: pending_session.clone(),
+                auth_challenge_url: Some("https://auth.example/challenge".to_owned()),
+            }),
+            Some((
+                AppTextKey::HomeSetupSignerAuthChallengeTitle,
+                Some("https://auth.example/challenge".to_owned()),
+            ))
+        );
+        assert_eq!(
+            startup_signer_status_spec(&StartupSignerConnectState::Approved {
+                pending_session,
+                approved_session: RadrootsAppRemoteSignerApprovedSession {
+                    user_identity: fixture_identity(
+                        "2222222222222222222222222222222222222222222222222222222222222222",
+                    )
+                    .to_public(),
+                    relays: vec!["wss://relay.radroots.example".to_owned()],
+                    approved_permissions: Default::default(),
+                },
+                auth_challenge_url: None,
+            }),
+            Some((AppTextKey::HomeSetupSignerApprovedTitle, None))
+        );
+    }
+
+    #[test]
+    fn startup_signer_transport_failure_notice_ignores_the_waiting_timeout_copy() {
+        assert!(!startup_signer_transport_failure_requires_notice(
+            "remote signer did not respond yet"
+        ));
+        assert!(startup_signer_transport_failure_requires_notice(
+            "remote signer connection failed: relay refused the request"
+        ));
+    }
+
     fn summary(
         home_route: HomeRoute,
         today_projection: TodayAgendaProjection,
@@ -4692,6 +5188,26 @@ mod tests {
                 TodayAgendaProjection::default(),
                 FarmSetupProjection::default(),
             )
+        }
+    }
+
+    fn fixture_identity(secret_key_hex: &str) -> RadrootsIdentity {
+        RadrootsIdentity::from_secret_key_str(secret_key_hex).expect("identity")
+    }
+
+    fn fixture_pending_session() -> RadrootsAppRemoteSignerPendingSession {
+        let signer_identity =
+            fixture_identity("1111111111111111111111111111111111111111111111111111111111111111");
+        let client_identity =
+            fixture_identity("3333333333333333333333333333333333333333333333333333333333333333");
+
+        RadrootsAppRemoteSignerPendingSession {
+            record: RadrootsAppRemoteSignerSessionRecord::pending(
+                client_identity.to_public(),
+                signer_identity.to_public(),
+                vec!["wss://relay.radroots.example".to_owned()],
+            ),
+            client_secret_key_hex: client_identity.secret_key_hex(),
         }
     }
 }

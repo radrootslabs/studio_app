@@ -18,6 +18,7 @@ radroots_secret_vault.workspace = true
 radroots_studio_app_core.workspace = true
 radroots_studio_app_i18n.workspace = true
 radroots_studio_app_models.workspace = true
+radroots_studio_app_remote_signer = { path = "../../shared/remote_signer" }
 radroots_studio_app_sqlite.workspace = true
 radroots_studio_app_state.workspace = true
 radroots_studio_app_sync.workspace = true
