@@ -5,9 +5,9 @@ use radroots_studio_app_core::{AppDesktopRuntimePaths, AppRuntimePathsError, App
 use radroots_studio_app_models::{
     ActiveSurface, AppActivityContext, AppActivityKind, AppIdentityProjection, AppStartupGate,
     FarmId, FarmReadiness, FarmSetupDraft, FarmSetupProjection, FarmSummary, FarmerSection,
-    ProductEditorDraft, ProductId, ProductsFilter, ProductsListProjection, ProductsSort,
-    SettingsAccountProjection, SettingsPreference, SettingsSection, ShellSection,
-    TodayAgendaProjection,
+    LoggedOutStartupProjection, ProductEditorDraft, ProductId, ProductsFilter,
+    ProductsListProjection, ProductsSort, SettingsAccountProjection, SettingsPreference,
+    SettingsSection, ShellSection, TodayAgendaProjection,
 };
 use radroots_studio_app_sqlite::{
     APP_ACTIVITY_CONTEXT_LIMIT, AppSqliteError, AppSqliteStore, DatabaseTarget,
@@ -51,6 +51,7 @@ impl DesktopAppRuntime {
             shell_projection: state.state_store.shell_projection().clone(),
             settings_account_projection: state.state_store.settings_account_projection(),
             startup_gate: state.state_store.startup_gate(),
+            logged_out_startup: state.state_store.logged_out_startup_projection().clone(),
             home_route: state.state_store.home_route(),
             farm_setup_projection: state.state_store.farm_setup_projection().clone(),
             today_projection: state.state_store.today_projection().clone(),
@@ -75,6 +76,30 @@ impl DesktopAppRuntime {
         self.lock_state_mut()
             .state_store
             .apply_in_memory(AppStateCommand::select_settings_section(section))
+    }
+
+    pub fn show_startup_identity_choice(&self) -> bool {
+        self.lock_state_mut()
+            .state_store
+            .apply_in_memory(AppStateCommand::show_startup_identity_choice())
+    }
+
+    pub fn begin_generate_key_startup(&self) -> bool {
+        self.lock_state_mut()
+            .state_store
+            .apply_in_memory(AppStateCommand::begin_generate_key_startup())
+    }
+
+    pub fn show_startup_signer_entry(&self) -> bool {
+        self.lock_state_mut()
+            .state_store
+            .apply_in_memory(AppStateCommand::show_startup_signer_entry())
+    }
+
+    pub fn set_startup_signer_source_input(&self, source_input: &str) -> bool {
+        self.lock_state_mut().state_store.apply_in_memory(
+            AppStateCommand::set_startup_signer_source_input(source_input),
+        )
     }
 
     pub fn select_settings_section(&self, section: SettingsSection) -> bool {
@@ -296,6 +321,7 @@ pub struct DesktopAppRuntimeSummary {
     pub shell_projection: AppShellProjection,
     pub settings_account_projection: SettingsAccountProjection,
     pub startup_gate: AppStartupGate,
+    pub logged_out_startup: LoggedOutStartupProjection,
     pub home_route: HomeRoute,
     pub farm_setup_projection: FarmSetupProjection,
     pub today_projection: TodayAgendaProjection,
@@ -1003,8 +1029,8 @@ mod tests {
     use radroots_studio_app_models::{
         AccountSurfaceActivationProjection, ActiveSurface, AppActivityKind, AppStartupGate, FarmId,
         FarmOrderMethod, FarmReadiness, FarmSetupDraft, FarmSetupProjection, FarmSummary,
-        FarmerActivationProjection, FarmerSection, ProductEditorDraft, ProductStatus,
-        ProductsFilter, ProductsSort, SelectedSurfaceProjection, SettingsPreference,
+        FarmerActivationProjection, FarmerSection, LoggedOutStartupProjection, ProductEditorDraft,
+        ProductStatus, ProductsFilter, ProductsSort, SelectedSurfaceProjection, SettingsPreference,
         SettingsSection, ShellSection, TodayAgendaProjection, TodaySetupTask, TodaySetupTaskKind,
         TodaySummary,
     };
@@ -1112,6 +1138,45 @@ mod tests {
                 .selected_account
                 .is_none()
         );
+        assert_eq!(
+            summary.logged_out_startup,
+            LoggedOutStartupProjection::default()
+        );
+    }
+
+    #[test]
+    fn cloned_runtime_handles_shared_startup_identity_choice_state() {
+        let runtime = DesktopAppRuntime::from_state(DesktopAppRuntimeState {
+            state_store: AppStateStore::load(InMemoryAppStateRepository::default())
+                .expect("in-memory state store should load"),
+            default_nostr_relay_url: "ws://127.0.0.1:8080".to_owned(),
+            shared_accounts_paths: None,
+            accounts_manager: None,
+            sqlite_store: Some(
+                AppSqliteStore::open(DatabaseTarget::InMemory)
+                    .expect("in-memory sqlite store should open"),
+            ),
+            startup_issue: None,
+        });
+        let cloned_runtime = runtime.clone();
+
+        assert!(runtime.show_startup_identity_choice());
+        assert!(cloned_runtime.show_startup_signer_entry());
+        assert!(cloned_runtime.set_startup_signer_source_input(
+            "bunker://npub1signer?relay=wss%3A%2F%2Frelay.radroots.example"
+        ));
+        assert!(runtime.begin_generate_key_startup());
+
+        let summary = runtime.summary();
+
+        assert_eq!(
+            summary.logged_out_startup.phase,
+            radroots_studio_app_models::LoggedOutStartupPhase::GenerateKeyStarting
+        );
+        assert_eq!(
+            summary.logged_out_startup.signer_entry.source_input,
+            "bunker://npub1signer?relay=wss%3A%2F%2Frelay.radroots.example"
+        );
     }
 
     #[test]
@@ -1193,6 +1258,10 @@ mod tests {
             SettingsSection::Account
         );
         assert_eq!(summary.startup_gate, AppStartupGate::SetupRequired);
+        assert_eq!(
+            summary.logged_out_startup,
+            LoggedOutStartupProjection::default()
+        );
         assert!(summary.settings_account_projection.roster.is_empty());
         assert_eq!(summary.home_route, HomeRoute::SetupRequired);
         assert_eq!(summary.today_projection, TodayAgendaProjection::default());

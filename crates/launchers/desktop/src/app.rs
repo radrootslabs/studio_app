@@ -160,7 +160,10 @@ mod tests {
         APP_PROJECTION_SOURCE, AppBuildIdentity, AppRuntimeCapture, AppRuntimeMode,
         AppRuntimeSnapshot,
     };
-    use radroots_studio_app_models::{AppStartupGate, SettingsAccountProjection, TodayAgendaProjection};
+    use radroots_studio_app_models::{
+        AppStartupGate, LoggedOutStartupProjection, SettingsAccountProjection,
+        TodayAgendaProjection,
+    };
     use radroots_studio_app_state::{AppShellProjection, HomeRoute};
     use tracing::{
         Event, Level, Subscriber,
@@ -267,6 +270,7 @@ mod tests {
             farm_setup_projection: Default::default(),
             today_projection: TodayAgendaProjection::default(),
             products_projection: Default::default(),
+            logged_out_startup: LoggedOutStartupProjection::default(),
             startup_issue: Some("desktop runtime roots require HOME for macos".to_owned()),
         };
 
@@ -301,6 +305,7 @@ mod tests {
             farm_setup_projection: Default::default(),
             today_projection: TodayAgendaProjection::default(),
             products_projection: Default::default(),
+            logged_out_startup: LoggedOutStartupProjection::default(),
             startup_issue: None,
         };
         let setup = DesktopAppRuntimeSummary {
@@ -311,6 +316,7 @@ mod tests {
             farm_setup_projection: Default::default(),
             today_projection: TodayAgendaProjection::default(),
             products_projection: Default::default(),
+            logged_out_startup: LoggedOutStartupProjection::default(),
             startup_issue: None,
         };
 
@@ -328,6 +334,7 @@ mod tests {
             farm_setup_projection: Default::default(),
             today_projection: TodayAgendaProjection::default(),
             products_projection: Default::default(),
+            logged_out_startup: LoggedOutStartupProjection::default(),
             startup_issue: None,
         };
         let farmer = DesktopAppRuntimeSummary {
@@ -338,6 +345,7 @@ mod tests {
             farm_setup_projection: Default::default(),
             today_projection: TodayAgendaProjection::default(),
             products_projection: Default::default(),
+            logged_out_startup: LoggedOutStartupProjection::default(),
             startup_issue: None,
         };
 
@@ -355,6 +363,7 @@ mod tests {
             farm_setup_projection: Default::default(),
             today_projection: TodayAgendaProjection::default(),
             products_projection: Default::default(),
+            logged_out_startup: LoggedOutStartupProjection::default(),
             startup_issue: Some("runtime unavailable".to_owned()),
         };
 
@@ -371,6 +380,7 @@ mod tests {
             farm_setup_projection: Default::default(),
             today_projection: TodayAgendaProjection::default(),
             products_projection: Default::default(),
+            logged_out_startup: LoggedOutStartupProjection::default(),
             startup_issue: None,
         };
         let personal = DesktopAppRuntimeSummary {
@@ -381,6 +391,7 @@ mod tests {
             farm_setup_projection: Default::default(),
             today_projection: TodayAgendaProjection::default(),
             products_projection: Default::default(),
+            logged_out_startup: LoggedOutStartupProjection::default(),
             startup_issue: None,
         };
         let farmer = DesktopAppRuntimeSummary {
@@ -391,6 +402,7 @@ mod tests {
             farm_setup_projection: Default::default(),
             today_projection: TodayAgendaProjection::default(),
             products_projection: Default::default(),
+            logged_out_startup: LoggedOutStartupProjection::default(),
             startup_issue: None,
         };
         let blocked = DesktopAppRuntimeSummary {
@@ -401,6 +413,7 @@ mod tests {
             farm_setup_projection: Default::default(),
             today_projection: TodayAgendaProjection::default(),
             products_projection: Default::default(),
+            logged_out_startup: LoggedOutStartupProjection::default(),
             startup_issue: Some("runtime unavailable".to_owned()),
         };
 

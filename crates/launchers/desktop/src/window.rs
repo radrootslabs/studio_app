@@ -14,10 +14,10 @@ use radroots_studio_app_i18n::AppTextKey;
 pub use radroots_studio_app_models::SettingsSection as SettingsPanelViewKey;
 use radroots_studio_app_models::{
     AppStartupGate, FarmOrderMethod, FarmReadiness, FarmSetupBlocker, FarmSetupDraft, FarmSummary,
-    FarmerSection, FulfillmentWindowSummary, OrderListRow, ProductAttentionState,
-    ProductEditorDraft, ProductId, ProductListRow, ProductPublishBlocker, ProductStatus,
-    ProductsFilter, ProductsListRow, ProductsSort, ShellSection, TodayAgendaProjection,
-    TodaySetupTaskKind,
+    FarmerSection, FulfillmentWindowSummary, LoggedOutStartupPhase, OrderListRow,
+    ProductAttentionState, ProductEditorDraft, ProductId, ProductListRow, ProductPublishBlocker,
+    ProductStatus, ProductsFilter, ProductsListRow, ProductsSort, ShellSection,
+    TodayAgendaProjection, TodaySetupTaskKind,
 };
 use radroots_studio_app_state::{FarmSetupFlowStage, HomeRoute};
 use radroots_studio_app_ui::{
@@ -155,6 +155,7 @@ pub fn open_settings_window(
 pub struct HomeView {
     runtime: DesktopAppRuntime,
     startup_view: StartupHomeView,
+    startup_signer_entry: Option<StartupSignerEntryState>,
     logged_in_view: LoggedInHomeView,
     farm_setup_form: Option<FarmSetupFormState>,
     products_search: Option<ProductsSearchState>,
@@ -168,6 +169,7 @@ impl HomeView {
         Self {
             runtime,
             startup_view: StartupHomeView::new(),
+            startup_signer_entry: None,
             logged_in_view: LoggedInHomeView::new(),
             farm_setup_form: None,
             products_search: None,
@@ -177,18 +179,36 @@ impl HomeView {
         }
     }
 
-    fn generate_local_account(&mut self, cx: &mut Context<Self>) {
+    fn generate_local_account(&mut self, cx: &mut Context<Self>) -> bool {
         if self.runtime.generate_local_account(None).unwrap_or(false) {
             cx.refresh_windows();
+            cx.notify();
+            return true;
+        }
+
+        false
+    }
+
+    fn show_startup_identity_choice(&mut self, cx: &mut Context<Self>) {
+        self.startup_view.clear_error();
+        if self.runtime.show_startup_identity_choice() {
             cx.notify();
         }
     }
 
-    fn start_create_account(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if !self.startup_view.begin_starting() {
+    fn show_startup_signer_entry(&mut self, cx: &mut Context<Self>) {
+        self.startup_view.clear_error();
+        if self.runtime.show_startup_signer_entry() {
+            cx.notify();
+        }
+    }
+
+    fn start_generate_key(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if !self.runtime.begin_generate_key_startup() {
             return;
         }
 
+        self.startup_view.clear_error();
         let relay_url = self.runtime.default_nostr_relay_url();
         cx.notify();
         cx.spawn_in(window, async move |this, cx| {
@@ -198,13 +218,13 @@ impl HomeView {
             Timer::after(Duration::from_secs(1)).await;
             let startup_result = startup_task.await;
             let _ = this.update(cx, |this, cx| {
-                this.finish_create_account(startup_result, cx);
+                this.finish_generate_key(startup_result, cx);
             });
         })
         .detach();
     }
 
-    fn finish_create_account(
+    fn finish_generate_key(
         &mut self,
         startup_result: Result<StartupAppInitResult, String>,
         cx: &mut Context<Self>,
@@ -213,12 +233,42 @@ impl HomeView {
             Ok(result) => {
                 self.relay_client = Some(result.relay_client);
                 self.startup_view.clear_error();
-                self.startup_view.finish_starting();
-                self.generate_local_account(cx);
+                if !self.generate_local_account(cx) {
+                    self.show_startup_identity_choice(cx);
+                }
             }
             Err(error) => {
+                self.runtime.show_startup_identity_choice();
                 self.startup_view.fail_starting(error);
                 cx.notify();
+            }
+        }
+    }
+
+    fn sync_startup_signer_entry(
+        &mut self,
+        runtime_summary: &DesktopAppRuntimeSummary,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if runtime_summary.startup_gate != AppStartupGate::SetupRequired
+            || runtime_summary.logged_out_startup.phase != LoggedOutStartupPhase::SignerEntry
+        {
+            self.startup_signer_entry = None;
+            return;
+        }
+
+        let source_input = runtime_summary
+            .logged_out_startup
+            .signer_entry
+            .source_input
+            .as_str();
+
+        match self.startup_signer_entry.as_mut() {
+            Some(entry) => entry.sync(source_input, window, cx),
+            None => {
+                self.startup_signer_entry =
+                    Some(StartupSignerEntryState::new(source_input, window, cx));
             }
         }
     }
@@ -420,6 +470,30 @@ impl HomeView {
             if section != FarmerSection::Products {
                 self.product_editor_form = None;
             }
+            cx.notify();
+        }
+    }
+
+    fn handle_startup_signer_input_event(
+        &mut self,
+        state: &Entity<InputState>,
+        event: &InputEvent,
+        _: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if !matches!(event, InputEvent::Change) {
+            return;
+        }
+
+        let Some(entry) = self.startup_signer_entry.as_ref() else {
+            return;
+        };
+        if entry.input != *state {
+            return;
+        }
+
+        let value = state.read(cx).value().to_string();
+        if self.runtime.set_startup_signer_source_input(value.as_str()) {
             cx.notify();
         }
     }
@@ -1089,6 +1163,7 @@ impl HomeView {
 impl Render for HomeView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let runtime_summary = self.runtime.summary();
+        self.sync_startup_signer_entry(&runtime_summary, window, cx);
         self.sync_farm_setup_form(&runtime_summary, window, cx);
         self.sync_products_search(&runtime_summary, window, cx);
         self.sync_products_stock_editor(&runtime_summary);
@@ -1098,9 +1173,12 @@ impl Render for HomeView {
                 .startup_view
                 .render(
                     &runtime_summary,
-                    runtime_summary.startup_issue.is_none()
-                        && runtime_summary.startup_gate == AppStartupGate::SetupRequired,
-                    cx.listener(|this, _, window, cx| this.start_create_account(window, cx)),
+                    self.startup_signer_entry.as_ref(),
+                    cx.listener(|this, _, _, cx| this.show_startup_identity_choice(cx)),
+                    cx.listener(|this, _, window, cx| this.start_generate_key(window, cx)),
+                    cx.listener(|this, _, _, cx| this.show_startup_signer_entry(cx)),
+                    cx.listener(|_, _, _, _| {}),
+                    cx.listener(|this, _, _, cx| this.show_startup_identity_choice(cx)),
                     cx,
                 )
                 .into_any_element(),
@@ -1205,6 +1283,40 @@ impl ProductsSearchState {
 
         self.input.update(cx, |input, cx| {
             input.set_value(search_query.to_owned(), window, cx);
+        });
+    }
+}
+
+struct StartupSignerEntryState {
+    input: Entity<InputState>,
+    _input_subscription: Subscription,
+}
+
+impl StartupSignerEntryState {
+    fn new(source_input: &str, window: &mut Window, cx: &mut Context<HomeView>) -> Self {
+        let input = cx.new(|cx| {
+            InputState::new(window, cx)
+                .placeholder(app_shared_text(
+                    AppTextKey::HomeSetupSignerSourcePlaceholder,
+                ))
+                .default_value(source_input.to_owned())
+        });
+        let input_subscription =
+            cx.subscribe_in(&input, window, HomeView::handle_startup_signer_input_event);
+
+        Self {
+            input,
+            _input_subscription: input_subscription,
+        }
+    }
+
+    fn sync(&mut self, source_input: &str, window: &mut Window, cx: &mut Context<HomeView>) {
+        if self.input.read(cx).value().as_ref() == source_input {
+            return;
+        }
+
+        self.input.update(cx, |input, cx| {
+            input.set_value(source_input.to_owned(), window, cx);
         });
     }
 }
@@ -1378,41 +1490,16 @@ impl ProductEditorFormState {
     }
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
-enum StartupPhase {
-    Idle,
-    Starting,
-}
-
 struct StartupHomeView {
-    phase: StartupPhase,
     relay_error: Option<String>,
 }
 
 impl StartupHomeView {
     fn new() -> Self {
-        Self {
-            phase: StartupPhase::Idle,
-            relay_error: None,
-        }
-    }
-
-    fn begin_starting(&mut self) -> bool {
-        if self.phase == StartupPhase::Starting {
-            return false;
-        }
-
-        self.phase = StartupPhase::Starting;
-        self.relay_error = None;
-        true
-    }
-
-    fn finish_starting(&mut self) {
-        self.phase = StartupPhase::Idle;
+        Self { relay_error: None }
     }
 
     fn fail_starting(&mut self, error: String) {
-        self.phase = StartupPhase::Idle;
         self.relay_error = Some(error);
     }
 
@@ -1423,16 +1510,23 @@ impl StartupHomeView {
     fn render(
         &self,
         runtime: &DesktopAppRuntimeSummary,
-        allow_create_account: bool,
-        on_create_account: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+        signer_entry: Option<&StartupSignerEntryState>,
+        on_continue: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+        on_generate_key: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+        on_connect_signer: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+        on_submit_signer: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+        on_back: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
         cx: &App,
     ) -> impl IntoElement {
         startup_home_shell(
             runtime,
-            self.phase == StartupPhase::Starting,
             self.relay_error.as_deref(),
-            allow_create_account,
-            on_create_account,
+            signer_entry,
+            on_continue,
+            on_generate_key,
+            on_connect_signer,
+            on_submit_signer,
+            on_back,
             cx,
         )
     }
@@ -2071,14 +2165,41 @@ fn holding_home_shell(runtime: &DesktopAppRuntimeSummary) -> impl IntoElement {
     )
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum StartupHomeSurface {
+    IssueCard,
+    ContinuePrompt,
+    IdentityChoice,
+    GenerateKeyStarting,
+    SignerEntry,
+}
+
+fn startup_home_surface(runtime: &DesktopAppRuntimeSummary) -> StartupHomeSurface {
+    if runtime.startup_issue.is_some() || runtime.startup_gate != AppStartupGate::SetupRequired {
+        return StartupHomeSurface::IssueCard;
+    }
+
+    match runtime.logged_out_startup.phase {
+        LoggedOutStartupPhase::ContinuePrompt => StartupHomeSurface::ContinuePrompt,
+        LoggedOutStartupPhase::IdentityChoice => StartupHomeSurface::IdentityChoice,
+        LoggedOutStartupPhase::GenerateKeyStarting => StartupHomeSurface::GenerateKeyStarting,
+        LoggedOutStartupPhase::SignerEntry => StartupHomeSurface::SignerEntry,
+    }
+}
+
 fn startup_home_shell(
     runtime: &DesktopAppRuntimeSummary,
-    is_starting: bool,
     relay_error: Option<&str>,
-    allow_create_account: bool,
-    on_create_account: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+    signer_entry: Option<&StartupSignerEntryState>,
+    on_continue: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+    on_generate_key: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+    on_connect_signer: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+    on_submit_signer: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+    on_back: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
     cx: &App,
 ) -> impl IntoElement {
+    let surface = startup_home_surface(runtime);
+
     app_window_shell(
         APP_UI_THEME.surfaces.window_background,
         div()
@@ -2103,47 +2224,83 @@ fn startup_home_shell(
                                     .flex_col()
                                     .items_center()
                                     .gap(px(APP_UI_THEME.layout.startup_stack_gap_px))
-                                    .child(startup_home_title(is_starting))
+                                    .child(startup_home_title(surface))
                                     .child(startup_home_tagline())
-                                    .when(allow_create_account, |this| {
-                                        this.child(
-                                            div()
-                                                .flex()
-                                                .flex_col()
-                                                .items_center()
-                                                .gap(px(APP_UI_THEME.layout.startup_stack_gap_px))
-                                                .child(if is_starting {
-                                                    action_button_primary_disabled(
-                                                    "home-create-account",
-                                                    app_shared_text(
-                                                        AppTextKey::HomeSetupCreateAccountAction,
-                                                    ),
-                                                    cx,
-                                                )
-                                                .into_any_element()
-                                                } else {
-                                                    action_button_primary(
-                                                    "home-create-account",
-                                                    app_shared_text(
-                                                        AppTextKey::HomeSetupCreateAccountAction,
-                                                    ),
-                                                    on_create_account,
-                                                    cx,
-                                                )
-                                                .into_any_element()
-                                                })
-                                                .when_some(relay_error, |this, error| {
-                                                    this.child(startup_home_support_text(
-                                                        error.to_owned(),
-                                                    ))
-                                                }),
-                                        )
-                                    })
-                                    .when(!allow_create_account, |this| {
-                                        this.child(startup_home_card(
+                                    .child(match surface {
+                                        StartupHomeSurface::ContinuePrompt => div()
+                                            .flex()
+                                            .flex_col()
+                                            .items_center()
+                                            .gap(px(APP_UI_THEME.layout.startup_stack_gap_px))
+                                            .child(action_button_primary(
+                                                "home-continue",
+                                                app_shared_text(
+                                                    AppTextKey::HomeSetupContinueAction,
+                                                ),
+                                                on_continue,
+                                                cx,
+                                            ))
+                                            .when_some(relay_error, |this, error| {
+                                                this.child(startup_home_support_text(
+                                                    error.to_owned(),
+                                                ))
+                                            })
+                                            .into_any_element(),
+                                        StartupHomeSurface::IdentityChoice => div()
+                                            .flex()
+                                            .flex_col()
+                                            .items_center()
+                                            .gap(px(APP_UI_THEME.layout.startup_stack_gap_px))
+                                            .child(action_button_primary(
+                                                "home-generate-key",
+                                                app_shared_text(
+                                                    AppTextKey::HomeSetupGenerateKeyAction,
+                                                ),
+                                                on_generate_key,
+                                                cx,
+                                            ))
+                                            .child(action_button(
+                                                "home-connect-signer",
+                                                app_shared_text(
+                                                    AppTextKey::HomeSetupConnectSignerAction,
+                                                ),
+                                                on_connect_signer,
+                                                cx,
+                                            ))
+                                            .when_some(relay_error, |this, error| {
+                                                this.child(startup_home_support_text(
+                                                    error.to_owned(),
+                                                ))
+                                            })
+                                            .into_any_element(),
+                                        StartupHomeSurface::GenerateKeyStarting => div()
+                                            .flex()
+                                            .flex_col()
+                                            .items_center()
+                                            .gap(px(APP_UI_THEME.layout.startup_stack_gap_px))
+                                            .child(action_button_primary_disabled(
+                                                "home-generate-key",
+                                                app_shared_text(
+                                                    AppTextKey::HomeSetupGenerateKeyAction,
+                                                ),
+                                                cx,
+                                            ))
+                                            .into_any_element(),
+                                        StartupHomeSurface::SignerEntry => {
+                                            startup_signer_entry_surface(
+                                                signer_entry,
+                                                relay_error,
+                                                on_submit_signer,
+                                                on_back,
+                                                cx,
+                                            )
+                                            .into_any_element()
+                                        }
+                                        StartupHomeSurface::IssueCard => startup_home_card(
                                             app_shared_text(AppTextKey::MetadataStartupIssue),
                                             startup_home_body(runtime),
-                                        ))
+                                        )
+                                        .into_any_element(),
                                     }),
                             ),
                     ),
@@ -2151,8 +2308,8 @@ fn startup_home_shell(
     )
 }
 
-fn startup_home_title(is_starting: bool) -> impl IntoElement {
-    let (animation_id, title_key) = if is_starting {
+fn startup_home_title(surface: StartupHomeSurface) -> impl IntoElement {
+    let (animation_id, title_key) = if surface == StartupHomeSurface::GenerateKeyStarting {
         ("startup-title-starting", AppTextKey::HomeSetupStarting)
     } else {
         ("startup-title-radroots", AppTextKey::HomeSetupTitle)
@@ -2187,6 +2344,75 @@ fn startup_home_support_text(body: impl Into<SharedString>) -> impl IntoElement 
         .text_color(rgb(APP_UI_THEME.text.secondary))
         .text_center()
         .child(body.into())
+}
+
+fn startup_signer_entry_surface(
+    signer_entry: Option<&StartupSignerEntryState>,
+    relay_error: Option<&str>,
+    on_submit_signer: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+    on_back: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+    cx: &App,
+) -> impl IntoElement {
+    div()
+        .w_full()
+        .flex()
+        .flex_col()
+        .items_center()
+        .gap(px(APP_UI_THEME.layout.startup_stack_gap_px))
+        .when_some(signer_entry, |this, signer_entry| {
+            this.child(
+                div()
+                    .w_full()
+                    .max_w(px(APP_UI_THEME.layout.home_card_max_width_px))
+                    .id("home-signer-source-input")
+                    .child(
+                        Input::new(&signer_entry.input)
+                            .with_size(ComponentSize::Large)
+                            .w_full(),
+                    ),
+            )
+        })
+        .child(action_button_primary(
+            "home-connect-signer-submit",
+            app_shared_text(AppTextKey::HomeSetupSignerConnectAction),
+            on_submit_signer,
+            cx,
+        ))
+        .child(startup_text_button(
+            "home-signer-back",
+            AppTextKey::HomeSetupBackAction,
+            on_back,
+            cx,
+        ))
+        .when_some(relay_error, |this, error| {
+            this.child(startup_home_support_text(error.to_owned()))
+        })
+}
+
+fn startup_text_button(
+    id: &'static str,
+    key: AppTextKey,
+    on_click: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+    cx: &App,
+) -> impl IntoElement {
+    Button::new(id)
+        .custom(
+            ButtonCustomVariant::new(cx)
+                .color(transparent_black().into())
+                .foreground(rgb(APP_UI_THEME.text.secondary).into())
+                .border(transparent_black())
+                .hover(transparent_black().into())
+                .active(transparent_black().into()),
+        )
+        .rounded(ButtonRounded::Size(px(0.0)))
+        .on_click(on_click)
+        .child(
+            div()
+                .text_size(px(APP_UI_THEME.typography.body_text_px))
+                .font_weight(gpui::FontWeight::MEDIUM)
+                .text_color(rgb(APP_UI_THEME.text.secondary))
+                .child(app_shared_text(key)),
+        )
 }
 
 fn startup_home_card(title: impl Into<SharedString>, body: impl IntoElement) -> impl IntoElement {
@@ -4232,17 +4458,17 @@ fn home_farm_order_method_label_key(method: FarmOrderMethod) -> AppTextKey {
 #[cfg(test)]
 mod tests {
     use super::{
-        AppTextKey, FarmerHomeFarmState, farm_setup_onboarding_card_spec, farmer_home_farm_state,
-        home_saved_farm, home_window_launch_size_px, home_window_minimum_size_px,
-        parse_optional_product_editor_stock_input, parse_product_editor_price_input,
-        product_display_title,
+        AppTextKey, FarmerHomeFarmState, StartupHomeSurface, farm_setup_onboarding_card_spec,
+        farmer_home_farm_state, home_saved_farm, home_window_launch_size_px,
+        home_window_minimum_size_px, parse_optional_product_editor_stock_input,
+        parse_product_editor_price_input, product_display_title, startup_home_surface,
     };
     use crate::runtime::DesktopAppRuntimeSummary;
     use radroots_studio_app_models::SettingsAccountProjection;
     use radroots_studio_app_models::{
         AppStartupGate, FarmId, FarmOrderMethod, FarmReadiness, FarmSetupDraft,
-        FarmSetupProjection, FarmSummary, TodayAgendaProjection, TodaySetupTask,
-        TodaySetupTaskKind,
+        FarmSetupProjection, FarmSummary, LoggedOutStartupPhase, LoggedOutStartupProjection,
+        TodayAgendaProjection, TodaySetupTask, TodaySetupTaskKind,
     };
     use radroots_studio_app_state::AppShellProjection;
     use radroots_studio_app_state::HomeRoute;
@@ -4277,6 +4503,54 @@ mod tests {
     fn home_window_launch_frame_and_minimum_size_are_split() {
         assert_eq!(home_window_launch_size_px(), (1284.0, 795.0));
         assert_eq!(home_window_minimum_size_px(), (1080.0, 720.0));
+    }
+
+    #[test]
+    fn startup_home_surface_tracks_the_shared_logged_out_phase_contract() {
+        let continue_prompt = summary_with_logged_out_phase(LoggedOutStartupPhase::ContinuePrompt);
+        let identity_choice = summary_with_logged_out_phase(LoggedOutStartupPhase::IdentityChoice);
+        let generate_key_starting =
+            summary_with_logged_out_phase(LoggedOutStartupPhase::GenerateKeyStarting);
+        let signer_entry = summary_with_logged_out_phase(LoggedOutStartupPhase::SignerEntry);
+
+        assert_eq!(
+            startup_home_surface(&continue_prompt),
+            StartupHomeSurface::ContinuePrompt
+        );
+        assert_eq!(
+            startup_home_surface(&identity_choice),
+            StartupHomeSurface::IdentityChoice
+        );
+        assert_eq!(
+            startup_home_surface(&generate_key_starting),
+            StartupHomeSurface::GenerateKeyStarting
+        );
+        assert_eq!(
+            startup_home_surface(&signer_entry),
+            StartupHomeSurface::SignerEntry
+        );
+    }
+
+    #[test]
+    fn startup_home_surface_uses_issue_card_when_setup_is_unavailable() {
+        let blocked = DesktopAppRuntimeSummary {
+            startup_gate: AppStartupGate::Blocked,
+            startup_issue: Some("runtime unavailable".to_owned()),
+            ..summary_with_logged_out_phase(LoggedOutStartupPhase::IdentityChoice)
+        };
+
+        assert_eq!(
+            startup_home_surface(&blocked),
+            StartupHomeSurface::IssueCard
+        );
+        assert_eq!(
+            startup_home_surface(&summary(
+                HomeRoute::Personal,
+                TodayAgendaProjection::default(),
+                FarmSetupProjection::default(),
+            )),
+            StartupHomeSurface::IssueCard
+        );
     }
 
     #[test]
@@ -4396,11 +4670,28 @@ mod tests {
             shell_projection: AppShellProjection::default(),
             settings_account_projection: SettingsAccountProjection::default(),
             startup_gate: AppStartupGate::Farmer,
+            logged_out_startup: LoggedOutStartupProjection::default(),
             home_route,
             farm_setup_projection,
             today_projection,
             products_projection: Default::default(),
             startup_issue: None,
+        }
+    }
+
+    fn summary_with_logged_out_phase(phase: LoggedOutStartupPhase) -> DesktopAppRuntimeSummary {
+        DesktopAppRuntimeSummary {
+            startup_gate: AppStartupGate::SetupRequired,
+            home_route: HomeRoute::SetupRequired,
+            logged_out_startup: LoggedOutStartupProjection {
+                phase,
+                ..LoggedOutStartupProjection::default()
+            },
+            ..summary(
+                HomeRoute::SetupRequired,
+                TodayAgendaProjection::default(),
+                FarmSetupProjection::default(),
+            )
         }
     }
 }
