@@ -5,8 +5,9 @@ use radroots_studio_app_core::{AppDesktopRuntimePaths, AppRuntimePathsError, App
 use radroots_studio_app_models::{
     ActiveSurface, AppActivityContext, AppActivityKind, AppIdentityProjection, AppStartupGate,
     FarmId, FarmReadiness, FarmSetupDraft, FarmSetupProjection, FarmSummary, FarmerSection,
-    ProductId, ProductsFilter, ProductsListProjection, ProductsSort, SettingsAccountProjection,
-    SettingsPreference, SettingsSection, ShellSection, TodayAgendaProjection,
+    ProductEditorDraft, ProductId, ProductsFilter, ProductsListProjection, ProductsSort,
+    SettingsAccountProjection, SettingsPreference, SettingsSection, ShellSection,
+    TodayAgendaProjection,
 };
 use radroots_studio_app_sqlite::{
     APP_ACTIVITY_CONTEXT_LIMIT, AppSqliteError, AppSqliteStore, DatabaseTarget,
@@ -95,9 +96,12 @@ impl DesktopAppRuntime {
             }
         };
 
-        state
+        let section_changed = state
             .state_store
-            .apply_in_memory(AppStateCommand::SelectSection(selected_section))
+            .apply_in_memory(AppStateCommand::SelectSection(selected_section));
+        let editor_changed = state.close_product_editor();
+
+        section_changed || editor_changed
     }
 
     pub fn select_farmer_section(&self, section: FarmerSection) -> bool {
@@ -128,6 +132,29 @@ impl DesktopAppRuntime {
     ) -> Result<bool, AppSqliteError> {
         self.lock_state_mut()
             .update_product_stock(product_id, stock_quantity)
+    }
+
+    pub fn open_new_product_editor(&self) -> Result<bool, AppSqliteError> {
+        self.lock_state_mut().open_new_product_editor()
+    }
+
+    pub fn open_existing_product_editor(
+        &self,
+        product_id: ProductId,
+    ) -> Result<bool, AppSqliteError> {
+        self.lock_state_mut()
+            .open_existing_product_editor(product_id)
+    }
+
+    pub fn save_product_editor_draft(
+        &self,
+        draft: ProductEditorDraft,
+    ) -> Result<bool, AppSqliteError> {
+        self.lock_state_mut().save_product_editor_draft(draft)
+    }
+
+    pub fn close_product_editor(&self) -> bool {
+        self.lock_state_mut().close_product_editor()
     }
 
     pub fn set_settings_preference(&self, preference: SettingsPreference, enabled: bool) -> bool {
@@ -453,10 +480,14 @@ impl DesktopAppRuntimeState {
     fn select_farmer_section(&mut self, section: FarmerSection) -> bool {
         match section {
             FarmerSection::Today => {
-                self.state_store
-                    .apply_in_memory(AppStateCommand::SelectSection(ShellSection::Farmer(
-                        FarmerSection::Today,
-                    )))
+                let section_changed =
+                    self.state_store
+                        .apply_in_memory(AppStateCommand::SelectSection(ShellSection::Farmer(
+                            FarmerSection::Today,
+                        )));
+                let editor_changed = self.close_product_editor();
+
+                section_changed || editor_changed
             }
             FarmerSection::Products
                 if self.state_store.farm_setup_projection().has_saved_farm() =>
@@ -555,6 +586,105 @@ impl DesktopAppRuntimeState {
         Ok(updated || context_changed)
     }
 
+    fn open_new_product_editor(&mut self) -> Result<bool, AppSqliteError> {
+        let Some(sqlite_store) = self.sqlite_store.as_ref() else {
+            return Ok(false);
+        };
+        let Some(farm_id) = self.selected_farm_id() else {
+            return Ok(false);
+        };
+
+        let product_id = sqlite_store.create_product_draft(farm_id)?;
+        let Some(draft) = sqlite_store.load_product_editor_draft(product_id)? else {
+            return Ok(false);
+        };
+        let selected_account_context = load_selected_account_context(
+            sqlite_store,
+            self.state_store.identity_projection(),
+            self.state_store.products_projection().query.clone(),
+        )?;
+        let context_changed = self.apply_selected_account_context(&selected_account_context);
+        let section_changed = self.select_farmer_section(FarmerSection::Products);
+        let editor_changed =
+            self.state_store
+                .apply_in_memory(AppStateCommand::open_existing_product_editor(
+                    product_id, draft,
+                ));
+
+        Ok(context_changed || section_changed || editor_changed)
+    }
+
+    fn open_existing_product_editor(
+        &mut self,
+        product_id: ProductId,
+    ) -> Result<bool, AppSqliteError> {
+        let Some(sqlite_store) = self.sqlite_store.as_ref() else {
+            return Ok(false);
+        };
+        let Some(draft) = sqlite_store.load_product_editor_draft(product_id)? else {
+            return Ok(false);
+        };
+        let section_changed = self.select_farmer_section(FarmerSection::Products);
+        let editor_changed =
+            self.state_store
+                .apply_in_memory(AppStateCommand::open_existing_product_editor(
+                    product_id, draft,
+                ));
+
+        Ok(section_changed || editor_changed)
+    }
+
+    fn save_product_editor_draft(
+        &mut self,
+        draft: ProductEditorDraft,
+    ) -> Result<bool, AppSqliteError> {
+        let Some(product_id) = self.selected_product_editor_id() else {
+            return Ok(false);
+        };
+
+        let saved = {
+            let Some(sqlite_store) = self.sqlite_store.as_ref() else {
+                return Ok(false);
+            };
+            sqlite_store.save_product_editor_draft(product_id, &draft)?
+        };
+        if !saved {
+            return Ok(false);
+        }
+
+        let selected_account_context = {
+            let Some(sqlite_store) = self.sqlite_store.as_ref() else {
+                return Ok(false);
+            };
+            load_selected_account_context(
+                sqlite_store,
+                self.state_store.identity_projection(),
+                self.state_store.products_projection().query.clone(),
+            )?
+        };
+        let reloaded_draft = {
+            let Some(sqlite_store) = self.sqlite_store.as_ref() else {
+                return Ok(false);
+            };
+            sqlite_store
+                .load_product_editor_draft(product_id)?
+                .unwrap_or(draft)
+        };
+        let context_changed = self.apply_selected_account_context(&selected_account_context);
+        let editor_changed =
+            self.state_store
+                .apply_in_memory(AppStateCommand::replace_product_editor_draft(
+                    reloaded_draft,
+                ));
+
+        Ok(saved || context_changed || editor_changed)
+    }
+
+    fn close_product_editor(&mut self) -> bool {
+        self.state_store
+            .apply_in_memory(AppStateCommand::close_product_editor())
+    }
+
     fn save_farm_setup_draft(
         &mut self,
         draft: FarmSetupDraft,
@@ -613,8 +743,9 @@ impl DesktopAppRuntimeState {
             .state_store
             .apply_in_memory(AppStateCommand::replace_identity_projection(projection));
         let context_changed = self.apply_selected_account_context(&selected_account_context);
+        let editor_changed = self.close_product_editor();
 
-        Ok(identity_changed || context_changed)
+        Ok(identity_changed || context_changed || editor_changed)
     }
 
     fn refresh_selected_account_context(
@@ -643,9 +774,14 @@ impl DesktopAppRuntimeState {
                 .apply_in_memory(AppStateCommand::replace_products_list(
                     context.products_list.clone(),
                 ));
+        let editor_changed = if context.farm_setup_projection.has_saved_farm() {
+            false
+        } else {
+            self.close_product_editor()
+        };
         let shell_changed = self.sync_truthful_farmer_section();
 
-        farm_setup_changed || today_changed || products_changed || shell_changed
+        farm_setup_changed || today_changed || products_changed || editor_changed || shell_changed
     }
 
     fn selected_account_id(&self) -> Result<String, DesktopAppRuntimeFarmSetupError> {
@@ -709,6 +845,27 @@ impl DesktopAppRuntimeState {
         Ok(query_changed || filter_changed || sort_changed || list_changed)
     }
 
+    fn selected_farm_id(&self) -> Option<FarmId> {
+        self.state_store
+            .identity_projection()
+            .selected_account
+            .as_ref()
+            .and_then(|account| account.farmer_activation.farm_id)
+            .or(self
+                .state_store
+                .farm_setup_projection()
+                .saved_farm
+                .as_ref()
+                .map(|farm| farm.farm_id))
+    }
+
+    fn selected_product_editor_id(&self) -> Option<ProductId> {
+        match &self.state_store.products_projection().editor {
+            radroots_studio_app_state::ProductEditorState::Open(session) => session.selected_product_id,
+            radroots_studio_app_state::ProductEditorState::Closed => None,
+        }
+    }
+
     fn load_products_list_for_query(
         &self,
         query: &ProductsScreenQueryState,
@@ -716,21 +873,7 @@ impl DesktopAppRuntimeState {
         let Some(sqlite_store) = self.sqlite_store.as_ref() else {
             return Ok(ProductsListProjection::default());
         };
-        let Some(selected_account) = self
-            .state_store
-            .identity_projection()
-            .selected_account
-            .as_ref()
-        else {
-            return Ok(ProductsListProjection::default());
-        };
-        let farm_id = selected_account.farmer_activation.farm_id.or(self
-            .state_store
-            .farm_setup_projection()
-            .saved_farm
-            .as_ref()
-            .map(|farm| farm.farm_id));
-        let Some(farm_id) = farm_id else {
+        let Some(farm_id) = self.selected_farm_id() else {
             return Ok(ProductsListProjection::default());
         };
 
@@ -860,9 +1003,10 @@ mod tests {
     use radroots_studio_app_models::{
         AccountSurfaceActivationProjection, ActiveSurface, AppActivityKind, AppStartupGate, FarmId,
         FarmOrderMethod, FarmReadiness, FarmSetupDraft, FarmSetupProjection, FarmSummary,
-        FarmerActivationProjection, FarmerSection, ProductsFilter, ProductsSort,
-        SelectedSurfaceProjection, SettingsPreference, SettingsSection, ShellSection,
-        TodayAgendaProjection, TodaySetupTask, TodaySetupTaskKind, TodaySummary,
+        FarmerActivationProjection, FarmerSection, ProductEditorDraft, ProductStatus,
+        ProductsFilter, ProductsSort, SelectedSurfaceProjection, SettingsPreference,
+        SettingsSection, ShellSection, TodayAgendaProjection, TodaySetupTask, TodaySetupTaskKind,
+        TodaySummary,
     };
     use radroots_studio_app_sqlite::{AppSqliteStore, DatabaseTarget};
     use radroots_studio_app_state::{
@@ -1516,6 +1660,197 @@ mod tests {
     }
 
     #[test]
+    fn runtime_open_new_product_editor_creates_a_local_draft_and_opens_it() {
+        let runtime = memory_runtime();
+
+        assert!(
+            runtime
+                .generate_local_account(Some("Farmer".to_owned()))
+                .expect("account should generate")
+        );
+        let account_id = runtime
+            .summary()
+            .settings_account_projection
+            .selected_account
+            .as_ref()
+            .expect("selected account")
+            .account
+            .account_id
+            .clone();
+        let farm_id =
+            save_farmer_surface_activation(&runtime, account_id.as_str(), ActiveSurface::Farmer);
+        let farm_setup_projection = FarmSetupProjection::from_saved_farm(FarmSummary {
+            farm_id,
+            display_name: "North field farm".to_owned(),
+            readiness: FarmReadiness::Ready,
+        });
+        runtime
+            .lock_state()
+            .sqlite_store
+            .as_ref()
+            .expect("sqlite store")
+            .save_farm_summary(
+                farm_setup_projection
+                    .saved_farm
+                    .as_ref()
+                    .expect("saved farm should exist"),
+            )
+            .expect("farm summary should save");
+        runtime
+            .lock_state()
+            .sqlite_store
+            .as_ref()
+            .expect("sqlite store")
+            .save_farm_setup(account_id.as_str(), &farm_setup_projection)
+            .expect("farm setup should save");
+
+        assert!(
+            runtime
+                .select_local_account(account_id.as_str())
+                .expect("account should select")
+        );
+        assert_eq!(
+            runtime
+                .summary()
+                .products_projection
+                .list
+                .summary
+                .total_products,
+            0
+        );
+
+        assert!(
+            runtime
+                .open_new_product_editor()
+                .expect("new product editor should open")
+        );
+
+        let summary = runtime.summary();
+        assert_eq!(summary.products_projection.list.summary.total_products, 1);
+        assert!(matches!(
+            summary.products_projection.editor,
+            radroots_studio_app_state::ProductEditorState::Open(_)
+        ));
+        assert_eq!(
+            summary.products_projection.list.rows[0].status,
+            ProductStatus::Draft
+        );
+    }
+
+    #[test]
+    fn runtime_open_existing_and_save_product_editor_refreshes_products_projection() {
+        let runtime = memory_runtime();
+
+        assert!(
+            runtime
+                .generate_local_account(Some("Farmer".to_owned()))
+                .expect("account should generate")
+        );
+        let account_id = runtime
+            .summary()
+            .settings_account_projection
+            .selected_account
+            .as_ref()
+            .expect("selected account")
+            .account
+            .account_id
+            .clone();
+        let farm_id =
+            save_farmer_surface_activation(&runtime, account_id.as_str(), ActiveSurface::Farmer);
+        let farm_setup_projection = FarmSetupProjection::from_saved_farm(FarmSummary {
+            farm_id,
+            display_name: "North field farm".to_owned(),
+            readiness: FarmReadiness::Ready,
+        });
+        runtime
+            .lock_state()
+            .sqlite_store
+            .as_ref()
+            .expect("sqlite store")
+            .save_farm_summary(
+                farm_setup_projection
+                    .saved_farm
+                    .as_ref()
+                    .expect("saved farm should exist"),
+            )
+            .expect("farm summary should save");
+        runtime
+            .lock_state()
+            .sqlite_store
+            .as_ref()
+            .expect("sqlite store")
+            .save_farm_setup(account_id.as_str(), &farm_setup_projection)
+            .expect("farm setup should save");
+        let product_id = seed_product(
+            &runtime,
+            farm_id,
+            "Salad mix",
+            "Spring blend",
+            "draft",
+            Some(2),
+            "2026-04-18T10:00:00Z",
+        );
+
+        assert!(
+            runtime
+                .select_local_account(account_id.as_str())
+                .expect("account should select")
+        );
+        assert!(
+            runtime
+                .open_existing_product_editor(product_id)
+                .expect("existing product editor should open")
+        );
+
+        let saved_draft = ProductEditorDraft {
+            title: "Salad mix".to_owned(),
+            subtitle: "Washed and boxed".to_owned(),
+            unit_label: "box".to_owned(),
+            price_minor_units: Some(900),
+            price_currency: "usd".to_owned(),
+            stock_quantity: Some(14),
+            availability_window_id: None,
+            status: radroots_studio_app_models::ProductStatus::Published,
+        };
+
+        assert!(
+            runtime
+                .save_product_editor_draft(saved_draft.clone())
+                .expect("product editor draft should save")
+        );
+
+        let summary = runtime.summary();
+        assert_eq!(
+            summary.products_projection.list.rows[0].subtitle.as_deref(),
+            Some("Washed and boxed")
+        );
+        assert_eq!(
+            summary.products_projection.list.rows[0]
+                .price
+                .as_ref()
+                .map(|price| price.amount_minor_units),
+            Some(900)
+        );
+        assert_eq!(
+            summary.products_projection.list.rows[0].stock.quantity,
+            Some(14)
+        );
+        assert_eq!(
+            runtime
+                .lock_state()
+                .sqlite_store
+                .as_ref()
+                .expect("sqlite store")
+                .load_product_editor_draft(product_id)
+                .expect("saved draft should load"),
+            Some(ProductEditorDraft {
+                price_currency: "USD".to_owned(),
+                ..saved_draft
+            })
+        );
+    }
+
+    #[test]
     fn runtime_account_commands_refresh_identity_projection() {
         let runtime = memory_runtime();
 
@@ -2067,7 +2402,8 @@ mod tests {
         status: &str,
         stock_count: Option<u32>,
         updated_at: &str,
-    ) {
+    ) -> radroots_studio_app_models::ProductId {
+        let product_id = radroots_studio_app_models::ProductId::new();
         let stock_count = stock_count
             .map(|value| value.to_string())
             .unwrap_or_else(|| "null".to_owned());
@@ -2097,7 +2433,7 @@ mod tests {
                 null,
                 '{updated_at}'
             )",
-            product_id = radroots_studio_app_models::ProductId::new(),
+            product_id = product_id,
             farm_id = farm_id,
             title = title,
             subtitle = subtitle,
@@ -2113,6 +2449,8 @@ mod tests {
             .connection()
             .execute_batch(&sql)
             .expect("product should seed");
+
+        product_id
     }
 
     fn cleanup_paths(paths: &AppSharedAccountsPaths) {

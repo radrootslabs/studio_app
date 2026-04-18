@@ -14,9 +14,10 @@ use radroots_studio_app_i18n::AppTextKey;
 pub use radroots_studio_app_models::SettingsSection as SettingsPanelViewKey;
 use radroots_studio_app_models::{
     AppStartupGate, FarmOrderMethod, FarmReadiness, FarmSetupBlocker, FarmSetupDraft, FarmSummary,
-    FarmerSection, FulfillmentWindowSummary, OrderListRow, ProductAttentionState, ProductId,
-    ProductListRow, ProductStatus, ProductsFilter, ProductsListRow, ProductsSort, ShellSection,
-    TodayAgendaProjection, TodaySetupTaskKind,
+    FarmerSection, FulfillmentWindowSummary, OrderListRow, ProductAttentionState,
+    ProductEditorDraft, ProductId, ProductListRow, ProductPublishBlocker, ProductStatus,
+    ProductsFilter, ProductsListRow, ProductsSort, ShellSection, TodayAgendaProjection,
+    TodaySetupTaskKind,
 };
 use radroots_studio_app_state::{FarmSetupFlowStage, HomeRoute};
 use radroots_studio_app_ui::{
@@ -158,6 +159,7 @@ pub struct HomeView {
     farm_setup_form: Option<FarmSetupFormState>,
     products_search: Option<ProductsSearchState>,
     products_stock_editor: Option<ProductsStockEditorState>,
+    product_editor_form: Option<ProductEditorFormState>,
     relay_client: Option<RadrootsNostrClient>,
 }
 
@@ -170,6 +172,7 @@ impl HomeView {
             farm_setup_form: None,
             products_search: None,
             products_stock_editor: None,
+            product_editor_form: None,
             relay_client: None,
         }
     }
@@ -361,9 +364,62 @@ impl HomeView {
         }
     }
 
+    fn sync_product_editor_form(
+        &mut self,
+        runtime_summary: &DesktopAppRuntimeSummary,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(account_id) = runtime_summary
+            .settings_account_projection
+            .selected_account
+            .as_ref()
+            .map(|account| account.account.account_id.clone())
+        else {
+            self.product_editor_form = None;
+            return;
+        };
+
+        if selected_farmer_section(runtime_summary) != FarmerSection::Products
+            || !runtime_summary.farm_setup_projection.has_saved_farm()
+        {
+            self.product_editor_form = None;
+            return;
+        }
+
+        let radroots_studio_app_state::ProductEditorState::Open(session) =
+            &runtime_summary.products_projection.editor
+        else {
+            self.product_editor_form = None;
+            return;
+        };
+        let Some(product_id) = session.selected_product_id else {
+            self.product_editor_form = None;
+            return;
+        };
+        let should_reset = self
+            .product_editor_form
+            .as_ref()
+            .map(|form| form.account_id != account_id || form.product_id != product_id)
+            .unwrap_or(true);
+
+        if should_reset {
+            self.product_editor_form = Some(ProductEditorFormState::new(
+                account_id,
+                product_id,
+                session.draft.clone(),
+                window,
+                cx,
+            ));
+        }
+    }
+
     fn select_farmer_section(&mut self, section: FarmerSection, cx: &mut Context<Self>) {
         if self.runtime.select_farmer_section(section) {
             self.products_stock_editor = None;
+            if section != FarmerSection::Products {
+                self.product_editor_form = None;
+            }
             cx.notify();
         }
     }
@@ -458,6 +514,7 @@ impl HomeView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        let _ = self.runtime.close_product_editor();
         let Some(account_id) = self
             .runtime
             .summary()
@@ -487,6 +544,7 @@ impl HomeView {
             window,
             cx,
         ));
+        self.product_editor_form = None;
         cx.notify();
     }
 
@@ -552,6 +610,126 @@ impl HomeView {
                 if let Some(editor) = self.products_stock_editor.as_mut() {
                     editor.save_failed = true;
                 }
+                cx.notify();
+            }
+        }
+    }
+
+    fn open_new_product_editor(&mut self, cx: &mut Context<Self>) {
+        match self.runtime.open_new_product_editor() {
+            Ok(true) => {
+                self.products_stock_editor = None;
+                cx.notify();
+            }
+            Ok(false) => {}
+            Err(runtime_error) => {
+                error!(
+                    target: "products",
+                    event = "products.new_editor_open_failed",
+                    error = %runtime_error,
+                    "failed to open new product editor"
+                );
+            }
+        }
+    }
+
+    fn open_existing_product_editor(&mut self, product_id: ProductId, cx: &mut Context<Self>) {
+        match self.runtime.open_existing_product_editor(product_id) {
+            Ok(true) => {
+                self.products_stock_editor = None;
+                cx.notify();
+            }
+            Ok(false) => {}
+            Err(runtime_error) => {
+                error!(
+                    target: "products",
+                    event = "products.editor_open_failed",
+                    error = %runtime_error,
+                    product_id = %product_id,
+                    "failed to open existing product editor"
+                );
+            }
+        }
+    }
+
+    fn close_product_editor(&mut self, cx: &mut Context<Self>) {
+        let changed = self.runtime.close_product_editor();
+        let cleared = self.product_editor_form.take().is_some();
+
+        if changed || cleared {
+            cx.notify();
+        }
+    }
+
+    fn handle_product_editor_input_event(
+        &mut self,
+        state: &Entity<InputState>,
+        event: &InputEvent,
+        _: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if !matches!(event, InputEvent::Change) {
+            return;
+        }
+
+        let Some(form) = self.product_editor_form.as_mut() else {
+            return;
+        };
+        let matches_input = form.title_input == *state
+            || form.subtitle_input == *state
+            || form.unit_input == *state
+            || form.price_input == *state
+            || form.stock_input == *state;
+
+        if !matches_input {
+            return;
+        }
+
+        if form.save_failed {
+            form.save_failed = false;
+        }
+
+        cx.notify();
+    }
+
+    fn select_product_editor_status(&mut self, status: ProductStatus, cx: &mut Context<Self>) {
+        let Some(form) = self.product_editor_form.as_mut() else {
+            return;
+        };
+
+        if form.status == status {
+            return;
+        }
+
+        form.status = status;
+        form.save_failed = false;
+        cx.notify();
+    }
+
+    fn save_product_editor(&mut self, cx: &mut Context<Self>) {
+        let Some(form) = self.product_editor_form.as_mut() else {
+            return;
+        };
+        let Some(draft) = form.current_draft(cx) else {
+            return;
+        };
+
+        match self.runtime.save_product_editor_draft(draft.clone()) {
+            Ok(true) => {
+                form.initial_draft = draft;
+                form.save_failed = false;
+                cx.notify();
+            }
+            Ok(false) => {}
+            Err(runtime_error) => {
+                error!(
+                    target: "products",
+                    event = "products.editor_save_failed",
+                    error = %runtime_error,
+                    product_id = %form.product_id,
+                    "failed to save product editor draft"
+                );
+                form.save_failed = true;
                 cx.notify();
             }
         }
@@ -723,7 +901,16 @@ impl HomeView {
             .flex()
             .flex_col()
             .gap(px(APP_UI_THEME.layout.home_stack_gap_px))
-            .child(products_title_row(runtime))
+            .child(products_title_row(
+                runtime,
+                action_button_primary(
+                    "products-add-product",
+                    app_shared_text(AppTextKey::ProductsAddAction),
+                    cx.listener(|this, _, _, cx| this.open_new_product_editor(cx)),
+                    cx,
+                )
+                .into_any_element(),
+            ))
             .child(
                 div()
                     .w_full()
@@ -772,6 +959,26 @@ impl HomeView {
                 cx.listener(|this, _, _, cx| this.select_products_sort(ProductsSort::Price, cx)),
                 cx,
             ))
+            .when_some(self.product_editor_form.as_ref(), |this, form| {
+                this.child(products_editor_surface(
+                    form,
+                    cx.listener(|this, _, _, cx| {
+                        this.select_product_editor_status(ProductStatus::Draft, cx)
+                    }),
+                    cx.listener(|this, _, _, cx| {
+                        this.select_product_editor_status(ProductStatus::Published, cx)
+                    }),
+                    cx.listener(|this, _, _, cx| {
+                        this.select_product_editor_status(ProductStatus::Paused, cx)
+                    }),
+                    cx.listener(|this, _, _, cx| {
+                        this.select_product_editor_status(ProductStatus::Archived, cx)
+                    }),
+                    cx.listener(|this, _, _, cx| this.close_product_editor(cx)),
+                    cx.listener(|this, _, _, cx| this.save_product_editor(cx)),
+                    cx,
+                ))
+            })
             .child(if projection.list.is_empty() {
                 products_empty_state_card(projection.query.filter).into_any_element()
             } else {
@@ -813,11 +1020,27 @@ impl HomeView {
         row: &ProductsListRow,
         cx: &mut Context<Self>,
     ) -> AnyElement {
+        let is_open = self
+            .product_editor_form
+            .as_ref()
+            .map(|form| form.product_id == row.product_id)
+            .unwrap_or(false);
         let is_editing = self
             .products_stock_editor
             .as_ref()
             .map(|editor| editor.product_id == row.product_id)
             .unwrap_or(false);
+        let product = products_row_open_button(
+            ("products-row-open", index),
+            row,
+            is_open,
+            cx.listener({
+                let product_id = row.product_id;
+                move |this, _, _, cx| this.open_existing_product_editor(product_id, cx)
+            }),
+            cx,
+        )
+        .into_any_element();
         let action = if is_editing {
             action_button_compact(
                 "products-stock-editor-cancel",
@@ -847,7 +1070,7 @@ impl HomeView {
             .flex()
             .flex_col()
             .gap(px(APP_UI_THEME.layout.home_stack_gap_px))
-            .child(products_table_row(row, action))
+            .child(products_table_row(product, row, action))
             .when(is_editing, |this| {
                 this.when_some(self.products_stock_editor.as_ref(), |this, editor| {
                     this.child(products_stock_editor_card(
@@ -869,6 +1092,7 @@ impl Render for HomeView {
         self.sync_farm_setup_form(&runtime_summary, window, cx);
         self.sync_products_search(&runtime_summary, window, cx);
         self.sync_products_stock_editor(&runtime_summary);
+        self.sync_product_editor_form(&runtime_summary, window, cx);
         match home_stage(&runtime_summary) {
             HomeStage::Setup => self
                 .startup_view
@@ -1032,6 +1256,125 @@ impl ProductsStockEditorState {
         self.parsed_stock_quantity(cx)
             .map(|stock_quantity| Some(stock_quantity) != self.initial_stock_quantity)
             .unwrap_or(false)
+    }
+}
+
+struct ProductEditorFormState {
+    account_id: String,
+    product_id: ProductId,
+    initial_draft: ProductEditorDraft,
+    status: ProductStatus,
+    title_input: Entity<InputState>,
+    subtitle_input: Entity<InputState>,
+    unit_input: Entity<InputState>,
+    price_input: Entity<InputState>,
+    stock_input: Entity<InputState>,
+    _title_subscription: Subscription,
+    _subtitle_subscription: Subscription,
+    _unit_subscription: Subscription,
+    _price_subscription: Subscription,
+    _stock_subscription: Subscription,
+    save_failed: bool,
+}
+
+impl ProductEditorFormState {
+    fn new(
+        account_id: String,
+        product_id: ProductId,
+        draft: ProductEditorDraft,
+        window: &mut Window,
+        cx: &mut Context<HomeView>,
+    ) -> Self {
+        let title_input =
+            cx.new(|cx| InputState::new(window, cx).default_value(draft.title.clone()));
+        let subtitle_input =
+            cx.new(|cx| InputState::new(window, cx).default_value(draft.subtitle.clone()));
+        let unit_input =
+            cx.new(|cx| InputState::new(window, cx).default_value(draft.unit_label.clone()));
+        let price_input = cx.new(|cx| {
+            InputState::new(window, cx)
+                .default_value(product_editor_price_input_value(draft.price_minor_units))
+        });
+        let stock_input = cx.new(|cx| {
+            InputState::new(window, cx).default_value(
+                draft
+                    .stock_quantity
+                    .map(|quantity| quantity.to_string())
+                    .unwrap_or_default(),
+            )
+        });
+        let title_subscription = cx.subscribe_in(
+            &title_input,
+            window,
+            HomeView::handle_product_editor_input_event,
+        );
+        let subtitle_subscription = cx.subscribe_in(
+            &subtitle_input,
+            window,
+            HomeView::handle_product_editor_input_event,
+        );
+        let unit_subscription = cx.subscribe_in(
+            &unit_input,
+            window,
+            HomeView::handle_product_editor_input_event,
+        );
+        let price_subscription = cx.subscribe_in(
+            &price_input,
+            window,
+            HomeView::handle_product_editor_input_event,
+        );
+        let stock_subscription = cx.subscribe_in(
+            &stock_input,
+            window,
+            HomeView::handle_product_editor_input_event,
+        );
+
+        Self {
+            account_id,
+            product_id,
+            status: draft.status,
+            initial_draft: draft,
+            title_input,
+            subtitle_input,
+            unit_input,
+            price_input,
+            stock_input,
+            _title_subscription: title_subscription,
+            _subtitle_subscription: subtitle_subscription,
+            _unit_subscription: unit_subscription,
+            _price_subscription: price_subscription,
+            _stock_subscription: stock_subscription,
+            save_failed: false,
+        }
+    }
+
+    fn current_draft(&self, cx: &App) -> Option<ProductEditorDraft> {
+        Some(ProductEditorDraft {
+            title: self.title_input.read(cx).value().to_string(),
+            subtitle: self.subtitle_input.read(cx).value().to_string(),
+            unit_label: self.unit_input.read(cx).value().to_string(),
+            price_minor_units: parse_product_editor_price_input(
+                self.price_input.read(cx).value().as_ref(),
+            )?,
+            price_currency: "USD".to_owned(),
+            stock_quantity: parse_optional_product_editor_stock_input(
+                self.stock_input.read(cx).value().as_ref(),
+            )?,
+            availability_window_id: self.initial_draft.availability_window_id,
+            status: self.status,
+        })
+    }
+
+    fn has_changes(&self, cx: &App) -> bool {
+        self.current_draft(cx)
+            .map(|draft| draft != self.initial_draft)
+            .unwrap_or(false)
+    }
+
+    fn publish_blockers(&self, cx: &App) -> Vec<ProductPublishBlocker> {
+        self.current_draft(cx)
+            .map(|draft| draft.publish_blockers())
+            .unwrap_or_default()
     }
 }
 
@@ -2276,29 +2619,40 @@ fn home_sidebar_nav_button(
     }
 }
 
-fn products_title_row(runtime: &DesktopAppRuntimeSummary) -> impl IntoElement {
+fn products_title_row(
+    runtime: &DesktopAppRuntimeSummary,
+    add_product_action: AnyElement,
+) -> impl IntoElement {
     div()
         .w_full()
         .flex()
-        .flex_col()
-        .gap(px(4.0))
+        .items_end()
+        .justify_between()
+        .gap(px(APP_UI_THEME.layout.home_stack_gap_px))
         .child(
             div()
-                .text_size(px(APP_UI_THEME.typography.body_text_px * 2.0))
-                .font_weight(gpui::FontWeight::BOLD)
-                .text_color(rgb(APP_UI_THEME.text.primary))
-                .child(app_shared_text(AppTextKey::ProductsTitle)),
+                .flex()
+                .flex_col()
+                .gap(px(4.0))
+                .child(
+                    div()
+                        .text_size(px(APP_UI_THEME.typography.body_text_px * 2.0))
+                        .font_weight(gpui::FontWeight::BOLD)
+                        .text_color(rgb(APP_UI_THEME.text.primary))
+                        .child(app_shared_text(AppTextKey::ProductsTitle)),
+                )
+                .child(
+                    div()
+                        .text_size(px(APP_UI_THEME.typography.body_text_px))
+                        .font_weight(gpui::FontWeight::MEDIUM)
+                        .line_height(relative(1.2))
+                        .text_color(rgb(APP_UI_THEME.text.primary))
+                        .when_some(home_saved_farm(runtime), |this, farm| {
+                            this.child(farm.display_name.clone())
+                        }),
+                ),
         )
-        .child(
-            div()
-                .text_size(px(APP_UI_THEME.typography.body_text_px))
-                .font_weight(gpui::FontWeight::MEDIUM)
-                .line_height(relative(1.2))
-                .text_color(rgb(APP_UI_THEME.text.primary))
-                .when_some(home_saved_farm(runtime), |this, farm| {
-                    this.child(farm.display_name.clone())
-                }),
-        )
+        .child(add_product_action)
 }
 
 fn products_controls_card(
@@ -2514,36 +2868,17 @@ fn products_table_header_column(
         .child(app_shared_text(key))
 }
 
-fn products_table_row(row: &ProductsListRow, action: AnyElement) -> impl IntoElement {
+fn products_table_row(
+    product: AnyElement,
+    row: &ProductsListRow,
+    action: AnyElement,
+) -> impl IntoElement {
     div()
         .w_full()
         .flex()
         .items_center()
         .gap(px(APP_UI_THEME.layout.home_stack_gap_px))
-        .child(
-            div()
-                .flex_1()
-                .min_w_0()
-                .flex()
-                .flex_col()
-                .gap(px(4.0))
-                .child(
-                    div()
-                        .text_size(px(APP_UI_THEME.typography.body_text_px))
-                        .font_weight(gpui::FontWeight::MEDIUM)
-                        .text_color(rgb(APP_UI_THEME.text.primary))
-                        .child(row.title.clone()),
-                )
-                .when_some(row.subtitle.as_ref(), |this, subtitle| {
-                    this.child(
-                        div()
-                            .text_size(px(APP_UI_THEME.typography.utility_title_text_px))
-                            .line_height(relative(1.2))
-                            .text_color(rgb(APP_UI_THEME.text.secondary))
-                            .child(subtitle.clone()),
-                    )
-                }),
-        )
+        .child(product)
         .child(
             div()
                 .w(px(112.0))
@@ -2591,6 +2926,64 @@ fn products_table_row(row: &ProductsListRow, action: AnyElement) -> impl IntoEle
                 .child(row.updated_at.clone()),
         )
         .child(div().w(px(120.0)).flex().justify_end().child(action))
+}
+
+fn products_row_open_button(
+    id: (&'static str, usize),
+    row: &ProductsListRow,
+    is_open: bool,
+    on_click: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+    cx: &App,
+) -> impl IntoElement {
+    let selected_background = rgb(APP_UI_THEME.surfaces.window_background);
+
+    Button::new(id)
+        .custom(
+            ButtonCustomVariant::new(cx)
+                .color(if is_open {
+                    selected_background.into()
+                } else {
+                    transparent_black().into()
+                })
+                .foreground(rgb(APP_UI_THEME.text.primary).into())
+                .border(transparent_black())
+                .hover(selected_background.into())
+                .active(selected_background.into()),
+        )
+        .rounded(ButtonRounded::Size(px(APP_UI_THEME
+            .controls
+            .action_button
+            .sizing
+            .corner_radius_px)))
+        .flex_1()
+        .min_w_0()
+        .on_click(on_click)
+        .child(
+            div()
+                .w_full()
+                .flex()
+                .flex_col()
+                .items_start()
+                .gap(px(4.0))
+                .px(px(8.0))
+                .py(px(6.0))
+                .child(
+                    div()
+                        .text_size(px(APP_UI_THEME.typography.body_text_px))
+                        .font_weight(gpui::FontWeight::MEDIUM)
+                        .text_color(rgb(APP_UI_THEME.text.primary))
+                        .child(product_display_title(row.title.as_str())),
+                )
+                .when_some(row.subtitle.as_ref(), |this, subtitle| {
+                    this.child(
+                        div()
+                            .text_size(px(APP_UI_THEME.typography.utility_title_text_px))
+                            .line_height(relative(1.2))
+                            .text_color(rgb(APP_UI_THEME.text.secondary))
+                            .child(subtitle.clone()),
+                    )
+                }),
+        )
 }
 
 fn products_empty_state_card(filter: ProductsFilter) -> impl IntoElement {
@@ -2725,7 +3118,7 @@ fn products_stock_editor_card(
                         .text_size(px(APP_UI_THEME.typography.utility_title_text_px))
                         .line_height(relative(1.2))
                         .text_color(rgb(APP_UI_THEME.text.secondary))
-                        .child(row.title.clone()),
+                        .child(product_display_title(row.title.as_str())),
                 ),
         )
         .child(
@@ -2816,8 +3209,348 @@ fn products_stock_editor_validation_key(
     Some(AppTextKey::ProductsStockEditorInvalidQuantity)
 }
 
+fn products_editor_surface(
+    form: &ProductEditorFormState,
+    on_select_draft: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+    on_select_live: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+    on_select_paused: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+    on_select_archived: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+    on_close: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+    on_save: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+    cx: &App,
+) -> impl IntoElement {
+    let validation_keys = products_editor_validation_keys(form, cx);
+    let save_ready = form.has_changes(cx) && validation_keys.is_empty();
+
+    div().w_full().flex().justify_center().child(
+        div().w_full().max_w(px(520.0)).child(home_card(
+            app_shared_text(AppTextKey::ProductsEditorTitle),
+            div()
+                .w_full()
+                .flex()
+                .flex_col()
+                .gap(px(APP_UI_THEME.layout.home_stack_gap_px))
+                .child(home_body_text(app_shared_text(
+                    AppTextKey::ProductsEditorBody,
+                )))
+                .child(products_editor_text_field(
+                    AppTextKey::ProductsEditorFieldTitle,
+                    &form.title_input,
+                    None,
+                ))
+                .child(products_editor_text_field(
+                    AppTextKey::ProductsEditorFieldSubtitle,
+                    &form.subtitle_input,
+                    None,
+                ))
+                .child(products_editor_text_field(
+                    AppTextKey::ProductsEditorFieldUnit,
+                    &form.unit_input,
+                    None,
+                ))
+                .child(products_editor_text_field(
+                    AppTextKey::ProductsEditorFieldPrice,
+                    &form.price_input,
+                    products_editor_invalid_price_key(form, cx),
+                ))
+                .child(products_editor_text_field(
+                    AppTextKey::ProductsEditorFieldStock,
+                    &form.stock_input,
+                    products_editor_invalid_stock_key(form, cx),
+                ))
+                .child(products_editor_status_section(
+                    form.status,
+                    on_select_draft,
+                    on_select_live,
+                    on_select_paused,
+                    on_select_archived,
+                    cx,
+                ))
+                .child(products_editor_publish_readiness_section(form, cx))
+                .when(form.save_failed, |this| {
+                    this.child(home_body_text(app_shared_text(
+                        AppTextKey::ProductsEditorSaveFailed,
+                    )))
+                })
+                .child(
+                    div()
+                        .w_full()
+                        .flex()
+                        .items_center()
+                        .justify_between()
+                        .gap(px(APP_UI_THEME.layout.home_stack_gap_px))
+                        .child(
+                            div()
+                                .text_size(px(APP_UI_THEME.typography.utility_title_text_px))
+                                .text_color(rgb(APP_UI_THEME.text.secondary))
+                                .child(product_display_title(
+                                    form.title_input.read(cx).value().as_ref(),
+                                )),
+                        )
+                        .child(
+                            div()
+                                .flex()
+                                .items_center()
+                                .gap(px(8.0))
+                                .child(action_button_compact(
+                                    "products-editor-close",
+                                    app_shared_text(AppTextKey::ProductsEditorCloseAction),
+                                    on_close,
+                                    cx,
+                                ))
+                                .child(if save_ready {
+                                    action_button_primary(
+                                        "products-editor-save",
+                                        app_shared_text(AppTextKey::ProductsEditorSaveAction),
+                                        on_save,
+                                        cx,
+                                    )
+                                    .into_any_element()
+                                } else {
+                                    action_button_primary_disabled(
+                                        "products-editor-save",
+                                        app_shared_text(AppTextKey::ProductsEditorSaveAction),
+                                        cx,
+                                    )
+                                    .into_any_element()
+                                }),
+                        ),
+                ),
+        )),
+    )
+}
+
+fn products_editor_text_field(
+    field_label_key: AppTextKey,
+    input: &Entity<InputState>,
+    validation_key: Option<AppTextKey>,
+) -> impl IntoElement {
+    div()
+        .w_full()
+        .flex()
+        .flex_col()
+        .items_start()
+        .gap(px(8.0))
+        .child(home_farm_setup_field_label(field_label_key))
+        .child(Input::new(input).with_size(ComponentSize::Large).w_full())
+        .when_some(validation_key, |this, validation_key| {
+            this.child(home_body_text(app_shared_text(validation_key)))
+        })
+}
+
+fn products_editor_status_section(
+    selected_status: ProductStatus,
+    on_select_draft: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+    on_select_live: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+    on_select_paused: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+    on_select_archived: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+    cx: &App,
+) -> impl IntoElement {
+    div()
+        .w_full()
+        .flex()
+        .flex_col()
+        .items_start()
+        .gap(px(8.0))
+        .child(home_farm_setup_field_label(
+            AppTextKey::ProductsEditorFieldStatus,
+        ))
+        .child(
+            div()
+                .w_full()
+                .flex()
+                .items_center()
+                .gap(px(8.0))
+                .child(products_filter_button(
+                    "products-editor-status-draft",
+                    AppTextKey::ProductsStatusDraft,
+                    selected_status == ProductStatus::Draft,
+                    on_select_draft,
+                    cx,
+                ))
+                .child(products_filter_button(
+                    "products-editor-status-live",
+                    AppTextKey::ProductsStatusLive,
+                    selected_status == ProductStatus::Published,
+                    on_select_live,
+                    cx,
+                ))
+                .child(products_filter_button(
+                    "products-editor-status-paused",
+                    AppTextKey::ProductsStatusPaused,
+                    selected_status == ProductStatus::Paused,
+                    on_select_paused,
+                    cx,
+                ))
+                .child(products_filter_button(
+                    "products-editor-status-archived",
+                    AppTextKey::ProductsStatusArchived,
+                    selected_status == ProductStatus::Archived,
+                    on_select_archived,
+                    cx,
+                )),
+        )
+}
+
+fn products_editor_publish_readiness_section(
+    form: &ProductEditorFormState,
+    cx: &App,
+) -> impl IntoElement {
+    let blockers = form.publish_blockers(cx);
+
+    div()
+        .w_full()
+        .flex()
+        .flex_col()
+        .items_start()
+        .gap(px(8.0))
+        .child(home_farm_setup_field_label(
+            AppTextKey::ProductsEditorPublishReadinessTitle,
+        ))
+        .child(if blockers.is_empty() {
+            home_body_text(app_shared_text(AppTextKey::ProductsEditorReady)).into_any_element()
+        } else {
+            div()
+                .w_full()
+                .flex()
+                .flex_col()
+                .items_start()
+                .gap(px(8.0))
+                .children(
+                    blockers
+                        .into_iter()
+                        .map(products_editor_publish_blocker_row)
+                        .collect::<Vec<_>>(),
+                )
+                .into_any_element()
+        })
+}
+
+fn products_editor_publish_blocker_row(blocker: ProductPublishBlocker) -> AnyElement {
+    div()
+        .w_full()
+        .flex()
+        .items_start()
+        .gap(px(APP_UI_THEME.layout.settings_account_status_gap_px))
+        .child(status_indicator(
+            APP_UI_THEME.controls.status_indicator.attention,
+        ))
+        .child(home_body_text(app_shared_text(
+            products_editor_publish_blocker_key(blocker),
+        )))
+        .into_any_element()
+}
+
+fn products_editor_publish_blocker_key(blocker: ProductPublishBlocker) -> AppTextKey {
+    match blocker {
+        ProductPublishBlocker::AddProductName => AppTextKey::ProductsEditorBlockerAddProductName,
+        ProductPublishBlocker::ChooseUnit => AppTextKey::ProductsEditorBlockerChooseUnit,
+        ProductPublishBlocker::SetPrice => AppTextKey::ProductsEditorBlockerSetPrice,
+        ProductPublishBlocker::AttachAvailability => {
+            AppTextKey::ProductsEditorBlockerAttachAvailability
+        }
+    }
+}
+
+fn products_editor_validation_keys(form: &ProductEditorFormState, cx: &App) -> Vec<AppTextKey> {
+    let mut keys = Vec::new();
+
+    if let Some(key) = products_editor_invalid_price_key(form, cx) {
+        keys.push(key);
+    }
+
+    if let Some(key) = products_editor_invalid_stock_key(form, cx) {
+        keys.push(key);
+    }
+
+    keys
+}
+
+fn products_editor_invalid_price_key(
+    form: &ProductEditorFormState,
+    cx: &App,
+) -> Option<AppTextKey> {
+    parse_product_editor_price_input(form.price_input.read(cx).value().as_ref())
+        .is_none()
+        .then_some(AppTextKey::ProductsEditorInvalidPrice)
+}
+
+fn products_editor_invalid_stock_key(
+    form: &ProductEditorFormState,
+    cx: &App,
+) -> Option<AppTextKey> {
+    parse_optional_product_editor_stock_input(form.stock_input.read(cx).value().as_ref())
+        .is_none()
+        .then_some(AppTextKey::ProductsEditorInvalidStock)
+}
+
 fn parse_products_stock_quantity(input: &str) -> Option<u32> {
     input.trim().parse().ok()
+}
+
+fn parse_product_editor_price_input(input: &str) -> Option<Option<u32>> {
+    let trimmed = input.trim();
+    if trimmed.is_empty() {
+        return Some(None);
+    }
+
+    let parse_whole_dollars = |value: &str| -> Option<u32> { value.parse::<u32>().ok() };
+
+    if let Some((dollars, cents)) = trimmed.split_once('.') {
+        if trimmed.matches('.').count() != 1 || cents.is_empty() || cents.len() > 2 {
+            return None;
+        }
+
+        let dollars = if dollars.is_empty() {
+            0
+        } else {
+            parse_whole_dollars(dollars)?
+        };
+        let cents = match cents.len() {
+            1 => cents.parse::<u32>().ok()?.checked_mul(10)?,
+            2 => cents.parse::<u32>().ok()?,
+            _ => return None,
+        };
+
+        return dollars
+            .checked_mul(100)
+            .and_then(|amount| amount.checked_add(cents))
+            .map(Some);
+    }
+
+    parse_whole_dollars(trimmed)
+        .and_then(|dollars| dollars.checked_mul(100))
+        .map(Some)
+}
+
+fn parse_optional_product_editor_stock_input(input: &str) -> Option<Option<u32>> {
+    let trimmed = input.trim();
+    if trimmed.is_empty() {
+        return Some(None);
+    }
+
+    trimmed.parse::<u32>().ok().map(Some)
+}
+
+fn product_editor_price_input_value(price_minor_units: Option<u32>) -> String {
+    price_minor_units
+        .map(|amount_minor_units| {
+            format!(
+                "{}.{:02}",
+                amount_minor_units / 100,
+                amount_minor_units % 100
+            )
+        })
+        .unwrap_or_default()
+}
+
+fn product_display_title(title: &str) -> String {
+    let trimmed = title.trim();
+    if trimmed.is_empty() {
+        app_shared_text(AppTextKey::ProductsUntitledDraft).to_string()
+    } else {
+        trimmed.to_owned()
+    }
 }
 
 fn home_farm_setup_onboarding_card(
@@ -3278,7 +4011,7 @@ fn home_low_stock_row(product: &ProductListRow) -> AnyElement {
                 .text_size(px(APP_UI_THEME.typography.body_text_px))
                 .font_weight(gpui::FontWeight::SEMIBOLD)
                 .text_color(rgb(APP_UI_THEME.text.primary))
-                .child(product.title.clone()),
+                .child(product_display_title(product.title.as_str())),
         )
         .child(
             div()
@@ -3325,7 +4058,7 @@ fn home_draft_row(product: &ProductListRow) -> AnyElement {
                 .text_size(px(APP_UI_THEME.typography.body_text_px))
                 .font_weight(gpui::FontWeight::SEMIBOLD)
                 .text_color(rgb(APP_UI_THEME.text.primary))
-                .child(product.title.clone()),
+                .child(product_display_title(product.title.as_str())),
         )
         .child(status_indicator(
             APP_UI_THEME.controls.status_indicator.offline,
@@ -3501,6 +4234,8 @@ mod tests {
     use super::{
         AppTextKey, FarmerHomeFarmState, farm_setup_onboarding_card_spec, farmer_home_farm_state,
         home_saved_farm, home_window_launch_size_px, home_window_minimum_size_px,
+        parse_optional_product_editor_stock_input, parse_product_editor_price_input,
+        product_display_title,
     };
     use crate::runtime::DesktopAppRuntimeSummary;
     use radroots_studio_app_models::SettingsAccountProjection;
@@ -3621,6 +4356,35 @@ mod tests {
         );
 
         assert_eq!(home_saved_farm(&runtime), Some(&saved_farm));
+    }
+
+    #[test]
+    fn product_editor_price_parser_handles_blank_whole_and_decimal_inputs() {
+        assert_eq!(parse_product_editor_price_input(""), Some(None));
+        assert_eq!(parse_product_editor_price_input("6"), Some(Some(600)));
+        assert_eq!(parse_product_editor_price_input("6.5"), Some(Some(650)));
+        assert_eq!(parse_product_editor_price_input("6.50"), Some(Some(650)));
+        assert_eq!(parse_product_editor_price_input("6."), None);
+        assert_eq!(parse_product_editor_price_input("6.500"), None);
+        assert_eq!(parse_product_editor_price_input("abc"), None);
+    }
+
+    #[test]
+    fn product_editor_stock_parser_accepts_blank_or_whole_numbers_only() {
+        assert_eq!(parse_optional_product_editor_stock_input(""), Some(None));
+        assert_eq!(
+            parse_optional_product_editor_stock_input("14"),
+            Some(Some(14))
+        );
+        assert_eq!(parse_optional_product_editor_stock_input("14.5"), None);
+        assert_eq!(parse_optional_product_editor_stock_input("abc"), None);
+    }
+
+    #[test]
+    fn blank_product_titles_fall_back_to_the_untitled_copy() {
+        assert_eq!(product_display_title(""), "Untitled draft");
+        assert_eq!(product_display_title("  "), "Untitled draft");
+        assert_eq!(product_display_title("Salad mix"), "Salad mix");
     }
 
     fn summary(
