@@ -168,6 +168,47 @@ mod tests {
     }
 
     #[test]
+    fn startup_identity_choice_keys_remain_defined_in_the_typed_registry_source() {
+        let source = include_str!("keys.rs");
+
+        for entry in [
+            "HomeSetupContinueAction => \"home.setup.continue_action\"",
+            "HomeSetupGenerateKeyAction => \"home.setup.generate_key_action\"",
+            "HomeSetupConnectSignerAction => \"home.setup.connect_signer_action\"",
+            "HomeSetupSignerSourcePlaceholder => \"home.setup.signer_source.placeholder\"",
+            "HomeSetupSignerConnectAction => \"home.setup.signer_connect_action\"",
+            "HomeSetupBackAction => \"home.setup.back_action\"",
+        ] {
+            assert!(
+                source.contains(entry),
+                "typed startup identity-choice registry is missing {entry}"
+            );
+        }
+    }
+
+    #[test]
+    fn english_startup_identity_choice_copy_matches_the_next_launcher_contract() {
+        assert_eq!(app_text(AppTextKey::HomeSetupContinueAction), "Continue");
+        assert_eq!(
+            app_text(AppTextKey::HomeSetupGenerateKeyAction),
+            "Generate key"
+        );
+        assert_eq!(
+            app_text(AppTextKey::HomeSetupConnectSignerAction),
+            "Connect signer"
+        );
+        assert_eq!(
+            app_text(AppTextKey::HomeSetupSignerSourcePlaceholder),
+            "Paste bunker URI or discovery URL"
+        );
+        assert_eq!(
+            app_text(AppTextKey::HomeSetupSignerConnectAction),
+            "Connect signer"
+        );
+        assert_eq!(app_text(AppTextKey::HomeSetupBackAction), "Back");
+    }
+
+    #[test]
     fn english_products_workflow_copy_matches_the_editor_contract() {
         assert_eq!(app_text(AppTextKey::ProductsAddAction), "Add product");
         assert_eq!(app_text(AppTextKey::ProductsEditorTitle), "Product details");

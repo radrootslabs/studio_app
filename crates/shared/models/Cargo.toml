@@ -9,6 +9,7 @@ publish = false
 
 [dependencies]
 serde.workspace = true
+url = "2"
 uuid.workspace = true
 
 [lints]

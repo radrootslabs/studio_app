@@ -2,6 +2,7 @@
 
 use serde::{Deserialize, Serialize};
 use std::{collections::BTreeSet, error::Error, fmt, str::FromStr};
+use url::Url;
 use uuid::Uuid;
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
@@ -399,6 +400,150 @@ impl AppStartupGate {
             Self::Farmer => "farmer",
         }
     }
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum LoggedOutStartupPhase {
+    #[default]
+    ContinuePrompt,
+    IdentityChoice,
+    GenerateKeyStarting,
+    SignerEntry,
+}
+
+impl LoggedOutStartupPhase {
+    pub const fn storage_key(self) -> &'static str {
+        match self {
+            Self::ContinuePrompt => "continue_prompt",
+            Self::IdentityChoice => "identity_choice",
+            Self::GenerateKeyStarting => "generate_key_starting",
+            Self::SignerEntry => "signer_entry",
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum StartupSignerSourceKind {
+    BunkerUri,
+    DiscoveryUrl,
+}
+
+impl StartupSignerSourceKind {
+    pub const fn storage_key(self) -> &'static str {
+        match self {
+            Self::BunkerUri => "bunker_uri",
+            Self::DiscoveryUrl => "discovery_url",
+        }
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum ParseStartupSignerSourceError {
+    EmptyInput,
+    UnsupportedClientUri,
+    UnsupportedSource,
+    MissingDiscoveryUri,
+}
+
+impl fmt::Display for ParseStartupSignerSourceError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::EmptyInput => formatter.write_str("signer source input must not be empty"),
+            Self::UnsupportedClientUri => formatter.write_str(
+                "client nostrconnect URIs are not accepted by the app signer entry flow",
+            ),
+            Self::UnsupportedSource => {
+                formatter.write_str("signer source input must be a bunker URI or discovery URL")
+            }
+            Self::MissingDiscoveryUri => {
+                formatter.write_str("discovery URL must include a non-empty uri query parameter")
+            }
+        }
+    }
+}
+
+impl Error for ParseStartupSignerSourceError {}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "kind", content = "value", rename_all = "snake_case")]
+pub enum StartupSignerSource {
+    BunkerUri(String),
+    DiscoveryUrl(String),
+}
+
+impl StartupSignerSource {
+    pub const fn kind(&self) -> StartupSignerSourceKind {
+        match self {
+            Self::BunkerUri(_) => StartupSignerSourceKind::BunkerUri,
+            Self::DiscoveryUrl(_) => StartupSignerSourceKind::DiscoveryUrl,
+        }
+    }
+
+    pub fn value(&self) -> &str {
+        match self {
+            Self::BunkerUri(value) | Self::DiscoveryUrl(value) => value,
+        }
+    }
+}
+
+impl FromStr for StartupSignerSource {
+    type Err = ParseStartupSignerSourceError;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        let trimmed = value.trim();
+        if trimmed.is_empty() {
+            return Err(ParseStartupSignerSourceError::EmptyInput);
+        }
+
+        if trimmed.starts_with("nostrconnect://") {
+            return Err(ParseStartupSignerSourceError::UnsupportedClientUri);
+        }
+
+        if trimmed.starts_with("bunker://") {
+            return Ok(Self::BunkerUri(trimmed.to_owned()));
+        }
+
+        let url =
+            Url::parse(trimmed).map_err(|_| ParseStartupSignerSourceError::UnsupportedSource)?;
+        let has_discovery_uri = url
+            .query_pairs()
+            .any(|(key, value)| key == "uri" && !value.trim().is_empty());
+
+        if !has_discovery_uri {
+            return Err(ParseStartupSignerSourceError::MissingDiscoveryUri);
+        }
+
+        Ok(Self::DiscoveryUrl(trimmed.to_owned()))
+    }
+}
+
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+pub struct StartupSignerEntryProjection {
+    pub source_input: String,
+}
+
+impl StartupSignerEntryProjection {
+    pub fn new(source_input: impl Into<String>) -> Self {
+        Self {
+            source_input: source_input.into(),
+        }
+    }
+
+    pub fn parsed_source(&self) -> Result<StartupSignerSource, ParseStartupSignerSourceError> {
+        self.source_input.parse()
+    }
+
+    pub fn set_source_input(&mut self, source_input: impl Into<String>) {
+        self.source_input = source_input.into();
+    }
+}
+
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+pub struct LoggedOutStartupProjection {
+    pub phase: LoggedOutStartupPhase,
+    pub signer_entry: StartupSignerEntryProjection,
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
@@ -1134,12 +1279,14 @@ mod tests {
         AppIdentityProjection, AppStartupGate, FarmId, FarmOrderMethod, FarmSetupBlocker,
         FarmSetupDraft, FarmSetupProjection, FarmSetupReadiness, FarmSetupSection,
         FarmerActivationProjection, FarmerSection, IdentityBlockedReason, IdentityReadiness,
-        OrderListRow, ProductAttentionState, ProductAvailabilityState, ProductAvailabilitySummary,
-        ProductEditorDraft, ProductListRow, ProductPricePresentation, ProductPublishBlocker,
-        ProductStatus, ProductStockState, ProductStockSummary, ProductsFilter,
-        ProductsListProjection, ProductsListRow, ProductsListSummary, ProductsSort,
+        LoggedOutStartupPhase, LoggedOutStartupProjection, OrderListRow,
+        ParseStartupSignerSourceError, ProductAttentionState, ProductAvailabilityState,
+        ProductAvailabilitySummary, ProductEditorDraft, ProductListRow, ProductPricePresentation,
+        ProductPublishBlocker, ProductStatus, ProductStockState, ProductStockSummary,
+        ProductsFilter, ProductsListProjection, ProductsListRow, ProductsListSummary, ProductsSort,
         SelectedAccountProjection, SelectedSurfaceProjection, SettingsPreference, SettingsSection,
-        ShellSection, TodayAgendaProjection, TodaySetupTask, TodaySetupTaskKind, TodaySummary,
+        ShellSection, StartupSignerEntryProjection, StartupSignerSource, StartupSignerSourceKind,
+        TodayAgendaProjection, TodaySetupTask, TodaySetupTaskKind, TodaySummary,
     };
     use std::{collections::BTreeSet, str::FromStr};
     use uuid::Uuid;
@@ -1358,6 +1505,119 @@ mod tests {
         assert_eq!(projection.roster, roster);
         assert!(projection.selected_account.is_none());
         assert_eq!(projection.startup_gate(), AppStartupGate::SetupRequired);
+    }
+
+    #[test]
+    fn logged_out_startup_defaults_to_continue_prompt_with_empty_signer_entry() {
+        assert_eq!(
+            LoggedOutStartupProjection::default(),
+            LoggedOutStartupProjection {
+                phase: LoggedOutStartupPhase::ContinuePrompt,
+                signer_entry: StartupSignerEntryProjection::default(),
+            }
+        );
+    }
+
+    #[test]
+    fn logged_out_startup_phase_and_signer_source_kind_storage_keys_are_stable() {
+        assert_eq!(
+            LoggedOutStartupPhase::ContinuePrompt.storage_key(),
+            "continue_prompt"
+        );
+        assert_eq!(
+            LoggedOutStartupPhase::IdentityChoice.storage_key(),
+            "identity_choice"
+        );
+        assert_eq!(
+            LoggedOutStartupPhase::GenerateKeyStarting.storage_key(),
+            "generate_key_starting"
+        );
+        assert_eq!(
+            LoggedOutStartupPhase::SignerEntry.storage_key(),
+            "signer_entry"
+        );
+        assert_eq!(
+            StartupSignerSourceKind::BunkerUri.storage_key(),
+            "bunker_uri"
+        );
+        assert_eq!(
+            StartupSignerSourceKind::DiscoveryUrl.storage_key(),
+            "discovery_url"
+        );
+    }
+
+    #[test]
+    fn startup_signer_source_parses_direct_bunker_uri_and_discovery_url() {
+        let bunker_uri =
+            "bunker://npub1signer?relay=wss%3A%2F%2Frelay.radroots.example&secret=test-secret";
+        let discovery_url =
+            format!("https://signer.radroots.example/connect?uri={bunker_uri}&label=field");
+
+        let bunker_source = bunker_uri
+            .parse::<StartupSignerSource>()
+            .expect("bunker uri should parse");
+        let discovery_source = discovery_url
+            .parse::<StartupSignerSource>()
+            .expect("discovery url should parse");
+
+        assert_eq!(
+            bunker_source,
+            StartupSignerSource::BunkerUri(bunker_uri.to_owned())
+        );
+        assert_eq!(bunker_source.kind(), StartupSignerSourceKind::BunkerUri);
+        assert_eq!(bunker_source.value(), bunker_uri);
+        assert_eq!(
+            discovery_source,
+            StartupSignerSource::DiscoveryUrl(discovery_url.clone())
+        );
+        assert_eq!(
+            discovery_source.kind(),
+            StartupSignerSourceKind::DiscoveryUrl
+        );
+        assert_eq!(discovery_source.value(), discovery_url);
+    }
+
+    #[test]
+    fn startup_signer_source_rejects_empty_client_uri_and_missing_discovery_uri() {
+        assert_eq!(
+            "".parse::<StartupSignerSource>(),
+            Err(ParseStartupSignerSourceError::EmptyInput)
+        );
+        assert_eq!(
+            "nostrconnect://npub1client?relay=wss%3A%2F%2Frelay.radroots.example&secret=test"
+                .parse::<StartupSignerSource>(),
+            Err(ParseStartupSignerSourceError::UnsupportedClientUri)
+        );
+        assert_eq!(
+            "https://signer.radroots.example/connect".parse::<StartupSignerSource>(),
+            Err(ParseStartupSignerSourceError::MissingDiscoveryUri)
+        );
+        assert_eq!(
+            "not a signer source".parse::<StartupSignerSource>(),
+            Err(ParseStartupSignerSourceError::UnsupportedSource)
+        );
+    }
+
+    #[test]
+    fn signer_entry_projection_exposes_the_typed_source_contract() {
+        let mut projection = StartupSignerEntryProjection::new(
+            " bunker://npub1signer?relay=wss%3A%2F%2Frelay.radroots.example ",
+        );
+
+        assert_eq!(
+            projection.parsed_source(),
+            Ok(StartupSignerSource::BunkerUri(
+                "bunker://npub1signer?relay=wss%3A%2F%2Frelay.radroots.example".to_owned()
+            ))
+        );
+
+        projection.set_source_input("https://signer.radroots.example/connect?uri=bunker://npub1");
+        assert_eq!(
+            projection.parsed_source(),
+            Ok(StartupSignerSource::DiscoveryUrl(
+                "https://signer.radroots.example/connect?uri=bunker://npub1".to_owned()
+            ))
+        );
     }
 
     #[test]

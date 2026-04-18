@@ -2,9 +2,10 @@
 
 use radroots_studio_app_models::{
     ActiveSurface, AppIdentityProjection, AppStartupGate, FarmSetupProjection, FarmSetupReadiness,
-    ProductEditorDraft, ProductId, ProductPublishBlocker, ProductsFilter, ProductsListProjection,
-    ProductsSort, SelectedSurfaceProjection, SettingsAccountProjection, SettingsPreference,
-    SettingsSection, ShellSection, TodayAgendaProjection,
+    LoggedOutStartupPhase, LoggedOutStartupProjection, ProductEditorDraft, ProductId,
+    ProductPublishBlocker, ProductsFilter, ProductsListProjection, ProductsSort,
+    SelectedSurfaceProjection, SettingsAccountProjection, SettingsPreference, SettingsSection,
+    ShellSection, TodayAgendaProjection,
 };
 use thiserror::Error;
 
@@ -281,6 +282,7 @@ pub struct AppProjection {
     pub shell: AppShellProjection,
     pub identity: AppIdentityProjection,
     pub startup_gate: AppStartupGate,
+    pub logged_out_startup: LoggedOutStartupProjection,
     pub today: TodayAgendaProjection,
     pub products: ProductsScreenProjection,
     pub farm_setup: FarmSetupProjection,
@@ -306,6 +308,7 @@ impl AppProjection {
             shell,
             identity,
             startup_gate: AppStartupGate::default(),
+            logged_out_startup: LoggedOutStartupProjection::default(),
             today,
             products: ProductsScreenProjection::default(),
             farm_setup,
@@ -348,6 +351,11 @@ pub enum AppStateCommand {
     SelectActiveSurface(ActiveSurface),
     SelectSection(ShellSection),
     SelectSettingsSection(SettingsSection),
+    ShowStartupIdentityChoice,
+    BeginGenerateKeyStartup,
+    ShowStartupSignerEntry,
+    SetStartupSignerSourceInput(String),
+    ResetLoggedOutStartup,
     ReplaceIdentityProjection(AppIdentityProjection),
     ReplaceFarmSetupProjection(FarmSetupProjection),
     SelectFarmSetupFlowStage(FarmSetupFlowStage),
@@ -376,6 +384,26 @@ impl AppStateCommand {
 
     pub const fn select_settings_section(section: SettingsSection) -> Self {
         Self::SelectSettingsSection(section)
+    }
+
+    pub const fn show_startup_identity_choice() -> Self {
+        Self::ShowStartupIdentityChoice
+    }
+
+    pub const fn begin_generate_key_startup() -> Self {
+        Self::BeginGenerateKeyStartup
+    }
+
+    pub const fn show_startup_signer_entry() -> Self {
+        Self::ShowStartupSignerEntry
+    }
+
+    pub fn set_startup_signer_source_input(source_input: impl Into<String>) -> Self {
+        Self::SetStartupSignerSourceInput(source_input.into())
+    }
+
+    pub const fn reset_logged_out_startup() -> Self {
+        Self::ResetLoggedOutStartup
     }
 
     pub fn replace_identity_projection(projection: AppIdentityProjection) -> Self {
@@ -543,6 +571,10 @@ impl<R: AppStateRepository> AppStateStore<R> {
         &self.projection.farm_setup
     }
 
+    pub fn logged_out_startup_projection(&self) -> &LoggedOutStartupProjection {
+        &self.projection.logged_out_startup
+    }
+
     pub fn products_projection(&self) -> &ProductsScreenProjection {
         &self.projection.products
     }
@@ -576,6 +608,11 @@ impl<R: AppStateRepository> AppStateStore<R> {
                 Ok(true)
             }
             AppStateMutation::FarmSetupChanged => {
+                self.projection = next_projection;
+
+                Ok(true)
+            }
+            AppStateMutation::StartupChanged => {
                 self.projection = next_projection;
 
                 Ok(true)
@@ -622,6 +659,11 @@ impl AppStateStore<InMemoryAppStateRepository> {
 
                 true
             }
+            AppStateMutation::StartupChanged => {
+                self.projection = next_projection;
+
+                true
+            }
             AppStateMutation::TodayChanged => {
                 self.projection = next_projection;
 
@@ -641,6 +683,7 @@ enum AppStateMutation {
     NoChange,
     ShellChanged,
     FarmSetupChanged,
+    StartupChanged,
     TodayChanged,
     ProductsChanged,
 }
@@ -666,6 +709,32 @@ fn apply_command(projection: &mut AppProjection, command: AppStateCommand) -> Ap
         }
         AppStateCommand::SelectSettingsSection(selected_section) => {
             projection.shell.select_settings_section(selected_section);
+        }
+        AppStateCommand::ShowStartupIdentityChoice => {
+            if projection.startup_gate == AppStartupGate::SetupRequired {
+                projection.logged_out_startup.phase = LoggedOutStartupPhase::IdentityChoice;
+            }
+        }
+        AppStateCommand::BeginGenerateKeyStartup => {
+            if projection.startup_gate == AppStartupGate::SetupRequired {
+                projection.logged_out_startup.phase = LoggedOutStartupPhase::GenerateKeyStarting;
+            }
+        }
+        AppStateCommand::ShowStartupSignerEntry => {
+            if projection.startup_gate == AppStartupGate::SetupRequired {
+                projection.logged_out_startup.phase = LoggedOutStartupPhase::SignerEntry;
+            }
+        }
+        AppStateCommand::SetStartupSignerSourceInput(source_input) => {
+            if projection.startup_gate == AppStartupGate::SetupRequired {
+                projection
+                    .logged_out_startup
+                    .signer_entry
+                    .set_source_input(source_input);
+            }
+        }
+        AppStateCommand::ResetLoggedOutStartup => {
+            projection.logged_out_startup = LoggedOutStartupProjection::default();
         }
         AppStateCommand::ReplaceIdentityProjection(identity_projection) => {
             projection.identity = identity_projection;
@@ -725,6 +794,8 @@ fn apply_command(projection: &mut AppProjection, command: AppStateCommand) -> Ap
         || projection.farm_setup_flow_stage != before.farm_setup_flow_stage
     {
         AppStateMutation::FarmSetupChanged
+    } else if projection.logged_out_startup != before.logged_out_startup {
+        AppStateMutation::StartupChanged
     } else if projection.products != before.products {
         AppStateMutation::ProductsChanged
     } else {
@@ -736,6 +807,7 @@ fn sync_projection(projection: &mut AppProjection) {
     sync_shell_to_identity(&mut projection.shell, &projection.identity);
     sync_farm_setup_to_today(&mut projection.farm_setup, &projection.today);
     projection.startup_gate = projection.identity.startup_gate();
+    sync_logged_out_startup(&mut projection.logged_out_startup, projection.startup_gate);
     sync_farm_setup_flow_stage(
         &mut projection.farm_setup_flow_stage,
         projection.startup_gate,
@@ -778,6 +850,15 @@ fn sync_farm_setup_flow_stage(
     }
 }
 
+fn sync_logged_out_startup(
+    logged_out_startup: &mut LoggedOutStartupProjection,
+    startup_gate: AppStartupGate,
+) {
+    if startup_gate != AppStartupGate::SetupRequired {
+        *logged_out_startup = LoggedOutStartupProjection::default();
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
@@ -789,10 +870,11 @@ mod tests {
     use radroots_studio_app_models::{
         AccountCustody, AccountSummary, ActiveSurface, AppIdentityProjection, AppStartupGate,
         FarmId, FarmOrderMethod, FarmReadiness, FarmSetupDraft, FarmSetupProjection,
-        FarmerActivationProjection, FarmerSection, FulfillmentWindowId, ProductEditorDraft,
-        ProductId, ProductPublishBlocker, ProductsFilter, ProductsListProjection, ProductsSort,
-        SelectedAccountProjection, SelectedSurfaceProjection, SettingsSection, ShellSection,
-        TodayAgendaProjection, TodaySetupTask, TodaySetupTaskKind,
+        FarmerActivationProjection, FarmerSection, FulfillmentWindowId, LoggedOutStartupPhase,
+        LoggedOutStartupProjection, ProductEditorDraft, ProductId, ProductPublishBlocker,
+        ProductsFilter, ProductsListProjection, ProductsSort, SelectedAccountProjection,
+        SelectedSurfaceProjection, SettingsSection, ShellSection, TodayAgendaProjection,
+        TodaySetupTask, TodaySetupTaskKind,
     };
 
     struct FailingRepository;
@@ -835,6 +917,10 @@ mod tests {
         assert_eq!(projection.identity, AppIdentityProjection::default());
         assert_eq!(projection.startup_gate, AppStartupGate::SetupRequired);
         assert_eq!(
+            projection.logged_out_startup,
+            LoggedOutStartupProjection::default()
+        );
+        assert_eq!(
             projection.shell.settings.selected_section,
             SettingsSection::Account
         );
@@ -873,6 +959,10 @@ mod tests {
             SettingsSection::About
         );
         assert_eq!(store.startup_gate(), AppStartupGate::SetupRequired);
+        assert_eq!(
+            store.logged_out_startup_projection(),
+            &LoggedOutStartupProjection::default()
+        );
         assert_eq!(store.projection().today, TodayAgendaProjection::default());
         assert_eq!(
             store.projection().products,
@@ -928,6 +1018,71 @@ mod tests {
         assert_eq!(
             store.repository().projection(),
             &AppShellProjection::default()
+        );
+    }
+
+    #[test]
+    fn startup_identity_choice_flow_is_explicit_and_in_memory_only() {
+        let mut store = AppStateStore::load(InMemoryAppStateRepository::default())
+            .expect("in-memory repository should load");
+
+        assert_eq!(
+            store.logged_out_startup_projection(),
+            &LoggedOutStartupProjection::default()
+        );
+
+        assert_eq!(
+            store.apply(AppStateCommand::show_startup_identity_choice()),
+            Ok(true)
+        );
+        assert_eq!(
+            store.logged_out_startup_projection().phase,
+            LoggedOutStartupPhase::IdentityChoice
+        );
+
+        assert_eq!(
+            store.apply(AppStateCommand::show_startup_signer_entry()),
+            Ok(true)
+        );
+        assert_eq!(
+            store.logged_out_startup_projection().phase,
+            LoggedOutStartupPhase::SignerEntry
+        );
+
+        assert_eq!(
+            store.apply(AppStateCommand::set_startup_signer_source_input(
+                "https://signer.radroots.example/connect?uri=bunker://npub1signer",
+            )),
+            Ok(true)
+        );
+        assert_eq!(
+            store
+                .logged_out_startup_projection()
+                .signer_entry
+                .source_input,
+            "https://signer.radroots.example/connect?uri=bunker://npub1signer"
+        );
+
+        assert_eq!(
+            store.apply(AppStateCommand::begin_generate_key_startup()),
+            Ok(true)
+        );
+        assert_eq!(
+            store.logged_out_startup_projection().phase,
+            LoggedOutStartupPhase::GenerateKeyStarting
+        );
+        assert_eq!(
+            store.repository().projection(),
+            &AppShellProjection::default()
+        );
+
+        assert_eq!(
+            store.apply(AppStateCommand::reset_logged_out_startup()),
+            Ok(true)
+        );
+        assert_eq!(
+            store.logged_out_startup_projection(),
+            &LoggedOutStartupProjection::default()
         );
     }
 
@@ -1084,6 +1239,75 @@ mod tests {
             ShellSection::Farmer(FarmerSection::Today)
         );
         assert_eq!(store.home_route(), HomeRoute::FarmSetupOnboarding);
+    }
+
+    #[test]
+    fn startup_identity_choice_state_resets_once_identity_leaves_setup_required() {
+        let mut store = AppStateStore::load(InMemoryAppStateRepository::default())
+            .expect("in-memory repository should load");
+
+        assert_eq!(
+            store.apply(AppStateCommand::show_startup_identity_choice()),
+            Ok(true)
+        );
+        assert_eq!(
+            store.apply(AppStateCommand::show_startup_signer_entry()),
+            Ok(true)
+        );
+        assert_eq!(
+            store.apply(AppStateCommand::set_startup_signer_source_input(
+                "bunker://npub1signer?relay=wss%3A%2F%2Frelay.radroots.example",
+            )),
+            Ok(true)
+        );
+
+        assert_eq!(
+            store.apply(AppStateCommand::replace_identity_projection(
+                ready_identity(ActiveSurface::Personal),
+            )),
+            Ok(true)
+        );
+        assert_eq!(store.startup_gate(), AppStartupGate::Personal);
+        assert_eq!(
+            store.logged_out_startup_projection(),
+            &LoggedOutStartupProjection::default()
+        );
+    }
+
+    #[test]
+    fn startup_identity_choice_commands_are_rejected_after_setup_gate_is_cleared() {
+        let mut store = AppStateStore::load(InMemoryAppStateRepository::default())
+            .expect("in-memory repository should load");
+
+        assert_eq!(
+            store.apply(AppStateCommand::replace_identity_projection(
+                ready_identity(ActiveSurface::Personal),
+            )),
+            Ok(true)
+        );
+
+        assert_eq!(
+            store.apply(AppStateCommand::show_startup_identity_choice()),
+            Ok(false)
+        );
+        assert_eq!(
+            store.apply(AppStateCommand::show_startup_signer_entry()),
+            Ok(false)
+        );
+        assert_eq!(
+            store.apply(AppStateCommand::begin_generate_key_startup()),
+            Ok(false)
+        );
+        assert_eq!(
+            store.apply(AppStateCommand::set_startup_signer_source_input(
+                "bunker://npub1signer?relay=wss%3A%2F%2Frelay.radroots.example",
+            )),
+            Ok(false)
+        );
+        assert_eq!(
+            store.logged_out_startup_projection(),
+            &LoggedOutStartupProjection::default()
+        );
     }
 
     #[test]
