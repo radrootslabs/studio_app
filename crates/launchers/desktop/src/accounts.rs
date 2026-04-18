@@ -319,7 +319,7 @@ fn blocked_identity_projection_from_store_state(
     ))
 }
 
-fn identity_projection_from_manager(
+pub(crate) fn identity_projection_from_manager(
     manager: &RadrootsNostrAccountsManager,
     sqlite_store: &AppSqliteStore,
 ) -> Result<AppIdentityProjection, DesktopAccountsProjectionError> {

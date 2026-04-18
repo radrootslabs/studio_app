@@ -3,6 +3,7 @@
 mod accounts;
 mod app;
 mod menus;
+mod remote_signer;
 mod runtime;
 #[cfg(test)]
 mod source_guards;

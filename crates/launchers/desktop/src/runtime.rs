@@ -9,6 +9,9 @@ use radroots_studio_app_models::{
     ProductsListProjection, ProductsSort, SettingsAccountProjection, SettingsPreference,
     SettingsSection, ShellSection, TodayAgendaProjection,
 };
+use radroots_studio_app_remote_signer::{
+    RadrootsAppRemoteSignerApprovedSession, RadrootsAppRemoteSignerPendingSession,
+};
 use radroots_studio_app_sqlite::{
     APP_ACTIVITY_CONTEXT_LIMIT, AppSqliteError, AppSqliteStore, DatabaseTarget,
 };
@@ -21,10 +24,15 @@ use thiserror::Error;
 use tracing::error;
 
 use crate::accounts::{
-    DesktopAccountsBootstrapError, DesktopAccountsCommandError, DesktopLocalIdentityImportRequest,
-    bootstrap_desktop_accounts, generate_local_account, import_local_account,
-    remove_selected_local_key, reset_local_device_state, select_active_surface,
-    select_local_account,
+    DesktopAccountsBootstrapError, DesktopAccountsCommandError, DesktopAccountsProjectionError,
+    DesktopLocalIdentityImportRequest, bootstrap_desktop_accounts, generate_local_account,
+    identity_projection_from_manager, import_local_account, remove_selected_local_key,
+    reset_local_device_state, select_active_surface, select_local_account,
+};
+use crate::remote_signer::{
+    DesktopRemoteSignerError, DesktopRemoteSignerPaths, activate_pending_session,
+    apply_remote_signer_custody, clear_pending_session, load_pending_session, purge_all_state,
+    reconcile_startup, store_pending_session,
 };
 
 const APP_DATABASE_FILE_NAME: &str = "app.sqlite3";
@@ -100,6 +108,37 @@ impl DesktopAppRuntime {
         self.lock_state_mut().state_store.apply_in_memory(
             AppStateCommand::set_startup_signer_source_input(source_input),
         )
+    }
+
+    pub fn load_startup_pending_remote_signer_session(
+        &self,
+    ) -> Result<Option<RadrootsAppRemoteSignerPendingSession>, DesktopAppRuntimeCommandError> {
+        self.lock_state()
+            .load_startup_pending_remote_signer_session()
+    }
+
+    pub fn store_startup_pending_remote_signer_session(
+        &self,
+        pending: &RadrootsAppRemoteSignerPendingSession,
+    ) -> Result<bool, DesktopAppRuntimeCommandError> {
+        self.lock_state_mut()
+            .store_startup_pending_remote_signer_session(pending)
+    }
+
+    pub fn clear_startup_pending_remote_signer_session(
+        &self,
+    ) -> Result<bool, DesktopAppRuntimeCommandError> {
+        self.lock_state_mut()
+            .clear_startup_pending_remote_signer_session()
+    }
+
+    pub fn activate_startup_approved_remote_signer_session(
+        &self,
+        pending: &RadrootsAppRemoteSignerPendingSession,
+        approved: &RadrootsAppRemoteSignerApprovedSession,
+    ) -> Result<bool, DesktopAppRuntimeCommandError> {
+        self.lock_state_mut()
+            .activate_startup_approved_remote_signer_session(pending, approved)
     }
 
     pub fn select_settings_section(&self, section: SettingsSection) -> bool {
@@ -348,6 +387,7 @@ struct DesktopAppRuntimeState {
     state_store: AppStateStore<InMemoryAppStateRepository>,
     default_nostr_relay_url: String,
     shared_accounts_paths: Option<AppSharedAccountsPaths>,
+    remote_signer_paths: Option<DesktopRemoteSignerPaths>,
     accounts_manager: Option<RadrootsNostrAccountsManager>,
     sqlite_store: Option<AppSqliteStore>,
     startup_issue: Option<String>,
@@ -361,6 +401,10 @@ impl fmt::Debug for DesktopAppRuntimeState {
             .field(
                 "shared_accounts_paths",
                 &self.shared_accounts_paths.as_ref().map(|_| "available"),
+            )
+            .field(
+                "remote_signer_paths",
+                &self.remote_signer_paths.as_ref().map(|_| "available"),
             )
             .field(
                 "accounts_manager",
@@ -380,18 +424,44 @@ impl DesktopAppRuntimeState {
         default_nostr_relay_url: String,
     ) -> Result<Self, DesktopAppRuntimeBootstrapError> {
         let paths = AppDesktopRuntimePaths::current_desktop()?;
+        Self::bootstrap_from_paths(paths, default_nostr_relay_url)
+    }
+
+    fn bootstrap_from_paths(
+        paths: AppDesktopRuntimePaths,
+        default_nostr_relay_url: String,
+    ) -> Result<Self, DesktopAppRuntimeBootstrapError> {
         let database_path = paths.app.data.join(APP_DATABASE_FILE_NAME);
         let sqlite_store = AppSqliteStore::open(DatabaseTarget::Path(database_path.clone()))?;
         let mut state_store = AppStateStore::load(InMemoryAppStateRepository::default())?;
+        let remote_signer_paths = DesktopRemoteSignerPaths::from_runtime_paths(&paths);
         let accounts_bootstrap = bootstrap_desktop_accounts(&paths.shared_accounts, &sqlite_store)?;
+        if let Some(accounts_manager) = accounts_bootstrap.accounts_manager.as_ref() {
+            reconcile_startup(accounts_manager, &remote_signer_paths)?;
+        }
+        let identity_projection = apply_remote_signer_custody(
+            identity_projection_from_manager(
+                accounts_bootstrap
+                    .accounts_manager
+                    .as_ref()
+                    .expect("desktop bootstrap always returns an accounts manager"),
+                &sqlite_store,
+            )?,
+            &remote_signer_paths,
+        )?;
         let selected_account_context = load_selected_account_context(
             &sqlite_store,
-            &accounts_bootstrap.identity_projection,
+            &identity_projection,
             state_store.products_projection().query.clone(),
         )?;
         let _ = state_store.apply_in_memory(AppStateCommand::replace_identity_projection(
-            accounts_bootstrap.identity_projection,
+            identity_projection.clone(),
         ));
+        if identity_projection.startup_gate() == AppStartupGate::SetupRequired
+            && load_pending_session(&remote_signer_paths)?.is_some()
+        {
+            let _ = state_store.apply_in_memory(AppStateCommand::show_startup_signer_entry());
+        }
         let _ = state_store.apply_in_memory(AppStateCommand::replace_farm_setup_projection(
             selected_account_context.farm_setup_projection,
         ));
@@ -406,6 +476,7 @@ impl DesktopAppRuntimeState {
             state_store,
             default_nostr_relay_url,
             shared_accounts_paths: Some(paths.shared_accounts.clone()),
+            remote_signer_paths: Some(remote_signer_paths),
             accounts_manager: accounts_bootstrap.accounts_manager,
             sqlite_store: Some(sqlite_store),
             startup_issue: None,
@@ -417,6 +488,7 @@ impl DesktopAppRuntimeState {
             state_store: AppStateStore::in_memory(AppShellProjection::default()),
             default_nostr_relay_url: String::new(),
             shared_accounts_paths: None,
+            remote_signer_paths: None,
             accounts_manager: None,
             sqlite_store: None,
             startup_issue: Some(error.to_string()),
@@ -486,6 +558,9 @@ impl DesktopAppRuntimeState {
     }
 
     fn reset_local_device_state(&mut self) -> Result<bool, DesktopAppRuntimeCommandError> {
+        if let Some(paths) = self.remote_signer_paths.as_ref() {
+            purge_all_state(paths)?;
+        }
         let projection = {
             let accounts_manager = self.accounts_manager()?;
             let sqlite_store = self.sqlite_store()?;
@@ -760,6 +835,7 @@ impl DesktopAppRuntimeState {
         &mut self,
         projection: AppIdentityProjection,
     ) -> Result<bool, DesktopAppRuntimeCommandError> {
+        let projection = self.decorate_identity_projection(projection)?;
         let selected_account_context = load_selected_account_context(
             self.sqlite_store()?,
             &projection,
@@ -935,6 +1011,74 @@ impl DesktopAppRuntimeState {
             .ok_or(DesktopAppRuntimeCommandError::RuntimeUnavailable)
     }
 
+    fn remote_signer_paths(&self) -> Option<&DesktopRemoteSignerPaths> {
+        self.remote_signer_paths.as_ref()
+    }
+
+    fn load_startup_pending_remote_signer_session(
+        &self,
+    ) -> Result<Option<RadrootsAppRemoteSignerPendingSession>, DesktopAppRuntimeCommandError> {
+        let Some(paths) = self.remote_signer_paths() else {
+            return Ok(None);
+        };
+        Ok(load_pending_session(paths)?)
+    }
+
+    fn store_startup_pending_remote_signer_session(
+        &mut self,
+        pending: &RadrootsAppRemoteSignerPendingSession,
+    ) -> Result<bool, DesktopAppRuntimeCommandError> {
+        let Some(paths) = self.remote_signer_paths() else {
+            return Err(DesktopAppRuntimeCommandError::RuntimeUnavailable);
+        };
+        store_pending_session(paths, pending)?;
+        Ok(true)
+    }
+
+    fn clear_startup_pending_remote_signer_session(
+        &mut self,
+    ) -> Result<bool, DesktopAppRuntimeCommandError> {
+        let Some(paths) = self.remote_signer_paths() else {
+            return Ok(false);
+        };
+        Ok(clear_pending_session(paths)?.is_some())
+    }
+
+    fn activate_startup_approved_remote_signer_session(
+        &mut self,
+        pending: &RadrootsAppRemoteSignerPendingSession,
+        approved: &RadrootsAppRemoteSignerApprovedSession,
+    ) -> Result<bool, DesktopAppRuntimeCommandError> {
+        let Some(paths) = self.remote_signer_paths() else {
+            return Err(DesktopAppRuntimeCommandError::RuntimeUnavailable);
+        };
+        {
+            let accounts_manager = self.accounts_manager()?;
+            activate_pending_session(
+                accounts_manager,
+                paths,
+                pending.record.client_account_id(),
+                approved,
+            )?;
+        }
+        let projection = {
+            let accounts_manager = self.accounts_manager()?;
+            let sqlite_store = self.sqlite_store()?;
+            identity_projection_from_manager(accounts_manager, sqlite_store)?
+        };
+        self.replace_identity_projection(projection)
+    }
+
+    fn decorate_identity_projection(
+        &self,
+        projection: AppIdentityProjection,
+    ) -> Result<AppIdentityProjection, DesktopAppRuntimeCommandError> {
+        let Some(paths) = self.remote_signer_paths() else {
+            return Ok(projection);
+        };
+        Ok(apply_remote_signer_custody(projection, paths)?)
+    }
+
     fn command_unavailable_error(&self) -> DesktopAppRuntimeCommandError {
         let _ = self;
         DesktopAppRuntimeCommandError::RuntimeUnavailable
@@ -947,6 +1091,10 @@ pub enum DesktopAppRuntimeCommandError {
     RuntimeUnavailable,
     #[error(transparent)]
     Accounts(#[from] DesktopAccountsCommandError),
+    #[error(transparent)]
+    Projection(#[from] DesktopAccountsProjectionError),
+    #[error(transparent)]
+    RemoteSigner(#[from] DesktopRemoteSignerError),
     #[error(transparent)]
     Sqlite(#[from] AppSqliteError),
 }
@@ -969,6 +1117,10 @@ enum DesktopAppRuntimeBootstrapError {
     RuntimePaths(#[from] AppRuntimePathsError),
     #[error(transparent)]
     Accounts(#[from] DesktopAccountsBootstrapError),
+    #[error(transparent)]
+    Projection(#[from] DesktopAccountsProjectionError),
+    #[error(transparent)]
+    RemoteSigner(#[from] DesktopRemoteSignerError),
     #[error(transparent)]
     Sqlite(#[from] AppSqliteError),
     #[error(transparent)]
@@ -1102,6 +1254,7 @@ mod tests {
                 .expect("in-memory state store should load"),
             default_nostr_relay_url: "ws://127.0.0.1:8080".to_owned(),
             shared_accounts_paths: None,
+            remote_signer_paths: None,
             accounts_manager: None,
             sqlite_store: Some(
                 AppSqliteStore::open(DatabaseTarget::InMemory)
@@ -1151,6 +1304,7 @@ mod tests {
                 .expect("in-memory state store should load"),
             default_nostr_relay_url: "ws://127.0.0.1:8080".to_owned(),
             shared_accounts_paths: None,
+            remote_signer_paths: None,
             accounts_manager: None,
             sqlite_store: Some(
                 AppSqliteStore::open(DatabaseTarget::InMemory)
@@ -1186,6 +1340,7 @@ mod tests {
                 .expect("in-memory state store should load"),
             default_nostr_relay_url: "ws://127.0.0.1:8080".to_owned(),
             shared_accounts_paths: None,
+            remote_signer_paths: None,
             accounts_manager: None,
             sqlite_store: Some(
                 AppSqliteStore::open(DatabaseTarget::InMemory)
@@ -1278,6 +1433,7 @@ mod tests {
                 .expect("in-memory state store should load"),
             default_nostr_relay_url: "ws://127.0.0.1:8080".to_owned(),
             shared_accounts_paths: None,
+            remote_signer_paths: None,
             accounts_manager: None,
             sqlite_store: Some(
                 AppSqliteStore::open(DatabaseTarget::InMemory)
@@ -1326,6 +1482,7 @@ mod tests {
                 .expect("in-memory state store should load"),
             default_nostr_relay_url: "ws://127.0.0.1:8080".to_owned(),
             shared_accounts_paths: None,
+            remote_signer_paths: None,
             accounts_manager: None,
             sqlite_store: Some(
                 AppSqliteStore::open(DatabaseTarget::InMemory)
@@ -1358,6 +1515,7 @@ mod tests {
                 .expect("in-memory state store should load"),
             default_nostr_relay_url: "ws://127.0.0.1:8080".to_owned(),
             shared_accounts_paths: None,
+            remote_signer_paths: None,
             accounts_manager: None,
             sqlite_store: Some(
                 AppSqliteStore::open(DatabaseTarget::InMemory)
@@ -1388,6 +1546,7 @@ mod tests {
                 .expect("in-memory state store should load"),
             default_nostr_relay_url: "ws://127.0.0.1:8080".to_owned(),
             shared_accounts_paths: None,
+            remote_signer_paths: None,
             accounts_manager: None,
             sqlite_store: Some(
                 AppSqliteStore::open(DatabaseTarget::InMemory)
@@ -2335,6 +2494,7 @@ mod tests {
                 .expect("in-memory state store should load"),
             default_nostr_relay_url: "ws://127.0.0.1:8080".to_owned(),
             shared_accounts_paths: Some(paths),
+            remote_signer_paths: None,
             accounts_manager: None,
             sqlite_store: Some(
                 AppSqliteStore::open(DatabaseTarget::InMemory)
@@ -2359,6 +2519,7 @@ mod tests {
                 .expect("in-memory state store should load"),
             default_nostr_relay_url: "ws://127.0.0.1:8080".to_owned(),
             shared_accounts_paths: None,
+            remote_signer_paths: None,
             accounts_manager: Some(
                 RadrootsNostrAccountsManager::new(
                     Arc::new(RadrootsNostrMemoryAccountStore::new()),
@@ -2385,6 +2546,7 @@ mod tests {
                     .expect("in-memory state store should load"),
                 default_nostr_relay_url: "ws://127.0.0.1:8080".to_owned(),
                 shared_accounts_paths: Some(paths.clone()),
+                remote_signer_paths: None,
                 accounts_manager: Some(
                     RadrootsNostrAccountsManager::new(
                         Arc::new(RadrootsNostrFileAccountStore::new(

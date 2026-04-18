@@ -164,6 +164,7 @@ pub struct HomeView {
     startup_signer_entry: Option<StartupSignerEntryState>,
     startup_signer_connect_state: StartupSignerConnectState,
     startup_signer_task_token: u64,
+    startup_signer_recovery_attempted: bool,
     logged_in_view: LoggedInHomeView,
     farm_setup_form: Option<FarmSetupFormState>,
     products_search: Option<ProductsSearchState>,
@@ -209,6 +210,7 @@ impl HomeView {
             startup_signer_entry: None,
             startup_signer_connect_state: StartupSignerConnectState::Idle,
             startup_signer_task_token: 0,
+            startup_signer_recovery_attempted: false,
             logged_in_view: LoggedInHomeView::new(),
             farm_setup_form: None,
             products_search: None,
@@ -243,8 +245,16 @@ impl HomeView {
     }
 
     fn show_startup_identity_choice(&mut self, cx: &mut Context<Self>) {
+        if !matches!(
+            self.startup_signer_connect_state,
+            StartupSignerConnectState::Idle
+        ) && !self.clear_startup_pending_remote_signer_session(cx)
+        {
+            return;
+        }
         self.startup_view.clear_notice();
         self.reset_startup_signer_flow();
+        self.startup_signer_recovery_attempted = false;
         if self.runtime.show_startup_identity_choice() {
             cx.notify();
         }
@@ -253,18 +263,23 @@ impl HomeView {
     fn show_startup_signer_entry(&mut self, cx: &mut Context<Self>) {
         self.startup_view.clear_notice();
         self.reset_startup_signer_flow();
+        self.startup_signer_recovery_attempted = false;
         if self.runtime.show_startup_signer_entry() {
             cx.notify();
         }
     }
 
     fn start_generate_key(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if !self.clear_startup_pending_remote_signer_session(cx) {
+            return;
+        }
         if !self.runtime.begin_generate_key_startup() {
             return;
         }
 
         self.startup_view.clear_notice();
         self.reset_startup_signer_flow();
+        self.startup_signer_recovery_attempted = false;
         let relay_url = self.runtime.default_nostr_relay_url();
         cx.notify();
         cx.spawn_in(window, async move |this, cx| {
@@ -318,6 +333,7 @@ impl HomeView {
             {
                 self.reset_startup_signer_flow();
             }
+            self.startup_signer_recovery_attempted = false;
             self.startup_signer_entry = None;
             return;
         }
@@ -334,6 +350,11 @@ impl HomeView {
                 self.startup_signer_entry =
                     Some(StartupSignerEntryState::new(source_input, window, cx));
             }
+        }
+
+        if !self.startup_signer_recovery_attempted {
+            self.startup_signer_recovery_attempted = true;
+            self.restore_startup_pending_remote_signer_session(window, cx);
         }
     }
 
@@ -371,32 +392,9 @@ impl HomeView {
             else {
                 return;
             };
-
-            loop {
-                let poll_result = cx
-                    .background_executor()
-                    .spawn(run_startup_signer_pending_poll(
-                        pending_session.record.clone(),
-                        pending_session.client_secret_key_hex.clone(),
-                    ))
-                    .await;
-                let should_continue = this
-                    .update(cx, |this, cx| {
-                        this.apply_startup_signer_poll_result(
-                            task_token,
-                            pending_session.clone(),
-                            poll_result,
-                            cx,
-                        )
-                    })
-                    .ok()
-                    .unwrap_or(false);
-                if !should_continue {
-                    return;
-                }
-
-                Timer::after(Duration::from_secs(1)).await;
-            }
+            let _ = this.update_in(cx, |this, window, cx| {
+                this.spawn_startup_signer_pending_poll(window, task_token, pending_session, cx);
+            });
         })
         .detach();
     }
@@ -413,6 +411,15 @@ impl HomeView {
 
         match connect_result {
             Ok(pending_session) => {
+                if let Err(error) = self
+                    .runtime
+                    .store_startup_pending_remote_signer_session(&pending_session)
+                {
+                    self.startup_signer_connect_state = StartupSignerConnectState::Idle;
+                    self.startup_view.set_notice(error.to_string());
+                    cx.notify();
+                    return None;
+                }
                 self.startup_view.clear_notice();
                 self.startup_signer_connect_state = StartupSignerConnectState::PendingApproval {
                     pending_session: pending_session.clone(),
@@ -465,21 +472,112 @@ impl HomeView {
                 cx.notify();
                 true
             }
-            Ok(RadrootsAppRemoteSignerPendingPollOutcome::Approved(approved_session)) => {
-                self.startup_view.clear_notice();
-                self.startup_signer_connect_state = StartupSignerConnectState::Approved {
-                    pending_session,
-                    approved_session,
-                    auth_challenge_url,
-                };
-                cx.notify();
-                false
-            }
+            Ok(RadrootsAppRemoteSignerPendingPollOutcome::Approved(approved_session)) => match self
+                .runtime
+                .activate_startup_approved_remote_signer_session(
+                    &pending_session,
+                    &approved_session,
+                ) {
+                Ok(_) => {
+                    self.startup_view.clear_notice();
+                    self.startup_signer_connect_state = StartupSignerConnectState::Approved {
+                        pending_session,
+                        approved_session,
+                        auth_challenge_url,
+                    };
+                    cx.notify();
+                    false
+                }
+                Err(error) => {
+                    self.startup_view.set_notice(error.to_string());
+                    self.startup_signer_connect_state =
+                        StartupSignerConnectState::PendingApproval {
+                            pending_session,
+                            auth_challenge_url,
+                        };
+                    cx.notify();
+                    false
+                }
+            },
             Ok(RadrootsAppRemoteSignerPendingPollOutcome::Rejected { message })
             | Ok(RadrootsAppRemoteSignerPendingPollOutcome::FatalError { message })
             | Err(message) => {
+                let _ = self.runtime.clear_startup_pending_remote_signer_session();
                 self.startup_signer_connect_state = StartupSignerConnectState::Idle;
                 self.startup_view.set_notice(message);
+                cx.notify();
+                false
+            }
+        }
+    }
+
+    fn spawn_startup_signer_pending_poll(
+        &mut self,
+        window: &mut Window,
+        task_token: u64,
+        pending_session: RadrootsAppRemoteSignerPendingSession,
+        cx: &mut Context<Self>,
+    ) {
+        cx.spawn_in(window, async move |this, cx| {
+            loop {
+                let poll_result = cx
+                    .background_executor()
+                    .spawn(run_startup_signer_pending_poll(
+                        pending_session.record.clone(),
+                        pending_session.client_secret_key_hex.clone(),
+                    ))
+                    .await;
+                let should_continue = this
+                    .update(cx, |this, cx| {
+                        this.apply_startup_signer_poll_result(
+                            task_token,
+                            pending_session.clone(),
+                            poll_result,
+                            cx,
+                        )
+                    })
+                    .ok()
+                    .unwrap_or(false);
+                if !should_continue {
+                    return;
+                }
+
+                Timer::after(Duration::from_secs(1)).await;
+            }
+        })
+        .detach();
+    }
+
+    fn restore_startup_pending_remote_signer_session(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let pending_session = match self.runtime.load_startup_pending_remote_signer_session() {
+            Ok(Some(pending_session)) => pending_session,
+            Ok(None) => return,
+            Err(error) => {
+                self.startup_view.set_notice(error.to_string());
+                cx.notify();
+                return;
+            }
+        };
+
+        let task_token = self.next_startup_signer_task_token();
+        self.startup_view.clear_notice();
+        self.startup_signer_connect_state = StartupSignerConnectState::PendingApproval {
+            pending_session: pending_session.clone(),
+            auth_challenge_url: None,
+        };
+        cx.notify();
+        self.spawn_startup_signer_pending_poll(window, task_token, pending_session, cx);
+    }
+
+    fn clear_startup_pending_remote_signer_session(&mut self, cx: &mut Context<Self>) -> bool {
+        match self.runtime.clear_startup_pending_remote_signer_session() {
+            Ok(_) => true,
+            Err(error) => {
+                self.startup_view.set_notice(error.to_string());
                 cx.notify();
                 false
             }
