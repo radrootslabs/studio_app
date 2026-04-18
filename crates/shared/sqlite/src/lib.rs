@@ -4,6 +4,7 @@ mod activation;
 mod activity;
 mod error;
 mod farm_setup;
+mod farm_rules;
 mod migrations;
 mod products;
 mod today;
@@ -12,8 +13,9 @@ use std::{fs, path::PathBuf, time::Duration};
 
 use radroots_studio_app_models::{
     AccountSurfaceActivationProjection, AppActivityContext, AppActivityEvent, AppActivityKind,
-    FarmId, FarmSetupProjection, FarmSummary, ProductEditorDraft, ProductId, ProductPublishBlocker,
-    ProductsFilter, ProductsListProjection, ProductsSort, TodayAgendaProjection,
+    FarmId, FarmRulesProjection, FarmSetupProjection, FarmSummary, ProductEditorDraft, ProductId,
+    ProductPublishBlocker, ProductsFilter, ProductsListProjection, ProductsSort,
+    TodayAgendaProjection,
 };
 use rusqlite::Connection;
 
@@ -23,6 +25,7 @@ pub use activity::{
 };
 pub use error::AppSqliteError;
 pub use farm_setup::AppFarmSetupRepository;
+pub use farm_rules::AppFarmRulesRepository;
 pub use migrations::latest_schema_version;
 pub use products::AppProductsRepository;
 pub use today::{
@@ -75,6 +78,10 @@ impl AppSqliteStore {
 
     pub fn farm_setup_repository(&self) -> AppFarmSetupRepository<'_> {
         AppFarmSetupRepository::new(&self.connection)
+    }
+
+    pub fn farm_rules_repository(&self) -> AppFarmRulesRepository<'_> {
+        AppFarmRulesRepository::new(&self.connection)
     }
 
     pub fn products_repository(&self) -> AppProductsRepository<'_> {
@@ -146,6 +153,14 @@ impl AppSqliteStore {
 
     pub fn clear_farm_setup(&self, account_id: &str) -> Result<(), AppSqliteError> {
         self.farm_setup_repository().clear_farm_setup(account_id)
+    }
+
+    pub fn load_farm_rules(&self, farm_id: FarmId) -> Result<FarmRulesProjection, AppSqliteError> {
+        self.farm_rules_repository().load_farm_rules(farm_id)
+    }
+
+    pub fn save_farm_rules(&self, projection: &FarmRulesProjection) -> Result<(), AppSqliteError> {
+        self.farm_rules_repository().save_farm_rules(projection)
     }
 
     pub fn load_products(
@@ -327,6 +342,14 @@ mod tests {
         assert!(table_exists(connection, "activity_events"));
         assert!(table_exists(connection, "account_surface_activations"));
         assert!(table_exists(connection, "account_farm_setups"));
+        assert!(table_exists(connection, "farm_operating_rules"));
+        assert!(table_exists(connection, "pickup_locations"));
+        assert!(table_exists(connection, "blackout_periods"));
+        assert!(column_exists(connection, "farms", "timezone"));
+        assert!(column_exists(connection, "farms", "currency_code"));
+        assert!(column_exists(connection, "fulfillment_windows", "pickup_location_id"));
+        assert!(column_exists(connection, "fulfillment_windows", "label"));
+        assert!(column_exists(connection, "fulfillment_windows", "order_cutoff_at"));
         assert_eq!(row_count(connection, "sync_checkpoints"), 1);
 
         drop(store);
@@ -378,6 +401,28 @@ mod tests {
         connection
             .query_row(&sql, [], |row| row.get(0))
             .expect("row count query should succeed")
+    }
+
+    fn column_exists(connection: &Connection, table_name: &str, column_name: &str) -> bool {
+        let sql = format!("PRAGMA table_info({table_name})");
+        let mut statement = connection
+            .prepare(&sql)
+            .expect("table info statement should prepare");
+        let mut rows = statement
+            .query([])
+            .expect("table info query should succeed");
+
+        while let Some(row) = rows.next().expect("table info row should load") {
+            if row
+                .get::<_, String>(1)
+                .expect("table info name should load")
+                == column_name
+            {
+                return true;
+            }
+        }
+
+        false
     }
 
     fn pragma_i64(connection: &Connection, pragma_name: &str) -> i64 {

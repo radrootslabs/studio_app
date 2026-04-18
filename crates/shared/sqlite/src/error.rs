@@ -77,4 +77,6 @@ pub enum AppSqliteError {
     MissingColumn { field: &'static str },
     #[error("invalid sqlite enum value in `{field}`: `{value}`")]
     DecodeEnum { field: &'static str, value: String },
+    #[error("invalid farm-rules projection: {reason}")]
+    InvalidProjection { reason: &'static str },
 }
