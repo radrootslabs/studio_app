@@ -168,6 +168,26 @@ mod tests {
     }
 
     #[test]
+    fn english_orders_copy_matches_the_queue_contract() {
+        assert_eq!(app_text(AppTextKey::HomeNavOrders), "Orders");
+        assert_eq!(
+            app_text(AppTextKey::HomeTodayOpenInOrdersAction),
+            "Open in Orders"
+        );
+        assert_eq!(app_text(AppTextKey::OrdersTitle), "Orders");
+        assert_eq!(
+            app_text(AppTextKey::OrdersStatusNeedsAction),
+            "Needs action"
+        );
+        assert_eq!(app_text(AppTextKey::OrdersActionMarkPacked), "Mark packed");
+        assert_eq!(
+            app_text(AppTextKey::OrdersActionMarkCompleted),
+            "Mark completed"
+        );
+        assert_eq!(app_text(AppTextKey::OrdersDetailTitle), "Order detail");
+    }
+
+    #[test]
     fn english_farm_rules_host_copy_matches_the_frozen_utility_window_inventory() {
         assert_eq!(app_text(AppTextKey::SettingsNavFarm), "Farm");
         assert_eq!(

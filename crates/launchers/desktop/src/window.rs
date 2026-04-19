@@ -15,10 +15,11 @@ use radroots_studio_app_models::{
     FarmOrderMethod, FarmProfileRecord, FarmReadinessBlocker, FarmRulesProjection,
     FarmRulesReadiness, FarmSetupBlocker, FarmSetupDraft, FarmSummary, FarmTimingConflictKind,
     FarmerSection, FulfillmentWindowId, FulfillmentWindowRecord, FulfillmentWindowSummary,
-    LoggedOutStartupPhase, OrderListRow, PickupLocationId, PickupLocationRecord,
-    ProductAttentionState, ProductEditorDraft, ProductId, ProductListRow, ProductPublishBlocker,
-    ProductStatus, ProductsFilter, ProductsListRow, ProductsSort, ShellSection,
-    TodayAgendaProjection, TodaySetupTaskKind,
+    LoggedOutStartupPhase, OrderDetailItemRow, OrderDetailProjection, OrderId, OrderListRow,
+    OrderPrimaryAction, OrderStatus, OrdersFilter, OrdersListRow, PickupLocationId,
+    PickupLocationRecord, ProductAttentionState, ProductEditorDraft, ProductId, ProductListRow,
+    ProductPublishBlocker, ProductStatus, ProductsFilter, ProductsListRow, ProductsSort,
+    ShellSection, TodayAgendaProjection, TodaySetupTaskKind,
 };
 use radroots_studio_app_remote_signer::{
     RadrootsAppRemoteSignerApprovedSession, RadrootsAppRemoteSignerPendingPollOutcome,
@@ -931,6 +932,93 @@ impl HomeView {
         }
     }
 
+    fn open_orders(&mut self, cx: &mut Context<Self>) {
+        match self.runtime.open_orders() {
+            Ok(true) => {
+                self.products_stock_editor = None;
+                self.product_editor_form = None;
+                cx.notify();
+            }
+            Ok(false) => {}
+            Err(runtime_error) => {
+                error!(
+                    target: "orders",
+                    event = "orders.route_failed",
+                    error = %runtime_error,
+                    "failed to route into orders view"
+                );
+            }
+        }
+    }
+
+    fn select_orders_filter(&mut self, filter: OrdersFilter, cx: &mut Context<Self>) {
+        match self.runtime.select_orders_filter(filter) {
+            Ok(true) => cx.notify(),
+            Ok(false) => {}
+            Err(runtime_error) => {
+                error!(
+                    target: "orders",
+                    event = "orders.filter_update_failed",
+                    error = %runtime_error,
+                    filter = filter.storage_key(),
+                    "failed to update orders filter"
+                );
+            }
+        }
+    }
+
+    fn open_order_detail(&mut self, order_id: OrderId, cx: &mut Context<Self>) {
+        match self.runtime.open_order_detail(order_id) {
+            Ok(true) => {
+                self.products_stock_editor = None;
+                self.product_editor_form = None;
+                cx.notify();
+            }
+            Ok(false) => {}
+            Err(runtime_error) => {
+                error!(
+                    target: "orders",
+                    event = "orders.detail_open_failed",
+                    error = %runtime_error,
+                    order_id = %order_id,
+                    "failed to open order detail"
+                );
+            }
+        }
+    }
+
+    fn mark_order_packed(&mut self, order_id: OrderId, cx: &mut Context<Self>) {
+        match self.runtime.mark_order_packed(order_id) {
+            Ok(true) => cx.notify(),
+            Ok(false) => {}
+            Err(runtime_error) => {
+                error!(
+                    target: "orders",
+                    event = "orders.mark_packed_failed",
+                    error = %runtime_error,
+                    order_id = %order_id,
+                    "failed to mark order packed"
+                );
+            }
+        }
+    }
+
+    fn mark_order_completed(&mut self, order_id: OrderId, cx: &mut Context<Self>) {
+        match self.runtime.mark_order_completed(order_id) {
+            Ok(true) => cx.notify(),
+            Ok(false) => {}
+            Err(runtime_error) => {
+                error!(
+                    target: "orders",
+                    event = "orders.mark_completed_failed",
+                    error = %runtime_error,
+                    order_id = %order_id,
+                    "failed to mark order completed"
+                );
+            }
+        }
+    }
+
     fn open_products_stock_editor(
         &mut self,
         product_id: ProductId,
@@ -1256,6 +1344,9 @@ impl HomeView {
             FarmerSection::Products if farmer_products_available(runtime) => {
                 self.render_products_content(runtime, cx)
             }
+            FarmerSection::Orders if farmer_products_available(runtime) => {
+                self.render_orders_content(runtime, cx)
+            }
             FarmerSection::Today
             | FarmerSection::Products
             | FarmerSection::Orders
@@ -1281,6 +1372,7 @@ impl HomeView {
                 }),
                 cx.listener(|this, _, window, cx| this.open_farm_setup(window, cx)),
                 cx.listener(|this, _, window, cx| this.open_farm_setup(window, cx)),
+                cx.listener(|this, _, _, cx| this.open_orders(cx)),
                 cx.listener(|this, _, _, cx| {
                     this.open_products_filter(ProductsFilter::NeedAttention, cx)
                 }),
@@ -1297,6 +1389,7 @@ impl HomeView {
                 cx.listener(|this, _, _, cx| {
                     this.select_farmer_section(FarmerSection::Products, cx)
                 }),
+                cx.listener(|this, _, _, cx| this.open_orders(cx)),
                 cx,
             )
             .into_any_element(),
@@ -1410,6 +1503,126 @@ impl HomeView {
             .into_any_element()
     }
 
+    fn render_orders_content(
+        &mut self,
+        runtime: &DesktopAppRuntimeSummary,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let projection = &runtime.orders_projection;
+        let summary = &projection.list.summary;
+
+        app_stack_v(APP_UI_THEME.shells.home_stack_gap_px)
+            .w_full()
+            .max_w(px(APP_UI_THEME.shells.home_card_max_width_px))
+            .mx_auto()
+            .child(app_text_value(app_shared_text(AppTextKey::OrdersTitle)))
+            .child(
+                div()
+                    .w_full()
+                    .flex()
+                    .gap(px(APP_UI_THEME.shells.home_stack_gap_px))
+                    .child(home_summary_metric(
+                        AppTextKey::OrdersSummaryTotal,
+                        summary.total_orders,
+                    ))
+                    .child(home_summary_metric(
+                        AppTextKey::OrdersStatusNeedsAction,
+                        summary.needs_action_orders,
+                    ))
+                    .child(home_summary_metric(
+                        AppTextKey::OrdersStatusScheduled,
+                        summary.scheduled_orders,
+                    ))
+                    .child(home_summary_metric(
+                        AppTextKey::OrdersStatusPacked,
+                        summary.packed_orders,
+                    )),
+            )
+            .child(home_card(
+                app_shared_text(AppTextKey::OrdersFiltersTitle),
+                app_cluster(APP_UI_THEME.foundation.spacing.tight_px)
+                    .child(choice_button(
+                        "orders-filter-all",
+                        app_shared_text(AppTextKey::OrdersFilterAll),
+                        projection.query.filter == OrdersFilter::All,
+                        cx.listener(|this, _, _, cx| {
+                            this.select_orders_filter(OrdersFilter::All, cx)
+                        }),
+                        cx,
+                    ))
+                    .child(choice_button(
+                        "orders-filter-needs-action",
+                        app_shared_text(AppTextKey::OrdersStatusNeedsAction),
+                        projection.query.filter == OrdersFilter::NeedsAction,
+                        cx.listener(|this, _, _, cx| {
+                            this.select_orders_filter(OrdersFilter::NeedsAction, cx)
+                        }),
+                        cx,
+                    ))
+                    .child(choice_button(
+                        "orders-filter-scheduled",
+                        app_shared_text(AppTextKey::OrdersStatusScheduled),
+                        projection.query.filter == OrdersFilter::Scheduled,
+                        cx.listener(|this, _, _, cx| {
+                            this.select_orders_filter(OrdersFilter::Scheduled, cx)
+                        }),
+                        cx,
+                    ))
+                    .child(choice_button(
+                        "orders-filter-packed",
+                        app_shared_text(AppTextKey::OrdersStatusPacked),
+                        projection.query.filter == OrdersFilter::Packed,
+                        cx.listener(|this, _, _, cx| {
+                            this.select_orders_filter(OrdersFilter::Packed, cx)
+                        }),
+                        cx,
+                    ))
+                    .child(choice_button(
+                        "orders-filter-completed",
+                        app_shared_text(AppTextKey::OrdersStatusCompleted),
+                        projection.query.filter == OrdersFilter::Completed,
+                        cx.listener(|this, _, _, cx| {
+                            this.select_orders_filter(OrdersFilter::Completed, cx)
+                        }),
+                        cx,
+                    ))
+                    .child(choice_button(
+                        "orders-filter-refunded",
+                        app_shared_text(AppTextKey::OrdersStatusRefunded),
+                        projection.query.filter == OrdersFilter::Refunded,
+                        cx.listener(|this, _, _, cx| {
+                            this.select_orders_filter(OrdersFilter::Refunded, cx)
+                        }),
+                        cx,
+                    )),
+            ))
+            .child(if projection.list.is_empty() {
+                orders_empty_state_card(projection.query.filter).into_any_element()
+            } else {
+                self.render_orders_table_card(
+                    &projection.list.rows,
+                    projection.detail.as_ref().map(|detail| detail.order_id),
+                    cx,
+                )
+            })
+            .when_some(projection.detail.as_ref(), |this, detail| {
+                this.child(self.render_order_detail_card(detail, cx))
+            })
+            .when(
+                projection.detail.is_none() && !projection.list.is_empty(),
+                |this| {
+                    this.child(
+                        home_card(
+                            app_shared_text(AppTextKey::OrdersDetailTitle),
+                            home_body_text(app_shared_text(AppTextKey::OrdersDetailEmptyBody)),
+                        )
+                        .into_any_element(),
+                    )
+                },
+            )
+            .into_any_element()
+    }
+
     fn render_products_table_card(
         &mut self,
         rows: &[ProductsListRow],
@@ -1433,6 +1646,115 @@ impl HomeView {
                 .child(products_table_header())
                 .child(section_divider())
                 .children(items),
+        )
+        .into_any_element()
+    }
+
+    fn render_orders_table_card(
+        &mut self,
+        rows: &[OrdersListRow],
+        selected_order_id: Option<OrderId>,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let mut items = Vec::with_capacity(rows.len().saturating_mul(2));
+        for (index, row) in rows.iter().enumerate() {
+            items.push(self.render_orders_table_entry(index, row, selected_order_id, cx));
+            if index + 1 < rows.len() {
+                items.push(section_divider().into_any_element());
+            }
+        }
+
+        home_card(
+            app_shared_text(AppTextKey::OrdersTableTitle),
+            div()
+                .w_full()
+                .flex()
+                .flex_col()
+                .gap(px(12.0))
+                .child(orders_table_header())
+                .child(section_divider())
+                .children(items),
+        )
+        .into_any_element()
+    }
+
+    fn render_order_detail_card(
+        &mut self,
+        detail: &OrderDetailProjection,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let primary_action = match detail.primary_action {
+            Some(OrderPrimaryAction::MarkPacked) => Some(
+                action_button_primary(
+                    "orders-detail-mark-packed",
+                    app_shared_text(AppTextKey::OrdersActionMarkPacked),
+                    cx.listener({
+                        let order_id = detail.order_id;
+                        move |this, _, _, cx| this.mark_order_packed(order_id, cx)
+                    }),
+                    cx,
+                )
+                .into_any_element(),
+            ),
+            Some(OrderPrimaryAction::MarkCompleted) => Some(
+                action_button_primary(
+                    "orders-detail-mark-completed",
+                    app_shared_text(AppTextKey::OrdersActionMarkCompleted),
+                    cx.listener({
+                        let order_id = detail.order_id;
+                        move |this, _, _, cx| this.mark_order_completed(order_id, cx)
+                    }),
+                    cx,
+                )
+                .into_any_element(),
+            ),
+            Some(OrderPrimaryAction::Review) | None => None,
+        };
+
+        home_card(
+            app_shared_text(AppTextKey::OrdersDetailTitle),
+            app_stack_v(APP_UI_THEME.shells.home_stack_gap_px)
+                .child(app_heading_section(detail.order_number.clone()))
+                .child(home_body_text(detail.customer_display_name.clone()))
+                .child(label_value_list([
+                    LabelValueRow::new(
+                        app_shared_text(AppTextKey::OrdersDetailCustomerLabel),
+                        detail.customer_display_name.clone(),
+                    ),
+                    LabelValueRow::new(
+                        app_shared_text(AppTextKey::OrdersDetailStatusLabel),
+                        app_shared_text(orders_status_key(detail.status)),
+                    ),
+                    LabelValueRow::new(
+                        app_shared_text(AppTextKey::OrdersDetailWindowLabel),
+                        order_optional_text(detail.fulfillment_window_label.as_deref()),
+                    ),
+                    LabelValueRow::new(
+                        app_shared_text(AppTextKey::OrdersDetailPickupLabel),
+                        order_optional_text(detail.pickup_location_label.as_deref()),
+                    ),
+                ]))
+                .child(app_form_section(
+                    app_shared_text(AppTextKey::OrdersDetailItemsTitle),
+                    div()
+                        .w_full()
+                        .flex()
+                        .flex_col()
+                        .gap(px(APP_UI_THEME.foundation.spacing.tight_px))
+                        .children(
+                            detail
+                                .items
+                                .iter()
+                                .map(order_detail_item_row)
+                                .collect::<Vec<_>>(),
+                        )
+                        .when(detail.items.is_empty(), |this| {
+                            this.child(home_body_text(app_shared_text(AppTextKey::ValueNone)))
+                        }),
+                ))
+                .when_some(primary_action, |this, primary_action| {
+                    this.child(div().child(primary_action))
+                }),
         )
         .into_any_element()
     }
@@ -1506,6 +1828,50 @@ impl HomeView {
                     ))
                 })
             })
+            .into_any_element()
+    }
+
+    fn render_orders_table_entry(
+        &mut self,
+        index: usize,
+        row: &OrdersListRow,
+        selected_order_id: Option<OrderId>,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let is_selected = selected_order_id.is_some_and(|order_id| order_id == row.order_id);
+        let order = list_row_button(
+            ("orders-row-open", index),
+            row.order_number.clone(),
+            Some(SharedString::from(row.customer_display_name.clone())),
+            is_selected,
+            cx.listener({
+                let order_id = row.order_id;
+                move |this, _, _, cx| this.open_order_detail(order_id, cx)
+            }),
+            cx,
+        )
+        .into_any_element();
+        let action = orders_table_action(
+            index,
+            row,
+            cx.listener({
+                let order_id = row.order_id;
+                move |this, _, _, cx| this.open_order_detail(order_id, cx)
+            }),
+            cx.listener({
+                let order_id = row.order_id;
+                move |this, _, _, cx| this.mark_order_packed(order_id, cx)
+            }),
+            cx.listener({
+                let order_id = row.order_id;
+                move |this, _, _, cx| this.mark_order_completed(order_id, cx)
+            }),
+            cx,
+        );
+
+        div()
+            .w_full()
+            .child(orders_table_row(order, row, action))
             .into_any_element()
     }
 }
@@ -4545,10 +4911,11 @@ fn home_sidebar(
     runtime: &DesktopAppRuntimeSummary,
     on_select_today: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
     on_select_products: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+    on_select_orders: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
     cx: &App,
 ) -> impl IntoElement {
     let selected_section = selected_farmer_section(runtime);
-    let products_available = farmer_products_available(runtime);
+    let workspace_available = farmer_products_available(runtime);
 
     app_surface_sidebar(
         div()
@@ -4572,12 +4939,19 @@ fn home_sidebar(
                         on_select_today,
                         cx,
                     ))
-                    .when(products_available, |this| {
+                    .when(workspace_available, |this| {
                         this.child(home_sidebar_nav_button(
                             "home-nav-products",
                             AppTextKey::HomeNavProducts,
                             selected_section == FarmerSection::Products,
                             on_select_products,
+                            cx,
+                        ))
+                        .child(home_sidebar_nav_button(
+                            "home-nav-orders",
+                            AppTextKey::HomeNavOrders,
+                            selected_section == FarmerSection::Orders,
+                            on_select_orders,
                             cx,
                         ))
                     }),
@@ -4619,6 +4993,7 @@ fn home_today_content(
     farm_setup_form: Option<AnyElement>,
     on_start_farm_setup: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
     on_continue_farm_setup: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+    on_open_orders: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
     on_open_low_stock_products: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
     on_open_draft_products: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
     cx: &App,
@@ -4684,7 +5059,15 @@ fn home_today_content(
                     .iter()
                     .map(home_order_row)
                     .collect::<Vec<_>>(),
-                None,
+                Some(
+                    action_button_compact(
+                        "home-today-open-orders",
+                        app_shared_text(AppTextKey::HomeTodayOpenInOrdersAction),
+                        on_open_orders,
+                        cx,
+                    )
+                    .into_any_element(),
+                ),
             )
             .into_any_element(),
         );
@@ -4822,10 +5205,8 @@ fn farmer_products_available(runtime: &DesktopAppRuntimeSummary) -> bool {
 fn home_content_scroll_id(section: FarmerSection) -> &'static str {
     match section {
         FarmerSection::Products => "home-products-scroll",
-        FarmerSection::Today
-        | FarmerSection::Orders
-        | FarmerSection::PackDay
-        | FarmerSection::Farm => "home-today-scroll",
+        FarmerSection::Orders => "home-orders-scroll",
+        FarmerSection::Today | FarmerSection::PackDay | FarmerSection::Farm => "home-today-scroll",
     }
 }
 
@@ -5136,6 +5517,156 @@ fn products_table_row(
                 .child(row.updated_at.clone()),
         )
         .child(div().w(px(120.0)).flex().justify_end().child(action))
+}
+
+fn orders_table_header() -> impl IntoElement {
+    div()
+        .w_full()
+        .flex()
+        .items_center()
+        .gap(px(APP_UI_THEME.shells.home_stack_gap_px))
+        .child(products_table_header_column(
+            AppTextKey::OrdersColumnOrder,
+            None,
+            true,
+        ))
+        .child(products_table_header_column(
+            AppTextKey::OrdersColumnStatus,
+            Some(128.0),
+            false,
+        ))
+        .child(products_table_header_column(
+            AppTextKey::OrdersColumnWindow,
+            Some(196.0),
+            false,
+        ))
+        .child(products_table_header_column(
+            AppTextKey::OrdersColumnPickup,
+            Some(196.0),
+            false,
+        ))
+        .child(products_table_header_column(
+            AppTextKey::OrdersColumnAction,
+            Some(132.0),
+            false,
+        ))
+}
+
+fn orders_table_row(
+    order: AnyElement,
+    row: &OrdersListRow,
+    action: AnyElement,
+) -> impl IntoElement {
+    div()
+        .w_full()
+        .flex()
+        .items_center()
+        .gap(px(APP_UI_THEME.shells.home_stack_gap_px))
+        .child(order)
+        .child(
+            div()
+                .w(px(128.0))
+                .flex()
+                .items_center()
+                .gap(px(6.0))
+                .child(status_indicator(orders_status_color(row.status)))
+                .child(
+                    div()
+                        .text_size(px(APP_UI_THEME.foundation.typography.utility_title_text_px))
+                        .text_color(rgb(APP_UI_THEME.foundation.text.primary))
+                        .child(app_shared_text(orders_status_key(row.status))),
+                ),
+        )
+        .child(
+            div()
+                .w(px(196.0))
+                .text_size(px(APP_UI_THEME.foundation.typography.utility_title_text_px))
+                .line_height(relative(1.2))
+                .text_color(rgb(APP_UI_THEME.foundation.text.primary))
+                .child(order_optional_text(row.fulfillment_window_label.as_deref())),
+        )
+        .child(
+            div()
+                .w(px(196.0))
+                .text_size(px(APP_UI_THEME.foundation.typography.utility_title_text_px))
+                .line_height(relative(1.2))
+                .text_color(rgb(APP_UI_THEME.foundation.text.primary))
+                .child(order_optional_text(row.pickup_location_label.as_deref())),
+        )
+        .child(div().w(px(132.0)).flex().justify_end().child(action))
+}
+
+fn orders_table_action(
+    index: usize,
+    row: &OrdersListRow,
+    on_review: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+    on_mark_packed: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+    on_mark_completed: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+    cx: &App,
+) -> AnyElement {
+    match row.primary_action {
+        Some(OrderPrimaryAction::Review) => action_button_compact(
+            ("orders-row-action-review", index),
+            app_shared_text(AppTextKey::OrdersActionReview),
+            on_review,
+            cx,
+        )
+        .into_any_element(),
+        Some(OrderPrimaryAction::MarkPacked) => action_button_compact(
+            ("orders-row-action-mark-packed", index),
+            app_shared_text(AppTextKey::OrdersActionMarkPacked),
+            on_mark_packed,
+            cx,
+        )
+        .into_any_element(),
+        Some(OrderPrimaryAction::MarkCompleted) => action_button_compact(
+            ("orders-row-action-mark-completed", index),
+            app_shared_text(AppTextKey::OrdersActionMarkCompleted),
+            on_mark_completed,
+            cx,
+        )
+        .into_any_element(),
+        None => div()
+            .text_size(px(APP_UI_THEME.foundation.typography.utility_title_text_px))
+            .text_color(rgb(APP_UI_THEME.foundation.text.secondary))
+            .child(app_shared_text(AppTextKey::ValueNone))
+            .into_any_element(),
+    }
+}
+
+fn orders_empty_state_card(filter: OrdersFilter) -> impl IntoElement {
+    let (title_key, body_key) = if filter == OrdersFilter::NeedsAction {
+        (
+            AppTextKey::OrdersEmptyNeedsActionTitle,
+            AppTextKey::OrdersEmptyNeedsActionBody,
+        )
+    } else {
+        (AppTextKey::OrdersEmptyTitle, AppTextKey::OrdersEmptyBody)
+    };
+
+    home_empty_state_card(title_key, body_key)
+}
+
+fn orders_status_key(status: OrderStatus) -> AppTextKey {
+    match status {
+        OrderStatus::NeedsAction => AppTextKey::OrdersStatusNeedsAction,
+        OrderStatus::Scheduled => AppTextKey::OrdersStatusScheduled,
+        OrderStatus::Packed => AppTextKey::OrdersStatusPacked,
+        OrderStatus::Completed => AppTextKey::OrdersStatusCompleted,
+        OrderStatus::Refunded => AppTextKey::OrdersStatusRefunded,
+    }
+}
+
+fn orders_status_color(status: OrderStatus) -> u32 {
+    match status {
+        OrderStatus::NeedsAction => APP_UI_THEME.components.app_status_indicator.attention,
+        OrderStatus::Scheduled | OrderStatus::Packed => {
+            APP_UI_THEME.components.app_status_indicator.online
+        }
+        OrderStatus::Completed | OrderStatus::Refunded => {
+            APP_UI_THEME.components.app_status_indicator.offline
+        }
+    }
 }
 
 fn products_empty_state_card(filter: ProductsFilter) -> impl IntoElement {
@@ -6420,6 +6951,40 @@ fn home_list_card(
             .children(rows)
             .when_some(action, |this, action| this.child(div().child(action))),
     )
+}
+
+fn order_detail_item_row(item: &OrderDetailItemRow) -> AnyElement {
+    div()
+        .w_full()
+        .min_w_0()
+        .flex()
+        .items_center()
+        .justify_between()
+        .gap(px(APP_UI_THEME.shells.home_stack_gap_px))
+        .child(
+            div()
+                .flex_1()
+                .min_w_0()
+                .text_size(px(APP_UI_THEME.foundation.typography.body_text_px))
+                .font_weight(gpui::FontWeight::MEDIUM)
+                .line_height(relative(1.2))
+                .text_color(rgb(APP_UI_THEME.foundation.text.primary))
+                .child(item.title.clone()),
+        )
+        .child(
+            div()
+                .text_size(px(APP_UI_THEME.foundation.typography.utility_title_text_px))
+                .text_color(rgb(APP_UI_THEME.foundation.text.secondary))
+                .child(item.quantity_display.clone()),
+        )
+        .into_any_element()
+}
+
+fn order_optional_text(value: Option<&str>) -> SharedString {
+    value
+        .filter(|value| !value.trim().is_empty())
+        .map(|value| SharedString::from(value.to_owned()))
+        .unwrap_or_else(|| app_shared_text(AppTextKey::ValueNone))
 }
 
 fn home_order_row(order: &OrderListRow) -> AnyElement {
