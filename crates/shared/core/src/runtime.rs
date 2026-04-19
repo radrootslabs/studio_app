@@ -94,13 +94,12 @@ pub enum AppRuntimeConfigError {
 
 impl AppRuntimeConfig {
     pub fn from_env() -> Result<Self, AppRuntimeConfigError> {
-        let default_log_root = AppRuntimeRoots::current_desktop()?.logs;
-        Self::from_env_with(|name| std::env::var(name).ok(), default_log_root)
+        Self::from_env_with(|name| std::env::var(name).ok(), None)
     }
 
     fn from_env_with<F>(
         mut read_env: F,
-        default_log_root: PathBuf,
+        default_log_root: Option<PathBuf>,
     ) -> Result<Self, AppRuntimeConfigError>
     where
         F: FnMut(&str) -> Option<String>,
@@ -113,8 +112,14 @@ impl AppRuntimeConfig {
             require_env_value(&mut read_env, APP_DEFAULT_NOSTR_RELAY_URL_ENV)?;
         let local_log_root = read_env(APP_LOCAL_LOG_ROOT_ENV)
             .map(|value| require_path_value(APP_LOCAL_LOG_ROOT_ENV, value))
-            .transpose()?
-            .unwrap_or(default_log_root);
+            .transpose()?;
+        let local_log_root = match local_log_root {
+            Some(local_log_root) => local_log_root,
+            None => match default_log_root {
+                Some(default_log_root) => default_log_root,
+                None => AppRuntimeRoots::current_desktop()?.logs,
+            },
+        };
 
         Ok(Self {
             runtime_mode,
@@ -344,7 +349,7 @@ mod tests {
         ]);
         let error = AppRuntimeConfig::from_env_with(
             |name| env.get(name).cloned(),
-            PathBuf::from("/tmp/default-logs"),
+            Some(PathBuf::from("/tmp/default-logs")),
         )
         .expect_err("missing runtime mode env should fail");
 
@@ -366,9 +371,9 @@ mod tests {
         ]);
         let config = AppRuntimeConfig::from_env_with(
             |name| env.get(name).cloned(),
-            PathBuf::from("/tmp/default-logs"),
+            Some(PathBuf::from("/tmp/default-logs")),
         )
-            .expect("valid env config");
+        .expect("valid env config");
 
         assert_eq!(config.runtime_mode, AppRuntimeMode::LocalhostDev);
         assert_eq!(config.default_nostr_relay_url, "ws://127.0.0.1:8080");
@@ -380,11 +385,27 @@ mod tests {
         let env = test_runtime_env();
         let config = AppRuntimeConfig::from_env_with(
             |name| env.get(name).cloned(),
-            PathBuf::from("/tmp/default-logs"),
+            Some(PathBuf::from("/tmp/default-logs")),
         )
         .expect("default log root should apply");
 
         assert_eq!(config.local_log_root, PathBuf::from("/tmp/default-logs"));
+    }
+
+    #[test]
+    fn runtime_config_accepts_explicit_log_root_without_default_runtime_paths() {
+        let env = BTreeMap::from([
+            (APP_RUNTIME_MODE_ENV, "localhost-dev".to_owned()),
+            (
+                APP_DEFAULT_NOSTR_RELAY_URL_ENV,
+                "ws://127.0.0.1:8080".to_owned(),
+            ),
+            (APP_LOCAL_LOG_ROOT_ENV, "/tmp/explicit-logs".to_owned()),
+        ]);
+        let config = AppRuntimeConfig::from_env_with(|name| env.get(name).cloned(), None)
+            .expect("explicit local log root should bypass runtime root discovery");
+
+        assert_eq!(config.local_log_root, PathBuf::from("/tmp/explicit-logs"));
     }
 
     #[test]
@@ -437,7 +458,7 @@ mod tests {
         ]);
         let error = AppRuntimeConfig::from_env_with(
             |name| env.get(name).cloned(),
-            PathBuf::from("/tmp/default-logs"),
+            Some(PathBuf::from("/tmp/default-logs")),
         )
         .expect_err("missing relay env should fail");
 
@@ -457,9 +478,9 @@ mod tests {
         ]);
         let error = AppRuntimeConfig::from_env_with(
             |name| env.get(name).cloned(),
-            PathBuf::from("/tmp/default-logs"),
+            Some(PathBuf::from("/tmp/default-logs")),
         )
-            .expect_err("missing default relay url should fail");
+        .expect_err("missing default relay url should fail");
 
         assert!(
             matches!(
