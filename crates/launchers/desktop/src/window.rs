@@ -655,7 +655,8 @@ impl HomeView {
             return;
         };
 
-        if runtime_summary.home_route != HomeRoute::FarmSetupForm {
+        if runtime_summary.home_route != HomeRoute::FarmSetupForm && self.farm_setup_form.is_none()
+        {
             self.farm_setup_form = None;
             return;
         }
@@ -4744,10 +4745,8 @@ fn home_today_content(
         );
     }
 
-    if runtime.home_route == HomeRoute::FarmSetupForm {
-        if let Some(farm_setup_form) = farm_setup_form {
-            sections.push(farm_setup_form);
-        }
+    if let Some(farm_setup_form) = farm_setup_form {
+        sections.push(farm_setup_form);
     } else if let Some(spec) = setup_onboarding {
         sections.push(
             home_farm_setup_onboarding_card(spec, on_start_farm_setup, cx).into_any_element(),
