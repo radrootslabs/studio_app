@@ -164,7 +164,7 @@ mod tests {
         AppStartupGate, LoggedOutStartupProjection, SettingsAccountProjection,
         TodayAgendaProjection,
     };
-    use radroots_studio_app_state::{AppShellProjection, HomeRoute};
+    use radroots_studio_app_state::{AppShellProjection, FarmWorkspaceReadinessProjection, HomeRoute};
     use tracing::{
         Event, Level, Subscriber,
         field::{Field, Visit},
@@ -256,23 +256,36 @@ mod tests {
         )
     }
 
+    fn summary_with_gate(
+        startup_gate: AppStartupGate,
+        home_route: HomeRoute,
+        startup_issue: Option<&str>,
+    ) -> DesktopAppRuntimeSummary {
+        DesktopAppRuntimeSummary {
+            shell_projection: AppShellProjection::default(),
+            settings_account_projection: SettingsAccountProjection::default(),
+            startup_gate,
+            home_route,
+            farm_setup_projection: Default::default(),
+            farm_readiness_projection: FarmWorkspaceReadinessProjection::default(),
+            today_projection: TodayAgendaProjection::default(),
+            products_projection: Default::default(),
+            logged_out_startup: LoggedOutStartupProjection::default(),
+            startup_issue: startup_issue.map(str::to_owned),
+        }
+    }
+
     #[test]
     fn degraded_runtime_emits_launch_and_degraded_events() {
         let events = Arc::new(Mutex::new(Vec::new()));
         let subscriber = tracing_subscriber::registry().with(CaptureLayer {
             events: Arc::clone(&events),
         });
-        let summary = DesktopAppRuntimeSummary {
-            shell_projection: AppShellProjection::default(),
-            settings_account_projection: SettingsAccountProjection::default(),
-            startup_gate: AppStartupGate::SetupRequired,
-            home_route: HomeRoute::SetupRequired,
-            farm_setup_projection: Default::default(),
-            today_projection: TodayAgendaProjection::default(),
-            products_projection: Default::default(),
-            logged_out_startup: LoggedOutStartupProjection::default(),
-            startup_issue: Some("desktop runtime roots require HOME for macos".to_owned()),
-        };
+        let summary = summary_with_gate(
+            AppStartupGate::SetupRequired,
+            HomeRoute::SetupRequired,
+            Some("desktop runtime roots require HOME for macos"),
+        );
 
         tracing::subscriber::with_default(subscriber, || {
             emit_runtime_events(&test_snapshot(), &summary);
@@ -297,28 +310,12 @@ mod tests {
 
     #[test]
     fn blocked_and_setup_runtime_target_the_home_window() {
-        let blocked = DesktopAppRuntimeSummary {
-            shell_projection: AppShellProjection::default(),
-            settings_account_projection: SettingsAccountProjection::default(),
-            startup_gate: AppStartupGate::Blocked,
-            home_route: HomeRoute::Blocked,
-            farm_setup_projection: Default::default(),
-            today_projection: TodayAgendaProjection::default(),
-            products_projection: Default::default(),
-            logged_out_startup: LoggedOutStartupProjection::default(),
-            startup_issue: None,
-        };
-        let setup = DesktopAppRuntimeSummary {
-            shell_projection: AppShellProjection::default(),
-            settings_account_projection: SettingsAccountProjection::default(),
-            startup_gate: AppStartupGate::SetupRequired,
-            home_route: HomeRoute::SetupRequired,
-            farm_setup_projection: Default::default(),
-            today_projection: TodayAgendaProjection::default(),
-            products_projection: Default::default(),
-            logged_out_startup: LoggedOutStartupProjection::default(),
-            startup_issue: None,
-        };
+        let blocked = summary_with_gate(AppStartupGate::Blocked, HomeRoute::Blocked, None);
+        let setup = summary_with_gate(
+            AppStartupGate::SetupRequired,
+            HomeRoute::SetupRequired,
+            None,
+        );
 
         assert_eq!(primary_window_target(&blocked), PrimaryWindowTarget::Home);
         assert_eq!(primary_window_target(&setup), PrimaryWindowTarget::Home);
@@ -326,28 +323,9 @@ mod tests {
 
     #[test]
     fn ready_runtime_targets_the_home_window() {
-        let personal = DesktopAppRuntimeSummary {
-            shell_projection: AppShellProjection::default(),
-            settings_account_projection: SettingsAccountProjection::default(),
-            startup_gate: AppStartupGate::Personal,
-            home_route: HomeRoute::Personal,
-            farm_setup_projection: Default::default(),
-            today_projection: TodayAgendaProjection::default(),
-            products_projection: Default::default(),
-            logged_out_startup: LoggedOutStartupProjection::default(),
-            startup_issue: None,
-        };
-        let farmer = DesktopAppRuntimeSummary {
-            shell_projection: AppShellProjection::default(),
-            settings_account_projection: SettingsAccountProjection::default(),
-            startup_gate: AppStartupGate::Farmer,
-            home_route: HomeRoute::FarmSetupOnboarding,
-            farm_setup_projection: Default::default(),
-            today_projection: TodayAgendaProjection::default(),
-            products_projection: Default::default(),
-            logged_out_startup: LoggedOutStartupProjection::default(),
-            startup_issue: None,
-        };
+        let personal = summary_with_gate(AppStartupGate::Personal, HomeRoute::Personal, None);
+        let farmer =
+            summary_with_gate(AppStartupGate::Farmer, HomeRoute::FarmSetupOnboarding, None);
 
         assert_eq!(primary_window_target(&personal), PrimaryWindowTarget::Home);
         assert_eq!(primary_window_target(&farmer), PrimaryWindowTarget::Home);
@@ -355,67 +333,30 @@ mod tests {
 
     #[test]
     fn degraded_runtime_targets_the_home_window() {
-        let degraded = DesktopAppRuntimeSummary {
-            shell_projection: AppShellProjection::default(),
-            settings_account_projection: SettingsAccountProjection::default(),
-            startup_gate: AppStartupGate::Personal,
-            home_route: HomeRoute::Personal,
-            farm_setup_projection: Default::default(),
-            today_projection: TodayAgendaProjection::default(),
-            products_projection: Default::default(),
-            logged_out_startup: LoggedOutStartupProjection::default(),
-            startup_issue: Some("runtime unavailable".to_owned()),
-        };
+        let degraded = summary_with_gate(
+            AppStartupGate::Personal,
+            HomeRoute::Personal,
+            Some("runtime unavailable"),
+        );
 
         assert_eq!(primary_window_target(&degraded), PrimaryWindowTarget::Home);
     }
 
     #[test]
     fn home_stage_tracks_setup_personal_and_farmer_states() {
-        let setup = DesktopAppRuntimeSummary {
-            shell_projection: AppShellProjection::default(),
-            settings_account_projection: SettingsAccountProjection::default(),
-            startup_gate: AppStartupGate::SetupRequired,
-            home_route: HomeRoute::SetupRequired,
-            farm_setup_projection: Default::default(),
-            today_projection: TodayAgendaProjection::default(),
-            products_projection: Default::default(),
-            logged_out_startup: LoggedOutStartupProjection::default(),
-            startup_issue: None,
-        };
-        let personal = DesktopAppRuntimeSummary {
-            shell_projection: AppShellProjection::default(),
-            settings_account_projection: SettingsAccountProjection::default(),
-            startup_gate: AppStartupGate::Personal,
-            home_route: HomeRoute::Personal,
-            farm_setup_projection: Default::default(),
-            today_projection: TodayAgendaProjection::default(),
-            products_projection: Default::default(),
-            logged_out_startup: LoggedOutStartupProjection::default(),
-            startup_issue: None,
-        };
-        let farmer = DesktopAppRuntimeSummary {
-            shell_projection: AppShellProjection::default(),
-            settings_account_projection: SettingsAccountProjection::default(),
-            startup_gate: AppStartupGate::Farmer,
-            home_route: HomeRoute::FarmSetupOnboarding,
-            farm_setup_projection: Default::default(),
-            today_projection: TodayAgendaProjection::default(),
-            products_projection: Default::default(),
-            logged_out_startup: LoggedOutStartupProjection::default(),
-            startup_issue: None,
-        };
-        let blocked = DesktopAppRuntimeSummary {
-            shell_projection: AppShellProjection::default(),
-            settings_account_projection: SettingsAccountProjection::default(),
-            startup_gate: AppStartupGate::Farmer,
-            home_route: HomeRoute::FarmSetupOnboarding,
-            farm_setup_projection: Default::default(),
-            today_projection: TodayAgendaProjection::default(),
-            products_projection: Default::default(),
-            logged_out_startup: LoggedOutStartupProjection::default(),
-            startup_issue: Some("runtime unavailable".to_owned()),
-        };
+        let setup = summary_with_gate(
+            AppStartupGate::SetupRequired,
+            HomeRoute::SetupRequired,
+            None,
+        );
+        let personal = summary_with_gate(AppStartupGate::Personal, HomeRoute::Personal, None);
+        let farmer =
+            summary_with_gate(AppStartupGate::Farmer, HomeRoute::FarmSetupOnboarding, None);
+        let blocked = summary_with_gate(
+            AppStartupGate::Farmer,
+            HomeRoute::FarmSetupOnboarding,
+            Some("runtime unavailable"),
+        );
 
         assert_eq!(home_stage(&setup), HomeStage::Setup);
         assert_eq!(home_stage(&personal), HomeStage::PersonalHolding);

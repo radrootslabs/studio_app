@@ -19,7 +19,8 @@ use radroots_studio_app_sqlite::{
 };
 use radroots_studio_app_state::{
     AppShellProjection, AppStateCommand, AppStateStore, AppStateStoreError, FarmSetupFlowStage,
-    HomeRoute, InMemoryAppStateRepository, ProductsScreenProjection, ProductsScreenQueryState,
+    FarmWorkspaceReadinessProjection, HomeRoute, InMemoryAppStateRepository,
+    ProductsScreenProjection, ProductsScreenQueryState,
 };
 use radroots_nostr_accounts::prelude::RadrootsNostrAccountsManager;
 use thiserror::Error;
@@ -64,6 +65,7 @@ impl DesktopAppRuntime {
             logged_out_startup: state.state_store.logged_out_startup_projection().clone(),
             home_route: state.state_store.home_route(),
             farm_setup_projection: state.state_store.farm_setup_projection().clone(),
+            farm_readiness_projection: state.state_store.farm_readiness_projection().clone(),
             today_projection: state.state_store.today_projection().clone(),
             products_projection: state.state_store.products_projection().clone(),
             startup_issue: state.startup_issue.clone(),
@@ -378,6 +380,7 @@ pub struct DesktopAppRuntimeSummary {
     pub logged_out_startup: LoggedOutStartupProjection,
     pub home_route: HomeRoute,
     pub farm_setup_projection: FarmSetupProjection,
+    pub farm_readiness_projection: FarmWorkspaceReadinessProjection,
     pub today_projection: TodayAgendaProjection,
     pub products_projection: ProductsScreenProjection,
     pub startup_issue: Option<String>,
@@ -394,6 +397,7 @@ pub enum DesktopAppRuntimeActivityContextError {
 #[derive(Clone, Debug, Default)]
 struct DesktopSelectedAccountContext {
     farm_setup_projection: FarmSetupProjection,
+    farm_rules_projection: FarmRulesProjection,
     today_projection: TodayAgendaProjection,
     products_list: ProductsListProjection,
 }
@@ -952,6 +956,11 @@ impl DesktopAppRuntimeState {
                 .apply_in_memory(AppStateCommand::replace_farm_setup_projection(
                     context.farm_setup_projection.clone(),
                 ));
+        let farm_rules_changed =
+            self.state_store
+                .apply_in_memory(AppStateCommand::replace_farm_rules_projection(
+                    context.farm_rules_projection.clone(),
+                ));
         let today_changed =
             self.state_store
                 .apply_in_memory(AppStateCommand::replace_today_agenda(
@@ -969,7 +978,12 @@ impl DesktopAppRuntimeState {
         };
         let shell_changed = self.sync_truthful_farmer_section();
 
-        farm_setup_changed || today_changed || products_changed || editor_changed || shell_changed
+        farm_setup_changed
+            || farm_rules_changed
+            || today_changed
+            || products_changed
+            || editor_changed
+            || shell_changed
     }
 
     fn selected_account_id(&self) -> Result<String, DesktopAppRuntimeFarmSetupError> {
@@ -1081,30 +1095,7 @@ impl DesktopAppRuntimeState {
     }
 
     fn fallback_farm_profile(&self, farm_id: FarmId) -> FarmProfileRecord {
-        let saved_farm_name = self
-            .state_store
-            .farm_setup_projection()
-            .saved_farm
-            .as_ref()
-            .filter(|farm| farm.farm_id == farm_id)
-            .map(|farm| farm.display_name.clone());
-        let drafted_farm_name = self
-            .state_store
-            .farm_setup_projection()
-            .draft
-            .farm_name
-            .trim()
-            .to_owned();
-        let display_name = saved_farm_name
-            .or_else(|| (!drafted_farm_name.is_empty()).then_some(drafted_farm_name))
-            .unwrap_or_default();
-
-        FarmProfileRecord {
-            farm_id,
-            display_name,
-            timezone: "UTC".to_owned(),
-            currency_code: "USD".to_owned(),
-        }
+        fallback_farm_profile_for_projection(farm_id, self.state_store.farm_setup_projection())
     }
 
     fn load_products_list_for_query(
@@ -1296,6 +1287,16 @@ fn load_selected_account_context(
             .saved_farm
             .as_ref()
             .map(|farm| farm.farm_id));
+    let farm_rules_projection = match today_farm_id {
+        Some(farm_id) => {
+            let fallback_profile =
+                fallback_farm_profile_for_projection(farm_id, &farm_setup_projection);
+            sqlite_store.load_farm_rules(farm_id).map(|projection| {
+                prepare_loaded_farm_rules_projection(projection, &fallback_profile)
+            })?
+        }
+        None => FarmRulesProjection::default(),
+    };
     let today_projection = match today_farm_id {
         Some(farm_id) => sqlite_store.load_today_agenda(Some(farm_id))?,
         None => TodayAgendaProjection::default(),
@@ -1312,9 +1313,32 @@ fn load_selected_account_context(
 
     Ok(DesktopSelectedAccountContext {
         farm_setup_projection,
+        farm_rules_projection,
         today_projection,
         products_list,
     })
+}
+
+fn fallback_farm_profile_for_projection(
+    farm_id: FarmId,
+    farm_setup_projection: &FarmSetupProjection,
+) -> FarmProfileRecord {
+    let saved_farm_name = farm_setup_projection
+        .saved_farm
+        .as_ref()
+        .filter(|farm| farm.farm_id == farm_id)
+        .map(|farm| farm.display_name.clone());
+    let drafted_farm_name = farm_setup_projection.draft.farm_name.trim().to_owned();
+    let display_name = saved_farm_name
+        .or_else(|| (!drafted_farm_name.is_empty()).then_some(drafted_farm_name))
+        .unwrap_or_default();
+
+    FarmProfileRecord {
+        farm_id,
+        display_name,
+        timezone: "UTC".to_owned(),
+        currency_code: "USD".to_owned(),
+    }
 }
 
 fn prepare_loaded_farm_rules_projection(
@@ -1730,7 +1754,10 @@ mod tests {
 
         let summary = runtime.summary();
 
-        assert_eq!(summary.today_projection, today_agenda);
+        assert_eq!(summary.today_projection.farm, today_agenda.farm);
+        assert_eq!(summary.today_projection.summary, today_agenda.summary);
+        assert_eq!(summary.today_projection.setup_checklist.len(), 6);
+        assert!(summary.today_projection.needs_setup());
         assert_eq!(summary.home_route, HomeRoute::SetupRequired);
         assert_eq!(
             summary.shell_projection.active_surface,
@@ -2733,7 +2760,7 @@ mod tests {
             summary.today_projection.farm,
             finished_projection.saved_farm.clone()
         );
-        assert_eq!(summary.today_projection.setup_checklist.len(), 2);
+        assert_eq!(summary.today_projection.setup_checklist.len(), 6);
         assert_eq!(
             runtime
                 .lock_state()

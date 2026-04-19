@@ -1036,6 +1036,11 @@ pub enum ProductPublishBlocker {
     ChooseUnit,
     SetPrice,
     AttachAvailability,
+    CompleteFarmProfile,
+    AddPickupLocation,
+    AddOperatingRules,
+    AddFulfillmentWindow,
+    ResolveAvailabilityConflicts,
 }
 
 impl ProductPublishBlocker {
@@ -1045,6 +1050,11 @@ impl ProductPublishBlocker {
             Self::ChooseUnit => "choose_unit",
             Self::SetPrice => "set_price",
             Self::AttachAvailability => "attach_availability",
+            Self::CompleteFarmProfile => "complete_farm_profile",
+            Self::AddPickupLocation => "add_pickup_location",
+            Self::AddOperatingRules => "add_operating_rules",
+            Self::AddFulfillmentWindow => "add_fulfillment_window",
+            Self::ResolveAvailabilityConflicts => "resolve_availability_conflicts",
         }
     }
 }
@@ -1399,7 +1409,11 @@ pub struct OrderListRow {
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum TodaySetupTaskKind {
+    CompleteFarmProfile,
+    AddPickupLocation,
+    AddOperatingRules,
     AddFulfillmentWindow,
+    ResolveAvailabilityConflicts,
     PublishProduct,
 }
 

@@ -14,7 +14,7 @@ use radroots_studio_app_i18n::AppTextKey;
 pub use radroots_studio_app_models::SettingsSection as SettingsPanelViewKey;
 use radroots_studio_app_models::{
     AppStartupGate, BlackoutPeriodId, BlackoutPeriodRecord, FarmId, FarmOperatingRulesRecord,
-    FarmOrderMethod, FarmProfileRecord, FarmReadiness, FarmReadinessBlocker, FarmRulesProjection,
+    FarmOrderMethod, FarmProfileRecord, FarmReadinessBlocker, FarmRulesProjection,
     FarmRulesReadiness, FarmSetupBlocker, FarmSetupDraft, FarmSummary, FarmTimingConflictKind,
     FarmerSection, FulfillmentWindowId, FulfillmentWindowRecord, FulfillmentWindowSummary,
     LoggedOutStartupPhase, OrderListRow, PickupLocationId, PickupLocationRecord,
@@ -29,7 +29,9 @@ use radroots_studio_app_remote_signer::{
     radroots_studio_app_remote_signer_preview, radroots_studio_app_remote_signer_requested_permissions,
 };
 use radroots_studio_app_sqlite::derive_farm_rules_readiness;
-use radroots_studio_app_state::{FarmSetupFlowStage, HomeRoute};
+use radroots_studio_app_state::{
+    FarmSetupFlowStage, FarmWorkspaceStatus, HomeRoute, derive_product_publish_blockers,
+};
 use radroots_studio_app_ui::{
     APP_UI_THEME, AppCheckboxFieldSpec, IconSegmentButtonSpec, LabelValueRow, action_button,
     action_button_compact, action_button_primary, action_button_primary_disabled,
@@ -1368,6 +1370,7 @@ impl HomeView {
             .when_some(self.product_editor_form.as_ref(), |this, form| {
                 this.child(products_editor_surface(
                     form,
+                    runtime,
                     cx.listener(|this, _, _, cx| {
                         this.select_product_editor_status(ProductStatus::Draft, cx)
                     }),
@@ -5530,6 +5533,7 @@ fn products_stock_editor_validation_key(
 
 fn products_editor_surface(
     form: &ProductEditorFormState,
+    runtime: &DesktopAppRuntimeSummary,
     on_select_draft: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
     on_select_live: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
     on_select_paused: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
@@ -5585,7 +5589,7 @@ fn products_editor_surface(
                     on_select_archived,
                     cx,
                 ))
-                .child(products_editor_publish_readiness_section(form, cx))
+                .child(products_editor_publish_readiness_section(form, runtime, cx))
                 .when(form.save_failed, |this| {
                     this.child(home_body_text(app_shared_text(
                         AppTextKey::ProductsEditorSaveFailed,
@@ -5713,9 +5717,13 @@ fn products_editor_status_section(
 
 fn products_editor_publish_readiness_section(
     form: &ProductEditorFormState,
+    runtime: &DesktopAppRuntimeSummary,
     cx: &App,
 ) -> impl IntoElement {
-    let blockers = form.publish_blockers(cx);
+    let blockers = form
+        .current_draft(cx)
+        .map(|draft| derive_product_publish_blockers(&draft, &runtime.farm_readiness_projection))
+        .unwrap_or_default();
 
     div()
         .w_full()
@@ -5767,6 +5775,21 @@ fn products_editor_publish_blocker_key(blocker: ProductPublishBlocker) -> AppTex
         ProductPublishBlocker::SetPrice => AppTextKey::ProductsEditorBlockerSetPrice,
         ProductPublishBlocker::AttachAvailability => {
             AppTextKey::ProductsEditorBlockerAttachAvailability
+        }
+        ProductPublishBlocker::CompleteFarmProfile => {
+            AppTextKey::ProductsEditorBlockerCompleteFarmProfile
+        }
+        ProductPublishBlocker::AddPickupLocation => {
+            AppTextKey::ProductsEditorBlockerAddPickupLocation
+        }
+        ProductPublishBlocker::AddOperatingRules => {
+            AppTextKey::ProductsEditorBlockerAddOperatingRules
+        }
+        ProductPublishBlocker::AddFulfillmentWindow => {
+            AppTextKey::ProductsEditorBlockerAddFulfillmentWindow
+        }
+        ProductPublishBlocker::ResolveAvailabilityConflicts => {
+            AppTextKey::ProductsEditorBlockerResolveAvailabilityConflicts
         }
     }
 }
@@ -6954,14 +6977,16 @@ fn home_saved_farm(runtime: &DesktopAppRuntimeSummary) -> Option<&FarmSummary> {
 }
 
 fn farmer_home_farm_state(runtime: &DesktopAppRuntimeSummary) -> FarmerHomeFarmState {
-    let Some(saved_farm) = home_saved_farm(runtime) else {
-        return FarmerHomeFarmState::NoFarm;
-    };
-
-    if runtime.today_projection.needs_setup() || saved_farm.readiness == FarmReadiness::Incomplete {
-        FarmerHomeFarmState::IncompleteFarm
-    } else {
-        FarmerHomeFarmState::ConfiguredFarm
+    match runtime.farm_readiness_projection.status {
+        FarmWorkspaceStatus::NoFarm => FarmerHomeFarmState::NoFarm,
+        FarmWorkspaceStatus::SetupRequired => {
+            if home_saved_farm(runtime).is_some() {
+                FarmerHomeFarmState::IncompleteFarm
+            } else {
+                FarmerHomeFarmState::NoFarm
+            }
+        }
+        FarmWorkspaceStatus::Ready => FarmerHomeFarmState::ConfiguredFarm,
     }
 }
 
@@ -7027,7 +7052,13 @@ fn home_status_presentation(runtime: &DesktopAppRuntimeSummary) -> HomeStatusPre
 
 fn home_setup_task_label_key(kind: TodaySetupTaskKind) -> AppTextKey {
     match kind {
+        TodaySetupTaskKind::CompleteFarmProfile => AppTextKey::HomeTodaySetupCompleteFarmProfile,
+        TodaySetupTaskKind::AddPickupLocation => AppTextKey::HomeTodaySetupAddPickupLocation,
+        TodaySetupTaskKind::AddOperatingRules => AppTextKey::HomeTodaySetupAddOperatingRules,
         TodaySetupTaskKind::AddFulfillmentWindow => AppTextKey::HomeTodaySetupAddFulfillmentWindow,
+        TodaySetupTaskKind::ResolveAvailabilityConflicts => {
+            AppTextKey::HomeTodaySetupResolveAvailabilityConflicts
+        }
         TodaySetupTaskKind::PublishProduct => AppTextKey::HomeTodaySetupPublishProduct,
     }
 }
@@ -7064,8 +7095,9 @@ mod tests {
         RadrootsAppRemoteSignerApprovedSession, RadrootsAppRemoteSignerPendingSession,
         RadrootsAppRemoteSignerSessionRecord,
     };
-    use radroots_studio_app_state::AppShellProjection;
-    use radroots_studio_app_state::HomeRoute;
+    use radroots_studio_app_state::{
+        AppShellProjection, FarmWorkspaceReadinessProjection, FarmWorkspaceStatus, HomeRoute,
+    };
     use radroots_identity::RadrootsIdentity;
 
     #[test]
@@ -7464,12 +7496,32 @@ mod tests {
         today_projection: TodayAgendaProjection,
         farm_setup_projection: FarmSetupProjection,
     ) -> DesktopAppRuntimeSummary {
+        let farm_readiness_projection = match farm_setup_projection.saved_farm.as_ref() {
+            Some(saved_farm)
+                if saved_farm.readiness == FarmReadiness::Ready
+                    && !today_projection.needs_setup() =>
+            {
+                FarmWorkspaceReadinessProjection {
+                    has_saved_farm: true,
+                    status: FarmWorkspaceStatus::Ready,
+                    ..FarmWorkspaceReadinessProjection::default()
+                }
+            }
+            Some(_) => FarmWorkspaceReadinessProjection {
+                has_saved_farm: true,
+                status: FarmWorkspaceStatus::SetupRequired,
+                ..FarmWorkspaceReadinessProjection::default()
+            },
+            None => FarmWorkspaceReadinessProjection::default(),
+        };
+
         DesktopAppRuntimeSummary {
             shell_projection: AppShellProjection::default(),
             settings_account_projection: SettingsAccountProjection::default(),
             startup_gate: AppStartupGate::Farmer,
             logged_out_startup: LoggedOutStartupProjection::default(),
             home_route,
+            farm_readiness_projection,
             farm_setup_projection,
             today_projection,
             products_projection: Default::default(),

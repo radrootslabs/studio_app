@@ -1,11 +1,12 @@
 #![forbid(unsafe_code)]
 
 use radroots_studio_app_models::{
-    ActiveSurface, AppIdentityProjection, AppStartupGate, FarmSetupProjection, FarmSetupReadiness,
-    LoggedOutStartupPhase, LoggedOutStartupProjection, ProductEditorDraft, ProductId,
-    ProductPublishBlocker, ProductsFilter, ProductsListProjection, ProductsSort,
+    ActiveSurface, AppIdentityProjection, AppStartupGate, FarmReadiness, FarmReadinessBlocker,
+    FarmRulesProjection, FarmSetupBlocker, FarmSetupProjection, FarmSetupReadiness,
+    FarmTimingConflict, LoggedOutStartupPhase, LoggedOutStartupProjection, ProductEditorDraft,
+    ProductId, ProductPublishBlocker, ProductsFilter, ProductsListProjection, ProductsSort,
     SelectedSurfaceProjection, SettingsAccountProjection, SettingsPreference, SettingsSection,
-    ShellSection, TodayAgendaProjection,
+    ShellSection, TodayAgendaProjection, TodaySetupTask, TodaySetupTaskKind,
 };
 use thiserror::Error;
 
@@ -119,16 +120,24 @@ pub struct ProductEditorSession {
 }
 
 impl ProductEditorSession {
-    fn new_draft() -> Self {
-        Self::from_selection(None, ProductEditorDraft::default())
+    fn new_draft(farm_readiness: &FarmWorkspaceReadinessProjection) -> Self {
+        Self::from_selection(None, ProductEditorDraft::default(), farm_readiness)
     }
 
-    fn existing(product_id: ProductId, draft: ProductEditorDraft) -> Self {
-        Self::from_selection(Some(product_id), draft)
+    fn existing(
+        product_id: ProductId,
+        draft: ProductEditorDraft,
+        farm_readiness: &FarmWorkspaceReadinessProjection,
+    ) -> Self {
+        Self::from_selection(Some(product_id), draft, farm_readiness)
     }
 
-    fn from_selection(selected_product_id: Option<ProductId>, draft: ProductEditorDraft) -> Self {
-        let publish_blockers = draft.publish_blockers();
+    fn from_selection(
+        selected_product_id: Option<ProductId>,
+        draft: ProductEditorDraft,
+        farm_readiness: &FarmWorkspaceReadinessProjection,
+    ) -> Self {
+        let publish_blockers = derive_product_publish_blockers(&draft, farm_readiness);
 
         Self {
             selected_product_id,
@@ -137,8 +146,12 @@ impl ProductEditorSession {
         }
     }
 
-    fn replace_draft(&mut self, draft: ProductEditorDraft) {
-        self.publish_blockers = draft.publish_blockers();
+    fn replace_draft(
+        &mut self,
+        draft: ProductEditorDraft,
+        farm_readiness: &FarmWorkspaceReadinessProjection,
+    ) {
+        self.publish_blockers = derive_product_publish_blockers(&draft, farm_readiness);
         self.draft = draft;
     }
 }
@@ -156,17 +169,30 @@ impl Default for ProductEditorState {
 }
 
 impl ProductEditorState {
-    fn open_new_draft(&mut self) {
-        *self = Self::Open(ProductEditorSession::new_draft());
+    fn open_new_draft(&mut self, farm_readiness: &FarmWorkspaceReadinessProjection) {
+        *self = Self::Open(ProductEditorSession::new_draft(farm_readiness));
     }
 
-    fn open_existing(&mut self, product_id: ProductId, draft: ProductEditorDraft) {
-        *self = Self::Open(ProductEditorSession::existing(product_id, draft));
+    fn open_existing(
+        &mut self,
+        product_id: ProductId,
+        draft: ProductEditorDraft,
+        farm_readiness: &FarmWorkspaceReadinessProjection,
+    ) {
+        *self = Self::Open(ProductEditorSession::existing(
+            product_id,
+            draft,
+            farm_readiness,
+        ));
     }
 
-    fn replace_draft(&mut self, draft: ProductEditorDraft) {
+    fn replace_draft(
+        &mut self,
+        draft: ProductEditorDraft,
+        farm_readiness: &FarmWorkspaceReadinessProjection,
+    ) {
         if let Self::Open(session) = self {
-            session.replace_draft(draft);
+            session.replace_draft(draft, farm_readiness);
         }
     }
 
@@ -187,6 +213,41 @@ pub enum FarmSetupFlowStage {
     #[default]
     Onboarding,
     Editing,
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum FarmWorkspaceStatus {
+    #[default]
+    NoFarm,
+    SetupRequired,
+    Ready,
+}
+
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct FarmWorkspaceReadinessProjection {
+    pub has_saved_farm: bool,
+    pub status: FarmWorkspaceStatus,
+    pub setup_blockers: Vec<FarmSetupBlocker>,
+    pub rules_blockers: Vec<FarmReadinessBlocker>,
+    pub timing_conflicts: Vec<FarmTimingConflict>,
+}
+
+impl FarmWorkspaceReadinessProjection {
+    pub const fn needs_setup(&self) -> bool {
+        matches!(self.status, FarmWorkspaceStatus::SetupRequired)
+    }
+
+    pub fn coarse_readiness(&self) -> Option<FarmReadiness> {
+        self.has_saved_farm.then_some(if self.needs_setup() {
+            FarmReadiness::Incomplete
+        } else {
+            FarmReadiness::Ready
+        })
+    }
+
+    fn has_rules_blocker(&self, blocker: FarmReadinessBlocker) -> bool {
+        self.rules_blockers.contains(&blocker)
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -286,6 +347,8 @@ pub struct AppProjection {
     pub today: TodayAgendaProjection,
     pub products: ProductsScreenProjection,
     pub farm_setup: FarmSetupProjection,
+    pub farm_rules: FarmRulesProjection,
+    pub farm_readiness: FarmWorkspaceReadinessProjection,
     pub farm_setup_flow_stage: FarmSetupFlowStage,
 }
 
@@ -312,6 +375,8 @@ impl AppProjection {
             today,
             products: ProductsScreenProjection::default(),
             farm_setup,
+            farm_rules: FarmRulesProjection::default(),
+            farm_readiness: FarmWorkspaceReadinessProjection::default(),
             farm_setup_flow_stage: FarmSetupFlowStage::default(),
         };
         sync_projection(&mut projection);
@@ -358,6 +423,7 @@ pub enum AppStateCommand {
     ResetLoggedOutStartup,
     ReplaceIdentityProjection(AppIdentityProjection),
     ReplaceFarmSetupProjection(FarmSetupProjection),
+    ReplaceFarmRulesProjection(FarmRulesProjection),
     SelectFarmSetupFlowStage(FarmSetupFlowStage),
     SetSettingsPreference {
         preference: SettingsPreference,
@@ -412,6 +478,10 @@ impl AppStateCommand {
 
     pub fn replace_farm_setup_projection(projection: FarmSetupProjection) -> Self {
         Self::ReplaceFarmSetupProjection(projection)
+    }
+
+    pub fn replace_farm_rules_projection(projection: FarmRulesProjection) -> Self {
+        Self::ReplaceFarmRulesProjection(projection)
     }
 
     pub const fn select_farm_setup_flow_stage(stage: FarmSetupFlowStage) -> Self {
@@ -569,6 +639,14 @@ impl<R: AppStateRepository> AppStateStore<R> {
 
     pub fn farm_setup_projection(&self) -> &FarmSetupProjection {
         &self.projection.farm_setup
+    }
+
+    pub fn farm_rules_projection(&self) -> &FarmRulesProjection {
+        &self.projection.farm_rules
+    }
+
+    pub fn farm_readiness_projection(&self) -> &FarmWorkspaceReadinessProjection {
+        &self.projection.farm_readiness
     }
 
     pub fn logged_out_startup_projection(&self) -> &LoggedOutStartupProjection {
@@ -742,6 +820,9 @@ fn apply_command(projection: &mut AppProjection, command: AppStateCommand) -> Ap
         AppStateCommand::ReplaceFarmSetupProjection(farm_setup_projection) => {
             projection.farm_setup = farm_setup_projection;
         }
+        AppStateCommand::ReplaceFarmRulesProjection(farm_rules_projection) => {
+            projection.farm_rules = farm_rules_projection;
+        }
         AppStateCommand::SelectFarmSetupFlowStage(flow_stage) => {
             projection.farm_setup_flow_stage = flow_stage;
         }
@@ -771,13 +852,22 @@ fn apply_command(projection: &mut AppProjection, command: AppStateCommand) -> Ap
             projection.products.list = products_projection;
         }
         AppStateCommand::OpenNewProductEditor => {
-            projection.products.editor.open_new_draft();
+            projection
+                .products
+                .editor
+                .open_new_draft(&projection.farm_readiness);
         }
         AppStateCommand::OpenExistingProductEditor { product_id, draft } => {
-            projection.products.editor.open_existing(product_id, draft);
+            projection
+                .products
+                .editor
+                .open_existing(product_id, draft, &projection.farm_readiness);
         }
         AppStateCommand::ReplaceProductEditorDraft(draft) => {
-            projection.products.editor.replace_draft(draft);
+            projection
+                .products
+                .editor
+                .replace_draft(draft, &projection.farm_readiness);
         }
         AppStateCommand::CloseProductEditor => {
             projection.products.editor.close();
@@ -791,6 +881,8 @@ fn apply_command(projection: &mut AppProjection, command: AppStateCommand) -> Ap
     } else if projection.shell != before.shell {
         AppStateMutation::ShellChanged
     } else if projection.farm_setup != before.farm_setup
+        || projection.farm_rules != before.farm_rules
+        || projection.farm_readiness != before.farm_readiness
         || projection.farm_setup_flow_stage != before.farm_setup_flow_stage
     {
         AppStateMutation::FarmSetupChanged
@@ -806,6 +898,19 @@ fn apply_command(projection: &mut AppProjection, command: AppStateCommand) -> Ap
 fn sync_projection(projection: &mut AppProjection) {
     sync_shell_to_identity(&mut projection.shell, &projection.identity);
     sync_farm_setup_to_today(&mut projection.farm_setup, &projection.today);
+    projection.farm_readiness =
+        derive_farm_workspace_readiness(&projection.farm_setup, &projection.farm_rules);
+    sync_coarse_farm_readiness(
+        &mut projection.farm_setup,
+        &mut projection.today,
+        &projection.farm_readiness,
+    );
+    projection.today.setup_checklist =
+        derive_today_setup_checklist(&projection.farm_readiness, &projection.products.list);
+    sync_product_editor_publish_blockers(
+        &mut projection.products.editor,
+        &projection.farm_readiness,
+    );
     projection.startup_gate = projection.identity.startup_gate();
     sync_logged_out_startup(&mut projection.logged_out_startup, projection.startup_gate);
     sync_farm_setup_flow_stage(
@@ -856,6 +961,170 @@ fn sync_logged_out_startup(
 ) {
     if startup_gate != AppStartupGate::SetupRequired {
         *logged_out_startup = LoggedOutStartupProjection::default();
+    }
+}
+
+pub fn derive_farm_workspace_readiness(
+    farm_setup: &FarmSetupProjection,
+    farm_rules: &FarmRulesProjection,
+) -> FarmWorkspaceReadinessProjection {
+    if !farm_setup.has_saved_farm() {
+        return FarmWorkspaceReadinessProjection {
+            has_saved_farm: false,
+            status: if farm_setup.readiness == FarmSetupReadiness::NotStarted {
+                FarmWorkspaceStatus::NoFarm
+            } else {
+                FarmWorkspaceStatus::SetupRequired
+            },
+            setup_blockers: farm_setup.blockers.clone(),
+            rules_blockers: Vec::new(),
+            timing_conflicts: Vec::new(),
+        };
+    }
+
+    let status = if farm_rules.is_ready() {
+        FarmWorkspaceStatus::Ready
+    } else {
+        FarmWorkspaceStatus::SetupRequired
+    };
+
+    FarmWorkspaceReadinessProjection {
+        has_saved_farm: true,
+        status,
+        setup_blockers: Vec::new(),
+        rules_blockers: farm_rules.readiness.blockers.clone(),
+        timing_conflicts: farm_rules.readiness.timing_conflicts.clone(),
+    }
+}
+
+pub fn derive_today_setup_checklist(
+    farm_readiness: &FarmWorkspaceReadinessProjection,
+    products: &ProductsListProjection,
+) -> Vec<TodaySetupTask> {
+    if !farm_readiness.has_saved_farm {
+        return Vec::new();
+    }
+
+    vec![
+        TodaySetupTask {
+            kind: TodaySetupTaskKind::CompleteFarmProfile,
+            is_complete: !farm_readiness
+                .has_rules_blocker(FarmReadinessBlocker::MissingProfileBasics),
+        },
+        TodaySetupTask {
+            kind: TodaySetupTaskKind::AddPickupLocation,
+            is_complete: !farm_readiness
+                .has_rules_blocker(FarmReadinessBlocker::MissingPickupLocation),
+        },
+        TodaySetupTask {
+            kind: TodaySetupTaskKind::AddOperatingRules,
+            is_complete: !farm_readiness
+                .has_rules_blocker(FarmReadinessBlocker::MissingOperatingRules),
+        },
+        TodaySetupTask {
+            kind: TodaySetupTaskKind::AddFulfillmentWindow,
+            is_complete: !farm_readiness
+                .has_rules_blocker(FarmReadinessBlocker::MissingFulfillmentWindow),
+        },
+        TodaySetupTask {
+            kind: TodaySetupTaskKind::ResolveAvailabilityConflicts,
+            is_complete: farm_readiness.timing_conflicts.is_empty(),
+        },
+        TodaySetupTask {
+            kind: TodaySetupTaskKind::PublishProduct,
+            is_complete: products.summary.live_products > 0,
+        },
+    ]
+}
+
+pub fn derive_product_publish_blockers(
+    draft: &ProductEditorDraft,
+    farm_readiness: &FarmWorkspaceReadinessProjection,
+) -> Vec<ProductPublishBlocker> {
+    let mut blockers = draft.publish_blockers();
+
+    if farm_readiness.has_saved_farm {
+        replace_availability_blocker(&mut blockers, farm_readiness);
+
+        if farm_readiness.has_rules_blocker(FarmReadinessBlocker::MissingProfileBasics) {
+            push_unique_product_blocker(&mut blockers, ProductPublishBlocker::CompleteFarmProfile);
+        }
+
+        if farm_readiness.has_rules_blocker(FarmReadinessBlocker::MissingPickupLocation) {
+            push_unique_product_blocker(&mut blockers, ProductPublishBlocker::AddPickupLocation);
+        }
+
+        if farm_readiness.has_rules_blocker(FarmReadinessBlocker::MissingOperatingRules) {
+            push_unique_product_blocker(&mut blockers, ProductPublishBlocker::AddOperatingRules);
+        }
+
+        if farm_readiness.has_rules_blocker(FarmReadinessBlocker::MissingFulfillmentWindow) {
+            push_unique_product_blocker(&mut blockers, ProductPublishBlocker::AddFulfillmentWindow);
+        }
+
+        if !farm_readiness.timing_conflicts.is_empty() {
+            push_unique_product_blocker(
+                &mut blockers,
+                ProductPublishBlocker::ResolveAvailabilityConflicts,
+            );
+        }
+    }
+
+    blockers
+}
+
+fn sync_coarse_farm_readiness(
+    farm_setup: &mut FarmSetupProjection,
+    today: &mut TodayAgendaProjection,
+    farm_readiness: &FarmWorkspaceReadinessProjection,
+) {
+    let Some(coarse_readiness) = farm_readiness.coarse_readiness() else {
+        return;
+    };
+
+    if let Some(saved_farm) = farm_setup.saved_farm.as_mut() {
+        saved_farm.readiness = coarse_readiness;
+    }
+
+    if let Some(saved_farm) = today.farm.as_mut() {
+        saved_farm.readiness = coarse_readiness;
+    }
+}
+
+fn sync_product_editor_publish_blockers(
+    editor: &mut ProductEditorState,
+    farm_readiness: &FarmWorkspaceReadinessProjection,
+) {
+    if let ProductEditorState::Open(session) = editor {
+        session.publish_blockers = derive_product_publish_blockers(&session.draft, farm_readiness);
+    }
+}
+
+fn replace_availability_blocker(
+    blockers: &mut [ProductPublishBlocker],
+    farm_readiness: &FarmWorkspaceReadinessProjection,
+) {
+    for blocker in blockers.iter_mut() {
+        if *blocker != ProductPublishBlocker::AttachAvailability {
+            continue;
+        }
+
+        *blocker = if !farm_readiness.timing_conflicts.is_empty() {
+            ProductPublishBlocker::ResolveAvailabilityConflicts
+        } else if farm_readiness.has_rules_blocker(FarmReadinessBlocker::MissingFulfillmentWindow) {
+            ProductPublishBlocker::AddFulfillmentWindow
+        } else {
+            ProductPublishBlocker::AttachAvailability
+        };
+    }
+}
+
+fn push_unique_product_blocker(
+    blockers: &mut Vec<ProductPublishBlocker>,
+    blocker: ProductPublishBlocker,
+) {
+    if !blockers.contains(&blocker) {
+        blockers.push(blocker);
     }
 }
 
@@ -1463,7 +1732,13 @@ mod tests {
     fn replace_today_agenda_updates_in_memory_state_without_touching_repository() {
         let mut store =
             AppStateStore::load(FailingRepository).expect("failing repository should still load");
+        let farm_id = FarmId::new();
         let today = TodayAgendaProjection {
+            farm: Some(radroots_studio_app_models::FarmSummary {
+                farm_id,
+                display_name: "North field farm".to_owned(),
+                readiness: FarmReadiness::Incomplete,
+            }),
             setup_checklist: vec![TodaySetupTask {
                 kind: TodaySetupTaskKind::AddFulfillmentWindow,
                 is_complete: false,
@@ -1474,7 +1749,9 @@ mod tests {
         let changed = store.apply(AppStateCommand::replace_today_agenda(today.clone()));
 
         assert_eq!(changed, Ok(true));
-        assert_eq!(store.projection().today, today);
+        assert_eq!(store.projection().today.farm, today.farm);
+        assert_eq!(store.projection().today.setup_checklist.len(), 6);
+        assert!(store.projection().today.needs_setup());
     }
 
     #[test]
