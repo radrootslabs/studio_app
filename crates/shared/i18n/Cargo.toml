@@ -13,12 +13,7 @@ build = "build.rs"
 mf2_i18n = { workspace = true, features = ["native"] }
 
 [build-dependencies]
-hex.workspace = true
-mf2_i18n_build.workspace = true
-mf2_i18n_core.workspace = true
-serde.workspace = true
-serde_json.workspace = true
-toml.workspace = true
+mf2_i18n = { workspace = true, features = ["build"] }
 
 [lints]
 workspace = true
