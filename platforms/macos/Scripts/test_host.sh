@@ -158,25 +158,17 @@ trap cleanup EXIT
 
 runtime_mode="localhost-dev"
 run_id="$(radroots_studio_app_run_id "${runtime_mode}")"
-platform_name="$(radroots_studio_app_platform_name)"
-bundle_identifier="$(radroots_studio_app_bundle_identifier)"
+default_nostr_relay_url="${RADROOTS_APP_DEFAULT_NOSTR_RELAY_URL:-ws://127.0.0.1:8080}"
 local_log_root="${tmp_root}/logs"
 structured_log_file="${local_log_root}/apps/local/app/app-macos-native/${date_utc}.jsonl"
 latest_log_path="${local_log_root}/apps/local/app/app-macos-native/latest.jsonl"
 stdout_file="${local_log_root}/apps/local/app/app-macos-native/raw/stdout.${date_utc}.log"
 stderr_file="${local_log_root}/apps/local/app/app-macos-native/raw/stderr.${date_utc}.log"
 
+RADROOTS_APP_RUNTIME_MODE="${runtime_mode}" \
 RADROOTS_APP_RUN_ID="${run_id}" \
+RADROOTS_APP_DEFAULT_NOSTR_RELAY_URL="${default_nostr_relay_url}" \
 RADROOTS_APP_LOCAL_LOG_ROOT="${local_log_root}" \
-RADROOTS_APP_RUNTIME_CONFIG_JSON="$(
-  radroots_studio_app_build_runtime_config_json \
-    "${repo_root}" \
-    "${runtime_mode}" \
-    "${run_id}" \
-    "${bundle_identifier}" \
-    "${platform_name}" \
-    "${local_log_root}"
-)" \
 "${script_dir}/run_host.sh" &
 runner_pid="$!"
 
@@ -192,20 +184,12 @@ degraded_structured_log_file="${degraded_log_root}/apps/local/app/app-macos-nati
 degraded_latest_log_path="${degraded_log_root}/apps/local/app/app-macos-native/latest.jsonl"
 degraded_stdout_file="${degraded_log_root}/apps/local/app/app-macos-native/raw/stdout.${date_utc}.log"
 degraded_stderr_file="${degraded_log_root}/apps/local/app/app-macos-native/raw/stderr.${date_utc}.log"
-degraded_runtime_config_json="$(
-  radroots_studio_app_build_runtime_config_json \
-    "${repo_root}" \
-    "${runtime_mode}" \
-    "${degraded_run_id}" \
-    "${bundle_identifier}" \
-    "${platform_name}" \
-    "${degraded_log_root}"
-)"
 
 env -u HOME \
+  RADROOTS_APP_RUNTIME_MODE="${runtime_mode}" \
   RADROOTS_APP_RUN_ID="${degraded_run_id}" \
+  RADROOTS_APP_DEFAULT_NOSTR_RELAY_URL="${default_nostr_relay_url}" \
   RADROOTS_APP_LOCAL_LOG_ROOT="${degraded_log_root}" \
-  RADROOTS_APP_RUNTIME_CONFIG_JSON="${degraded_runtime_config_json}" \
   "${script_dir}/run_host.sh" &
 degraded_runner_pid="$!"
 

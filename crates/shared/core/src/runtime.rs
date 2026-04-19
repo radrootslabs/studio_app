@@ -3,7 +3,7 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use thiserror::Error;
 
 pub const APP_ID: &str = "org.radroots.app";
@@ -12,8 +12,10 @@ pub const APP_PLATFORM_RUNTIME: &str = "app-macos-native";
 pub const APP_PROJECTION_SOURCE: &str = "gpui-native";
 pub const APP_RUNTIME_ORIGIN: &str = "gpui://localhost";
 pub const APP_HOST_PLATFORM: &str = "desktop";
-pub const APP_RUNTIME_CONFIG_ENV: &str = "RADROOTS_APP_RUNTIME_CONFIG_JSON";
-pub const APP_RUNTIME_CONFIG_SCHEMA: &str = "radroots.app.runtime-config.v1";
+pub const APP_RUNTIME_MODE_ENV: &str = "RADROOTS_APP_RUNTIME_MODE";
+pub const APP_RUN_ID_ENV: &str = "RADROOTS_APP_RUN_ID";
+pub const APP_DEFAULT_NOSTR_RELAY_URL_ENV: &str = "RADROOTS_APP_DEFAULT_NOSTR_RELAY_URL";
+pub const APP_LOCAL_LOG_ROOT_ENV: &str = "RADROOTS_APP_LOCAL_LOG_ROOT";
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum AppRuntimeMode {
@@ -88,71 +90,48 @@ pub struct AppRuntimeSnapshot {
 
 #[derive(Debug, Error)]
 pub enum AppRuntimeConfigError {
-    #[error("missing required runtime config env: {APP_RUNTIME_CONFIG_ENV}")]
-    MissingEnv,
-    #[error("invalid app runtime config json")]
-    InvalidJson(#[source] serde_json::Error),
-    #[error("unsupported app runtime config schema: {0}")]
-    UnsupportedSchema(String),
+    #[error("missing required runtime env: {0}")]
+    MissingEnv(&'static str),
     #[error("unsupported runtime mode: {0}")]
     UnsupportedRuntimeMode(String),
     #[error("missing required runtime config field: {0}")]
     MissingField(&'static str),
 }
 
-#[derive(Deserialize)]
-struct RawRuntimeConfig {
-    schema_version: String,
-    runtime_mode: String,
-    run_id: String,
-    default_nostr_relay_url: String,
-    bundle_identifier: String,
-    bundle_name: String,
-    marketing_version: String,
-    build_number: String,
-    platform_name: String,
-    operating_system_version: String,
-    host_locale: String,
-    runtime_origin: String,
-    local_log_root: String,
-}
-
 impl AppRuntimeConfig {
     pub fn from_env() -> Result<Self, AppRuntimeConfigError> {
-        let raw =
-            std::env::var(APP_RUNTIME_CONFIG_ENV).map_err(|_| AppRuntimeConfigError::MissingEnv)?;
-        Self::from_json_str(&raw)
+        Self::from_env_with(|name| std::env::var(name).ok())
     }
 
-    pub fn from_json_str(raw: &str) -> Result<Self, AppRuntimeConfigError> {
-        let config: RawRuntimeConfig =
-            serde_json::from_str(raw).map_err(AppRuntimeConfigError::InvalidJson)?;
-
-        if config.schema_version != APP_RUNTIME_CONFIG_SCHEMA {
-            return Err(AppRuntimeConfigError::UnsupportedSchema(
-                config.schema_version,
-            ));
-        }
+    fn from_env_with<F>(mut read_env: F) -> Result<Self, AppRuntimeConfigError>
+    where
+        F: FnMut(&str) -> Option<String>,
+    {
+        let runtime_mode = parse_config_runtime_mode(&require_env_value(
+            &mut read_env,
+            APP_RUNTIME_MODE_ENV,
+        )?)?;
+        let run_id = require_env_value(&mut read_env, APP_RUN_ID_ENV)?;
+        let default_nostr_relay_url =
+            require_env_value(&mut read_env, APP_DEFAULT_NOSTR_RELAY_URL_ENV)?;
+        let local_log_root =
+            require_path_value(APP_LOCAL_LOG_ROOT_ENV, require_env_value(&mut read_env, APP_LOCAL_LOG_ROOT_ENV)?)?;
 
         Ok(Self {
-            runtime_mode: parse_config_runtime_mode(&config.runtime_mode)?,
-            run_id: require_value("run_id", config.run_id)?,
-            default_nostr_relay_url: require_value(
-                "default_nostr_relay_url",
-                config.default_nostr_relay_url,
-            )?,
-            bundle_identifier: require_value("bundle_identifier", config.bundle_identifier)?,
-            bundle_name: require_value("bundle_name", config.bundle_name)?,
-            marketing_version: require_value("marketing_version", config.marketing_version)?,
-            build_number: require_value("build_number", config.build_number)?,
-            platform_name: require_value("platform_name", config.platform_name)?,
-            operating_system_version: require_value(
-                "operating_system_version",
-                config.operating_system_version,
-            )?,
-            host_locale: require_value("host_locale", config.host_locale)?,
-            runtime_origin: require_value("runtime_origin", config.runtime_origin)?,
-            local_log_root: require_path_value("local_log_root", config.local_log_root)?,
+            runtime_mode,
+            run_id,
+            default_nostr_relay_url,
+            bundle_identifier: APP_ID.to_owned(),
+            bundle_name: APP_NAME.to_owned(),
+            marketing_version: env!("CARGO_PKG_VERSION").to_owned(),
+            build_number: option_env!("RADROOTS_GIT_COMMIT")
+                .unwrap_or(option_env!("PROFILE").unwrap_or("debug"))
+                .to_owned(),
+            platform_name: APP_HOST_PLATFORM.to_owned(),
+            operating_system_version: std::env::consts::OS.to_owned(),
+            host_locale: detect_host_locale(),
+            runtime_origin: APP_RUNTIME_ORIGIN.to_owned(),
+            local_log_root,
         })
     }
 }
@@ -283,6 +262,17 @@ fn require_value(field: &'static str, value: String) -> Result<String, AppRuntim
     Ok(trimmed.to_owned())
 }
 
+fn require_env_value<F>(
+    read_env: &mut F,
+    field: &'static str,
+) -> Result<String, AppRuntimeConfigError>
+where
+    F: FnMut(&str) -> Option<String>,
+{
+    let value = read_env(field).ok_or(AppRuntimeConfigError::MissingEnv(field))?;
+    require_value(field, value)
+}
+
 fn detect_host_locale() -> String {
     [
         std::env::var("LC_ALL").ok(),
@@ -317,10 +307,11 @@ fn build_run_id(mode: &AppRuntimeMode) -> String {
 
 #[cfg(test)]
 mod tests {
-    use std::path::PathBuf;
+    use std::{collections::BTreeMap, path::PathBuf};
 
     use super::{
-        APP_HOST_PLATFORM, APP_ID, APP_NAME, APP_PROJECTION_SOURCE, APP_RUNTIME_CONFIG_SCHEMA,
+        APP_DEFAULT_NOSTR_RELAY_URL_ENV, APP_HOST_PLATFORM, APP_ID, APP_LOCAL_LOG_ROOT_ENV,
+        APP_NAME, APP_PROJECTION_SOURCE, APP_RUN_ID_ENV, APP_RUNTIME_MODE_ENV,
         APP_RUNTIME_ORIGIN, AppBuildIdentity, AppRuntimeCapture, AppRuntimeConfig,
         AppRuntimeConfigError, AppRuntimeMode, AppRuntimeSnapshot, runtime_mode_label,
     };
@@ -336,24 +327,19 @@ mod tests {
         }
     }
 
-    fn test_runtime_config_json() -> String {
-        format!(
-            r#"{{
-                "schema_version":"{APP_RUNTIME_CONFIG_SCHEMA}",
-                "runtime_mode":"localhost-dev",
-                "run_id":"run-localhost-dev-20260417T000000Z-deadbeefcafefeed",
-                "default_nostr_relay_url":"ws://127.0.0.1:8080",
-                "bundle_identifier":"org.radroots.app.macos",
-                "bundle_name":"Radroots",
-                "marketing_version":"0.1.0",
-                "build_number":"dev",
-                "platform_name":"macos",
-                "operating_system_version":"macos-15.5",
-                "host_locale":"en_US.UTF-8",
-                "runtime_origin":"gpui://localhost",
-                "local_log_root":"/tmp/radroots/logs"
-            }}"#
-        )
+    fn test_runtime_env() -> BTreeMap<&'static str, String> {
+        BTreeMap::from([
+            (APP_RUNTIME_MODE_ENV, "localhost-dev".to_owned()),
+            (
+                APP_RUN_ID_ENV,
+                "run-localhost-dev-20260417T000000Z-deadbeefcafefeed".to_owned(),
+            ),
+            (
+                APP_DEFAULT_NOSTR_RELAY_URL_ENV,
+                "ws://127.0.0.1:8080".to_owned(),
+            ),
+            (APP_LOCAL_LOG_ROOT_ENV, "/tmp/radroots/logs".to_owned()),
+        ])
     }
 
     #[test]
@@ -388,44 +374,63 @@ mod tests {
     }
 
     #[test]
-    fn runtime_config_requires_supported_schema() {
-        let error = AppRuntimeConfig::from_json_str(
-            r#"{"schema_version":"unsupported","runtime_mode":"localhost-dev","run_id":"x","default_nostr_relay_url":"ws://127.0.0.1:8080","bundle_identifier":"y","bundle_name":"z","marketing_version":"0.1.0","build_number":"1","platform_name":"macos","operating_system_version":"macos-15.5","host_locale":"en","runtime_origin":"gpui://localhost","local_log_root":"/tmp/logs"}"#,
-        )
-        .expect_err("schema mismatch should fail");
+    fn runtime_config_requires_explicit_runtime_mode_env() {
+        let env = BTreeMap::from([
+            (APP_RUN_ID_ENV, "run-localhost-dev-20260417T000000Z-deadbeefcafefeed".to_owned()),
+            (
+                APP_DEFAULT_NOSTR_RELAY_URL_ENV,
+                "ws://127.0.0.1:8080".to_owned(),
+            ),
+            (APP_LOCAL_LOG_ROOT_ENV, "/tmp/radroots/logs".to_owned()),
+        ]);
+        let error = AppRuntimeConfig::from_env_with(|name| env.get(name).cloned())
+            .expect_err("missing runtime mode env should fail");
 
-        assert!(
-            error
-                .to_string()
-                .contains("unsupported app runtime config schema")
-        );
+        assert!(matches!(
+            error,
+            AppRuntimeConfigError::MissingEnv(APP_RUNTIME_MODE_ENV)
+        ));
     }
 
     #[test]
     fn runtime_config_surfaces_explicit_local_log_root() {
-        let config =
-            AppRuntimeConfig::from_json_str(&test_runtime_config_json()).expect("valid config");
+        let env = test_runtime_env();
+        let config = AppRuntimeConfig::from_env_with(|name| env.get(name).cloned())
+            .expect("valid env config");
 
         assert_eq!(config.runtime_mode, AppRuntimeMode::LocalhostDev);
+        assert_eq!(
+            config.run_id,
+            "run-localhost-dev-20260417T000000Z-deadbeefcafefeed"
+        );
         assert_eq!(config.default_nostr_relay_url, "ws://127.0.0.1:8080");
-        assert_eq!(config.bundle_identifier, "org.radroots.app.macos");
+        assert_eq!(config.bundle_identifier, APP_ID);
+        assert_eq!(config.bundle_name, APP_NAME);
+        assert_eq!(config.platform_name, APP_HOST_PLATFORM);
+        assert_eq!(config.runtime_origin, APP_RUNTIME_ORIGIN);
+        assert_eq!(config.operating_system_version, std::env::consts::OS);
+        assert!(!config.host_locale.trim().is_empty());
         assert_eq!(config.local_log_root, PathBuf::from("/tmp/radroots/logs"));
     }
 
     #[test]
     fn runtime_snapshot_uses_explicit_runtime_config_host_identity() {
+        let env = test_runtime_env();
         let snapshot = AppRuntimeSnapshot::from_config(
             test_build_identity(),
-            &AppRuntimeConfig::from_json_str(&test_runtime_config_json()).expect("valid config"),
+            &AppRuntimeConfig::from_env_with(|name| env.get(name).cloned())
+                .expect("valid env config"),
         );
 
         assert_eq!(
             snapshot.run_id,
             "run-localhost-dev-20260417T000000Z-deadbeefcafefeed"
         );
-        assert_eq!(snapshot.host.app_identifier, "org.radroots.app.macos");
-        assert_eq!(snapshot.host.platform_name, "macos");
-        assert_eq!(snapshot.host.operating_system, "macos-15.5");
+        assert_eq!(snapshot.host.app_identifier, APP_ID);
+        assert_eq!(snapshot.host.app_name, APP_NAME);
+        assert_eq!(snapshot.host.platform_name, APP_HOST_PLATFORM);
+        assert_eq!(snapshot.host.operating_system, std::env::consts::OS);
+        assert_eq!(snapshot.host.runtime_origin, APP_RUNTIME_ORIGIN);
         assert_eq!(runtime_mode_label(&snapshot.runtime_mode), "localhost-dev");
     }
 
@@ -452,10 +457,15 @@ mod tests {
     #[test]
     fn runtime_snapshot_capture_matches_canonical_runtime_config_metadata() {
         let build = test_build_identity();
-        let git_commit = build
-            .git_commit
-            .clone()
-            .expect("test build identity should include git commit");
+        let env = BTreeMap::from([
+            (APP_RUNTIME_MODE_ENV, "development".to_owned()),
+            (APP_RUN_ID_ENV, "run-development-123-pid456".to_owned()),
+            (
+                APP_DEFAULT_NOSTR_RELAY_URL_ENV,
+                "ws://127.0.0.1:8080".to_owned(),
+            ),
+            (APP_LOCAL_LOG_ROOT_ENV, "/tmp/radroots/logs".to_owned()),
+        ]);
         let snapshot_from_capture = AppRuntimeSnapshot::from_capture(
             build.clone(),
             AppRuntimeMode::Development,
@@ -467,82 +477,78 @@ mod tests {
         );
         let snapshot_from_config = AppRuntimeSnapshot::from_config(
             build.clone(),
-            &AppRuntimeConfig::from_json_str(&format!(
-                r#"{{
-                    "schema_version":"{APP_RUNTIME_CONFIG_SCHEMA}",
-                    "runtime_mode":"development",
-                    "run_id":"run-development-123-pid456",
-                    "default_nostr_relay_url":"ws://127.0.0.1:8080",
-                    "bundle_identifier":"{APP_ID}",
-                    "bundle_name":"{APP_NAME}",
-                    "marketing_version":"{}",
-                    "build_number":"{}",
-                    "platform_name":"{APP_HOST_PLATFORM}",
-                    "operating_system_version":"macos",
-                    "host_locale":"en_US.UTF-8",
-                    "runtime_origin":"{APP_RUNTIME_ORIGIN}",
-                    "local_log_root":"/tmp/radroots/logs"
-                }}"#,
-                build.package_version, git_commit
-            ))
-            .expect("canonical config should parse"),
+            &AppRuntimeConfig::from_env_with(|name| env.get(name).cloned())
+                .expect("canonical env config should parse"),
         );
 
-        assert_eq!(snapshot_from_config, snapshot_from_capture);
+        assert_eq!(snapshot_from_config.title, snapshot_from_capture.title);
+        assert_eq!(snapshot_from_config.runtime_mode, snapshot_from_capture.runtime_mode);
+        assert_eq!(snapshot_from_config.run_id, snapshot_from_capture.run_id);
+        assert_eq!(snapshot_from_config.core, snapshot_from_capture.core);
+        assert_eq!(
+            snapshot_from_config.host.app_identifier,
+            snapshot_from_capture.host.app_identifier
+        );
+        assert_eq!(
+            snapshot_from_config.host.app_name,
+            snapshot_from_capture.host.app_name
+        );
+        assert_eq!(
+            snapshot_from_config.host.app_version,
+            snapshot_from_capture.host.app_version
+        );
+        assert_eq!(
+            snapshot_from_config.host.platform_name,
+            snapshot_from_capture.host.platform_name
+        );
+        assert_eq!(
+            snapshot_from_config.host.operating_system,
+            snapshot_from_capture.host.operating_system
+        );
+        assert_eq!(
+            snapshot_from_config.host.runtime_origin,
+            snapshot_from_capture.host.runtime_origin
+        );
     }
 
     #[test]
     fn runtime_config_rejects_empty_required_fields() {
-        let error = AppRuntimeConfig::from_json_str(&format!(
-            r#"{{
-                "schema_version":"{APP_RUNTIME_CONFIG_SCHEMA}",
-                "runtime_mode":"localhost-dev",
-                "run_id":"",
-                "default_nostr_relay_url":"ws://127.0.0.1:8080",
-                "bundle_identifier":"org.radroots.app.macos",
-                "bundle_name":"Radroots",
-                "marketing_version":"0.1.0",
-                "build_number":"dev",
-                "platform_name":"macos",
-                "operating_system_version":"macos-15.5",
-                "host_locale":"en_US.UTF-8",
-                "runtime_origin":"gpui://localhost",
-                "local_log_root":"/tmp/radroots/logs"
-            }}"#
-        ))
-        .expect_err("missing run id should fail");
+        let env = BTreeMap::from([
+            (APP_RUNTIME_MODE_ENV, "localhost-dev".to_owned()),
+            (APP_RUN_ID_ENV, "".to_owned()),
+            (
+                APP_DEFAULT_NOSTR_RELAY_URL_ENV,
+                "ws://127.0.0.1:8080".to_owned(),
+            ),
+            (APP_LOCAL_LOG_ROOT_ENV, "/tmp/radroots/logs".to_owned()),
+        ]);
+        let error = AppRuntimeConfig::from_env_with(|name| env.get(name).cloned())
+            .expect_err("missing run id should fail");
 
         assert!(
-            matches!(error, AppRuntimeConfigError::MissingField("run_id")),
+            matches!(error, AppRuntimeConfigError::MissingField(APP_RUN_ID_ENV)),
             "unexpected error: {error}"
         );
     }
 
     #[test]
     fn runtime_config_rejects_missing_default_nostr_relay_url() {
-        let error = AppRuntimeConfig::from_json_str(&format!(
-            r#"{{
-                "schema_version":"{APP_RUNTIME_CONFIG_SCHEMA}",
-                "runtime_mode":"localhost-dev",
-                "run_id":"run-localhost-dev-20260417T000000Z-deadbeefcafefeed",
-                "default_nostr_relay_url":"",
-                "bundle_identifier":"org.radroots.app.macos",
-                "bundle_name":"Radroots",
-                "marketing_version":"0.1.0",
-                "build_number":"dev",
-                "platform_name":"macos",
-                "operating_system_version":"macos-15.5",
-                "host_locale":"en_US.UTF-8",
-                "runtime_origin":"gpui://localhost",
-                "local_log_root":"/tmp/radroots/logs"
-            }}"#
-        ))
-        .expect_err("missing default relay url should fail");
+        let env = BTreeMap::from([
+            (APP_RUNTIME_MODE_ENV, "localhost-dev".to_owned()),
+            (
+                APP_RUN_ID_ENV,
+                "run-localhost-dev-20260417T000000Z-deadbeefcafefeed".to_owned(),
+            ),
+            (APP_DEFAULT_NOSTR_RELAY_URL_ENV, "".to_owned()),
+            (APP_LOCAL_LOG_ROOT_ENV, "/tmp/radroots/logs".to_owned()),
+        ]);
+        let error = AppRuntimeConfig::from_env_with(|name| env.get(name).cloned())
+            .expect_err("missing default relay url should fail");
 
         assert!(
             matches!(
                 error,
-                AppRuntimeConfigError::MissingField("default_nostr_relay_url")
+                AppRuntimeConfigError::MissingField(APP_DEFAULT_NOSTR_RELAY_URL_ENV)
             ),
             "unexpected error: {error}"
         );

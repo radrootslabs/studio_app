@@ -31,7 +31,6 @@ forward_signal() {
 
 require_command grep
 require_command /usr/libexec/PlistBuddy
-require_env RADROOTS_APP_RUNTIME_CONFIG_JSON
 require_env RADROOTS_APP_LOCAL_LOG_ROOT
 
 app_path="$("${script_dir}/build_host.sh")"
