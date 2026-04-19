@@ -1,6 +1,7 @@
 use gpui::{
-    App, ClickEvent, Entity, IntoElement, ParentElement, SharedString, Styled, Window, div,
-    prelude::FluentBuilder, px, relative, rgb, transparent_black,
+    AnyElement, App, ClickEvent, Div, Entity, InteractiveElement, IntoElement, ParentElement,
+    SharedString, StatefulInteractiveElement, Styled, Window, div, prelude::FluentBuilder, px,
+    relative, rgb, transparent_black,
 };
 use gpui_component::{
     Icon, IconName, Sizable, Size,
@@ -124,6 +125,84 @@ pub fn app_surface_card_section(
     body: impl IntoElement,
 ) -> impl IntoElement {
     app_surface_card(app_form_section(title, body))
+}
+
+pub fn app_stack_v(gap_px: f32) -> Div {
+    div().flex().flex_col().gap(px(gap_px))
+}
+
+pub fn app_stack_h(gap_px: f32) -> Div {
+    div().flex().items_center().gap(px(gap_px))
+}
+
+pub fn app_cluster(gap_px: f32) -> Div {
+    div().flex().flex_wrap().items_center().gap(px(gap_px))
+}
+
+pub fn app_split_shell(sidebar: impl IntoElement, main_content: impl IntoElement) -> AnyElement {
+    let sidebar = sidebar.into_any_element();
+    let main_content = main_content.into_any_element();
+
+    app_surface_window(
+        APP_UI_THEME.foundation.surfaces.window_background,
+        div()
+            .size_full()
+            .overflow_hidden()
+            .flex()
+            .child(sidebar)
+            .child(
+                div()
+                    .h_full()
+                    .w(px(APP_UI_THEME.foundation.borders.divider_thickness_px))
+                    .bg(rgb(APP_UI_THEME.foundation.surfaces.divider)),
+            )
+            .child(
+                div()
+                    .flex_1()
+                    .h_full()
+                    .bg(rgb(APP_UI_THEME.foundation.surfaces.window_background))
+                    .overflow_hidden()
+                    .child(
+                        div()
+                            .size_full()
+                            .p(px(APP_UI_THEME.shells.home_window_padding_px))
+                            .child(main_content),
+                    ),
+            ),
+    )
+    .into_any_element()
+}
+
+pub fn app_scroll_panel(
+    id: &'static str,
+    content_padding_px: f32,
+    content_max_width_px: Option<f32>,
+    content: impl IntoElement,
+) -> AnyElement {
+    let content = content.into_any_element();
+    let content: AnyElement = match content_max_width_px {
+        Some(content_max_width_px) => div()
+            .w_full()
+            .max_w(px(content_max_width_px))
+            .mx_auto()
+            .child(content)
+            .into_any_element(),
+        None => div().w_full().child(content).into_any_element(),
+    };
+
+    div()
+        .id(id)
+        .size_full()
+        .overflow_y_scroll()
+        .child(
+            div()
+                .w_full()
+                .when(content_padding_px > 0.0, |this| {
+                    this.p(px(content_padding_px))
+                })
+                .child(content),
+        )
+        .into_any_element()
 }
 
 pub fn app_divider() -> impl IntoElement {

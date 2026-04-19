@@ -1,9 +1,8 @@
 use gpui::{
     Animation, AnimationExt, AnyElement, App, AppContext, Bounds, ClickEvent, Context, Entity,
-    InteractiveElement, IntoElement, ParentElement, Render, SharedString,
-    StatefulInteractiveElement, Styled, Subscription, Timer, Window, WindowBackgroundAppearance,
-    WindowBounds, WindowOptions, div, prelude::FluentBuilder, px, relative, rgb, size,
-    transparent_black,
+    InteractiveElement, IntoElement, ParentElement, Render, SharedString, Styled, Subscription,
+    Timer, Window, WindowBackgroundAppearance, WindowBounds, WindowOptions, div,
+    prelude::FluentBuilder, px, relative, rgb, size, transparent_black,
 };
 use gpui_component::{
     IconName, Root,
@@ -38,10 +37,11 @@ use radroots_studio_app_ui::{
     app_button_compact as action_button_compact, app_button_icon as action_icon_button,
     app_button_primary as action_button_primary,
     app_button_primary_disabled as action_button_primary_disabled,
-    app_button_secondary as action_button, app_checkbox_field, app_divider as section_divider,
-    app_form_field, app_form_input_text, app_form_section, app_heading_section, app_heading_view,
-    app_input_text as app_text_input, app_segment_button_icon as icon_segment_button,
-    app_shared_label_text, app_shared_text, app_status_indicator as status_indicator,
+    app_button_secondary as action_button, app_checkbox_field, app_cluster,
+    app_divider as section_divider, app_form_field, app_form_input_text, app_form_section,
+    app_heading_section, app_heading_view, app_input_text as app_text_input, app_scroll_panel,
+    app_segment_button_icon as icon_segment_button, app_shared_label_text, app_shared_text,
+    app_split_shell, app_stack_h, app_stack_v, app_status_indicator as status_indicator,
     app_surface_card, app_surface_card_section as home_card, app_surface_panel,
     app_surface_sidebar, app_surface_window as app_window_shell,
     app_text_badge as settings_badge_text, app_text_body_subtle as home_body_text,
@@ -1289,7 +1289,7 @@ impl HomeView {
             .into_any_element(),
         };
 
-        home_shell_frame(
+        app_split_shell(
             home_sidebar(
                 runtime,
                 cx.listener(|this, _, _, cx| this.select_farmer_section(FarmerSection::Today, cx)),
@@ -1299,12 +1299,13 @@ impl HomeView {
                 cx,
             )
             .into_any_element(),
-            div()
-                .id(home_content_scroll_id(selected_farmer_section))
-                .size_full()
-                .overflow_y_scroll()
-                .child(main_content)
-                .into_any_element(),
+            app_scroll_panel(
+                home_content_scroll_id(selected_farmer_section),
+                0.0,
+                None,
+                main_content,
+            )
+            .into_any_element(),
         )
         .into_any_element()
     }
@@ -1317,13 +1318,10 @@ impl HomeView {
         let projection = &runtime.products_projection;
         let summary = &projection.list.summary;
 
-        div()
+        app_stack_v(APP_UI_THEME.shells.home_stack_gap_px)
             .w_full()
             .max_w(px(APP_UI_THEME.shells.home_card_max_width_px))
             .mx_auto()
-            .flex()
-            .flex_col()
-            .gap(px(APP_UI_THEME.shells.home_stack_gap_px))
             .child(products_title_row(
                 runtime,
                 action_button_primary(
@@ -3793,55 +3791,48 @@ impl SettingsWindowView {
     }
 
     fn about_panel(&self) -> impl IntoElement {
-        div()
-            .id("settings-panel-scroll")
-            .size_full()
-            .overflow_y_scroll()
-            .child(
-                div()
-                    .p(px(APP_UI_THEME.shells.settings_content_padding_px))
-                    .size_full()
-                    .flex()
-                    .flex_col()
-                    .py_12()
-                    .child(
-                        div()
-                            .w_full()
-                            .flex()
-                            .flex_col()
-                            .justify_between()
-                            .gap(px(APP_UI_THEME.shells.settings_account_main_stack_gap_px))
-                            .text_size(px(APP_UI_THEME.foundation.typography.body_text_px))
-                            .text_color(rgb(APP_UI_THEME.foundation.text.secondary))
-                            .child(app_shared_text(
-                                AppTextKey::SettingsAboutPlaceholderTopPrimary,
-                            ))
-                            .child(app_shared_text(
-                                AppTextKey::SettingsAboutPlaceholderTopSecondary,
-                            ))
-                            .child(app_shared_text(
-                                AppTextKey::SettingsAboutPlaceholderTopTertiary,
-                            )),
-                    )
-                    .child(section_divider())
-                    .child(
-                        div()
-                            .w_full()
-                            .py_12()
-                            .text_size(px(APP_UI_THEME.foundation.typography.body_text_px))
-                            .text_color(rgb(APP_UI_THEME.foundation.text.secondary))
-                            .child(app_shared_text(AppTextKey::SettingsAboutPlaceholderMiddle)),
-                    )
-                    .child(section_divider())
-                    .child(
-                        div()
-                            .w_full()
-                            .py_12()
-                            .text_size(px(APP_UI_THEME.foundation.typography.body_text_px))
-                            .text_color(rgb(APP_UI_THEME.foundation.text.secondary))
-                            .child(app_shared_text(AppTextKey::SettingsAboutPlaceholderBottom)),
-                    ),
-            )
+        app_scroll_panel(
+            "settings-panel-scroll",
+            APP_UI_THEME.shells.settings_content_padding_px,
+            None,
+            app_stack_v(APP_UI_THEME.shells.settings_account_main_stack_gap_px)
+                .size_full()
+                .py_12()
+                .child(
+                    app_stack_v(APP_UI_THEME.shells.settings_account_main_stack_gap_px)
+                        .w_full()
+                        .justify_between()
+                        .text_size(px(APP_UI_THEME.foundation.typography.body_text_px))
+                        .text_color(rgb(APP_UI_THEME.foundation.text.secondary))
+                        .child(app_shared_text(
+                            AppTextKey::SettingsAboutPlaceholderTopPrimary,
+                        ))
+                        .child(app_shared_text(
+                            AppTextKey::SettingsAboutPlaceholderTopSecondary,
+                        ))
+                        .child(app_shared_text(
+                            AppTextKey::SettingsAboutPlaceholderTopTertiary,
+                        )),
+                )
+                .child(section_divider())
+                .child(
+                    div()
+                        .w_full()
+                        .py_12()
+                        .text_size(px(APP_UI_THEME.foundation.typography.body_text_px))
+                        .text_color(rgb(APP_UI_THEME.foundation.text.secondary))
+                        .child(app_shared_text(AppTextKey::SettingsAboutPlaceholderMiddle)),
+                )
+                .child(section_divider())
+                .child(
+                    div()
+                        .w_full()
+                        .py_12()
+                        .text_size(px(APP_UI_THEME.foundation.typography.body_text_px))
+                        .text_color(rgb(APP_UI_THEME.foundation.text.secondary))
+                        .child(app_shared_text(AppTextKey::SettingsAboutPlaceholderBottom)),
+                ),
+        )
     }
 
     fn settings_panel_content(
@@ -3868,30 +3859,24 @@ impl Render for SettingsWindowView {
 
         app_window_shell(
             APP_UI_THEME.foundation.surfaces.panel_background,
-            div()
+            app_stack_v(0.0)
                 .size_full()
                 .bg(rgb(APP_UI_THEME.foundation.surfaces.panel_background))
                 .overflow_hidden()
-                .flex()
-                .flex_col()
                 .child(
-                    div()
+                    app_stack_v(0.0)
                         .w_full()
                         .h(px(APP_UI_THEME.shells.settings_chrome_height_px))
                         .bg(rgb(APP_UI_THEME.foundation.surfaces.chrome_background))
-                        .flex()
-                        .flex_col()
                         .child(utility_title_row(app_shared_text(
                             AppTextKey::SettingsTitle,
                         )))
                         .child(
-                            div()
+                            app_cluster(APP_UI_THEME.shells.settings_navigation_row_gap_px)
                                 .w_full()
-                                .flex()
                                 .justify_center()
                                 .pt(px(APP_UI_THEME.shells.settings_navigation_row_padding_px))
                                 .pb(px(APP_UI_THEME.shells.settings_navigation_row_padding_px))
-                                .gap(px(APP_UI_THEME.shells.settings_navigation_row_gap_px))
                                 .children(navigation_buttons),
                         ),
                 )
@@ -4058,21 +4043,14 @@ fn holding_home_shell(runtime: &DesktopAppRuntimeSummary) -> impl IntoElement {
         );
     }
 
-    home_shell_frame(
+    app_split_shell(
         holding_home_sidebar(runtime).into_any_element(),
-        div()
-            .size_full()
-            .child(
-                div()
-                    .w_full()
-                    .max_w(px(APP_UI_THEME.shells.home_card_max_width_px))
-                    .mx_auto()
-                    .flex()
-                    .flex_col()
-                    .gap(px(APP_UI_THEME.shells.home_stack_gap_px))
-                    .child(home_status_row(&home_status))
-                    .children(sections),
-            )
+        app_stack_v(APP_UI_THEME.shells.home_stack_gap_px)
+            .w_full()
+            .max_w(px(APP_UI_THEME.shells.home_card_max_width_px))
+            .mx_auto()
+            .child(home_status_row(&home_status))
+            .children(sections)
             .into_any_element(),
     )
 }
@@ -4129,82 +4107,74 @@ fn startup_home_shell(
                             .items_center()
                             .justify_center()
                             .child(
-                                div()
+                                app_stack_v(APP_UI_THEME.shells.startup_stack_gap_px)
                                     .w_full()
                                     .max_w(px(APP_UI_THEME.shells.home_card_max_width_px))
                                     .mx_auto()
-                                    .flex()
-                                    .flex_col()
                                     .items_center()
-                                    .gap(px(APP_UI_THEME.shells.startup_stack_gap_px))
                                     .child(startup_home_title(surface))
                                     .child(startup_home_tagline())
                                     .child(match surface {
-                                        StartupHomeSurface::ContinuePrompt => div()
-                                            .flex()
-                                            .flex_col()
-                                            .items_center()
-                                            .gap(px(APP_UI_THEME.shells.startup_stack_gap_px))
-                                            .child(action_button_primary(
-                                                "home-continue",
-                                                app_shared_text(
-                                                    AppTextKey::HomeSetupContinueAction,
-                                                ),
-                                                on_continue,
-                                                cx,
-                                            ))
-                                            .when_some(startup_notice, |this, error| {
-                                                this.child(
-                                                    div()
-                                                        .w_full()
-                                                        .text_center()
-                                                        .child(home_body_text(error.to_owned())),
-                                                )
-                                            })
-                                            .into_any_element(),
-                                        StartupHomeSurface::IdentityChoice => div()
-                                            .flex()
-                                            .flex_col()
-                                            .items_center()
-                                            .gap(px(APP_UI_THEME.shells.startup_stack_gap_px))
-                                            .child(action_button_primary(
-                                                "home-generate-key",
-                                                app_shared_text(
-                                                    AppTextKey::HomeSetupGenerateKeyAction,
-                                                ),
-                                                on_generate_key,
-                                                cx,
-                                            ))
-                                            .child(action_button(
-                                                "home-connect-signer",
-                                                app_shared_text(
-                                                    AppTextKey::HomeSetupConnectSignerAction,
-                                                ),
-                                                on_connect_signer,
-                                                cx,
-                                            ))
-                                            .when_some(startup_notice, |this, error| {
-                                                this.child(
-                                                    div()
-                                                        .w_full()
-                                                        .text_center()
-                                                        .child(home_body_text(error.to_owned())),
-                                                )
-                                            })
-                                            .into_any_element(),
-                                        StartupHomeSurface::GenerateKeyStarting => div()
-                                            .flex()
-                                            .flex_col()
-                                            .items_center()
-                                            .gap(px(APP_UI_THEME.shells.startup_stack_gap_px))
-                                            .child(action_button_primary_disabled(
-                                                "home-generate-key",
-                                                app_shared_text(
-                                                    AppTextKey::HomeSetupGenerateKeyAction,
-                                                ),
-                                                cx,
-                                            ))
-                                            .into_any_element(),
+                                        StartupHomeSurface::ContinuePrompt => {
+                                            app_stack_v(APP_UI_THEME.shells.startup_stack_gap_px)
+                                                .items_center()
+                                                .child(action_button_primary(
+                                                    "home-continue",
+                                                    app_shared_text(
+                                                        AppTextKey::HomeSetupContinueAction,
+                                                    ),
+                                                    on_continue,
+                                                    cx,
+                                                ))
+                                                .when_some(startup_notice, |this, error| {
+                                                    this.child(
+                                                        div().w_full().text_center().child(
+                                                            home_body_text(error.to_owned()),
+                                                        ),
+                                                    )
+                                                })
+                                                .into_any_element()
+                                        }
+                                        StartupHomeSurface::IdentityChoice => {
+                                            app_stack_v(APP_UI_THEME.shells.startup_stack_gap_px)
+                                                .items_center()
+                                                .child(action_button_primary(
+                                                    "home-generate-key",
+                                                    app_shared_text(
+                                                        AppTextKey::HomeSetupGenerateKeyAction,
+                                                    ),
+                                                    on_generate_key,
+                                                    cx,
+                                                ))
+                                                .child(action_button(
+                                                    "home-connect-signer",
+                                                    app_shared_text(
+                                                        AppTextKey::HomeSetupConnectSignerAction,
+                                                    ),
+                                                    on_connect_signer,
+                                                    cx,
+                                                ))
+                                                .when_some(startup_notice, |this, error| {
+                                                    this.child(
+                                                        div().w_full().text_center().child(
+                                                            home_body_text(error.to_owned()),
+                                                        ),
+                                                    )
+                                                })
+                                                .into_any_element()
+                                        }
+                                        StartupHomeSurface::GenerateKeyStarting => {
+                                            app_stack_v(APP_UI_THEME.shells.startup_stack_gap_px)
+                                                .items_center()
+                                                .child(action_button_primary_disabled(
+                                                    "home-generate-key",
+                                                    app_shared_text(
+                                                        AppTextKey::HomeSetupGenerateKeyAction,
+                                                    ),
+                                                    cx,
+                                                ))
+                                                .into_any_element()
+                                        }
                                         StartupHomeSurface::SignerEntry => {
                                             startup_signer_entry_surface(
                                                 signer_entry,
@@ -4217,12 +4187,9 @@ fn startup_home_shell(
                                             .into_any_element()
                                         }
                                         StartupHomeSurface::IssueCard => app_surface_card(
-                                            div()
+                                            app_stack_v(APP_UI_THEME.shells.home_stack_gap_px)
                                                 .w_full()
-                                                .flex()
-                                                .flex_col()
                                                 .items_center()
-                                                .gap(px(APP_UI_THEME.shells.home_stack_gap_px))
                                                 .child(app_heading_section(app_shared_text(
                                                     AppTextKey::MetadataStartupIssue,
                                                 )))
@@ -4289,12 +4256,9 @@ fn startup_signer_entry_surface(
         preview.is_ok() && matches!(connect_state, StartupSignerConnectState::Idle);
     let source_input_is_editable = startup_signer_source_input_is_editable(connect_state);
 
-    div()
+    app_stack_v(APP_UI_THEME.shells.startup_stack_gap_px)
         .w_full()
-        .flex()
-        .flex_col()
         .items_center()
-        .gap(px(APP_UI_THEME.shells.startup_stack_gap_px))
         .when_some(signer_entry, |this, signer_entry| {
             this.child(
                 div()
@@ -4310,12 +4274,9 @@ fn startup_signer_entry_surface(
         })
         .when_some(preview.as_ref().ok(), |this, preview| {
             this.child(app_surface_card(
-                div()
+                app_stack_v(APP_UI_THEME.shells.home_stack_gap_px)
                     .w_full()
-                    .flex()
-                    .flex_col()
                     .items_center()
-                    .gap(px(APP_UI_THEME.shells.home_stack_gap_px))
                     .child(app_heading_section(app_shared_text(
                         AppTextKey::HomeSetupSignerReviewTitle,
                     )))
@@ -4341,12 +4302,9 @@ fn startup_signer_entry_surface(
         })
         .when_some(startup_signer_status_spec(connect_state), |this, status| {
             this.child(app_surface_card(
-                div()
+                app_stack_v(APP_UI_THEME.shells.home_stack_gap_px)
                     .w_full()
-                    .flex()
-                    .flex_col()
                     .items_center()
-                    .gap(px(APP_UI_THEME.shells.home_stack_gap_px))
                     .child(app_heading_section(app_shared_text(status.0)))
                     .child(
                         status
@@ -4591,36 +4549,6 @@ async fn run_startup_signer_pending_poll(
         auth_challenge_url,
         outcome,
     }
-}
-
-fn home_shell_frame(sidebar: AnyElement, main_content: AnyElement) -> impl IntoElement {
-    app_window_shell(
-        APP_UI_THEME.foundation.surfaces.window_background,
-        div()
-            .size_full()
-            .overflow_hidden()
-            .flex()
-            .child(sidebar)
-            .child(
-                div()
-                    .h_full()
-                    .w(px(APP_UI_THEME.foundation.borders.divider_thickness_px))
-                    .bg(rgb(APP_UI_THEME.foundation.surfaces.divider)),
-            )
-            .child(
-                div()
-                    .flex_1()
-                    .h_full()
-                    .bg(rgb(APP_UI_THEME.foundation.surfaces.window_background))
-                    .overflow_hidden()
-                    .child(
-                        div()
-                            .size_full()
-                            .p(px(APP_UI_THEME.shells.home_window_padding_px))
-                            .child(main_content),
-                    ),
-            ),
-    )
 }
 
 fn home_sidebar(
@@ -4935,17 +4863,12 @@ fn products_title_row(
     runtime: &DesktopAppRuntimeSummary,
     add_product_action: AnyElement,
 ) -> impl IntoElement {
-    div()
+    app_stack_h(APP_UI_THEME.shells.home_stack_gap_px)
         .w_full()
-        .flex()
         .items_end()
         .justify_between()
-        .gap(px(APP_UI_THEME.shells.home_stack_gap_px))
         .child(
-            div()
-                .flex()
-                .flex_col()
-                .gap(px(4.0))
+            app_stack_v(4.0)
                 .child(
                     div()
                         .text_size(px(APP_UI_THEME.foundation.typography.body_text_px * 2.0))
@@ -6483,28 +6406,15 @@ fn settings_dynamic_action_button(
 fn settings_inventory_panel(intro_key: AppTextKey, cards: Vec<AnyElement>) -> impl IntoElement {
     let content_max_width_px = 560.0;
 
-    div()
-        .id("settings-panel-scroll")
-        .size_full()
-        .overflow_y_scroll()
-        .child(
-            div()
-                .w_full()
-                .p(px(APP_UI_THEME.shells.settings_content_padding_px))
-                .flex()
-                .flex_col()
-                .items_center()
-                .child(
-                    div()
-                        .w_full()
-                        .max_w(px(content_max_width_px))
-                        .flex()
-                        .flex_col()
-                        .gap(px(APP_UI_THEME.shells.home_stack_gap_px))
-                        .child(home_body_text(app_shared_text(intro_key)))
-                        .children(cards),
-                ),
-        )
+    app_scroll_panel(
+        "settings-panel-scroll",
+        APP_UI_THEME.shells.settings_content_padding_px,
+        Some(content_max_width_px),
+        app_stack_v(APP_UI_THEME.shells.home_stack_gap_px)
+            .w_full()
+            .child(home_body_text(app_shared_text(intro_key)))
+            .children(cards),
+    )
 }
 
 #[cfg(test)]
