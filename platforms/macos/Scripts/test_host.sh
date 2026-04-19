@@ -6,8 +6,6 @@ platform_root="$(cd "${script_dir}/.." && pwd -P)"
 repo_root="$(git -C "${script_dir}" rev-parse --show-toplevel)"
 date_utc="$(date -u +%F)"
 
-source "${repo_root}/scripts/runtime_env.sh"
-
 require_command() {
   if command -v "$1" >/dev/null 2>&1; then
     return
@@ -157,7 +155,6 @@ cleanup() {
 trap cleanup EXIT
 
 runtime_mode="localhost-dev"
-run_id="$(radroots_studio_app_run_id "${runtime_mode}")"
 default_nostr_relay_url="${RADROOTS_APP_DEFAULT_NOSTR_RELAY_URL:-ws://127.0.0.1:8080}"
 local_log_root="${tmp_root}/logs"
 structured_log_file="${local_log_root}/apps/local/app/app-macos-native/${date_utc}.jsonl"
@@ -166,7 +163,6 @@ stdout_file="${local_log_root}/apps/local/app/app-macos-native/raw/stdout.${date
 stderr_file="${local_log_root}/apps/local/app/app-macos-native/raw/stderr.${date_utc}.log"
 
 RADROOTS_APP_RUNTIME_MODE="${runtime_mode}" \
-RADROOTS_APP_RUN_ID="${run_id}" \
 RADROOTS_APP_DEFAULT_NOSTR_RELAY_URL="${default_nostr_relay_url}" \
 RADROOTS_APP_LOCAL_LOG_ROOT="${local_log_root}" \
 "${script_dir}/run_host.sh" &
@@ -178,7 +174,6 @@ assert_raw_logs_exist "${stdout_file}" "${stderr_file}"
 terminate_runner "${runner_pid}"
 runner_pid=""
 
-degraded_run_id="$(radroots_studio_app_run_id "${runtime_mode}")"
 degraded_log_root="${tmp_root}/degraded-logs"
 degraded_structured_log_file="${degraded_log_root}/apps/local/app/app-macos-native/${date_utc}.jsonl"
 degraded_latest_log_path="${degraded_log_root}/apps/local/app/app-macos-native/latest.jsonl"
@@ -187,7 +182,6 @@ degraded_stderr_file="${degraded_log_root}/apps/local/app/app-macos-native/raw/s
 
 env -u HOME \
   RADROOTS_APP_RUNTIME_MODE="${runtime_mode}" \
-  RADROOTS_APP_RUN_ID="${degraded_run_id}" \
   RADROOTS_APP_DEFAULT_NOSTR_RELAY_URL="${default_nostr_relay_url}" \
   RADROOTS_APP_LOCAL_LOG_ROOT="${degraded_log_root}" \
   "${script_dir}/run_host.sh" &
