@@ -1,0 +1,1375 @@
+use std::collections::BTreeMap;
+
+use radroots_studio_app_models::{
+    FarmId, FulfillmentWindowId, FulfillmentWindowSummary, OrderDetailItemRow,
+    OrderDetailProjection, OrderId, OrderPrimaryAction, OrderStatus, OrdersFilter,
+    OrdersListProjection, OrdersListRow, OrdersListSummary, OrdersScreenQueryState,
+    PackDayPackListRow, PackDayProductTotalRow, PackDayProjection, PackDayRosterRow,
+    PackDayScreenQueryState,
+};
+use rusqlite::{Connection, OptionalExtension, params};
+
+use crate::AppSqliteError;
+
+pub struct AppOrdersRepository<'a> {
+    connection: &'a Connection,
+}
+
+impl<'a> AppOrdersRepository<'a> {
+    pub const fn new(connection: &'a Connection) -> Self {
+        Self { connection }
+    }
+
+    pub fn load_orders_list(
+        &self,
+        farm_id: FarmId,
+        query: &OrdersScreenQueryState,
+    ) -> Result<OrdersListProjection, AppSqliteError> {
+        let mut records = self.load_order_records(farm_id, query.fulfillment_window_id)?;
+        let summary = summarize_orders(&records);
+
+        records.retain(|record| record.matches_filter(query.filter));
+
+        Ok(OrdersListProjection {
+            summary,
+            rows: records
+                .into_iter()
+                .map(OrderRecord::into_list_row)
+                .collect(),
+        })
+    }
+
+    pub fn load_order_detail(
+        &self,
+        farm_id: FarmId,
+        order_id: OrderId,
+    ) -> Result<Option<OrderDetailProjection>, AppSqliteError> {
+        let record = self
+            .connection
+            .query_row(
+                "select
+                    o.id,
+                    o.farm_id,
+                    o.order_number,
+                    o.customer_display_name,
+                    o.status,
+                    o.fulfillment_window_id,
+                    fw.label,
+                    pl.label
+                 from orders o
+                 left join fulfillment_windows fw on fw.id = o.fulfillment_window_id
+                 left join pickup_locations pl on pl.id = fw.pickup_location_id
+                 where o.farm_id = ?1 and o.id = ?2
+                 limit 1",
+                params![farm_id.to_string(), order_id.to_string()],
+                |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, String>(2)?,
+                        row.get::<_, String>(3)?,
+                        row.get::<_, String>(4)?,
+                        row.get::<_, Option<String>>(5)?,
+                        row.get::<_, Option<String>>(6)?,
+                        row.get::<_, Option<String>>(7)?,
+                    ))
+                },
+            )
+            .optional()
+            .map_err(|source| AppSqliteError::Query {
+                operation: "load order detail",
+                source,
+            })?;
+
+        record
+            .map(
+                |(
+                    order_id,
+                    farm_id,
+                    order_number,
+                    customer_display_name,
+                    status,
+                    fulfillment_window_id,
+                    fulfillment_window_label,
+                    pickup_location_label,
+                )| {
+                    let status = parse_order_status("orders.status", status)?;
+                    let items = self.load_order_detail_items(order_id.clone())?;
+                    Ok(OrderDetailProjection {
+                        order_id: parse_typed_id("orders.id", order_id)?,
+                        farm_id: parse_typed_id("orders.farm_id", farm_id)?,
+                        order_number,
+                        customer_display_name,
+                        status,
+                        fulfillment_window_id: parse_optional_typed_id(
+                            "orders.fulfillment_window_id",
+                            fulfillment_window_id,
+                        )?,
+                        fulfillment_window_label: empty_string_to_none(fulfillment_window_label),
+                        pickup_location_label: empty_string_to_none(pickup_location_label),
+                        items,
+                        primary_action: primary_action_for_status(status),
+                    })
+                },
+            )
+            .transpose()
+    }
+
+    pub fn load_pack_day(
+        &self,
+        farm_id: FarmId,
+        query: &PackDayScreenQueryState,
+    ) -> Result<PackDayProjection, AppSqliteError> {
+        let fulfillment_window = if let Some(fulfillment_window_id) = query.fulfillment_window_id {
+            self.load_fulfillment_window_by_id(farm_id, fulfillment_window_id)?
+        } else {
+            self.load_next_upcoming_fulfillment_window(farm_id)?
+                .or(self.load_first_active_order_window(farm_id)?)
+        };
+
+        let Some(fulfillment_window) = fulfillment_window else {
+            return Ok(PackDayProjection::default());
+        };
+
+        let totals_by_product =
+            self.load_pack_day_totals(farm_id, fulfillment_window.fulfillment_window_id)?;
+        let pack_list =
+            self.load_pack_day_pack_list(farm_id, fulfillment_window.fulfillment_window_id)?;
+        let pickup_roster =
+            self.load_pack_day_roster(farm_id, fulfillment_window.fulfillment_window_id)?;
+
+        Ok(PackDayProjection {
+            fulfillment_window: Some(fulfillment_window),
+            totals_by_product,
+            pack_list,
+            pickup_roster,
+        })
+    }
+
+    pub fn mark_order_packed(
+        &self,
+        farm_id: FarmId,
+        order_id: OrderId,
+    ) -> Result<bool, AppSqliteError> {
+        self.transition_order_status(
+            farm_id,
+            order_id,
+            OrderStatus::Scheduled,
+            OrderStatus::Packed,
+            "mark order packed",
+        )
+    }
+
+    pub fn mark_order_completed(
+        &self,
+        farm_id: FarmId,
+        order_id: OrderId,
+    ) -> Result<bool, AppSqliteError> {
+        self.transition_order_status(
+            farm_id,
+            order_id,
+            OrderStatus::Packed,
+            OrderStatus::Completed,
+            "mark order completed",
+        )
+    }
+
+    fn load_order_records(
+        &self,
+        farm_id: FarmId,
+        fulfillment_window_id: Option<FulfillmentWindowId>,
+    ) -> Result<Vec<OrderRecord>, AppSqliteError> {
+        let mut statement = self
+            .connection
+            .prepare(
+                "select
+                    o.id,
+                    o.farm_id,
+                    o.fulfillment_window_id,
+                    o.order_number,
+                    o.customer_display_name,
+                    o.status,
+                    fw.label,
+                    pl.label
+                 from orders o
+                 left join fulfillment_windows fw on fw.id = o.fulfillment_window_id
+                 left join pickup_locations pl on pl.id = fw.pickup_location_id
+                 where o.farm_id = ?1
+                   and (?2 is null or o.fulfillment_window_id = ?2)
+                 order by o.updated_at desc, o.id desc",
+            )
+            .map_err(|source| AppSqliteError::Query {
+                operation: "prepare orders list",
+                source,
+            })?;
+        let rows = statement
+            .query_map(
+                params![
+                    farm_id.to_string(),
+                    fulfillment_window_id.map(|id| id.to_string())
+                ],
+                |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, Option<String>>(2)?,
+                        row.get::<_, String>(3)?,
+                        row.get::<_, String>(4)?,
+                        row.get::<_, String>(5)?,
+                        row.get::<_, Option<String>>(6)?,
+                        row.get::<_, Option<String>>(7)?,
+                    ))
+                },
+            )
+            .map_err(|source| AppSqliteError::Query {
+                operation: "query orders list",
+                source,
+            })?;
+        let mut records = Vec::new();
+
+        for row in rows {
+            let (
+                order_id,
+                farm_id,
+                fulfillment_window_id,
+                order_number,
+                customer_display_name,
+                status,
+                fulfillment_window_label,
+                pickup_location_label,
+            ) = row.map_err(|source| AppSqliteError::Query {
+                operation: "read orders list",
+                source,
+            })?;
+
+            records.push(OrderRecord {
+                order_id: parse_typed_id("orders.id", order_id)?,
+                farm_id: parse_typed_id("orders.farm_id", farm_id)?,
+                fulfillment_window_id: parse_optional_typed_id(
+                    "orders.fulfillment_window_id",
+                    fulfillment_window_id,
+                )?,
+                order_number,
+                customer_display_name,
+                fulfillment_window_label: empty_string_to_none(fulfillment_window_label),
+                pickup_location_label: empty_string_to_none(pickup_location_label),
+                status: parse_order_status("orders.status", status)?,
+            });
+        }
+
+        Ok(records)
+    }
+
+    fn load_order_detail_items(
+        &self,
+        order_id: String,
+    ) -> Result<Vec<OrderDetailItemRow>, AppSqliteError> {
+        let mut statement = self
+            .connection
+            .prepare(
+                "select title, quantity_display
+                 from order_lines
+                 where order_id = ?1
+                 order by sort_index asc, id asc",
+            )
+            .map_err(|source| AppSqliteError::Query {
+                operation: "prepare order detail items",
+                source,
+            })?;
+        let rows = statement
+            .query_map(params![order_id], |row| {
+                Ok(OrderDetailItemRow {
+                    title: row.get(0)?,
+                    quantity_display: row.get(1)?,
+                })
+            })
+            .map_err(|source| AppSqliteError::Query {
+                operation: "query order detail items",
+                source,
+            })?;
+
+        rows.collect::<Result<Vec<_>, _>>()
+            .map_err(|source| AppSqliteError::Query {
+                operation: "read order detail items",
+                source,
+            })
+    }
+
+    fn load_fulfillment_window_by_id(
+        &self,
+        farm_id: FarmId,
+        fulfillment_window_id: FulfillmentWindowId,
+    ) -> Result<Option<FulfillmentWindowSummary>, AppSqliteError> {
+        self.connection
+            .query_row(
+                "select id, starts_at, ends_at
+                 from fulfillment_windows
+                 where farm_id = ?1 and id = ?2
+                 limit 1",
+                params![farm_id.to_string(), fulfillment_window_id.to_string()],
+                |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, String>(2)?,
+                    ))
+                },
+            )
+            .optional()
+            .map_err(|source| AppSqliteError::Query {
+                operation: "load pack day fulfillment window",
+                source,
+            })?
+            .map(|(fulfillment_window_id, starts_at, ends_at)| {
+                Ok(FulfillmentWindowSummary {
+                    fulfillment_window_id: parse_typed_id(
+                        "fulfillment_windows.id",
+                        fulfillment_window_id,
+                    )?,
+                    farm_id,
+                    starts_at,
+                    ends_at,
+                })
+            })
+            .transpose()
+    }
+
+    fn load_next_upcoming_fulfillment_window(
+        &self,
+        farm_id: FarmId,
+    ) -> Result<Option<FulfillmentWindowSummary>, AppSqliteError> {
+        self.connection
+            .query_row(
+                "select id, starts_at, ends_at
+                 from fulfillment_windows
+                 where farm_id = ?1 and starts_at >= strftime('%Y-%m-%dT%H:%M:%SZ', 'now')
+                 order by starts_at asc, id asc
+                 limit 1",
+                params![farm_id.to_string()],
+                |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, String>(2)?,
+                    ))
+                },
+            )
+            .optional()
+            .map_err(|source| AppSqliteError::Query {
+                operation: "load next pack day fulfillment window",
+                source,
+            })?
+            .map(|(fulfillment_window_id, starts_at, ends_at)| {
+                Ok(FulfillmentWindowSummary {
+                    fulfillment_window_id: parse_typed_id(
+                        "fulfillment_windows.id",
+                        fulfillment_window_id,
+                    )?,
+                    farm_id,
+                    starts_at,
+                    ends_at,
+                })
+            })
+            .transpose()
+    }
+
+    fn load_first_active_order_window(
+        &self,
+        farm_id: FarmId,
+    ) -> Result<Option<FulfillmentWindowSummary>, AppSqliteError> {
+        self.connection
+            .query_row(
+                "select fw.id, fw.starts_at, fw.ends_at
+                 from orders o
+                 join fulfillment_windows fw on fw.id = o.fulfillment_window_id
+                 where o.farm_id = ?1
+                   and o.status in ('needs_action', 'scheduled', 'packed')
+                 order by fw.starts_at asc, fw.id asc
+                 limit 1",
+                params![farm_id.to_string()],
+                |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, String>(2)?,
+                    ))
+                },
+            )
+            .optional()
+            .map_err(|source| AppSqliteError::Query {
+                operation: "load active pack day fulfillment window",
+                source,
+            })?
+            .map(|(fulfillment_window_id, starts_at, ends_at)| {
+                Ok(FulfillmentWindowSummary {
+                    fulfillment_window_id: parse_typed_id(
+                        "fulfillment_windows.id",
+                        fulfillment_window_id,
+                    )?,
+                    farm_id,
+                    starts_at,
+                    ends_at,
+                })
+            })
+            .transpose()
+    }
+
+    fn load_pack_day_totals(
+        &self,
+        farm_id: FarmId,
+        fulfillment_window_id: FulfillmentWindowId,
+    ) -> Result<Vec<PackDayProductTotalRow>, AppSqliteError> {
+        let mut statement = self
+            .connection
+            .prepare(
+                "select l.title, l.quantity_value, l.quantity_unit_label
+                 from order_lines l
+                 join orders o on o.id = l.order_id
+                 where o.farm_id = ?1
+                   and o.fulfillment_window_id = ?2
+                   and o.status in ('needs_action', 'scheduled', 'packed')
+                 order by l.title asc, l.sort_index asc, l.id asc",
+            )
+            .map_err(|source| AppSqliteError::Query {
+                operation: "prepare pack day totals",
+                source,
+            })?;
+        let rows = statement
+            .query_map(
+                params![farm_id.to_string(), fulfillment_window_id.to_string()],
+                |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, u32>(1)?,
+                        row.get::<_, String>(2)?,
+                    ))
+                },
+            )
+            .map_err(|source| AppSqliteError::Query {
+                operation: "query pack day totals",
+                source,
+            })?;
+        let mut totals = BTreeMap::<(String, String), u32>::new();
+
+        for row in rows {
+            let (title, quantity_value, quantity_unit_label) =
+                row.map_err(|source| AppSqliteError::Query {
+                    operation: "read pack day totals",
+                    source,
+                })?;
+            *totals.entry((title, quantity_unit_label)).or_insert(0) += quantity_value;
+        }
+
+        Ok(totals
+            .into_iter()
+            .map(
+                |((title, quantity_unit_label), quantity_value)| PackDayProductTotalRow {
+                    title,
+                    quantity_display: format_quantity_display(quantity_value, &quantity_unit_label),
+                },
+            )
+            .collect())
+    }
+
+    fn load_pack_day_pack_list(
+        &self,
+        farm_id: FarmId,
+        fulfillment_window_id: FulfillmentWindowId,
+    ) -> Result<Vec<PackDayPackListRow>, AppSqliteError> {
+        let mut statement = self
+            .connection
+            .prepare(
+                "select o.customer_display_name, l.title, l.quantity_display
+                 from order_lines l
+                 join orders o on o.id = l.order_id
+                 where o.farm_id = ?1
+                   and o.fulfillment_window_id = ?2
+                   and o.status in ('needs_action', 'scheduled', 'packed')
+                 order by l.title asc, o.customer_display_name asc, o.order_number asc, l.sort_index asc, l.id asc",
+            )
+            .map_err(|source| AppSqliteError::Query {
+                operation: "prepare pack day pack list",
+                source,
+            })?;
+        let rows = statement
+            .query_map(
+                params![farm_id.to_string(), fulfillment_window_id.to_string()],
+                |row| {
+                    Ok(PackDayPackListRow {
+                        title: row.get(1)?,
+                        quantity_display: format!(
+                            "{}: {}",
+                            row.get::<_, String>(0)?,
+                            row.get::<_, String>(2)?
+                        ),
+                    })
+                },
+            )
+            .map_err(|source| AppSqliteError::Query {
+                operation: "query pack day pack list",
+                source,
+            })?;
+
+        rows.collect::<Result<Vec<_>, _>>()
+            .map_err(|source| AppSqliteError::Query {
+                operation: "read pack day pack list",
+                source,
+            })
+    }
+
+    fn load_pack_day_roster(
+        &self,
+        farm_id: FarmId,
+        fulfillment_window_id: FulfillmentWindowId,
+    ) -> Result<Vec<PackDayRosterRow>, AppSqliteError> {
+        let mut statement = self
+            .connection
+            .prepare(
+                "select id, order_number, customer_display_name
+                 from orders
+                 where farm_id = ?1
+                   and fulfillment_window_id = ?2
+                   and status in ('needs_action', 'scheduled', 'packed')
+                 order by customer_display_name asc, order_number asc, id asc",
+            )
+            .map_err(|source| AppSqliteError::Query {
+                operation: "prepare pack day roster",
+                source,
+            })?;
+        let rows = statement
+            .query_map(
+                params![farm_id.to_string(), fulfillment_window_id.to_string()],
+                |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, String>(2)?,
+                    ))
+                },
+            )
+            .map_err(|source| AppSqliteError::Query {
+                operation: "query pack day roster",
+                source,
+            })?;
+        let mut roster = Vec::new();
+
+        for row in rows {
+            let (order_id, order_number, customer_display_name) =
+                row.map_err(|source| AppSqliteError::Query {
+                    operation: "read pack day roster",
+                    source,
+                })?;
+            roster.push(PackDayRosterRow {
+                order_id: parse_typed_id("orders.id", order_id)?,
+                order_number,
+                customer_display_name,
+            });
+        }
+
+        Ok(roster)
+    }
+
+    fn transition_order_status(
+        &self,
+        farm_id: FarmId,
+        order_id: OrderId,
+        current_status: OrderStatus,
+        next_status: OrderStatus,
+        operation: &'static str,
+    ) -> Result<bool, AppSqliteError> {
+        let updated_rows = self
+            .connection
+            .execute(
+                "update orders
+                 set
+                    status = ?3,
+                    updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now')
+                 where farm_id = ?1
+                   and id = ?2
+                   and status = ?4",
+                params![
+                    farm_id.to_string(),
+                    order_id.to_string(),
+                    next_status.storage_key(),
+                    current_status.storage_key(),
+                ],
+            )
+            .map_err(|source| AppSqliteError::Query { operation, source })?;
+
+        Ok(updated_rows > 0)
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct OrderRecord {
+    order_id: OrderId,
+    farm_id: FarmId,
+    fulfillment_window_id: Option<FulfillmentWindowId>,
+    order_number: String,
+    customer_display_name: String,
+    fulfillment_window_label: Option<String>,
+    pickup_location_label: Option<String>,
+    status: OrderStatus,
+}
+
+impl OrderRecord {
+    fn matches_filter(&self, filter: OrdersFilter) -> bool {
+        match filter {
+            OrdersFilter::All => true,
+            OrdersFilter::NeedsAction => self.status == OrderStatus::NeedsAction,
+            OrdersFilter::Scheduled => self.status == OrderStatus::Scheduled,
+            OrdersFilter::Packed => self.status == OrderStatus::Packed,
+            OrdersFilter::Completed => self.status == OrderStatus::Completed,
+            OrdersFilter::Refunded => self.status == OrderStatus::Refunded,
+        }
+    }
+
+    fn into_list_row(self) -> OrdersListRow {
+        OrdersListRow {
+            order_id: self.order_id,
+            farm_id: self.farm_id,
+            fulfillment_window_id: self.fulfillment_window_id,
+            order_number: self.order_number,
+            customer_display_name: self.customer_display_name,
+            fulfillment_window_label: self.fulfillment_window_label,
+            pickup_location_label: self.pickup_location_label,
+            status: self.status,
+            primary_action: primary_action_for_status(self.status),
+        }
+    }
+}
+
+fn summarize_orders(records: &[OrderRecord]) -> OrdersListSummary {
+    let mut summary = OrdersListSummary {
+        total_orders: records.len() as u32,
+        ..OrdersListSummary::default()
+    };
+
+    for record in records {
+        match record.status {
+            OrderStatus::NeedsAction => summary.needs_action_orders += 1,
+            OrderStatus::Scheduled => summary.scheduled_orders += 1,
+            OrderStatus::Packed => summary.packed_orders += 1,
+            OrderStatus::Completed | OrderStatus::Refunded => {}
+        }
+    }
+
+    summary
+}
+
+fn primary_action_for_status(status: OrderStatus) -> Option<OrderPrimaryAction> {
+    match status {
+        OrderStatus::NeedsAction => Some(OrderPrimaryAction::Review),
+        OrderStatus::Scheduled => Some(OrderPrimaryAction::MarkPacked),
+        OrderStatus::Packed => Some(OrderPrimaryAction::MarkCompleted),
+        OrderStatus::Completed | OrderStatus::Refunded => None,
+    }
+}
+
+fn format_quantity_display(quantity_value: u32, quantity_unit_label: &str) -> String {
+    if quantity_unit_label.trim().is_empty() {
+        quantity_value.to_string()
+    } else {
+        format!("{quantity_value} {}", quantity_unit_label.trim())
+    }
+}
+
+fn parse_typed_id<T>(field: &'static str, value: String) -> Result<T, AppSqliteError>
+where
+    T: std::str::FromStr,
+{
+    value
+        .parse()
+        .map_err(|_| AppSqliteError::DecodeId { field, value })
+}
+
+fn parse_optional_typed_id<T>(
+    field: &'static str,
+    value: Option<String>,
+) -> Result<Option<T>, AppSqliteError>
+where
+    T: std::str::FromStr,
+{
+    value.map(|value| parse_typed_id(field, value)).transpose()
+}
+
+fn parse_order_status(field: &'static str, value: String) -> Result<OrderStatus, AppSqliteError> {
+    match value.as_str() {
+        "needs_action" => Ok(OrderStatus::NeedsAction),
+        "scheduled" => Ok(OrderStatus::Scheduled),
+        "packed" => Ok(OrderStatus::Packed),
+        "completed" => Ok(OrderStatus::Completed),
+        "refunded" => Ok(OrderStatus::Refunded),
+        _ => Err(AppSqliteError::DecodeEnum { field, value }),
+    }
+}
+
+fn empty_string_to_none(value: Option<String>) -> Option<String> {
+    value.and_then(|value| {
+        let trimmed = value.trim().to_owned();
+        if trimmed.is_empty() {
+            None
+        } else {
+            Some(trimmed)
+        }
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use radroots_studio_app_models::{
+        FarmId, FulfillmentWindowId, OrderId, OrderPrimaryAction, OrderStatus, OrdersFilter,
+        OrdersScreenQueryState, PackDayProductTotalRow, PackDayScreenQueryState, PickupLocationId,
+    };
+    use rusqlite::{Connection, params};
+
+    use crate::{AppSqliteStore, DatabaseTarget};
+
+    #[test]
+    fn orders_list_loads_summary_rows_and_window_filter_truthfully() {
+        let store = AppSqliteStore::open(DatabaseTarget::InMemory).expect("store should open");
+        let connection = store.connection();
+        let farm_id = FarmId::new();
+        let other_farm_id = FarmId::new();
+        let fulfillment_window_id = FulfillmentWindowId::new();
+        let other_window_id = FulfillmentWindowId::new();
+
+        insert_farm(
+            connection,
+            farm_id,
+            "Willow farm",
+            "ready",
+            "2026-04-17T08:00:00Z",
+        );
+        insert_farm(
+            connection,
+            other_farm_id,
+            "Other farm",
+            "ready",
+            "2026-04-17T08:00:00Z",
+        );
+        let pickup_location_id = insert_pickup_location(connection, farm_id, "North barn", true);
+        insert_window(
+            connection,
+            fulfillment_window_id,
+            farm_id,
+            Some(pickup_location_id),
+            "Friday pickup",
+            "2099-04-18T16:00:00Z",
+            "2099-04-18T18:00:00Z",
+            "2099-04-17T18:00:00Z",
+        );
+        insert_window(
+            connection,
+            other_window_id,
+            farm_id,
+            None,
+            "Saturday pickup",
+            "2099-04-19T16:00:00Z",
+            "2099-04-19T18:00:00Z",
+            "2099-04-18T18:00:00Z",
+        );
+
+        insert_order(
+            connection,
+            OrderId::new(),
+            farm_id,
+            Some(fulfillment_window_id),
+            "R-100",
+            "Casey",
+            "needs_action",
+            "2026-04-17T10:00:00Z",
+        );
+        insert_order(
+            connection,
+            OrderId::new(),
+            farm_id,
+            Some(fulfillment_window_id),
+            "R-101",
+            "Taylor",
+            "scheduled",
+            "2026-04-17T11:00:00Z",
+        );
+        insert_order(
+            connection,
+            OrderId::new(),
+            farm_id,
+            Some(fulfillment_window_id),
+            "R-102",
+            "Robin",
+            "packed",
+            "2026-04-17T12:00:00Z",
+        );
+        insert_order(
+            connection,
+            OrderId::new(),
+            farm_id,
+            Some(other_window_id),
+            "R-103",
+            "Morgan",
+            "completed",
+            "2026-04-17T13:00:00Z",
+        );
+        insert_order(
+            connection,
+            OrderId::new(),
+            farm_id,
+            None,
+            "R-104",
+            "Alex",
+            "refunded",
+            "2026-04-17T14:00:00Z",
+        );
+        insert_order(
+            connection,
+            OrderId::new(),
+            other_farm_id,
+            Some(fulfillment_window_id),
+            "R-999",
+            "Other",
+            "needs_action",
+            "2026-04-17T15:00:00Z",
+        );
+
+        let projection = store
+            .load_orders_list(
+                farm_id,
+                &OrdersScreenQueryState {
+                    filter: OrdersFilter::NeedsAction,
+                    fulfillment_window_id: Some(fulfillment_window_id),
+                },
+            )
+            .expect("orders list should load");
+
+        assert_eq!(projection.summary.total_orders, 3);
+        assert_eq!(projection.summary.needs_action_orders, 1);
+        assert_eq!(projection.summary.scheduled_orders, 1);
+        assert_eq!(projection.summary.packed_orders, 1);
+        assert_eq!(projection.rows.len(), 1);
+        assert_eq!(projection.rows[0].order_number, "R-100");
+        assert_eq!(
+            projection.rows[0].fulfillment_window_label.as_deref(),
+            Some("Friday pickup")
+        );
+        assert_eq!(
+            projection.rows[0].pickup_location_label.as_deref(),
+            Some("North barn")
+        );
+        assert_eq!(
+            projection.rows[0].primary_action,
+            Some(OrderPrimaryAction::Review)
+        );
+    }
+
+    #[test]
+    fn order_detail_loads_items_and_context() {
+        let store = AppSqliteStore::open(DatabaseTarget::InMemory).expect("store should open");
+        let connection = store.connection();
+        let farm_id = FarmId::new();
+        let fulfillment_window_id = FulfillmentWindowId::new();
+        let order_id = OrderId::new();
+
+        insert_farm(
+            connection,
+            farm_id,
+            "Willow farm",
+            "ready",
+            "2026-04-17T08:00:00Z",
+        );
+        let pickup_location_id = insert_pickup_location(connection, farm_id, "North barn", true);
+        insert_window(
+            connection,
+            fulfillment_window_id,
+            farm_id,
+            Some(pickup_location_id),
+            "Friday pickup",
+            "2099-04-18T16:00:00Z",
+            "2099-04-18T18:00:00Z",
+            "2099-04-17T18:00:00Z",
+        );
+        insert_order(
+            connection,
+            order_id,
+            farm_id,
+            Some(fulfillment_window_id),
+            "R-100",
+            "Casey",
+            "scheduled",
+            "2026-04-17T10:00:00Z",
+        );
+        insert_order_line(
+            connection,
+            "line-1",
+            order_id,
+            "Salad mix",
+            2,
+            "bags",
+            "2 bags",
+            0,
+        );
+        insert_order_line(
+            connection, "line-2", order_id, "Carrots", 1, "bunches", "1 bunch", 1,
+        );
+
+        let detail = store
+            .load_order_detail(farm_id, order_id)
+            .expect("order detail should load")
+            .expect("order detail should exist");
+
+        assert_eq!(detail.order_number, "R-100");
+        assert_eq!(detail.customer_display_name, "Casey");
+        assert_eq!(detail.status, OrderStatus::Scheduled);
+        assert_eq!(
+            detail.fulfillment_window_label.as_deref(),
+            Some("Friday pickup")
+        );
+        assert_eq!(detail.pickup_location_label.as_deref(), Some("North barn"));
+        assert_eq!(detail.items.len(), 2);
+        assert_eq!(detail.items[0].title, "Salad mix");
+        assert_eq!(detail.items[1].quantity_display, "1 bunch");
+        assert_eq!(detail.primary_action, Some(OrderPrimaryAction::MarkPacked));
+    }
+
+    #[test]
+    fn pack_day_defaults_to_next_window_and_projects_totals_pack_list_and_roster() {
+        let store = AppSqliteStore::open(DatabaseTarget::InMemory).expect("store should open");
+        let connection = store.connection();
+        let farm_id = FarmId::new();
+        let next_window_id = FulfillmentWindowId::new();
+        let later_window_id = FulfillmentWindowId::new();
+        let scheduled_order_id = OrderId::new();
+        let packed_order_id = OrderId::new();
+
+        insert_farm(
+            connection,
+            farm_id,
+            "Willow farm",
+            "ready",
+            "2026-04-17T08:00:00Z",
+        );
+        let pickup_location_id = insert_pickup_location(connection, farm_id, "North barn", true);
+        insert_window(
+            connection,
+            next_window_id,
+            farm_id,
+            Some(pickup_location_id),
+            "Friday pickup",
+            "2099-04-18T16:00:00Z",
+            "2099-04-18T18:00:00Z",
+            "2099-04-17T18:00:00Z",
+        );
+        insert_window(
+            connection,
+            later_window_id,
+            farm_id,
+            Some(pickup_location_id),
+            "Saturday pickup",
+            "2099-04-19T16:00:00Z",
+            "2099-04-19T18:00:00Z",
+            "2099-04-18T18:00:00Z",
+        );
+        insert_order(
+            connection,
+            scheduled_order_id,
+            farm_id,
+            Some(next_window_id),
+            "R-100",
+            "Casey",
+            "scheduled",
+            "2026-04-17T10:00:00Z",
+        );
+        insert_order(
+            connection,
+            packed_order_id,
+            farm_id,
+            Some(next_window_id),
+            "R-101",
+            "Taylor",
+            "packed",
+            "2026-04-17T11:00:00Z",
+        );
+        insert_order(
+            connection,
+            OrderId::new(),
+            farm_id,
+            Some(next_window_id),
+            "R-102",
+            "Robin",
+            "completed",
+            "2026-04-17T12:00:00Z",
+        );
+        insert_order(
+            connection,
+            OrderId::new(),
+            farm_id,
+            Some(later_window_id),
+            "R-200",
+            "Morgan",
+            "scheduled",
+            "2026-04-17T13:00:00Z",
+        );
+        insert_order_line(
+            connection,
+            "line-1",
+            scheduled_order_id,
+            "Salad mix",
+            2,
+            "bags",
+            "2 bags",
+            0,
+        );
+        insert_order_line(
+            connection,
+            "line-2",
+            packed_order_id,
+            "Salad mix",
+            1,
+            "bags",
+            "1 bag",
+            0,
+        );
+        insert_order_line(
+            connection,
+            "line-3",
+            packed_order_id,
+            "Carrots",
+            3,
+            "bunches",
+            "3 bunches",
+            1,
+        );
+
+        let projection = store
+            .load_pack_day(farm_id, &PackDayScreenQueryState::default())
+            .expect("pack day should load");
+
+        assert_eq!(
+            projection
+                .fulfillment_window
+                .expect("window should exist")
+                .fulfillment_window_id,
+            next_window_id
+        );
+        assert_eq!(
+            projection.totals_by_product,
+            vec![
+                PackDayProductTotalRow {
+                    title: "Carrots".to_owned(),
+                    quantity_display: "3 bunches".to_owned(),
+                },
+                PackDayProductTotalRow {
+                    title: "Salad mix".to_owned(),
+                    quantity_display: "3 bags".to_owned(),
+                },
+            ]
+        );
+        assert_eq!(projection.pack_list.len(), 3);
+        assert_eq!(projection.pack_list[0].title, "Carrots");
+        assert_eq!(
+            projection.pack_list[0].quantity_display,
+            "Taylor: 3 bunches"
+        );
+        assert_eq!(projection.pickup_roster.len(), 2);
+        assert_eq!(projection.pickup_roster[0].order_id, scheduled_order_id);
+        assert_eq!(projection.pickup_roster[1].order_id, packed_order_id);
+    }
+
+    #[test]
+    fn order_status_transitions_are_guarded() {
+        let store = AppSqliteStore::open(DatabaseTarget::InMemory).expect("store should open");
+        let connection = store.connection();
+        let farm_id = FarmId::new();
+        let scheduled_order_id = OrderId::new();
+        let packed_order_id = OrderId::new();
+
+        insert_farm(
+            connection,
+            farm_id,
+            "Willow farm",
+            "ready",
+            "2026-04-17T08:00:00Z",
+        );
+        insert_order(
+            connection,
+            scheduled_order_id,
+            farm_id,
+            None,
+            "R-100",
+            "Casey",
+            "scheduled",
+            "2026-04-17T10:00:00Z",
+        );
+        insert_order(
+            connection,
+            packed_order_id,
+            farm_id,
+            None,
+            "R-101",
+            "Taylor",
+            "packed",
+            "2026-04-17T11:00:00Z",
+        );
+
+        assert!(
+            store
+                .mark_order_packed(farm_id, scheduled_order_id)
+                .expect("scheduled order should mark packed")
+        );
+        assert!(
+            !store
+                .mark_order_packed(farm_id, packed_order_id)
+                .expect("packed order should not mark packed twice")
+        );
+        assert!(
+            store
+                .mark_order_completed(farm_id, packed_order_id)
+                .expect("packed order should mark completed")
+        );
+        assert_eq!(
+            read_order_status(connection, scheduled_order_id),
+            OrderStatus::Packed
+        );
+        assert_eq!(
+            read_order_status(connection, packed_order_id),
+            OrderStatus::Completed
+        );
+    }
+
+    #[test]
+    fn orders_list_stays_aligned_with_today_needs_action_order_boundary() {
+        let store = AppSqliteStore::open(DatabaseTarget::InMemory).expect("store should open");
+        let connection = store.connection();
+        let farm_id = FarmId::new();
+        let fulfillment_window_id = FulfillmentWindowId::new();
+
+        insert_farm(
+            connection,
+            farm_id,
+            "Willow farm",
+            "ready",
+            "2026-04-17T08:00:00Z",
+        );
+        insert_window(
+            connection,
+            fulfillment_window_id,
+            farm_id,
+            None,
+            "Friday pickup",
+            "2099-04-18T16:00:00Z",
+            "2099-04-18T18:00:00Z",
+            "2099-04-17T18:00:00Z",
+        );
+        for index in 0..5 {
+            insert_order(
+                connection,
+                OrderId::new(),
+                farm_id,
+                Some(fulfillment_window_id),
+                &format!("R-10{index}"),
+                "Casey",
+                "needs_action",
+                &format!("2026-04-17T0{index}:00:00Z"),
+            );
+        }
+
+        let today = store
+            .load_today_agenda(Some(farm_id))
+            .expect("today agenda should load");
+        let orders = store
+            .load_orders_list(
+                farm_id,
+                &OrdersScreenQueryState {
+                    filter: OrdersFilter::NeedsAction,
+                    fulfillment_window_id: None,
+                },
+            )
+            .expect("orders list should load");
+
+        assert_eq!(today.orders_needing_action.len(), 4);
+        assert_eq!(orders.rows.len(), 5);
+        let today_numbers = today
+            .orders_needing_action
+            .iter()
+            .map(|row| row.order_number.as_str())
+            .collect::<Vec<_>>();
+        let orders_numbers = orders
+            .rows
+            .iter()
+            .take(4)
+            .map(|row| row.order_number.as_str())
+            .collect::<Vec<_>>();
+        assert_eq!(today_numbers, orders_numbers);
+    }
+
+    fn insert_farm(
+        connection: &Connection,
+        farm_id: FarmId,
+        display_name: &str,
+        readiness: &str,
+        created_at: &str,
+    ) {
+        connection
+            .execute(
+                "insert into farms (
+                    id,
+                    display_name,
+                    readiness,
+                    timezone,
+                    currency_code,
+                    created_at,
+                    updated_at
+                 ) values (?1, ?2, ?3, 'UTC', 'USD', ?4, ?4)",
+                params![farm_id.to_string(), display_name, readiness, created_at],
+            )
+            .expect("farm insert should succeed");
+    }
+
+    fn insert_pickup_location(
+        connection: &Connection,
+        farm_id: FarmId,
+        label: &str,
+        is_default: bool,
+    ) -> PickupLocationId {
+        let pickup_location_id = PickupLocationId::new();
+
+        connection
+            .execute(
+                "insert into pickup_locations (
+                    id,
+                    farm_id,
+                    label,
+                    address_line,
+                    directions,
+                    is_default,
+                    created_at,
+                    updated_at
+                 ) values (?1, ?2, ?3, '14 County Road', null, ?4, '2026-04-17T08:00:00Z', '2026-04-17T08:00:00Z')",
+                params![
+                    pickup_location_id.to_string(),
+                    farm_id.to_string(),
+                    label,
+                    if is_default { 1_i64 } else { 0_i64 },
+                ],
+            )
+            .expect("pickup location insert should succeed");
+
+        pickup_location_id
+    }
+
+    fn insert_window(
+        connection: &Connection,
+        fulfillment_window_id: FulfillmentWindowId,
+        farm_id: FarmId,
+        pickup_location_id: Option<PickupLocationId>,
+        label: &str,
+        starts_at: &str,
+        ends_at: &str,
+        order_cutoff_at: &str,
+    ) {
+        connection
+            .execute(
+                "insert into fulfillment_windows (
+                    id,
+                    farm_id,
+                    starts_at,
+                    ends_at,
+                    capacity_limit,
+                    created_at,
+                    updated_at,
+                    pickup_location_id,
+                    label,
+                    order_cutoff_at
+                 ) values (?1, ?2, ?3, ?4, null, ?3, ?3, ?5, ?6, ?7)",
+                params![
+                    fulfillment_window_id.to_string(),
+                    farm_id.to_string(),
+                    starts_at,
+                    ends_at,
+                    pickup_location_id.map(|value| value.to_string()),
+                    label,
+                    order_cutoff_at,
+                ],
+            )
+            .expect("fulfillment window insert should succeed");
+    }
+
+    fn insert_order(
+        connection: &Connection,
+        order_id: OrderId,
+        farm_id: FarmId,
+        fulfillment_window_id: Option<FulfillmentWindowId>,
+        order_number: &str,
+        customer_display_name: &str,
+        status: &str,
+        updated_at: &str,
+    ) {
+        connection
+            .execute(
+                "insert into orders (
+                    id,
+                    farm_id,
+                    fulfillment_window_id,
+                    order_number,
+                    customer_display_name,
+                    status,
+                    updated_at
+                 ) values (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+                params![
+                    order_id.to_string(),
+                    farm_id.to_string(),
+                    fulfillment_window_id.map(|id| id.to_string()),
+                    order_number,
+                    customer_display_name,
+                    status,
+                    updated_at,
+                ],
+            )
+            .expect("order insert should succeed");
+    }
+
+    fn insert_order_line(
+        connection: &Connection,
+        line_id: &str,
+        order_id: OrderId,
+        title: &str,
+        quantity_value: u32,
+        quantity_unit_label: &str,
+        quantity_display: &str,
+        sort_index: i64,
+    ) {
+        connection
+            .execute(
+                "insert into order_lines (
+                    id,
+                    order_id,
+                    title,
+                    quantity_value,
+                    quantity_unit_label,
+                    quantity_display,
+                    sort_index
+                 ) values (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+                params![
+                    line_id,
+                    order_id.to_string(),
+                    title,
+                    quantity_value,
+                    quantity_unit_label,
+                    quantity_display,
+                    sort_index,
+                ],
+            )
+            .expect("order line insert should succeed");
+    }
+
+    fn read_order_status(connection: &Connection, order_id: OrderId) -> OrderStatus {
+        let status = connection
+            .query_row(
+                "select status from orders where id = ?1 limit 1",
+                params![order_id.to_string()],
+                |row| row.get::<_, String>(0),
+            )
+            .expect("order status should load");
+
+        super::parse_order_status("orders.status", status).expect("order status should decode")
+    }
+}

@@ -6,6 +6,7 @@ mod error;
 mod farm_rules;
 mod farm_setup;
 mod migrations;
+mod orders;
 mod products;
 mod today;
 
@@ -13,9 +14,10 @@ use std::{fs, path::PathBuf, time::Duration};
 
 use radroots_studio_app_models::{
     AccountSurfaceActivationProjection, AppActivityContext, AppActivityEvent, AppActivityKind,
-    FarmId, FarmRulesProjection, FarmSetupProjection, FarmSummary, ProductEditorDraft, ProductId,
-    ProductPublishBlocker, ProductsFilter, ProductsListProjection, ProductsSort,
-    TodayAgendaProjection,
+    FarmId, FarmRulesProjection, FarmSetupProjection, FarmSummary, OrderDetailProjection, OrderId,
+    OrdersListProjection, OrdersScreenQueryState, PackDayProjection, PackDayScreenQueryState,
+    ProductEditorDraft, ProductId, ProductPublishBlocker, ProductsFilter, ProductsListProjection,
+    ProductsSort, TodayAgendaProjection,
 };
 use rusqlite::Connection;
 
@@ -27,6 +29,7 @@ pub use error::AppSqliteError;
 pub use farm_rules::{AppFarmRulesRepository, derive_farm_rules_readiness};
 pub use farm_setup::AppFarmSetupRepository;
 pub use migrations::latest_schema_version;
+pub use orders::AppOrdersRepository;
 pub use products::AppProductsRepository;
 pub use today::{
     AppTodayAgendaRepository, TODAY_AGENDA_LIST_LIMIT, TODAY_AGENDA_LOW_STOCK_THRESHOLD,
@@ -86,6 +89,10 @@ impl AppSqliteStore {
 
     pub fn products_repository(&self) -> AppProductsRepository<'_> {
         AppProductsRepository::new(&self.connection)
+    }
+
+    pub fn orders_repository(&self) -> AppOrdersRepository<'_> {
+        AppOrdersRepository::new(&self.connection)
     }
 
     pub fn load_today_agenda(
@@ -184,6 +191,49 @@ impl AppSqliteStore {
 
     pub fn create_product_draft(&self, farm_id: FarmId) -> Result<ProductId, AppSqliteError> {
         self.products_repository().create_product_draft(farm_id)
+    }
+
+    pub fn load_orders_list(
+        &self,
+        farm_id: FarmId,
+        query: &OrdersScreenQueryState,
+    ) -> Result<OrdersListProjection, AppSqliteError> {
+        self.orders_repository().load_orders_list(farm_id, query)
+    }
+
+    pub fn load_order_detail(
+        &self,
+        farm_id: FarmId,
+        order_id: OrderId,
+    ) -> Result<Option<OrderDetailProjection>, AppSqliteError> {
+        self.orders_repository()
+            .load_order_detail(farm_id, order_id)
+    }
+
+    pub fn load_pack_day(
+        &self,
+        farm_id: FarmId,
+        query: &PackDayScreenQueryState,
+    ) -> Result<PackDayProjection, AppSqliteError> {
+        self.orders_repository().load_pack_day(farm_id, query)
+    }
+
+    pub fn mark_order_packed(
+        &self,
+        farm_id: FarmId,
+        order_id: OrderId,
+    ) -> Result<bool, AppSqliteError> {
+        self.orders_repository()
+            .mark_order_packed(farm_id, order_id)
+    }
+
+    pub fn mark_order_completed(
+        &self,
+        farm_id: FarmId,
+        order_id: OrderId,
+    ) -> Result<bool, AppSqliteError> {
+        self.orders_repository()
+            .mark_order_completed(farm_id, order_id)
     }
 
     pub fn save_product_editor_draft(
@@ -345,6 +395,7 @@ mod tests {
         assert!(table_exists(connection, "farm_operating_rules"));
         assert!(table_exists(connection, "pickup_locations"));
         assert!(table_exists(connection, "blackout_periods"));
+        assert!(table_exists(connection, "order_lines"));
         assert!(column_exists(connection, "farms", "timezone"));
         assert!(column_exists(connection, "farms", "currency_code"));
         assert!(column_exists(
@@ -358,6 +409,13 @@ mod tests {
             "fulfillment_windows",
             "order_cutoff_at"
         ));
+        assert!(column_exists(connection, "order_lines", "quantity_value"));
+        assert!(column_exists(
+            connection,
+            "order_lines",
+            "quantity_unit_label"
+        ));
+        assert!(column_exists(connection, "order_lines", "quantity_display"));
         assert_eq!(row_count(connection, "sync_checkpoints"), 1);
 
         drop(store);
