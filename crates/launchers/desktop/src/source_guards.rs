@@ -1,4 +1,8 @@
-use std::collections::BTreeSet;
+use std::{
+    collections::BTreeSet,
+    fs,
+    path::{Path, PathBuf},
+};
 
 const ALLOWED_MENU_LITERALS: &[&str] = &["cmd-q", "settings window should open"];
 
@@ -297,6 +301,44 @@ const REQUIRED_WINDOW_COPY_KEYS: &[&str] = &[
     "AppTextKey::SettingsReadinessReady",
 ];
 
+const FORBIDDEN_LAUNCHER_UI_BYPASS_PATTERNS: &[(&str, &str)] = &[
+    (
+        "Button::new(",
+        "launcher code must use radroots_studio_app_ui button primitives",
+    ),
+    (
+        "Checkbox::new(",
+        "launcher code must use radroots_studio_app_ui checkbox primitives",
+    ),
+    (
+        "Input::new(",
+        "launcher code must use radroots_studio_app_ui input primitives",
+    ),
+    (
+        "TextInput::new(",
+        "launcher code must use radroots_studio_app_ui input primitives",
+    ),
+    (
+        "pub fn app_",
+        "shared app_* helpers belong in radroots_studio_app_ui, not in launcher code",
+    ),
+    (
+        "fn app_",
+        "shared app_* helpers belong in radroots_studio_app_ui, not in launcher code",
+    ),
+];
+
+const REMOVED_WINDOW_HELPER_FAMILIES: &[&str] = &[
+    "fn settings_account_detail_row(",
+    "fn settings_checkbox_row(",
+    "fn settings_text_field(",
+    "fn settings_dynamic_action_button(",
+    "fn settings_inventory_panel(",
+    "fn settings_inventory_field_row(",
+    "fn settings_validation_rows(",
+    "fn home_farm_setup_blocker(",
+];
+
 #[test]
 fn desktop_menu_source_uses_localized_copy_paths() {
     assert_eq!(
@@ -331,6 +373,31 @@ fn desktop_window_source_keeps_shell_reset_copy_keyed() {
     }
 }
 
+#[test]
+fn desktop_launcher_source_keeps_shared_ui_boundary_enforced() {
+    for (path, source) in launcher_source_files() {
+        for (pattern, reason) in FORBIDDEN_LAUNCHER_UI_BYPASS_PATTERNS {
+            assert!(
+                !source.contains(pattern),
+                "{} contains forbidden UI bypass pattern `{pattern}`: {reason}",
+                path.display()
+            );
+        }
+    }
+}
+
+#[test]
+fn desktop_window_source_does_not_reintroduce_removed_ui_helper_families() {
+    let source = include_str!("window.rs");
+
+    for helper_name in REMOVED_WINDOW_HELPER_FAMILIES {
+        assert!(
+            !source.contains(helper_name),
+            "window.rs reintroduced removed launcher-local helper family `{helper_name}`"
+        );
+    }
+}
+
 fn extract_string_literals(source: &str) -> BTreeSet<&str> {
     let mut literals = BTreeSet::new();
     let bytes = source.as_bytes();
@@ -351,4 +418,51 @@ fn extract_string_literals(source: &str) -> BTreeSet<&str> {
     }
 
     literals
+}
+
+fn launcher_source_files() -> Vec<(PathBuf, String)> {
+    let mut paths = Vec::new();
+    collect_rust_source_files(
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("src").as_path(),
+        &mut paths,
+    );
+    paths.sort();
+    paths
+        .into_iter()
+        .filter(|path| path.file_name().and_then(|name| name.to_str()) != Some("source_guards.rs"))
+        .map(|path| {
+            let source = fs::read_to_string(&path).unwrap_or_else(|error| {
+                panic!("failed to read launcher source {}: {error}", path.display())
+            });
+            (path, source)
+        })
+        .collect()
+}
+
+fn collect_rust_source_files(root: &Path, paths: &mut Vec<PathBuf>) {
+    let entries = fs::read_dir(root).unwrap_or_else(|error| {
+        panic!(
+            "failed to read launcher source directory {}: {error}",
+            root.display()
+        )
+    });
+
+    for entry in entries {
+        let entry = entry.unwrap_or_else(|error| {
+            panic!(
+                "failed to inspect launcher source directory {}: {error}",
+                root.display()
+            )
+        });
+        let path = entry.path();
+
+        if path.is_dir() {
+            collect_rust_source_files(path.as_path(), paths);
+            continue;
+        }
+
+        if path.extension().and_then(|extension| extension.to_str()) == Some("rs") {
+            paths.push(path);
+        }
+    }
 }
