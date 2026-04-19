@@ -3756,6 +3756,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "mf2_i18n"
+version = "0.1.0"
+dependencies = [
+ "mf2_i18n_core",
+ "mf2_i18n_embedded",
+ "mf2_i18n_native",
+ "mf2_i18n_runtime",
+ "mf2_i18n_std",
+]
+
+[[package]]
 name = "mf2_i18n_build"
 version = "0.1.0"
 dependencies = [
@@ -5061,9 +5072,9 @@ name = "radroots_studio_app_i18n"
 version = "0.1.0"
 dependencies = [
  "hex",
+ "mf2_i18n",
  "mf2_i18n_build",
  "mf2_i18n_core",
- "mf2_i18n_native",
  "serde",
  "serde_json",
  "toml 0.8.23",

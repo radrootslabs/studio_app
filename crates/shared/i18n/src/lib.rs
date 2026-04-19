@@ -1,6 +1,6 @@
 #![forbid(unsafe_code)]
 
-use mf2_i18n_core::{LanguageTag, negotiate_lookup};
+use mf2_i18n::{LanguageTag, negotiate_lookup};
 
 mod keys;
 

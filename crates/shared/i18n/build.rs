@@ -236,7 +236,7 @@ fn write_generated_runtime(
         .collect::<Vec<_>>()
         .join("\n");
     let runtime_source = format!(
-        "mod generated {{\n    mf2_i18n_native::define_i18n_module! {{\n        init_policy: strict,\n        default_locale: {default_locale:?},\n        id_map_json: include_bytes!(concat!(env!(\"OUT_DIR\"), \"/app_i18n/id-map.json\")),\n        id_map_hash: include_bytes!(concat!(env!(\"OUT_DIR\"), \"/app_i18n/id-map.sha256\")),\n        packs: [\n{packs_source}\n        ],\n    }}\n}}\n"
+        "mod generated {{\n    mf2_i18n::define_i18n_module! {{\n        init_policy: strict,\n        default_locale: {default_locale:?},\n        id_map_json: include_bytes!(concat!(env!(\"OUT_DIR\"), \"/app_i18n/id-map.json\")),\n        id_map_hash: include_bytes!(concat!(env!(\"OUT_DIR\"), \"/app_i18n/id-map.sha256\")),\n        packs: [\n{packs_source}\n        ],\n    }}\n}}\n"
     );
     fs::write(out_dir.join("generated_module.rs"), runtime_source)
         .expect("generated runtime module should write");

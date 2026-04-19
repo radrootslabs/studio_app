@@ -28,6 +28,7 @@ gpui = "0.2.2"
 gpui-component = "0.5.1"
 gpui-component-assets = "0.5.1"
 hex = "0.4"
+mf2_i18n = { path = "../../../../vendor/triesap/mf2_i18n/crates/mf2_i18n" }
 mf2_i18n_build = { path = "../../../../vendor/triesap/mf2_i18n/crates/mf2_i18n_build" }
 mf2_i18n_core = { path = "../../../../vendor/triesap/mf2_i18n/crates/mf2_i18n_core" }
 mf2_i18n_native = { path = "../../../../vendor/triesap/mf2_i18n/crates/mf2_i18n_native" }

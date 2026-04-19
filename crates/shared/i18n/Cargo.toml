@@ -10,8 +10,7 @@ publish = false
 build = "build.rs"
 
 [dependencies]
-mf2_i18n_core.workspace = true
-mf2_i18n_native.workspace = true
+mf2_i18n = { workspace = true, features = ["native"] }
 
 [build-dependencies]
 hex.workspace = true
