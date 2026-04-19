@@ -33,11 +33,14 @@ use radroots_studio_app_state::{
     FarmSetupFlowStage, FarmWorkspaceStatus, HomeRoute, derive_product_publish_blockers,
 };
 use radroots_studio_app_ui::{
-    APP_UI_THEME, AppCheckboxFieldSpec, IconSegmentButtonSpec, LabelValueRow, action_button,
-    action_button_compact, action_button_primary, action_button_primary_disabled,
-    action_icon_button, app_checkbox_field, app_shared_label_text, app_shared_text, app_text_input,
-    app_window_shell, icon_segment_button, label_value_list, section_divider, status_indicator,
-    utility_title_row,
+    APP_UI_THEME, AppCheckboxFieldSpec, AppSegmentButtonIconSpec as IconSegmentButtonSpec,
+    LabelValueRow, app_button_compact as action_button_compact,
+    app_button_icon as action_icon_button, app_button_primary as action_button_primary,
+    app_button_primary_disabled as action_button_primary_disabled,
+    app_button_secondary as action_button, app_checkbox_field, app_divider as section_divider,
+    app_input_text as app_text_input, app_segment_button_icon as icon_segment_button,
+    app_shared_label_text, app_shared_text, app_status_indicator as status_indicator,
+    app_surface_window as app_window_shell, label_value_list, utility_title_row,
 };
 use radroots_nostr::prelude::RadrootsNostrClient;
 use std::time::Duration;
@@ -111,8 +114,8 @@ pub fn home_window_options(cx: &mut App) -> WindowOptions {
 
 fn home_window_launch_size_px() -> (f32, f32) {
     (
-        APP_UI_THEME.windows.home_min_width_px,
-        APP_UI_THEME.windows.home_min_height_px,
+        APP_UI_THEME.shells.home_min_width_px,
+        APP_UI_THEME.shells.home_min_height_px,
     )
 }
 
@@ -124,8 +127,8 @@ pub fn settings_window_options(cx: &mut App) -> WindowOptions {
     let bounds = Bounds::centered(
         None,
         size(
-            px(APP_UI_THEME.windows.settings_width_px),
-            px(APP_UI_THEME.windows.settings_height_px),
+            px(APP_UI_THEME.shells.settings_width_px),
+            px(APP_UI_THEME.shells.settings_height_px),
         ),
         cx,
     );
@@ -133,8 +136,8 @@ pub fn settings_window_options(cx: &mut App) -> WindowOptions {
     WindowOptions {
         window_bounds: Some(WindowBounds::Windowed(bounds)),
         window_min_size: Some(size(
-            px(APP_UI_THEME.windows.settings_width_px),
-            px(APP_UI_THEME.windows.settings_height_px),
+            px(APP_UI_THEME.shells.settings_width_px),
+            px(APP_UI_THEME.shells.settings_height_px),
         )),
         titlebar: Some(settings_titlebar_options()),
         window_background: WindowBackgroundAppearance::Transparent,
@@ -1310,11 +1313,11 @@ impl HomeView {
 
         div()
             .w_full()
-            .max_w(px(APP_UI_THEME.layout.home_card_max_width_px))
+            .max_w(px(APP_UI_THEME.shells.home_card_max_width_px))
             .mx_auto()
             .flex()
             .flex_col()
-            .gap(px(APP_UI_THEME.layout.home_stack_gap_px))
+            .gap(px(APP_UI_THEME.shells.home_stack_gap_px))
             .child(products_title_row(
                 runtime,
                 action_button_primary(
@@ -1329,7 +1332,7 @@ impl HomeView {
                 div()
                     .w_full()
                     .flex()
-                    .gap(px(APP_UI_THEME.layout.home_stack_gap_px))
+                    .gap(px(APP_UI_THEME.shells.home_stack_gap_px))
                     .child(home_summary_metric(
                         AppTextKey::ProductsSummaryTotal,
                         summary.total_products,
@@ -1484,7 +1487,7 @@ impl HomeView {
             .w_full()
             .flex()
             .flex_col()
-            .gap(px(APP_UI_THEME.layout.home_stack_gap_px))
+            .gap(px(APP_UI_THEME.shells.home_stack_gap_px))
             .child(products_table_row(product, row, action))
             .when(is_editing, |this| {
                 this.when_some(self.products_stock_editor.as_ref(), |this, editor| {
@@ -3039,8 +3042,11 @@ impl SettingsWindowView {
     }
 
     fn account_panel(&self, cx: &mut Context<Self>) -> impl IntoElement {
-        let detail_text_px = APP_UI_THEME.typography.settings_account_detail_text_px;
-        let account_status_color = APP_UI_THEME.controls.status_indicator.offline;
+        let detail_text_px = APP_UI_THEME
+            .foundation
+            .typography
+            .settings_account_detail_text_px;
+        let account_status_color = APP_UI_THEME.components.app_status_indicator.offline;
 
         div()
             .size_full()
@@ -3048,22 +3054,22 @@ impl SettingsWindowView {
             .child(
                 div()
                     .h_full()
-                    .w(px(APP_UI_THEME.layout.settings_account_sidebar_width_px))
-                    .p(px(APP_UI_THEME.layout.settings_account_sidebar_padding_px))
+                    .w(px(APP_UI_THEME.shells.settings_account_sidebar_width_px))
+                    .p(px(APP_UI_THEME.shells.settings_account_sidebar_padding_px))
                     .flex()
                     .flex_col()
                     .justify_between()
                     .child(
                         div()
                             .w_full()
-                            .bg(rgb(APP_UI_THEME.surfaces.chrome_background))
+                            .bg(rgb(APP_UI_THEME.foundation.surfaces.chrome_background))
                             .rounded(px(
                                 APP_UI_THEME
                                     .layout
                                     .settings_account_sidebar_button_corner_radius_px,
                             ))
                             .p(px(
-                                APP_UI_THEME.layout.settings_account_sidebar_button_padding_px,
+                                APP_UI_THEME.shells.settings_account_sidebar_button_padding_px,
                             ))
                             .child(
                                 div()
@@ -3078,7 +3084,7 @@ impl SettingsWindowView {
                                                     .settings_account_identity_text_px,
                                             ))
                                             .font_weight(gpui::FontWeight::MEDIUM)
-                                            .text_color(rgb(APP_UI_THEME.text.primary))
+                                            .text_color(rgb(APP_UI_THEME.foundation.text.primary))
                                             .child(app_shared_text(
                                                 AppTextKey::SettingsAccountNoSelectionTitle,
                                             )),
@@ -3090,7 +3096,7 @@ impl SettingsWindowView {
                                                     .typography
                                                     .settings_account_identity_text_px,
                                             ))
-                                            .text_color(rgb(APP_UI_THEME.text.secondary))
+                                            .text_color(rgb(APP_UI_THEME.foundation.text.secondary))
                                             .line_height(relative(1.2))
                                             .child(app_shared_text(
                                                 AppTextKey::SettingsAccountNoSelectionBody,
@@ -3109,7 +3115,7 @@ impl SettingsWindowView {
                             .flex()
                             .flex_col()
                             .gap(px(
-                                APP_UI_THEME.layout.settings_account_sidebar_footer_row_gap_px,
+                                APP_UI_THEME.shells.settings_account_sidebar_footer_row_gap_px,
                             ))
                             .child(section_divider())
                             .child(
@@ -3141,14 +3147,14 @@ impl SettingsWindowView {
             .child(
                 div()
                     .h_full()
-                    .w(px(APP_UI_THEME.layout.divider_thickness_px))
-                    .bg(rgb(APP_UI_THEME.surfaces.divider)),
+                    .w(px(APP_UI_THEME.foundation.borders.divider_thickness_px))
+                    .bg(rgb(APP_UI_THEME.foundation.surfaces.divider)),
             )
             .child(
                 div()
                     .flex_1()
                     .h_full()
-                    .p(px(APP_UI_THEME.layout.settings_account_main_padding_px))
+                    .p(px(APP_UI_THEME.shells.settings_account_main_padding_px))
                     .flex()
                     .flex_col()
                     .items_center()
@@ -3156,18 +3162,18 @@ impl SettingsWindowView {
                     .child(
                         div()
                             .w_full()
-                            .max_w(px(APP_UI_THEME.layout.settings_account_content_max_width_px))
+                            .max_w(px(APP_UI_THEME.shells.settings_account_content_max_width_px))
                             .flex()
                             .flex_col()
                             .items_start()
-                            .gap(px(APP_UI_THEME.layout.settings_account_main_stack_gap_px))
+                            .gap(px(APP_UI_THEME.shells.settings_account_main_stack_gap_px))
                             .child(
                                 div()
                                     .w_full()
                                     .flex()
                                     .flex_col()
                                     .items_center()
-                                    .gap(px(APP_UI_THEME.layout.settings_account_main_stack_gap_px))
+                                    .gap(px(APP_UI_THEME.shells.settings_account_main_stack_gap_px))
                                     .child(
                                         div()
                                             .size(px(
@@ -3175,7 +3181,7 @@ impl SettingsWindowView {
                                                     .layout
                                                     .settings_account_profile_avatar_size_px,
                                             ))
-                                            .bg(rgb(APP_UI_THEME.surfaces.card_background))
+                                            .bg(rgb(APP_UI_THEME.foundation.surfaces.card_background))
                                             .rounded(px(
                                                 APP_UI_THEME
                                                     .layout
@@ -3187,7 +3193,7 @@ impl SettingsWindowView {
                                         div()
                                             .text_size(px(detail_text_px))
                                             .font_weight(gpui::FontWeight::MEDIUM)
-                                            .text_color(rgb(APP_UI_THEME.text.primary))
+                                            .text_color(rgb(APP_UI_THEME.foundation.text.primary))
                                             .child(app_shared_text(
                                                 AppTextKey::SettingsAccountNoSelectionTitle,
                                             )),
@@ -3198,12 +3204,12 @@ impl SettingsWindowView {
                                     .w_full()
                                     .flex()
                                     .flex_col()
-                                    .gap(px(APP_UI_THEME.layout.settings_account_detail_row_gap_px))
+                                    .gap(px(APP_UI_THEME.shells.settings_account_detail_row_gap_px))
                                     .child(self.settings_account_detail_row(
                                         AppTextKey::SettingsAccountProfileLabel,
                                         div()
                                             .text_size(px(detail_text_px))
-                                            .text_color(rgb(APP_UI_THEME.text.primary))
+                                            .text_color(rgb(APP_UI_THEME.foundation.text.primary))
                                             .child(app_shared_text(AppTextKey::ValueNone)),
                                     ))
                                     .child(self.settings_account_detail_row(
@@ -3220,7 +3226,7 @@ impl SettingsWindowView {
                                             .child(
                                                 div()
                                                     .text_size(px(detail_text_px))
-                                                    .text_color(rgb(APP_UI_THEME.text.primary))
+                                                    .text_color(rgb(APP_UI_THEME.foundation.text.primary))
                                                     .child(app_shared_text(
                                                         AppTextKey::SettingsAccountStatusLoggedOut,
                                                     )),
@@ -3230,21 +3236,21 @@ impl SettingsWindowView {
                                         AppTextKey::SettingsAccountCustodyLabel,
                                         div()
                                             .text_size(px(detail_text_px))
-                                            .text_color(rgb(APP_UI_THEME.text.primary))
+                                            .text_color(rgb(APP_UI_THEME.foundation.text.primary))
                                             .child(app_shared_text(AppTextKey::ValueNone)),
                                     ))
                                     .child(self.settings_account_detail_row(
                                         AppTextKey::SettingsAccountSurfaceLabel,
                                         div()
                                             .text_size(px(detail_text_px))
-                                            .text_color(rgb(APP_UI_THEME.text.primary))
+                                            .text_color(rgb(APP_UI_THEME.foundation.text.primary))
                                             .child(app_shared_text(AppTextKey::ValueNone)),
                                     ))
                                     .child(self.settings_account_detail_row(
                                         AppTextKey::SettingsAccountActivationLabel,
                                         div()
                                             .text_size(px(detail_text_px))
-                                            .text_color(rgb(APP_UI_THEME.text.primary))
+                                            .text_color(rgb(APP_UI_THEME.foundation.text.primary))
                                             .child(app_shared_text(
                                                 AppTextKey::SettingsAccountActivationInactive,
                                             )),
@@ -3254,7 +3260,7 @@ impl SettingsWindowView {
                                             .w_full()
                                             .text_size(px(detail_text_px))
                                             .line_height(relative(1.2))
-                                            .text_color(rgb(APP_UI_THEME.text.secondary))
+                                            .text_color(rgb(APP_UI_THEME.foundation.text.secondary))
                                             .child(app_shared_text(
                                                 AppTextKey::SettingsAccountNoSelectionBody,
                                             )),
@@ -3305,12 +3311,15 @@ impl SettingsWindowView {
             .w_full()
             .flex()
             .items_center()
-            .gap(px(APP_UI_THEME.layout.settings_account_detail_value_gap_px))
+            .gap(px(APP_UI_THEME.shells.settings_account_detail_value_gap_px))
             .child(
                 div()
-                    .text_size(px(APP_UI_THEME.typography.settings_account_detail_text_px))
+                    .text_size(px(APP_UI_THEME
+                        .foundation
+                        .typography
+                        .settings_account_detail_text_px))
                     .font_weight(gpui::FontWeight::SEMIBOLD)
-                    .text_color(rgb(APP_UI_THEME.text.secondary))
+                    .text_color(rgb(APP_UI_THEME.foundation.text.secondary))
                     .child(app_shared_label_text(label_key)),
             )
             .child(value)
@@ -3334,7 +3343,7 @@ impl SettingsWindowView {
                 .w_full()
                 .flex()
                 .items_start()
-                .gap(px(APP_UI_THEME.layout.settings_account_detail_value_gap_px))
+                .gap(px(APP_UI_THEME.shells.settings_account_detail_value_gap_px))
                 .child(app_checkbox_field(
                     AppCheckboxFieldSpec::new(id, app_shared_text(label_key), note_text),
                     checked,
@@ -3782,7 +3791,7 @@ impl SettingsWindowView {
             .overflow_y_scroll()
             .child(
                 div()
-                    .p(px(APP_UI_THEME.layout.settings_content_padding_px))
+                    .p(px(APP_UI_THEME.shells.settings_content_padding_px))
                     .size_full()
                     .flex()
                     .flex_col()
@@ -3793,9 +3802,9 @@ impl SettingsWindowView {
                             .flex()
                             .flex_col()
                             .justify_between()
-                            .gap(px(APP_UI_THEME.layout.settings_account_main_stack_gap_px))
-                            .text_size(px(APP_UI_THEME.typography.body_text_px))
-                            .text_color(rgb(APP_UI_THEME.text.secondary))
+                            .gap(px(APP_UI_THEME.shells.settings_account_main_stack_gap_px))
+                            .text_size(px(APP_UI_THEME.foundation.typography.body_text_px))
+                            .text_color(rgb(APP_UI_THEME.foundation.text.secondary))
                             .child(app_shared_text(
                                 AppTextKey::SettingsAboutPlaceholderTopPrimary,
                             ))
@@ -3811,8 +3820,8 @@ impl SettingsWindowView {
                         div()
                             .w_full()
                             .py_12()
-                            .text_size(px(APP_UI_THEME.typography.body_text_px))
-                            .text_color(rgb(APP_UI_THEME.text.secondary))
+                            .text_size(px(APP_UI_THEME.foundation.typography.body_text_px))
+                            .text_color(rgb(APP_UI_THEME.foundation.text.secondary))
                             .child(app_shared_text(AppTextKey::SettingsAboutPlaceholderMiddle)),
                     )
                     .child(section_divider())
@@ -3820,8 +3829,8 @@ impl SettingsWindowView {
                         div()
                             .w_full()
                             .py_12()
-                            .text_size(px(APP_UI_THEME.typography.body_text_px))
-                            .text_color(rgb(APP_UI_THEME.text.secondary))
+                            .text_size(px(APP_UI_THEME.foundation.typography.body_text_px))
+                            .text_color(rgb(APP_UI_THEME.foundation.text.secondary))
                             .child(app_shared_text(AppTextKey::SettingsAboutPlaceholderBottom)),
                     ),
             )
@@ -3850,18 +3859,18 @@ impl Render for SettingsWindowView {
             .collect::<Vec<_>>();
 
         app_window_shell(
-            APP_UI_THEME.surfaces.panel_background,
+            APP_UI_THEME.foundation.surfaces.panel_background,
             div()
                 .size_full()
-                .bg(rgb(APP_UI_THEME.surfaces.panel_background))
+                .bg(rgb(APP_UI_THEME.foundation.surfaces.panel_background))
                 .overflow_hidden()
                 .flex()
                 .flex_col()
                 .child(
                     div()
                         .w_full()
-                        .h(px(APP_UI_THEME.layout.settings_chrome_height_px))
-                        .bg(rgb(APP_UI_THEME.surfaces.chrome_background))
+                        .h(px(APP_UI_THEME.shells.settings_chrome_height_px))
+                        .bg(rgb(APP_UI_THEME.foundation.surfaces.chrome_background))
                         .flex()
                         .flex_col()
                         .child(utility_title_row(app_shared_text(
@@ -3872,9 +3881,9 @@ impl Render for SettingsWindowView {
                                 .w_full()
                                 .flex()
                                 .justify_center()
-                                .pt(px(APP_UI_THEME.layout.settings_navigation_row_padding_px))
-                                .pb(px(APP_UI_THEME.layout.settings_navigation_row_padding_px))
-                                .gap(px(APP_UI_THEME.layout.settings_navigation_row_gap_px))
+                                .pt(px(APP_UI_THEME.shells.settings_navigation_row_padding_px))
+                                .pb(px(APP_UI_THEME.shells.settings_navigation_row_padding_px))
+                                .gap(px(APP_UI_THEME.shells.settings_navigation_row_gap_px))
                                 .children(navigation_buttons),
                         ),
                 )
@@ -4048,11 +4057,11 @@ fn holding_home_shell(runtime: &DesktopAppRuntimeSummary) -> impl IntoElement {
             .child(
                 div()
                     .w_full()
-                    .max_w(px(APP_UI_THEME.layout.home_card_max_width_px))
+                    .max_w(px(APP_UI_THEME.shells.home_card_max_width_px))
                     .mx_auto()
                     .flex()
                     .flex_col()
-                    .gap(px(APP_UI_THEME.layout.home_stack_gap_px))
+                    .gap(px(APP_UI_THEME.shells.home_stack_gap_px))
                     .child(home_status_row(&home_status))
                     .children(sections),
             )
@@ -4097,14 +4106,14 @@ fn startup_home_shell(
     let surface = startup_home_surface(runtime);
 
     app_window_shell(
-        APP_UI_THEME.surfaces.window_background,
+        APP_UI_THEME.foundation.surfaces.window_background,
         div()
             .size_full()
-            .bg(rgb(APP_UI_THEME.surfaces.window_background))
+            .bg(rgb(APP_UI_THEME.foundation.surfaces.window_background))
             .child(
                 div()
                     .size_full()
-                    .p(px(APP_UI_THEME.layout.home_window_padding_px))
+                    .p(px(APP_UI_THEME.shells.home_window_padding_px))
                     .child(
                         div()
                             .size_full()
@@ -4114,12 +4123,12 @@ fn startup_home_shell(
                             .child(
                                 div()
                                     .w_full()
-                                    .max_w(px(APP_UI_THEME.layout.home_card_max_width_px))
+                                    .max_w(px(APP_UI_THEME.shells.home_card_max_width_px))
                                     .mx_auto()
                                     .flex()
                                     .flex_col()
                                     .items_center()
-                                    .gap(px(APP_UI_THEME.layout.startup_stack_gap_px))
+                                    .gap(px(APP_UI_THEME.shells.startup_stack_gap_px))
                                     .child(startup_home_title(surface))
                                     .child(startup_home_tagline())
                                     .child(match surface {
@@ -4127,7 +4136,7 @@ fn startup_home_shell(
                                             .flex()
                                             .flex_col()
                                             .items_center()
-                                            .gap(px(APP_UI_THEME.layout.startup_stack_gap_px))
+                                            .gap(px(APP_UI_THEME.shells.startup_stack_gap_px))
                                             .child(action_button_primary(
                                                 "home-continue",
                                                 app_shared_text(
@@ -4146,7 +4155,7 @@ fn startup_home_shell(
                                             .flex()
                                             .flex_col()
                                             .items_center()
-                                            .gap(px(APP_UI_THEME.layout.startup_stack_gap_px))
+                                            .gap(px(APP_UI_THEME.shells.startup_stack_gap_px))
                                             .child(action_button_primary(
                                                 "home-generate-key",
                                                 app_shared_text(
@@ -4173,7 +4182,7 @@ fn startup_home_shell(
                                             .flex()
                                             .flex_col()
                                             .items_center()
-                                            .gap(px(APP_UI_THEME.layout.startup_stack_gap_px))
+                                            .gap(px(APP_UI_THEME.shells.startup_stack_gap_px))
                                             .child(action_button_primary_disabled(
                                                 "home-generate-key",
                                                 app_shared_text(
@@ -4213,9 +4222,9 @@ fn startup_home_title(surface: StartupHomeSurface) -> impl IntoElement {
     };
 
     div()
-        .text_size(px(APP_UI_THEME.typography.startup_title_text_px))
+        .text_size(px(APP_UI_THEME.foundation.typography.startup_title_text_px))
         .font_weight(gpui::FontWeight::NORMAL)
-        .text_color(rgb(APP_UI_THEME.text.primary))
+        .text_color(rgb(APP_UI_THEME.foundation.text.primary))
         .text_center()
         .child(app_shared_text(title_key))
         .with_animation(
@@ -4227,18 +4236,21 @@ fn startup_home_title(surface: StartupHomeSurface) -> impl IntoElement {
 
 fn startup_home_tagline() -> impl IntoElement {
     div()
-        .text_size(px(APP_UI_THEME.typography.startup_tagline_text_px))
+        .text_size(px(APP_UI_THEME
+            .foundation
+            .typography
+            .startup_tagline_text_px))
         .font_weight(gpui::FontWeight::SEMIBOLD)
-        .text_color(rgb(APP_UI_THEME.text.primary))
+        .text_color(rgb(APP_UI_THEME.foundation.text.primary))
         .text_center()
         .child(app_shared_text(AppTextKey::HomeSetupTagline))
 }
 
 fn startup_home_support_text(body: impl Into<SharedString>) -> impl IntoElement {
     div()
-        .text_size(px(APP_UI_THEME.typography.body_text_px))
+        .text_size(px(APP_UI_THEME.foundation.typography.body_text_px))
         .line_height(relative(1.2))
-        .text_color(rgb(APP_UI_THEME.text.secondary))
+        .text_color(rgb(APP_UI_THEME.foundation.text.secondary))
         .text_center()
         .child(body.into())
 }
@@ -4272,12 +4284,12 @@ fn startup_signer_entry_surface(
         .flex()
         .flex_col()
         .items_center()
-        .gap(px(APP_UI_THEME.layout.startup_stack_gap_px))
+        .gap(px(APP_UI_THEME.shells.startup_stack_gap_px))
         .when_some(signer_entry, |this, signer_entry| {
             this.child(
                 div()
                     .w_full()
-                    .max_w(px(APP_UI_THEME.layout.home_card_max_width_px))
+                    .max_w(px(APP_UI_THEME.shells.home_card_max_width_px))
                     .id("home-signer-source-input")
                     .child(
                         app_text_input(&signer_entry.input, !source_input_is_editable)
@@ -4471,7 +4483,7 @@ fn startup_text_button(
         .custom(
             ButtonCustomVariant::new(cx)
                 .color(transparent_black().into())
-                .foreground(rgb(APP_UI_THEME.text.secondary).into())
+                .foreground(rgb(APP_UI_THEME.foundation.text.secondary).into())
                 .border(transparent_black())
                 .hover(transparent_black().into())
                 .active(transparent_black().into()),
@@ -4480,9 +4492,9 @@ fn startup_text_button(
         .on_click(on_click)
         .child(
             div()
-                .text_size(px(APP_UI_THEME.typography.body_text_px))
+                .text_size(px(APP_UI_THEME.foundation.typography.body_text_px))
                 .font_weight(gpui::FontWeight::MEDIUM)
-                .text_color(rgb(APP_UI_THEME.text.secondary))
+                .text_color(rgb(APP_UI_THEME.foundation.text.secondary))
                 .child(app_shared_text(key)),
         )
 }
@@ -4490,7 +4502,7 @@ fn startup_text_button(
 fn startup_home_card(title: impl Into<SharedString>, body: impl IntoElement) -> impl IntoElement {
     div()
         .w_full()
-        .bg(rgb(APP_UI_THEME.surfaces.card_background))
+        .bg(rgb(APP_UI_THEME.foundation.surfaces.card_background))
         .rounded(px(APP_UI_THEME
             .controls
             .action_button
@@ -4499,16 +4511,16 @@ fn startup_home_card(title: impl Into<SharedString>, body: impl IntoElement) -> 
         .child(
             div()
                 .w_full()
-                .p(px(APP_UI_THEME.layout.home_card_padding_px))
+                .p(px(APP_UI_THEME.shells.home_card_padding_px))
                 .flex()
                 .flex_col()
                 .items_center()
-                .gap(px(APP_UI_THEME.layout.home_stack_gap_px))
+                .gap(px(APP_UI_THEME.shells.home_stack_gap_px))
                 .child(
                     div()
-                        .text_size(px(APP_UI_THEME.typography.body_text_px))
+                        .text_size(px(APP_UI_THEME.foundation.typography.body_text_px))
                         .font_weight(gpui::FontWeight::SEMIBOLD)
-                        .text_color(rgb(APP_UI_THEME.text.primary))
+                        .text_color(rgb(APP_UI_THEME.foundation.text.primary))
                         .child(title.into()),
                 )
                 .child(body),
@@ -4523,9 +4535,9 @@ fn startup_home_body(runtime: &DesktopAppRuntimeSummary) -> impl IntoElement {
 
     div()
         .w_full()
-        .text_size(px(APP_UI_THEME.typography.body_text_px))
+        .text_size(px(APP_UI_THEME.foundation.typography.body_text_px))
         .line_height(relative(1.2))
-        .text_color(rgb(APP_UI_THEME.text.secondary))
+        .text_color(rgb(APP_UI_THEME.foundation.text.secondary))
         .text_center()
         .child(body)
 }
@@ -4580,7 +4592,7 @@ async fn run_startup_signer_pending_poll(
 
 fn home_shell_frame(sidebar: AnyElement, main_content: AnyElement) -> impl IntoElement {
     app_window_shell(
-        APP_UI_THEME.surfaces.window_background,
+        APP_UI_THEME.foundation.surfaces.window_background,
         div()
             .size_full()
             .overflow_hidden()
@@ -4589,19 +4601,19 @@ fn home_shell_frame(sidebar: AnyElement, main_content: AnyElement) -> impl IntoE
             .child(
                 div()
                     .h_full()
-                    .w(px(APP_UI_THEME.layout.divider_thickness_px))
-                    .bg(rgb(APP_UI_THEME.surfaces.divider)),
+                    .w(px(APP_UI_THEME.foundation.borders.divider_thickness_px))
+                    .bg(rgb(APP_UI_THEME.foundation.surfaces.divider)),
             )
             .child(
                 div()
                     .flex_1()
                     .h_full()
-                    .bg(rgb(APP_UI_THEME.surfaces.window_background))
+                    .bg(rgb(APP_UI_THEME.foundation.surfaces.window_background))
                     .overflow_hidden()
                     .child(
                         div()
                             .size_full()
-                            .p(px(APP_UI_THEME.layout.home_window_padding_px))
+                            .p(px(APP_UI_THEME.shells.home_window_padding_px))
                             .child(main_content),
                     ),
             ),
@@ -4619,9 +4631,9 @@ fn home_sidebar(
 
     div()
         .h_full()
-        .w(px(APP_UI_THEME.layout.home_sidebar_width_px))
-        .bg(rgb(APP_UI_THEME.surfaces.card_background))
-        .p(px(APP_UI_THEME.layout.home_window_padding_px))
+        .w(px(APP_UI_THEME.shells.home_sidebar_width_px))
+        .bg(rgb(APP_UI_THEME.foundation.surfaces.card_background))
+        .p(px(APP_UI_THEME.shells.home_window_padding_px))
         .flex()
         .flex_col()
         .justify_between()
@@ -4631,7 +4643,7 @@ fn home_sidebar(
                 .flex()
                 .flex_col()
                 .justify_start()
-                .gap(px(APP_UI_THEME.layout.home_stack_gap_px))
+                .gap(px(APP_UI_THEME.shells.home_stack_gap_px))
                 .child(home_sidebar_nav_button(
                     "home-nav-today",
                     AppTextKey::HomeNavToday,
@@ -4652,9 +4664,9 @@ fn home_sidebar(
         .child(
             div().child(
                 div()
-                    .text_size(px(APP_UI_THEME.typography.body_text_px))
+                    .text_size(px(APP_UI_THEME.foundation.typography.body_text_px))
                     .line_height(relative(1.2))
-                    .text_color(rgb(APP_UI_THEME.text.secondary))
+                    .text_color(rgb(APP_UI_THEME.foundation.text.secondary))
                     .when_some(home_saved_farm(runtime), |this, farm| {
                         this.child(farm.display_name.clone())
                     }),
@@ -4665,9 +4677,9 @@ fn home_sidebar(
 fn holding_home_sidebar(runtime: &DesktopAppRuntimeSummary) -> impl IntoElement {
     div()
         .h_full()
-        .w(px(APP_UI_THEME.layout.home_sidebar_width_px))
-        .bg(rgb(APP_UI_THEME.surfaces.card_background))
-        .p(px(APP_UI_THEME.layout.home_window_padding_px))
+        .w(px(APP_UI_THEME.shells.home_sidebar_width_px))
+        .bg(rgb(APP_UI_THEME.foundation.surfaces.card_background))
+        .p(px(APP_UI_THEME.shells.home_window_padding_px))
         .flex()
         .flex_col()
         .justify_between()
@@ -4675,21 +4687,21 @@ fn holding_home_sidebar(runtime: &DesktopAppRuntimeSummary) -> impl IntoElement 
             div()
                 .flex()
                 .flex_col()
-                .gap(px(APP_UI_THEME.layout.home_stack_gap_px))
+                .gap(px(APP_UI_THEME.shells.home_stack_gap_px))
                 .child(
                     div()
-                        .text_size(px(APP_UI_THEME.typography.body_text_px * 2.0))
+                        .text_size(px(APP_UI_THEME.foundation.typography.body_text_px * 2.0))
                         .font_weight(gpui::FontWeight::BOLD)
-                        .text_color(rgb(APP_UI_THEME.text.primary))
+                        .text_color(rgb(APP_UI_THEME.foundation.text.primary))
                         .child(app_shared_text(AppTextKey::HomeTodayTitle)),
                 ),
         )
         .child(
             div().child(
                 div()
-                    .text_size(px(APP_UI_THEME.typography.body_text_px))
+                    .text_size(px(APP_UI_THEME.foundation.typography.body_text_px))
                     .line_height(relative(1.2))
-                    .text_color(rgb(APP_UI_THEME.text.secondary))
+                    .text_color(rgb(APP_UI_THEME.foundation.text.secondary))
                     .when_some(home_saved_farm(runtime), |this, farm| {
                         this.child(farm.display_name.clone())
                     }),
@@ -4855,11 +4867,11 @@ fn home_today_content(
 
     div()
         .w_full()
-        .max_w(px(APP_UI_THEME.layout.home_card_max_width_px))
+        .max_w(px(APP_UI_THEME.shells.home_card_max_width_px))
         .mx_auto()
         .flex()
         .flex_col()
-        .gap(px(APP_UI_THEME.layout.home_stack_gap_px))
+        .gap(px(APP_UI_THEME.shells.home_stack_gap_px))
         .child(
             div()
                 .w_full()
@@ -4868,17 +4880,17 @@ fn home_today_content(
                 .gap(px(4.0))
                 .child(
                     div()
-                        .text_size(px(APP_UI_THEME.typography.body_text_px * 2.0))
+                        .text_size(px(APP_UI_THEME.foundation.typography.body_text_px * 2.0))
                         .font_weight(gpui::FontWeight::BOLD)
-                        .text_color(rgb(APP_UI_THEME.text.primary))
+                        .text_color(rgb(APP_UI_THEME.foundation.text.primary))
                         .child(app_shared_text(AppTextKey::HomeTodayTitle)),
                 )
                 .child(
                     div()
-                        .text_size(px(APP_UI_THEME.typography.body_text_px))
+                        .text_size(px(APP_UI_THEME.foundation.typography.body_text_px))
                         .font_weight(gpui::FontWeight::MEDIUM)
                         .line_height(relative(1.2))
-                        .text_color(rgb(APP_UI_THEME.text.primary))
+                        .text_color(rgb(APP_UI_THEME.foundation.text.primary))
                         .when_some(home_saved_farm(runtime), |this, farm| {
                             this.child(farm.display_name.clone())
                         })
@@ -4920,7 +4932,13 @@ fn home_sidebar_nav_button(
     cx: &App,
 ) -> impl IntoElement {
     if is_active {
-        action_button_primary(id, app_shared_text(key), on_click, cx).into_any_element()
+        div()
+            .id(id)
+            .text_size(px(APP_UI_THEME.foundation.typography.body_text_px * 2.0))
+            .font_weight(gpui::FontWeight::BOLD)
+            .text_color(rgb(APP_UI_THEME.foundation.text.primary))
+            .child(app_shared_text(key))
+            .into_any_element()
     } else {
         action_button(id, app_shared_text(key), on_click, cx).into_any_element()
     }
@@ -4935,7 +4953,7 @@ fn products_title_row(
         .flex()
         .items_end()
         .justify_between()
-        .gap(px(APP_UI_THEME.layout.home_stack_gap_px))
+        .gap(px(APP_UI_THEME.shells.home_stack_gap_px))
         .child(
             div()
                 .flex()
@@ -4943,17 +4961,17 @@ fn products_title_row(
                 .gap(px(4.0))
                 .child(
                     div()
-                        .text_size(px(APP_UI_THEME.typography.body_text_px * 2.0))
+                        .text_size(px(APP_UI_THEME.foundation.typography.body_text_px * 2.0))
                         .font_weight(gpui::FontWeight::BOLD)
-                        .text_color(rgb(APP_UI_THEME.text.primary))
+                        .text_color(rgb(APP_UI_THEME.foundation.text.primary))
                         .child(app_shared_text(AppTextKey::ProductsTitle)),
                 )
                 .child(
                     div()
-                        .text_size(px(APP_UI_THEME.typography.body_text_px))
+                        .text_size(px(APP_UI_THEME.foundation.typography.body_text_px))
                         .font_weight(gpui::FontWeight::MEDIUM)
                         .line_height(relative(1.2))
-                        .text_color(rgb(APP_UI_THEME.text.primary))
+                        .text_color(rgb(APP_UI_THEME.foundation.text.primary))
                         .when_some(home_saved_farm(runtime), |this, farm| {
                             this.child(farm.display_name.clone())
                         }),
@@ -4987,7 +5005,7 @@ fn products_controls_card(
             .w_full()
             .flex()
             .flex_col()
-            .gap(px(APP_UI_THEME.layout.home_stack_gap_px))
+            .gap(px(APP_UI_THEME.shells.home_stack_gap_px))
             .when_some(products_search, |this, products_search| {
                 this.child(
                     app_text_input(&products_search.input, false)
@@ -5050,12 +5068,12 @@ fn products_controls_card(
                     .flex()
                     .items_center()
                     .justify_between()
-                    .gap(px(APP_UI_THEME.layout.home_stack_gap_px))
+                    .gap(px(APP_UI_THEME.shells.home_stack_gap_px))
                     .child(
                         div()
-                            .text_size(px(APP_UI_THEME.typography.utility_title_text_px))
+                            .text_size(px(APP_UI_THEME.foundation.typography.utility_title_text_px))
                             .font_weight(gpui::FontWeight::SEMIBOLD)
-                            .text_color(rgb(APP_UI_THEME.text.secondary))
+                            .text_color(rgb(APP_UI_THEME.foundation.text.secondary))
                             .child(app_shared_text(AppTextKey::ProductsSortTitle)),
                     )
                     .child(
@@ -5122,7 +5140,7 @@ fn products_table_header() -> impl IntoElement {
         .w_full()
         .flex()
         .items_center()
-        .gap(px(APP_UI_THEME.layout.home_stack_gap_px))
+        .gap(px(APP_UI_THEME.shells.home_stack_gap_px))
         .child(products_table_header_column(
             AppTextKey::ProductsColumnProduct,
             None,
@@ -5168,9 +5186,9 @@ fn products_table_header_column(
     div()
         .when_some(width_px, |this, width_px| this.w(px(width_px)))
         .when(grows, |this| this.flex_1().min_w_0())
-        .text_size(px(APP_UI_THEME.typography.utility_title_text_px))
+        .text_size(px(APP_UI_THEME.foundation.typography.utility_title_text_px))
         .font_weight(gpui::FontWeight::SEMIBOLD)
-        .text_color(rgb(APP_UI_THEME.text.secondary))
+        .text_color(rgb(APP_UI_THEME.foundation.text.secondary))
         .child(app_shared_text(key))
 }
 
@@ -5183,7 +5201,7 @@ fn products_table_row(
         .w_full()
         .flex()
         .items_center()
-        .gap(px(APP_UI_THEME.layout.home_stack_gap_px))
+        .gap(px(APP_UI_THEME.shells.home_stack_gap_px))
         .child(product)
         .child(
             div()
@@ -5194,41 +5212,41 @@ fn products_table_row(
                 .child(status_indicator(products_row_status_color(row)))
                 .child(
                     div()
-                        .text_size(px(APP_UI_THEME.typography.utility_title_text_px))
-                        .text_color(rgb(APP_UI_THEME.text.primary))
+                        .text_size(px(APP_UI_THEME.foundation.typography.utility_title_text_px))
+                        .text_color(rgb(APP_UI_THEME.foundation.text.primary))
                         .child(app_shared_text(products_status_key(row.status))),
                 ),
         )
         .child(
             div()
                 .w(px(192.0))
-                .text_size(px(APP_UI_THEME.typography.utility_title_text_px))
+                .text_size(px(APP_UI_THEME.foundation.typography.utility_title_text_px))
                 .line_height(relative(1.2))
-                .text_color(rgb(APP_UI_THEME.text.primary))
+                .text_color(rgb(APP_UI_THEME.foundation.text.primary))
                 .child(row.availability.label.clone()),
         )
         .child(
             div()
                 .w(px(128.0))
-                .text_size(px(APP_UI_THEME.typography.utility_title_text_px))
+                .text_size(px(APP_UI_THEME.foundation.typography.utility_title_text_px))
                 .line_height(relative(1.2))
-                .text_color(rgb(APP_UI_THEME.text.primary))
+                .text_color(rgb(APP_UI_THEME.foundation.text.primary))
                 .child(products_stock_text(row)),
         )
         .child(
             div()
                 .w(px(128.0))
-                .text_size(px(APP_UI_THEME.typography.utility_title_text_px))
+                .text_size(px(APP_UI_THEME.foundation.typography.utility_title_text_px))
                 .line_height(relative(1.2))
-                .text_color(rgb(APP_UI_THEME.text.primary))
+                .text_color(rgb(APP_UI_THEME.foundation.text.primary))
                 .child(products_price_text(row)),
         )
         .child(
             div()
                 .w(px(164.0))
-                .text_size(px(APP_UI_THEME.typography.utility_title_text_px))
+                .text_size(px(APP_UI_THEME.foundation.typography.utility_title_text_px))
                 .line_height(relative(1.2))
-                .text_color(rgb(APP_UI_THEME.text.secondary))
+                .text_color(rgb(APP_UI_THEME.foundation.text.secondary))
                 .child(row.updated_at.clone()),
         )
         .child(div().w(px(120.0)).flex().justify_end().child(action))
@@ -5241,7 +5259,7 @@ fn products_row_open_button(
     on_click: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
     cx: &App,
 ) -> impl IntoElement {
-    let selected_background = rgb(APP_UI_THEME.surfaces.window_background);
+    let selected_background = rgb(APP_UI_THEME.foundation.surfaces.window_background);
 
     Button::new(id)
         .custom(
@@ -5251,7 +5269,7 @@ fn products_row_open_button(
                 } else {
                     transparent_black().into()
                 })
-                .foreground(rgb(APP_UI_THEME.text.primary).into())
+                .foreground(rgb(APP_UI_THEME.foundation.text.primary).into())
                 .border(transparent_black())
                 .hover(selected_background.into())
                 .active(selected_background.into()),
@@ -5275,17 +5293,17 @@ fn products_row_open_button(
                 .py(px(6.0))
                 .child(
                     div()
-                        .text_size(px(APP_UI_THEME.typography.body_text_px))
+                        .text_size(px(APP_UI_THEME.foundation.typography.body_text_px))
                         .font_weight(gpui::FontWeight::MEDIUM)
-                        .text_color(rgb(APP_UI_THEME.text.primary))
+                        .text_color(rgb(APP_UI_THEME.foundation.text.primary))
                         .child(product_display_title(row.title.as_str())),
                 )
                 .when_some(row.subtitle.as_ref(), |this, subtitle| {
                     this.child(
                         div()
-                            .text_size(px(APP_UI_THEME.typography.utility_title_text_px))
+                            .text_size(px(APP_UI_THEME.foundation.typography.utility_title_text_px))
                             .line_height(relative(1.2))
-                            .text_color(rgb(APP_UI_THEME.text.secondary))
+                            .text_color(rgb(APP_UI_THEME.foundation.text.secondary))
                             .child(subtitle.clone()),
                     )
                 }),
@@ -5319,12 +5337,12 @@ fn products_status_key(status: ProductStatus) -> AppTextKey {
 
 fn products_row_status_color(row: &ProductsListRow) -> u32 {
     if row.attention_state != ProductAttentionState::Healthy {
-        APP_UI_THEME.controls.status_indicator.attention
+        APP_UI_THEME.components.app_status_indicator.attention
     } else {
         match row.status {
-            ProductStatus::Published => APP_UI_THEME.controls.status_indicator.online,
+            ProductStatus::Published => APP_UI_THEME.components.app_status_indicator.online,
             ProductStatus::Draft | ProductStatus::Paused | ProductStatus::Archived => {
-                APP_UI_THEME.controls.status_indicator.offline
+                APP_UI_THEME.components.app_status_indicator.offline
             }
         }
     }
@@ -5356,8 +5374,8 @@ fn products_row_action_button(
     on_click: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
     cx: &App,
 ) -> impl IntoElement {
-    let sizing = APP_UI_THEME.controls.action_button.sizing;
-    let colors = APP_UI_THEME.controls.action_button.colors;
+    let sizing = APP_UI_THEME.components.app_button.sizing;
+    let colors = APP_UI_THEME.components.app_button.colors;
 
     Button::new(id)
         .custom(
@@ -5396,7 +5414,7 @@ fn products_stock_editor_card(
 
     div()
         .w_full()
-        .bg(rgb(APP_UI_THEME.surfaces.window_background))
+        .bg(rgb(APP_UI_THEME.foundation.surfaces.window_background))
         .rounded(px(APP_UI_THEME
             .controls
             .action_button
@@ -5414,16 +5432,16 @@ fn products_stock_editor_card(
                 .gap(px(2.0))
                 .child(
                     div()
-                        .text_size(px(APP_UI_THEME.typography.body_text_px))
+                        .text_size(px(APP_UI_THEME.foundation.typography.body_text_px))
                         .font_weight(gpui::FontWeight::SEMIBOLD)
-                        .text_color(rgb(APP_UI_THEME.text.primary))
+                        .text_color(rgb(APP_UI_THEME.foundation.text.primary))
                         .child(app_shared_text(AppTextKey::ProductsStockEditorTitle)),
                 )
                 .child(
                     div()
-                        .text_size(px(APP_UI_THEME.typography.utility_title_text_px))
+                        .text_size(px(APP_UI_THEME.foundation.typography.utility_title_text_px))
                         .line_height(relative(1.2))
-                        .text_color(rgb(APP_UI_THEME.text.secondary))
+                        .text_color(rgb(APP_UI_THEME.foundation.text.secondary))
                         .child(product_display_title(row.title.as_str())),
                 ),
         )
@@ -5432,7 +5450,7 @@ fn products_stock_editor_card(
                 .w_full()
                 .flex()
                 .items_end()
-                .gap(px(APP_UI_THEME.layout.home_stack_gap_px))
+                .gap(px(APP_UI_THEME.shells.home_stack_gap_px))
                 .child(
                     div()
                         .flex_1()
@@ -5442,27 +5460,36 @@ fn products_stock_editor_card(
                         .gap(px(6.0))
                         .child(
                             div()
-                                .text_size(px(APP_UI_THEME.typography.utility_title_text_px))
+                                .text_size(px(APP_UI_THEME
+                                    .foundation
+                                    .typography
+                                    .utility_title_text_px))
                                 .font_weight(gpui::FontWeight::SEMIBOLD)
-                                .text_color(rgb(APP_UI_THEME.text.secondary))
+                                .text_color(rgb(APP_UI_THEME.foundation.text.secondary))
                                 .child(app_shared_text(AppTextKey::ProductsStockEditorFieldLabel)),
                         )
                         .child(app_text_input(&editor.input, false).w_full())
                         .when_some(validation_key, |this, key| {
                             this.child(
                                 div()
-                                    .text_size(px(APP_UI_THEME.typography.utility_title_text_px))
+                                    .text_size(px(APP_UI_THEME
+                                        .foundation
+                                        .typography
+                                        .utility_title_text_px))
                                     .line_height(relative(1.2))
-                                    .text_color(rgb(APP_UI_THEME.text.secondary))
+                                    .text_color(rgb(APP_UI_THEME.foundation.text.secondary))
                                     .child(app_shared_text(key)),
                             )
                         })
                         .when(editor.save_failed, |this| {
                             this.child(
                                 div()
-                                    .text_size(px(APP_UI_THEME.typography.utility_title_text_px))
+                                    .text_size(px(APP_UI_THEME
+                                        .foundation
+                                        .typography
+                                        .utility_title_text_px))
                                     .line_height(relative(1.2))
-                                    .text_color(rgb(APP_UI_THEME.text.secondary))
+                                    .text_color(rgb(APP_UI_THEME.foundation.text.secondary))
                                     .child(app_shared_text(
                                         AppTextKey::ProductsStockEditorSaveFailed,
                                     )),
@@ -5532,7 +5559,7 @@ fn products_editor_surface(
                 .w_full()
                 .flex()
                 .flex_col()
-                .gap(px(APP_UI_THEME.layout.home_stack_gap_px))
+                .gap(px(APP_UI_THEME.shells.home_stack_gap_px))
                 .child(home_body_text(app_shared_text(
                     AppTextKey::ProductsEditorBody,
                 )))
@@ -5581,11 +5608,14 @@ fn products_editor_surface(
                         .flex()
                         .items_center()
                         .justify_between()
-                        .gap(px(APP_UI_THEME.layout.home_stack_gap_px))
+                        .gap(px(APP_UI_THEME.shells.home_stack_gap_px))
                         .child(
                             div()
-                                .text_size(px(APP_UI_THEME.typography.utility_title_text_px))
-                                .text_color(rgb(APP_UI_THEME.text.secondary))
+                                .text_size(px(APP_UI_THEME
+                                    .foundation
+                                    .typography
+                                    .utility_title_text_px))
+                                .text_color(rgb(APP_UI_THEME.foundation.text.secondary))
                                 .child(product_display_title(
                                     form.title_input.read(cx).value().as_ref(),
                                 )),
@@ -5738,9 +5768,9 @@ fn products_editor_publish_blocker_row(blocker: ProductPublishBlocker) -> AnyEle
         .w_full()
         .flex()
         .items_start()
-        .gap(px(APP_UI_THEME.layout.settings_account_status_gap_px))
+        .gap(px(APP_UI_THEME.shells.settings_account_status_gap_px))
         .child(status_indicator(
-            APP_UI_THEME.controls.status_indicator.attention,
+            APP_UI_THEME.components.app_status_indicator.attention,
         ))
         .child(home_body_text(app_shared_text(
             products_editor_publish_blocker_key(blocker),
@@ -5887,7 +5917,7 @@ fn home_farm_setup_onboarding_card(
             .flex()
             .flex_col()
             .items_start()
-            .gap(px(APP_UI_THEME.layout.home_stack_gap_px))
+            .gap(px(APP_UI_THEME.shells.home_stack_gap_px))
             .child(home_body_text(app_shared_text(spec.body_key)))
             .when_some(spec.action_key, |this, action_key| {
                 this.child(div().child(action_button_primary(
@@ -5918,7 +5948,7 @@ fn home_farm_setup_form_card(
             .flex()
             .flex_col()
             .items_start()
-            .gap(px(APP_UI_THEME.layout.home_stack_gap_px))
+            .gap(px(APP_UI_THEME.shells.home_stack_gap_px))
             .child(home_body_text(app_shared_text(
                 AppTextKey::HomeFarmSetupOnboardingBody,
             )))
@@ -5954,7 +5984,7 @@ fn home_farm_setup_form_card(
                     .flex()
                     .flex_col()
                     .items_start()
-                    .gap(px(APP_UI_THEME.layout.home_stack_gap_px))
+                    .gap(px(APP_UI_THEME.shells.home_stack_gap_px))
                     .child(home_body_text(app_shared_text(farm_setup_save_state_key(
                         form.save_state,
                     ))))
@@ -6072,25 +6102,25 @@ fn home_farm_setup_order_method_section(
 
 fn home_farm_setup_section_label(key: AppTextKey) -> impl IntoElement {
     div()
-        .text_size(px(APP_UI_THEME.typography.utility_title_text_px))
+        .text_size(px(APP_UI_THEME.foundation.typography.utility_title_text_px))
         .font_weight(gpui::FontWeight::SEMIBOLD)
-        .text_color(rgb(APP_UI_THEME.text.secondary))
+        .text_color(rgb(APP_UI_THEME.foundation.text.secondary))
         .child(app_shared_text(key))
 }
 
 fn home_farm_setup_field_label(key: AppTextKey) -> impl IntoElement {
     div()
-        .text_size(px(APP_UI_THEME.typography.body_text_px))
+        .text_size(px(APP_UI_THEME.foundation.typography.body_text_px))
         .font_weight(gpui::FontWeight::MEDIUM)
-        .text_color(rgb(APP_UI_THEME.text.primary))
+        .text_color(rgb(APP_UI_THEME.foundation.text.primary))
         .child(app_shared_text(key))
 }
 
 fn home_farm_setup_blocker(key: AppTextKey) -> impl IntoElement {
     div()
-        .text_size(px(APP_UI_THEME.typography.utility_title_text_px))
+        .text_size(px(APP_UI_THEME.foundation.typography.utility_title_text_px))
         .line_height(relative(1.2))
-        .text_color(rgb(APP_UI_THEME.text.secondary))
+        .text_color(rgb(APP_UI_THEME.foundation.text.secondary))
         .child(app_shared_text(key))
 }
 
@@ -6187,7 +6217,7 @@ fn settings_pickup_location_card(
 
     div()
         .w_full()
-        .bg(rgb(APP_UI_THEME.surfaces.chrome_background))
+        .bg(rgb(APP_UI_THEME.foundation.surfaces.chrome_background))
         .rounded(px(APP_UI_THEME
             .controls
             .action_button
@@ -6206,9 +6236,9 @@ fn settings_pickup_location_card(
                 .gap(px(8.0))
                 .child(
                     div()
-                        .text_size(px(APP_UI_THEME.typography.body_text_px))
+                        .text_size(px(APP_UI_THEME.foundation.typography.body_text_px))
                         .font_weight(gpui::FontWeight::SEMIBOLD)
-                        .text_color(rgb(APP_UI_THEME.text.primary))
+                        .text_color(rgb(APP_UI_THEME.foundation.text.primary))
                         .child(title),
                 )
                 .child(action_row),
@@ -6289,7 +6319,7 @@ fn settings_fulfillment_window_card(
 ) -> impl IntoElement {
     div()
         .w_full()
-        .bg(rgb(APP_UI_THEME.surfaces.chrome_background))
+        .bg(rgb(APP_UI_THEME.foundation.surfaces.chrome_background))
         .rounded(px(APP_UI_THEME
             .controls
             .action_button
@@ -6308,9 +6338,9 @@ fn settings_fulfillment_window_card(
                 .gap(px(8.0))
                 .child(
                     div()
-                        .text_size(px(APP_UI_THEME.typography.body_text_px))
+                        .text_size(px(APP_UI_THEME.foundation.typography.body_text_px))
                         .font_weight(gpui::FontWeight::SEMIBOLD)
-                        .text_color(rgb(APP_UI_THEME.text.primary))
+                        .text_color(rgb(APP_UI_THEME.foundation.text.primary))
                         .child(settings_fulfillment_window_title(
                             index,
                             fulfillment_window,
@@ -6374,7 +6404,7 @@ fn settings_blackout_period_card(
 ) -> impl IntoElement {
     div()
         .w_full()
-        .bg(rgb(APP_UI_THEME.surfaces.chrome_background))
+        .bg(rgb(APP_UI_THEME.foundation.surfaces.chrome_background))
         .rounded(px(APP_UI_THEME
             .controls
             .action_button
@@ -6393,9 +6423,9 @@ fn settings_blackout_period_card(
                 .gap(px(8.0))
                 .child(
                     div()
-                        .text_size(px(APP_UI_THEME.typography.body_text_px))
+                        .text_size(px(APP_UI_THEME.foundation.typography.body_text_px))
                         .font_weight(gpui::FontWeight::SEMIBOLD)
-                        .text_color(rgb(APP_UI_THEME.text.primary))
+                        .text_color(rgb(APP_UI_THEME.foundation.text.primary))
                         .child(settings_blackout_period_title(index, blackout_period, cx)),
                 )
                 .child(
@@ -6474,9 +6504,9 @@ fn settings_timing_conflict_key(kind: FarmTimingConflictKind) -> AppTextKey {
 
 fn settings_badge_text(key: AppTextKey) -> impl IntoElement {
     div()
-        .text_size(px(APP_UI_THEME.typography.utility_title_text_px))
+        .text_size(px(APP_UI_THEME.foundation.typography.utility_title_text_px))
         .font_weight(gpui::FontWeight::SEMIBOLD)
-        .text_color(rgb(APP_UI_THEME.text.accent))
+        .text_color(rgb(APP_UI_THEME.foundation.text.accent))
         .child(app_shared_text(key))
 }
 
@@ -6487,11 +6517,11 @@ fn settings_dynamic_action_button(
     on_click: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
     cx: &App,
 ) -> impl IntoElement {
-    let sizing = APP_UI_THEME.controls.action_button.sizing;
+    let sizing = APP_UI_THEME.components.app_button.sizing;
     let colors = if is_primary {
-        APP_UI_THEME.controls.action_button.primary_colors
+        APP_UI_THEME.components.app_button.primary_colors
     } else {
-        APP_UI_THEME.controls.action_button.colors
+        APP_UI_THEME.components.app_button.colors
     };
     let hover_background = if colors.hover_changes_background {
         colors.hover_background
@@ -6535,7 +6565,7 @@ fn settings_inventory_panel(intro_key: AppTextKey, cards: Vec<AnyElement>) -> im
         .child(
             div()
                 .w_full()
-                .p(px(APP_UI_THEME.layout.settings_content_padding_px))
+                .p(px(APP_UI_THEME.shells.settings_content_padding_px))
                 .flex()
                 .flex_col()
                 .items_center()
@@ -6545,7 +6575,7 @@ fn settings_inventory_panel(intro_key: AppTextKey, cards: Vec<AnyElement>) -> im
                         .max_w(px(content_max_width_px))
                         .flex()
                         .flex_col()
-                        .gap(px(APP_UI_THEME.layout.home_stack_gap_px))
+                        .gap(px(APP_UI_THEME.shells.home_stack_gap_px))
                         .child(home_body_text(app_shared_text(intro_key)))
                         .children(cards),
                 ),
@@ -6570,7 +6600,7 @@ fn settings_inventory_card(spec: SettingsInventorySectionSpec) -> impl IntoEleme
 fn settings_inventory_field_row(key: AppTextKey) -> impl IntoElement {
     div()
         .w_full()
-        .bg(rgb(APP_UI_THEME.surfaces.chrome_background))
+        .bg(rgb(APP_UI_THEME.foundation.surfaces.chrome_background))
         .rounded(px(APP_UI_THEME
             .controls
             .action_button
@@ -6620,7 +6650,7 @@ fn home_saved_farm_summary_card(runtime: &DesktopAppRuntimeSummary) -> Option<An
 fn home_card(title: impl Into<SharedString>, body: impl IntoElement) -> impl IntoElement {
     div()
         .w_full()
-        .bg(rgb(APP_UI_THEME.surfaces.card_background))
+        .bg(rgb(APP_UI_THEME.foundation.surfaces.card_background))
         .rounded(px(APP_UI_THEME
             .controls
             .action_button
@@ -6629,15 +6659,15 @@ fn home_card(title: impl Into<SharedString>, body: impl IntoElement) -> impl Int
         .child(
             div()
                 .w_full()
-                .p(px(APP_UI_THEME.layout.home_card_padding_px))
+                .p(px(APP_UI_THEME.shells.home_card_padding_px))
                 .flex()
                 .flex_col()
-                .gap(px(APP_UI_THEME.layout.home_stack_gap_px))
+                .gap(px(APP_UI_THEME.shells.home_stack_gap_px))
                 .child(
                     div()
-                        .text_size(px(APP_UI_THEME.typography.body_text_px))
+                        .text_size(px(APP_UI_THEME.foundation.typography.body_text_px))
                         .font_weight(gpui::FontWeight::SEMIBOLD)
-                        .text_color(rgb(APP_UI_THEME.text.primary))
+                        .text_color(rgb(APP_UI_THEME.foundation.text.primary))
                         .child(title.into()),
                 )
                 .child(body),
@@ -6647,9 +6677,9 @@ fn home_card(title: impl Into<SharedString>, body: impl IntoElement) -> impl Int
 fn home_body_text(body: impl Into<SharedString>) -> impl IntoElement {
     div()
         .w_full()
-        .text_size(px(APP_UI_THEME.typography.body_text_px))
+        .text_size(px(APP_UI_THEME.foundation.typography.body_text_px))
         .line_height(relative(1.2))
-        .text_color(rgb(APP_UI_THEME.text.secondary))
+        .text_color(rgb(APP_UI_THEME.foundation.text.secondary))
         .child(body.into())
 }
 
@@ -6657,12 +6687,12 @@ fn home_status_row(status: &HomeStatusPresentation) -> impl IntoElement {
     div()
         .flex()
         .items_center()
-        .gap(px(APP_UI_THEME.layout.settings_account_status_gap_px))
+        .gap(px(APP_UI_THEME.shells.settings_account_status_gap_px))
         .child(status_indicator(status.indicator_color))
         .child(
             div()
-                .text_size(px(APP_UI_THEME.typography.body_text_px))
-                .text_color(rgb(APP_UI_THEME.text.secondary))
+                .text_size(px(APP_UI_THEME.foundation.typography.body_text_px))
+                .text_color(rgb(APP_UI_THEME.foundation.text.secondary))
                 .child(app_shared_text(status.label_key)),
         )
 }
@@ -6673,7 +6703,7 @@ fn home_summary_card(summary: &radroots_studio_app_models::TodaySummary) -> impl
         div()
             .w_full()
             .flex()
-            .gap(px(APP_UI_THEME.layout.home_stack_gap_px))
+            .gap(px(APP_UI_THEME.shells.home_stack_gap_px))
             .child(home_summary_metric(
                 AppTextKey::HomeTodayOrdersNeedingAction,
                 summary.orders_needing_action,
@@ -6693,7 +6723,7 @@ fn home_summary_metric(label_key: AppTextKey, value: u32) -> impl IntoElement {
     div()
         .flex_1()
         .min_w_0()
-        .bg(rgb(APP_UI_THEME.surfaces.window_background))
+        .bg(rgb(APP_UI_THEME.foundation.surfaces.window_background))
         .rounded(px(APP_UI_THEME
             .controls
             .action_button
@@ -6705,16 +6735,16 @@ fn home_summary_metric(label_key: AppTextKey, value: u32) -> impl IntoElement {
         .gap(px(4.0))
         .child(
             div()
-                .text_size(px(APP_UI_THEME.typography.body_text_px * 2.0))
+                .text_size(px(APP_UI_THEME.foundation.typography.body_text_px * 2.0))
                 .font_weight(gpui::FontWeight::BOLD)
-                .text_color(rgb(APP_UI_THEME.text.primary))
+                .text_color(rgb(APP_UI_THEME.foundation.text.primary))
                 .child(value.to_string()),
         )
         .child(
             div()
-                .text_size(px(APP_UI_THEME.typography.utility_title_text_px))
+                .text_size(px(APP_UI_THEME.foundation.typography.utility_title_text_px))
                 .line_height(relative(1.2))
-                .text_color(rgb(APP_UI_THEME.text.secondary))
+                .text_color(rgb(APP_UI_THEME.foundation.text.secondary))
                 .child(app_shared_text(label_key)),
         )
 }
@@ -6761,7 +6791,7 @@ fn home_list_card(
             .w_full()
             .flex()
             .flex_col()
-            .gap(px(APP_UI_THEME.layout.home_stack_gap_px))
+            .gap(px(APP_UI_THEME.shells.home_stack_gap_px))
             .children(rows)
             .when_some(action, |this, action| this.child(div().child(action))),
     )
@@ -6774,7 +6804,7 @@ fn home_order_row(order: &OrderListRow) -> AnyElement {
         .flex()
         .items_center()
         .justify_between()
-        .gap(px(APP_UI_THEME.layout.home_stack_gap_px))
+        .gap(px(APP_UI_THEME.shells.home_stack_gap_px))
         .child(
             div()
                 .min_w_0()
@@ -6783,20 +6813,20 @@ fn home_order_row(order: &OrderListRow) -> AnyElement {
                 .gap(px(2.0))
                 .child(
                     div()
-                        .text_size(px(APP_UI_THEME.typography.body_text_px))
+                        .text_size(px(APP_UI_THEME.foundation.typography.body_text_px))
                         .font_weight(gpui::FontWeight::SEMIBOLD)
-                        .text_color(rgb(APP_UI_THEME.text.primary))
+                        .text_color(rgb(APP_UI_THEME.foundation.text.primary))
                         .child(order.order_number.clone()),
                 )
                 .child(
                     div()
-                        .text_size(px(APP_UI_THEME.typography.utility_title_text_px))
-                        .text_color(rgb(APP_UI_THEME.text.secondary))
+                        .text_size(px(APP_UI_THEME.foundation.typography.utility_title_text_px))
+                        .text_color(rgb(APP_UI_THEME.foundation.text.secondary))
                         .child(order.customer_display_name.clone()),
                 ),
         )
         .child(status_indicator(
-            APP_UI_THEME.controls.status_indicator.attention,
+            APP_UI_THEME.components.app_status_indicator.attention,
         ))
         .into_any_element()
 }
@@ -6808,22 +6838,22 @@ fn home_low_stock_row(product: &ProductListRow) -> AnyElement {
         .flex()
         .items_center()
         .justify_between()
-        .gap(px(APP_UI_THEME.layout.home_stack_gap_px))
+        .gap(px(APP_UI_THEME.shells.home_stack_gap_px))
         .child(
             div()
                 .min_w_0()
-                .text_size(px(APP_UI_THEME.typography.body_text_px))
+                .text_size(px(APP_UI_THEME.foundation.typography.body_text_px))
                 .font_weight(gpui::FontWeight::SEMIBOLD)
-                .text_color(rgb(APP_UI_THEME.text.primary))
+                .text_color(rgb(APP_UI_THEME.foundation.text.primary))
                 .child(product_display_title(product.title.as_str())),
         )
         .child(
             div()
                 .flex()
                 .items_center()
-                .gap(px(APP_UI_THEME.layout.settings_account_status_gap_px))
+                .gap(px(APP_UI_THEME.shells.settings_account_status_gap_px))
                 .child(status_indicator(
-                    APP_UI_THEME.controls.status_indicator.attention,
+                    APP_UI_THEME.components.app_status_indicator.attention,
                 ))
                 .child(
                     div()
@@ -6832,15 +6862,18 @@ fn home_low_stock_row(product: &ProductListRow) -> AnyElement {
                         .gap(px(4.0))
                         .child(
                             div()
-                                .text_size(px(APP_UI_THEME.typography.utility_title_text_px))
-                                .text_color(rgb(APP_UI_THEME.text.secondary))
+                                .text_size(px(APP_UI_THEME
+                                    .foundation
+                                    .typography
+                                    .utility_title_text_px))
+                                .text_color(rgb(APP_UI_THEME.foundation.text.secondary))
                                 .child(app_shared_label_text(AppTextKey::HomeTodayStockCountLabel)),
                         )
                         .child(
                             div()
-                                .text_size(px(APP_UI_THEME.typography.body_text_px))
+                                .text_size(px(APP_UI_THEME.foundation.typography.body_text_px))
                                 .font_weight(gpui::FontWeight::SEMIBOLD)
-                                .text_color(rgb(APP_UI_THEME.text.primary))
+                                .text_color(rgb(APP_UI_THEME.foundation.text.primary))
                                 .child(product.stock_count.to_string()),
                         ),
                 ),
@@ -6855,17 +6888,17 @@ fn home_draft_row(product: &ProductListRow) -> AnyElement {
         .flex()
         .items_center()
         .justify_between()
-        .gap(px(APP_UI_THEME.layout.home_stack_gap_px))
+        .gap(px(APP_UI_THEME.shells.home_stack_gap_px))
         .child(
             div()
                 .min_w_0()
-                .text_size(px(APP_UI_THEME.typography.body_text_px))
+                .text_size(px(APP_UI_THEME.foundation.typography.body_text_px))
                 .font_weight(gpui::FontWeight::SEMIBOLD)
-                .text_color(rgb(APP_UI_THEME.text.primary))
+                .text_color(rgb(APP_UI_THEME.foundation.text.primary))
                 .child(product_display_title(product.title.as_str())),
         )
         .child(status_indicator(
-            APP_UI_THEME.controls.status_indicator.offline,
+            APP_UI_THEME.components.app_status_indicator.offline,
         ))
         .into_any_element()
 }
@@ -6878,22 +6911,22 @@ fn home_setup_task_row(task: &radroots_studio_app_models::TodaySetupTask) -> Any
         .min_w_0()
         .flex()
         .items_center()
-        .gap(px(APP_UI_THEME.layout.settings_account_status_gap_px))
+        .gap(px(APP_UI_THEME.shells.settings_account_status_gap_px))
         .child(status_indicator(if is_complete {
-            APP_UI_THEME.controls.status_indicator.online
+            APP_UI_THEME.components.app_status_indicator.online
         } else {
-            APP_UI_THEME.controls.status_indicator.offline
+            APP_UI_THEME.components.app_status_indicator.offline
         }))
         .child(
             div()
                 .min_w_0()
-                .text_size(px(APP_UI_THEME.typography.body_text_px))
+                .text_size(px(APP_UI_THEME.foundation.typography.body_text_px))
                 .font_weight(gpui::FontWeight::MEDIUM)
                 .line_height(relative(1.2))
                 .text_color(rgb(if is_complete {
-                    APP_UI_THEME.text.secondary
+                    APP_UI_THEME.foundation.text.secondary
                 } else {
-                    APP_UI_THEME.text.primary
+                    APP_UI_THEME.foundation.text.primary
                 }))
                 .child(app_shared_text(home_setup_task_label_key(task.kind))),
         )
@@ -6979,14 +7012,14 @@ fn home_farm_order_methods_summary(draft: &FarmSetupDraft) -> String {
 fn home_status_presentation(runtime: &DesktopAppRuntimeSummary) -> HomeStatusPresentation {
     if runtime.startup_issue.is_some() || runtime.startup_gate == AppStartupGate::Blocked {
         return HomeStatusPresentation {
-            indicator_color: APP_UI_THEME.controls.status_indicator.attention,
+            indicator_color: APP_UI_THEME.components.app_status_indicator.attention,
             label_key: AppTextKey::HomeTodayStatusStartupIssue,
         };
     }
 
     if runtime.startup_gate == AppStartupGate::SetupRequired {
         return HomeStatusPresentation {
-            indicator_color: APP_UI_THEME.controls.status_indicator.offline,
+            indicator_color: APP_UI_THEME.components.app_status_indicator.offline,
             label_key: AppTextKey::HomeTodayStatusSetup,
         };
     }
@@ -6994,13 +7027,13 @@ fn home_status_presentation(runtime: &DesktopAppRuntimeSummary) -> HomeStatusPre
     match farmer_home_farm_state(runtime) {
         FarmerHomeFarmState::NoFarm => {
             return HomeStatusPresentation {
-                indicator_color: APP_UI_THEME.controls.status_indicator.offline,
+                indicator_color: APP_UI_THEME.components.app_status_indicator.offline,
                 label_key: AppTextKey::HomeTodayStatusNoFarm,
             };
         }
         FarmerHomeFarmState::IncompleteFarm => {
             return HomeStatusPresentation {
-                indicator_color: APP_UI_THEME.controls.status_indicator.offline,
+                indicator_color: APP_UI_THEME.components.app_status_indicator.offline,
                 label_key: AppTextKey::HomeTodayStatusSetup,
             };
         }
@@ -7009,13 +7042,13 @@ fn home_status_presentation(runtime: &DesktopAppRuntimeSummary) -> HomeStatusPre
 
     if runtime.today_projection.has_attention_items() {
         return HomeStatusPresentation {
-            indicator_color: APP_UI_THEME.controls.status_indicator.attention,
+            indicator_color: APP_UI_THEME.components.app_status_indicator.attention,
             label_key: AppTextKey::HomeTodayStatusAttention,
         };
     }
 
     HomeStatusPresentation {
-        indicator_color: APP_UI_THEME.controls.status_indicator.online,
+        indicator_color: APP_UI_THEME.components.app_status_indicator.online,
         label_key: AppTextKey::HomeTodayStatusReady,
     }
 }

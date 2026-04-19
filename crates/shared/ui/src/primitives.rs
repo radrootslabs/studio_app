@@ -12,18 +12,18 @@ use std::rc::Rc;
 use crate::APP_UI_THEME;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-enum ActionButtonVariant {
-    Standard,
+enum AppButtonVariant {
+    Secondary,
     Primary,
 }
 
-pub struct IconSegmentButtonSpec {
+pub struct AppSegmentButtonIconSpec {
     pub id: &'static str,
     pub label: SharedString,
     pub icon: IconName,
 }
 
-impl IconSegmentButtonSpec {
+impl AppSegmentButtonIconSpec {
     pub fn new(id: &'static str, label: impl Into<SharedString>, icon: IconName) -> Self {
         Self {
             id,
@@ -68,59 +68,49 @@ impl LabelValueRow {
     }
 }
 
-pub fn app_window_shell(background: u32, content: impl IntoElement) -> impl IntoElement {
+pub fn app_surface_window(background: u32, content: impl IntoElement) -> impl IntoElement {
     div()
         .size_full()
         .overflow_hidden()
         .bg(rgb(background))
-        .text_color(rgb(APP_UI_THEME.text.primary))
+        .text_color(rgb(APP_UI_THEME.foundation.text.primary))
         .child(content)
 }
 
-pub fn app_center_stage(content: impl IntoElement) -> impl IntoElement {
-    div()
-        .size_full()
-        .flex()
-        .items_center()
-        .justify_center()
-        .p(px(APP_UI_THEME.layout.home_window_padding_px))
-        .child(content)
-}
-
-pub fn app_card(content: impl IntoElement) -> impl IntoElement {
+pub fn app_surface_card(content: impl IntoElement) -> impl IntoElement {
     div()
         .w_full()
         .h_full()
-        .max_w(px(APP_UI_THEME.layout.home_card_max_width_px))
+        .max_w(px(APP_UI_THEME.shells.home_card_max_width_px))
         .mx_auto()
-        .bg(rgb(APP_UI_THEME.surfaces.card_background))
+        .bg(rgb(APP_UI_THEME.foundation.surfaces.card_background))
         .overflow_hidden()
         .child(
             div()
                 .size_full()
                 .overflow_hidden()
-                .p(px(APP_UI_THEME.layout.home_card_padding_px))
+                .p(px(APP_UI_THEME.shells.home_card_padding_px))
                 .child(content),
         )
 }
 
-pub fn section_divider() -> impl IntoElement {
+pub fn app_divider() -> impl IntoElement {
     div()
         .w_full()
-        .h(px(APP_UI_THEME.layout.divider_thickness_px))
-        .bg(rgb(APP_UI_THEME.surfaces.divider))
+        .h(px(APP_UI_THEME.foundation.borders.divider_thickness_px))
+        .bg(rgb(APP_UI_THEME.foundation.surfaces.divider))
 }
 
 pub fn utility_title_row(title: impl Into<SharedString>) -> impl IntoElement {
     div()
         .w_full()
-        .h(px(APP_UI_THEME.layout.utility_title_row_height_px))
+        .h(px(APP_UI_THEME.shells.utility_title_row_height_px))
         .flex()
         .justify_center()
         .items_center()
-        .text_size(px(APP_UI_THEME.typography.utility_title_text_px))
+        .text_size(px(APP_UI_THEME.foundation.typography.utility_title_text_px))
         .font_weight(gpui::FontWeight::BOLD)
-        .text_color(rgb(APP_UI_THEME.text.primary))
+        .text_color(rgb(APP_UI_THEME.foundation.text.primary))
         .child(title.into())
 }
 
@@ -131,8 +121,8 @@ pub fn label_value_list(rows: impl IntoIterator<Item = LabelValueRow>) -> impl I
             let line = format!("{}: {}", row.label, row.value);
             div()
                 .w_full()
-                .text_size(px(APP_UI_THEME.typography.body_text_px))
-                .text_color(rgb(APP_UI_THEME.text.secondary))
+                .text_size(px(APP_UI_THEME.foundation.typography.body_text_px))
+                .text_color(rgb(APP_UI_THEME.foundation.text.secondary))
                 .child(line)
         })
         .collect::<Vec<_>>();
@@ -141,17 +131,17 @@ pub fn label_value_list(rows: impl IntoIterator<Item = LabelValueRow>) -> impl I
         .w_full()
         .flex()
         .flex_col()
-        .gap(px(APP_UI_THEME.layout.metadata_row_gap_px))
+        .gap(px(APP_UI_THEME.shells.metadata_row_gap_px))
         .children(rows)
 }
 
-pub fn app_checkbox(
+fn app_checkbox(
     id: &'static str,
     checked: bool,
     cx: &App,
     on_change: impl Fn(bool, &mut Window, &mut App) + 'static,
 ) -> impl IntoElement {
-    let colors = APP_UI_THEME.controls.checkbox;
+    let colors = APP_UI_THEME.components.app_checkbox_field;
     let background = if checked {
         colors.checked_background
     } else {
@@ -195,10 +185,10 @@ pub fn app_checkbox_field(
     let checkbox_id = spec.id;
     let checkbox_label = spec.label;
     let checkbox_note = spec.note;
-    let row_text_px = APP_UI_THEME.typography.settings_row_text_px;
-    let note_text_px = APP_UI_THEME.typography.utility_title_text_px;
-    let note_indent_px =
-        APP_UI_THEME.controls.checkbox.size_px + APP_UI_THEME.layout.settings_checkbox_label_gap_px;
+    let row_text_px = APP_UI_THEME.foundation.typography.settings_row_text_px;
+    let note_text_px = APP_UI_THEME.foundation.typography.utility_title_text_px;
+    let note_indent_px = APP_UI_THEME.components.app_checkbox_field.size_px
+        + APP_UI_THEME.shells.settings_checkbox_label_gap_px;
     let on_change = Rc::new(on_change);
 
     div()
@@ -211,7 +201,7 @@ pub fn app_checkbox_field(
                 .custom(
                     ButtonCustomVariant::new(cx)
                         .color(transparent_black().into())
-                        .foreground(rgb(APP_UI_THEME.text.primary).into())
+                        .foreground(rgb(APP_UI_THEME.foundation.text.primary).into())
                         .border(transparent_black())
                         .hover(transparent_black().into())
                         .active(transparent_black().into()),
@@ -227,7 +217,7 @@ pub fn app_checkbox_field(
                         .w_full()
                         .flex()
                         .items_start()
-                        .gap(px(APP_UI_THEME.layout.settings_checkbox_label_gap_px))
+                        .gap(px(APP_UI_THEME.shells.settings_checkbox_label_gap_px))
                         .child(app_checkbox(checkbox_id, checked, cx, {
                             let on_change = Rc::clone(&on_change);
                             move |checked, window, cx| on_change(checked, window, cx)
@@ -237,7 +227,7 @@ pub fn app_checkbox_field(
                                 .min_w_0()
                                 .text_size(px(row_text_px))
                                 .line_height(relative(1.1))
-                                .text_color(rgb(APP_UI_THEME.text.primary))
+                                .text_color(rgb(APP_UI_THEME.foundation.text.primary))
                                 .child(checkbox_label),
                         ),
                 ),
@@ -249,20 +239,20 @@ pub fn app_checkbox_field(
                     .pl(px(note_indent_px))
                     .min_w_0()
                     .text_size(px(note_text_px))
-                    .text_color(rgb(APP_UI_THEME.text.secondary))
+                    .text_color(rgb(APP_UI_THEME.foundation.text.secondary))
                     .child(note),
             )
         })
 }
 
-pub fn icon_segment_button(
-    spec: IconSegmentButtonSpec,
+pub fn app_segment_button_icon(
+    spec: AppSegmentButtonIconSpec,
     is_active: bool,
     on_click: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
     cx: &App,
 ) -> impl IntoElement {
-    let colors = APP_UI_THEME.controls.icon_segment_button.colors;
-    let sizing = APP_UI_THEME.controls.icon_segment_button.sizing;
+    let colors = APP_UI_THEME.components.app_segment_button_icon.colors;
+    let sizing = APP_UI_THEME.components.app_segment_button_icon.sizing;
     let background = if is_active {
         colors.active_background
     } else {
@@ -310,12 +300,17 @@ pub fn icon_segment_button(
         )
 }
 
-pub fn app_text_input(input: &Entity<InputState>, disabled: bool) -> Input {
-    let tokens = APP_UI_THEME.controls.text_input;
+pub fn app_input_text(input: &Entity<InputState>, disabled: bool) -> Input {
+    let tokens = APP_UI_THEME.components.app_input_text;
     let background = if disabled {
         tokens.disabled_background
     } else {
         tokens.background
+    };
+    let foreground = if disabled {
+        APP_UI_THEME.foundation.text.secondary
+    } else {
+        APP_UI_THEME.foundation.text.primary
     };
 
     Input::new(input)
@@ -323,90 +318,91 @@ pub fn app_text_input(input: &Entity<InputState>, disabled: bool) -> Input {
         .disabled(disabled)
         .focus_bordered(false)
         .bg(rgb(background))
+        .text_color(rgb(foreground))
         .border_color(rgb(tokens.border))
         .border_1()
         .rounded(px(tokens.corner_radius_px))
 }
 
-pub fn action_button(
+pub fn app_button_secondary(
     id: &'static str,
     label: impl Into<SharedString>,
     on_click: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
     cx: &App,
 ) -> impl IntoElement {
-    action_button_label(
-        action_button_base(id, ActionButtonVariant::Standard, on_click, cx),
+    app_button_label(
+        app_button_base(id, AppButtonVariant::Secondary, on_click, cx),
         label.into(),
         APP_UI_THEME
-            .controls
-            .action_button
+            .components
+            .app_button
             .sizing
             .horizontal_padding_px,
-        ActionButtonVariant::Standard,
+        AppButtonVariant::Secondary,
     )
 }
 
-pub fn action_button_primary(
+pub fn app_button_primary(
     id: &'static str,
     label: impl Into<SharedString>,
     on_click: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
     cx: &App,
 ) -> impl IntoElement {
-    action_button_label(
-        action_button_base(id, ActionButtonVariant::Primary, on_click, cx),
+    app_button_label(
+        app_button_base(id, AppButtonVariant::Primary, on_click, cx),
         label.into(),
         APP_UI_THEME
-            .controls
-            .action_button
+            .components
+            .app_button
             .sizing
             .horizontal_padding_px,
-        ActionButtonVariant::Primary,
+        AppButtonVariant::Primary,
     )
 }
 
-pub fn action_button_primary_disabled(
+pub fn app_button_primary_disabled(
     id: &'static str,
     label: impl Into<SharedString>,
     cx: &App,
 ) -> impl IntoElement {
-    action_button_label(
-        action_button_base_disabled(id, ActionButtonVariant::Primary, cx),
+    app_button_label(
+        app_button_base_disabled(id, AppButtonVariant::Primary, cx),
         label.into(),
         APP_UI_THEME
-            .controls
-            .action_button
+            .components
+            .app_button
             .sizing
             .horizontal_padding_px,
-        ActionButtonVariant::Primary,
+        AppButtonVariant::Primary,
     )
 }
 
-pub fn action_button_compact(
+pub fn app_button_compact(
     id: &'static str,
     label: impl Into<SharedString>,
     on_click: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
     cx: &App,
 ) -> impl IntoElement {
-    action_button_label(
-        action_button_base(id, ActionButtonVariant::Standard, on_click, cx),
+    app_button_label(
+        app_button_base(id, AppButtonVariant::Secondary, on_click, cx),
         label.into(),
         APP_UI_THEME
-            .controls
-            .action_button
+            .components
+            .app_button
             .sizing
             .compact_horizontal_padding_px,
-        ActionButtonVariant::Standard,
+        AppButtonVariant::Secondary,
     )
 }
 
-fn action_button_label(
+fn app_button_label(
     button: Button,
     label: SharedString,
     horizontal_padding_px: f32,
-    variant: ActionButtonVariant,
+    variant: AppButtonVariant,
 ) -> impl IntoElement {
-    let sizing = APP_UI_THEME.controls.action_button.sizing;
-    let colors = action_button_colors(variant);
+    let sizing = APP_UI_THEME.components.app_button.sizing;
+    let colors = app_button_colors(variant);
     button.child(
         div()
             .h_full()
@@ -414,22 +410,23 @@ fn action_button_label(
             .items_center()
             .justify_center()
             .px(px(horizontal_padding_px))
+            .whitespace_nowrap()
             .text_size(px(sizing.label_size_px))
             .text_color(rgb(colors.foreground))
             .child(label),
     )
 }
 
-pub fn action_icon_button(
+pub fn app_button_icon(
     id: &'static str,
     icon: IconName,
     on_click: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
     cx: &App,
 ) -> impl IntoElement {
-    let sizing = APP_UI_THEME.controls.action_button.sizing;
-    let colors = action_button_colors(ActionButtonVariant::Standard);
+    let sizing = APP_UI_THEME.components.app_button.sizing;
+    let colors = app_button_colors(AppButtonVariant::Secondary);
 
-    action_button_base(id, ActionButtonVariant::Standard, on_click, cx)
+    app_button_base(id, AppButtonVariant::Secondary, on_click, cx)
         .with_size(Size::Size(px(sizing.square_width_px)))
         .icon(
             Icon::new(icon)
@@ -438,8 +435,8 @@ pub fn action_icon_button(
         )
 }
 
-pub fn status_indicator(color: u32) -> impl IntoElement {
-    let sizing = APP_UI_THEME.controls.status_indicator;
+pub fn app_status_indicator(color: u32) -> impl IntoElement {
+    let sizing = APP_UI_THEME.components.app_status_indicator;
 
     div()
         .size(px(sizing.size_px))
@@ -447,14 +444,14 @@ pub fn status_indicator(color: u32) -> impl IntoElement {
         .rounded(px(sizing.size_px / 2.0))
 }
 
-fn action_button_base(
+fn app_button_base(
     id: &'static str,
-    variant: ActionButtonVariant,
+    variant: AppButtonVariant,
     on_click: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
     cx: &App,
 ) -> Button {
-    let sizing = APP_UI_THEME.controls.action_button.sizing;
-    let colors = action_button_colors(variant);
+    let sizing = APP_UI_THEME.components.app_button.sizing;
+    let colors = app_button_colors(variant);
     let hover_background = if colors.hover_changes_background {
         colors.hover_background
     } else {
@@ -475,9 +472,9 @@ fn action_button_base(
         .on_click(on_click)
 }
 
-fn action_button_base_disabled(id: &'static str, variant: ActionButtonVariant, cx: &App) -> Button {
-    let sizing = APP_UI_THEME.controls.action_button.sizing;
-    let colors = action_button_disabled_colors(variant);
+fn app_button_base_disabled(id: &'static str, variant: AppButtonVariant, cx: &App) -> Button {
+    let sizing = APP_UI_THEME.components.app_button.sizing;
+    let colors = app_button_disabled_colors(variant);
 
     Button::new(id)
         .custom(
@@ -492,17 +489,17 @@ fn action_button_base_disabled(id: &'static str, variant: ActionButtonVariant, c
         .h(px(sizing.height_px))
 }
 
-fn action_button_colors(variant: ActionButtonVariant) -> crate::ActionButtonColors {
+fn app_button_colors(variant: AppButtonVariant) -> crate::AppButtonColors {
     match variant {
-        ActionButtonVariant::Standard => APP_UI_THEME.controls.action_button.colors,
-        ActionButtonVariant::Primary => APP_UI_THEME.controls.action_button.primary_colors,
+        AppButtonVariant::Secondary => APP_UI_THEME.components.app_button.secondary_colors,
+        AppButtonVariant::Primary => APP_UI_THEME.components.app_button.primary_colors,
     }
 }
 
-fn action_button_disabled_colors(variant: ActionButtonVariant) -> crate::ActionButtonColors {
+fn app_button_disabled_colors(variant: AppButtonVariant) -> crate::AppButtonColors {
     match variant {
-        ActionButtonVariant::Standard | ActionButtonVariant::Primary => {
-            APP_UI_THEME.controls.action_button.disabled_colors
+        AppButtonVariant::Secondary | AppButtonVariant::Primary => {
+            APP_UI_THEME.components.app_button.primary_disabled_colors
         }
     }
 }
@@ -511,11 +508,11 @@ fn action_button_disabled_colors(variant: ActionButtonVariant) -> crate::ActionB
 mod tests {
     use gpui_component::IconName;
 
-    use super::{AppCheckboxFieldSpec, IconSegmentButtonSpec};
+    use super::{AppCheckboxFieldSpec, AppSegmentButtonIconSpec};
 
     #[test]
     fn icon_segment_spec_preserves_id_and_label() {
-        let spec = IconSegmentButtonSpec::new("settings", "Settings", IconName::Settings2);
+        let spec = AppSegmentButtonIconSpec::new("settings", "Settings", IconName::Settings2);
 
         assert_eq!(spec.id, "settings");
         assert_eq!(spec.label.as_ref(), "Settings");
