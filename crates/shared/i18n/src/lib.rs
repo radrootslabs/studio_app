@@ -175,8 +175,45 @@ mod tests {
             "Farm profile and pickup details stay local on this device."
         );
         assert_eq!(
+            app_text(AppTextKey::SettingsFarmUnavailableBody),
+            "Finish setting up a farm before editing farm settings on this device."
+        );
+        assert_eq!(app_text(AppTextKey::SettingsFarmSaveAction), "Save changes");
+        assert_eq!(
+            app_text(AppTextKey::SettingsFarmSaveSaved),
+            "Saved locally on this device."
+        );
+        assert_eq!(
+            app_text(AppTextKey::SettingsFarmSavePending),
+            "Save changes to keep this on this device."
+        );
+        assert_eq!(
+            app_text(AppTextKey::SettingsFarmSaveFailed),
+            "Could not save farm settings on this device."
+        );
+        assert_eq!(
             app_text(AppTextKey::SettingsPickupLocationsSectionLabel),
             "Pickup locations"
+        );
+        assert_eq!(
+            app_text(AppTextKey::SettingsPickupLocationsEmptyBody),
+            "Add a pickup location so customers know where to collect orders."
+        );
+        assert_eq!(
+            app_text(AppTextKey::SettingsPickupLocationsAddAction),
+            "Add pickup location"
+        );
+        assert_eq!(
+            app_text(AppTextKey::SettingsPickupLocationsMakeDefaultAction),
+            "Make default"
+        );
+        assert_eq!(
+            app_text(AppTextKey::SettingsPickupLocationsDefaultBadge),
+            "Default"
+        );
+        assert_eq!(
+            app_text(AppTextKey::SettingsPickupLocationsRemoveAction),
+            "Remove"
         );
         assert_eq!(
             app_text(AppTextKey::SettingsOperatingRulesSectionLabel),
@@ -198,6 +235,7 @@ mod tests {
             app_text(AppTextKey::SettingsReadinessFieldInvalidTimingConflicts),
             "Invalid timing conflicts"
         );
+        assert_eq!(app_text(AppTextKey::SettingsReadinessReady), "Ready");
     }
 
     #[test]

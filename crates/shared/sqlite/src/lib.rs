@@ -3,8 +3,8 @@
 mod activation;
 mod activity;
 mod error;
-mod farm_setup;
 mod farm_rules;
+mod farm_setup;
 mod migrations;
 mod products;
 mod today;
@@ -24,8 +24,8 @@ pub use activity::{
     APP_ACTIVITY_CONTEXT_LIMIT, APP_ACTIVITY_RETENTION_LIMIT, AppActivityRepository,
 };
 pub use error::AppSqliteError;
+pub use farm_rules::{AppFarmRulesRepository, derive_farm_rules_readiness};
 pub use farm_setup::AppFarmSetupRepository;
-pub use farm_rules::AppFarmRulesRepository;
 pub use migrations::latest_schema_version;
 pub use products::AppProductsRepository;
 pub use today::{
@@ -347,9 +347,17 @@ mod tests {
         assert!(table_exists(connection, "blackout_periods"));
         assert!(column_exists(connection, "farms", "timezone"));
         assert!(column_exists(connection, "farms", "currency_code"));
-        assert!(column_exists(connection, "fulfillment_windows", "pickup_location_id"));
+        assert!(column_exists(
+            connection,
+            "fulfillment_windows",
+            "pickup_location_id"
+        ));
         assert!(column_exists(connection, "fulfillment_windows", "label"));
-        assert!(column_exists(connection, "fulfillment_windows", "order_cutoff_at"));
+        assert!(column_exists(
+            connection,
+            "fulfillment_windows",
+            "order_cutoff_at"
+        ));
         assert_eq!(row_count(connection, "sync_checkpoints"), 1);
 
         drop(store);

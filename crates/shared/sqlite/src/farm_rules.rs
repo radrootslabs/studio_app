@@ -29,7 +29,7 @@ impl<'a> AppFarmRulesRepository<'a> {
         let operating_rules = self.load_operating_rules(farm_id)?;
         let fulfillment_windows = self.load_fulfillment_windows(farm_id)?;
         let blackout_periods = self.load_blackout_periods(farm_id)?;
-        let readiness = compute_farm_rules_readiness(
+        let readiness = derive_farm_rules_readiness_parts(
             farm_profile.as_ref(),
             &pickup_locations,
             operating_rules.as_ref(),
@@ -49,19 +49,14 @@ impl<'a> AppFarmRulesRepository<'a> {
 
     pub fn save_farm_rules(&self, projection: &FarmRulesProjection) -> Result<(), AppSqliteError> {
         let farm_id = validate_projection(projection)?;
-        let readiness = compute_farm_rules_readiness(
-            projection.farm_profile.as_ref(),
-            &projection.pickup_locations,
-            projection.operating_rules.as_ref(),
-            &projection.fulfillment_windows,
-            &projection.blackout_periods,
-        );
-        let farm_profile = projection
-            .farm_profile
-            .as_ref()
-            .ok_or(AppSqliteError::InvalidProjection {
-                reason: "farm rules projection must include a farm profile",
-            })?;
+        let readiness = derive_farm_rules_readiness(projection);
+        let farm_profile =
+            projection
+                .farm_profile
+                .as_ref()
+                .ok_or(AppSqliteError::InvalidProjection {
+                    reason: "farm rules projection must include a farm profile",
+                })?;
 
         self.connection
             .execute_batch("BEGIN IMMEDIATE")
@@ -99,12 +94,12 @@ impl<'a> AppFarmRulesRepository<'a> {
 
         match result {
             Ok(()) => {
-                self.connection
-                    .execute_batch("COMMIT")
-                    .map_err(|source| AppSqliteError::Query {
+                self.connection.execute_batch("COMMIT").map_err(|source| {
+                    AppSqliteError::Query {
                         operation: "commit save farm rules transaction",
                         source,
-                    })?;
+                    }
+                })?;
                 Ok(())
             }
             Err(error) => {
@@ -675,12 +670,13 @@ impl<'a> AppFarmRulesRepository<'a> {
 }
 
 fn validate_projection(projection: &FarmRulesProjection) -> Result<FarmId, AppSqliteError> {
-    let farm_profile = projection
-        .farm_profile
-        .as_ref()
-        .ok_or(AppSqliteError::InvalidProjection {
-            reason: "farm rules projection must include a farm profile",
-        })?;
+    let farm_profile =
+        projection
+            .farm_profile
+            .as_ref()
+            .ok_or(AppSqliteError::InvalidProjection {
+                reason: "farm rules projection must include a farm profile",
+            })?;
     let farm_id = farm_profile.farm_id;
 
     if projection
@@ -722,7 +718,9 @@ fn validate_projection(projection: &FarmRulesProjection) -> Result<FarmId, AppSq
     if projection
         .fulfillment_windows
         .iter()
-        .any(|fulfillment_window| !pickup_location_ids.contains(&fulfillment_window.pickup_location_id))
+        .any(|fulfillment_window| {
+            !pickup_location_ids.contains(&fulfillment_window.pickup_location_id)
+        })
     {
         return Err(AppSqliteError::InvalidProjection {
             reason: "fulfillment windows must reference a saved pickup location",
@@ -742,7 +740,17 @@ fn validate_projection(projection: &FarmRulesProjection) -> Result<FarmId, AppSq
     Ok(farm_id)
 }
 
-fn compute_farm_rules_readiness(
+pub fn derive_farm_rules_readiness(projection: &FarmRulesProjection) -> FarmRulesReadiness {
+    derive_farm_rules_readiness_parts(
+        projection.farm_profile.as_ref(),
+        &projection.pickup_locations,
+        projection.operating_rules.as_ref(),
+        &projection.fulfillment_windows,
+        &projection.blackout_periods,
+    )
+}
+
+fn derive_farm_rules_readiness_parts(
     farm_profile: Option<&FarmProfileRecord>,
     pickup_locations: &[PickupLocationRecord],
     operating_rules: Option<&FarmOperatingRulesRecord>,
@@ -760,7 +768,10 @@ fn compute_farm_rules_readiness(
         blockers.push(FarmReadinessBlocker::MissingProfileBasics);
     }
 
-    if pickup_locations.is_empty() {
+    if !pickup_locations
+        .iter()
+        .any(|pickup_location| pickup_location_is_present(pickup_location))
+    {
         blockers.push(FarmReadinessBlocker::MissingPickupLocation);
     }
 
@@ -827,6 +838,10 @@ fn compute_farm_rules_readiness(
         blockers,
         timing_conflicts,
     }
+}
+
+fn pickup_location_is_present(pickup_location: &PickupLocationRecord) -> bool {
+    !pickup_location.label.trim().is_empty() && !pickup_location.address_line.trim().is_empty()
 }
 
 fn delete_missing_rows<T>(
@@ -902,12 +917,10 @@ fn parse_sqlite_bool(field: &'static str, value: i64) -> Result<bool, AppSqliteE
 }
 
 fn parse_u16(field: &'static str, value: i64) -> Result<u16, AppSqliteError> {
-    value
-        .try_into()
-        .map_err(|_| AppSqliteError::DecodeEnum {
-            field,
-            value: value.to_string(),
-        })
+    value.try_into().map_err(|_| AppSqliteError::DecodeEnum {
+        field,
+        value: value.to_string(),
+    })
 }
 
 fn farm_readiness_storage_key(ready: bool) -> &'static str {
@@ -926,14 +939,15 @@ mod tests {
     };
 
     use radroots_studio_app_models::{
-        BlackoutPeriodId, BlackoutPeriodRecord, FarmId, FarmOperatingRulesRecord, FarmProfileRecord,
-        FarmReadinessBlocker, FarmRulesProjection, FarmRulesReadiness, FarmTimingConflictKind,
-        FulfillmentWindowId, FulfillmentWindowRecord, PickupLocationId, PickupLocationRecord,
+        BlackoutPeriodId, BlackoutPeriodRecord, FarmId, FarmOperatingRulesRecord,
+        FarmProfileRecord, FarmReadinessBlocker, FarmRulesProjection, FarmRulesReadiness,
+        FarmTimingConflictKind, FulfillmentWindowId, FulfillmentWindowRecord, PickupLocationId,
+        PickupLocationRecord,
     };
 
     use crate::{AppSqliteStore, DatabaseTarget};
 
-    use super::AppFarmRulesRepository;
+    use super::{AppFarmRulesRepository, derive_farm_rules_readiness};
 
     #[test]
     fn load_farm_rules_returns_default_when_farm_is_missing() {
@@ -1003,8 +1017,8 @@ mod tests {
                 .expect("farm rules should save");
         }
 
-        let reopened = AppSqliteStore::open(DatabaseTarget::Path(path.clone()))
-            .expect("store should reopen");
+        let reopened =
+            AppSqliteStore::open(DatabaseTarget::Path(path.clone())).expect("store should reopen");
         let loaded = reopened
             .load_farm_rules(farm_id)
             .expect("farm rules should load after restart");
@@ -1082,6 +1096,93 @@ mod tests {
             projection.readiness.timing_conflicts[2].kind,
             FarmTimingConflictKind::BlackoutOverlapsFulfillmentWindow
         );
+    }
+
+    #[test]
+    fn blank_pickup_location_rows_do_not_count_as_present_for_readiness() {
+        let farm_id = FarmId::new();
+        let readiness = derive_farm_rules_readiness(&FarmRulesProjection {
+            farm_profile: Some(FarmProfileRecord {
+                farm_id,
+                display_name: "North field farm".to_owned(),
+                timezone: "UTC".to_owned(),
+                currency_code: "USD".to_owned(),
+            }),
+            pickup_locations: vec![PickupLocationRecord {
+                pickup_location_id: PickupLocationId::new(),
+                farm_id,
+                label: "   ".to_owned(),
+                address_line: String::new(),
+                directions: None,
+                is_default: true,
+            }],
+            operating_rules: Some(FarmOperatingRulesRecord {
+                farm_id,
+                promise_lead_hours: 24,
+                substitution_policy: "ask_customer".to_owned(),
+                missed_pickup_policy: "hold_next_window".to_owned(),
+            }),
+            fulfillment_windows: Vec::new(),
+            blackout_periods: Vec::new(),
+            readiness: FarmRulesReadiness::ready(),
+        });
+
+        assert!(
+            readiness
+                .blockers
+                .contains(&FarmReadinessBlocker::MissingPickupLocation)
+        );
+        assert!(
+            readiness
+                .blockers
+                .contains(&FarmReadinessBlocker::MissingFulfillmentWindow)
+        );
+    }
+
+    #[test]
+    fn complete_pickup_location_row_counts_as_present_for_readiness() {
+        let farm_id = FarmId::new();
+        let pickup_location_id = PickupLocationId::new();
+        let readiness = derive_farm_rules_readiness(&FarmRulesProjection {
+            farm_profile: Some(FarmProfileRecord {
+                farm_id,
+                display_name: "North field farm".to_owned(),
+                timezone: "UTC".to_owned(),
+                currency_code: "USD".to_owned(),
+            }),
+            pickup_locations: vec![PickupLocationRecord {
+                pickup_location_id,
+                farm_id,
+                label: "Barn pickup".to_owned(),
+                address_line: "14 Orchard Lane".to_owned(),
+                directions: None,
+                is_default: true,
+            }],
+            operating_rules: Some(FarmOperatingRulesRecord {
+                farm_id,
+                promise_lead_hours: 24,
+                substitution_policy: "ask_customer".to_owned(),
+                missed_pickup_policy: "hold_next_window".to_owned(),
+            }),
+            fulfillment_windows: vec![FulfillmentWindowRecord {
+                fulfillment_window_id: FulfillmentWindowId::new(),
+                farm_id,
+                pickup_location_id,
+                label: "Friday pickup".to_owned(),
+                starts_at: "2026-04-25T14:00:00Z".to_owned(),
+                ends_at: "2026-04-25T18:00:00Z".to_owned(),
+                order_cutoff_at: "2026-04-24T18:00:00Z".to_owned(),
+            }],
+            blackout_periods: Vec::new(),
+            readiness: FarmRulesReadiness::ready(),
+        });
+
+        assert!(
+            !readiness
+                .blockers
+                .contains(&FarmReadinessBlocker::MissingPickupLocation)
+        );
+        assert!(readiness.blockers.is_empty());
     }
 
     fn temp_database_path(test_name: &str) -> PathBuf {

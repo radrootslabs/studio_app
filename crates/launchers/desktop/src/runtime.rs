@@ -4,16 +4,18 @@ use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use radroots_studio_app_core::{AppDesktopRuntimePaths, AppRuntimePathsError, AppSharedAccountsPaths};
 use radroots_studio_app_models::{
     ActiveSurface, AppActivityContext, AppActivityKind, AppIdentityProjection, AppStartupGate,
-    FarmId, FarmReadiness, FarmSetupDraft, FarmSetupProjection, FarmSummary, FarmerSection,
-    LoggedOutStartupProjection, ProductEditorDraft, ProductId, ProductsFilter,
-    ProductsListProjection, ProductsSort, SettingsAccountProjection, SettingsPreference,
-    SettingsSection, ShellSection, TodayAgendaProjection,
+    FarmId, FarmProfileRecord, FarmReadiness, FarmRulesProjection, FarmSetupDraft,
+    FarmSetupProjection, FarmSummary, FarmerSection, LoggedOutStartupProjection,
+    PickupLocationRecord, ProductEditorDraft, ProductId, ProductsFilter, ProductsListProjection,
+    ProductsSort, SettingsAccountProjection, SettingsPreference, SettingsSection, ShellSection,
+    TodayAgendaProjection,
 };
 use radroots_studio_app_remote_signer::{
     RadrootsAppRemoteSignerApprovedSession, RadrootsAppRemoteSignerPendingSession,
 };
 use radroots_studio_app_sqlite::{
     APP_ACTIVITY_CONTEXT_LIMIT, AppSqliteError, AppSqliteStore, DatabaseTarget,
+    derive_farm_rules_readiness,
 };
 use radroots_studio_app_state::{
     AppShellProjection, AppStateCommand, AppStateStore, AppStateStoreError, FarmSetupFlowStage,
@@ -299,6 +301,19 @@ impl DesktopAppRuntime {
         &self,
     ) -> Result<FarmSetupProjection, DesktopAppRuntimeFarmSetupError> {
         self.lock_state_mut().finish_farm_setup()
+    }
+
+    pub fn load_farm_rules_projection(
+        &self,
+    ) -> Result<FarmRulesProjection, DesktopAppRuntimeFarmRulesError> {
+        self.lock_state().load_farm_rules_projection()
+    }
+
+    pub fn save_farm_rules_projection(
+        &self,
+        projection: FarmRulesProjection,
+    ) -> Result<FarmRulesProjection, DesktopAppRuntimeFarmRulesError> {
+        self.lock_state_mut().save_farm_rules_projection(projection)
     }
 
     pub fn record_home_opened(&self) -> bool {
@@ -831,6 +846,77 @@ impl DesktopAppRuntimeState {
         Ok(selected_account_context.farm_setup_projection)
     }
 
+    fn load_farm_rules_projection(
+        &self,
+    ) -> Result<FarmRulesProjection, DesktopAppRuntimeFarmRulesError> {
+        let farm_id = self
+            .selected_farm_id()
+            .ok_or(DesktopAppRuntimeFarmRulesError::FarmRequired)?;
+        let fallback_profile = self.fallback_farm_profile(farm_id);
+        let projection = self
+            .sqlite_store_for_farm_rules()?
+            .load_farm_rules(farm_id)
+            .map(|projection| {
+                prepare_loaded_farm_rules_projection(projection, &fallback_profile)
+            })?;
+
+        Ok(projection)
+    }
+
+    fn save_farm_rules_projection(
+        &mut self,
+        projection: FarmRulesProjection,
+    ) -> Result<FarmRulesProjection, DesktopAppRuntimeFarmRulesError> {
+        let account_id = self.selected_account_id_for_farm_rules()?;
+        let farm_id = self
+            .selected_farm_id()
+            .ok_or(DesktopAppRuntimeFarmRulesError::FarmRequired)?;
+        let fallback_profile = self.fallback_farm_profile(farm_id);
+        let normalized = normalize_farm_rules_projection(projection, &fallback_profile);
+
+        let saved_projection = {
+            let sqlite_store = self.sqlite_store_for_farm_rules()?;
+            sqlite_store.save_farm_rules(&normalized)?;
+
+            let mut refreshed = sqlite_store.load_farm_rules(farm_id)?;
+            refreshed = prepare_loaded_farm_rules_projection(refreshed, &fallback_profile);
+
+            let saved_farm = FarmSummary {
+                farm_id,
+                display_name: refreshed
+                    .farm_profile
+                    .as_ref()
+                    .map(|profile| profile.display_name.clone())
+                    .unwrap_or_default(),
+                readiness: if refreshed.is_ready() {
+                    FarmReadiness::Ready
+                } else {
+                    FarmReadiness::Incomplete
+                },
+            };
+            let mut farm_setup_projection = self.state_store.farm_setup_projection().clone();
+            farm_setup_projection.draft.farm_name = saved_farm.display_name.clone();
+            farm_setup_projection.saved_farm = Some(saved_farm.clone());
+
+            sqlite_store.save_farm_summary(&saved_farm)?;
+            sqlite_store.save_farm_setup(account_id.as_str(), &farm_setup_projection)?;
+
+            refreshed
+        };
+
+        let selected_account_context = {
+            let sqlite_store = self.sqlite_store_for_farm_rules()?;
+            load_selected_account_context(
+                sqlite_store,
+                self.state_store.identity_projection(),
+                self.state_store.products_projection().query.clone(),
+            )?
+        };
+        self.apply_selected_account_context(&selected_account_context);
+
+        Ok(saved_projection)
+    }
+
     fn replace_identity_projection(
         &mut self,
         projection: AppIdentityProjection,
@@ -891,6 +977,13 @@ impl DesktopAppRuntimeState {
             .map(|account| account.account.account_id.clone())
     }
 
+    fn selected_account_id_for_farm_rules(
+        &self,
+    ) -> Result<String, DesktopAppRuntimeFarmRulesError> {
+        self.selected_account_for_farm_rules()
+            .map(|account| account.account.account_id.clone())
+    }
+
     fn selected_account_for_farm_setup(
         &self,
     ) -> Result<&radroots_studio_app_models::SelectedAccountProjection, DesktopAppRuntimeFarmSetupError>
@@ -900,6 +993,17 @@ impl DesktopAppRuntimeState {
             .selected_account
             .as_ref()
             .ok_or(DesktopAppRuntimeFarmSetupError::AccountRequired)
+    }
+
+    fn selected_account_for_farm_rules(
+        &self,
+    ) -> Result<&radroots_studio_app_models::SelectedAccountProjection, DesktopAppRuntimeFarmRulesError>
+    {
+        self.state_store
+            .identity_projection()
+            .selected_account
+            .as_ref()
+            .ok_or(DesktopAppRuntimeFarmRulesError::AccountRequired)
     }
 
     fn accounts_manager(
@@ -922,6 +1026,14 @@ impl DesktopAppRuntimeState {
         self.sqlite_store
             .as_ref()
             .ok_or(DesktopAppRuntimeFarmSetupError::RuntimeUnavailable)
+    }
+
+    fn sqlite_store_for_farm_rules(
+        &self,
+    ) -> Result<&AppSqliteStore, DesktopAppRuntimeFarmRulesError> {
+        self.sqlite_store
+            .as_ref()
+            .ok_or(DesktopAppRuntimeFarmRulesError::RuntimeUnavailable)
     }
 
     fn replace_products_query(
@@ -965,6 +1077,33 @@ impl DesktopAppRuntimeState {
         match &self.state_store.products_projection().editor {
             radroots_studio_app_state::ProductEditorState::Open(session) => session.selected_product_id,
             radroots_studio_app_state::ProductEditorState::Closed => None,
+        }
+    }
+
+    fn fallback_farm_profile(&self, farm_id: FarmId) -> FarmProfileRecord {
+        let saved_farm_name = self
+            .state_store
+            .farm_setup_projection()
+            .saved_farm
+            .as_ref()
+            .filter(|farm| farm.farm_id == farm_id)
+            .map(|farm| farm.display_name.clone());
+        let drafted_farm_name = self
+            .state_store
+            .farm_setup_projection()
+            .draft
+            .farm_name
+            .trim()
+            .to_owned();
+        let display_name = saved_farm_name
+            .or_else(|| (!drafted_farm_name.is_empty()).then_some(drafted_farm_name))
+            .unwrap_or_default();
+
+        FarmProfileRecord {
+            farm_id,
+            display_name,
+            timezone: "UTC".to_owned(),
+            currency_code: "USD".to_owned(),
         }
     }
 
@@ -1113,6 +1252,18 @@ pub enum DesktopAppRuntimeFarmSetupError {
 }
 
 #[derive(Debug, Error)]
+pub enum DesktopAppRuntimeFarmRulesError {
+    #[error("desktop runtime commands are unavailable while the runtime is degraded")]
+    RuntimeUnavailable,
+    #[error("farm settings require a selected account")]
+    AccountRequired,
+    #[error("farm settings require a configured farm")]
+    FarmRequired,
+    #[error(transparent)]
+    Sqlite(#[from] AppSqliteError),
+}
+
+#[derive(Debug, Error)]
 enum DesktopAppRuntimeBootstrapError {
     #[error(transparent)]
     RuntimePaths(#[from] AppRuntimePathsError),
@@ -1166,6 +1317,60 @@ fn load_selected_account_context(
     })
 }
 
+fn prepare_loaded_farm_rules_projection(
+    mut projection: FarmRulesProjection,
+    fallback_profile: &FarmProfileRecord,
+) -> FarmRulesProjection {
+    if projection.farm_profile.is_none() {
+        projection.farm_profile = Some(fallback_profile.clone());
+    }
+
+    normalize_pickup_location_defaults(&mut projection.pickup_locations);
+    projection.readiness = derive_farm_rules_readiness(&projection);
+    projection
+}
+
+fn normalize_farm_rules_projection(
+    mut projection: FarmRulesProjection,
+    fallback_profile: &FarmProfileRecord,
+) -> FarmRulesProjection {
+    let mut farm_profile = projection
+        .farm_profile
+        .take()
+        .unwrap_or_else(|| fallback_profile.clone());
+    farm_profile.farm_id = fallback_profile.farm_id;
+    farm_profile.display_name = farm_profile.display_name.trim().to_owned();
+    farm_profile.timezone = farm_profile.timezone.trim().to_owned();
+    farm_profile.currency_code = farm_profile.currency_code.trim().to_uppercase();
+    projection.farm_profile = Some(farm_profile);
+
+    for pickup_location in &mut projection.pickup_locations {
+        pickup_location.farm_id = fallback_profile.farm_id;
+        pickup_location.label = pickup_location.label.trim().to_owned();
+        pickup_location.address_line = pickup_location.address_line.trim().to_owned();
+        pickup_location.directions = pickup_location
+            .directions
+            .take()
+            .map(|directions| directions.trim().to_owned())
+            .filter(|directions| !directions.is_empty());
+    }
+
+    normalize_pickup_location_defaults(&mut projection.pickup_locations);
+    projection.readiness = derive_farm_rules_readiness(&projection);
+    projection
+}
+
+fn normalize_pickup_location_defaults(pickup_locations: &mut [PickupLocationRecord]) {
+    let default_index = pickup_locations
+        .iter()
+        .position(|pickup_location| pickup_location.is_default)
+        .or_else(|| (!pickup_locations.is_empty()).then_some(0));
+
+    for (index, pickup_location) in pickup_locations.iter_mut().enumerate() {
+        pickup_location.is_default = Some(index) == default_index;
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::{
@@ -1181,8 +1386,9 @@ mod tests {
     };
     use radroots_studio_app_models::{
         AccountSurfaceActivationProjection, ActiveSurface, AppActivityKind, AppStartupGate, FarmId,
-        FarmOrderMethod, FarmReadiness, FarmSetupDraft, FarmSetupProjection, FarmSummary,
-        FarmerActivationProjection, FarmerSection, LoggedOutStartupProjection, ProductEditorDraft,
+        FarmOrderMethod, FarmProfileRecord, FarmReadiness, FarmReadinessBlocker, FarmSetupDraft,
+        FarmSetupProjection, FarmSummary, FarmerActivationProjection, FarmerSection,
+        LoggedOutStartupProjection, PickupLocationId, PickupLocationRecord, ProductEditorDraft,
         ProductStatus, ProductsFilter, ProductsSort, SelectedSurfaceProjection, SettingsPreference,
         SettingsSection, ShellSection, TodayAgendaProjection, TodaySetupTask, TodaySetupTaskKind,
         TodaySummary,
@@ -2525,6 +2731,200 @@ mod tests {
                 .expect("today agenda should load")
                 .farm,
             finished_projection.saved_farm
+        );
+    }
+
+    #[test]
+    fn loading_farm_rules_projection_seeds_profile_from_saved_farm() {
+        let runtime = memory_runtime();
+
+        assert!(
+            runtime
+                .generate_local_account(Some("Farmer".to_owned()))
+                .expect("account should generate")
+        );
+        let account_id = runtime
+            .summary()
+            .settings_account_projection
+            .selected_account
+            .as_ref()
+            .expect("selected account")
+            .account
+            .account_id
+            .clone();
+        let farm_id =
+            save_farmer_surface_activation(&runtime, account_id.as_str(), ActiveSurface::Farmer);
+        let farm_setup_projection = FarmSetupProjection::from_saved_farm(FarmSummary {
+            farm_id,
+            display_name: "North field farm".to_owned(),
+            readiness: FarmReadiness::Incomplete,
+        });
+        runtime
+            .lock_state()
+            .sqlite_store
+            .as_ref()
+            .expect("sqlite store")
+            .save_farm_summary(
+                farm_setup_projection
+                    .saved_farm
+                    .as_ref()
+                    .expect("saved farm should exist"),
+            )
+            .expect("farm summary should save");
+        runtime
+            .lock_state()
+            .sqlite_store
+            .as_ref()
+            .expect("sqlite store")
+            .save_farm_setup(account_id.as_str(), &farm_setup_projection)
+            .expect("farm setup should save");
+
+        assert!(
+            runtime
+                .select_local_account(account_id.as_str())
+                .expect("account should select")
+        );
+
+        let projection = runtime
+            .load_farm_rules_projection()
+            .expect("farm rules projection should load");
+
+        assert_eq!(
+            projection.farm_profile,
+            Some(FarmProfileRecord {
+                farm_id,
+                display_name: "North field farm".to_owned(),
+                timezone: "UTC".to_owned(),
+                currency_code: "USD".to_owned(),
+            })
+        );
+        assert_eq!(
+            projection.readiness.blockers,
+            vec![
+                FarmReadinessBlocker::MissingPickupLocation,
+                FarmReadinessBlocker::MissingOperatingRules,
+                FarmReadinessBlocker::MissingFulfillmentWindow,
+            ]
+        );
+    }
+
+    #[test]
+    fn saving_farm_rules_projection_refreshes_saved_farm_summary_and_pickup_defaults() {
+        let runtime = memory_runtime();
+
+        assert!(
+            runtime
+                .generate_local_account(Some("Farmer".to_owned()))
+                .expect("account should generate")
+        );
+        let account_id = runtime
+            .summary()
+            .settings_account_projection
+            .selected_account
+            .as_ref()
+            .expect("selected account")
+            .account
+            .account_id
+            .clone();
+        let farm_id =
+            save_farmer_surface_activation(&runtime, account_id.as_str(), ActiveSurface::Farmer);
+        let farm_setup_projection = FarmSetupProjection::from_saved_farm(FarmSummary {
+            farm_id,
+            display_name: "North field farm".to_owned(),
+            readiness: FarmReadiness::Incomplete,
+        });
+        runtime
+            .lock_state()
+            .sqlite_store
+            .as_ref()
+            .expect("sqlite store")
+            .save_farm_summary(
+                farm_setup_projection
+                    .saved_farm
+                    .as_ref()
+                    .expect("saved farm should exist"),
+            )
+            .expect("farm summary should save");
+        runtime
+            .lock_state()
+            .sqlite_store
+            .as_ref()
+            .expect("sqlite store")
+            .save_farm_setup(account_id.as_str(), &farm_setup_projection)
+            .expect("farm setup should save");
+
+        assert!(
+            runtime
+                .select_local_account(account_id.as_str())
+                .expect("account should select")
+        );
+
+        let saved_projection = runtime
+            .save_farm_rules_projection(radroots_studio_app_models::FarmRulesProjection {
+                farm_profile: Some(FarmProfileRecord {
+                    farm_id,
+                    display_name: "Harbor farm".to_owned(),
+                    timezone: "Europe/Stockholm".to_owned(),
+                    currency_code: "sek".to_owned(),
+                }),
+                pickup_locations: vec![
+                    PickupLocationRecord {
+                        pickup_location_id: PickupLocationId::new(),
+                        farm_id,
+                        label: "   Barn pickup   ".to_owned(),
+                        address_line: " 14 Orchard Lane ".to_owned(),
+                        directions: Some("  Drive to the red barn.  ".to_owned()),
+                        is_default: false,
+                    },
+                    PickupLocationRecord {
+                        pickup_location_id: PickupLocationId::new(),
+                        farm_id,
+                        label: "Market stall".to_owned(),
+                        address_line: "2 Harbor Road".to_owned(),
+                        directions: None,
+                        is_default: false,
+                    },
+                ],
+                ..runtime
+                    .load_farm_rules_projection()
+                    .expect("farm rules projection should load")
+            })
+            .expect("farm rules projection should save");
+
+        assert_eq!(
+            saved_projection.farm_profile,
+            Some(FarmProfileRecord {
+                farm_id,
+                display_name: "Harbor farm".to_owned(),
+                timezone: "Europe/Stockholm".to_owned(),
+                currency_code: "SEK".to_owned(),
+            })
+        );
+        assert_eq!(saved_projection.pickup_locations.len(), 2);
+        assert!(saved_projection.pickup_locations[0].is_default);
+        assert_eq!(saved_projection.pickup_locations[0].label, "Barn pickup");
+        assert_eq!(
+            saved_projection.pickup_locations[0].address_line,
+            "14 Orchard Lane"
+        );
+        assert_eq!(
+            saved_projection.pickup_locations[0].directions.as_deref(),
+            Some("Drive to the red barn.")
+        );
+
+        let summary = runtime.summary();
+        assert_eq!(
+            summary.farm_setup_projection.saved_farm,
+            Some(FarmSummary {
+                farm_id,
+                display_name: "Harbor farm".to_owned(),
+                readiness: FarmReadiness::Incomplete,
+            })
+        );
+        assert_eq!(summary.farm_setup_projection.draft.farm_name, "Harbor farm");
+        assert_eq!(
+            summary.today_projection.farm,
+            summary.farm_setup_projection.saved_farm
         );
     }
 
