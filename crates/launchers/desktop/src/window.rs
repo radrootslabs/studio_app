@@ -16,10 +16,11 @@ use radroots_studio_app_models::{
     FarmRulesReadiness, FarmSetupBlocker, FarmSetupDraft, FarmSummary, FarmTimingConflictKind,
     FarmerSection, FulfillmentWindowId, FulfillmentWindowRecord, FulfillmentWindowSummary,
     LoggedOutStartupPhase, OrderDetailItemRow, OrderDetailProjection, OrderId, OrderListRow,
-    OrderPrimaryAction, OrderStatus, OrdersFilter, OrdersListRow, PickupLocationId,
-    PickupLocationRecord, ProductAttentionState, ProductEditorDraft, ProductId, ProductListRow,
-    ProductPublishBlocker, ProductStatus, ProductsFilter, ProductsListRow, ProductsSort,
-    ShellSection, TodayAgendaProjection, TodaySetupTaskKind,
+    OrderPrimaryAction, OrderStatus, OrdersFilter, OrdersListRow, PackDayPackListRow,
+    PackDayProductTotalRow, PackDayRosterRow, PickupLocationId, PickupLocationRecord,
+    ProductAttentionState, ProductEditorDraft, ProductId, ProductListRow, ProductPublishBlocker,
+    ProductStatus, ProductsFilter, ProductsListRow, ProductsSort, ShellSection,
+    TodayAgendaProjection, TodaySetupTaskKind,
 };
 use radroots_studio_app_remote_signer::{
     RadrootsAppRemoteSignerApprovedSession, RadrootsAppRemoteSignerPendingPollOutcome,
@@ -951,6 +952,29 @@ impl HomeView {
         }
     }
 
+    fn open_pack_day(
+        &mut self,
+        fulfillment_window_id: Option<FulfillmentWindowId>,
+        cx: &mut Context<Self>,
+    ) {
+        match self.runtime.open_pack_day(fulfillment_window_id) {
+            Ok(true) => {
+                self.products_stock_editor = None;
+                self.product_editor_form = None;
+                cx.notify();
+            }
+            Ok(false) => {}
+            Err(runtime_error) => {
+                error!(
+                    target: "pack_day",
+                    event = "pack_day.route_failed",
+                    error = %runtime_error,
+                    "failed to route into pack day view"
+                );
+            }
+        }
+    }
+
     fn select_orders_filter(&mut self, filter: OrdersFilter, cx: &mut Context<Self>) {
         match self.runtime.select_orders_filter(filter) {
             Ok(true) => cx.notify(),
@@ -1347,6 +1371,9 @@ impl HomeView {
             FarmerSection::Orders if farmer_products_available(runtime) => {
                 self.render_orders_content(runtime, cx)
             }
+            FarmerSection::PackDay if farmer_pack_day_available(runtime) => {
+                self.render_pack_day_content(runtime, cx)
+            }
             FarmerSection::Today
             | FarmerSection::Products
             | FarmerSection::Orders
@@ -1390,6 +1417,7 @@ impl HomeView {
                     this.select_farmer_section(FarmerSection::Products, cx)
                 }),
                 cx.listener(|this, _, _, cx| this.open_orders(cx)),
+                cx.listener(|this, _, _, cx| this.open_pack_day(None, cx)),
                 cx,
             )
             .into_any_element(),
@@ -1620,6 +1648,44 @@ impl HomeView {
                     )
                 },
             )
+            .into_any_element()
+    }
+
+    fn render_pack_day_content(
+        &mut self,
+        runtime: &DesktopAppRuntimeSummary,
+        _: &mut Context<Self>,
+    ) -> AnyElement {
+        let projection = &runtime.pack_day_projection.projection;
+        let Some(fulfillment_window) = projection.fulfillment_window.as_ref() else {
+            return home_empty_state_card(
+                AppTextKey::PackDayEmptyTitle,
+                AppTextKey::PackDayEmptyBody,
+            )
+            .into_any_element();
+        };
+
+        app_stack_v(APP_UI_THEME.shells.home_stack_gap_px)
+            .w_full()
+            .max_w(px(APP_UI_THEME.shells.home_card_max_width_px))
+            .mx_auto()
+            .child(pack_day_title_row(runtime))
+            .child(pack_day_window_summary_card(fulfillment_window))
+            .when(!projection.totals_by_product.is_empty(), |this| {
+                this.child(pack_day_totals_card(&projection.totals_by_product))
+            })
+            .when(!projection.pack_list.is_empty(), |this| {
+                this.child(pack_day_pack_list_card(&projection.pack_list))
+            })
+            .when(!projection.pickup_roster.is_empty(), |this| {
+                this.child(pack_day_pickup_roster_card(&projection.pickup_roster))
+            })
+            .when(projection.is_empty(), |this| {
+                this.child(home_empty_state_card(
+                    AppTextKey::PackDayEmptyTitle,
+                    AppTextKey::PackDayEmptyBody,
+                ))
+            })
             .into_any_element()
     }
 
@@ -4912,10 +4978,12 @@ fn home_sidebar(
     on_select_today: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
     on_select_products: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
     on_select_orders: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+    on_select_pack_day: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
     cx: &App,
 ) -> impl IntoElement {
     let selected_section = selected_farmer_section(runtime);
     let workspace_available = farmer_products_available(runtime);
+    let pack_day_available = farmer_pack_day_available(runtime);
 
     app_surface_sidebar(
         div()
@@ -4952,6 +5020,15 @@ fn home_sidebar(
                             AppTextKey::HomeNavOrders,
                             selected_section == FarmerSection::Orders,
                             on_select_orders,
+                            cx,
+                        ))
+                    })
+                    .when(pack_day_available, |this| {
+                        this.child(home_sidebar_nav_button(
+                            "home-nav-pack-day",
+                            AppTextKey::PackDayTitle,
+                            selected_section == FarmerSection::PackDay,
+                            on_select_pack_day,
                             cx,
                         ))
                     }),
@@ -5202,11 +5279,20 @@ fn farmer_products_available(runtime: &DesktopAppRuntimeSummary) -> bool {
     runtime.farm_setup_projection.has_saved_farm()
 }
 
+fn farmer_pack_day_available(runtime: &DesktopAppRuntimeSummary) -> bool {
+    runtime
+        .pack_day_projection
+        .projection
+        .fulfillment_window
+        .is_some()
+}
+
 fn home_content_scroll_id(section: FarmerSection) -> &'static str {
     match section {
         FarmerSection::Products => "home-products-scroll",
         FarmerSection::Orders => "home-orders-scroll",
-        FarmerSection::Today | FarmerSection::PackDay | FarmerSection::Farm => "home-today-scroll",
+        FarmerSection::PackDay => "home-pack-day-scroll",
+        FarmerSection::Today | FarmerSection::Farm => "home-today-scroll",
     }
 }
 
@@ -5667,6 +5753,149 @@ fn orders_status_color(status: OrderStatus) -> u32 {
             APP_UI_THEME.components.app_status_indicator.offline
         }
     }
+}
+
+fn pack_day_title_row(runtime: &DesktopAppRuntimeSummary) -> impl IntoElement {
+    app_stack_v(4.0)
+        .child(
+            div()
+                .text_size(px(APP_UI_THEME.foundation.typography.body_text_px * 2.0))
+                .font_weight(gpui::FontWeight::BOLD)
+                .text_color(rgb(APP_UI_THEME.foundation.text.primary))
+                .child(app_shared_text(AppTextKey::PackDayTitle)),
+        )
+        .child(
+            div()
+                .text_size(px(APP_UI_THEME.foundation.typography.body_text_px))
+                .font_weight(gpui::FontWeight::MEDIUM)
+                .line_height(relative(1.2))
+                .text_color(rgb(APP_UI_THEME.foundation.text.primary))
+                .when_some(home_saved_farm(runtime), |this, farm| {
+                    this.child(farm.display_name.clone())
+                }),
+        )
+}
+
+fn pack_day_window_summary_card(fulfillment_window: &FulfillmentWindowSummary) -> impl IntoElement {
+    home_card(
+        app_shared_text(AppTextKey::PackDayWindowSummaryTitle),
+        label_value_list([
+            LabelValueRow::new(
+                app_shared_text(AppTextKey::HomeTodayWindowStartsLabel),
+                fulfillment_window.starts_at.clone(),
+            ),
+            LabelValueRow::new(
+                app_shared_text(AppTextKey::HomeTodayWindowEndsLabel),
+                fulfillment_window.ends_at.clone(),
+            ),
+        ]),
+    )
+}
+
+fn pack_day_totals_card(rows: &[PackDayProductTotalRow]) -> impl IntoElement {
+    home_card(
+        app_shared_text(AppTextKey::PackDayTotalsTitle),
+        div()
+            .w_full()
+            .flex()
+            .flex_col()
+            .gap(px(APP_UI_THEME.foundation.spacing.tight_px))
+            .children(
+                rows.iter()
+                    .map(pack_day_product_total_row)
+                    .collect::<Vec<_>>(),
+            ),
+    )
+}
+
+fn pack_day_pack_list_card(rows: &[PackDayPackListRow]) -> impl IntoElement {
+    home_card(
+        app_shared_text(AppTextKey::PackDayPackListTitle),
+        div()
+            .w_full()
+            .flex()
+            .flex_col()
+            .gap(px(APP_UI_THEME.foundation.spacing.tight_px))
+            .children(rows.iter().map(pack_day_pack_list_row).collect::<Vec<_>>()),
+    )
+}
+
+fn pack_day_pickup_roster_card(rows: &[PackDayRosterRow]) -> impl IntoElement {
+    home_card(
+        app_shared_text(AppTextKey::PackDayPickupRosterTitle),
+        div()
+            .w_full()
+            .flex()
+            .flex_col()
+            .gap(px(APP_UI_THEME.foundation.spacing.tight_px))
+            .children(rows.iter().map(pack_day_roster_row).collect::<Vec<_>>()),
+    )
+}
+
+fn pack_day_product_total_row(row: &PackDayProductTotalRow) -> AnyElement {
+    pack_day_label_value_row(row.title.as_str(), row.quantity_display.as_str())
+}
+
+fn pack_day_pack_list_row(row: &PackDayPackListRow) -> AnyElement {
+    pack_day_label_value_row(row.title.as_str(), row.quantity_display.as_str())
+}
+
+fn pack_day_roster_row(row: &PackDayRosterRow) -> AnyElement {
+    div()
+        .w_full()
+        .min_w_0()
+        .flex()
+        .items_center()
+        .justify_between()
+        .gap(px(APP_UI_THEME.shells.home_stack_gap_px))
+        .child(
+            div()
+                .min_w_0()
+                .flex()
+                .flex_col()
+                .gap(px(2.0))
+                .child(
+                    div()
+                        .text_size(px(APP_UI_THEME.foundation.typography.body_text_px))
+                        .font_weight(gpui::FontWeight::SEMIBOLD)
+                        .text_color(rgb(APP_UI_THEME.foundation.text.primary))
+                        .child(row.order_number.clone()),
+                )
+                .child(
+                    div()
+                        .text_size(px(APP_UI_THEME.foundation.typography.utility_title_text_px))
+                        .text_color(rgb(APP_UI_THEME.foundation.text.secondary))
+                        .child(row.customer_display_name.clone()),
+                ),
+        )
+        .into_any_element()
+}
+
+fn pack_day_label_value_row(label: &str, value: &str) -> AnyElement {
+    div()
+        .w_full()
+        .min_w_0()
+        .flex()
+        .items_center()
+        .justify_between()
+        .gap(px(APP_UI_THEME.shells.home_stack_gap_px))
+        .child(
+            div()
+                .flex_1()
+                .min_w_0()
+                .text_size(px(APP_UI_THEME.foundation.typography.body_text_px))
+                .font_weight(gpui::FontWeight::MEDIUM)
+                .line_height(relative(1.2))
+                .text_color(rgb(APP_UI_THEME.foundation.text.primary))
+                .child(label.to_owned()),
+        )
+        .child(
+            div()
+                .text_size(px(APP_UI_THEME.foundation.typography.utility_title_text_px))
+                .text_color(rgb(APP_UI_THEME.foundation.text.secondary))
+                .child(value.to_owned()),
+        )
+        .into_any_element()
 }
 
 fn products_empty_state_card(filter: ProductsFilter) -> impl IntoElement {
@@ -7271,19 +7500,20 @@ mod tests {
         AppTextKey, FarmerHomeFarmState, SETTINGS_FARM_PANEL_SECTIONS, SETTINGS_NAVIGATION_ORDER,
         SETTINGS_OPERATIONS_PANEL_SECTIONS, SettingsInventorySectionSpec, SettingsPanelViewKey,
         StartupHomeSurface, StartupSignerConnectState, farm_setup_onboarding_card_spec,
-        farmer_home_farm_state, home_saved_farm, home_window_launch_size_px,
-        home_window_minimum_size_px, parse_optional_product_editor_stock_input,
-        parse_product_editor_price_input, product_display_title, startup_home_surface,
-        startup_signer_preview_summary, startup_signer_preview_summary_for_connect_state,
-        startup_signer_source_input_is_editable, startup_signer_status_spec,
-        startup_signer_transport_failure_requires_notice,
+        farmer_home_farm_state, farmer_pack_day_available, home_content_scroll_id, home_saved_farm,
+        home_window_launch_size_px, home_window_minimum_size_px,
+        parse_optional_product_editor_stock_input, parse_product_editor_price_input,
+        product_display_title, startup_home_surface, startup_signer_preview_summary,
+        startup_signer_preview_summary_for_connect_state, startup_signer_source_input_is_editable,
+        startup_signer_status_spec, startup_signer_transport_failure_requires_notice,
     };
     use crate::runtime::DesktopAppRuntimeSummary;
     use radroots_studio_app_models::SettingsAccountProjection;
     use radroots_studio_app_models::{
         AppStartupGate, FarmId, FarmOrderMethod, FarmReadiness, FarmSetupDraft,
-        FarmSetupProjection, FarmSummary, LoggedOutStartupPhase, LoggedOutStartupProjection,
-        TodayAgendaProjection, TodaySetupTask, TodaySetupTaskKind,
+        FarmSetupProjection, FarmSummary, FarmerSection, FulfillmentWindowId,
+        FulfillmentWindowSummary, LoggedOutStartupPhase, LoggedOutStartupProjection,
+        PackDayProjection, TodayAgendaProjection, TodaySetupTask, TodaySetupTaskKind,
     };
     use radroots_studio_app_remote_signer::{
         RadrootsAppRemoteSignerApprovedSession, RadrootsAppRemoteSignerPendingSession,
@@ -7512,6 +7742,40 @@ mod tests {
             )),
             FarmerHomeFarmState::ConfiguredFarm
         );
+    }
+
+    #[test]
+    fn pack_day_availability_tracks_the_contextual_window_projection() {
+        let farm_id = FarmId::new();
+        let mut runtime = summary(
+            HomeRoute::Today,
+            TodayAgendaProjection::default(),
+            FarmSetupProjection::from_saved_farm(FarmSummary {
+                farm_id,
+                display_name: String::new(),
+                readiness: FarmReadiness::Ready,
+            }),
+        );
+
+        assert!(!farmer_pack_day_available(&runtime));
+        assert_eq!(
+            home_content_scroll_id(FarmerSection::PackDay),
+            "home-pack-day-scroll"
+        );
+
+        runtime.pack_day_projection.projection = PackDayProjection {
+            fulfillment_window: Some(FulfillmentWindowSummary {
+                fulfillment_window_id: FulfillmentWindowId::new(),
+                farm_id,
+                starts_at: String::new(),
+                ends_at: String::new(),
+            }),
+            totals_by_product: Vec::new(),
+            pack_list: Vec::new(),
+            pickup_roster: Vec::new(),
+        };
+
+        assert!(farmer_pack_day_available(&runtime));
     }
 
     #[test]

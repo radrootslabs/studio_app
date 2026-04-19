@@ -684,7 +684,7 @@ impl DesktopAppRuntimeState {
 
                 section_changed || detail_changed || editor_changed
             }
-            FarmerSection::PackDay if self.has_saved_farm() => {
+            FarmerSection::PackDay if self.has_saved_farm() && self.has_pack_day_context() => {
                 let section_changed =
                     self.state_store
                         .apply_in_memory(AppStateCommand::SelectSection(ShellSection::Farmer(
@@ -870,9 +870,13 @@ impl DesktopAppRuntimeState {
             return Ok(false);
         }
 
-        let query_changed = self.replace_pack_day_query(PackDayScreenQueryState {
+        let query = PackDayScreenQueryState {
             fulfillment_window_id,
-        })?;
+        };
+        let query_changed = self.replace_pack_day_query(query)?;
+        if !self.has_pack_day_context() {
+            return Ok(false);
+        }
         let section_changed = self
             .state_store
             .apply_in_memory(AppStateCommand::SelectSection(ShellSection::Farmer(
@@ -1336,6 +1340,14 @@ impl DesktopAppRuntimeState {
         self.state_store.farm_setup_projection().has_saved_farm()
     }
 
+    fn has_pack_day_context(&self) -> bool {
+        self.state_store
+            .pack_day_projection()
+            .projection
+            .fulfillment_window
+            .is_some()
+    }
+
     fn selected_product_editor_id(&self) -> Option<ProductId> {
         match &self.state_store.products_projection().editor {
             radroots_studio_app_state::ProductEditorState::Open(session) => session.selected_product_id,
@@ -1440,9 +1452,12 @@ impl DesktopAppRuntimeState {
         let selected_section = self.state_store.shell_projection().selected_section;
         let should_reset_to_today = match selected_section {
             ShellSection::Farmer(FarmerSection::Today) => false,
-            ShellSection::Farmer(
-                FarmerSection::Products | FarmerSection::Orders | FarmerSection::PackDay,
-            ) => !self.has_saved_farm(),
+            ShellSection::Farmer(FarmerSection::Products | FarmerSection::Orders) => {
+                !self.has_saved_farm()
+            }
+            ShellSection::Farmer(FarmerSection::PackDay) => {
+                !self.has_saved_farm() || !self.has_pack_day_context()
+            }
             ShellSection::Farmer(FarmerSection::Farm) => true,
             ShellSection::Home | ShellSection::Settings(_) => false,
         };
@@ -2286,6 +2301,31 @@ mod tests {
         assert_eq!(
             runtime.summary().shell_projection.selected_section,
             ShellSection::Home
+        );
+    }
+
+    #[test]
+    fn pack_day_stays_blocked_without_a_window_context() {
+        let runtime = memory_runtime();
+        let _ = provision_ready_farmer_account(&runtime);
+
+        assert!(!runtime.select_farmer_section(FarmerSection::PackDay));
+        assert!(
+            !runtime
+                .open_pack_day(None)
+                .expect("pack day route should stay blocked")
+        );
+        assert_eq!(
+            runtime.summary().shell_projection.selected_section,
+            ShellSection::Farmer(FarmerSection::Today)
+        );
+        assert!(
+            runtime
+                .summary()
+                .pack_day_projection
+                .projection
+                .fulfillment_window
+                .is_none()
         );
     }
 

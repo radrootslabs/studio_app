@@ -188,6 +188,28 @@ mod tests {
     }
 
     #[test]
+    fn english_pack_day_copy_matches_the_contextual_execution_contract() {
+        assert_eq!(app_text(AppTextKey::PackDayTitle), "Pack day");
+        assert_eq!(
+            app_text(AppTextKey::PackDayWindowSummaryTitle),
+            "Window summary"
+        );
+        assert_eq!(
+            app_text(AppTextKey::PackDayTotalsTitle),
+            "Totals by product"
+        );
+        assert_eq!(app_text(AppTextKey::PackDayPackListTitle), "Pack list");
+        assert_eq!(
+            app_text(AppTextKey::PackDayPickupRosterTitle),
+            "Pickup roster"
+        );
+        assert_eq!(
+            app_text(AppTextKey::PackDayEmptyTitle),
+            "Nothing to pack yet"
+        );
+    }
+
+    #[test]
     fn english_farm_rules_host_copy_matches_the_frozen_utility_window_inventory() {
         assert_eq!(app_text(AppTextKey::SettingsNavFarm), "Farm");
         assert_eq!(
