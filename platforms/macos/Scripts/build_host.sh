@@ -93,7 +93,7 @@ mkdir -p "${executable_root}" "${resources_root}"
 cp "${plist_template}" "${plist_path}"
 cp "${binary_source}" "${binary_target}"
 chmod +x "${binary_target}"
-"${script_dir}/generate-macos-app-icon.sh" "${app_icon_path}"
+"${script_dir}/build_icon.sh" "${app_icon_path}"
 
 /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $(workspace_version)" "${plist_path}"
 /usr/libexec/PlistBuddy -c "Set :CFBundleVersion ${RADROOTS_APP_BUILD:-1}" "${plist_path}"

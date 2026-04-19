@@ -6,7 +6,7 @@ platform_root="$(cd "${script_dir}/.." && pwd -P)"
 repo_root="$(git -C "${script_dir}" rev-parse --show-toplevel)"
 date_utc="$(date -u +%F)"
 
-source "${repo_root}/scripts/launch-config.sh"
+source "${repo_root}/scripts/runtime_env.sh"
 
 require_command() {
   if command -v "$1" >/dev/null 2>&1; then
@@ -20,7 +20,7 @@ require_command /usr/libexec/PlistBuddy
 require_command mktemp
 require_command readlink
 
-app_path="$("${script_dir}/build-macos-host.sh")"
+app_path="$("${script_dir}/build_host.sh")"
 plist_path="${app_path}/Contents/Info.plist"
 executable_name="$(
   /usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "${plist_path}"
@@ -56,7 +56,7 @@ icon_name="$(
 }
 
 release_app_path="$(
-  CONFIGURATION=Release "${script_dir}/build-macos-host.sh"
+  CONFIGURATION=Release "${script_dir}/build_host.sh"
 )"
 [[ "${release_app_path}" == "${platform_root}/.derived-data/Build/Products/Release/Radroots.app" ]] || {
   echo "unexpected release bundle path: ${release_app_path}" >&2
@@ -92,7 +92,7 @@ wait_for_log_event() {
   done
 
   [[ "${event_verified}" == "true" ]] || {
-    echo "${expected_event} was not recorded by run-macos-host.sh" >&2
+    echo "${expected_event} was not recorded by run_host.sh" >&2
     exit 1
   }
 }
@@ -177,7 +177,7 @@ RADROOTS_APP_RUNTIME_CONFIG_JSON="$(
     "${platform_name}" \
     "${local_log_root}"
 )" \
-"${script_dir}/run-macos-host.sh" &
+"${script_dir}/run_host.sh" &
 runner_pid="$!"
 
 wait_for_log_event "${structured_log_file}" "runtime.launch" "${runner_pid}"
@@ -206,7 +206,7 @@ env -u HOME \
   RADROOTS_APP_RUN_ID="${degraded_run_id}" \
   RADROOTS_APP_LOCAL_LOG_ROOT="${degraded_log_root}" \
   RADROOTS_APP_RUNTIME_CONFIG_JSON="${degraded_runtime_config_json}" \
-  "${script_dir}/run-macos-host.sh" &
+  "${script_dir}/run_host.sh" &
 degraded_runner_pid="$!"
 
 wait_for_log_event "${degraded_structured_log_file}" "runtime.launch" "${degraded_runner_pid}"

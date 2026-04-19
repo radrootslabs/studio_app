@@ -75,17 +75,29 @@ radroots_studio_app_local_log_root() {
   printf '%s' "${repo_root}/logs"
 }
 
+radroots_studio_app_default_nostr_relay_url() {
+  if [[ -n "${RADROOTS_APP_DEFAULT_NOSTR_RELAY_URL:-}" ]]; then
+    printf '%s' "${RADROOTS_APP_DEFAULT_NOSTR_RELAY_URL}"
+    return
+  fi
+
+  printf 'missing required env: RADROOTS_APP_DEFAULT_NOSTR_RELAY_URL\n' >&2
+  exit 1
+}
+
 radroots_studio_app_build_runtime_config_json() {
   local repo_root="$1"
   local runtime_mode="$2"
   local run_id="$3"
-  local bundle_identifier="$4"
-  local platform_name="$5"
-  local local_log_root="$6"
+  local default_nostr_relay_url="$4"
+  local bundle_identifier="$5"
+  local platform_name="$6"
+  local local_log_root="$7"
 
   RADROOTS_APP_RUNTIME_CONFIG_SCHEMA="radroots.app.runtime-config.v1" \
   RADROOTS_APP_RUNTIME_MODE="${runtime_mode}" \
   RADROOTS_APP_RUN_ID="${run_id}" \
+  RADROOTS_APP_DEFAULT_NOSTR_RELAY_URL="${default_nostr_relay_url}" \
   RADROOTS_APP_BUNDLE_IDENTIFIER="${bundle_identifier}" \
   RADROOTS_APP_BUNDLE_NAME="Radroots" \
   RADROOTS_APP_MARKETING_VERSION="$(radroots_studio_app_workspace_version "${repo_root}")" \
@@ -103,6 +115,7 @@ print(json.dumps({
     "schema_version": os.environ["RADROOTS_APP_RUNTIME_CONFIG_SCHEMA"],
     "runtime_mode": os.environ["RADROOTS_APP_RUNTIME_MODE"],
     "run_id": os.environ["RADROOTS_APP_RUN_ID"],
+    "default_nostr_relay_url": os.environ["RADROOTS_APP_DEFAULT_NOSTR_RELAY_URL"],
     "bundle_identifier": os.environ["RADROOTS_APP_BUNDLE_IDENTIFIER"],
     "bundle_name": os.environ["RADROOTS_APP_BUNDLE_NAME"],
     "marketing_version": os.environ["RADROOTS_APP_MARKETING_VERSION"],

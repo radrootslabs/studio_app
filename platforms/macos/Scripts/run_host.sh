@@ -34,7 +34,7 @@ require_command /usr/libexec/PlistBuddy
 require_env RADROOTS_APP_RUNTIME_CONFIG_JSON
 require_env RADROOTS_APP_LOCAL_LOG_ROOT
 
-app_path="$("${script_dir}/build-macos-host.sh")"
+app_path="$("${script_dir}/build_host.sh")"
 plist_path="${app_path}/Contents/Info.plist"
 executable_name="$(
   /usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "${plist_path}"
