@@ -53,6 +53,20 @@ impl AppCheckboxFieldSpec {
     }
 }
 
+pub struct AppFormFieldSpec {
+    pub label: SharedString,
+    pub note: Option<SharedString>,
+}
+
+impl AppFormFieldSpec {
+    pub fn new(label: impl Into<SharedString>, note: Option<impl Into<SharedString>>) -> Self {
+        Self {
+            label: label.into(),
+            note: note.map(Into::into),
+        }
+    }
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct LabelValueRow {
     pub label: SharedString,
@@ -77,21 +91,39 @@ pub fn app_surface_window(background: u32, content: impl IntoElement) -> impl In
         .child(content)
 }
 
+pub fn app_surface_sidebar(content: impl IntoElement) -> impl IntoElement {
+    div()
+        .h_full()
+        .bg(rgb(APP_UI_THEME.foundation.surfaces.card_background))
+        .child(content)
+}
+
+pub fn app_surface_panel(content: impl IntoElement) -> impl IntoElement {
+    div()
+        .w_full()
+        .bg(rgb(APP_UI_THEME.foundation.surfaces.chrome_background))
+        .rounded(px(APP_UI_THEME.foundation.radii.medium_px))
+        .child(content)
+}
+
 pub fn app_surface_card(content: impl IntoElement) -> impl IntoElement {
     div()
         .w_full()
-        .h_full()
-        .max_w(px(APP_UI_THEME.shells.home_card_max_width_px))
-        .mx_auto()
         .bg(rgb(APP_UI_THEME.foundation.surfaces.card_background))
-        .overflow_hidden()
+        .rounded(px(APP_UI_THEME.foundation.radii.medium_px))
         .child(
             div()
-                .size_full()
-                .overflow_hidden()
+                .w_full()
                 .p(px(APP_UI_THEME.shells.home_card_padding_px))
                 .child(content),
         )
+}
+
+pub fn app_surface_card_section(
+    title: impl Into<SharedString>,
+    body: impl IntoElement,
+) -> impl IntoElement {
+    app_surface_card(app_form_section(title, body))
 }
 
 pub fn app_divider() -> impl IntoElement {
@@ -99,6 +131,69 @@ pub fn app_divider() -> impl IntoElement {
         .w_full()
         .h(px(APP_UI_THEME.foundation.borders.divider_thickness_px))
         .bg(rgb(APP_UI_THEME.foundation.surfaces.divider))
+}
+
+pub fn app_heading_view(content: impl Into<SharedString>) -> impl IntoElement {
+    div()
+        .w_full()
+        .text_size(px(APP_UI_THEME.foundation.typography.startup_title_text_px))
+        .font_weight(gpui::FontWeight::NORMAL)
+        .text_color(rgb(APP_UI_THEME.foundation.text.primary))
+        .child(content.into())
+}
+
+pub fn app_heading_section(content: impl Into<SharedString>) -> impl IntoElement {
+    div()
+        .w_full()
+        .text_size(px(APP_UI_THEME.foundation.typography.body_text_px))
+        .font_weight(gpui::FontWeight::SEMIBOLD)
+        .text_color(rgb(APP_UI_THEME.foundation.text.primary))
+        .child(content.into())
+}
+
+pub fn app_text_body(content: impl Into<SharedString>) -> impl IntoElement {
+    div()
+        .w_full()
+        .text_size(px(APP_UI_THEME.foundation.typography.body_text_px))
+        .line_height(relative(1.2))
+        .text_color(rgb(APP_UI_THEME.foundation.text.primary))
+        .child(content.into())
+}
+
+pub fn app_text_body_subtle(content: impl Into<SharedString>) -> impl IntoElement {
+    div()
+        .w_full()
+        .text_size(px(APP_UI_THEME.foundation.typography.body_text_px))
+        .line_height(relative(1.2))
+        .text_color(rgb(APP_UI_THEME.foundation.text.secondary))
+        .child(content.into())
+}
+
+pub fn app_text_label(content: impl Into<SharedString>) -> impl IntoElement {
+    div()
+        .w_full()
+        .text_size(px(APP_UI_THEME.foundation.typography.body_text_px))
+        .font_weight(gpui::FontWeight::MEDIUM)
+        .text_color(rgb(APP_UI_THEME.foundation.text.primary))
+        .child(content.into())
+}
+
+pub fn app_text_value(content: impl Into<SharedString>) -> impl IntoElement {
+    div()
+        .w_full()
+        .text_size(px(APP_UI_THEME.foundation.typography.body_text_px * 2.0))
+        .font_weight(gpui::FontWeight::BOLD)
+        .text_color(rgb(APP_UI_THEME.foundation.text.primary))
+        .child(content.into())
+}
+
+pub fn app_text_badge(content: impl Into<SharedString>) -> impl IntoElement {
+    div()
+        .w_full()
+        .text_size(px(APP_UI_THEME.foundation.typography.utility_title_text_px))
+        .font_weight(gpui::FontWeight::SEMIBOLD)
+        .text_color(rgb(APP_UI_THEME.foundation.text.accent))
+        .child(content.into())
 }
 
 pub fn utility_title_row(title: impl Into<SharedString>) -> impl IntoElement {
@@ -133,6 +228,42 @@ pub fn label_value_list(rows: impl IntoIterator<Item = LabelValueRow>) -> impl I
         .flex_col()
         .gap(px(APP_UI_THEME.shells.metadata_row_gap_px))
         .children(rows)
+}
+
+pub fn app_form_section(
+    title: impl Into<SharedString>,
+    content: impl IntoElement,
+) -> impl IntoElement {
+    div()
+        .w_full()
+        .flex()
+        .flex_col()
+        .items_start()
+        .gap(px(APP_UI_THEME.foundation.spacing.small_px))
+        .child(app_heading_section(title))
+        .child(content)
+}
+
+pub fn app_form_field(spec: AppFormFieldSpec, field: impl IntoElement) -> impl IntoElement {
+    div()
+        .w_full()
+        .flex()
+        .flex_col()
+        .items_start()
+        .gap(px(APP_UI_THEME.foundation.spacing.tight_px))
+        .child(app_text_label(spec.label))
+        .child(field)
+        .when_some(spec.note, |this, note| {
+            this.child(app_text_body_subtle(note))
+        })
+}
+
+pub fn app_form_input_text(
+    spec: AppFormFieldSpec,
+    input: &Entity<InputState>,
+    disabled: bool,
+) -> impl IntoElement {
+    app_form_field(spec, app_input_text(input, disabled).w_full())
 }
 
 fn app_checkbox(
@@ -508,7 +639,7 @@ fn app_button_disabled_colors(variant: AppButtonVariant) -> crate::AppButtonColo
 mod tests {
     use gpui_component::IconName;
 
-    use super::{AppCheckboxFieldSpec, AppSegmentButtonIconSpec};
+    use super::{AppCheckboxFieldSpec, AppFormFieldSpec, AppSegmentButtonIconSpec};
 
     #[test]
     fn icon_segment_spec_preserves_id_and_label() {
@@ -527,6 +658,17 @@ mod tests {
         assert_eq!(
             spec.note.as_ref().map(|note| note.as_ref()),
             Some("Optional note")
+        );
+    }
+
+    #[test]
+    fn form_field_spec_preserves_optional_note() {
+        let spec = AppFormFieldSpec::new("Farm name", Some("Saved locally"));
+
+        assert_eq!(spec.label.as_ref(), "Farm name");
+        assert_eq!(
+            spec.note.as_ref().map(|note| note.as_ref()),
+            Some("Saved locally")
         );
     }
 }
