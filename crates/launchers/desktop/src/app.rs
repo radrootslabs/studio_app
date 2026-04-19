@@ -272,6 +272,8 @@ mod tests {
             farm_readiness_projection: FarmWorkspaceReadinessProjection::default(),
             today_projection: TodayAgendaProjection::default(),
             products_projection: Default::default(),
+            orders_projection: Default::default(),
+            pack_day_projection: Default::default(),
             logged_out_startup: LoggedOutStartupProjection::default(),
             startup_issue: startup_issue.map(str::to_owned),
         }

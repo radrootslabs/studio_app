@@ -3,8 +3,10 @@
 use radroots_studio_app_models::{
     ActiveSurface, AppIdentityProjection, AppStartupGate, FarmReadiness, FarmReadinessBlocker,
     FarmRulesProjection, FarmSetupBlocker, FarmSetupProjection, FarmSetupReadiness,
-    FarmTimingConflict, LoggedOutStartupPhase, LoggedOutStartupProjection, ProductEditorDraft,
-    ProductId, ProductPublishBlocker, ProductsFilter, ProductsListProjection, ProductsSort,
+    FarmTimingConflict, FulfillmentWindowId, LoggedOutStartupPhase, LoggedOutStartupProjection,
+    OrderDetailProjection, OrdersFilter, OrdersListProjection, OrdersScreenQueryState,
+    PackDayProjection, PackDayScreenQueryState, ProductEditorDraft, ProductId,
+    ProductPublishBlocker, ProductsFilter, ProductsListProjection, ProductsSort,
     SelectedSurfaceProjection, SettingsAccountProjection, SettingsPreference, SettingsSection,
     ShellSection, TodayAgendaProjection, TodaySetupTask, TodaySetupTaskKind,
 };
@@ -208,6 +210,41 @@ pub struct ProductsScreenProjection {
     pub editor: ProductEditorState,
 }
 
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct OrdersScreenProjection {
+    pub list: OrdersListProjection,
+    pub query: OrdersScreenQueryState,
+    pub detail: Option<OrderDetailProjection>,
+}
+
+impl OrdersScreenProjection {
+    fn select_filter(&mut self, filter: OrdersFilter) {
+        self.query.filter = filter;
+        self.detail = None;
+    }
+
+    fn select_fulfillment_window(&mut self, fulfillment_window_id: Option<FulfillmentWindowId>) {
+        self.query.fulfillment_window_id = fulfillment_window_id;
+        self.detail = None;
+    }
+
+    fn replace_detail(&mut self, detail: Option<OrderDetailProjection>) {
+        self.detail = detail;
+    }
+}
+
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct PackDayScreenProjection {
+    pub query: PackDayScreenQueryState,
+    pub projection: PackDayProjection,
+}
+
+impl PackDayScreenProjection {
+    fn select_fulfillment_window(&mut self, fulfillment_window_id: Option<FulfillmentWindowId>) {
+        self.query.fulfillment_window_id = fulfillment_window_id;
+    }
+}
+
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub enum FarmSetupFlowStage {
     #[default]
@@ -346,6 +383,8 @@ pub struct AppProjection {
     pub logged_out_startup: LoggedOutStartupProjection,
     pub today: TodayAgendaProjection,
     pub products: ProductsScreenProjection,
+    pub orders: OrdersScreenProjection,
+    pub pack_day: PackDayScreenProjection,
     pub farm_setup: FarmSetupProjection,
     pub farm_rules: FarmRulesProjection,
     pub farm_readiness: FarmWorkspaceReadinessProjection,
@@ -374,6 +413,8 @@ impl AppProjection {
             logged_out_startup: LoggedOutStartupProjection::default(),
             today,
             products: ProductsScreenProjection::default(),
+            orders: OrdersScreenProjection::default(),
+            pack_day: PackDayScreenProjection::default(),
             farm_setup,
             farm_rules: FarmRulesProjection::default(),
             farm_readiness: FarmWorkspaceReadinessProjection::default(),
@@ -434,6 +475,12 @@ pub enum AppStateCommand {
     SelectProductsFilter(ProductsFilter),
     SelectProductsSort(ProductsSort),
     ReplaceProductsList(ProductsListProjection),
+    SelectOrdersFilter(OrdersFilter),
+    SelectOrdersFulfillmentWindow(Option<FulfillmentWindowId>),
+    ReplaceOrdersList(OrdersListProjection),
+    ReplaceOrderDetail(Option<OrderDetailProjection>),
+    SetPackDayFulfillmentWindow(Option<FulfillmentWindowId>),
+    ReplacePackDayProjection(PackDayProjection),
     OpenNewProductEditor,
     OpenExistingProductEditor {
         product_id: ProductId,
@@ -506,6 +553,34 @@ impl AppStateCommand {
 
     pub fn replace_products_list(projection: ProductsListProjection) -> Self {
         Self::ReplaceProductsList(projection)
+    }
+
+    pub const fn select_orders_filter(filter: OrdersFilter) -> Self {
+        Self::SelectOrdersFilter(filter)
+    }
+
+    pub fn select_orders_fulfillment_window(
+        fulfillment_window_id: Option<FulfillmentWindowId>,
+    ) -> Self {
+        Self::SelectOrdersFulfillmentWindow(fulfillment_window_id)
+    }
+
+    pub fn replace_orders_list(projection: OrdersListProjection) -> Self {
+        Self::ReplaceOrdersList(projection)
+    }
+
+    pub fn replace_order_detail(projection: Option<OrderDetailProjection>) -> Self {
+        Self::ReplaceOrderDetail(projection)
+    }
+
+    pub fn set_pack_day_fulfillment_window(
+        fulfillment_window_id: Option<FulfillmentWindowId>,
+    ) -> Self {
+        Self::SetPackDayFulfillmentWindow(fulfillment_window_id)
+    }
+
+    pub fn replace_pack_day_projection(projection: PackDayProjection) -> Self {
+        Self::ReplacePackDayProjection(projection)
     }
 
     pub const fn open_new_product_editor() -> Self {
@@ -657,6 +732,14 @@ impl<R: AppStateRepository> AppStateStore<R> {
         &self.projection.products
     }
 
+    pub fn orders_projection(&self) -> &OrdersScreenProjection {
+        &self.projection.orders
+    }
+
+    pub fn pack_day_projection(&self) -> &PackDayScreenProjection {
+        &self.projection.pack_day
+    }
+
     pub fn home_route(&self) -> HomeRoute {
         self.projection.home_route()
     }
@@ -701,6 +784,16 @@ impl<R: AppStateRepository> AppStateStore<R> {
                 Ok(true)
             }
             AppStateMutation::ProductsChanged => {
+                self.projection = next_projection;
+
+                Ok(true)
+            }
+            AppStateMutation::OrdersChanged => {
+                self.projection = next_projection;
+
+                Ok(true)
+            }
+            AppStateMutation::PackDayChanged => {
                 self.projection = next_projection;
 
                 Ok(true)
@@ -752,6 +845,16 @@ impl AppStateStore<InMemoryAppStateRepository> {
 
                 true
             }
+            AppStateMutation::OrdersChanged => {
+                self.projection = next_projection;
+
+                true
+            }
+            AppStateMutation::PackDayChanged => {
+                self.projection = next_projection;
+
+                true
+            }
         }
     }
 }
@@ -764,6 +867,8 @@ enum AppStateMutation {
     StartupChanged,
     TodayChanged,
     ProductsChanged,
+    OrdersChanged,
+    PackDayChanged,
 }
 
 fn apply_command(projection: &mut AppProjection, command: AppStateCommand) -> AppStateMutation {
@@ -851,6 +956,28 @@ fn apply_command(projection: &mut AppProjection, command: AppStateCommand) -> Ap
         AppStateCommand::ReplaceProductsList(products_projection) => {
             projection.products.list = products_projection;
         }
+        AppStateCommand::SelectOrdersFilter(filter) => {
+            projection.orders.select_filter(filter);
+        }
+        AppStateCommand::SelectOrdersFulfillmentWindow(fulfillment_window_id) => {
+            projection
+                .orders
+                .select_fulfillment_window(fulfillment_window_id);
+        }
+        AppStateCommand::ReplaceOrdersList(orders_projection) => {
+            projection.orders.list = orders_projection;
+        }
+        AppStateCommand::ReplaceOrderDetail(order_detail_projection) => {
+            projection.orders.replace_detail(order_detail_projection);
+        }
+        AppStateCommand::SetPackDayFulfillmentWindow(fulfillment_window_id) => {
+            projection
+                .pack_day
+                .select_fulfillment_window(fulfillment_window_id);
+        }
+        AppStateCommand::ReplacePackDayProjection(pack_day_projection) => {
+            projection.pack_day.projection = pack_day_projection;
+        }
         AppStateCommand::OpenNewProductEditor => {
             projection
                 .products
@@ -890,6 +1017,10 @@ fn apply_command(projection: &mut AppProjection, command: AppStateCommand) -> Ap
         AppStateMutation::StartupChanged
     } else if projection.products != before.products {
         AppStateMutation::ProductsChanged
+    } else if projection.orders != before.orders {
+        AppStateMutation::OrdersChanged
+    } else if projection.pack_day != before.pack_day {
+        AppStateMutation::PackDayChanged
     } else {
         AppStateMutation::TodayChanged
     }
@@ -1133,17 +1264,20 @@ mod tests {
     use super::{
         AppProjection, AppShellProjection, AppStateCommand, AppStateRepository,
         AppStateRepositoryError, AppStateStore, AppStateStoreError, FarmSetupFlowStage, HomeRoute,
-        InMemoryAppStateRepository, ProductEditorState, ProductsScreenProjection,
-        ProductsScreenQueryState, SettingsPreference,
+        InMemoryAppStateRepository, OrdersScreenProjection, PackDayScreenProjection,
+        ProductEditorState, ProductsScreenProjection, ProductsScreenQueryState, SettingsPreference,
     };
     use radroots_studio_app_models::{
         AccountCustody, AccountSummary, ActiveSurface, AppIdentityProjection, AppStartupGate,
         FarmId, FarmOrderMethod, FarmReadiness, FarmSetupDraft, FarmSetupProjection,
         FarmerActivationProjection, FarmerSection, FulfillmentWindowId, LoggedOutStartupPhase,
-        LoggedOutStartupProjection, ProductEditorDraft, ProductId, ProductPublishBlocker,
-        ProductsFilter, ProductsListProjection, ProductsSort, SelectedAccountProjection,
-        SelectedSurfaceProjection, SettingsSection, ShellSection, TodayAgendaProjection,
-        TodaySetupTask, TodaySetupTaskKind,
+        LoggedOutStartupProjection, OrderDetailItemRow, OrderDetailProjection, OrderId,
+        OrderPrimaryAction, OrderStatus, OrdersFilter, OrdersListProjection, OrdersListRow,
+        OrdersListSummary, OrdersScreenQueryState, PackDayPackListRow, PackDayProductTotalRow,
+        PackDayProjection, PackDayRosterRow, PackDayScreenQueryState, ProductEditorDraft,
+        ProductId, ProductPublishBlocker, ProductsFilter, ProductsListProjection, ProductsSort,
+        SelectedAccountProjection, SelectedSurfaceProjection, SettingsSection, ShellSection,
+        TodayAgendaProjection, TodaySetupTask, TodaySetupTaskKind,
     };
 
     struct FailingRepository;
@@ -1199,6 +1333,8 @@ mod tests {
         assert!(!projection.shell.settings.general.launch_at_login);
         assert_eq!(projection.today, TodayAgendaProjection::default());
         assert_eq!(projection.products, ProductsScreenProjection::default());
+        assert_eq!(projection.orders, OrdersScreenProjection::default());
+        assert_eq!(projection.pack_day, PackDayScreenProjection::default());
         assert_eq!(projection.farm_setup, FarmSetupProjection::default());
         assert_eq!(
             projection.farm_setup_flow_stage,
@@ -1236,6 +1372,11 @@ mod tests {
         assert_eq!(
             store.projection().products,
             ProductsScreenProjection::default()
+        );
+        assert_eq!(store.projection().orders, OrdersScreenProjection::default());
+        assert_eq!(
+            store.projection().pack_day,
+            PackDayScreenProjection::default()
         );
         assert_eq!(store.home_route(), HomeRoute::SetupRequired);
     }
@@ -1284,6 +1425,142 @@ mod tests {
             ProductsScreenQueryState::new("pea", ProductsFilter::NeedAttention, ProductsSort::Name)
         );
         assert_eq!(store.projection().products.list, products_list);
+        assert_eq!(
+            store.repository().projection(),
+            &AppShellProjection::default()
+        );
+    }
+
+    #[test]
+    fn orders_and_pack_day_queries_refresh_as_local_app_state() {
+        let mut store = AppStateStore::load(InMemoryAppStateRepository::default())
+            .expect("in-memory repository should load");
+        let farm_id = FarmId::new();
+        let fulfillment_window_id = FulfillmentWindowId::new();
+        let order_id = OrderId::new();
+        let orders_list = OrdersListProjection {
+            summary: OrdersListSummary {
+                total_orders: 2,
+                needs_action_orders: 1,
+                scheduled_orders: 1,
+                packed_orders: 0,
+            },
+            rows: vec![OrdersListRow {
+                order_id,
+                farm_id,
+                fulfillment_window_id: Some(fulfillment_window_id),
+                order_number: "R-100".to_owned(),
+                customer_display_name: "Casey".to_owned(),
+                fulfillment_window_label: Some("Friday pickup".to_owned()),
+                pickup_location_label: Some("North barn".to_owned()),
+                status: OrderStatus::NeedsAction,
+                primary_action: Some(OrderPrimaryAction::Review),
+            }],
+        };
+        let order_detail = OrderDetailProjection {
+            order_id,
+            farm_id,
+            order_number: "R-100".to_owned(),
+            customer_display_name: "Casey".to_owned(),
+            status: OrderStatus::NeedsAction,
+            fulfillment_window_id: Some(fulfillment_window_id),
+            fulfillment_window_label: Some("Friday pickup".to_owned()),
+            pickup_location_label: Some("North barn".to_owned()),
+            items: vec![OrderDetailItemRow {
+                title: "Salad mix".to_owned(),
+                quantity_display: "2 bags".to_owned(),
+            }],
+            primary_action: Some(OrderPrimaryAction::Review),
+        };
+        let pack_day = PackDayProjection {
+            fulfillment_window: Some(radroots_studio_app_models::FulfillmentWindowSummary {
+                fulfillment_window_id,
+                farm_id,
+                pickup_location_id: None,
+                label: "Friday pickup".to_owned(),
+                starts_at: "2026-04-18T16:00:00Z".to_owned(),
+                ends_at: "2026-04-18T18:00:00Z".to_owned(),
+                order_cutoff_at: "2026-04-17T18:00:00Z".to_owned(),
+            }),
+            totals_by_product: vec![PackDayProductTotalRow {
+                title: "Salad mix".to_owned(),
+                quantity_display: "2 bags".to_owned(),
+            }],
+            pack_list: vec![PackDayPackListRow {
+                title: "Salad mix".to_owned(),
+                quantity_display: "Casey: 2 bags".to_owned(),
+            }],
+            pickup_roster: vec![PackDayRosterRow {
+                order_id,
+                order_number: "R-100".to_owned(),
+                customer_display_name: "Casey".to_owned(),
+            }],
+        };
+
+        assert_eq!(
+            store.projection().orders.query,
+            OrdersScreenQueryState::default()
+        );
+        assert_eq!(
+            store.projection().pack_day.query,
+            PackDayScreenQueryState::default()
+        );
+
+        assert_eq!(
+            store.apply(AppStateCommand::select_orders_filter(OrdersFilter::Packed)),
+            Ok(true)
+        );
+        assert_eq!(
+            store.apply(AppStateCommand::select_orders_fulfillment_window(Some(
+                fulfillment_window_id,
+            ))),
+            Ok(true)
+        );
+        assert_eq!(
+            store.apply(AppStateCommand::replace_orders_list(orders_list.clone())),
+            Ok(true)
+        );
+        assert_eq!(
+            store.apply(AppStateCommand::replace_order_detail(Some(
+                order_detail.clone()
+            ))),
+            Ok(true)
+        );
+        assert_eq!(
+            store.apply(AppStateCommand::set_pack_day_fulfillment_window(Some(
+                fulfillment_window_id,
+            ))),
+            Ok(true)
+        );
+        assert_eq!(
+            store.apply(AppStateCommand::replace_pack_day_projection(
+                pack_day.clone()
+            )),
+            Ok(true)
+        );
+        assert_eq!(
+            store.projection().orders.query,
+            OrdersScreenQueryState {
+                filter: OrdersFilter::Packed,
+                fulfillment_window_id: Some(fulfillment_window_id),
+            }
+        );
+        assert_eq!(store.projection().orders.list, orders_list);
+        assert_eq!(store.projection().orders.detail, Some(order_detail));
+        assert_eq!(
+            store.projection().pack_day.query,
+            PackDayScreenQueryState {
+                fulfillment_window_id: Some(fulfillment_window_id),
+            }
+        );
+        assert_eq!(store.projection().pack_day.projection, pack_day);
+        assert_eq!(
+            store.apply(AppStateCommand::select_orders_filter(
+                OrdersFilter::NeedsAction
+            )),
+            Ok(true)
+        );
+        assert_eq!(store.projection().orders.detail, None);
         assert_eq!(
             store.repository().projection(),
             &AppShellProjection::default()

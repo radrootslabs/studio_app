@@ -7154,6 +7154,8 @@ mod tests {
             farm_setup_projection,
             today_projection,
             products_projection: Default::default(),
+            orders_projection: Default::default(),
+            pack_day_projection: Default::default(),
             startup_issue: None,
         }
     }

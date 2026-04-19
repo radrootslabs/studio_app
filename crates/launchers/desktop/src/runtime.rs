@@ -5,37 +5,40 @@ use radroots_studio_app_core::{AppDesktopRuntimePaths, AppRuntimePathsError, App
 use radroots_studio_app_models::{
     ActiveSurface, AppActivityContext, AppActivityKind, AppIdentityProjection, AppStartupGate,
     FarmId, FarmProfileRecord, FarmReadiness, FarmRulesProjection, FarmSetupDraft,
-    FarmSetupProjection, FarmSummary, FarmerSection, LoggedOutStartupProjection,
-    PickupLocationRecord, ProductEditorDraft, ProductId, ProductsFilter, ProductsListProjection,
-    ProductsSort, SettingsAccountProjection, SettingsPreference, SettingsSection, ShellSection,
+    FarmSetupProjection, FarmSummary, FarmerSection, FulfillmentWindowId,
+    LoggedOutStartupProjection, OrderDetailProjection, OrderId, OrdersListProjection,
+    OrdersScreenQueryState, PackDayProjection, PackDayScreenQueryState, PickupLocationRecord,
+    ProductEditorDraft, ProductId, ProductsFilter, ProductsListProjection, ProductsSort,
+    SettingsAccountProjection, SettingsPreference, SettingsSection, ShellSection,
     TodayAgendaProjection,
 };
 use radroots_studio_app_remote_signer::{
     RadrootsAppRemoteSignerApprovedSession, RadrootsAppRemoteSignerPendingSession,
 };
 use radroots_studio_app_sqlite::{
-    APP_ACTIVITY_CONTEXT_LIMIT, AppSqliteError, AppSqliteStore, DatabaseTarget,
-    derive_farm_rules_readiness,
+    derive_farm_rules_readiness, AppSqliteError, AppSqliteStore, DatabaseTarget,
+    APP_ACTIVITY_CONTEXT_LIMIT,
 };
 use radroots_studio_app_state::{
     AppShellProjection, AppStateCommand, AppStateStore, AppStateStoreError, FarmSetupFlowStage,
     FarmWorkspaceReadinessProjection, HomeRoute, InMemoryAppStateRepository,
-    ProductsScreenProjection, ProductsScreenQueryState,
+    OrdersScreenProjection, PackDayScreenProjection, ProductsScreenProjection,
+    ProductsScreenQueryState,
 };
 use radroots_nostr_accounts::prelude::RadrootsNostrAccountsManager;
 use thiserror::Error;
 use tracing::error;
 
 use crate::accounts::{
-    DesktopAccountsBootstrapError, DesktopAccountsCommandError, DesktopAccountsProjectionError,
-    DesktopLocalIdentityImportRequest, bootstrap_desktop_accounts, generate_local_account,
-    identity_projection_from_manager, import_local_account, remove_selected_local_key,
-    reset_local_device_state, select_active_surface, select_local_account,
+    bootstrap_desktop_accounts, generate_local_account, identity_projection_from_manager,
+    import_local_account, remove_selected_local_key, reset_local_device_state,
+    select_active_surface, select_local_account, DesktopAccountsBootstrapError,
+    DesktopAccountsCommandError, DesktopAccountsProjectionError, DesktopLocalIdentityImportRequest,
 };
 use crate::remote_signer::{
-    DesktopRemoteSignerError, DesktopRemoteSignerPaths, activate_pending_session,
-    apply_remote_signer_custody, clear_pending_session, load_pending_session, purge_all_state,
-    reconcile_startup, store_pending_session,
+    activate_pending_session, apply_remote_signer_custody, clear_pending_session,
+    load_pending_session, purge_all_state, reconcile_startup, store_pending_session,
+    DesktopRemoteSignerError, DesktopRemoteSignerPaths,
 };
 
 const APP_DATABASE_FILE_NAME: &str = "app.sqlite3";
@@ -68,6 +71,8 @@ impl DesktopAppRuntime {
             farm_readiness_projection: state.state_store.farm_readiness_projection().clone(),
             today_projection: state.state_store.today_projection().clone(),
             products_projection: state.state_store.products_projection().clone(),
+            orders_projection: state.state_store.orders_projection().clone(),
+            pack_day_projection: state.state_store.pack_day_projection().clone(),
             startup_issue: state.startup_issue.clone(),
         }
     }
@@ -191,6 +196,21 @@ impl DesktopAppRuntime {
 
     pub fn open_products_filter(&self, filter: ProductsFilter) -> Result<bool, AppSqliteError> {
         self.lock_state_mut().open_products_filter(filter)
+    }
+
+    pub fn open_orders(&self) -> Result<bool, AppSqliteError> {
+        self.lock_state_mut().open_orders()
+    }
+
+    pub fn open_order_detail(&self, order_id: OrderId) -> Result<bool, AppSqliteError> {
+        self.lock_state_mut().open_order_detail(order_id)
+    }
+
+    pub fn open_pack_day(
+        &self,
+        fulfillment_window_id: Option<FulfillmentWindowId>,
+    ) -> Result<bool, AppSqliteError> {
+        self.lock_state_mut().open_pack_day(fulfillment_window_id)
     }
 
     pub fn update_product_stock(
@@ -383,6 +403,8 @@ pub struct DesktopAppRuntimeSummary {
     pub farm_readiness_projection: FarmWorkspaceReadinessProjection,
     pub today_projection: TodayAgendaProjection,
     pub products_projection: ProductsScreenProjection,
+    pub orders_projection: OrdersScreenProjection,
+    pub pack_day_projection: PackDayScreenProjection,
     pub startup_issue: Option<String>,
 }
 
@@ -400,6 +422,9 @@ struct DesktopSelectedAccountContext {
     farm_rules_projection: FarmRulesProjection,
     today_projection: TodayAgendaProjection,
     products_list: ProductsListProjection,
+    orders_list: OrdersListProjection,
+    order_detail: Option<OrderDetailProjection>,
+    pack_day_projection: PackDayProjection,
 }
 
 struct DesktopAppRuntimeState {
@@ -472,6 +497,13 @@ impl DesktopAppRuntimeState {
             &sqlite_store,
             &identity_projection,
             state_store.products_projection().query.clone(),
+            state_store.orders_projection().query.clone(),
+            state_store
+                .orders_projection()
+                .detail
+                .as_ref()
+                .map(|detail| detail.order_id),
+            state_store.pack_day_projection().query.clone(),
         )?;
         let _ = state_store.apply_in_memory(AppStateCommand::replace_identity_projection(
             identity_projection.clone(),
@@ -481,6 +513,9 @@ impl DesktopAppRuntimeState {
         {
             let _ = state_store.apply_in_memory(AppStateCommand::show_startup_signer_entry());
         }
+        let _ = state_store.apply_in_memory(AppStateCommand::replace_farm_rules_projection(
+            selected_account_context.farm_rules_projection,
+        ));
         let _ = state_store.apply_in_memory(AppStateCommand::replace_farm_setup_projection(
             selected_account_context.farm_setup_projection,
         ));
@@ -489,6 +524,15 @@ impl DesktopAppRuntimeState {
         ));
         let _ = state_store.apply_in_memory(AppStateCommand::replace_products_list(
             selected_account_context.products_list,
+        ));
+        let _ = state_store.apply_in_memory(AppStateCommand::replace_orders_list(
+            selected_account_context.orders_list,
+        ));
+        let _ = state_store.apply_in_memory(AppStateCommand::replace_order_detail(
+            selected_account_context.order_detail,
+        ));
+        let _ = state_store.apply_in_memory(AppStateCommand::replace_pack_day_projection(
+            selected_account_context.pack_day_projection,
         ));
 
         Ok(Self {
@@ -609,13 +653,34 @@ impl DesktopAppRuntimeState {
 
                 section_changed || editor_changed
             }
-            FarmerSection::Products
-                if self.state_store.farm_setup_projection().has_saved_farm() =>
-            {
+            FarmerSection::Products if self.has_saved_farm() => {
                 self.state_store
                     .apply_in_memory(AppStateCommand::SelectSection(ShellSection::Farmer(
                         FarmerSection::Products,
                     )))
+            }
+            FarmerSection::Orders if self.has_saved_farm() => {
+                let section_changed =
+                    self.state_store
+                        .apply_in_memory(AppStateCommand::SelectSection(ShellSection::Farmer(
+                            FarmerSection::Orders,
+                        )));
+                let detail_changed = self
+                    .state_store
+                    .apply_in_memory(AppStateCommand::replace_order_detail(None));
+                let editor_changed = self.close_product_editor();
+
+                section_changed || detail_changed || editor_changed
+            }
+            FarmerSection::PackDay if self.has_saved_farm() => {
+                let section_changed =
+                    self.state_store
+                        .apply_in_memory(AppStateCommand::SelectSection(ShellSection::Farmer(
+                            FarmerSection::PackDay,
+                        )));
+                let editor_changed = self.close_product_editor();
+
+                section_changed || editor_changed
             }
             FarmerSection::Products
             | FarmerSection::Orders
@@ -674,6 +739,68 @@ impl DesktopAppRuntimeState {
         Ok(filter_changed || section_changed)
     }
 
+    fn open_orders(&mut self) -> Result<bool, AppSqliteError> {
+        if !self.has_saved_farm() {
+            return Ok(false);
+        }
+
+        let query_changed =
+            self.replace_orders_query(self.state_store.orders_projection().query.clone())?;
+        let section_changed = self
+            .state_store
+            .apply_in_memory(AppStateCommand::SelectSection(ShellSection::Farmer(
+                FarmerSection::Orders,
+            )));
+        let editor_changed = self.close_product_editor();
+
+        Ok(query_changed || section_changed || editor_changed)
+    }
+
+    fn open_order_detail(&mut self, order_id: OrderId) -> Result<bool, AppSqliteError> {
+        let Some(sqlite_store) = self.sqlite_store.as_ref() else {
+            return Ok(false);
+        };
+        let Some(farm_id) = self.selected_farm_id() else {
+            return Ok(false);
+        };
+        let Some(order_detail) = sqlite_store.load_order_detail(farm_id, order_id)? else {
+            return Ok(false);
+        };
+
+        let detail_changed = self
+            .state_store
+            .apply_in_memory(AppStateCommand::replace_order_detail(Some(order_detail)));
+        let section_changed = self
+            .state_store
+            .apply_in_memory(AppStateCommand::SelectSection(ShellSection::Farmer(
+                FarmerSection::Orders,
+            )));
+        let editor_changed = self.close_product_editor();
+
+        Ok(detail_changed || section_changed || editor_changed)
+    }
+
+    fn open_pack_day(
+        &mut self,
+        fulfillment_window_id: Option<FulfillmentWindowId>,
+    ) -> Result<bool, AppSqliteError> {
+        if !self.has_saved_farm() {
+            return Ok(false);
+        }
+
+        let query_changed = self.replace_pack_day_query(PackDayScreenQueryState {
+            fulfillment_window_id,
+        })?;
+        let section_changed = self
+            .state_store
+            .apply_in_memory(AppStateCommand::SelectSection(ShellSection::Farmer(
+                FarmerSection::PackDay,
+            )));
+        let editor_changed = self.close_product_editor();
+
+        Ok(query_changed || section_changed || editor_changed)
+    }
+
     fn update_product_stock(
         &mut self,
         product_id: ProductId,
@@ -700,6 +827,9 @@ impl DesktopAppRuntimeState {
             sqlite_store,
             self.state_store.identity_projection(),
             self.state_store.products_projection().query.clone(),
+            self.state_store.orders_projection().query.clone(),
+            self.selected_order_detail_id(),
+            self.state_store.pack_day_projection().query.clone(),
         )?;
         let context_changed = self.apply_selected_account_context(&selected_account_context);
 
@@ -722,6 +852,9 @@ impl DesktopAppRuntimeState {
             sqlite_store,
             self.state_store.identity_projection(),
             self.state_store.products_projection().query.clone(),
+            self.state_store.orders_projection().query.clone(),
+            self.selected_order_detail_id(),
+            self.state_store.pack_day_projection().query.clone(),
         )?;
         let context_changed = self.apply_selected_account_context(&selected_account_context);
         let section_changed = self.select_farmer_section(FarmerSection::Products);
@@ -780,6 +913,9 @@ impl DesktopAppRuntimeState {
                 sqlite_store,
                 self.state_store.identity_projection(),
                 self.state_store.products_projection().query.clone(),
+                self.state_store.orders_projection().query.clone(),
+                self.selected_order_detail_id(),
+                self.state_store.pack_day_projection().query.clone(),
             )?
         };
         let reloaded_draft = {
@@ -914,6 +1050,9 @@ impl DesktopAppRuntimeState {
                 sqlite_store,
                 self.state_store.identity_projection(),
                 self.state_store.products_projection().query.clone(),
+                self.state_store.orders_projection().query.clone(),
+                self.selected_order_detail_id(),
+                self.state_store.pack_day_projection().query.clone(),
             )?
         };
         self.apply_selected_account_context(&selected_account_context);
@@ -930,6 +1069,9 @@ impl DesktopAppRuntimeState {
             self.sqlite_store()?,
             &projection,
             self.state_store.products_projection().query.clone(),
+            self.state_store.orders_projection().query.clone(),
+            self.selected_order_detail_id(),
+            self.state_store.pack_day_projection().query.clone(),
         )?;
         let identity_changed = self
             .state_store
@@ -947,6 +1089,9 @@ impl DesktopAppRuntimeState {
             self.sqlite_store_for_farm_setup()?,
             self.state_store.identity_projection(),
             self.state_store.products_projection().query.clone(),
+            self.state_store.orders_projection().query.clone(),
+            self.selected_order_detail_id(),
+            self.state_store.pack_day_projection().query.clone(),
         )?)
     }
 
@@ -971,6 +1116,21 @@ impl DesktopAppRuntimeState {
                 .apply_in_memory(AppStateCommand::replace_products_list(
                     context.products_list.clone(),
                 ));
+        let orders_changed =
+            self.state_store
+                .apply_in_memory(AppStateCommand::replace_orders_list(
+                    context.orders_list.clone(),
+                ));
+        let order_detail_changed =
+            self.state_store
+                .apply_in_memory(AppStateCommand::replace_order_detail(
+                    context.order_detail.clone(),
+                ));
+        let pack_day_changed =
+            self.state_store
+                .apply_in_memory(AppStateCommand::replace_pack_day_projection(
+                    context.pack_day_projection.clone(),
+                ));
         let editor_changed = if context.farm_setup_projection.has_saved_farm() {
             false
         } else {
@@ -982,6 +1142,9 @@ impl DesktopAppRuntimeState {
             || farm_rules_changed
             || today_changed
             || products_changed
+            || orders_changed
+            || order_detail_changed
+            || pack_day_changed
             || editor_changed
             || shell_changed
     }
@@ -1087,11 +1250,23 @@ impl DesktopAppRuntimeState {
                 .map(|farm| farm.farm_id))
     }
 
+    fn has_saved_farm(&self) -> bool {
+        self.state_store.farm_setup_projection().has_saved_farm()
+    }
+
     fn selected_product_editor_id(&self) -> Option<ProductId> {
         match &self.state_store.products_projection().editor {
             radroots_studio_app_state::ProductEditorState::Open(session) => session.selected_product_id,
             radroots_studio_app_state::ProductEditorState::Closed => None,
         }
+    }
+
+    fn selected_order_detail_id(&self) -> Option<OrderId> {
+        self.state_store
+            .orders_projection()
+            .detail
+            .as_ref()
+            .map(|detail| detail.order_id)
     }
 
     fn fallback_farm_profile(&self, farm_id: FarmId) -> FarmProfileRecord {
@@ -1112,16 +1287,81 @@ impl DesktopAppRuntimeState {
         sqlite_store.load_products(farm_id, &query.search_query, query.filter, query.sort)
     }
 
+    fn replace_orders_query(
+        &mut self,
+        query: OrdersScreenQueryState,
+    ) -> Result<bool, AppSqliteError> {
+        let orders_list = self.load_orders_list_for_query(&query)?;
+        let filter_changed = self
+            .state_store
+            .apply_in_memory(AppStateCommand::select_orders_filter(query.filter));
+        let fulfillment_window_changed =
+            self.state_store
+                .apply_in_memory(AppStateCommand::select_orders_fulfillment_window(
+                    query.fulfillment_window_id,
+                ));
+        let list_changed = self
+            .state_store
+            .apply_in_memory(AppStateCommand::replace_orders_list(orders_list));
+
+        Ok(filter_changed || fulfillment_window_changed || list_changed)
+    }
+
+    fn load_orders_list_for_query(
+        &self,
+        query: &OrdersScreenQueryState,
+    ) -> Result<OrdersListProjection, AppSqliteError> {
+        let Some(sqlite_store) = self.sqlite_store.as_ref() else {
+            return Ok(OrdersListProjection::default());
+        };
+        let Some(farm_id) = self.selected_farm_id() else {
+            return Ok(OrdersListProjection::default());
+        };
+
+        sqlite_store.load_orders_list(farm_id, query)
+    }
+
+    fn replace_pack_day_query(
+        &mut self,
+        query: PackDayScreenQueryState,
+    ) -> Result<bool, AppSqliteError> {
+        let pack_day_projection = self.load_pack_day_for_query(&query)?;
+        let fulfillment_window_changed =
+            self.state_store
+                .apply_in_memory(AppStateCommand::set_pack_day_fulfillment_window(
+                    query.fulfillment_window_id,
+                ));
+        let projection_changed =
+            self.state_store
+                .apply_in_memory(AppStateCommand::replace_pack_day_projection(
+                    pack_day_projection,
+                ));
+
+        Ok(fulfillment_window_changed || projection_changed)
+    }
+
+    fn load_pack_day_for_query(
+        &self,
+        query: &PackDayScreenQueryState,
+    ) -> Result<PackDayProjection, AppSqliteError> {
+        let Some(sqlite_store) = self.sqlite_store.as_ref() else {
+            return Ok(PackDayProjection::default());
+        };
+        let Some(farm_id) = self.selected_farm_id() else {
+            return Ok(PackDayProjection::default());
+        };
+
+        sqlite_store.load_pack_day(farm_id, query)
+    }
+
     fn sync_truthful_farmer_section(&mut self) -> bool {
         let selected_section = self.state_store.shell_projection().selected_section;
         let should_reset_to_today = match selected_section {
             ShellSection::Farmer(FarmerSection::Today) => false,
-            ShellSection::Farmer(FarmerSection::Products) => {
-                !self.state_store.farm_setup_projection().has_saved_farm()
-            }
             ShellSection::Farmer(
-                FarmerSection::Orders | FarmerSection::PackDay | FarmerSection::Farm,
-            ) => true,
+                FarmerSection::Products | FarmerSection::Orders | FarmerSection::PackDay,
+            ) => !self.has_saved_farm(),
+            ShellSection::Farmer(FarmerSection::Farm) => true,
             ShellSection::Home | ShellSection::Settings(_) => false,
         };
 
@@ -1274,6 +1514,9 @@ fn load_selected_account_context(
     sqlite_store: &AppSqliteStore,
     identity_projection: &AppIdentityProjection,
     products_query: ProductsScreenQueryState,
+    orders_query: OrdersScreenQueryState,
+    selected_order_id: Option<OrderId>,
+    pack_day_query: PackDayScreenQueryState,
 ) -> Result<DesktopSelectedAccountContext, AppSqliteError> {
     let Some(selected_account) = identity_projection.selected_account.as_ref() else {
         return Ok(DesktopSelectedAccountContext::default());
@@ -1310,12 +1553,27 @@ fn load_selected_account_context(
         )?,
         None => ProductsListProjection::default(),
     };
+    let orders_list = match today_farm_id {
+        Some(farm_id) => sqlite_store.load_orders_list(farm_id, &orders_query)?,
+        None => OrdersListProjection::default(),
+    };
+    let order_detail = match today_farm_id.zip(selected_order_id) {
+        Some((farm_id, order_id)) => sqlite_store.load_order_detail(farm_id, order_id)?,
+        None => None,
+    };
+    let pack_day_projection = match today_farm_id {
+        Some(farm_id) => sqlite_store.load_pack_day(farm_id, &pack_day_query)?,
+        None => PackDayProjection::default(),
+    };
 
     Ok(DesktopSelectedAccountContext {
         farm_setup_projection,
         farm_rules_projection,
         today_projection,
         products_list,
+        orders_list,
+        order_detail,
+        pack_day_projection,
     })
 }
 
@@ -1435,10 +1693,11 @@ mod tests {
         BlackoutPeriodId, BlackoutPeriodRecord, FarmId, FarmOperatingRulesRecord, FarmOrderMethod,
         FarmProfileRecord, FarmReadiness, FarmReadinessBlocker, FarmSetupDraft,
         FarmSetupProjection, FarmSummary, FarmerActivationProjection, FarmerSection,
-        FulfillmentWindowId, FulfillmentWindowRecord, LoggedOutStartupProjection, PickupLocationId,
-        PickupLocationRecord, ProductEditorDraft, ProductStatus, ProductsFilter, ProductsSort,
-        SelectedSurfaceProjection, SettingsPreference, SettingsSection, ShellSection,
-        TodayAgendaProjection, TodaySetupTask, TodaySetupTaskKind, TodaySummary,
+        FulfillmentWindowId, FulfillmentWindowRecord, LoggedOutStartupProjection, OrderId,
+        OrdersFilter, PickupLocationId, PickupLocationRecord, ProductEditorDraft, ProductStatus,
+        ProductsFilter, ProductsSort, SelectedSurfaceProjection, SettingsPreference,
+        SettingsSection, ShellSection, TodayAgendaProjection, TodaySetupTask, TodaySetupTaskKind,
+        TodaySummary,
     };
     use radroots_studio_app_remote_signer::{
         RadrootsAppRemoteSignerPendingSession, RadrootsAppRemoteSignerSessionRecord,
@@ -1457,8 +1716,8 @@ mod tests {
     use crate::accounts::DesktopLocalIdentityImportRequest;
 
     use super::{
-        APP_DATABASE_FILE_NAME, DesktopAppRuntime, DesktopAppRuntimeActivityContextError,
-        DesktopAppRuntimeCommandError, DesktopAppRuntimeState, DesktopRemoteSignerPaths,
+        DesktopAppRuntime, DesktopAppRuntimeActivityContextError, DesktopAppRuntimeCommandError,
+        DesktopAppRuntimeState, DesktopRemoteSignerPaths, APP_DATABASE_FILE_NAME,
     };
 
     #[test]
@@ -1542,12 +1801,10 @@ mod tests {
         assert_eq!(summary.startup_gate, AppStartupGate::SetupRequired);
         assert_eq!(summary.home_route, HomeRoute::SetupRequired);
         assert!(summary.settings_account_projection.roster.is_empty());
-        assert!(
-            summary
-                .settings_account_projection
-                .selected_account
-                .is_none()
-        );
+        assert!(summary
+            .settings_account_projection
+            .selected_account
+            .is_none());
         assert_eq!(
             summary.logged_out_startup,
             LoggedOutStartupProjection::default()
@@ -1634,11 +1891,9 @@ mod tests {
             startup_issue: None,
         });
 
-        assert!(
-            runtime
-                .clear_startup_pending_remote_signer_session()
-                .expect("clear pending should succeed")
-        );
+        assert!(runtime
+            .clear_startup_pending_remote_signer_session()
+            .expect("clear pending should succeed"));
         assert!(runtime.begin_generate_key_startup());
         assert_eq!(
             runtime.summary().logged_out_startup.phase,
@@ -1653,11 +1908,9 @@ mod tests {
         let (runtime, paths) = bootstrapped_runtime("restart_pending_recovery");
         let pending_session = fixture_pending_session();
 
-        assert!(
-            runtime
-                .store_startup_pending_remote_signer_session(&pending_session)
-                .expect("store pending should succeed")
-        );
+        assert!(runtime
+            .store_startup_pending_remote_signer_session(&pending_session)
+            .expect("store pending should succeed"));
 
         let restarted = restart_runtime(paths.clone());
         let restored = restarted
@@ -1686,16 +1939,12 @@ mod tests {
         let (runtime, paths) = bootstrapped_runtime("restart_after_explicit_cancel");
         let pending_session = fixture_pending_session();
 
-        assert!(
-            runtime
-                .store_startup_pending_remote_signer_session(&pending_session)
-                .expect("store pending should succeed")
-        );
-        assert!(
-            runtime
-                .clear_startup_pending_remote_signer_session()
-                .expect("clear pending should succeed")
-        );
+        assert!(runtime
+            .store_startup_pending_remote_signer_session(&pending_session)
+            .expect("store pending should succeed"));
+        assert!(runtime
+            .clear_startup_pending_remote_signer_session()
+            .expect("clear pending should succeed"));
 
         let restarted = restart_runtime(paths.clone());
 
@@ -1940,6 +2189,8 @@ mod tests {
         });
 
         assert!(!runtime.select_farmer_section(FarmerSection::Products));
+        assert!(!runtime.select_farmer_section(FarmerSection::Orders));
+        assert!(!runtime.select_farmer_section(FarmerSection::PackDay));
         assert_eq!(
             runtime.summary().shell_projection.selected_section,
             ShellSection::Home
@@ -1950,11 +2201,9 @@ mod tests {
     fn runtime_routes_between_farmer_home_and_products_through_explicit_methods() {
         let runtime = memory_runtime();
 
-        assert!(
-            runtime
-                .generate_local_account(Some("Farmer".to_owned()))
-                .expect("account should generate")
-        );
+        assert!(runtime
+            .generate_local_account(Some("Farmer".to_owned()))
+            .expect("account should generate"));
         let account_id = runtime
             .summary()
             .settings_account_projection
@@ -1990,11 +2239,9 @@ mod tests {
             .expect("sqlite store")
             .save_farm_setup(account_id.as_str(), &farm_setup_projection)
             .expect("farm setup should save");
-        assert!(
-            runtime
-                .select_local_account(account_id.as_str())
-                .expect("account should select")
-        );
+        assert!(runtime
+            .select_local_account(account_id.as_str())
+            .expect("account should select"));
 
         assert!(runtime.select_farmer_section(FarmerSection::Products));
         assert_eq!(
@@ -2013,11 +2260,9 @@ mod tests {
     fn runtime_products_queries_refresh_the_repository_backed_projection() {
         let runtime = memory_runtime();
 
-        assert!(
-            runtime
-                .generate_local_account(Some("Farmer".to_owned()))
-                .expect("account should generate")
-        );
+        assert!(runtime
+            .generate_local_account(Some("Farmer".to_owned()))
+            .expect("account should generate"));
         let account_id = runtime
             .summary()
             .settings_account_projection
@@ -2072,11 +2317,9 @@ mod tests {
             "2026-04-18T09:00:00Z",
         );
 
-        assert!(
-            runtime
-                .select_local_account(account_id.as_str())
-                .expect("account should select")
-        );
+        assert!(runtime
+            .select_local_account(account_id.as_str())
+            .expect("account should select"));
 
         let summary = runtime.summary();
         assert_eq!(summary.products_projection.list.summary.total_products, 2);
@@ -2090,18 +2333,14 @@ mod tests {
             ProductsSort::default()
         );
 
-        assert!(
-            runtime
-                .select_products_filter(ProductsFilter::NeedAttention)
-                .expect("filter should apply")
-        );
+        assert!(runtime
+            .select_products_filter(ProductsFilter::NeedAttention)
+            .expect("filter should apply"));
         assert_eq!(runtime.summary().products_projection.list.rows.len(), 2);
 
-        assert!(
-            runtime
-                .set_products_search_query("pea")
-                .expect("search should apply")
-        );
+        assert!(runtime
+            .set_products_search_query("pea")
+            .expect("search should apply"));
         let searched = runtime.summary();
         assert_eq!(searched.products_projection.list.rows.len(), 1);
         assert_eq!(
@@ -2109,11 +2348,9 @@ mod tests {
             "Pea shoots"
         );
 
-        assert!(
-            runtime
-                .select_products_sort(ProductsSort::Name)
-                .expect("sort should apply")
-        );
+        assert!(runtime
+            .select_products_sort(ProductsSort::Name)
+            .expect("sort should apply"));
         assert_eq!(
             runtime.summary().products_projection.query.sort,
             ProductsSort::Name
@@ -2124,11 +2361,9 @@ mod tests {
     fn runtime_open_products_filter_routes_today_follow_ons_into_products() {
         let runtime = memory_runtime();
 
-        assert!(
-            runtime
-                .generate_local_account(Some("Farmer".to_owned()))
-                .expect("account should generate")
-        );
+        assert!(runtime
+            .generate_local_account(Some("Farmer".to_owned()))
+            .expect("account should generate"));
         let account_id = runtime
             .summary()
             .settings_account_projection
@@ -2165,21 +2400,17 @@ mod tests {
             .save_farm_setup(account_id.as_str(), &farm_setup_projection)
             .expect("farm setup should save");
 
-        assert!(
-            runtime
-                .select_local_account(account_id.as_str())
-                .expect("account should select")
-        );
+        assert!(runtime
+            .select_local_account(account_id.as_str())
+            .expect("account should select"));
         assert_eq!(
             runtime.summary().shell_projection.selected_section,
             ShellSection::Farmer(FarmerSection::Today)
         );
 
-        assert!(
-            runtime
-                .open_products_filter(ProductsFilter::Drafts)
-                .expect("products follow-on should route")
-        );
+        assert!(runtime
+            .open_products_filter(ProductsFilter::Drafts)
+            .expect("products follow-on should route"));
         let summary = runtime.summary();
 
         assert_eq!(
@@ -2193,14 +2424,79 @@ mod tests {
     }
 
     #[test]
+    fn runtime_opens_orders_detail_and_pack_day_through_shared_farmer_routing() {
+        let runtime = memory_runtime();
+        let (_, farm_id) = provision_ready_farmer_account(&runtime);
+        let (fulfillment_window_id, order_id) = seed_order_workspace(&runtime, farm_id);
+
+        assert_eq!(
+            runtime.summary().orders_projection.query.filter,
+            OrdersFilter::NeedsAction
+        );
+
+        assert!(runtime.open_orders().expect("orders should open"));
+        let orders_summary = runtime.summary();
+        assert_eq!(
+            orders_summary.shell_projection.selected_section,
+            ShellSection::Farmer(FarmerSection::Orders)
+        );
+        assert_eq!(orders_summary.orders_projection.list.rows.len(), 1);
+        assert_eq!(
+            orders_summary.orders_projection.list.rows[0].order_id,
+            order_id
+        );
+        assert!(orders_summary.orders_projection.detail.is_none());
+
+        assert!(runtime
+            .open_order_detail(order_id)
+            .expect("order detail should open"));
+        let detail_summary = runtime.summary();
+        assert_eq!(
+            detail_summary.shell_projection.selected_section,
+            ShellSection::Farmer(FarmerSection::Orders)
+        );
+        assert_eq!(
+            detail_summary
+                .orders_projection
+                .detail
+                .as_ref()
+                .expect("order detail")
+                .order_id,
+            order_id
+        );
+
+        assert!(runtime.open_pack_day(None).expect("pack day should open"));
+        let pack_day_summary = runtime.summary();
+        assert_eq!(
+            pack_day_summary.shell_projection.selected_section,
+            ShellSection::Farmer(FarmerSection::PackDay)
+        );
+        assert_eq!(
+            pack_day_summary
+                .pack_day_projection
+                .query
+                .fulfillment_window_id,
+            None
+        );
+        assert_eq!(
+            pack_day_summary
+                .pack_day_projection
+                .projection
+                .fulfillment_window
+                .as_ref()
+                .expect("pack day fulfillment window")
+                .fulfillment_window_id,
+            fulfillment_window_id
+        );
+    }
+
+    #[test]
     fn runtime_stock_updates_refresh_today_and_products_projections() {
         let runtime = memory_runtime();
 
-        assert!(
-            runtime
-                .generate_local_account(Some("Farmer".to_owned()))
-                .expect("account should generate")
-        );
+        assert!(runtime
+            .generate_local_account(Some("Farmer".to_owned()))
+            .expect("account should generate"));
         let account_id = runtime
             .summary()
             .settings_account_projection
@@ -2246,22 +2542,18 @@ mod tests {
             "2026-04-18T10:00:00Z",
         );
 
-        assert!(
-            runtime
-                .select_local_account(account_id.as_str())
-                .expect("account should select")
-        );
+        assert!(runtime
+            .select_local_account(account_id.as_str())
+            .expect("account should select"));
         let product_id = runtime.summary().products_projection.list.rows[0].product_id;
 
         assert_eq!(
             runtime.summary().today_projection.low_stock_products.len(),
             1
         );
-        assert!(
-            runtime
-                .update_product_stock(product_id, 12)
-                .expect("stock update should succeed")
-        );
+        assert!(runtime
+            .update_product_stock(product_id, 12)
+            .expect("stock update should succeed"));
 
         let summary = runtime.summary();
         assert_eq!(
@@ -2275,11 +2567,9 @@ mod tests {
     fn runtime_open_new_product_editor_creates_a_local_draft_and_opens_it() {
         let runtime = memory_runtime();
 
-        assert!(
-            runtime
-                .generate_local_account(Some("Farmer".to_owned()))
-                .expect("account should generate")
-        );
+        assert!(runtime
+            .generate_local_account(Some("Farmer".to_owned()))
+            .expect("account should generate"));
         let account_id = runtime
             .summary()
             .settings_account_projection
@@ -2316,11 +2606,9 @@ mod tests {
             .save_farm_setup(account_id.as_str(), &farm_setup_projection)
             .expect("farm setup should save");
 
-        assert!(
-            runtime
-                .select_local_account(account_id.as_str())
-                .expect("account should select")
-        );
+        assert!(runtime
+            .select_local_account(account_id.as_str())
+            .expect("account should select"));
         assert_eq!(
             runtime
                 .summary()
@@ -2331,11 +2619,9 @@ mod tests {
             0
         );
 
-        assert!(
-            runtime
-                .open_new_product_editor()
-                .expect("new product editor should open")
-        );
+        assert!(runtime
+            .open_new_product_editor()
+            .expect("new product editor should open"));
 
         let summary = runtime.summary();
         assert_eq!(summary.products_projection.list.summary.total_products, 1);
@@ -2353,11 +2639,9 @@ mod tests {
     fn runtime_open_existing_and_save_product_editor_refreshes_products_projection() {
         let runtime = memory_runtime();
 
-        assert!(
-            runtime
-                .generate_local_account(Some("Farmer".to_owned()))
-                .expect("account should generate")
-        );
+        assert!(runtime
+            .generate_local_account(Some("Farmer".to_owned()))
+            .expect("account should generate"));
         let account_id = runtime
             .summary()
             .settings_account_projection
@@ -2403,16 +2687,12 @@ mod tests {
             "2026-04-18T10:00:00Z",
         );
 
-        assert!(
-            runtime
-                .select_local_account(account_id.as_str())
-                .expect("account should select")
-        );
-        assert!(
-            runtime
-                .open_existing_product_editor(product_id)
-                .expect("existing product editor should open")
-        );
+        assert!(runtime
+            .select_local_account(account_id.as_str())
+            .expect("account should select"));
+        assert!(runtime
+            .open_existing_product_editor(product_id)
+            .expect("existing product editor should open"));
 
         let saved_draft = ProductEditorDraft {
             title: "Salad mix".to_owned(),
@@ -2425,11 +2705,9 @@ mod tests {
             status: radroots_studio_app_models::ProductStatus::Published,
         };
 
-        assert!(
-            runtime
-                .save_product_editor_draft(saved_draft.clone())
-                .expect("product editor draft should save")
-        );
+        assert!(runtime
+            .save_product_editor_draft(saved_draft.clone())
+            .expect("product editor draft should save"));
 
         let summary = runtime.summary();
         assert_eq!(
@@ -2466,11 +2744,9 @@ mod tests {
     fn runtime_account_commands_refresh_identity_projection() {
         let runtime = memory_runtime();
 
-        assert!(
-            runtime
-                .generate_local_account(Some("First".to_owned()))
-                .expect("first account should generate")
-        );
+        assert!(runtime
+            .generate_local_account(Some("First".to_owned()))
+            .expect("first account should generate"));
         let first_summary = runtime.summary();
         let first_account_id = first_summary
             .settings_account_projection
@@ -2481,11 +2757,9 @@ mod tests {
             .account_id
             .clone();
 
-        assert!(
-            runtime
-                .generate_local_account(Some("Second".to_owned()))
-                .expect("second account should generate")
-        );
+        assert!(runtime
+            .generate_local_account(Some("Second".to_owned()))
+            .expect("second account should generate"));
         let second_summary = runtime.summary();
         let second_account_id = second_summary
             .settings_account_projection
@@ -2511,11 +2785,9 @@ mod tests {
             ActiveSurface::Farmer,
             true,
         );
-        assert!(
-            runtime
-                .select_local_account(second_account_id.as_str())
-                .expect("selection should succeed")
-        );
+        assert!(runtime
+            .select_local_account(second_account_id.as_str())
+            .expect("selection should succeed"));
         let selected_summary = runtime.summary();
         assert_eq!(selected_summary.startup_gate, AppStartupGate::Farmer);
         assert_eq!(selected_summary.home_route, HomeRoute::FarmSetupOnboarding);
@@ -2528,11 +2800,9 @@ mod tests {
             Some(ActiveSurface::Farmer)
         );
 
-        assert!(
-            runtime
-                .remove_selected_local_key()
-                .expect("selected local key should remove")
-        );
+        assert!(runtime
+            .remove_selected_local_key()
+            .expect("selected local key should remove"));
         let removed_summary = runtime.summary();
         assert_eq!(removed_summary.settings_account_projection.roster.len(), 1);
         assert_eq!(
@@ -2555,13 +2825,11 @@ mod tests {
         );
 
         let imported_identity = RadrootsIdentity::generate();
-        assert!(
-            runtime
-                .import_local_account(DesktopLocalIdentityImportRequest::raw_secret_key(
-                    imported_identity.nsec(),
-                ))
-                .expect("raw import should succeed")
-        );
+        assert!(runtime
+            .import_local_account(DesktopLocalIdentityImportRequest::raw_secret_key(
+                imported_identity.nsec(),
+            ))
+            .expect("raw import should succeed"));
         let imported_summary = runtime.summary();
         assert_eq!(imported_summary.settings_account_projection.roster.len(), 2);
         assert_eq!(
@@ -2578,11 +2846,9 @@ mod tests {
     fn runtime_select_active_surface_persists_selected_surface() {
         let runtime = memory_runtime();
 
-        assert!(
-            runtime
-                .generate_local_account(Some("Farmer".to_owned()))
-                .expect("account should generate")
-        );
+        assert!(runtime
+            .generate_local_account(Some("Farmer".to_owned()))
+            .expect("account should generate"));
         let account_id = runtime
             .summary()
             .settings_account_projection
@@ -2593,18 +2859,14 @@ mod tests {
             .account_id
             .clone();
         save_surface_activation(&runtime, account_id.as_str(), ActiveSurface::Farmer, true);
-        assert!(
-            runtime
-                .select_local_account(account_id.as_str())
-                .expect("account should select")
-        );
+        assert!(runtime
+            .select_local_account(account_id.as_str())
+            .expect("account should select"));
         assert_eq!(runtime.summary().startup_gate, AppStartupGate::Farmer);
 
-        assert!(
-            runtime
-                .select_active_surface(ActiveSurface::Personal)
-                .expect("surface should select")
-        );
+        assert!(runtime
+            .select_active_surface(ActiveSurface::Personal)
+            .expect("surface should select"));
         let personal_summary = runtime.summary();
         assert_eq!(personal_summary.startup_gate, AppStartupGate::Personal);
         assert_eq!(
@@ -2628,11 +2890,9 @@ mod tests {
             ActiveSurface::Personal
         );
 
-        assert!(
-            runtime
-                .select_active_surface(ActiveSurface::Farmer)
-                .expect("surface should reselect")
-        );
+        assert!(runtime
+            .select_active_surface(ActiveSurface::Farmer)
+            .expect("surface should reselect"));
         let farmer_summary = runtime.summary();
         assert_eq!(farmer_summary.startup_gate, AppStartupGate::Farmer);
         assert_eq!(
@@ -2661,11 +2921,9 @@ mod tests {
     fn selecting_farmer_account_loads_persisted_farm_setup_draft() {
         let runtime = memory_runtime();
 
-        assert!(
-            runtime
-                .generate_local_account(Some("Farmer".to_owned()))
-                .expect("account should generate")
-        );
+        assert!(runtime
+            .generate_local_account(Some("Farmer".to_owned()))
+            .expect("account should generate"));
         let account_id = runtime
             .summary()
             .settings_account_projection
@@ -2689,11 +2947,9 @@ mod tests {
             .expect("farm setup should save");
         save_surface_activation(&runtime, account_id.as_str(), ActiveSurface::Farmer, true);
 
-        assert!(
-            runtime
-                .select_local_account(account_id.as_str())
-                .expect("account should select")
-        );
+        assert!(runtime
+            .select_local_account(account_id.as_str())
+            .expect("account should select"));
         let summary = runtime.summary();
 
         assert_eq!(summary.startup_gate, AppStartupGate::Farmer);
@@ -2705,11 +2961,9 @@ mod tests {
     fn finishing_farm_setup_persists_saved_farm_and_today_projection() {
         let runtime = memory_runtime();
 
-        assert!(
-            runtime
-                .generate_local_account(Some("Farmer".to_owned()))
-                .expect("account should generate")
-        );
+        assert!(runtime
+            .generate_local_account(Some("Farmer".to_owned()))
+            .expect("account should generate"));
         let account_id = runtime
             .summary()
             .settings_account_projection
@@ -2721,11 +2975,9 @@ mod tests {
             .clone();
         let farm_id =
             save_farmer_surface_activation(&runtime, account_id.as_str(), ActiveSurface::Farmer);
-        assert!(
-            runtime
-                .select_local_account(account_id.as_str())
-                .expect("account should select")
-        );
+        assert!(runtime
+            .select_local_account(account_id.as_str())
+            .expect("account should select"));
         assert_eq!(runtime.summary().home_route, HomeRoute::FarmSetupOnboarding);
 
         let draft = FarmSetupDraft::new(
@@ -2788,11 +3040,9 @@ mod tests {
     fn loading_farm_rules_projection_seeds_profile_from_saved_farm() {
         let runtime = memory_runtime();
 
-        assert!(
-            runtime
-                .generate_local_account(Some("Farmer".to_owned()))
-                .expect("account should generate")
-        );
+        assert!(runtime
+            .generate_local_account(Some("Farmer".to_owned()))
+            .expect("account should generate"));
         let account_id = runtime
             .summary()
             .settings_account_projection
@@ -2829,11 +3079,9 @@ mod tests {
             .save_farm_setup(account_id.as_str(), &farm_setup_projection)
             .expect("farm setup should save");
 
-        assert!(
-            runtime
-                .select_local_account(account_id.as_str())
-                .expect("account should select")
-        );
+        assert!(runtime
+            .select_local_account(account_id.as_str())
+            .expect("account should select"));
 
         let projection = runtime
             .load_farm_rules_projection()
@@ -2862,11 +3110,9 @@ mod tests {
     fn saving_farm_rules_projection_refreshes_saved_farm_summary_and_pickup_defaults() {
         let runtime = memory_runtime();
 
-        assert!(
-            runtime
-                .generate_local_account(Some("Farmer".to_owned()))
-                .expect("account should generate")
-        );
+        assert!(runtime
+            .generate_local_account(Some("Farmer".to_owned()))
+            .expect("account should generate"));
         let account_id = runtime
             .summary()
             .settings_account_projection
@@ -2903,11 +3149,9 @@ mod tests {
             .save_farm_setup(account_id.as_str(), &farm_setup_projection)
             .expect("farm setup should save");
 
-        assert!(
-            runtime
-                .select_local_account(account_id.as_str())
-                .expect("account should select")
-        );
+        assert!(runtime
+            .select_local_account(account_id.as_str())
+            .expect("account should select"));
 
         let default_pickup_location_id = PickupLocationId::new();
         let market_pickup_location_id = PickupLocationId::new();
@@ -3040,11 +3284,9 @@ mod tests {
     fn runtime_reset_local_device_state_clears_store_file_and_projection() {
         let (runtime, paths) = file_backed_runtime("reset");
 
-        assert!(
-            runtime
-                .generate_local_account(Some("First".to_owned()))
-                .expect("first account should generate")
-        );
+        assert!(runtime
+            .generate_local_account(Some("First".to_owned()))
+            .expect("first account should generate"));
         let first_account_id = runtime
             .summary()
             .settings_account_projection
@@ -3054,11 +3296,9 @@ mod tests {
             .account
             .account_id
             .clone();
-        assert!(
-            runtime
-                .generate_local_account(Some("Second".to_owned()))
-                .expect("second account should generate")
-        );
+        assert!(runtime
+            .generate_local_account(Some("Second".to_owned()))
+            .expect("second account should generate"));
         let second_account_id = runtime
             .summary()
             .settings_account_projection
@@ -3082,21 +3322,17 @@ mod tests {
         );
         assert!(paths.store_path.exists());
 
-        assert!(
-            runtime
-                .reset_local_device_state()
-                .expect("device state should reset")
-        );
+        assert!(runtime
+            .reset_local_device_state()
+            .expect("device state should reset"));
         let summary = runtime.summary();
 
         assert_eq!(summary.startup_gate, AppStartupGate::SetupRequired);
         assert!(summary.settings_account_projection.roster.is_empty());
-        assert!(
-            summary
-                .settings_account_projection
-                .selected_account
-                .is_none()
-        );
+        assert!(summary
+            .settings_account_projection
+            .selected_account
+            .is_none());
         assert!(!paths.store_path.exists());
         assert_eq!(
             runtime
@@ -3392,6 +3628,149 @@ mod tests {
             .expect("product should seed");
 
         product_id
+    }
+
+    fn provision_ready_farmer_account(runtime: &DesktopAppRuntime) -> (String, FarmId) {
+        assert!(runtime
+            .generate_local_account(Some("Farmer".to_owned()))
+            .expect("account should generate"));
+        let account_id = runtime
+            .summary()
+            .settings_account_projection
+            .selected_account
+            .as_ref()
+            .expect("selected account")
+            .account
+            .account_id
+            .clone();
+        let farm_id =
+            save_farmer_surface_activation(runtime, account_id.as_str(), ActiveSurface::Farmer);
+        let farm_setup_projection = FarmSetupProjection::from_saved_farm(FarmSummary {
+            farm_id,
+            display_name: "North field farm".to_owned(),
+            readiness: FarmReadiness::Ready,
+        });
+        runtime
+            .lock_state()
+            .sqlite_store
+            .as_ref()
+            .expect("sqlite store")
+            .save_farm_summary(
+                farm_setup_projection
+                    .saved_farm
+                    .as_ref()
+                    .expect("saved farm should exist"),
+            )
+            .expect("farm summary should save");
+        runtime
+            .lock_state()
+            .sqlite_store
+            .as_ref()
+            .expect("sqlite store")
+            .save_farm_setup(account_id.as_str(), &farm_setup_projection)
+            .expect("farm setup should save");
+        assert!(runtime
+            .select_local_account(account_id.as_str())
+            .expect("account should select"));
+
+        (account_id, farm_id)
+    }
+
+    fn seed_order_workspace(
+        runtime: &DesktopAppRuntime,
+        farm_id: FarmId,
+    ) -> (FulfillmentWindowId, OrderId) {
+        let pickup_location_id = PickupLocationId::new();
+        let fulfillment_window_id = FulfillmentWindowId::new();
+        let order_id = OrderId::new();
+        let sql = format!(
+            "insert into pickup_locations (
+                id,
+                farm_id,
+                label,
+                address_line,
+                directions,
+                is_default,
+                created_at,
+                updated_at
+             ) values (
+                '{pickup_location_id}',
+                '{farm_id}',
+                'North barn',
+                '14 County Road',
+                null,
+                1,
+                '2026-04-17T08:00:00Z',
+                '2026-04-17T08:00:00Z'
+             );
+             insert into fulfillment_windows (
+                id,
+                farm_id,
+                starts_at,
+                ends_at,
+                capacity_limit,
+                created_at,
+                updated_at,
+                pickup_location_id,
+                label,
+                order_cutoff_at
+             ) values (
+                '{fulfillment_window_id}',
+                '{farm_id}',
+                '2099-04-18T16:00:00Z',
+                '2099-04-18T18:00:00Z',
+                null,
+                '2099-04-18T16:00:00Z',
+                '2099-04-18T16:00:00Z',
+                '{pickup_location_id}',
+                'Friday pickup',
+                '2099-04-17T18:00:00Z'
+             );
+             insert into orders (
+                id,
+                farm_id,
+                fulfillment_window_id,
+                order_number,
+                customer_display_name,
+                status,
+                updated_at
+             ) values (
+                '{order_id}',
+                '{farm_id}',
+                '{fulfillment_window_id}',
+                'R-100',
+                'Casey',
+                'needs_action',
+                '2026-04-17T10:00:00Z'
+             );
+             insert into order_lines (
+                id,
+                order_id,
+                title,
+                quantity_value,
+                quantity_unit_label,
+                quantity_display,
+                sort_index
+             ) values (
+                'line-1',
+                '{order_id}',
+                'Salad mix',
+                2,
+                'bags',
+                '2 bags',
+                0
+             )",
+        );
+        runtime
+            .lock_state()
+            .sqlite_store
+            .as_ref()
+            .expect("sqlite store")
+            .connection()
+            .execute_batch(&sql)
+            .expect("orders workspace should seed");
+
+        (fulfillment_window_id, order_id)
     }
 
     fn cleanup_paths(paths: &AppSharedAccountsPaths) {
