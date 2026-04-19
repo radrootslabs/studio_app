@@ -13,12 +13,14 @@ use gpui_component::{
 use radroots_studio_app_i18n::AppTextKey;
 pub use radroots_studio_app_models::SettingsSection as SettingsPanelViewKey;
 use radroots_studio_app_models::{
-    AppStartupGate, FarmId, FarmOrderMethod, FarmProfileRecord, FarmReadiness,
-    FarmReadinessBlocker, FarmRulesProjection, FarmSetupBlocker, FarmSetupDraft, FarmSummary,
-    FarmerSection, FulfillmentWindowSummary, LoggedOutStartupPhase, OrderListRow, PickupLocationId,
-    PickupLocationRecord, ProductAttentionState, ProductEditorDraft, ProductId, ProductListRow,
-    ProductPublishBlocker, ProductStatus, ProductsFilter, ProductsListRow, ProductsSort,
-    ShellSection, TodayAgendaProjection, TodaySetupTaskKind,
+    AppStartupGate, BlackoutPeriodId, BlackoutPeriodRecord, FarmId, FarmOperatingRulesRecord,
+    FarmOrderMethod, FarmProfileRecord, FarmReadiness, FarmReadinessBlocker, FarmRulesProjection,
+    FarmRulesReadiness, FarmSetupBlocker, FarmSetupDraft, FarmSummary, FarmTimingConflictKind,
+    FarmerSection, FulfillmentWindowId, FulfillmentWindowRecord, FulfillmentWindowSummary,
+    LoggedOutStartupPhase, OrderListRow, PickupLocationId, PickupLocationRecord,
+    ProductAttentionState, ProductEditorDraft, ProductId, ProductListRow, ProductPublishBlocker,
+    ProductStatus, ProductsFilter, ProductsListRow, ProductsSort, ShellSection,
+    TodayAgendaProjection, TodaySetupTaskKind,
 };
 use radroots_studio_app_remote_signer::{
     RadrootsAppRemoteSignerApprovedSession, RadrootsAppRemoteSignerPendingPollOutcome,
@@ -1934,28 +1936,404 @@ impl SettingsPickupLocationFormState {
         }
     }
 
-    fn current_record(&self, farm_id: FarmId, cx: &App) -> PickupLocationRecord {
-        let directions = self.directions_input.read(cx).value().trim().to_owned();
+    fn current_draft(&self, cx: &App) -> SettingsPickupLocationDraft {
+        SettingsPickupLocationDraft {
+            pickup_location_id: self.pickup_location_id,
+            label: self.label_input.read(cx).value().to_string(),
+            address_line: self.address_input.read(cx).value().to_string(),
+            directions: self.directions_input.read(cx).value().to_string(),
+            is_default: self.is_default,
+        }
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct SettingsPickupLocationDraft {
+    pickup_location_id: PickupLocationId,
+    label: String,
+    address_line: String,
+    directions: String,
+    is_default: bool,
+}
+
+impl SettingsPickupLocationDraft {
+    fn from_record(record: &PickupLocationRecord) -> Self {
+        Self {
+            pickup_location_id: record.pickup_location_id,
+            label: record.label.clone(),
+            address_line: record.address_line.clone(),
+            directions: record.directions.clone().unwrap_or_default(),
+            is_default: record.is_default,
+        }
+    }
+
+    fn into_record(self, farm_id: FarmId) -> PickupLocationRecord {
+        let directions = self.directions.trim().to_owned();
 
         PickupLocationRecord {
             pickup_location_id: self.pickup_location_id,
             farm_id,
-            label: self.label_input.read(cx).value().to_string(),
-            address_line: self.address_input.read(cx).value().to_string(),
+            label: self.label.trim().to_owned(),
+            address_line: self.address_line.trim().to_owned(),
             directions: (!directions.is_empty()).then_some(directions),
             is_default: self.is_default,
         }
     }
 }
 
+struct SettingsOperatingRulesFormState {
+    promise_lead_hours_input: Entity<InputState>,
+    substitution_policy_input: Entity<InputState>,
+    missed_pickup_policy_input: Entity<InputState>,
+    _promise_lead_hours_subscription: Subscription,
+    _substitution_policy_subscription: Subscription,
+    _missed_pickup_policy_subscription: Subscription,
+}
+
+impl SettingsOperatingRulesFormState {
+    fn new(
+        record: Option<&FarmOperatingRulesRecord>,
+        window: &mut Window,
+        cx: &mut Context<SettingsWindowView>,
+    ) -> Self {
+        let promise_lead_hours_input = cx.new(|cx| {
+            InputState::new(window, cx).default_value(
+                record
+                    .map(|record| record.promise_lead_hours.to_string())
+                    .unwrap_or_default(),
+            )
+        });
+        let substitution_policy_input = cx.new(|cx| {
+            InputState::new(window, cx).default_value(
+                record
+                    .map(|record| record.substitution_policy.clone())
+                    .unwrap_or_default(),
+            )
+        });
+        let missed_pickup_policy_input = cx.new(|cx| {
+            InputState::new(window, cx).default_value(
+                record
+                    .map(|record| record.missed_pickup_policy.clone())
+                    .unwrap_or_default(),
+            )
+        });
+        let promise_lead_hours_subscription = cx.subscribe_in(
+            &promise_lead_hours_input,
+            window,
+            SettingsWindowView::handle_farm_rules_input_event,
+        );
+        let substitution_policy_subscription = cx.subscribe_in(
+            &substitution_policy_input,
+            window,
+            SettingsWindowView::handle_farm_rules_input_event,
+        );
+        let missed_pickup_policy_subscription = cx.subscribe_in(
+            &missed_pickup_policy_input,
+            window,
+            SettingsWindowView::handle_farm_rules_input_event,
+        );
+
+        Self {
+            promise_lead_hours_input,
+            substitution_policy_input,
+            missed_pickup_policy_input,
+            _promise_lead_hours_subscription: promise_lead_hours_subscription,
+            _substitution_policy_subscription: substitution_policy_subscription,
+            _missed_pickup_policy_subscription: missed_pickup_policy_subscription,
+        }
+    }
+
+    fn current_draft(&self, cx: &App) -> SettingsOperatingRulesDraft {
+        SettingsOperatingRulesDraft {
+            promise_lead_hours: self.promise_lead_hours_input.read(cx).value().to_string(),
+            substitution_policy: self.substitution_policy_input.read(cx).value().to_string(),
+            missed_pickup_policy: self.missed_pickup_policy_input.read(cx).value().to_string(),
+        }
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct SettingsOperatingRulesDraft {
+    promise_lead_hours: String,
+    substitution_policy: String,
+    missed_pickup_policy: String,
+}
+
+impl SettingsOperatingRulesDraft {
+    fn from_record(record: Option<&FarmOperatingRulesRecord>) -> Self {
+        Self {
+            promise_lead_hours: record
+                .map(|record| record.promise_lead_hours.to_string())
+                .unwrap_or_default(),
+            substitution_policy: record
+                .map(|record| record.substitution_policy.clone())
+                .unwrap_or_default(),
+            missed_pickup_policy: record
+                .map(|record| record.missed_pickup_policy.clone())
+                .unwrap_or_default(),
+        }
+    }
+
+    fn is_empty(&self) -> bool {
+        self.promise_lead_hours.trim().is_empty()
+            && self.substitution_policy.trim().is_empty()
+            && self.missed_pickup_policy.trim().is_empty()
+    }
+}
+
+struct SettingsFulfillmentWindowFormState {
+    fulfillment_window_id: FulfillmentWindowId,
+    selected_pickup_location_id: Option<PickupLocationId>,
+    label_input: Entity<InputState>,
+    starts_at_input: Entity<InputState>,
+    ends_at_input: Entity<InputState>,
+    order_cutoff_input: Entity<InputState>,
+    _label_subscription: Subscription,
+    _starts_at_subscription: Subscription,
+    _ends_at_subscription: Subscription,
+    _order_cutoff_subscription: Subscription,
+}
+
+impl SettingsFulfillmentWindowFormState {
+    fn new(
+        draft: &SettingsFulfillmentWindowDraft,
+        window: &mut Window,
+        cx: &mut Context<SettingsWindowView>,
+    ) -> Self {
+        let label_input =
+            cx.new(|cx| InputState::new(window, cx).default_value(draft.label.clone()));
+        let starts_at_input =
+            cx.new(|cx| InputState::new(window, cx).default_value(draft.starts_at.clone()));
+        let ends_at_input =
+            cx.new(|cx| InputState::new(window, cx).default_value(draft.ends_at.clone()));
+        let order_cutoff_input =
+            cx.new(|cx| InputState::new(window, cx).default_value(draft.order_cutoff_at.clone()));
+        let label_subscription = cx.subscribe_in(
+            &label_input,
+            window,
+            SettingsWindowView::handle_farm_rules_input_event,
+        );
+        let starts_at_subscription = cx.subscribe_in(
+            &starts_at_input,
+            window,
+            SettingsWindowView::handle_farm_rules_input_event,
+        );
+        let ends_at_subscription = cx.subscribe_in(
+            &ends_at_input,
+            window,
+            SettingsWindowView::handle_farm_rules_input_event,
+        );
+        let order_cutoff_subscription = cx.subscribe_in(
+            &order_cutoff_input,
+            window,
+            SettingsWindowView::handle_farm_rules_input_event,
+        );
+
+        Self {
+            fulfillment_window_id: draft.fulfillment_window_id,
+            selected_pickup_location_id: draft.selected_pickup_location_id,
+            label_input,
+            starts_at_input,
+            ends_at_input,
+            order_cutoff_input,
+            _label_subscription: label_subscription,
+            _starts_at_subscription: starts_at_subscription,
+            _ends_at_subscription: ends_at_subscription,
+            _order_cutoff_subscription: order_cutoff_subscription,
+        }
+    }
+
+    fn current_draft(&self, cx: &App) -> SettingsFulfillmentWindowDraft {
+        SettingsFulfillmentWindowDraft {
+            fulfillment_window_id: self.fulfillment_window_id,
+            selected_pickup_location_id: self.selected_pickup_location_id,
+            label: self.label_input.read(cx).value().to_string(),
+            starts_at: self.starts_at_input.read(cx).value().to_string(),
+            ends_at: self.ends_at_input.read(cx).value().to_string(),
+            order_cutoff_at: self.order_cutoff_input.read(cx).value().to_string(),
+        }
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct SettingsFulfillmentWindowDraft {
+    fulfillment_window_id: FulfillmentWindowId,
+    selected_pickup_location_id: Option<PickupLocationId>,
+    label: String,
+    starts_at: String,
+    ends_at: String,
+    order_cutoff_at: String,
+}
+
+impl SettingsFulfillmentWindowDraft {
+    fn from_record(record: &FulfillmentWindowRecord) -> Self {
+        Self {
+            fulfillment_window_id: record.fulfillment_window_id,
+            selected_pickup_location_id: Some(record.pickup_location_id),
+            label: record.label.clone(),
+            starts_at: record.starts_at.clone(),
+            ends_at: record.ends_at.clone(),
+            order_cutoff_at: record.order_cutoff_at.clone(),
+        }
+    }
+}
+
+struct SettingsBlackoutPeriodFormState {
+    blackout_period_id: BlackoutPeriodId,
+    label_input: Entity<InputState>,
+    starts_at_input: Entity<InputState>,
+    ends_at_input: Entity<InputState>,
+    _label_subscription: Subscription,
+    _starts_at_subscription: Subscription,
+    _ends_at_subscription: Subscription,
+}
+
+impl SettingsBlackoutPeriodFormState {
+    fn new(
+        draft: &SettingsBlackoutPeriodDraft,
+        window: &mut Window,
+        cx: &mut Context<SettingsWindowView>,
+    ) -> Self {
+        let label_input =
+            cx.new(|cx| InputState::new(window, cx).default_value(draft.label.clone()));
+        let starts_at_input =
+            cx.new(|cx| InputState::new(window, cx).default_value(draft.starts_at.clone()));
+        let ends_at_input =
+            cx.new(|cx| InputState::new(window, cx).default_value(draft.ends_at.clone()));
+        let label_subscription = cx.subscribe_in(
+            &label_input,
+            window,
+            SettingsWindowView::handle_farm_rules_input_event,
+        );
+        let starts_at_subscription = cx.subscribe_in(
+            &starts_at_input,
+            window,
+            SettingsWindowView::handle_farm_rules_input_event,
+        );
+        let ends_at_subscription = cx.subscribe_in(
+            &ends_at_input,
+            window,
+            SettingsWindowView::handle_farm_rules_input_event,
+        );
+
+        Self {
+            blackout_period_id: draft.blackout_period_id,
+            label_input,
+            starts_at_input,
+            ends_at_input,
+            _label_subscription: label_subscription,
+            _starts_at_subscription: starts_at_subscription,
+            _ends_at_subscription: ends_at_subscription,
+        }
+    }
+
+    fn current_draft(&self, cx: &App) -> SettingsBlackoutPeriodDraft {
+        SettingsBlackoutPeriodDraft {
+            blackout_period_id: self.blackout_period_id,
+            label: self.label_input.read(cx).value().to_string(),
+            starts_at: self.starts_at_input.read(cx).value().to_string(),
+            ends_at: self.ends_at_input.read(cx).value().to_string(),
+        }
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct SettingsBlackoutPeriodDraft {
+    blackout_period_id: BlackoutPeriodId,
+    label: String,
+    starts_at: String,
+    ends_at: String,
+}
+
+impl SettingsBlackoutPeriodDraft {
+    fn from_record(record: &BlackoutPeriodRecord) -> Self {
+        Self {
+            blackout_period_id: record.blackout_period_id,
+            label: record.label.clone(),
+            starts_at: record.starts_at.clone(),
+            ends_at: record.ends_at.clone(),
+        }
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct SettingsFarmRulesDraft {
+    farm_profile: FarmProfileRecord,
+    pickup_locations: Vec<SettingsPickupLocationDraft>,
+    operating_rules: SettingsOperatingRulesDraft,
+    fulfillment_windows: Vec<SettingsFulfillmentWindowDraft>,
+    blackout_periods: Vec<SettingsBlackoutPeriodDraft>,
+}
+
+impl SettingsFarmRulesDraft {
+    fn from_projection(farm_id: FarmId, projection: &FarmRulesProjection) -> Self {
+        let farm_profile = projection
+            .farm_profile
+            .as_ref()
+            .cloned()
+            .unwrap_or(FarmProfileRecord {
+                farm_id,
+                display_name: String::new(),
+                timezone: String::new(),
+                currency_code: String::new(),
+            });
+
+        Self {
+            farm_profile,
+            pickup_locations: projection
+                .pickup_locations
+                .iter()
+                .map(SettingsPickupLocationDraft::from_record)
+                .collect(),
+            operating_rules: SettingsOperatingRulesDraft::from_record(
+                projection.operating_rules.as_ref(),
+            ),
+            fulfillment_windows: projection
+                .fulfillment_windows
+                .iter()
+                .map(SettingsFulfillmentWindowDraft::from_record)
+                .collect(),
+            blackout_periods: projection
+                .blackout_periods
+                .iter()
+                .map(SettingsBlackoutPeriodDraft::from_record)
+                .collect(),
+        }
+    }
+}
+
+struct SettingsFarmRulesEvaluation {
+    projection: FarmRulesProjection,
+    operating_rules_validation_keys: Vec<AppTextKey>,
+    fulfillment_window_validation_keys: Vec<Vec<AppTextKey>>,
+    blackout_period_validation_keys: Vec<Vec<AppTextKey>>,
+    blocking_keys: Vec<AppTextKey>,
+    readiness_keys: Vec<AppTextKey>,
+}
+
+impl SettingsFarmRulesEvaluation {
+    fn has_blocking_errors(&self) -> bool {
+        !self.blocking_keys.is_empty()
+    }
+}
+
+fn push_unique_text_key(keys: &mut Vec<AppTextKey>, key: AppTextKey) {
+    if !keys.contains(&key) {
+        keys.push(key);
+    }
+}
+
 struct SettingsFarmPanelState {
     account_id: String,
     farm_id: FarmId,
-    initial_projection: FarmRulesProjection,
+    initial_draft: SettingsFarmRulesDraft,
     farm_name_input: Entity<InputState>,
     timezone_input: Entity<InputState>,
     currency_input: Entity<InputState>,
     pickup_locations: Vec<SettingsPickupLocationFormState>,
+    operating_rules: SettingsOperatingRulesFormState,
+    fulfillment_windows: Vec<SettingsFulfillmentWindowFormState>,
+    blackout_periods: Vec<SettingsBlackoutPeriodFormState>,
     _farm_name_subscription: Subscription,
     _timezone_subscription: Subscription,
     _currency_subscription: Subscription,
@@ -1969,22 +2347,23 @@ impl SettingsFarmPanelState {
         window: &mut Window,
         cx: &mut Context<SettingsWindowView>,
     ) -> Self {
-        let farm_profile = projection
+        let farm_id = projection
             .farm_profile
             .as_ref()
-            .cloned()
-            .unwrap_or(FarmProfileRecord {
-                farm_id: FarmId::new(),
-                display_name: String::new(),
-                timezone: String::new(),
-                currency_code: String::new(),
-            });
-        let farm_name_input =
-            cx.new(|cx| InputState::new(window, cx).default_value(farm_profile.display_name));
-        let timezone_input =
-            cx.new(|cx| InputState::new(window, cx).default_value(farm_profile.timezone));
-        let currency_input =
-            cx.new(|cx| InputState::new(window, cx).default_value(farm_profile.currency_code));
+            .map(|farm_profile| farm_profile.farm_id)
+            .unwrap_or_else(FarmId::new);
+        let initial_draft = SettingsFarmRulesDraft::from_projection(farm_id, &projection);
+        let farm_name_input = cx.new(|cx| {
+            InputState::new(window, cx)
+                .default_value(initial_draft.farm_profile.display_name.clone())
+        });
+        let timezone_input = cx.new(|cx| {
+            InputState::new(window, cx).default_value(initial_draft.farm_profile.timezone.clone())
+        });
+        let currency_input = cx.new(|cx| {
+            InputState::new(window, cx)
+                .default_value(initial_draft.farm_profile.currency_code.clone())
+        });
         let farm_name_subscription = cx.subscribe_in(
             &farm_name_input,
             window,
@@ -2010,25 +2389,48 @@ impl SettingsFarmPanelState {
                 SettingsPickupLocationFormState::new(record, can_remove, window, cx)
             })
             .collect();
-        let farm_id = projection
-            .farm_profile
-            .as_ref()
-            .map(|farm_profile| farm_profile.farm_id)
-            .unwrap_or_else(FarmId::new);
-
-        Self {
+        let operating_rules =
+            SettingsOperatingRulesFormState::new(projection.operating_rules.as_ref(), window, cx);
+        let fulfillment_windows = projection
+            .fulfillment_windows
+            .iter()
+            .map(|record| {
+                SettingsFulfillmentWindowFormState::new(
+                    &SettingsFulfillmentWindowDraft::from_record(record),
+                    window,
+                    cx,
+                )
+            })
+            .collect();
+        let blackout_periods = projection
+            .blackout_periods
+            .iter()
+            .map(|record| {
+                SettingsBlackoutPeriodFormState::new(
+                    &SettingsBlackoutPeriodDraft::from_record(record),
+                    window,
+                    cx,
+                )
+            })
+            .collect();
+        let mut state = Self {
             account_id,
             farm_id,
-            initial_projection: projection,
+            initial_draft,
             farm_name_input,
             timezone_input,
             currency_input,
             pickup_locations,
+            operating_rules,
+            fulfillment_windows,
+            blackout_periods,
             _farm_name_subscription: farm_name_subscription,
             _timezone_subscription: timezone_subscription,
             _currency_subscription: currency_subscription,
             save_failed: false,
-        }
+        };
+        state.sync_pickup_location_removability();
+        state
     }
 
     fn add_pickup_location(&mut self, window: &mut Window, cx: &mut Context<SettingsWindowView>) {
@@ -2043,6 +2445,7 @@ impl SettingsFarmPanelState {
         let pickup_location = SettingsPickupLocationFormState::new(&record, true, window, cx);
 
         self.pickup_locations.push(pickup_location);
+        self.sync_pickup_location_removability();
         self.save_failed = false;
     }
 
@@ -2065,37 +2468,329 @@ impl SettingsFarmPanelState {
                 first_pickup_location.is_default = true;
             }
         }
+        self.sync_pickup_location_removability();
         self.save_failed = false;
     }
 
-    fn current_projection(&self, cx: &App) -> FarmRulesProjection {
-        let mut projection = self.initial_projection.clone();
-        projection.farm_profile = Some(FarmProfileRecord {
-            farm_id: self.farm_id,
-            display_name: self.farm_name_input.read(cx).value().to_string(),
-            timezone: self.timezone_input.read(cx).value().to_string(),
-            currency_code: self.currency_input.read(cx).value().to_string(),
-        });
-        projection.pickup_locations = self
+    fn add_fulfillment_window(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<SettingsWindowView>,
+    ) {
+        let selected_pickup_location_id = self
             .pickup_locations
             .iter()
-            .map(|pickup_location| pickup_location.current_record(self.farm_id, cx))
+            .find(|pickup_location| pickup_location.is_default)
+            .or_else(|| self.pickup_locations.first())
+            .map(|pickup_location| pickup_location.pickup_location_id);
+        let fulfillment_window = SettingsFulfillmentWindowFormState::new(
+            &SettingsFulfillmentWindowDraft {
+                fulfillment_window_id: FulfillmentWindowId::new(),
+                selected_pickup_location_id,
+                label: String::new(),
+                starts_at: String::new(),
+                ends_at: String::new(),
+                order_cutoff_at: String::new(),
+            },
+            window,
+            cx,
+        );
+
+        self.fulfillment_windows.push(fulfillment_window);
+        self.sync_pickup_location_removability();
+        self.save_failed = false;
+    }
+
+    fn select_fulfillment_window_pickup_location(
+        &mut self,
+        fulfillment_window_id: FulfillmentWindowId,
+        pickup_location_id: PickupLocationId,
+    ) {
+        if let Some(fulfillment_window) =
+            self.fulfillment_windows
+                .iter_mut()
+                .find(|fulfillment_window| {
+                    fulfillment_window.fulfillment_window_id == fulfillment_window_id
+                })
+        {
+            fulfillment_window.selected_pickup_location_id = Some(pickup_location_id);
+            self.sync_pickup_location_removability();
+            self.save_failed = false;
+        }
+    }
+
+    fn remove_fulfillment_window(&mut self, fulfillment_window_id: FulfillmentWindowId) {
+        self.fulfillment_windows.retain(|fulfillment_window| {
+            fulfillment_window.fulfillment_window_id != fulfillment_window_id
+        });
+        self.sync_pickup_location_removability();
+        self.save_failed = false;
+    }
+
+    fn add_blackout_period(&mut self, window: &mut Window, cx: &mut Context<SettingsWindowView>) {
+        let blackout_period = SettingsBlackoutPeriodFormState::new(
+            &SettingsBlackoutPeriodDraft {
+                blackout_period_id: BlackoutPeriodId::new(),
+                label: String::new(),
+                starts_at: String::new(),
+                ends_at: String::new(),
+            },
+            window,
+            cx,
+        );
+
+        self.blackout_periods.push(blackout_period);
+        self.save_failed = false;
+    }
+
+    fn remove_blackout_period(&mut self, blackout_period_id: BlackoutPeriodId) {
+        self.blackout_periods
+            .retain(|blackout_period| blackout_period.blackout_period_id != blackout_period_id);
+        self.save_failed = false;
+    }
+
+    fn current_draft(&self, cx: &App) -> SettingsFarmRulesDraft {
+        SettingsFarmRulesDraft {
+            farm_profile: FarmProfileRecord {
+                farm_id: self.farm_id,
+                display_name: self.farm_name_input.read(cx).value().to_string(),
+                timezone: self.timezone_input.read(cx).value().to_string(),
+                currency_code: self.currency_input.read(cx).value().to_string(),
+            },
+            pickup_locations: self
+                .pickup_locations
+                .iter()
+                .map(|pickup_location| pickup_location.current_draft(cx))
+                .collect(),
+            operating_rules: self.operating_rules.current_draft(cx),
+            fulfillment_windows: self
+                .fulfillment_windows
+                .iter()
+                .map(|fulfillment_window| fulfillment_window.current_draft(cx))
+                .collect(),
+            blackout_periods: self
+                .blackout_periods
+                .iter()
+                .map(|blackout_period| blackout_period.current_draft(cx))
+                .collect(),
+        }
+    }
+
+    fn evaluate(&self, cx: &App) -> SettingsFarmRulesEvaluation {
+        let draft = self.current_draft(cx);
+        let farm_profile = FarmProfileRecord {
+            farm_id: self.farm_id,
+            display_name: draft.farm_profile.display_name.trim().to_owned(),
+            timezone: draft.farm_profile.timezone.trim().to_owned(),
+            currency_code: draft.farm_profile.currency_code.trim().to_owned(),
+        };
+        let pickup_locations = draft
+            .pickup_locations
+            .clone()
+            .into_iter()
+            .map(|pickup_location| pickup_location.into_record(self.farm_id))
             .collect();
+        let mut operating_rules_validation_keys = Vec::new();
+        let operating_rules = if draft.operating_rules.is_empty() {
+            None
+        } else {
+            let promise_lead_hours = match draft
+                .operating_rules
+                .promise_lead_hours
+                .trim()
+                .parse::<u16>()
+            {
+                Ok(promise_lead_hours) => promise_lead_hours,
+                Err(_) if draft.operating_rules.promise_lead_hours.trim().is_empty() => 0,
+                Err(_) => {
+                    push_unique_text_key(
+                        &mut operating_rules_validation_keys,
+                        AppTextKey::SettingsOperatingRulesInvalidPromiseLeadTime,
+                    );
+                    0
+                }
+            };
+
+            Some(FarmOperatingRulesRecord {
+                farm_id: self.farm_id,
+                promise_lead_hours,
+                substitution_policy: draft.operating_rules.substitution_policy.trim().to_owned(),
+                missed_pickup_policy: draft.operating_rules.missed_pickup_policy.trim().to_owned(),
+            })
+        };
+        let mut fulfillment_windows = Vec::new();
+        let mut fulfillment_window_validation_keys =
+            Vec::with_capacity(draft.fulfillment_windows.len());
+        for fulfillment_window in &draft.fulfillment_windows {
+            let label = fulfillment_window.label.trim().to_owned();
+            let starts_at = fulfillment_window.starts_at.trim().to_owned();
+            let ends_at = fulfillment_window.ends_at.trim().to_owned();
+            let order_cutoff_at = fulfillment_window.order_cutoff_at.trim().to_owned();
+            let mut row_validation_keys = Vec::new();
+            let missing_required_fields = label.is_empty()
+                || starts_at.is_empty()
+                || ends_at.is_empty()
+                || order_cutoff_at.is_empty();
+
+            if missing_required_fields {
+                push_unique_text_key(
+                    &mut row_validation_keys,
+                    AppTextKey::SettingsFulfillmentWindowsValidationCompleteBeforeSave,
+                );
+            } else if fulfillment_window.selected_pickup_location_id.is_none() {
+                push_unique_text_key(
+                    &mut row_validation_keys,
+                    AppTextKey::SettingsFulfillmentWindowsValidationChoosePickupLocation,
+                );
+            }
+
+            if let Some(pickup_location_id) = fulfillment_window.selected_pickup_location_id {
+                if !missing_required_fields {
+                    if ends_at <= starts_at {
+                        push_unique_text_key(
+                            &mut row_validation_keys,
+                            AppTextKey::SettingsReadinessFieldFulfillmentWindowEndsBeforeStart,
+                        );
+                    }
+                    if order_cutoff_at >= starts_at {
+                        push_unique_text_key(
+                            &mut row_validation_keys,
+                            AppTextKey::SettingsReadinessFieldFulfillmentWindowCutoffAfterStart,
+                        );
+                    }
+                    fulfillment_windows.push(FulfillmentWindowRecord {
+                        fulfillment_window_id: fulfillment_window.fulfillment_window_id,
+                        farm_id: self.farm_id,
+                        pickup_location_id,
+                        label,
+                        starts_at,
+                        ends_at,
+                        order_cutoff_at,
+                    });
+                }
+            }
+
+            fulfillment_window_validation_keys.push(row_validation_keys);
+        }
+        let mut blackout_periods = Vec::new();
+        let mut blackout_period_validation_keys = Vec::with_capacity(draft.blackout_periods.len());
+        for blackout_period in &draft.blackout_periods {
+            let label = blackout_period.label.trim().to_owned();
+            let starts_at = blackout_period.starts_at.trim().to_owned();
+            let ends_at = blackout_period.ends_at.trim().to_owned();
+            let mut row_validation_keys = Vec::new();
+
+            if label.is_empty() || starts_at.is_empty() || ends_at.is_empty() {
+                push_unique_text_key(
+                    &mut row_validation_keys,
+                    AppTextKey::SettingsBlackoutPeriodsValidationCompleteBeforeSave,
+                );
+            } else {
+                if ends_at <= starts_at {
+                    push_unique_text_key(
+                        &mut row_validation_keys,
+                        AppTextKey::SettingsReadinessFieldBlackoutPeriodEndsBeforeStart,
+                    );
+                }
+                blackout_periods.push(BlackoutPeriodRecord {
+                    blackout_period_id: blackout_period.blackout_period_id,
+                    farm_id: self.farm_id,
+                    label,
+                    starts_at,
+                    ends_at,
+                });
+            }
+
+            blackout_period_validation_keys.push(row_validation_keys);
+        }
+
+        let mut projection = FarmRulesProjection {
+            farm_profile: Some(farm_profile),
+            pickup_locations,
+            operating_rules,
+            fulfillment_windows,
+            blackout_periods,
+            readiness: FarmRulesReadiness::ready(),
+        };
         projection.readiness = derive_farm_rules_readiness(&projection);
-        projection
+
+        let mut blocking_keys = operating_rules_validation_keys.clone();
+        for row_validation_keys in &fulfillment_window_validation_keys {
+            for validation_key in row_validation_keys {
+                push_unique_text_key(&mut blocking_keys, *validation_key);
+            }
+        }
+        for row_validation_keys in &blackout_period_validation_keys {
+            for validation_key in row_validation_keys {
+                push_unique_text_key(&mut blocking_keys, *validation_key);
+            }
+        }
+        for timing_conflict in &projection.readiness.timing_conflicts {
+            push_unique_text_key(
+                &mut blocking_keys,
+                settings_timing_conflict_key(timing_conflict.kind),
+            );
+        }
+
+        let mut readiness_keys = projection
+            .readiness
+            .blockers
+            .iter()
+            .copied()
+            .map(settings_readiness_key)
+            .collect::<Vec<_>>();
+        for blocking_key in &blocking_keys {
+            push_unique_text_key(&mut readiness_keys, *blocking_key);
+        }
+
+        SettingsFarmRulesEvaluation {
+            projection,
+            operating_rules_validation_keys,
+            fulfillment_window_validation_keys,
+            blackout_period_validation_keys,
+            blocking_keys,
+            readiness_keys,
+        }
+    }
+
+    fn current_projection(&self, cx: &App) -> FarmRulesProjection {
+        self.evaluate(cx).projection
     }
 
     fn has_changes(&self, cx: &App) -> bool {
-        self.current_projection(cx) != self.initial_projection
+        self.current_draft(cx) != self.initial_draft
+    }
+
+    fn save_ready(&self, cx: &App) -> bool {
+        let evaluation = self.evaluate(cx);
+        self.has_changes(cx) && !evaluation.has_blocking_errors()
     }
 
     fn save_status_key(&self, cx: &App) -> AppTextKey {
         if self.save_failed {
             AppTextKey::SettingsFarmSaveFailed
         } else if self.has_changes(cx) {
-            AppTextKey::SettingsFarmSavePending
+            let evaluation = self.evaluate(cx);
+            if evaluation.has_blocking_errors() {
+                AppTextKey::SettingsFarmSaveBlocked
+            } else {
+                AppTextKey::SettingsFarmSavePending
+            }
         } else {
             AppTextKey::SettingsFarmSaveSaved
+        }
+    }
+
+    fn sync_pickup_location_removability(&mut self) {
+        let selected_pickup_location_ids = self
+            .fulfillment_windows
+            .iter()
+            .filter_map(|fulfillment_window| fulfillment_window.selected_pickup_location_id)
+            .collect::<Vec<_>>();
+
+        for pickup_location in &mut self.pickup_locations {
+            pickup_location.can_remove =
+                !selected_pickup_location_ids.contains(&pickup_location.pickup_location_id);
         }
     }
 }
@@ -2215,14 +2910,75 @@ impl SettingsWindowView {
         cx.notify();
     }
 
+    fn add_fulfillment_window(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(form) = self.farm_panel_state.as_mut() else {
+            return;
+        };
+
+        form.add_fulfillment_window(window, cx);
+        cx.notify();
+    }
+
+    fn select_fulfillment_window_pickup_location(
+        &mut self,
+        fulfillment_window_id: FulfillmentWindowId,
+        pickup_location_id: PickupLocationId,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(form) = self.farm_panel_state.as_mut() else {
+            return;
+        };
+
+        form.select_fulfillment_window_pickup_location(fulfillment_window_id, pickup_location_id);
+        cx.notify();
+    }
+
+    fn remove_fulfillment_window(
+        &mut self,
+        fulfillment_window_id: FulfillmentWindowId,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(form) = self.farm_panel_state.as_mut() else {
+            return;
+        };
+
+        form.remove_fulfillment_window(fulfillment_window_id);
+        cx.notify();
+    }
+
+    fn add_blackout_period(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(form) = self.farm_panel_state.as_mut() else {
+            return;
+        };
+
+        form.add_blackout_period(window, cx);
+        cx.notify();
+    }
+
+    fn remove_blackout_period(
+        &mut self,
+        blackout_period_id: BlackoutPeriodId,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(form) = self.farm_panel_state.as_mut() else {
+            return;
+        };
+
+        form.remove_blackout_period(blackout_period_id);
+        cx.notify();
+    }
+
     fn save_farm_panel(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(current_projection) = self
+        let Some((current_projection, save_ready)) = self
             .farm_panel_state
             .as_ref()
-            .map(|form| form.current_projection(cx))
+            .map(|form| (form.current_projection(cx), form.save_ready(cx)))
         else {
             return;
         };
+        if !save_ready {
+            return;
+        }
 
         match self.runtime.save_farm_rules_projection(current_projection) {
             Ok(saved_projection) => {
@@ -2590,7 +3346,9 @@ impl SettingsWindowView {
         )
     }
 
-    fn settings_panel(&mut self, cx: &mut Context<Self>) -> impl IntoElement {
+    fn settings_panel(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        self.sync_farm_panel_state(window, cx);
+
         let runtime_summary = self.runtime.summary();
         let general_settings = runtime_summary.shell_projection.settings.general;
         let general_allow_relay_connections = general_settings.allow_relay_connections;
@@ -2598,12 +3356,238 @@ impl SettingsWindowView {
         let general_use_nip05 = general_settings.use_nip05;
         let general_launch_at_login = general_settings.launch_at_login;
 
-        let mut cards = SETTINGS_OPERATIONS_PANEL_SECTIONS
-            .iter()
-            .copied()
-            .map(settings_inventory_card)
-            .map(IntoElement::into_any_element)
-            .collect::<Vec<_>>();
+        let mut cards = Vec::new();
+
+        if let Some(error) = self.farm_panel_error.as_ref() {
+            cards.push(
+                home_card(
+                    app_shared_text(AppTextKey::SettingsNavSettings),
+                    home_body_text(error.clone()),
+                )
+                .into_any_element(),
+            );
+        } else if let Some(form) = self.farm_panel_state.as_ref() {
+            let evaluation = form.evaluate(cx);
+            let save_ready = form.has_changes(cx) && !evaluation.has_blocking_errors();
+            let save_action = if save_ready {
+                action_button_primary(
+                    "settings-farm-save",
+                    app_shared_text(AppTextKey::SettingsFarmSaveAction),
+                    cx.listener(|this, _, window, cx| this.save_farm_panel(window, cx)),
+                    cx,
+                )
+                .into_any_element()
+            } else {
+                action_button_primary_disabled(
+                    "settings-farm-save",
+                    app_shared_text(AppTextKey::SettingsFarmSaveAction),
+                    cx,
+                )
+                .into_any_element()
+            };
+
+            cards.push(
+                home_card(
+                    app_shared_text(AppTextKey::SettingsOperatingRulesSectionLabel),
+                    div()
+                        .w_full()
+                        .flex()
+                        .flex_col()
+                        .gap(px(12.0))
+                        .child(settings_text_field(
+                            AppTextKey::SettingsOperatingRulesFieldPromiseLeadTime,
+                            &form.operating_rules.promise_lead_hours_input,
+                        ))
+                        .child(settings_text_field(
+                            AppTextKey::SettingsOperatingRulesFieldSubstitutionPolicy,
+                            &form.operating_rules.substitution_policy_input,
+                        ))
+                        .child(settings_text_field(
+                            AppTextKey::SettingsOperatingRulesFieldMissedPickupPolicy,
+                            &form.operating_rules.missed_pickup_policy_input,
+                        ))
+                        .children(settings_validation_rows(
+                            &evaluation.operating_rules_validation_keys,
+                        )),
+                )
+                .into_any_element(),
+            );
+            cards.push(
+                home_card(
+                    app_shared_text(AppTextKey::SettingsFulfillmentWindowsSectionLabel),
+                    div()
+                        .w_full()
+                        .flex()
+                        .flex_col()
+                        .gap(px(12.0))
+                        .when(form.fulfillment_windows.is_empty(), |this| {
+                            this.child(home_body_text(app_shared_text(
+                                AppTextKey::SettingsFulfillmentWindowsEmptyBody,
+                            )))
+                        })
+                        .when(form.pickup_locations.is_empty(), |this| {
+                            this.child(home_body_text(app_shared_text(
+                                AppTextKey::SettingsFulfillmentWindowsPickupLocationsBody,
+                            )))
+                        })
+                        .children(
+                            form.fulfillment_windows
+                                .iter()
+                                .enumerate()
+                                .map(|(index, fulfillment_window)| {
+                                    let fulfillment_window_id =
+                                        fulfillment_window.fulfillment_window_id;
+                                    let pickup_location_options = form
+                                        .pickup_locations
+                                        .iter()
+                                        .enumerate()
+                                        .map(|(pickup_index, pickup_location)| {
+                                            let pickup_location_id =
+                                                pickup_location.pickup_location_id;
+                                            let is_selected = fulfillment_window
+                                                .selected_pickup_location_id
+                                                .is_some_and(|selected_pickup_location_id| {
+                                                    selected_pickup_location_id
+                                                        == pickup_location_id
+                                                });
+                                            settings_dynamic_action_button(
+                                                (
+                                                    "settings-fulfillment-window-pickup-location",
+                                                    index * 100 + pickup_index,
+                                                ),
+                                                settings_pickup_location_title(
+                                                    pickup_index,
+                                                    pickup_location,
+                                                    cx,
+                                                ),
+                                                is_selected,
+                                                cx.listener(move |this, _, _, cx| {
+                                                    this.select_fulfillment_window_pickup_location(
+                                                        fulfillment_window_id,
+                                                        pickup_location_id,
+                                                        cx,
+                                                    )
+                                                }),
+                                                cx,
+                                            )
+                                            .into_any_element()
+                                        })
+                                        .collect::<Vec<_>>();
+                                    let validation_keys = evaluation
+                                        .fulfillment_window_validation_keys
+                                        .get(index)
+                                        .cloned()
+                                        .unwrap_or_default();
+
+                                    settings_fulfillment_window_card(
+                                        index,
+                                        fulfillment_window,
+                                        pickup_location_options,
+                                        &validation_keys,
+                                        cx.listener(move |this, _, _, cx| {
+                                            this.remove_fulfillment_window(
+                                                fulfillment_window_id,
+                                                cx,
+                                            )
+                                        }),
+                                        cx,
+                                    )
+                                    .into_any_element()
+                                })
+                                .collect::<Vec<_>>(),
+                        )
+                        .child(
+                            settings_dynamic_action_button(
+                                "settings-add-fulfillment-window",
+                                app_shared_text(AppTextKey::SettingsFulfillmentWindowsAddAction),
+                                false,
+                                cx.listener(|this, _, window, cx| {
+                                    this.add_fulfillment_window(window, cx)
+                                }),
+                                cx,
+                            )
+                            .into_any_element(),
+                        ),
+                )
+                .into_any_element(),
+            );
+            cards.push(
+                home_card(
+                    app_shared_text(AppTextKey::SettingsBlackoutPeriodsSectionLabel),
+                    div()
+                        .w_full()
+                        .flex()
+                        .flex_col()
+                        .gap(px(12.0))
+                        .when(form.blackout_periods.is_empty(), |this| {
+                            this.child(home_body_text(app_shared_text(
+                                AppTextKey::SettingsBlackoutPeriodsEmptyBody,
+                            )))
+                        })
+                        .children(
+                            form.blackout_periods
+                                .iter()
+                                .enumerate()
+                                .map(|(index, blackout_period)| {
+                                    let blackout_period_id = blackout_period.blackout_period_id;
+                                    let validation_keys = evaluation
+                                        .blackout_period_validation_keys
+                                        .get(index)
+                                        .cloned()
+                                        .unwrap_or_default();
+
+                                    settings_blackout_period_card(
+                                        index,
+                                        blackout_period,
+                                        &validation_keys,
+                                        cx.listener(move |this, _, _, cx| {
+                                            this.remove_blackout_period(blackout_period_id, cx)
+                                        }),
+                                        cx,
+                                    )
+                                    .into_any_element()
+                                })
+                                .collect::<Vec<_>>(),
+                        )
+                        .child(
+                            settings_dynamic_action_button(
+                                "settings-add-blackout-period",
+                                app_shared_text(AppTextKey::SettingsBlackoutPeriodsAddAction),
+                                false,
+                                cx.listener(|this, _, window, cx| {
+                                    this.add_blackout_period(window, cx)
+                                }),
+                                cx,
+                            )
+                            .into_any_element(),
+                        ),
+                )
+                .into_any_element(),
+            );
+            cards.push(
+                home_card(
+                    app_shared_text(AppTextKey::SettingsReadinessSectionLabel),
+                    div()
+                        .w_full()
+                        .flex()
+                        .flex_col()
+                        .gap(px(12.0))
+                        .children(settings_farm_readiness_rows(&evaluation))
+                        .child(section_divider())
+                        .child(home_body_text(app_shared_text(form.save_status_key(cx))))
+                        .child(div().child(save_action)),
+                )
+                .into_any_element(),
+            );
+        } else {
+            cards.push(
+                home_card(
+                    app_shared_text(AppTextKey::SettingsNavSettings),
+                    home_body_text(app_shared_text(AppTextKey::SettingsFarmUnavailableBody)),
+                )
+                .into_any_element(),
+            );
+        }
 
         cards.push(
             home_card(
@@ -2687,8 +3671,8 @@ impl SettingsWindowView {
             return settings_inventory_panel(AppTextKey::SettingsFarmPanelBody, cards);
         };
 
-        let current_projection = form.current_projection(cx);
-        let save_action = if form.has_changes(cx) {
+        let evaluation = form.evaluate(cx);
+        let save_action = if form.has_changes(cx) && !evaluation.has_blocking_errors() {
             action_button_primary(
                 "settings-farm-save",
                 app_shared_text(AppTextKey::SettingsFarmSaveAction),
@@ -2771,19 +3755,7 @@ impl SettingsWindowView {
                             cx,
                         )
                         .into_any_element(),
-                    ),
-            )
-            .into_any_element(),
-        );
-        cards.push(
-            home_card(
-                app_shared_text(AppTextKey::SettingsReadinessSectionLabel),
-                div()
-                    .w_full()
-                    .flex()
-                    .flex_col()
-                    .gap(px(12.0))
-                    .children(settings_farm_readiness_rows(&current_projection.readiness))
+                    )
                     .child(section_divider())
                     .child(home_body_text(app_shared_text(form.save_status_key(cx))))
                     .child(div().child(save_action)),
@@ -2854,7 +3826,7 @@ impl SettingsWindowView {
         match self.selected_view() {
             SettingsPanelViewKey::Account => self.account_panel(cx).into_any_element(),
             SettingsPanelViewKey::Farm => self.farm_panel(window, cx).into_any_element(),
-            SettingsPanelViewKey::Settings => self.settings_panel(cx).into_any_element(),
+            SettingsPanelViewKey::Settings => self.settings_panel(window, cx).into_any_element(),
             SettingsPanelViewKey::About => self.about_panel().into_any_element(),
         }
     }
@@ -2939,6 +3911,7 @@ struct FarmSetupOnboardingCardSpec {
     action_key: Option<AppTextKey>,
 }
 
+#[cfg(test)]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 struct SettingsInventorySectionSpec {
     title_key: AppTextKey,
@@ -2952,12 +3925,14 @@ const SETTINGS_NAVIGATION_ORDER: &[SettingsPanelViewKey] = &[
     SettingsPanelViewKey::About,
 ];
 
+#[cfg(test)]
 const SETTINGS_FARM_SECTION_FIELDS: &[AppTextKey] = &[
     AppTextKey::HomeFarmSetupFieldFarmName,
     AppTextKey::SettingsFarmFieldTimezone,
     AppTextKey::SettingsFarmFieldCurrency,
 ];
 
+#[cfg(test)]
 const SETTINGS_PICKUP_LOCATIONS_SECTION_FIELDS: &[AppTextKey] = &[
     AppTextKey::SettingsPickupLocationsFieldLabel,
     AppTextKey::SettingsPickupLocationsFieldAddress,
@@ -2965,12 +3940,14 @@ const SETTINGS_PICKUP_LOCATIONS_SECTION_FIELDS: &[AppTextKey] = &[
     AppTextKey::SettingsPickupLocationsFieldDefault,
 ];
 
+#[cfg(test)]
 const SETTINGS_OPERATING_RULES_SECTION_FIELDS: &[AppTextKey] = &[
     AppTextKey::SettingsOperatingRulesFieldPromiseLeadTime,
     AppTextKey::SettingsOperatingRulesFieldSubstitutionPolicy,
     AppTextKey::SettingsOperatingRulesFieldMissedPickupPolicy,
 ];
 
+#[cfg(test)]
 const SETTINGS_FULFILLMENT_WINDOWS_SECTION_FIELDS: &[AppTextKey] = &[
     AppTextKey::SettingsFulfillmentWindowsFieldLabel,
     AppTextKey::SettingsFulfillmentWindowsFieldPickupLocation,
@@ -2979,12 +3956,14 @@ const SETTINGS_FULFILLMENT_WINDOWS_SECTION_FIELDS: &[AppTextKey] = &[
     AppTextKey::SettingsFulfillmentWindowsFieldOrderCutoff,
 ];
 
+#[cfg(test)]
 const SETTINGS_BLACKOUT_PERIODS_SECTION_FIELDS: &[AppTextKey] = &[
     AppTextKey::SettingsBlackoutPeriodsFieldLabel,
     AppTextKey::SettingsBlackoutPeriodsFieldStartsAt,
     AppTextKey::SettingsBlackoutPeriodsFieldEndsAt,
 ];
 
+#[cfg(test)]
 const SETTINGS_READINESS_SECTION_FIELDS: &[AppTextKey] = &[
     AppTextKey::SettingsReadinessFieldMissingProfileBasics,
     AppTextKey::SettingsReadinessFieldMissingPickupLocation,
@@ -2993,6 +3972,7 @@ const SETTINGS_READINESS_SECTION_FIELDS: &[AppTextKey] = &[
     AppTextKey::SettingsReadinessFieldInvalidTimingConflicts,
 ];
 
+#[cfg(test)]
 const SETTINGS_FARM_PANEL_SECTIONS: &[SettingsInventorySectionSpec] = &[
     SettingsInventorySectionSpec {
         title_key: AppTextKey::HomeFarmSetupSectionFarm,
@@ -3004,6 +3984,7 @@ const SETTINGS_FARM_PANEL_SECTIONS: &[SettingsInventorySectionSpec] = &[
     },
 ];
 
+#[cfg(test)]
 const SETTINGS_OPERATIONS_PANEL_SECTIONS: &[SettingsInventorySectionSpec] = &[
     SettingsInventorySectionSpec {
         title_key: AppTextKey::SettingsOperatingRulesSectionLabel,
@@ -5152,6 +6133,28 @@ fn settings_text_field(label_key: AppTextKey, input: &Entity<InputState>) -> imp
         )
 }
 
+fn settings_pickup_location_title(
+    index: usize,
+    pickup_location: &SettingsPickupLocationFormState,
+    cx: &App,
+) -> String {
+    let label = pickup_location
+        .label_input
+        .read(cx)
+        .value()
+        .trim()
+        .to_owned();
+    if label.is_empty() {
+        format!(
+            "{} {}",
+            app_shared_text(AppTextKey::SettingsPickupLocationsSectionLabel),
+            index + 1
+        )
+    } else {
+        label
+    }
+}
+
 fn settings_pickup_location_card(
     index: usize,
     pickup_location: &SettingsPickupLocationFormState,
@@ -5159,23 +6162,7 @@ fn settings_pickup_location_card(
     on_remove: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
     cx: &App,
 ) -> impl IntoElement {
-    let title = {
-        let label = pickup_location
-            .label_input
-            .read(cx)
-            .value()
-            .trim()
-            .to_owned();
-        if label.is_empty() {
-            format!(
-                "{} {}",
-                app_shared_text(AppTextKey::SettingsPickupLocationsSectionLabel),
-                index + 1
-            )
-        } else {
-            label
-        }
-    };
+    let title = settings_pickup_location_title(index, pickup_location, cx);
     let action_row = div()
         .flex()
         .items_center()
@@ -5247,32 +6234,215 @@ fn settings_pickup_location_card(
         ))
 }
 
-fn settings_farm_readiness_rows(
-    readiness: &radroots_studio_app_models::FarmRulesReadiness,
-) -> Vec<AnyElement> {
-    let mut rows = readiness
-        .blockers
-        .iter()
+fn settings_fulfillment_window_title(
+    index: usize,
+    fulfillment_window: &SettingsFulfillmentWindowFormState,
+    cx: &App,
+) -> String {
+    let label = fulfillment_window
+        .label_input
+        .read(cx)
+        .value()
+        .trim()
+        .to_owned();
+    if label.is_empty() {
+        format!(
+            "{} {}",
+            app_shared_text(AppTextKey::SettingsFulfillmentWindowsItemLabel),
+            index + 1
+        )
+    } else {
+        label
+    }
+}
+
+fn settings_blackout_period_title(
+    index: usize,
+    blackout_period: &SettingsBlackoutPeriodFormState,
+    cx: &App,
+) -> String {
+    let label = blackout_period
+        .label_input
+        .read(cx)
+        .value()
+        .trim()
+        .to_owned();
+    if label.is_empty() {
+        format!(
+            "{} {}",
+            app_shared_text(AppTextKey::SettingsBlackoutPeriodsItemLabel),
+            index + 1
+        )
+    } else {
+        label
+    }
+}
+
+fn settings_validation_rows(keys: &[AppTextKey]) -> Vec<AnyElement> {
+    keys.iter()
         .copied()
-        .map(settings_readiness_key)
+        .map(home_farm_setup_blocker)
+        .map(IntoElement::into_any_element)
+        .collect()
+}
+
+fn settings_fulfillment_window_card(
+    index: usize,
+    fulfillment_window: &SettingsFulfillmentWindowFormState,
+    pickup_location_options: Vec<AnyElement>,
+    validation_keys: &[AppTextKey],
+    on_remove: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+    cx: &App,
+) -> impl IntoElement {
+    div()
+        .w_full()
+        .bg(rgb(APP_UI_THEME.surfaces.chrome_background))
+        .rounded(px(APP_UI_THEME
+            .controls
+            .action_button
+            .sizing
+            .corner_radius_px))
+        .p(px(12.0))
+        .flex()
+        .flex_col()
+        .gap(px(10.0))
+        .child(
+            div()
+                .w_full()
+                .flex()
+                .items_start()
+                .justify_between()
+                .gap(px(8.0))
+                .child(
+                    div()
+                        .text_size(px(APP_UI_THEME.typography.body_text_px))
+                        .font_weight(gpui::FontWeight::SEMIBOLD)
+                        .text_color(rgb(APP_UI_THEME.text.primary))
+                        .child(settings_fulfillment_window_title(
+                            index,
+                            fulfillment_window,
+                            cx,
+                        )),
+                )
+                .child(
+                    settings_dynamic_action_button(
+                        ("settings-remove-fulfillment-window", index),
+                        app_shared_text(AppTextKey::SettingsFulfillmentWindowsRemoveAction),
+                        false,
+                        on_remove,
+                        cx,
+                    )
+                    .into_any_element(),
+                ),
+        )
+        .child(settings_text_field(
+            AppTextKey::SettingsFulfillmentWindowsFieldLabel,
+            &fulfillment_window.label_input,
+        ))
+        .child(
+            div()
+                .w_full()
+                .flex()
+                .flex_col()
+                .gap(px(6.0))
+                .child(home_farm_setup_field_label(
+                    AppTextKey::SettingsFulfillmentWindowsFieldPickupLocation,
+                ))
+                .child(
+                    div()
+                        .w_full()
+                        .flex()
+                        .flex_wrap()
+                        .gap(px(8.0))
+                        .children(pickup_location_options),
+                ),
+        )
+        .child(settings_text_field(
+            AppTextKey::SettingsFulfillmentWindowsFieldStartsAt,
+            &fulfillment_window.starts_at_input,
+        ))
+        .child(settings_text_field(
+            AppTextKey::SettingsFulfillmentWindowsFieldEndsAt,
+            &fulfillment_window.ends_at_input,
+        ))
+        .child(settings_text_field(
+            AppTextKey::SettingsFulfillmentWindowsFieldOrderCutoff,
+            &fulfillment_window.order_cutoff_input,
+        ))
+        .children(settings_validation_rows(validation_keys))
+}
+
+fn settings_blackout_period_card(
+    index: usize,
+    blackout_period: &SettingsBlackoutPeriodFormState,
+    validation_keys: &[AppTextKey],
+    on_remove: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+    cx: &App,
+) -> impl IntoElement {
+    div()
+        .w_full()
+        .bg(rgb(APP_UI_THEME.surfaces.chrome_background))
+        .rounded(px(APP_UI_THEME
+            .controls
+            .action_button
+            .sizing
+            .corner_radius_px))
+        .p(px(12.0))
+        .flex()
+        .flex_col()
+        .gap(px(10.0))
+        .child(
+            div()
+                .w_full()
+                .flex()
+                .items_start()
+                .justify_between()
+                .gap(px(8.0))
+                .child(
+                    div()
+                        .text_size(px(APP_UI_THEME.typography.body_text_px))
+                        .font_weight(gpui::FontWeight::SEMIBOLD)
+                        .text_color(rgb(APP_UI_THEME.text.primary))
+                        .child(settings_blackout_period_title(index, blackout_period, cx)),
+                )
+                .child(
+                    settings_dynamic_action_button(
+                        ("settings-remove-blackout-period", index),
+                        app_shared_text(AppTextKey::SettingsBlackoutPeriodsRemoveAction),
+                        false,
+                        on_remove,
+                        cx,
+                    )
+                    .into_any_element(),
+                ),
+        )
+        .child(settings_text_field(
+            AppTextKey::SettingsBlackoutPeriodsFieldLabel,
+            &blackout_period.label_input,
+        ))
+        .child(settings_text_field(
+            AppTextKey::SettingsBlackoutPeriodsFieldStartsAt,
+            &blackout_period.starts_at_input,
+        ))
+        .child(settings_text_field(
+            AppTextKey::SettingsBlackoutPeriodsFieldEndsAt,
+            &blackout_period.ends_at_input,
+        ))
+        .children(settings_validation_rows(validation_keys))
+}
+
+fn settings_farm_readiness_rows(evaluation: &SettingsFarmRulesEvaluation) -> Vec<AnyElement> {
+    let readiness_keys = if evaluation.readiness_keys.is_empty() {
+        vec![AppTextKey::SettingsReadinessReady]
+    } else {
+        evaluation.readiness_keys.clone()
+    };
+
+    readiness_keys
+        .into_iter()
         .map(settings_inventory_field_row)
         .map(IntoElement::into_any_element)
-        .collect::<Vec<_>>();
-
-    if !readiness.timing_conflicts.is_empty() {
-        rows.push(
-            settings_inventory_field_row(AppTextKey::SettingsReadinessFieldInvalidTimingConflicts)
-                .into_any_element(),
-        );
-    }
-
-    if rows.is_empty() {
-        rows.push(
-            settings_inventory_field_row(AppTextKey::SettingsReadinessReady).into_any_element(),
-        );
-    }
-
-    rows
+        .collect()
 }
 
 fn settings_readiness_key(blocker: FarmReadinessBlocker) -> AppTextKey {
@@ -5288,6 +6458,23 @@ fn settings_readiness_key(blocker: FarmReadinessBlocker) -> AppTextKey {
         }
         FarmReadinessBlocker::MissingOperatingRules => {
             AppTextKey::SettingsReadinessFieldMissingOperatingRules
+        }
+    }
+}
+
+fn settings_timing_conflict_key(kind: FarmTimingConflictKind) -> AppTextKey {
+    match kind {
+        FarmTimingConflictKind::FulfillmentWindowEndsBeforeStart => {
+            AppTextKey::SettingsReadinessFieldFulfillmentWindowEndsBeforeStart
+        }
+        FarmTimingConflictKind::FulfillmentWindowCutoffAfterStart => {
+            AppTextKey::SettingsReadinessFieldFulfillmentWindowCutoffAfterStart
+        }
+        FarmTimingConflictKind::BlackoutPeriodEndsBeforeStart => {
+            AppTextKey::SettingsReadinessFieldBlackoutPeriodEndsBeforeStart
+        }
+        FarmTimingConflictKind::BlackoutOverlapsFulfillmentWindow => {
+            AppTextKey::SettingsReadinessFieldBlackoutOverlapsFulfillmentWindow
         }
     }
 }
@@ -5372,6 +6559,7 @@ fn settings_inventory_panel(intro_key: AppTextKey, cards: Vec<AnyElement>) -> im
         )
 }
 
+#[cfg(test)]
 fn settings_inventory_card(spec: SettingsInventorySectionSpec) -> impl IntoElement {
     home_card(
         app_shared_text(spec.title_key),

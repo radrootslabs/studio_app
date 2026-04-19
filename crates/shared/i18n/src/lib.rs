@@ -188,6 +188,10 @@ mod tests {
             "Save changes to keep this on this device."
         );
         assert_eq!(
+            app_text(AppTextKey::SettingsFarmSaveBlocked),
+            "Complete the highlighted fields before saving."
+        );
+        assert_eq!(
             app_text(AppTextKey::SettingsFarmSaveFailed),
             "Could not save farm settings on this device."
         );
@@ -220,12 +224,44 @@ mod tests {
             "Operating rules"
         );
         assert_eq!(
+            app_text(AppTextKey::SettingsOperatingRulesInvalidPromiseLeadTime),
+            "Enter whole hours, for example 24."
+        );
+        assert_eq!(
             app_text(AppTextKey::SettingsFulfillmentWindowsSectionLabel),
             "Fulfillment windows"
         );
         assert_eq!(
+            app_text(AppTextKey::SettingsFulfillmentWindowsEmptyBody),
+            "Add a fulfillment window so customers know when orders are ready."
+        );
+        assert_eq!(
+            app_text(AppTextKey::SettingsFulfillmentWindowsPickupLocationsBody),
+            "Add a pickup location before saving a fulfillment window."
+        );
+        assert_eq!(
+            app_text(AppTextKey::SettingsFulfillmentWindowsAddAction),
+            "Add fulfillment window"
+        );
+        assert_eq!(
+            app_text(AppTextKey::SettingsFulfillmentWindowsItemLabel),
+            "Fulfillment window"
+        );
+        assert_eq!(
             app_text(AppTextKey::SettingsBlackoutPeriodsSectionLabel),
             "Blackout periods"
+        );
+        assert_eq!(
+            app_text(AppTextKey::SettingsBlackoutPeriodsEmptyBody),
+            "Add a blackout period for days when this farm is unavailable."
+        );
+        assert_eq!(
+            app_text(AppTextKey::SettingsBlackoutPeriodsAddAction),
+            "Add blackout period"
+        );
+        assert_eq!(
+            app_text(AppTextKey::SettingsBlackoutPeriodsItemLabel),
+            "Blackout period"
         );
         assert_eq!(
             app_text(AppTextKey::SettingsReadinessSectionLabel),
@@ -234,6 +270,14 @@ mod tests {
         assert_eq!(
             app_text(AppTextKey::SettingsReadinessFieldInvalidTimingConflicts),
             "Invalid timing conflicts"
+        );
+        assert_eq!(
+            app_text(AppTextKey::SettingsReadinessFieldFulfillmentWindowEndsBeforeStart),
+            "A fulfillment window ends before it starts."
+        );
+        assert_eq!(
+            app_text(AppTextKey::SettingsReadinessFieldBlackoutOverlapsFulfillmentWindow),
+            "A blackout period overlaps a fulfillment window."
         );
         assert_eq!(app_text(AppTextKey::SettingsReadinessReady), "Ready");
     }

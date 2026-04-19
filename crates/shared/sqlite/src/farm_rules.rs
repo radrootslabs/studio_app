@@ -776,7 +776,8 @@ fn derive_farm_rules_readiness_parts(
     }
 
     if operating_rules.is_none_or(|operating_rules| {
-        operating_rules.substitution_policy.trim().is_empty()
+        operating_rules.promise_lead_hours == 0
+            || operating_rules.substitution_policy.trim().is_empty()
             || operating_rules.missed_pickup_policy.trim().is_empty()
     }) {
         blockers.push(FarmReadinessBlocker::MissingOperatingRules);
@@ -1136,6 +1137,51 @@ mod tests {
             readiness
                 .blockers
                 .contains(&FarmReadinessBlocker::MissingFulfillmentWindow)
+        );
+    }
+
+    #[test]
+    fn zero_promise_lead_hours_keep_operating_rules_incomplete() {
+        let farm_id = FarmId::new();
+        let pickup_location_id = PickupLocationId::new();
+        let readiness = derive_farm_rules_readiness(&FarmRulesProjection {
+            farm_profile: Some(FarmProfileRecord {
+                farm_id,
+                display_name: "North field farm".to_owned(),
+                timezone: "UTC".to_owned(),
+                currency_code: "USD".to_owned(),
+            }),
+            pickup_locations: vec![PickupLocationRecord {
+                pickup_location_id,
+                farm_id,
+                label: "Barn pickup".to_owned(),
+                address_line: "14 Orchard Lane".to_owned(),
+                directions: None,
+                is_default: true,
+            }],
+            operating_rules: Some(FarmOperatingRulesRecord {
+                farm_id,
+                promise_lead_hours: 0,
+                substitution_policy: "ask_customer".to_owned(),
+                missed_pickup_policy: "hold_next_window".to_owned(),
+            }),
+            fulfillment_windows: vec![FulfillmentWindowRecord {
+                fulfillment_window_id: FulfillmentWindowId::new(),
+                farm_id,
+                pickup_location_id,
+                label: "Friday pickup".to_owned(),
+                starts_at: "2026-04-25T14:00:00Z".to_owned(),
+                ends_at: "2026-04-25T18:00:00Z".to_owned(),
+                order_cutoff_at: "2026-04-24T18:00:00Z".to_owned(),
+            }],
+            blackout_periods: Vec::new(),
+            readiness: FarmRulesReadiness::ready(),
+        });
+
+        assert!(
+            readiness
+                .blockers
+                .contains(&FarmReadinessBlocker::MissingOperatingRules)
         );
     }
 

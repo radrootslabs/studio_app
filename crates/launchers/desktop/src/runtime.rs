@@ -1355,6 +1355,28 @@ fn normalize_farm_rules_projection(
             .filter(|directions| !directions.is_empty());
     }
 
+    if let Some(operating_rules) = projection.operating_rules.as_mut() {
+        operating_rules.farm_id = fallback_profile.farm_id;
+        operating_rules.substitution_policy = operating_rules.substitution_policy.trim().to_owned();
+        operating_rules.missed_pickup_policy =
+            operating_rules.missed_pickup_policy.trim().to_owned();
+    }
+
+    for fulfillment_window in &mut projection.fulfillment_windows {
+        fulfillment_window.farm_id = fallback_profile.farm_id;
+        fulfillment_window.label = fulfillment_window.label.trim().to_owned();
+        fulfillment_window.starts_at = fulfillment_window.starts_at.trim().to_owned();
+        fulfillment_window.ends_at = fulfillment_window.ends_at.trim().to_owned();
+        fulfillment_window.order_cutoff_at = fulfillment_window.order_cutoff_at.trim().to_owned();
+    }
+
+    for blackout_period in &mut projection.blackout_periods {
+        blackout_period.farm_id = fallback_profile.farm_id;
+        blackout_period.label = blackout_period.label.trim().to_owned();
+        blackout_period.starts_at = blackout_period.starts_at.trim().to_owned();
+        blackout_period.ends_at = blackout_period.ends_at.trim().to_owned();
+    }
+
     normalize_pickup_location_defaults(&mut projection.pickup_locations);
     projection.readiness = derive_farm_rules_readiness(&projection);
     projection
@@ -1385,13 +1407,14 @@ mod tests {
         AppSharedAccountsPaths, SHARED_ACCOUNTS_STORE_FILE_NAME, SHARED_IDENTITY_FILE_NAME,
     };
     use radroots_studio_app_models::{
-        AccountSurfaceActivationProjection, ActiveSurface, AppActivityKind, AppStartupGate, FarmId,
-        FarmOrderMethod, FarmProfileRecord, FarmReadiness, FarmReadinessBlocker, FarmSetupDraft,
+        AccountSurfaceActivationProjection, ActiveSurface, AppActivityKind, AppStartupGate,
+        BlackoutPeriodId, BlackoutPeriodRecord, FarmId, FarmOperatingRulesRecord, FarmOrderMethod,
+        FarmProfileRecord, FarmReadiness, FarmReadinessBlocker, FarmSetupDraft,
         FarmSetupProjection, FarmSummary, FarmerActivationProjection, FarmerSection,
-        LoggedOutStartupProjection, PickupLocationId, PickupLocationRecord, ProductEditorDraft,
-        ProductStatus, ProductsFilter, ProductsSort, SelectedSurfaceProjection, SettingsPreference,
-        SettingsSection, ShellSection, TodayAgendaProjection, TodaySetupTask, TodaySetupTaskKind,
-        TodaySummary,
+        FulfillmentWindowId, FulfillmentWindowRecord, LoggedOutStartupProjection, PickupLocationId,
+        PickupLocationRecord, ProductEditorDraft, ProductStatus, ProductsFilter, ProductsSort,
+        SelectedSurfaceProjection, SettingsPreference, SettingsSection, ShellSection,
+        TodayAgendaProjection, TodaySetupTask, TodaySetupTaskKind, TodaySummary,
     };
     use radroots_studio_app_remote_signer::{
         RadrootsAppRemoteSignerPendingSession, RadrootsAppRemoteSignerSessionRecord,
@@ -2859,6 +2882,11 @@ mod tests {
                 .expect("account should select")
         );
 
+        let default_pickup_location_id = PickupLocationId::new();
+        let market_pickup_location_id = PickupLocationId::new();
+        let fulfillment_window_id = FulfillmentWindowId::new();
+        let blackout_period_id = BlackoutPeriodId::new();
+
         let saved_projection = runtime
             .save_farm_rules_projection(radroots_studio_app_models::FarmRulesProjection {
                 farm_profile: Some(FarmProfileRecord {
@@ -2869,7 +2897,7 @@ mod tests {
                 }),
                 pickup_locations: vec![
                     PickupLocationRecord {
-                        pickup_location_id: PickupLocationId::new(),
+                        pickup_location_id: default_pickup_location_id,
                         farm_id,
                         label: "   Barn pickup   ".to_owned(),
                         address_line: " 14 Orchard Lane ".to_owned(),
@@ -2877,7 +2905,7 @@ mod tests {
                         is_default: false,
                     },
                     PickupLocationRecord {
-                        pickup_location_id: PickupLocationId::new(),
+                        pickup_location_id: market_pickup_location_id,
                         farm_id,
                         label: "Market stall".to_owned(),
                         address_line: "2 Harbor Road".to_owned(),
@@ -2885,6 +2913,28 @@ mod tests {
                         is_default: false,
                     },
                 ],
+                operating_rules: Some(FarmOperatingRulesRecord {
+                    farm_id,
+                    promise_lead_hours: 24,
+                    substitution_policy: "  ask_customer  ".to_owned(),
+                    missed_pickup_policy: "  hold_next_window  ".to_owned(),
+                }),
+                fulfillment_windows: vec![FulfillmentWindowRecord {
+                    fulfillment_window_id,
+                    farm_id,
+                    pickup_location_id: default_pickup_location_id,
+                    label: "  Friday pickup  ".to_owned(),
+                    starts_at: " 2026-04-25T14:00:00Z ".to_owned(),
+                    ends_at: " 2026-04-25T18:00:00Z ".to_owned(),
+                    order_cutoff_at: " 2026-04-24T18:00:00Z ".to_owned(),
+                }],
+                blackout_periods: vec![BlackoutPeriodRecord {
+                    blackout_period_id,
+                    farm_id,
+                    label: "  Spring break  ".to_owned(),
+                    starts_at: " 2026-05-01T00:00:00Z ".to_owned(),
+                    ends_at: " 2026-05-03T23:59:59Z ".to_owned(),
+                }],
                 ..runtime
                     .load_farm_rules_projection()
                     .expect("farm rules projection should load")
@@ -2911,6 +2961,37 @@ mod tests {
             saved_projection.pickup_locations[0].directions.as_deref(),
             Some("Drive to the red barn.")
         );
+        assert_eq!(
+            saved_projection.operating_rules,
+            Some(FarmOperatingRulesRecord {
+                farm_id,
+                promise_lead_hours: 24,
+                substitution_policy: "ask_customer".to_owned(),
+                missed_pickup_policy: "hold_next_window".to_owned(),
+            })
+        );
+        assert_eq!(
+            saved_projection.fulfillment_windows,
+            vec![FulfillmentWindowRecord {
+                fulfillment_window_id,
+                farm_id,
+                pickup_location_id: default_pickup_location_id,
+                label: "Friday pickup".to_owned(),
+                starts_at: "2026-04-25T14:00:00Z".to_owned(),
+                ends_at: "2026-04-25T18:00:00Z".to_owned(),
+                order_cutoff_at: "2026-04-24T18:00:00Z".to_owned(),
+            }]
+        );
+        assert_eq!(
+            saved_projection.blackout_periods,
+            vec![BlackoutPeriodRecord {
+                blackout_period_id,
+                farm_id,
+                label: "Spring break".to_owned(),
+                starts_at: "2026-05-01T00:00:00Z".to_owned(),
+                ends_at: "2026-05-03T23:59:59Z".to_owned(),
+            }]
+        );
 
         let summary = runtime.summary();
         assert_eq!(
@@ -2918,7 +2999,7 @@ mod tests {
             Some(FarmSummary {
                 farm_id,
                 display_name: "Harbor farm".to_owned(),
-                readiness: FarmReadiness::Incomplete,
+                readiness: FarmReadiness::Ready,
             })
         );
         assert_eq!(summary.farm_setup_projection.draft.farm_name, "Harbor farm");
