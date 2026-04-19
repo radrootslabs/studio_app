@@ -16,8 +16,8 @@ workspace = true
 [dependencies]
 nostr = { version = "0.44.2", features = ["nip44"] }
 radroots_identity.workspace = true
-radroots_nostr = { path = "../../../../lib/crates/nostr", features = ["client"] }
-radroots_nostr_connect = { path = "../../../../lib/crates/nostr_connect" }
+radroots_nostr.workspace = true
+radroots_nostr_connect.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 tokio = { version = "1.48", features = ["rt", "sync", "time"] }

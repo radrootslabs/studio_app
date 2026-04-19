@@ -15,7 +15,7 @@ gpui-component-assets.workspace = true
 radroots_identity.workspace = true
 radroots_nostr.workspace = true
 radroots_nostr_accounts.workspace = true
-radroots_protected_store = { path = "../../../../lib/crates/protected_store" }
+radroots_protected_store.workspace = true
 radroots_secret_vault.workspace = true
 radroots_studio_app_core.workspace = true
 radroots_studio_app_i18n.workspace = true

@@ -28,7 +28,7 @@ fn main() {
         .and_then(Path::parent)
         .expect("app root should be discoverable from shared i18n crate");
     let i18n_root = app_root.join("i18n");
-    let config_path = i18n_root.join("mf2-i18n.toml");
+    let config_path = i18n_root.join("mf2_i18n.toml");
     println!("cargo:rerun-if-changed={}", config_path.display());
 
     let config = load_project_config(&config_path);

@@ -28,12 +28,15 @@ gpui = "0.2.2"
 gpui-component = "0.5.1"
 gpui-component-assets = "0.5.1"
 hex = "0.4"
-mf2-i18n-build = { git = "https://github.com/triesap/mf2-i18n.git", rev = "0c3ba2729b309f27aed3e27ae4e753b0147a75ec" }
-mf2-i18n-core = { git = "https://github.com/triesap/mf2-i18n.git", rev = "0c3ba2729b309f27aed3e27ae4e753b0147a75ec" }
-mf2-i18n-native = { git = "https://github.com/triesap/mf2-i18n.git", rev = "0c3ba2729b309f27aed3e27ae4e753b0147a75ec" }
+mf2_i18n_build = { path = "../../../../vendor/triesap/mf2_i18n/crates/mf2_i18n_build" }
+mf2_i18n_core = { path = "../../../../vendor/triesap/mf2_i18n/crates/mf2_i18n_core" }
+mf2_i18n_native = { path = "../../../../vendor/triesap/mf2_i18n/crates/mf2_i18n_native" }
 radroots_identity = { path = "../lib/crates/identity" }
-radroots_nostr_accounts = { path = "../lib/crates/nostr_accounts", features = ["os-keyring"] }
-radroots_secret_vault = { path = "../lib/crates/secret_vault", default-features = false, features = ["std", "os-keyring"] }
+radroots_nostr = { path = "../lib/crates/nostr", features = ["client"] }
+radroots_nostr_accounts = { path = "../lib/crates/nostr_accounts" }
+radroots_nostr_connect = { path = "../lib/crates/nostr_connect" }
+radroots_protected_store = { path = "../lib/crates/protected_store" }
+radroots_secret_vault = { path = "../lib/crates/secret_vault", default-features = false, features = ["std"] }
 radroots_studio_app_core = { path = "crates/shared/core", version = "0.1.0" }
 radroots_studio_app_i18n = { path = "crates/shared/i18n", version = "0.1.0" }
 radroots_studio_app_models = { path = "crates/shared/models", version = "0.1.0" }
