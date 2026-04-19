@@ -1124,6 +1124,166 @@ pub enum OrderStatus {
     Refunded,
 }
 
+impl OrderStatus {
+    pub const fn storage_key(self) -> &'static str {
+        match self {
+            Self::NeedsAction => "needs_action",
+            Self::Scheduled => "scheduled",
+            Self::Packed => "packed",
+            Self::Completed => "completed",
+            Self::Refunded => "refunded",
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum OrdersFilter {
+    All,
+    #[default]
+    NeedsAction,
+    Scheduled,
+    Packed,
+    Completed,
+    Refunded,
+}
+
+impl OrdersFilter {
+    pub const fn storage_key(self) -> &'static str {
+        match self {
+            Self::All => "all",
+            Self::NeedsAction => "needs_action",
+            Self::Scheduled => "scheduled",
+            Self::Packed => "packed",
+            Self::Completed => "completed",
+            Self::Refunded => "refunded",
+        }
+    }
+}
+
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+pub struct OrdersScreenQueryState {
+    pub filter: OrdersFilter,
+    pub fulfillment_window_id: Option<FulfillmentWindowId>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum OrderPrimaryAction {
+    Review,
+    MarkPacked,
+    MarkCompleted,
+}
+
+impl OrderPrimaryAction {
+    pub const fn storage_key(self) -> &'static str {
+        match self {
+            Self::Review => "review",
+            Self::MarkPacked => "mark_packed",
+            Self::MarkCompleted => "mark_completed",
+        }
+    }
+}
+
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+pub struct OrdersListSummary {
+    pub total_orders: u32,
+    pub needs_action_orders: u32,
+    pub scheduled_orders: u32,
+    pub packed_orders: u32,
+}
+
+impl OrdersListSummary {
+    pub const fn has_orders(&self) -> bool {
+        self.total_orders > 0
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct OrdersListRow {
+    pub order_id: OrderId,
+    pub farm_id: FarmId,
+    pub fulfillment_window_id: Option<FulfillmentWindowId>,
+    pub order_number: String,
+    pub customer_display_name: String,
+    pub fulfillment_window_label: Option<String>,
+    pub pickup_location_label: Option<String>,
+    pub status: OrderStatus,
+    pub primary_action: Option<OrderPrimaryAction>,
+}
+
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+pub struct OrdersListProjection {
+    pub summary: OrdersListSummary,
+    pub rows: Vec<OrdersListRow>,
+}
+
+impl OrdersListProjection {
+    pub fn is_empty(&self) -> bool {
+        self.rows.is_empty()
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct OrderDetailItemRow {
+    pub title: String,
+    pub quantity_display: String,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct OrderDetailProjection {
+    pub order_id: OrderId,
+    pub farm_id: FarmId,
+    pub order_number: String,
+    pub customer_display_name: String,
+    pub status: OrderStatus,
+    pub fulfillment_window_id: Option<FulfillmentWindowId>,
+    pub fulfillment_window_label: Option<String>,
+    pub pickup_location_label: Option<String>,
+    pub items: Vec<OrderDetailItemRow>,
+    pub primary_action: Option<OrderPrimaryAction>,
+}
+
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+pub struct PackDayScreenQueryState {
+    pub fulfillment_window_id: Option<FulfillmentWindowId>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct PackDayProductTotalRow {
+    pub title: String,
+    pub quantity_display: String,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct PackDayPackListRow {
+    pub title: String,
+    pub quantity_display: String,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct PackDayRosterRow {
+    pub order_id: OrderId,
+    pub order_number: String,
+    pub customer_display_name: String,
+}
+
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+pub struct PackDayProjection {
+    pub fulfillment_window: Option<FulfillmentWindowSummary>,
+    pub totals_by_product: Vec<PackDayProductTotalRow>,
+    pub pack_list: Vec<PackDayPackListRow>,
+    pub pickup_roster: Vec<PackDayRosterRow>,
+}
+
+impl PackDayProjection {
+    pub fn is_empty(&self) -> bool {
+        self.totals_by_product.is_empty()
+            && self.pack_list.is_empty()
+            && self.pickup_roster.is_empty()
+    }
+}
+
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct FarmSummary {
     pub farm_id: FarmId,
@@ -1459,14 +1619,18 @@ mod tests {
         FarmSetupDraft, FarmSetupProjection, FarmSetupReadiness, FarmSetupSection,
         FarmTimingConflict, FarmTimingConflictKind, FarmerActivationProjection, FarmerSection,
         IdentityBlockedReason, IdentityReadiness, LoggedOutStartupPhase,
-        LoggedOutStartupProjection, OrderListRow, ParseStartupSignerSourceError, PickupLocationId,
-        ProductAttentionState, ProductAvailabilityState, ProductAvailabilitySummary,
-        ProductEditorDraft, ProductListRow, ProductPricePresentation, ProductPublishBlocker,
-        ProductStatus, ProductStockState, ProductStockSummary, ProductsFilter,
-        ProductsListProjection, ProductsListRow, ProductsListSummary, ProductsSort,
-        SelectedAccountProjection, SelectedSurfaceProjection, SettingsPreference, SettingsSection,
-        ShellSection, StartupSignerEntryProjection, StartupSignerSource, StartupSignerSourceKind,
-        TodayAgendaProjection, TodaySetupTask, TodaySetupTaskKind, TodaySummary,
+        LoggedOutStartupProjection, OrderDetailItemRow, OrderDetailProjection, OrderListRow,
+        OrderPrimaryAction, OrderStatus, OrdersFilter, OrdersListProjection, OrdersListRow,
+        OrdersListSummary, OrdersScreenQueryState, PackDayPackListRow, PackDayProductTotalRow,
+        PackDayProjection, PackDayRosterRow, PackDayScreenQueryState,
+        ParseStartupSignerSourceError, PickupLocationId, ProductAttentionState,
+        ProductAvailabilityState, ProductAvailabilitySummary, ProductEditorDraft, ProductListRow,
+        ProductPricePresentation, ProductPublishBlocker, ProductStatus, ProductStockState,
+        ProductStockSummary, ProductsFilter, ProductsListProjection, ProductsListRow,
+        ProductsListSummary, ProductsSort, SelectedAccountProjection, SelectedSurfaceProjection,
+        SettingsPreference, SettingsSection, ShellSection, StartupSignerEntryProjection,
+        StartupSignerSource, StartupSignerSourceKind, TodayAgendaProjection, TodaySetupTask,
+        TodaySetupTaskKind, TodaySummary,
     };
     use std::{collections::BTreeSet, str::FromStr};
     use uuid::Uuid;
@@ -1923,6 +2087,153 @@ mod tests {
         assert!(!empty_draft.is_publish_ready());
         assert!(ready_draft.is_publish_ready());
         assert!(ready_draft.publish_blockers().is_empty());
+    }
+
+    #[test]
+    fn order_status_filter_and_primary_action_storage_keys_are_stable() {
+        assert_eq!(OrderStatus::NeedsAction.storage_key(), "needs_action");
+        assert_eq!(OrderStatus::Scheduled.storage_key(), "scheduled");
+        assert_eq!(OrderStatus::Packed.storage_key(), "packed");
+        assert_eq!(OrderStatus::Completed.storage_key(), "completed");
+        assert_eq!(OrderStatus::Refunded.storage_key(), "refunded");
+
+        assert_eq!(OrdersFilter::default(), OrdersFilter::NeedsAction);
+        assert_eq!(OrdersFilter::All.storage_key(), "all");
+        assert_eq!(OrdersFilter::NeedsAction.storage_key(), "needs_action");
+        assert_eq!(OrdersFilter::Scheduled.storage_key(), "scheduled");
+        assert_eq!(OrdersFilter::Packed.storage_key(), "packed");
+        assert_eq!(OrdersFilter::Completed.storage_key(), "completed");
+        assert_eq!(OrdersFilter::Refunded.storage_key(), "refunded");
+
+        assert_eq!(OrderPrimaryAction::Review.storage_key(), "review");
+        assert_eq!(OrderPrimaryAction::MarkPacked.storage_key(), "mark_packed");
+        assert_eq!(
+            OrderPrimaryAction::MarkCompleted.storage_key(),
+            "mark_completed"
+        );
+    }
+
+    #[test]
+    fn orders_and_pack_day_query_state_defaults_are_frozen() {
+        assert_eq!(
+            OrdersScreenQueryState::default(),
+            OrdersScreenQueryState {
+                filter: OrdersFilter::NeedsAction,
+                fulfillment_window_id: None,
+            }
+        );
+        assert_eq!(
+            PackDayScreenQueryState::default(),
+            PackDayScreenQueryState {
+                fulfillment_window_id: None,
+            }
+        );
+    }
+
+    #[test]
+    fn orders_and_pack_day_projections_hold_truthful_execution_data() {
+        let fulfillment_window_id = super::FulfillmentWindowId::new();
+        let farm_id = FarmId::new();
+        let order_id = super::OrderId::new();
+        let orders_list = OrdersListProjection {
+            summary: OrdersListSummary {
+                total_orders: 3,
+                needs_action_orders: 1,
+                scheduled_orders: 1,
+                packed_orders: 1,
+            },
+            rows: vec![OrdersListRow {
+                order_id,
+                farm_id,
+                fulfillment_window_id: Some(fulfillment_window_id),
+                order_number: "R-1001".to_owned(),
+                customer_display_name: "Casey".to_owned(),
+                fulfillment_window_label: Some("Wednesday pickup".to_owned()),
+                pickup_location_label: Some("North barn".to_owned()),
+                status: OrderStatus::Scheduled,
+                primary_action: Some(OrderPrimaryAction::MarkPacked),
+            }],
+        };
+        let order_detail = OrderDetailProjection {
+            order_id,
+            farm_id,
+            order_number: "R-1001".to_owned(),
+            customer_display_name: "Casey".to_owned(),
+            status: OrderStatus::Scheduled,
+            fulfillment_window_id: Some(fulfillment_window_id),
+            fulfillment_window_label: Some("Wednesday pickup".to_owned()),
+            pickup_location_label: Some("North barn".to_owned()),
+            items: vec![OrderDetailItemRow {
+                title: "Salad mix".to_owned(),
+                quantity_display: "2 bags".to_owned(),
+            }],
+            primary_action: Some(OrderPrimaryAction::MarkPacked),
+        };
+        let pack_day = PackDayProjection {
+            fulfillment_window: Some(super::FulfillmentWindowSummary {
+                fulfillment_window_id,
+                farm_id,
+                starts_at: "2026-04-23T16:00:00Z".to_owned(),
+                ends_at: "2026-04-23T19:00:00Z".to_owned(),
+            }),
+            totals_by_product: vec![PackDayProductTotalRow {
+                title: "Salad mix".to_owned(),
+                quantity_display: "8 bags".to_owned(),
+            }],
+            pack_list: vec![PackDayPackListRow {
+                title: "Salad mix".to_owned(),
+                quantity_display: "Casey: 2 bags".to_owned(),
+            }],
+            pickup_roster: vec![PackDayRosterRow {
+                order_id,
+                order_number: "R-1001".to_owned(),
+                customer_display_name: "Casey".to_owned(),
+            }],
+        };
+
+        assert!(orders_list.summary.has_orders());
+        assert!(!orders_list.is_empty());
+        assert_eq!(
+            orders_list.rows[0].primary_action,
+            Some(OrderPrimaryAction::MarkPacked)
+        );
+        assert_eq!(order_detail.items[0].quantity_display, "2 bags");
+        assert!(!pack_day.is_empty());
+        assert_eq!(pack_day.pickup_roster[0].order_number, "R-1001");
+    }
+
+    #[test]
+    fn today_agenda_stays_on_the_compact_order_row_contract() {
+        let today = TodayAgendaProjection {
+            orders_needing_action: vec![OrderListRow {
+                order_id: super::OrderId::new(),
+                farm_id: FarmId::new(),
+                fulfillment_window_id: Some(super::FulfillmentWindowId::new()),
+                order_number: "R-1002".to_owned(),
+                customer_display_name: "Morgan".to_owned(),
+                status: OrderStatus::NeedsAction,
+            }],
+            ..TodayAgendaProjection::default()
+        };
+        let orders_row = OrdersListRow {
+            order_id: super::OrderId::new(),
+            farm_id: FarmId::new(),
+            fulfillment_window_id: None,
+            order_number: "R-2002".to_owned(),
+            customer_display_name: "Robin".to_owned(),
+            fulfillment_window_label: None,
+            pickup_location_label: None,
+            status: OrderStatus::Completed,
+            primary_action: None,
+        };
+
+        assert_eq!(today.orders_needing_action.len(), 1);
+        assert_eq!(
+            today.orders_needing_action[0].status,
+            OrderStatus::NeedsAction
+        );
+        assert_eq!(orders_row.primary_action, None);
+        assert_eq!(orders_row.status, OrderStatus::Completed);
     }
 
     #[test]
