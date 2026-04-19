@@ -2,11 +2,10 @@ use gpui::{
     Animation, AnimationExt, AnyElement, App, AppContext, Bounds, ClickEvent, Context, Entity,
     InteractiveElement, IntoElement, ParentElement, Render, SharedString, Styled, Subscription,
     Timer, Window, WindowBackgroundAppearance, WindowBounds, WindowOptions, div,
-    prelude::FluentBuilder, px, relative, rgb, size, transparent_black,
+    prelude::FluentBuilder, px, relative, rgb, size,
 };
 use gpui_component::{
     IconName, Root,
-    button::{Button, ButtonCustomVariant, ButtonRounded, ButtonVariants},
     input::{InputEvent, InputState},
 };
 use radroots_studio_app_i18n::AppTextKey;
@@ -39,15 +38,16 @@ use radroots_studio_app_ui::{
     app_button_primary as action_button_primary,
     app_button_primary_disabled as action_button_primary_disabled,
     app_button_secondary as action_button, app_button_text as text_button, app_checkbox_field,
-    app_cluster, app_divider as section_divider, app_form_field, app_form_input_text,
-    app_form_section, app_heading_section, app_heading_view, app_input_text as app_text_input,
-    app_scroll_panel, app_segment_button_icon as icon_segment_button, app_shared_label_text,
-    app_shared_text, app_split_shell, app_stack_h, app_stack_v,
-    app_status_indicator as status_indicator, app_surface_card,
-    app_surface_card_section as home_card, app_surface_panel, app_surface_sidebar,
-    app_surface_window as app_window_shell, app_text_badge as settings_badge_text,
-    app_text_body_subtle as home_body_text, app_text_label as home_farm_setup_field_label,
-    app_text_value, label_value_list, utility_title_row,
+    app_cluster, app_detail_row, app_divider as section_divider, app_form_field,
+    app_form_input_text, app_form_section, app_heading_section, app_heading_view,
+    app_input_text as app_text_input, app_scroll_panel,
+    app_segment_button_icon as icon_segment_button, app_shared_label_text, app_shared_text,
+    app_split_shell, app_stack_h, app_stack_v, app_status_indicator as status_indicator,
+    app_surface_card, app_surface_card_section as home_card, app_surface_panel,
+    app_surface_sidebar, app_surface_window as app_window_shell,
+    app_text_badge as settings_badge_text, app_text_body_subtle as home_body_text,
+    app_text_label as home_farm_setup_field_label, app_text_value, label_value_list,
+    utility_title_row,
 };
 use radroots_nostr::prelude::RadrootsNostrClient;
 use std::time::Duration;
@@ -3069,14 +3069,12 @@ impl SettingsWindowView {
                         div()
                             .w_full()
                             .bg(rgb(APP_UI_THEME.foundation.surfaces.chrome_background))
-                            .rounded(px(
-                                APP_UI_THEME
-                                    .shells
-                                    .settings_account_sidebar_button_corner_radius_px,
-                            ))
-                            .p(px(
-                                APP_UI_THEME.shells.settings_account_sidebar_button_padding_px,
-                            ))
+                            .rounded(px(APP_UI_THEME
+                                .shells
+                                .settings_account_sidebar_button_corner_radius_px))
+                            .p(px(APP_UI_THEME
+                                .shells
+                                .settings_account_sidebar_button_padding_px))
                             .child(
                                 div()
                                     .flex()
@@ -3084,12 +3082,10 @@ impl SettingsWindowView {
                                     .gap(px(2.0))
                                     .child(
                                         div()
-                                            .text_size(px(
-                                                APP_UI_THEME
-                                                    .foundation
-                                                    .typography
-                                                    .settings_account_identity_text_px,
-                                            ))
+                                            .text_size(px(APP_UI_THEME
+                                                .foundation
+                                                .typography
+                                                .settings_account_identity_text_px))
                                             .font_weight(gpui::FontWeight::MEDIUM)
                                             .text_color(rgb(APP_UI_THEME.foundation.text.primary))
                                             .child(app_shared_text(
@@ -3098,12 +3094,10 @@ impl SettingsWindowView {
                                     )
                                     .child(
                                         div()
-                                            .text_size(px(
-                                                APP_UI_THEME
-                                                    .foundation
-                                                    .typography
-                                                    .settings_account_identity_text_px,
-                                            ))
+                                            .text_size(px(APP_UI_THEME
+                                                .foundation
+                                                .typography
+                                                .settings_account_identity_text_px))
                                             .text_color(rgb(APP_UI_THEME.foundation.text.secondary))
                                             .line_height(relative(1.2))
                                             .child(app_shared_text(
@@ -3115,16 +3109,14 @@ impl SettingsWindowView {
                     .child(
                         div()
                             .w_full()
-                            .pt(px(
-                                APP_UI_THEME
-                                    .shells
-                                    .settings_account_sidebar_footer_padding_top_px,
-                            ))
+                            .pt(px(APP_UI_THEME
+                                .shells
+                                .settings_account_sidebar_footer_padding_top_px))
                             .flex()
                             .flex_col()
-                            .gap(px(
-                                APP_UI_THEME.shells.settings_account_sidebar_footer_row_gap_px,
-                            ))
+                            .gap(px(APP_UI_THEME
+                                .shells
+                                .settings_account_sidebar_footer_row_gap_px))
                             .child(section_divider())
                             .child(
                                 div()
@@ -3132,11 +3124,9 @@ impl SettingsWindowView {
                                     .flex()
                                     .items_center()
                                     .justify_between()
-                                    .gap(px(
-                                        APP_UI_THEME
-                                            .shells
-                                            .settings_account_sidebar_footer_button_gap_px,
-                                    ))
+                                    .gap(px(APP_UI_THEME
+                                        .shells
+                                        .settings_account_sidebar_footer_button_gap_px))
                                     .child(action_button(
                                         "account-add",
                                         app_shared_text(AppTextKey::SettingsAccountAddAction),
@@ -3170,7 +3160,9 @@ impl SettingsWindowView {
                     .child(
                         div()
                             .w_full()
-                            .max_w(px(APP_UI_THEME.shells.settings_account_content_max_width_px))
+                            .max_w(px(APP_UI_THEME
+                                .shells
+                                .settings_account_content_max_width_px))
                             .flex()
                             .flex_col()
                             .items_start()
@@ -3184,18 +3176,17 @@ impl SettingsWindowView {
                                     .gap(px(APP_UI_THEME.shells.settings_account_main_stack_gap_px))
                                     .child(
                                         div()
-                                            .size(px(
-                                                APP_UI_THEME
-                                                    .shells
-                                                    .settings_account_profile_avatar_size_px,
-                                            ))
-                                            .bg(rgb(APP_UI_THEME.foundation.surfaces.card_background))
-                                            .rounded(px(
-                                                APP_UI_THEME
-                                                    .shells
-                                                    .settings_account_profile_avatar_size_px
-                                                    / 2.0,
-                                            )),
+                                            .size(px(APP_UI_THEME
+                                                .shells
+                                                .settings_account_profile_avatar_size_px))
+                                            .bg(rgb(APP_UI_THEME
+                                                .foundation
+                                                .surfaces
+                                                .card_background))
+                                            .rounded(px(APP_UI_THEME
+                                                .shells
+                                                .settings_account_profile_avatar_size_px
+                                                / 2.0)),
                                     )
                                     .child(
                                         div()
@@ -3213,49 +3204,60 @@ impl SettingsWindowView {
                                     .flex()
                                     .flex_col()
                                     .gap(px(APP_UI_THEME.shells.settings_account_detail_row_gap_px))
-                                    .child(self.settings_account_detail_row(
-                                        AppTextKey::SettingsAccountProfileLabel,
+                                    .child(app_detail_row(
+                                        app_shared_label_text(
+                                            AppTextKey::SettingsAccountProfileLabel,
+                                        ),
                                         div()
                                             .text_size(px(detail_text_px))
                                             .text_color(rgb(APP_UI_THEME.foundation.text.primary))
                                             .child(app_shared_text(AppTextKey::ValueNone)),
                                     ))
-                                    .child(self.settings_account_detail_row(
-                                        AppTextKey::SettingsAccountStatusLabel,
+                                    .child(app_detail_row(
+                                        app_shared_label_text(
+                                            AppTextKey::SettingsAccountStatusLabel,
+                                        ),
                                         div()
                                             .flex()
                                             .items_center()
-                                            .gap(px(
-                                                APP_UI_THEME
-                                                    .shells
-                                                    .settings_account_status_gap_px,
-                                            ))
+                                            .gap(px(APP_UI_THEME
+                                                .shells
+                                                .settings_account_status_gap_px))
                                             .child(status_indicator(account_status_color))
                                             .child(
                                                 div()
                                                     .text_size(px(detail_text_px))
-                                                    .text_color(rgb(APP_UI_THEME.foundation.text.primary))
+                                                    .text_color(rgb(APP_UI_THEME
+                                                        .foundation
+                                                        .text
+                                                        .primary))
                                                     .child(app_shared_text(
                                                         AppTextKey::SettingsAccountStatusLoggedOut,
                                                     )),
                                             ),
                                     ))
-                                    .child(self.settings_account_detail_row(
-                                        AppTextKey::SettingsAccountCustodyLabel,
+                                    .child(app_detail_row(
+                                        app_shared_label_text(
+                                            AppTextKey::SettingsAccountCustodyLabel,
+                                        ),
                                         div()
                                             .text_size(px(detail_text_px))
                                             .text_color(rgb(APP_UI_THEME.foundation.text.primary))
                                             .child(app_shared_text(AppTextKey::ValueNone)),
                                     ))
-                                    .child(self.settings_account_detail_row(
-                                        AppTextKey::SettingsAccountSurfaceLabel,
+                                    .child(app_detail_row(
+                                        app_shared_label_text(
+                                            AppTextKey::SettingsAccountSurfaceLabel,
+                                        ),
                                         div()
                                             .text_size(px(detail_text_px))
                                             .text_color(rgb(APP_UI_THEME.foundation.text.primary))
                                             .child(app_shared_text(AppTextKey::ValueNone)),
                                     ))
-                                    .child(self.settings_account_detail_row(
-                                        AppTextKey::SettingsAccountActivationLabel,
+                                    .child(app_detail_row(
+                                        app_shared_label_text(
+                                            AppTextKey::SettingsAccountActivationLabel,
+                                        ),
                                         div()
                                             .text_size(px(detail_text_px))
                                             .text_color(rgb(APP_UI_THEME.foundation.text.primary))
@@ -3263,113 +3265,38 @@ impl SettingsWindowView {
                                                 AppTextKey::SettingsAccountActivationInactive,
                                             )),
                                     ))
-                                    .child(
-                                        div()
-                                            .w_full()
-                                            .text_size(px(detail_text_px))
-                                            .line_height(relative(1.2))
-                                            .text_color(rgb(APP_UI_THEME.foundation.text.secondary))
-                                            .child(app_shared_text(
-                                                AppTextKey::SettingsAccountNoSelectionBody,
-                                            )),
-                                    )
+                                    .child(home_body_text(app_shared_text(
+                                        AppTextKey::SettingsAccountNoSelectionBody,
+                                    )))
                                     .child(
                                         div()
                                             .w_full()
                                             .flex()
                                             .min_w_0()
                                             .items_center()
-                                            .gap(px(
-                                                APP_UI_THEME
-                                                    .shells
-                                                    .settings_account_action_row_gap_px,
-                                            ))
-                                            .child(
-                                                div().child(action_button(
-                                                    "account-log-out",
-                                                    app_shared_text(
-                                                        AppTextKey::SettingsAccountLogOutAction,
-                                                    ),
-                                                    |_, _, _| {},
-                                                    cx,
-                                                )),
-                                            )
-                                            .child(
-                                                div().child(action_button(
-                                                    "account-open-workspace",
-                                                    app_shared_text(
-                                                        AppTextKey::SettingsAccountOpenWorkspaceAction,
-                                                    ),
-                                                    |_, _, _| {},
-                                                    cx,
-                                                )),
-                                            ),
+                                            .gap(px(APP_UI_THEME
+                                                .shells
+                                                .settings_account_action_row_gap_px))
+                                            .child(div().child(action_button(
+                                                "account-log-out",
+                                                app_shared_text(
+                                                    AppTextKey::SettingsAccountLogOutAction,
+                                                ),
+                                                |_, _, _| {},
+                                                cx,
+                                            )))
+                                            .child(div().child(action_button(
+                                                "account-open-workspace",
+                                                app_shared_text(
+                                                    AppTextKey::SettingsAccountOpenWorkspaceAction,
+                                                ),
+                                                |_, _, _| {},
+                                                cx,
+                                            ))),
                                     ),
                             ),
                     ),
             )
-    }
-
-    fn settings_account_detail_row(
-        &self,
-        label_key: AppTextKey,
-        value: impl IntoElement,
-    ) -> impl IntoElement {
-        div()
-            .w_full()
-            .flex()
-            .items_center()
-            .gap(px(APP_UI_THEME.shells.settings_account_detail_value_gap_px))
-            .child(
-                div()
-                    .text_size(px(APP_UI_THEME
-                        .foundation
-                        .typography
-                        .settings_account_detail_text_px))
-                    .font_weight(gpui::FontWeight::SEMIBOLD)
-                    .text_color(rgb(APP_UI_THEME.foundation.text.secondary))
-                    .child(app_shared_label_text(label_key)),
-            )
-            .child(value)
-    }
-
-    fn settings_checkbox_row(
-        &mut self,
-        id: &'static str,
-        checked: bool,
-        label_key: AppTextKey,
-        trailing_button_id: Option<&'static str>,
-        trailing_button_key: Option<AppTextKey>,
-        note_key: Option<AppTextKey>,
-        on_toggle: impl Fn(&bool, &mut Window, &mut gpui::App) + 'static,
-        cx: &mut Context<Self>,
-    ) -> impl IntoElement {
-        let note_text = note_key.map(app_shared_text);
-
-        div().w_full().child(
-            div()
-                .w_full()
-                .flex()
-                .items_start()
-                .gap(px(APP_UI_THEME.shells.settings_account_detail_value_gap_px))
-                .child(app_checkbox_field(
-                    AppCheckboxFieldSpec::new(id, app_shared_text(label_key), note_text),
-                    checked,
-                    cx,
-                    move |checked, window, cx| on_toggle(&checked, window, cx),
-                ))
-                .when_some(
-                    trailing_button_id.zip(trailing_button_key),
-                    |this, (button_id, button_key)| {
-                        this.child(div().flex_none().child(action_button_compact(
-                            button_id,
-                            app_shared_text(button_key),
-                            |_, _, _| {},
-                            cx,
-                        )))
-                    },
-                ),
-        )
     }
 
     fn settings_panel(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
@@ -3415,26 +3342,46 @@ impl SettingsWindowView {
             cards.push(
                 home_card(
                     app_shared_text(AppTextKey::SettingsOperatingRulesSectionLabel),
-                    div()
+                    app_stack_v(12.0)
                         .w_full()
-                        .flex()
-                        .flex_col()
-                        .gap(px(12.0))
-                        .child(settings_text_field(
-                            AppTextKey::SettingsOperatingRulesFieldPromiseLeadTime,
+                        .child(app_form_input_text(
+                            AppFormFieldSpec::new(
+                                app_shared_text(
+                                    AppTextKey::SettingsOperatingRulesFieldPromiseLeadTime,
+                                ),
+                                Option::<SharedString>::None,
+                            ),
                             &form.operating_rules.promise_lead_hours_input,
+                            false,
                         ))
-                        .child(settings_text_field(
-                            AppTextKey::SettingsOperatingRulesFieldSubstitutionPolicy,
+                        .child(app_form_input_text(
+                            AppFormFieldSpec::new(
+                                app_shared_text(
+                                    AppTextKey::SettingsOperatingRulesFieldSubstitutionPolicy,
+                                ),
+                                Option::<SharedString>::None,
+                            ),
                             &form.operating_rules.substitution_policy_input,
+                            false,
                         ))
-                        .child(settings_text_field(
-                            AppTextKey::SettingsOperatingRulesFieldMissedPickupPolicy,
+                        .child(app_form_input_text(
+                            AppFormFieldSpec::new(
+                                app_shared_text(
+                                    AppTextKey::SettingsOperatingRulesFieldMissedPickupPolicy,
+                                ),
+                                Option::<SharedString>::None,
+                            ),
                             &form.operating_rules.missed_pickup_policy_input,
+                            false,
                         ))
-                        .children(settings_validation_rows(
-                            &evaluation.operating_rules_validation_keys,
-                        )),
+                        .children(
+                            evaluation
+                                .operating_rules_validation_keys
+                                .iter()
+                                .copied()
+                                .map(|key| home_body_text(app_shared_text(key)).into_any_element())
+                                .collect::<Vec<_>>(),
+                        ),
                 )
                 .into_any_element(),
             );
@@ -3476,7 +3423,7 @@ impl SettingsWindowView {
                                                     selected_pickup_location_id
                                                         == pickup_location_id
                                                 });
-                                            settings_dynamic_action_button(
+                                            choice_button(
                                                 (
                                                     "settings-fulfillment-window-pickup-location",
                                                     index * 100 + pickup_index,
@@ -3523,10 +3470,9 @@ impl SettingsWindowView {
                                 .collect::<Vec<_>>(),
                         )
                         .child(
-                            settings_dynamic_action_button(
+                            action_button_compact(
                                 "settings-add-fulfillment-window",
                                 app_shared_text(AppTextKey::SettingsFulfillmentWindowsAddAction),
-                                false,
                                 cx.listener(|this, _, window, cx| {
                                     this.add_fulfillment_window(window, cx)
                                 }),
@@ -3576,10 +3522,9 @@ impl SettingsWindowView {
                                 .collect::<Vec<_>>(),
                         )
                         .child(
-                            settings_dynamic_action_button(
+                            action_button_compact(
                                 "settings-add-blackout-period",
                                 app_shared_text(AppTextKey::SettingsBlackoutPeriodsAddAction),
-                                false,
                                 cx.listener(|this, _, window, cx| {
                                     this.add_blackout_period(window, cx)
                                 }),
@@ -3618,56 +3563,99 @@ impl SettingsWindowView {
         cards.push(
             home_card(
                 app_shared_text(AppTextKey::SettingsGeneralSectionLabel),
-                div()
+                app_stack_v(16.0)
                     .w_full()
-                    .flex()
-                    .flex_col()
-                    .gap(px(16.0))
-                    .child(self.settings_checkbox_row(
-                        "settings-allow-relay-connections",
-                        general_allow_relay_connections,
-                        AppTextKey::SettingsGeneralAllowRelayConnections,
-                        None,
-                        None,
-                        None,
-                        |_, _, _| {},
-                        cx,
-                    ))
-                    .child(self.settings_checkbox_row(
-                        "settings-use-media-servers",
-                        general_use_media_servers,
-                        AppTextKey::SettingsGeneralUseMediaServers,
-                        Some("settings-manage-media-servers"),
-                        Some(AppTextKey::SettingsGeneralManageAction),
-                        None,
-                        |_, _, _| {},
-                        cx,
-                    ))
-                    .child(self.settings_checkbox_row(
-                        "settings-use-nip05",
-                        general_use_nip05,
-                        AppTextKey::SettingsGeneralUseNip05,
-                        None,
-                        None,
-                        Some(AppTextKey::SettingsGeneralUseNip05Note),
-                        |_, _, _| {},
-                        cx,
-                    ))
-                    .child(self.settings_checkbox_row(
-                        "settings-launch-at-login",
-                        general_launch_at_login,
-                        AppTextKey::SettingsGeneralLaunchAtLogin,
-                        None,
-                        None,
-                        None,
-                        |_, _, _| {},
-                        cx,
-                    )),
+                    .child(
+                        div()
+                            .w_full()
+                            .flex()
+                            .items_start()
+                            .gap(px(APP_UI_THEME.shells.settings_account_detail_value_gap_px))
+                            .child(app_checkbox_field(
+                                AppCheckboxFieldSpec::new(
+                                    "settings-allow-relay-connections",
+                                    app_shared_text(
+                                        AppTextKey::SettingsGeneralAllowRelayConnections,
+                                    ),
+                                    Option::<SharedString>::None,
+                                ),
+                                general_allow_relay_connections,
+                                cx,
+                                |_, _, _| {},
+                            )),
+                    )
+                    .child(
+                        div()
+                            .w_full()
+                            .flex()
+                            .items_start()
+                            .gap(px(APP_UI_THEME.shells.settings_account_detail_value_gap_px))
+                            .child(app_checkbox_field(
+                                AppCheckboxFieldSpec::new(
+                                    "settings-use-media-servers",
+                                    app_shared_text(AppTextKey::SettingsGeneralUseMediaServers),
+                                    Option::<SharedString>::None,
+                                ),
+                                general_use_media_servers,
+                                cx,
+                                |_, _, _| {},
+                            ))
+                            .child(div().flex_none().child(action_button_compact(
+                                "settings-manage-media-servers",
+                                app_shared_text(AppTextKey::SettingsGeneralManageAction),
+                                |_, _, _| {},
+                                cx,
+                            ))),
+                    )
+                    .child(
+                        div()
+                            .w_full()
+                            .flex()
+                            .items_start()
+                            .gap(px(APP_UI_THEME.shells.settings_account_detail_value_gap_px))
+                            .child(app_checkbox_field(
+                                AppCheckboxFieldSpec::new(
+                                    "settings-use-nip05",
+                                    app_shared_text(AppTextKey::SettingsGeneralUseNip05),
+                                    Some(app_shared_text(AppTextKey::SettingsGeneralUseNip05Note)),
+                                ),
+                                general_use_nip05,
+                                cx,
+                                |_, _, _| {},
+                            )),
+                    )
+                    .child(
+                        div()
+                            .w_full()
+                            .flex()
+                            .items_start()
+                            .gap(px(APP_UI_THEME.shells.settings_account_detail_value_gap_px))
+                            .child(app_checkbox_field(
+                                AppCheckboxFieldSpec::new(
+                                    "settings-launch-at-login",
+                                    app_shared_text(AppTextKey::SettingsGeneralLaunchAtLogin),
+                                    Option::<SharedString>::None,
+                                ),
+                                general_launch_at_login,
+                                cx,
+                                |_, _, _| {},
+                            )),
+                    ),
             )
             .into_any_element(),
         );
 
-        settings_inventory_panel(AppTextKey::SettingsSettingsPanelBody, cards)
+        app_scroll_panel(
+            "settings-panel-scroll",
+            APP_UI_THEME.shells.settings_content_padding_px,
+            Some(560.0),
+            app_stack_v(APP_UI_THEME.shells.home_stack_gap_px)
+                .w_full()
+                .child(home_body_text(app_shared_text(
+                    AppTextKey::SettingsSettingsPanelBody,
+                )))
+                .children(cards),
+        )
     }
 
     fn farm_panel(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
@@ -3683,7 +3671,17 @@ impl SettingsWindowView {
                 )
                 .into_any_element(),
             );
-            return settings_inventory_panel(AppTextKey::SettingsFarmPanelBody, cards);
+            return app_scroll_panel(
+                "settings-panel-scroll",
+                APP_UI_THEME.shells.settings_content_padding_px,
+                Some(560.0),
+                app_stack_v(APP_UI_THEME.shells.home_stack_gap_px)
+                    .w_full()
+                    .child(home_body_text(app_shared_text(
+                        AppTextKey::SettingsFarmPanelBody,
+                    )))
+                    .children(cards),
+            );
         }
 
         let Some(form) = self.farm_panel_state.as_ref() else {
@@ -3694,7 +3692,17 @@ impl SettingsWindowView {
                 )
                 .into_any_element(),
             );
-            return settings_inventory_panel(AppTextKey::SettingsFarmPanelBody, cards);
+            return app_scroll_panel(
+                "settings-panel-scroll",
+                APP_UI_THEME.shells.settings_content_padding_px,
+                Some(560.0),
+                app_stack_v(APP_UI_THEME.shells.home_stack_gap_px)
+                    .w_full()
+                    .child(home_body_text(app_shared_text(
+                        AppTextKey::SettingsFarmPanelBody,
+                    )))
+                    .children(cards),
+            );
         };
 
         let evaluation = form.evaluate(cx);
@@ -3718,22 +3726,31 @@ impl SettingsWindowView {
         cards.push(
             home_card(
                 app_shared_text(AppTextKey::HomeFarmSetupSectionFarm),
-                div()
+                app_stack_v(12.0)
                     .w_full()
-                    .flex()
-                    .flex_col()
-                    .gap(px(12.0))
-                    .child(settings_text_field(
-                        AppTextKey::HomeFarmSetupFieldFarmName,
+                    .child(app_form_input_text(
+                        AppFormFieldSpec::new(
+                            app_shared_text(AppTextKey::HomeFarmSetupFieldFarmName),
+                            Option::<SharedString>::None,
+                        ),
                         &form.farm_name_input,
+                        false,
                     ))
-                    .child(settings_text_field(
-                        AppTextKey::SettingsFarmFieldTimezone,
+                    .child(app_form_input_text(
+                        AppFormFieldSpec::new(
+                            app_shared_text(AppTextKey::SettingsFarmFieldTimezone),
+                            Option::<SharedString>::None,
+                        ),
                         &form.timezone_input,
+                        false,
                     ))
-                    .child(settings_text_field(
-                        AppTextKey::SettingsFarmFieldCurrency,
+                    .child(app_form_input_text(
+                        AppFormFieldSpec::new(
+                            app_shared_text(AppTextKey::SettingsFarmFieldCurrency),
+                            Option::<SharedString>::None,
+                        ),
                         &form.currency_input,
+                        false,
                     )),
             )
             .into_any_element(),
@@ -3773,10 +3790,9 @@ impl SettingsWindowView {
                             .collect::<Vec<_>>(),
                     )
                     .child(
-                        settings_dynamic_action_button(
+                        action_button_compact(
                             "settings-farm-add-pickup",
                             app_shared_text(AppTextKey::SettingsPickupLocationsAddAction),
-                            false,
                             cx.listener(|this, _, window, cx| this.add_pickup_location(window, cx)),
                             cx,
                         )
@@ -3789,7 +3805,17 @@ impl SettingsWindowView {
             .into_any_element(),
         );
 
-        settings_inventory_panel(AppTextKey::SettingsFarmPanelBody, cards)
+        app_scroll_panel(
+            "settings-panel-scroll",
+            APP_UI_THEME.shells.settings_content_padding_px,
+            Some(560.0),
+            app_stack_v(APP_UI_THEME.shells.home_stack_gap_px)
+                .w_full()
+                .child(home_body_text(app_shared_text(
+                    AppTextKey::SettingsFarmPanelBody,
+                )))
+                .children(cards),
+        )
     }
 
     fn about_panel(&self) -> impl IntoElement {
@@ -3804,36 +3830,24 @@ impl SettingsWindowView {
                     app_stack_v(APP_UI_THEME.shells.settings_account_main_stack_gap_px)
                         .w_full()
                         .justify_between()
-                        .text_size(px(APP_UI_THEME.foundation.typography.body_text_px))
-                        .text_color(rgb(APP_UI_THEME.foundation.text.secondary))
-                        .child(app_shared_text(
+                        .child(home_body_text(app_shared_text(
                             AppTextKey::SettingsAboutPlaceholderTopPrimary,
-                        ))
-                        .child(app_shared_text(
+                        )))
+                        .child(home_body_text(app_shared_text(
                             AppTextKey::SettingsAboutPlaceholderTopSecondary,
-                        ))
-                        .child(app_shared_text(
+                        )))
+                        .child(home_body_text(app_shared_text(
                             AppTextKey::SettingsAboutPlaceholderTopTertiary,
-                        )),
+                        ))),
                 )
                 .child(section_divider())
-                .child(
-                    div()
-                        .w_full()
-                        .py_12()
-                        .text_size(px(APP_UI_THEME.foundation.typography.body_text_px))
-                        .text_color(rgb(APP_UI_THEME.foundation.text.secondary))
-                        .child(app_shared_text(AppTextKey::SettingsAboutPlaceholderMiddle)),
-                )
+                .child(div().w_full().py_12().child(home_body_text(app_shared_text(
+                    AppTextKey::SettingsAboutPlaceholderMiddle,
+                ))))
                 .child(section_divider())
-                .child(
-                    div()
-                        .w_full()
-                        .py_12()
-                        .text_size(px(APP_UI_THEME.foundation.typography.body_text_px))
-                        .text_color(rgb(APP_UI_THEME.foundation.text.secondary))
-                        .child(app_shared_text(AppTextKey::SettingsAboutPlaceholderBottom)),
-                ),
+                .child(div().w_full().py_12().child(home_body_text(app_shared_text(
+                    AppTextKey::SettingsAboutPlaceholderBottom,
+                )))),
         )
     }
 
@@ -5844,17 +5858,9 @@ fn home_farm_setup_order_method_section(
                 move |checked, window, cx| on_shipping_change(&checked, window, cx),
             ))
             .when_some(blocker_key, |this, blocker_key| {
-                this.child(home_farm_setup_blocker(blocker_key))
+                this.child(home_body_text(app_shared_text(blocker_key)))
             }),
     )
-}
-
-fn home_farm_setup_blocker(key: AppTextKey) -> impl IntoElement {
-    div()
-        .text_size(px(APP_UI_THEME.foundation.typography.utility_title_text_px))
-        .line_height(relative(1.2))
-        .text_color(rgb(APP_UI_THEME.foundation.text.secondary))
-        .child(app_shared_text(key))
 }
 
 fn settings_panel_farm_context(runtime: &DesktopAppRuntimeSummary) -> Option<(String, FarmId)> {
@@ -5877,14 +5883,6 @@ fn settings_panel_farm_context(runtime: &DesktopAppRuntimeSummary) -> Option<(St
             .map(|farm| farm.farm_id))?;
 
     Some((account_id, farm_id))
-}
-
-fn settings_text_field(label_key: AppTextKey, input: &Entity<InputState>) -> impl IntoElement {
-    app_form_input_text(
-        AppFormFieldSpec::new(app_shared_text(label_key), Option::<SharedString>::None),
-        input,
-        false,
-    )
 }
 
 fn settings_pickup_location_title(
@@ -5927,10 +5925,9 @@ fn settings_pickup_location_card(
             ))
             .into_any_element()
         } else {
-            settings_dynamic_action_button(
+            action_button_compact(
                 ("settings-farm-default-pickup", index),
                 app_shared_text(AppTextKey::SettingsPickupLocationsMakeDefaultAction),
-                false,
                 on_make_default,
                 cx,
             )
@@ -5938,10 +5935,9 @@ fn settings_pickup_location_card(
         })
         .when(pickup_location.can_remove, |this| {
             this.child(
-                settings_dynamic_action_button(
+                action_button_compact(
                     ("settings-farm-remove-pickup", index),
                     app_shared_text(AppTextKey::SettingsPickupLocationsRemoveAction),
-                    false,
                     on_remove,
                     cx,
                 )
@@ -5949,42 +5945,51 @@ fn settings_pickup_location_card(
             )
         });
 
-    div()
-        .w_full()
-        .bg(rgb(APP_UI_THEME.foundation.surfaces.chrome_background))
-        .rounded(px(APP_UI_THEME.foundation.radii.medium_px))
-        .p(px(12.0))
-        .flex()
-        .flex_col()
-        .gap(px(10.0))
-        .child(
-            div()
-                .w_full()
-                .flex()
-                .items_start()
-                .justify_between()
-                .gap(px(8.0))
-                .child(
-                    div()
-                        .text_size(px(APP_UI_THEME.foundation.typography.body_text_px))
-                        .font_weight(gpui::FontWeight::SEMIBOLD)
-                        .text_color(rgb(APP_UI_THEME.foundation.text.primary))
-                        .child(title),
-                )
-                .child(action_row),
-        )
-        .child(settings_text_field(
-            AppTextKey::SettingsPickupLocationsFieldLabel,
-            &pickup_location.label_input,
-        ))
-        .child(settings_text_field(
-            AppTextKey::SettingsPickupLocationsFieldAddress,
-            &pickup_location.address_input,
-        ))
-        .child(settings_text_field(
-            AppTextKey::SettingsPickupLocationsFieldDirections,
-            &pickup_location.directions_input,
-        ))
+    app_surface_panel(
+        app_stack_v(10.0)
+            .w_full()
+            .p(px(12.0))
+            .child(
+                div()
+                    .w_full()
+                    .flex()
+                    .items_start()
+                    .justify_between()
+                    .gap(px(8.0))
+                    .child(
+                        div()
+                            .text_size(px(APP_UI_THEME.foundation.typography.body_text_px))
+                            .font_weight(gpui::FontWeight::SEMIBOLD)
+                            .text_color(rgb(APP_UI_THEME.foundation.text.primary))
+                            .child(title),
+                    )
+                    .child(action_row),
+            )
+            .child(app_form_input_text(
+                AppFormFieldSpec::new(
+                    app_shared_text(AppTextKey::SettingsPickupLocationsFieldLabel),
+                    Option::<SharedString>::None,
+                ),
+                &pickup_location.label_input,
+                false,
+            ))
+            .child(app_form_input_text(
+                AppFormFieldSpec::new(
+                    app_shared_text(AppTextKey::SettingsPickupLocationsFieldAddress),
+                    Option::<SharedString>::None,
+                ),
+                &pickup_location.address_input,
+                false,
+            ))
+            .child(app_form_input_text(
+                AppFormFieldSpec::new(
+                    app_shared_text(AppTextKey::SettingsPickupLocationsFieldDirections),
+                    Option::<SharedString>::None,
+                ),
+                &pickup_location.directions_input,
+                false,
+            )),
+    )
 }
 
 fn settings_fulfillment_window_title(
@@ -6031,14 +6036,6 @@ fn settings_blackout_period_title(
     }
 }
 
-fn settings_validation_rows(keys: &[AppTextKey]) -> Vec<AnyElement> {
-    keys.iter()
-        .copied()
-        .map(home_farm_setup_blocker)
-        .map(IntoElement::into_any_element)
-        .collect()
-}
-
 fn settings_fulfillment_window_card(
     index: usize,
     fulfillment_window: &SettingsFulfillmentWindowFormState,
@@ -6047,72 +6044,90 @@ fn settings_fulfillment_window_card(
     on_remove: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
     cx: &App,
 ) -> impl IntoElement {
-    div()
-        .w_full()
-        .bg(rgb(APP_UI_THEME.foundation.surfaces.chrome_background))
-        .rounded(px(APP_UI_THEME.foundation.radii.medium_px))
-        .p(px(12.0))
-        .flex()
-        .flex_col()
-        .gap(px(10.0))
-        .child(
-            div()
-                .w_full()
-                .flex()
-                .items_start()
-                .justify_between()
-                .gap(px(8.0))
-                .child(
-                    div()
-                        .text_size(px(APP_UI_THEME.foundation.typography.body_text_px))
-                        .font_weight(gpui::FontWeight::SEMIBOLD)
-                        .text_color(rgb(APP_UI_THEME.foundation.text.primary))
-                        .child(settings_fulfillment_window_title(
-                            index,
-                            fulfillment_window,
-                            cx,
-                        )),
-                )
-                .child(
-                    settings_dynamic_action_button(
-                        ("settings-remove-fulfillment-window", index),
-                        app_shared_text(AppTextKey::SettingsFulfillmentWindowsRemoveAction),
-                        false,
-                        on_remove,
-                        cx,
+    app_surface_panel(
+        app_stack_v(10.0)
+            .w_full()
+            .p(px(12.0))
+            .child(
+                div()
+                    .w_full()
+                    .flex()
+                    .items_start()
+                    .justify_between()
+                    .gap(px(8.0))
+                    .child(
+                        div()
+                            .text_size(px(APP_UI_THEME.foundation.typography.body_text_px))
+                            .font_weight(gpui::FontWeight::SEMIBOLD)
+                            .text_color(rgb(APP_UI_THEME.foundation.text.primary))
+                            .child(settings_fulfillment_window_title(
+                                index,
+                                fulfillment_window,
+                                cx,
+                            )),
                     )
-                    .into_any_element(),
+                    .child(
+                        action_button_compact(
+                            ("settings-remove-fulfillment-window", index),
+                            app_shared_text(AppTextKey::SettingsFulfillmentWindowsRemoveAction),
+                            on_remove,
+                            cx,
+                        )
+                        .into_any_element(),
+                    ),
+            )
+            .child(app_form_input_text(
+                AppFormFieldSpec::new(
+                    app_shared_text(AppTextKey::SettingsFulfillmentWindowsFieldLabel),
+                    Option::<SharedString>::None,
                 ),
-        )
-        .child(settings_text_field(
-            AppTextKey::SettingsFulfillmentWindowsFieldLabel,
-            &fulfillment_window.label_input,
-        ))
-        .child(app_form_field(
-            AppFormFieldSpec::new(
-                app_shared_text(AppTextKey::SettingsFulfillmentWindowsFieldPickupLocation),
-                Option::<SharedString>::None,
+                &fulfillment_window.label_input,
+                false,
+            ))
+            .child(app_form_field(
+                AppFormFieldSpec::new(
+                    app_shared_text(AppTextKey::SettingsFulfillmentWindowsFieldPickupLocation),
+                    Option::<SharedString>::None,
+                ),
+                div()
+                    .w_full()
+                    .flex()
+                    .flex_wrap()
+                    .gap(px(8.0))
+                    .children(pickup_location_options),
+            ))
+            .child(app_form_input_text(
+                AppFormFieldSpec::new(
+                    app_shared_text(AppTextKey::SettingsFulfillmentWindowsFieldStartsAt),
+                    Option::<SharedString>::None,
+                ),
+                &fulfillment_window.starts_at_input,
+                false,
+            ))
+            .child(app_form_input_text(
+                AppFormFieldSpec::new(
+                    app_shared_text(AppTextKey::SettingsFulfillmentWindowsFieldEndsAt),
+                    Option::<SharedString>::None,
+                ),
+                &fulfillment_window.ends_at_input,
+                false,
+            ))
+            .child(app_form_input_text(
+                AppFormFieldSpec::new(
+                    app_shared_text(AppTextKey::SettingsFulfillmentWindowsFieldOrderCutoff),
+                    Option::<SharedString>::None,
+                ),
+                &fulfillment_window.order_cutoff_input,
+                false,
+            ))
+            .children(
+                validation_keys
+                    .iter()
+                    .copied()
+                    .map(|key| home_body_text(app_shared_text(key)).into_any_element())
+                    .collect::<Vec<_>>(),
             ),
-            div()
-                .w_full()
-                .flex()
-                .flex_wrap()
-                .gap(px(8.0))
-                .children(pickup_location_options),
-        ))
-        .child(settings_text_field(
-            AppTextKey::SettingsFulfillmentWindowsFieldStartsAt,
-            &fulfillment_window.starts_at_input,
-        ))
-        .child(settings_text_field(
-            AppTextKey::SettingsFulfillmentWindowsFieldEndsAt,
-            &fulfillment_window.ends_at_input,
-        ))
-        .child(settings_text_field(
-            AppTextKey::SettingsFulfillmentWindowsFieldOrderCutoff,
-            &fulfillment_window.order_cutoff_input,
-        ))
-        .children(settings_validation_rows(validation_keys))
+    )
 }
 
 fn settings_blackout_period_card(
@@ -6122,52 +6137,66 @@ fn settings_blackout_period_card(
     on_remove: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
     cx: &App,
 ) -> impl IntoElement {
-    div()
-        .w_full()
-        .bg(rgb(APP_UI_THEME.foundation.surfaces.chrome_background))
-        .rounded(px(APP_UI_THEME.foundation.radii.medium_px))
-        .p(px(12.0))
-        .flex()
-        .flex_col()
-        .gap(px(10.0))
-        .child(
-            div()
-                .w_full()
-                .flex()
-                .items_start()
-                .justify_between()
-                .gap(px(8.0))
-                .child(
-                    div()
-                        .text_size(px(APP_UI_THEME.foundation.typography.body_text_px))
-                        .font_weight(gpui::FontWeight::SEMIBOLD)
-                        .text_color(rgb(APP_UI_THEME.foundation.text.primary))
-                        .child(settings_blackout_period_title(index, blackout_period, cx)),
-                )
-                .child(
-                    settings_dynamic_action_button(
-                        ("settings-remove-blackout-period", index),
-                        app_shared_text(AppTextKey::SettingsBlackoutPeriodsRemoveAction),
-                        false,
-                        on_remove,
-                        cx,
+    app_surface_panel(
+        app_stack_v(10.0)
+            .w_full()
+            .p(px(12.0))
+            .child(
+                div()
+                    .w_full()
+                    .flex()
+                    .items_start()
+                    .justify_between()
+                    .gap(px(8.0))
+                    .child(
+                        div()
+                            .text_size(px(APP_UI_THEME.foundation.typography.body_text_px))
+                            .font_weight(gpui::FontWeight::SEMIBOLD)
+                            .text_color(rgb(APP_UI_THEME.foundation.text.primary))
+                            .child(settings_blackout_period_title(index, blackout_period, cx)),
                     )
-                    .into_any_element(),
+                    .child(
+                        action_button_compact(
+                            ("settings-remove-blackout-period", index),
+                            app_shared_text(AppTextKey::SettingsBlackoutPeriodsRemoveAction),
+                            on_remove,
+                            cx,
+                        )
+                        .into_any_element(),
+                    ),
+            )
+            .child(app_form_input_text(
+                AppFormFieldSpec::new(
+                    app_shared_text(AppTextKey::SettingsBlackoutPeriodsFieldLabel),
+                    Option::<SharedString>::None,
                 ),
-        )
-        .child(settings_text_field(
-            AppTextKey::SettingsBlackoutPeriodsFieldLabel,
-            &blackout_period.label_input,
-        ))
-        .child(settings_text_field(
-            AppTextKey::SettingsBlackoutPeriodsFieldStartsAt,
-            &blackout_period.starts_at_input,
-        ))
-        .child(settings_text_field(
-            AppTextKey::SettingsBlackoutPeriodsFieldEndsAt,
-            &blackout_period.ends_at_input,
-        ))
-        .children(settings_validation_rows(validation_keys))
+                &blackout_period.label_input,
+                false,
+            ))
+            .child(app_form_input_text(
+                AppFormFieldSpec::new(
+                    app_shared_text(AppTextKey::SettingsBlackoutPeriodsFieldStartsAt),
+                    Option::<SharedString>::None,
+                ),
+                &blackout_period.starts_at_input,
+                false,
+            ))
+            .child(app_form_input_text(
+                AppFormFieldSpec::new(
+                    app_shared_text(AppTextKey::SettingsBlackoutPeriodsFieldEndsAt),
+                    Option::<SharedString>::None,
+                ),
+                &blackout_period.ends_at_input,
+                false,
+            ))
+            .children(
+                validation_keys
+                    .iter()
+                    .copied()
+                    .map(|key| home_body_text(app_shared_text(key)).into_any_element())
+                    .collect::<Vec<_>>(),
+            ),
+    )
 }
 
 fn settings_farm_readiness_rows(evaluation: &SettingsFarmRulesEvaluation) -> Vec<AnyElement> {
@@ -6179,8 +6208,15 @@ fn settings_farm_readiness_rows(evaluation: &SettingsFarmRulesEvaluation) -> Vec
 
     readiness_keys
         .into_iter()
-        .map(settings_inventory_field_row)
-        .map(IntoElement::into_any_element)
+        .map(|key| {
+            app_surface_panel(
+                div()
+                    .px(px(12.0))
+                    .py(px(10.0))
+                    .child(home_farm_setup_field_label(app_shared_text(key))),
+            )
+            .into_any_element()
+        })
         .collect()
 }
 
@@ -6218,86 +6254,25 @@ fn settings_timing_conflict_key(kind: FarmTimingConflictKind) -> AppTextKey {
     }
 }
 
-fn settings_dynamic_action_button(
-    id: impl Into<gpui::ElementId>,
-    label: impl Into<SharedString>,
-    is_primary: bool,
-    on_click: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
-    cx: &App,
-) -> impl IntoElement {
-    let sizing = APP_UI_THEME.components.app_button.sizing;
-    let colors = if is_primary {
-        APP_UI_THEME.components.app_button.primary_colors
-    } else {
-        APP_UI_THEME.components.app_button.secondary_colors
-    };
-    let hover_background = if colors.hover_changes_background {
-        colors.hover_background
-    } else {
-        colors.background
-    };
-    let label = label.into();
-
-    Button::new(id)
-        .custom(
-            ButtonCustomVariant::new(cx)
-                .color(rgb(colors.background).into())
-                .foreground(rgb(colors.foreground).into())
-                .border(transparent_black())
-                .hover(rgb(hover_background).into())
-                .active(rgb(colors.active_background).into()),
-        )
-        .rounded(ButtonRounded::Size(px(sizing.corner_radius_px)))
-        .h(px(sizing.height_px))
-        .on_click(on_click)
-        .child(
-            div()
-                .h_full()
-                .flex()
-                .items_center()
-                .justify_center()
-                .px(px(sizing.compact_horizontal_padding_px))
-                .text_size(px(sizing.label_size_px))
-                .text_color(rgb(colors.foreground))
-                .child(label),
-        )
-}
-
-fn settings_inventory_panel(intro_key: AppTextKey, cards: Vec<AnyElement>) -> impl IntoElement {
-    let content_max_width_px = 560.0;
-
-    app_scroll_panel(
-        "settings-panel-scroll",
-        APP_UI_THEME.shells.settings_content_padding_px,
-        Some(content_max_width_px),
-        app_stack_v(APP_UI_THEME.shells.home_stack_gap_px)
-            .w_full()
-            .child(home_body_text(app_shared_text(intro_key)))
-            .children(cards),
-    )
-}
-
 #[cfg(test)]
 fn settings_inventory_card(spec: SettingsInventorySectionSpec) -> impl IntoElement {
     home_card(
         app_shared_text(spec.title_key),
-        div().w_full().flex().flex_col().gap(px(8.0)).children(
+        app_stack_v(8.0).w_full().children(
             spec.field_keys
                 .iter()
                 .copied()
-                .map(settings_inventory_field_row)
-                .map(IntoElement::into_any_element)
+                .map(|key| {
+                    app_surface_panel(
+                        div()
+                            .px(px(12.0))
+                            .py(px(10.0))
+                            .child(home_farm_setup_field_label(app_shared_text(key))),
+                    )
+                    .into_any_element()
+                })
                 .collect::<Vec<_>>(),
         ),
-    )
-}
-
-fn settings_inventory_field_row(key: AppTextKey) -> impl IntoElement {
-    app_surface_panel(
-        div()
-            .px(px(12.0))
-            .py(px(10.0))
-            .child(home_farm_setup_field_label(app_shared_text(key))),
     )
 }
 

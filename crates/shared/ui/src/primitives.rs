@@ -309,6 +309,25 @@ pub fn label_value_list(rows: impl IntoIterator<Item = LabelValueRow>) -> impl I
         .children(rows)
 }
 
+pub fn app_detail_row(label: impl Into<SharedString>, value: impl IntoElement) -> impl IntoElement {
+    div()
+        .w_full()
+        .flex()
+        .items_center()
+        .gap(px(APP_UI_THEME.shells.settings_account_detail_value_gap_px))
+        .child(
+            div()
+                .text_size(px(APP_UI_THEME
+                    .foundation
+                    .typography
+                    .settings_account_detail_text_px))
+                .font_weight(gpui::FontWeight::SEMIBOLD)
+                .text_color(rgb(APP_UI_THEME.foundation.text.secondary))
+                .child(label.into()),
+        )
+        .child(value)
+}
+
 pub fn app_form_section(
     title: impl Into<SharedString>,
     content: impl IntoElement,
