@@ -4615,7 +4615,6 @@ fn home_sidebar(
     on_select_products: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
     cx: &App,
 ) -> impl IntoElement {
-    let home_status = home_status_presentation(runtime);
     let selected_section = selected_farmer_section(runtime);
     let products_available = farmer_products_available(runtime);
 
@@ -4627,20 +4626,6 @@ fn home_sidebar(
         .flex()
         .flex_col()
         .justify_between()
-        .child(
-            div()
-                .flex()
-                .flex_col()
-                .gap(px(APP_UI_THEME.layout.home_stack_gap_px))
-                .child(
-                    div()
-                        .text_size(px(APP_UI_THEME.typography.body_text_px * 2.0))
-                        .font_weight(gpui::FontWeight::BOLD)
-                        .text_color(rgb(APP_UI_THEME.text.primary))
-                        .child(app_shared_text(AppTextKey::AppName)),
-                )
-                .child(home_status_row(&home_status)),
-        )
         .child(
             div()
                 .flex_1()
@@ -4679,8 +4664,6 @@ fn home_sidebar(
 }
 
 fn holding_home_sidebar(runtime: &DesktopAppRuntimeSummary) -> impl IntoElement {
-    let home_status = home_status_presentation(runtime);
-
     div()
         .h_full()
         .w(px(APP_UI_THEME.layout.home_sidebar_width_px))
@@ -4699,9 +4682,8 @@ fn holding_home_sidebar(runtime: &DesktopAppRuntimeSummary) -> impl IntoElement 
                         .text_size(px(APP_UI_THEME.typography.body_text_px * 2.0))
                         .font_weight(gpui::FontWeight::BOLD)
                         .text_color(rgb(APP_UI_THEME.text.primary))
-                        .child(app_shared_text(AppTextKey::AppName)),
-                )
-                .child(home_status_row(&home_status)),
+                        .child(app_shared_text(AppTextKey::HomeTodayTitle)),
+                ),
         )
         .child(
             div().child(

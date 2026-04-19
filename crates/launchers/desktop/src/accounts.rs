@@ -1,31 +1,24 @@
 use std::{
-    env, fs,
+    fs,
     path::{Path, PathBuf},
 };
 
 use radroots_studio_app_core::AppSharedAccountsPaths;
 use radroots_studio_app_models::{
     AccountSummary, AccountSurfaceActivationProjection, ActiveSurface, AppIdentityProjection,
-    FarmerActivationProjection, IdentityBlockedReason, SelectedAccountProjection,
-    SelectedSurfaceProjection,
+    FarmId, FarmerActivationProjection, SelectedAccountProjection, SelectedSurfaceProjection,
 };
 use radroots_studio_app_sqlite::{AppSqliteError, AppSqliteStore};
 use radroots_identity::{IdentityError, RadrootsIdentity, RadrootsIdentityId};
 use radroots_nostr_accounts::prelude::{
-    RadrootsNostrAccountRecord, RadrootsNostrAccountStore, RadrootsNostrAccountStoreState,
-    RadrootsNostrAccountsError, RadrootsNostrAccountsManager, RadrootsNostrFileAccountStore,
+    RadrootsNostrAccountRecord, RadrootsNostrAccountsError, RadrootsNostrAccountsManager,
     RadrootsNostrSelectedAccountStatus,
 };
 use radroots_secret_vault::{
-    RadrootsHostVaultCapabilities, RadrootsHostVaultPolicy, RadrootsSecretBackend,
-    RadrootsSecretBackendAvailability, RadrootsSecretBackendSelection, RadrootsSecretVault,
-    RadrootsSecretVaultError, RadrootsSecretVaultOsKeyring,
+    RadrootsHostVaultCapabilities, RadrootsSecretBackend, RadrootsSecretBackendAvailability,
+    RadrootsSecretBackendSelection,
 };
 use thiserror::Error;
-
-const HOST_VAULT_AVAILABILITY_OVERRIDE_ENV: &str = "RADROOTS_APP_HOST_VAULT_AVAILABLE";
-const HOST_VAULT_SERVICE_NAME: &str = "org.radroots.app.local-account";
-const HOST_VAULT_PROBE_SLOT: &str = "__radroots_studio_app_host_vault_probe__";
 
 pub struct DesktopAccountsBootstrap {
     pub accounts_manager: Option<RadrootsNostrAccountsManager>,
@@ -184,38 +177,19 @@ fn bootstrap_desktop_accounts_with_availability(
     ensure_directory(paths.secrets_root.as_path())?;
 
     let selection = local_account_secret_backend_selection();
-    let store = RadrootsNostrFileAccountStore::new(paths.store_path.as_path());
+    let (accounts_manager, _) = RadrootsNostrAccountsManager::new_local_file_backed(
+        paths.store_path.as_path(),
+        paths.secrets_root.as_path(),
+        selection,
+        availability,
+        "radroots_studio_app_encrypted_file",
+    )?;
+    let identity_projection = identity_projection_from_manager(&accounts_manager, sqlite_store)?;
 
-    match RadrootsNostrAccountsManager::resolve_local_backend(selection, availability) {
-        Ok(_) => {
-            let (accounts_manager, _) = RadrootsNostrAccountsManager::new_local_file_backed(
-                paths.store_path.as_path(),
-                paths.secrets_root.as_path(),
-                selection,
-                availability,
-                HOST_VAULT_SERVICE_NAME,
-            )?;
-            let identity_projection =
-                identity_projection_from_manager(&accounts_manager, sqlite_store)?;
-
-            Ok(DesktopAccountsBootstrap {
-                accounts_manager: Some(accounts_manager),
-                identity_projection,
-            })
-        }
-        Err(RadrootsSecretVaultError::BackendUnavailable { .. })
-        | Err(RadrootsSecretVaultError::FallbackUnavailable { .. }) => {
-            let state = store.load()?;
-            let identity_projection =
-                blocked_identity_projection_from_store_state(state, sqlite_store)?;
-
-            Ok(DesktopAccountsBootstrap {
-                accounts_manager: None,
-                identity_projection,
-            })
-        }
-        Err(error) => Err(error.into()),
-    }
+    Ok(DesktopAccountsBootstrap {
+        accounts_manager: Some(accounts_manager),
+        identity_projection,
+    })
 }
 
 fn ensure_directory(path: &Path) -> Result<(), DesktopAccountsBootstrapError> {
@@ -227,7 +201,7 @@ fn ensure_directory(path: &Path) -> Result<(), DesktopAccountsBootstrapError> {
 
 fn local_account_secret_backend_selection() -> RadrootsSecretBackendSelection {
     RadrootsSecretBackendSelection {
-        primary: RadrootsSecretBackend::HostVault(RadrootsHostVaultPolicy::desktop()),
+        primary: RadrootsSecretBackend::EncryptedFile,
         fallback: None,
     }
 }
@@ -235,45 +209,11 @@ fn local_account_secret_backend_selection() -> RadrootsSecretBackendSelection {
 fn secret_backend_availability()
 -> Result<RadrootsSecretBackendAvailability, DesktopAccountsBootstrapError> {
     Ok(RadrootsSecretBackendAvailability {
-        host_vault: host_vault_capabilities()?,
-        encrypted_file: false,
+        host_vault: RadrootsHostVaultCapabilities::unavailable(),
+        encrypted_file: true,
         external_command: false,
         memory: false,
     })
-}
-
-fn host_vault_capabilities() -> Result<RadrootsHostVaultCapabilities, DesktopAccountsBootstrapError>
-{
-    if let Some(available) = host_vault_availability_override()? {
-        return Ok(match available {
-            true => RadrootsHostVaultCapabilities::desktop_keyring(),
-            false => RadrootsHostVaultCapabilities::unavailable(),
-        });
-    }
-
-    let keyring = RadrootsSecretVaultOsKeyring::new(HOST_VAULT_SERVICE_NAME);
-    match keyring.load_secret(HOST_VAULT_PROBE_SLOT) {
-        Ok(_) => Ok(RadrootsHostVaultCapabilities::desktop_keyring()),
-        Err(_) => Ok(RadrootsHostVaultCapabilities::unavailable()),
-    }
-}
-
-fn host_vault_availability_override() -> Result<Option<bool>, DesktopAccountsBootstrapError> {
-    let Ok(value) = env::var(HOST_VAULT_AVAILABILITY_OVERRIDE_ENV) else {
-        return Ok(None);
-    };
-
-    parse_bool_value(HOST_VAULT_AVAILABILITY_OVERRIDE_ENV, value.trim()).map(Some)
-}
-
-fn parse_bool_value(key: &str, value: &str) -> Result<bool, DesktopAccountsBootstrapError> {
-    match value.trim().to_ascii_lowercase().as_str() {
-        "1" | "true" | "yes" | "on" => Ok(true),
-        "0" | "false" | "no" | "off" => Ok(false),
-        other => Err(DesktopAccountsBootstrapError::Configuration(format!(
-            "{key} must be a boolean value, got `{other}`"
-        ))),
-    }
 }
 
 fn import_identity(
@@ -306,19 +246,6 @@ fn remove_accounts_file_if_present(path: &Path) -> Result<(), DesktopAccountsCom
     }
 }
 
-fn blocked_identity_projection_from_store_state(
-    state: RadrootsNostrAccountStoreState,
-    sqlite_store: &AppSqliteStore,
-) -> Result<AppIdentityProjection, DesktopAccountsProjectionError> {
-    let selected_account = selected_account_from_store_state(&state, sqlite_store)?;
-
-    Ok(AppIdentityProjection::blocked_with_selection(
-        IdentityBlockedReason::HostVaultUnavailable,
-        account_roster_from_records(state.accounts.as_slice()),
-        selected_account,
-    ))
-}
-
 pub(crate) fn identity_projection_from_manager(
     manager: &RadrootsNostrAccountsManager,
     sqlite_store: &AppSqliteStore,
@@ -340,24 +267,6 @@ pub(crate) fn identity_projection_from_manager(
     }
 }
 
-fn selected_account_from_store_state(
-    state: &RadrootsNostrAccountStoreState,
-    sqlite_store: &AppSqliteStore,
-) -> Result<Option<SelectedAccountProjection>, DesktopAccountsProjectionError> {
-    let Some(selected_account_id) = state.selected_account_id.as_ref() else {
-        return Ok(None);
-    };
-    let Some(record) = state
-        .accounts
-        .iter()
-        .find(|record| &record.account_id == selected_account_id)
-    else {
-        return Ok(None);
-    };
-
-    selected_account_projection_from_record(record, sqlite_store).map(Some)
-}
-
 fn selected_account_projection_from_record(
     record: &RadrootsNostrAccountRecord,
     sqlite_store: &AppSqliteStore,
@@ -369,12 +278,20 @@ fn selected_account_projection_from_record(
             Some(activation) => {
                 SelectedAccountProjection::from_surface_activation(account, activation)
             }
-            None => SelectedAccountProjection::new(
-                account,
-                SelectedSurfaceProjection::default(),
-                FarmerActivationProjection::inactive(),
-            ),
+            None => {
+                let activation = default_farmer_surface_activation(account.account_id.as_str());
+                sqlite_store.save_surface_activation(&activation)?;
+                SelectedAccountProjection::from_surface_activation(account, activation)
+            }
         },
+    )
+}
+
+fn default_farmer_surface_activation(account_id: &str) -> AccountSurfaceActivationProjection {
+    AccountSurfaceActivationProjection::new(
+        account_id,
+        SelectedSurfaceProjection::new(ActiveSurface::Farmer),
+        FarmerActivationProjection::active(FarmId::new()),
     )
 }
 
@@ -429,10 +346,6 @@ pub enum DesktopAccountsBootstrapError {
     Accounts(#[from] RadrootsNostrAccountsError),
     #[error(transparent)]
     Projection(#[from] DesktopAccountsProjectionError),
-    #[error(transparent)]
-    SecretVault(#[from] RadrootsSecretVaultError),
-    #[error("{0}")]
-    Configuration(String),
 }
 
 #[cfg(test)]
@@ -446,8 +359,8 @@ mod tests {
 
     use radroots_studio_app_core::AppSharedAccountsPaths;
     use radroots_studio_app_models::{
-        AccountSurfaceActivationProjection, ActiveSurface, AppStartupGate, IdentityBlockedReason,
-        IdentityReadiness, SelectedSurfaceProjection,
+        AccountSurfaceActivationProjection, ActiveSurface, AppStartupGate, IdentityReadiness,
+        SelectedSurfaceProjection,
     };
     use radroots_studio_app_sqlite::{AppSqliteStore, DatabaseTarget};
     use radroots_identity::RadrootsIdentity;
@@ -459,10 +372,9 @@ mod tests {
 
     use super::{
         DesktopLocalIdentityImportRequest, account_summary_from_record,
-        blocked_identity_projection_from_store_state, bootstrap_desktop_accounts_with_availability,
-        generate_local_account, identity_projection_from_manager, import_local_account,
-        remove_selected_local_key, reset_local_device_state, select_local_account,
-        selected_account_projection_from_record,
+        bootstrap_desktop_accounts_with_availability, generate_local_account,
+        identity_projection_from_manager, import_local_account, remove_selected_local_key,
+        reset_local_device_state, select_local_account, selected_account_projection_from_record,
     };
 
     fn temp_shared_accounts_paths(label: &str) -> AppSharedAccountsPaths {
@@ -490,62 +402,20 @@ mod tests {
     }
 
     #[test]
-    fn blocked_bootstrap_keeps_roster_and_selected_account_when_host_vault_is_unavailable() {
+    fn bootstrap_fails_when_encrypted_file_backend_is_unavailable() {
         let paths = temp_shared_accounts_paths("blocked");
         fs::create_dir_all(paths.data_root.as_path()).expect("data root should create");
         fs::create_dir_all(paths.secrets_root.as_path()).expect("secrets root should create");
-        let store = Arc::new(RadrootsNostrFileAccountStore::new(
-            paths.store_path.as_path(),
-        ));
-        let manager = RadrootsNostrAccountsManager::new(
-            store,
-            Arc::new(RadrootsNostrSecretVaultMemory::new()),
-        )
-        .expect("file-backed memory manager should build");
         let sqlite_store = AppSqliteStore::open(DatabaseTarget::InMemory).expect("sqlite store");
-
-        let first_account_id = manager
-            .generate_identity(Some("North field".to_owned()), true)
-            .expect("first account should generate");
-        let second_account_id = manager
-            .generate_identity(Some("South field".to_owned()), false)
-            .expect("second account should generate");
-        manager
-            .select_account(&first_account_id)
-            .expect("first account should remain selected");
-
-        let bootstrap = bootstrap_desktop_accounts_with_availability(
+        match bootstrap_desktop_accounts_with_availability(
             &paths,
             &sqlite_store,
             unavailable_secret_backend_availability(),
-        )
-        .expect("blocked bootstrap should succeed");
-
-        assert!(bootstrap.accounts_manager.is_none());
-        assert_eq!(
-            bootstrap.identity_projection.readiness,
-            IdentityReadiness::Blocked(IdentityBlockedReason::HostVaultUnavailable)
-        );
-        assert_eq!(
-            bootstrap.identity_projection.startup_gate(),
-            AppStartupGate::Blocked
-        );
-        assert_eq!(bootstrap.identity_projection.roster.len(), 2);
-        assert_eq!(
-            bootstrap
-                .identity_projection
-                .selected_account
-                .as_ref()
-                .map(|account| account.account.account_id.as_str()),
-            Some(first_account_id.as_str())
-        );
-        assert!(
-            bootstrap
-                .identity_projection
-                .roster
-                .iter()
-                .any(|account| account.account_id == second_account_id.as_str())
-        );
+        ) {
+            Err(super::DesktopAccountsBootstrapError::Accounts(_)) => {}
+            Err(other) => panic!("unexpected bootstrap error: {other}"),
+            Ok(_) => panic!("bootstrap should fail when encrypted file backend is unavailable"),
+        }
 
         cleanup_paths(&paths);
     }
@@ -576,8 +446,9 @@ mod tests {
         );
         assert_eq!(
             selected_account_projection.selected_surface,
-            SelectedSurfaceProjection::default()
+            SelectedSurfaceProjection::new(ActiveSurface::Farmer)
         );
+        assert!(selected_account_projection.farmer_activation.is_active());
 
         let activation = AccountSurfaceActivationProjection::new(
             account_id.as_str(),
@@ -616,46 +487,6 @@ mod tests {
                 .as_ref()
                 .is_some_and(|account| account.farmer_activation.is_active())
         );
-    }
-
-    #[test]
-    fn blocked_projection_from_store_state_ignores_stale_selected_account_ids() {
-        let sqlite_store = AppSqliteStore::open(DatabaseTarget::InMemory).expect("sqlite store");
-        let manager = RadrootsNostrAccountsManager::new(
-            Arc::new(RadrootsNostrMemoryAccountStore::new()),
-            Arc::new(RadrootsNostrSecretVaultMemory::new()),
-        )
-        .expect("memory manager should build");
-        let account_id = manager
-            .generate_identity(Some("North field".to_owned()), true)
-            .expect("account should generate");
-        let stale_selected_account_id = RadrootsNostrAccountsManager::new(
-            Arc::new(RadrootsNostrMemoryAccountStore::new()),
-            Arc::new(RadrootsNostrSecretVaultMemory::new()),
-        )
-        .expect("secondary memory manager should build")
-        .generate_identity(Some("South field".to_owned()), true)
-        .expect("secondary account should generate");
-        let record = manager
-            .selected_account()
-            .expect("selected account should load")
-            .expect("selected account should exist");
-        let state = radroots_nostr_accounts::prelude::RadrootsNostrAccountStoreState {
-            version: radroots_nostr_accounts::prelude::RADROOTS_NOSTR_ACCOUNTS_STORE_VERSION,
-            selected_account_id: Some(stale_selected_account_id),
-            accounts: vec![record],
-        };
-
-        let projection =
-            blocked_identity_projection_from_store_state(state, &sqlite_store).expect("projection");
-
-        assert_eq!(
-            projection.readiness,
-            IdentityReadiness::Blocked(IdentityBlockedReason::HostVaultUnavailable)
-        );
-        assert!(projection.selected_account.is_none());
-        assert_eq!(projection.roster.len(), 1);
-        assert_eq!(projection.roster[0].account_id, account_id.as_str());
     }
 
     #[test]
@@ -699,7 +530,7 @@ mod tests {
                 .map(|account| account.account.label.as_deref()),
             Some(Some("Second"))
         );
-        assert_eq!(second_projection.startup_gate(), AppStartupGate::Personal);
+        assert_eq!(second_projection.startup_gate(), AppStartupGate::Farmer);
     }
 
     #[test]
