@@ -34,19 +34,20 @@ use radroots_studio_app_state::{
 use radroots_studio_app_ui::{
     APP_UI_THEME, AppCheckboxFieldSpec, AppFormFieldSpec,
     AppSegmentButtonIconSpec as IconSegmentButtonSpec, LabelValueRow,
-    app_button_compact as action_button_compact, app_button_icon as action_icon_button,
+    app_button_choice as choice_button, app_button_compact as action_button_compact,
+    app_button_icon as action_icon_button, app_button_list_row as list_row_button,
     app_button_primary as action_button_primary,
     app_button_primary_disabled as action_button_primary_disabled,
-    app_button_secondary as action_button, app_checkbox_field, app_cluster,
-    app_divider as section_divider, app_form_field, app_form_input_text, app_form_section,
-    app_heading_section, app_heading_view, app_input_text as app_text_input, app_scroll_panel,
-    app_segment_button_icon as icon_segment_button, app_shared_label_text, app_shared_text,
-    app_split_shell, app_stack_h, app_stack_v, app_status_indicator as status_indicator,
-    app_surface_card, app_surface_card_section as home_card, app_surface_panel,
-    app_surface_sidebar, app_surface_window as app_window_shell,
-    app_text_badge as settings_badge_text, app_text_body_subtle as home_body_text,
-    app_text_label as home_farm_setup_field_label, app_text_value, label_value_list,
-    utility_title_row,
+    app_button_secondary as action_button, app_button_text as text_button, app_checkbox_field,
+    app_cluster, app_divider as section_divider, app_form_field, app_form_input_text,
+    app_form_section, app_heading_section, app_heading_view, app_input_text as app_text_input,
+    app_scroll_panel, app_segment_button_icon as icon_segment_button, app_shared_label_text,
+    app_shared_text, app_split_shell, app_stack_h, app_stack_v,
+    app_status_indicator as status_indicator, app_surface_card,
+    app_surface_card_section as home_card, app_surface_panel, app_surface_sidebar,
+    app_surface_window as app_window_shell, app_text_badge as settings_badge_text,
+    app_text_body_subtle as home_body_text, app_text_label as home_farm_setup_field_label,
+    app_text_value, label_value_list, utility_title_row,
 };
 use radroots_nostr::prelude::RadrootsNostrClient;
 use std::time::Duration;
@@ -1452,9 +1453,10 @@ impl HomeView {
             .as_ref()
             .map(|editor| editor.product_id == row.product_id)
             .unwrap_or(false);
-        let product = products_row_open_button(
+        let product = list_row_button(
             ("products-row-open", index),
-            row,
+            product_display_title(row.title.as_str()),
+            row.subtitle.clone().map(SharedString::from),
             is_open,
             cx.listener({
                 let product_id = row.product_id;
@@ -1472,7 +1474,7 @@ impl HomeView {
             )
             .into_any_element()
         } else {
-            products_row_action_button(
+            action_button_compact(
                 ("products-row-stock-action", index),
                 app_shared_text(AppTextKey::ProductsUpdateStockAction),
                 cx.listener({
@@ -4339,9 +4341,9 @@ fn startup_signer_entry_surface(
             )
             .into_any_element()
         })
-        .child(startup_text_button(
+        .child(text_button(
             "home-signer-back",
-            AppTextKey::HomeSetupBackAction,
+            app_shared_text(AppTextKey::HomeSetupBackAction),
             on_back,
             cx,
         ))
@@ -4466,32 +4468,6 @@ fn startup_signer_status_spec(
 
 fn startup_signer_transport_failure_requires_notice(message: &str) -> bool {
     message != "remote signer did not respond yet"
-}
-
-fn startup_text_button(
-    id: &'static str,
-    key: AppTextKey,
-    on_click: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
-    cx: &App,
-) -> impl IntoElement {
-    Button::new(id)
-        .custom(
-            ButtonCustomVariant::new(cx)
-                .color(transparent_black().into())
-                .foreground(rgb(APP_UI_THEME.foundation.text.secondary).into())
-                .border(transparent_black())
-                .hover(transparent_black().into())
-                .active(transparent_black().into()),
-        )
-        .rounded(ButtonRounded::Size(px(0.0)))
-        .on_click(on_click)
-        .child(
-            div()
-                .text_size(px(APP_UI_THEME.foundation.typography.body_text_px))
-                .font_weight(gpui::FontWeight::MEDIUM)
-                .text_color(rgb(APP_UI_THEME.foundation.text.secondary))
-                .child(app_shared_text(key)),
-        )
 }
 
 fn startup_home_body(runtime: &DesktopAppRuntimeSummary) -> impl IntoElement {
@@ -4929,44 +4905,44 @@ fn products_controls_card(
                     .flex()
                     .items_center()
                     .gap(px(8.0))
-                    .child(products_filter_button(
+                    .child(choice_button(
                         "products-filter-all",
-                        AppTextKey::ProductsFilterAll,
+                        app_shared_text(AppTextKey::ProductsFilterAll),
                         selected_filter == ProductsFilter::All,
                         on_select_all_products,
                         cx,
                     ))
-                    .child(products_filter_button(
+                    .child(choice_button(
                         "products-filter-live",
-                        AppTextKey::ProductsFilterLive,
+                        app_shared_text(AppTextKey::ProductsFilterLive),
                         selected_filter == ProductsFilter::Live,
                         on_select_live_products,
                         cx,
                     ))
-                    .child(products_filter_button(
+                    .child(choice_button(
                         "products-filter-drafts",
-                        AppTextKey::ProductsFilterDrafts,
+                        app_shared_text(AppTextKey::ProductsFilterDrafts),
                         selected_filter == ProductsFilter::Drafts,
                         on_select_draft_products,
                         cx,
                     ))
-                    .child(products_filter_button(
+                    .child(choice_button(
                         "products-filter-need-attention",
-                        AppTextKey::ProductsFilterNeedAttention,
+                        app_shared_text(AppTextKey::ProductsFilterNeedAttention),
                         selected_filter == ProductsFilter::NeedAttention,
                         on_select_products_needing_attention,
                         cx,
                     ))
-                    .child(products_filter_button(
+                    .child(choice_button(
                         "products-filter-paused",
-                        AppTextKey::ProductsFilterPaused,
+                        app_shared_text(AppTextKey::ProductsFilterPaused),
                         selected_filter == ProductsFilter::Paused,
                         on_select_paused_products,
                         cx,
                     ))
-                    .child(products_filter_button(
+                    .child(choice_button(
                         "products-filter-archived",
-                        AppTextKey::ProductsFilterArchived,
+                        app_shared_text(AppTextKey::ProductsFilterArchived),
                         selected_filter == ProductsFilter::Archived,
                         on_select_archived_products,
                         cx,
@@ -4991,37 +4967,37 @@ fn products_controls_card(
                             .flex()
                             .items_center()
                             .gap(px(8.0))
-                            .child(products_filter_button(
+                            .child(choice_button(
                                 "products-sort-updated",
-                                AppTextKey::ProductsSortUpdated,
+                                app_shared_text(AppTextKey::ProductsSortUpdated),
                                 selected_sort == ProductsSort::Updated,
                                 on_sort_products_by_updated,
                                 cx,
                             ))
-                            .child(products_filter_button(
+                            .child(choice_button(
                                 "products-sort-name",
-                                AppTextKey::ProductsSortName,
+                                app_shared_text(AppTextKey::ProductsSortName),
                                 selected_sort == ProductsSort::Name,
                                 on_sort_products_by_name,
                                 cx,
                             ))
-                            .child(products_filter_button(
+                            .child(choice_button(
                                 "products-sort-availability",
-                                AppTextKey::ProductsSortAvailability,
+                                app_shared_text(AppTextKey::ProductsSortAvailability),
                                 selected_sort == ProductsSort::Availability,
                                 on_sort_products_by_availability,
                                 cx,
                             ))
-                            .child(products_filter_button(
+                            .child(choice_button(
                                 "products-sort-stock",
-                                AppTextKey::ProductsSortStock,
+                                app_shared_text(AppTextKey::ProductsSortStock),
                                 selected_sort == ProductsSort::Stock,
                                 on_sort_products_by_stock,
                                 cx,
                             ))
-                            .child(products_filter_button(
+                            .child(choice_button(
                                 "products-sort-price",
-                                AppTextKey::ProductsSortPrice,
+                                app_shared_text(AppTextKey::ProductsSortPrice),
                                 selected_sort == ProductsSort::Price,
                                 on_sort_products_by_price,
                                 cx,
@@ -5029,20 +5005,6 @@ fn products_controls_card(
                     ),
             ),
     )
-}
-
-fn products_filter_button(
-    id: &'static str,
-    key: AppTextKey,
-    is_active: bool,
-    on_click: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
-    cx: &App,
-) -> impl IntoElement {
-    if is_active {
-        action_button_primary(id, app_shared_text(key), on_click, cx).into_any_element()
-    } else {
-        action_button_compact(id, app_shared_text(key), on_click, cx).into_any_element()
-    }
 }
 
 fn products_table_header() -> impl IntoElement {
@@ -5162,63 +5124,6 @@ fn products_table_row(
         .child(div().w(px(120.0)).flex().justify_end().child(action))
 }
 
-fn products_row_open_button(
-    id: (&'static str, usize),
-    row: &ProductsListRow,
-    is_open: bool,
-    on_click: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
-    cx: &App,
-) -> impl IntoElement {
-    let selected_background = rgb(APP_UI_THEME.foundation.surfaces.window_background);
-
-    Button::new(id)
-        .custom(
-            ButtonCustomVariant::new(cx)
-                .color(if is_open {
-                    selected_background.into()
-                } else {
-                    transparent_black().into()
-                })
-                .foreground(rgb(APP_UI_THEME.foundation.text.primary).into())
-                .border(transparent_black())
-                .hover(selected_background.into())
-                .active(selected_background.into()),
-        )
-        .rounded(ButtonRounded::Size(px(APP_UI_THEME
-            .foundation
-            .radii
-            .medium_px)))
-        .flex_1()
-        .min_w_0()
-        .on_click(on_click)
-        .child(
-            div()
-                .w_full()
-                .flex()
-                .flex_col()
-                .items_start()
-                .gap(px(4.0))
-                .px(px(8.0))
-                .py(px(6.0))
-                .child(
-                    div()
-                        .text_size(px(APP_UI_THEME.foundation.typography.body_text_px))
-                        .font_weight(gpui::FontWeight::MEDIUM)
-                        .text_color(rgb(APP_UI_THEME.foundation.text.primary))
-                        .child(product_display_title(row.title.as_str())),
-                )
-                .when_some(row.subtitle.as_ref(), |this, subtitle| {
-                    this.child(
-                        div()
-                            .text_size(px(APP_UI_THEME.foundation.typography.utility_title_text_px))
-                            .line_height(relative(1.2))
-                            .text_color(rgb(APP_UI_THEME.foundation.text.secondary))
-                            .child(subtitle.clone()),
-                    )
-                }),
-        )
-}
-
 fn products_empty_state_card(filter: ProductsFilter) -> impl IntoElement {
     let (title_key, body_key) = if filter == ProductsFilter::NeedAttention {
         (
@@ -5275,40 +5180,6 @@ fn products_price_text(row: &ProductsListRow) -> String {
     let cents = price.amount_minor_units % 100;
 
     format!("${dollars}.{cents:02} / {}", price.unit_label)
-}
-
-fn products_row_action_button(
-    id: (&'static str, usize),
-    label: impl Into<SharedString>,
-    on_click: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
-    cx: &App,
-) -> impl IntoElement {
-    let sizing = APP_UI_THEME.components.app_button.sizing;
-    let colors = APP_UI_THEME.components.app_button.secondary_colors;
-
-    Button::new(id)
-        .custom(
-            ButtonCustomVariant::new(cx)
-                .color(rgb(colors.background).into())
-                .foreground(rgb(colors.foreground).into())
-                .border(transparent_black())
-                .hover(rgb(colors.background).into())
-                .active(rgb(colors.active_background).into()),
-        )
-        .rounded(ButtonRounded::Size(px(sizing.corner_radius_px)))
-        .h(px(sizing.height_px))
-        .on_click(on_click)
-        .child(
-            div()
-                .h_full()
-                .flex()
-                .items_center()
-                .justify_center()
-                .px(px(sizing.compact_horizontal_padding_px))
-                .text_size(px(sizing.label_size_px))
-                .text_color(rgb(colors.foreground))
-                .child(label.into()),
-        )
 }
 
 fn products_stock_editor_card(
@@ -5468,30 +5339,45 @@ fn products_editor_surface(
                 .child(home_body_text(app_shared_text(
                     AppTextKey::ProductsEditorBody,
                 )))
-                .child(products_editor_text_field(
-                    AppTextKey::ProductsEditorFieldTitle,
+                .child(app_form_input_text(
+                    AppFormFieldSpec::new(
+                        app_shared_text(AppTextKey::ProductsEditorFieldTitle),
+                        Option::<SharedString>::None,
+                    ),
                     &form.title_input,
-                    None,
+                    false,
                 ))
-                .child(products_editor_text_field(
-                    AppTextKey::ProductsEditorFieldSubtitle,
+                .child(app_form_input_text(
+                    AppFormFieldSpec::new(
+                        app_shared_text(AppTextKey::ProductsEditorFieldSubtitle),
+                        Option::<SharedString>::None,
+                    ),
                     &form.subtitle_input,
-                    None,
+                    false,
                 ))
-                .child(products_editor_text_field(
-                    AppTextKey::ProductsEditorFieldUnit,
+                .child(app_form_input_text(
+                    AppFormFieldSpec::new(
+                        app_shared_text(AppTextKey::ProductsEditorFieldUnit),
+                        Option::<SharedString>::None,
+                    ),
                     &form.unit_input,
-                    None,
+                    false,
                 ))
-                .child(products_editor_text_field(
-                    AppTextKey::ProductsEditorFieldPrice,
+                .child(app_form_input_text(
+                    AppFormFieldSpec::new(
+                        app_shared_text(AppTextKey::ProductsEditorFieldPrice),
+                        products_editor_invalid_price_key(form, cx).map(app_shared_text),
+                    ),
                     &form.price_input,
-                    products_editor_invalid_price_key(form, cx),
+                    false,
                 ))
-                .child(products_editor_text_field(
-                    AppTextKey::ProductsEditorFieldStock,
+                .child(app_form_input_text(
+                    AppFormFieldSpec::new(
+                        app_shared_text(AppTextKey::ProductsEditorFieldStock),
+                        products_editor_invalid_stock_key(form, cx).map(app_shared_text),
+                    ),
                     &form.stock_input,
-                    products_editor_invalid_stock_key(form, cx),
+                    false,
                 ))
                 .child(products_editor_status_section(
                     form.status,
@@ -5558,26 +5444,6 @@ fn products_editor_surface(
     )
 }
 
-fn products_editor_text_field(
-    field_label_key: AppTextKey,
-    input: &Entity<InputState>,
-    validation_key: Option<AppTextKey>,
-) -> impl IntoElement {
-    div()
-        .w_full()
-        .flex()
-        .flex_col()
-        .items_start()
-        .gap(px(8.0))
-        .child(home_farm_setup_field_label(app_shared_text(
-            field_label_key,
-        )))
-        .child(app_text_input(input, false).w_full())
-        .when_some(validation_key, |this, validation_key| {
-            this.child(home_body_text(app_shared_text(validation_key)))
-        })
-}
-
 fn products_editor_status_section(
     selected_status: ProductStatus,
     on_select_draft: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
@@ -5601,30 +5467,30 @@ fn products_editor_status_section(
                 .flex()
                 .items_center()
                 .gap(px(8.0))
-                .child(products_filter_button(
+                .child(choice_button(
                     "products-editor-status-draft",
-                    AppTextKey::ProductsStatusDraft,
+                    app_shared_text(AppTextKey::ProductsStatusDraft),
                     selected_status == ProductStatus::Draft,
                     on_select_draft,
                     cx,
                 ))
-                .child(products_filter_button(
+                .child(choice_button(
                     "products-editor-status-live",
-                    AppTextKey::ProductsStatusLive,
+                    app_shared_text(AppTextKey::ProductsStatusLive),
                     selected_status == ProductStatus::Published,
                     on_select_live,
                     cx,
                 ))
-                .child(products_filter_button(
+                .child(choice_button(
                     "products-editor-status-paused",
-                    AppTextKey::ProductsStatusPaused,
+                    app_shared_text(AppTextKey::ProductsStatusPaused),
                     selected_status == ProductStatus::Paused,
                     on_select_paused,
                     cx,
                 ))
-                .child(products_filter_button(
+                .child(choice_button(
                     "products-editor-status-archived",
-                    AppTextKey::ProductsStatusArchived,
+                    app_shared_text(AppTextKey::ProductsStatusArchived),
                     selected_status == ProductStatus::Archived,
                     on_select_archived,
                     cx,
@@ -5859,21 +5725,33 @@ fn home_farm_setup_form_card(
             .child(home_body_text(app_shared_text(
                 AppTextKey::HomeFarmSetupOnboardingBody,
             )))
-            .child(home_farm_setup_text_field(
-                AppTextKey::HomeFarmSetupSectionFarm,
-                AppTextKey::HomeFarmSetupFieldFarmName,
-                &form.farm_name_input,
-                blockers
-                    .contains(&FarmSetupBlocker::AddFarmName)
-                    .then_some(AppTextKey::HomeFarmSetupBlockerAddFarmName),
+            .child(app_form_section(
+                app_shared_text(AppTextKey::HomeFarmSetupSectionFarm),
+                app_form_input_text(
+                    AppFormFieldSpec::new(
+                        app_shared_text(AppTextKey::HomeFarmSetupFieldFarmName),
+                        blockers
+                            .contains(&FarmSetupBlocker::AddFarmName)
+                            .then_some(AppTextKey::HomeFarmSetupBlockerAddFarmName)
+                            .map(app_shared_text),
+                    ),
+                    &form.farm_name_input,
+                    false,
+                ),
             ))
-            .child(home_farm_setup_text_field(
-                AppTextKey::HomeFarmSetupSectionLocation,
-                AppTextKey::HomeFarmSetupFieldLocationOrServiceArea,
-                &form.location_input,
-                blockers
-                    .contains(&FarmSetupBlocker::AddLocationOrServiceArea)
-                    .then_some(AppTextKey::HomeFarmSetupBlockerAddLocationOrServiceArea),
+            .child(app_form_section(
+                app_shared_text(AppTextKey::HomeFarmSetupSectionLocation),
+                app_form_input_text(
+                    AppFormFieldSpec::new(
+                        app_shared_text(AppTextKey::HomeFarmSetupFieldLocationOrServiceArea),
+                        blockers
+                            .contains(&FarmSetupBlocker::AddLocationOrServiceArea)
+                            .then_some(AppTextKey::HomeFarmSetupBlockerAddLocationOrServiceArea)
+                            .map(app_shared_text),
+                    ),
+                    &form.location_input,
+                    false,
+                ),
             ))
             .child(home_farm_setup_order_method_section(
                 form,
@@ -5912,24 +5790,6 @@ fn home_farm_setup_form_card(
                         .into_any_element()
                     })),
             ),
-    )
-}
-
-fn home_farm_setup_text_field(
-    section_key: AppTextKey,
-    field_label_key: AppTextKey,
-    input: &Entity<InputState>,
-    blocker_key: Option<AppTextKey>,
-) -> impl IntoElement {
-    app_form_section(
-        app_shared_text(section_key),
-        app_form_field(
-            AppFormFieldSpec::new(
-                app_shared_text(field_label_key),
-                blocker_key.map(app_shared_text),
-            ),
-            app_text_input(input, false).w_full(),
-        ),
     )
 }
 

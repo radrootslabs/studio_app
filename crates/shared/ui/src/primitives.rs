@@ -1,7 +1,7 @@
 use gpui::{
-    AnyElement, App, ClickEvent, Div, Entity, InteractiveElement, IntoElement, ParentElement,
-    SharedString, StatefulInteractiveElement, Styled, Window, div, prelude::FluentBuilder, px,
-    relative, rgb, transparent_black,
+    AnyElement, App, ClickEvent, Div, ElementId, Entity, InteractiveElement, IntoElement,
+    ParentElement, SharedString, StatefulInteractiveElement, Styled, Window, div,
+    prelude::FluentBuilder, px, relative, rgb, transparent_black,
 };
 use gpui_component::{
     Icon, IconName, Sizable, Size,
@@ -535,7 +535,7 @@ pub fn app_input_text(input: &Entity<InputState>, disabled: bool) -> Input {
 }
 
 pub fn app_button_secondary(
-    id: &'static str,
+    id: impl Into<ElementId>,
     label: impl Into<SharedString>,
     on_click: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
     cx: &App,
@@ -553,7 +553,7 @@ pub fn app_button_secondary(
 }
 
 pub fn app_button_primary(
-    id: &'static str,
+    id: impl Into<ElementId>,
     label: impl Into<SharedString>,
     on_click: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
     cx: &App,
@@ -571,7 +571,7 @@ pub fn app_button_primary(
 }
 
 pub fn app_button_primary_disabled(
-    id: &'static str,
+    id: impl Into<ElementId>,
     label: impl Into<SharedString>,
     cx: &App,
 ) -> impl IntoElement {
@@ -588,7 +588,7 @@ pub fn app_button_primary_disabled(
 }
 
 pub fn app_button_compact(
-    id: &'static str,
+    id: impl Into<ElementId>,
     label: impl Into<SharedString>,
     on_click: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
     cx: &App,
@@ -628,7 +628,7 @@ fn app_button_label(
 }
 
 pub fn app_button_icon(
-    id: &'static str,
+    id: impl Into<ElementId>,
     icon: IconName,
     on_click: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
     cx: &App,
@@ -654,8 +654,106 @@ pub fn app_status_indicator(color: u32) -> impl IntoElement {
         .rounded(px(sizing.size_px / 2.0))
 }
 
+pub fn app_button_text(
+    id: impl Into<ElementId>,
+    label: impl Into<SharedString>,
+    on_click: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+    cx: &App,
+) -> impl IntoElement {
+    Button::new(id)
+        .custom(
+            ButtonCustomVariant::new(cx)
+                .color(transparent_black().into())
+                .foreground(rgb(APP_UI_THEME.foundation.text.secondary).into())
+                .border(transparent_black())
+                .hover(transparent_black().into())
+                .active(transparent_black().into()),
+        )
+        .rounded(ButtonRounded::Size(px(0.0)))
+        .on_click(on_click)
+        .child(
+            div()
+                .text_size(px(APP_UI_THEME.foundation.typography.body_text_px))
+                .font_weight(gpui::FontWeight::MEDIUM)
+                .text_color(rgb(APP_UI_THEME.foundation.text.secondary))
+                .child(label.into()),
+        )
+}
+
+pub fn app_button_choice(
+    id: impl Into<ElementId>,
+    label: impl Into<SharedString>,
+    is_active: bool,
+    on_click: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+    cx: &App,
+) -> AnyElement {
+    if is_active {
+        app_button_primary(id, label, on_click, cx).into_any_element()
+    } else {
+        app_button_compact(id, label, on_click, cx).into_any_element()
+    }
+}
+
+pub fn app_button_list_row(
+    id: impl Into<ElementId>,
+    title: impl Into<SharedString>,
+    subtitle: Option<SharedString>,
+    is_selected: bool,
+    on_click: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+    cx: &App,
+) -> impl IntoElement {
+    let selected_background = rgb(APP_UI_THEME.foundation.surfaces.window_background);
+
+    Button::new(id)
+        .custom(
+            ButtonCustomVariant::new(cx)
+                .color(if is_selected {
+                    selected_background.into()
+                } else {
+                    transparent_black().into()
+                })
+                .foreground(rgb(APP_UI_THEME.foundation.text.primary).into())
+                .border(transparent_black())
+                .hover(selected_background.into())
+                .active(selected_background.into()),
+        )
+        .rounded(ButtonRounded::Size(px(APP_UI_THEME
+            .foundation
+            .radii
+            .medium_px)))
+        .flex_1()
+        .min_w_0()
+        .on_click(on_click)
+        .child(
+            div()
+                .w_full()
+                .flex()
+                .flex_col()
+                .items_start()
+                .gap(px(4.0))
+                .px(px(8.0))
+                .py(px(6.0))
+                .child(
+                    div()
+                        .text_size(px(APP_UI_THEME.foundation.typography.body_text_px))
+                        .font_weight(gpui::FontWeight::MEDIUM)
+                        .text_color(rgb(APP_UI_THEME.foundation.text.primary))
+                        .child(title.into()),
+                )
+                .when_some(subtitle, |this, subtitle| {
+                    this.child(
+                        div()
+                            .text_size(px(APP_UI_THEME.foundation.typography.utility_title_text_px))
+                            .line_height(relative(1.2))
+                            .text_color(rgb(APP_UI_THEME.foundation.text.secondary))
+                            .child(subtitle),
+                    )
+                }),
+        )
+}
+
 fn app_button_base(
-    id: &'static str,
+    id: impl Into<ElementId>,
     variant: AppButtonVariant,
     on_click: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
     cx: &App,
@@ -682,7 +780,11 @@ fn app_button_base(
         .on_click(on_click)
 }
 
-fn app_button_base_disabled(id: &'static str, variant: AppButtonVariant, cx: &App) -> Button {
+fn app_button_base_disabled(
+    id: impl Into<ElementId>,
+    variant: AppButtonVariant,
+    cx: &App,
+) -> Button {
     let sizing = APP_UI_THEME.components.app_button.sizing;
     let colors = app_button_disabled_colors(variant);
 
