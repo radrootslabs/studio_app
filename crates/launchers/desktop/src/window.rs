@@ -6,9 +6,9 @@ use gpui::{
     transparent_black,
 };
 use gpui_component::{
-    IconName, Root, Sizable, Size as ComponentSize,
+    IconName, Root,
     button::{Button, ButtonCustomVariant, ButtonRounded, ButtonVariants},
-    input::{Input, InputEvent, InputState},
+    input::{InputEvent, InputState},
 };
 use radroots_studio_app_i18n::AppTextKey;
 pub use radroots_studio_app_models::SettingsSection as SettingsPanelViewKey;
@@ -35,7 +35,7 @@ use radroots_studio_app_state::{
 use radroots_studio_app_ui::{
     APP_UI_THEME, AppCheckboxFieldSpec, IconSegmentButtonSpec, LabelValueRow, action_button,
     action_button_compact, action_button_primary, action_button_primary_disabled,
-    action_icon_button, app_checkbox_field, app_shared_label_text, app_shared_text,
+    action_icon_button, app_checkbox_field, app_shared_label_text, app_shared_text, app_text_input,
     app_window_shell, icon_segment_button, label_value_list, section_divider, status_indicator,
     utility_title_row,
 };
@@ -4280,8 +4280,7 @@ fn startup_signer_entry_surface(
                     .max_w(px(APP_UI_THEME.layout.home_card_max_width_px))
                     .id("home-signer-source-input")
                     .child(
-                        Input::new(&signer_entry.input)
-                            .with_size(ComponentSize::Large)
+                        app_text_input(&signer_entry.input, !source_input_is_editable)
                             .disabled(!source_input_is_editable)
                             .w_full(),
                     ),
@@ -4991,8 +4990,7 @@ fn products_controls_card(
             .gap(px(APP_UI_THEME.layout.home_stack_gap_px))
             .when_some(products_search, |this, products_search| {
                 this.child(
-                    Input::new(&products_search.input)
-                        .with_size(ComponentSize::Large)
+                    app_text_input(&products_search.input, false)
                         .cleanable(true)
                         .w_full(),
                 )
@@ -5449,11 +5447,7 @@ fn products_stock_editor_card(
                                 .text_color(rgb(APP_UI_THEME.text.secondary))
                                 .child(app_shared_text(AppTextKey::ProductsStockEditorFieldLabel)),
                         )
-                        .child(
-                            Input::new(&editor.input)
-                                .with_size(ComponentSize::Large)
-                                .w_full(),
-                        )
+                        .child(app_text_input(&editor.input, false).w_full())
                         .when_some(validation_key, |this, key| {
                             this.child(
                                 div()
@@ -5641,7 +5635,7 @@ fn products_editor_text_field(
         .items_start()
         .gap(px(8.0))
         .child(home_farm_setup_field_label(field_label_key))
-        .child(Input::new(input).with_size(ComponentSize::Large).w_full())
+        .child(app_text_input(input, false).w_full())
         .when_some(validation_key, |this, validation_key| {
             this.child(home_body_text(app_shared_text(validation_key)))
         })
@@ -6005,12 +5999,7 @@ fn home_farm_setup_text_field(
                 .items_start()
                 .gap(px(6.0))
                 .child(home_farm_setup_field_label(field_label_key))
-                .child(
-                    Input::new(input)
-                        .with_size(ComponentSize::Large)
-                        .w_full()
-                        .into_any_element(),
-                )
+                .child(app_text_input(input, false).w_full().into_any_element())
                 .when_some(blocker_key, |this, blocker_key| {
                     this.child(home_farm_setup_blocker(blocker_key))
                 }),
@@ -6134,12 +6123,7 @@ fn settings_text_field(label_key: AppTextKey, input: &Entity<InputState>) -> imp
         .flex_col()
         .gap(px(6.0))
         .child(home_farm_setup_field_label(label_key))
-        .child(
-            Input::new(input)
-                .with_size(ComponentSize::Large)
-                .w_full()
-                .into_any_element(),
-        )
+        .child(app_text_input(input, false).w_full().into_any_element())
 }
 
 fn settings_pickup_location_title(

@@ -1,14 +1,21 @@
 use gpui::{
-    App, ClickEvent, IntoElement, ParentElement, SharedString, Styled, Window, div,
+    App, ClickEvent, Entity, IntoElement, ParentElement, SharedString, Styled, Window, div,
     prelude::FluentBuilder, px, relative, rgb, transparent_black,
 };
 use gpui_component::{
     Icon, IconName, Sizable, Size,
     button::{Button, ButtonCustomVariant, ButtonRounded, ButtonVariants},
+    input::{Input, InputState},
 };
 use std::rc::Rc;
 
 use crate::APP_UI_THEME;
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum ActionButtonVariant {
+    Standard,
+    Primary,
+}
 
 pub struct IconSegmentButtonSpec {
     pub id: &'static str,
@@ -303,6 +310,24 @@ pub fn icon_segment_button(
         )
 }
 
+pub fn app_text_input(input: &Entity<InputState>, disabled: bool) -> Input {
+    let tokens = APP_UI_THEME.controls.text_input;
+    let background = if disabled {
+        tokens.disabled_background
+    } else {
+        tokens.background
+    };
+
+    Input::new(input)
+        .with_size(Size::Medium)
+        .disabled(disabled)
+        .focus_bordered(false)
+        .bg(rgb(background))
+        .border_color(rgb(tokens.border))
+        .border_1()
+        .rounded(px(tokens.corner_radius_px))
+}
+
 pub fn action_button(
     id: &'static str,
     label: impl Into<SharedString>,
@@ -310,13 +335,49 @@ pub fn action_button(
     cx: &App,
 ) -> impl IntoElement {
     action_button_label(
-        action_button_base(id, on_click, cx),
+        action_button_base(id, ActionButtonVariant::Standard, on_click, cx),
         label.into(),
         APP_UI_THEME
             .controls
             .action_button
             .sizing
             .horizontal_padding_px,
+        ActionButtonVariant::Standard,
+    )
+}
+
+pub fn action_button_primary(
+    id: &'static str,
+    label: impl Into<SharedString>,
+    on_click: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+    cx: &App,
+) -> impl IntoElement {
+    action_button_label(
+        action_button_base(id, ActionButtonVariant::Primary, on_click, cx),
+        label.into(),
+        APP_UI_THEME
+            .controls
+            .action_button
+            .sizing
+            .horizontal_padding_px,
+        ActionButtonVariant::Primary,
+    )
+}
+
+pub fn action_button_primary_disabled(
+    id: &'static str,
+    label: impl Into<SharedString>,
+    cx: &App,
+) -> impl IntoElement {
+    action_button_label(
+        action_button_base_disabled(id, ActionButtonVariant::Primary, cx),
+        label.into(),
+        APP_UI_THEME
+            .controls
+            .action_button
+            .sizing
+            .horizontal_padding_px,
+        ActionButtonVariant::Primary,
     )
 }
 
@@ -327,13 +388,14 @@ pub fn action_button_compact(
     cx: &App,
 ) -> impl IntoElement {
     action_button_label(
-        action_button_base(id, on_click, cx),
+        action_button_base(id, ActionButtonVariant::Standard, on_click, cx),
         label.into(),
         APP_UI_THEME
             .controls
             .action_button
             .sizing
             .compact_horizontal_padding_px,
+        ActionButtonVariant::Standard,
     )
 }
 
@@ -341,9 +403,10 @@ fn action_button_label(
     button: Button,
     label: SharedString,
     horizontal_padding_px: f32,
+    variant: ActionButtonVariant,
 ) -> impl IntoElement {
     let sizing = APP_UI_THEME.controls.action_button.sizing;
-    let colors = APP_UI_THEME.controls.action_button.colors;
+    let colors = action_button_colors(variant);
     button.child(
         div()
             .h_full()
@@ -364,9 +427,9 @@ pub fn action_icon_button(
     cx: &App,
 ) -> impl IntoElement {
     let sizing = APP_UI_THEME.controls.action_button.sizing;
-    let colors = APP_UI_THEME.controls.action_button.colors;
+    let colors = action_button_colors(ActionButtonVariant::Standard);
 
-    action_button_base(id, on_click, cx)
+    action_button_base(id, ActionButtonVariant::Standard, on_click, cx)
         .with_size(Size::Size(px(sizing.square_width_px)))
         .icon(
             Icon::new(icon)
@@ -386,11 +449,12 @@ pub fn status_indicator(color: u32) -> impl IntoElement {
 
 fn action_button_base(
     id: &'static str,
+    variant: ActionButtonVariant,
     on_click: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
     cx: &App,
 ) -> Button {
     let sizing = APP_UI_THEME.controls.action_button.sizing;
-    let colors = APP_UI_THEME.controls.action_button.colors;
+    let colors = action_button_colors(variant);
     let hover_background = if colors.hover_changes_background {
         colors.hover_background
     } else {
@@ -409,6 +473,38 @@ fn action_button_base(
         .rounded(ButtonRounded::Size(px(sizing.corner_radius_px)))
         .h(px(sizing.height_px))
         .on_click(on_click)
+}
+
+fn action_button_base_disabled(id: &'static str, variant: ActionButtonVariant, cx: &App) -> Button {
+    let sizing = APP_UI_THEME.controls.action_button.sizing;
+    let colors = action_button_disabled_colors(variant);
+
+    Button::new(id)
+        .custom(
+            ButtonCustomVariant::new(cx)
+                .color(rgb(colors.background).into())
+                .foreground(rgb(colors.foreground).into())
+                .border(transparent_black())
+                .hover(rgb(colors.hover_background).into())
+                .active(rgb(colors.active_background).into()),
+        )
+        .rounded(ButtonRounded::Size(px(sizing.corner_radius_px)))
+        .h(px(sizing.height_px))
+}
+
+fn action_button_colors(variant: ActionButtonVariant) -> crate::ActionButtonColors {
+    match variant {
+        ActionButtonVariant::Standard => APP_UI_THEME.controls.action_button.colors,
+        ActionButtonVariant::Primary => APP_UI_THEME.controls.action_button.primary_colors,
+    }
+}
+
+fn action_button_disabled_colors(variant: ActionButtonVariant) -> crate::ActionButtonColors {
+    match variant {
+        ActionButtonVariant::Standard | ActionButtonVariant::Primary => {
+            APP_UI_THEME.controls.action_button.disabled_colors
+        }
+    }
 }
 
 #[cfg(test)]

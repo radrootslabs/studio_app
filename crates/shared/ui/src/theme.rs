@@ -37,6 +37,8 @@ pub struct AppTypographyTokens {
     pub utility_title_text_px: f32,
     pub body_text_px: f32,
     pub brand_text_px: f32,
+    pub startup_title_text_px: f32,
+    pub startup_tagline_text_px: f32,
     pub settings_row_text_px: f32,
     pub settings_account_identity_text_px: f32,
     pub settings_account_detail_text_px: f32,
@@ -50,6 +52,7 @@ pub struct AppLayoutTokens {
     pub home_card_max_width_px: f32,
     pub home_card_padding_px: f32,
     pub home_stack_gap_px: f32,
+    pub startup_stack_gap_px: f32,
     pub metadata_row_gap_px: f32,
     pub utility_title_row_height_px: f32,
     pub settings_chrome_height_px: f32,
@@ -84,6 +87,7 @@ pub struct AppLayoutTokens {
 pub struct AppControlTokens {
     pub icon_segment_button: IconSegmentButtonTokens,
     pub action_button: ActionButtonTokens,
+    pub text_input: TextInputTokens,
     pub checkbox: CheckboxTokens,
     pub status_indicator: StatusIndicatorTokens,
 }
@@ -115,6 +119,8 @@ pub struct IconSegmentButtonColors {
 pub struct ActionButtonTokens {
     pub sizing: ActionButtonSizing,
     pub colors: ActionButtonColors,
+    pub primary_colors: ActionButtonColors,
+    pub disabled_colors: ActionButtonColors,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -149,6 +155,14 @@ pub struct CheckboxTokens {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
+pub struct TextInputTokens {
+    pub background: u32,
+    pub disabled_background: u32,
+    pub border: u32,
+    pub corner_radius_px: f32,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct StatusIndicatorTokens {
     pub size_px: f32,
     pub online: u32,
@@ -179,6 +193,8 @@ pub const APP_UI_THEME: AppUiTheme = AppUiTheme {
         utility_title_text_px: 12.0,
         body_text_px: 14.0,
         brand_text_px: 14.0,
+        startup_title_text_px: 18.0,
+        startup_tagline_text_px: 16.0,
         settings_row_text_px: 13.0,
         settings_account_identity_text_px: 14.0,
         settings_account_detail_text_px: 14.0,
@@ -190,6 +206,7 @@ pub const APP_UI_THEME: AppUiTheme = AppUiTheme {
         home_card_max_width_px: 1080.0,
         home_card_padding_px: 24.0,
         home_stack_gap_px: 12.0,
+        startup_stack_gap_px: 6.0,
         metadata_row_gap_px: 12.0,
         utility_title_row_height_px: 24.0,
         settings_chrome_height_px: 88.0,
@@ -252,6 +269,26 @@ pub const APP_UI_THEME: AppUiTheme = AppUiTheme {
                 hover_background: 0xDCDCE1,
                 active_background: 0xD1D1D6,
             },
+            primary_colors: ActionButtonColors {
+                background: 0x0A84FF,
+                foreground: 0xFFFFFF,
+                hover_changes_background: true,
+                hover_background: 0x007AFF,
+                active_background: 0x0062CC,
+            },
+            disabled_colors: ActionButtonColors {
+                background: 0xA7C8F8,
+                foreground: 0xFFFFFF,
+                hover_changes_background: false,
+                hover_background: 0xA7C8F8,
+                active_background: 0xA7C8F8,
+            },
+        },
+        text_input: TextInputTokens {
+            background: 0xFFFFFF,
+            disabled_background: 0xF2F2F7,
+            border: 0xD1D1D6,
+            corner_radius_px: 10.0,
         },
         checkbox: CheckboxTokens {
             size_px: 16.0,
@@ -314,6 +351,7 @@ mod tests {
     fn control_tokens_match_the_frozen_budget() {
         let segmented = APP_UI_THEME.controls.icon_segment_button.sizing;
         let action = APP_UI_THEME.controls.action_button.sizing;
+        let text_input = APP_UI_THEME.controls.text_input;
         let checkbox = APP_UI_THEME.controls.checkbox;
         let status = APP_UI_THEME.controls.status_indicator;
 
@@ -323,6 +361,9 @@ mod tests {
         assert_eq!(action.height_px, 24.0);
         assert_eq!(action.corner_radius_px, 8.0);
         assert_eq!(action.square_width_px, 24.0);
+        assert_eq!(text_input.corner_radius_px, 10.0);
+        assert_eq!(text_input.background, 0xFFFFFF);
+        assert_eq!(text_input.disabled_background, 0xF2F2F7);
         assert_eq!(checkbox.size_px, 16.0);
         assert_eq!(checkbox.corner_radius_px, 5.0);
         assert_eq!(status.size_px, 12.0);
@@ -331,6 +372,22 @@ mod tests {
     #[test]
     fn accent_and_status_colors_match_the_current_shell_contract() {
         assert_eq!(APP_UI_THEME.text.accent, 0x0A84FF);
+        assert_eq!(
+            APP_UI_THEME
+                .controls
+                .action_button
+                .primary_colors
+                .background,
+            0x0A84FF
+        );
+        assert_eq!(
+            APP_UI_THEME
+                .controls
+                .action_button
+                .primary_colors
+                .foreground,
+            0xFFFFFF
+        );
         assert_eq!(APP_UI_THEME.controls.checkbox.checked_background, 0x0A84FF);
         assert_eq!(APP_UI_THEME.controls.status_indicator.online, 0x34C759);
         assert_eq!(APP_UI_THEME.controls.status_indicator.offline, 0xFFD60A);
