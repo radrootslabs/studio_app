@@ -4,17 +4,18 @@ set -euo pipefail
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 repo_root="$(git -C "${script_dir}" rev-parse --show-toplevel)"
 
-source "${script_dir}/runtime_env.sh"
-
 cd "${repo_root}"
 
-runtime_mode="$(radroots_studio_app_runtime_mode)"
-run_id="$(radroots_studio_app_run_id "${runtime_mode}")"
-default_nostr_relay_url="$(radroots_studio_app_default_nostr_relay_url)"
-local_log_root="$(radroots_studio_app_local_log_root "${repo_root}")"
+runtime_mode="${RADROOTS_APP_RUNTIME_MODE:-localhost-dev}"
+default_nostr_relay_url="${RADROOTS_APP_DEFAULT_NOSTR_RELAY_URL:-}"
+local_log_root="${RADROOTS_APP_LOCAL_LOG_ROOT:-${repo_root}/logs}"
+
+if [[ -z "${default_nostr_relay_url}" ]]; then
+  echo "missing required env: RADROOTS_APP_DEFAULT_NOSTR_RELAY_URL" >&2
+  exit 1
+fi
 
 export RADROOTS_APP_RUNTIME_MODE="${runtime_mode}"
-export RADROOTS_APP_RUN_ID="${run_id}"
 export RADROOTS_APP_DEFAULT_NOSTR_RELAY_URL="${default_nostr_relay_url}"
 export RADROOTS_APP_LOCAL_LOG_ROOT="${local_log_root}"
 export RUST_LOG="${RADROOTS_APP_RUST_LOG:-info}"
