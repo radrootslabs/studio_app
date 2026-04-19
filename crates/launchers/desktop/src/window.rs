@@ -604,17 +604,16 @@ impl HomeView {
 
     fn open_farm_setup(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let runtime_summary = self.runtime.summary();
+        let Some(account_id) = runtime_summary
+            .settings_account_projection
+            .selected_account
+            .as_ref()
+            .map(|account| account.account.account_id.clone())
+        else {
+            return;
+        };
 
         if runtime_summary.farm_setup_projection.has_saved_farm() {
-            let Some(account_id) = runtime_summary
-                .settings_account_projection
-                .selected_account
-                .as_ref()
-                .map(|account| account.account.account_id.clone())
-            else {
-                return;
-            };
-
             self.farm_setup_form = Some(FarmSetupFormState::new(
                 account_id,
                 runtime_summary.farm_setup_projection.draft,
@@ -625,10 +624,17 @@ impl HomeView {
             return;
         }
 
-        if self
+        let stage_changed = self
             .runtime
-            .select_farm_setup_flow_stage(FarmSetupFlowStage::Editing)
-        {
+            .select_farm_setup_flow_stage(FarmSetupFlowStage::Editing);
+
+        self.farm_setup_form = Some(FarmSetupFormState::new(
+            account_id,
+            runtime_summary.farm_setup_projection.draft,
+            window,
+            cx,
+        ));
+        if stage_changed || self.farm_setup_form.is_some() {
             cx.notify();
         }
     }
@@ -649,8 +655,7 @@ impl HomeView {
             return;
         };
 
-        if runtime_summary.home_route != HomeRoute::FarmSetupForm && self.farm_setup_form.is_none()
-        {
+        if runtime_summary.home_route != HomeRoute::FarmSetupForm {
             self.farm_setup_form = None;
             return;
         }
