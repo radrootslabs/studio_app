@@ -26,6 +26,7 @@ pub enum AppRuntimeMode {
 pub struct AppRuntimeConfig {
     pub runtime_mode: AppRuntimeMode,
     pub run_id: String,
+    pub default_nostr_relay_url: String,
     pub bundle_identifier: String,
     pub bundle_name: String,
     pub marketing_version: String,
@@ -104,6 +105,7 @@ struct RawRuntimeConfig {
     schema_version: String,
     runtime_mode: String,
     run_id: String,
+    default_nostr_relay_url: String,
     bundle_identifier: String,
     bundle_name: String,
     marketing_version: String,
@@ -135,6 +137,10 @@ impl AppRuntimeConfig {
         Ok(Self {
             runtime_mode: parse_config_runtime_mode(&config.runtime_mode)?,
             run_id: require_value("run_id", config.run_id)?,
+            default_nostr_relay_url: require_value(
+                "default_nostr_relay_url",
+                config.default_nostr_relay_url,
+            )?,
             bundle_identifier: require_value("bundle_identifier", config.bundle_identifier)?,
             bundle_name: require_value("bundle_name", config.bundle_name)?,
             marketing_version: require_value("marketing_version", config.marketing_version)?,
@@ -336,6 +342,7 @@ mod tests {
                 "schema_version":"{APP_RUNTIME_CONFIG_SCHEMA}",
                 "runtime_mode":"localhost-dev",
                 "run_id":"run-localhost-dev-20260417T000000Z-deadbeefcafefeed",
+                "default_nostr_relay_url":"ws://127.0.0.1:8080",
                 "bundle_identifier":"org.radroots.app.macos",
                 "bundle_name":"Radroots",
                 "marketing_version":"0.1.0",
@@ -383,7 +390,7 @@ mod tests {
     #[test]
     fn runtime_config_requires_supported_schema() {
         let error = AppRuntimeConfig::from_json_str(
-            r#"{"schema_version":"unsupported","runtime_mode":"localhost-dev","run_id":"x","bundle_identifier":"y","bundle_name":"z","marketing_version":"0.1.0","build_number":"1","platform_name":"macos","operating_system_version":"macos-15.5","host_locale":"en","runtime_origin":"gpui://localhost","local_log_root":"/tmp/logs"}"#,
+            r#"{"schema_version":"unsupported","runtime_mode":"localhost-dev","run_id":"x","default_nostr_relay_url":"ws://127.0.0.1:8080","bundle_identifier":"y","bundle_name":"z","marketing_version":"0.1.0","build_number":"1","platform_name":"macos","operating_system_version":"macos-15.5","host_locale":"en","runtime_origin":"gpui://localhost","local_log_root":"/tmp/logs"}"#,
         )
         .expect_err("schema mismatch should fail");
 
@@ -400,6 +407,7 @@ mod tests {
             AppRuntimeConfig::from_json_str(&test_runtime_config_json()).expect("valid config");
 
         assert_eq!(config.runtime_mode, AppRuntimeMode::LocalhostDev);
+        assert_eq!(config.default_nostr_relay_url, "ws://127.0.0.1:8080");
         assert_eq!(config.bundle_identifier, "org.radroots.app.macos");
         assert_eq!(config.local_log_root, PathBuf::from("/tmp/radroots/logs"));
     }
@@ -442,12 +450,55 @@ mod tests {
     }
 
     #[test]
+    fn runtime_snapshot_capture_matches_canonical_runtime_config_metadata() {
+        let build = test_build_identity();
+        let git_commit = build
+            .git_commit
+            .clone()
+            .expect("test build identity should include git commit");
+        let snapshot_from_capture = AppRuntimeSnapshot::from_capture(
+            build.clone(),
+            AppRuntimeMode::Development,
+            AppRuntimeCapture {
+                host_locale: "en_US.UTF-8".to_owned(),
+                operating_system: "macos".to_owned(),
+                run_id: "run-development-123-pid456".to_owned(),
+            },
+        );
+        let snapshot_from_config = AppRuntimeSnapshot::from_config(
+            build.clone(),
+            &AppRuntimeConfig::from_json_str(&format!(
+                r#"{{
+                    "schema_version":"{APP_RUNTIME_CONFIG_SCHEMA}",
+                    "runtime_mode":"development",
+                    "run_id":"run-development-123-pid456",
+                    "default_nostr_relay_url":"ws://127.0.0.1:8080",
+                    "bundle_identifier":"{APP_ID}",
+                    "bundle_name":"{APP_NAME}",
+                    "marketing_version":"{}",
+                    "build_number":"{}",
+                    "platform_name":"{APP_HOST_PLATFORM}",
+                    "operating_system_version":"macos",
+                    "host_locale":"en_US.UTF-8",
+                    "runtime_origin":"{APP_RUNTIME_ORIGIN}",
+                    "local_log_root":"/tmp/radroots/logs"
+                }}"#,
+                build.package_version, git_commit
+            ))
+            .expect("canonical config should parse"),
+        );
+
+        assert_eq!(snapshot_from_config, snapshot_from_capture);
+    }
+
+    #[test]
     fn runtime_config_rejects_empty_required_fields() {
         let error = AppRuntimeConfig::from_json_str(&format!(
             r#"{{
                 "schema_version":"{APP_RUNTIME_CONFIG_SCHEMA}",
                 "runtime_mode":"localhost-dev",
                 "run_id":"",
+                "default_nostr_relay_url":"ws://127.0.0.1:8080",
                 "bundle_identifier":"org.radroots.app.macos",
                 "bundle_name":"Radroots",
                 "marketing_version":"0.1.0",
@@ -463,6 +514,36 @@ mod tests {
 
         assert!(
             matches!(error, AppRuntimeConfigError::MissingField("run_id")),
+            "unexpected error: {error}"
+        );
+    }
+
+    #[test]
+    fn runtime_config_rejects_missing_default_nostr_relay_url() {
+        let error = AppRuntimeConfig::from_json_str(&format!(
+            r#"{{
+                "schema_version":"{APP_RUNTIME_CONFIG_SCHEMA}",
+                "runtime_mode":"localhost-dev",
+                "run_id":"run-localhost-dev-20260417T000000Z-deadbeefcafefeed",
+                "default_nostr_relay_url":"",
+                "bundle_identifier":"org.radroots.app.macos",
+                "bundle_name":"Radroots",
+                "marketing_version":"0.1.0",
+                "build_number":"dev",
+                "platform_name":"macos",
+                "operating_system_version":"macos-15.5",
+                "host_locale":"en_US.UTF-8",
+                "runtime_origin":"gpui://localhost",
+                "local_log_root":"/tmp/radroots/logs"
+            }}"#
+        ))
+        .expect_err("missing default relay url should fail");
+
+        assert!(
+            matches!(
+                error,
+                AppRuntimeConfigError::MissingField("default_nostr_relay_url")
+            ),
             "unexpected error: {error}"
         );
     }
