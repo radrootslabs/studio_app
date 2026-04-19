@@ -6,6 +6,8 @@ use std::{
 use serde::Serialize;
 use thiserror::Error;
 
+use crate::{AppRuntimePathsError, AppRuntimeRoots};
+
 pub const APP_ID: &str = "org.radroots.app";
 pub const APP_NAME: &str = "Radroots";
 pub const APP_PLATFORM_RUNTIME: &str = "app-macos-native";
@@ -13,7 +15,6 @@ pub const APP_PROJECTION_SOURCE: &str = "gpui-native";
 pub const APP_RUNTIME_ORIGIN: &str = "gpui://localhost";
 pub const APP_HOST_PLATFORM: &str = "desktop";
 pub const APP_RUNTIME_MODE_ENV: &str = "RADROOTS_APP_RUNTIME_MODE";
-pub const APP_RUN_ID_ENV: &str = "RADROOTS_APP_RUN_ID";
 pub const APP_DEFAULT_NOSTR_RELAY_URL_ENV: &str = "RADROOTS_APP_DEFAULT_NOSTR_RELAY_URL";
 pub const APP_LOCAL_LOG_ROOT_ENV: &str = "RADROOTS_APP_LOCAL_LOG_ROOT";
 
@@ -27,16 +28,7 @@ pub enum AppRuntimeMode {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct AppRuntimeConfig {
     pub runtime_mode: AppRuntimeMode,
-    pub run_id: String,
     pub default_nostr_relay_url: String,
-    pub bundle_identifier: String,
-    pub bundle_name: String,
-    pub marketing_version: String,
-    pub build_number: String,
-    pub platform_name: String,
-    pub operating_system_version: String,
-    pub host_locale: String,
-    pub runtime_origin: String,
     pub local_log_root: PathBuf,
 }
 
@@ -90,6 +82,8 @@ pub struct AppRuntimeSnapshot {
 
 #[derive(Debug, Error)]
 pub enum AppRuntimeConfigError {
+    #[error(transparent)]
+    RuntimePaths(#[from] AppRuntimePathsError),
     #[error("missing required runtime env: {0}")]
     MissingEnv(&'static str),
     #[error("unsupported runtime mode: {0}")]
@@ -100,10 +94,14 @@ pub enum AppRuntimeConfigError {
 
 impl AppRuntimeConfig {
     pub fn from_env() -> Result<Self, AppRuntimeConfigError> {
-        Self::from_env_with(|name| std::env::var(name).ok())
+        let default_log_root = AppRuntimeRoots::current_desktop()?.logs;
+        Self::from_env_with(|name| std::env::var(name).ok(), default_log_root)
     }
 
-    fn from_env_with<F>(mut read_env: F) -> Result<Self, AppRuntimeConfigError>
+    fn from_env_with<F>(
+        mut read_env: F,
+        default_log_root: PathBuf,
+    ) -> Result<Self, AppRuntimeConfigError>
     where
         F: FnMut(&str) -> Option<String>,
     {
@@ -111,26 +109,16 @@ impl AppRuntimeConfig {
             &mut read_env,
             APP_RUNTIME_MODE_ENV,
         )?)?;
-        let run_id = require_env_value(&mut read_env, APP_RUN_ID_ENV)?;
         let default_nostr_relay_url =
             require_env_value(&mut read_env, APP_DEFAULT_NOSTR_RELAY_URL_ENV)?;
-        let local_log_root =
-            require_path_value(APP_LOCAL_LOG_ROOT_ENV, require_env_value(&mut read_env, APP_LOCAL_LOG_ROOT_ENV)?)?;
+        let local_log_root = read_env(APP_LOCAL_LOG_ROOT_ENV)
+            .map(|value| require_path_value(APP_LOCAL_LOG_ROOT_ENV, value))
+            .transpose()?
+            .unwrap_or(default_log_root);
 
         Ok(Self {
             runtime_mode,
-            run_id,
             default_nostr_relay_url,
-            bundle_identifier: APP_ID.to_owned(),
-            bundle_name: APP_NAME.to_owned(),
-            marketing_version: env!("CARGO_PKG_VERSION").to_owned(),
-            build_number: option_env!("RADROOTS_GIT_COMMIT")
-                .unwrap_or(option_env!("PROFILE").unwrap_or("debug"))
-                .to_owned(),
-            platform_name: APP_HOST_PLATFORM.to_owned(),
-            operating_system_version: std::env::consts::OS.to_owned(),
-            host_locale: detect_host_locale(),
-            runtime_origin: APP_RUNTIME_ORIGIN.to_owned(),
             local_log_root,
         })
     }
@@ -149,33 +137,11 @@ impl AppRuntimeCapture {
 impl AppRuntimeSnapshot {
     pub fn capture(build: AppBuildIdentity) -> Self {
         let mode = parse_build_runtime_mode(&build.build_profile);
-        Self::from_capture(build, mode, AppRuntimeCapture::current(&mode))
+        Self::capture_for_mode(build, mode)
     }
 
-    pub fn from_config(build: AppBuildIdentity, config: &AppRuntimeConfig) -> Self {
-        Self {
-            title: APP_NAME.to_owned(),
-            runtime_mode: config.runtime_mode,
-            run_id: config.run_id.clone(),
-            core: AppCoreRuntimeMetadata {
-                package_name: env!("CARGO_PKG_NAME").to_owned(),
-                package_version: env!("CARGO_PKG_VERSION").to_owned(),
-                package_authors: env!("CARGO_PKG_AUTHORS").to_owned(),
-                rust_edition: "2024".to_owned(),
-                rust_toolchain: env!("CARGO_PKG_RUST_VERSION").to_owned(),
-            },
-            build,
-            host: AppHostRuntimeMetadata {
-                app_identifier: config.bundle_identifier.clone(),
-                app_name: config.bundle_name.clone(),
-                app_version: config.marketing_version.clone(),
-                app_build: config.build_number.clone(),
-                platform_name: config.platform_name.clone(),
-                operating_system: config.operating_system_version.clone(),
-                host_locale: config.host_locale.clone(),
-                runtime_origin: config.runtime_origin.clone(),
-            },
-        }
+    pub fn capture_for_mode(build: AppBuildIdentity, runtime_mode: AppRuntimeMode) -> Self {
+        Self::from_capture(build, runtime_mode, AppRuntimeCapture::current(&runtime_mode))
     }
 
     pub fn from_capture(
@@ -311,9 +277,9 @@ mod tests {
 
     use super::{
         APP_DEFAULT_NOSTR_RELAY_URL_ENV, APP_HOST_PLATFORM, APP_ID, APP_LOCAL_LOG_ROOT_ENV,
-        APP_NAME, APP_PROJECTION_SOURCE, APP_RUN_ID_ENV, APP_RUNTIME_MODE_ENV,
-        APP_RUNTIME_ORIGIN, AppBuildIdentity, AppRuntimeCapture, AppRuntimeConfig,
-        AppRuntimeConfigError, AppRuntimeMode, AppRuntimeSnapshot, runtime_mode_label,
+        APP_NAME, APP_PROJECTION_SOURCE, APP_RUNTIME_MODE_ENV, APP_RUNTIME_ORIGIN,
+        AppBuildIdentity, AppRuntimeCapture, AppRuntimeConfig, AppRuntimeConfigError,
+        AppRuntimeMode, AppRuntimeSnapshot, runtime_mode_label,
     };
 
     fn test_build_identity() -> AppBuildIdentity {
@@ -331,14 +297,9 @@ mod tests {
         BTreeMap::from([
             (APP_RUNTIME_MODE_ENV, "localhost-dev".to_owned()),
             (
-                APP_RUN_ID_ENV,
-                "run-localhost-dev-20260417T000000Z-deadbeefcafefeed".to_owned(),
-            ),
-            (
                 APP_DEFAULT_NOSTR_RELAY_URL_ENV,
                 "ws://127.0.0.1:8080".to_owned(),
             ),
-            (APP_LOCAL_LOG_ROOT_ENV, "/tmp/radroots/logs".to_owned()),
         ])
     }
 
@@ -376,15 +337,16 @@ mod tests {
     #[test]
     fn runtime_config_requires_explicit_runtime_mode_env() {
         let env = BTreeMap::from([
-            (APP_RUN_ID_ENV, "run-localhost-dev-20260417T000000Z-deadbeefcafefeed".to_owned()),
             (
                 APP_DEFAULT_NOSTR_RELAY_URL_ENV,
                 "ws://127.0.0.1:8080".to_owned(),
             ),
-            (APP_LOCAL_LOG_ROOT_ENV, "/tmp/radroots/logs".to_owned()),
         ]);
-        let error = AppRuntimeConfig::from_env_with(|name| env.get(name).cloned())
-            .expect_err("missing runtime mode env should fail");
+        let error = AppRuntimeConfig::from_env_with(
+            |name| env.get(name).cloned(),
+            PathBuf::from("/tmp/default-logs"),
+        )
+        .expect_err("missing runtime mode env should fail");
 
         assert!(matches!(
             error,
@@ -394,44 +356,35 @@ mod tests {
 
     #[test]
     fn runtime_config_surfaces_explicit_local_log_root() {
-        let env = test_runtime_env();
-        let config = AppRuntimeConfig::from_env_with(|name| env.get(name).cloned())
+        let env = BTreeMap::from([
+            (APP_RUNTIME_MODE_ENV, "localhost-dev".to_owned()),
+            (
+                APP_DEFAULT_NOSTR_RELAY_URL_ENV,
+                "ws://127.0.0.1:8080".to_owned(),
+            ),
+            (APP_LOCAL_LOG_ROOT_ENV, "/tmp/radroots/logs".to_owned()),
+        ]);
+        let config = AppRuntimeConfig::from_env_with(
+            |name| env.get(name).cloned(),
+            PathBuf::from("/tmp/default-logs"),
+        )
             .expect("valid env config");
 
         assert_eq!(config.runtime_mode, AppRuntimeMode::LocalhostDev);
-        assert_eq!(
-            config.run_id,
-            "run-localhost-dev-20260417T000000Z-deadbeefcafefeed"
-        );
         assert_eq!(config.default_nostr_relay_url, "ws://127.0.0.1:8080");
-        assert_eq!(config.bundle_identifier, APP_ID);
-        assert_eq!(config.bundle_name, APP_NAME);
-        assert_eq!(config.platform_name, APP_HOST_PLATFORM);
-        assert_eq!(config.runtime_origin, APP_RUNTIME_ORIGIN);
-        assert_eq!(config.operating_system_version, std::env::consts::OS);
-        assert!(!config.host_locale.trim().is_empty());
         assert_eq!(config.local_log_root, PathBuf::from("/tmp/radroots/logs"));
     }
 
     #[test]
-    fn runtime_snapshot_uses_explicit_runtime_config_host_identity() {
+    fn runtime_config_defaults_local_log_root_from_runtime_paths() {
         let env = test_runtime_env();
-        let snapshot = AppRuntimeSnapshot::from_config(
-            test_build_identity(),
-            &AppRuntimeConfig::from_env_with(|name| env.get(name).cloned())
-                .expect("valid env config"),
-        );
+        let config = AppRuntimeConfig::from_env_with(
+            |name| env.get(name).cloned(),
+            PathBuf::from("/tmp/default-logs"),
+        )
+        .expect("default log root should apply");
 
-        assert_eq!(
-            snapshot.run_id,
-            "run-localhost-dev-20260417T000000Z-deadbeefcafefeed"
-        );
-        assert_eq!(snapshot.host.app_identifier, APP_ID);
-        assert_eq!(snapshot.host.app_name, APP_NAME);
-        assert_eq!(snapshot.host.platform_name, APP_HOST_PLATFORM);
-        assert_eq!(snapshot.host.operating_system, std::env::consts::OS);
-        assert_eq!(snapshot.host.runtime_origin, APP_RUNTIME_ORIGIN);
-        assert_eq!(runtime_mode_label(&snapshot.runtime_mode), "localhost-dev");
+        assert_eq!(config.local_log_root, PathBuf::from("/tmp/default-logs"));
     }
 
     #[test]
@@ -455,78 +408,44 @@ mod tests {
     }
 
     #[test]
-    fn runtime_snapshot_capture_matches_canonical_runtime_config_metadata() {
-        let build = test_build_identity();
-        let env = BTreeMap::from([
-            (APP_RUNTIME_MODE_ENV, "development".to_owned()),
-            (APP_RUN_ID_ENV, "run-development-123-pid456".to_owned()),
-            (
-                APP_DEFAULT_NOSTR_RELAY_URL_ENV,
-                "ws://127.0.0.1:8080".to_owned(),
-            ),
-            (APP_LOCAL_LOG_ROOT_ENV, "/tmp/radroots/logs".to_owned()),
-        ]);
-        let snapshot_from_capture = AppRuntimeSnapshot::from_capture(
-            build.clone(),
-            AppRuntimeMode::Development,
-            AppRuntimeCapture {
-                host_locale: "en_US.UTF-8".to_owned(),
-                operating_system: "macos".to_owned(),
-                run_id: "run-development-123-pid456".to_owned(),
-            },
-        );
-        let snapshot_from_config = AppRuntimeSnapshot::from_config(
-            build.clone(),
-            &AppRuntimeConfig::from_env_with(|name| env.get(name).cloned())
-                .expect("canonical env config should parse"),
+    fn runtime_snapshot_capture_for_mode_uses_rust_owned_host_identity() {
+        let snapshot = AppRuntimeSnapshot::capture_for_mode(
+            test_build_identity(),
+            AppRuntimeMode::LocalhostDev,
         );
 
-        assert_eq!(snapshot_from_config.title, snapshot_from_capture.title);
-        assert_eq!(snapshot_from_config.runtime_mode, snapshot_from_capture.runtime_mode);
-        assert_eq!(snapshot_from_config.run_id, snapshot_from_capture.run_id);
-        assert_eq!(snapshot_from_config.core, snapshot_from_capture.core);
-        assert_eq!(
-            snapshot_from_config.host.app_identifier,
-            snapshot_from_capture.host.app_identifier
-        );
-        assert_eq!(
-            snapshot_from_config.host.app_name,
-            snapshot_from_capture.host.app_name
-        );
-        assert_eq!(
-            snapshot_from_config.host.app_version,
-            snapshot_from_capture.host.app_version
-        );
-        assert_eq!(
-            snapshot_from_config.host.platform_name,
-            snapshot_from_capture.host.platform_name
-        );
-        assert_eq!(
-            snapshot_from_config.host.operating_system,
-            snapshot_from_capture.host.operating_system
-        );
-        assert_eq!(
-            snapshot_from_config.host.runtime_origin,
-            snapshot_from_capture.host.runtime_origin
-        );
+        assert_eq!(snapshot.title, APP_NAME);
+        assert!(snapshot.run_id.starts_with("run-localhost-dev-"));
+        assert!(snapshot.run_id.contains("-pid"));
+        assert_eq!(snapshot.host.app_identifier, APP_ID);
+        assert_eq!(snapshot.host.app_name, APP_NAME);
+        assert_eq!(snapshot.host.app_version, env!("CARGO_PKG_VERSION"));
+        assert_eq!(snapshot.host.platform_name, APP_HOST_PLATFORM);
+        assert_eq!(snapshot.host.operating_system, std::env::consts::OS);
+        assert_eq!(snapshot.host.runtime_origin, APP_RUNTIME_ORIGIN);
+        assert!(!snapshot.host.host_locale.trim().is_empty());
     }
 
     #[test]
     fn runtime_config_rejects_empty_required_fields() {
         let env = BTreeMap::from([
             (APP_RUNTIME_MODE_ENV, "localhost-dev".to_owned()),
-            (APP_RUN_ID_ENV, "".to_owned()),
             (
                 APP_DEFAULT_NOSTR_RELAY_URL_ENV,
-                "ws://127.0.0.1:8080".to_owned(),
+                "".to_owned(),
             ),
-            (APP_LOCAL_LOG_ROOT_ENV, "/tmp/radroots/logs".to_owned()),
         ]);
-        let error = AppRuntimeConfig::from_env_with(|name| env.get(name).cloned())
-            .expect_err("missing run id should fail");
+        let error = AppRuntimeConfig::from_env_with(
+            |name| env.get(name).cloned(),
+            PathBuf::from("/tmp/default-logs"),
+        )
+        .expect_err("missing relay env should fail");
 
         assert!(
-            matches!(error, AppRuntimeConfigError::MissingField(APP_RUN_ID_ENV)),
+            matches!(
+                error,
+                AppRuntimeConfigError::MissingField(APP_DEFAULT_NOSTR_RELAY_URL_ENV)
+            ),
             "unexpected error: {error}"
         );
     }
@@ -535,20 +454,17 @@ mod tests {
     fn runtime_config_rejects_missing_default_nostr_relay_url() {
         let env = BTreeMap::from([
             (APP_RUNTIME_MODE_ENV, "localhost-dev".to_owned()),
-            (
-                APP_RUN_ID_ENV,
-                "run-localhost-dev-20260417T000000Z-deadbeefcafefeed".to_owned(),
-            ),
-            (APP_DEFAULT_NOSTR_RELAY_URL_ENV, "".to_owned()),
-            (APP_LOCAL_LOG_ROOT_ENV, "/tmp/radroots/logs".to_owned()),
         ]);
-        let error = AppRuntimeConfig::from_env_with(|name| env.get(name).cloned())
+        let error = AppRuntimeConfig::from_env_with(
+            |name| env.get(name).cloned(),
+            PathBuf::from("/tmp/default-logs"),
+        )
             .expect_err("missing default relay url should fail");
 
         assert!(
             matches!(
                 error,
-                AppRuntimeConfigError::MissingField(APP_DEFAULT_NOSTR_RELAY_URL_ENV)
+                AppRuntimeConfigError::MissingEnv(APP_DEFAULT_NOSTR_RELAY_URL_ENV)
             ),
             "unexpected error: {error}"
         );

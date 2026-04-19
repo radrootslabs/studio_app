@@ -26,7 +26,7 @@ pub enum AppLaunchError {
 pub fn launch() -> Result<(), AppLaunchError> {
     let build = build_identity();
     let runtime_config = AppRuntimeConfig::from_env()?;
-    let snapshot = AppRuntimeSnapshot::from_config(build, &runtime_config);
+    let snapshot = AppRuntimeSnapshot::capture_for_mode(build, runtime_config.runtime_mode);
     bootstrap_logging(&snapshot, runtime_config.local_log_root.as_path())?;
     install_panic_hook();
 

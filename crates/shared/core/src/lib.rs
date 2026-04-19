@@ -19,9 +19,9 @@ pub use paths::{
 };
 pub use runtime::{
     APP_HOST_PLATFORM, APP_ID, APP_NAME, APP_PLATFORM_RUNTIME, APP_PROJECTION_SOURCE,
-    APP_RUNTIME_MODE_ENV, APP_RUN_ID_ENV, APP_DEFAULT_NOSTR_RELAY_URL_ENV,
-    APP_LOCAL_LOG_ROOT_ENV, APP_RUNTIME_ORIGIN, AppBuildIdentity, AppCoreRuntimeMetadata,
-    AppHostRuntimeMetadata, AppRuntimeCapture, AppRuntimeConfig, AppRuntimeConfigError,
-    AppRuntimeMode, AppRuntimeSnapshot, runtime_mode_label,
+    APP_RUNTIME_MODE_ENV, APP_DEFAULT_NOSTR_RELAY_URL_ENV, APP_LOCAL_LOG_ROOT_ENV,
+    APP_RUNTIME_ORIGIN, AppBuildIdentity, AppCoreRuntimeMetadata, AppHostRuntimeMetadata,
+    AppRuntimeCapture, AppRuntimeConfig, AppRuntimeConfigError, AppRuntimeMode,
+    AppRuntimeSnapshot, runtime_mode_label,
 };
 pub use startup::{AppStartupEvent, AppStartupEventMetadata, launch_startup_event};
