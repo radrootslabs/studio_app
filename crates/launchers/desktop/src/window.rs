@@ -6544,6 +6544,7 @@ fn home_setup_task_row(task: &radroots_studio_app_models::TodaySetupTask) -> Any
         }))
         .child(
             div()
+                .flex_1()
                 .min_w_0()
                 .text_size(px(APP_UI_THEME.foundation.typography.body_text_px))
                 .font_weight(gpui::FontWeight::MEDIUM)
