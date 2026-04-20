@@ -9,6 +9,7 @@ mod farm_setup;
 mod migrations;
 mod orders;
 mod products;
+mod sync;
 mod today;
 
 use std::{collections::BTreeSet, fs, path::PathBuf, time::Duration};
@@ -23,6 +24,9 @@ use radroots_studio_app_models::{
     ProductId, ProductPublishBlocker, ProductsFilter, ProductsListProjection, ProductsSort,
     TodayAgendaProjection,
 };
+use radroots_studio_app_sync::{
+    PendingSyncOperation, SyncCheckpointStatus, SyncConflict, SyncConflictResolutionStatus,
+};
 use rusqlite::Connection;
 
 pub use activation::AppActivationRepository;
@@ -36,6 +40,7 @@ pub use farm_setup::AppFarmSetupRepository;
 pub use migrations::latest_schema_version;
 pub use orders::AppOrdersRepository;
 pub use products::AppProductsRepository;
+pub use sync::{AppSyncRepository, StoredPendingSyncOperation, StoredSyncConflict};
 pub use today::{
     AppTodayAgendaRepository, TODAY_AGENDA_LIST_LIMIT, TODAY_AGENDA_LOW_STOCK_THRESHOLD,
 };
@@ -102,6 +107,10 @@ impl AppSqliteStore {
 
     pub fn orders_repository(&self) -> AppOrdersRepository<'_> {
         AppOrdersRepository::new(&self.connection)
+    }
+
+    pub fn sync_repository(&self) -> AppSyncRepository<'_> {
+        AppSyncRepository::new(&self.connection)
     }
 
     pub fn load_today_agenda(
@@ -342,6 +351,88 @@ impl AppSqliteStore {
         self.buyer_repository()
             .load_buyer_order_detail(context, order_id)
     }
+
+    pub fn enqueue_pending_sync_operation(
+        &self,
+        account_id: &str,
+        operation: &PendingSyncOperation,
+    ) -> Result<String, AppSqliteError> {
+        self.sync_repository()
+            .enqueue_pending_operation(account_id, operation)
+    }
+
+    pub fn load_pending_sync_operations(
+        &self,
+        account_id: &str,
+    ) -> Result<Vec<StoredPendingSyncOperation>, AppSqliteError> {
+        self.sync_repository().load_pending_operations(account_id)
+    }
+
+    pub fn update_pending_sync_operation_retry(
+        &self,
+        account_id: &str,
+        operation_id: &str,
+        available_at: &str,
+        attempt_count: u32,
+    ) -> Result<bool, AppSqliteError> {
+        self.sync_repository().update_pending_operation_retry(
+            account_id,
+            operation_id,
+            available_at,
+            attempt_count,
+        )
+    }
+
+    pub fn dequeue_pending_sync_operation(
+        &self,
+        account_id: &str,
+        operation_id: &str,
+    ) -> Result<bool, AppSqliteError> {
+        self.sync_repository()
+            .dequeue_pending_operation(account_id, operation_id)
+    }
+
+    pub fn load_sync_checkpoint(
+        &self,
+        account_id: &str,
+    ) -> Result<SyncCheckpointStatus, AppSqliteError> {
+        self.sync_repository().load_checkpoint(account_id)
+    }
+
+    pub fn save_sync_checkpoint(
+        &self,
+        account_id: &str,
+        checkpoint: &SyncCheckpointStatus,
+    ) -> Result<(), AppSqliteError> {
+        self.sync_repository()
+            .save_checkpoint(account_id, checkpoint)
+    }
+
+    pub fn record_sync_conflict(
+        &self,
+        account_id: &str,
+        conflict: &SyncConflict,
+    ) -> Result<String, AppSqliteError> {
+        self.sync_repository().record_conflict(account_id, conflict)
+    }
+
+    pub fn load_sync_conflicts(
+        &self,
+        account_id: &str,
+    ) -> Result<Vec<StoredSyncConflict>, AppSqliteError> {
+        self.sync_repository().load_conflicts(account_id)
+    }
+
+    pub fn resolve_sync_conflict(
+        &self,
+        account_id: &str,
+        conflict_id: &str,
+        resolution: SyncConflictResolutionStatus,
+        resolved_at: &str,
+    ) -> Result<bool, AppSqliteError> {
+        self.sync_repository()
+            .resolve_conflict(account_id, conflict_id, resolution, resolved_at)
+    }
 }
 
 fn open_connection(target: &DatabaseTarget) -> Result<Connection, AppSqliteError> {
@@ -443,7 +534,7 @@ fn apply_migrations(connection: &mut Connection) -> Result<(), AppSqliteError> {
 
 #[cfg(test)]
 mod tests {
-    use super::{AppSqliteStore, DatabaseTarget, latest_schema_version};
+    use super::{AppSqliteStore, DatabaseTarget, latest_schema_version, migrations};
     use rusqlite::Connection;
     use std::{
         env, fs,
@@ -481,6 +572,16 @@ mod tests {
         assert!(table_exists(connection, "buyer_cart_lines"));
         assert!(column_exists(connection, "farms", "timezone"));
         assert!(column_exists(connection, "farms", "currency_code"));
+        assert!(column_exists(connection, "local_outbox", "account_id"));
+        assert!(column_exists(connection, "local_conflicts", "account_id"));
+        assert!(column_exists(connection, "local_conflicts", "severity"));
+        assert!(column_exists(
+            connection,
+            "local_conflicts",
+            "resolution_status"
+        ));
+        assert!(column_exists(connection, "sync_checkpoints", "account_id"));
+        assert!(column_exists(connection, "sync_checkpoints", "state"));
         assert!(column_exists(
             connection,
             "fulfillment_windows",
@@ -506,7 +607,7 @@ mod tests {
         assert!(column_exists(connection, "orders", "buyer_email"));
         assert!(column_exists(connection, "orders", "buyer_phone"));
         assert!(column_exists(connection, "orders", "buyer_order_note"));
-        assert_eq!(row_count(connection, "sync_checkpoints"), 1);
+        assert_eq!(row_count(connection, "sync_checkpoints"), 0);
 
         drop(store);
         remove_database_artifacts(&path);
@@ -523,7 +624,7 @@ mod tests {
             reopened.schema_version().expect("schema version"),
             latest_schema_version()
         );
-        assert_eq!(row_count(reopened.connection(), "sync_checkpoints"), 1);
+        assert_eq!(row_count(reopened.connection(), "sync_checkpoints"), 0);
 
         drop(reopened);
         remove_database_artifacts(&path);
@@ -539,6 +640,48 @@ mod tests {
         );
         assert_eq!(pragma_i64(store.connection(), "foreign_keys"), 1);
         assert!(table_exists(store.connection(), "farms"));
+    }
+
+    #[test]
+    fn legacy_sync_scaffolding_migrates_to_account_scoped_contract() {
+        let path = temp_database_path("legacy-sync-contract");
+        fs::create_dir_all(path.parent().expect("temp database should have a parent"))
+            .expect("legacy database parent should exist");
+        let connection = Connection::open(&path).expect("legacy database should open");
+
+        for (version, sql) in migrations::pending_migrations(0)
+            .filter(|(version, _)| *version < latest_schema_version())
+        {
+            connection
+                .execute_batch(sql)
+                .expect("legacy migration should apply");
+            connection
+                .pragma_update(None, "user_version", version)
+                .expect("legacy schema version should record");
+        }
+
+        drop(connection);
+
+        let store =
+            AppSqliteStore::open(DatabaseTarget::Path(path.clone())).expect("store should open");
+        let connection = store.connection();
+
+        assert_eq!(
+            store.schema_version().expect("schema version"),
+            latest_schema_version()
+        );
+        assert!(column_exists(connection, "local_outbox", "account_id"));
+        assert!(column_exists(connection, "local_conflicts", "severity"));
+        assert!(column_exists(
+            connection,
+            "local_conflicts",
+            "resolution_status"
+        ));
+        assert!(column_exists(connection, "sync_checkpoints", "state"));
+        assert_eq!(row_count(connection, "sync_checkpoints"), 0);
+
+        drop(store);
+        remove_database_artifacts(&path);
     }
 
     fn table_exists(connection: &Connection, table_name: &str) -> bool {

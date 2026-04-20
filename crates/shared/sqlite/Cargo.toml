@@ -10,8 +10,10 @@ publish = false
 
 [dependencies]
 radroots_studio_app_models.workspace = true
+radroots_studio_app_sync.workspace = true
 rusqlite.workspace = true
 thiserror.workspace = true
+uuid.workspace = true
 
 [lints]
 workspace = true

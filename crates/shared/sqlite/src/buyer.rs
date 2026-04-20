@@ -1682,6 +1682,9 @@ mod tests {
                 "Leave by the cooler".to_owned(),
             )
         );
+        assert_eq!(row_count(connection, "local_outbox"), 0);
+        assert_eq!(row_count(connection, "local_conflicts"), 0);
+        assert_eq!(row_count(connection, "sync_checkpoints"), 0);
     }
 
     #[test]
@@ -2032,5 +2035,13 @@ mod tests {
                 },
             )
             .expect("order contact should load")
+    }
+
+    fn row_count(connection: &Connection, table_name: &str) -> i64 {
+        let sql = format!("SELECT COUNT(*) FROM {table_name}");
+
+        connection
+            .query_row(&sql, [], |row| row.get(0))
+            .expect("row count query should succeed")
     }
 }

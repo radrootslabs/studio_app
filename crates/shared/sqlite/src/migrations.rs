@@ -40,6 +40,10 @@ const MIGRATIONS: &[Migration] = &[
         version: 9,
         sql: include_str!("../migrations/0009_buyer_marketplace.sql"),
     },
+    Migration {
+        version: 10,
+        sql: include_str!("../migrations/0010_sync_contract_alignment.sql"),
+    },
 ];
 
 pub fn latest_schema_version() -> u32 {
