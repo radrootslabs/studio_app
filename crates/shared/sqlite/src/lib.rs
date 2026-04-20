@@ -416,6 +416,15 @@ impl AppSqliteStore {
         self.sync_repository().record_conflict(account_id, conflict)
     }
 
+    pub fn replace_sync_conflicts(
+        &self,
+        account_id: &str,
+        conflicts: &[SyncConflict],
+    ) -> Result<(), AppSqliteError> {
+        self.sync_repository()
+            .replace_conflicts(account_id, conflicts)
+    }
+
     pub fn load_sync_conflicts(
         &self,
         account_id: &str,

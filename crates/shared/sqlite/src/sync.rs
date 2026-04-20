@@ -329,6 +329,28 @@ impl<'a> AppSyncRepository<'a> {
         Ok(conflict_id)
     }
 
+    pub fn replace_conflicts(
+        &self,
+        account_id: &str,
+        conflicts: &[SyncConflict],
+    ) -> Result<(), AppSqliteError> {
+        self.connection
+            .execute(
+                "DELETE FROM local_conflicts WHERE account_id = ?1",
+                [account_id],
+            )
+            .map_err(|source| AppSqliteError::Query {
+                operation: "clear sync conflicts",
+                source,
+            })?;
+
+        for conflict in conflicts {
+            let _ = self.record_conflict(account_id, conflict)?;
+        }
+
+        Ok(())
+    }
+
     pub fn load_conflicts(
         &self,
         account_id: &str,
@@ -778,5 +800,54 @@ mod tests {
         );
         assert_eq!(acct_b.len(), 1);
         assert_eq!(acct_b[0].conflict, second);
+    }
+
+    #[test]
+    fn replacing_conflicts_clears_stale_rows_for_the_selected_account() {
+        let store = AppSqliteStore::open(DatabaseTarget::InMemory).expect("store should open");
+        let repository = store.sync_repository();
+        let first = SyncConflict {
+            aggregate: SyncAggregateRef::Farm(FarmId::new()),
+            kind: SyncConflictKind::RevisionMismatch,
+            severity: SyncConflictSeverity::Blocking,
+            resolution: SyncConflictResolutionStatus::Unresolved,
+            local_payload_json: "{\"farm\":\"local\"}".to_owned(),
+            remote_payload_json: Some("{\"farm\":\"remote\"}".to_owned()),
+            detected_at: "2026-04-20T18:00:00Z".to_owned(),
+            resolved_at: None,
+        };
+        let second = SyncConflict {
+            aggregate: SyncAggregateRef::Product(ProductId::new()),
+            kind: SyncConflictKind::RemoteValidationReject,
+            severity: SyncConflictSeverity::ReviewRequired,
+            resolution: SyncConflictResolutionStatus::Unresolved,
+            local_payload_json: "{\"product\":\"local\"}".to_owned(),
+            remote_payload_json: None,
+            detected_at: "2026-04-20T18:05:00Z".to_owned(),
+            resolved_at: None,
+        };
+
+        repository
+            .record_conflict("acct_a", &first)
+            .expect("first conflict should save");
+        repository
+            .record_conflict("acct_b", &first)
+            .expect("other account conflict should save");
+
+        repository
+            .replace_conflicts("acct_a", std::slice::from_ref(&second))
+            .expect("conflicts should replace");
+
+        let acct_a = repository
+            .load_conflicts("acct_a")
+            .expect("account conflicts should load");
+        let acct_b = repository
+            .load_conflicts("acct_b")
+            .expect("other account conflicts should load");
+
+        assert_eq!(acct_a.len(), 1);
+        assert_eq!(acct_a[0].conflict, second);
+        assert_eq!(acct_b.len(), 1);
+        assert_eq!(acct_b[0].conflict, first);
     }
 }

@@ -5034,6 +5034,7 @@ checksum = "f8dcc9c7d52a811697d2151c701e0d08956f92b0e24136cf4cf27b57a6a0d9bf"
 name = "radroots_studio_app"
 version = "0.1.0"
 dependencies = [
+ "chrono",
  "gpui",
  "gpui-component",
  "gpui-component-assets",
@@ -5050,6 +5051,7 @@ dependencies = [
  "radroots_nostr_accounts",
  "radroots_protected_store",
  "radroots_secret_vault",
+ "serde_json",
  "thiserror 2.0.18",
  "tracing",
  "tracing-subscriber",

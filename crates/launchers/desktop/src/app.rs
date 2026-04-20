@@ -34,6 +34,14 @@ pub fn launch() -> Result<(), AppLaunchError> {
         runtime_config.default_nostr_relay_url.clone(),
         snapshot.clone(),
     );
+    if let Err(error) = runtime.sync_on_app_launch() {
+        error!(
+            target: "sync",
+            event = "sync.launch_attempt_failed",
+            error = %error,
+            "failed to execute launch sync attempt"
+        );
+    }
     let runtime_summary = runtime.summary();
     emit_runtime_events(&snapshot, &runtime_summary);
     let launch_target = primary_window_target(&runtime_summary);
