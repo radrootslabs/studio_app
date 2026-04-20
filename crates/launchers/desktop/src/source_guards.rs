@@ -28,8 +28,11 @@ const ALLOWED_WINDOW_LITERALS: &[&str] = &[
     "Salad mix",
     "USD",
     "Untitled draft",
+    "/tmp/radroots/data/apps/app",
+    "/tmp/radroots/logs/apps/app",
     "{}.{:02}",
     "abc",
+    "app.sqlite3",
     "account-add",
     "account-open-workspace",
     "account-log-out",
@@ -488,6 +491,16 @@ const REQUIRED_WINDOW_COPY_KEYS: &[&str] = &[
     "AppTextKey::SettingsReadinessFieldBlackoutPeriodEndsBeforeStart",
     "AppTextKey::SettingsReadinessFieldBlackoutOverlapsFulfillmentWindow",
     "AppTextKey::SettingsReadinessReady",
+    "AppTextKey::SettingsAboutStatusSectionLabel",
+    "AppTextKey::SettingsAboutConflictReviewSectionLabel",
+    "AppTextKey::SettingsAboutRuntimeSectionLabel",
+    "AppTextKey::SettingsAboutConflictReviewUnavailable",
+    "AppTextKey::SettingsAboutConflictReviewClear",
+    "AppTextKey::SettingsAboutConflictReviewNeedsAttention",
+    "AppTextKey::SettingsAboutConflictReviewBlocking",
+    "AppTextKey::MetadataSelectedAccount",
+    "AppTextKey::MetadataSyncPendingWriteCount",
+    "AppTextKey::MetadataSyncBlockingConflictCount",
 ];
 
 const FORBIDDEN_LAUNCHER_UI_BYPASS_PATTERNS: &[(&str, &str)] = &[
@@ -585,6 +598,16 @@ fn desktop_window_source_does_not_reintroduce_removed_ui_helper_families() {
             "window.rs reintroduced removed launcher-local helper family `{helper_name}`"
         );
     }
+}
+
+#[test]
+fn desktop_window_source_does_not_use_about_placeholder_copy() {
+    let source = include_str!("window.rs");
+
+    assert!(
+        !source.contains("SettingsAboutPlaceholder"),
+        "window.rs still references retired about placeholder copy"
+    );
 }
 
 fn extract_string_literals(source: &str) -> BTreeSet<&str> {

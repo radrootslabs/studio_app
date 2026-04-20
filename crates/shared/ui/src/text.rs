@@ -112,23 +112,6 @@ pub fn settings_preferences_general_rows() -> Vec<LabelValueRow> {
     ]
 }
 
-pub fn settings_about_status_rows() -> Vec<LabelValueRow> {
-    vec![
-        text_row(
-            AppTextKey::SettingsViewAbout,
-            AppTextKey::SettingsAboutPlaceholderTopPrimary,
-        ),
-        text_row(
-            AppTextKey::SettingsGeneralSectionLabel,
-            AppTextKey::SettingsAboutPlaceholderMiddle,
-        ),
-        text_row(
-            AppTextKey::SettingsAccountProfileLabel,
-            AppTextKey::SettingsAboutPlaceholderBottom,
-        ),
-    ]
-}
-
 fn metadata_row(label: AppTextKey, value: impl Into<String>) -> LabelValueRow {
     LabelValueRow::new(app_shared_text(label), value.into())
 }
@@ -152,9 +135,7 @@ mod tests {
     };
     use radroots_studio_app_i18n::{AppTextKey, app_text};
 
-    use super::{
-        runtime_metadata_rows, settings_about_status_rows, settings_preferences_general_rows,
-    };
+    use super::{runtime_metadata_rows, settings_preferences_general_rows};
 
     #[test]
     fn runtime_metadata_rows_use_localized_labels() {
@@ -188,24 +169,16 @@ mod tests {
     }
 
     #[test]
-    fn settings_placeholder_rows_use_localized_copy() {
+    fn settings_preferences_rows_use_localized_copy() {
         let general_rows = settings_preferences_general_rows();
-        let about_rows = settings_about_status_rows();
 
         let allow_relay_label = app_text(AppTextKey::SettingsGeneralAllowRelayConnections);
         let enabled_value = app_text(AppTextKey::ValueEnabled);
-        let about_label = app_text(AppTextKey::SettingsViewAbout);
-        let about_primary = app_text(AppTextKey::SettingsAboutPlaceholderTopPrimary);
 
         assert!(
             general_rows
                 .iter()
                 .any(|row| row.label == allow_relay_label && row.value == enabled_value)
-        );
-        assert!(
-            about_rows
-                .iter()
-                .any(|row| row.label == about_label && row.value == about_primary)
         );
     }
 }

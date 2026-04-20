@@ -168,6 +168,50 @@ mod tests {
     }
 
     #[test]
+    fn english_about_copy_matches_the_runtime_status_contract() {
+        assert_eq!(
+            app_text(AppTextKey::SettingsAboutStatusSectionLabel),
+            "Status"
+        );
+        assert_eq!(
+            app_text(AppTextKey::SettingsAboutConflictReviewSectionLabel),
+            "Conflict review"
+        );
+        assert_eq!(
+            app_text(AppTextKey::SettingsAboutRuntimeSectionLabel),
+            "Runtime"
+        );
+        assert_eq!(
+            app_text(AppTextKey::SettingsAboutConflictReviewUnavailable),
+            "Conflict review becomes available after you select an account."
+        );
+        assert_eq!(
+            app_text(AppTextKey::SettingsAboutConflictReviewBlocking),
+            "Blocking conflicts pause sync until you resolve them."
+        );
+        assert_eq!(
+            app_text(AppTextKey::SettingsAboutConflictAcceptLocalAction),
+            "Accept local"
+        );
+        assert_eq!(
+            app_text(AppTextKey::SettingsAboutConflictAcceptRemoteAction),
+            "Accept remote"
+        );
+        assert_eq!(
+            app_text(AppTextKey::SettingsAboutConflictDismissAction),
+            "Dismiss"
+        );
+        assert_eq!(
+            app_text(AppTextKey::MetadataSyncPendingWriteCount),
+            "pending writes"
+        );
+        assert_eq!(
+            app_text(AppTextKey::MetadataSyncBlockingConflictCount),
+            "blocking conflict count"
+        );
+    }
+
+    #[test]
     fn english_orders_copy_matches_the_queue_contract() {
         assert_eq!(app_text(AppTextKey::HomeNavOrders), "Orders");
         assert_eq!(

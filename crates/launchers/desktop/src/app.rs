@@ -30,7 +30,10 @@ pub fn launch() -> Result<(), AppLaunchError> {
     bootstrap_logging(&snapshot, runtime_config.local_log_root.as_path())?;
     install_panic_hook();
 
-    let runtime = DesktopAppRuntime::bootstrap(runtime_config.default_nostr_relay_url.clone());
+    let runtime = DesktopAppRuntime::bootstrap(
+        runtime_config.default_nostr_relay_url.clone(),
+        snapshot.clone(),
+    );
     let runtime_summary = runtime.summary();
     emit_runtime_events(&snapshot, &runtime_summary);
     let launch_target = primary_window_target(&runtime_summary);
@@ -275,6 +278,7 @@ mod tests {
             products_projection: Default::default(),
             orders_projection: Default::default(),
             pack_day_projection: Default::default(),
+            runtime_metadata: crate::runtime::DesktopAppRuntimeMetadataSummary::default(),
             logged_out_startup: LoggedOutStartupProjection::default(),
             sync_status: crate::runtime::DesktopAppSyncStatusSummary::default(),
             startup_issue: startup_issue.map(str::to_owned),

@@ -1,8 +1,12 @@
 use std::collections::BTreeSet;
 use std::fmt;
+use std::path::PathBuf;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
-use radroots_studio_app_core::{AppDesktopRuntimePaths, AppRuntimePathsError, AppSharedAccountsPaths};
+use radroots_studio_app_core::{
+    AppBuildIdentity, AppDesktopRuntimePaths, AppRuntimeCapture, AppRuntimeMode,
+    AppRuntimePathsError, AppRuntimeSnapshot, AppSharedAccountsPaths,
+};
 use radroots_studio_app_models::{
     ActiveSurface, AppActivityContext, AppActivityKind, AppIdentityProjection, AppStartupGate,
     BuyerCartLineProjection, BuyerCartProjection, BuyerCartReplaceConfirmationProjection,
@@ -55,10 +59,16 @@ pub struct DesktopAppRuntime {
 }
 
 impl DesktopAppRuntime {
-    pub fn bootstrap(default_nostr_relay_url: String) -> Self {
-        let state = match DesktopAppRuntimeState::try_bootstrap(default_nostr_relay_url) {
+    pub fn bootstrap(
+        default_nostr_relay_url: String,
+        runtime_snapshot: AppRuntimeSnapshot,
+    ) -> Self {
+        let state = match DesktopAppRuntimeState::try_bootstrap(
+            default_nostr_relay_url,
+            runtime_snapshot.clone(),
+        ) {
             Ok(state) => state,
-            Err(error) => DesktopAppRuntimeState::degraded(error),
+            Err(error) => DesktopAppRuntimeState::degraded_with_snapshot(error, runtime_snapshot),
         };
 
         Self::from_state(state)
@@ -90,6 +100,7 @@ impl DesktopAppRuntime {
             products_projection: state.state_store.products_projection().clone(),
             orders_projection: state.state_store.orders_projection().clone(),
             pack_day_projection: state.state_store.pack_day_projection().clone(),
+            runtime_metadata: state.runtime_metadata.clone(),
             sync_status,
             startup_issue: state.startup_issue.clone(),
         }
@@ -503,6 +514,25 @@ impl DesktopAppRuntime {
     }
 }
 
+fn default_runtime_snapshot() -> AppRuntimeSnapshot {
+    AppRuntimeSnapshot::from_capture(
+        AppBuildIdentity {
+            package_name: env!("CARGO_PKG_NAME").to_owned(),
+            package_version: env!("CARGO_PKG_VERSION").to_owned(),
+            build_profile: option_env!("PROFILE").unwrap_or("debug").to_owned(),
+            target_triple: option_env!("TARGET").unwrap_or("unknown-target").to_owned(),
+            projection_source: "rust".to_owned(),
+            git_commit: None,
+        },
+        AppRuntimeMode::Development,
+        AppRuntimeCapture {
+            host_locale: "en_US.UTF-8".to_owned(),
+            operating_system: "macos".to_owned(),
+            run_id: "runtime-summary-test-run".to_owned(),
+        },
+    )
+}
+
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct DesktopAppSyncStatusSummary {
     pub account_id: Option<String>,
@@ -513,6 +543,48 @@ pub struct DesktopAppSyncStatusSummary {
 impl DesktopAppSyncStatusSummary {
     pub const fn is_enabled(&self) -> bool {
         self.account_id.is_some()
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct DesktopAppRuntimeMetadataSummary {
+    pub snapshot: AppRuntimeSnapshot,
+    pub data_root: Option<PathBuf>,
+    pub logs_root: Option<PathBuf>,
+    pub database_path: Option<PathBuf>,
+    pub database_schema_version: Option<u32>,
+}
+
+impl DesktopAppRuntimeMetadataSummary {
+    fn available(
+        snapshot: AppRuntimeSnapshot,
+        paths: &AppDesktopRuntimePaths,
+        database_path: PathBuf,
+        database_schema_version: u32,
+    ) -> Self {
+        Self {
+            snapshot,
+            data_root: Some(paths.app.data.clone()),
+            logs_root: Some(paths.app.logs.clone()),
+            database_path: Some(database_path),
+            database_schema_version: Some(database_schema_version),
+        }
+    }
+
+    fn unavailable(snapshot: AppRuntimeSnapshot) -> Self {
+        Self {
+            snapshot,
+            data_root: None,
+            logs_root: None,
+            database_path: None,
+            database_schema_version: None,
+        }
+    }
+}
+
+impl Default for DesktopAppRuntimeMetadataSummary {
+    fn default() -> Self {
+        Self::unavailable(default_runtime_snapshot())
     }
 }
 
@@ -530,6 +602,7 @@ pub struct DesktopAppRuntimeSummary {
     pub products_projection: ProductsScreenProjection,
     pub orders_projection: OrdersScreenProjection,
     pub pack_day_projection: PackDayScreenProjection,
+    pub runtime_metadata: DesktopAppRuntimeMetadataSummary,
     pub sync_status: DesktopAppSyncStatusSummary,
     pub startup_issue: Option<String>,
 }
@@ -567,6 +640,7 @@ struct DesktopAppRuntimeState {
     remote_signer_paths: Option<DesktopRemoteSignerPaths>,
     accounts_manager: Option<RadrootsNostrAccountsManager>,
     sqlite_store: Option<AppSqliteStore>,
+    runtime_metadata: DesktopAppRuntimeMetadataSummary,
     selected_account_pending_sync_write_count: usize,
     startup_issue: Option<String>,
 }
@@ -592,6 +666,7 @@ impl fmt::Debug for DesktopAppRuntimeState {
                 "sqlite_store",
                 &self.sqlite_store.as_ref().map(|_| "available"),
             )
+            .field("runtime_metadata", &self.runtime_metadata)
             .field(
                 "selected_account_pending_sync_write_count",
                 &self.selected_account_pending_sync_write_count,
@@ -604,17 +679,20 @@ impl fmt::Debug for DesktopAppRuntimeState {
 impl DesktopAppRuntimeState {
     fn try_bootstrap(
         default_nostr_relay_url: String,
+        runtime_snapshot: AppRuntimeSnapshot,
     ) -> Result<Self, DesktopAppRuntimeBootstrapError> {
         let paths = AppDesktopRuntimePaths::current_desktop()?;
-        Self::bootstrap_from_paths(paths, default_nostr_relay_url)
+        Self::bootstrap_from_paths(paths, default_nostr_relay_url, runtime_snapshot)
     }
 
     fn bootstrap_from_paths(
         paths: AppDesktopRuntimePaths,
         default_nostr_relay_url: String,
+        runtime_snapshot: AppRuntimeSnapshot,
     ) -> Result<Self, DesktopAppRuntimeBootstrapError> {
         let database_path = paths.app.data.join(APP_DATABASE_FILE_NAME);
         let sqlite_store = AppSqliteStore::open(DatabaseTarget::Path(database_path.clone()))?;
+        let database_schema_version = sqlite_store.schema_version()?;
         let mut state_store = AppStateStore::load(InMemoryAppStateRepository::default())?;
         let remote_signer_paths = DesktopRemoteSignerPaths::from_runtime_paths(&paths);
         let accounts_bootstrap = bootstrap_desktop_accounts(&paths.shared_accounts, &sqlite_store)?;
@@ -689,12 +767,25 @@ impl DesktopAppRuntimeState {
             remote_signer_paths: Some(remote_signer_paths),
             accounts_manager: accounts_bootstrap.accounts_manager,
             sqlite_store: Some(sqlite_store),
+            runtime_metadata: DesktopAppRuntimeMetadataSummary::available(
+                runtime_snapshot,
+                &paths,
+                database_path,
+                database_schema_version,
+            ),
             selected_account_pending_sync_write_count: pending_sync_write_count,
             startup_issue: None,
         })
     }
 
     fn degraded(error: DesktopAppRuntimeBootstrapError) -> Self {
+        Self::degraded_with_snapshot(error, default_runtime_snapshot())
+    }
+
+    fn degraded_with_snapshot(
+        error: DesktopAppRuntimeBootstrapError,
+        runtime_snapshot: AppRuntimeSnapshot,
+    ) -> Self {
         Self {
             state_store: AppStateStore::in_memory(AppShellProjection::default()),
             default_nostr_relay_url: String::new(),
@@ -702,6 +793,7 @@ impl DesktopAppRuntimeState {
             remote_signer_paths: None,
             accounts_manager: None,
             sqlite_store: None,
+            runtime_metadata: DesktopAppRuntimeMetadataSummary::unavailable(runtime_snapshot),
             selected_account_pending_sync_write_count: 0,
             startup_issue: Some(error.to_string()),
         }
@@ -2577,7 +2669,7 @@ mod tests {
     use radroots_studio_app_remote_signer::{
         RadrootsAppRemoteSignerPendingSession, RadrootsAppRemoteSignerSessionRecord,
     };
-    use radroots_studio_app_sqlite::{AppSqliteStore, DatabaseTarget};
+    use radroots_studio_app_sqlite::{AppSqliteStore, DatabaseTarget, latest_schema_version};
     use radroots_studio_app_state::{
         AppStateRepositoryError, AppStateStore, AppStateStoreError, HomeRoute,
         InMemoryAppStateRepository,
@@ -2597,8 +2689,8 @@ mod tests {
 
     use super::{
         APP_DATABASE_FILE_NAME, DesktopAppRuntime, DesktopAppRuntimeActivityContextError,
-        DesktopAppRuntimeCommandError, DesktopAppRuntimeState, DesktopAppSyncStatusSummary,
-        DesktopRemoteSignerPaths,
+        DesktopAppRuntimeCommandError, DesktopAppRuntimeMetadataSummary, DesktopAppRuntimeState,
+        DesktopAppSyncStatusSummary, DesktopRemoteSignerPaths,
     };
 
     #[test]
@@ -2657,6 +2749,7 @@ mod tests {
                 AppSqliteStore::open(DatabaseTarget::InMemory)
                     .expect("in-memory sqlite store should open"),
             ),
+            runtime_metadata: DesktopAppRuntimeMetadataSummary::default(),
             selected_account_pending_sync_write_count: 0,
             startup_issue: None,
         });
@@ -2708,6 +2801,7 @@ mod tests {
                 AppSqliteStore::open(DatabaseTarget::InMemory)
                     .expect("in-memory sqlite store should open"),
             ),
+            runtime_metadata: DesktopAppRuntimeMetadataSummary::default(),
             selected_account_pending_sync_write_count: 0,
             startup_issue: None,
         });
@@ -2834,6 +2928,35 @@ mod tests {
     }
 
     #[test]
+    fn runtime_summary_surfaces_runtime_metadata_from_bootstrap() {
+        let (runtime, paths) = bootstrapped_runtime("runtime_metadata");
+        let summary = runtime.summary();
+
+        assert_eq!(
+            summary.runtime_metadata.snapshot.host.app_name,
+            radroots_studio_app_core::APP_NAME
+        );
+        assert_eq!(
+            summary.runtime_metadata.data_root.as_ref(),
+            Some(&paths.app.data)
+        );
+        assert_eq!(
+            summary.runtime_metadata.logs_root.as_ref(),
+            Some(&paths.app.logs)
+        );
+        assert_eq!(
+            summary.runtime_metadata.database_path.as_ref(),
+            Some(&paths.app.data.join(APP_DATABASE_FILE_NAME))
+        );
+        assert_eq!(
+            summary.runtime_metadata.database_schema_version,
+            Some(latest_schema_version())
+        );
+
+        cleanup_bootstrapped_runtime_paths(&paths);
+    }
+
+    #[test]
     fn clearing_startup_pending_remote_signer_session_is_idempotent_without_record() {
         let paths = temp_remote_signer_paths("clear_pending_none");
         let runtime = DesktopAppRuntime::from_state(DesktopAppRuntimeState {
@@ -2847,6 +2970,7 @@ mod tests {
                 AppSqliteStore::open(DatabaseTarget::InMemory)
                     .expect("in-memory sqlite store should open"),
             ),
+            runtime_metadata: DesktopAppRuntimeMetadataSummary::default(),
             selected_account_pending_sync_write_count: 0,
             startup_issue: None,
         });
@@ -2875,6 +2999,7 @@ mod tests {
                 AppSqliteStore::open(DatabaseTarget::InMemory)
                     .expect("in-memory sqlite store should open"),
             ),
+            runtime_metadata: DesktopAppRuntimeMetadataSummary::default(),
             selected_account_pending_sync_write_count: 0,
             startup_issue: None,
         });
@@ -2972,6 +3097,7 @@ mod tests {
                 AppSqliteStore::open(DatabaseTarget::InMemory)
                     .expect("in-memory sqlite store should open"),
             ),
+            runtime_metadata: DesktopAppRuntimeMetadataSummary::default(),
             selected_account_pending_sync_write_count: 0,
             startup_issue: None,
         });
@@ -3069,6 +3195,7 @@ mod tests {
                 AppSqliteStore::open(DatabaseTarget::InMemory)
                     .expect("in-memory sqlite store should open"),
             ),
+            runtime_metadata: DesktopAppRuntimeMetadataSummary::default(),
             selected_account_pending_sync_write_count: 0,
             startup_issue: None,
         });
@@ -3119,6 +3246,7 @@ mod tests {
                 AppSqliteStore::open(DatabaseTarget::InMemory)
                     .expect("in-memory sqlite store should open"),
             ),
+            runtime_metadata: DesktopAppRuntimeMetadataSummary::default(),
             selected_account_pending_sync_write_count: 0,
             startup_issue: None,
         });
@@ -3153,6 +3281,7 @@ mod tests {
                 AppSqliteStore::open(DatabaseTarget::InMemory)
                     .expect("in-memory sqlite store should open"),
             ),
+            runtime_metadata: DesktopAppRuntimeMetadataSummary::default(),
             selected_account_pending_sync_write_count: 0,
             startup_issue: None,
         });
@@ -3185,6 +3314,7 @@ mod tests {
                 AppSqliteStore::open(DatabaseTarget::InMemory)
                     .expect("in-memory sqlite store should open"),
             ),
+            runtime_metadata: DesktopAppRuntimeMetadataSummary::default(),
             selected_account_pending_sync_write_count: 0,
             startup_issue: None,
         });
@@ -5388,6 +5518,7 @@ mod tests {
                 AppSqliteStore::open(DatabaseTarget::InMemory)
                     .expect("in-memory sqlite store should open"),
             ),
+            runtime_metadata: DesktopAppRuntimeMetadataSummary::default(),
             selected_account_pending_sync_write_count: 0,
             startup_issue: None,
         });
@@ -5420,6 +5551,7 @@ mod tests {
                 AppSqliteStore::open(DatabaseTarget::InMemory)
                     .expect("in-memory sqlite store should open"),
             ),
+            runtime_metadata: DesktopAppRuntimeMetadataSummary::default(),
             selected_account_pending_sync_write_count: 0,
             startup_issue: None,
         })
@@ -5450,6 +5582,7 @@ mod tests {
                     AppSqliteStore::open(DatabaseTarget::InMemory)
                         .expect("in-memory sqlite store should open"),
                 ),
+                runtime_metadata: DesktopAppRuntimeMetadataSummary::default(),
                 selected_account_pending_sync_write_count: 0,
                 startup_issue: None,
             }),
@@ -5465,8 +5598,12 @@ mod tests {
 
     fn restart_runtime(paths: AppDesktopRuntimePaths) -> DesktopAppRuntime {
         DesktopAppRuntime::from_state(
-            DesktopAppRuntimeState::bootstrap_from_paths(paths, "ws://127.0.0.1:8080".to_owned())
-                .expect("runtime bootstrap should succeed"),
+            DesktopAppRuntimeState::bootstrap_from_paths(
+                paths,
+                "ws://127.0.0.1:8080".to_owned(),
+                super::default_runtime_snapshot(),
+            )
+            .expect("runtime bootstrap should succeed"),
         )
     }
 

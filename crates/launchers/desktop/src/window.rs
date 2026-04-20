@@ -8,7 +8,7 @@ use gpui_component::{
     IconName, Root,
     input::{InputEvent, InputState},
 };
-use radroots_studio_app_i18n::AppTextKey;
+use radroots_studio_app_i18n::{AppTextKey, app_text};
 pub use radroots_studio_app_models::SettingsSection as SettingsPanelViewKey;
 use radroots_studio_app_models::{
     AppStartupGate, BlackoutPeriodId, BlackoutPeriodRecord, BuyerCartProjection,
@@ -35,6 +35,7 @@ use radroots_studio_app_sqlite::derive_farm_rules_readiness;
 use radroots_studio_app_state::{
     FarmSetupFlowStage, FarmWorkspaceStatus, HomeRoute, derive_product_publish_blockers,
 };
+use radroots_studio_app_sync::{AppSyncRunStatus, SyncCheckpointState};
 use radroots_studio_app_ui::{
     APP_UI_THEME, AppCheckboxFieldSpec, AppFormFieldSpec,
     AppSegmentButtonIconSpec as IconSegmentButtonSpec, LabelValueRow, app_button_card,
@@ -52,13 +53,13 @@ use radroots_studio_app_ui::{
     app_surface_sidebar, app_surface_window as app_window_shell,
     app_text_badge as settings_badge_text, app_text_body_subtle as home_body_text, app_text_label,
     app_text_label as home_farm_setup_field_label, app_text_value, label_value_list,
-    utility_title_row,
+    runtime_metadata_rows, utility_title_row,
 };
 use radroots_nostr::prelude::RadrootsNostrClient;
-use std::{collections::BTreeSet, sync::Arc, time::Duration};
+use std::{collections::BTreeSet, path::PathBuf, sync::Arc, time::Duration};
 use tracing::error;
 
-use crate::runtime::{DesktopAppRuntime, DesktopAppRuntimeSummary};
+use crate::runtime::{DesktopAppRuntime, DesktopAppRuntimeSummary, DesktopAppSyncStatusSummary};
 
 const HOME_WINDOW_MIN_WIDTH_PX: f32 = 1080.0;
 const HOME_WINDOW_MIN_HEIGHT_PX: f32 = 720.0;
@@ -5491,6 +5492,11 @@ impl SettingsWindowView {
     }
 
     fn about_panel(&self) -> impl IntoElement {
+        let runtime = self.runtime.summary();
+        let status_rows = about_status_rows(&runtime);
+        let conflict_rows = about_conflict_review_rows(&runtime.sync_status);
+        let runtime_rows = about_runtime_rows(&runtime);
+
         app_scroll_panel(
             "settings-panel-scroll",
             APP_UI_THEME.shells.settings_content_padding_px,
@@ -5498,28 +5504,33 @@ impl SettingsWindowView {
             app_stack_v(APP_UI_THEME.shells.settings_account_main_stack_gap_px)
                 .size_full()
                 .py_12()
-                .child(
-                    app_stack_v(APP_UI_THEME.shells.settings_account_main_stack_gap_px)
+                .child(app_surface_card(
+                    app_stack_v(APP_UI_THEME.shells.home_stack_gap_px)
                         .w_full()
-                        .justify_between()
-                        .child(home_body_text(app_shared_text(
-                            AppTextKey::SettingsAboutPlaceholderTopPrimary,
+                        .child(app_heading_section(app_shared_text(
+                            AppTextKey::SettingsAboutStatusSectionLabel,
                         )))
-                        .child(home_body_text(app_shared_text(
-                            AppTextKey::SettingsAboutPlaceholderTopSecondary,
+                        .child(label_value_list(status_rows)),
+                ))
+                .child(app_surface_card(
+                    app_stack_v(APP_UI_THEME.shells.home_stack_gap_px)
+                        .w_full()
+                        .child(app_heading_section(app_shared_text(
+                            AppTextKey::SettingsAboutConflictReviewSectionLabel,
                         )))
-                        .child(home_body_text(app_shared_text(
-                            AppTextKey::SettingsAboutPlaceholderTopTertiary,
-                        ))),
-                )
-                .child(section_divider())
-                .child(div().w_full().py_12().child(home_body_text(app_shared_text(
-                    AppTextKey::SettingsAboutPlaceholderMiddle,
-                ))))
-                .child(section_divider())
-                .child(div().w_full().py_12().child(home_body_text(app_shared_text(
-                    AppTextKey::SettingsAboutPlaceholderBottom,
-                )))),
+                        .child(home_body_text(app_text(about_conflict_review_body_key(
+                            &runtime.sync_status,
+                        ))))
+                        .child(label_value_list(conflict_rows)),
+                ))
+                .child(app_surface_card(
+                    app_stack_v(APP_UI_THEME.shells.home_stack_gap_px)
+                        .w_full()
+                        .child(app_heading_section(app_shared_text(
+                            AppTextKey::SettingsAboutRuntimeSectionLabel,
+                        )))
+                        .child(label_value_list(runtime_rows)),
+                )),
         )
     }
 
@@ -5535,6 +5546,175 @@ impl SettingsWindowView {
             SettingsPanelViewKey::About => self.about_panel().into_any_element(),
         }
     }
+}
+
+fn about_status_rows(runtime: &DesktopAppRuntimeSummary) -> Vec<LabelValueRow> {
+    let mut rows = vec![
+        LabelValueRow::new(
+            app_shared_text(AppTextKey::MetadataSelectedAccount),
+            selected_account_label(runtime.sync_status.account_id.as_deref()),
+        ),
+        LabelValueRow::new(
+            app_shared_text(AppTextKey::MetadataSyncRunStatus),
+            about_sync_run_status_text(&runtime.sync_status),
+        ),
+        LabelValueRow::new(
+            app_shared_text(AppTextKey::MetadataSyncCheckpointState),
+            about_sync_checkpoint_state_text(&runtime.sync_status),
+        ),
+        LabelValueRow::new(
+            app_shared_text(AppTextKey::MetadataSyncPendingWriteCount),
+            runtime.sync_status.pending_write_count.to_string(),
+        ),
+        LabelValueRow::new(
+            app_shared_text(AppTextKey::MetadataSyncConflictCount),
+            runtime
+                .sync_status
+                .projection
+                .conflict_status
+                .unresolved_count
+                .to_string(),
+        ),
+    ];
+
+    if runtime
+        .sync_status
+        .projection
+        .conflict_status
+        .blocking_count
+        > 0
+    {
+        rows.push(LabelValueRow::new(
+            app_shared_text(AppTextKey::MetadataSyncBlockingConflictCount),
+            runtime
+                .sync_status
+                .projection
+                .conflict_status
+                .blocking_count
+                .to_string(),
+        ));
+    }
+
+    rows.push(LabelValueRow::new(
+        app_shared_text(AppTextKey::MetadataStartupIssue),
+        runtime
+            .startup_issue
+            .clone()
+            .unwrap_or_else(|| app_text(AppTextKey::ValueNone)),
+    ));
+
+    rows
+}
+
+fn about_conflict_review_body_key(sync_status: &DesktopAppSyncStatusSummary) -> AppTextKey {
+    if !sync_status.is_enabled() {
+        AppTextKey::SettingsAboutConflictReviewUnavailable
+    } else if sync_status
+        .projection
+        .conflict_status
+        .has_blocking_conflicts()
+    {
+        AppTextKey::SettingsAboutConflictReviewBlocking
+    } else if sync_status.projection.conflict_status.requires_attention() {
+        AppTextKey::SettingsAboutConflictReviewNeedsAttention
+    } else {
+        AppTextKey::SettingsAboutConflictReviewClear
+    }
+}
+
+fn about_conflict_review_rows(sync_status: &DesktopAppSyncStatusSummary) -> Vec<LabelValueRow> {
+    let mut rows = vec![LabelValueRow::new(
+        app_shared_text(AppTextKey::MetadataSyncConflictCount),
+        sync_status
+            .projection
+            .conflict_status
+            .unresolved_count
+            .to_string(),
+    )];
+
+    if sync_status.projection.conflict_status.blocking_count > 0 {
+        rows.push(LabelValueRow::new(
+            app_shared_text(AppTextKey::MetadataSyncBlockingConflictCount),
+            sync_status
+                .projection
+                .conflict_status
+                .blocking_count
+                .to_string(),
+        ));
+    }
+
+    rows
+}
+
+fn about_runtime_rows(runtime: &DesktopAppRuntimeSummary) -> Vec<LabelValueRow> {
+    let mut rows = runtime_metadata_rows(&runtime.runtime_metadata.snapshot);
+    rows.push(LabelValueRow::new(
+        app_shared_text(AppTextKey::MetadataDataRoot),
+        path_or_none(runtime.runtime_metadata.data_root.as_ref()),
+    ));
+    rows.push(LabelValueRow::new(
+        app_shared_text(AppTextKey::MetadataLogsRoot),
+        path_or_none(runtime.runtime_metadata.logs_root.as_ref()),
+    ));
+    rows.push(LabelValueRow::new(
+        app_shared_text(AppTextKey::MetadataDatabasePath),
+        path_or_none(runtime.runtime_metadata.database_path.as_ref()),
+    ));
+    rows.push(LabelValueRow::new(
+        app_shared_text(AppTextKey::MetadataDatabaseSchemaVersion),
+        runtime
+            .runtime_metadata
+            .database_schema_version
+            .map(|version| version.to_string())
+            .unwrap_or_else(|| app_text(AppTextKey::ValueNone)),
+    ));
+    rows.push(LabelValueRow::new(
+        app_shared_text(AppTextKey::MetadataShellSection),
+        runtime
+            .shell_projection
+            .selected_section
+            .storage_key()
+            .to_owned(),
+    ));
+    rows
+}
+
+fn selected_account_label(account_id: Option<&str>) -> String {
+    account_id
+        .map(ToOwned::to_owned)
+        .unwrap_or_else(|| app_text(AppTextKey::ValueNone))
+}
+
+fn about_sync_run_status_text(sync_status: &DesktopAppSyncStatusSummary) -> String {
+    if !sync_status.is_enabled() {
+        return app_text(AppTextKey::ValueDisabled);
+    }
+
+    match sync_status.projection.run_status {
+        AppSyncRunStatus::Idle => app_text(AppTextKey::ValueSyncRunStatusIdle),
+        AppSyncRunStatus::Syncing => app_text(AppTextKey::ValueSyncRunStatusSyncing),
+        AppSyncRunStatus::Succeeded => app_text(AppTextKey::ValueSyncRunStatusSucceeded),
+        AppSyncRunStatus::Conflicted => app_text(AppTextKey::ValueSyncRunStatusConflicted),
+        AppSyncRunStatus::Failed => app_text(AppTextKey::ValueSyncRunStatusFailed),
+    }
+}
+
+fn about_sync_checkpoint_state_text(sync_status: &DesktopAppSyncStatusSummary) -> String {
+    if !sync_status.is_enabled() {
+        return app_text(AppTextKey::ValueNone);
+    }
+
+    match sync_status.projection.checkpoint.state {
+        SyncCheckpointState::NeverSynced => app_text(AppTextKey::ValueSyncCheckpointNeverSynced),
+        SyncCheckpointState::Syncing => app_text(AppTextKey::ValueSyncCheckpointSyncing),
+        SyncCheckpointState::Current => app_text(AppTextKey::ValueSyncCheckpointCurrent),
+        SyncCheckpointState::Failed => app_text(AppTextKey::ValueSyncCheckpointFailed),
+    }
+}
+
+fn path_or_none(path: Option<&PathBuf>) -> String {
+    path.map(|value| value.display().to_string())
+        .unwrap_or_else(|| app_text(AppTextKey::ValueNone))
 }
 
 impl Render for SettingsWindowView {
@@ -9537,16 +9717,19 @@ mod tests {
         AppTextKey, FarmerHomeFarmState, HomeStage, SETTINGS_FARM_PANEL_SECTIONS,
         SETTINGS_NAVIGATION_ORDER, SETTINGS_OPERATIONS_PANEL_SECTIONS,
         SettingsInventorySectionSpec, SettingsPanelViewKey, StartupHomeSurface,
-        StartupSignerConnectState, buyer_orders_status_key, farm_setup_onboarding_card_spec,
-        farmer_home_farm_state, farmer_pack_day_available, home_content_scroll_id, home_saved_farm,
-        home_sidebar_navigation_sections, home_stage, home_window_launch_size_px,
-        home_window_minimum_size_px, parse_optional_product_editor_stock_input,
-        parse_product_editor_price_input, product_display_title, startup_home_surface,
-        startup_signer_preview_summary, startup_signer_preview_summary_for_connect_state,
-        startup_signer_source_input_is_editable, startup_signer_status_spec,
-        startup_signer_transport_failure_requires_notice,
+        StartupSignerConnectState, about_conflict_review_body_key, about_conflict_review_rows,
+        about_runtime_rows, about_status_rows, app_text, buyer_orders_status_key,
+        farm_setup_onboarding_card_spec, farmer_home_farm_state, farmer_pack_day_available,
+        home_content_scroll_id, home_saved_farm, home_sidebar_navigation_sections, home_stage,
+        home_window_launch_size_px, home_window_minimum_size_px,
+        parse_optional_product_editor_stock_input, parse_product_editor_price_input,
+        product_display_title, startup_home_surface, startup_signer_preview_summary,
+        startup_signer_preview_summary_for_connect_state, startup_signer_source_input_is_editable,
+        startup_signer_status_spec, startup_signer_transport_failure_requires_notice,
     };
-    use crate::runtime::DesktopAppRuntimeSummary;
+    use crate::runtime::{
+        DesktopAppRuntimeMetadataSummary, DesktopAppRuntimeSummary, DesktopAppSyncStatusSummary,
+    };
     use radroots_studio_app_models::SettingsAccountProjection;
     use radroots_studio_app_models::{
         ActiveSurface, AppStartupGate, BuyerOrderStatus, FarmId, FarmOrderMethod, FarmReadiness,
@@ -9562,7 +9745,11 @@ mod tests {
     use radroots_studio_app_state::{
         AppShellProjection, FarmWorkspaceReadinessProjection, FarmWorkspaceStatus, HomeRoute,
     };
+    use radroots_studio_app_sync::{
+        AppSyncProjection, AppSyncRunStatus, SyncCheckpointStatus, SyncConflictStatus,
+    };
     use radroots_identity::RadrootsIdentity;
+    use std::path::PathBuf;
 
     #[test]
     fn farm_setup_onboarding_uses_frozen_copy_and_primary_action() {
@@ -10054,6 +10241,104 @@ mod tests {
         ));
     }
 
+    #[test]
+    fn about_status_rows_disable_sync_without_a_selected_account() {
+        let rows = about_status_rows(&summary(
+            HomeRoute::SetupRequired,
+            TodayAgendaProjection::default(),
+            FarmSetupProjection::default(),
+        ));
+
+        assert!(rows.iter().any(|row| {
+            row.label == app_text(AppTextKey::MetadataSelectedAccount)
+                && row.value == app_text(AppTextKey::ValueNone)
+        }));
+        assert!(rows.iter().any(|row| {
+            row.label == app_text(AppTextKey::MetadataSyncRunStatus)
+                && row.value == app_text(AppTextKey::ValueDisabled)
+        }));
+        assert!(rows.iter().any(|row| {
+            row.label == app_text(AppTextKey::MetadataSyncCheckpointState)
+                && row.value == app_text(AppTextKey::ValueNone)
+        }));
+        assert!(rows.iter().any(|row| {
+            row.label == app_text(AppTextKey::MetadataStartupIssue)
+                && row.value == app_text(AppTextKey::ValueNone)
+        }));
+    }
+
+    #[test]
+    fn about_conflict_review_helpers_surface_blocking_attention_truthfully() {
+        let mut runtime = summary(
+            HomeRoute::Today,
+            TodayAgendaProjection::default(),
+            FarmSetupProjection::default(),
+        );
+        runtime.sync_status = DesktopAppSyncStatusSummary {
+            account_id: Some(app_text(AppTextKey::AppName)),
+            projection: AppSyncProjection {
+                run_status: AppSyncRunStatus::Conflicted,
+                checkpoint: SyncCheckpointStatus::never_synced(),
+                conflict_status: SyncConflictStatus {
+                    unresolved_count: 2,
+                    blocking_count: 1,
+                },
+            },
+            pending_write_count: 3,
+        };
+
+        let rows = about_conflict_review_rows(&runtime.sync_status);
+
+        assert_eq!(
+            about_conflict_review_body_key(&runtime.sync_status),
+            AppTextKey::SettingsAboutConflictReviewBlocking
+        );
+        assert!(rows.iter().any(|row| {
+            row.label == app_text(AppTextKey::MetadataSyncConflictCount)
+                && row.value == 2.to_string()
+        }));
+        assert!(rows.iter().any(|row| {
+            row.label == app_text(AppTextKey::MetadataSyncBlockingConflictCount)
+                && row.value == 1.to_string()
+        }));
+    }
+
+    #[test]
+    fn about_runtime_rows_append_paths_schema_and_shell_section() {
+        let mut runtime = summary(
+            HomeRoute::Today,
+            TodayAgendaProjection::default(),
+            FarmSetupProjection::default(),
+        );
+        let data_root = PathBuf::from("/tmp/radroots/data/apps/app");
+        let logs_root = PathBuf::from("/tmp/radroots/logs/apps/app");
+        let database_path = data_root.join("app.sqlite3");
+        runtime.shell_projection.selected_section =
+            ShellSection::Settings(SettingsPanelViewKey::About);
+        runtime.runtime_metadata = DesktopAppRuntimeMetadataSummary {
+            data_root: Some(data_root.clone()),
+            logs_root: Some(logs_root),
+            database_path: Some(database_path),
+            database_schema_version: Some(7),
+            ..DesktopAppRuntimeMetadataSummary::default()
+        };
+
+        let rows = about_runtime_rows(&runtime);
+
+        assert!(rows.iter().any(|row| {
+            row.label == app_text(AppTextKey::MetadataDataRoot)
+                && row.value == data_root.display().to_string()
+        }));
+        assert!(rows.iter().any(|row| {
+            row.label == app_text(AppTextKey::MetadataDatabaseSchemaVersion)
+                && row.value == 7.to_string()
+        }));
+        assert!(rows.iter().any(|row| {
+            row.label == app_text(AppTextKey::MetadataShellSection)
+                && row.value == ShellSection::Settings(SettingsPanelViewKey::About).storage_key()
+        }));
+    }
+
     fn summary(
         home_route: HomeRoute,
         today_projection: TodayAgendaProjection,
@@ -10091,6 +10376,7 @@ mod tests {
             products_projection: Default::default(),
             orders_projection: Default::default(),
             pack_day_projection: Default::default(),
+            runtime_metadata: DesktopAppRuntimeMetadataSummary::default(),
             sync_status: crate::runtime::DesktopAppSyncStatusSummary::default(),
             startup_issue: None,
         }
