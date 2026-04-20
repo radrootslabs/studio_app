@@ -11,16 +11,17 @@ use gpui_component::{
 use radroots_studio_app_i18n::AppTextKey;
 pub use radroots_studio_app_models::SettingsSection as SettingsPanelViewKey;
 use radroots_studio_app_models::{
-    AppStartupGate, BlackoutPeriodId, BlackoutPeriodRecord, FarmId, FarmOperatingRulesRecord,
-    FarmOrderMethod, FarmProfileRecord, FarmReadinessBlocker, FarmRulesProjection,
-    FarmRulesReadiness, FarmSetupBlocker, FarmSetupDraft, FarmSummary, FarmTimingConflictKind,
-    FarmerSection, FulfillmentWindowId, FulfillmentWindowRecord, FulfillmentWindowSummary,
-    LoggedOutStartupPhase, OrderDetailItemRow, OrderDetailProjection, OrderId, OrderListRow,
-    OrderPrimaryAction, OrderStatus, OrdersFilter, OrdersListRow, PackDayPackListRow,
-    PackDayProductTotalRow, PackDayRosterRow, PersonalEntryState, PersonalSection,
-    PickupLocationId, PickupLocationRecord, ProductAttentionState, ProductEditorDraft, ProductId,
-    ProductListRow, ProductPublishBlocker, ProductStatus, ProductsFilter, ProductsListRow,
-    ProductsSort, ShellSection, TodayAgendaProjection, TodaySetupTaskKind,
+    AppStartupGate, BlackoutPeriodId, BlackoutPeriodRecord, BuyerListingRow, FarmId,
+    FarmOperatingRulesRecord, FarmOrderMethod, FarmProfileRecord, FarmReadinessBlocker,
+    FarmRulesProjection, FarmRulesReadiness, FarmSetupBlocker, FarmSetupDraft, FarmSummary,
+    FarmTimingConflictKind, FarmerSection, FulfillmentWindowId, FulfillmentWindowRecord,
+    FulfillmentWindowSummary, LoggedOutStartupPhase, OrderDetailItemRow, OrderDetailProjection,
+    OrderId, OrderListRow, OrderPrimaryAction, OrderStatus, OrdersFilter, OrdersListRow,
+    PackDayPackListRow, PackDayProductTotalRow, PackDayRosterRow, PersonalEntryState,
+    PersonalSection, PickupLocationId, PickupLocationRecord, ProductAttentionState,
+    ProductEditorDraft, ProductId, ProductListRow, ProductPricePresentation, ProductPublishBlocker,
+    ProductStatus, ProductsFilter, ProductsListRow, ProductsSort, ShellSection,
+    TodayAgendaProjection, TodaySetupTaskKind,
 };
 use radroots_studio_app_remote_signer::{
     RadrootsAppRemoteSignerApprovedSession, RadrootsAppRemoteSignerPendingPollOutcome,
@@ -52,7 +53,7 @@ use radroots_studio_app_ui::{
     utility_title_row,
 };
 use radroots_nostr::prelude::RadrootsNostrClient;
-use std::{sync::Arc, time::Duration};
+use std::{collections::BTreeSet, sync::Arc, time::Duration};
 use tracing::error;
 
 use crate::runtime::{DesktopAppRuntime, DesktopAppRuntimeSummary};
@@ -185,6 +186,7 @@ pub struct HomeView {
     startup_signer_task_token: u64,
     startup_signer_recovery_attempted: bool,
     farm_setup_form: Option<FarmSetupFormState>,
+    personal_search: Option<PersonalSearchState>,
     products_search: Option<ProductsSearchState>,
     products_stock_editor: Option<ProductsStockEditorState>,
     product_editor_form: Option<ProductEditorFormState>,
@@ -230,6 +232,7 @@ impl HomeView {
             startup_signer_task_token: 0,
             startup_signer_recovery_attempted: false,
             farm_setup_form: None,
+            personal_search: None,
             products_search: None,
             products_stock_editor: None,
             product_editor_form: None,
@@ -731,6 +734,52 @@ impl HomeView {
         }
     }
 
+    fn sync_personal_search(
+        &mut self,
+        runtime_summary: &DesktopAppRuntimeSummary,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if home_stage(runtime_summary) != HomeStage::BuyerWorkspace
+            || selected_personal_section(runtime_summary) != PersonalSection::Search
+        {
+            self.personal_search = None;
+            return;
+        }
+
+        let workspace_id = runtime_summary
+            .settings_account_projection
+            .selected_account
+            .as_ref()
+            .map(|account| account.account.account_id.clone())
+            .unwrap_or_else(|| "guest".to_owned());
+        let search_query = runtime_summary
+            .personal_projection
+            .search
+            .query
+            .search_query
+            .as_str();
+        let should_reset = self
+            .personal_search
+            .as_ref()
+            .map(|state| state.workspace_id != workspace_id)
+            .unwrap_or(true);
+
+        if should_reset {
+            self.personal_search = Some(PersonalSearchState::new(
+                workspace_id,
+                search_query,
+                window,
+                cx,
+            ));
+            return;
+        }
+
+        if let Some(personal_search) = self.personal_search.as_mut() {
+            personal_search.sync(search_query, window, cx);
+        }
+    }
+
     fn sync_products_stock_editor(&mut self, runtime_summary: &DesktopAppRuntimeSummary) {
         let Some(editor) = self.products_stock_editor.as_ref() else {
             return;
@@ -930,6 +979,56 @@ impl HomeView {
                     event = "products.search_query_update_failed",
                     error = %runtime_error,
                     "failed to update products search query"
+                );
+            }
+        }
+    }
+
+    fn handle_personal_search_input_event(
+        &mut self,
+        state: &Entity<InputState>,
+        event: &InputEvent,
+        _: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if !matches!(event, InputEvent::Change) {
+            return;
+        }
+
+        let value = state.read(cx).value().to_string();
+        match self.runtime.set_personal_search_query(value.as_str()) {
+            Ok(true) => cx.notify(),
+            Ok(false) => {}
+            Err(runtime_error) => {
+                error!(
+                    target: "buyer",
+                    event = "buyer.search_query_update_failed",
+                    error = %runtime_error,
+                    "failed to update buyer search query"
+                );
+            }
+        }
+    }
+
+    fn toggle_personal_search_fulfillment_method(
+        &mut self,
+        method: FarmOrderMethod,
+        enabled: bool,
+        cx: &mut Context<Self>,
+    ) {
+        match self
+            .runtime
+            .set_personal_search_fulfillment_method(method, enabled)
+        {
+            Ok(true) => cx.notify(),
+            Ok(false) => {}
+            Err(runtime_error) => {
+                error!(
+                    target: "buyer",
+                    event = "buyer.fulfillment_filter_update_failed",
+                    error = %runtime_error,
+                    method = method.storage_key(),
+                    "failed to update buyer fulfillment filter"
                 );
             }
         }
@@ -1734,8 +1833,10 @@ impl HomeView {
     ) -> AnyElement {
         let selected_personal_section = selected_personal_section(runtime);
         let main_content = match selected_personal_section {
-            PersonalSection::Browse => buyer_browse_placeholder(runtime).into_any_element(),
-            PersonalSection::Search => buyer_search_placeholder(runtime).into_any_element(),
+            PersonalSection::Browse => self.render_buyer_browse_content(runtime).into_any_element(),
+            PersonalSection::Search => self
+                .render_buyer_search_content(runtime, cx)
+                .into_any_element(),
             PersonalSection::Cart => buyer_cart_placeholder(runtime).into_any_element(),
             PersonalSection::Orders => buyer_orders_placeholder(runtime).into_any_element(),
         };
@@ -1779,6 +1880,145 @@ impl HomeView {
                 .into_any_element(),
         )
         .into_any_element()
+    }
+
+    fn render_buyer_browse_content(&mut self, runtime: &DesktopAppRuntimeSummary) -> AnyElement {
+        let listings = &runtime.personal_projection.browse.listings.rows;
+
+        app_stack_v(APP_UI_THEME.shells.home_stack_gap_px)
+            .w_full()
+            .max_w(px(APP_UI_THEME.shells.home_card_max_width_px))
+            .mx_auto()
+            .child(buyer_workspace_title_block(
+                AppTextKey::HomeNavBrowse,
+                AppTextKey::PersonalBrowsePlaceholderBody,
+            ))
+            .child(if listings.is_empty() {
+                home_empty_state_card(
+                    AppTextKey::PersonalBrowseEmptyTitle,
+                    AppTextKey::PersonalBrowseEmptyBody,
+                )
+                .into_any_element()
+            } else {
+                buyer_listings_feed(listings).into_any_element()
+            })
+            .into_any_element()
+    }
+
+    fn render_buyer_search_content(
+        &mut self,
+        runtime: &DesktopAppRuntimeSummary,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let query = &runtime.personal_projection.search.query;
+        let listings = &runtime.personal_projection.search.listings.rows;
+
+        app_stack_v(APP_UI_THEME.shells.home_stack_gap_px)
+            .w_full()
+            .max_w(px(APP_UI_THEME.shells.home_card_max_width_px))
+            .mx_auto()
+            .child(buyer_workspace_title_block(
+                AppTextKey::HomeNavSearch,
+                AppTextKey::PersonalSearchPlaceholderBody,
+            ))
+            .child(
+                home_card(
+                    app_shared_text(AppTextKey::PersonalSearchFiltersTitle),
+                    div()
+                        .w_full()
+                        .flex()
+                        .flex_col()
+                        .gap(px(APP_UI_THEME.shells.home_stack_gap_px))
+                        .when_some(self.personal_search.as_ref(), |this, personal_search| {
+                            this.child(
+                                app_text_input(&personal_search.input, false)
+                                    .cleanable(true)
+                                    .w_full(),
+                            )
+                        })
+                        .child(
+                            app_cluster(8.0)
+                                .child(choice_button(
+                                    "personal-search-pickup",
+                                    app_shared_text(AppTextKey::HomeFarmSetupOrderMethodPickup),
+                                    query.fulfillment_methods.contains(&FarmOrderMethod::Pickup),
+                                    cx.listener(|this, _, _, cx| {
+                                        let enabled = !this
+                                            .runtime
+                                            .summary()
+                                            .personal_projection
+                                            .search
+                                            .query
+                                            .fulfillment_methods
+                                            .contains(&FarmOrderMethod::Pickup);
+                                        this.toggle_personal_search_fulfillment_method(
+                                            FarmOrderMethod::Pickup,
+                                            enabled,
+                                            cx,
+                                        )
+                                    }),
+                                    cx,
+                                ))
+                                .child(choice_button(
+                                    "personal-search-delivery",
+                                    app_shared_text(AppTextKey::HomeFarmSetupOrderMethodDelivery),
+                                    query
+                                        .fulfillment_methods
+                                        .contains(&FarmOrderMethod::Delivery),
+                                    cx.listener(|this, _, _, cx| {
+                                        let enabled = !this
+                                            .runtime
+                                            .summary()
+                                            .personal_projection
+                                            .search
+                                            .query
+                                            .fulfillment_methods
+                                            .contains(&FarmOrderMethod::Delivery);
+                                        this.toggle_personal_search_fulfillment_method(
+                                            FarmOrderMethod::Delivery,
+                                            enabled,
+                                            cx,
+                                        )
+                                    }),
+                                    cx,
+                                ))
+                                .child(choice_button(
+                                    "personal-search-shipping",
+                                    app_shared_text(AppTextKey::HomeFarmSetupOrderMethodShipping),
+                                    query
+                                        .fulfillment_methods
+                                        .contains(&FarmOrderMethod::Shipping),
+                                    cx.listener(|this, _, _, cx| {
+                                        let enabled = !this
+                                            .runtime
+                                            .summary()
+                                            .personal_projection
+                                            .search
+                                            .query
+                                            .fulfillment_methods
+                                            .contains(&FarmOrderMethod::Shipping);
+                                        this.toggle_personal_search_fulfillment_method(
+                                            FarmOrderMethod::Shipping,
+                                            enabled,
+                                            cx,
+                                        )
+                                    }),
+                                    cx,
+                                )),
+                        ),
+                )
+                .into_any_element(),
+            )
+            .child(if listings.is_empty() {
+                home_empty_state_card(
+                    AppTextKey::PersonalSearchEmptyTitle,
+                    AppTextKey::PersonalSearchEmptyBody,
+                )
+                .into_any_element()
+            } else {
+                buyer_listings_feed(listings).into_any_element()
+            })
+            .into_any_element()
     }
 
     fn render_farmer_workspace(
@@ -2354,6 +2594,7 @@ impl Render for HomeView {
         let runtime_summary = self.runtime.summary();
         self.sync_startup_signer_entry(&runtime_summary, window, cx);
         self.sync_farm_setup_form(&runtime_summary, window, cx);
+        self.sync_personal_search(&runtime_summary, window, cx);
         self.sync_products_search(&runtime_summary, window, cx);
         self.sync_products_stock_editor(&runtime_summary);
         self.sync_product_editor_form(&runtime_summary, window, cx);
@@ -2435,6 +2676,45 @@ impl FarmSetupFormState {
             _location_subscription: location_subscription,
             save_state,
         }
+    }
+}
+
+struct PersonalSearchState {
+    workspace_id: String,
+    input: Entity<InputState>,
+    _input_subscription: Subscription,
+}
+
+impl PersonalSearchState {
+    fn new(
+        workspace_id: String,
+        search_query: &str,
+        window: &mut Window,
+        cx: &mut Context<HomeView>,
+    ) -> Self {
+        let input = cx.new(|cx| {
+            InputState::new(window, cx)
+                .placeholder(app_shared_text(AppTextKey::PersonalSearchPlaceholder))
+                .default_value(search_query.to_owned())
+        });
+        let input_subscription =
+            cx.subscribe_in(&input, window, HomeView::handle_personal_search_input_event);
+
+        Self {
+            workspace_id,
+            input,
+            _input_subscription: input_subscription,
+        }
+    }
+
+    fn sync(&mut self, search_query: &str, window: &mut Window, cx: &mut Context<HomeView>) {
+        if self.input.read(cx).value().as_ref() == search_query {
+            return;
+        }
+
+        self.input.update(cx, |input, cx| {
+            input.set_value(search_query.to_owned(), window, cx);
+        });
     }
 }
 
@@ -4989,6 +5269,178 @@ fn shell_account_label(runtime: &DesktopAppRuntimeSummary) -> String {
         .unwrap_or_else(|| app_shared_text(AppTextKey::HomeHeaderGuestLabel).to_string())
 }
 
+fn buyer_workspace_title_block(title_key: AppTextKey, body_key: AppTextKey) -> impl IntoElement {
+    div()
+        .w_full()
+        .flex()
+        .flex_col()
+        .gap(px(4.0))
+        .child(
+            div()
+                .text_size(px(APP_UI_THEME.foundation.typography.body_text_px * 2.0))
+                .font_weight(gpui::FontWeight::BOLD)
+                .text_color(rgb(APP_UI_THEME.foundation.text.primary))
+                .child(app_shared_text(title_key)),
+        )
+        .child(
+            div()
+                .w_full()
+                .min_w_0()
+                .text_size(px(APP_UI_THEME.foundation.typography.body_text_px))
+                .font_weight(gpui::FontWeight::MEDIUM)
+                .line_height(relative(1.2))
+                .text_color(rgb(APP_UI_THEME.foundation.text.secondary))
+                .child(app_shared_text(body_key)),
+        )
+}
+
+fn buyer_listings_feed(rows: &[BuyerListingRow]) -> impl IntoElement {
+    app_stack_v(APP_UI_THEME.shells.home_stack_gap_px)
+        .w_full()
+        .children(rows.iter().map(buyer_listing_card).collect::<Vec<_>>())
+}
+
+fn buyer_listing_card(row: &BuyerListingRow) -> AnyElement {
+    let subtitle = row
+        .subtitle
+        .as_deref()
+        .map(str::trim)
+        .filter(|subtitle| !subtitle.is_empty())
+        .map(str::to_owned);
+
+    app_surface_card(
+        div()
+            .w_full()
+            .min_w_0()
+            .flex()
+            .flex_col()
+            .gap(px(APP_UI_THEME.shells.home_stack_gap_px))
+            .child(
+                div()
+                    .w_full()
+                    .min_w_0()
+                    .flex()
+                    .items_start()
+                    .justify_between()
+                    .gap(px(APP_UI_THEME.shells.home_stack_gap_px))
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w_0()
+                            .flex()
+                            .flex_col()
+                            .gap(px(4.0))
+                            .child(
+                                div()
+                                    .w_full()
+                                    .min_w_0()
+                                    .text_size(px(APP_UI_THEME.foundation.typography.body_text_px))
+                                    .font_weight(gpui::FontWeight::BOLD)
+                                    .line_height(relative(1.2))
+                                    .text_color(rgb(APP_UI_THEME.foundation.text.primary))
+                                    .child(product_display_title(row.title.as_str())),
+                            )
+                            .child(
+                                div()
+                                    .w_full()
+                                    .min_w_0()
+                                    .text_size(px(APP_UI_THEME
+                                        .foundation
+                                        .typography
+                                        .utility_title_text_px))
+                                    .font_weight(gpui::FontWeight::SEMIBOLD)
+                                    .text_color(rgb(APP_UI_THEME.foundation.text.accent))
+                                    .child(row.farm_display_name.clone()),
+                            )
+                            .when_some(subtitle, |this, subtitle| {
+                                this.child(
+                                    div()
+                                        .w_full()
+                                        .min_w_0()
+                                        .text_size(px(APP_UI_THEME
+                                            .foundation
+                                            .typography
+                                            .utility_title_text_px))
+                                        .line_height(relative(1.2))
+                                        .text_color(rgb(APP_UI_THEME.foundation.text.secondary))
+                                        .child(subtitle),
+                                )
+                            }),
+                    )
+                    .child(
+                        div()
+                            .text_size(px(APP_UI_THEME.foundation.typography.body_text_px))
+                            .font_weight(gpui::FontWeight::SEMIBOLD)
+                            .text_color(rgb(APP_UI_THEME.foundation.text.primary))
+                            .child(buyer_listing_price_text(&row.price)),
+                    ),
+            )
+            .child(
+                app_cluster(APP_UI_THEME.foundation.spacing.small_px)
+                    .w_full()
+                    .child(buyer_listing_chip(buyer_listing_next_window_text(row)))
+                    .child(buyer_listing_chip(buyer_listing_fulfillment_methods_text(
+                        &row.fulfillment_methods,
+                    )))
+                    .child(buyer_listing_chip(
+                        buyer_listing_stock_or_availability_text(row),
+                    )),
+            ),
+    )
+    .into_any_element()
+}
+
+fn buyer_listing_chip(content: impl Into<SharedString>) -> impl IntoElement {
+    div()
+        .flex()
+        .items_center()
+        .min_w_0()
+        .bg(rgb(APP_UI_THEME.foundation.surfaces.window_background))
+        .rounded(px(APP_UI_THEME.foundation.radii.small_px))
+        .px(px(8.0))
+        .py(px(6.0))
+        .text_size(px(APP_UI_THEME.foundation.typography.utility_title_text_px))
+        .font_weight(gpui::FontWeight::MEDIUM)
+        .line_height(relative(1.1))
+        .text_color(rgb(APP_UI_THEME.foundation.text.secondary))
+        .child(content.into())
+}
+
+fn buyer_listing_next_window_text(row: &BuyerListingRow) -> String {
+    row.next_fulfillment_window_label
+        .clone()
+        .unwrap_or_else(|| row.availability.label.clone())
+}
+
+fn buyer_listing_fulfillment_methods_text(methods: &BTreeSet<FarmOrderMethod>) -> String {
+    if methods.is_empty() {
+        return app_shared_text(AppTextKey::ValueNone).to_string();
+    }
+
+    methods
+        .iter()
+        .map(|method| app_shared_text(home_farm_order_method_label_key(*method)).to_string())
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+fn buyer_listing_stock_or_availability_text(row: &BuyerListingRow) -> String {
+    match row.stock.quantity {
+        Some(quantity) => match row.stock.unit_label.as_deref() {
+            Some(unit_label) if !unit_label.trim().is_empty() => format!("{quantity} {unit_label}"),
+            Some(_) | None => quantity.to_string(),
+        },
+        None => row.availability.label.clone(),
+    }
+}
+
+fn buyer_listing_price_text(price: &ProductPricePresentation) -> String {
+    let dollars = price.amount_minor_units / 100;
+    let cents = price.amount_minor_units % 100;
+
+    format!("${dollars}.{cents:02} / {}", price.unit_label)
+}
+
 fn buyer_surface_placeholder(
     title_key: AppTextKey,
     body_key: AppTextKey,
@@ -5006,32 +5458,6 @@ fn buyer_surface_placeholder(
                 .when_some(detail, |this, detail| this.child(home_body_text(detail))),
         ))
         .into_any_element()
-}
-
-fn buyer_browse_placeholder(runtime: &DesktopAppRuntimeSummary) -> AnyElement {
-    let detail = (!runtime.personal_projection.browse.listings.rows.is_empty()).then_some(format!(
-        "{} local listings are already loaded on this device.",
-        runtime.personal_projection.browse.listings.rows.len()
-    ));
-
-    buyer_surface_placeholder(
-        AppTextKey::HomeNavBrowse,
-        AppTextKey::PersonalBrowsePlaceholderBody,
-        detail,
-    )
-}
-
-fn buyer_search_placeholder(runtime: &DesktopAppRuntimeSummary) -> AnyElement {
-    let detail = (!runtime.personal_projection.search.listings.rows.is_empty()).then_some(format!(
-        "{} local listings are available to search from the shared marketplace source.",
-        runtime.personal_projection.search.listings.rows.len()
-    ));
-
-    buyer_surface_placeholder(
-        AppTextKey::HomeNavSearch,
-        AppTextKey::PersonalSearchPlaceholderBody,
-        detail,
-    )
 }
 
 fn buyer_cart_placeholder(runtime: &DesktopAppRuntimeSummary) -> AnyElement {

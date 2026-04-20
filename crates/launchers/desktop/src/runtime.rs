@@ -5,7 +5,7 @@ use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use radroots_studio_app_core::{AppDesktopRuntimePaths, AppRuntimePathsError, AppSharedAccountsPaths};
 use radroots_studio_app_models::{
     ActiveSurface, AppActivityContext, AppActivityKind, AppIdentityProjection, AppStartupGate,
-    FarmId, FarmProfileRecord, FarmReadiness, FarmRulesProjection, FarmSetupDraft,
+    FarmId, FarmOrderMethod, FarmProfileRecord, FarmReadiness, FarmRulesProjection, FarmSetupDraft,
     FarmSetupProjection, FarmSummary, FarmerSection, FulfillmentWindowId,
     LoggedOutStartupProjection, OrderDetailProjection, OrderId, OrdersFilter, OrdersListProjection,
     OrdersScreenQueryState, PackDayProjection, PackDayScreenQueryState, PersonalSection,
@@ -186,6 +186,20 @@ impl DesktopAppRuntime {
 
     pub fn select_farmer_section(&self, section: FarmerSection) -> bool {
         self.lock_state_mut().select_farmer_section(section)
+    }
+
+    pub fn set_personal_search_query(&self, search_query: &str) -> Result<bool, AppSqliteError> {
+        self.lock_state_mut()
+            .set_personal_search_query(search_query)
+    }
+
+    pub fn set_personal_search_fulfillment_method(
+        &self,
+        method: FarmOrderMethod,
+        enabled: bool,
+    ) -> Result<bool, AppSqliteError> {
+        self.lock_state_mut()
+            .set_personal_search_fulfillment_method(method, enabled)
     }
 
     pub fn set_products_search_query(&self, search_query: &str) -> Result<bool, AppSqliteError> {
@@ -730,6 +744,37 @@ impl DesktopAppRuntimeState {
         let editor_changed = self.close_product_editor();
 
         section_changed || editor_changed
+    }
+
+    fn set_personal_search_query(&mut self, search_query: &str) -> Result<bool, AppSqliteError> {
+        let query = self.state_store.personal_projection().search.query.clone();
+        if query.search_query == search_query {
+            return Ok(false);
+        }
+
+        self.replace_personal_search_query(BuyerSearchScreenQueryState::new(
+            search_query,
+            query.fulfillment_methods,
+        ))
+    }
+
+    fn set_personal_search_fulfillment_method(
+        &mut self,
+        method: FarmOrderMethod,
+        enabled: bool,
+    ) -> Result<bool, AppSqliteError> {
+        let mut query = self.state_store.personal_projection().search.query.clone();
+        let changed = if enabled {
+            query.fulfillment_methods.insert(method)
+        } else {
+            query.fulfillment_methods.remove(&method)
+        };
+
+        if !changed {
+            return Ok(false);
+        }
+
+        self.replace_personal_search_query(query)
     }
 
     fn set_products_search_query(&mut self, search_query: &str) -> Result<bool, AppSqliteError> {
@@ -1354,6 +1399,40 @@ impl DesktopAppRuntimeState {
             .ok_or(DesktopAppRuntimeFarmRulesError::RuntimeUnavailable)
     }
 
+    fn replace_personal_search_query(
+        &mut self,
+        query: BuyerSearchScreenQueryState,
+    ) -> Result<bool, AppSqliteError> {
+        let search_listings = self.load_personal_listings_for_query(&query)?;
+        let mut personal_projection = self.state_store.personal_projection().clone();
+
+        if personal_projection.search.query == query
+            && personal_projection.search.listings == search_listings
+        {
+            return Ok(false);
+        }
+
+        personal_projection.search.query = query;
+        personal_projection.search.listings = search_listings;
+
+        Ok(self
+            .state_store
+            .apply_in_memory(AppStateCommand::replace_personal_projection(
+                personal_projection,
+            )))
+    }
+
+    fn load_personal_listings_for_query(
+        &self,
+        query: &BuyerSearchScreenQueryState,
+    ) -> Result<radroots_studio_app_models::BuyerListingsProjection, AppSqliteError> {
+        let Some(sqlite_store) = self.sqlite_store.as_ref() else {
+            return Ok(Default::default());
+        };
+
+        sqlite_store.load_buyer_listings(&query.search_query, &query.fulfillment_methods)
+    }
+
     fn replace_products_query(
         &mut self,
         query: ProductsScreenQueryState,
@@ -1860,6 +1939,7 @@ fn normalize_pickup_location_defaults(pickup_locations: &mut [PickupLocationReco
 #[cfg(test)]
 mod tests {
     use std::{
+        collections::BTreeSet,
         fs,
         path::PathBuf,
         sync::Arc,
@@ -2492,6 +2572,154 @@ mod tests {
         assert_eq!(
             summary.personal_projection.entry.state,
             radroots_studio_app_models::PersonalEntryState::Guest
+        );
+    }
+
+    #[test]
+    fn runtime_personal_search_queries_refresh_repository_backed_marketplace_projection() {
+        let runtime = memory_runtime();
+        let (account_id, farm_id) = provision_ready_farmer_account(&runtime);
+        let pickup_location_id = PickupLocationId::new();
+        let fulfillment_window_id = FulfillmentWindowId::new();
+        let sql = format!(
+            "insert into pickup_locations (
+                id,
+                farm_id,
+                label,
+                address_line,
+                directions,
+                is_default,
+                created_at,
+                updated_at
+             ) values (
+                '{pickup_location_id}',
+                '{farm_id}',
+                'North barn',
+                '14 County Road',
+                null,
+                1,
+                '2026-04-20T08:00:00Z',
+                '2026-04-20T08:00:00Z'
+             );
+             insert into fulfillment_windows (
+                id,
+                farm_id,
+                starts_at,
+                ends_at,
+                capacity_limit,
+                created_at,
+                updated_at,
+                pickup_location_id,
+                label,
+                order_cutoff_at
+             ) values (
+                '{fulfillment_window_id}',
+                '{farm_id}',
+                '2099-04-18T16:00:00Z',
+                '2099-04-18T18:00:00Z',
+                null,
+                '2099-04-18T16:00:00Z',
+                '2099-04-18T16:00:00Z',
+                '{pickup_location_id}',
+                'Friday pickup',
+                '2099-04-17T18:00:00Z'
+             );
+             update account_farm_setups
+             set
+                pickup_enabled = 1,
+                delivery_enabled = 0,
+                shipping_enabled = 0,
+                saved_farm_id = '{farm_id}',
+                saved_farm_display_name = 'North field farm',
+                saved_farm_readiness = 'ready',
+                updated_at = '2026-04-20T08:00:00Z'
+             where account_id = '{account_id}';"
+        );
+        runtime
+            .lock_state()
+            .sqlite_store
+            .as_ref()
+            .expect("sqlite store")
+            .connection()
+            .execute_batch(&sql)
+            .expect("buyer search workspace should seed");
+        let salad_mix_id = seed_product(
+            &runtime,
+            farm_id,
+            "Salad mix",
+            "Spring blend",
+            "published",
+            Some(8),
+            "2026-04-20T09:00:00Z",
+        );
+        let pea_shoots_id = seed_product(
+            &runtime,
+            farm_id,
+            "Pea shoots",
+            "Tray-grown",
+            "published",
+            Some(4),
+            "2026-04-20T09:30:00Z",
+        );
+        runtime
+            .lock_state()
+            .sqlite_store
+            .as_ref()
+            .expect("sqlite store")
+            .connection()
+            .execute_batch(&format!(
+                "update products
+                 set availability_window_id = '{fulfillment_window_id}'
+                 where id in ('{salad_mix_id}', '{pea_shoots_id}')"
+            ))
+            .expect("buyer-visible products should attach a fulfillment window");
+
+        let _ = runtime
+            .select_local_account(account_id.as_str())
+            .expect("account should refresh after buyer workspace seeding");
+        let summary = runtime.summary();
+        assert_eq!(summary.personal_projection.search.listings.rows.len(), 2);
+        assert!(
+            summary
+                .personal_projection
+                .search
+                .query
+                .fulfillment_methods
+                .is_empty()
+        );
+
+        assert!(
+            runtime
+                .set_personal_search_query("pea")
+                .expect("buyer search query should apply")
+        );
+        let searched = runtime.summary();
+        assert_eq!(searched.personal_projection.search.listings.rows.len(), 1);
+        assert_eq!(
+            searched.personal_projection.search.listings.rows[0].title,
+            "Pea shoots"
+        );
+
+        assert!(
+            runtime
+                .set_personal_search_fulfillment_method(FarmOrderMethod::Pickup, true)
+                .expect("buyer fulfillment filter should apply")
+        );
+        let filtered = runtime.summary();
+        assert_eq!(
+            filtered
+                .personal_projection
+                .search
+                .query
+                .fulfillment_methods,
+            BTreeSet::from([FarmOrderMethod::Pickup])
+        );
+        assert_eq!(filtered.personal_projection.search.listings.rows.len(), 1);
+        assert_eq!(
+            filtered.personal_projection.search.listings.rows[0]
+                .next_fulfillment_window_label
+                .as_deref(),
+            Some("Friday pickup")
         );
     }
 
