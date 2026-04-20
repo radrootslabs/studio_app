@@ -5323,7 +5323,7 @@ fn home_sidebar(
                 )
                 .into_any_element()
             }
-            FarmerSection::Farm => unreachable!("farm is not a sidebar destination"),
+            FarmerSection::Farm => unreachable!(),
         };
         navigation_elements.push(element);
     }

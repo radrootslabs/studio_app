@@ -1476,11 +1476,8 @@ mod tests {
             fulfillment_window: Some(radroots_studio_app_models::FulfillmentWindowSummary {
                 fulfillment_window_id,
                 farm_id,
-                pickup_location_id: None,
-                label: "Friday pickup".to_owned(),
                 starts_at: "2026-04-18T16:00:00Z".to_owned(),
                 ends_at: "2026-04-18T18:00:00Z".to_owned(),
-                order_cutoff_at: "2026-04-17T18:00:00Z".to_owned(),
             }),
             totals_by_product: vec![PackDayProductTotalRow {
                 title: "Salad mix".to_owned(),
