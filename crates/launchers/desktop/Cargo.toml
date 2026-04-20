@@ -29,6 +29,7 @@ radroots_studio_app_ui.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
 tracing.workspace = true
+uuid.workspace = true
 
 [dev-dependencies]
 tracing-subscriber.workspace = true

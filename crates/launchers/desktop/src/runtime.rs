@@ -3,7 +3,7 @@ use std::fmt;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
-use chrono::Utc;
+use chrono::{Duration, Utc};
 use radroots_studio_app_core::{
     AppBuildIdentity, AppDesktopRuntimePaths, AppRuntimeCapture, AppRuntimeMode,
     AppRuntimePathsError, AppRuntimeSnapshot, AppSharedAccountsPaths,
@@ -14,11 +14,13 @@ use radroots_studio_app_models::{
     BuyerCheckoutDraft, BuyerContext, BuyerOrderDetailProjection, BuyerProductDetailProjection,
     FarmId, FarmOrderMethod, FarmProfileRecord, FarmReadiness, FarmRulesProjection, FarmSetupDraft,
     FarmSetupProjection, FarmSummary, FarmerSection, FulfillmentWindowId,
-    LoggedOutStartupProjection, OrderDetailProjection, OrderId, OrdersFilter, OrdersListProjection,
-    OrdersScreenQueryState, PackDayProjection, PackDayScreenQueryState, PersonalSection,
-    PickupLocationRecord, ProductEditorDraft, ProductId, ProductsFilter, ProductsListProjection,
-    ProductsSort, SettingsAccountProjection, SettingsPreference, SettingsSection, ShellSection,
-    TodayAgendaProjection,
+    LoggedOutStartupProjection, OrderDetailProjection, OrderId, OrderRecoveryProjection,
+    OrdersFilter, OrdersListProjection, OrdersScreenQueryState, PackDayProjection,
+    PackDayScreenQueryState, PersonalSection, PickupLocationRecord, ProductEditorDraft, ProductId,
+    ProductsFilter, ProductsListProjection, ProductsSort, RecoveryKind, RecoveryQueueProjection,
+    RecoveryState, ReminderDeadlineProjection, ReminderDeliveryState, ReminderFeedProjection,
+    ReminderId, ReminderKind, ReminderSurface, ReminderUrgency, SettingsAccountProjection,
+    SettingsPreference, SettingsSection, ShellSection, TodayAgendaProjection,
 };
 use radroots_studio_app_remote_signer::{
     RadrootsAppRemoteSignerApprovedSession, RadrootsAppRemoteSignerPendingSession,
@@ -44,6 +46,7 @@ use radroots_nostr_accounts::prelude::RadrootsNostrAccountsManager;
 use serde_json::json;
 use thiserror::Error;
 use tracing::error;
+use uuid::Uuid;
 
 use crate::accounts::{
     DesktopAccountsBootstrapError, DesktopAccountsCommandError, DesktopAccountsProjectionError,
@@ -676,8 +679,29 @@ struct DesktopSelectedAccountContext {
     today_projection: TodayAgendaProjection,
     products_list: ProductsListProjection,
     orders_list: OrdersListProjection,
+    orders_reminders: ReminderFeedProjection,
+    recovery_queue: RecoveryQueueProjection,
     order_detail: Option<OrderDetailProjection>,
     pack_day_projection: PackDayProjection,
+}
+
+#[derive(Clone, Debug, Default)]
+struct DesktopSellerReminderContext {
+    today_feed: ReminderFeedProjection,
+    orders_feed: ReminderFeedProjection,
+    pack_day_feed: ReminderFeedProjection,
+    recovery_queue: RecoveryQueueProjection,
+    selected_order_recovery: Option<OrderRecoveryProjection>,
+    due_soon_count: u32,
+    recovery_actions_open: u32,
+}
+
+#[derive(Clone, Debug, Default)]
+struct DesktopReminderSyncTruth {
+    checkpoint: SyncCheckpointStatus,
+    pending_write_count: usize,
+    unresolved_conflict_count: usize,
+    blocking_conflict_count: usize,
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
@@ -817,6 +841,12 @@ impl DesktopAppRuntimeState {
         ));
         let _ = state_store.apply_in_memory(AppStateCommand::replace_orders_list(
             selected_account_context.orders_list,
+        ));
+        let _ = state_store.apply_in_memory(AppStateCommand::replace_orders_reminders(
+            selected_account_context.orders_reminders,
+        ));
+        let _ = state_store.apply_in_memory(AppStateCommand::replace_orders_recovery_queue(
+            selected_account_context.recovery_queue,
         ));
         let _ = state_store.apply_in_memory(AppStateCommand::replace_order_detail(
             selected_account_context.order_detail,
@@ -1384,9 +1414,6 @@ impl DesktopAppRuntimeState {
 
     fn open_orders_query(&mut self, query: OrdersScreenQueryState) -> Result<bool, AppSqliteError> {
         let query_changed = self.replace_orders_query(query)?;
-        let detail_changed = self
-            .state_store
-            .apply_in_memory(AppStateCommand::replace_order_detail(None));
         let section_changed = self
             .state_store
             .apply_in_memory(AppStateCommand::SelectSection(ShellSection::Farmer(
@@ -1394,7 +1421,7 @@ impl DesktopAppRuntimeState {
             )));
         let editor_changed = self.close_product_editor();
 
-        Ok(query_changed || detail_changed || section_changed || editor_changed)
+        Ok(query_changed || section_changed || editor_changed)
     }
 
     fn open_order_detail(&mut self, order_id: OrderId) -> Result<bool, AppSqliteError> {
@@ -1404,13 +1431,18 @@ impl DesktopAppRuntimeState {
         let Some(farm_id) = self.selected_farm_id() else {
             return Ok(false);
         };
-        let Some(order_detail) = sqlite_store.load_order_detail(farm_id, order_id)? else {
+        let Some(_) = sqlite_store.load_order_detail(farm_id, order_id)? else {
             return Ok(false);
         };
-
-        let detail_changed = self
-            .state_store
-            .apply_in_memory(AppStateCommand::replace_order_detail(Some(order_detail)));
+        let selected_account_context = load_selected_account_context(
+            sqlite_store,
+            self.state_store.identity_projection(),
+            self.state_store.products_projection().query.clone(),
+            self.state_store.orders_projection().query.clone(),
+            Some(order_id),
+            self.state_store.pack_day_projection().query.clone(),
+        )?;
+        let detail_changed = self.apply_selected_account_context(&selected_account_context);
         let section_changed = self
             .state_store
             .apply_in_memory(AppStateCommand::SelectSection(ShellSection::Farmer(
@@ -1906,11 +1938,29 @@ impl DesktopAppRuntimeState {
     }
 
     fn apply_selected_account_context(&mut self, context: &DesktopSelectedAccountContext) -> bool {
-        let personal_changed =
+        self.apply_selected_account_context_with_options(context, true)
+    }
+
+    fn apply_selected_account_seller_context(
+        &mut self,
+        context: &DesktopSelectedAccountContext,
+    ) -> bool {
+        self.apply_selected_account_context_with_options(context, false)
+    }
+
+    fn apply_selected_account_context_with_options(
+        &mut self,
+        context: &DesktopSelectedAccountContext,
+        include_personal: bool,
+    ) -> bool {
+        let personal_changed = if include_personal {
             self.state_store
                 .apply_in_memory(AppStateCommand::replace_personal_projection(
                     context.personal_projection.clone(),
-                ));
+                ))
+        } else {
+            false
+        };
         let farm_setup_changed =
             self.state_store
                 .apply_in_memory(AppStateCommand::replace_farm_setup_projection(
@@ -1936,6 +1986,16 @@ impl DesktopAppRuntimeState {
                 .apply_in_memory(AppStateCommand::replace_orders_list(
                     context.orders_list.clone(),
                 ));
+        let orders_reminders_changed =
+            self.state_store
+                .apply_in_memory(AppStateCommand::replace_orders_reminders(
+                    context.orders_reminders.clone(),
+                ));
+        let recovery_queue_changed =
+            self.state_store
+                .apply_in_memory(AppStateCommand::replace_orders_recovery_queue(
+                    context.recovery_queue.clone(),
+                ));
         let order_detail_changed =
             self.state_store
                 .apply_in_memory(AppStateCommand::replace_order_detail(
@@ -1959,6 +2019,8 @@ impl DesktopAppRuntimeState {
             || today_changed
             || products_changed
             || orders_changed
+            || orders_reminders_changed
+            || recovery_queue_changed
             || order_detail_changed
             || pack_day_changed
             || editor_changed
@@ -1996,8 +2058,23 @@ impl DesktopAppRuntimeState {
 
     fn refresh_selected_account_sync(&mut self) -> Result<bool, AppSqliteError> {
         let context = self.refresh_selected_account_sync_context()?;
+        let sync_changed = self.apply_selected_account_sync_context(&context);
+        let selected_account_changed = match self.sqlite_store.as_ref() {
+            Some(sqlite_store) => {
+                let selected_account_context = load_selected_account_context(
+                    sqlite_store,
+                    self.state_store.identity_projection(),
+                    self.state_store.products_projection().query.clone(),
+                    self.state_store.orders_projection().query.clone(),
+                    self.selected_order_detail_id(),
+                    self.state_store.pack_day_projection().query.clone(),
+                )?;
+                self.apply_selected_account_seller_context(&selected_account_context)
+            }
+            None => false,
+        };
 
-        Ok(self.apply_selected_account_sync_context(&context))
+        Ok(sync_changed || selected_account_changed)
     }
 
     fn resolve_sync_conflict(
@@ -2504,7 +2581,6 @@ impl DesktopAppRuntimeState {
         &mut self,
         query: OrdersScreenQueryState,
     ) -> Result<bool, AppSqliteError> {
-        let orders_list = self.load_orders_list_for_query(&query)?;
         let filter_changed = self
             .state_store
             .apply_in_memory(AppStateCommand::select_orders_filter(query.filter));
@@ -2513,60 +2589,46 @@ impl DesktopAppRuntimeState {
                 .apply_in_memory(AppStateCommand::select_orders_fulfillment_window(
                     query.fulfillment_window_id,
                 ));
-        let list_changed = self
-            .state_store
-            .apply_in_memory(AppStateCommand::replace_orders_list(orders_list));
-
-        Ok(filter_changed || fulfillment_window_changed || list_changed)
-    }
-
-    fn load_orders_list_for_query(
-        &self,
-        query: &OrdersScreenQueryState,
-    ) -> Result<OrdersListProjection, AppSqliteError> {
         let Some(sqlite_store) = self.sqlite_store.as_ref() else {
-            return Ok(OrdersListProjection::default());
+            return Ok(filter_changed || fulfillment_window_changed);
         };
-        let Some(farm_id) = self.selected_farm_id() else {
-            return Ok(OrdersListProjection::default());
-        };
+        let selected_account_context = load_selected_account_context(
+            sqlite_store,
+            self.state_store.identity_projection(),
+            self.state_store.products_projection().query.clone(),
+            query,
+            None,
+            self.state_store.pack_day_projection().query.clone(),
+        )?;
+        let context_changed = self.apply_selected_account_context(&selected_account_context);
 
-        sqlite_store.load_orders_list(farm_id, query)
+        Ok(filter_changed || fulfillment_window_changed || context_changed)
     }
 
     fn replace_pack_day_query(
         &mut self,
         query: PackDayScreenQueryState,
     ) -> Result<bool, AppSqliteError> {
-        let pack_day_projection = self.load_pack_day_for_query(&query)?;
         let fulfillment_window_changed =
             self.state_store
                 .apply_in_memory(AppStateCommand::set_pack_day_fulfillment_window(
                     query.fulfillment_window_id,
                 ));
-        let projection_changed =
-            self.state_store
-                .apply_in_memory(AppStateCommand::replace_pack_day_projection(
-                    pack_day_projection,
-                ));
-
-        Ok(fulfillment_window_changed || projection_changed)
-    }
-
-    fn load_pack_day_for_query(
-        &self,
-        query: &PackDayScreenQueryState,
-    ) -> Result<PackDayProjection, AppSqliteError> {
         let Some(sqlite_store) = self.sqlite_store.as_ref() else {
-            return Ok(PackDayProjection::default());
+            return Ok(fulfillment_window_changed);
         };
-        let Some(farm_id) = self.selected_farm_id() else {
-            return Ok(PackDayProjection::default());
-        };
+        let selected_account_context = load_selected_account_context(
+            sqlite_store,
+            self.state_store.identity_projection(),
+            self.state_store.products_projection().query.clone(),
+            self.state_store.orders_projection().query.clone(),
+            self.selected_order_detail_id(),
+            query,
+        )?;
+        let context_changed = self.apply_selected_account_context(&selected_account_context);
 
-        sqlite_store.load_pack_day(farm_id, query)
+        Ok(fulfillment_window_changed || context_changed)
     }
-
     fn sync_truthful_farmer_section(&mut self) -> bool {
         let selected_section = self.state_store.shell_projection().selected_section;
         let should_reset_to_today = match selected_section {
@@ -2763,6 +2825,9 @@ fn load_selected_account_context(
     let Some(selected_account) = identity_projection.selected_account.as_ref() else {
         return Ok(DesktopSelectedAccountContext {
             personal_projection,
+            orders_list: OrdersListProjection::default(),
+            orders_reminders: ReminderFeedProjection::default(),
+            recovery_queue: RecoveryQueueProjection::default(),
             ..DesktopSelectedAccountContext::default()
         });
     };
@@ -2785,7 +2850,7 @@ fn load_selected_account_context(
         }
         None => FarmRulesProjection::default(),
     };
-    let today_projection = match today_farm_id {
+    let mut today_projection = match today_farm_id {
         Some(farm_id) => sqlite_store.load_today_agenda(Some(farm_id))?,
         None => TodayAgendaProjection::default(),
     };
@@ -2802,13 +2867,50 @@ fn load_selected_account_context(
         Some(farm_id) => sqlite_store.load_orders_list(farm_id, &orders_query)?,
         None => OrdersListProjection::default(),
     };
-    let order_detail = match today_farm_id.zip(selected_order_id) {
+    let canonical_orders_list = match today_farm_id {
+        Some(farm_id) => {
+            sqlite_store.load_orders_list(farm_id, &OrdersScreenQueryState::default())?
+        }
+        None => OrdersListProjection::default(),
+    };
+    let mut order_detail = match today_farm_id.zip(selected_order_id) {
         Some((farm_id, order_id)) => sqlite_store.load_order_detail(farm_id, order_id)?,
         None => None,
     };
-    let pack_day_projection = match today_farm_id {
+    let mut pack_day_projection = match today_farm_id {
         Some(farm_id) => sqlite_store.load_pack_day(farm_id, &pack_day_query)?,
         None => PackDayProjection::default(),
+    };
+    let (orders_reminders, recovery_queue) = match today_farm_id {
+        Some(farm_id) => {
+            let reminder_context = load_selected_account_reminder_context(
+                sqlite_store,
+                selected_account.account.account_id.as_str(),
+                farm_id,
+                &today_projection,
+                &canonical_orders_list,
+                &pack_day_projection,
+                order_detail.as_ref(),
+            )?;
+            today_projection.reminders = reminder_context.today_feed;
+            if let Some(summary) = today_projection.summary.as_mut() {
+                summary.reminders_due_soon = reminder_context.due_soon_count;
+                summary.recovery_actions_open = reminder_context.recovery_actions_open;
+            }
+            if let Some(detail) = order_detail.as_mut() {
+                detail.recovery = reminder_context.selected_order_recovery;
+            }
+            pack_day_projection.reminders = reminder_context.pack_day_feed;
+
+            (
+                reminder_context.orders_feed,
+                reminder_context.recovery_queue,
+            )
+        }
+        None => (
+            ReminderFeedProjection::default(),
+            RecoveryQueueProjection::default(),
+        ),
     };
 
     Ok(DesktopSelectedAccountContext {
@@ -2818,9 +2920,406 @@ fn load_selected_account_context(
         today_projection,
         products_list,
         orders_list,
+        orders_reminders,
+        recovery_queue,
         order_detail,
         pack_day_projection,
     })
+}
+
+fn load_selected_account_reminder_context(
+    sqlite_store: &AppSqliteStore,
+    account_id: &str,
+    farm_id: FarmId,
+    today_projection: &TodayAgendaProjection,
+    canonical_orders_list: &OrdersListProjection,
+    pack_day_projection: &PackDayProjection,
+    selected_order_detail: Option<&OrderDetailProjection>,
+) -> Result<DesktopSellerReminderContext, AppSqliteError> {
+    let existing_schedule = sqlite_store.load_reminder_schedule(account_id, farm_id)?;
+    let recovery_queue = sqlite_store.load_recovery_queue(account_id, farm_id)?;
+    let sync_truth = load_selected_account_reminder_sync_truth(sqlite_store, account_id)?;
+    let schedule = derive_selected_account_reminder_schedule(
+        farm_id,
+        today_projection,
+        canonical_orders_list,
+        pack_day_projection,
+        &recovery_queue,
+        &sync_truth,
+        &existing_schedule,
+    );
+    if schedule != existing_schedule {
+        sqlite_store.replace_reminder_schedule(account_id, farm_id, &schedule)?;
+    }
+
+    let selected_order_recovery = selected_order_detail.and_then(|detail| {
+        recovery_queue
+            .items
+            .iter()
+            .find(|record| record.order_id == detail.order_id)
+            .cloned()
+    });
+    let due_soon_count = schedule
+        .items
+        .iter()
+        .filter(|item| {
+            !matches!(
+                item.kind,
+                ReminderKind::MissedPickupRecovery | ReminderKind::RefundRecovery
+            ) && matches!(
+                item.urgency,
+                ReminderUrgency::DueSoon | ReminderUrgency::Overdue | ReminderUrgency::Blocking
+            )
+        })
+        .count() as u32;
+    let recovery_actions_open = recovery_queue
+        .items
+        .iter()
+        .filter(|record| record.state != RecoveryState::Resolved)
+        .count() as u32;
+
+    Ok(DesktopSellerReminderContext {
+        today_feed: filter_reminder_surface(&schedule, ReminderSurface::Today),
+        orders_feed: filter_reminder_surface(&schedule, ReminderSurface::Orders),
+        pack_day_feed: filter_reminder_surface(&schedule, ReminderSurface::PackDay),
+        recovery_queue,
+        selected_order_recovery,
+        due_soon_count,
+        recovery_actions_open,
+    })
+}
+
+fn load_selected_account_reminder_sync_truth(
+    sqlite_store: &AppSqliteStore,
+    account_id: &str,
+) -> Result<DesktopReminderSyncTruth, AppSqliteError> {
+    let checkpoint = sqlite_store.load_sync_checkpoint(account_id)?;
+    let conflicts = sqlite_store.load_sync_conflicts(account_id)?;
+    let pending_write_count = sqlite_store.load_pending_sync_operations(account_id)?.len();
+    let unresolved_conflict_count = conflicts
+        .iter()
+        .filter(|stored| stored.conflict.is_unresolved())
+        .count();
+    let blocking_conflict_count = conflicts
+        .iter()
+        .filter(|stored| {
+            stored.conflict.is_unresolved()
+                && matches!(stored.conflict.severity, SyncConflictSeverity::Blocking)
+        })
+        .count();
+
+    Ok(DesktopReminderSyncTruth {
+        checkpoint,
+        pending_write_count,
+        unresolved_conflict_count,
+        blocking_conflict_count,
+    })
+}
+
+fn derive_selected_account_reminder_schedule(
+    farm_id: FarmId,
+    today_projection: &TodayAgendaProjection,
+    canonical_orders_list: &OrdersListProjection,
+    pack_day_projection: &PackDayProjection,
+    recovery_queue: &RecoveryQueueProjection,
+    sync_truth: &DesktopReminderSyncTruth,
+    existing_schedule: &ReminderFeedProjection,
+) -> ReminderFeedProjection {
+    let mut items = Vec::new();
+
+    if let Some(window) = today_projection.next_fulfillment_window.as_ref() {
+        items.push(build_reminder_projection(
+            farm_id,
+            format!(
+                "reminder:today:fulfillment_window:{}",
+                window.fulfillment_window_id
+            ),
+            None,
+            Some(window.fulfillment_window_id),
+            ReminderKind::FulfillmentWindow,
+            ReminderSurface::Today,
+            "Prepare the next fulfillment window".to_owned(),
+            format!(
+                "The next fulfillment window starts at {}.",
+                window.starts_at
+            ),
+            window.starts_at.clone(),
+            Some("Open pack day".to_owned()),
+            None,
+            existing_schedule,
+        ));
+    }
+
+    if canonical_orders_list.summary.needs_action_orders > 0 {
+        let deadline_at = today_projection
+            .next_fulfillment_window
+            .as_ref()
+            .map(|window| window.starts_at.clone())
+            .unwrap_or_else(current_utc_timestamp);
+        let detail = canonical_orders_list
+            .rows
+            .first()
+            .and_then(|row| row.fulfillment_window_label.as_ref())
+            .map(|label| {
+                format!(
+                    "{} order(s) still need review before {}.",
+                    canonical_orders_list.summary.needs_action_orders, label
+                )
+            })
+            .unwrap_or_else(|| {
+                format!(
+                    "{} order(s) still need review.",
+                    canonical_orders_list.summary.needs_action_orders
+                )
+            });
+        items.push(build_reminder_projection(
+            farm_id,
+            "reminder:orders:needs_action".to_owned(),
+            canonical_orders_list.rows.first().map(|row| row.order_id),
+            canonical_orders_list
+                .rows
+                .first()
+                .and_then(|row| row.fulfillment_window_id),
+            ReminderKind::OrderAction,
+            ReminderSurface::Orders,
+            "Review open orders".to_owned(),
+            detail,
+            deadline_at,
+            Some("Review".to_owned()),
+            None,
+            existing_schedule,
+        ));
+    }
+
+    if let Some(window) = pack_day_projection.fulfillment_window.as_ref() {
+        items.push(build_reminder_projection(
+            farm_id,
+            format!(
+                "reminder:pack_day:fulfillment_window:{}",
+                window.fulfillment_window_id
+            ),
+            None,
+            Some(window.fulfillment_window_id),
+            ReminderKind::FulfillmentWindow,
+            ReminderSurface::PackDay,
+            "Pack for this fulfillment window".to_owned(),
+            format!("Packing needs to be ready before {}.", window.starts_at),
+            window.starts_at.clone(),
+            Some("Review pack day".to_owned()),
+            None,
+            existing_schedule,
+        ));
+    }
+
+    if let Some(sync_reminder) =
+        build_sync_reminder_projection(farm_id, sync_truth, existing_schedule)
+    {
+        items.push(sync_reminder);
+    }
+
+    for record in recovery_queue
+        .items
+        .iter()
+        .filter(|record| record.state != RecoveryState::Resolved)
+    {
+        let kind = match record.kind {
+            RecoveryKind::MissedPickup => ReminderKind::MissedPickupRecovery,
+            RecoveryKind::RefundFollowUp => ReminderKind::RefundRecovery,
+        };
+        items.push(build_reminder_projection(
+            farm_id,
+            format!(
+                "reminder:orders:recovery:{}:{}",
+                record.kind.storage_key(),
+                record.order_id
+            ),
+            Some(record.order_id),
+            None,
+            kind,
+            ReminderSurface::Orders,
+            record.summary.clone(),
+            record
+                .note
+                .clone()
+                .unwrap_or_else(|| "Recovery follow-up is still open.".to_owned()),
+            record.last_updated_at.clone(),
+            Some("Review".to_owned()),
+            None,
+            existing_schedule,
+        ));
+    }
+
+    items.sort_by(|left, right| {
+        left.deadline_at.cmp(&right.deadline_at).then_with(|| {
+            left.reminder_id
+                .to_string()
+                .cmp(&right.reminder_id.to_string())
+        })
+    });
+
+    ReminderFeedProjection { items }
+}
+
+fn build_sync_reminder_projection(
+    farm_id: FarmId,
+    sync_truth: &DesktopReminderSyncTruth,
+    existing_schedule: &ReminderFeedProjection,
+) -> Option<ReminderDeadlineProjection> {
+    if sync_truth.blocking_conflict_count > 0 {
+        return Some(build_reminder_projection(
+            farm_id,
+            "reminder:orders:sync:blocking_conflicts".to_owned(),
+            None,
+            None,
+            ReminderKind::SyncImpact,
+            ReminderSurface::Orders,
+            "Resolve blocking sync conflicts".to_owned(),
+            format!(
+                "{} blocking sync conflict(s) need review before the next sync run.",
+                sync_truth.blocking_conflict_count
+            ),
+            current_utc_timestamp(),
+            Some("Review".to_owned()),
+            Some(ReminderUrgency::Blocking),
+            existing_schedule,
+        ));
+    }
+
+    if sync_truth.unresolved_conflict_count > 0 {
+        return Some(build_reminder_projection(
+            farm_id,
+            "reminder:orders:sync:conflicts".to_owned(),
+            None,
+            None,
+            ReminderKind::SyncImpact,
+            ReminderSurface::Orders,
+            "Review sync conflicts".to_owned(),
+            format!(
+                "{} sync conflict(s) are still unresolved.",
+                sync_truth.unresolved_conflict_count
+            ),
+            current_utc_timestamp(),
+            Some("Review".to_owned()),
+            Some(ReminderUrgency::DueSoon),
+            existing_schedule,
+        ));
+    }
+
+    if sync_truth.checkpoint.is_failed() {
+        return Some(build_reminder_projection(
+            farm_id,
+            "reminder:orders:sync:failed".to_owned(),
+            None,
+            None,
+            ReminderKind::SyncImpact,
+            ReminderSurface::Orders,
+            "Retry sync".to_owned(),
+            sync_truth
+                .checkpoint
+                .last_error_message
+                .clone()
+                .unwrap_or_else(|| "The last sync attempt failed.".to_owned()),
+            current_utc_timestamp(),
+            Some("Review".to_owned()),
+            Some(ReminderUrgency::Blocking),
+            existing_schedule,
+        ));
+    }
+
+    if sync_truth.pending_write_count > 0 {
+        return Some(build_reminder_projection(
+            farm_id,
+            "reminder:orders:sync:pending".to_owned(),
+            None,
+            None,
+            ReminderKind::SyncImpact,
+            ReminderSurface::Orders,
+            "Pending local changes".to_owned(),
+            format!(
+                "{} local change(s) are waiting to sync.",
+                sync_truth.pending_write_count
+            ),
+            current_utc_timestamp(),
+            Some("Review".to_owned()),
+            Some(ReminderUrgency::Upcoming),
+            existing_schedule,
+        ));
+    }
+
+    None
+}
+
+fn build_reminder_projection(
+    farm_id: FarmId,
+    identity_key: String,
+    order_id: Option<OrderId>,
+    fulfillment_window_id: Option<FulfillmentWindowId>,
+    kind: ReminderKind,
+    surface: ReminderSurface,
+    title: String,
+    detail: String,
+    deadline_at: String,
+    action_label: Option<String>,
+    urgency_override: Option<ReminderUrgency>,
+    existing_schedule: &ReminderFeedProjection,
+) -> ReminderDeadlineProjection {
+    let reminder_id = stable_reminder_id(identity_key.as_str());
+    let urgency = urgency_override.unwrap_or_else(|| reminder_urgency(deadline_at.as_str()));
+    let delivery_state = existing_schedule
+        .items
+        .iter()
+        .find(|item| item.reminder_id == reminder_id)
+        .map(|item| item.delivery_state)
+        .unwrap_or(ReminderDeliveryState::Scheduled);
+
+    ReminderDeadlineProjection {
+        reminder_id,
+        farm_id,
+        order_id,
+        fulfillment_window_id,
+        kind,
+        surface,
+        urgency,
+        title,
+        detail,
+        deadline_at,
+        action_label,
+        delivery_state,
+    }
+}
+
+fn stable_reminder_id(identity_key: &str) -> ReminderId {
+    ReminderId::from(Uuid::new_v5(&Uuid::NAMESPACE_URL, identity_key.as_bytes()))
+}
+
+fn reminder_urgency(deadline_at: &str) -> ReminderUrgency {
+    let Ok(deadline) = chrono::DateTime::parse_from_rfc3339(deadline_at) else {
+        return ReminderUrgency::Upcoming;
+    };
+    let deadline = deadline.with_timezone(&Utc);
+    let now = Utc::now();
+
+    if deadline <= now {
+        ReminderUrgency::Overdue
+    } else if deadline <= now + Duration::hours(48) {
+        ReminderUrgency::DueSoon
+    } else {
+        ReminderUrgency::Upcoming
+    }
+}
+
+fn filter_reminder_surface(
+    schedule: &ReminderFeedProjection,
+    surface: ReminderSurface,
+) -> ReminderFeedProjection {
+    ReminderFeedProjection {
+        items: schedule
+            .items
+            .iter()
+            .filter(|item| item.surface == surface)
+            .cloned()
+            .collect(),
+    }
 }
 
 fn load_selected_account_sync_context(
@@ -3219,6 +3718,7 @@ mod tests {
         time::{SystemTime, UNIX_EPOCH},
     };
 
+    use chrono::{Duration, Utc};
     use radroots_studio_app_core::{
         AppDesktopRuntimePaths, AppRuntimeHostEnvironment, AppRuntimePlatform,
         AppSharedAccountsPaths, SHARED_ACCOUNTS_STORE_FILE_NAME, SHARED_IDENTITY_FILE_NAME,
@@ -3231,8 +3731,9 @@ mod tests {
         FarmerActivationProjection, FarmerSection, FulfillmentWindowId, FulfillmentWindowRecord,
         LoggedOutStartupProjection, OrderId, OrderStatus, OrdersFilter, PersonalSection,
         PickupLocationId, PickupLocationRecord, ProductEditorDraft, ProductStatus, ProductsFilter,
-        ProductsSort, SelectedSurfaceProjection, SettingsPreference, SettingsSection, ShellSection,
-        TodayAgendaProjection, TodaySetupTask, TodaySetupTaskKind, TodaySummary,
+        ProductsSort, RecoveryKind, RecoveryRecordId, ReminderKind, SelectedSurfaceProjection,
+        SettingsPreference, SettingsSection, ShellSection, TodayAgendaProjection, TodaySetupTask,
+        TodaySetupTaskKind, TodaySummary,
     };
     use radroots_studio_app_remote_signer::{
         RadrootsAppRemoteSignerPendingSession, RadrootsAppRemoteSignerSessionRecord,
@@ -5377,6 +5878,177 @@ mod tests {
                 .expect("pack day fulfillment window")
                 .fulfillment_window_id,
             fulfillment_window_id
+        );
+    }
+
+    #[test]
+    fn runtime_threads_canonical_seller_reminders_across_today_orders_and_pack_day() {
+        let runtime = memory_runtime();
+        let (_, farm_id) = provision_ready_farmer_account(&runtime);
+        seed_order_workspace(&runtime, farm_id);
+
+        assert!(runtime.open_orders().expect("orders should open"));
+        let summary = runtime.summary();
+
+        assert_eq!(summary.today_projection.reminders.items.len(), 1);
+        assert_eq!(
+            summary.today_projection.reminders.items[0].kind,
+            ReminderKind::FulfillmentWindow
+        );
+        assert_eq!(summary.orders_projection.reminders.items.len(), 1);
+        assert_eq!(
+            summary.orders_projection.reminders.items[0].kind,
+            ReminderKind::OrderAction
+        );
+        assert_eq!(
+            summary.pack_day_projection.projection.reminders.items.len(),
+            1
+        );
+        assert_eq!(
+            summary.pack_day_projection.projection.reminders.items[0].kind,
+            ReminderKind::FulfillmentWindow
+        );
+        assert_eq!(
+            summary
+                .today_projection
+                .summary
+                .as_ref()
+                .expect("today summary")
+                .recovery_actions_open,
+            0
+        );
+    }
+
+    #[test]
+    fn runtime_sync_refresh_threads_sync_reminders_into_orders_projection() {
+        let runtime = memory_runtime();
+        let (_, farm_id) = provision_ready_farmer_account(&runtime);
+        let (_, order_id) = seed_order_workspace(&runtime, farm_id);
+        let sql = format!(
+            "update orders
+             set status = 'scheduled', updated_at = '2026-04-17T12:00:00Z'
+             where id = '{order_id}' and farm_id = '{farm_id}'"
+        );
+        runtime
+            .lock_state()
+            .sqlite_store
+            .as_ref()
+            .expect("sqlite store")
+            .connection()
+            .execute_batch(&sql)
+            .expect("order should update to scheduled");
+
+        assert!(runtime.open_orders().expect("orders should open"));
+        assert!(
+            runtime
+                .mark_order_packed(order_id)
+                .expect("mark packed should succeed")
+        );
+        let summary = runtime.summary();
+
+        assert_eq!(summary.sync_status.pending_write_count, 1);
+        assert!(
+            summary
+                .orders_projection
+                .reminders
+                .items
+                .iter()
+                .any(|item| item.kind == ReminderKind::SyncImpact
+                    && item.title == "Pending local changes")
+        );
+    }
+
+    #[test]
+    fn runtime_threads_recovery_queue_into_today_counts_and_order_detail() {
+        let runtime = memory_runtime();
+        let (_, farm_id) = provision_ready_farmer_account(&runtime);
+        let (_, order_id) = seed_order_workspace(&runtime, farm_id);
+        let recovery_record_id = RecoveryRecordId::new();
+        let sql = format!(
+            "insert into order_recovery_records (
+                recovery_record_id,
+                account_id,
+                farm_id,
+                order_id,
+                recovery_kind,
+                recovery_state,
+                summary,
+                note,
+                last_updated_at
+             ) values (
+                '{recovery_record_id}',
+                '{}',
+                '{farm_id}',
+                '{order_id}',
+                'missed_pickup',
+                'open',
+                'Follow up on the missed pickup',
+                'Confirm a new pickup time.',
+                '2026-04-18T18:30:00Z'
+             )",
+            runtime
+                .summary()
+                .settings_account_projection
+                .selected_account
+                .as_ref()
+                .expect("selected account")
+                .account
+                .account_id
+        );
+        runtime
+            .lock_state()
+            .sqlite_store
+            .as_ref()
+            .expect("sqlite store")
+            .connection()
+            .execute_batch(&sql)
+            .expect("recovery record should seed");
+
+        assert!(
+            runtime
+                .open_order_detail(order_id)
+                .expect("order detail should open")
+        );
+        let summary = runtime.summary();
+
+        assert_eq!(summary.orders_projection.recovery_queue.items.len(), 1);
+        assert_eq!(
+            summary
+                .today_projection
+                .summary
+                .as_ref()
+                .expect("today summary")
+                .recovery_actions_open,
+            1
+        );
+        assert_eq!(
+            summary
+                .orders_projection
+                .detail
+                .as_ref()
+                .and_then(|detail| detail.recovery.as_ref())
+                .expect("order recovery")
+                .kind,
+            RecoveryKind::MissedPickup
+        );
+    }
+
+    #[test]
+    fn reminder_urgency_marks_due_soon_and_overdue_deadlines() {
+        let due_soon = (Utc::now() + Duration::hours(24))
+            .format("%Y-%m-%dT%H:%M:%SZ")
+            .to_string();
+        let overdue = (Utc::now() - Duration::hours(2))
+            .format("%Y-%m-%dT%H:%M:%SZ")
+            .to_string();
+
+        assert_eq!(
+            super::reminder_urgency(due_soon.as_str()),
+            super::ReminderUrgency::DueSoon
+        );
+        assert_eq!(
+            super::reminder_urgency(overdue.as_str()),
+            super::ReminderUrgency::Overdue
         );
     }
 
