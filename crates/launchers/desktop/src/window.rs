@@ -11,7 +11,8 @@ use gpui_component::{
 use radroots_studio_app_i18n::AppTextKey;
 pub use radroots_studio_app_models::SettingsSection as SettingsPanelViewKey;
 use radroots_studio_app_models::{
-    AppStartupGate, BlackoutPeriodId, BlackoutPeriodRecord, BuyerCartReplaceConfirmationProjection,
+    AppStartupGate, BlackoutPeriodId, BlackoutPeriodRecord, BuyerCartProjection,
+    BuyerCartReplaceConfirmationProjection, BuyerCheckoutDraft, BuyerCheckoutSummaryProjection,
     BuyerListingRow, BuyerProductDetailProjection, FarmId, FarmOperatingRulesRecord,
     FarmOrderMethod, FarmProfileRecord, FarmReadinessBlocker, FarmRulesProjection,
     FarmRulesReadiness, FarmSetupBlocker, FarmSetupDraft, FarmSummary, FarmTimingConflictKind,
@@ -187,6 +188,7 @@ pub struct HomeView {
     startup_signer_recovery_attempted: bool,
     farm_setup_form: Option<FarmSetupFormState>,
     personal_search: Option<PersonalSearchState>,
+    buyer_checkout_form: Option<BuyerCheckoutFormState>,
     products_search: Option<ProductsSearchState>,
     products_stock_editor: Option<ProductsStockEditorState>,
     product_editor_form: Option<ProductEditorFormState>,
@@ -233,6 +235,7 @@ impl HomeView {
             startup_signer_recovery_attempted: false,
             farm_setup_form: None,
             personal_search: None,
+            buyer_checkout_form: None,
             products_search: None,
             products_stock_editor: None,
             product_editor_form: None,
@@ -780,6 +783,44 @@ impl HomeView {
         }
     }
 
+    fn sync_buyer_checkout_form(
+        &mut self,
+        runtime_summary: &DesktopAppRuntimeSummary,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if home_stage(runtime_summary) != HomeStage::BuyerWorkspace
+            || selected_personal_section(runtime_summary) != PersonalSection::Cart
+            || runtime_summary
+                .personal_projection
+                .cart
+                .cart
+                .lines
+                .is_empty()
+        {
+            self.buyer_checkout_form = None;
+            return;
+        }
+
+        let workspace_id = personal_workspace_id(runtime_summary);
+        let draft = &runtime_summary.personal_projection.cart.checkout.draft;
+        let should_reset = self
+            .buyer_checkout_form
+            .as_ref()
+            .map(|form| form.workspace_id != workspace_id)
+            .unwrap_or(false);
+
+        if should_reset {
+            self.buyer_checkout_form =
+                Some(BuyerCheckoutFormState::new(workspace_id, draft, window, cx));
+            return;
+        }
+
+        if let Some(form) = self.buyer_checkout_form.as_mut() {
+            form.sync(draft, window, cx);
+        }
+    }
+
     fn sync_products_stock_editor(&mut self, runtime_summary: &DesktopAppRuntimeSummary) {
         let Some(editor) = self.products_stock_editor.as_ref() else {
             return;
@@ -1010,6 +1051,45 @@ impl HomeView {
         }
     }
 
+    fn handle_buyer_checkout_input_event(
+        &mut self,
+        state: &Entity<InputState>,
+        event: &InputEvent,
+        _: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if !matches!(event, InputEvent::Change) {
+            return;
+        }
+
+        let Some(form) = self.buyer_checkout_form.as_ref() else {
+            return;
+        };
+        let matches_input = form.name_input == *state
+            || form.email_input == *state
+            || form.phone_input == *state
+            || form.order_note_input == *state;
+        if !matches_input {
+            return;
+        }
+
+        match self
+            .runtime
+            .save_personal_checkout_draft(form.current_draft(cx))
+        {
+            Ok(true) => cx.notify(),
+            Ok(false) => {}
+            Err(runtime_error) => {
+                error!(
+                    target: "buyer",
+                    event = "buyer.checkout_save_failed",
+                    error = %runtime_error,
+                    "failed to save buyer checkout draft"
+                );
+            }
+        }
+    }
+
     fn toggle_personal_search_fulfillment_method(
         &mut self,
         method: FarmOrderMethod,
@@ -1109,6 +1189,73 @@ impl HomeView {
     fn clear_personal_cart_replace_confirmation(&mut self, cx: &mut Context<Self>) {
         if self.runtime.clear_personal_cart_replace_confirmation() {
             cx.notify();
+        }
+    }
+
+    fn open_personal_checkout(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.buyer_checkout_form.is_some() {
+            return;
+        }
+
+        let runtime_summary = self.runtime.summary();
+        if home_stage(&runtime_summary) != HomeStage::BuyerWorkspace
+            || selected_personal_section(&runtime_summary) != PersonalSection::Cart
+            || runtime_summary
+                .personal_projection
+                .cart
+                .cart
+                .lines
+                .is_empty()
+        {
+            return;
+        }
+
+        self.buyer_checkout_form = Some(BuyerCheckoutFormState::new(
+            personal_workspace_id(&runtime_summary),
+            &runtime_summary.personal_projection.cart.checkout.draft,
+            window,
+            cx,
+        ));
+        cx.notify();
+    }
+
+    fn close_personal_checkout(&mut self, cx: &mut Context<Self>) {
+        if self.buyer_checkout_form.take().is_some() {
+            cx.notify();
+        }
+    }
+
+    fn remove_personal_cart_line(&mut self, product_id: ProductId, cx: &mut Context<Self>) {
+        match self.runtime.remove_personal_cart_line(product_id) {
+            Ok(true) => cx.notify(),
+            Ok(false) => {}
+            Err(runtime_error) => {
+                error!(
+                    target: "buyer",
+                    event = "buyer.cart_remove_failed",
+                    error = %runtime_error,
+                    product_id = %product_id,
+                    "failed to remove buyer cart line"
+                );
+            }
+        }
+    }
+
+    fn place_personal_order(&mut self, cx: &mut Context<Self>) {
+        match self.runtime.place_personal_order() {
+            Ok(true) => {
+                self.buyer_checkout_form = None;
+                cx.notify();
+            }
+            Ok(false) => {}
+            Err(runtime_error) => {
+                error!(
+                    target: "buyer",
+                    event = "buyer.checkout_place_failed",
+                    error = %runtime_error,
+                    "failed to place buyer order"
+                );
+            }
         }
     }
 
@@ -1917,7 +2064,9 @@ impl HomeView {
             PersonalSection::Search => self
                 .render_buyer_search_content(runtime, cx)
                 .into_any_element(),
-            PersonalSection::Cart => buyer_cart_placeholder(runtime).into_any_element(),
+            PersonalSection::Cart => self
+                .render_buyer_cart_content(runtime, cx)
+                .into_any_element(),
             PersonalSection::Orders => buyer_orders_placeholder(runtime).into_any_element(),
         };
 
@@ -2222,6 +2371,50 @@ impl HomeView {
                         selected_product_id,
                         cx,
                     ))
+                    .into_any_element()
+            })
+            .into_any_element()
+    }
+
+    fn render_buyer_cart_content(
+        &mut self,
+        runtime: &DesktopAppRuntimeSummary,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let cart = &runtime.personal_projection.cart.cart;
+        let checkout = &runtime.personal_projection.cart.checkout;
+
+        app_stack_v(APP_UI_THEME.shells.home_stack_gap_px)
+            .w_full()
+            .max_w(px(APP_UI_THEME.shells.home_card_max_width_px))
+            .mx_auto()
+            .child(buyer_workspace_title_block(
+                AppTextKey::HomeNavCart,
+                AppTextKey::PersonalCartSurfaceBody,
+            ))
+            .child(if cart.lines.is_empty() {
+                app_surface_card(home_body_text(app_shared_text(
+                    AppTextKey::PersonalCartPlaceholderBody,
+                )))
+                .into_any_element()
+            } else {
+                app_stack_v(APP_UI_THEME.shells.home_stack_gap_px)
+                    .w_full()
+                    .child(buyer_cart_card(
+                        cart,
+                        &checkout.summary,
+                        self.buyer_checkout_form.is_some(),
+                        cx,
+                    ))
+                    .when_some(self.buyer_checkout_form.as_ref(), |this, form| {
+                        this.child(buyer_checkout_card(
+                            form,
+                            checkout,
+                            cx.listener(|this, _, _, cx| this.close_personal_checkout(cx)),
+                            cx.listener(|this, _, _, cx| this.place_personal_order(cx)),
+                            cx,
+                        ))
+                    })
                     .into_any_element()
             })
             .into_any_element()
@@ -2801,6 +2994,7 @@ impl Render for HomeView {
         self.sync_startup_signer_entry(&runtime_summary, window, cx);
         self.sync_farm_setup_form(&runtime_summary, window, cx);
         self.sync_personal_search(&runtime_summary, window, cx);
+        self.sync_buyer_checkout_form(&runtime_summary, window, cx);
         self.sync_products_search(&runtime_summary, window, cx);
         self.sync_products_stock_editor(&runtime_summary);
         self.sync_product_editor_form(&runtime_summary, window, cx);
@@ -2922,6 +3116,108 @@ impl PersonalSearchState {
             input.set_value(search_query.to_owned(), window, cx);
         });
     }
+}
+
+struct BuyerCheckoutFormState {
+    workspace_id: String,
+    name_input: Entity<InputState>,
+    email_input: Entity<InputState>,
+    phone_input: Entity<InputState>,
+    order_note_input: Entity<InputState>,
+    _name_subscription: Subscription,
+    _email_subscription: Subscription,
+    _phone_subscription: Subscription,
+    _order_note_subscription: Subscription,
+}
+
+impl BuyerCheckoutFormState {
+    fn new(
+        workspace_id: String,
+        draft: &BuyerCheckoutDraft,
+        window: &mut Window,
+        cx: &mut Context<HomeView>,
+    ) -> Self {
+        let name_input = cx.new(|cx| InputState::new(window, cx).default_value(draft.name.clone()));
+        let email_input =
+            cx.new(|cx| InputState::new(window, cx).default_value(draft.email.clone()));
+        let phone_input =
+            cx.new(|cx| InputState::new(window, cx).default_value(draft.phone.clone()));
+        let order_note_input =
+            cx.new(|cx| InputState::new(window, cx).default_value(draft.order_note.clone()));
+        let name_subscription = cx.subscribe_in(
+            &name_input,
+            window,
+            HomeView::handle_buyer_checkout_input_event,
+        );
+        let email_subscription = cx.subscribe_in(
+            &email_input,
+            window,
+            HomeView::handle_buyer_checkout_input_event,
+        );
+        let phone_subscription = cx.subscribe_in(
+            &phone_input,
+            window,
+            HomeView::handle_buyer_checkout_input_event,
+        );
+        let order_note_subscription = cx.subscribe_in(
+            &order_note_input,
+            window,
+            HomeView::handle_buyer_checkout_input_event,
+        );
+
+        Self {
+            workspace_id,
+            name_input,
+            email_input,
+            phone_input,
+            order_note_input,
+            _name_subscription: name_subscription,
+            _email_subscription: email_subscription,
+            _phone_subscription: phone_subscription,
+            _order_note_subscription: order_note_subscription,
+        }
+    }
+
+    fn sync(
+        &mut self,
+        draft: &BuyerCheckoutDraft,
+        window: &mut Window,
+        cx: &mut Context<HomeView>,
+    ) {
+        sync_checkout_input(&self.name_input, draft.name.as_str(), window, cx);
+        sync_checkout_input(&self.email_input, draft.email.as_str(), window, cx);
+        sync_checkout_input(&self.phone_input, draft.phone.as_str(), window, cx);
+        sync_checkout_input(
+            &self.order_note_input,
+            draft.order_note.as_str(),
+            window,
+            cx,
+        );
+    }
+
+    fn current_draft(&self, cx: &App) -> BuyerCheckoutDraft {
+        BuyerCheckoutDraft {
+            name: self.name_input.read(cx).value().to_string(),
+            email: self.email_input.read(cx).value().to_string(),
+            phone: self.phone_input.read(cx).value().to_string(),
+            order_note: self.order_note_input.read(cx).value().to_string(),
+        }
+    }
+}
+
+fn sync_checkout_input(
+    input: &Entity<InputState>,
+    value: &str,
+    window: &mut Window,
+    cx: &mut Context<HomeView>,
+) {
+    if input.read(cx).value().as_ref() == value {
+        return;
+    }
+
+    input.update(cx, |input, cx| {
+        input.set_value(value.to_owned(), window, cx);
+    });
 }
 
 struct ProductsSearchState {
@@ -5819,6 +6115,246 @@ fn buyer_product_detail_card(
     )
 }
 
+fn buyer_cart_card(
+    cart: &BuyerCartProjection,
+    summary: &BuyerCheckoutSummaryProjection,
+    checkout_open: bool,
+    cx: &mut Context<HomeView>,
+) -> impl IntoElement {
+    app_surface_card(
+        app_stack_v(APP_UI_THEME.shells.home_stack_gap_px)
+            .w_full()
+            .children(
+                cart.lines
+                    .iter()
+                    .enumerate()
+                    .map(|(index, line)| buyer_cart_line_card(index, line, cx).into_any_element())
+                    .collect::<Vec<_>>(),
+            )
+            .child(app_surface_panel(
+                app_stack_v(APP_UI_THEME.foundation.spacing.small_px)
+                    .w_full()
+                    .p(px(APP_UI_THEME.shells.home_card_padding_px))
+                    .child(app_text_label(app_shared_text(
+                        AppTextKey::PersonalOrderSummaryTitle,
+                    )))
+                    .child(label_value_list(buyer_order_summary_rows(summary))),
+            ))
+            .when(!checkout_open, |this| {
+                this.child(action_button_primary(
+                    "buyer-cart-open-checkout",
+                    app_shared_text(AppTextKey::PersonalCartContinueCheckoutAction),
+                    cx.listener(|this, _, window, cx| this.open_personal_checkout(window, cx)),
+                    cx,
+                ))
+            }),
+    )
+}
+
+fn buyer_cart_line_card(
+    index: usize,
+    line: &radroots_studio_app_models::BuyerCartLineProjection,
+    cx: &mut Context<HomeView>,
+) -> impl IntoElement {
+    app_surface_panel(
+        app_stack_v(APP_UI_THEME.foundation.spacing.small_px)
+            .w_full()
+            .p(px(APP_UI_THEME.shells.home_card_padding_px))
+            .child(
+                div()
+                    .w_full()
+                    .flex()
+                    .items_start()
+                    .justify_between()
+                    .gap(px(APP_UI_THEME.shells.home_stack_gap_px))
+                    .child(
+                        app_stack_v(4.0)
+                            .flex_1()
+                            .min_w_0()
+                            .child(app_text_label(product_display_title(line.title.as_str())))
+                            .child(settings_badge_text(line.farm_display_name.clone())),
+                    )
+                    .child(action_button_compact(
+                        ("buyer-cart-remove-line", index),
+                        app_shared_text(AppTextKey::PersonalCartRemoveLineAction),
+                        cx.listener({
+                            let product_id = line.product_id;
+                            move |this, _, _, cx| this.remove_personal_cart_line(product_id, cx)
+                        }),
+                        cx,
+                    )),
+            )
+            .child(label_value_list(vec![
+                LabelValueRow::new(
+                    app_shared_text(AppTextKey::PersonalCartLineQuantityLabel),
+                    line.quantity.to_string(),
+                ),
+                LabelValueRow::new(
+                    app_shared_text(AppTextKey::PersonalCartLineUnitPriceLabel),
+                    buyer_listing_price_text(&line.unit_price),
+                ),
+                LabelValueRow::new(
+                    app_shared_text(AppTextKey::PersonalCartLineTotalLabel),
+                    buyer_money_text(
+                        line.line_total_minor_units,
+                        line.unit_price.currency_code.as_str(),
+                    ),
+                ),
+            ]))
+            .child(buyer_listing_chip(line.fulfillment_summary.clone())),
+    )
+}
+
+fn buyer_checkout_card(
+    form: &BuyerCheckoutFormState,
+    checkout: &radroots_studio_app_models::BuyerCheckoutProjection,
+    on_close: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+    on_place_order: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+    cx: &App,
+) -> impl IntoElement {
+    app_surface_card(
+        app_stack_v(APP_UI_THEME.shells.home_stack_gap_px)
+            .w_full()
+            .child(
+                div()
+                    .w_full()
+                    .flex()
+                    .items_start()
+                    .justify_between()
+                    .gap(px(APP_UI_THEME.shells.home_stack_gap_px))
+                    .child(app_text_value(app_shared_text(
+                        AppTextKey::PersonalCheckoutTitle,
+                    )))
+                    .child(text_button(
+                        "buyer-checkout-back",
+                        app_shared_text(AppTextKey::PersonalCheckoutBackAction),
+                        on_close,
+                        cx,
+                    )),
+            )
+            .child(home_body_text(app_shared_text(
+                AppTextKey::PersonalCheckoutLocalOnlyBody,
+            )))
+            .child(app_surface_panel(
+                app_stack_v(APP_UI_THEME.foundation.spacing.small_px)
+                    .w_full()
+                    .p(px(APP_UI_THEME.shells.home_card_padding_px))
+                    .child(app_text_label(app_shared_text(
+                        AppTextKey::PersonalOrderSummaryTitle,
+                    )))
+                    .child(label_value_list(buyer_order_summary_rows(
+                        &checkout.summary,
+                    ))),
+            ))
+            .child(app_surface_panel(
+                app_stack_v(APP_UI_THEME.foundation.spacing.small_px)
+                    .w_full()
+                    .p(px(APP_UI_THEME.shells.home_card_padding_px))
+                    .child(app_text_label(app_shared_text(
+                        AppTextKey::PersonalFulfillmentTitle,
+                    )))
+                    .child(home_body_text(
+                        checkout
+                            .summary
+                            .fulfillment_summary
+                            .clone()
+                            .unwrap_or_else(|| app_shared_text(AppTextKey::ValueNone).to_string()),
+                    )),
+            ))
+            .child(app_form_section(
+                app_shared_text(AppTextKey::PersonalCheckoutContactTitle),
+                div()
+                    .w_full()
+                    .flex()
+                    .flex_col()
+                    .gap(px(APP_UI_THEME.shells.home_stack_gap_px))
+                    .child(app_form_input_text(
+                        AppFormFieldSpec::new(
+                            app_shared_text(AppTextKey::PersonalCheckoutFieldName),
+                            Option::<SharedString>::None,
+                        ),
+                        &form.name_input,
+                        false,
+                    ))
+                    .child(app_form_input_text(
+                        AppFormFieldSpec::new(
+                            app_shared_text(AppTextKey::PersonalCheckoutFieldEmail),
+                            Option::<SharedString>::None,
+                        ),
+                        &form.email_input,
+                        false,
+                    ))
+                    .child(app_form_input_text(
+                        AppFormFieldSpec::new(
+                            app_shared_text(AppTextKey::PersonalCheckoutFieldPhone),
+                            Option::<SharedString>::None,
+                        ),
+                        &form.phone_input,
+                        false,
+                    ))
+                    .child(app_form_input_text(
+                        AppFormFieldSpec::new(
+                            app_shared_text(AppTextKey::PersonalCheckoutFieldOrderNote),
+                            Option::<SharedString>::None,
+                        ),
+                        &form.order_note_input,
+                        false,
+                    )),
+            ))
+            .child(if checkout.can_place_order {
+                action_button_primary(
+                    "buyer-checkout-place-order",
+                    app_shared_text(AppTextKey::PersonalCheckoutPlaceOrderAction),
+                    on_place_order,
+                    cx,
+                )
+                .into_any_element()
+            } else {
+                action_button_primary_disabled(
+                    "buyer-checkout-place-order",
+                    app_shared_text(AppTextKey::PersonalCheckoutPlaceOrderAction),
+                    cx,
+                )
+                .into_any_element()
+            }),
+    )
+}
+
+fn buyer_order_summary_rows(summary: &BuyerCheckoutSummaryProjection) -> Vec<LabelValueRow> {
+    vec![
+        LabelValueRow::new(
+            app_shared_text(AppTextKey::PersonalSummaryFarmLabel),
+            summary
+                .farm_display_name
+                .clone()
+                .unwrap_or_else(|| app_shared_text(AppTextKey::ValueNone).to_string()),
+        ),
+        LabelValueRow::new(
+            app_shared_text(AppTextKey::PersonalSummaryItemsLabel),
+            summary.line_count.to_string(),
+        ),
+        LabelValueRow::new(
+            app_shared_text(AppTextKey::PersonalSummarySubtotalLabel),
+            summary
+                .subtotal_minor_units
+                .zip(summary.currency_code.as_deref())
+                .map(|(amount, currency_code)| buyer_money_text(amount, currency_code))
+                .unwrap_or_else(|| app_shared_text(AppTextKey::ValueNone).to_string()),
+        ),
+    ]
+}
+
+fn buyer_money_text(amount_minor_units: u32, currency_code: &str) -> String {
+    let dollars = amount_minor_units / 100;
+    let cents = amount_minor_units % 100;
+
+    if currency_code == "USD" {
+        format!("${dollars}.{cents:02}")
+    } else {
+        format!("{currency_code} {dollars}.{cents:02}")
+    }
+}
+
 fn buyer_surface_placeholder(
     title_key: AppTextKey,
     body_key: AppTextKey,
@@ -5836,28 +6372,6 @@ fn buyer_surface_placeholder(
                 .when_some(detail, |this, detail| this.child(home_body_text(detail))),
         ))
         .into_any_element()
-}
-
-fn buyer_cart_placeholder(runtime: &DesktopAppRuntimeSummary) -> AnyElement {
-    let cart = &runtime.personal_projection.cart.cart;
-    let detail = if cart.lines.is_empty() {
-        None
-    } else {
-        Some(format!(
-            "{} items are ready in your cart{}.",
-            cart.lines.len(),
-            cart.farm_display_name
-                .as_ref()
-                .map(|farm| format!(" from {farm}"))
-                .unwrap_or_default()
-        ))
-    };
-
-    buyer_surface_placeholder(
-        AppTextKey::HomeNavCart,
-        AppTextKey::PersonalCartPlaceholderBody,
-        detail,
-    )
 }
 
 fn buyer_orders_placeholder(runtime: &DesktopAppRuntimeSummary) -> AnyElement {
@@ -6582,6 +7096,15 @@ fn selected_personal_section(runtime: &DesktopAppRuntimeSummary) -> PersonalSect
             PersonalSection::Browse
         }
     }
+}
+
+fn personal_workspace_id(runtime: &DesktopAppRuntimeSummary) -> String {
+    runtime
+        .settings_account_projection
+        .selected_account
+        .as_ref()
+        .map(|account| account.account.account_id.clone())
+        .unwrap_or_else(|| "guest".to_owned())
 }
 
 fn farmer_products_available(runtime: &DesktopAppRuntimeSummary) -> bool {

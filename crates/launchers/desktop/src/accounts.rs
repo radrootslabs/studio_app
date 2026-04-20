@@ -11,8 +11,8 @@ use radroots_studio_app_models::{
 use radroots_studio_app_sqlite::{AppSqliteError, AppSqliteStore};
 use radroots_identity::{IdentityError, RadrootsIdentity, RadrootsIdentityId};
 use radroots_nostr_accounts::prelude::{
-    RadrootsNostrAccountRecord, RadrootsNostrAccountsError, RadrootsNostrAccountsManager,
-    RadrootsNostrSelectedAccountStatus,
+    RadrootsNostrAccountRecord, RadrootsNostrAccountStatus, RadrootsNostrAccountsError,
+    RadrootsNostrAccountsManager,
 };
 use radroots_secret_vault::{
     RadrootsHostVaultCapabilities, RadrootsSecretBackend, RadrootsSecretBackendAvailability,
@@ -107,7 +107,7 @@ pub fn select_local_account(
     account_id: &str,
 ) -> Result<AppIdentityProjection, DesktopAccountsCommandError> {
     let account_id = RadrootsIdentityId::parse(account_id.trim())?;
-    manager.select_account(&account_id)?;
+    manager.set_default_account(&account_id)?;
     Ok(identity_projection_from_manager(manager, sqlite_store)?)
 }
 
@@ -116,7 +116,7 @@ pub fn select_active_surface(
     sqlite_store: &AppSqliteStore,
     active_surface: ActiveSurface,
 ) -> Result<AppIdentityProjection, DesktopAccountsCommandError> {
-    let Some(selected_account) = manager.selected_account()? else {
+    let Some(selected_account) = selected_account_record(manager)? else {
         return Ok(identity_projection_from_manager(manager, sqlite_store)?);
     };
     let selected_projection =
@@ -135,13 +135,16 @@ pub fn remove_selected_local_key(
     manager: &RadrootsNostrAccountsManager,
     sqlite_store: &AppSqliteStore,
 ) -> Result<AppIdentityProjection, DesktopAccountsCommandError> {
-    let Some(selected_account) = manager.selected_account()? else {
+    let Some(selected_account) = selected_account_record(manager)? else {
         return Ok(identity_projection_from_manager(manager, sqlite_store)?);
     };
     let account_id = selected_account.account_id.to_string();
 
     sqlite_store.clear_surface_activation(account_id.as_str())?;
     manager.remove_account(&selected_account.account_id)?;
+    if let Some(next_account) = manager.list_accounts()?.into_iter().next() {
+        manager.set_default_account(&next_account.account_id)?;
+    }
 
     Ok(identity_projection_from_manager(manager, sqlite_store)?)
 }
@@ -253,17 +256,15 @@ pub(crate) fn identity_projection_from_manager(
     let roster_records = manager.list_accounts()?;
     let roster = account_roster_from_records(roster_records.as_slice());
 
-    match manager.selected_account_status()? {
-        RadrootsNostrSelectedAccountStatus::NotConfigured => {
+    match manager.default_account_status()? {
+        RadrootsNostrAccountStatus::NotConfigured => {
             Ok(AppIdentityProjection::missing_with_roster(roster))
         }
-        RadrootsNostrSelectedAccountStatus::PublicOnly { account }
-        | RadrootsNostrSelectedAccountStatus::Ready { account } => {
-            Ok(AppIdentityProjection::ready(
-                roster,
-                selected_account_projection_from_record(&account, sqlite_store)?,
-            ))
-        }
+        RadrootsNostrAccountStatus::PublicOnly { account }
+        | RadrootsNostrAccountStatus::Ready { account } => Ok(AppIdentityProjection::ready(
+            roster,
+            selected_account_projection_from_record(&account, sqlite_store)?,
+        )),
     }
 }
 
@@ -285,6 +286,16 @@ fn selected_account_projection_from_record(
             }
         },
     )
+}
+
+fn selected_account_record(
+    manager: &RadrootsNostrAccountsManager,
+) -> Result<Option<RadrootsNostrAccountRecord>, RadrootsNostrAccountsError> {
+    match manager.default_account_status()? {
+        RadrootsNostrAccountStatus::NotConfigured => Ok(None),
+        RadrootsNostrAccountStatus::PublicOnly { account }
+        | RadrootsNostrAccountStatus::Ready { account } => Ok(Some(account)),
+    }
 }
 
 fn default_farmer_surface_activation(account_id: &str) -> AccountSurfaceActivationProjection {
@@ -375,6 +386,7 @@ mod tests {
         bootstrap_desktop_accounts_with_availability, generate_local_account,
         identity_projection_from_manager, import_local_account, remove_selected_local_key,
         reset_local_device_state, select_local_account, selected_account_projection_from_record,
+        selected_account_record,
     };
 
     fn temp_shared_accounts_paths(label: &str) -> AppSharedAccountsPaths {
@@ -431,8 +443,7 @@ mod tests {
         let account_id = manager
             .generate_identity(Some("North field".to_owned()), true)
             .expect("account should generate");
-        let selected_account = manager
-            .selected_account()
+        let selected_account = selected_account_record(&manager)
             .expect("selected account should load")
             .expect("selected account should exist");
         let selected_account_summary = account_summary_from_record(&selected_account);
@@ -618,15 +629,17 @@ mod tests {
             Some(ActiveSurface::Farmer)
         );
         assert_eq!(
-            manager.selected_account_id().expect("selected account id"),
-            Some(second_account_id)
+            selected_account_record(&manager)
+                .expect("selected account")
+                .map(|account| account.account_id),
+            Some(second_account_id.clone())
         );
         assert_ne!(
             first_account_id,
-            manager
-                .selected_account_id()
-                .expect("selected account id")
+            selected_account_record(&manager)
+                .expect("selected account")
                 .expect("selected")
+                .account_id
         );
     }
 
@@ -645,7 +658,7 @@ mod tests {
             .generate_identity(Some("Second".to_owned()), false)
             .expect("second account should generate");
         manager
-            .select_account(&first_account_id)
+            .set_default_account(&first_account_id)
             .expect("first account should remain selected");
         let activation = AccountSurfaceActivationProjection::new(
             first_account_id.as_str(),

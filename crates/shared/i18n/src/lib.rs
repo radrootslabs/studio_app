@@ -209,6 +209,23 @@ mod tests {
     }
 
     #[test]
+    fn english_marketplace_checkout_copy_matches_the_local_order_contract() {
+        assert_eq!(
+            app_text(AppTextKey::PersonalCartContinueCheckoutAction),
+            "Continue to checkout"
+        );
+        assert_eq!(app_text(AppTextKey::PersonalCheckoutTitle), "Checkout");
+        assert_eq!(
+            app_text(AppTextKey::PersonalCheckoutPlaceOrderAction),
+            "Place order"
+        );
+        assert_eq!(
+            app_text(AppTextKey::PersonalCheckoutLocalOnlyBody),
+            "This places a local order on this device. It does not charge a card."
+        );
+    }
+
+    #[test]
     fn english_pack_day_copy_matches_the_contextual_execution_contract() {
         assert_eq!(app_text(AppTextKey::PackDayTitle), "Pack day");
         assert_eq!(

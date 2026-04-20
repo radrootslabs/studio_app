@@ -387,7 +387,9 @@ mod tests {
         RadrootsAppRemoteSignerSessionRecord, radroots_studio_app_remote_signer_requested_permissions,
     };
     use radroots_identity::{RadrootsIdentity, RadrootsIdentityPublic};
-    use radroots_nostr_accounts::prelude::RadrootsNostrAccountsManager;
+    use radroots_nostr_accounts::prelude::{
+        RadrootsNostrAccountStatus, RadrootsNostrAccountsManager,
+    };
 
     use super::{
         DesktopRemoteSignerPaths, activate_pending_session, apply_remote_signer_custody,
@@ -486,10 +488,14 @@ mod tests {
         )
         .expect("activate pending");
 
-        let selected = manager
-            .selected_account()
-            .expect("selected account")
-            .expect("configured account");
+        let selected = match manager
+            .default_account_status()
+            .expect("selected account status")
+        {
+            RadrootsNostrAccountStatus::NotConfigured => panic!("configured account"),
+            RadrootsNostrAccountStatus::PublicOnly { account }
+            | RadrootsNostrAccountStatus::Ready { account } => account,
+        };
         assert_eq!(
             selected.account_id.as_str(),
             approved.user_identity.id.as_str()

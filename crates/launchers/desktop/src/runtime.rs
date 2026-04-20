@@ -6,13 +6,13 @@ use radroots_studio_app_core::{AppDesktopRuntimePaths, AppRuntimePathsError, App
 use radroots_studio_app_models::{
     ActiveSurface, AppActivityContext, AppActivityKind, AppIdentityProjection, AppStartupGate,
     BuyerCartLineProjection, BuyerCartProjection, BuyerCartReplaceConfirmationProjection,
-    BuyerProductDetailProjection, FarmId, FarmOrderMethod, FarmProfileRecord, FarmReadiness,
-    FarmRulesProjection, FarmSetupDraft, FarmSetupProjection, FarmSummary, FarmerSection,
-    FulfillmentWindowId, LoggedOutStartupProjection, OrderDetailProjection, OrderId, OrdersFilter,
-    OrdersListProjection, OrdersScreenQueryState, PackDayProjection, PackDayScreenQueryState,
-    PersonalSection, PickupLocationRecord, ProductEditorDraft, ProductId, ProductsFilter,
-    ProductsListProjection, ProductsSort, SettingsAccountProjection, SettingsPreference,
-    SettingsSection, ShellSection, TodayAgendaProjection,
+    BuyerCheckoutDraft, BuyerProductDetailProjection, FarmId, FarmOrderMethod, FarmProfileRecord,
+    FarmReadiness, FarmRulesProjection, FarmSetupDraft, FarmSetupProjection, FarmSummary,
+    FarmerSection, FulfillmentWindowId, LoggedOutStartupProjection, OrderDetailProjection, OrderId,
+    OrdersFilter, OrdersListProjection, OrdersScreenQueryState, PackDayProjection,
+    PackDayScreenQueryState, PersonalSection, PickupLocationRecord, ProductEditorDraft, ProductId,
+    ProductsFilter, ProductsListProjection, ProductsSort, SettingsAccountProjection,
+    SettingsPreference, SettingsSection, ShellSection, TodayAgendaProjection,
 };
 use radroots_studio_app_remote_signer::{
     RadrootsAppRemoteSignerApprovedSession, RadrootsAppRemoteSignerPendingSession,
@@ -224,6 +224,21 @@ impl DesktopAppRuntime {
     pub fn clear_personal_cart_replace_confirmation(&self) -> bool {
         self.lock_state_mut()
             .clear_personal_cart_replace_confirmation()
+    }
+
+    pub fn remove_personal_cart_line(&self, product_id: ProductId) -> Result<bool, AppSqliteError> {
+        self.lock_state_mut().remove_personal_cart_line(product_id)
+    }
+
+    pub fn save_personal_checkout_draft(
+        &self,
+        draft: BuyerCheckoutDraft,
+    ) -> Result<bool, AppSqliteError> {
+        self.lock_state_mut().save_personal_checkout_draft(draft)
+    }
+
+    pub fn place_personal_order(&self) -> Result<bool, AppSqliteError> {
+        self.lock_state_mut().place_personal_order()
     }
 
     pub fn set_personal_search_query(&self, search_query: &str) -> Result<bool, AppSqliteError> {
@@ -907,6 +922,94 @@ impl DesktopAppRuntimeState {
             projection.cart.cart.replace_confirmation = None;
             true
         })
+    }
+
+    fn remove_personal_cart_line(&mut self, product_id: ProductId) -> Result<bool, AppSqliteError> {
+        let Some(sqlite_store) = self.sqlite_store.as_ref() else {
+            return Ok(false);
+        };
+        let buyer_context = self.state_store.identity_projection().buyer_context();
+        let current_cart = sqlite_store.load_buyer_cart(&buyer_context)?;
+        let Some(next_cart) = next_buyer_cart_after_removing_line(current_cart, product_id)? else {
+            return Ok(false);
+        };
+
+        if next_cart.lines.is_empty() {
+            sqlite_store.clear_buyer_cart(&buyer_context)?;
+        } else {
+            sqlite_store.replace_buyer_cart(&buyer_context, &next_cart)?;
+        }
+
+        let refreshed_cart = sqlite_store.load_buyer_cart(&buyer_context)?;
+        let refreshed_checkout = sqlite_store.load_buyer_checkout(&buyer_context)?;
+
+        Ok(self.refresh_personal_cart_and_checkout(refreshed_cart, refreshed_checkout))
+    }
+
+    fn save_personal_checkout_draft(
+        &mut self,
+        draft: BuyerCheckoutDraft,
+    ) -> Result<bool, AppSqliteError> {
+        let Some(sqlite_store) = self.sqlite_store.as_ref() else {
+            return Ok(false);
+        };
+        let buyer_context = self.state_store.identity_projection().buyer_context();
+        sqlite_store.save_buyer_checkout_draft(&buyer_context, &draft)?;
+        let refreshed_checkout = sqlite_store.load_buyer_checkout(&buyer_context)?;
+
+        Ok(self.mutate_personal_projection(|projection| {
+            if projection.cart.checkout == refreshed_checkout {
+                return false;
+            }
+
+            projection.cart.checkout = refreshed_checkout;
+            true
+        }))
+    }
+
+    fn place_personal_order(&mut self) -> Result<bool, AppSqliteError> {
+        let Some(sqlite_store) = self.sqlite_store.as_ref() else {
+            return Ok(false);
+        };
+        let buyer_context = self.state_store.identity_projection().buyer_context();
+        let order_id = sqlite_store.place_buyer_order(&buyer_context)?;
+        let refreshed_cart = sqlite_store.load_buyer_cart(&buyer_context)?;
+        let refreshed_checkout = sqlite_store.load_buyer_checkout(&buyer_context)?;
+        let refreshed_orders = sqlite_store.load_buyer_orders(&buyer_context)?;
+        if !refreshed_orders
+            .rows
+            .iter()
+            .any(|row| row.order_id == order_id)
+        {
+            return Err(AppSqliteError::InvalidProjection {
+                reason: "buyer order write did not surface in buyer order history",
+            });
+        }
+
+        let personal_changed = self.mutate_personal_projection(|projection| {
+            let mut changed = false;
+            if projection.cart.cart != refreshed_cart {
+                projection.cart.cart = refreshed_cart.clone();
+                changed = true;
+            }
+            if projection.cart.checkout != refreshed_checkout {
+                projection.cart.checkout = refreshed_checkout.clone();
+                changed = true;
+            }
+            if projection.orders.list != refreshed_orders {
+                projection.orders.list = refreshed_orders.clone();
+                changed = true;
+            }
+            if projection.orders.detail.is_some() {
+                projection.orders.detail = None;
+                changed = true;
+            }
+
+            changed
+        });
+        let section_changed = self.select_personal_section(PersonalSection::Orders);
+
+        Ok(personal_changed || section_changed)
     }
 
     fn set_personal_search_query(&mut self, search_query: &str) -> Result<bool, AppSqliteError> {
@@ -1629,6 +1732,26 @@ impl DesktopAppRuntimeState {
         sqlite_store.load_buyer_listings(&query.search_query, &query.fulfillment_methods)
     }
 
+    fn refresh_personal_cart_and_checkout(
+        &mut self,
+        refreshed_cart: BuyerCartProjection,
+        refreshed_checkout: radroots_studio_app_models::BuyerCheckoutProjection,
+    ) -> bool {
+        self.mutate_personal_projection(|projection| {
+            let mut changed = false;
+            if projection.cart.cart != refreshed_cart {
+                projection.cart.cart = refreshed_cart.clone();
+                changed = true;
+            }
+            if projection.cart.checkout != refreshed_checkout {
+                projection.cart.checkout = refreshed_checkout.clone();
+                changed = true;
+            }
+
+            changed
+        })
+    }
+
     fn replace_products_query(
         &mut self,
         query: ProductsScreenQueryState,
@@ -2102,6 +2225,36 @@ fn next_buyer_cart_for_detail(
     Ok(current_cart)
 }
 
+fn next_buyer_cart_after_removing_line(
+    mut current_cart: BuyerCartProjection,
+    product_id: ProductId,
+) -> Result<Option<BuyerCartProjection>, AppSqliteError> {
+    let previous_line_count = current_cart.lines.len();
+    current_cart
+        .lines
+        .retain(|line| line.product_id != product_id);
+    if current_cart.lines.len() == previous_line_count {
+        return Ok(None);
+    }
+
+    if current_cart.lines.is_empty() {
+        current_cart.farm_id = None;
+        current_cart.farm_display_name = None;
+        current_cart.replace_confirmation = None;
+        refresh_buyer_cart_totals(&mut current_cart)?;
+        return Ok(Some(current_cart));
+    }
+
+    let farm_id = current_cart.lines[0].farm_id;
+    let farm_display_name = current_cart.lines[0].farm_display_name.clone();
+    current_cart.farm_id = Some(farm_id);
+    current_cart.farm_display_name = Some(farm_display_name);
+    current_cart.replace_confirmation = None;
+    refresh_buyer_cart_totals(&mut current_cart)?;
+
+    Ok(Some(current_cart))
+}
+
 fn buyer_cart_line_from_detail(
     detail: &BuyerProductDetailProjection,
 ) -> Result<BuyerCartLineProjection, AppSqliteError> {
@@ -2271,14 +2424,14 @@ mod tests {
     };
     use radroots_studio_app_models::{
         AccountSurfaceActivationProjection, ActiveSurface, AppActivityKind, AppStartupGate,
-        BlackoutPeriodId, BlackoutPeriodRecord, FarmId, FarmOperatingRulesRecord, FarmOrderMethod,
-        FarmProfileRecord, FarmReadiness, FarmReadinessBlocker, FarmSetupDraft,
-        FarmSetupProjection, FarmSummary, FarmerActivationProjection, FarmerSection,
-        FulfillmentWindowId, FulfillmentWindowRecord, LoggedOutStartupProjection, OrderId,
-        OrderStatus, OrdersFilter, PersonalSection, PickupLocationId, PickupLocationRecord,
-        ProductEditorDraft, ProductStatus, ProductsFilter, ProductsSort, SelectedSurfaceProjection,
-        SettingsPreference, SettingsSection, ShellSection, TodayAgendaProjection, TodaySetupTask,
-        TodaySetupTaskKind, TodaySummary,
+        BlackoutPeriodId, BlackoutPeriodRecord, BuyerCheckoutDraft, FarmId,
+        FarmOperatingRulesRecord, FarmOrderMethod, FarmProfileRecord, FarmReadiness,
+        FarmReadinessBlocker, FarmSetupDraft, FarmSetupProjection, FarmSummary,
+        FarmerActivationProjection, FarmerSection, FulfillmentWindowId, FulfillmentWindowRecord,
+        LoggedOutStartupProjection, OrderId, OrderStatus, OrdersFilter, PersonalSection,
+        PickupLocationId, PickupLocationRecord, ProductEditorDraft, ProductStatus, ProductsFilter,
+        ProductsSort, SelectedSurfaceProjection, SettingsPreference, SettingsSection, ShellSection,
+        TodayAgendaProjection, TodaySetupTask, TodaySetupTaskKind, TodaySummary,
     };
     use radroots_studio_app_remote_signer::{
         RadrootsAppRemoteSignerPendingSession, RadrootsAppRemoteSignerSessionRecord,
@@ -3300,6 +3453,153 @@ mod tests {
                 .cart
                 .replace_confirmation
                 .is_none()
+        );
+    }
+
+    #[test]
+    fn runtime_removing_buyer_cart_line_clears_cart_and_checkout_readiness() {
+        let runtime = memory_runtime();
+        let (account_id, farm_id) = provision_ready_farmer_account(&runtime);
+        assert!(
+            runtime
+                .select_active_surface(ActiveSurface::Personal)
+                .expect("surface should switch into marketplace")
+        );
+        let fulfillment_window_id = seed_buyer_marketplace_support(
+            &runtime,
+            account_id.as_str(),
+            farm_id,
+            "North field farm",
+            "Friday pickup",
+        );
+        let product_id = seed_product(
+            &runtime,
+            farm_id,
+            "Salad mix",
+            "Spring blend",
+            "published",
+            Some(8),
+            "2026-04-20T09:00:00Z",
+        );
+        runtime
+            .lock_state()
+            .sqlite_store
+            .as_ref()
+            .expect("sqlite store")
+            .connection()
+            .execute_batch(&format!(
+                "update products
+                 set availability_window_id = '{fulfillment_window_id}'
+                 where id = '{product_id}'"
+            ))
+            .expect("buyer detail product should attach a fulfillment window");
+        assert!(
+            runtime
+                .open_personal_product_detail(PersonalSection::Browse, product_id)
+                .expect("buyer detail should open")
+        );
+        assert!(
+            runtime
+                .add_personal_product_to_cart(PersonalSection::Browse, false)
+                .expect("buyer product should add to cart")
+        );
+
+        assert!(
+            runtime
+                .remove_personal_cart_line(product_id)
+                .expect("buyer cart line should remove")
+        );
+
+        let summary = runtime.summary();
+        assert!(summary.personal_projection.cart.cart.lines.is_empty());
+        assert!(summary.personal_projection.cart.cart.farm_id.is_none());
+        assert!(!summary.personal_projection.cart.checkout.can_place_order);
+        assert_eq!(
+            summary.personal_projection.cart.checkout.summary.line_count,
+            0
+        );
+    }
+
+    #[test]
+    fn runtime_places_buyer_order_and_routes_into_personal_orders() {
+        let runtime = memory_runtime();
+        let (account_id, farm_id) = provision_ready_farmer_account(&runtime);
+        assert!(
+            runtime
+                .select_active_surface(ActiveSurface::Personal)
+                .expect("surface should switch into marketplace")
+        );
+        let fulfillment_window_id = seed_buyer_marketplace_support(
+            &runtime,
+            account_id.as_str(),
+            farm_id,
+            "North field farm",
+            "Friday pickup",
+        );
+        let product_id = seed_product(
+            &runtime,
+            farm_id,
+            "Salad mix",
+            "Spring blend",
+            "published",
+            Some(8),
+            "2026-04-20T09:00:00Z",
+        );
+        runtime
+            .lock_state()
+            .sqlite_store
+            .as_ref()
+            .expect("sqlite store")
+            .connection()
+            .execute_batch(&format!(
+                "update products
+                 set availability_window_id = '{fulfillment_window_id}'
+                 where id = '{product_id}'"
+            ))
+            .expect("buyer detail product should attach a fulfillment window");
+        assert!(
+            runtime
+                .open_personal_product_detail(PersonalSection::Browse, product_id)
+                .expect("buyer detail should open")
+        );
+        assert!(
+            runtime
+                .add_personal_product_to_cart(PersonalSection::Browse, false)
+                .expect("buyer product should add to cart")
+        );
+        assert!(
+            runtime
+                .save_personal_checkout_draft(BuyerCheckoutDraft {
+                    name: "Casey Buyer".to_owned(),
+                    email: "casey@example.com".to_owned(),
+                    phone: "555-0101".to_owned(),
+                    order_note: "Leave by the cooler".to_owned(),
+                })
+                .expect("buyer checkout draft should save")
+        );
+        assert!(
+            runtime
+                .place_personal_order()
+                .expect("buyer order should place")
+        );
+
+        let summary = runtime.summary();
+        assert_eq!(
+            summary.shell_projection.selected_section,
+            ShellSection::Personal(PersonalSection::Orders)
+        );
+        assert!(summary.personal_projection.cart.cart.lines.is_empty());
+        assert!(!summary.personal_projection.cart.checkout.can_place_order);
+        assert_eq!(summary.personal_projection.orders.list.rows.len(), 1);
+        assert_eq!(
+            summary.personal_projection.orders.list.rows[0].farm_display_name,
+            "North field farm"
+        );
+        assert_eq!(
+            summary.personal_projection.orders.list.rows[0]
+                .status
+                .storage_key(),
+            "placed"
         );
     }
 
