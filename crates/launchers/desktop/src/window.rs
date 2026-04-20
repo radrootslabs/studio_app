@@ -23,7 +23,8 @@ use radroots_studio_app_models::{
     PackDayRosterRow, PersonalEntryState, PersonalSection, PickupLocationId, PickupLocationRecord,
     ProductAttentionState, ProductEditorDraft, ProductId, ProductListRow, ProductPricePresentation,
     ProductPublishBlocker, ProductStatus, ProductsFilter, ProductsListRow, ProductsSort,
-    ShellSection, TodayAgendaProjection, TodaySetupTaskKind,
+    ReminderDeadlineProjection, ReminderUrgency, ShellSection, TodayAgendaProjection,
+    TodaySetupTaskKind,
 };
 use radroots_studio_app_remote_signer::{
     RadrootsAppRemoteSignerApprovedSession, RadrootsAppRemoteSignerPendingPollOutcome,
@@ -1897,6 +1898,10 @@ impl HomeView {
             sections.push(saved_farm_summary_card);
         }
 
+        if !projection.reminders.is_empty() {
+            sections.push(self.render_today_reminder_strip(&projection.reminders.items, cx));
+        }
+
         if let Some(next_window) = projection.next_fulfillment_window.as_ref() {
             sections.push(
                 home_next_fulfillment_window_card(
@@ -2738,6 +2743,14 @@ impl HomeView {
                         cx,
                     )),
             ))
+            .when(!projection.reminders.is_empty(), |this| {
+                this.child(self.render_reminder_feed_card(
+                    "orders-reminders",
+                    AppTextKey::OrdersRemindersTitle,
+                    &projection.reminders.items,
+                    cx,
+                ))
+            })
             .child(if projection.list.is_empty() {
                 orders_empty_state_card(projection.query.filter).into_any_element()
             } else {
@@ -2768,7 +2781,7 @@ impl HomeView {
     fn render_pack_day_content(
         &mut self,
         runtime: &DesktopAppRuntimeSummary,
-        _: &mut Context<Self>,
+        cx: &mut Context<Self>,
     ) -> AnyElement {
         let projection = &runtime.pack_day_projection.projection;
         let Some(fulfillment_window) = projection.fulfillment_window.as_ref() else {
@@ -2784,6 +2797,14 @@ impl HomeView {
             .max_w(px(APP_UI_THEME.shells.home_card_max_width_px))
             .mx_auto()
             .child(pack_day_title_row(runtime))
+            .when(!projection.reminders.is_empty(), |this| {
+                this.child(self.render_reminder_feed_card(
+                    "pack-day-reminders",
+                    AppTextKey::PackDayRemindersTitle,
+                    &projection.reminders.items,
+                    cx,
+                ))
+            })
             .child(pack_day_window_summary_card(fulfillment_window))
             .when(!projection.totals_by_product.is_empty(), |this| {
                 this.child(pack_day_totals_card(&projection.totals_by_product))
@@ -2801,6 +2822,230 @@ impl HomeView {
                 ))
             })
             .into_any_element()
+    }
+
+    fn render_today_reminder_strip(
+        &mut self,
+        reminders: &[ReminderDeadlineProjection],
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        app_surface_card(
+            app_stack_v(APP_UI_THEME.foundation.spacing.tight_px)
+                .w_full()
+                .child(app_text_label(app_shared_text(
+                    AppTextKey::HomeTodayRemindersTitle,
+                )))
+                .child(
+                    app_cluster(APP_UI_THEME.foundation.spacing.tight_px)
+                        .w_full()
+                        .items_start()
+                        .children(
+                            reminders
+                                .iter()
+                                .enumerate()
+                                .map(|(index, reminder)| {
+                                    self.render_today_reminder_chip(index, reminder, cx)
+                                })
+                                .collect::<Vec<_>>(),
+                        ),
+                ),
+        )
+        .into_any_element()
+    }
+
+    fn render_today_reminder_chip(
+        &mut self,
+        index: usize,
+        reminder: &ReminderDeadlineProjection,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let content = div()
+            .w_full()
+            .min_w_0()
+            .p(px(APP_UI_THEME.shells.home_card_padding_px))
+            .flex()
+            .flex_col()
+            .gap(px(APP_UI_THEME.foundation.spacing.tight_px))
+            .child(
+                div()
+                    .w_full()
+                    .min_w_0()
+                    .flex()
+                    .items_start()
+                    .justify_between()
+                    .gap(px(APP_UI_THEME.foundation.spacing.tight_px))
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w_0()
+                            .flex()
+                            .items_center()
+                            .gap(px(APP_UI_THEME.foundation.spacing.tight_px))
+                            .child(status_indicator(reminder_urgency_color(reminder.urgency)))
+                            .child(
+                                div()
+                                    .flex_1()
+                                    .min_w_0()
+                                    .text_size(px(APP_UI_THEME.foundation.typography.body_text_px))
+                                    .font_weight(gpui::FontWeight::SEMIBOLD)
+                                    .line_height(relative(1.2))
+                                    .text_color(rgb(APP_UI_THEME.foundation.text.primary))
+                                    .child(reminder.title.clone()),
+                            ),
+                    )
+                    .child(reminder_urgency_badge(reminder.urgency)),
+            )
+            .child(
+                div()
+                    .text_size(px(APP_UI_THEME.foundation.typography.utility_title_text_px))
+                    .text_color(rgb(APP_UI_THEME.foundation.text.secondary))
+                    .child(reminder_deadline_text(reminder)),
+            );
+        let shell = div().min_w(px(244.0)).max_w(px(296.0)).flex_1();
+
+        match reminder_action_target(reminder) {
+            Some(ReminderActionTarget::OrderDetail(order_id)) => shell
+                .child(app_button_card(
+                    ("today-reminder-chip", index),
+                    false,
+                    cx.listener(move |this, _, _, cx| this.open_order_detail(order_id, cx)),
+                    cx,
+                    content,
+                ))
+                .into_any_element(),
+            Some(ReminderActionTarget::PackDay(fulfillment_window_id)) => shell
+                .child(app_button_card(
+                    ("today-reminder-chip", index),
+                    false,
+                    cx.listener(move |this, _, _, cx| {
+                        this.open_pack_day(Some(fulfillment_window_id), cx)
+                    }),
+                    cx,
+                    content,
+                ))
+                .into_any_element(),
+            None => shell
+                .child(
+                    div()
+                        .w_full()
+                        .bg(rgb(APP_UI_THEME.foundation.surfaces.card_background))
+                        .rounded(px(APP_UI_THEME.foundation.radii.medium_px))
+                        .child(content),
+                )
+                .into_any_element(),
+        }
+    }
+
+    fn render_reminder_feed_card(
+        &mut self,
+        scope: &'static str,
+        title_key: AppTextKey,
+        reminders: &[ReminderDeadlineProjection],
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let mut rows = Vec::with_capacity(reminders.len().saturating_mul(2));
+        for (index, reminder) in reminders.iter().enumerate() {
+            rows.push(self.render_reminder_feed_row(scope, index, reminder, cx));
+            if index + 1 < reminders.len() {
+                rows.push(section_divider().into_any_element());
+            }
+        }
+
+        home_card(
+            app_shared_text(title_key),
+            div()
+                .w_full()
+                .flex()
+                .flex_col()
+                .gap(px(APP_UI_THEME.foundation.spacing.medium_px))
+                .children(rows),
+        )
+        .into_any_element()
+    }
+
+    fn render_reminder_feed_row(
+        &mut self,
+        scope: &'static str,
+        index: usize,
+        reminder: &ReminderDeadlineProjection,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let action = self.render_reminder_action(scope, index, reminder, cx);
+
+        app_stack_v(APP_UI_THEME.foundation.spacing.tight_px)
+            .w_full()
+            .child(
+                div()
+                    .w_full()
+                    .min_w_0()
+                    .flex()
+                    .items_start()
+                    .justify_between()
+                    .gap(px(APP_UI_THEME.foundation.spacing.tight_px))
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w_0()
+                            .flex()
+                            .items_center()
+                            .gap(px(APP_UI_THEME.foundation.spacing.tight_px))
+                            .child(status_indicator(reminder_urgency_color(reminder.urgency)))
+                            .child(
+                                div()
+                                    .flex_1()
+                                    .min_w_0()
+                                    .text_size(px(APP_UI_THEME.foundation.typography.body_text_px))
+                                    .font_weight(gpui::FontWeight::SEMIBOLD)
+                                    .line_height(relative(1.2))
+                                    .text_color(rgb(APP_UI_THEME.foundation.text.primary))
+                                    .child(reminder.title.clone()),
+                            ),
+                    )
+                    .child(reminder_urgency_badge(reminder.urgency)),
+            )
+            .child(home_body_text(reminder.detail.clone()))
+            .child(
+                div()
+                    .text_size(px(APP_UI_THEME.foundation.typography.utility_title_text_px))
+                    .text_color(rgb(APP_UI_THEME.foundation.text.secondary))
+                    .child(reminder_deadline_text(reminder)),
+            )
+            .when_some(action, |this, action| this.child(div().child(action)))
+            .into_any_element()
+    }
+
+    fn render_reminder_action(
+        &mut self,
+        scope: &'static str,
+        index: usize,
+        reminder: &ReminderDeadlineProjection,
+        cx: &mut Context<Self>,
+    ) -> Option<AnyElement> {
+        let label = reminder.action_label.clone()?;
+
+        match reminder_action_target(reminder) {
+            Some(ReminderActionTarget::OrderDetail(order_id)) => Some(
+                action_button_compact(
+                    (scope, index),
+                    SharedString::from(label),
+                    cx.listener(move |this, _, _, cx| this.open_order_detail(order_id, cx)),
+                    cx,
+                )
+                .into_any_element(),
+            ),
+            Some(ReminderActionTarget::PackDay(fulfillment_window_id)) => Some(
+                action_button_compact(
+                    (scope, index),
+                    SharedString::from(label),
+                    cx.listener(move |this, _, _, cx| {
+                        this.open_pack_day(Some(fulfillment_window_id), cx)
+                    }),
+                    cx,
+                )
+                .into_any_element(),
+            ),
+            None => None,
+        }
     }
 
     fn render_products_table_card(
@@ -8366,6 +8611,59 @@ fn pack_day_label_value_row(label: &str, value: &str) -> AnyElement {
         .into_any_element()
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum ReminderActionTarget {
+    OrderDetail(OrderId),
+    PackDay(FulfillmentWindowId),
+}
+
+fn reminder_action_target(reminder: &ReminderDeadlineProjection) -> Option<ReminderActionTarget> {
+    reminder
+        .order_id
+        .map(ReminderActionTarget::OrderDetail)
+        .or_else(|| {
+            reminder
+                .fulfillment_window_id
+                .map(ReminderActionTarget::PackDay)
+        })
+}
+
+fn reminder_urgency_key(urgency: ReminderUrgency) -> AppTextKey {
+    match urgency {
+        ReminderUrgency::Upcoming => AppTextKey::ReminderUrgencyUpcoming,
+        ReminderUrgency::DueSoon => AppTextKey::ReminderUrgencyDueSoon,
+        ReminderUrgency::Overdue => AppTextKey::ReminderUrgencyOverdue,
+        ReminderUrgency::Blocking => AppTextKey::ReminderUrgencyBlocking,
+    }
+}
+
+fn reminder_urgency_color(urgency: ReminderUrgency) -> u32 {
+    match urgency {
+        ReminderUrgency::Upcoming => APP_UI_THEME.components.app_status_indicator.offline,
+        ReminderUrgency::DueSoon => APP_UI_THEME.foundation.text.accent,
+        ReminderUrgency::Overdue | ReminderUrgency::Blocking => {
+            APP_UI_THEME.components.app_status_indicator.attention
+        }
+    }
+}
+
+fn reminder_urgency_badge(urgency: ReminderUrgency) -> AnyElement {
+    div()
+        .text_size(px(APP_UI_THEME.foundation.typography.utility_title_text_px))
+        .font_weight(gpui::FontWeight::SEMIBOLD)
+        .text_color(rgb(reminder_urgency_color(urgency)))
+        .child(app_shared_text(reminder_urgency_key(urgency)))
+        .into_any_element()
+}
+
+fn reminder_deadline_text(reminder: &ReminderDeadlineProjection) -> String {
+    format!(
+        "{}: {}",
+        app_text(AppTextKey::ReminderDeadlineLabel),
+        reminder.deadline_at
+    )
+}
+
 fn products_empty_state_card(filter: ProductsFilter) -> impl IntoElement {
     let (title_key, body_key) = if filter == ProductsFilter::NeedAttention {
         (
@@ -9966,19 +10264,21 @@ fn home_farm_order_method_label_key(method: FarmOrderMethod) -> AppTextKey {
 #[cfg(test)]
 mod tests {
     use super::{
-        AppTextKey, FarmerHomeFarmState, HomeStage, SETTINGS_FARM_PANEL_SECTIONS,
-        SETTINGS_NAVIGATION_ORDER, SETTINGS_OPERATIONS_PANEL_SECTIONS,
-        SettingsInventorySectionSpec, SettingsPanelViewKey, StartupHomeSurface,
-        StartupSignerConnectState, about_conflict_action_specs, about_conflict_aggregate_text,
-        about_conflict_detail_rows, about_conflict_review_body_key, about_manual_refresh_enabled,
-        about_runtime_rows, about_status_rows, app_text, buyer_orders_status_key,
-        farm_setup_onboarding_card_spec, farmer_home_farm_state, farmer_pack_day_available,
-        home_content_scroll_id, home_saved_farm, home_sidebar_navigation_sections, home_stage,
-        home_window_launch_size_px, home_window_minimum_size_px,
-        parse_optional_product_editor_stock_input, parse_product_editor_price_input,
-        product_display_title, startup_home_surface, startup_signer_preview_summary,
-        startup_signer_preview_summary_for_connect_state, startup_signer_source_input_is_editable,
-        startup_signer_status_spec, startup_signer_transport_failure_requires_notice,
+        APP_UI_THEME, AppTextKey, FarmerHomeFarmState, HomeStage, ReminderActionTarget,
+        SETTINGS_FARM_PANEL_SECTIONS, SETTINGS_NAVIGATION_ORDER,
+        SETTINGS_OPERATIONS_PANEL_SECTIONS, SettingsInventorySectionSpec, SettingsPanelViewKey,
+        StartupHomeSurface, StartupSignerConnectState, about_conflict_action_specs,
+        about_conflict_aggregate_text, about_conflict_detail_rows, about_conflict_review_body_key,
+        about_manual_refresh_enabled, about_runtime_rows, about_status_rows, app_text,
+        buyer_orders_status_key, farm_setup_onboarding_card_spec, farmer_home_farm_state,
+        farmer_pack_day_available, home_content_scroll_id, home_saved_farm,
+        home_sidebar_navigation_sections, home_stage, home_window_launch_size_px,
+        home_window_minimum_size_px, parse_optional_product_editor_stock_input,
+        parse_product_editor_price_input, product_display_title, reminder_action_target,
+        reminder_deadline_text, reminder_urgency_color, reminder_urgency_key, startup_home_surface,
+        startup_signer_preview_summary, startup_signer_preview_summary_for_connect_state,
+        startup_signer_source_input_is_editable, startup_signer_status_spec,
+        startup_signer_transport_failure_requires_notice,
     };
     use crate::runtime::{
         DesktopAppRuntimeMetadataSummary, DesktopAppRuntimeSummary, DesktopAppSyncConflictSummary,
@@ -9989,8 +10289,9 @@ mod tests {
         ActiveSurface, AppStartupGate, BuyerOrderStatus, FarmId, FarmOrderMethod, FarmReadiness,
         FarmSetupDraft, FarmSetupProjection, FarmSummary, FarmerSection, FulfillmentWindowId,
         FulfillmentWindowSummary, LoggedOutStartupPhase, LoggedOutStartupProjection,
-        PackDayProjection, PersonalSection, ShellSection, TodayAgendaProjection, TodaySetupTask,
-        TodaySetupTaskKind,
+        PackDayProjection, PersonalSection, ReminderDeadlineProjection, ReminderDeliveryState,
+        ReminderId, ReminderKind, ReminderSurface, ReminderUrgency, ShellSection,
+        TodayAgendaProjection, TodaySetupTask, TodaySetupTaskKind,
     };
     use radroots_studio_app_remote_signer::{
         RadrootsAppRemoteSignerApprovedSession, RadrootsAppRemoteSignerPendingSession,
@@ -10498,6 +10799,79 @@ mod tests {
     }
 
     #[test]
+    fn reminder_action_target_prefers_order_detail_before_pack_day() {
+        let order_id = radroots_studio_app_models::OrderId::new();
+        let fulfillment_window_id = FulfillmentWindowId::new();
+
+        assert_eq!(
+            reminder_action_target(&fixture_reminder(
+                Some(order_id),
+                Some(fulfillment_window_id),
+                ReminderKind::OrderAction,
+                ReminderUrgency::DueSoon,
+            )),
+            Some(ReminderActionTarget::OrderDetail(order_id))
+        );
+        assert_eq!(
+            reminder_action_target(&fixture_reminder(
+                None,
+                Some(fulfillment_window_id),
+                ReminderKind::FulfillmentWindow,
+                ReminderUrgency::Upcoming,
+            )),
+            Some(ReminderActionTarget::PackDay(fulfillment_window_id))
+        );
+        assert_eq!(
+            reminder_action_target(&fixture_reminder(
+                None,
+                None,
+                ReminderKind::SyncImpact,
+                ReminderUrgency::Blocking,
+            )),
+            None
+        );
+    }
+
+    #[test]
+    fn reminder_urgency_helpers_follow_the_surface_contract() {
+        assert_eq!(
+            reminder_urgency_key(ReminderUrgency::Upcoming),
+            AppTextKey::ReminderUrgencyUpcoming
+        );
+        assert_eq!(
+            reminder_urgency_key(ReminderUrgency::DueSoon),
+            AppTextKey::ReminderUrgencyDueSoon
+        );
+        assert_eq!(
+            reminder_urgency_color(ReminderUrgency::Upcoming),
+            APP_UI_THEME.components.app_status_indicator.offline
+        );
+        assert_eq!(
+            reminder_urgency_color(ReminderUrgency::DueSoon),
+            APP_UI_THEME.foundation.text.accent
+        );
+        assert_eq!(
+            reminder_urgency_color(ReminderUrgency::Blocking),
+            APP_UI_THEME.components.app_status_indicator.attention
+        );
+    }
+
+    #[test]
+    fn reminder_deadline_text_uses_the_typed_due_label() {
+        let reminder = fixture_reminder(
+            None,
+            Some(FulfillmentWindowId::new()),
+            ReminderKind::FulfillmentWindow,
+            ReminderUrgency::Upcoming,
+        );
+
+        assert_eq!(
+            reminder_deadline_text(&reminder),
+            format!("{}: {}", app_text(AppTextKey::ReminderDeadlineLabel), "0")
+        );
+    }
+
+    #[test]
     fn about_status_rows_disable_sync_without_a_selected_account() {
         let rows = about_status_rows(&summary(
             HomeRoute::SetupRequired,
@@ -10734,6 +11108,28 @@ mod tests {
                 vec!["wss://relay.radroots.example".to_owned()],
             ),
             client_secret_key_hex: client_identity.secret_key_hex(),
+        }
+    }
+
+    fn fixture_reminder(
+        order_id: Option<radroots_studio_app_models::OrderId>,
+        fulfillment_window_id: Option<FulfillmentWindowId>,
+        kind: ReminderKind,
+        urgency: ReminderUrgency,
+    ) -> ReminderDeadlineProjection {
+        ReminderDeadlineProjection {
+            reminder_id: ReminderId::new(),
+            farm_id: FarmId::new(),
+            order_id,
+            fulfillment_window_id,
+            kind,
+            surface: ReminderSurface::Orders,
+            urgency,
+            title: String::new(),
+            detail: String::new(),
+            deadline_at: "0".to_owned(),
+            action_label: None,
+            delivery_state: ReminderDeliveryState::Scheduled,
         }
     }
 }

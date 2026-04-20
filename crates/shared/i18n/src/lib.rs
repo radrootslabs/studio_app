@@ -168,6 +168,19 @@ mod tests {
     }
 
     #[test]
+    fn english_reminder_copy_matches_the_seller_surface_contract() {
+        assert_eq!(app_text(AppTextKey::HomeTodayRemindersTitle), "Coming up");
+        assert_eq!(app_text(AppTextKey::OrdersRemindersTitle), "Reminders");
+        assert_eq!(
+            app_text(AppTextKey::PackDayRemindersTitle),
+            "Before this window"
+        );
+        assert_eq!(app_text(AppTextKey::ReminderDeadlineLabel), "Due");
+        assert_eq!(app_text(AppTextKey::ReminderUrgencyDueSoon), "Due soon");
+        assert_eq!(app_text(AppTextKey::ReminderUrgencyBlocking), "Blocking");
+    }
+
+    #[test]
     fn english_about_copy_matches_the_runtime_status_contract() {
         assert_eq!(
             app_text(AppTextKey::SettingsAboutStatusSectionLabel),
