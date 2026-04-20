@@ -9,6 +9,7 @@ mod farm_setup;
 mod migrations;
 mod orders;
 mod products;
+mod reminders;
 mod sync;
 mod today;
 
@@ -19,10 +20,11 @@ use radroots_studio_app_models::{
     BuyerCartProjection, BuyerCheckoutDraft, BuyerCheckoutProjection, BuyerContext,
     BuyerListingsProjection, BuyerOrderDetailProjection, BuyerOrdersProjection,
     BuyerProductDetailProjection, FarmId, FarmOrderMethod, FarmRulesProjection,
-    FarmSetupProjection, FarmSummary, OrderDetailProjection, OrderId, OrdersListProjection,
-    OrdersScreenQueryState, PackDayProjection, PackDayScreenQueryState, ProductEditorDraft,
-    ProductId, ProductPublishBlocker, ProductsFilter, ProductsListProjection, ProductsSort,
-    TodayAgendaProjection,
+    FarmSetupProjection, FarmSummary, OrderDetailProjection, OrderId, OrderRecoveryProjection,
+    OrdersListProjection, OrdersScreenQueryState, PackDayProjection, PackDayScreenQueryState,
+    ProductEditorDraft, ProductId, ProductPublishBlocker, ProductsFilter, ProductsListProjection,
+    ProductsSort, RecoveryKind, RecoveryQueueProjection, ReminderFeedProjection,
+    ReminderLogEntryProjection, ReminderLogProjection, TodayAgendaProjection,
 };
 use radroots_studio_app_sync::{
     PendingSyncOperation, SyncCheckpointStatus, SyncConflict, SyncConflictResolutionStatus,
@@ -40,6 +42,7 @@ pub use farm_setup::AppFarmSetupRepository;
 pub use migrations::latest_schema_version;
 pub use orders::AppOrdersRepository;
 pub use products::AppProductsRepository;
+pub use reminders::AppRemindersRepository;
 pub use sync::{AppSyncRepository, StoredPendingSyncOperation, StoredSyncConflict};
 pub use today::{
     AppTodayAgendaRepository, TODAY_AGENDA_LIST_LIMIT, TODAY_AGENDA_LOW_STOCK_THRESHOLD,
@@ -111,6 +114,10 @@ impl AppSqliteStore {
 
     pub fn sync_repository(&self) -> AppSyncRepository<'_> {
         AppSyncRepository::new(&self.connection)
+    }
+
+    pub fn reminders_repository(&self) -> AppRemindersRepository<'_> {
+        AppRemindersRepository::new(&self.connection)
     }
 
     pub fn load_today_agenda(
@@ -252,6 +259,74 @@ impl AppSqliteStore {
     ) -> Result<bool, AppSqliteError> {
         self.orders_repository()
             .mark_order_completed(farm_id, order_id)
+    }
+
+    pub fn load_reminder_schedule(
+        &self,
+        account_id: &str,
+        farm_id: FarmId,
+    ) -> Result<ReminderFeedProjection, AppSqliteError> {
+        self.reminders_repository()
+            .load_reminder_schedule(account_id, farm_id)
+    }
+
+    pub fn replace_reminder_schedule(
+        &self,
+        account_id: &str,
+        farm_id: FarmId,
+        projection: &ReminderFeedProjection,
+    ) -> Result<(), AppSqliteError> {
+        self.reminders_repository()
+            .replace_reminder_schedule(account_id, farm_id, projection)
+    }
+
+    pub fn record_reminder_log_entry(
+        &self,
+        account_id: &str,
+        farm_id: FarmId,
+        entry: &ReminderLogEntryProjection,
+    ) -> Result<String, AppSqliteError> {
+        self.reminders_repository()
+            .record_reminder_log_entry(account_id, farm_id, entry)
+    }
+
+    pub fn load_reminder_log(
+        &self,
+        account_id: &str,
+        farm_id: FarmId,
+        limit: usize,
+    ) -> Result<ReminderLogProjection, AppSqliteError> {
+        self.reminders_repository()
+            .load_reminder_log(account_id, farm_id, limit)
+    }
+
+    pub fn load_recovery_queue(
+        &self,
+        account_id: &str,
+        farm_id: FarmId,
+    ) -> Result<RecoveryQueueProjection, AppSqliteError> {
+        self.reminders_repository()
+            .load_recovery_queue(account_id, farm_id)
+    }
+
+    pub fn load_recovery_record(
+        &self,
+        account_id: &str,
+        order_id: OrderId,
+        kind: RecoveryKind,
+    ) -> Result<Option<OrderRecoveryProjection>, AppSqliteError> {
+        self.reminders_repository()
+            .load_recovery_record(account_id, order_id, kind)
+    }
+
+    pub fn save_recovery_record(
+        &self,
+        account_id: &str,
+        farm_id: FarmId,
+        record: &OrderRecoveryProjection,
+    ) -> Result<(), AppSqliteError> {
+        self.reminders_repository()
+            .save_recovery_record(account_id, farm_id, record)
     }
 
     pub fn save_product_editor_draft(
@@ -579,6 +654,9 @@ mod tests {
         assert!(table_exists(connection, "order_lines"));
         assert!(table_exists(connection, "buyer_carts"));
         assert!(table_exists(connection, "buyer_cart_lines"));
+        assert!(table_exists(connection, "reminder_schedules"));
+        assert!(table_exists(connection, "reminder_log_entries"));
+        assert!(table_exists(connection, "order_recovery_records"));
         assert!(column_exists(connection, "farms", "timezone"));
         assert!(column_exists(connection, "farms", "currency_code"));
         assert!(column_exists(connection, "local_outbox", "account_id"));
@@ -616,6 +694,11 @@ mod tests {
         assert!(column_exists(connection, "orders", "buyer_email"));
         assert!(column_exists(connection, "orders", "buyer_phone"));
         assert!(column_exists(connection, "orders", "buyer_order_note"));
+        assert!(column_exists(connection, "reminder_schedules", "account_id"));
+        assert!(column_exists(connection, "reminder_schedules", "delivery_state"));
+        assert!(column_exists(connection, "reminder_log_entries", "recorded_at"));
+        assert!(column_exists(connection, "order_recovery_records", "recovery_kind"));
+        assert!(column_exists(connection, "order_recovery_records", "recovery_state"));
         assert_eq!(row_count(connection, "sync_checkpoints"), 0);
 
         drop(store);
