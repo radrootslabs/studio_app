@@ -47,6 +47,27 @@ impl FarmerSection {
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
+pub enum PersonalSection {
+    #[default]
+    Browse,
+    Search,
+    Cart,
+    Orders,
+}
+
+impl PersonalSection {
+    pub const fn storage_key(self) -> &'static str {
+        match self {
+            Self::Browse => "personal.browse",
+            Self::Search => "personal.search",
+            Self::Cart => "personal.cart",
+            Self::Orders => "personal.orders",
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum SettingsSection {
     #[default]
     Account,
@@ -91,6 +112,7 @@ impl SettingsPreference {
 pub enum ShellSection {
     #[default]
     Home,
+    Personal(PersonalSection),
     Farmer(FarmerSection),
     Settings(SettingsSection),
 }
@@ -99,13 +121,14 @@ impl ShellSection {
     pub const fn surface(self) -> Option<ActiveSurface> {
         match self {
             Self::Home | Self::Settings(_) => None,
+            Self::Personal(_) => Some(ActiveSurface::Personal),
             Self::Farmer(_) => Some(ActiveSurface::Farmer),
         }
     }
 
     pub const fn default_for_surface(surface: ActiveSurface) -> Self {
         match surface {
-            ActiveSurface::Personal => Self::Home,
+            ActiveSurface::Personal => Self::Personal(PersonalSection::Browse),
             ActiveSurface::Farmer => Self::Farmer(FarmerSection::Today),
         }
     }
@@ -113,6 +136,7 @@ impl ShellSection {
     pub const fn storage_key(self) -> &'static str {
         match self {
             Self::Home => "home",
+            Self::Personal(section) => section.storage_key(),
             Self::Farmer(section) => section.storage_key(),
             Self::Settings(section) => section.storage_key(),
         }
@@ -136,6 +160,10 @@ impl FromStr for ShellSection {
     fn from_str(value: &str) -> Result<Self, Self::Err> {
         match value {
             "home" => Ok(Self::Home),
+            "personal.browse" => Ok(Self::Personal(PersonalSection::Browse)),
+            "personal.search" => Ok(Self::Personal(PersonalSection::Search)),
+            "personal.cart" => Ok(Self::Personal(PersonalSection::Cart)),
+            "personal.orders" => Ok(Self::Personal(PersonalSection::Orders)),
             "farmer.today" => Ok(Self::Farmer(FarmerSection::Today)),
             "farmer.products" => Ok(Self::Farmer(FarmerSection::Products)),
             "farmer.orders" => Ok(Self::Farmer(FarmerSection::Orders)),
@@ -551,6 +579,64 @@ pub struct LoggedOutStartupProjection {
     pub signer_entry: StartupSignerEntryProjection,
 }
 
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PersonalEntryState {
+    Blocked,
+    #[default]
+    Guest,
+    SignedIn,
+}
+
+impl PersonalEntryState {
+    pub const fn storage_key(self) -> &'static str {
+        match self {
+            Self::Blocked => "blocked",
+            Self::Guest => "guest",
+            Self::SignedIn => "signed_in",
+        }
+    }
+}
+
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+pub struct PersonalEntryProjection {
+    pub state: PersonalEntryState,
+    pub selected_account: Option<SelectedAccountProjection>,
+    pub can_enter_farmer_workspace: bool,
+}
+
+impl PersonalEntryProjection {
+    pub fn blocked(selected_account: Option<SelectedAccountProjection>) -> Self {
+        let can_enter_farmer_workspace = selected_account
+            .as_ref()
+            .is_some_and(|account| account.farmer_activation.is_active());
+
+        Self {
+            state: PersonalEntryState::Blocked,
+            selected_account,
+            can_enter_farmer_workspace,
+        }
+    }
+
+    pub const fn guest() -> Self {
+        Self {
+            state: PersonalEntryState::Guest,
+            selected_account: None,
+            can_enter_farmer_workspace: false,
+        }
+    }
+
+    pub fn signed_in(selected_account: SelectedAccountProjection) -> Self {
+        let can_enter_farmer_workspace = selected_account.farmer_activation.is_active();
+
+        Self {
+            state: PersonalEntryState::SignedIn,
+            selected_account: Some(selected_account),
+            can_enter_farmer_workspace,
+        }
+    }
+}
+
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
 pub struct AppIdentityProjection {
     pub readiness: IdentityReadiness,
@@ -625,6 +711,20 @@ impl AppIdentityProjection {
 
     pub fn settings_account(&self) -> SettingsAccountProjection {
         self.into()
+    }
+
+    pub fn personal_entry(&self) -> PersonalEntryProjection {
+        match self.readiness {
+            IdentityReadiness::MissingAccount => PersonalEntryProjection::guest(),
+            IdentityReadiness::Blocked(_) => {
+                PersonalEntryProjection::blocked(self.selected_account.clone())
+            }
+            IdentityReadiness::Ready => self
+                .selected_account
+                .clone()
+                .map(PersonalEntryProjection::signed_in)
+                .unwrap_or_else(PersonalEntryProjection::guest),
+        }
     }
 }
 
@@ -1114,6 +1214,96 @@ impl ProductEditorDraft {
     }
 }
 
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct BuyerListingRow {
+    pub product_id: ProductId,
+    pub farm_id: FarmId,
+    pub farm_display_name: String,
+    pub title: String,
+    pub subtitle: Option<String>,
+    pub price: ProductPricePresentation,
+    pub availability: ProductAvailabilitySummary,
+    pub stock: ProductStockSummary,
+    pub fulfillment_methods: BTreeSet<FarmOrderMethod>,
+    pub next_fulfillment_window_label: Option<String>,
+}
+
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+pub struct BuyerListingsProjection {
+    pub rows: Vec<BuyerListingRow>,
+}
+
+impl BuyerListingsProjection {
+    pub fn is_empty(&self) -> bool {
+        self.rows.is_empty()
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct BuyerProductDetailProjection {
+    pub listing: BuyerListingRow,
+    pub detail_text: Option<String>,
+    pub selected_quantity: u32,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct BuyerCartLineProjection {
+    pub product_id: ProductId,
+    pub farm_id: FarmId,
+    pub farm_display_name: String,
+    pub title: String,
+    pub quantity: u32,
+    pub unit_price: ProductPricePresentation,
+    pub line_total_minor_units: u32,
+    pub fulfillment_summary: String,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct BuyerCartReplaceConfirmationProjection {
+    pub current_farm_display_name: String,
+    pub incoming_farm_display_name: String,
+}
+
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+pub struct BuyerCartProjection {
+    pub farm_id: Option<FarmId>,
+    pub farm_display_name: Option<String>,
+    pub lines: Vec<BuyerCartLineProjection>,
+    pub subtotal_minor_units: Option<u32>,
+    pub currency_code: Option<String>,
+    pub replace_confirmation: Option<BuyerCartReplaceConfirmationProjection>,
+}
+
+impl BuyerCartProjection {
+    pub fn is_empty(&self) -> bool {
+        self.lines.is_empty()
+    }
+}
+
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+pub struct BuyerCheckoutDraft {
+    pub name: String,
+    pub email: String,
+    pub phone: String,
+    pub order_note: String,
+}
+
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+pub struct BuyerCheckoutSummaryProjection {
+    pub farm_display_name: Option<String>,
+    pub fulfillment_summary: Option<String>,
+    pub line_count: u32,
+    pub subtotal_minor_units: Option<u32>,
+    pub currency_code: Option<String>,
+}
+
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+pub struct BuyerCheckoutProjection {
+    pub draft: BuyerCheckoutDraft,
+    pub summary: BuyerCheckoutSummaryProjection,
+    pub can_place_order: bool,
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum OrderStatus {
@@ -1132,6 +1322,40 @@ impl OrderStatus {
             Self::Packed => "packed",
             Self::Completed => "completed",
             Self::Refunded => "refunded",
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum BuyerOrderStatus {
+    Placed,
+    Scheduled,
+    Ready,
+    Completed,
+    Refunded,
+}
+
+impl BuyerOrderStatus {
+    pub const fn storage_key(self) -> &'static str {
+        match self {
+            Self::Placed => "placed",
+            Self::Scheduled => "scheduled",
+            Self::Ready => "ready",
+            Self::Completed => "completed",
+            Self::Refunded => "refunded",
+        }
+    }
+}
+
+impl From<OrderStatus> for BuyerOrderStatus {
+    fn from(value: OrderStatus) -> Self {
+        match value {
+            OrderStatus::NeedsAction => Self::Placed,
+            OrderStatus::Scheduled => Self::Scheduled,
+            OrderStatus::Packed => Self::Ready,
+            OrderStatus::Completed => Self::Completed,
+            OrderStatus::Refunded => Self::Refunded,
         }
     }
 }
@@ -1242,6 +1466,39 @@ pub struct OrderDetailProjection {
     pub pickup_location_label: Option<String>,
     pub items: Vec<OrderDetailItemRow>,
     pub primary_action: Option<OrderPrimaryAction>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct BuyerOrdersListRow {
+    pub order_id: OrderId,
+    pub farm_id: FarmId,
+    pub order_number: String,
+    pub farm_display_name: String,
+    pub fulfillment_summary: String,
+    pub status: BuyerOrderStatus,
+}
+
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+pub struct BuyerOrdersProjection {
+    pub rows: Vec<BuyerOrdersListRow>,
+}
+
+impl BuyerOrdersProjection {
+    pub fn is_empty(&self) -> bool {
+        self.rows.is_empty()
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct BuyerOrderDetailProjection {
+    pub order_id: OrderId,
+    pub farm_id: FarmId,
+    pub order_number: String,
+    pub farm_display_name: String,
+    pub fulfillment_summary: String,
+    pub status: BuyerOrderStatus,
+    pub items: Vec<OrderDetailItemRow>,
+    pub order_note: Option<String>,
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
@@ -1614,23 +1871,26 @@ mod tests {
     use super::{
         AccountCustody, AccountSummary, AccountSurfaceActivationProjection, ActiveSurface,
         ActivityEventId, AppActivityContext, AppActivityEvent, AppActivityKind,
-        AppIdentityProjection, AppStartupGate, BlackoutPeriodId, FarmId, FarmOrderMethod,
-        FarmReadinessBlocker, FarmRulesProjection, FarmRulesReadiness, FarmSetupBlocker,
-        FarmSetupDraft, FarmSetupProjection, FarmSetupReadiness, FarmSetupSection,
-        FarmTimingConflict, FarmTimingConflictKind, FarmerActivationProjection, FarmerSection,
-        IdentityBlockedReason, IdentityReadiness, LoggedOutStartupPhase,
+        AppIdentityProjection, AppStartupGate, BlackoutPeriodId, BuyerCartLineProjection,
+        BuyerCartProjection, BuyerCheckoutDraft, BuyerCheckoutProjection,
+        BuyerCheckoutSummaryProjection, BuyerListingRow, BuyerListingsProjection,
+        BuyerOrderDetailProjection, BuyerOrderStatus, BuyerOrdersListRow, BuyerOrdersProjection,
+        FarmId, FarmOrderMethod, FarmReadinessBlocker, FarmRulesProjection, FarmRulesReadiness,
+        FarmSetupBlocker, FarmSetupDraft, FarmSetupProjection, FarmSetupReadiness,
+        FarmSetupSection, FarmTimingConflict, FarmTimingConflictKind, FarmerActivationProjection,
+        FarmerSection, IdentityBlockedReason, IdentityReadiness, LoggedOutStartupPhase,
         LoggedOutStartupProjection, OrderDetailItemRow, OrderDetailProjection, OrderListRow,
         OrderPrimaryAction, OrderStatus, OrdersFilter, OrdersListProjection, OrdersListRow,
         OrdersListSummary, OrdersScreenQueryState, PackDayPackListRow, PackDayProductTotalRow,
         PackDayProjection, PackDayRosterRow, PackDayScreenQueryState,
-        ParseStartupSignerSourceError, PickupLocationId, ProductAttentionState,
-        ProductAvailabilityState, ProductAvailabilitySummary, ProductEditorDraft, ProductListRow,
-        ProductPricePresentation, ProductPublishBlocker, ProductStatus, ProductStockState,
-        ProductStockSummary, ProductsFilter, ProductsListProjection, ProductsListRow,
-        ProductsListSummary, ProductsSort, SelectedAccountProjection, SelectedSurfaceProjection,
-        SettingsPreference, SettingsSection, ShellSection, StartupSignerEntryProjection,
-        StartupSignerSource, StartupSignerSourceKind, TodayAgendaProjection, TodaySetupTask,
-        TodaySetupTaskKind, TodaySummary,
+        ParseStartupSignerSourceError, PersonalEntryProjection, PersonalEntryState,
+        PersonalSection, PickupLocationId, ProductAttentionState, ProductAvailabilityState,
+        ProductAvailabilitySummary, ProductEditorDraft, ProductListRow, ProductPricePresentation,
+        ProductPublishBlocker, ProductStatus, ProductStockState, ProductStockSummary,
+        ProductsFilter, ProductsListProjection, ProductsListRow, ProductsListSummary, ProductsSort,
+        SelectedAccountProjection, SelectedSurfaceProjection, SettingsPreference, SettingsSection,
+        ShellSection, StartupSignerEntryProjection, StartupSignerSource, StartupSignerSourceKind,
+        TodayAgendaProjection, TodaySetupTask, TodaySetupTaskKind, TodaySummary,
     };
     use std::{collections::BTreeSet, str::FromStr};
     use uuid::Uuid;
@@ -1639,6 +1899,10 @@ mod tests {
     fn shell_section_storage_keys_are_unique_and_round_trip() {
         let sections = [
             ShellSection::Home,
+            ShellSection::Personal(PersonalSection::Browse),
+            ShellSection::Personal(PersonalSection::Search),
+            ShellSection::Personal(PersonalSection::Cart),
+            ShellSection::Personal(PersonalSection::Orders),
             ShellSection::Farmer(FarmerSection::Today),
             ShellSection::Farmer(FarmerSection::Products),
             ShellSection::Farmer(FarmerSection::Orders),
@@ -1664,8 +1928,12 @@ mod tests {
     }
 
     #[test]
-    fn shell_section_surface_is_explicit_only_for_farmer_routes() {
+    fn shell_section_surface_is_explicit_for_surface_routes_only() {
         assert_eq!(ShellSection::Home.surface(), None);
+        assert_eq!(
+            ShellSection::Personal(PersonalSection::Browse).surface(),
+            Some(ActiveSurface::Personal)
+        );
         assert_eq!(
             ShellSection::Farmer(FarmerSection::Today).surface(),
             Some(ActiveSurface::Farmer)
@@ -1680,7 +1948,7 @@ mod tests {
     fn shell_section_default_for_surface_preserves_current_farmer_entry() {
         assert_eq!(
             ShellSection::default_for_surface(ActiveSurface::Personal),
-            ShellSection::Home
+            ShellSection::Personal(PersonalSection::Browse)
         );
         assert_eq!(
             ShellSection::default_for_surface(ActiveSurface::Farmer),
@@ -1850,6 +2118,49 @@ mod tests {
         assert_eq!(projection.roster, roster);
         assert!(projection.selected_account.is_none());
         assert_eq!(projection.startup_gate(), AppStartupGate::SetupRequired);
+    }
+
+    #[test]
+    fn personal_entry_projection_is_derived_from_identity_truth() {
+        let guest_identity = AppIdentityProjection::missing();
+        let selected_account = SelectedAccountProjection::new(
+            AccountSummary {
+                account_id: "acct_farmer".to_owned(),
+                npub: "npub1farmer".to_owned(),
+                label: Some("Field stand".to_owned()),
+                custody: AccountCustody::LocalManaged,
+            },
+            SelectedSurfaceProjection::new(ActiveSurface::Farmer),
+            FarmerActivationProjection::active(FarmId::new()),
+        );
+        let signed_in_identity = AppIdentityProjection::ready(Vec::new(), selected_account.clone());
+        let blocked_identity = AppIdentityProjection::blocked_with_selection(
+            IdentityBlockedReason::HostVaultUnavailable,
+            Vec::new(),
+            Some(selected_account.clone()),
+        );
+
+        assert_eq!(
+            guest_identity.personal_entry(),
+            PersonalEntryProjection::guest()
+        );
+        assert_eq!(
+            guest_identity.personal_entry().state.storage_key(),
+            PersonalEntryState::Guest.storage_key()
+        );
+        assert_eq!(
+            signed_in_identity.personal_entry(),
+            PersonalEntryProjection::signed_in(selected_account.clone())
+        );
+        assert!(
+            signed_in_identity
+                .personal_entry()
+                .can_enter_farmer_workspace
+        );
+        assert_eq!(
+            blocked_identity.personal_entry(),
+            PersonalEntryProjection::blocked(Some(selected_account))
+        );
     }
 
     #[test]
@@ -2096,6 +2407,19 @@ mod tests {
         assert_eq!(OrderStatus::Packed.storage_key(), "packed");
         assert_eq!(OrderStatus::Completed.storage_key(), "completed");
         assert_eq!(OrderStatus::Refunded.storage_key(), "refunded");
+        assert_eq!(BuyerOrderStatus::Placed.storage_key(), "placed");
+        assert_eq!(BuyerOrderStatus::Scheduled.storage_key(), "scheduled");
+        assert_eq!(BuyerOrderStatus::Ready.storage_key(), "ready");
+        assert_eq!(BuyerOrderStatus::Completed.storage_key(), "completed");
+        assert_eq!(BuyerOrderStatus::Refunded.storage_key(), "refunded");
+        assert_eq!(
+            BuyerOrderStatus::from(OrderStatus::NeedsAction),
+            BuyerOrderStatus::Placed
+        );
+        assert_eq!(
+            BuyerOrderStatus::from(OrderStatus::Packed),
+            BuyerOrderStatus::Ready
+        );
 
         assert_eq!(OrdersFilter::default(), OrdersFilter::NeedsAction);
         assert_eq!(OrdersFilter::All.storage_key(), "all");
@@ -2200,6 +2524,106 @@ mod tests {
         assert_eq!(order_detail.items[0].quantity_display, "2 bags");
         assert!(!pack_day.is_empty());
         assert_eq!(pack_day.pickup_roster[0].order_number, "R-1001");
+    }
+
+    #[test]
+    fn buyer_marketplace_projections_hold_guest_capable_contract_data() {
+        let farm_id = FarmId::new();
+        let product_id = super::ProductId::new();
+        let order_id = super::OrderId::new();
+        let listing = BuyerListingRow {
+            product_id,
+            farm_id,
+            farm_display_name: "Cedar Grove Farm".to_owned(),
+            title: "Spring salad mix".to_owned(),
+            subtitle: Some("Tender leaves".to_owned()),
+            price: ProductPricePresentation {
+                amount_minor_units: 650,
+                currency_code: "USD".to_owned(),
+                unit_label: "bag".to_owned(),
+            },
+            availability: ProductAvailabilitySummary {
+                state: ProductAvailabilityState::Scheduled,
+                label: "Thursday pickup".to_owned(),
+            },
+            stock: ProductStockSummary {
+                quantity: Some(8),
+                unit_label: Some("bag".to_owned()),
+                state: ProductStockState::InStock,
+            },
+            fulfillment_methods: BTreeSet::from([FarmOrderMethod::Pickup]),
+            next_fulfillment_window_label: Some("Thursday pickup".to_owned()),
+        };
+        let listings = BuyerListingsProjection {
+            rows: vec![listing.clone()],
+        };
+        let cart = BuyerCartProjection {
+            farm_id: Some(farm_id),
+            farm_display_name: Some("Cedar Grove Farm".to_owned()),
+            lines: vec![BuyerCartLineProjection {
+                product_id,
+                farm_id,
+                farm_display_name: "Cedar Grove Farm".to_owned(),
+                title: "Spring salad mix".to_owned(),
+                quantity: 2,
+                unit_price: ProductPricePresentation {
+                    amount_minor_units: 650,
+                    currency_code: "USD".to_owned(),
+                    unit_label: "bag".to_owned(),
+                },
+                line_total_minor_units: 1300,
+                fulfillment_summary: "Thursday pickup".to_owned(),
+            }],
+            subtotal_minor_units: Some(1300),
+            currency_code: Some("USD".to_owned()),
+            replace_confirmation: None,
+        };
+        let checkout = BuyerCheckoutProjection {
+            draft: BuyerCheckoutDraft {
+                name: "Casey Buyer".to_owned(),
+                email: "casey@example.com".to_owned(),
+                phone: String::new(),
+                order_note: "Leave by the cooler".to_owned(),
+            },
+            summary: BuyerCheckoutSummaryProjection {
+                farm_display_name: Some("Cedar Grove Farm".to_owned()),
+                fulfillment_summary: Some("Thursday pickup".to_owned()),
+                line_count: 1,
+                subtotal_minor_units: Some(1300),
+                currency_code: Some("USD".to_owned()),
+            },
+            can_place_order: true,
+        };
+        let orders = BuyerOrdersProjection {
+            rows: vec![BuyerOrdersListRow {
+                order_id,
+                farm_id,
+                order_number: "R-2001".to_owned(),
+                farm_display_name: "Cedar Grove Farm".to_owned(),
+                fulfillment_summary: "Thursday pickup".to_owned(),
+                status: BuyerOrderStatus::Scheduled,
+            }],
+        };
+        let order_detail = BuyerOrderDetailProjection {
+            order_id,
+            farm_id,
+            order_number: "R-2001".to_owned(),
+            farm_display_name: "Cedar Grove Farm".to_owned(),
+            fulfillment_summary: "Thursday pickup".to_owned(),
+            status: BuyerOrderStatus::Scheduled,
+            items: vec![OrderDetailItemRow {
+                title: "Spring salad mix".to_owned(),
+                quantity_display: "2 bags".to_owned(),
+            }],
+            order_note: Some("Leave by the cooler".to_owned()),
+        };
+
+        assert!(!listings.is_empty());
+        assert!(!cart.is_empty());
+        assert!(checkout.can_place_order);
+        assert!(!orders.is_empty());
+        assert_eq!(listing.fulfillment_methods.len(), 1);
+        assert_eq!(order_detail.status, BuyerOrderStatus::Scheduled);
     }
 
     #[test]

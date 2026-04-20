@@ -1485,7 +1485,7 @@ impl DesktopAppRuntimeState {
                 !self.has_saved_farm() || !self.has_pack_day_context()
             }
             ShellSection::Farmer(FarmerSection::Farm) => true,
-            ShellSection::Home | ShellSection::Settings(_) => false,
+            ShellSection::Home | ShellSection::Personal(_) | ShellSection::Settings(_) => false,
         };
 
         should_reset_to_today

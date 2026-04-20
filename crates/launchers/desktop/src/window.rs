@@ -5405,7 +5405,9 @@ fn home_sidebar_navigation_sections(
 fn selected_farmer_section(runtime: &DesktopAppRuntimeSummary) -> FarmerSection {
     match runtime.shell_projection.selected_section {
         ShellSection::Farmer(section) => section,
-        ShellSection::Home | ShellSection::Settings(_) => FarmerSection::Today,
+        ShellSection::Home | ShellSection::Personal(_) | ShellSection::Settings(_) => {
+            FarmerSection::Today
+        }
     }
 }
 

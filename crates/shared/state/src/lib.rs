@@ -1,14 +1,18 @@
 #![forbid(unsafe_code)]
 
+use std::collections::BTreeSet;
+
 use radroots_studio_app_models::{
-    ActiveSurface, AppIdentityProjection, AppStartupGate, FarmReadiness, FarmReadinessBlocker,
-    FarmRulesProjection, FarmSetupBlocker, FarmSetupProjection, FarmSetupReadiness,
-    FarmTimingConflict, FulfillmentWindowId, LoggedOutStartupPhase, LoggedOutStartupProjection,
-    OrderDetailProjection, OrdersFilter, OrdersListProjection, OrdersScreenQueryState,
-    PackDayProjection, PackDayScreenQueryState, ProductEditorDraft, ProductId,
-    ProductPublishBlocker, ProductsFilter, ProductsListProjection, ProductsSort,
-    SelectedSurfaceProjection, SettingsAccountProjection, SettingsPreference, SettingsSection,
-    ShellSection, TodayAgendaProjection, TodaySetupTask, TodaySetupTaskKind,
+    ActiveSurface, AppIdentityProjection, AppStartupGate, BuyerCartProjection,
+    BuyerCheckoutProjection, BuyerListingsProjection, BuyerOrderDetailProjection,
+    BuyerOrdersProjection, BuyerProductDetailProjection, FarmOrderMethod, FarmReadiness,
+    FarmReadinessBlocker, FarmRulesProjection, FarmSetupBlocker, FarmSetupProjection,
+    FarmSetupReadiness, FarmTimingConflict, FulfillmentWindowId, LoggedOutStartupPhase,
+    LoggedOutStartupProjection, OrderDetailProjection, OrdersFilter, OrdersListProjection,
+    OrdersScreenQueryState, PackDayProjection, PackDayScreenQueryState, PersonalEntryProjection,
+    ProductEditorDraft, ProductId, ProductPublishBlocker, ProductsFilter, ProductsListProjection,
+    ProductsSort, SelectedSurfaceProjection, SettingsAccountProjection, SettingsPreference,
+    SettingsSection, ShellSection, TodayAgendaProjection, TodaySetupTask, TodaySetupTaskKind,
 };
 use thiserror::Error;
 
@@ -69,6 +73,58 @@ impl SettingsShellProjection {
             general: GeneralSettingsProjection::default(),
         }
     }
+}
+
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct BuyerSearchScreenQueryState {
+    pub search_query: String,
+    pub fulfillment_methods: BTreeSet<FarmOrderMethod>,
+}
+
+impl BuyerSearchScreenQueryState {
+    pub fn new(
+        search_query: impl Into<String>,
+        fulfillment_methods: impl IntoIterator<Item = FarmOrderMethod>,
+    ) -> Self {
+        Self {
+            search_query: search_query.into(),
+            fulfillment_methods: fulfillment_methods.into_iter().collect(),
+        }
+    }
+}
+
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct BuyerBrowseScreenProjection {
+    pub listings: BuyerListingsProjection,
+    pub detail: Option<BuyerProductDetailProjection>,
+}
+
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct BuyerSearchScreenProjection {
+    pub query: BuyerSearchScreenQueryState,
+    pub listings: BuyerListingsProjection,
+    pub detail: Option<BuyerProductDetailProjection>,
+}
+
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct BuyerCartScreenProjection {
+    pub cart: BuyerCartProjection,
+    pub checkout: BuyerCheckoutProjection,
+}
+
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct BuyerOrdersScreenProjection {
+    pub list: BuyerOrdersProjection,
+    pub detail: Option<BuyerOrderDetailProjection>,
+}
+
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct PersonalWorkspaceProjection {
+    pub entry: PersonalEntryProjection,
+    pub browse: BuyerBrowseScreenProjection,
+    pub search: BuyerSearchScreenProjection,
+    pub cart: BuyerCartScreenProjection,
+    pub orders: BuyerOrdersScreenProjection,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -359,7 +415,10 @@ impl AppShellProjection {
                 }
             }
             ActiveSurface::Farmer => {
-                if matches!(self.selected_section, ShellSection::Home) {
+                if matches!(
+                    self.selected_section,
+                    ShellSection::Home | ShellSection::Personal(_)
+                ) {
                     self.selected_section = ShellSection::default_for_surface(active_surface);
                 }
             }
@@ -381,6 +440,7 @@ pub struct AppProjection {
     pub identity: AppIdentityProjection,
     pub startup_gate: AppStartupGate,
     pub logged_out_startup: LoggedOutStartupProjection,
+    pub personal: PersonalWorkspaceProjection,
     pub today: TodayAgendaProjection,
     pub products: ProductsScreenProjection,
     pub orders: OrdersScreenProjection,
@@ -411,6 +471,7 @@ impl AppProjection {
             identity,
             startup_gate: AppStartupGate::default(),
             logged_out_startup: LoggedOutStartupProjection::default(),
+            personal: PersonalWorkspaceProjection::default(),
             today,
             products: ProductsScreenProjection::default(),
             orders: OrdersScreenProjection::default(),
@@ -728,6 +789,10 @@ impl<R: AppStateRepository> AppStateStore<R> {
         &self.projection.logged_out_startup
     }
 
+    pub fn personal_projection(&self) -> &PersonalWorkspaceProjection {
+        &self.projection.personal
+    }
+
     pub fn products_projection(&self) -> &ProductsScreenProjection {
         &self.projection.products
     }
@@ -774,6 +839,11 @@ impl<R: AppStateRepository> AppStateStore<R> {
                 Ok(true)
             }
             AppStateMutation::StartupChanged => {
+                self.projection = next_projection;
+
+                Ok(true)
+            }
+            AppStateMutation::PersonalChanged => {
                 self.projection = next_projection;
 
                 Ok(true)
@@ -835,6 +905,11 @@ impl AppStateStore<InMemoryAppStateRepository> {
 
                 true
             }
+            AppStateMutation::PersonalChanged => {
+                self.projection = next_projection;
+
+                true
+            }
             AppStateMutation::TodayChanged => {
                 self.projection = next_projection;
 
@@ -865,6 +940,7 @@ enum AppStateMutation {
     ShellChanged,
     FarmSetupChanged,
     StartupChanged,
+    PersonalChanged,
     TodayChanged,
     ProductsChanged,
     OrdersChanged,
@@ -1015,6 +1091,8 @@ fn apply_command(projection: &mut AppProjection, command: AppStateCommand) -> Ap
         AppStateMutation::FarmSetupChanged
     } else if projection.logged_out_startup != before.logged_out_startup {
         AppStateMutation::StartupChanged
+    } else if projection.personal != before.personal {
+        AppStateMutation::PersonalChanged
     } else if projection.products != before.products {
         AppStateMutation::ProductsChanged
     } else if projection.orders != before.orders {
@@ -1043,6 +1121,7 @@ fn sync_projection(projection: &mut AppProjection) {
         &projection.farm_readiness,
     );
     projection.startup_gate = projection.identity.startup_gate();
+    projection.personal.entry = projection.identity.personal_entry();
     sync_logged_out_startup(&mut projection.logged_out_startup, projection.startup_gate);
     sync_farm_setup_flow_stage(
         &mut projection.farm_setup_flow_stage,
@@ -1053,15 +1132,24 @@ fn sync_projection(projection: &mut AppProjection) {
 
 fn sync_shell_to_identity(shell: &mut AppShellProjection, identity: &AppIdentityProjection) {
     match identity.startup_gate() {
-        AppStartupGate::Blocked | AppStartupGate::SetupRequired | AppStartupGate::Personal => {
+        AppStartupGate::Blocked | AppStartupGate::SetupRequired => {
             shell.active_surface = ActiveSurface::Personal;
             if matches!(shell.selected_section, ShellSection::Farmer(_)) {
                 shell.selected_section = ShellSection::Home;
             }
         }
+        AppStartupGate::Personal => {
+            shell.active_surface = ActiveSurface::Personal;
+            if matches!(shell.selected_section, ShellSection::Farmer(_)) {
+                shell.selected_section = ShellSection::default_for_surface(ActiveSurface::Personal);
+            }
+        }
         AppStartupGate::Farmer => {
             shell.active_surface = ActiveSurface::Farmer;
-            if matches!(shell.selected_section, ShellSection::Home) {
+            if matches!(
+                shell.selected_section,
+                ShellSection::Home | ShellSection::Personal(_)
+            ) {
                 shell.selected_section = ShellSection::default_for_surface(ActiveSurface::Farmer);
             }
         }
@@ -1274,10 +1362,10 @@ mod tests {
         LoggedOutStartupProjection, OrderDetailItemRow, OrderDetailProjection, OrderId,
         OrderPrimaryAction, OrderStatus, OrdersFilter, OrdersListProjection, OrdersListRow,
         OrdersListSummary, OrdersScreenQueryState, PackDayPackListRow, PackDayProductTotalRow,
-        PackDayProjection, PackDayRosterRow, PackDayScreenQueryState, ProductEditorDraft,
-        ProductId, ProductPublishBlocker, ProductsFilter, ProductsListProjection, ProductsSort,
-        SelectedAccountProjection, SelectedSurfaceProjection, SettingsSection, ShellSection,
-        TodayAgendaProjection, TodaySetupTask, TodaySetupTaskKind,
+        PackDayProjection, PackDayRosterRow, PackDayScreenQueryState, PersonalEntryState,
+        PersonalSection, ProductEditorDraft, ProductId, ProductPublishBlocker, ProductsFilter,
+        ProductsListProjection, ProductsSort, SelectedAccountProjection, SelectedSurfaceProjection,
+        SettingsSection, ShellSection, TodayAgendaProjection, TodaySetupTask, TodaySetupTaskKind,
     };
 
     struct FailingRepository;
@@ -1335,6 +1423,7 @@ mod tests {
         assert_eq!(projection.products, ProductsScreenProjection::default());
         assert_eq!(projection.orders, OrdersScreenProjection::default());
         assert_eq!(projection.pack_day, PackDayScreenProjection::default());
+        assert_eq!(projection.personal.entry.state, PersonalEntryState::Guest);
         assert_eq!(projection.farm_setup, FarmSetupProjection::default());
         assert_eq!(
             projection.farm_setup_flow_stage,
@@ -1377,6 +1466,10 @@ mod tests {
         assert_eq!(
             store.projection().pack_day,
             PackDayScreenProjection::default()
+        );
+        assert_eq!(
+            store.personal_projection().entry.state,
+            PersonalEntryState::Guest
         );
         assert_eq!(store.home_route(), HomeRoute::SetupRequired);
     }
@@ -1785,6 +1878,28 @@ mod tests {
     }
 
     #[test]
+    fn replacing_identity_projection_makes_signed_in_personal_entry_explicit_without_rewriting_home()
+     {
+        let mut store = AppStateStore::load(InMemoryAppStateRepository::default())
+            .expect("in-memory repository should load");
+
+        let changed = store.apply(AppStateCommand::replace_identity_projection(
+            ready_identity(ActiveSurface::Personal),
+        ));
+
+        assert_eq!(changed, Ok(true));
+        assert_eq!(store.startup_gate(), AppStartupGate::Personal);
+        assert_eq!(
+            store.projection().shell.selected_section,
+            ShellSection::Home
+        );
+        assert_eq!(
+            store.personal_projection().entry.state,
+            PersonalEntryState::SignedIn
+        );
+    }
+
+    #[test]
     fn startup_identity_choice_state_resets_once_identity_leaves_setup_required() {
         let mut store = AppStateStore::load(InMemoryAppStateRepository::default())
             .expect("in-memory repository should load");
@@ -1915,7 +2030,7 @@ mod tests {
         );
         assert_eq!(
             store.projection().shell.selected_section,
-            ShellSection::Home
+            ShellSection::Personal(PersonalSection::Browse)
         );
         assert_eq!(store.startup_gate(), AppStartupGate::Personal);
     }
