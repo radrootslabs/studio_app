@@ -240,10 +240,34 @@ mod tests {
             "Order history"
         );
         assert_eq!(app_text(AppTextKey::PersonalOrdersStatusPlaced), "Placed");
+        assert_eq!(
+            app_text(AppTextKey::PersonalOrdersStatusScheduled),
+            "Scheduled"
+        );
         assert_eq!(app_text(AppTextKey::PersonalOrdersStatusReady), "Ready");
+        assert_eq!(
+            app_text(AppTextKey::PersonalOrdersStatusCompleted),
+            "Completed"
+        );
+        assert_eq!(
+            app_text(AppTextKey::PersonalOrdersStatusRefunded),
+            "Refunded"
+        );
         assert_eq!(
             app_text(AppTextKey::PersonalOrdersDetailTitle),
             "Order detail"
+        );
+        assert_eq!(
+            app_text(AppTextKey::PersonalOrdersDetailEmptyBody),
+            "Select an order to review the details."
+        );
+        assert_eq!(
+            app_text(AppTextKey::PersonalOrdersDetailFulfillmentLabel),
+            "Fulfillment"
+        );
+        assert_eq!(
+            app_text(AppTextKey::PersonalOrdersDetailNoteLabel),
+            "Order note"
         );
     }
 

@@ -109,7 +109,6 @@ define_app_text_keys! {
     PersonalBrowsePlaceholderBody => "personal.browse.placeholder.body",
     PersonalSearchPlaceholderBody => "personal.search.placeholder.body",
     PersonalCartPlaceholderBody => "personal.cart.placeholder.body",
-    PersonalOrdersPlaceholderBody => "personal.orders.placeholder.body",
     PersonalOrdersSurfaceBody => "personal.orders.surface.body",
     PersonalOrdersEmptyTitle => "personal.orders.empty.title",
     PersonalOrdersEmptyBody => "personal.orders.empty.body",
