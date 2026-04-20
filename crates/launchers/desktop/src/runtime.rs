@@ -107,6 +107,7 @@ impl DesktopAppRuntime {
                 .map(|account| account.account.account_id.clone()),
             projection: state.state_store.sync_projection().clone(),
             pending_write_count: state.selected_account_pending_sync_write_count,
+            conflicts: state.selected_account_sync_conflicts.clone(),
         };
 
         DesktopAppRuntimeSummary {
@@ -496,6 +497,15 @@ impl DesktopAppRuntime {
             .attempt_sync(SyncTrigger::ManualRefresh)
     }
 
+    pub fn resolve_sync_conflict(
+        &self,
+        conflict_id: &str,
+        resolution: radroots_studio_app_sync::SyncConflictResolutionStatus,
+    ) -> Result<bool, AppSqliteError> {
+        self.lock_state_mut()
+            .resolve_sync_conflict(conflict_id, resolution)
+    }
+
     pub fn record_home_opened(&self) -> bool {
         self.record_activity(AppActivityKind::HomeOpened)
     }
@@ -574,12 +584,19 @@ pub struct DesktopAppSyncStatusSummary {
     pub account_id: Option<String>,
     pub projection: AppSyncProjection,
     pub pending_write_count: usize,
+    pub conflicts: Vec<DesktopAppSyncConflictSummary>,
 }
 
 impl DesktopAppSyncStatusSummary {
     pub const fn is_enabled(&self) -> bool {
         self.account_id.is_some()
     }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct DesktopAppSyncConflictSummary {
+    pub conflict_id: String,
+    pub conflict: radroots_studio_app_sync::SyncConflict,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -667,6 +684,7 @@ struct DesktopSelectedAccountContext {
 struct DesktopSelectedAccountSyncContext {
     projection: AppSyncProjection,
     pending_write_count: usize,
+    conflicts: Vec<DesktopAppSyncConflictSummary>,
 }
 
 #[derive(Clone, Debug)]
@@ -687,6 +705,7 @@ struct DesktopAppRuntimeState {
     sync_transport: Box<dyn AppSyncTransport + Send>,
     runtime_metadata: DesktopAppRuntimeMetadataSummary,
     selected_account_pending_sync_write_count: usize,
+    selected_account_sync_conflicts: Vec<DesktopAppSyncConflictSummary>,
     startup_issue: Option<String>,
 }
 
@@ -716,6 +735,10 @@ impl fmt::Debug for DesktopAppRuntimeState {
             .field(
                 "selected_account_pending_sync_write_count",
                 &self.selected_account_pending_sync_write_count,
+            )
+            .field(
+                "selected_account_sync_conflicts",
+                &self.selected_account_sync_conflicts,
             )
             .field("startup_issue", &self.startup_issue)
             .finish()
@@ -802,6 +825,7 @@ impl DesktopAppRuntimeState {
             selected_account_context.pack_day_projection,
         ));
         let pending_sync_write_count = selected_account_sync_context.pending_write_count;
+        let selected_account_sync_conflicts = selected_account_sync_context.conflicts;
         let _ = state_store.apply_in_memory(AppStateCommand::replace_sync_projection(
             selected_account_sync_context.projection,
         ));
@@ -821,6 +845,7 @@ impl DesktopAppRuntimeState {
                 database_schema_version,
             ),
             selected_account_pending_sync_write_count: pending_sync_write_count,
+            selected_account_sync_conflicts,
             startup_issue: None,
         })
     }
@@ -843,6 +868,7 @@ impl DesktopAppRuntimeState {
             sync_transport: default_sync_transport(),
             runtime_metadata: DesktopAppRuntimeMetadataSummary::unavailable(runtime_snapshot),
             selected_account_pending_sync_write_count: 0,
+            selected_account_sync_conflicts: Vec::new(),
             startup_issue: Some(error.to_string()),
         }
     }
@@ -1960,16 +1986,67 @@ impl DesktopAppRuntimeState {
                 ));
         let pending_changed =
             self.selected_account_pending_sync_write_count != context.pending_write_count;
+        let conflicts_changed = self.selected_account_sync_conflicts != context.conflicts;
 
         self.selected_account_pending_sync_write_count = context.pending_write_count;
+        self.selected_account_sync_conflicts = context.conflicts.clone();
 
-        projection_changed || pending_changed
+        projection_changed || pending_changed || conflicts_changed
     }
 
     fn refresh_selected_account_sync(&mut self) -> Result<bool, AppSqliteError> {
         let context = self.refresh_selected_account_sync_context()?;
 
         Ok(self.apply_selected_account_sync_context(&context))
+    }
+
+    fn resolve_sync_conflict(
+        &mut self,
+        conflict_id: &str,
+        resolution: radroots_studio_app_sync::SyncConflictResolutionStatus,
+    ) -> Result<bool, AppSqliteError> {
+        let Some(sqlite_store) = self.sqlite_store.as_ref() else {
+            return Ok(false);
+        };
+        let Some(selected_account) = self
+            .state_store
+            .identity_projection()
+            .selected_account
+            .as_ref()
+        else {
+            return Ok(false);
+        };
+        let account_id = selected_account.account.account_id.as_str();
+        let stored_conflicts = sqlite_store.load_sync_conflicts(account_id)?;
+        let Some(stored_conflict) = stored_conflicts
+            .iter()
+            .find(|stored| stored.conflict_id == conflict_id)
+        else {
+            return Ok(false);
+        };
+        if !stored_conflict.conflict.is_unresolved() {
+            return Ok(false);
+        }
+        if matches!(
+            (stored_conflict.conflict.severity, resolution,),
+            (
+                SyncConflictSeverity::Blocking,
+                radroots_studio_app_sync::SyncConflictResolutionStatus::Dismissed,
+            )
+        ) {
+            return Ok(false);
+        }
+
+        if !sqlite_store.resolve_sync_conflict(
+            account_id,
+            conflict_id,
+            resolution,
+            current_utc_timestamp().as_str(),
+        )? {
+            return Ok(false);
+        }
+
+        self.refresh_selected_account_sync()
     }
 
     fn attempt_sync(&mut self, trigger: SyncTrigger) -> Result<bool, AppSqliteError> {
@@ -2755,16 +2832,23 @@ fn load_selected_account_sync_context(
     };
     let account_id = selected_account.account.account_id.as_str();
     let checkpoint = sqlite_store.load_sync_checkpoint(account_id)?;
-    let conflicts = sqlite_store
-        .load_sync_conflicts(account_id)?
-        .into_iter()
-        .map(|stored| stored.conflict)
+    let stored_conflicts = sqlite_store.load_sync_conflicts(account_id)?;
+    let conflicts = stored_conflicts
+        .iter()
+        .map(|stored| stored.conflict.clone())
         .collect::<Vec<_>>();
     let pending_write_count = sqlite_store.load_pending_sync_operations(account_id)?.len();
 
     Ok(DesktopSelectedAccountSyncContext {
         projection: derive_sync_projection(&checkpoint, &conflicts),
         pending_write_count,
+        conflicts: stored_conflicts
+            .into_iter()
+            .map(|stored| DesktopAppSyncConflictSummary {
+                conflict_id: stored.conflict_id,
+                conflict: stored.conflict,
+            })
+            .collect(),
     })
 }
 
@@ -3263,6 +3347,7 @@ mod tests {
             sync_transport: default_sync_transport(),
             runtime_metadata: DesktopAppRuntimeMetadataSummary::default(),
             selected_account_pending_sync_write_count: 0,
+            selected_account_sync_conflicts: Vec::new(),
             startup_issue: None,
         });
         let cloned_runtime = runtime.clone();
@@ -3316,6 +3401,7 @@ mod tests {
             sync_transport: default_sync_transport(),
             runtime_metadata: DesktopAppRuntimeMetadataSummary::default(),
             selected_account_pending_sync_write_count: 0,
+            selected_account_sync_conflicts: Vec::new(),
             startup_issue: None,
         });
         let cloned_runtime = runtime.clone();
@@ -3714,6 +3800,146 @@ mod tests {
     }
 
     #[test]
+    fn runtime_resolving_a_blocking_conflict_refreshes_sync_summary() {
+        let runtime = memory_runtime();
+        let (account_id, farm_id) = provision_ready_farmer_account(&runtime);
+
+        let conflict_id = runtime
+            .lock_state()
+            .sqlite_store
+            .as_ref()
+            .expect("sqlite store")
+            .record_sync_conflict(
+                account_id.as_str(),
+                &SyncConflict {
+                    aggregate: SyncAggregateRef::Farm(farm_id),
+                    kind: SyncConflictKind::RevisionMismatch,
+                    severity: SyncConflictSeverity::Blocking,
+                    resolution: SyncConflictResolutionStatus::Unresolved,
+                    local_payload_json: "{\"farm\":\"local\"}".to_owned(),
+                    remote_payload_json: Some("{\"farm\":\"remote\"}".to_owned()),
+                    detected_at: "2026-04-20T20:05:00Z".to_owned(),
+                    resolved_at: None,
+                },
+            )
+            .expect("blocking conflict should save");
+        assert!(
+            runtime
+                .lock_state_mut()
+                .refresh_selected_account_sync()
+                .expect("sync status should refresh")
+        );
+
+        assert!(
+            runtime
+                .resolve_sync_conflict(
+                    conflict_id.as_str(),
+                    SyncConflictResolutionStatus::AcceptedLocal,
+                )
+                .expect("conflict resolution should succeed")
+        );
+
+        let summary = runtime.summary();
+
+        assert_eq!(
+            summary
+                .sync_status
+                .projection
+                .conflict_status
+                .unresolved_count,
+            0
+        );
+        assert_eq!(
+            summary
+                .sync_status
+                .projection
+                .conflict_status
+                .blocking_count,
+            0
+        );
+        assert_eq!(summary.sync_status.conflicts.len(), 1);
+        assert_eq!(
+            summary.sync_status.conflicts[0].conflict.resolution,
+            SyncConflictResolutionStatus::AcceptedLocal
+        );
+        assert!(
+            summary.sync_status.conflicts[0]
+                .conflict
+                .resolved_at
+                .as_deref()
+                .is_some()
+        );
+    }
+
+    #[test]
+    fn runtime_review_required_conflicts_do_not_block_manual_refresh() {
+        let runtime = memory_runtime();
+        let (account_id, farm_id) = provision_ready_farmer_account(&runtime);
+
+        assert!(
+            runtime
+                .open_new_product_editor()
+                .expect("new product editor should open")
+        );
+
+        runtime
+            .lock_state()
+            .sqlite_store
+            .as_ref()
+            .expect("sqlite store")
+            .record_sync_conflict(
+                account_id.as_str(),
+                &SyncConflict {
+                    aggregate: SyncAggregateRef::Farm(farm_id),
+                    kind: SyncConflictKind::RemoteValidationReject,
+                    severity: SyncConflictSeverity::ReviewRequired,
+                    resolution: SyncConflictResolutionStatus::Unresolved,
+                    local_payload_json: "{\"farm\":\"local\"}".to_owned(),
+                    remote_payload_json: Some("{\"farm\":\"remote\"}".to_owned()),
+                    detected_at: "2026-04-20T20:10:00Z".to_owned(),
+                    resolved_at: None,
+                },
+            )
+            .expect("review-required conflict should save");
+        assert!(
+            runtime
+                .lock_state_mut()
+                .refresh_selected_account_sync()
+                .expect("sync status should refresh")
+        );
+
+        let recorded = install_recorded_sync_transport(
+            &runtime,
+            RecordedAppSyncTransport::succeed(AppSyncResult {
+                run_status: AppSyncRunStatus::Succeeded,
+                checkpoint: SyncCheckpointStatus::current(
+                    Some("2026-04-20T20:10:05Z".to_owned()),
+                    "2026-04-20T20:10:08Z",
+                    Some("cursor-review-required".to_owned()),
+                ),
+                pushed_operation_count: 1,
+                pulled_record_count: 0,
+                conflicts: Vec::new(),
+            }),
+        );
+
+        assert!(
+            runtime
+                .sync_on_manual_refresh()
+                .expect("manual refresh should succeed")
+        );
+
+        let recorded = recorded.lock().expect("recorded transport");
+        let request = recorded
+            .last_request()
+            .cloned()
+            .expect("manual refresh request should record");
+
+        assert_eq!(recorded.call_count(), 1);
+        assert_eq!(request.trigger, SyncTrigger::ManualRefresh);
+    }
+
+    #[test]
     fn runtime_summary_surfaces_runtime_metadata_from_bootstrap() {
         let (runtime, paths) = bootstrapped_runtime("runtime_metadata");
         let summary = runtime.summary();
@@ -3759,6 +3985,7 @@ mod tests {
             sync_transport: default_sync_transport(),
             runtime_metadata: DesktopAppRuntimeMetadataSummary::default(),
             selected_account_pending_sync_write_count: 0,
+            selected_account_sync_conflicts: Vec::new(),
             startup_issue: None,
         });
 
@@ -3789,6 +4016,7 @@ mod tests {
             sync_transport: default_sync_transport(),
             runtime_metadata: DesktopAppRuntimeMetadataSummary::default(),
             selected_account_pending_sync_write_count: 0,
+            selected_account_sync_conflicts: Vec::new(),
             startup_issue: None,
         });
 
@@ -3888,6 +4116,7 @@ mod tests {
             sync_transport: default_sync_transport(),
             runtime_metadata: DesktopAppRuntimeMetadataSummary::default(),
             selected_account_pending_sync_write_count: 0,
+            selected_account_sync_conflicts: Vec::new(),
             startup_issue: None,
         });
         let cloned_runtime = runtime.clone();
@@ -3987,6 +4216,7 @@ mod tests {
             sync_transport: default_sync_transport(),
             runtime_metadata: DesktopAppRuntimeMetadataSummary::default(),
             selected_account_pending_sync_write_count: 0,
+            selected_account_sync_conflicts: Vec::new(),
             startup_issue: None,
         });
 
@@ -4039,6 +4269,7 @@ mod tests {
             sync_transport: default_sync_transport(),
             runtime_metadata: DesktopAppRuntimeMetadataSummary::default(),
             selected_account_pending_sync_write_count: 0,
+            selected_account_sync_conflicts: Vec::new(),
             startup_issue: None,
         });
 
@@ -4075,6 +4306,7 @@ mod tests {
             sync_transport: default_sync_transport(),
             runtime_metadata: DesktopAppRuntimeMetadataSummary::default(),
             selected_account_pending_sync_write_count: 0,
+            selected_account_sync_conflicts: Vec::new(),
             startup_issue: None,
         });
 
@@ -4109,6 +4341,7 @@ mod tests {
             sync_transport: default_sync_transport(),
             runtime_metadata: DesktopAppRuntimeMetadataSummary::default(),
             selected_account_pending_sync_write_count: 0,
+            selected_account_sync_conflicts: Vec::new(),
             startup_issue: None,
         });
 
@@ -6314,6 +6547,7 @@ mod tests {
             sync_transport: default_sync_transport(),
             runtime_metadata: DesktopAppRuntimeMetadataSummary::default(),
             selected_account_pending_sync_write_count: 0,
+            selected_account_sync_conflicts: Vec::new(),
             startup_issue: None,
         });
 
@@ -6348,6 +6582,7 @@ mod tests {
             sync_transport: default_sync_transport(),
             runtime_metadata: DesktopAppRuntimeMetadataSummary::default(),
             selected_account_pending_sync_write_count: 0,
+            selected_account_sync_conflicts: Vec::new(),
             startup_issue: None,
         })
     }
@@ -6380,6 +6615,7 @@ mod tests {
                 sync_transport: default_sync_transport(),
                 runtime_metadata: DesktopAppRuntimeMetadataSummary::default(),
                 selected_account_pending_sync_write_count: 0,
+                selected_account_sync_conflicts: Vec::new(),
                 startup_issue: None,
             }),
             paths,

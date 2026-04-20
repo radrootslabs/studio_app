@@ -190,6 +190,10 @@ mod tests {
             "Blocking conflicts pause sync until you resolve them."
         );
         assert_eq!(
+            app_text(AppTextKey::SettingsAboutRefreshAction),
+            "Refresh sync"
+        );
+        assert_eq!(
             app_text(AppTextKey::SettingsAboutConflictAcceptLocalAction),
             "Accept local"
         );
@@ -208,6 +212,39 @@ mod tests {
         assert_eq!(
             app_text(AppTextKey::MetadataSyncBlockingConflictCount),
             "blocking conflict count"
+        );
+        assert_eq!(
+            app_text(AppTextKey::MetadataSyncConflictAggregate),
+            "aggregate"
+        );
+        assert_eq!(app_text(AppTextKey::MetadataSyncConflictKind), "kind");
+        assert_eq!(
+            app_text(AppTextKey::MetadataSyncConflictSeverity),
+            "severity"
+        );
+        assert_eq!(
+            app_text(AppTextKey::MetadataSyncConflictDetectedAt),
+            "detected"
+        );
+        assert_eq!(
+            app_text(AppTextKey::MetadataSyncConflictResolution),
+            "resolution"
+        );
+        assert_eq!(
+            app_text(AppTextKey::ValueSyncConflictAggregateFulfillmentWindow),
+            "Fulfillment window"
+        );
+        assert_eq!(
+            app_text(AppTextKey::ValueSyncConflictKindRevisionMismatch),
+            "Revision mismatch"
+        );
+        assert_eq!(
+            app_text(AppTextKey::ValueSyncConflictSeverityBlocking),
+            "Blocking"
+        );
+        assert_eq!(
+            app_text(AppTextKey::ValueSyncConflictResolutionAcceptedRemote),
+            "Accepted remote"
         );
     }
 

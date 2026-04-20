@@ -35,7 +35,10 @@ use radroots_studio_app_sqlite::derive_farm_rules_readiness;
 use radroots_studio_app_state::{
     FarmSetupFlowStage, FarmWorkspaceStatus, HomeRoute, derive_product_publish_blockers,
 };
-use radroots_studio_app_sync::{AppSyncRunStatus, SyncCheckpointState};
+use radroots_studio_app_sync::{
+    AppSyncRunStatus, SyncAggregateRef, SyncCheckpointState, SyncConflict, SyncConflictKind,
+    SyncConflictResolutionStatus, SyncConflictSeverity,
+};
 use radroots_studio_app_ui::{
     APP_UI_THEME, AppCheckboxFieldSpec, AppFormFieldSpec,
     AppSegmentButtonIconSpec as IconSegmentButtonSpec, LabelValueRow, app_button_card,
@@ -59,7 +62,10 @@ use radroots_nostr::prelude::RadrootsNostrClient;
 use std::{collections::BTreeSet, path::PathBuf, sync::Arc, time::Duration};
 use tracing::error;
 
-use crate::runtime::{DesktopAppRuntime, DesktopAppRuntimeSummary, DesktopAppSyncStatusSummary};
+use crate::runtime::{
+    DesktopAppRuntime, DesktopAppRuntimeSummary, DesktopAppSyncConflictSummary,
+    DesktopAppSyncStatusSummary,
+};
 
 const HOME_WINDOW_MIN_WIDTH_PX: f32 = 1080.0;
 const HOME_WINDOW_MIN_HEIGHT_PX: f32 = 720.0;
@@ -4490,6 +4496,7 @@ pub struct SettingsWindowView {
     runtime: DesktopAppRuntime,
     farm_panel_state: Option<SettingsFarmPanelState>,
     farm_panel_error: Option<String>,
+    about_panel_notice: Option<String>,
 }
 
 impl SettingsWindowView {
@@ -4499,10 +4506,12 @@ impl SettingsWindowView {
             runtime,
             farm_panel_state: None,
             farm_panel_error: None,
+            about_panel_notice: None,
         }
     }
 
     fn select_view(&mut self, view: SettingsPanelViewKey, cx: &mut Context<Self>) {
+        self.about_panel_notice = None;
         if self.runtime.select_settings_section(view) {
             cx.notify();
         }
@@ -4700,6 +4709,122 @@ impl SettingsWindowView {
                 cx.notify();
             }
         }
+    }
+
+    fn refresh_about_sync(&mut self, cx: &mut Context<Self>) {
+        match self.runtime.sync_on_manual_refresh() {
+            Ok(changed) => {
+                if changed {
+                    self.about_panel_notice = None;
+                    cx.refresh_windows();
+                } else {
+                    self.about_panel_notice = Some(app_text(about_conflict_review_body_key(
+                        &self.runtime.summary().sync_status,
+                    )));
+                }
+                cx.notify();
+            }
+            Err(runtime_error) => {
+                error!(
+                    target: "settings",
+                    event = "settings.about.sync_refresh_failed",
+                    error = %runtime_error,
+                    "failed to refresh sync from the about panel"
+                );
+                self.about_panel_notice = Some(runtime_error.to_string());
+                cx.notify();
+            }
+        }
+    }
+
+    fn resolve_about_conflict(
+        &mut self,
+        conflict_id: String,
+        resolution: SyncConflictResolutionStatus,
+        cx: &mut Context<Self>,
+    ) {
+        match self
+            .runtime
+            .resolve_sync_conflict(conflict_id.as_str(), resolution)
+        {
+            Ok(changed) => {
+                if changed {
+                    self.about_panel_notice = None;
+                    cx.refresh_windows();
+                } else {
+                    self.about_panel_notice = Some(app_text(about_conflict_review_body_key(
+                        &self.runtime.summary().sync_status,
+                    )));
+                }
+                cx.notify();
+            }
+            Err(runtime_error) => {
+                error!(
+                    target: "settings",
+                    event = "settings.about.conflict_resolution_failed",
+                    conflict_id = %conflict_id,
+                    error = %runtime_error,
+                    "failed to resolve sync conflict from the about panel"
+                );
+                self.about_panel_notice = Some(runtime_error.to_string());
+                cx.notify();
+            }
+        }
+    }
+
+    fn about_conflict_card(
+        &mut self,
+        conflict_index: usize,
+        conflict: &DesktopAppSyncConflictSummary,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement {
+        let action_specs = about_conflict_action_specs(&conflict.conflict);
+
+        app_surface_panel(
+            app_stack_v(APP_UI_THEME.foundation.spacing.small_px)
+                .w_full()
+                .p(px(APP_UI_THEME.shells.home_card_padding_px))
+                .child(app_text_value(about_conflict_aggregate_text(
+                    &conflict.conflict,
+                )))
+                .child(label_value_list(about_conflict_detail_rows(conflict)))
+                .when(!action_specs.is_empty(), |this| {
+                    this.child(
+                        app_cluster(APP_UI_THEME.foundation.spacing.small_px)
+                            .w_full()
+                            .children(
+                                action_specs
+                                    .into_iter()
+                                    .enumerate()
+                                    .map(|(action_index, (key, resolution))| {
+                                        action_button_compact(
+                                            (
+                                                gpui::ElementId::from((
+                                                    "settings-about-conflict-action",
+                                                    conflict_index,
+                                                )),
+                                                action_index.to_string(),
+                                            ),
+                                            app_shared_text(key),
+                                            cx.listener({
+                                                let conflict_id = conflict.conflict_id.clone();
+                                                move |this, _, _, cx| {
+                                                    this.resolve_about_conflict(
+                                                        conflict_id.clone(),
+                                                        resolution,
+                                                        cx,
+                                                    )
+                                                }
+                                            }),
+                                            cx,
+                                        )
+                                        .into_any_element()
+                                    })
+                                    .collect::<Vec<_>>(),
+                            ),
+                    )
+                }),
+        )
     }
 
     fn navigation_button(
@@ -5491,11 +5616,21 @@ impl SettingsWindowView {
         )
     }
 
-    fn about_panel(&self) -> impl IntoElement {
+    fn about_panel(&mut self, cx: &mut Context<Self>) -> impl IntoElement {
         let runtime = self.runtime.summary();
         let status_rows = about_status_rows(&runtime);
-        let conflict_rows = about_conflict_review_rows(&runtime.sync_status);
         let runtime_rows = about_runtime_rows(&runtime);
+        let manual_refresh_enabled = about_manual_refresh_enabled(&runtime.sync_status);
+        let conflict_cards = runtime
+            .sync_status
+            .conflicts
+            .iter()
+            .enumerate()
+            .map(|(conflict_index, conflict)| {
+                self.about_conflict_card(conflict_index, conflict, cx)
+                    .into_any_element()
+            })
+            .collect::<Vec<_>>();
 
         app_scroll_panel(
             "settings-panel-scroll",
@@ -5510,7 +5645,23 @@ impl SettingsWindowView {
                         .child(app_heading_section(app_shared_text(
                             AppTextKey::SettingsAboutStatusSectionLabel,
                         )))
-                        .child(label_value_list(status_rows)),
+                        .child(label_value_list(status_rows))
+                        .child(if manual_refresh_enabled {
+                            action_button_primary(
+                                "settings-about-refresh-sync",
+                                app_shared_text(AppTextKey::SettingsAboutRefreshAction),
+                                cx.listener(|this, _, _, cx| this.refresh_about_sync(cx)),
+                                cx,
+                            )
+                            .into_any_element()
+                        } else {
+                            action_button_primary_disabled(
+                                "settings-about-refresh-sync-disabled",
+                                app_shared_text(AppTextKey::SettingsAboutRefreshAction),
+                                cx,
+                            )
+                            .into_any_element()
+                        }),
                 ))
                 .child(app_surface_card(
                     app_stack_v(APP_UI_THEME.shells.home_stack_gap_px)
@@ -5521,7 +5672,10 @@ impl SettingsWindowView {
                         .child(home_body_text(app_text(about_conflict_review_body_key(
                             &runtime.sync_status,
                         ))))
-                        .child(label_value_list(conflict_rows)),
+                        .when_some(self.about_panel_notice.as_deref(), |this, notice| {
+                            this.child(home_body_text(notice.to_owned()))
+                        })
+                        .children(conflict_cards),
                 ))
                 .child(app_surface_card(
                     app_stack_v(APP_UI_THEME.shells.home_stack_gap_px)
@@ -5543,7 +5697,7 @@ impl SettingsWindowView {
             SettingsPanelViewKey::Account => self.account_panel(cx).into_any_element(),
             SettingsPanelViewKey::Farm => self.farm_panel(window, cx).into_any_element(),
             SettingsPanelViewKey::Settings => self.settings_panel(window, cx).into_any_element(),
-            SettingsPanelViewKey::About => self.about_panel().into_any_element(),
+            SettingsPanelViewKey::About => self.about_panel(cx).into_any_element(),
         }
     }
 }
@@ -5622,28 +5776,126 @@ fn about_conflict_review_body_key(sync_status: &DesktopAppSyncStatusSummary) -> 
     }
 }
 
-fn about_conflict_review_rows(sync_status: &DesktopAppSyncStatusSummary) -> Vec<LabelValueRow> {
-    let mut rows = vec![LabelValueRow::new(
-        app_shared_text(AppTextKey::MetadataSyncConflictCount),
-        sync_status
+fn about_manual_refresh_enabled(sync_status: &DesktopAppSyncStatusSummary) -> bool {
+    sync_status.is_enabled()
+        && !sync_status
             .projection
             .conflict_status
-            .unresolved_count
-            .to_string(),
-    )];
+            .has_blocking_conflicts()
+}
 
-    if sync_status.projection.conflict_status.blocking_count > 0 {
-        rows.push(LabelValueRow::new(
-            app_shared_text(AppTextKey::MetadataSyncBlockingConflictCount),
-            sync_status
-                .projection
-                .conflict_status
-                .blocking_count
-                .to_string(),
+fn about_conflict_action_specs(
+    conflict: &SyncConflict,
+) -> Vec<(AppTextKey, SyncConflictResolutionStatus)> {
+    if !conflict.is_unresolved() {
+        return Vec::new();
+    }
+
+    let mut actions = vec![
+        (
+            AppTextKey::SettingsAboutConflictAcceptLocalAction,
+            SyncConflictResolutionStatus::AcceptedLocal,
+        ),
+        (
+            AppTextKey::SettingsAboutConflictAcceptRemoteAction,
+            SyncConflictResolutionStatus::AcceptedRemote,
+        ),
+    ];
+    if !matches!(
+        conflict.severity,
+        radroots_studio_app_sync::SyncConflictSeverity::Blocking
+    ) {
+        actions.push((
+            AppTextKey::SettingsAboutConflictDismissAction,
+            SyncConflictResolutionStatus::Dismissed,
         ));
     }
 
-    rows
+    actions
+}
+
+fn about_conflict_detail_rows(conflict: &DesktopAppSyncConflictSummary) -> Vec<LabelValueRow> {
+    vec![
+        LabelValueRow::new(
+            app_shared_text(AppTextKey::MetadataSyncConflictAggregate),
+            about_conflict_aggregate_text(&conflict.conflict),
+        ),
+        LabelValueRow::new(
+            app_shared_text(AppTextKey::MetadataSyncConflictKind),
+            about_conflict_kind_text(&conflict.conflict),
+        ),
+        LabelValueRow::new(
+            app_shared_text(AppTextKey::MetadataSyncConflictSeverity),
+            about_conflict_severity_text(&conflict.conflict),
+        ),
+        LabelValueRow::new(
+            app_shared_text(AppTextKey::MetadataSyncConflictDetectedAt),
+            conflict.conflict.detected_at.clone(),
+        ),
+        LabelValueRow::new(
+            app_shared_text(AppTextKey::MetadataSyncConflictResolution),
+            about_conflict_resolution_text(&conflict.conflict),
+        ),
+    ]
+}
+
+fn about_conflict_aggregate_text(conflict: &SyncConflict) -> String {
+    let (aggregate_kind_key, aggregate_id) = match &conflict.aggregate {
+        SyncAggregateRef::Farm(farm_id) => (
+            AppTextKey::ValueSyncConflictAggregateFarm,
+            farm_id.to_string(),
+        ),
+        SyncAggregateRef::FulfillmentWindow(fulfillment_window_id) => (
+            AppTextKey::ValueSyncConflictAggregateFulfillmentWindow,
+            fulfillment_window_id.to_string(),
+        ),
+        SyncAggregateRef::Product(product_id) => (
+            AppTextKey::ValueSyncConflictAggregateProduct,
+            product_id.to_string(),
+        ),
+        SyncAggregateRef::Order(order_id) => (
+            AppTextKey::ValueSyncConflictAggregateOrder,
+            order_id.to_string(),
+        ),
+    };
+
+    format!("{}: {}", app_text(aggregate_kind_key), aggregate_id)
+}
+
+fn about_conflict_kind_text(conflict: &SyncConflict) -> String {
+    app_text(match conflict.kind {
+        SyncConflictKind::RevisionMismatch => AppTextKey::ValueSyncConflictKindRevisionMismatch,
+        SyncConflictKind::RemoteDelete => AppTextKey::ValueSyncConflictKindRemoteDelete,
+        SyncConflictKind::RemoteValidationReject => {
+            AppTextKey::ValueSyncConflictKindRemoteValidationReject
+        }
+    })
+}
+
+fn about_conflict_severity_text(conflict: &SyncConflict) -> String {
+    match conflict.severity {
+        SyncConflictSeverity::ReviewRequired => {
+            app_text(AppTextKey::ValueSyncConflictSeverityReviewRequired)
+        }
+        SyncConflictSeverity::Blocking => app_text(AppTextKey::ValueSyncConflictSeverityBlocking),
+    }
+}
+
+fn about_conflict_resolution_text(conflict: &SyncConflict) -> String {
+    match conflict.resolution {
+        SyncConflictResolutionStatus::Unresolved => {
+            app_text(AppTextKey::ValueSyncConflictResolutionUnresolved)
+        }
+        SyncConflictResolutionStatus::AcceptedLocal => {
+            app_text(AppTextKey::ValueSyncConflictResolutionAcceptedLocal)
+        }
+        SyncConflictResolutionStatus::AcceptedRemote => {
+            app_text(AppTextKey::ValueSyncConflictResolutionAcceptedRemote)
+        }
+        SyncConflictResolutionStatus::Dismissed => {
+            app_text(AppTextKey::ValueSyncConflictResolutionDismissed)
+        }
+    }
 }
 
 fn about_runtime_rows(runtime: &DesktopAppRuntimeSummary) -> Vec<LabelValueRow> {
@@ -9717,7 +9969,8 @@ mod tests {
         AppTextKey, FarmerHomeFarmState, HomeStage, SETTINGS_FARM_PANEL_SECTIONS,
         SETTINGS_NAVIGATION_ORDER, SETTINGS_OPERATIONS_PANEL_SECTIONS,
         SettingsInventorySectionSpec, SettingsPanelViewKey, StartupHomeSurface,
-        StartupSignerConnectState, about_conflict_review_body_key, about_conflict_review_rows,
+        StartupSignerConnectState, about_conflict_action_specs, about_conflict_aggregate_text,
+        about_conflict_detail_rows, about_conflict_review_body_key, about_manual_refresh_enabled,
         about_runtime_rows, about_status_rows, app_text, buyer_orders_status_key,
         farm_setup_onboarding_card_spec, farmer_home_farm_state, farmer_pack_day_available,
         home_content_scroll_id, home_saved_farm, home_sidebar_navigation_sections, home_stage,
@@ -9728,7 +9981,8 @@ mod tests {
         startup_signer_status_spec, startup_signer_transport_failure_requires_notice,
     };
     use crate::runtime::{
-        DesktopAppRuntimeMetadataSummary, DesktopAppRuntimeSummary, DesktopAppSyncStatusSummary,
+        DesktopAppRuntimeMetadataSummary, DesktopAppRuntimeSummary, DesktopAppSyncConflictSummary,
+        DesktopAppSyncStatusSummary,
     };
     use radroots_studio_app_models::SettingsAccountProjection;
     use radroots_studio_app_models::{
@@ -9746,7 +10000,8 @@ mod tests {
         AppShellProjection, FarmWorkspaceReadinessProjection, FarmWorkspaceStatus, HomeRoute,
     };
     use radroots_studio_app_sync::{
-        AppSyncProjection, AppSyncRunStatus, SyncCheckpointStatus, SyncConflictStatus,
+        AppSyncProjection, AppSyncRunStatus, SyncAggregateRef, SyncCheckpointStatus, SyncConflict,
+        SyncConflictKind, SyncConflictResolutionStatus, SyncConflictSeverity, SyncConflictStatus,
     };
     use radroots_identity::RadrootsIdentity;
     use std::path::PathBuf;
@@ -10268,7 +10523,33 @@ mod tests {
     }
 
     #[test]
-    fn about_conflict_review_helpers_surface_blocking_attention_truthfully() {
+    fn about_conflict_review_helpers_surface_actions_and_details_truthfully() {
+        let blocking_conflict = DesktopAppSyncConflictSummary {
+            conflict_id: String::new(),
+            conflict: SyncConflict {
+                aggregate: SyncAggregateRef::Farm(FarmId::new()),
+                kind: SyncConflictKind::RevisionMismatch,
+                severity: SyncConflictSeverity::Blocking,
+                resolution: SyncConflictResolutionStatus::Unresolved,
+                local_payload_json: String::new(),
+                remote_payload_json: Some(String::new()),
+                detected_at: "0".to_owned(),
+                resolved_at: None,
+            },
+        };
+        let review_conflict = DesktopAppSyncConflictSummary {
+            conflict_id: String::new(),
+            conflict: SyncConflict {
+                aggregate: SyncAggregateRef::Order(radroots_studio_app_models::OrderId::new()),
+                kind: SyncConflictKind::RemoteValidationReject,
+                severity: SyncConflictSeverity::ReviewRequired,
+                resolution: SyncConflictResolutionStatus::Unresolved,
+                local_payload_json: String::new(),
+                remote_payload_json: Some(String::new()),
+                detected_at: "0".to_owned(),
+                resolved_at: None,
+            },
+        };
         let mut runtime = summary(
             HomeRoute::Today,
             TodayAgendaProjection::default(),
@@ -10285,21 +10566,58 @@ mod tests {
                 },
             },
             pending_write_count: 3,
+            conflicts: vec![blocking_conflict.clone(), review_conflict.clone()],
         };
-
-        let rows = about_conflict_review_rows(&runtime.sync_status);
 
         assert_eq!(
             about_conflict_review_body_key(&runtime.sync_status),
             AppTextKey::SettingsAboutConflictReviewBlocking
         );
+        assert!(!about_manual_refresh_enabled(&runtime.sync_status));
+
+        let blocking_actions = about_conflict_action_specs(&blocking_conflict.conflict);
+        assert_eq!(
+            blocking_actions,
+            vec![
+                (
+                    AppTextKey::SettingsAboutConflictAcceptLocalAction,
+                    SyncConflictResolutionStatus::AcceptedLocal,
+                ),
+                (
+                    AppTextKey::SettingsAboutConflictAcceptRemoteAction,
+                    SyncConflictResolutionStatus::AcceptedRemote,
+                ),
+            ]
+        );
+
+        let review_actions = about_conflict_action_specs(&review_conflict.conflict);
+        assert_eq!(
+            review_actions,
+            vec![
+                (
+                    AppTextKey::SettingsAboutConflictAcceptLocalAction,
+                    SyncConflictResolutionStatus::AcceptedLocal,
+                ),
+                (
+                    AppTextKey::SettingsAboutConflictAcceptRemoteAction,
+                    SyncConflictResolutionStatus::AcceptedRemote,
+                ),
+                (
+                    AppTextKey::SettingsAboutConflictDismissAction,
+                    SyncConflictResolutionStatus::Dismissed,
+                ),
+            ]
+        );
+
+        let rows = about_conflict_detail_rows(&blocking_conflict);
+        assert_eq!(rows.len(), 5);
         assert!(rows.iter().any(|row| {
-            row.label == app_text(AppTextKey::MetadataSyncConflictCount)
-                && row.value == 2.to_string()
+            row.label == app_text(AppTextKey::MetadataSyncConflictAggregate)
+                && row.value == about_conflict_aggregate_text(&blocking_conflict.conflict)
         }));
         assert!(rows.iter().any(|row| {
-            row.label == app_text(AppTextKey::MetadataSyncBlockingConflictCount)
-                && row.value == 1.to_string()
+            row.label == app_text(AppTextKey::MetadataSyncConflictResolution)
+                && row.value == app_text(AppTextKey::ValueSyncConflictResolutionUnresolved)
         }));
     }
 
