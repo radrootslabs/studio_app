@@ -52,7 +52,7 @@ use radroots_studio_app_ui::{
     utility_title_row,
 };
 use radroots_nostr::prelude::RadrootsNostrClient;
-use std::time::Duration;
+use std::{sync::Arc, time::Duration};
 use tracing::error;
 
 use crate::runtime::{DesktopAppRuntime, DesktopAppRuntimeSummary};
@@ -5266,6 +5266,67 @@ fn home_sidebar(
     let selected_section = selected_farmer_section(runtime);
     let workspace_available = farmer_products_available(runtime);
     let pack_day_available = farmer_pack_day_available(runtime);
+    let navigation_sections =
+        home_sidebar_navigation_sections(selected_section, workspace_available, pack_day_available);
+    let on_select_today = Arc::new(on_select_today);
+    let on_select_products = Arc::new(on_select_products);
+    let on_select_orders = Arc::new(on_select_orders);
+    let on_select_pack_day = Arc::new(on_select_pack_day);
+    let mut navigation_elements = Vec::with_capacity(navigation_sections.len());
+    for section in navigation_sections {
+        let element = match section {
+            FarmerSection::Today => {
+                let on_click = Arc::clone(&on_select_today);
+                home_sidebar_nav_button(
+                    "home-nav-today",
+                    AppTextKey::HomeNavToday,
+                    true,
+                    selected_section == FarmerSection::Today,
+                    move |event, window, app| on_click(event, window, app),
+                    cx,
+                )
+                .into_any_element()
+            }
+            FarmerSection::Products => {
+                let on_click = Arc::clone(&on_select_products);
+                home_sidebar_nav_button(
+                    "home-nav-products",
+                    AppTextKey::HomeNavProducts,
+                    true,
+                    selected_section == FarmerSection::Products,
+                    move |event, window, app| on_click(event, window, app),
+                    cx,
+                )
+                .into_any_element()
+            }
+            FarmerSection::Orders => {
+                let on_click = Arc::clone(&on_select_orders);
+                home_sidebar_nav_button(
+                    "home-nav-orders",
+                    AppTextKey::HomeNavOrders,
+                    true,
+                    selected_section == FarmerSection::Orders,
+                    move |event, window, app| on_click(event, window, app),
+                    cx,
+                )
+                .into_any_element()
+            }
+            FarmerSection::PackDay => {
+                let on_click = Arc::clone(&on_select_pack_day);
+                home_sidebar_nav_button(
+                    "home-nav-pack-day",
+                    AppTextKey::PackDayTitle,
+                    true,
+                    selected_section == FarmerSection::PackDay,
+                    move |event, window, app| on_click(event, window, app),
+                    cx,
+                )
+                .into_any_element()
+            }
+            FarmerSection::Farm => unreachable!("farm is not a sidebar destination"),
+        };
+        navigation_elements.push(element);
+    }
 
     app_surface_sidebar(
         div()
@@ -5282,38 +5343,7 @@ fn home_sidebar(
                     .flex_col()
                     .justify_start()
                     .gap(px(APP_UI_THEME.shells.home_stack_gap_px))
-                    .child(home_sidebar_nav_button(
-                        "home-nav-today",
-                        AppTextKey::HomeNavToday,
-                        selected_section == FarmerSection::Today,
-                        on_select_today,
-                        cx,
-                    ))
-                    .when(workspace_available, |this| {
-                        this.child(home_sidebar_nav_button(
-                            "home-nav-products",
-                            AppTextKey::HomeNavProducts,
-                            selected_section == FarmerSection::Products,
-                            on_select_products,
-                            cx,
-                        ))
-                        .child(home_sidebar_nav_button(
-                            "home-nav-orders",
-                            AppTextKey::HomeNavOrders,
-                            selected_section == FarmerSection::Orders,
-                            on_select_orders,
-                            cx,
-                        ))
-                    })
-                    .when(pack_day_available, |this| {
-                        this.child(home_sidebar_nav_button(
-                            "home-nav-pack-day",
-                            AppTextKey::PackDayTitle,
-                            selected_section == FarmerSection::PackDay,
-                            on_select_pack_day,
-                            cx,
-                        ))
-                    }),
+                    .children(navigation_elements),
             )
             .child(
                 div().child(div().when_some(home_saved_farm(runtime), |this, farm| {
@@ -5347,6 +5377,31 @@ fn holding_home_sidebar(runtime: &DesktopAppRuntimeSummary) -> impl IntoElement 
     )
 }
 
+fn home_sidebar_navigation_sections(
+    selected_section: FarmerSection,
+    workspace_available: bool,
+    pack_day_available: bool,
+) -> Vec<FarmerSection> {
+    let mut sections = vec![FarmerSection::Today];
+    if workspace_available {
+        sections.push(FarmerSection::Products);
+        sections.push(FarmerSection::Orders);
+    }
+    if pack_day_available {
+        sections.push(FarmerSection::PackDay);
+    }
+
+    if let Some(selected_index) = sections
+        .iter()
+        .position(|section| *section == selected_section)
+    {
+        let selected = sections.remove(selected_index);
+        sections.insert(0, selected);
+    }
+
+    sections
+}
+
 fn selected_farmer_section(runtime: &DesktopAppRuntimeSummary) -> FarmerSection {
     match runtime.shell_projection.selected_section {
         ShellSection::Farmer(section) => section,
@@ -5378,10 +5433,15 @@ fn home_content_scroll_id(section: FarmerSection) -> &'static str {
 fn home_sidebar_nav_button(
     id: &'static str,
     key: AppTextKey,
+    is_available: bool,
     is_active: bool,
     on_click: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
     cx: &App,
 ) -> impl IntoElement {
+    if !is_available {
+        return div().id(id).into_any_element();
+    }
+
     if is_active {
         div()
             .id(id)
@@ -7581,7 +7641,7 @@ mod tests {
         SETTINGS_OPERATIONS_PANEL_SECTIONS, SettingsInventorySectionSpec, SettingsPanelViewKey,
         StartupHomeSurface, StartupSignerConnectState, farm_setup_onboarding_card_spec,
         farmer_home_farm_state, farmer_pack_day_available, home_content_scroll_id, home_saved_farm,
-        home_window_launch_size_px, home_window_minimum_size_px,
+        home_sidebar_navigation_sections, home_window_launch_size_px, home_window_minimum_size_px,
         parse_optional_product_editor_stock_input, parse_product_editor_price_input,
         product_display_title, startup_home_surface, startup_signer_preview_summary,
         startup_signer_preview_summary_for_connect_state, startup_signer_source_input_is_editable,
@@ -7856,6 +7916,43 @@ mod tests {
         };
 
         assert!(farmer_pack_day_available(&runtime));
+    }
+
+    #[test]
+    fn sidebar_navigation_keeps_the_active_destination_first() {
+        assert_eq!(
+            home_sidebar_navigation_sections(FarmerSection::Today, true, false),
+            vec![
+                FarmerSection::Today,
+                FarmerSection::Products,
+                FarmerSection::Orders,
+            ]
+        );
+        assert_eq!(
+            home_sidebar_navigation_sections(FarmerSection::Products, true, false),
+            vec![
+                FarmerSection::Products,
+                FarmerSection::Today,
+                FarmerSection::Orders,
+            ]
+        );
+        assert_eq!(
+            home_sidebar_navigation_sections(FarmerSection::Orders, true, false),
+            vec![
+                FarmerSection::Orders,
+                FarmerSection::Today,
+                FarmerSection::Products,
+            ]
+        );
+        assert_eq!(
+            home_sidebar_navigation_sections(FarmerSection::PackDay, true, true),
+            vec![
+                FarmerSection::PackDay,
+                FarmerSection::Today,
+                FarmerSection::Products,
+                FarmerSection::Orders,
+            ]
+        );
     }
 
     #[test]
