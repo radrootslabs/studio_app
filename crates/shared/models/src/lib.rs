@@ -579,6 +579,31 @@ pub struct LoggedOutStartupProjection {
     pub signer_entry: StartupSignerEntryProjection,
 }
 
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "kind", content = "account_id", rename_all = "snake_case")]
+pub enum BuyerContext {
+    #[default]
+    Guest,
+    Account(String),
+}
+
+impl BuyerContext {
+    pub const fn guest() -> Self {
+        Self::Guest
+    }
+
+    pub fn account(account_id: impl Into<String>) -> Self {
+        Self::Account(account_id.into())
+    }
+
+    pub fn storage_key(&self) -> String {
+        match self {
+            Self::Guest => "guest".to_owned(),
+            Self::Account(account_id) => format!("account:{account_id}"),
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum PersonalEntryState {
@@ -725,6 +750,13 @@ impl AppIdentityProjection {
                 .map(PersonalEntryProjection::signed_in)
                 .unwrap_or_else(PersonalEntryProjection::guest),
         }
+    }
+
+    pub fn buyer_context(&self) -> BuyerContext {
+        self.selected_account
+            .as_ref()
+            .map(|account| BuyerContext::account(account.account.account_id.clone()))
+            .unwrap_or_default()
     }
 }
 
@@ -1873,7 +1905,7 @@ mod tests {
         ActivityEventId, AppActivityContext, AppActivityEvent, AppActivityKind,
         AppIdentityProjection, AppStartupGate, BlackoutPeriodId, BuyerCartLineProjection,
         BuyerCartProjection, BuyerCheckoutDraft, BuyerCheckoutProjection,
-        BuyerCheckoutSummaryProjection, BuyerListingRow, BuyerListingsProjection,
+        BuyerCheckoutSummaryProjection, BuyerContext, BuyerListingRow, BuyerListingsProjection,
         BuyerOrderDetailProjection, BuyerOrderStatus, BuyerOrdersListRow, BuyerOrdersProjection,
         FarmId, FarmOrderMethod, FarmReadinessBlocker, FarmRulesProjection, FarmRulesReadiness,
         FarmSetupBlocker, FarmSetupDraft, FarmSetupProjection, FarmSetupReadiness,
@@ -2160,6 +2192,35 @@ mod tests {
         assert_eq!(
             blocked_identity.personal_entry(),
             PersonalEntryProjection::blocked(Some(selected_account))
+        );
+    }
+
+    #[test]
+    fn buyer_context_defaults_to_guest_and_tracks_selected_account() {
+        let selected_account = SelectedAccountProjection::new(
+            AccountSummary {
+                account_id: "acct_buyer".to_owned(),
+                npub: "npub1buyer".to_owned(),
+                label: Some("Buyer".to_owned()),
+                custody: AccountCustody::LocalManaged,
+            },
+            SelectedSurfaceProjection::new(ActiveSurface::Personal),
+            FarmerActivationProjection::inactive(),
+        );
+        let ready_identity = AppIdentityProjection::ready(Vec::new(), selected_account);
+
+        assert_eq!(BuyerContext::guest().storage_key(), "guest");
+        assert_eq!(
+            BuyerContext::account("acct_buyer").storage_key(),
+            "account:acct_buyer"
+        );
+        assert_eq!(
+            AppIdentityProjection::missing().buyer_context(),
+            BuyerContext::Guest
+        );
+        assert_eq!(
+            ready_identity.buyer_context(),
+            BuyerContext::account("acct_buyer")
         );
     }
 

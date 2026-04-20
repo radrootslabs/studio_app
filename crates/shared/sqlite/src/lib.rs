@@ -2,6 +2,7 @@
 
 mod activation;
 mod activity;
+mod buyer;
 mod error;
 mod farm_rules;
 mod farm_setup;
@@ -10,14 +11,17 @@ mod orders;
 mod products;
 mod today;
 
-use std::{fs, path::PathBuf, time::Duration};
+use std::{collections::BTreeSet, fs, path::PathBuf, time::Duration};
 
 use radroots_studio_app_models::{
     AccountSurfaceActivationProjection, AppActivityContext, AppActivityEvent, AppActivityKind,
-    FarmId, FarmRulesProjection, FarmSetupProjection, FarmSummary, OrderDetailProjection, OrderId,
-    OrdersListProjection, OrdersScreenQueryState, PackDayProjection, PackDayScreenQueryState,
-    ProductEditorDraft, ProductId, ProductPublishBlocker, ProductsFilter, ProductsListProjection,
-    ProductsSort, TodayAgendaProjection,
+    BuyerCartProjection, BuyerCheckoutDraft, BuyerCheckoutProjection, BuyerContext,
+    BuyerListingsProjection, BuyerOrderDetailProjection, BuyerOrdersProjection,
+    BuyerProductDetailProjection, FarmId, FarmOrderMethod, FarmRulesProjection,
+    FarmSetupProjection, FarmSummary, OrderDetailProjection, OrderId, OrdersListProjection,
+    OrdersScreenQueryState, PackDayProjection, PackDayScreenQueryState, ProductEditorDraft,
+    ProductId, ProductPublishBlocker, ProductsFilter, ProductsListProjection, ProductsSort,
+    TodayAgendaProjection,
 };
 use rusqlite::Connection;
 
@@ -25,6 +29,7 @@ pub use activation::AppActivationRepository;
 pub use activity::{
     APP_ACTIVITY_CONTEXT_LIMIT, APP_ACTIVITY_RETENTION_LIMIT, AppActivityRepository,
 };
+pub use buyer::AppBuyerRepository;
 pub use error::AppSqliteError;
 pub use farm_rules::{AppFarmRulesRepository, derive_farm_rules_readiness};
 pub use farm_setup::AppFarmSetupRepository;
@@ -85,6 +90,10 @@ impl AppSqliteStore {
 
     pub fn farm_rules_repository(&self) -> AppFarmRulesRepository<'_> {
         AppFarmRulesRepository::new(&self.connection)
+    }
+
+    pub fn buyer_repository(&self) -> AppBuyerRepository<'_> {
+        AppBuyerRepository::new(&self.connection)
     }
 
     pub fn products_repository(&self) -> AppProductsRepository<'_> {
@@ -261,6 +270,78 @@ impl AppSqliteStore {
         self.products_repository()
             .evaluate_product_publish_blockers(product_id)
     }
+
+    pub fn load_buyer_listings(
+        &self,
+        search_query: &str,
+        fulfillment_methods: &BTreeSet<FarmOrderMethod>,
+    ) -> Result<BuyerListingsProjection, AppSqliteError> {
+        self.buyer_repository()
+            .load_buyer_listings(search_query, fulfillment_methods)
+    }
+
+    pub fn load_buyer_product_detail(
+        &self,
+        product_id: ProductId,
+    ) -> Result<Option<BuyerProductDetailProjection>, AppSqliteError> {
+        self.buyer_repository()
+            .load_buyer_product_detail(product_id)
+    }
+
+    pub fn load_buyer_cart(
+        &self,
+        context: &BuyerContext,
+    ) -> Result<BuyerCartProjection, AppSqliteError> {
+        self.buyer_repository().load_buyer_cart(context)
+    }
+
+    pub fn replace_buyer_cart(
+        &self,
+        context: &BuyerContext,
+        cart: &BuyerCartProjection,
+    ) -> Result<(), AppSqliteError> {
+        self.buyer_repository().replace_buyer_cart(context, cart)
+    }
+
+    pub fn clear_buyer_cart(&self, context: &BuyerContext) -> Result<(), AppSqliteError> {
+        self.buyer_repository().clear_buyer_cart(context)
+    }
+
+    pub fn load_buyer_checkout(
+        &self,
+        context: &BuyerContext,
+    ) -> Result<BuyerCheckoutProjection, AppSqliteError> {
+        self.buyer_repository().load_buyer_checkout(context)
+    }
+
+    pub fn save_buyer_checkout_draft(
+        &self,
+        context: &BuyerContext,
+        draft: &BuyerCheckoutDraft,
+    ) -> Result<(), AppSqliteError> {
+        self.buyer_repository()
+            .save_buyer_checkout_draft(context, draft)
+    }
+
+    pub fn place_buyer_order(&self, context: &BuyerContext) -> Result<OrderId, AppSqliteError> {
+        self.buyer_repository().place_buyer_order(context)
+    }
+
+    pub fn load_buyer_orders(
+        &self,
+        context: &BuyerContext,
+    ) -> Result<BuyerOrdersProjection, AppSqliteError> {
+        self.buyer_repository().load_buyer_orders(context)
+    }
+
+    pub fn load_buyer_order_detail(
+        &self,
+        context: &BuyerContext,
+        order_id: OrderId,
+    ) -> Result<Option<BuyerOrderDetailProjection>, AppSqliteError> {
+        self.buyer_repository()
+            .load_buyer_order_detail(context, order_id)
+    }
 }
 
 fn open_connection(target: &DatabaseTarget) -> Result<Connection, AppSqliteError> {
@@ -396,6 +477,8 @@ mod tests {
         assert!(table_exists(connection, "pickup_locations"));
         assert!(table_exists(connection, "blackout_periods"));
         assert!(table_exists(connection, "order_lines"));
+        assert!(table_exists(connection, "buyer_carts"));
+        assert!(table_exists(connection, "buyer_cart_lines"));
         assert!(column_exists(connection, "farms", "timezone"));
         assert!(column_exists(connection, "farms", "currency_code"));
         assert!(column_exists(
@@ -416,6 +499,13 @@ mod tests {
             "quantity_unit_label"
         ));
         assert!(column_exists(connection, "order_lines", "quantity_display"));
+        assert!(column_exists(connection, "buyer_carts", "buyer_email"));
+        assert!(column_exists(connection, "buyer_carts", "buyer_phone"));
+        assert!(column_exists(connection, "buyer_carts", "buyer_order_note"));
+        assert!(column_exists(connection, "orders", "buyer_context_key"));
+        assert!(column_exists(connection, "orders", "buyer_email"));
+        assert!(column_exists(connection, "orders", "buyer_phone"));
+        assert!(column_exists(connection, "orders", "buyer_order_note"));
         assert_eq!(row_count(connection, "sync_checkpoints"), 1);
 
         drop(store);
