@@ -952,6 +952,33 @@ impl HomeView {
         }
     }
 
+    fn open_orders_fulfillment_window(
+        &mut self,
+        fulfillment_window_id: FulfillmentWindowId,
+        cx: &mut Context<Self>,
+    ) {
+        match self
+            .runtime
+            .open_orders_fulfillment_window(fulfillment_window_id)
+        {
+            Ok(true) => {
+                self.products_stock_editor = None;
+                self.product_editor_form = None;
+                cx.notify();
+            }
+            Ok(false) => {}
+            Err(runtime_error) => {
+                error!(
+                    target: "orders",
+                    event = "orders.route_failed",
+                    error = %runtime_error,
+                    fulfillment_window_id = %fulfillment_window_id,
+                    "failed to route into orders view"
+                );
+            }
+        }
+    }
+
     fn open_pack_day(
         &mut self,
         fulfillment_window_id: Option<FulfillmentWindowId>,
@@ -964,6 +991,33 @@ impl HomeView {
                 cx.notify();
             }
             Ok(false) => {}
+            Err(runtime_error) => {
+                error!(
+                    target: "pack_day",
+                    event = "pack_day.route_failed",
+                    error = %runtime_error,
+                    "failed to route into pack day view"
+                );
+            }
+        }
+    }
+
+    fn open_today_next_window(
+        &mut self,
+        fulfillment_window_id: Option<FulfillmentWindowId>,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(fulfillment_window_id) = fulfillment_window_id else {
+            return;
+        };
+
+        match self.runtime.open_pack_day(Some(fulfillment_window_id)) {
+            Ok(true) => {
+                self.products_stock_editor = None;
+                self.product_editor_form = None;
+                cx.notify();
+            }
+            Ok(false) => self.open_orders_fulfillment_window(fulfillment_window_id, cx),
             Err(runtime_error) => {
                 error!(
                     target: "pack_day",
@@ -1358,6 +1412,262 @@ impl HomeView {
         cx.notify();
     }
 
+    fn render_today_content(
+        &mut self,
+        runtime: &DesktopAppRuntimeSummary,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let projection = &runtime.today_projection;
+        let home_status = home_status_presentation(runtime);
+        let setup_onboarding = farm_setup_onboarding_card_spec(runtime.home_route);
+        let farm_state = farmer_home_farm_state(runtime);
+        let next_fulfillment_window_id = projection
+            .next_fulfillment_window
+            .as_ref()
+            .map(|window| window.fulfillment_window_id);
+        let mut sections = Vec::<AnyElement>::new();
+
+        if let Some(summary) = projection.summary.as_ref() {
+            sections.push(home_summary_card(summary).into_any_element());
+        }
+
+        if let Some(issue) = runtime.startup_issue.as_ref() {
+            sections.push(
+                home_card(
+                    app_shared_text(AppTextKey::MetadataStartupIssue),
+                    home_body_text(issue.clone()),
+                )
+                .into_any_element(),
+            );
+        }
+
+        if let Some(farm_setup_form) = self.farm_setup_form.as_ref() {
+            sections.push(
+                home_farm_setup_form_card(
+                    farm_setup_form,
+                    cx.listener(|this, checked: &bool, _, cx| {
+                        this.toggle_farm_order_method(FarmOrderMethod::Pickup, *checked, cx)
+                    }),
+                    cx.listener(|this, checked: &bool, _, cx| {
+                        this.toggle_farm_order_method(FarmOrderMethod::Delivery, *checked, cx)
+                    }),
+                    cx.listener(|this, checked: &bool, _, cx| {
+                        this.toggle_farm_order_method(FarmOrderMethod::Shipping, *checked, cx)
+                    }),
+                    cx.listener(|this, _, _, cx| this.finish_farm_setup(cx)),
+                    cx,
+                )
+                .into_any_element(),
+            );
+        } else if let Some(spec) = setup_onboarding {
+            sections.push(
+                home_farm_setup_onboarding_card(
+                    spec,
+                    cx.listener(|this, _, window, cx| this.open_farm_setup(window, cx)),
+                    cx,
+                )
+                .into_any_element(),
+            );
+        } else if projection.needs_setup() {
+            sections.push(
+                home_setup_card(
+                    projection,
+                    matches!(farm_state, FarmerHomeFarmState::IncompleteFarm).then_some(
+                        action_button_primary(
+                            "home-farm-setup-continue",
+                            app_shared_text(AppTextKey::HomeFarmSetupContinueAction),
+                            cx.listener(|this, _, window, cx| this.open_farm_setup(window, cx)),
+                            cx,
+                        )
+                        .into_any_element(),
+                    ),
+                )
+                .into_any_element(),
+            );
+        }
+
+        if let Some(saved_farm_summary_card) = home_saved_farm_summary_card(runtime) {
+            sections.push(saved_farm_summary_card);
+        }
+
+        if let Some(next_window) = projection.next_fulfillment_window.as_ref() {
+            sections.push(
+                home_next_fulfillment_window_card(
+                    next_window,
+                    Some(
+                        action_button_compact(
+                            "home-today-open-pack-day",
+                            app_shared_text(AppTextKey::HomeTodayOpenInPackDayAction),
+                            cx.listener(move |this, _, _, cx| {
+                                this.open_today_next_window(next_fulfillment_window_id, cx)
+                            }),
+                            cx,
+                        )
+                        .into_any_element(),
+                    ),
+                )
+                .into_any_element(),
+            );
+        }
+
+        if !projection.orders_needing_action.is_empty() {
+            sections.push(
+                home_list_card(
+                    AppTextKey::HomeTodayOrdersNeedingAction,
+                    projection
+                        .orders_needing_action
+                        .iter()
+                        .enumerate()
+                        .map(|(index, order)| {
+                            home_order_row(
+                                index,
+                                order,
+                                cx.listener({
+                                    let order_id = order.order_id;
+                                    move |this, _, _, cx| this.open_order_detail(order_id, cx)
+                                }),
+                                cx,
+                            )
+                        })
+                        .collect::<Vec<_>>(),
+                    Some(
+                        action_button_compact(
+                            "home-today-open-orders",
+                            app_shared_text(AppTextKey::HomeTodayOpenInOrdersAction),
+                            cx.listener(|this, _, _, cx| this.open_orders(cx)),
+                            cx,
+                        )
+                        .into_any_element(),
+                    ),
+                )
+                .into_any_element(),
+            );
+        }
+
+        if !projection.low_stock_products.is_empty() {
+            sections.push(
+                home_list_card(
+                    AppTextKey::HomeTodayLowStock,
+                    projection
+                        .low_stock_products
+                        .iter()
+                        .map(home_low_stock_row)
+                        .collect::<Vec<_>>(),
+                    Some(
+                        action_button_compact(
+                            "home-today-open-products-low-stock",
+                            app_shared_text(AppTextKey::HomeTodayOpenInProductsAction),
+                            cx.listener(|this, _, _, cx| {
+                                this.open_products_filter(ProductsFilter::NeedAttention, cx)
+                            }),
+                            cx,
+                        )
+                        .into_any_element(),
+                    ),
+                )
+                .into_any_element(),
+            );
+        }
+
+        if !projection.draft_products.is_empty() {
+            sections.push(
+                home_list_card(
+                    AppTextKey::HomeTodayDraftProducts,
+                    projection
+                        .draft_products
+                        .iter()
+                        .map(home_draft_row)
+                        .collect::<Vec<_>>(),
+                    Some(
+                        action_button_compact(
+                            "home-today-open-products-drafts",
+                            app_shared_text(AppTextKey::HomeTodayOpenInProductsAction),
+                            cx.listener(|this, _, _, cx| {
+                                this.open_products_filter(ProductsFilter::Drafts, cx)
+                            }),
+                            cx,
+                        )
+                        .into_any_element(),
+                    ),
+                )
+                .into_any_element(),
+            );
+        }
+
+        if runtime.startup_issue.is_none() && runtime.startup_gate == AppStartupGate::SetupRequired
+        {
+            sections.push(
+                home_empty_state_card(
+                    AppTextKey::HomeTodayEmptySetupTitle,
+                    AppTextKey::HomeTodayEmptySetupBody,
+                )
+                .into_any_element(),
+            );
+        } else if runtime.startup_issue.is_none()
+            && farm_state == FarmerHomeFarmState::NoFarm
+            && setup_onboarding.is_none()
+        {
+            sections.push(
+                home_empty_state_card(
+                    AppTextKey::HomeTodayEmptyNoFarmTitle,
+                    AppTextKey::HomeTodayEmptyNoFarmBody,
+                )
+                .into_any_element(),
+            );
+        } else if runtime.startup_issue.is_none()
+            && farm_state == FarmerHomeFarmState::ConfiguredFarm
+            && !projection.needs_setup()
+            && projection.next_fulfillment_window.is_none()
+            && !projection.has_attention_items()
+        {
+            sections.push(
+                home_empty_state_card(
+                    AppTextKey::HomeTodayEmptyQuietTitle,
+                    AppTextKey::HomeTodayEmptyQuietBody,
+                )
+                .into_any_element(),
+            );
+        }
+
+        div()
+            .w_full()
+            .max_w(px(APP_UI_THEME.shells.home_card_max_width_px))
+            .mx_auto()
+            .flex()
+            .flex_col()
+            .gap(px(APP_UI_THEME.shells.home_stack_gap_px))
+            .child(
+                div()
+                    .w_full()
+                    .flex()
+                    .flex_col()
+                    .gap(px(4.0))
+                    .child(
+                        div()
+                            .text_size(px(APP_UI_THEME.foundation.typography.body_text_px * 2.0))
+                            .font_weight(gpui::FontWeight::BOLD)
+                            .text_color(rgb(APP_UI_THEME.foundation.text.primary))
+                            .child(app_shared_text(AppTextKey::HomeTodayTitle)),
+                    )
+                    .child(
+                        div()
+                            .text_size(px(APP_UI_THEME.foundation.typography.body_text_px))
+                            .font_weight(gpui::FontWeight::MEDIUM)
+                            .line_height(relative(1.2))
+                            .text_color(rgb(APP_UI_THEME.foundation.text.primary))
+                            .when_some(home_saved_farm(runtime), |this, farm| {
+                                this.child(farm.display_name.clone())
+                            })
+                            .when(home_saved_farm(runtime).is_none(), |this| {
+                                this.child(app_shared_text(home_status.label_key))
+                            }),
+                    )
+                    .child(home_status_row(&home_status)),
+            )
+            .children(sections)
+            .into_any_element()
+    }
+
     fn render_farmer_workspace(
         &mut self,
         runtime: &DesktopAppRuntimeSummary,
@@ -1378,35 +1688,7 @@ impl HomeView {
             | FarmerSection::Products
             | FarmerSection::Orders
             | FarmerSection::PackDay
-            | FarmerSection::Farm => home_today_content(
-                runtime,
-                self.farm_setup_form.as_ref().map(|form| {
-                    home_farm_setup_form_card(
-                        form,
-                        cx.listener(|this, checked: &bool, _, cx| {
-                            this.toggle_farm_order_method(FarmOrderMethod::Pickup, *checked, cx)
-                        }),
-                        cx.listener(|this, checked: &bool, _, cx| {
-                            this.toggle_farm_order_method(FarmOrderMethod::Delivery, *checked, cx)
-                        }),
-                        cx.listener(|this, checked: &bool, _, cx| {
-                            this.toggle_farm_order_method(FarmOrderMethod::Shipping, *checked, cx)
-                        }),
-                        cx.listener(|this, _, _, cx| this.finish_farm_setup(cx)),
-                        cx,
-                    )
-                    .into_any_element()
-                }),
-                cx.listener(|this, _, window, cx| this.open_farm_setup(window, cx)),
-                cx.listener(|this, _, window, cx| this.open_farm_setup(window, cx)),
-                cx.listener(|this, _, _, cx| this.open_orders(cx)),
-                cx.listener(|this, _, _, cx| {
-                    this.open_products_filter(ProductsFilter::NeedAttention, cx)
-                }),
-                cx.listener(|this, _, _, cx| this.open_products_filter(ProductsFilter::Drafts, cx)),
-                cx,
-            )
-            .into_any_element(),
+            | FarmerSection::Farm => self.render_today_content(runtime, cx),
         };
 
         app_split_shell(
@@ -5065,209 +5347,6 @@ fn holding_home_sidebar(runtime: &DesktopAppRuntimeSummary) -> impl IntoElement 
     )
 }
 
-fn home_today_content(
-    runtime: &DesktopAppRuntimeSummary,
-    farm_setup_form: Option<AnyElement>,
-    on_start_farm_setup: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
-    on_continue_farm_setup: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
-    on_open_orders: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
-    on_open_low_stock_products: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
-    on_open_draft_products: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
-    cx: &App,
-) -> impl IntoElement {
-    let projection = &runtime.today_projection;
-    let home_status = home_status_presentation(runtime);
-    let setup_onboarding = farm_setup_onboarding_card_spec(runtime.home_route);
-    let farm_state = farmer_home_farm_state(runtime);
-    let mut sections = Vec::<AnyElement>::new();
-
-    if let Some(summary) = projection.summary.as_ref() {
-        sections.push(home_summary_card(summary).into_any_element());
-    }
-
-    if let Some(issue) = runtime.startup_issue.as_ref() {
-        sections.push(
-            home_card(
-                app_shared_text(AppTextKey::MetadataStartupIssue),
-                home_body_text(issue.clone()),
-            )
-            .into_any_element(),
-        );
-    }
-
-    if let Some(farm_setup_form) = farm_setup_form {
-        sections.push(farm_setup_form);
-    } else if let Some(spec) = setup_onboarding {
-        sections.push(
-            home_farm_setup_onboarding_card(spec, on_start_farm_setup, cx).into_any_element(),
-        );
-    } else if projection.needs_setup() {
-        sections.push(
-            home_setup_card(
-                projection,
-                matches!(farm_state, FarmerHomeFarmState::IncompleteFarm).then_some(
-                    action_button_primary(
-                        "home-farm-setup-continue",
-                        app_shared_text(AppTextKey::HomeFarmSetupContinueAction),
-                        on_continue_farm_setup,
-                        cx,
-                    )
-                    .into_any_element(),
-                ),
-            )
-            .into_any_element(),
-        );
-    }
-
-    if let Some(saved_farm_summary_card) = home_saved_farm_summary_card(runtime) {
-        sections.push(saved_farm_summary_card);
-    }
-
-    if let Some(next_window) = projection.next_fulfillment_window.as_ref() {
-        sections.push(home_next_fulfillment_window_card(next_window).into_any_element());
-    }
-
-    if !projection.orders_needing_action.is_empty() {
-        sections.push(
-            home_list_card(
-                AppTextKey::HomeTodayOrdersNeedingAction,
-                projection
-                    .orders_needing_action
-                    .iter()
-                    .map(home_order_row)
-                    .collect::<Vec<_>>(),
-                Some(
-                    action_button_compact(
-                        "home-today-open-orders",
-                        app_shared_text(AppTextKey::HomeTodayOpenInOrdersAction),
-                        on_open_orders,
-                        cx,
-                    )
-                    .into_any_element(),
-                ),
-            )
-            .into_any_element(),
-        );
-    }
-
-    if !projection.low_stock_products.is_empty() {
-        sections.push(
-            home_list_card(
-                AppTextKey::HomeTodayLowStock,
-                projection
-                    .low_stock_products
-                    .iter()
-                    .map(home_low_stock_row)
-                    .collect::<Vec<_>>(),
-                Some(
-                    action_button_compact(
-                        "home-today-open-products-low-stock",
-                        app_shared_text(AppTextKey::HomeTodayOpenInProductsAction),
-                        on_open_low_stock_products,
-                        cx,
-                    )
-                    .into_any_element(),
-                ),
-            )
-            .into_any_element(),
-        );
-    }
-
-    if !projection.draft_products.is_empty() {
-        sections.push(
-            home_list_card(
-                AppTextKey::HomeTodayDraftProducts,
-                projection
-                    .draft_products
-                    .iter()
-                    .map(home_draft_row)
-                    .collect::<Vec<_>>(),
-                Some(
-                    action_button_compact(
-                        "home-today-open-products-drafts",
-                        app_shared_text(AppTextKey::HomeTodayOpenInProductsAction),
-                        on_open_draft_products,
-                        cx,
-                    )
-                    .into_any_element(),
-                ),
-            )
-            .into_any_element(),
-        );
-    }
-
-    if runtime.startup_issue.is_none() && runtime.startup_gate == AppStartupGate::SetupRequired {
-        sections.push(
-            home_empty_state_card(
-                AppTextKey::HomeTodayEmptySetupTitle,
-                AppTextKey::HomeTodayEmptySetupBody,
-            )
-            .into_any_element(),
-        );
-    } else if runtime.startup_issue.is_none()
-        && farm_state == FarmerHomeFarmState::NoFarm
-        && setup_onboarding.is_none()
-    {
-        sections.push(
-            home_empty_state_card(
-                AppTextKey::HomeTodayEmptyNoFarmTitle,
-                AppTextKey::HomeTodayEmptyNoFarmBody,
-            )
-            .into_any_element(),
-        );
-    } else if runtime.startup_issue.is_none()
-        && farm_state == FarmerHomeFarmState::ConfiguredFarm
-        && !projection.needs_setup()
-        && projection.next_fulfillment_window.is_none()
-        && !projection.has_attention_items()
-    {
-        sections.push(
-            home_empty_state_card(
-                AppTextKey::HomeTodayEmptyQuietTitle,
-                AppTextKey::HomeTodayEmptyQuietBody,
-            )
-            .into_any_element(),
-        );
-    }
-
-    div()
-        .w_full()
-        .max_w(px(APP_UI_THEME.shells.home_card_max_width_px))
-        .mx_auto()
-        .flex()
-        .flex_col()
-        .gap(px(APP_UI_THEME.shells.home_stack_gap_px))
-        .child(
-            div()
-                .w_full()
-                .flex()
-                .flex_col()
-                .gap(px(4.0))
-                .child(
-                    div()
-                        .text_size(px(APP_UI_THEME.foundation.typography.body_text_px * 2.0))
-                        .font_weight(gpui::FontWeight::BOLD)
-                        .text_color(rgb(APP_UI_THEME.foundation.text.primary))
-                        .child(app_shared_text(AppTextKey::HomeTodayTitle)),
-                )
-                .child(
-                    div()
-                        .text_size(px(APP_UI_THEME.foundation.typography.body_text_px))
-                        .font_weight(gpui::FontWeight::MEDIUM)
-                        .line_height(relative(1.2))
-                        .text_color(rgb(APP_UI_THEME.foundation.text.primary))
-                        .when_some(home_saved_farm(runtime), |this, farm| {
-                            this.child(farm.display_name.clone())
-                        })
-                        .when(home_saved_farm(runtime).is_none(), |this| {
-                            this.child(app_shared_text(home_status.label_key))
-                        }),
-                )
-                .child(home_status_row(&home_status)),
-        )
-        .children(sections)
-}
-
 fn selected_farmer_section(runtime: &DesktopAppRuntimeSummary) -> FarmerSection {
     match runtime.shell_projection.selected_section {
         ShellSection::Farmer(section) => section,
@@ -7149,19 +7228,28 @@ fn home_setup_card(
     )
 }
 
-fn home_next_fulfillment_window_card(next_window: &FulfillmentWindowSummary) -> impl IntoElement {
+fn home_next_fulfillment_window_card(
+    next_window: &FulfillmentWindowSummary,
+    action: Option<AnyElement>,
+) -> impl IntoElement {
     home_card(
         app_shared_text(AppTextKey::HomeTodayNextFulfillmentWindow),
-        label_value_list(vec![
-            LabelValueRow::new(
-                app_shared_text(AppTextKey::HomeTodayWindowStartsLabel),
-                next_window.starts_at.clone(),
-            ),
-            LabelValueRow::new(
-                app_shared_text(AppTextKey::HomeTodayWindowEndsLabel),
-                next_window.ends_at.clone(),
-            ),
-        ]),
+        div()
+            .w_full()
+            .flex()
+            .flex_col()
+            .gap(px(APP_UI_THEME.shells.home_stack_gap_px))
+            .child(label_value_list(vec![
+                LabelValueRow::new(
+                    app_shared_text(AppTextKey::HomeTodayWindowStartsLabel),
+                    next_window.starts_at.clone(),
+                ),
+                LabelValueRow::new(
+                    app_shared_text(AppTextKey::HomeTodayWindowEndsLabel),
+                    next_window.ends_at.clone(),
+                ),
+            ]))
+            .when_some(action, |this, action| this.child(div().child(action))),
     )
 }
 
@@ -7216,34 +7304,26 @@ fn order_optional_text(value: Option<&str>) -> SharedString {
         .unwrap_or_else(|| app_shared_text(AppTextKey::ValueNone))
 }
 
-fn home_order_row(order: &OrderListRow) -> AnyElement {
+fn home_order_row(
+    index: usize,
+    order: &OrderListRow,
+    on_open: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+    cx: &App,
+) -> AnyElement {
     div()
         .w_full()
         .min_w_0()
         .flex()
         .items_center()
-        .justify_between()
         .gap(px(APP_UI_THEME.shells.home_stack_gap_px))
-        .child(
-            div()
-                .min_w_0()
-                .flex()
-                .flex_col()
-                .gap(px(2.0))
-                .child(
-                    div()
-                        .text_size(px(APP_UI_THEME.foundation.typography.body_text_px))
-                        .font_weight(gpui::FontWeight::SEMIBOLD)
-                        .text_color(rgb(APP_UI_THEME.foundation.text.primary))
-                        .child(order.order_number.clone()),
-                )
-                .child(
-                    div()
-                        .text_size(px(APP_UI_THEME.foundation.typography.utility_title_text_px))
-                        .text_color(rgb(APP_UI_THEME.foundation.text.secondary))
-                        .child(order.customer_display_name.clone()),
-                ),
-        )
+        .child(list_row_button(
+            ("home-today-order-open", index),
+            order.order_number.clone(),
+            Some(SharedString::from(order.customer_display_name.clone())),
+            false,
+            on_open,
+            cx,
+        ))
         .child(status_indicator(
             APP_UI_THEME.components.app_status_indicator.attention,
         ))

@@ -206,6 +206,14 @@ impl DesktopAppRuntime {
         self.lock_state_mut().open_orders()
     }
 
+    pub fn open_orders_fulfillment_window(
+        &self,
+        fulfillment_window_id: FulfillmentWindowId,
+    ) -> Result<bool, AppSqliteError> {
+        self.lock_state_mut()
+            .open_orders_fulfillment_window(fulfillment_window_id)
+    }
+
     pub fn open_order_detail(&self, order_id: OrderId) -> Result<bool, AppSqliteError> {
         self.lock_state_mut().open_order_detail(order_id)
     }
@@ -772,7 +780,25 @@ impl DesktopAppRuntimeState {
             return Ok(false);
         }
 
-        let query_changed = self.replace_orders_query(OrdersScreenQueryState::default())?;
+        self.open_orders_query(OrdersScreenQueryState::default())
+    }
+
+    fn open_orders_fulfillment_window(
+        &mut self,
+        fulfillment_window_id: FulfillmentWindowId,
+    ) -> Result<bool, AppSqliteError> {
+        if !self.has_saved_farm() {
+            return Ok(false);
+        }
+
+        self.open_orders_query(OrdersScreenQueryState {
+            filter: OrdersFilter::All,
+            fulfillment_window_id: Some(fulfillment_window_id),
+        })
+    }
+
+    fn open_orders_query(&mut self, query: OrdersScreenQueryState) -> Result<bool, AppSqliteError> {
+        let query_changed = self.replace_orders_query(query)?;
         let detail_changed = self
             .state_store
             .apply_in_memory(AppStateCommand::replace_order_detail(None));
@@ -2673,6 +2699,87 @@ mod tests {
             OrdersFilter::NeedsAction
         );
         assert_eq!(summary.orders_projection.list.rows.len(), 1);
+        assert!(summary.orders_projection.detail.is_none());
+    }
+
+    #[test]
+    fn runtime_open_orders_fulfillment_window_filters_the_queue_to_one_window() {
+        let runtime = memory_runtime();
+        let (_, farm_id) = provision_ready_farmer_account(&runtime);
+        let (fulfillment_window_id, order_id) = seed_order_workspace(&runtime, farm_id);
+        let other_fulfillment_window_id = FulfillmentWindowId::new();
+        let other_order_id = OrderId::new();
+        let sql = format!(
+            "insert into fulfillment_windows (
+                id,
+                farm_id,
+                starts_at,
+                ends_at,
+                capacity_limit,
+                created_at,
+                updated_at,
+                pickup_location_id,
+                label,
+                order_cutoff_at
+             )
+             select
+                '{other_fulfillment_window_id}',
+                farm_id,
+                '2099-04-19T16:00:00Z',
+                '2099-04-19T18:00:00Z',
+                capacity_limit,
+                '2099-04-19T16:00:00Z',
+                '2099-04-19T16:00:00Z',
+                pickup_location_id,
+                'Saturday pickup',
+                '2099-04-18T18:00:00Z'
+             from fulfillment_windows
+             where id = '{fulfillment_window_id}' and farm_id = '{farm_id}';
+             insert into orders (
+                id,
+                farm_id,
+                fulfillment_window_id,
+                order_number,
+                customer_display_name,
+                status,
+                updated_at
+             ) values (
+                '{other_order_id}',
+                '{farm_id}',
+                '{other_fulfillment_window_id}',
+                'R-101',
+                'Robin',
+                'scheduled',
+                '2026-04-17T11:00:00Z'
+             )"
+        );
+        runtime
+            .lock_state()
+            .sqlite_store
+            .as_ref()
+            .expect("sqlite store")
+            .connection()
+            .execute_batch(&sql)
+            .expect("second orders workspace should seed");
+
+        assert!(
+            runtime
+                .open_orders_fulfillment_window(fulfillment_window_id)
+                .expect("orders window follow-on should route")
+        );
+        let summary = runtime.summary();
+
+        assert_eq!(
+            summary.shell_projection.selected_section,
+            ShellSection::Farmer(FarmerSection::Orders)
+        );
+        assert_eq!(summary.orders_projection.query.filter, OrdersFilter::All);
+        assert_eq!(
+            summary.orders_projection.query.fulfillment_window_id,
+            Some(fulfillment_window_id)
+        );
+        assert_eq!(summary.orders_projection.list.rows.len(), 1);
+        assert_eq!(summary.orders_projection.list.rows[0].order_id, order_id);
         assert!(summary.orders_projection.detail.is_none());
     }
 

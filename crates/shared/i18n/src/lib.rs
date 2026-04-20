@@ -172,7 +172,11 @@ mod tests {
         assert_eq!(app_text(AppTextKey::HomeNavOrders), "Orders");
         assert_eq!(
             app_text(AppTextKey::HomeTodayOpenInOrdersAction),
-            "Open in Orders"
+            "View all"
+        );
+        assert_eq!(
+            app_text(AppTextKey::HomeTodayOpenInPackDayAction),
+            "Open pack day"
         );
         assert_eq!(app_text(AppTextKey::OrdersTitle), "Orders");
         assert_eq!(

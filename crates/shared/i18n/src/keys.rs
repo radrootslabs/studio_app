@@ -35,6 +35,7 @@ define_app_text_keys! {
     HomeTodayLowStock => "home.today.low_stock",
     HomeTodayDraftProducts => "home.today.draft_products",
     HomeTodayOpenInOrdersAction => "home.today.open_in_orders.action",
+    HomeTodayOpenInPackDayAction => "home.today.open_in_pack_day.action",
     HomeTodayOpenInProductsAction => "home.today.open_in_products.action",
     HomeTodaySetupChecklist => "home.today.setup_checklist",
     HomeTodayNextFulfillmentWindow => "home.today.next_fulfillment_window",
