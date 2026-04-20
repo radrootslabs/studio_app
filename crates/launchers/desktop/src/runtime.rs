@@ -28,8 +28,9 @@ use radroots_studio_app_state::{
     BuyerSearchScreenProjection, BuyerSearchScreenQueryState, FarmSetupFlowStage,
     FarmWorkspaceReadinessProjection, HomeRoute, InMemoryAppStateRepository,
     OrdersScreenProjection, PackDayScreenProjection, PersonalWorkspaceProjection,
-    ProductsScreenProjection, ProductsScreenQueryState,
+    ProductsScreenProjection, ProductsScreenQueryState, derive_sync_projection,
 };
+use radroots_studio_app_sync::AppSyncProjection;
 use radroots_nostr_accounts::prelude::RadrootsNostrAccountsManager;
 use thiserror::Error;
 use tracing::error;
@@ -65,6 +66,16 @@ impl DesktopAppRuntime {
 
     pub fn summary(&self) -> DesktopAppRuntimeSummary {
         let state = self.lock_state();
+        let sync_status = DesktopAppSyncStatusSummary {
+            account_id: state
+                .state_store
+                .identity_projection()
+                .selected_account
+                .as_ref()
+                .map(|account| account.account.account_id.clone()),
+            projection: state.state_store.sync_projection().clone(),
+            pending_write_count: state.selected_account_pending_sync_write_count,
+        };
 
         DesktopAppRuntimeSummary {
             shell_projection: state.state_store.shell_projection().clone(),
@@ -79,6 +90,7 @@ impl DesktopAppRuntime {
             products_projection: state.state_store.products_projection().clone(),
             orders_projection: state.state_store.orders_projection().clone(),
             pack_day_projection: state.state_store.pack_day_projection().clone(),
+            sync_status,
             startup_issue: state.startup_issue.clone(),
         }
     }
@@ -491,6 +503,19 @@ impl DesktopAppRuntime {
     }
 }
 
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct DesktopAppSyncStatusSummary {
+    pub account_id: Option<String>,
+    pub projection: AppSyncProjection,
+    pub pending_write_count: usize,
+}
+
+impl DesktopAppSyncStatusSummary {
+    pub const fn is_enabled(&self) -> bool {
+        self.account_id.is_some()
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct DesktopAppRuntimeSummary {
     pub shell_projection: AppShellProjection,
@@ -505,6 +530,7 @@ pub struct DesktopAppRuntimeSummary {
     pub products_projection: ProductsScreenProjection,
     pub orders_projection: OrdersScreenProjection,
     pub pack_day_projection: PackDayScreenProjection,
+    pub sync_status: DesktopAppSyncStatusSummary,
     pub startup_issue: Option<String>,
 }
 
@@ -528,6 +554,12 @@ struct DesktopSelectedAccountContext {
     pack_day_projection: PackDayProjection,
 }
 
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+struct DesktopSelectedAccountSyncContext {
+    projection: AppSyncProjection,
+    pending_write_count: usize,
+}
+
 struct DesktopAppRuntimeState {
     state_store: AppStateStore<InMemoryAppStateRepository>,
     default_nostr_relay_url: String,
@@ -535,6 +567,7 @@ struct DesktopAppRuntimeState {
     remote_signer_paths: Option<DesktopRemoteSignerPaths>,
     accounts_manager: Option<RadrootsNostrAccountsManager>,
     sqlite_store: Option<AppSqliteStore>,
+    selected_account_pending_sync_write_count: usize,
     startup_issue: Option<String>,
 }
 
@@ -558,6 +591,10 @@ impl fmt::Debug for DesktopAppRuntimeState {
             .field(
                 "sqlite_store",
                 &self.sqlite_store.as_ref().map(|_| "available"),
+            )
+            .field(
+                "selected_account_pending_sync_write_count",
+                &self.selected_account_pending_sync_write_count,
             )
             .field("startup_issue", &self.startup_issue)
             .finish()
@@ -606,6 +643,8 @@ impl DesktopAppRuntimeState {
                 .map(|detail| detail.order_id),
             state_store.pack_day_projection().query.clone(),
         )?;
+        let selected_account_sync_context =
+            load_selected_account_sync_context(&sqlite_store, &identity_projection)?;
         let _ = state_store.apply_in_memory(AppStateCommand::replace_identity_projection(
             identity_projection.clone(),
         ));
@@ -638,6 +677,10 @@ impl DesktopAppRuntimeState {
         let _ = state_store.apply_in_memory(AppStateCommand::replace_pack_day_projection(
             selected_account_context.pack_day_projection,
         ));
+        let pending_sync_write_count = selected_account_sync_context.pending_write_count;
+        let _ = state_store.apply_in_memory(AppStateCommand::replace_sync_projection(
+            selected_account_sync_context.projection,
+        ));
 
         Ok(Self {
             state_store,
@@ -646,6 +689,7 @@ impl DesktopAppRuntimeState {
             remote_signer_paths: Some(remote_signer_paths),
             accounts_manager: accounts_bootstrap.accounts_manager,
             sqlite_store: Some(sqlite_store),
+            selected_account_pending_sync_write_count: pending_sync_write_count,
             startup_issue: None,
         })
     }
@@ -658,6 +702,7 @@ impl DesktopAppRuntimeState {
             remote_signer_paths: None,
             accounts_manager: None,
             sqlite_store: None,
+            selected_account_pending_sync_write_count: 0,
             startup_issue: Some(error.to_string()),
         }
     }
@@ -1546,13 +1591,16 @@ impl DesktopAppRuntimeState {
             self.selected_order_detail_id(),
             self.state_store.pack_day_projection().query.clone(),
         )?;
+        let selected_account_sync_context =
+            load_selected_account_sync_context(self.sqlite_store()?, &projection)?;
         let identity_changed = self
             .state_store
             .apply_in_memory(AppStateCommand::replace_identity_projection(projection));
         let context_changed = self.apply_selected_account_context(&selected_account_context);
+        let sync_changed = self.apply_selected_account_sync_context(&selected_account_sync_context);
         let editor_changed = self.close_product_editor();
 
-        Ok(identity_changed || context_changed || editor_changed)
+        Ok(identity_changed || context_changed || sync_changed || editor_changed)
     }
 
     fn refresh_selected_account_context(
@@ -1626,6 +1674,39 @@ impl DesktopAppRuntimeState {
             || pack_day_changed
             || editor_changed
             || shell_changed
+    }
+
+    fn refresh_selected_account_sync_context(
+        &self,
+    ) -> Result<DesktopSelectedAccountSyncContext, AppSqliteError> {
+        let Some(sqlite_store) = self.sqlite_store.as_ref() else {
+            return Ok(DesktopSelectedAccountSyncContext::default());
+        };
+
+        load_selected_account_sync_context(sqlite_store, self.state_store.identity_projection())
+    }
+
+    fn apply_selected_account_sync_context(
+        &mut self,
+        context: &DesktopSelectedAccountSyncContext,
+    ) -> bool {
+        let projection_changed =
+            self.state_store
+                .apply_in_memory(AppStateCommand::replace_sync_projection(
+                    context.projection.clone(),
+                ));
+        let pending_changed =
+            self.selected_account_pending_sync_write_count != context.pending_write_count;
+
+        self.selected_account_pending_sync_write_count = context.pending_write_count;
+
+        projection_changed || pending_changed
+    }
+
+    fn refresh_selected_account_sync(&mut self) -> Result<bool, AppSqliteError> {
+        let context = self.refresh_selected_account_sync_context()?;
+
+        Ok(self.apply_selected_account_sync_context(&context))
     }
 
     fn selected_account_id(&self) -> Result<String, DesktopAppRuntimeFarmSetupError> {
@@ -2195,6 +2276,28 @@ fn load_selected_account_context(
     })
 }
 
+fn load_selected_account_sync_context(
+    sqlite_store: &AppSqliteStore,
+    identity_projection: &AppIdentityProjection,
+) -> Result<DesktopSelectedAccountSyncContext, AppSqliteError> {
+    let Some(selected_account) = identity_projection.selected_account.as_ref() else {
+        return Ok(DesktopSelectedAccountSyncContext::default());
+    };
+    let account_id = selected_account.account.account_id.as_str();
+    let checkpoint = sqlite_store.load_sync_checkpoint(account_id)?;
+    let conflicts = sqlite_store
+        .load_sync_conflicts(account_id)?
+        .into_iter()
+        .map(|stored| stored.conflict)
+        .collect::<Vec<_>>();
+    let pending_write_count = sqlite_store.load_pending_sync_operations(account_id)?.len();
+
+    Ok(DesktopSelectedAccountSyncContext {
+        projection: derive_sync_projection(&checkpoint, &conflicts),
+        pending_write_count,
+    })
+}
+
 fn personal_detail(
     projection: &PersonalWorkspaceProjection,
     section: PersonalSection,
@@ -2479,6 +2582,11 @@ mod tests {
         AppStateRepositoryError, AppStateStore, AppStateStoreError, HomeRoute,
         InMemoryAppStateRepository,
     };
+    use radroots_studio_app_sync::{
+        AppSyncRunStatus, PendingSyncOperation, SyncAggregateRef, SyncCheckpointStatus,
+        SyncConflict, SyncConflictKind, SyncConflictResolutionStatus, SyncConflictSeverity,
+        SyncOperationKind,
+    };
     use radroots_identity::RadrootsIdentity;
     use radroots_nostr_accounts::prelude::{
         RadrootsNostrAccountsManager, RadrootsNostrFileAccountStore,
@@ -2489,7 +2597,8 @@ mod tests {
 
     use super::{
         APP_DATABASE_FILE_NAME, DesktopAppRuntime, DesktopAppRuntimeActivityContextError,
-        DesktopAppRuntimeCommandError, DesktopAppRuntimeState, DesktopRemoteSignerPaths,
+        DesktopAppRuntimeCommandError, DesktopAppRuntimeState, DesktopAppSyncStatusSummary,
+        DesktopRemoteSignerPaths,
     };
 
     #[test]
@@ -2548,6 +2657,7 @@ mod tests {
                 AppSqliteStore::open(DatabaseTarget::InMemory)
                     .expect("in-memory sqlite store should open"),
             ),
+            selected_account_pending_sync_write_count: 0,
             startup_issue: None,
         });
         let cloned_runtime = runtime.clone();
@@ -2598,6 +2708,7 @@ mod tests {
                 AppSqliteStore::open(DatabaseTarget::InMemory)
                     .expect("in-memory sqlite store should open"),
             ),
+            selected_account_pending_sync_write_count: 0,
             startup_issue: None,
         });
         let cloned_runtime = runtime.clone();
@@ -2622,6 +2733,107 @@ mod tests {
     }
 
     #[test]
+    fn runtime_summary_keeps_sync_disabled_without_a_selected_account() {
+        let runtime = memory_runtime();
+        let summary = runtime.summary();
+
+        assert_eq!(summary.sync_status, DesktopAppSyncStatusSummary::default());
+        assert!(!summary.sync_status.is_enabled());
+    }
+
+    #[test]
+    fn runtime_summary_refreshes_selected_account_sync_status_from_sqlite() {
+        let (runtime, paths) = bootstrapped_runtime("selected_account_sync_status");
+        let (account_id, farm_id) = provision_ready_farmer_account(&runtime);
+
+        {
+            let state = runtime.lock_state();
+            let sqlite_store = state
+                .sqlite_store
+                .as_ref()
+                .expect("sqlite store should exist");
+
+            sqlite_store
+                .save_sync_checkpoint(
+                    &account_id,
+                    &SyncCheckpointStatus::current(
+                        None,
+                        "2026-04-20T19:00:00Z",
+                        Some("cursor-3".to_owned()),
+                    ),
+                )
+                .expect("sync checkpoint should save");
+            sqlite_store
+                .record_sync_conflict(
+                    &account_id,
+                    &SyncConflict {
+                        aggregate: SyncAggregateRef::Farm(farm_id),
+                        kind: SyncConflictKind::RevisionMismatch,
+                        severity: SyncConflictSeverity::Blocking,
+                        resolution: SyncConflictResolutionStatus::Unresolved,
+                        local_payload_json: "{\"farm\":\"local\"}".to_owned(),
+                        remote_payload_json: Some("{\"farm\":\"remote\"}".to_owned()),
+                        detected_at: "2026-04-20T19:01:00Z".to_owned(),
+                        resolved_at: None,
+                    },
+                )
+                .expect("sync conflict should save");
+            sqlite_store
+                .enqueue_pending_sync_operation(
+                    &account_id,
+                    &PendingSyncOperation {
+                        aggregate: SyncAggregateRef::Farm(farm_id),
+                        operation: SyncOperationKind::Upsert,
+                        payload_json: "{\"farm\":\"queued\"}".to_owned(),
+                        created_at: "2026-04-20T19:02:00Z".to_owned(),
+                        available_at: "2026-04-20T19:02:00Z".to_owned(),
+                        attempt_count: 0,
+                    },
+                )
+                .expect("pending sync operation should save");
+        }
+
+        assert!(
+            runtime
+                .lock_state_mut()
+                .refresh_selected_account_sync()
+                .expect("sync status should refresh")
+        );
+
+        let summary = runtime.summary();
+
+        assert_eq!(
+            summary.sync_status.account_id.as_deref(),
+            Some(account_id.as_str())
+        );
+        assert!(summary.sync_status.is_enabled());
+        assert_eq!(summary.sync_status.pending_write_count, 1);
+        assert_eq!(
+            summary.sync_status.projection.run_status,
+            AppSyncRunStatus::Conflicted
+        );
+        assert_eq!(
+            summary
+                .sync_status
+                .projection
+                .conflict_status
+                .unresolved_count,
+            1
+        );
+        assert_eq!(
+            summary
+                .sync_status
+                .projection
+                .checkpoint
+                .last_remote_cursor
+                .as_deref(),
+            Some("cursor-3")
+        );
+
+        cleanup_bootstrapped_runtime_paths(&paths);
+    }
+
+    #[test]
     fn clearing_startup_pending_remote_signer_session_is_idempotent_without_record() {
         let paths = temp_remote_signer_paths("clear_pending_none");
         let runtime = DesktopAppRuntime::from_state(DesktopAppRuntimeState {
@@ -2635,6 +2847,7 @@ mod tests {
                 AppSqliteStore::open(DatabaseTarget::InMemory)
                     .expect("in-memory sqlite store should open"),
             ),
+            selected_account_pending_sync_write_count: 0,
             startup_issue: None,
         });
 
@@ -2662,6 +2875,7 @@ mod tests {
                 AppSqliteStore::open(DatabaseTarget::InMemory)
                     .expect("in-memory sqlite store should open"),
             ),
+            selected_account_pending_sync_write_count: 0,
             startup_issue: None,
         });
 
@@ -2758,6 +2972,7 @@ mod tests {
                 AppSqliteStore::open(DatabaseTarget::InMemory)
                     .expect("in-memory sqlite store should open"),
             ),
+            selected_account_pending_sync_write_count: 0,
             startup_issue: None,
         });
         let cloned_runtime = runtime.clone();
@@ -2854,6 +3069,7 @@ mod tests {
                 AppSqliteStore::open(DatabaseTarget::InMemory)
                     .expect("in-memory sqlite store should open"),
             ),
+            selected_account_pending_sync_write_count: 0,
             startup_issue: None,
         });
 
@@ -2903,6 +3119,7 @@ mod tests {
                 AppSqliteStore::open(DatabaseTarget::InMemory)
                     .expect("in-memory sqlite store should open"),
             ),
+            selected_account_pending_sync_write_count: 0,
             startup_issue: None,
         });
 
@@ -2936,6 +3153,7 @@ mod tests {
                 AppSqliteStore::open(DatabaseTarget::InMemory)
                     .expect("in-memory sqlite store should open"),
             ),
+            selected_account_pending_sync_write_count: 0,
             startup_issue: None,
         });
 
@@ -2967,6 +3185,7 @@ mod tests {
                 AppSqliteStore::open(DatabaseTarget::InMemory)
                     .expect("in-memory sqlite store should open"),
             ),
+            selected_account_pending_sync_write_count: 0,
             startup_issue: None,
         });
 
@@ -5169,6 +5388,7 @@ mod tests {
                 AppSqliteStore::open(DatabaseTarget::InMemory)
                     .expect("in-memory sqlite store should open"),
             ),
+            selected_account_pending_sync_write_count: 0,
             startup_issue: None,
         });
 
@@ -5200,6 +5420,7 @@ mod tests {
                 AppSqliteStore::open(DatabaseTarget::InMemory)
                     .expect("in-memory sqlite store should open"),
             ),
+            selected_account_pending_sync_write_count: 0,
             startup_issue: None,
         })
     }
@@ -5229,6 +5450,7 @@ mod tests {
                     AppSqliteStore::open(DatabaseTarget::InMemory)
                         .expect("in-memory sqlite store should open"),
                 ),
+                selected_account_pending_sync_write_count: 0,
                 startup_issue: None,
             }),
             paths,

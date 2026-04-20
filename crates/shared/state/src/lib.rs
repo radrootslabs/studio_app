@@ -14,6 +14,10 @@ use radroots_studio_app_models::{
     ProductsSort, SelectedSurfaceProjection, SettingsAccountProjection, SettingsPreference,
     SettingsSection, ShellSection, TodayAgendaProjection, TodaySetupTask, TodaySetupTaskKind,
 };
+use radroots_studio_app_sync::{
+    AppSyncProjection, AppSyncRunStatus, SyncCheckpointState, SyncCheckpointStatus, SyncConflict,
+    SyncConflictStatus,
+};
 use thiserror::Error;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -439,6 +443,7 @@ pub struct AppProjection {
     pub shell: AppShellProjection,
     pub identity: AppIdentityProjection,
     pub startup_gate: AppStartupGate,
+    pub sync: AppSyncProjection,
     pub logged_out_startup: LoggedOutStartupProjection,
     pub personal: PersonalWorkspaceProjection,
     pub today: TodayAgendaProjection,
@@ -470,6 +475,7 @@ impl AppProjection {
             shell,
             identity,
             startup_gate: AppStartupGate::default(),
+            sync: AppSyncProjection::default(),
             logged_out_startup: LoggedOutStartupProjection::default(),
             personal: PersonalWorkspaceProjection::default(),
             today,
@@ -524,6 +530,7 @@ pub enum AppStateCommand {
     SetStartupSignerSourceInput(String),
     ResetLoggedOutStartup,
     ReplaceIdentityProjection(AppIdentityProjection),
+    ReplaceSyncProjection(AppSyncProjection),
     ReplacePersonalProjection(PersonalWorkspaceProjection),
     ReplaceFarmSetupProjection(FarmSetupProjection),
     ReplaceFarmRulesProjection(FarmRulesProjection),
@@ -583,6 +590,10 @@ impl AppStateCommand {
 
     pub fn replace_identity_projection(projection: AppIdentityProjection) -> Self {
         Self::ReplaceIdentityProjection(projection)
+    }
+
+    pub fn replace_sync_projection(projection: AppSyncProjection) -> Self {
+        Self::ReplaceSyncProjection(projection)
     }
 
     pub fn replace_personal_projection(projection: PersonalWorkspaceProjection) -> Self {
@@ -822,6 +833,10 @@ impl<R: AppStateRepository> AppStateStore<R> {
         self.projection.startup_gate
     }
 
+    pub fn sync_projection(&self) -> &AppSyncProjection {
+        &self.projection.sync
+    }
+
     pub fn repository(&self) -> &R {
         &self.repository
     }
@@ -844,6 +859,11 @@ impl<R: AppStateRepository> AppStateStore<R> {
                 Ok(true)
             }
             AppStateMutation::StartupChanged => {
+                self.projection = next_projection;
+
+                Ok(true)
+            }
+            AppStateMutation::SyncChanged => {
                 self.projection = next_projection;
 
                 Ok(true)
@@ -910,6 +930,11 @@ impl AppStateStore<InMemoryAppStateRepository> {
 
                 true
             }
+            AppStateMutation::SyncChanged => {
+                self.projection = next_projection;
+
+                true
+            }
             AppStateMutation::PersonalChanged => {
                 self.projection = next_projection;
 
@@ -945,6 +970,7 @@ enum AppStateMutation {
     ShellChanged,
     FarmSetupChanged,
     StartupChanged,
+    SyncChanged,
     PersonalChanged,
     TodayChanged,
     ProductsChanged,
@@ -1002,6 +1028,9 @@ fn apply_command(projection: &mut AppProjection, command: AppStateCommand) -> Ap
         }
         AppStateCommand::ReplaceIdentityProjection(identity_projection) => {
             projection.identity = identity_projection;
+        }
+        AppStateCommand::ReplaceSyncProjection(sync_projection) => {
+            projection.sync = sync_projection;
         }
         AppStateCommand::ReplacePersonalProjection(personal_projection) => {
             projection.personal = personal_projection;
@@ -1099,6 +1128,8 @@ fn apply_command(projection: &mut AppProjection, command: AppStateCommand) -> Ap
         AppStateMutation::FarmSetupChanged
     } else if projection.logged_out_startup != before.logged_out_startup {
         AppStateMutation::StartupChanged
+    } else if projection.sync != before.sync {
+        AppStateMutation::SyncChanged
     } else if projection.personal != before.personal {
         AppStateMutation::PersonalChanged
     } else if projection.products != before.products {
@@ -1355,6 +1386,36 @@ fn push_unique_product_blocker(
     }
 }
 
+pub fn derive_sync_projection(
+    checkpoint: &SyncCheckpointStatus,
+    conflicts: &[SyncConflict],
+) -> AppSyncProjection {
+    let conflict_status = SyncConflictStatus::from_conflicts(conflicts);
+
+    AppSyncProjection {
+        run_status: derive_sync_run_status(checkpoint, &conflict_status),
+        checkpoint: checkpoint.clone(),
+        conflict_status,
+    }
+}
+
+pub fn derive_sync_run_status(
+    checkpoint: &SyncCheckpointStatus,
+    conflict_status: &SyncConflictStatus,
+) -> AppSyncRunStatus {
+    if checkpoint.is_syncing() {
+        AppSyncRunStatus::Syncing
+    } else if checkpoint.is_failed() {
+        AppSyncRunStatus::Failed
+    } else if conflict_status.requires_attention() {
+        AppSyncRunStatus::Conflicted
+    } else if checkpoint.state == SyncCheckpointState::Current {
+        AppSyncRunStatus::Succeeded
+    } else {
+        AppSyncRunStatus::Idle
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
@@ -1362,6 +1423,7 @@ mod tests {
         AppStateRepositoryError, AppStateStore, AppStateStoreError, FarmSetupFlowStage, HomeRoute,
         InMemoryAppStateRepository, OrdersScreenProjection, PackDayScreenProjection,
         ProductEditorState, ProductsScreenProjection, ProductsScreenQueryState, SettingsPreference,
+        derive_sync_projection, derive_sync_run_status,
     };
     use radroots_studio_app_models::{
         AccountCustody, AccountSummary, ActiveSurface, AppIdentityProjection, AppStartupGate,
@@ -1374,6 +1436,11 @@ mod tests {
         PersonalSection, ProductEditorDraft, ProductId, ProductPublishBlocker, ProductsFilter,
         ProductsListProjection, ProductsSort, SelectedAccountProjection, SelectedSurfaceProjection,
         SettingsSection, ShellSection, TodayAgendaProjection, TodaySetupTask, TodaySetupTaskKind,
+    };
+    use radroots_studio_app_sync::{
+        AppSyncProjection, AppSyncRunStatus, SyncCheckpointState, SyncCheckpointStatus,
+        SyncConflict, SyncConflictKind, SyncConflictResolutionStatus, SyncConflictSeverity,
+        SyncConflictStatus,
     };
 
     struct FailingRepository;
@@ -1415,6 +1482,7 @@ mod tests {
         assert_eq!(projection.shell.selected_section, ShellSection::Home);
         assert_eq!(projection.identity, AppIdentityProjection::default());
         assert_eq!(projection.startup_gate, AppStartupGate::SetupRequired);
+        assert_eq!(projection.sync, AppSyncProjection::default());
         assert_eq!(
             projection.logged_out_startup,
             LoggedOutStartupProjection::default()
@@ -1461,6 +1529,7 @@ mod tests {
             SettingsSection::About
         );
         assert_eq!(store.startup_gate(), AppStartupGate::SetupRequired);
+        assert_eq!(store.sync_projection(), &AppSyncProjection::default());
         assert_eq!(
             store.logged_out_startup_projection(),
             &LoggedOutStartupProjection::default()
@@ -2277,6 +2346,108 @@ mod tests {
                 .account_id,
             "acct_surface"
         );
+    }
+
+    #[test]
+    fn replace_sync_projection_updates_in_memory_state_without_touching_repository() {
+        let mut store =
+            AppStateStore::load(FailingRepository).expect("failing repository should still load");
+        let checkpoint = SyncCheckpointStatus::current(
+            None,
+            "2026-04-20T19:00:00Z",
+            Some("cursor-1".to_owned()),
+        );
+        let sync_projection = derive_sync_projection(&checkpoint, &[]);
+
+        let changed = store.apply(AppStateCommand::replace_sync_projection(
+            sync_projection.clone(),
+        ));
+
+        assert_eq!(changed, Ok(true));
+        assert_eq!(store.sync_projection(), &sync_projection);
+    }
+
+    #[test]
+    fn derive_sync_run_status_prefers_syncing_failed_and_conflicted_states_explicitly() {
+        assert_eq!(
+            derive_sync_run_status(
+                &SyncCheckpointStatus::syncing("2026-04-20T18:00:00Z", None),
+                &SyncConflictStatus::clear(),
+            ),
+            AppSyncRunStatus::Syncing
+        );
+        assert_eq!(
+            derive_sync_run_status(
+                &SyncCheckpointStatus::failed(None, None, None, "relay unavailable"),
+                &SyncConflictStatus::clear(),
+            ),
+            AppSyncRunStatus::Failed
+        );
+        assert_eq!(
+            derive_sync_run_status(
+                &SyncCheckpointStatus {
+                    state: SyncCheckpointState::Current,
+                    ..SyncCheckpointStatus::never_synced()
+                },
+                &SyncConflictStatus {
+                    unresolved_count: 1,
+                    blocking_count: 1,
+                },
+            ),
+            AppSyncRunStatus::Conflicted
+        );
+        assert_eq!(
+            derive_sync_run_status(
+                &SyncCheckpointStatus::current(None, "2026-04-20T19:00:00Z", None),
+                &SyncConflictStatus::clear(),
+            ),
+            AppSyncRunStatus::Succeeded
+        );
+        assert_eq!(
+            derive_sync_run_status(
+                &SyncCheckpointStatus::never_synced(),
+                &SyncConflictStatus::clear(),
+            ),
+            AppSyncRunStatus::Idle
+        );
+    }
+
+    #[test]
+    fn derive_sync_projection_counts_unresolved_conflicts_from_typed_rows() {
+        let checkpoint = SyncCheckpointStatus::current(
+            None,
+            "2026-04-20T19:00:00Z",
+            Some("cursor-2".to_owned()),
+        );
+        let conflicts = vec![
+            SyncConflict {
+                aggregate: radroots_studio_app_sync::SyncAggregateRef::Farm(FarmId::new()),
+                kind: SyncConflictKind::RevisionMismatch,
+                severity: SyncConflictSeverity::Blocking,
+                resolution: SyncConflictResolutionStatus::Unresolved,
+                local_payload_json: "{\"farm\":\"local\"}".to_owned(),
+                remote_payload_json: Some("{\"farm\":\"remote\"}".to_owned()),
+                detected_at: "2026-04-20T19:01:00Z".to_owned(),
+                resolved_at: None,
+            },
+            SyncConflict {
+                aggregate: radroots_studio_app_sync::SyncAggregateRef::Farm(FarmId::new()),
+                kind: SyncConflictKind::RemoteValidationReject,
+                severity: SyncConflictSeverity::ReviewRequired,
+                resolution: SyncConflictResolutionStatus::AcceptedRemote,
+                local_payload_json: "{\"farm\":\"local-two\"}".to_owned(),
+                remote_payload_json: None,
+                detected_at: "2026-04-20T19:02:00Z".to_owned(),
+                resolved_at: Some("2026-04-20T19:03:00Z".to_owned()),
+            },
+        ];
+
+        let projection = derive_sync_projection(&checkpoint, &conflicts);
+
+        assert_eq!(projection.run_status, AppSyncRunStatus::Conflicted);
+        assert_eq!(projection.checkpoint, checkpoint);
+        assert_eq!(projection.conflict_status.unresolved_count, 1);
+        assert_eq!(projection.conflict_status.blocking_count, 1);
     }
 
     #[test]
