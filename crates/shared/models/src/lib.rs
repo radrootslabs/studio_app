@@ -239,6 +239,8 @@ typed_id!(ProductId);
 typed_id!(OrderId);
 typed_id!(FulfillmentWindowId);
 typed_id!(ActivityEventId);
+typed_id!(ReminderId);
+typed_id!(RecoveryRecordId);
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -1498,6 +1500,7 @@ pub struct OrderDetailProjection {
     pub pickup_location_label: Option<String>,
     pub items: Vec<OrderDetailItemRow>,
     pub primary_action: Option<OrderPrimaryAction>,
+    pub recovery: Option<OrderRecoveryProjection>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -1508,6 +1511,7 @@ pub struct BuyerOrdersListRow {
     pub farm_display_name: String,
     pub fulfillment_summary: String,
     pub status: BuyerOrderStatus,
+    pub repeat_demand: Option<RepeatDemandHandoffProjection>,
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
@@ -1531,6 +1535,7 @@ pub struct BuyerOrderDetailProjection {
     pub status: BuyerOrderStatus,
     pub items: Vec<OrderDetailItemRow>,
     pub order_note: Option<String>,
+    pub repeat_demand: Option<RepeatDemandHandoffProjection>,
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
@@ -1560,6 +1565,7 @@ pub struct PackDayRosterRow {
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
 pub struct PackDayProjection {
     pub fulfillment_window: Option<FulfillmentWindowSummary>,
+    pub reminders: ReminderFeedProjection,
     pub totals_by_product: Vec<PackDayProductTotalRow>,
     pub pack_list: Vec<PackDayPackListRow>,
     pub pickup_roster: Vec<PackDayRosterRow>,
@@ -1784,12 +1790,245 @@ pub struct TodaySummary {
     pub orders_needing_action: u32,
     pub low_stock_products: u32,
     pub draft_products: u32,
+    pub reminders_due_soon: u32,
+    pub recovery_actions_open: u32,
 }
 
 impl TodaySummary {
     pub const fn has_attention_items(&self) -> bool {
-        self.orders_needing_action > 0 || self.low_stock_products > 0 || self.draft_products > 0
+        self.orders_needing_action > 0
+            || self.low_stock_products > 0
+            || self.draft_products > 0
+            || self.reminders_due_soon > 0
+            || self.recovery_actions_open > 0
     }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ReminderSurface {
+    Today,
+    Orders,
+    PackDay,
+}
+
+impl ReminderSurface {
+    pub const fn storage_key(self) -> &'static str {
+        match self {
+            Self::Today => "today",
+            Self::Orders => "orders",
+            Self::PackDay => "pack_day",
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ReminderKind {
+    FulfillmentWindow,
+    OrderAction,
+    MissedPickupRecovery,
+    RefundRecovery,
+    SyncImpact,
+}
+
+impl ReminderKind {
+    pub const fn storage_key(self) -> &'static str {
+        match self {
+            Self::FulfillmentWindow => "fulfillment_window",
+            Self::OrderAction => "order_action",
+            Self::MissedPickupRecovery => "missed_pickup_recovery",
+            Self::RefundRecovery => "refund_recovery",
+            Self::SyncImpact => "sync_impact",
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ReminderUrgency {
+    Upcoming,
+    DueSoon,
+    Overdue,
+    Blocking,
+}
+
+impl ReminderUrgency {
+    pub const fn storage_key(self) -> &'static str {
+        match self {
+            Self::Upcoming => "upcoming",
+            Self::DueSoon => "due_soon",
+            Self::Overdue => "overdue",
+            Self::Blocking => "blocking",
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ReminderDeliveryState {
+    Scheduled,
+    Presented,
+    Acknowledged,
+    Resolved,
+}
+
+impl ReminderDeliveryState {
+    pub const fn storage_key(self) -> &'static str {
+        match self {
+            Self::Scheduled => "scheduled",
+            Self::Presented => "presented",
+            Self::Acknowledged => "acknowledged",
+            Self::Resolved => "resolved",
+        }
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct ReminderDeadlineProjection {
+    pub reminder_id: ReminderId,
+    pub farm_id: FarmId,
+    pub order_id: Option<OrderId>,
+    pub fulfillment_window_id: Option<FulfillmentWindowId>,
+    pub kind: ReminderKind,
+    pub surface: ReminderSurface,
+    pub urgency: ReminderUrgency,
+    pub title: String,
+    pub detail: String,
+    pub deadline_at: String,
+    pub action_label: Option<String>,
+    pub delivery_state: ReminderDeliveryState,
+}
+
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+pub struct ReminderFeedProjection {
+    pub items: Vec<ReminderDeadlineProjection>,
+}
+
+impl ReminderFeedProjection {
+    pub fn is_empty(&self) -> bool {
+        self.items.is_empty()
+    }
+
+    pub fn due_soon_count(&self) -> usize {
+        self.items
+            .iter()
+            .filter(|item| {
+                matches!(
+                    item.urgency,
+                    ReminderUrgency::DueSoon
+                        | ReminderUrgency::Overdue
+                        | ReminderUrgency::Blocking
+                )
+            })
+            .count()
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct ReminderLogEntryProjection {
+    pub reminder_id: ReminderId,
+    pub kind: ReminderKind,
+    pub title: String,
+    pub recorded_at: String,
+    pub delivery_state: ReminderDeliveryState,
+    pub detail: Option<String>,
+}
+
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+pub struct ReminderLogProjection {
+    pub entries: Vec<ReminderLogEntryProjection>,
+}
+
+impl ReminderLogProjection {
+    pub fn is_empty(&self) -> bool {
+        self.entries.is_empty()
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RecoveryKind {
+    MissedPickup,
+    RefundFollowUp,
+}
+
+impl RecoveryKind {
+    pub const fn storage_key(self) -> &'static str {
+        match self {
+            Self::MissedPickup => "missed_pickup",
+            Self::RefundFollowUp => "refund_follow_up",
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RecoveryState {
+    Open,
+    InReview,
+    Resolved,
+}
+
+impl RecoveryState {
+    pub const fn storage_key(self) -> &'static str {
+        match self {
+            Self::Open => "open",
+            Self::InReview => "in_review",
+            Self::Resolved => "resolved",
+        }
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct OrderRecoveryProjection {
+    pub recovery_record_id: RecoveryRecordId,
+    pub order_id: OrderId,
+    pub kind: RecoveryKind,
+    pub state: RecoveryState,
+    pub summary: String,
+    pub note: Option<String>,
+    pub last_updated_at: String,
+}
+
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+pub struct RecoveryQueueProjection {
+    pub items: Vec<OrderRecoveryProjection>,
+}
+
+impl RecoveryQueueProjection {
+    pub fn is_empty(&self) -> bool {
+        self.items.is_empty()
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RepeatDemandEligibility {
+    Eligible,
+    Partial,
+    Unavailable,
+}
+
+impl RepeatDemandEligibility {
+    pub const fn storage_key(self) -> &'static str {
+        match self {
+            Self::Eligible => "eligible",
+            Self::Partial => "partial",
+            Self::Unavailable => "unavailable",
+        }
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct RepeatDemandHandoffProjection {
+    pub order_id: OrderId,
+    pub farm_id: FarmId,
+    pub eligibility: RepeatDemandEligibility,
+    pub available_item_count: u32,
+    pub unavailable_item_count: u32,
+    pub action_label: String,
+    pub note: Option<String>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -1876,6 +2115,7 @@ pub struct TodaySetupTask {
 pub struct TodayAgendaProjection {
     pub farm: Option<FarmSummary>,
     pub summary: Option<TodaySummary>,
+    pub reminders: ReminderFeedProjection,
     pub orders_needing_action: Vec<OrderListRow>,
     pub low_stock_products: Vec<ProductListRow>,
     pub draft_products: Vec<ProductListRow>,
@@ -1888,6 +2128,7 @@ impl TodayAgendaProjection {
         self.summary
             .as_ref()
             .is_some_and(TodaySummary::has_attention_items)
+            || !self.reminders.is_empty()
             || !self.orders_needing_action.is_empty()
             || !self.low_stock_products.is_empty()
             || !self.draft_products.is_empty()
@@ -1912,17 +2153,22 @@ mod tests {
         FarmSetupSection, FarmTimingConflict, FarmTimingConflictKind, FarmerActivationProjection,
         FarmerSection, IdentityBlockedReason, IdentityReadiness, LoggedOutStartupPhase,
         LoggedOutStartupProjection, OrderDetailItemRow, OrderDetailProjection, OrderListRow,
-        OrderPrimaryAction, OrderStatus, OrdersFilter, OrdersListProjection, OrdersListRow,
-        OrdersListSummary, OrdersScreenQueryState, PackDayPackListRow, PackDayProductTotalRow,
-        PackDayProjection, PackDayRosterRow, PackDayScreenQueryState,
-        ParseStartupSignerSourceError, PersonalEntryProjection, PersonalEntryState,
-        PersonalSection, PickupLocationId, ProductAttentionState, ProductAvailabilityState,
-        ProductAvailabilitySummary, ProductEditorDraft, ProductListRow, ProductPricePresentation,
-        ProductPublishBlocker, ProductStatus, ProductStockState, ProductStockSummary,
-        ProductsFilter, ProductsListProjection, ProductsListRow, ProductsListSummary, ProductsSort,
+        OrderId, OrderPrimaryAction, OrderRecoveryProjection, OrderStatus, OrdersFilter,
+        OrdersListProjection, OrdersListRow, OrdersListSummary, OrdersScreenQueryState,
+        PackDayPackListRow, PackDayProductTotalRow, PackDayProjection, PackDayRosterRow,
+        PackDayScreenQueryState, ParseStartupSignerSourceError, PersonalEntryProjection,
+        PersonalEntryState, PersonalSection, PickupLocationId, ProductAttentionState,
+        ProductAvailabilityState, ProductAvailabilitySummary, ProductEditorDraft, ProductListRow,
+        ProductPricePresentation, ProductPublishBlocker, ProductStatus, ProductStockState,
+        ProductStockSummary, ProductsFilter, ProductsListProjection, ProductsListRow,
+        ProductsListSummary, ProductsSort, RecoveryKind, RecoveryQueueProjection, RecoveryRecordId,
+        RecoveryState, ReminderDeadlineProjection, ReminderDeliveryState, ReminderFeedProjection,
+        ReminderId, ReminderKind, ReminderLogEntryProjection, ReminderLogProjection,
+        ReminderSurface, ReminderUrgency, RepeatDemandEligibility, RepeatDemandHandoffProjection,
         SelectedAccountProjection, SelectedSurfaceProjection, SettingsPreference, SettingsSection,
         ShellSection, StartupSignerEntryProjection, StartupSignerSource, StartupSignerSourceKind,
         TodayAgendaProjection, TodaySetupTask, TodaySetupTaskKind, TodaySummary,
+        FulfillmentWindowId,
     };
     use std::{collections::BTreeSet, str::FromStr};
     use uuid::Uuid;
@@ -2553,6 +2799,7 @@ mod tests {
                 quantity_display: "2 bags".to_owned(),
             }],
             primary_action: Some(OrderPrimaryAction::MarkPacked),
+            recovery: None,
         };
         let pack_day = PackDayProjection {
             fulfillment_window: Some(super::FulfillmentWindowSummary {
@@ -2572,9 +2819,10 @@ mod tests {
             pickup_roster: vec![PackDayRosterRow {
                 order_id,
                 order_number: "R-1001".to_owned(),
-                customer_display_name: "Casey".to_owned(),
-            }],
-        };
+                    customer_display_name: "Casey".to_owned(),
+                }],
+                reminders: ReminderFeedProjection::default(),
+            };
 
         assert!(orders_list.summary.has_orders());
         assert!(!orders_list.is_empty());
@@ -2663,6 +2911,7 @@ mod tests {
                 farm_display_name: "Cedar Grove Farm".to_owned(),
                 fulfillment_summary: "Thursday pickup".to_owned(),
                 status: BuyerOrderStatus::Scheduled,
+                repeat_demand: None,
             }],
         };
         let order_detail = BuyerOrderDetailProjection {
@@ -2677,6 +2926,7 @@ mod tests {
                 quantity_display: "2 bags".to_owned(),
             }],
             order_note: Some("Leave by the cooler".to_owned()),
+            repeat_demand: None,
         };
 
         assert!(!listings.is_empty());
@@ -2728,16 +2978,94 @@ mod tests {
             orders_needing_action: 0,
             low_stock_products: 0,
             draft_products: 0,
+            reminders_due_soon: 0,
+            recovery_actions_open: 0,
         };
         let busy = TodaySummary {
             farm_id: FarmId::new(),
             orders_needing_action: 1,
             low_stock_products: 0,
             draft_products: 0,
+            reminders_due_soon: 0,
+            recovery_actions_open: 0,
         };
 
         assert!(!quiet.has_attention_items());
         assert!(busy.has_attention_items());
+    }
+
+    #[test]
+    fn reminder_recovery_and_repeat_demand_contracts_are_explicit() {
+        let farm_id = FarmId::new();
+        let order_id = OrderId::new();
+        let fulfillment_window_id = FulfillmentWindowId::new();
+        let reminder = ReminderDeadlineProjection {
+            reminder_id: ReminderId::new(),
+            farm_id,
+            order_id: Some(order_id),
+            fulfillment_window_id: Some(fulfillment_window_id),
+            kind: ReminderKind::FulfillmentWindow,
+            surface: ReminderSurface::Today,
+            urgency: ReminderUrgency::DueSoon,
+            title: "Pickup closes soon".to_owned(),
+            detail: "Pack before the pickup window opens.".to_owned(),
+            deadline_at: "2026-04-24T15:00:00Z".to_owned(),
+            action_label: Some("Open pack day".to_owned()),
+            delivery_state: ReminderDeliveryState::Scheduled,
+        };
+        let recovery = OrderRecoveryProjection {
+            recovery_record_id: RecoveryRecordId::new(),
+            order_id,
+            kind: RecoveryKind::MissedPickup,
+            state: RecoveryState::Open,
+            summary: "Customer missed pickup".to_owned(),
+            note: Some("Hold one extra day".to_owned()),
+            last_updated_at: "2026-04-24T18:00:00Z".to_owned(),
+        };
+        let repeat_demand = RepeatDemandHandoffProjection {
+            order_id,
+            farm_id,
+            eligibility: RepeatDemandEligibility::Partial,
+            available_item_count: 2,
+            unavailable_item_count: 1,
+            action_label: "Reorder available items".to_owned(),
+            note: Some("One prior item is no longer listed.".to_owned()),
+        };
+
+        let reminder_feed = ReminderFeedProjection {
+            items: vec![reminder.clone()],
+        };
+        let reminder_log = ReminderLogProjection {
+            entries: vec![ReminderLogEntryProjection {
+                reminder_id: reminder.reminder_id,
+                kind: reminder.kind,
+                title: reminder.title.clone(),
+                recorded_at: "2026-04-24T14:00:00Z".to_owned(),
+                delivery_state: ReminderDeliveryState::Presented,
+                detail: Some(reminder.detail.clone()),
+            }],
+        };
+        let recovery_queue = RecoveryQueueProjection {
+            items: vec![recovery.clone()],
+        };
+
+        assert_eq!(ReminderSurface::PackDay.storage_key(), "pack_day");
+        assert_eq!(ReminderKind::RefundRecovery.storage_key(), "refund_recovery");
+        assert_eq!(ReminderUrgency::DueSoon.storage_key(), "due_soon");
+        assert_eq!(
+            ReminderDeliveryState::Acknowledged.storage_key(),
+            "acknowledged"
+        );
+        assert_eq!(RecoveryKind::RefundFollowUp.storage_key(), "refund_follow_up");
+        assert_eq!(RecoveryState::InReview.storage_key(), "in_review");
+        assert_eq!(
+            RepeatDemandEligibility::Unavailable.storage_key(),
+            "unavailable"
+        );
+        assert_eq!(reminder_feed.due_soon_count(), 1);
+        assert!(!reminder_log.is_empty());
+        assert!(!recovery_queue.is_empty());
+        assert_eq!(repeat_demand.unavailable_item_count, 1);
     }
 
     #[test]

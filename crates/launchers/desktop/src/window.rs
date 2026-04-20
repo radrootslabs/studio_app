@@ -10280,6 +10280,7 @@ mod tests {
                 starts_at: String::new(),
                 ends_at: String::new(),
             }),
+            reminders: Default::default(),
             totals_by_product: Vec::new(),
             pack_list: Vec::new(),
             pickup_roster: Vec::new(),

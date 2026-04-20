@@ -109,6 +109,7 @@ impl<'a> AppOrdersRepository<'a> {
                         pickup_location_label: empty_string_to_none(pickup_location_label),
                         items,
                         primary_action: primary_action_for_status(status),
+                        recovery: None,
                     })
                 },
             )
@@ -140,6 +141,7 @@ impl<'a> AppOrdersRepository<'a> {
 
         Ok(PackDayProjection {
             fulfillment_window: Some(fulfillment_window),
+            reminders: Default::default(),
             totals_by_product,
             pack_list,
             pickup_roster,

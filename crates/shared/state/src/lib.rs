@@ -11,8 +11,9 @@ use radroots_studio_app_models::{
     LoggedOutStartupProjection, OrderDetailProjection, OrdersFilter, OrdersListProjection,
     OrdersScreenQueryState, PackDayProjection, PackDayScreenQueryState, PersonalEntryProjection,
     ProductEditorDraft, ProductId, ProductPublishBlocker, ProductsFilter, ProductsListProjection,
-    ProductsSort, SelectedSurfaceProjection, SettingsAccountProjection, SettingsPreference,
-    SettingsSection, ShellSection, TodayAgendaProjection, TodaySetupTask, TodaySetupTaskKind,
+    ProductsSort, RecoveryQueueProjection, ReminderFeedProjection, ReminderLogProjection,
+    SelectedSurfaceProjection, SettingsAccountProjection, SettingsPreference, SettingsSection,
+    ShellSection, TodayAgendaProjection, TodaySetupTask, TodaySetupTaskKind,
 };
 use radroots_studio_app_sync::{
     AppSyncProjection, AppSyncRunStatus, SyncCheckpointState, SyncCheckpointStatus, SyncConflict,
@@ -274,6 +275,8 @@ pub struct ProductsScreenProjection {
 pub struct OrdersScreenProjection {
     pub list: OrdersListProjection,
     pub query: OrdersScreenQueryState,
+    pub reminders: ReminderFeedProjection,
+    pub recovery_queue: RecoveryQueueProjection,
     pub detail: Option<OrderDetailProjection>,
 }
 
@@ -450,6 +453,7 @@ pub struct AppProjection {
     pub products: ProductsScreenProjection,
     pub orders: OrdersScreenProjection,
     pub pack_day: PackDayScreenProjection,
+    pub reminder_log: ReminderLogProjection,
     pub farm_setup: FarmSetupProjection,
     pub farm_rules: FarmRulesProjection,
     pub farm_readiness: FarmWorkspaceReadinessProjection,
@@ -482,6 +486,7 @@ impl AppProjection {
             products: ProductsScreenProjection::default(),
             orders: OrdersScreenProjection::default(),
             pack_day: PackDayScreenProjection::default(),
+            reminder_log: ReminderLogProjection::default(),
             farm_setup,
             farm_rules: FarmRulesProjection::default(),
             farm_readiness: FarmWorkspaceReadinessProjection::default(),
@@ -1434,8 +1439,9 @@ mod tests {
         OrdersListSummary, OrdersScreenQueryState, PackDayPackListRow, PackDayProductTotalRow,
         PackDayProjection, PackDayRosterRow, PackDayScreenQueryState, PersonalEntryState,
         PersonalSection, ProductEditorDraft, ProductId, ProductPublishBlocker, ProductsFilter,
-        ProductsListProjection, ProductsSort, SelectedAccountProjection, SelectedSurfaceProjection,
-        SettingsSection, ShellSection, TodayAgendaProjection, TodaySetupTask, TodaySetupTaskKind,
+        ProductsListProjection, ProductsSort, ReminderFeedProjection, SelectedAccountProjection,
+        SelectedSurfaceProjection, SettingsSection, ShellSection, TodayAgendaProjection,
+        TodaySetupTask, TodaySetupTaskKind,
     };
     use radroots_studio_app_sync::{
         AppSyncProjection, AppSyncRunStatus, SyncCheckpointState, SyncCheckpointStatus,
@@ -1641,6 +1647,7 @@ mod tests {
                 quantity_display: "2 bags".to_owned(),
             }],
             primary_action: Some(OrderPrimaryAction::Review),
+            recovery: None,
         };
         let pack_day = PackDayProjection {
             fulfillment_window: Some(radroots_studio_app_models::FulfillmentWindowSummary {
@@ -1662,6 +1669,7 @@ mod tests {
                 order_number: "R-100".to_owned(),
                 customer_display_name: "Casey".to_owned(),
             }],
+            reminders: ReminderFeedProjection::default(),
         };
 
         assert_eq!(
@@ -2479,5 +2487,17 @@ mod tests {
                 .general
                 .allow_relay_connections
         );
+    }
+
+    #[test]
+    fn app_projection_defaults_the_new_reminder_contracts() {
+        let projection = AppProjection::default();
+
+        assert!(projection.today.reminders.is_empty());
+        assert!(projection.orders.reminders.is_empty());
+        assert!(projection.orders.recovery_queue.is_empty());
+        assert!(projection.reminder_log.is_empty());
+        assert!(projection.pack_day.projection.reminders.is_empty());
+        assert_eq!(projection.orders.reminders, ReminderFeedProjection::default());
     }
 }

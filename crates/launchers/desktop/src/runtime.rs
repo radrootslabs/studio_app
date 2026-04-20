@@ -4131,6 +4131,8 @@ mod tests {
                 orders_needing_action: 2,
                 low_stock_products: 1,
                 draft_products: 3,
+                reminders_due_soon: 0,
+                recovery_actions_open: 0,
             }),
             setup_checklist: vec![TodaySetupTask {
                 kind: TodaySetupTaskKind::AddFulfillmentWindow,

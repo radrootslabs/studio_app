@@ -465,6 +465,7 @@ impl<'a> AppBuyerRepository<'a> {
                     fulfillment_ends_at,
                 ),
                 status: BuyerOrderStatus::from(parse_order_status("orders.status", status)?),
+                repeat_demand: None,
             });
         }
 
@@ -545,6 +546,7 @@ impl<'a> AppBuyerRepository<'a> {
                         )?),
                         items: self.load_order_detail_items(order_id)?,
                         order_note: empty_string_to_none(order_note),
+                        repeat_demand: None,
                     })
                 },
             )

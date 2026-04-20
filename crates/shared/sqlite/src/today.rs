@@ -27,6 +27,7 @@ impl<'a> AppTodayAgendaRepository<'a> {
         Ok(TodayAgendaProjection {
             farm: Some(farm.clone()),
             summary: Some(self.load_today_summary(farm.farm_id)?),
+            reminders: Default::default(),
             orders_needing_action: self.load_orders_needing_action(farm.farm_id)?,
             low_stock_products: self.load_low_stock_products(farm.farm_id)?,
             draft_products: self.load_draft_products(farm.farm_id)?,
@@ -135,6 +136,8 @@ impl<'a> AppTodayAgendaRepository<'a> {
                 "select count(*) from products where farm_id = ?1 and status = 'draft'",
                 params![farm_id.to_string()],
             )?,
+            reminders_due_soon: 0,
+            recovery_actions_open: 0,
         })
     }
 
