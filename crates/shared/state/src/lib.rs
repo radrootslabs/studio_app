@@ -524,6 +524,7 @@ pub enum AppStateCommand {
     SetStartupSignerSourceInput(String),
     ResetLoggedOutStartup,
     ReplaceIdentityProjection(AppIdentityProjection),
+    ReplacePersonalProjection(PersonalWorkspaceProjection),
     ReplaceFarmSetupProjection(FarmSetupProjection),
     ReplaceFarmRulesProjection(FarmRulesProjection),
     SelectFarmSetupFlowStage(FarmSetupFlowStage),
@@ -582,6 +583,10 @@ impl AppStateCommand {
 
     pub fn replace_identity_projection(projection: AppIdentityProjection) -> Self {
         Self::ReplaceIdentityProjection(projection)
+    }
+
+    pub fn replace_personal_projection(projection: PersonalWorkspaceProjection) -> Self {
+        Self::ReplacePersonalProjection(projection)
     }
 
     pub fn replace_farm_setup_projection(projection: FarmSetupProjection) -> Self {
@@ -997,6 +1002,9 @@ fn apply_command(projection: &mut AppProjection, command: AppStateCommand) -> Ap
         }
         AppStateCommand::ReplaceIdentityProjection(identity_projection) => {
             projection.identity = identity_projection;
+        }
+        AppStateCommand::ReplacePersonalProjection(personal_projection) => {
+            projection.personal = personal_projection;
         }
         AppStateCommand::ReplaceFarmSetupProjection(farm_setup_projection) => {
             projection.farm_setup = farm_setup_projection;

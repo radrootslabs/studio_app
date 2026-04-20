@@ -268,6 +268,7 @@ mod tests {
             settings_account_projection: SettingsAccountProjection::default(),
             startup_gate,
             home_route,
+            personal_projection: Default::default(),
             farm_setup_projection: Default::default(),
             farm_readiness_projection: FarmWorkspaceReadinessProjection::default(),
             today_projection: TodayAgendaProjection::default(),
@@ -363,7 +364,7 @@ mod tests {
         );
 
         assert_eq!(home_stage(&setup), HomeStage::Setup);
-        assert_eq!(home_stage(&personal), HomeStage::PersonalHolding);
+        assert_eq!(home_stage(&personal), HomeStage::BuyerWorkspace);
         assert_eq!(home_stage(&farmer), HomeStage::FarmerWorkspace);
         assert_eq!(home_stage(&blocked), HomeStage::Setup);
     }

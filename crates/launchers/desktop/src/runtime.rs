@@ -1,3 +1,4 @@
+use std::collections::BTreeSet;
 use std::fmt;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
@@ -7,9 +8,9 @@ use radroots_studio_app_models::{
     FarmId, FarmProfileRecord, FarmReadiness, FarmRulesProjection, FarmSetupDraft,
     FarmSetupProjection, FarmSummary, FarmerSection, FulfillmentWindowId,
     LoggedOutStartupProjection, OrderDetailProjection, OrderId, OrdersFilter, OrdersListProjection,
-    OrdersScreenQueryState, PackDayProjection, PackDayScreenQueryState, PickupLocationRecord,
-    ProductEditorDraft, ProductId, ProductsFilter, ProductsListProjection, ProductsSort,
-    SettingsAccountProjection, SettingsPreference, SettingsSection, ShellSection,
+    OrdersScreenQueryState, PackDayProjection, PackDayScreenQueryState, PersonalSection,
+    PickupLocationRecord, ProductEditorDraft, ProductId, ProductsFilter, ProductsListProjection,
+    ProductsSort, SettingsAccountProjection, SettingsPreference, SettingsSection, ShellSection,
     TodayAgendaProjection,
 };
 use radroots_studio_app_remote_signer::{
@@ -20,10 +21,12 @@ use radroots_studio_app_sqlite::{
     derive_farm_rules_readiness,
 };
 use radroots_studio_app_state::{
-    AppShellProjection, AppStateCommand, AppStateStore, AppStateStoreError, FarmSetupFlowStage,
+    AppShellProjection, AppStateCommand, AppStateStore, AppStateStoreError,
+    BuyerBrowseScreenProjection, BuyerCartScreenProjection, BuyerOrdersScreenProjection,
+    BuyerSearchScreenProjection, BuyerSearchScreenQueryState, FarmSetupFlowStage,
     FarmWorkspaceReadinessProjection, HomeRoute, InMemoryAppStateRepository,
-    OrdersScreenProjection, PackDayScreenProjection, ProductsScreenProjection,
-    ProductsScreenQueryState,
+    OrdersScreenProjection, PackDayScreenProjection, PersonalWorkspaceProjection,
+    ProductsScreenProjection, ProductsScreenQueryState,
 };
 use radroots_nostr_accounts::prelude::RadrootsNostrAccountsManager;
 use thiserror::Error;
@@ -67,6 +70,7 @@ impl DesktopAppRuntime {
             startup_gate: state.state_store.startup_gate(),
             logged_out_startup: state.state_store.logged_out_startup_projection().clone(),
             home_route: state.state_store.home_route(),
+            personal_projection: state.state_store.personal_projection().clone(),
             farm_setup_projection: state.state_store.farm_setup_projection().clone(),
             farm_readiness_projection: state.state_store.farm_readiness_projection().clone(),
             today_projection: state.state_store.today_projection().clone(),
@@ -164,9 +168,8 @@ impl DesktopAppRuntime {
         let mut state = self.lock_state_mut();
         let selected_section = match state.state_store.startup_gate() {
             AppStartupGate::Farmer => ShellSection::Farmer(FarmerSection::Today),
-            AppStartupGate::Blocked | AppStartupGate::SetupRequired | AppStartupGate::Personal => {
-                ShellSection::Home
-            }
+            AppStartupGate::Blocked | AppStartupGate::SetupRequired => ShellSection::Home,
+            AppStartupGate::Personal => ShellSection::Personal(PersonalSection::Browse),
         };
 
         let section_changed = state
@@ -175,6 +178,10 @@ impl DesktopAppRuntime {
         let editor_changed = state.close_product_editor();
 
         section_changed || editor_changed
+    }
+
+    pub fn select_personal_section(&self, section: PersonalSection) -> bool {
+        self.lock_state_mut().select_personal_section(section)
     }
 
     pub fn select_farmer_section(&self, section: FarmerSection) -> bool {
@@ -419,6 +426,7 @@ pub struct DesktopAppRuntimeSummary {
     pub startup_gate: AppStartupGate,
     pub logged_out_startup: LoggedOutStartupProjection,
     pub home_route: HomeRoute,
+    pub personal_projection: PersonalWorkspaceProjection,
     pub farm_setup_projection: FarmSetupProjection,
     pub farm_readiness_projection: FarmWorkspaceReadinessProjection,
     pub today_projection: TodayAgendaProjection,
@@ -438,6 +446,7 @@ pub enum DesktopAppRuntimeActivityContextError {
 
 #[derive(Clone, Debug, Default)]
 struct DesktopSelectedAccountContext {
+    personal_projection: PersonalWorkspaceProjection,
     farm_setup_projection: FarmSetupProjection,
     farm_rules_projection: FarmRulesProjection,
     today_projection: TodayAgendaProjection,
@@ -533,6 +542,9 @@ impl DesktopAppRuntimeState {
         {
             let _ = state_store.apply_in_memory(AppStateCommand::show_startup_signer_entry());
         }
+        let _ = state_store.apply_in_memory(AppStateCommand::replace_personal_projection(
+            selected_account_context.personal_projection.clone(),
+        ));
         let _ = state_store.apply_in_memory(AppStateCommand::replace_farm_rules_projection(
             selected_account_context.farm_rules_projection,
         ));
@@ -707,6 +719,17 @@ impl DesktopAppRuntimeState {
             | FarmerSection::PackDay
             | FarmerSection::Farm => false,
         }
+    }
+
+    fn select_personal_section(&mut self, section: PersonalSection) -> bool {
+        let section_changed = self
+            .state_store
+            .apply_in_memory(AppStateCommand::SelectSection(ShellSection::Personal(
+                section,
+            )));
+        let editor_changed = self.close_product_editor();
+
+        section_changed || editor_changed
     }
 
     fn set_products_search_query(&mut self, search_query: &str) -> Result<bool, AppSqliteError> {
@@ -1208,6 +1231,11 @@ impl DesktopAppRuntimeState {
     }
 
     fn apply_selected_account_context(&mut self, context: &DesktopSelectedAccountContext) -> bool {
+        let personal_changed =
+            self.state_store
+                .apply_in_memory(AppStateCommand::replace_personal_projection(
+                    context.personal_projection.clone(),
+                ));
         let farm_setup_changed =
             self.state_store
                 .apply_in_memory(AppStateCommand::replace_farm_setup_projection(
@@ -1250,7 +1278,8 @@ impl DesktopAppRuntimeState {
         };
         let shell_changed = self.sync_truthful_farmer_section();
 
-        farm_setup_changed
+        personal_changed
+            || farm_setup_changed
             || farm_rules_changed
             || today_changed
             || products_changed
@@ -1641,8 +1670,37 @@ fn load_selected_account_context(
     selected_order_id: Option<OrderId>,
     pack_day_query: PackDayScreenQueryState,
 ) -> Result<DesktopSelectedAccountContext, AppSqliteError> {
+    let buyer_context = identity_projection.buyer_context();
+    let buyer_fulfillment_methods = BTreeSet::new();
+    let buyer_listings = sqlite_store.load_buyer_listings("", &buyer_fulfillment_methods)?;
+    let buyer_cart = sqlite_store.load_buyer_cart(&buyer_context)?;
+    let buyer_checkout = sqlite_store.load_buyer_checkout(&buyer_context)?;
+    let buyer_orders = sqlite_store.load_buyer_orders(&buyer_context)?;
+    let personal_projection = PersonalWorkspaceProjection {
+        browse: BuyerBrowseScreenProjection {
+            listings: buyer_listings.clone(),
+            detail: None,
+        },
+        search: BuyerSearchScreenProjection {
+            query: BuyerSearchScreenQueryState::default(),
+            listings: buyer_listings,
+            detail: None,
+        },
+        cart: BuyerCartScreenProjection {
+            cart: buyer_cart,
+            checkout: buyer_checkout,
+        },
+        orders: BuyerOrdersScreenProjection {
+            list: buyer_orders,
+            detail: None,
+        },
+        ..PersonalWorkspaceProjection::default()
+    };
     let Some(selected_account) = identity_projection.selected_account.as_ref() else {
-        return Ok(DesktopSelectedAccountContext::default());
+        return Ok(DesktopSelectedAccountContext {
+            personal_projection,
+            ..DesktopSelectedAccountContext::default()
+        });
     };
     let farm_setup_projection =
         sqlite_store.load_farm_setup(&selected_account.account.account_id)?;
@@ -1690,6 +1748,7 @@ fn load_selected_account_context(
     };
 
     Ok(DesktopSelectedAccountContext {
+        personal_projection,
         farm_setup_projection,
         farm_rules_projection,
         today_projection,
@@ -1817,10 +1876,10 @@ mod tests {
         FarmProfileRecord, FarmReadiness, FarmReadinessBlocker, FarmSetupDraft,
         FarmSetupProjection, FarmSummary, FarmerActivationProjection, FarmerSection,
         FulfillmentWindowId, FulfillmentWindowRecord, LoggedOutStartupProjection, OrderId,
-        OrderStatus, OrdersFilter, PickupLocationId, PickupLocationRecord, ProductEditorDraft,
-        ProductStatus, ProductsFilter, ProductsSort, SelectedSurfaceProjection, SettingsPreference,
-        SettingsSection, ShellSection, TodayAgendaProjection, TodaySetupTask, TodaySetupTaskKind,
-        TodaySummary,
+        OrderStatus, OrdersFilter, PersonalSection, PickupLocationId, PickupLocationRecord,
+        ProductEditorDraft, ProductStatus, ProductsFilter, ProductsSort, SelectedSurfaceProjection,
+        SettingsPreference, SettingsSection, ShellSection, TodayAgendaProjection, TodaySetupTask,
+        TodaySetupTaskKind, TodaySummary,
     };
     use radroots_studio_app_remote_signer::{
         RadrootsAppRemoteSignerPendingSession, RadrootsAppRemoteSignerSessionRecord,
@@ -2415,6 +2474,24 @@ mod tests {
         assert_eq!(
             runtime.summary().shell_projection.selected_section,
             ShellSection::Farmer(FarmerSection::Today)
+        );
+    }
+
+    #[test]
+    fn guest_marketplace_entry_selects_personal_browse_without_an_account() {
+        let runtime = memory_runtime();
+
+        assert!(runtime.select_personal_section(PersonalSection::Browse));
+
+        let summary = runtime.summary();
+        assert_eq!(summary.startup_gate, AppStartupGate::SetupRequired);
+        assert_eq!(
+            summary.shell_projection.selected_section,
+            ShellSection::Personal(PersonalSection::Browse)
+        );
+        assert_eq!(
+            summary.personal_projection.entry.state,
+            radroots_studio_app_models::PersonalEntryState::Guest
         );
     }
 

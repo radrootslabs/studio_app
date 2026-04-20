@@ -17,10 +17,10 @@ use radroots_studio_app_models::{
     FarmerSection, FulfillmentWindowId, FulfillmentWindowRecord, FulfillmentWindowSummary,
     LoggedOutStartupPhase, OrderDetailItemRow, OrderDetailProjection, OrderId, OrderListRow,
     OrderPrimaryAction, OrderStatus, OrdersFilter, OrdersListRow, PackDayPackListRow,
-    PackDayProductTotalRow, PackDayRosterRow, PickupLocationId, PickupLocationRecord,
-    ProductAttentionState, ProductEditorDraft, ProductId, ProductListRow, ProductPublishBlocker,
-    ProductStatus, ProductsFilter, ProductsListRow, ProductsSort, ShellSection,
-    TodayAgendaProjection, TodaySetupTaskKind,
+    PackDayProductTotalRow, PackDayRosterRow, PersonalEntryState, PersonalSection,
+    PickupLocationId, PickupLocationRecord, ProductAttentionState, ProductEditorDraft, ProductId,
+    ProductListRow, ProductPublishBlocker, ProductStatus, ProductsFilter, ProductsListRow,
+    ProductsSort, ShellSection, TodayAgendaProjection, TodaySetupTaskKind,
 };
 use radroots_studio_app_remote_signer::{
     RadrootsAppRemoteSignerApprovedSession, RadrootsAppRemoteSignerPendingPollOutcome,
@@ -47,7 +47,7 @@ use radroots_studio_app_ui::{
     app_split_shell, app_stack_h, app_stack_v, app_status_indicator as status_indicator,
     app_surface_card, app_surface_card_section as home_card, app_surface_panel,
     app_surface_sidebar, app_surface_window as app_window_shell,
-    app_text_badge as settings_badge_text, app_text_body_subtle as home_body_text,
+    app_text_badge as settings_badge_text, app_text_body_subtle as home_body_text, app_text_label,
     app_text_label as home_farm_setup_field_label, app_text_value, label_value_list,
     utility_title_row,
 };
@@ -85,7 +85,7 @@ pub enum PrimaryWindowTarget {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum HomeStage {
     Setup,
-    PersonalHolding,
+    BuyerWorkspace,
     FarmerWorkspace,
 }
 
@@ -94,17 +94,18 @@ pub fn primary_window_target(_: &DesktopAppRuntimeSummary) -> PrimaryWindowTarge
 }
 
 pub fn home_stage(summary: &DesktopAppRuntimeSummary) -> HomeStage {
-    if summary.startup_issue.is_some()
-        || matches!(
-            summary.startup_gate,
-            AppStartupGate::Blocked | AppStartupGate::SetupRequired
-        )
-    {
+    if summary.startup_issue.is_some() || summary.startup_gate == AppStartupGate::Blocked {
         HomeStage::Setup
     } else if summary.startup_gate == AppStartupGate::Farmer {
         HomeStage::FarmerWorkspace
+    } else if matches!(
+        summary.shell_projection.selected_section,
+        ShellSection::Personal(_)
+    ) || summary.startup_gate == AppStartupGate::Personal
+    {
+        HomeStage::BuyerWorkspace
     } else {
-        HomeStage::PersonalHolding
+        HomeStage::Setup
     }
 }
 
@@ -183,7 +184,6 @@ pub struct HomeView {
     startup_signer_connect_state: StartupSignerConnectState,
     startup_signer_task_token: u64,
     startup_signer_recovery_attempted: bool,
-    logged_in_view: LoggedInHomeView,
     farm_setup_form: Option<FarmSetupFormState>,
     products_search: Option<ProductsSearchState>,
     products_stock_editor: Option<ProductsStockEditorState>,
@@ -229,7 +229,6 @@ impl HomeView {
             startup_signer_connect_state: StartupSignerConnectState::Idle,
             startup_signer_task_token: 0,
             startup_signer_recovery_attempted: false,
-            logged_in_view: LoggedInHomeView::new(),
             farm_setup_form: None,
             products_search: None,
             products_stock_editor: None,
@@ -817,6 +816,66 @@ impl HomeView {
             if section != FarmerSection::Products {
                 self.product_editor_form = None;
             }
+            cx.notify();
+        }
+    }
+
+    fn select_personal_section(&mut self, section: PersonalSection, cx: &mut Context<Self>) {
+        if self.runtime.select_personal_section(section) {
+            self.products_stock_editor = None;
+            self.product_editor_form = None;
+            cx.notify();
+        }
+    }
+
+    fn switch_to_marketplace(&mut self, cx: &mut Context<Self>) {
+        match self
+            .runtime
+            .select_active_surface(radroots_studio_app_models::ActiveSurface::Personal)
+        {
+            Ok(true) => {
+                self.products_stock_editor = None;
+                self.product_editor_form = None;
+                cx.notify();
+            }
+            Ok(false) => {}
+            Err(runtime_error) => {
+                error!(
+                    target: "shell",
+                    event = "shell.switch_marketplace_failed",
+                    error = %runtime_error,
+                    "failed to switch into marketplace mode"
+                );
+            }
+        }
+    }
+
+    fn switch_to_farmer_workspace(&mut self, cx: &mut Context<Self>) {
+        match self
+            .runtime
+            .select_active_surface(radroots_studio_app_models::ActiveSurface::Farmer)
+        {
+            Ok(true) => {
+                self.products_stock_editor = None;
+                self.product_editor_form = None;
+                cx.notify();
+            }
+            Ok(false) => {}
+            Err(runtime_error) => {
+                error!(
+                    target: "shell",
+                    event = "shell.switch_farm_failed",
+                    error = %runtime_error,
+                    "failed to switch into farm mode"
+                );
+            }
+        }
+    }
+
+    fn open_account_entry(&mut self, cx: &mut Context<Self>) {
+        if self.runtime.select_home() {
+            self.products_stock_editor = None;
+            self.product_editor_form = None;
             cx.notify();
         }
     }
@@ -1668,6 +1727,60 @@ impl HomeView {
             .into_any_element()
     }
 
+    fn render_buyer_workspace(
+        &mut self,
+        runtime: &DesktopAppRuntimeSummary,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let selected_personal_section = selected_personal_section(runtime);
+        let main_content = match selected_personal_section {
+            PersonalSection::Browse => buyer_browse_placeholder(runtime).into_any_element(),
+            PersonalSection::Search => buyer_search_placeholder(runtime).into_any_element(),
+            PersonalSection::Cart => buyer_cart_placeholder(runtime).into_any_element(),
+            PersonalSection::Orders => buyer_orders_placeholder(runtime).into_any_element(),
+        };
+
+        app_split_shell(
+            buyer_sidebar(
+                runtime,
+                cx.listener(|this, _, _, cx| {
+                    this.select_personal_section(PersonalSection::Browse, cx)
+                }),
+                cx.listener(|this, _, _, cx| {
+                    this.select_personal_section(PersonalSection::Search, cx)
+                }),
+                cx.listener(|this, _, _, cx| {
+                    this.select_personal_section(PersonalSection::Cart, cx)
+                }),
+                cx.listener(|this, _, _, cx| {
+                    this.select_personal_section(PersonalSection::Orders, cx)
+                }),
+                cx,
+            )
+            .into_any_element(),
+            app_stack_v(APP_UI_THEME.shells.home_stack_gap_px)
+                .size_full()
+                .child(shared_shell_header(
+                    runtime,
+                    cx.listener(|this, _, _, cx| this.switch_to_marketplace(cx)),
+                    cx.listener(|this, _, _, cx| this.switch_to_farmer_workspace(cx)),
+                    cx.listener(|this, _, _, cx| this.open_account_entry(cx)),
+                    cx,
+                ))
+                .child(
+                    app_scroll_panel(
+                        buyer_content_scroll_id(selected_personal_section),
+                        0.0,
+                        None,
+                        main_content,
+                    )
+                    .into_any_element(),
+                )
+                .into_any_element(),
+        )
+        .into_any_element()
+    }
+
     fn render_farmer_workspace(
         &mut self,
         runtime: &DesktopAppRuntimeSummary,
@@ -1703,13 +1816,25 @@ impl HomeView {
                 cx,
             )
             .into_any_element(),
-            app_scroll_panel(
-                home_content_scroll_id(selected_farmer_section),
-                0.0,
-                None,
-                main_content,
-            )
-            .into_any_element(),
+            app_stack_v(APP_UI_THEME.shells.home_stack_gap_px)
+                .size_full()
+                .child(shared_shell_header(
+                    runtime,
+                    cx.listener(|this, _, _, cx| this.switch_to_marketplace(cx)),
+                    cx.listener(|this, _, _, cx| this.switch_to_farmer_workspace(cx)),
+                    cx.listener(|this, _, _, cx| this.open_account_entry(cx)),
+                    cx,
+                ))
+                .child(
+                    app_scroll_panel(
+                        home_content_scroll_id(selected_farmer_section),
+                        0.0,
+                        None,
+                        main_content,
+                    )
+                    .into_any_element(),
+                )
+                .into_any_element(),
         )
         .into_any_element()
     }
@@ -2240,6 +2365,9 @@ impl Render for HomeView {
                     self.startup_signer_entry.as_ref(),
                     &self.startup_signer_connect_state,
                     cx.listener(|this, _, _, cx| this.show_startup_identity_choice(cx)),
+                    cx.listener(|this, _, _, cx| {
+                        this.select_personal_section(PersonalSection::Browse, cx)
+                    }),
                     cx.listener(|this, _, window, cx| this.start_generate_key(window, cx)),
                     cx.listener(|this, _, _, cx| this.show_startup_signer_entry(cx)),
                     cx.listener(|this, _, window, cx| this.submit_startup_signer(window, cx)),
@@ -2247,10 +2375,7 @@ impl Render for HomeView {
                     cx,
                 )
                 .into_any_element(),
-            HomeStage::PersonalHolding => self
-                .logged_in_view
-                .render_holding(&runtime_summary)
-                .into_any_element(),
+            HomeStage::BuyerWorkspace => self.render_buyer_workspace(&runtime_summary, cx),
             HomeStage::FarmerWorkspace => self.render_farmer_workspace(&runtime_summary, cx),
         }
     }
@@ -2580,6 +2705,7 @@ impl StartupHomeView {
         signer_entry: Option<&StartupSignerEntryState>,
         connect_state: &StartupSignerConnectState,
         on_continue: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+        on_browse_marketplace: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
         on_generate_key: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
         on_connect_signer: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
         on_submit_signer: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
@@ -2592,24 +2718,13 @@ impl StartupHomeView {
             signer_entry,
             connect_state,
             on_continue,
+            on_browse_marketplace,
             on_generate_key,
             on_connect_signer,
             on_submit_signer,
             on_back,
             cx,
         )
-    }
-}
-
-struct LoggedInHomeView;
-
-impl LoggedInHomeView {
-    fn new() -> Self {
-        Self
-    }
-
-    fn render_holding(&self, runtime: &DesktopAppRuntimeSummary) -> AnyElement {
-        holding_home_shell(runtime).into_any_element()
     }
 }
 
@@ -4745,43 +4860,212 @@ const SETTINGS_OPERATIONS_PANEL_SECTIONS: &[SettingsInventorySectionSpec] = &[
     },
 ];
 
-fn holding_home_shell(runtime: &DesktopAppRuntimeSummary) -> impl IntoElement {
-    let home_status = home_status_presentation(runtime);
-    let (title_key, body_key) = match home_stage(runtime) {
-        HomeStage::Setup => (
-            AppTextKey::HomeTodayEmptySetupTitle,
-            AppTextKey::HomeTodayEmptySetupBody,
-        ),
-        HomeStage::PersonalHolding => (
-            AppTextKey::HomeTodayEmptyNoFarmTitle,
-            AppTextKey::HomeTodayEmptyNoFarmBody,
-        ),
-        HomeStage::FarmerWorkspace => (
-            AppTextKey::HomeTodayEmptyQuietTitle,
-            AppTextKey::HomeTodayEmptyQuietBody,
-        ),
-    };
-    let mut sections = vec![home_empty_state_card(title_key, body_key).into_any_element()];
+fn shared_shell_header(
+    runtime: &DesktopAppRuntimeSummary,
+    on_select_marketplace: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+    on_select_farm: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+    on_open_account: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+    cx: &App,
+) -> impl IntoElement {
+    let can_enter_farmer_workspace = runtime.personal_projection.entry.can_enter_farmer_workspace;
+    let is_marketplace_active =
+        runtime.shell_projection.active_surface != radroots_studio_app_models::ActiveSurface::Farmer;
+    let farm_name = home_saved_farm(runtime).map(|farm| farm.display_name.clone());
+    let account_label = shell_account_label(runtime);
 
-    if let Some(issue) = runtime.startup_issue.as_ref() {
-        sections.push(
-            home_card(
-                app_shared_text(AppTextKey::MetadataStartupIssue),
-                home_body_text(issue.clone()),
-            )
-            .into_any_element(),
-        );
-    }
-
-    app_split_shell(
-        holding_home_sidebar(runtime).into_any_element(),
-        app_stack_v(APP_UI_THEME.shells.home_stack_gap_px)
+    app_surface_panel(
+        div()
             .w_full()
-            .max_w(px(APP_UI_THEME.shells.home_card_max_width_px))
-            .mx_auto()
-            .child(home_status_row(&home_status))
-            .children(sections)
-            .into_any_element(),
+            .px(px(APP_UI_THEME.shells.home_card_padding_px))
+            .py(px(APP_UI_THEME.foundation.spacing.small_px))
+            .flex()
+            .justify_between()
+            .items_center()
+            .gap(px(APP_UI_THEME.shells.home_stack_gap_px))
+            .child(
+                div()
+                    .flex()
+                    .flex_col()
+                    .gap(px(2.0))
+                    .child(app_text_label(app_shared_text(AppTextKey::AppName)))
+                    .when_some(farm_name, |this, farm_name| {
+                        this.child(home_body_text(farm_name))
+                    }),
+            )
+            .child(
+                app_cluster(APP_UI_THEME.foundation.spacing.small_px)
+                    .items_center()
+                    .when(can_enter_farmer_workspace, |this| {
+                        this.child(
+                            shared_shell_mode_button(
+                                "shell-mode-marketplace",
+                                AppTextKey::HomeHeaderMarketplaceMode,
+                                is_marketplace_active,
+                                on_select_marketplace,
+                                cx,
+                            )
+                            .into_any_element(),
+                        )
+                        .child(
+                            shared_shell_mode_button(
+                                "shell-mode-farm",
+                                AppTextKey::HomeHeaderFarmMode,
+                                !is_marketplace_active,
+                                on_select_farm,
+                                cx,
+                            )
+                            .into_any_element(),
+                        )
+                    })
+                    .child(shell_account_entry(
+                        runtime,
+                        account_label,
+                        on_open_account,
+                        cx,
+                    )),
+            ),
+    )
+}
+
+fn shared_shell_mode_button(
+    id: &'static str,
+    key: AppTextKey,
+    is_active: bool,
+    on_click: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+    cx: &App,
+) -> AnyElement {
+    if is_active {
+        div()
+            .id(id)
+            .text_size(px(APP_UI_THEME.foundation.typography.body_text_px))
+            .font_weight(gpui::FontWeight::SEMIBOLD)
+            .text_color(rgb(APP_UI_THEME.foundation.text.primary))
+            .child(app_shared_text(key))
+            .into_any_element()
+    } else {
+        action_button_compact(id, app_shared_text(key), on_click, cx).into_any_element()
+    }
+}
+
+fn shell_account_entry(
+    runtime: &DesktopAppRuntimeSummary,
+    account_label: String,
+    on_open_account: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+    cx: &App,
+) -> AnyElement {
+    if runtime.personal_projection.entry.state == PersonalEntryState::Guest {
+        action_button_compact(
+            "shell-account-entry",
+            app_shared_text(AppTextKey::HomeHeaderAccountSetupAction),
+            on_open_account,
+            cx,
+        )
+        .into_any_element()
+    } else {
+        div()
+            .id("shell-account-label")
+            .text_size(px(APP_UI_THEME.foundation.typography.body_text_px))
+            .font_weight(gpui::FontWeight::MEDIUM)
+            .text_color(rgb(APP_UI_THEME.foundation.text.secondary))
+            .child(account_label)
+            .into_any_element()
+    }
+}
+
+fn shell_account_label(runtime: &DesktopAppRuntimeSummary) -> String {
+    runtime
+        .settings_account_projection
+        .selected_account
+        .as_ref()
+        .and_then(|account| {
+            account
+                .account
+                .label
+                .as_ref()
+                .map(|label| label.trim().to_owned())
+                .filter(|label| !label.is_empty())
+                .or_else(|| Some(account.account.npub.clone()))
+        })
+        .unwrap_or_else(|| app_shared_text(AppTextKey::HomeHeaderGuestLabel).to_string())
+}
+
+fn buyer_surface_placeholder(
+    title_key: AppTextKey,
+    body_key: AppTextKey,
+    detail: Option<String>,
+) -> AnyElement {
+    app_stack_v(APP_UI_THEME.shells.home_stack_gap_px)
+        .w_full()
+        .max_w(px(APP_UI_THEME.shells.home_card_max_width_px))
+        .mx_auto()
+        .child(app_text_value(app_shared_text(title_key)))
+        .child(app_surface_card(
+            app_stack_v(APP_UI_THEME.shells.home_stack_gap_px)
+                .w_full()
+                .child(home_body_text(app_shared_text(body_key)))
+                .when_some(detail, |this, detail| this.child(home_body_text(detail))),
+        ))
+        .into_any_element()
+}
+
+fn buyer_browse_placeholder(runtime: &DesktopAppRuntimeSummary) -> AnyElement {
+    let detail = (!runtime.personal_projection.browse.listings.rows.is_empty()).then_some(format!(
+        "{} local listings are already loaded on this device.",
+        runtime.personal_projection.browse.listings.rows.len()
+    ));
+
+    buyer_surface_placeholder(
+        AppTextKey::HomeNavBrowse,
+        AppTextKey::PersonalBrowsePlaceholderBody,
+        detail,
+    )
+}
+
+fn buyer_search_placeholder(runtime: &DesktopAppRuntimeSummary) -> AnyElement {
+    let detail = (!runtime.personal_projection.search.listings.rows.is_empty()).then_some(format!(
+        "{} local listings are available to search from the shared marketplace source.",
+        runtime.personal_projection.search.listings.rows.len()
+    ));
+
+    buyer_surface_placeholder(
+        AppTextKey::HomeNavSearch,
+        AppTextKey::PersonalSearchPlaceholderBody,
+        detail,
+    )
+}
+
+fn buyer_cart_placeholder(runtime: &DesktopAppRuntimeSummary) -> AnyElement {
+    let cart = &runtime.personal_projection.cart.cart;
+    let detail = if cart.lines.is_empty() {
+        None
+    } else {
+        Some(format!(
+            "{} items are ready in your cart{}.",
+            cart.lines.len(),
+            cart.farm_display_name
+                .as_ref()
+                .map(|farm| format!(" from {farm}"))
+                .unwrap_or_default()
+        ))
+    };
+
+    buyer_surface_placeholder(
+        AppTextKey::HomeNavCart,
+        AppTextKey::PersonalCartPlaceholderBody,
+        detail,
+    )
+}
+
+fn buyer_orders_placeholder(runtime: &DesktopAppRuntimeSummary) -> AnyElement {
+    let detail = (!runtime.personal_projection.orders.list.rows.is_empty()).then_some(format!(
+        "{} local orders are already available on this device.",
+        runtime.personal_projection.orders.list.rows.len()
+    ));
+
+    buyer_surface_placeholder(
+        AppTextKey::HomeNavOrders,
+        AppTextKey::PersonalOrdersPlaceholderBody,
+        detail,
     )
 }
 
@@ -4813,6 +5097,7 @@ fn startup_home_shell(
     signer_entry: Option<&StartupSignerEntryState>,
     connect_state: &StartupSignerConnectState,
     on_continue: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+    on_browse_marketplace: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
     on_generate_key: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
     on_connect_signer: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
     on_submit_signer: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
@@ -4845,26 +5130,33 @@ fn startup_home_shell(
                                     .child(startup_home_title(surface))
                                     .child(startup_home_tagline())
                                     .child(match surface {
-                                        StartupHomeSurface::ContinuePrompt => {
-                                            app_stack_v(APP_UI_THEME.shells.startup_stack_gap_px)
-                                                .items_center()
-                                                .child(action_button_primary(
-                                                    "home-continue",
-                                                    app_shared_text(
-                                                        AppTextKey::HomeSetupContinueAction,
-                                                    ),
-                                                    on_continue,
-                                                    cx,
-                                                ))
-                                                .when_some(startup_notice, |this, error| {
-                                                    this.child(
-                                                        div().w_full().text_center().child(
-                                                            home_body_text(error.to_owned()),
-                                                        ),
-                                                    )
-                                                })
-                                                .into_any_element()
-                                        }
+                                        StartupHomeSurface::ContinuePrompt => app_stack_v(
+                                            APP_UI_THEME.shells.startup_stack_gap_px,
+                                        )
+                                        .items_center()
+                                        .child(action_button_primary(
+                                            "home-continue",
+                                            app_shared_text(AppTextKey::HomeSetupContinueAction),
+                                            on_continue,
+                                            cx,
+                                        ))
+                                        .child(action_button(
+                                            "home-browse-marketplace",
+                                            app_shared_text(
+                                                AppTextKey::HomeSetupBrowseMarketplaceAction,
+                                            ),
+                                            on_browse_marketplace,
+                                            cx,
+                                        ))
+                                        .when_some(startup_notice, |this, error| {
+                                            this.child(
+                                                div()
+                                                    .w_full()
+                                                    .text_center()
+                                                    .child(home_body_text(error.to_owned())),
+                                            )
+                                        })
+                                        .into_any_element(),
                                         StartupHomeSurface::IdentityChoice => {
                                             app_stack_v(APP_UI_THEME.shells.startup_stack_gap_px)
                                                 .items_center()
@@ -5353,7 +5645,16 @@ fn home_sidebar(
     )
 }
 
-fn holding_home_sidebar(runtime: &DesktopAppRuntimeSummary) -> impl IntoElement {
+fn buyer_sidebar(
+    runtime: &DesktopAppRuntimeSummary,
+    on_select_browse: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+    on_select_search: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+    on_select_cart: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+    on_select_orders: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+    cx: &App,
+) -> impl IntoElement {
+    let selected_section = selected_personal_section(runtime);
+
     app_surface_sidebar(
         div()
             .h_full()
@@ -5367,7 +5668,46 @@ fn holding_home_sidebar(runtime: &DesktopAppRuntimeSummary) -> impl IntoElement 
                     .flex()
                     .flex_col()
                     .gap(px(APP_UI_THEME.shells.home_stack_gap_px))
-                    .child(app_text_value(app_shared_text(AppTextKey::HomeTodayTitle))),
+                    .child(
+                        buyer_sidebar_nav_button(
+                            "buyer-nav-browse",
+                            AppTextKey::HomeNavBrowse,
+                            selected_section == PersonalSection::Browse,
+                            on_select_browse,
+                            cx,
+                        )
+                        .into_any_element(),
+                    )
+                    .child(
+                        buyer_sidebar_nav_button(
+                            "buyer-nav-search",
+                            AppTextKey::HomeNavSearch,
+                            selected_section == PersonalSection::Search,
+                            on_select_search,
+                            cx,
+                        )
+                        .into_any_element(),
+                    )
+                    .child(
+                        buyer_sidebar_nav_button(
+                            "buyer-nav-cart",
+                            AppTextKey::HomeNavCart,
+                            selected_section == PersonalSection::Cart,
+                            on_select_cart,
+                            cx,
+                        )
+                        .into_any_element(),
+                    )
+                    .child(
+                        buyer_sidebar_nav_button(
+                            "buyer-nav-orders",
+                            AppTextKey::HomeNavOrders,
+                            selected_section == PersonalSection::Orders,
+                            on_select_orders,
+                            cx,
+                        )
+                        .into_any_element(),
+                    ),
             )
             .child(
                 div().child(div().when_some(home_saved_farm(runtime), |this, farm| {
@@ -5375,6 +5715,26 @@ fn holding_home_sidebar(runtime: &DesktopAppRuntimeSummary) -> impl IntoElement 
                 })),
             ),
     )
+}
+
+fn buyer_sidebar_nav_button(
+    id: &'static str,
+    key: AppTextKey,
+    is_active: bool,
+    on_click: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+    cx: &App,
+) -> AnyElement {
+    if is_active {
+        div()
+            .id(id)
+            .text_size(px(APP_UI_THEME.foundation.typography.body_text_px * 2.0))
+            .font_weight(gpui::FontWeight::BOLD)
+            .text_color(rgb(APP_UI_THEME.foundation.text.primary))
+            .child(app_shared_text(key))
+            .into_any_element()
+    } else {
+        action_button(id, app_shared_text(key), on_click, cx).into_any_element()
+    }
 }
 
 fn home_sidebar_navigation_sections(
@@ -5411,6 +5771,15 @@ fn selected_farmer_section(runtime: &DesktopAppRuntimeSummary) -> FarmerSection 
     }
 }
 
+fn selected_personal_section(runtime: &DesktopAppRuntimeSummary) -> PersonalSection {
+    match runtime.shell_projection.selected_section {
+        ShellSection::Personal(section) => section,
+        ShellSection::Home | ShellSection::Farmer(_) | ShellSection::Settings(_) => {
+            PersonalSection::Browse
+        }
+    }
+}
+
 fn farmer_products_available(runtime: &DesktopAppRuntimeSummary) -> bool {
     runtime.farm_setup_projection.has_saved_farm()
 }
@@ -5429,6 +5798,15 @@ fn home_content_scroll_id(section: FarmerSection) -> &'static str {
         FarmerSection::Orders => "home-orders-scroll",
         FarmerSection::PackDay => "home-pack-day-scroll",
         FarmerSection::Today | FarmerSection::Farm => "home-today-scroll",
+    }
+}
+
+fn buyer_content_scroll_id(section: PersonalSection) -> &'static str {
+    match section {
+        PersonalSection::Browse => "buyer-browse-scroll",
+        PersonalSection::Search => "buyer-search-scroll",
+        PersonalSection::Cart => "buyer-cart-scroll",
+        PersonalSection::Orders => "buyer-orders-scroll",
     }
 }
 
@@ -7639,23 +8017,26 @@ fn home_farm_order_method_label_key(method: FarmOrderMethod) -> AppTextKey {
 #[cfg(test)]
 mod tests {
     use super::{
-        AppTextKey, FarmerHomeFarmState, SETTINGS_FARM_PANEL_SECTIONS, SETTINGS_NAVIGATION_ORDER,
-        SETTINGS_OPERATIONS_PANEL_SECTIONS, SettingsInventorySectionSpec, SettingsPanelViewKey,
-        StartupHomeSurface, StartupSignerConnectState, farm_setup_onboarding_card_spec,
-        farmer_home_farm_state, farmer_pack_day_available, home_content_scroll_id, home_saved_farm,
-        home_sidebar_navigation_sections, home_window_launch_size_px, home_window_minimum_size_px,
-        parse_optional_product_editor_stock_input, parse_product_editor_price_input,
-        product_display_title, startup_home_surface, startup_signer_preview_summary,
-        startup_signer_preview_summary_for_connect_state, startup_signer_source_input_is_editable,
-        startup_signer_status_spec, startup_signer_transport_failure_requires_notice,
+        AppTextKey, FarmerHomeFarmState, HomeStage, SETTINGS_FARM_PANEL_SECTIONS,
+        SETTINGS_NAVIGATION_ORDER, SETTINGS_OPERATIONS_PANEL_SECTIONS,
+        SettingsInventorySectionSpec, SettingsPanelViewKey, StartupHomeSurface,
+        StartupSignerConnectState, farm_setup_onboarding_card_spec, farmer_home_farm_state,
+        farmer_pack_day_available, home_content_scroll_id, home_saved_farm,
+        home_sidebar_navigation_sections, home_stage, home_window_launch_size_px,
+        home_window_minimum_size_px, parse_optional_product_editor_stock_input,
+        parse_product_editor_price_input, product_display_title, startup_home_surface,
+        startup_signer_preview_summary, startup_signer_preview_summary_for_connect_state,
+        startup_signer_source_input_is_editable, startup_signer_status_spec,
+        startup_signer_transport_failure_requires_notice,
     };
     use crate::runtime::DesktopAppRuntimeSummary;
     use radroots_studio_app_models::SettingsAccountProjection;
     use radroots_studio_app_models::{
-        AppStartupGate, FarmId, FarmOrderMethod, FarmReadiness, FarmSetupDraft,
+        ActiveSurface, AppStartupGate, FarmId, FarmOrderMethod, FarmReadiness, FarmSetupDraft,
         FarmSetupProjection, FarmSummary, FarmerSection, FulfillmentWindowId,
         FulfillmentWindowSummary, LoggedOutStartupPhase, LoggedOutStartupProjection,
-        PackDayProjection, TodayAgendaProjection, TodaySetupTask, TodaySetupTaskKind,
+        PackDayProjection, PersonalSection, ShellSection, TodayAgendaProjection, TodaySetupTask,
+        TodaySetupTaskKind,
     };
     use radroots_studio_app_remote_signer::{
         RadrootsAppRemoteSignerApprovedSession, RadrootsAppRemoteSignerPendingSession,
@@ -7824,6 +8205,22 @@ mod tests {
             )),
             StartupHomeSurface::IssueCard
         );
+    }
+
+    #[test]
+    fn home_stage_uses_buyer_workspace_when_guest_enters_marketplace() {
+        let mut guest_marketplace = summary(
+            HomeRoute::SetupRequired,
+            TodayAgendaProjection::default(),
+            FarmSetupProjection::default(),
+        );
+        guest_marketplace.startup_gate = AppStartupGate::SetupRequired;
+        guest_marketplace.shell_projection = AppShellProjection::new(
+            ActiveSurface::Personal,
+            ShellSection::Personal(PersonalSection::Browse),
+        );
+
+        assert_eq!(home_stage(&guest_marketplace), HomeStage::BuyerWorkspace);
     }
 
     #[test]
@@ -8158,6 +8555,7 @@ mod tests {
             startup_gate: AppStartupGate::Farmer,
             logged_out_startup: LoggedOutStartupProjection::default(),
             home_route,
+            personal_projection: Default::default(),
             farm_readiness_projection,
             farm_setup_projection,
             today_projection,
