@@ -771,6 +771,44 @@ pub fn app_button_list_row(
         )
 }
 
+pub fn app_button_card(
+    id: impl Into<ElementId>,
+    is_selected: bool,
+    on_click: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+    cx: &App,
+    content: impl IntoElement,
+) -> impl IntoElement {
+    let selected_background = rgb(APP_UI_THEME.foundation.surfaces.window_background);
+
+    Button::new(id)
+        .custom(
+            ButtonCustomVariant::new(cx)
+                .color(rgb(APP_UI_THEME.foundation.surfaces.card_background).into())
+                .foreground(rgb(APP_UI_THEME.foundation.text.primary).into())
+                .border(transparent_black())
+                .hover(selected_background.into())
+                .active(selected_background.into()),
+        )
+        .rounded(ButtonRounded::Size(px(APP_UI_THEME
+            .foundation
+            .radii
+            .medium_px)))
+        .w_full()
+        .on_click(on_click)
+        .child(
+            div()
+                .w_full()
+                .min_w_0()
+                .bg(rgb(if is_selected {
+                    APP_UI_THEME.foundation.surfaces.window_background
+                } else {
+                    APP_UI_THEME.foundation.surfaces.card_background
+                }))
+                .rounded(px(APP_UI_THEME.foundation.radii.medium_px))
+                .child(content),
+        )
+}
+
 fn app_button_base(
     id: impl Into<ElementId>,
     variant: AppButtonVariant,

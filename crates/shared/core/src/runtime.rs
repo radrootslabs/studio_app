@@ -104,10 +104,8 @@ impl AppRuntimeConfig {
     where
         F: FnMut(&str) -> Option<String>,
     {
-        let runtime_mode = parse_config_runtime_mode(&require_env_value(
-            &mut read_env,
-            APP_RUNTIME_MODE_ENV,
-        )?)?;
+        let runtime_mode =
+            parse_config_runtime_mode(&require_env_value(&mut read_env, APP_RUNTIME_MODE_ENV)?)?;
         let default_nostr_relay_url =
             require_env_value(&mut read_env, APP_DEFAULT_NOSTR_RELAY_URL_ENV)?;
         let local_log_root = read_env(APP_LOCAL_LOG_ROOT_ENV)
@@ -146,7 +144,11 @@ impl AppRuntimeSnapshot {
     }
 
     pub fn capture_for_mode(build: AppBuildIdentity, runtime_mode: AppRuntimeMode) -> Self {
-        Self::from_capture(build, runtime_mode, AppRuntimeCapture::current(&runtime_mode))
+        Self::from_capture(
+            build,
+            runtime_mode,
+            AppRuntimeCapture::current(&runtime_mode),
+        )
     }
 
     pub fn from_capture(
@@ -341,12 +343,10 @@ mod tests {
 
     #[test]
     fn runtime_config_requires_explicit_runtime_mode_env() {
-        let env = BTreeMap::from([
-            (
-                APP_DEFAULT_NOSTR_RELAY_URL_ENV,
-                "ws://127.0.0.1:8080".to_owned(),
-            ),
-        ]);
+        let env = BTreeMap::from([(
+            APP_DEFAULT_NOSTR_RELAY_URL_ENV,
+            "ws://127.0.0.1:8080".to_owned(),
+        )]);
         let error = AppRuntimeConfig::from_env_with(
             |name| env.get(name).cloned(),
             Some(PathBuf::from("/tmp/default-logs")),
@@ -451,10 +451,7 @@ mod tests {
     fn runtime_config_rejects_empty_required_fields() {
         let env = BTreeMap::from([
             (APP_RUNTIME_MODE_ENV, "localhost-dev".to_owned()),
-            (
-                APP_DEFAULT_NOSTR_RELAY_URL_ENV,
-                "".to_owned(),
-            ),
+            (APP_DEFAULT_NOSTR_RELAY_URL_ENV, "".to_owned()),
         ]);
         let error = AppRuntimeConfig::from_env_with(
             |name| env.get(name).cloned(),
@@ -473,9 +470,7 @@ mod tests {
 
     #[test]
     fn runtime_config_rejects_missing_default_nostr_relay_url() {
-        let env = BTreeMap::from([
-            (APP_RUNTIME_MODE_ENV, "localhost-dev".to_owned()),
-        ]);
+        let env = BTreeMap::from([(APP_RUNTIME_MODE_ENV, "localhost-dev".to_owned())]);
         let error = AppRuntimeConfig::from_env_with(
             |name| env.get(name).cloned(),
             Some(PathBuf::from("/tmp/default-logs")),

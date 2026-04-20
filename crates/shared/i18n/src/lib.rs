@@ -192,6 +192,23 @@ mod tests {
     }
 
     #[test]
+    fn english_marketplace_detail_copy_matches_the_buyer_detail_contract() {
+        assert_eq!(app_text(AppTextKey::PersonalDetailBackAction), "Back");
+        assert_eq!(
+            app_text(AppTextKey::PersonalDetailQuantityLabel),
+            "Quantity"
+        );
+        assert_eq!(
+            app_text(AppTextKey::PersonalDetailAddToCartAction),
+            "Add to cart"
+        );
+        assert_eq!(
+            app_text(AppTextKey::PersonalDetailReplaceCartAction),
+            "Replace cart"
+        );
+    }
+
+    #[test]
     fn english_pack_day_copy_matches_the_contextual_execution_contract() {
         assert_eq!(app_text(AppTextKey::PackDayTitle), "Pack day");
         assert_eq!(

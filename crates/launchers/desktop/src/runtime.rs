@@ -5,13 +5,14 @@ use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use radroots_studio_app_core::{AppDesktopRuntimePaths, AppRuntimePathsError, AppSharedAccountsPaths};
 use radroots_studio_app_models::{
     ActiveSurface, AppActivityContext, AppActivityKind, AppIdentityProjection, AppStartupGate,
-    FarmId, FarmOrderMethod, FarmProfileRecord, FarmReadiness, FarmRulesProjection, FarmSetupDraft,
-    FarmSetupProjection, FarmSummary, FarmerSection, FulfillmentWindowId,
-    LoggedOutStartupProjection, OrderDetailProjection, OrderId, OrdersFilter, OrdersListProjection,
-    OrdersScreenQueryState, PackDayProjection, PackDayScreenQueryState, PersonalSection,
-    PickupLocationRecord, ProductEditorDraft, ProductId, ProductsFilter, ProductsListProjection,
-    ProductsSort, SettingsAccountProjection, SettingsPreference, SettingsSection, ShellSection,
-    TodayAgendaProjection,
+    BuyerCartLineProjection, BuyerCartProjection, BuyerCartReplaceConfirmationProjection,
+    BuyerProductDetailProjection, FarmId, FarmOrderMethod, FarmProfileRecord, FarmReadiness,
+    FarmRulesProjection, FarmSetupDraft, FarmSetupProjection, FarmSummary, FarmerSection,
+    FulfillmentWindowId, LoggedOutStartupProjection, OrderDetailProjection, OrderId, OrdersFilter,
+    OrdersListProjection, OrdersScreenQueryState, PackDayProjection, PackDayScreenQueryState,
+    PersonalSection, PickupLocationRecord, ProductEditorDraft, ProductId, ProductsFilter,
+    ProductsListProjection, ProductsSort, SettingsAccountProjection, SettingsPreference,
+    SettingsSection, ShellSection, TodayAgendaProjection,
 };
 use radroots_studio_app_remote_signer::{
     RadrootsAppRemoteSignerApprovedSession, RadrootsAppRemoteSignerPendingSession,
@@ -186,6 +187,43 @@ impl DesktopAppRuntime {
 
     pub fn select_farmer_section(&self, section: FarmerSection) -> bool {
         self.lock_state_mut().select_farmer_section(section)
+    }
+
+    pub fn open_personal_product_detail(
+        &self,
+        section: PersonalSection,
+        product_id: ProductId,
+    ) -> Result<bool, AppSqliteError> {
+        self.lock_state_mut()
+            .open_personal_product_detail(section, product_id)
+    }
+
+    pub fn close_personal_product_detail(&self, section: PersonalSection) -> bool {
+        self.lock_state_mut().close_personal_product_detail(section)
+    }
+
+    pub fn increase_personal_product_quantity(&self, section: PersonalSection) -> bool {
+        self.lock_state_mut()
+            .adjust_personal_product_quantity(section, 1)
+    }
+
+    pub fn decrease_personal_product_quantity(&self, section: PersonalSection) -> bool {
+        self.lock_state_mut()
+            .adjust_personal_product_quantity(section, -1)
+    }
+
+    pub fn add_personal_product_to_cart(
+        &self,
+        section: PersonalSection,
+        replace_existing: bool,
+    ) -> Result<bool, AppSqliteError> {
+        self.lock_state_mut()
+            .add_personal_product_to_cart(section, replace_existing)
+    }
+
+    pub fn clear_personal_cart_replace_confirmation(&self) -> bool {
+        self.lock_state_mut()
+            .clear_personal_cart_replace_confirmation()
     }
 
     pub fn set_personal_search_query(&self, search_query: &str) -> Result<bool, AppSqliteError> {
@@ -744,6 +782,131 @@ impl DesktopAppRuntimeState {
         let editor_changed = self.close_product_editor();
 
         section_changed || editor_changed
+    }
+
+    fn open_personal_product_detail(
+        &mut self,
+        section: PersonalSection,
+        product_id: ProductId,
+    ) -> Result<bool, AppSqliteError> {
+        let Some(sqlite_store) = self.sqlite_store.as_ref() else {
+            return Ok(false);
+        };
+        let Some(detail) = sqlite_store.load_buyer_product_detail(product_id)? else {
+            return Ok(false);
+        };
+
+        let section_changed = matches!(section, PersonalSection::Browse | PersonalSection::Search)
+            && self.select_personal_section(section);
+        let detail_changed = self.set_personal_product_detail(section, Some(detail));
+
+        Ok(section_changed || detail_changed)
+    }
+
+    fn close_personal_product_detail(&mut self, section: PersonalSection) -> bool {
+        self.set_personal_product_detail(section, None)
+    }
+
+    fn adjust_personal_product_quantity(&mut self, section: PersonalSection, delta: i32) -> bool {
+        self.mutate_personal_projection(|projection| {
+            let Some(detail) = personal_detail_mut(projection, section) else {
+                return false;
+            };
+            let next_quantity = if delta.is_negative() {
+                detail
+                    .selected_quantity
+                    .saturating_sub(delta.unsigned_abs())
+            } else {
+                detail.selected_quantity.saturating_add(delta as u32)
+            };
+
+            if next_quantity == 0 || next_quantity == detail.selected_quantity {
+                return false;
+            }
+
+            detail.selected_quantity = next_quantity;
+            true
+        })
+    }
+
+    fn add_personal_product_to_cart(
+        &mut self,
+        section: PersonalSection,
+        replace_existing: bool,
+    ) -> Result<bool, AppSqliteError> {
+        let Some(sqlite_store) = self.sqlite_store.as_ref() else {
+            return Ok(false);
+        };
+        let Some(detail) =
+            personal_detail(self.state_store.personal_projection(), section).cloned()
+        else {
+            return Ok(false);
+        };
+        let buyer_context = self.state_store.identity_projection().buyer_context();
+        let current_cart = sqlite_store.load_buyer_cart(&buyer_context)?;
+
+        if !replace_existing
+            && !current_cart.is_empty()
+            && current_cart.farm_id != Some(detail.listing.farm_id)
+        {
+            let current_farm_display_name = current_cart
+                .farm_display_name
+                .clone()
+                .or_else(|| {
+                    current_cart
+                        .lines
+                        .first()
+                        .map(|line| line.farm_display_name.clone())
+                })
+                .ok_or(AppSqliteError::InvalidProjection {
+                    reason: "buyer cart farm display name is missing",
+                })?;
+            let replace_confirmation = BuyerCartReplaceConfirmationProjection {
+                current_farm_display_name,
+                incoming_farm_display_name: detail.listing.farm_display_name.clone(),
+            };
+
+            return Ok(self.mutate_personal_projection(|projection| {
+                let cart = &mut projection.cart.cart;
+                if cart.replace_confirmation.as_ref() == Some(&replace_confirmation) {
+                    return false;
+                }
+
+                cart.replace_confirmation = Some(replace_confirmation);
+                true
+            }));
+        }
+
+        let next_cart = next_buyer_cart_for_detail(current_cart, &detail, replace_existing)?;
+        sqlite_store.replace_buyer_cart(&buyer_context, &next_cart)?;
+        let refreshed_cart = sqlite_store.load_buyer_cart(&buyer_context)?;
+        let refreshed_checkout = sqlite_store.load_buyer_checkout(&buyer_context)?;
+        let cart_changed = self.mutate_personal_projection(|projection| {
+            let mut changed = false;
+            if projection.cart.cart != refreshed_cart {
+                projection.cart.cart = refreshed_cart.clone();
+                changed = true;
+            }
+            if projection.cart.checkout != refreshed_checkout {
+                projection.cart.checkout = refreshed_checkout.clone();
+                changed = true;
+            }
+            changed
+        });
+        let section_changed = self.select_personal_section(PersonalSection::Cart);
+
+        Ok(cart_changed || section_changed)
+    }
+
+    fn clear_personal_cart_replace_confirmation(&mut self) -> bool {
+        self.mutate_personal_projection(|projection| {
+            if projection.cart.cart.replace_confirmation.is_none() {
+                return false;
+            }
+
+            projection.cart.cart.replace_confirmation = None;
+            true
+        })
     }
 
     fn set_personal_search_query(&mut self, search_query: &str) -> Result<bool, AppSqliteError> {
@@ -1399,6 +1562,39 @@ impl DesktopAppRuntimeState {
             .ok_or(DesktopAppRuntimeFarmRulesError::RuntimeUnavailable)
     }
 
+    fn mutate_personal_projection(
+        &mut self,
+        mutator: impl FnOnce(&mut PersonalWorkspaceProjection) -> bool,
+    ) -> bool {
+        let mut projection = self.state_store.personal_projection().clone();
+        if !mutator(&mut projection) {
+            return false;
+        }
+
+        self.state_store
+            .apply_in_memory(AppStateCommand::replace_personal_projection(projection))
+    }
+
+    fn set_personal_product_detail(
+        &mut self,
+        section: PersonalSection,
+        detail: Option<BuyerProductDetailProjection>,
+    ) -> bool {
+        self.mutate_personal_projection(|projection| {
+            let current_detail = match section {
+                PersonalSection::Browse => &mut projection.browse.detail,
+                PersonalSection::Search => &mut projection.search.detail,
+                PersonalSection::Cart | PersonalSection::Orders => return false,
+            };
+            if *current_detail == detail {
+                return false;
+            }
+
+            *current_detail = detail;
+            true
+        })
+    }
+
     fn replace_personal_search_query(
         &mut self,
         query: BuyerSearchScreenQueryState,
@@ -1836,6 +2032,129 @@ fn load_selected_account_context(
         order_detail,
         pack_day_projection,
     })
+}
+
+fn personal_detail(
+    projection: &PersonalWorkspaceProjection,
+    section: PersonalSection,
+) -> Option<&BuyerProductDetailProjection> {
+    match section {
+        PersonalSection::Browse => projection.browse.detail.as_ref(),
+        PersonalSection::Search => projection.search.detail.as_ref(),
+        PersonalSection::Cart | PersonalSection::Orders => None,
+    }
+}
+
+fn personal_detail_mut(
+    projection: &mut PersonalWorkspaceProjection,
+    section: PersonalSection,
+) -> Option<&mut BuyerProductDetailProjection> {
+    match section {
+        PersonalSection::Browse => projection.browse.detail.as_mut(),
+        PersonalSection::Search => projection.search.detail.as_mut(),
+        PersonalSection::Cart | PersonalSection::Orders => None,
+    }
+}
+
+fn next_buyer_cart_for_detail(
+    mut current_cart: BuyerCartProjection,
+    detail: &BuyerProductDetailProjection,
+    replace_existing: bool,
+) -> Result<BuyerCartProjection, AppSqliteError> {
+    let incoming_line = buyer_cart_line_from_detail(detail)?;
+    let current_farm_id = current_cart.farm_id;
+    let should_replace_lines = replace_existing
+        || current_cart.is_empty()
+        || current_farm_id != Some(detail.listing.farm_id);
+
+    if should_replace_lines {
+        current_cart.lines.clear();
+    }
+
+    current_cart.farm_id = Some(detail.listing.farm_id);
+    current_cart.farm_display_name = Some(detail.listing.farm_display_name.clone());
+    current_cart.replace_confirmation = None;
+
+    if let Some(existing_line) = current_cart
+        .lines
+        .iter_mut()
+        .find(|line| line.product_id == incoming_line.product_id)
+    {
+        existing_line.quantity = existing_line
+            .quantity
+            .checked_add(incoming_line.quantity)
+            .ok_or(AppSqliteError::InvalidProjection {
+                reason: "buyer cart quantity overflow",
+            })?;
+        existing_line.line_total_minor_units = existing_line
+            .unit_price
+            .amount_minor_units
+            .checked_mul(existing_line.quantity)
+            .ok_or(AppSqliteError::InvalidProjection {
+                reason: "buyer cart line total overflow",
+            })?;
+    } else {
+        current_cart.lines.push(incoming_line);
+    }
+
+    refresh_buyer_cart_totals(&mut current_cart)?;
+
+    Ok(current_cart)
+}
+
+fn buyer_cart_line_from_detail(
+    detail: &BuyerProductDetailProjection,
+) -> Result<BuyerCartLineProjection, AppSqliteError> {
+    Ok(BuyerCartLineProjection {
+        product_id: detail.listing.product_id,
+        farm_id: detail.listing.farm_id,
+        farm_display_name: detail.listing.farm_display_name.clone(),
+        title: detail.listing.title.clone(),
+        quantity: detail.selected_quantity,
+        unit_price: detail.listing.price.clone(),
+        line_total_minor_units: detail
+            .listing
+            .price
+            .amount_minor_units
+            .checked_mul(detail.selected_quantity)
+            .ok_or(AppSqliteError::InvalidProjection {
+                reason: "buyer cart line total overflow",
+            })?,
+        fulfillment_summary: detail
+            .listing
+            .next_fulfillment_window_label
+            .clone()
+            .unwrap_or_else(|| detail.listing.availability.label.clone()),
+    })
+}
+
+fn refresh_buyer_cart_totals(cart: &mut BuyerCartProjection) -> Result<(), AppSqliteError> {
+    if cart.lines.is_empty() {
+        cart.subtotal_minor_units = None;
+        cart.currency_code = None;
+        cart.replace_confirmation = None;
+        return Ok(());
+    }
+
+    let currency_code = cart.lines[0].unit_price.currency_code.clone();
+    let subtotal_minor_units = cart.lines.iter().try_fold(0u32, |subtotal, line| {
+        if line.unit_price.currency_code != currency_code {
+            return Err(AppSqliteError::InvalidProjection {
+                reason: "buyer cart currency mismatch",
+            });
+        }
+
+        subtotal
+            .checked_add(line.line_total_minor_units)
+            .ok_or(AppSqliteError::InvalidProjection {
+                reason: "buyer cart subtotal overflow",
+            })
+    })?;
+
+    cart.subtotal_minor_units = Some(subtotal_minor_units);
+    cart.currency_code = Some(currency_code);
+
+    Ok(())
 }
 
 fn fallback_farm_profile_for_projection(
@@ -2720,6 +3039,267 @@ mod tests {
                 .next_fulfillment_window_label
                 .as_deref(),
             Some("Friday pickup")
+        );
+    }
+
+    #[test]
+    fn runtime_personal_product_detail_adds_to_cart_and_routes_into_cart() {
+        let runtime = memory_runtime();
+        let (account_id, farm_id) = provision_ready_farmer_account(&runtime);
+        assert!(
+            runtime
+                .select_active_surface(ActiveSurface::Personal)
+                .expect("surface should switch into marketplace")
+        );
+        let fulfillment_window_id = seed_buyer_marketplace_support(
+            &runtime,
+            account_id.as_str(),
+            farm_id,
+            "North field farm",
+            "Friday pickup",
+        );
+        let product_id = seed_product(
+            &runtime,
+            farm_id,
+            "Salad mix",
+            "Spring blend",
+            "published",
+            Some(8),
+            "2026-04-20T09:00:00Z",
+        );
+        runtime
+            .lock_state()
+            .sqlite_store
+            .as_ref()
+            .expect("sqlite store")
+            .connection()
+            .execute_batch(&format!(
+                "update products
+                 set availability_window_id = '{fulfillment_window_id}'
+                 where id = '{product_id}'"
+            ))
+            .expect("buyer detail product should attach a fulfillment window");
+
+        assert!(
+            runtime
+                .open_personal_product_detail(PersonalSection::Browse, product_id)
+                .expect("buyer detail should open")
+        );
+        assert!(runtime.increase_personal_product_quantity(PersonalSection::Browse));
+        assert!(
+            runtime
+                .add_personal_product_to_cart(PersonalSection::Browse, false)
+                .expect("buyer product should add to cart")
+        );
+
+        let summary = runtime.summary();
+        assert_eq!(
+            summary.shell_projection.selected_section,
+            ShellSection::Personal(PersonalSection::Cart)
+        );
+        assert_eq!(summary.personal_projection.cart.cart.lines.len(), 1);
+        assert_eq!(
+            summary.personal_projection.cart.cart.lines[0].title,
+            "Salad mix"
+        );
+        assert_eq!(summary.personal_projection.cart.cart.lines[0].quantity, 2);
+        assert_eq!(
+            summary.personal_projection.cart.cart.subtotal_minor_units,
+            Some(1200)
+        );
+        assert_eq!(
+            summary
+                .personal_projection
+                .cart
+                .cart
+                .farm_display_name
+                .as_deref(),
+            Some("North field farm")
+        );
+        assert!(
+            summary
+                .personal_projection
+                .cart
+                .cart
+                .replace_confirmation
+                .is_none()
+        );
+        assert_eq!(
+            summary
+                .personal_projection
+                .browse
+                .detail
+                .as_ref()
+                .expect("buyer detail should persist on browse")
+                .selected_quantity,
+            2
+        );
+    }
+
+    #[test]
+    fn runtime_cross_farm_buyer_add_requires_replace_confirmation() {
+        let runtime = memory_runtime();
+        let (account_id, farm_id) = provision_ready_farmer_account(&runtime);
+        assert!(
+            runtime
+                .select_active_surface(ActiveSurface::Personal)
+                .expect("surface should switch into marketplace")
+        );
+        let first_window_id = seed_buyer_marketplace_support(
+            &runtime,
+            account_id.as_str(),
+            farm_id,
+            "North field farm",
+            "Friday pickup",
+        );
+        let first_product_id = seed_product(
+            &runtime,
+            farm_id,
+            "Salad mix",
+            "Spring blend",
+            "published",
+            Some(8),
+            "2026-04-20T09:00:00Z",
+        );
+        runtime
+            .lock_state()
+            .sqlite_store
+            .as_ref()
+            .expect("sqlite store")
+            .connection()
+            .execute_batch(&format!(
+                "update products
+                 set availability_window_id = '{first_window_id}'
+                 where id = '{first_product_id}'"
+            ))
+            .expect("first product should attach a fulfillment window");
+        assert!(
+            runtime
+                .open_personal_product_detail(PersonalSection::Browse, first_product_id)
+                .expect("first buyer detail should open")
+        );
+        assert!(
+            runtime
+                .add_personal_product_to_cart(PersonalSection::Browse, false)
+                .expect("first buyer product should add to cart")
+        );
+
+        let other_farm_id = FarmId::new();
+        runtime
+            .lock_state()
+            .sqlite_store
+            .as_ref()
+            .expect("sqlite store")
+            .save_farm_summary(&FarmSummary {
+                farm_id: other_farm_id,
+                display_name: "Willow Farm".to_owned(),
+                readiness: FarmReadiness::Ready,
+            })
+            .expect("other farm summary should save");
+        let second_window_id = seed_buyer_marketplace_support(
+            &runtime,
+            "acct_other_farmer",
+            other_farm_id,
+            "Willow Farm",
+            "Saturday pickup",
+        );
+        let second_product_id = seed_product(
+            &runtime,
+            other_farm_id,
+            "Pea shoots",
+            "Tray-grown",
+            "published",
+            Some(5),
+            "2026-04-20T10:00:00Z",
+        );
+        runtime
+            .lock_state()
+            .sqlite_store
+            .as_ref()
+            .expect("sqlite store")
+            .connection()
+            .execute_batch(&format!(
+                "update products
+                 set availability_window_id = '{second_window_id}'
+                 where id = '{second_product_id}'"
+            ))
+            .expect("second product should attach a fulfillment window");
+
+        assert!(
+            runtime
+                .open_personal_product_detail(PersonalSection::Browse, second_product_id)
+                .expect("second buyer detail should open")
+        );
+        assert!(
+            runtime
+                .add_personal_product_to_cart(PersonalSection::Browse, false)
+                .expect("cross-farm add should require confirmation")
+        );
+
+        let confirmation_summary = runtime.summary();
+        assert_eq!(
+            confirmation_summary.shell_projection.selected_section,
+            ShellSection::Personal(PersonalSection::Browse)
+        );
+        assert_eq!(
+            confirmation_summary
+                .personal_projection
+                .cart
+                .cart
+                .lines
+                .len(),
+            1
+        );
+        assert_eq!(
+            confirmation_summary.personal_projection.cart.cart.lines[0].title,
+            "Salad mix"
+        );
+        assert_eq!(
+            confirmation_summary
+                .personal_projection
+                .cart
+                .cart
+                .replace_confirmation
+                .as_ref()
+                .expect("replace confirmation should exist")
+                .incoming_farm_display_name,
+            "Willow Farm"
+        );
+
+        assert!(
+            runtime
+                .add_personal_product_to_cart(PersonalSection::Browse, true)
+                .expect("confirmed cross-farm add should replace the cart")
+        );
+        let replaced_summary = runtime.summary();
+        assert_eq!(
+            replaced_summary.shell_projection.selected_section,
+            ShellSection::Personal(PersonalSection::Cart)
+        );
+        assert_eq!(
+            replaced_summary.personal_projection.cart.cart.lines.len(),
+            1
+        );
+        assert_eq!(
+            replaced_summary.personal_projection.cart.cart.lines[0].title,
+            "Pea shoots"
+        );
+        assert_eq!(
+            replaced_summary
+                .personal_projection
+                .cart
+                .cart
+                .farm_display_name
+                .as_deref(),
+            Some("Willow Farm")
+        );
+        assert!(
+            replaced_summary
+                .personal_projection
+                .cart
+                .cart
+                .replace_confirmation
+                .is_none()
         );
     }
 
@@ -4397,6 +4977,104 @@ mod tests {
             .expect("product should seed");
 
         product_id
+    }
+
+    fn seed_buyer_marketplace_support(
+        runtime: &DesktopAppRuntime,
+        account_id: &str,
+        farm_id: FarmId,
+        farm_display_name: &str,
+        fulfillment_label: &str,
+    ) -> FulfillmentWindowId {
+        let pickup_location_id = PickupLocationId::new();
+        let fulfillment_window_id = FulfillmentWindowId::new();
+        let sql = format!(
+            "insert into pickup_locations (
+                id,
+                farm_id,
+                label,
+                address_line,
+                directions,
+                is_default,
+                created_at,
+                updated_at
+             ) values (
+                '{pickup_location_id}',
+                '{farm_id}',
+                'North barn',
+                '14 County Road',
+                null,
+                1,
+                '2026-04-20T08:00:00Z',
+                '2026-04-20T08:00:00Z'
+             );
+             insert into fulfillment_windows (
+                id,
+                farm_id,
+                starts_at,
+                ends_at,
+                capacity_limit,
+                created_at,
+                updated_at,
+                pickup_location_id,
+                label,
+                order_cutoff_at
+             ) values (
+                '{fulfillment_window_id}',
+                '{farm_id}',
+                '2099-04-18T16:00:00Z',
+                '2099-04-18T18:00:00Z',
+                null,
+                '2099-04-18T16:00:00Z',
+                '2099-04-18T16:00:00Z',
+                '{pickup_location_id}',
+                '{fulfillment_label}',
+                '2099-04-17T18:00:00Z'
+             );
+             insert into account_farm_setups (
+                account_id,
+                farm_name,
+                location_or_service_area,
+                pickup_enabled,
+                delivery_enabled,
+                shipping_enabled,
+                saved_farm_id,
+                saved_farm_display_name,
+                saved_farm_readiness,
+                updated_at
+             ) values (
+                '{account_id}',
+                '{farm_display_name}',
+                'County Road',
+                1,
+                0,
+                0,
+                '{farm_id}',
+                '{farm_display_name}',
+                'ready',
+                '2026-04-20T08:00:00Z'
+             )
+             on conflict(account_id) do update set
+                farm_name = excluded.farm_name,
+                location_or_service_area = excluded.location_or_service_area,
+                pickup_enabled = excluded.pickup_enabled,
+                delivery_enabled = excluded.delivery_enabled,
+                shipping_enabled = excluded.shipping_enabled,
+                saved_farm_id = excluded.saved_farm_id,
+                saved_farm_display_name = excluded.saved_farm_display_name,
+                saved_farm_readiness = excluded.saved_farm_readiness,
+                updated_at = excluded.updated_at;"
+        );
+        runtime
+            .lock_state()
+            .sqlite_store
+            .as_ref()
+            .expect("sqlite store")
+            .connection()
+            .execute_batch(&sql)
+            .expect("buyer marketplace support should seed");
+
+        fulfillment_window_id
     }
 
     fn provision_ready_farmer_account(runtime: &DesktopAppRuntime) -> (String, FarmId) {

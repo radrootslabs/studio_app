@@ -11,17 +11,17 @@ use gpui_component::{
 use radroots_studio_app_i18n::AppTextKey;
 pub use radroots_studio_app_models::SettingsSection as SettingsPanelViewKey;
 use radroots_studio_app_models::{
-    AppStartupGate, BlackoutPeriodId, BlackoutPeriodRecord, BuyerListingRow, FarmId,
-    FarmOperatingRulesRecord, FarmOrderMethod, FarmProfileRecord, FarmReadinessBlocker,
-    FarmRulesProjection, FarmRulesReadiness, FarmSetupBlocker, FarmSetupDraft, FarmSummary,
-    FarmTimingConflictKind, FarmerSection, FulfillmentWindowId, FulfillmentWindowRecord,
-    FulfillmentWindowSummary, LoggedOutStartupPhase, OrderDetailItemRow, OrderDetailProjection,
-    OrderId, OrderListRow, OrderPrimaryAction, OrderStatus, OrdersFilter, OrdersListRow,
-    PackDayPackListRow, PackDayProductTotalRow, PackDayRosterRow, PersonalEntryState,
-    PersonalSection, PickupLocationId, PickupLocationRecord, ProductAttentionState,
-    ProductEditorDraft, ProductId, ProductListRow, ProductPricePresentation, ProductPublishBlocker,
-    ProductStatus, ProductsFilter, ProductsListRow, ProductsSort, ShellSection,
-    TodayAgendaProjection, TodaySetupTaskKind,
+    AppStartupGate, BlackoutPeriodId, BlackoutPeriodRecord, BuyerCartReplaceConfirmationProjection,
+    BuyerListingRow, BuyerProductDetailProjection, FarmId, FarmOperatingRulesRecord,
+    FarmOrderMethod, FarmProfileRecord, FarmReadinessBlocker, FarmRulesProjection,
+    FarmRulesReadiness, FarmSetupBlocker, FarmSetupDraft, FarmSummary, FarmTimingConflictKind,
+    FarmerSection, FulfillmentWindowId, FulfillmentWindowRecord, FulfillmentWindowSummary,
+    LoggedOutStartupPhase, OrderDetailItemRow, OrderDetailProjection, OrderId, OrderListRow,
+    OrderPrimaryAction, OrderStatus, OrdersFilter, OrdersListRow, PackDayPackListRow,
+    PackDayProductTotalRow, PackDayRosterRow, PersonalEntryState, PersonalSection,
+    PickupLocationId, PickupLocationRecord, ProductAttentionState, ProductEditorDraft, ProductId,
+    ProductListRow, ProductPricePresentation, ProductPublishBlocker, ProductStatus, ProductsFilter,
+    ProductsListRow, ProductsSort, ShellSection, TodayAgendaProjection, TodaySetupTaskKind,
 };
 use radroots_studio_app_remote_signer::{
     RadrootsAppRemoteSignerApprovedSession, RadrootsAppRemoteSignerPendingPollOutcome,
@@ -35,7 +35,7 @@ use radroots_studio_app_state::{
 };
 use radroots_studio_app_ui::{
     APP_UI_THEME, AppCheckboxFieldSpec, AppFormFieldSpec,
-    AppSegmentButtonIconSpec as IconSegmentButtonSpec, LabelValueRow,
+    AppSegmentButtonIconSpec as IconSegmentButtonSpec, LabelValueRow, app_button_card,
     app_button_choice as choice_button, app_button_compact as action_button_compact,
     app_button_icon as action_icon_button, app_button_list_row as list_row_button,
     app_button_primary as action_button_primary,
@@ -1034,6 +1034,84 @@ impl HomeView {
         }
     }
 
+    fn open_personal_product_detail(
+        &mut self,
+        section: PersonalSection,
+        product_id: ProductId,
+        cx: &mut Context<Self>,
+    ) {
+        match self
+            .runtime
+            .open_personal_product_detail(section, product_id)
+        {
+            Ok(true) => cx.notify(),
+            Ok(false) => {}
+            Err(runtime_error) => {
+                error!(
+                    target: "buyer",
+                    event = "buyer.detail_open_failed",
+                    error = %runtime_error,
+                    "failed to open buyer product detail"
+                );
+            }
+        }
+    }
+
+    fn close_personal_product_detail(&mut self, section: PersonalSection, cx: &mut Context<Self>) {
+        if self.runtime.close_personal_product_detail(section) {
+            cx.notify();
+        }
+    }
+
+    fn increase_personal_product_quantity(
+        &mut self,
+        section: PersonalSection,
+        cx: &mut Context<Self>,
+    ) {
+        if self.runtime.increase_personal_product_quantity(section) {
+            cx.notify();
+        }
+    }
+
+    fn decrease_personal_product_quantity(
+        &mut self,
+        section: PersonalSection,
+        cx: &mut Context<Self>,
+    ) {
+        if self.runtime.decrease_personal_product_quantity(section) {
+            cx.notify();
+        }
+    }
+
+    fn add_personal_product_to_cart(
+        &mut self,
+        section: PersonalSection,
+        replace_existing: bool,
+        cx: &mut Context<Self>,
+    ) {
+        match self
+            .runtime
+            .add_personal_product_to_cart(section, replace_existing)
+        {
+            Ok(true) => cx.notify(),
+            Ok(false) => {}
+            Err(runtime_error) => {
+                error!(
+                    target: "buyer",
+                    event = "buyer.add_to_cart_failed",
+                    error = %runtime_error,
+                    "failed to add buyer product to cart"
+                );
+            }
+        }
+    }
+
+    fn clear_personal_cart_replace_confirmation(&mut self, cx: &mut Context<Self>) {
+        if self.runtime.clear_personal_cart_replace_confirmation() {
+            cx.notify();
+        }
+    }
+
     fn select_products_filter(&mut self, filter: ProductsFilter, cx: &mut Context<Self>) {
         match self.runtime.select_products_filter(filter) {
             Ok(true) => {
@@ -1833,7 +1911,9 @@ impl HomeView {
     ) -> AnyElement {
         let selected_personal_section = selected_personal_section(runtime);
         let main_content = match selected_personal_section {
-            PersonalSection::Browse => self.render_buyer_browse_content(runtime).into_any_element(),
+            PersonalSection::Browse => self
+                .render_buyer_browse_content(runtime, cx)
+                .into_any_element(),
             PersonalSection::Search => self
                 .render_buyer_search_content(runtime, cx)
                 .into_any_element(),
@@ -1882,8 +1962,18 @@ impl HomeView {
         .into_any_element()
     }
 
-    fn render_buyer_browse_content(&mut self, runtime: &DesktopAppRuntimeSummary) -> AnyElement {
+    fn render_buyer_browse_content(
+        &mut self,
+        runtime: &DesktopAppRuntimeSummary,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         let listings = &runtime.personal_projection.browse.listings.rows;
+        let selected_product_id = runtime
+            .personal_projection
+            .browse
+            .detail
+            .as_ref()
+            .map(|detail| detail.listing.product_id);
 
         app_stack_v(APP_UI_THEME.shells.home_stack_gap_px)
             .w_full()
@@ -1900,7 +1990,62 @@ impl HomeView {
                 )
                 .into_any_element()
             } else {
-                buyer_listings_feed(listings).into_any_element()
+                app_stack_v(APP_UI_THEME.shells.home_stack_gap_px)
+                    .w_full()
+                    .when_some(
+                        runtime.personal_projection.browse.detail.as_ref(),
+                        |this, detail| {
+                            this.child(buyer_product_detail_card(
+                                detail,
+                                runtime
+                                    .personal_projection
+                                    .cart
+                                    .cart
+                                    .replace_confirmation
+                                    .as_ref(),
+                                cx.listener(|this, _, _, cx| {
+                                    this.close_personal_product_detail(PersonalSection::Browse, cx)
+                                }),
+                                cx.listener(|this, _, _, cx| {
+                                    this.decrease_personal_product_quantity(
+                                        PersonalSection::Browse,
+                                        cx,
+                                    )
+                                }),
+                                cx.listener(|this, _, _, cx| {
+                                    this.increase_personal_product_quantity(
+                                        PersonalSection::Browse,
+                                        cx,
+                                    )
+                                }),
+                                cx.listener(|this, _, _, cx| {
+                                    this.add_personal_product_to_cart(
+                                        PersonalSection::Browse,
+                                        false,
+                                        cx,
+                                    )
+                                }),
+                                cx.listener(|this, _, _, cx| {
+                                    this.add_personal_product_to_cart(
+                                        PersonalSection::Browse,
+                                        true,
+                                        cx,
+                                    )
+                                }),
+                                cx.listener(|this, _, _, cx| {
+                                    this.clear_personal_cart_replace_confirmation(cx)
+                                }),
+                                cx,
+                            ))
+                        },
+                    )
+                    .child(buyer_listings_feed(
+                        PersonalSection::Browse,
+                        listings,
+                        selected_product_id,
+                        cx,
+                    ))
+                    .into_any_element()
             })
             .into_any_element()
     }
@@ -1912,6 +2057,12 @@ impl HomeView {
     ) -> AnyElement {
         let query = &runtime.personal_projection.search.query;
         let listings = &runtime.personal_projection.search.listings.rows;
+        let selected_product_id = runtime
+            .personal_projection
+            .search
+            .detail
+            .as_ref()
+            .map(|detail| detail.listing.product_id);
 
         app_stack_v(APP_UI_THEME.shells.home_stack_gap_px)
             .w_full()
@@ -2016,7 +2167,62 @@ impl HomeView {
                 )
                 .into_any_element()
             } else {
-                buyer_listings_feed(listings).into_any_element()
+                app_stack_v(APP_UI_THEME.shells.home_stack_gap_px)
+                    .w_full()
+                    .when_some(
+                        runtime.personal_projection.search.detail.as_ref(),
+                        |this, detail| {
+                            this.child(buyer_product_detail_card(
+                                detail,
+                                runtime
+                                    .personal_projection
+                                    .cart
+                                    .cart
+                                    .replace_confirmation
+                                    .as_ref(),
+                                cx.listener(|this, _, _, cx| {
+                                    this.close_personal_product_detail(PersonalSection::Search, cx)
+                                }),
+                                cx.listener(|this, _, _, cx| {
+                                    this.decrease_personal_product_quantity(
+                                        PersonalSection::Search,
+                                        cx,
+                                    )
+                                }),
+                                cx.listener(|this, _, _, cx| {
+                                    this.increase_personal_product_quantity(
+                                        PersonalSection::Search,
+                                        cx,
+                                    )
+                                }),
+                                cx.listener(|this, _, _, cx| {
+                                    this.add_personal_product_to_cart(
+                                        PersonalSection::Search,
+                                        false,
+                                        cx,
+                                    )
+                                }),
+                                cx.listener(|this, _, _, cx| {
+                                    this.add_personal_product_to_cart(
+                                        PersonalSection::Search,
+                                        true,
+                                        cx,
+                                    )
+                                }),
+                                cx.listener(|this, _, _, cx| {
+                                    this.clear_personal_cart_replace_confirmation(cx)
+                                }),
+                                cx,
+                            ))
+                        },
+                    )
+                    .child(buyer_listings_feed(
+                        PersonalSection::Search,
+                        listings,
+                        selected_product_id,
+                        cx,
+                    ))
+                    .into_any_element()
             })
             .into_any_element()
     }
@@ -5294,24 +5500,55 @@ fn buyer_workspace_title_block(title_key: AppTextKey, body_key: AppTextKey) -> i
         )
 }
 
-fn buyer_listings_feed(rows: &[BuyerListingRow]) -> impl IntoElement {
+fn buyer_listings_feed(
+    section: PersonalSection,
+    rows: &[BuyerListingRow],
+    selected_product_id: Option<ProductId>,
+    cx: &mut Context<HomeView>,
+) -> impl IntoElement {
     app_stack_v(APP_UI_THEME.shells.home_stack_gap_px)
         .w_full()
-        .children(rows.iter().map(buyer_listing_card).collect::<Vec<_>>())
+        .children(
+            rows.iter()
+                .enumerate()
+                .map(|(index, row)| {
+                    buyer_listing_card(
+                        index,
+                        section,
+                        row,
+                        selected_product_id == Some(row.product_id),
+                        cx,
+                    )
+                })
+                .collect::<Vec<_>>(),
+        )
 }
 
-fn buyer_listing_card(row: &BuyerListingRow) -> AnyElement {
+fn buyer_listing_card(
+    index: usize,
+    section: PersonalSection,
+    row: &BuyerListingRow,
+    is_selected: bool,
+    cx: &mut Context<HomeView>,
+) -> AnyElement {
     let subtitle = row
         .subtitle
         .as_deref()
         .map(str::trim)
         .filter(|subtitle| !subtitle.is_empty())
         .map(str::to_owned);
-
-    app_surface_card(
+    app_button_card(
+        ("buyer-listing-open", index),
+        is_selected,
+        cx.listener({
+            let product_id = row.product_id;
+            move |this, _, _, cx| this.open_personal_product_detail(section, product_id, cx)
+        }),
+        cx,
         div()
             .w_full()
             .min_w_0()
+            .p(px(APP_UI_THEME.shells.home_card_padding_px))
             .flex()
             .flex_col()
             .gap(px(APP_UI_THEME.shells.home_stack_gap_px))
@@ -5439,6 +5676,147 @@ fn buyer_listing_price_text(price: &ProductPricePresentation) -> String {
     let cents = price.amount_minor_units % 100;
 
     format!("${dollars}.{cents:02} / {}", price.unit_label)
+}
+
+fn buyer_product_detail_card(
+    detail: &BuyerProductDetailProjection,
+    replace_confirmation: Option<&BuyerCartReplaceConfirmationProjection>,
+    on_close: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+    on_decrease_quantity: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+    on_increase_quantity: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+    on_add_to_cart: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+    on_confirm_replace: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+    on_keep_current_cart: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+    cx: &App,
+) -> impl IntoElement {
+    app_surface_card(
+        app_stack_v(APP_UI_THEME.shells.home_stack_gap_px)
+            .w_full()
+            .child(
+                div()
+                    .w_full()
+                    .flex()
+                    .items_start()
+                    .justify_between()
+                    .gap(px(APP_UI_THEME.shells.home_stack_gap_px))
+                    .child(
+                        app_stack_v(4.0)
+                            .flex_1()
+                            .min_w_0()
+                            .child(app_text_value(product_display_title(
+                                detail.listing.title.as_str(),
+                            )))
+                            .child(settings_badge_text(
+                                detail.listing.farm_display_name.clone(),
+                            )),
+                    )
+                    .child(text_button(
+                        "buyer-detail-back",
+                        app_shared_text(AppTextKey::PersonalDetailBackAction),
+                        on_close,
+                        cx,
+                    )),
+            )
+            .when_some(
+                detail
+                    .detail_text
+                    .as_deref()
+                    .map(str::trim)
+                    .filter(|value| !value.is_empty())
+                    .map(str::to_owned),
+                |this, detail_text| this.child(home_body_text(detail_text)),
+            )
+            .child(
+                app_cluster(APP_UI_THEME.foundation.spacing.small_px)
+                    .w_full()
+                    .child(buyer_listing_chip(buyer_listing_price_text(
+                        &detail.listing.price,
+                    )))
+                    .child(buyer_listing_chip(buyer_listing_next_window_text(
+                        &detail.listing,
+                    )))
+                    .child(buyer_listing_chip(buyer_listing_fulfillment_methods_text(
+                        &detail.listing.fulfillment_methods,
+                    )))
+                    .child(buyer_listing_chip(
+                        buyer_listing_stock_or_availability_text(&detail.listing),
+                    )),
+            )
+            .child(
+                div()
+                    .w_full()
+                    .flex()
+                    .items_center()
+                    .justify_between()
+                    .gap(px(APP_UI_THEME.shells.home_stack_gap_px))
+                    .child(app_text_label(app_shared_text(
+                        AppTextKey::PersonalDetailQuantityLabel,
+                    )))
+                    .child(
+                        app_stack_h(APP_UI_THEME.foundation.spacing.small_px)
+                            .child(action_button_compact(
+                                "buyer-detail-quantity-decrease",
+                                SharedString::from("-"),
+                                on_decrease_quantity,
+                                cx,
+                            ))
+                            .child(
+                                div()
+                                    .min_w(px(36.0))
+                                    .text_size(px(APP_UI_THEME.foundation.typography.body_text_px))
+                                    .font_weight(gpui::FontWeight::SEMIBOLD)
+                                    .text_color(rgb(APP_UI_THEME.foundation.text.primary))
+                                    .child(detail.selected_quantity.to_string()),
+                            )
+                            .child(action_button_compact(
+                                "buyer-detail-quantity-increase",
+                                SharedString::from("+"),
+                                on_increase_quantity,
+                                cx,
+                            )),
+                    ),
+            )
+            .when_some(replace_confirmation, |this, replace_confirmation| {
+                this.child(app_surface_panel(
+                    app_stack_v(APP_UI_THEME.foundation.spacing.small_px)
+                        .w_full()
+                        .p(px(APP_UI_THEME.shells.home_card_padding_px))
+                        .child(app_text_label(app_shared_text(
+                            AppTextKey::PersonalDetailReplaceCartTitle,
+                        )))
+                        .child(home_body_text(format!(
+                            "{} {} {}.",
+                            replace_confirmation.current_farm_display_name,
+                            app_shared_text(AppTextKey::PersonalDetailReplaceCartBody),
+                            replace_confirmation.incoming_farm_display_name,
+                        )))
+                        .child(
+                            app_cluster(APP_UI_THEME.foundation.spacing.small_px)
+                                .w_full()
+                                .child(action_button_primary(
+                                    "buyer-detail-confirm-replace",
+                                    app_shared_text(AppTextKey::PersonalDetailReplaceCartAction),
+                                    on_confirm_replace,
+                                    cx,
+                                ))
+                                .child(action_button_compact(
+                                    "buyer-detail-keep-current",
+                                    app_shared_text(
+                                        AppTextKey::PersonalDetailKeepCurrentCartAction,
+                                    ),
+                                    on_keep_current_cart,
+                                    cx,
+                                )),
+                        ),
+                ))
+            })
+            .child(action_button_primary(
+                "buyer-detail-add-to-cart",
+                app_shared_text(AppTextKey::PersonalDetailAddToCartAction),
+                on_add_to_cart,
+                cx,
+            )),
+    )
 }
 
 fn buyer_surface_placeholder(
