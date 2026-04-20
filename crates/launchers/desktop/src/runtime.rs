@@ -6,13 +6,14 @@ use radroots_studio_app_core::{AppDesktopRuntimePaths, AppRuntimePathsError, App
 use radroots_studio_app_models::{
     ActiveSurface, AppActivityContext, AppActivityKind, AppIdentityProjection, AppStartupGate,
     BuyerCartLineProjection, BuyerCartProjection, BuyerCartReplaceConfirmationProjection,
-    BuyerCheckoutDraft, BuyerProductDetailProjection, FarmId, FarmOrderMethod, FarmProfileRecord,
-    FarmReadiness, FarmRulesProjection, FarmSetupDraft, FarmSetupProjection, FarmSummary,
-    FarmerSection, FulfillmentWindowId, LoggedOutStartupProjection, OrderDetailProjection, OrderId,
-    OrdersFilter, OrdersListProjection, OrdersScreenQueryState, PackDayProjection,
-    PackDayScreenQueryState, PersonalSection, PickupLocationRecord, ProductEditorDraft, ProductId,
-    ProductsFilter, ProductsListProjection, ProductsSort, SettingsAccountProjection,
-    SettingsPreference, SettingsSection, ShellSection, TodayAgendaProjection,
+    BuyerCheckoutDraft, BuyerOrderDetailProjection, BuyerProductDetailProjection, FarmId,
+    FarmOrderMethod, FarmProfileRecord, FarmReadiness, FarmRulesProjection, FarmSetupDraft,
+    FarmSetupProjection, FarmSummary, FarmerSection, FulfillmentWindowId,
+    LoggedOutStartupProjection, OrderDetailProjection, OrderId, OrdersFilter, OrdersListProjection,
+    OrdersScreenQueryState, PackDayProjection, PackDayScreenQueryState, PersonalSection,
+    PickupLocationRecord, ProductEditorDraft, ProductId, ProductsFilter, ProductsListProjection,
+    ProductsSort, SettingsAccountProjection, SettingsPreference, SettingsSection, ShellSection,
+    TodayAgendaProjection,
 };
 use radroots_studio_app_remote_signer::{
     RadrootsAppRemoteSignerApprovedSession, RadrootsAppRemoteSignerPendingSession,
@@ -239,6 +240,10 @@ impl DesktopAppRuntime {
 
     pub fn place_personal_order(&self) -> Result<bool, AppSqliteError> {
         self.lock_state_mut().place_personal_order()
+    }
+
+    pub fn open_personal_order_detail(&self, order_id: OrderId) -> Result<bool, AppSqliteError> {
+        self.lock_state_mut().open_personal_order_detail(order_id)
     }
 
     pub fn set_personal_search_query(&self, search_query: &str) -> Result<bool, AppSqliteError> {
@@ -985,6 +990,12 @@ impl DesktopAppRuntimeState {
                 reason: "buyer order write did not surface in buyer order history",
             });
         }
+        let Some(order_detail) = sqlite_store.load_buyer_order_detail(&buyer_context, order_id)?
+        else {
+            return Err(AppSqliteError::InvalidProjection {
+                reason: "buyer order write did not surface in buyer order detail",
+            });
+        };
 
         let personal_changed = self.mutate_personal_projection(|projection| {
             let mut changed = false;
@@ -1000,8 +1011,8 @@ impl DesktopAppRuntimeState {
                 projection.orders.list = refreshed_orders.clone();
                 changed = true;
             }
-            if projection.orders.detail.is_some() {
-                projection.orders.detail = None;
+            if projection.orders.detail.as_ref() != Some(&order_detail) {
+                projection.orders.detail = Some(order_detail.clone());
                 changed = true;
             }
 
@@ -1010,6 +1021,22 @@ impl DesktopAppRuntimeState {
         let section_changed = self.select_personal_section(PersonalSection::Orders);
 
         Ok(personal_changed || section_changed)
+    }
+
+    fn open_personal_order_detail(&mut self, order_id: OrderId) -> Result<bool, AppSqliteError> {
+        let Some(sqlite_store) = self.sqlite_store.as_ref() else {
+            return Ok(false);
+        };
+        let buyer_context = self.state_store.identity_projection().buyer_context();
+        let Some(order_detail) = sqlite_store.load_buyer_order_detail(&buyer_context, order_id)?
+        else {
+            return Ok(false);
+        };
+
+        let detail_changed = self.set_personal_order_detail(Some(order_detail));
+        let section_changed = self.select_personal_section(PersonalSection::Orders);
+
+        Ok(detail_changed || section_changed)
     }
 
     fn set_personal_search_query(&mut self, search_query: &str) -> Result<bool, AppSqliteError> {
@@ -1694,6 +1721,17 @@ impl DesktopAppRuntimeState {
             }
 
             *current_detail = detail;
+            true
+        })
+    }
+
+    fn set_personal_order_detail(&mut self, detail: Option<BuyerOrderDetailProjection>) -> bool {
+        self.mutate_personal_projection(|projection| {
+            if projection.orders.detail == detail {
+                return false;
+            }
+
+            projection.orders.detail = detail;
             true
         })
     }
@@ -3600,6 +3638,116 @@ mod tests {
                 .status
                 .storage_key(),
             "placed"
+        );
+        assert_eq!(
+            summary
+                .personal_projection
+                .orders
+                .detail
+                .as_ref()
+                .expect("buyer order detail should be selected")
+                .order_id,
+            summary.personal_projection.orders.list.rows[0].order_id
+        );
+        assert_eq!(
+            summary
+                .personal_projection
+                .orders
+                .detail
+                .as_ref()
+                .expect("buyer order detail")
+                .order_note
+                .as_deref(),
+            Some("Leave by the cooler")
+        );
+    }
+
+    #[test]
+    fn runtime_opens_buyer_order_detail_from_personal_orders() {
+        let runtime = memory_runtime();
+        let (account_id, farm_id) = provision_ready_farmer_account(&runtime);
+        assert!(
+            runtime
+                .select_active_surface(ActiveSurface::Personal)
+                .expect("surface should switch into marketplace")
+        );
+        let fulfillment_window_id = seed_buyer_marketplace_support(
+            &runtime,
+            account_id.as_str(),
+            farm_id,
+            "North field farm",
+            "Friday pickup",
+        );
+        let product_id = seed_product(
+            &runtime,
+            farm_id,
+            "Salad mix",
+            "Spring blend",
+            "published",
+            Some(8),
+            "2026-04-20T09:00:00Z",
+        );
+        runtime
+            .lock_state()
+            .sqlite_store
+            .as_ref()
+            .expect("sqlite store")
+            .connection()
+            .execute_batch(&format!(
+                "update products
+                 set availability_window_id = '{fulfillment_window_id}'
+                 where id = '{product_id}'"
+            ))
+            .expect("buyer detail product should attach a fulfillment window");
+        assert!(
+            runtime
+                .open_personal_product_detail(PersonalSection::Browse, product_id)
+                .expect("buyer detail should open")
+        );
+        assert!(
+            runtime
+                .add_personal_product_to_cart(PersonalSection::Browse, false)
+                .expect("buyer product should add to cart")
+        );
+        assert!(
+            runtime
+                .save_personal_checkout_draft(BuyerCheckoutDraft {
+                    name: "Casey Buyer".to_owned(),
+                    email: "casey@example.com".to_owned(),
+                    phone: String::new(),
+                    order_note: String::new(),
+                })
+                .expect("buyer checkout draft should save")
+        );
+        assert!(
+            runtime
+                .place_personal_order()
+                .expect("buyer order should place")
+        );
+        let order_id = runtime.summary().personal_projection.orders.list.rows[0].order_id;
+        assert!(runtime.select_personal_section(PersonalSection::Browse));
+        assert!(runtime.lock_state_mut().set_personal_order_detail(None));
+
+        assert!(
+            runtime
+                .open_personal_order_detail(order_id)
+                .expect("buyer order detail should open")
+        );
+
+        let summary = runtime.summary();
+        assert_eq!(
+            summary.shell_projection.selected_section,
+            ShellSection::Personal(PersonalSection::Orders)
+        );
+        assert_eq!(
+            summary
+                .personal_projection
+                .orders
+                .detail
+                .as_ref()
+                .expect("buyer order detail")
+                .order_id,
+            order_id
         );
     }
 

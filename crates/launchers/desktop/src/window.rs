@@ -13,16 +13,17 @@ pub use radroots_studio_app_models::SettingsSection as SettingsPanelViewKey;
 use radroots_studio_app_models::{
     AppStartupGate, BlackoutPeriodId, BlackoutPeriodRecord, BuyerCartProjection,
     BuyerCartReplaceConfirmationProjection, BuyerCheckoutDraft, BuyerCheckoutSummaryProjection,
-    BuyerListingRow, BuyerProductDetailProjection, FarmId, FarmOperatingRulesRecord,
-    FarmOrderMethod, FarmProfileRecord, FarmReadinessBlocker, FarmRulesProjection,
-    FarmRulesReadiness, FarmSetupBlocker, FarmSetupDraft, FarmSummary, FarmTimingConflictKind,
-    FarmerSection, FulfillmentWindowId, FulfillmentWindowRecord, FulfillmentWindowSummary,
-    LoggedOutStartupPhase, OrderDetailItemRow, OrderDetailProjection, OrderId, OrderListRow,
-    OrderPrimaryAction, OrderStatus, OrdersFilter, OrdersListRow, PackDayPackListRow,
-    PackDayProductTotalRow, PackDayRosterRow, PersonalEntryState, PersonalSection,
-    PickupLocationId, PickupLocationRecord, ProductAttentionState, ProductEditorDraft, ProductId,
-    ProductListRow, ProductPricePresentation, ProductPublishBlocker, ProductStatus, ProductsFilter,
-    ProductsListRow, ProductsSort, ShellSection, TodayAgendaProjection, TodaySetupTaskKind,
+    BuyerListingRow, BuyerOrderDetailProjection, BuyerOrderStatus, BuyerOrdersListRow,
+    BuyerProductDetailProjection, FarmId, FarmOperatingRulesRecord, FarmOrderMethod,
+    FarmProfileRecord, FarmReadinessBlocker, FarmRulesProjection, FarmRulesReadiness,
+    FarmSetupBlocker, FarmSetupDraft, FarmSummary, FarmTimingConflictKind, FarmerSection,
+    FulfillmentWindowId, FulfillmentWindowRecord, FulfillmentWindowSummary, LoggedOutStartupPhase,
+    OrderDetailItemRow, OrderDetailProjection, OrderId, OrderListRow, OrderPrimaryAction,
+    OrderStatus, OrdersFilter, OrdersListRow, PackDayPackListRow, PackDayProductTotalRow,
+    PackDayRosterRow, PersonalEntryState, PersonalSection, PickupLocationId, PickupLocationRecord,
+    ProductAttentionState, ProductEditorDraft, ProductId, ProductListRow, ProductPricePresentation,
+    ProductPublishBlocker, ProductStatus, ProductsFilter, ProductsListRow, ProductsSort,
+    ShellSection, TodayAgendaProjection, TodaySetupTaskKind,
 };
 use radroots_studio_app_remote_signer::{
     RadrootsAppRemoteSignerApprovedSession, RadrootsAppRemoteSignerPendingPollOutcome,
@@ -1259,6 +1260,22 @@ impl HomeView {
         }
     }
 
+    fn open_personal_order_detail(&mut self, order_id: OrderId, cx: &mut Context<Self>) {
+        match self.runtime.open_personal_order_detail(order_id) {
+            Ok(true) => cx.notify(),
+            Ok(false) => {}
+            Err(runtime_error) => {
+                error!(
+                    target: "buyer",
+                    event = "buyer.order_open_failed",
+                    error = %runtime_error,
+                    order_id = %order_id,
+                    "failed to open buyer order detail"
+                );
+            }
+        }
+    }
+
     fn select_products_filter(&mut self, filter: ProductsFilter, cx: &mut Context<Self>) {
         match self.runtime.select_products_filter(filter) {
             Ok(true) => {
@@ -2067,7 +2084,9 @@ impl HomeView {
             PersonalSection::Cart => self
                 .render_buyer_cart_content(runtime, cx)
                 .into_any_element(),
-            PersonalSection::Orders => buyer_orders_placeholder(runtime).into_any_element(),
+            PersonalSection::Orders => self
+                .render_buyer_orders_content(runtime, cx)
+                .into_any_element(),
         };
 
         app_split_shell(
@@ -2415,6 +2434,48 @@ impl HomeView {
                             cx,
                         ))
                     })
+                    .into_any_element()
+            })
+            .into_any_element()
+    }
+
+    fn render_buyer_orders_content(
+        &mut self,
+        runtime: &DesktopAppRuntimeSummary,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let orders = &runtime.personal_projection.orders;
+        let selected_order_id = orders.detail.as_ref().map(|detail| detail.order_id);
+
+        app_stack_v(APP_UI_THEME.shells.home_stack_gap_px)
+            .w_full()
+            .max_w(px(APP_UI_THEME.shells.home_card_max_width_px))
+            .mx_auto()
+            .child(buyer_workspace_title_block(
+                AppTextKey::HomeNavOrders,
+                AppTextKey::PersonalOrdersSurfaceBody,
+            ))
+            .child(if orders.list.rows.is_empty() {
+                home_empty_state_card(
+                    AppTextKey::PersonalOrdersEmptyTitle,
+                    AppTextKey::PersonalOrdersEmptyBody,
+                )
+                .into_any_element()
+            } else {
+                app_stack_v(APP_UI_THEME.shells.home_stack_gap_px)
+                    .w_full()
+                    .child(buyer_orders_list_card(
+                        &orders.list.rows,
+                        selected_order_id,
+                        cx,
+                    ))
+                    .child(
+                        orders
+                            .detail
+                            .as_ref()
+                            .map(buyer_order_detail_card)
+                            .unwrap_or_else(|| buyer_order_detail_empty_card().into_any_element()),
+                    )
                     .into_any_element()
             })
             .into_any_element()
@@ -6355,36 +6416,165 @@ fn buyer_money_text(amount_minor_units: u32, currency_code: &str) -> String {
     }
 }
 
-fn buyer_surface_placeholder(
-    title_key: AppTextKey,
-    body_key: AppTextKey,
-    detail: Option<String>,
+fn buyer_orders_list_card(
+    rows: &[BuyerOrdersListRow],
+    selected_order_id: Option<OrderId>,
+    cx: &mut Context<HomeView>,
 ) -> AnyElement {
-    app_stack_v(APP_UI_THEME.shells.home_stack_gap_px)
-        .w_full()
-        .max_w(px(APP_UI_THEME.shells.home_card_max_width_px))
-        .mx_auto()
-        .child(app_text_value(app_shared_text(title_key)))
-        .child(app_surface_card(
-            app_stack_v(APP_UI_THEME.shells.home_stack_gap_px)
-                .w_full()
-                .child(home_body_text(app_shared_text(body_key)))
-                .when_some(detail, |this, detail| this.child(home_body_text(detail))),
-        ))
-        .into_any_element()
+    home_card(
+        app_shared_text(AppTextKey::PersonalOrdersListTitle),
+        app_stack_v(APP_UI_THEME.shells.home_stack_gap_px)
+            .w_full()
+            .children(
+                rows.iter()
+                    .enumerate()
+                    .map(|(index, row)| {
+                        buyer_orders_list_entry(
+                            index,
+                            row,
+                            selected_order_id == Some(row.order_id),
+                            cx,
+                        )
+                    })
+                    .collect::<Vec<_>>(),
+            ),
+    )
+    .into_any_element()
 }
 
-fn buyer_orders_placeholder(runtime: &DesktopAppRuntimeSummary) -> AnyElement {
-    let detail = (!runtime.personal_projection.orders.list.rows.is_empty()).then_some(format!(
-        "{} local orders are already available on this device.",
-        runtime.personal_projection.orders.list.rows.len()
-    ));
-
-    buyer_surface_placeholder(
-        AppTextKey::HomeNavOrders,
-        AppTextKey::PersonalOrdersPlaceholderBody,
-        detail,
+fn buyer_orders_list_entry(
+    index: usize,
+    row: &BuyerOrdersListRow,
+    is_selected: bool,
+    cx: &mut Context<HomeView>,
+) -> AnyElement {
+    app_button_card(
+        ("buyer-order-open", index),
+        is_selected,
+        cx.listener({
+            let order_id = row.order_id;
+            move |this, _, _, cx| this.open_personal_order_detail(order_id, cx)
+        }),
+        cx,
+        div()
+            .w_full()
+            .min_w_0()
+            .p(px(APP_UI_THEME.shells.home_card_padding_px))
+            .flex()
+            .flex_col()
+            .gap(px(APP_UI_THEME.foundation.spacing.small_px))
+            .child(
+                div()
+                    .w_full()
+                    .min_w_0()
+                    .flex()
+                    .items_start()
+                    .justify_between()
+                    .gap(px(APP_UI_THEME.shells.home_stack_gap_px))
+                    .child(
+                        app_stack_v(4.0)
+                            .flex_1()
+                            .min_w_0()
+                            .child(app_text_label(row.order_number.clone()))
+                            .child(settings_badge_text(row.farm_display_name.clone())),
+                    )
+                    .child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .gap(px(6.0))
+                            .child(status_indicator(buyer_orders_status_color(row.status)))
+                            .child(
+                                div()
+                                    .text_size(px(APP_UI_THEME
+                                        .foundation
+                                        .typography
+                                        .utility_title_text_px))
+                                    .font_weight(gpui::FontWeight::MEDIUM)
+                                    .text_color(rgb(APP_UI_THEME.foundation.text.primary))
+                                    .child(app_shared_text(buyer_orders_status_key(row.status))),
+                            ),
+                    ),
+            )
+            .child(buyer_listing_chip(row.fulfillment_summary.clone())),
     )
+    .into_any_element()
+}
+
+fn buyer_order_detail_card(detail: &BuyerOrderDetailProjection) -> AnyElement {
+    home_card(
+        app_shared_text(AppTextKey::PersonalOrdersDetailTitle),
+        app_stack_v(APP_UI_THEME.shells.home_stack_gap_px)
+            .w_full()
+            .child(app_heading_section(detail.order_number.clone()))
+            .child(settings_badge_text(detail.farm_display_name.clone()))
+            .child(label_value_list([
+                LabelValueRow::new(
+                    app_shared_text(AppTextKey::PersonalOrdersDetailFarmLabel),
+                    detail.farm_display_name.clone(),
+                ),
+                LabelValueRow::new(
+                    app_shared_text(AppTextKey::PersonalOrdersDetailStatusLabel),
+                    app_shared_text(buyer_orders_status_key(detail.status)),
+                ),
+                LabelValueRow::new(
+                    app_shared_text(AppTextKey::PersonalOrdersDetailFulfillmentLabel),
+                    detail.fulfillment_summary.clone(),
+                ),
+                LabelValueRow::new(
+                    app_shared_text(AppTextKey::PersonalOrdersDetailNoteLabel),
+                    order_optional_text(detail.order_note.as_deref()),
+                ),
+            ]))
+            .child(app_form_section(
+                app_shared_text(AppTextKey::PersonalOrdersDetailItemsTitle),
+                div()
+                    .w_full()
+                    .flex()
+                    .flex_col()
+                    .gap(px(APP_UI_THEME.foundation.spacing.tight_px))
+                    .children(
+                        detail
+                            .items
+                            .iter()
+                            .map(order_detail_item_row)
+                            .collect::<Vec<_>>(),
+                    )
+                    .when(detail.items.is_empty(), |this| {
+                        this.child(home_body_text(app_shared_text(AppTextKey::ValueNone)))
+                    }),
+            )),
+    )
+    .into_any_element()
+}
+
+fn buyer_order_detail_empty_card() -> impl IntoElement {
+    home_card(
+        app_shared_text(AppTextKey::PersonalOrdersDetailTitle),
+        home_body_text(app_shared_text(AppTextKey::PersonalOrdersDetailEmptyBody)),
+    )
+}
+
+fn buyer_orders_status_key(status: BuyerOrderStatus) -> AppTextKey {
+    match status {
+        BuyerOrderStatus::Placed => AppTextKey::PersonalOrdersStatusPlaced,
+        BuyerOrderStatus::Scheduled => AppTextKey::PersonalOrdersStatusScheduled,
+        BuyerOrderStatus::Ready => AppTextKey::PersonalOrdersStatusReady,
+        BuyerOrderStatus::Completed => AppTextKey::PersonalOrdersStatusCompleted,
+        BuyerOrderStatus::Refunded => AppTextKey::PersonalOrdersStatusRefunded,
+    }
+}
+
+fn buyer_orders_status_color(status: BuyerOrderStatus) -> u32 {
+    match status {
+        BuyerOrderStatus::Placed => APP_UI_THEME.components.app_status_indicator.attention,
+        BuyerOrderStatus::Scheduled | BuyerOrderStatus::Ready => {
+            APP_UI_THEME.components.app_status_indicator.online
+        }
+        BuyerOrderStatus::Completed | BuyerOrderStatus::Refunded => {
+            APP_UI_THEME.components.app_status_indicator.offline
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -9347,8 +9537,8 @@ mod tests {
         AppTextKey, FarmerHomeFarmState, HomeStage, SETTINGS_FARM_PANEL_SECTIONS,
         SETTINGS_NAVIGATION_ORDER, SETTINGS_OPERATIONS_PANEL_SECTIONS,
         SettingsInventorySectionSpec, SettingsPanelViewKey, StartupHomeSurface,
-        StartupSignerConnectState, farm_setup_onboarding_card_spec, farmer_home_farm_state,
-        farmer_pack_day_available, home_content_scroll_id, home_saved_farm,
+        StartupSignerConnectState, buyer_orders_status_key, farm_setup_onboarding_card_spec,
+        farmer_home_farm_state, farmer_pack_day_available, home_content_scroll_id, home_saved_farm,
         home_sidebar_navigation_sections, home_stage, home_window_launch_size_px,
         home_window_minimum_size_px, parse_optional_product_editor_stock_input,
         parse_product_editor_price_input, product_display_title, startup_home_surface,
@@ -9359,8 +9549,8 @@ mod tests {
     use crate::runtime::DesktopAppRuntimeSummary;
     use radroots_studio_app_models::SettingsAccountProjection;
     use radroots_studio_app_models::{
-        ActiveSurface, AppStartupGate, FarmId, FarmOrderMethod, FarmReadiness, FarmSetupDraft,
-        FarmSetupProjection, FarmSummary, FarmerSection, FulfillmentWindowId,
+        ActiveSurface, AppStartupGate, BuyerOrderStatus, FarmId, FarmOrderMethod, FarmReadiness,
+        FarmSetupDraft, FarmSetupProjection, FarmSummary, FarmerSection, FulfillmentWindowId,
         FulfillmentWindowSummary, LoggedOutStartupPhase, LoggedOutStartupProjection,
         PackDayProjection, PersonalSection, ShellSection, TodayAgendaProjection, TodaySetupTask,
         TodaySetupTaskKind,
@@ -9548,6 +9738,18 @@ mod tests {
         );
 
         assert_eq!(home_stage(&guest_marketplace), HomeStage::BuyerWorkspace);
+    }
+
+    #[test]
+    fn buyer_orders_status_keys_use_buyer_facing_copy() {
+        assert_eq!(
+            buyer_orders_status_key(BuyerOrderStatus::Placed),
+            AppTextKey::PersonalOrdersStatusPlaced
+        );
+        assert_eq!(
+            buyer_orders_status_key(BuyerOrderStatus::Ready),
+            AppTextKey::PersonalOrdersStatusReady
+        );
     }
 
     #[test]

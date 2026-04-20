@@ -226,6 +226,28 @@ mod tests {
     }
 
     #[test]
+    fn english_marketplace_orders_copy_matches_the_buyer_history_contract() {
+        assert_eq!(
+            app_text(AppTextKey::PersonalOrdersSurfaceBody),
+            "Review orders placed on this device."
+        );
+        assert_eq!(
+            app_text(AppTextKey::PersonalOrdersEmptyTitle),
+            "No orders yet"
+        );
+        assert_eq!(
+            app_text(AppTextKey::PersonalOrdersListTitle),
+            "Order history"
+        );
+        assert_eq!(app_text(AppTextKey::PersonalOrdersStatusPlaced), "Placed");
+        assert_eq!(app_text(AppTextKey::PersonalOrdersStatusReady), "Ready");
+        assert_eq!(
+            app_text(AppTextKey::PersonalOrdersDetailTitle),
+            "Order detail"
+        );
+    }
+
+    #[test]
     fn english_pack_day_copy_matches_the_contextual_execution_contract() {
         assert_eq!(app_text(AppTextKey::PackDayTitle), "Pack day");
         assert_eq!(
