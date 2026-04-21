@@ -32,6 +32,7 @@ forward_signal() {
 require_command grep
 require_command /usr/libexec/PlistBuddy
 require_env RADROOTS_APP_LOCAL_LOG_ROOT
+require_env RADROOTS_APP_DEFAULT_NOSTR_RELAY_URL
 
 app_path="$("${script_dir}/build_host.sh")"
 plist_path="${app_path}/Contents/Info.plist"
@@ -41,6 +42,7 @@ executable_name="$(
 executable_path="${app_path}/Contents/MacOS/${executable_name}"
 app_log_root="${RADROOTS_APP_LOCAL_LOG_ROOT}/apps/local/app/app-macos-native"
 structured_log_file="${app_log_root}/${date_utc}.jsonl"
+latest_log_path="${app_log_root}/latest.jsonl"
 stdout_file="${app_log_root}/raw/stdout.${date_utc}.log"
 stderr_file="${app_log_root}/raw/stderr.${date_utc}.log"
 
@@ -50,6 +52,18 @@ export RUST_LOG="${RADROOTS_APP_RUST_LOG:-info}"
 trap 'forward_signal TERM' TERM
 trap 'forward_signal INT' INT
 trap 'forward_signal HUP' HUP
+
+stop_app_with_error() {
+  local message="$1"
+
+  if [[ -n "${app_pid:-}" ]] && kill -0 "${app_pid}" 2>/dev/null; then
+    kill "${app_pid}" 2>/dev/null || true
+    wait "${app_pid}" || true
+  fi
+
+  echo "${message}" >&2
+  exit 1
+}
 
 "${executable_path}" "$@" >>"${stdout_file}" 2>>"${stderr_file}" &
 app_pid="$!"
@@ -70,12 +84,30 @@ for _ in $(seq 1 100); do
 done
 
 if [[ "${launch_confirmed}" != "true" ]]; then
-  if kill -0 "${app_pid}" 2>/dev/null; then
-    kill "${app_pid}" 2>/dev/null || true
-    wait "${app_pid}" || true
-  fi
-  echo "app launch did not emit runtime.launch within startup timeout" >&2
-  exit 1
+  stop_app_with_error "app launch did not emit runtime.launch within startup timeout"
 fi
+
+grep -q '"event":"logging.initialized"' "${structured_log_file}" 2>/dev/null || {
+  stop_app_with_error "app launch did not emit logging.initialized in ${structured_log_file}"
+}
+
+[[ -e "${latest_log_path}" ]] || {
+  stop_app_with_error "app launch did not create latest structured log alias: ${latest_log_path}"
+}
+
+[[ -f "${stdout_file}" ]] || {
+  stop_app_with_error "app launch did not create raw stdout log: ${stdout_file}"
+}
+
+[[ -f "${stderr_file}" ]] || {
+  stop_app_with_error "app launch did not create raw stderr log: ${stderr_file}"
+}
+
+printf 'radroots_studio_app run: ready\n'
+printf 'relay=%s\n' "${RADROOTS_APP_DEFAULT_NOSTR_RELAY_URL}"
+printf 'structured_log=%s\n' "${structured_log_file}"
+printf 'latest_log=%s\n' "${latest_log_path}"
+printf 'stdout_log=%s\n' "${stdout_file}"
+printf 'stderr_log=%s\n' "${stderr_file}"
 
 wait "${app_pid}"

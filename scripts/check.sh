@@ -5,4 +5,9 @@ script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 repo_root="$(git -C "${script_dir}" rev-parse --show-toplevel)"
 
 cd "${repo_root}"
+cargo metadata --format-version 1 --no-deps
 cargo check -p radroots_studio_app
+
+if [[ "$(uname -s)" == "Darwin" ]]; then
+  "${repo_root}/platforms/macos/Scripts/test_host.sh"
+fi

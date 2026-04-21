@@ -169,6 +169,7 @@ RADROOTS_APP_LOCAL_LOG_ROOT="${local_log_root}" \
 runner_pid="$!"
 
 wait_for_log_event "${structured_log_file}" "runtime.launch" "${runner_pid}"
+wait_for_log_event "${structured_log_file}" "logging.initialized" "${runner_pid}"
 assert_latest_alias "${latest_log_path}"
 assert_raw_logs_exist "${stdout_file}" "${stderr_file}"
 terminate_runner "${runner_pid}"
@@ -189,6 +190,7 @@ degraded_runner_pid="$!"
 
 wait_for_log_event "${degraded_structured_log_file}" "runtime.launch" "${degraded_runner_pid}"
 wait_for_log_event "${degraded_structured_log_file}" "runtime.degraded" "${degraded_runner_pid}"
+wait_for_log_event "${degraded_structured_log_file}" "logging.initialized" "${degraded_runner_pid}"
 assert_latest_alias "${degraded_latest_log_path}"
 assert_raw_logs_exist "${degraded_stdout_file}" "${degraded_stderr_file}"
 grep -q '"startup_issue":"desktop runtime roots require HOME for macos"' "${degraded_structured_log_file}" || {
