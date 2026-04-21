@@ -1579,6 +1579,187 @@ impl PackDayProjection {
     }
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PackDayExportArtifactKind {
+    PackSheet,
+    PickupRoster,
+    CustomerLabels,
+}
+
+impl PackDayExportArtifactKind {
+    pub const fn all_v1() -> [Self; 3] {
+        [Self::PackSheet, Self::PickupRoster, Self::CustomerLabels]
+    }
+
+    pub const fn storage_key(self) -> &'static str {
+        match self {
+            Self::PackSheet => "pack_sheet",
+            Self::PickupRoster => "pickup_roster",
+            Self::CustomerLabels => "customer_labels",
+        }
+    }
+
+    pub const fn file_name(self) -> &'static str {
+        match self {
+            Self::PackSheet => "pack_sheet.txt",
+            Self::PickupRoster => "pickup_roster.txt",
+            Self::CustomerLabels => "customer_labels.txt",
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PackDayExportStatus {
+    #[default]
+    Idle,
+    Running,
+    Succeeded,
+    Failed,
+}
+
+impl PackDayExportStatus {
+    pub const fn storage_key(self) -> &'static str {
+        match self {
+            Self::Idle => "idle",
+            Self::Running => "running",
+            Self::Succeeded => "succeeded",
+            Self::Failed => "failed",
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PackDayOutputOrderState {
+    NeedsAction,
+    Scheduled,
+    Packed,
+}
+
+impl PackDayOutputOrderState {
+    pub const fn all_v1() -> [Self; 3] {
+        [Self::NeedsAction, Self::Scheduled, Self::Packed]
+    }
+
+    pub const fn storage_key(self) -> &'static str {
+        match self {
+            Self::NeedsAction => "needs_action",
+            Self::Scheduled => "scheduled",
+            Self::Packed => "packed",
+        }
+    }
+
+    pub const fn from_order_status(status: OrderStatus) -> Option<Self> {
+        match status {
+            OrderStatus::NeedsAction => Some(Self::NeedsAction),
+            OrderStatus::Scheduled => Some(Self::Scheduled),
+            OrderStatus::Packed => Some(Self::Packed),
+            OrderStatus::Completed | OrderStatus::Refunded => None,
+        }
+    }
+}
+
+impl From<PackDayOutputOrderState> for OrderStatus {
+    fn from(value: PackDayOutputOrderState) -> Self {
+        match value {
+            PackDayOutputOrderState::NeedsAction => Self::NeedsAction,
+            PackDayOutputOrderState::Scheduled => Self::Scheduled,
+            PackDayOutputOrderState::Packed => Self::Packed,
+        }
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct PackDayOutputQuantity {
+    pub value: u32,
+    pub unit_label: String,
+}
+
+impl PackDayOutputQuantity {
+    pub fn new(value: u32, unit_label: impl Into<String>) -> Self {
+        Self {
+            value,
+            unit_label: unit_label.into(),
+        }
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct PackDayOutputWindow {
+    pub fulfillment_window_id: FulfillmentWindowId,
+    pub farm_id: FarmId,
+    pub farm_display_name: String,
+    pub pickup_location_label: Option<String>,
+    pub starts_at: String,
+    pub ends_at: String,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct PackDayOutputProductTotal {
+    pub title: String,
+    pub quantity: PackDayOutputQuantity,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct PackDayOutputPackListEntry {
+    pub order_id: OrderId,
+    pub order_number: String,
+    pub customer_display_name: String,
+    pub order_state: PackDayOutputOrderState,
+    pub title: String,
+    pub quantity: PackDayOutputQuantity,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct PackDayOutputCustomerOrder {
+    pub order_id: OrderId,
+    pub order_number: String,
+    pub customer_display_name: String,
+    pub order_state: PackDayOutputOrderState,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct PackDayOutputSource {
+    pub fulfillment_window: PackDayOutputWindow,
+    pub totals_by_product: Vec<PackDayOutputProductTotal>,
+    pub pack_list: Vec<PackDayOutputPackListEntry>,
+    pub pickup_roster: Vec<PackDayOutputCustomerOrder>,
+}
+
+impl PackDayOutputSource {
+    pub fn is_empty(&self) -> bool {
+        self.totals_by_product.is_empty()
+            && self.pack_list.is_empty()
+            && self.pickup_roster.is_empty()
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct PackDayExportArtifact {
+    pub kind: PackDayExportArtifactKind,
+    pub relative_path: String,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct PackDayExportBundle {
+    pub fulfillment_window_id: FulfillmentWindowId,
+    pub generated_at_utc: String,
+    pub bundle_directory: String,
+    pub artifacts: Vec<PackDayExportArtifact>,
+}
+
+impl PackDayExportBundle {
+    pub fn artifact_count(&self) -> usize {
+        self.artifacts.len()
+    }
+
+    pub fn includes_artifact(&self, kind: PackDayExportArtifactKind) -> bool {
+        self.artifacts.iter().any(|artifact| artifact.kind == kind)
+    }
+}
+
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct FarmSummary {
     pub farm_id: FarmId,
@@ -2151,19 +2332,22 @@ mod tests {
         LoggedOutStartupPhase, LoggedOutStartupProjection, OrderDetailItemRow,
         OrderDetailProjection, OrderId, OrderListRow, OrderPrimaryAction, OrderRecoveryProjection,
         OrderStatus, OrdersFilter, OrdersListProjection, OrdersListRow, OrdersListSummary,
-        OrdersScreenQueryState, PackDayPackListRow, PackDayProductTotalRow, PackDayProjection,
-        PackDayRosterRow, PackDayScreenQueryState, ParseStartupSignerSourceError,
-        PersonalEntryProjection, PersonalEntryState, PersonalSection, PickupLocationId,
-        ProductAttentionState, ProductAvailabilityState, ProductAvailabilitySummary,
-        ProductEditorDraft, ProductListRow, ProductPricePresentation, ProductPublishBlocker,
-        ProductStatus, ProductStockState, ProductStockSummary, ProductsFilter,
-        ProductsListProjection, ProductsListRow, ProductsListSummary, ProductsSort, RecoveryKind,
-        RecoveryQueueProjection, RecoveryRecordId, RecoveryState, ReminderDeadlineProjection,
-        ReminderDeliveryState, ReminderFeedProjection, ReminderId, ReminderKind,
-        ReminderLogEntryProjection, ReminderLogProjection, ReminderSurface, ReminderUrgency,
-        RepeatDemandEligibility, RepeatDemandHandoffProjection, SelectedAccountProjection,
-        SelectedSurfaceProjection, SettingsPreference, SettingsSection, ShellSection,
-        StartupSignerEntryProjection, StartupSignerSource, StartupSignerSourceKind,
+        OrdersScreenQueryState, PackDayExportArtifact, PackDayExportArtifactKind,
+        PackDayExportBundle, PackDayExportStatus, PackDayOutputCustomerOrder,
+        PackDayOutputOrderState, PackDayOutputPackListEntry, PackDayOutputProductTotal,
+        PackDayOutputQuantity, PackDayOutputSource, PackDayOutputWindow, PackDayPackListRow,
+        PackDayProductTotalRow, PackDayProjection, PackDayRosterRow, PackDayScreenQueryState,
+        ParseStartupSignerSourceError, PersonalEntryProjection, PersonalEntryState,
+        PersonalSection, PickupLocationId, ProductAttentionState, ProductAvailabilityState,
+        ProductAvailabilitySummary, ProductEditorDraft, ProductListRow, ProductPricePresentation,
+        ProductPublishBlocker, ProductStatus, ProductStockState, ProductStockSummary,
+        ProductsFilter, ProductsListProjection, ProductsListRow, ProductsListSummary, ProductsSort,
+        RecoveryKind, RecoveryQueueProjection, RecoveryRecordId, RecoveryState,
+        ReminderDeadlineProjection, ReminderDeliveryState, ReminderFeedProjection, ReminderId,
+        ReminderKind, ReminderLogEntryProjection, ReminderLogProjection, ReminderSurface,
+        ReminderUrgency, RepeatDemandEligibility, RepeatDemandHandoffProjection,
+        SelectedAccountProjection, SelectedSurfaceProjection, SettingsPreference, SettingsSection,
+        ShellSection, StartupSignerEntryProjection, StartupSignerSource, StartupSignerSourceKind,
         TodayAgendaProjection, TodaySetupTask, TodaySetupTaskKind, TodaySummary,
     };
     use std::{collections::BTreeSet, str::FromStr};
@@ -2755,6 +2939,149 @@ mod tests {
                 fulfillment_window_id: None,
             }
         );
+    }
+
+    #[test]
+    fn pack_day_export_artifact_contract_is_frozen_for_v1() {
+        assert_eq!(
+            PackDayExportArtifactKind::all_v1(),
+            [
+                PackDayExportArtifactKind::PackSheet,
+                PackDayExportArtifactKind::PickupRoster,
+                PackDayExportArtifactKind::CustomerLabels,
+            ]
+        );
+        assert_eq!(
+            PackDayExportArtifactKind::PackSheet.storage_key(),
+            "pack_sheet"
+        );
+        assert_eq!(
+            PackDayExportArtifactKind::PackSheet.file_name(),
+            "pack_sheet.txt"
+        );
+        assert_eq!(
+            PackDayExportArtifactKind::PickupRoster.file_name(),
+            "pickup_roster.txt"
+        );
+        assert_eq!(
+            PackDayExportArtifactKind::CustomerLabels.file_name(),
+            "customer_labels.txt"
+        );
+        assert_eq!(PackDayExportStatus::default(), PackDayExportStatus::Idle);
+        assert_eq!(PackDayExportStatus::Running.storage_key(), "running");
+        assert_eq!(PackDayExportStatus::Succeeded.storage_key(), "succeeded");
+        assert_eq!(PackDayExportStatus::Failed.storage_key(), "failed");
+    }
+
+    #[test]
+    fn pack_day_output_order_state_freezes_the_v1_status_subset() {
+        assert_eq!(
+            PackDayOutputOrderState::all_v1(),
+            [
+                PackDayOutputOrderState::NeedsAction,
+                PackDayOutputOrderState::Scheduled,
+                PackDayOutputOrderState::Packed,
+            ]
+        );
+        assert_eq!(
+            PackDayOutputOrderState::from_order_status(OrderStatus::NeedsAction),
+            Some(PackDayOutputOrderState::NeedsAction)
+        );
+        assert_eq!(
+            PackDayOutputOrderState::from_order_status(OrderStatus::Scheduled),
+            Some(PackDayOutputOrderState::Scheduled)
+        );
+        assert_eq!(
+            PackDayOutputOrderState::from_order_status(OrderStatus::Packed),
+            Some(PackDayOutputOrderState::Packed)
+        );
+        assert_eq!(
+            PackDayOutputOrderState::from_order_status(OrderStatus::Completed),
+            None
+        );
+        assert_eq!(
+            PackDayOutputOrderState::from_order_status(OrderStatus::Refunded),
+            None
+        );
+        assert_eq!(
+            OrderStatus::from(PackDayOutputOrderState::Packed),
+            OrderStatus::Packed
+        );
+    }
+
+    #[test]
+    fn pack_day_output_source_keeps_export_truth_out_of_ui_display_strings() {
+        let farm_id = FarmId::new();
+        let fulfillment_window_id = FulfillmentWindowId::new();
+        let order_id = OrderId::new();
+        let screen_row = PackDayPackListRow {
+            title: "Salad mix".to_owned(),
+            quantity_display: "Casey: 2 bags".to_owned(),
+        };
+        let source = PackDayOutputSource {
+            fulfillment_window: PackDayOutputWindow {
+                fulfillment_window_id,
+                farm_id,
+                farm_display_name: "Willow farm".to_owned(),
+                pickup_location_label: Some("North barn".to_owned()),
+                starts_at: "2026-04-23T16:00:00Z".to_owned(),
+                ends_at: "2026-04-23T19:00:00Z".to_owned(),
+            },
+            totals_by_product: vec![PackDayOutputProductTotal {
+                title: "Salad mix".to_owned(),
+                quantity: PackDayOutputQuantity::new(2, "bags"),
+            }],
+            pack_list: vec![PackDayOutputPackListEntry {
+                order_id,
+                order_number: "R-1001".to_owned(),
+                customer_display_name: "Casey".to_owned(),
+                order_state: PackDayOutputOrderState::Scheduled,
+                title: "Salad mix".to_owned(),
+                quantity: PackDayOutputQuantity::new(2, "bags"),
+            }],
+            pickup_roster: vec![PackDayOutputCustomerOrder {
+                order_id,
+                order_number: "R-1001".to_owned(),
+                customer_display_name: "Casey".to_owned(),
+                order_state: PackDayOutputOrderState::Scheduled,
+            }],
+        };
+
+        assert_eq!(screen_row.quantity_display, "Casey: 2 bags");
+        assert!(!source.is_empty());
+        assert_eq!(source.pack_list[0].customer_display_name, "Casey");
+        assert_eq!(source.pack_list[0].quantity.value, 2);
+        assert_eq!(source.pack_list[0].quantity.unit_label, "bags");
+        assert_eq!(
+            source.pickup_roster[0].order_state.storage_key(),
+            "scheduled"
+        );
+    }
+
+    #[test]
+    fn pack_day_export_bundle_tracks_output_directory_and_artifacts() {
+        let fulfillment_window_id = FulfillmentWindowId::new();
+        let bundle = PackDayExportBundle {
+            fulfillment_window_id,
+            generated_at_utc: "2026-04-23T15:00:00Z".to_owned(),
+            bundle_directory: "exports/pack_day/window-1/20260423T150000Z".to_owned(),
+            artifacts: vec![
+                PackDayExportArtifact {
+                    kind: PackDayExportArtifactKind::PackSheet,
+                    relative_path: "pack_sheet.txt".to_owned(),
+                },
+                PackDayExportArtifact {
+                    kind: PackDayExportArtifactKind::PickupRoster,
+                    relative_path: "pickup_roster.txt".to_owned(),
+                },
+            ],
+        };
+
+        assert_eq!(bundle.fulfillment_window_id, fulfillment_window_id);
+        assert_eq!(bundle.artifact_count(), 2);
+        assert!(bundle.includes_artifact(PackDayExportArtifactKind::PackSheet));
+        assert!(bundle.includes_artifact(PackDayExportArtifactKind::PickupRoster));
+        assert!(!bundle.includes_artifact(PackDayExportArtifactKind::CustomerLabels));
     }
 
     #[test]

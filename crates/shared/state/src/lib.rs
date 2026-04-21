@@ -14,9 +14,10 @@ use radroots_studio_app_models::{
     FarmReadinessBlocker, FarmRulesProjection, FarmSetupBlocker, FarmSetupProjection,
     FarmSetupReadiness, FarmTimingConflict, FulfillmentWindowId, LoggedOutStartupPhase,
     LoggedOutStartupProjection, OrderDetailProjection, OrderId, OrdersFilter, OrdersListProjection,
-    OrdersScreenQueryState, PackDayProjection, PackDayScreenQueryState, PersonalEntryProjection,
-    ProductEditorDraft, ProductId, ProductPublishBlocker, ProductsFilter, ProductsListProjection,
-    ProductsSort, RecoveryQueueProjection, ReminderFeedProjection, ReminderLogProjection,
+    OrdersScreenQueryState, PackDayExportArtifactKind, PackDayExportBundle, PackDayExportStatus,
+    PackDayProjection, PackDayScreenQueryState, PersonalEntryProjection, ProductEditorDraft,
+    ProductId, ProductPublishBlocker, ProductsFilter, ProductsListProjection, ProductsSort,
+    RecoveryQueueProjection, ReminderFeedProjection, ReminderLogProjection,
     SelectedSurfaceProjection, SettingsAccountProjection, SettingsPreference, SettingsSection,
     ShellSection, TodayAgendaProjection, TodaySetupTask, TodaySetupTaskKind,
 };
@@ -307,11 +308,89 @@ impl OrdersScreenProjection {
 pub struct PackDayScreenProjection {
     pub query: PackDayScreenQueryState,
     pub projection: PackDayProjection,
+    pub export: PackDayExportProjection,
 }
 
 impl PackDayScreenProjection {
     fn select_fulfillment_window(&mut self, fulfillment_window_id: Option<FulfillmentWindowId>) {
+        if self.query.fulfillment_window_id != fulfillment_window_id {
+            self.export = PackDayExportProjection::default();
+        }
         self.query.fulfillment_window_id = fulfillment_window_id;
+    }
+
+    fn replace_projection(&mut self, projection: PackDayProjection) {
+        let previous_window_id = self
+            .projection
+            .fulfillment_window
+            .as_ref()
+            .map(|window| window.fulfillment_window_id);
+        let next_window_id = projection
+            .fulfillment_window
+            .as_ref()
+            .map(|window| window.fulfillment_window_id);
+
+        if previous_window_id != next_window_id {
+            self.export = PackDayExportProjection::default();
+        }
+
+        self.projection = projection;
+    }
+
+    fn replace_export(&mut self, export: PackDayExportProjection) {
+        self.export = export;
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PackDayExportRequest {
+    pub fulfillment_window_id: FulfillmentWindowId,
+    pub artifact_kinds: Vec<PackDayExportArtifactKind>,
+}
+
+impl PackDayExportRequest {
+    pub fn for_fulfillment_window(fulfillment_window_id: FulfillmentWindowId) -> Self {
+        Self {
+            fulfillment_window_id,
+            artifact_kinds: Vec::from(PackDayExportArtifactKind::all_v1()),
+        }
+    }
+}
+
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct PackDayExportProjection {
+    pub status: PackDayExportStatus,
+    pub request: Option<PackDayExportRequest>,
+    pub bundle: Option<PackDayExportBundle>,
+    pub error_message: Option<String>,
+}
+
+impl PackDayExportProjection {
+    pub fn running(request: PackDayExportRequest) -> Self {
+        Self {
+            status: PackDayExportStatus::Running,
+            request: Some(request),
+            bundle: None,
+            error_message: None,
+        }
+    }
+
+    pub fn succeeded(request: PackDayExportRequest, bundle: PackDayExportBundle) -> Self {
+        Self {
+            status: PackDayExportStatus::Succeeded,
+            request: Some(request),
+            bundle: Some(bundle),
+            error_message: None,
+        }
+    }
+
+    pub fn failed(request: PackDayExportRequest, message: impl Into<String>) -> Self {
+        Self {
+            status: PackDayExportStatus::Failed,
+            request: Some(request),
+            bundle: None,
+            error_message: Some(message.into()),
+        }
     }
 }
 
@@ -756,6 +835,16 @@ pub enum AppStateCommand {
     ReplaceOrderDetail(Option<OrderDetailProjection>),
     SetPackDayFulfillmentWindow(Option<FulfillmentWindowId>),
     ReplacePackDayProjection(PackDayProjection),
+    BeginPackDayExport(PackDayExportRequest),
+    SucceedPackDayExport {
+        request: PackDayExportRequest,
+        bundle: PackDayExportBundle,
+    },
+    FailPackDayExport {
+        request: PackDayExportRequest,
+        message: String,
+    },
+    ResetPackDayExport,
     OpenNewProductEditor,
     OpenExistingProductEditor {
         product_id: ProductId,
@@ -876,6 +965,28 @@ impl AppStateCommand {
 
     pub fn replace_pack_day_projection(projection: PackDayProjection) -> Self {
         Self::ReplacePackDayProjection(projection)
+    }
+
+    pub fn begin_pack_day_export(request: PackDayExportRequest) -> Self {
+        Self::BeginPackDayExport(request)
+    }
+
+    pub fn succeed_pack_day_export(
+        request: PackDayExportRequest,
+        bundle: PackDayExportBundle,
+    ) -> Self {
+        Self::SucceedPackDayExport { request, bundle }
+    }
+
+    pub fn fail_pack_day_export(request: PackDayExportRequest, message: impl Into<String>) -> Self {
+        Self::FailPackDayExport {
+            request,
+            message: message.into(),
+        }
+    }
+
+    pub const fn reset_pack_day_export() -> Self {
+        Self::ResetPackDayExport
     }
 
     pub const fn open_new_product_editor() -> Self {
@@ -1365,7 +1476,27 @@ fn apply_command(projection: &mut AppProjection, command: AppStateCommand) -> Ap
                 .select_fulfillment_window(fulfillment_window_id);
         }
         AppStateCommand::ReplacePackDayProjection(pack_day_projection) => {
-            projection.pack_day.projection = pack_day_projection;
+            projection.pack_day.replace_projection(pack_day_projection);
+        }
+        AppStateCommand::BeginPackDayExport(request) => {
+            projection
+                .pack_day
+                .replace_export(PackDayExportProjection::running(request));
+        }
+        AppStateCommand::SucceedPackDayExport { request, bundle } => {
+            projection
+                .pack_day
+                .replace_export(PackDayExportProjection::succeeded(request, bundle));
+        }
+        AppStateCommand::FailPackDayExport { request, message } => {
+            projection
+                .pack_day
+                .replace_export(PackDayExportProjection::failed(request, message));
+        }
+        AppStateCommand::ResetPackDayExport => {
+            projection
+                .pack_day
+                .replace_export(PackDayExportProjection::default());
         }
         AppStateCommand::OpenNewProductEditor => {
             projection
@@ -1699,9 +1830,10 @@ mod tests {
     use super::{
         AppProjection, AppShellProjection, AppStateCommand, AppStateRepository,
         AppStateRepositoryError, AppStateStore, AppStateStoreError, FarmSetupFlowStage, HomeRoute,
-        InMemoryAppStateRepository, OrdersScreenProjection, PackDayScreenProjection,
-        PersistedAppState, ProductEditorState, ProductsScreenProjection, ProductsScreenQueryState,
-        SettingsPreference, derive_sync_projection, derive_sync_run_status,
+        InMemoryAppStateRepository, OrdersScreenProjection, PackDayExportProjection,
+        PackDayExportRequest, PackDayScreenProjection, PersistedAppState, ProductEditorState,
+        ProductsScreenProjection, ProductsScreenQueryState, SettingsPreference,
+        derive_sync_projection, derive_sync_run_status,
     };
     use radroots_studio_app_models::{
         AccountCustody, AccountSummary, ActiveSurface, AppIdentityProjection, AppStartupGate,
@@ -1709,13 +1841,14 @@ mod tests {
         FarmerActivationProjection, FarmerSection, FulfillmentWindowId, LoggedOutStartupPhase,
         LoggedOutStartupProjection, OrderDetailItemRow, OrderDetailProjection, OrderId,
         OrderPrimaryAction, OrderStatus, OrdersFilter, OrdersListProjection, OrdersListRow,
-        OrdersListSummary, OrdersScreenQueryState, PackDayPackListRow, PackDayProductTotalRow,
-        PackDayProjection, PackDayRosterRow, PackDayScreenQueryState, PersonalEntryState,
-        PersonalSection, ProductEditorDraft, ProductId, ProductPublishBlocker, ProductsFilter,
-        ProductsListProjection, ProductsSort, ReminderDeliveryState, ReminderFeedProjection,
-        ReminderKind, ReminderLogEntryProjection, ReminderLogProjection, SelectedAccountProjection,
-        SelectedSurfaceProjection, SettingsSection, ShellSection, TodayAgendaProjection,
-        TodaySetupTask, TodaySetupTaskKind,
+        OrdersListSummary, OrdersScreenQueryState, PackDayExportArtifact,
+        PackDayExportArtifactKind, PackDayExportBundle, PackDayExportStatus, PackDayPackListRow,
+        PackDayProductTotalRow, PackDayProjection, PackDayRosterRow, PackDayScreenQueryState,
+        PersonalEntryState, PersonalSection, ProductEditorDraft, ProductId, ProductPublishBlocker,
+        ProductsFilter, ProductsListProjection, ProductsSort, ReminderDeliveryState,
+        ReminderFeedProjection, ReminderKind, ReminderLogEntryProjection, ReminderLogProjection,
+        SelectedAccountProjection, SelectedSurfaceProjection, SettingsSection, ShellSection,
+        TodayAgendaProjection, TodaySetupTask, TodaySetupTaskKind,
     };
     use radroots_studio_app_sync::{
         AppSyncProjection, AppSyncRunStatus, SyncCheckpointState, SyncCheckpointStatus,
@@ -1752,6 +1885,36 @@ mod tests {
                 FarmerActivationProjection::active(FarmId::new()),
             ),
         )
+    }
+
+    fn sample_pack_day_export_request(
+        fulfillment_window_id: FulfillmentWindowId,
+    ) -> PackDayExportRequest {
+        PackDayExportRequest::for_fulfillment_window(fulfillment_window_id)
+    }
+
+    fn sample_pack_day_export_bundle(
+        fulfillment_window_id: FulfillmentWindowId,
+    ) -> PackDayExportBundle {
+        PackDayExportBundle {
+            fulfillment_window_id,
+            generated_at_utc: "2026-04-23T15:00:00Z".to_owned(),
+            bundle_directory: "exports/pack_day/window-1/20260423T150000Z".to_owned(),
+            artifacts: vec![
+                PackDayExportArtifact {
+                    kind: PackDayExportArtifactKind::PackSheet,
+                    relative_path: "pack_sheet.txt".to_owned(),
+                },
+                PackDayExportArtifact {
+                    kind: PackDayExportArtifactKind::PickupRoster,
+                    relative_path: "pickup_roster.txt".to_owned(),
+                },
+                PackDayExportArtifact {
+                    kind: PackDayExportArtifactKind::CustomerLabels,
+                    relative_path: "customer_labels.txt".to_owned(),
+                },
+            ],
+        }
     }
 
     #[test]
@@ -2094,6 +2257,113 @@ mod tests {
             PackDayScreenQueryState {
                 fulfillment_window_id: Some(fulfillment_window_id),
             }
+        );
+        assert_eq!(
+            store.projection().pack_day.export,
+            PackDayExportProjection::default()
+        );
+    }
+
+    #[test]
+    fn pack_day_export_projection_defaults_to_idle() {
+        assert_eq!(
+            PackDayScreenProjection::default().export,
+            PackDayExportProjection {
+                status: PackDayExportStatus::Idle,
+                request: None,
+                bundle: None,
+                error_message: None,
+            }
+        );
+    }
+
+    #[test]
+    fn pack_day_export_state_is_restart_ephemeral_and_skips_persistence() {
+        let mut store =
+            AppStateStore::load(FailingRepository).expect("failing repository should still load");
+        let fulfillment_window_id = FulfillmentWindowId::new();
+        let request = sample_pack_day_export_request(fulfillment_window_id);
+        let bundle = sample_pack_day_export_bundle(fulfillment_window_id);
+
+        assert_eq!(
+            store.apply(AppStateCommand::begin_pack_day_export(request.clone())),
+            Ok(true)
+        );
+        assert_eq!(
+            store.pack_day_projection().export,
+            PackDayExportProjection::running(request.clone())
+        );
+        assert_eq!(
+            store.persisted_state().seller.pack_day_query,
+            PackDayScreenQueryState::default()
+        );
+
+        assert_eq!(
+            store.apply(AppStateCommand::succeed_pack_day_export(
+                request.clone(),
+                bundle.clone(),
+            )),
+            Ok(true)
+        );
+        assert_eq!(
+            store.pack_day_projection().export,
+            PackDayExportProjection::succeeded(request.clone(), bundle)
+        );
+
+        assert_eq!(
+            store.apply(AppStateCommand::fail_pack_day_export(
+                request.clone(),
+                "disk unavailable",
+            )),
+            Ok(true)
+        );
+        assert_eq!(
+            store.pack_day_projection().export,
+            PackDayExportProjection::failed(request, "disk unavailable")
+        );
+
+        assert_eq!(
+            store.apply(AppStateCommand::reset_pack_day_export()),
+            Ok(true)
+        );
+        assert_eq!(
+            store.pack_day_projection().export,
+            PackDayExportProjection::default()
+        );
+    }
+
+    #[test]
+    fn changing_pack_day_window_clears_stale_export_state() {
+        let mut store = AppStateStore::load(InMemoryAppStateRepository::default())
+            .expect("in-memory repository should load");
+        let fulfillment_window_id = FulfillmentWindowId::new();
+        let next_window_id = FulfillmentWindowId::new();
+        let request = sample_pack_day_export_request(fulfillment_window_id);
+
+        assert_eq!(
+            store.apply(AppStateCommand::begin_pack_day_export(request)),
+            Ok(true)
+        );
+        assert_eq!(
+            store.pack_day_projection().export.status,
+            PackDayExportStatus::Running
+        );
+
+        assert_eq!(
+            store.apply(AppStateCommand::set_pack_day_fulfillment_window(Some(
+                next_window_id,
+            ))),
+            Ok(true)
+        );
+        assert_eq!(
+            store.pack_day_projection().query,
+            PackDayScreenQueryState {
+                fulfillment_window_id: Some(next_window_id),
+            }
+        );
+        assert_eq!(
+            store.pack_day_projection().export,
+            PackDayExportProjection::default()
         );
     }
 
