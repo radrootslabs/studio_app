@@ -5063,6 +5063,7 @@ name = "radroots_studio_app_core"
 version = "0.1.0"
 dependencies = [
  "chrono",
+ "radroots_studio_app_models",
  "serde",
  "serde_json",
  "thiserror 2.0.18",
