@@ -1609,6 +1609,33 @@ impl PackDayExportArtifactKind {
     }
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PackDayHostHandoffKind {
+    RevealBundle,
+    OpenPackSheet,
+}
+
+impl PackDayHostHandoffKind {
+    pub const fn all_v1() -> [Self; 2] {
+        [Self::RevealBundle, Self::OpenPackSheet]
+    }
+
+    pub const fn storage_key(self) -> &'static str {
+        match self {
+            Self::RevealBundle => "reveal_bundle",
+            Self::OpenPackSheet => "open_pack_sheet",
+        }
+    }
+
+    pub const fn artifact_kind(self) -> Option<PackDayExportArtifactKind> {
+        match self {
+            Self::RevealBundle => None,
+            Self::OpenPackSheet => Some(PackDayExportArtifactKind::PackSheet),
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum PackDayExportStatus {
@@ -1620,6 +1647,27 @@ pub enum PackDayExportStatus {
 }
 
 impl PackDayExportStatus {
+    pub const fn storage_key(self) -> &'static str {
+        match self {
+            Self::Idle => "idle",
+            Self::Running => "running",
+            Self::Succeeded => "succeeded",
+            Self::Failed => "failed",
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PackDayHostHandoffStatus {
+    #[default]
+    Idle,
+    Running,
+    Succeeded,
+    Failed,
+}
+
+impl PackDayHostHandoffStatus {
     pub const fn storage_key(self) -> &'static str {
         match self {
             Self::Idle => "idle",
@@ -2333,19 +2381,19 @@ mod tests {
         OrderDetailProjection, OrderId, OrderListRow, OrderPrimaryAction, OrderRecoveryProjection,
         OrderStatus, OrdersFilter, OrdersListProjection, OrdersListRow, OrdersListSummary,
         OrdersScreenQueryState, PackDayExportArtifact, PackDayExportArtifactKind,
-        PackDayExportBundle, PackDayExportStatus, PackDayOutputCustomerOrder,
-        PackDayOutputOrderState, PackDayOutputPackListEntry, PackDayOutputProductTotal,
-        PackDayOutputQuantity, PackDayOutputSource, PackDayOutputWindow, PackDayPackListRow,
-        PackDayProductTotalRow, PackDayProjection, PackDayRosterRow, PackDayScreenQueryState,
-        ParseStartupSignerSourceError, PersonalEntryProjection, PersonalEntryState,
-        PersonalSection, PickupLocationId, ProductAttentionState, ProductAvailabilityState,
-        ProductAvailabilitySummary, ProductEditorDraft, ProductListRow, ProductPricePresentation,
-        ProductPublishBlocker, ProductStatus, ProductStockState, ProductStockSummary,
-        ProductsFilter, ProductsListProjection, ProductsListRow, ProductsListSummary, ProductsSort,
-        RecoveryKind, RecoveryQueueProjection, RecoveryRecordId, RecoveryState,
-        ReminderDeadlineProjection, ReminderDeliveryState, ReminderFeedProjection, ReminderId,
-        ReminderKind, ReminderLogEntryProjection, ReminderLogProjection, ReminderSurface,
-        ReminderUrgency, RepeatDemandEligibility, RepeatDemandHandoffProjection,
+        PackDayExportBundle, PackDayExportStatus, PackDayHostHandoffKind, PackDayHostHandoffStatus,
+        PackDayOutputCustomerOrder, PackDayOutputOrderState, PackDayOutputPackListEntry,
+        PackDayOutputProductTotal, PackDayOutputQuantity, PackDayOutputSource, PackDayOutputWindow,
+        PackDayPackListRow, PackDayProductTotalRow, PackDayProjection, PackDayRosterRow,
+        PackDayScreenQueryState, ParseStartupSignerSourceError, PersonalEntryProjection,
+        PersonalEntryState, PersonalSection, PickupLocationId, ProductAttentionState,
+        ProductAvailabilityState, ProductAvailabilitySummary, ProductEditorDraft, ProductListRow,
+        ProductPricePresentation, ProductPublishBlocker, ProductStatus, ProductStockState,
+        ProductStockSummary, ProductsFilter, ProductsListProjection, ProductsListRow,
+        ProductsListSummary, ProductsSort, RecoveryKind, RecoveryQueueProjection, RecoveryRecordId,
+        RecoveryState, ReminderDeadlineProjection, ReminderDeliveryState, ReminderFeedProjection,
+        ReminderId, ReminderKind, ReminderLogEntryProjection, ReminderLogProjection,
+        ReminderSurface, ReminderUrgency, RepeatDemandEligibility, RepeatDemandHandoffProjection,
         SelectedAccountProjection, SelectedSurfaceProjection, SettingsPreference, SettingsSection,
         ShellSection, StartupSignerEntryProjection, StartupSignerSource, StartupSignerSourceKind,
         TodayAgendaProjection, TodaySetupTask, TodaySetupTaskKind, TodaySummary,
@@ -2942,7 +2990,7 @@ mod tests {
     }
 
     #[test]
-    fn pack_day_export_artifact_contract_is_frozen_for_v1() {
+    fn pack_day_export_and_host_handoff_contracts_are_frozen_for_v1() {
         assert_eq!(
             PackDayExportArtifactKind::all_v1(),
             [
@@ -2971,6 +3019,36 @@ mod tests {
         assert_eq!(PackDayExportStatus::Running.storage_key(), "running");
         assert_eq!(PackDayExportStatus::Succeeded.storage_key(), "succeeded");
         assert_eq!(PackDayExportStatus::Failed.storage_key(), "failed");
+        assert_eq!(
+            PackDayHostHandoffKind::all_v1(),
+            [
+                PackDayHostHandoffKind::RevealBundle,
+                PackDayHostHandoffKind::OpenPackSheet,
+            ]
+        );
+        assert_eq!(
+            PackDayHostHandoffKind::RevealBundle.storage_key(),
+            "reveal_bundle"
+        );
+        assert_eq!(
+            PackDayHostHandoffKind::OpenPackSheet.storage_key(),
+            "open_pack_sheet"
+        );
+        assert_eq!(PackDayHostHandoffKind::RevealBundle.artifact_kind(), None);
+        assert_eq!(
+            PackDayHostHandoffKind::OpenPackSheet.artifact_kind(),
+            Some(PackDayExportArtifactKind::PackSheet)
+        );
+        assert_eq!(
+            PackDayHostHandoffStatus::default(),
+            PackDayHostHandoffStatus::Idle
+        );
+        assert_eq!(PackDayHostHandoffStatus::Running.storage_key(), "running");
+        assert_eq!(
+            PackDayHostHandoffStatus::Succeeded.storage_key(),
+            "succeeded"
+        );
+        assert_eq!(PackDayHostHandoffStatus::Failed.storage_key(), "failed");
     }
 
     #[test]

@@ -15,11 +15,12 @@ use radroots_studio_app_models::{
     FarmSetupReadiness, FarmTimingConflict, FulfillmentWindowId, LoggedOutStartupPhase,
     LoggedOutStartupProjection, OrderDetailProjection, OrderId, OrdersFilter, OrdersListProjection,
     OrdersScreenQueryState, PackDayExportArtifactKind, PackDayExportBundle, PackDayExportStatus,
-    PackDayProjection, PackDayScreenQueryState, PersonalEntryProjection, ProductEditorDraft,
-    ProductId, ProductPublishBlocker, ProductsFilter, ProductsListProjection, ProductsSort,
-    RecoveryQueueProjection, ReminderFeedProjection, ReminderLogProjection,
-    SelectedSurfaceProjection, SettingsAccountProjection, SettingsPreference, SettingsSection,
-    ShellSection, TodayAgendaProjection, TodaySetupTask, TodaySetupTaskKind,
+    PackDayHostHandoffKind, PackDayHostHandoffStatus, PackDayProjection, PackDayScreenQueryState,
+    PersonalEntryProjection, ProductEditorDraft, ProductId, ProductPublishBlocker, ProductsFilter,
+    ProductsListProjection, ProductsSort, RecoveryQueueProjection, ReminderFeedProjection,
+    ReminderLogProjection, SelectedSurfaceProjection, SettingsAccountProjection,
+    SettingsPreference, SettingsSection, ShellSection, TodayAgendaProjection, TodaySetupTask,
+    TodaySetupTaskKind,
 };
 use radroots_studio_app_sync::{
     AppSyncProjection, AppSyncRunStatus, SyncCheckpointState, SyncCheckpointStatus, SyncConflict,
@@ -309,12 +310,14 @@ pub struct PackDayScreenProjection {
     pub query: PackDayScreenQueryState,
     pub projection: PackDayProjection,
     pub export: PackDayExportProjection,
+    pub host_handoff: PackDayHostHandoffProjection,
 }
 
 impl PackDayScreenProjection {
     fn select_fulfillment_window(&mut self, fulfillment_window_id: Option<FulfillmentWindowId>) {
         if self.query.fulfillment_window_id != fulfillment_window_id {
             self.export = PackDayExportProjection::default();
+            self.host_handoff = PackDayHostHandoffProjection::default();
         }
         self.query.fulfillment_window_id = fulfillment_window_id;
     }
@@ -332,13 +335,21 @@ impl PackDayScreenProjection {
 
         if previous_window_id != next_window_id {
             self.export = PackDayExportProjection::default();
+            self.host_handoff = PackDayHostHandoffProjection::default();
         }
 
         self.projection = projection;
     }
 
     fn replace_export(&mut self, export: PackDayExportProjection) {
+        if self.export != export {
+            self.host_handoff = PackDayHostHandoffProjection::default();
+        }
         self.export = export;
+    }
+
+    fn replace_host_handoff(&mut self, host_handoff: PackDayHostHandoffProjection) {
+        self.host_handoff = host_handoff;
     }
 }
 
@@ -389,6 +400,56 @@ impl PackDayExportProjection {
             status: PackDayExportStatus::Failed,
             request: Some(request),
             bundle: None,
+            error_message: Some(message.into()),
+        }
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PackDayHostHandoffRequest {
+    pub fulfillment_window_id: FulfillmentWindowId,
+    pub kind: PackDayHostHandoffKind,
+    pub bundle_directory: String,
+}
+
+impl PackDayHostHandoffRequest {
+    pub fn for_bundle(kind: PackDayHostHandoffKind, bundle: &PackDayExportBundle) -> Self {
+        Self {
+            fulfillment_window_id: bundle.fulfillment_window_id,
+            kind,
+            bundle_directory: bundle.bundle_directory.clone(),
+        }
+    }
+}
+
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct PackDayHostHandoffProjection {
+    pub status: PackDayHostHandoffStatus,
+    pub request: Option<PackDayHostHandoffRequest>,
+    pub error_message: Option<String>,
+}
+
+impl PackDayHostHandoffProjection {
+    pub fn running(request: PackDayHostHandoffRequest) -> Self {
+        Self {
+            status: PackDayHostHandoffStatus::Running,
+            request: Some(request),
+            error_message: None,
+        }
+    }
+
+    pub fn succeeded(request: PackDayHostHandoffRequest) -> Self {
+        Self {
+            status: PackDayHostHandoffStatus::Succeeded,
+            request: Some(request),
+            error_message: None,
+        }
+    }
+
+    pub fn failed(request: PackDayHostHandoffRequest, message: impl Into<String>) -> Self {
+        Self {
+            status: PackDayHostHandoffStatus::Failed,
+            request: Some(request),
             error_message: Some(message.into()),
         }
     }
@@ -845,6 +906,13 @@ pub enum AppStateCommand {
         message: String,
     },
     ResetPackDayExport,
+    BeginPackDayHostHandoff(PackDayHostHandoffRequest),
+    SucceedPackDayHostHandoff(PackDayHostHandoffRequest),
+    FailPackDayHostHandoff {
+        request: PackDayHostHandoffRequest,
+        message: String,
+    },
+    ResetPackDayHostHandoff,
     OpenNewProductEditor,
     OpenExistingProductEditor {
         product_id: ProductId,
@@ -987,6 +1055,28 @@ impl AppStateCommand {
 
     pub const fn reset_pack_day_export() -> Self {
         Self::ResetPackDayExport
+    }
+
+    pub fn begin_pack_day_host_handoff(request: PackDayHostHandoffRequest) -> Self {
+        Self::BeginPackDayHostHandoff(request)
+    }
+
+    pub fn succeed_pack_day_host_handoff(request: PackDayHostHandoffRequest) -> Self {
+        Self::SucceedPackDayHostHandoff(request)
+    }
+
+    pub fn fail_pack_day_host_handoff(
+        request: PackDayHostHandoffRequest,
+        message: impl Into<String>,
+    ) -> Self {
+        Self::FailPackDayHostHandoff {
+            request,
+            message: message.into(),
+        }
+    }
+
+    pub const fn reset_pack_day_host_handoff() -> Self {
+        Self::ResetPackDayHostHandoff
     }
 
     pub const fn open_new_product_editor() -> Self {
@@ -1498,6 +1588,26 @@ fn apply_command(projection: &mut AppProjection, command: AppStateCommand) -> Ap
                 .pack_day
                 .replace_export(PackDayExportProjection::default());
         }
+        AppStateCommand::BeginPackDayHostHandoff(request) => {
+            projection
+                .pack_day
+                .replace_host_handoff(PackDayHostHandoffProjection::running(request));
+        }
+        AppStateCommand::SucceedPackDayHostHandoff(request) => {
+            projection
+                .pack_day
+                .replace_host_handoff(PackDayHostHandoffProjection::succeeded(request));
+        }
+        AppStateCommand::FailPackDayHostHandoff { request, message } => {
+            projection
+                .pack_day
+                .replace_host_handoff(PackDayHostHandoffProjection::failed(request, message));
+        }
+        AppStateCommand::ResetPackDayHostHandoff => {
+            projection
+                .pack_day
+                .replace_host_handoff(PackDayHostHandoffProjection::default());
+        }
         AppStateCommand::OpenNewProductEditor => {
             projection
                 .products
@@ -1831,9 +1941,10 @@ mod tests {
         AppProjection, AppShellProjection, AppStateCommand, AppStateRepository,
         AppStateRepositoryError, AppStateStore, AppStateStoreError, FarmSetupFlowStage, HomeRoute,
         InMemoryAppStateRepository, OrdersScreenProjection, PackDayExportProjection,
-        PackDayExportRequest, PackDayScreenProjection, PersistedAppState, ProductEditorState,
-        ProductsScreenProjection, ProductsScreenQueryState, SettingsPreference,
-        derive_sync_projection, derive_sync_run_status,
+        PackDayExportRequest, PackDayHostHandoffProjection, PackDayHostHandoffRequest,
+        PackDayScreenProjection, PersistedAppState, ProductEditorState, ProductsScreenProjection,
+        ProductsScreenQueryState, SettingsPreference, derive_sync_projection,
+        derive_sync_run_status,
     };
     use radroots_studio_app_models::{
         AccountCustody, AccountSummary, ActiveSurface, AppIdentityProjection, AppStartupGate,
@@ -1842,7 +1953,8 @@ mod tests {
         LoggedOutStartupProjection, OrderDetailItemRow, OrderDetailProjection, OrderId,
         OrderPrimaryAction, OrderStatus, OrdersFilter, OrdersListProjection, OrdersListRow,
         OrdersListSummary, OrdersScreenQueryState, PackDayExportArtifact,
-        PackDayExportArtifactKind, PackDayExportBundle, PackDayExportStatus, PackDayPackListRow,
+        PackDayExportArtifactKind, PackDayExportBundle, PackDayExportStatus,
+        PackDayHostHandoffKind, PackDayHostHandoffStatus, PackDayPackListRow,
         PackDayProductTotalRow, PackDayProjection, PackDayRosterRow, PackDayScreenQueryState,
         PersonalEntryState, PersonalSection, ProductEditorDraft, ProductId, ProductPublishBlocker,
         ProductsFilter, ProductsListProjection, ProductsSort, ReminderDeliveryState,
@@ -1891,6 +2003,14 @@ mod tests {
         fulfillment_window_id: FulfillmentWindowId,
     ) -> PackDayExportRequest {
         PackDayExportRequest::for_fulfillment_window(fulfillment_window_id)
+    }
+
+    fn sample_pack_day_host_handoff_request(
+        fulfillment_window_id: FulfillmentWindowId,
+        kind: PackDayHostHandoffKind,
+    ) -> PackDayHostHandoffRequest {
+        let bundle = sample_pack_day_export_bundle(fulfillment_window_id);
+        PackDayHostHandoffRequest::for_bundle(kind, &bundle)
     }
 
     fn sample_pack_day_export_bundle(
@@ -2265,13 +2385,21 @@ mod tests {
     }
 
     #[test]
-    fn pack_day_export_projection_defaults_to_idle() {
+    fn pack_day_export_and_host_handoff_projections_default_to_idle() {
         assert_eq!(
             PackDayScreenProjection::default().export,
             PackDayExportProjection {
                 status: PackDayExportStatus::Idle,
                 request: None,
                 bundle: None,
+                error_message: None,
+            }
+        );
+        assert_eq!(
+            PackDayScreenProjection::default().host_handoff,
+            PackDayHostHandoffProjection {
+                status: PackDayHostHandoffStatus::Idle,
+                request: None,
                 error_message: None,
             }
         );
@@ -2333,6 +2461,64 @@ mod tests {
     }
 
     #[test]
+    fn pack_day_host_handoff_state_is_restart_ephemeral_and_skips_persistence() {
+        let mut store =
+            AppStateStore::load(FailingRepository).expect("failing repository should still load");
+        let fulfillment_window_id = FulfillmentWindowId::new();
+        let request = sample_pack_day_host_handoff_request(
+            fulfillment_window_id,
+            PackDayHostHandoffKind::RevealBundle,
+        );
+
+        assert_eq!(
+            store.apply(AppStateCommand::begin_pack_day_host_handoff(
+                request.clone(),
+            )),
+            Ok(true)
+        );
+        assert_eq!(
+            store.pack_day_projection().host_handoff,
+            PackDayHostHandoffProjection::running(request.clone())
+        );
+        assert_eq!(
+            store.persisted_state().seller.pack_day_query,
+            PackDayScreenQueryState::default()
+        );
+
+        assert_eq!(
+            store.apply(AppStateCommand::succeed_pack_day_host_handoff(
+                request.clone(),
+            )),
+            Ok(true)
+        );
+        assert_eq!(
+            store.pack_day_projection().host_handoff,
+            PackDayHostHandoffProjection::succeeded(request.clone())
+        );
+
+        assert_eq!(
+            store.apply(AppStateCommand::fail_pack_day_host_handoff(
+                request.clone(),
+                "finder unavailable",
+            )),
+            Ok(true)
+        );
+        assert_eq!(
+            store.pack_day_projection().host_handoff,
+            PackDayHostHandoffProjection::failed(request, "finder unavailable")
+        );
+
+        assert_eq!(
+            store.apply(AppStateCommand::reset_pack_day_host_handoff()),
+            Ok(true)
+        );
+        assert_eq!(
+            store.pack_day_projection().host_handoff,
+            PackDayHostHandoffProjection::default()
+        );
+    }
+
+    #[test]
     fn changing_pack_day_window_clears_stale_export_state() {
         let mut store = AppStateStore::load(InMemoryAppStateRepository::default())
             .expect("in-memory repository should load");
@@ -2364,6 +2550,128 @@ mod tests {
         assert_eq!(
             store.pack_day_projection().export,
             PackDayExportProjection::default()
+        );
+    }
+
+    #[test]
+    fn changing_pack_day_window_clears_stale_host_handoff_state() {
+        let mut store = AppStateStore::load(InMemoryAppStateRepository::default())
+            .expect("in-memory repository should load");
+        let fulfillment_window_id = FulfillmentWindowId::new();
+        let next_window_id = FulfillmentWindowId::new();
+        let request = sample_pack_day_host_handoff_request(
+            fulfillment_window_id,
+            PackDayHostHandoffKind::OpenPackSheet,
+        );
+
+        assert_eq!(
+            store.apply(AppStateCommand::begin_pack_day_host_handoff(request)),
+            Ok(true)
+        );
+        assert_eq!(
+            store.pack_day_projection().host_handoff.status,
+            PackDayHostHandoffStatus::Running
+        );
+
+        assert_eq!(
+            store.apply(AppStateCommand::set_pack_day_fulfillment_window(Some(
+                next_window_id,
+            ))),
+            Ok(true)
+        );
+        assert_eq!(
+            store.pack_day_projection().query,
+            PackDayScreenQueryState {
+                fulfillment_window_id: Some(next_window_id),
+            }
+        );
+        assert_eq!(
+            store.pack_day_projection().host_handoff,
+            PackDayHostHandoffProjection::default()
+        );
+    }
+
+    #[test]
+    fn changing_pack_day_export_state_clears_stale_host_handoff_state() {
+        let mut store = AppStateStore::load(InMemoryAppStateRepository::default())
+            .expect("in-memory repository should load");
+        let fulfillment_window_id = FulfillmentWindowId::new();
+        let export_request = sample_pack_day_export_request(fulfillment_window_id);
+        let host_handoff_request = sample_pack_day_host_handoff_request(
+            fulfillment_window_id,
+            PackDayHostHandoffKind::RevealBundle,
+        );
+
+        assert_eq!(
+            store.apply(AppStateCommand::begin_pack_day_export(
+                export_request.clone(),
+            )),
+            Ok(true)
+        );
+        assert_eq!(
+            store.apply(AppStateCommand::begin_pack_day_host_handoff(
+                host_handoff_request,
+            )),
+            Ok(true)
+        );
+        assert_eq!(
+            store.pack_day_projection().host_handoff.status,
+            PackDayHostHandoffStatus::Running
+        );
+
+        assert_eq!(
+            store.apply(AppStateCommand::succeed_pack_day_export(
+                export_request,
+                sample_pack_day_export_bundle(fulfillment_window_id),
+            )),
+            Ok(true)
+        );
+        assert_eq!(
+            store.pack_day_projection().host_handoff,
+            PackDayHostHandoffProjection::default()
+        );
+    }
+
+    #[test]
+    fn replacing_pack_day_projection_with_new_window_clears_stale_host_handoff_state() {
+        let mut store = AppStateStore::load(InMemoryAppStateRepository::default())
+            .expect("in-memory repository should load");
+        let farm_id = FarmId::new();
+        let current_window_id = FulfillmentWindowId::new();
+        let next_window_id = FulfillmentWindowId::new();
+        let request = sample_pack_day_host_handoff_request(
+            current_window_id,
+            PackDayHostHandoffKind::OpenPackSheet,
+        );
+
+        assert_eq!(
+            store.apply(AppStateCommand::begin_pack_day_host_handoff(request)),
+            Ok(true)
+        );
+
+        let next_pack_day = PackDayProjection {
+            fulfillment_window: Some(radroots_studio_app_models::FulfillmentWindowSummary {
+                fulfillment_window_id: next_window_id,
+                farm_id,
+                starts_at: "2026-04-25T16:00:00Z".to_owned(),
+                ends_at: "2026-04-25T19:00:00Z".to_owned(),
+            }),
+            totals_by_product: Vec::new(),
+            pack_list: Vec::new(),
+            pickup_roster: Vec::new(),
+            reminders: ReminderFeedProjection::default(),
+        };
+
+        assert_eq!(
+            store.apply(AppStateCommand::replace_pack_day_projection(
+                next_pack_day.clone(),
+            )),
+            Ok(true)
+        );
+        assert_eq!(store.pack_day_projection().projection, next_pack_day);
+        assert_eq!(
+            store.pack_day_projection().host_handoff,
+            PackDayHostHandoffProjection::default()
         );
     }
 
