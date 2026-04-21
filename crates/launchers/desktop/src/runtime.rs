@@ -28,15 +28,14 @@ use radroots_studio_app_remote_signer::{
 };
 use radroots_studio_app_sqlite::{
     APP_ACTIVITY_CONTEXT_LIMIT, AppSqliteError, AppSqliteStore, BuyerRepeatDemandApplyOutcome,
-    DatabaseTarget,
-    StoredPendingSyncOperation, StoredSyncConflict, derive_farm_rules_readiness,
+    DatabaseTarget, StoredPendingSyncOperation, StoredSyncConflict, derive_farm_rules_readiness,
 };
 use radroots_studio_app_state::{
-    AppShellProjection, AppStateCommand, AppStateStore, AppStateStoreError,
-    BuyerBrowseScreenProjection, BuyerCartScreenProjection, BuyerOrdersScreenProjection,
-    BuyerSearchScreenProjection, BuyerSearchScreenQueryState, FarmSetupFlowStage,
-    FarmWorkspaceReadinessProjection, HomeRoute, InMemoryAppStateRepository,
-    OrdersScreenProjection, PackDayScreenProjection, PersonalWorkspaceProjection,
+    APP_STATE_FILE_NAME, AppShellProjection, AppStateCommand, AppStatePersistenceRepository,
+    AppStateStore, AppStateStoreError, BuyerBrowseScreenProjection, BuyerCartScreenProjection,
+    BuyerOrdersScreenProjection, BuyerSearchScreenProjection, BuyerSearchScreenQueryState,
+    FarmSetupFlowStage, FarmWorkspaceReadinessProjection, HomeRoute, OrdersScreenProjection,
+    PackDayScreenProjection, PersistedAppState, PersonalWorkspaceProjection,
     ProductsScreenProjection, ProductsScreenQueryState, derive_sync_projection,
 };
 use radroots_studio_app_sync::{
@@ -726,12 +725,16 @@ struct DesktopSelectedAccountContext {
     farm_setup_projection: FarmSetupProjection,
     farm_rules_projection: FarmRulesProjection,
     today_projection: TodayAgendaProjection,
+    products_query: ProductsScreenQueryState,
     products_list: ProductsListProjection,
+    orders_query: OrdersScreenQueryState,
     orders_list: OrdersListProjection,
     orders_reminders: ReminderFeedProjection,
     recovery_queue: RecoveryQueueProjection,
     order_detail: Option<OrderDetailProjection>,
+    pack_day_query: PackDayScreenQueryState,
     pack_day_projection: PackDayProjection,
+    product_editor_draft: Option<(ProductId, ProductEditorDraft)>,
     reminder_log: ReminderLogProjection,
 }
 
@@ -771,7 +774,7 @@ struct DesktopPreparedSyncRequest {
 }
 
 struct DesktopAppRuntimeState {
-    state_store: AppStateStore<InMemoryAppStateRepository>,
+    state_store: AppStateStore<AppStatePersistenceRepository>,
     default_nostr_relay_url: String,
     shared_accounts_paths: Option<AppSharedAccountsPaths>,
     remote_signer_paths: Option<DesktopRemoteSignerPaths>,
@@ -837,7 +840,10 @@ impl DesktopAppRuntimeState {
         let database_path = paths.app.data.join(APP_DATABASE_FILE_NAME);
         let sqlite_store = AppSqliteStore::open(DatabaseTarget::Path(database_path.clone()))?;
         let database_schema_version = sqlite_store.schema_version()?;
-        let mut state_store = AppStateStore::load(InMemoryAppStateRepository::default())?;
+        let mut state_store = AppStateStore::load(AppStatePersistenceRepository::file_backed(
+            paths.app.data.join(APP_STATE_FILE_NAME),
+        ))?;
+        let continuity_state = state_store.persisted_state().clone();
         let remote_signer_paths = DesktopRemoteSignerPaths::from_runtime_paths(&paths);
         let accounts_bootstrap = bootstrap_desktop_accounts(&paths.shared_accounts, &sqlite_store)?;
         if let Some(accounts_manager) = accounts_bootstrap.accounts_manager.as_ref() {
@@ -853,18 +859,8 @@ impl DesktopAppRuntimeState {
             )?,
             &remote_signer_paths,
         )?;
-        let selected_account_context = load_selected_account_context(
-            &sqlite_store,
-            &identity_projection,
-            state_store.products_projection().query.clone(),
-            state_store.orders_projection().query.clone(),
-            state_store
-                .orders_projection()
-                .detail
-                .as_ref()
-                .map(|detail| detail.order_id),
-            state_store.pack_day_projection().query.clone(),
-        )?;
+        let selected_account_context =
+            load_selected_account_context(&sqlite_store, &identity_projection, &continuity_state)?;
         let selected_account_sync_context =
             load_selected_account_sync_context(&sqlite_store, &identity_projection)?;
         let _ = state_store.apply_in_memory(AppStateCommand::replace_identity_projection(
@@ -875,46 +871,12 @@ impl DesktopAppRuntimeState {
         {
             let _ = state_store.apply_in_memory(AppStateCommand::show_startup_signer_entry());
         }
-        let _ = state_store.apply_in_memory(AppStateCommand::replace_personal_projection(
-            selected_account_context.personal_projection.clone(),
-        ));
-        let _ = state_store.apply_in_memory(AppStateCommand::replace_farm_rules_projection(
-            selected_account_context.farm_rules_projection,
-        ));
-        let _ = state_store.apply_in_memory(AppStateCommand::replace_farm_setup_projection(
-            selected_account_context.farm_setup_projection,
-        ));
-        let _ = state_store.apply_in_memory(AppStateCommand::replace_today_agenda(
-            selected_account_context.today_projection,
-        ));
-        let _ = state_store.apply_in_memory(AppStateCommand::replace_products_list(
-            selected_account_context.products_list,
-        ));
-        let _ = state_store.apply_in_memory(AppStateCommand::replace_orders_list(
-            selected_account_context.orders_list,
-        ));
-        let _ = state_store.apply_in_memory(AppStateCommand::replace_orders_reminders(
-            selected_account_context.orders_reminders,
-        ));
-        let _ = state_store.apply_in_memory(AppStateCommand::replace_orders_recovery_queue(
-            selected_account_context.recovery_queue,
-        ));
-        let _ = state_store.apply_in_memory(AppStateCommand::replace_reminder_log(
-            selected_account_context.reminder_log,
-        ));
-        let _ = state_store.apply_in_memory(AppStateCommand::replace_order_detail(
-            selected_account_context.order_detail,
-        ));
-        let _ = state_store.apply_in_memory(AppStateCommand::replace_pack_day_projection(
-            selected_account_context.pack_day_projection,
-        ));
         let pending_sync_write_count = selected_account_sync_context.pending_write_count;
         let selected_account_sync_conflicts = selected_account_sync_context.conflicts;
         let _ = state_store.apply_in_memory(AppStateCommand::replace_sync_projection(
             selected_account_sync_context.projection,
         ));
-
-        Ok(Self {
+        let mut state = Self {
             state_store,
             default_nostr_relay_url,
             shared_accounts_paths: Some(paths.shared_accounts.clone()),
@@ -931,7 +893,10 @@ impl DesktopAppRuntimeState {
             selected_account_pending_sync_write_count: pending_sync_write_count,
             selected_account_sync_conflicts,
             startup_issue: None,
-        })
+        };
+        let _ = state.apply_selected_account_context(&selected_account_context);
+
+        Ok(state)
     }
 
     fn degraded(error: DesktopAppRuntimeBootstrapError) -> Self {
@@ -943,7 +908,8 @@ impl DesktopAppRuntimeState {
         runtime_snapshot: AppRuntimeSnapshot,
     ) -> Self {
         Self {
-            state_store: AppStateStore::in_memory(AppShellProjection::default()),
+            state_store: AppStateStore::load(AppStatePersistenceRepository::in_memory())
+                .expect("in-memory state store should load"),
             default_nostr_relay_url: String::new(),
             shared_accounts_paths: None,
             remote_signer_paths: None,
@@ -1393,8 +1359,8 @@ impl DesktopAppRuntimeState {
 
                 Ok(personal_changed || section_changed)
             }
-            BuyerRepeatDemandApplyOutcome::ConfirmationRequired(replace_confirmation) => {
-                Ok(self.mutate_personal_projection(|projection| {
+            BuyerRepeatDemandApplyOutcome::ConfirmationRequired(replace_confirmation) => Ok(self
+                .mutate_personal_projection(|projection| {
                     let cart = &mut projection.cart.cart;
                     if cart.replace_confirmation.as_ref() == Some(&replace_confirmation) {
                         return false;
@@ -1402,8 +1368,7 @@ impl DesktopAppRuntimeState {
 
                     cart.replace_confirmation = Some(replace_confirmation);
                     true
-                }))
-            }
+                })),
             BuyerRepeatDemandApplyOutcome::Unavailable => Ok(false),
         }
     }
@@ -1549,13 +1514,11 @@ impl DesktopAppRuntimeState {
         let Some(_) = sqlite_store.load_order_detail(farm_id, order_id)? else {
             return Ok(false);
         };
+        let continuity_state = self.continuity_state_with_order_detail(Some(order_id));
         let selected_account_context = load_selected_account_context(
             sqlite_store,
             self.state_store.identity_projection(),
-            self.state_store.products_projection().query.clone(),
-            self.state_store.orders_projection().query.clone(),
-            Some(order_id),
-            self.state_store.pack_day_projection().query.clone(),
+            &continuity_state,
         )?;
         let detail_changed = self.apply_selected_account_context(&selected_account_context);
         let section_changed = self
@@ -1581,13 +1544,12 @@ impl DesktopAppRuntimeState {
             return Ok(false);
         }
 
+        let continuity_state =
+            self.continuity_state_with_order_detail(self.selected_order_detail_id());
         let selected_account_context = load_selected_account_context(
             sqlite_store,
             self.state_store.identity_projection(),
-            self.state_store.products_projection().query.clone(),
-            self.state_store.orders_projection().query.clone(),
-            self.selected_order_detail_id(),
-            self.state_store.pack_day_projection().query.clone(),
+            &continuity_state,
         )?;
         let context_changed = self.apply_selected_account_context(&selected_account_context);
         let pending_changed =
@@ -1612,13 +1574,12 @@ impl DesktopAppRuntimeState {
             return Ok(false);
         }
 
+        let continuity_state =
+            self.continuity_state_with_order_detail(self.selected_order_detail_id());
         let selected_account_context = load_selected_account_context(
             sqlite_store,
             self.state_store.identity_projection(),
-            self.state_store.products_projection().query.clone(),
-            self.state_store.orders_projection().query.clone(),
-            self.selected_order_detail_id(),
-            self.state_store.pack_day_projection().query.clone(),
+            &continuity_state,
         )?;
         let context_changed = self.apply_selected_account_context(&selected_account_context);
         let pending_changed =
@@ -1723,13 +1684,12 @@ impl DesktopAppRuntimeState {
         record.last_updated_at = last_updated_at;
         sqlite_store.save_recovery_record(account_id, farm_id, &record)?;
 
+        let continuity_state = self
+            .continuity_state_with_order_detail(self.selected_order_detail_id().or(Some(order_id)));
         let selected_account_context = load_selected_account_context(
             sqlite_store,
             self.state_store.identity_projection(),
-            self.state_store.products_projection().query.clone(),
-            self.state_store.orders_projection().query.clone(),
-            self.selected_order_detail_id().or(Some(order_id)),
-            self.state_store.pack_day_projection().query.clone(),
+            &continuity_state,
         )?;
         let context_changed = self.apply_selected_account_context(&selected_account_context);
         let pending_changed =
@@ -1791,13 +1751,12 @@ impl DesktopAppRuntimeState {
             return Ok(false);
         }
 
+        let continuity_state =
+            self.continuity_state_with_order_detail(self.selected_order_detail_id());
         let selected_account_context = load_selected_account_context(
             sqlite_store,
             self.state_store.identity_projection(),
-            self.state_store.products_projection().query.clone(),
-            self.state_store.orders_projection().query.clone(),
-            self.selected_order_detail_id(),
-            self.state_store.pack_day_projection().query.clone(),
+            &continuity_state,
         )?;
         let context_changed = self.apply_selected_account_context(&selected_account_context);
         let pending_changed =
@@ -1828,13 +1787,11 @@ impl DesktopAppRuntimeState {
         let Some(draft) = sqlite_store.load_product_editor_draft(product_id)? else {
             return Ok(false);
         };
+        let continuity_state = self.continuity_state();
         let selected_account_context = load_selected_account_context(
             sqlite_store,
             self.state_store.identity_projection(),
-            self.state_store.products_projection().query.clone(),
-            self.state_store.orders_projection().query.clone(),
-            self.selected_order_detail_id(),
-            self.state_store.pack_day_projection().query.clone(),
+            &continuity_state,
         )?;
         let context_changed = self.apply_selected_account_context(&selected_account_context);
         let section_changed = self.select_farmer_section(FarmerSection::Products);
@@ -1902,13 +1859,11 @@ impl DesktopAppRuntimeState {
             let Some(sqlite_store) = self.sqlite_store.as_ref() else {
                 return Ok(false);
             };
+            let continuity_state = self.continuity_state();
             load_selected_account_context(
                 sqlite_store,
                 self.state_store.identity_projection(),
-                self.state_store.products_projection().query.clone(),
-                self.state_store.orders_projection().query.clone(),
-                self.selected_order_detail_id(),
-                self.state_store.pack_day_projection().query.clone(),
+                &continuity_state,
             )?
         };
         let reloaded_draft = {
@@ -2070,13 +2025,11 @@ impl DesktopAppRuntimeState {
 
         let selected_account_context = {
             let sqlite_store = self.sqlite_store_for_farm_rules()?;
+            let continuity_state = self.continuity_state();
             load_selected_account_context(
                 sqlite_store,
                 self.state_store.identity_projection(),
-                self.state_store.products_projection().query.clone(),
-                self.state_store.orders_projection().query.clone(),
-                self.selected_order_detail_id(),
-                self.state_store.pack_day_projection().query.clone(),
+                &continuity_state,
             )?
         };
         self.apply_selected_account_context(&selected_account_context);
@@ -2130,14 +2083,9 @@ impl DesktopAppRuntimeState {
         projection: AppIdentityProjection,
     ) -> Result<bool, DesktopAppRuntimeCommandError> {
         let projection = self.decorate_identity_projection(projection)?;
-        let selected_account_context = load_selected_account_context(
-            self.sqlite_store()?,
-            &projection,
-            self.state_store.products_projection().query.clone(),
-            self.state_store.orders_projection().query.clone(),
-            self.selected_order_detail_id(),
-            self.state_store.pack_day_projection().query.clone(),
-        )?;
+        let continuity_state = self.continuity_state();
+        let selected_account_context =
+            load_selected_account_context(self.sqlite_store()?, &projection, &continuity_state)?;
         let selected_account_sync_context =
             load_selected_account_sync_context(self.sqlite_store()?, &projection)?;
         let identity_changed = self
@@ -2153,13 +2101,11 @@ impl DesktopAppRuntimeState {
     fn refresh_selected_account_context(
         &self,
     ) -> Result<DesktopSelectedAccountContext, DesktopAppRuntimeFarmSetupError> {
+        let continuity_state = self.continuity_state();
         Ok(load_selected_account_context(
             self.sqlite_store_for_farm_setup()?,
             self.state_store.identity_projection(),
-            self.state_store.products_projection().query.clone(),
-            self.state_store.orders_projection().query.clone(),
-            self.selected_order_detail_id(),
-            self.state_store.pack_day_projection().query.clone(),
+            &continuity_state,
         )?)
     }
 
@@ -2202,11 +2148,36 @@ impl DesktopAppRuntimeState {
                 .apply_in_memory(AppStateCommand::replace_today_agenda(
                     context.today_projection.clone(),
                 ));
+        let products_query_changed =
+            self.state_store
+                .apply_in_memory(AppStateCommand::set_products_search_query(
+                    context.products_query.search_query.clone(),
+                ))
+                || self
+                    .state_store
+                    .apply_in_memory(AppStateCommand::select_products_filter(
+                        context.products_query.filter,
+                    ))
+                || self
+                    .state_store
+                    .apply_in_memory(AppStateCommand::select_products_sort(
+                        context.products_query.sort,
+                    ));
         let products_changed =
             self.state_store
                 .apply_in_memory(AppStateCommand::replace_products_list(
                     context.products_list.clone(),
                 ));
+        let orders_query_changed =
+            self.state_store
+                .apply_in_memory(AppStateCommand::select_orders_filter(
+                    context.orders_query.filter,
+                ))
+                || self.state_store.apply_in_memory(
+                    AppStateCommand::select_orders_fulfillment_window(
+                        context.orders_query.fulfillment_window_id,
+                    ),
+                );
         let orders_changed =
             self.state_store
                 .apply_in_memory(AppStateCommand::replace_orders_list(
@@ -2237,23 +2208,36 @@ impl DesktopAppRuntimeState {
                 .apply_in_memory(AppStateCommand::replace_pack_day_projection(
                     context.pack_day_projection.clone(),
                 ));
-        let editor_changed = if context.farm_setup_projection.has_saved_farm() {
-            false
-        } else {
-            self.close_product_editor()
-        };
+        let pack_day_query_changed =
+            self.state_store
+                .apply_in_memory(AppStateCommand::set_pack_day_fulfillment_window(
+                    context.pack_day_query.fulfillment_window_id,
+                ));
+        let editor_changed =
+            if let Some((product_id, draft)) = context.product_editor_draft.as_ref() {
+                self.state_store
+                    .apply_in_memory(AppStateCommand::open_existing_product_editor(
+                        *product_id,
+                        draft.clone(),
+                    ))
+            } else {
+                self.close_product_editor()
+            };
         let shell_changed = self.sync_truthful_farmer_section();
 
         personal_changed
             || farm_setup_changed
             || farm_rules_changed
             || today_changed
+            || products_query_changed
             || products_changed
+            || orders_query_changed
             || orders_changed
             || orders_reminders_changed
             || recovery_queue_changed
             || reminder_log_changed
             || order_detail_changed
+            || pack_day_query_changed
             || pack_day_changed
             || editor_changed
             || shell_changed
@@ -2293,13 +2277,11 @@ impl DesktopAppRuntimeState {
         let sync_changed = self.apply_selected_account_sync_context(&context);
         let selected_account_changed = match self.sqlite_store.as_ref() {
             Some(sqlite_store) => {
+                let continuity_state = self.continuity_state();
                 let selected_account_context = load_selected_account_context(
                     sqlite_store,
                     self.state_store.identity_projection(),
-                    self.state_store.products_projection().query.clone(),
-                    self.state_store.orders_projection().query.clone(),
-                    self.selected_order_detail_id(),
-                    self.state_store.pack_day_projection().query.clone(),
+                    &continuity_state,
                 )?;
                 self.apply_selected_account_seller_context(&selected_account_context)
             }
@@ -2399,13 +2381,11 @@ impl DesktopAppRuntimeState {
             &[reminder_log_entry],
         )?;
 
+        let continuity_state = self.continuity_state();
         let selected_account_context = load_selected_account_context_with_options(
             sqlite_store,
             self.state_store.identity_projection(),
-            self.state_store.products_projection().query.clone(),
-            self.state_store.orders_projection().query.clone(),
-            self.selected_order_detail_id(),
-            self.state_store.pack_day_projection().query.clone(),
+            &continuity_state,
             false,
         )?;
 
@@ -2847,6 +2827,36 @@ impl DesktopAppRuntimeState {
             .map(|detail| detail.order_id)
     }
 
+    fn continuity_state(&self) -> PersistedAppState {
+        self.state_store.persisted_state().clone()
+    }
+
+    fn continuity_state_with_order_detail(&self, order_id: Option<OrderId>) -> PersistedAppState {
+        let mut state = self.continuity_state();
+        state.seller.order_detail_order_id = order_id;
+        state
+    }
+
+    fn continuity_state_with_orders_query(
+        &self,
+        query: OrdersScreenQueryState,
+        order_id: Option<OrderId>,
+    ) -> PersistedAppState {
+        let mut state = self.continuity_state();
+        state.seller.orders_query = query;
+        state.seller.order_detail_order_id = order_id;
+        state
+    }
+
+    fn continuity_state_with_pack_day_query(
+        &self,
+        query: PackDayScreenQueryState,
+    ) -> PersistedAppState {
+        let mut state = self.continuity_state();
+        state.seller.pack_day_query = query;
+        state
+    }
+
     fn fallback_farm_profile(&self, farm_id: FarmId) -> FarmProfileRecord {
         fallback_farm_profile_for_projection(farm_id, self.state_store.farm_setup_projection())
     }
@@ -2880,13 +2890,11 @@ impl DesktopAppRuntimeState {
         let Some(sqlite_store) = self.sqlite_store.as_ref() else {
             return Ok(filter_changed || fulfillment_window_changed);
         };
+        let continuity_state = self.continuity_state_with_orders_query(query, None);
         let selected_account_context = load_selected_account_context(
             sqlite_store,
             self.state_store.identity_projection(),
-            self.state_store.products_projection().query.clone(),
-            query,
-            None,
-            self.state_store.pack_day_projection().query.clone(),
+            &continuity_state,
         )?;
         let context_changed = self.apply_selected_account_context(&selected_account_context);
 
@@ -2905,13 +2913,11 @@ impl DesktopAppRuntimeState {
         let Some(sqlite_store) = self.sqlite_store.as_ref() else {
             return Ok(fulfillment_window_changed);
         };
+        let continuity_state = self.continuity_state_with_pack_day_query(query);
         let selected_account_context = load_selected_account_context(
             sqlite_store,
             self.state_store.identity_projection(),
-            self.state_store.products_projection().query.clone(),
-            self.state_store.orders_projection().query.clone(),
-            self.selected_order_detail_id(),
-            query,
+            &continuity_state,
         )?;
         let context_changed = self.apply_selected_account_context(&selected_account_context);
 
@@ -3079,18 +3085,12 @@ enum DesktopAppRuntimeBootstrapError {
 fn load_selected_account_context(
     sqlite_store: &AppSqliteStore,
     identity_projection: &AppIdentityProjection,
-    products_query: ProductsScreenQueryState,
-    orders_query: OrdersScreenQueryState,
-    selected_order_id: Option<OrderId>,
-    pack_day_query: PackDayScreenQueryState,
+    continuity_state: &PersistedAppState,
 ) -> Result<DesktopSelectedAccountContext, AppSqliteError> {
     load_selected_account_context_with_options(
         sqlite_store,
         identity_projection,
-        products_query,
-        orders_query,
-        selected_order_id,
-        pack_day_query,
+        continuity_state,
         true,
     )
 }
@@ -3098,27 +3098,41 @@ fn load_selected_account_context(
 fn load_selected_account_context_with_options(
     sqlite_store: &AppSqliteStore,
     identity_projection: &AppIdentityProjection,
-    products_query: ProductsScreenQueryState,
-    orders_query: OrdersScreenQueryState,
-    selected_order_id: Option<OrderId>,
-    pack_day_query: PackDayScreenQueryState,
+    continuity_state: &PersistedAppState,
     allow_auto_present: bool,
 ) -> Result<DesktopSelectedAccountContext, AppSqliteError> {
     let buyer_context = identity_projection.buyer_context();
-    let buyer_fulfillment_methods = BTreeSet::new();
-    let buyer_listings = sqlite_store.load_buyer_listings("", &buyer_fulfillment_methods)?;
+    let browse_fulfillment_methods = BTreeSet::new();
+    let browse_listings = sqlite_store.load_buyer_listings("", &browse_fulfillment_methods)?;
+    let search_query = continuity_state.buyer.search_query.clone();
+    let search_listings = sqlite_store.load_buyer_listings(
+        &search_query.search_query,
+        &search_query.fulfillment_methods,
+    )?;
+    let browse_detail = match continuity_state.buyer.browse_detail_product_id {
+        Some(product_id) => sqlite_store.load_buyer_product_detail(product_id)?,
+        None => None,
+    };
+    let search_detail = match continuity_state.buyer.search_detail_product_id {
+        Some(product_id) => sqlite_store.load_buyer_product_detail(product_id)?,
+        None => None,
+    };
     let buyer_cart = sqlite_store.load_buyer_cart(&buyer_context)?;
     let buyer_checkout = sqlite_store.load_buyer_checkout(&buyer_context)?;
     let buyer_orders = sqlite_store.load_buyer_orders(&buyer_context)?;
+    let buyer_order_detail = match continuity_state.buyer.orders_detail_order_id {
+        Some(order_id) => sqlite_store.load_buyer_order_detail(&buyer_context, order_id)?,
+        None => None,
+    };
     let personal_projection = PersonalWorkspaceProjection {
         browse: BuyerBrowseScreenProjection {
-            listings: buyer_listings.clone(),
-            detail: None,
+            listings: browse_listings,
+            detail: browse_detail,
         },
         search: BuyerSearchScreenProjection {
-            query: BuyerSearchScreenQueryState::default(),
-            listings: buyer_listings,
-            detail: None,
+            query: search_query,
+            listings: search_listings,
+            detail: search_detail,
         },
         cart: BuyerCartScreenProjection {
             cart: buyer_cart,
@@ -3126,16 +3140,20 @@ fn load_selected_account_context_with_options(
         },
         orders: BuyerOrdersScreenProjection {
             list: buyer_orders,
-            detail: None,
+            detail: buyer_order_detail,
         },
         ..PersonalWorkspaceProjection::default()
     };
     let Some(selected_account) = identity_projection.selected_account.as_ref() else {
         return Ok(DesktopSelectedAccountContext {
             personal_projection,
+            products_query: ProductsScreenQueryState::default(),
             orders_list: OrdersListProjection::default(),
+            orders_query: OrdersScreenQueryState::default(),
             orders_reminders: ReminderFeedProjection::default(),
             recovery_queue: RecoveryQueueProjection::default(),
+            pack_day_query: PackDayScreenQueryState::default(),
+            product_editor_draft: None,
             reminder_log: ReminderLogProjection::default(),
             ..DesktopSelectedAccountContext::default()
         });
@@ -3149,46 +3167,92 @@ fn load_selected_account_context_with_options(
             .saved_farm
             .as_ref()
             .map(|farm| farm.farm_id));
-    let farm_rules_projection = match today_farm_id {
+    let (
+        farm_rules_projection,
+        mut today_projection,
+        products_query,
+        products_list,
+        orders_query,
+        orders_list,
+        canonical_orders_list,
+        mut order_detail,
+        pack_day_query,
+        mut pack_day_projection,
+        product_editor_draft,
+    ) = match today_farm_id {
         Some(farm_id) => {
             let fallback_profile =
                 fallback_farm_profile_for_projection(farm_id, &farm_setup_projection);
-            sqlite_store.load_farm_rules(farm_id).map(|projection| {
-                prepare_loaded_farm_rules_projection(projection, &fallback_profile)
-            })?
+            let farm_rules_projection =
+                sqlite_store.load_farm_rules(farm_id).map(|projection| {
+                    prepare_loaded_farm_rules_projection(projection, &fallback_profile)
+                })?;
+            let today_projection = sqlite_store.load_today_agenda(Some(farm_id))?;
+            let products_query = continuity_state.seller.products_query.clone();
+            let products_list = sqlite_store.load_products(
+                farm_id,
+                &products_query.search_query,
+                products_query.filter,
+                products_query.sort,
+            )?;
+            let orders_query = sanitize_orders_query(
+                sqlite_store,
+                farm_id,
+                continuity_state.seller.orders_query.clone(),
+            )?;
+            let orders_list = sqlite_store.load_orders_list(farm_id, &orders_query)?;
+            let canonical_orders_list =
+                sqlite_store.load_orders_list(farm_id, &OrdersScreenQueryState::default())?;
+            let order_detail = match continuity_state.seller.order_detail_order_id {
+                Some(order_id) => sqlite_store.load_order_detail(farm_id, order_id)?,
+                None => None,
+            };
+            let (pack_day_query, pack_day_projection) = sanitize_pack_day_query(
+                sqlite_store,
+                farm_id,
+                continuity_state.seller.pack_day_query.clone(),
+            )?;
+            let product_editor_draft = if matches!(
+                continuity_state.shell.selected_section,
+                ShellSection::Farmer(FarmerSection::Products)
+            ) {
+                match continuity_state.seller.product_editor_product_id {
+                    Some(product_id) => sqlite_store
+                        .load_product_editor_draft(product_id)?
+                        .map(|draft| (product_id, draft)),
+                    None => None,
+                }
+            } else {
+                None
+            };
+
+            (
+                farm_rules_projection,
+                today_projection,
+                products_query,
+                products_list,
+                orders_query,
+                orders_list,
+                canonical_orders_list,
+                order_detail,
+                pack_day_query,
+                pack_day_projection,
+                product_editor_draft,
+            )
         }
-        None => FarmRulesProjection::default(),
-    };
-    let mut today_projection = match today_farm_id {
-        Some(farm_id) => sqlite_store.load_today_agenda(Some(farm_id))?,
-        None => TodayAgendaProjection::default(),
-    };
-    let products_list = match today_farm_id {
-        Some(farm_id) => sqlite_store.load_products(
-            farm_id,
-            &products_query.search_query,
-            products_query.filter,
-            products_query.sort,
-        )?,
-        None => ProductsListProjection::default(),
-    };
-    let orders_list = match today_farm_id {
-        Some(farm_id) => sqlite_store.load_orders_list(farm_id, &orders_query)?,
-        None => OrdersListProjection::default(),
-    };
-    let canonical_orders_list = match today_farm_id {
-        Some(farm_id) => {
-            sqlite_store.load_orders_list(farm_id, &OrdersScreenQueryState::default())?
-        }
-        None => OrdersListProjection::default(),
-    };
-    let mut order_detail = match today_farm_id.zip(selected_order_id) {
-        Some((farm_id, order_id)) => sqlite_store.load_order_detail(farm_id, order_id)?,
-        None => None,
-    };
-    let mut pack_day_projection = match today_farm_id {
-        Some(farm_id) => sqlite_store.load_pack_day(farm_id, &pack_day_query)?,
-        None => PackDayProjection::default(),
+        None => (
+            FarmRulesProjection::default(),
+            TodayAgendaProjection::default(),
+            ProductsScreenQueryState::default(),
+            ProductsListProjection::default(),
+            OrdersScreenQueryState::default(),
+            OrdersListProjection::default(),
+            OrdersListProjection::default(),
+            None,
+            PackDayScreenQueryState::default(),
+            PackDayProjection::default(),
+            None,
+        ),
     };
     let (orders_reminders, recovery_queue, reminder_log) = match today_farm_id {
         Some(farm_id) => {
@@ -3230,14 +3294,69 @@ fn load_selected_account_context_with_options(
         farm_setup_projection,
         farm_rules_projection,
         today_projection,
+        products_query,
         products_list,
+        orders_query,
         orders_list,
         orders_reminders,
         recovery_queue,
         reminder_log,
         order_detail,
+        pack_day_query,
         pack_day_projection,
+        product_editor_draft,
     })
+}
+
+fn sanitize_orders_query(
+    sqlite_store: &AppSqliteStore,
+    farm_id: FarmId,
+    query: OrdersScreenQueryState,
+) -> Result<OrdersScreenQueryState, AppSqliteError> {
+    let Some(fulfillment_window_id) = query.fulfillment_window_id else {
+        return Ok(query);
+    };
+    let pack_day = sqlite_store.load_pack_day(
+        farm_id,
+        &PackDayScreenQueryState {
+            fulfillment_window_id: Some(fulfillment_window_id),
+        },
+    )?;
+    if pack_day
+        .fulfillment_window
+        .as_ref()
+        .map(|window| window.fulfillment_window_id)
+        == Some(fulfillment_window_id)
+    {
+        Ok(query)
+    } else {
+        Ok(OrdersScreenQueryState {
+            filter: query.filter,
+            fulfillment_window_id: None,
+        })
+    }
+}
+
+fn sanitize_pack_day_query(
+    sqlite_store: &AppSqliteStore,
+    farm_id: FarmId,
+    query: PackDayScreenQueryState,
+) -> Result<(PackDayScreenQueryState, PackDayProjection), AppSqliteError> {
+    let projection = sqlite_store.load_pack_day(farm_id, &query)?;
+    if query.fulfillment_window_id.is_none()
+        || projection
+            .fulfillment_window
+            .as_ref()
+            .map(|window| window.fulfillment_window_id)
+            == query.fulfillment_window_id
+    {
+        return Ok((query, projection));
+    }
+
+    let default_query = PackDayScreenQueryState::default();
+    let default_projection = sqlite_store.load_pack_day(farm_id, &default_query)?;
+
+    Ok((default_query, default_projection))
 }
 
 fn load_selected_account_reminder_context(
@@ -4261,8 +4380,9 @@ mod tests {
     };
     use radroots_studio_app_sqlite::{AppSqliteStore, DatabaseTarget, latest_schema_version};
     use radroots_studio_app_state::{
-        AppStateRepositoryError, AppStateStore, AppStateStoreError, HomeRoute,
-        InMemoryAppStateRepository,
+        APP_STATE_FILE_NAME, AppStatePersistenceRepository, AppStateRepository,
+        AppStateRepositoryError, AppStateStore, AppStateStoreError, FileBackedAppStateRepository,
+        HomeRoute,
     };
     use radroots_studio_app_sync::{
         AppSyncRequest, AppSyncResult, AppSyncRunStatus, AppSyncTransport, AppSyncTransportError,
@@ -4356,7 +4476,7 @@ mod tests {
     #[test]
     fn cloned_runtime_handles_shared_settings_state() {
         let runtime = DesktopAppRuntime::from_state(DesktopAppRuntimeState {
-            state_store: AppStateStore::load(InMemoryAppStateRepository::default())
+            state_store: AppStateStore::load(AppStatePersistenceRepository::in_memory())
                 .expect("in-memory state store should load"),
             default_nostr_relay_url: "ws://127.0.0.1:8080".to_owned(),
             shared_accounts_paths: None,
@@ -4410,7 +4530,7 @@ mod tests {
     #[test]
     fn cloned_runtime_handles_shared_startup_identity_choice_state() {
         let runtime = DesktopAppRuntime::from_state(DesktopAppRuntimeState {
-            state_store: AppStateStore::load(InMemoryAppStateRepository::default())
+            state_store: AppStateStore::load(AppStatePersistenceRepository::in_memory())
                 .expect("in-memory state store should load"),
             default_nostr_relay_url: "ws://127.0.0.1:8080".to_owned(),
             shared_accounts_paths: None,
@@ -4994,7 +5114,7 @@ mod tests {
     fn clearing_startup_pending_remote_signer_session_is_idempotent_without_record() {
         let paths = temp_remote_signer_paths("clear_pending_none");
         let runtime = DesktopAppRuntime::from_state(DesktopAppRuntimeState {
-            state_store: AppStateStore::load(InMemoryAppStateRepository::default())
+            state_store: AppStateStore::load(AppStatePersistenceRepository::in_memory())
                 .expect("in-memory state store should load"),
             default_nostr_relay_url: "ws://127.0.0.1:8080".to_owned(),
             shared_accounts_paths: None,
@@ -5025,7 +5145,7 @@ mod tests {
     fn clean_startup_cleanup_allows_generate_key_phase_transition() {
         let paths = temp_remote_signer_paths("generate_key_after_clean_cleanup");
         let runtime = DesktopAppRuntime::from_state(DesktopAppRuntimeState {
-            state_store: AppStateStore::load(InMemoryAppStateRepository::default())
+            state_store: AppStateStore::load(AppStatePersistenceRepository::in_memory())
                 .expect("in-memory state store should load"),
             default_nostr_relay_url: "ws://127.0.0.1:8080".to_owned(),
             shared_accounts_paths: None,
@@ -5123,9 +5243,318 @@ mod tests {
     }
 
     #[test]
+    fn startup_signer_entry_source_input_recovers_after_runtime_restart() {
+        let (runtime, paths) = bootstrapped_runtime("restart_startup_signer_entry");
+
+        assert!(runtime.show_startup_identity_choice());
+        assert!(runtime.show_startup_signer_entry());
+        assert!(runtime.set_startup_signer_source_input(
+            "bunker://npub1signer?relay=wss%3A%2F%2Frelay.radroots.example"
+        ));
+
+        let restarted = restart_runtime(paths.clone());
+        let summary = restarted.summary();
+
+        assert_eq!(
+            summary.logged_out_startup.phase,
+            radroots_studio_app_models::LoggedOutStartupPhase::SignerEntry
+        );
+        assert_eq!(
+            summary.logged_out_startup.signer_entry.source_input,
+            "bunker://npub1signer?relay=wss%3A%2F%2Frelay.radroots.example"
+        );
+
+        cleanup_bootstrapped_runtime_paths(&paths);
+    }
+
+    #[test]
+    fn generate_key_startup_phase_fails_closed_to_identity_choice_after_restart() {
+        let (runtime, paths) = bootstrapped_runtime("restart_generate_key_sanitize");
+
+        assert!(runtime.show_startup_identity_choice());
+        assert!(runtime.begin_generate_key_startup());
+
+        let restarted = restart_runtime(paths.clone());
+
+        assert_eq!(
+            restarted.summary().logged_out_startup.phase,
+            radroots_studio_app_models::LoggedOutStartupPhase::IdentityChoice
+        );
+
+        cleanup_bootstrapped_runtime_paths(&paths);
+    }
+
+    #[test]
+    fn buyer_search_query_and_detail_recover_after_runtime_restart() {
+        let (runtime, paths) = bootstrapped_runtime("restart_buyer_search_detail");
+        let (account_id, farm_id) = provision_ready_farmer_account(&runtime);
+
+        assert!(
+            runtime
+                .select_active_surface(ActiveSurface::Personal)
+                .expect("surface should switch into marketplace")
+        );
+        let fulfillment_window_id = seed_buyer_marketplace_support(
+            &runtime,
+            account_id.as_str(),
+            farm_id,
+            "North field farm",
+            "Friday pickup",
+        );
+        let product_id = seed_product(
+            &runtime,
+            farm_id,
+            "Salad mix",
+            "Spring blend",
+            "published",
+            Some(8),
+            "2026-04-20T09:00:00Z",
+        );
+        runtime
+            .lock_state()
+            .sqlite_store
+            .as_ref()
+            .expect("sqlite store")
+            .connection()
+            .execute_batch(&format!(
+                "update products
+                 set availability_window_id = '{fulfillment_window_id}'
+                 where id = '{product_id}'"
+            ))
+            .expect("buyer detail product should attach a fulfillment window");
+
+        assert!(
+            runtime
+                .set_personal_search_query("salad")
+                .expect("buyer search query should update")
+        );
+        assert!(
+            runtime
+                .open_personal_product_detail(PersonalSection::Search, product_id)
+                .expect("buyer search detail should open")
+        );
+
+        let restarted = restart_runtime(paths.clone());
+        let summary = restarted.summary();
+
+        assert_eq!(
+            summary.shell_projection.selected_section,
+            ShellSection::Personal(PersonalSection::Search)
+        );
+        assert_eq!(
+            summary.personal_projection.search.query.search_query,
+            "salad"
+        );
+        assert_eq!(
+            summary
+                .personal_projection
+                .search
+                .detail
+                .as_ref()
+                .map(|detail| detail.listing.product_id),
+            Some(product_id)
+        );
+
+        cleanup_bootstrapped_runtime_paths(&paths);
+    }
+
+    #[test]
+    fn products_query_and_editor_recover_after_runtime_restart() {
+        let (runtime, paths) = bootstrapped_runtime("restart_products_editor");
+        let (_, farm_id) = provision_ready_farmer_account(&runtime);
+        let product_id = seed_product(
+            &runtime,
+            farm_id,
+            "Pea shoots",
+            "Tray",
+            "draft",
+            Some(4),
+            "2026-04-20T09:30:00Z",
+        );
+
+        assert!(
+            runtime
+                .set_products_search_query("pea")
+                .expect("products query should update")
+        );
+        assert!(
+            runtime
+                .select_products_filter(ProductsFilter::Drafts)
+                .expect("products filter should update")
+        );
+        assert!(
+            runtime
+                .select_products_sort(ProductsSort::Name)
+                .expect("products sort should update")
+        );
+        assert!(
+            runtime
+                .open_existing_product_editor(product_id)
+                .expect("product editor should open")
+        );
+
+        let restarted = restart_runtime(paths.clone());
+        let summary = restarted.summary();
+
+        assert_eq!(
+            summary.shell_projection.selected_section,
+            ShellSection::Farmer(FarmerSection::Products)
+        );
+        assert_eq!(summary.products_projection.query.search_query, "pea");
+        assert_eq!(
+            summary.products_projection.query.filter,
+            ProductsFilter::Drafts
+        );
+        assert_eq!(summary.products_projection.query.sort, ProductsSort::Name);
+        match &summary.products_projection.editor {
+            radroots_studio_app_state::ProductEditorState::Open(session) => {
+                assert_eq!(session.selected_product_id, Some(product_id));
+            }
+            radroots_studio_app_state::ProductEditorState::Closed => {
+                panic!("product editor should recover after restart")
+            }
+        }
+
+        cleanup_bootstrapped_runtime_paths(&paths);
+    }
+
+    #[test]
+    fn orders_query_and_detail_recover_after_runtime_restart() {
+        let (runtime, paths) = bootstrapped_runtime("restart_orders_detail");
+        let (_, farm_id) = provision_ready_farmer_account(&runtime);
+        let (_, order_id) = seed_order_workspace(&runtime, farm_id);
+
+        runtime
+            .lock_state()
+            .sqlite_store
+            .as_ref()
+            .expect("sqlite store")
+            .connection()
+            .execute_batch(&format!(
+                "update orders
+                 set status = 'packed', updated_at = '2026-04-20T09:45:00Z'
+                 where id = '{order_id}' and farm_id = '{farm_id}'"
+            ))
+            .expect("order should update to packed");
+
+        assert!(
+            runtime
+                .select_orders_filter(OrdersFilter::Packed)
+                .expect("orders filter should update")
+        );
+        assert!(
+            runtime
+                .open_order_detail(order_id)
+                .expect("order detail should open")
+        );
+
+        let restarted = restart_runtime(paths.clone());
+        let summary = restarted.summary();
+
+        assert_eq!(
+            summary.shell_projection.selected_section,
+            ShellSection::Farmer(FarmerSection::Orders)
+        );
+        assert_eq!(summary.orders_projection.query.filter, OrdersFilter::Packed);
+        assert_eq!(
+            summary
+                .orders_projection
+                .detail
+                .as_ref()
+                .map(|detail| detail.order_id),
+            Some(order_id)
+        );
+
+        cleanup_bootstrapped_runtime_paths(&paths);
+    }
+
+    #[test]
+    fn stale_orders_selection_clears_invalid_window_after_runtime_restart() {
+        let (runtime, paths) = bootstrapped_runtime("restart_stale_orders");
+        let (_, farm_id) = provision_ready_farmer_account(&runtime);
+        let (fulfillment_window_id, _) = seed_order_workspace(&runtime, farm_id);
+
+        assert!(
+            runtime
+                .open_orders_fulfillment_window(fulfillment_window_id)
+                .expect("orders window should open")
+        );
+        let mut persisted_state = runtime.lock_state().state_store.persisted_state().clone();
+        persisted_state.seller.orders_query.fulfillment_window_id =
+            Some(FulfillmentWindowId::new());
+        let mut repository =
+            FileBackedAppStateRepository::new(paths.app.data.join(APP_STATE_FILE_NAME));
+        repository
+            .save_persisted_state(&persisted_state)
+            .expect("stale orders selection should persist");
+
+        let restarted = restart_runtime(paths.clone());
+        let summary = restarted.summary();
+
+        assert_eq!(
+            summary.shell_projection.selected_section,
+            ShellSection::Farmer(FarmerSection::Orders)
+        );
+        assert_eq!(summary.orders_projection.query.fulfillment_window_id, None);
+        assert!(
+            summary
+                .orders_projection
+                .list
+                .rows
+                .iter()
+                .any(|row| { row.fulfillment_window_id == Some(fulfillment_window_id) })
+        );
+
+        cleanup_bootstrapped_runtime_paths(&paths);
+    }
+
+    #[test]
+    fn stale_pack_day_selection_clears_invalid_window_after_runtime_restart() {
+        let (runtime, paths) = bootstrapped_runtime("restart_stale_pack_day");
+        let (_, farm_id) = provision_ready_farmer_account(&runtime);
+        let (_, _) = seed_order_workspace(&runtime, farm_id);
+
+        assert!(runtime.open_pack_day(None).expect("pack day should open"));
+        let mut persisted_state = runtime.lock_state().state_store.persisted_state().clone();
+        let stale_fulfillment_window_id = FulfillmentWindowId::new();
+        persisted_state.seller.pack_day_query.fulfillment_window_id =
+            Some(stale_fulfillment_window_id);
+        let mut repository =
+            FileBackedAppStateRepository::new(paths.app.data.join(APP_STATE_FILE_NAME));
+        repository
+            .save_persisted_state(&persisted_state)
+            .expect("stale pack day selection should persist");
+
+        let restarted = restart_runtime(paths.clone());
+        let summary = restarted.summary();
+
+        assert_eq!(
+            summary.shell_projection.selected_section,
+            ShellSection::Farmer(FarmerSection::PackDay)
+        );
+        assert_eq!(
+            summary.pack_day_projection.query.fulfillment_window_id,
+            None
+        );
+        assert!(
+            summary
+                .pack_day_projection
+                .projection
+                .fulfillment_window
+                .is_some()
+        );
+        assert_ne!(
+            summary.pack_day_projection.query.fulfillment_window_id,
+            Some(stale_fulfillment_window_id)
+        );
+
+        cleanup_bootstrapped_runtime_paths(&paths);
+    }
+
+    #[test]
     fn replacing_today_agenda_is_shared_without_clobbering_home_shell() {
         let runtime = DesktopAppRuntime::from_state(DesktopAppRuntimeState {
-            state_store: AppStateStore::load(InMemoryAppStateRepository::default())
+            state_store: AppStateStore::load(AppStatePersistenceRepository::in_memory())
                 .expect("in-memory state store should load"),
             default_nostr_relay_url: "ws://127.0.0.1:8080".to_owned(),
             shared_accounts_paths: None,
@@ -5227,7 +5656,7 @@ mod tests {
     #[test]
     fn runtime_records_activity_context_for_user_visible_actions() {
         let runtime = DesktopAppRuntime::from_state(DesktopAppRuntimeState {
-            state_store: AppStateStore::load(InMemoryAppStateRepository::default())
+            state_store: AppStateStore::load(AppStatePersistenceRepository::in_memory())
                 .expect("in-memory state store should load"),
             default_nostr_relay_url: "ws://127.0.0.1:8080".to_owned(),
             shared_accounts_paths: None,
@@ -5280,7 +5709,7 @@ mod tests {
     #[test]
     fn activity_context_distinguishes_empty_history_from_runtime_unavailable() {
         let runtime = DesktopAppRuntime::from_state(DesktopAppRuntimeState {
-            state_store: AppStateStore::load(InMemoryAppStateRepository::default())
+            state_store: AppStateStore::load(AppStatePersistenceRepository::in_memory())
                 .expect("in-memory state store should load"),
             default_nostr_relay_url: "ws://127.0.0.1:8080".to_owned(),
             shared_accounts_paths: None,
@@ -5317,7 +5746,7 @@ mod tests {
     #[test]
     fn activity_context_surfaces_store_load_failure() {
         let runtime = DesktopAppRuntime::from_state(DesktopAppRuntimeState {
-            state_store: AppStateStore::load(InMemoryAppStateRepository::default())
+            state_store: AppStateStore::load(AppStatePersistenceRepository::in_memory())
                 .expect("in-memory state store should load"),
             default_nostr_relay_url: "ws://127.0.0.1:8080".to_owned(),
             shared_accounts_paths: None,
@@ -5352,7 +5781,7 @@ mod tests {
     #[test]
     fn selecting_farmer_section_requires_farmer_identity_gate() {
         let runtime = DesktopAppRuntime::from_state(DesktopAppRuntimeState {
-            state_store: AppStateStore::load(InMemoryAppStateRepository::default())
+            state_store: AppStateStore::load(AppStatePersistenceRepository::in_memory())
                 .expect("in-memory state store should load"),
             default_nostr_relay_url: "ws://127.0.0.1:8080".to_owned(),
             shared_accounts_paths: None,
@@ -6279,12 +6708,14 @@ mod tests {
             available_product_id
         );
         assert_eq!(summary.personal_projection.cart.cart.lines[0].quantity, 1);
-        assert!(summary
-            .personal_projection
-            .cart
-            .cart
-            .replace_confirmation
-            .is_none());
+        assert!(
+            summary
+                .personal_projection
+                .cart
+                .cart
+                .replace_confirmation
+                .is_none()
+        );
     }
 
     #[test]
@@ -8007,7 +8438,7 @@ mod tests {
     fn runtime_account_commands_fail_closed_without_accounts_manager() {
         let paths = temp_shared_accounts_paths("blocked");
         let runtime = DesktopAppRuntime::from_state(DesktopAppRuntimeState {
-            state_store: AppStateStore::load(InMemoryAppStateRepository::default())
+            state_store: AppStateStore::load(AppStatePersistenceRepository::in_memory())
                 .expect("in-memory state store should load"),
             default_nostr_relay_url: "ws://127.0.0.1:8080".to_owned(),
             shared_accounts_paths: Some(paths),
@@ -8036,7 +8467,7 @@ mod tests {
 
     fn memory_runtime() -> DesktopAppRuntime {
         DesktopAppRuntime::from_state(DesktopAppRuntimeState {
-            state_store: AppStateStore::load(InMemoryAppStateRepository::default())
+            state_store: AppStateStore::load(AppStatePersistenceRepository::in_memory())
                 .expect("in-memory state store should load"),
             default_nostr_relay_url: "ws://127.0.0.1:8080".to_owned(),
             shared_accounts_paths: None,
@@ -8067,7 +8498,7 @@ mod tests {
 
         (
             DesktopAppRuntime::from_state(DesktopAppRuntimeState {
-                state_store: AppStateStore::load(InMemoryAppStateRepository::default())
+                state_store: AppStateStore::load(AppStatePersistenceRepository::in_memory())
                     .expect("in-memory state store should load"),
                 default_nostr_relay_url: "ws://127.0.0.1:8080".to_owned(),
                 shared_accounts_paths: Some(paths.clone()),

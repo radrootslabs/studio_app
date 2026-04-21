@@ -1,6 +1,11 @@
 #![forbid(unsafe_code)]
 
-use std::collections::BTreeSet;
+use std::{
+    collections::BTreeSet,
+    fs,
+    io::ErrorKind,
+    path::{Path, PathBuf},
+};
 
 use radroots_studio_app_models::{
     ActiveSurface, AppIdentityProjection, AppStartupGate, BuyerCartProjection,
@@ -8,7 +13,7 @@ use radroots_studio_app_models::{
     BuyerOrdersProjection, BuyerProductDetailProjection, FarmOrderMethod, FarmReadiness,
     FarmReadinessBlocker, FarmRulesProjection, FarmSetupBlocker, FarmSetupProjection,
     FarmSetupReadiness, FarmTimingConflict, FulfillmentWindowId, LoggedOutStartupPhase,
-    LoggedOutStartupProjection, OrderDetailProjection, OrdersFilter, OrdersListProjection,
+    LoggedOutStartupProjection, OrderDetailProjection, OrderId, OrdersFilter, OrdersListProjection,
     OrdersScreenQueryState, PackDayProjection, PackDayScreenQueryState, PersonalEntryProjection,
     ProductEditorDraft, ProductId, ProductPublishBlocker, ProductsFilter, ProductsListProjection,
     ProductsSort, RecoveryQueueProjection, ReminderFeedProjection, ReminderLogProjection,
@@ -19,7 +24,9 @@ use radroots_studio_app_sync::{
     AppSyncProjection, AppSyncRunStatus, SyncCheckpointState, SyncCheckpointStatus, SyncConflict,
     SyncConflictStatus,
 };
+use serde::{Deserialize, Serialize};
 use thiserror::Error;
+use tracing::error;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct GeneralSettingsProjection {
@@ -80,7 +87,7 @@ impl SettingsShellProjection {
     }
 }
 
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
 pub struct BuyerSearchScreenQueryState {
     pub search_query: String,
     pub fulfillment_methods: BTreeSet<FarmOrderMethod>,
@@ -132,7 +139,7 @@ pub struct PersonalWorkspaceProjection {
     pub orders: BuyerOrdersScreenProjection,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct ProductsScreenQueryState {
     pub search_query: String,
     pub filter: ProductsFilter,
@@ -524,6 +531,197 @@ impl Default for AppProjection {
     }
 }
 
+pub const APP_STATE_FILE_NAME: &str = "state.json";
+const APP_STATE_SCHEMA_VERSION: u32 = 1;
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct PersistedShellProjection {
+    pub selected_section: ShellSection,
+    pub settings_section: SettingsSection,
+}
+
+impl Default for PersistedShellProjection {
+    fn default() -> Self {
+        Self {
+            selected_section: ShellSection::Home,
+            settings_section: SettingsSection::default(),
+        }
+    }
+}
+
+impl PersistedShellProjection {
+    fn from_shell(shell: &AppShellProjection) -> Self {
+        Self {
+            selected_section: shell.selected_section,
+            settings_section: shell.settings.selected_section,
+        }
+    }
+
+    fn to_shell_projection(&self) -> AppShellProjection {
+        let mut shell = AppShellProjection::new(ActiveSurface::Personal, self.selected_section);
+        shell.settings.selected_section = self.settings_section;
+        if matches!(shell.selected_section, ShellSection::Settings(_)) {
+            shell.selected_section = ShellSection::Settings(self.settings_section);
+        }
+
+        shell
+    }
+}
+
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+pub struct PersistedBuyerProjection {
+    pub search_query: BuyerSearchScreenQueryState,
+    pub browse_detail_product_id: Option<ProductId>,
+    pub search_detail_product_id: Option<ProductId>,
+    pub orders_detail_order_id: Option<OrderId>,
+}
+
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+pub struct PersistedSellerProjection {
+    pub products_query: ProductsScreenQueryState,
+    pub product_editor_product_id: Option<ProductId>,
+    pub orders_query: OrdersScreenQueryState,
+    pub order_detail_order_id: Option<OrderId>,
+    pub pack_day_query: PackDayScreenQueryState,
+}
+
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+pub struct PersistedAppState {
+    pub shell: PersistedShellProjection,
+    pub logged_out_startup: LoggedOutStartupProjection,
+    pub buyer: PersistedBuyerProjection,
+    pub seller: PersistedSellerProjection,
+}
+
+impl PersistedAppState {
+    pub fn from_projection(projection: &AppProjection) -> Self {
+        Self {
+            shell: PersistedShellProjection::from_shell(&projection.shell),
+            logged_out_startup: projection.logged_out_startup.clone(),
+            buyer: PersistedBuyerProjection {
+                search_query: projection.personal.search.query.clone(),
+                browse_detail_product_id: projection
+                    .personal
+                    .browse
+                    .detail
+                    .as_ref()
+                    .map(|detail| detail.listing.product_id),
+                search_detail_product_id: projection
+                    .personal
+                    .search
+                    .detail
+                    .as_ref()
+                    .map(|detail| detail.listing.product_id),
+                orders_detail_order_id: projection
+                    .personal
+                    .orders
+                    .detail
+                    .as_ref()
+                    .map(|detail| detail.order_id),
+            },
+            seller: PersistedSellerProjection {
+                products_query: projection.products.query.clone(),
+                product_editor_product_id: match &projection.products.editor {
+                    ProductEditorState::Open(session) => session.selected_product_id,
+                    ProductEditorState::Closed => None,
+                },
+                orders_query: projection.orders.query.clone(),
+                order_detail_order_id: projection
+                    .orders
+                    .detail
+                    .as_ref()
+                    .map(|detail| detail.order_id),
+                pack_day_query: projection.pack_day.query.clone(),
+            },
+        }
+    }
+
+    fn sanitized_for_restart(&self) -> Self {
+        let mut state = self.clone();
+
+        if state.logged_out_startup.phase == LoggedOutStartupPhase::GenerateKeyStarting {
+            state.logged_out_startup.phase = LoggedOutStartupPhase::IdentityChoice;
+        }
+
+        state
+    }
+
+    fn to_projection(&self) -> AppProjection {
+        let mut projection = AppProjection {
+            shell: self.shell.to_shell_projection(),
+            identity: AppIdentityProjection::default(),
+            startup_gate: AppStartupGate::SetupRequired,
+            sync: AppSyncProjection::default(),
+            logged_out_startup: self.logged_out_startup.clone(),
+            personal: PersonalWorkspaceProjection {
+                entry: AppIdentityProjection::default().personal_entry(),
+                search: BuyerSearchScreenProjection {
+                    query: self.buyer.search_query.clone(),
+                    ..BuyerSearchScreenProjection::default()
+                },
+                ..PersonalWorkspaceProjection::default()
+            },
+            today: TodayAgendaProjection::default(),
+            products: ProductsScreenProjection {
+                query: self.seller.products_query.clone(),
+                ..ProductsScreenProjection::default()
+            },
+            orders: OrdersScreenProjection {
+                query: self.seller.orders_query.clone(),
+                ..OrdersScreenProjection::default()
+            },
+            pack_day: PackDayScreenProjection {
+                query: self.seller.pack_day_query.clone(),
+                ..PackDayScreenProjection::default()
+            },
+            reminder_log: ReminderLogProjection::default(),
+            farm_setup: FarmSetupProjection::default(),
+            farm_rules: FarmRulesProjection::default(),
+            farm_readiness: FarmWorkspaceReadinessProjection::default(),
+            farm_setup_flow_stage: FarmSetupFlowStage::default(),
+        };
+        sync_farm_setup_to_today(&mut projection.farm_setup, &projection.today);
+        projection.farm_readiness =
+            derive_farm_workspace_readiness(&projection.farm_setup, &projection.farm_rules);
+        sync_coarse_farm_readiness(
+            &mut projection.farm_setup,
+            &mut projection.today,
+            &projection.farm_readiness,
+        );
+        projection.today.setup_checklist =
+            derive_today_setup_checklist(&projection.farm_readiness, &projection.products.list);
+        sync_product_editor_publish_blockers(
+            &mut projection.products.editor,
+            &projection.farm_readiness,
+        );
+        projection.startup_gate = projection.identity.startup_gate();
+        projection.personal.entry = projection.identity.personal_entry();
+        sync_logged_out_startup(&mut projection.logged_out_startup, projection.startup_gate);
+        sync_farm_setup_flow_stage(
+            &mut projection.farm_setup_flow_stage,
+            projection.startup_gate,
+            projection.farm_setup.has_saved_farm(),
+        );
+
+        projection
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+struct PersistedAppStateEnvelope {
+    version: u32,
+    state: PersistedAppState,
+}
+
+impl PersistedAppStateEnvelope {
+    fn new(state: PersistedAppState) -> Self {
+        Self {
+            version: APP_STATE_SCHEMA_VERSION,
+            state,
+        }
+    }
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum AppStateCommand {
     SelectActiveSurface(ActiveSurface),
@@ -720,17 +918,17 @@ impl AppStateRepositoryError {
 }
 
 pub trait AppStateRepository {
-    fn load_shell_projection(&self) -> Result<AppShellProjection, AppStateRepositoryError>;
+    fn load_persisted_state(&self) -> Result<PersistedAppState, AppStateRepositoryError>;
 
-    fn save_shell_projection(
+    fn save_persisted_state(
         &mut self,
-        projection: &AppShellProjection,
+        state: &PersistedAppState,
     ) -> Result<(), AppStateRepositoryError>;
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct InMemoryAppStateRepository {
-    projection: AppShellProjection,
+    state: PersistedAppState,
 }
 
 impl Default for InMemoryAppStateRepository {
@@ -741,29 +939,151 @@ impl Default for InMemoryAppStateRepository {
 
 impl InMemoryAppStateRepository {
     pub fn new(projection: AppShellProjection) -> Self {
-        Self { projection }
+        let state = PersistedAppState {
+            shell: PersistedShellProjection::from_shell(&projection),
+            ..PersistedAppState::default()
+        };
+
+        Self { state }
     }
 
-    pub fn projection(&self) -> &AppShellProjection {
-        &self.projection
+    pub fn from_persisted_state(state: PersistedAppState) -> Self {
+        Self { state }
     }
 
-    pub fn overwrite(&mut self, projection: AppShellProjection) {
-        self.projection = projection;
+    pub fn projection(&self) -> AppShellProjection {
+        self.state.shell.to_shell_projection()
+    }
+
+    pub fn persisted_state(&self) -> &PersistedAppState {
+        &self.state
+    }
+
+    pub fn overwrite(&mut self, state: PersistedAppState) {
+        self.state = state;
     }
 }
 
 impl AppStateRepository for InMemoryAppStateRepository {
-    fn load_shell_projection(&self) -> Result<AppShellProjection, AppStateRepositoryError> {
-        Ok(self.projection.clone())
+    fn load_persisted_state(&self) -> Result<PersistedAppState, AppStateRepositoryError> {
+        Ok(self.state.clone())
     }
 
-    fn save_shell_projection(
+    fn save_persisted_state(
         &mut self,
-        projection: &AppShellProjection,
+        state: &PersistedAppState,
     ) -> Result<(), AppStateRepositoryError> {
-        self.projection = projection.clone();
+        self.state = state.clone();
         Ok(())
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct FileBackedAppStateRepository {
+    path: PathBuf,
+}
+
+impl FileBackedAppStateRepository {
+    pub fn new(path: impl Into<PathBuf>) -> Self {
+        Self { path: path.into() }
+    }
+
+    pub fn path(&self) -> &Path {
+        self.path.as_path()
+    }
+
+    fn write_state(&self, state: &PersistedAppState) -> Result<(), AppStateRepositoryError> {
+        let Some(parent) = self.path.parent() else {
+            return Err(AppStateRepositoryError::save(
+                "app state path must have a parent directory",
+            ));
+        };
+        fs::create_dir_all(parent)
+            .map_err(|error| AppStateRepositoryError::save(error.to_string()))?;
+        let payload = serde_json::to_vec_pretty(&PersistedAppStateEnvelope::new(state.clone()))
+            .map_err(|error| AppStateRepositoryError::save(error.to_string()))?;
+        let temporary_path = self.path.with_extension("tmp");
+        let _ = fs::remove_file(&temporary_path);
+        fs::write(&temporary_path, payload)
+            .map_err(|error| AppStateRepositoryError::save(error.to_string()))?;
+        if self.path.exists() {
+            fs::remove_file(&self.path)
+                .map_err(|error| AppStateRepositoryError::save(error.to_string()))?;
+        }
+        fs::rename(&temporary_path, &self.path)
+            .map_err(|error| AppStateRepositoryError::save(error.to_string()))
+    }
+}
+
+impl AppStateRepository for FileBackedAppStateRepository {
+    fn load_persisted_state(&self) -> Result<PersistedAppState, AppStateRepositoryError> {
+        let contents = match fs::read_to_string(&self.path) {
+            Ok(contents) => contents,
+            Err(error) if error.kind() == ErrorKind::NotFound => {
+                return Ok(PersistedAppState::default());
+            }
+            Err(error) => {
+                return Err(AppStateRepositoryError::load(error.to_string()));
+            }
+        };
+
+        let envelope = match serde_json::from_str::<PersistedAppStateEnvelope>(&contents) {
+            Ok(envelope) if envelope.version == APP_STATE_SCHEMA_VERSION => envelope,
+            Ok(_) | Err(_) => {
+                let default_state = PersistedAppState::default();
+                self.write_state(&default_state)?;
+                return Ok(default_state);
+            }
+        };
+
+        let sanitized = envelope.state.sanitized_for_restart();
+        if sanitized != envelope.state {
+            self.write_state(&sanitized)?;
+        }
+
+        Ok(sanitized)
+    }
+
+    fn save_persisted_state(
+        &mut self,
+        state: &PersistedAppState,
+    ) -> Result<(), AppStateRepositoryError> {
+        self.write_state(state)
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum AppStatePersistenceRepository {
+    InMemory(InMemoryAppStateRepository),
+    FileBacked(FileBackedAppStateRepository),
+}
+
+impl AppStatePersistenceRepository {
+    pub fn in_memory() -> Self {
+        Self::InMemory(InMemoryAppStateRepository::default())
+    }
+
+    pub fn file_backed(path: impl Into<PathBuf>) -> Self {
+        Self::FileBacked(FileBackedAppStateRepository::new(path))
+    }
+}
+
+impl AppStateRepository for AppStatePersistenceRepository {
+    fn load_persisted_state(&self) -> Result<PersistedAppState, AppStateRepositoryError> {
+        match self {
+            Self::InMemory(repository) => repository.load_persisted_state(),
+            Self::FileBacked(repository) => repository.load_persisted_state(),
+        }
+    }
+
+    fn save_persisted_state(
+        &mut self,
+        state: &PersistedAppState,
+    ) -> Result<(), AppStateRepositoryError> {
+        match self {
+            Self::InMemory(repository) => repository.save_persisted_state(state),
+            Self::FileBacked(repository) => repository.save_persisted_state(state),
+        }
     }
 }
 
@@ -777,19 +1097,18 @@ pub enum AppStateStoreError {
 pub struct AppStateStore<R> {
     repository: R,
     projection: AppProjection,
+    persisted_state: PersistedAppState,
 }
 
 impl<R: AppStateRepository> AppStateStore<R> {
     pub fn load(repository: R) -> Result<Self, AppStateStoreError> {
-        let projection = AppProjection::new(
-            repository.load_shell_projection()?,
-            AppIdentityProjection::default(),
-            TodayAgendaProjection::default(),
-        );
+        let persisted_state = repository.load_persisted_state()?;
+        let projection = persisted_state.to_projection();
 
         Ok(Self {
             repository,
             projection,
+            persisted_state,
         })
     }
 
@@ -865,57 +1184,36 @@ impl<R: AppStateRepository> AppStateStore<R> {
         &self.repository
     }
 
+    pub fn persisted_state(&self) -> &PersistedAppState {
+        &self.persisted_state
+    }
+
     pub fn apply(&mut self, command: AppStateCommand) -> Result<bool, AppStateStoreError> {
         let mut next_projection = self.projection.clone();
+        if matches!(
+            apply_command(&mut next_projection, command),
+            AppStateMutation::NoChange
+        ) {
+            return Ok(false);
+        }
 
-        match apply_command(&mut next_projection, command) {
-            AppStateMutation::NoChange => Ok(false),
-            AppStateMutation::ShellChanged => {
-                self.repository
-                    .save_shell_projection(&next_projection.shell)?;
-                self.projection = next_projection;
+        let next_persisted_state = PersistedAppState::from_projection(&next_projection);
+        if next_persisted_state != self.persisted_state {
+            self.repository
+                .save_persisted_state(&next_persisted_state)?;
+        }
+        self.persisted_state = next_persisted_state;
+        self.projection = next_projection;
 
-                Ok(true)
-            }
-            AppStateMutation::FarmSetupChanged => {
-                self.projection = next_projection;
+        Ok(true)
+    }
 
-                Ok(true)
-            }
-            AppStateMutation::StartupChanged => {
-                self.projection = next_projection;
-
-                Ok(true)
-            }
-            AppStateMutation::SyncChanged => {
-                self.projection = next_projection;
-
-                Ok(true)
-            }
-            AppStateMutation::PersonalChanged => {
-                self.projection = next_projection;
-
-                Ok(true)
-            }
-            AppStateMutation::TodayChanged => {
-                self.projection = next_projection;
-
-                Ok(true)
-            }
-            AppStateMutation::ProductsChanged => {
-                self.projection = next_projection;
-
-                Ok(true)
-            }
-            AppStateMutation::OrdersChanged => {
-                self.projection = next_projection;
-
-                Ok(true)
-            }
-            AppStateMutation::PackDayChanged => {
-                self.projection = next_projection;
-
-                Ok(true)
+    pub fn apply_in_memory(&mut self, command: AppStateCommand) -> bool {
+        match self.apply(command) {
+            Ok(changed) => changed,
+            Err(error) => {
+                error!(target: "app_state", error = %error, "failed to persist app state");
+                false
             }
         }
     }
@@ -923,67 +1221,12 @@ impl<R: AppStateRepository> AppStateStore<R> {
 
 impl AppStateStore<InMemoryAppStateRepository> {
     pub fn in_memory(projection: AppShellProjection) -> Self {
+        let repository = InMemoryAppStateRepository::new(projection.clone());
+        let persisted_state = repository.persisted_state().clone();
         Self {
-            repository: InMemoryAppStateRepository::new(projection.clone()),
-            projection: AppProjection::new(
-                projection,
-                AppIdentityProjection::default(),
-                TodayAgendaProjection::default(),
-            ),
-        }
-    }
-
-    pub fn apply_in_memory(&mut self, command: AppStateCommand) -> bool {
-        let mut next_projection = self.projection.clone();
-
-        match apply_command(&mut next_projection, command) {
-            AppStateMutation::NoChange => false,
-            AppStateMutation::ShellChanged => {
-                self.repository.overwrite(next_projection.shell.clone());
-                self.projection = next_projection;
-
-                true
-            }
-            AppStateMutation::FarmSetupChanged => {
-                self.projection = next_projection;
-
-                true
-            }
-            AppStateMutation::StartupChanged => {
-                self.projection = next_projection;
-
-                true
-            }
-            AppStateMutation::SyncChanged => {
-                self.projection = next_projection;
-
-                true
-            }
-            AppStateMutation::PersonalChanged => {
-                self.projection = next_projection;
-
-                true
-            }
-            AppStateMutation::TodayChanged => {
-                self.projection = next_projection;
-
-                true
-            }
-            AppStateMutation::ProductsChanged => {
-                self.projection = next_projection;
-
-                true
-            }
-            AppStateMutation::OrdersChanged => {
-                self.projection = next_projection;
-
-                true
-            }
-            AppStateMutation::PackDayChanged => {
-                self.projection = next_projection;
-
-                true
-            }
+            repository,
+            projection: persisted_state.to_projection(),
+            persisted_state,
         }
     }
 }
@@ -1457,8 +1700,8 @@ mod tests {
         AppProjection, AppShellProjection, AppStateCommand, AppStateRepository,
         AppStateRepositoryError, AppStateStore, AppStateStoreError, FarmSetupFlowStage, HomeRoute,
         InMemoryAppStateRepository, OrdersScreenProjection, PackDayScreenProjection,
-        ProductEditorState, ProductsScreenProjection, ProductsScreenQueryState, SettingsPreference,
-        derive_sync_projection, derive_sync_run_status,
+        PersistedAppState, ProductEditorState, ProductsScreenProjection, ProductsScreenQueryState,
+        SettingsPreference, derive_sync_projection, derive_sync_run_status,
     };
     use radroots_studio_app_models::{
         AccountCustody, AccountSummary, ActiveSurface, AppIdentityProjection, AppStartupGate,
@@ -1483,13 +1726,13 @@ mod tests {
     struct FailingRepository;
 
     impl AppStateRepository for FailingRepository {
-        fn load_shell_projection(&self) -> Result<AppShellProjection, AppStateRepositoryError> {
-            Ok(AppShellProjection::default())
+        fn load_persisted_state(&self) -> Result<PersistedAppState, AppStateRepositoryError> {
+            Ok(PersistedAppState::default())
         }
 
-        fn save_shell_projection(
+        fn save_persisted_state(
             &mut self,
-            _: &AppShellProjection,
+            _: &PersistedAppState,
         ) -> Result<(), AppStateRepositoryError> {
             Err(AppStateRepositoryError::save("disk unavailable"))
         }
@@ -1634,7 +1877,11 @@ mod tests {
         assert_eq!(store.projection().products.list, products_list);
         assert_eq!(
             store.repository().projection(),
-            &AppShellProjection::default()
+            AppShellProjection::default()
+        );
+        assert_eq!(
+            store.repository().persisted_state().seller.products_query,
+            ProductsScreenQueryState::new("pea", ProductsFilter::NeedAttention, ProductsSort::Name)
         );
     }
 
@@ -1825,7 +2072,28 @@ mod tests {
         assert_eq!(store.projection().orders.detail, None);
         assert_eq!(
             store.repository().projection(),
-            &AppShellProjection::default()
+            AppShellProjection::default()
+        );
+        assert_eq!(
+            store.repository().persisted_state().seller.orders_query,
+            OrdersScreenQueryState {
+                filter: OrdersFilter::NeedsAction,
+                fulfillment_window_id: Some(fulfillment_window_id),
+            }
+        );
+        assert_eq!(
+            store
+                .repository()
+                .persisted_state()
+                .seller
+                .order_detail_order_id,
+            None
+        );
+        assert_eq!(
+            store.repository().persisted_state().seller.pack_day_query,
+            PackDayScreenQueryState {
+                fulfillment_window_id: Some(fulfillment_window_id),
+            }
         );
     }
 
@@ -1881,7 +2149,15 @@ mod tests {
         );
         assert_eq!(
             store.repository().projection(),
-            &AppShellProjection::default()
+            AppShellProjection::default()
+        );
+        assert_eq!(
+            store
+                .repository()
+                .persisted_state()
+                .logged_out_startup
+                .phase,
+            LoggedOutStartupPhase::GenerateKeyStarting
         );
 
         assert_eq!(
@@ -2263,7 +2539,7 @@ mod tests {
         assert_eq!(changed, Ok(true));
         assert!(store.projection().shell.settings.general.launch_at_login);
         assert!(
-            store
+            !store
                 .repository()
                 .projection()
                 .settings
@@ -2567,7 +2843,7 @@ mod tests {
                 .allow_relay_connections
         );
         assert!(
-            !store
+            store
                 .repository()
                 .projection()
                 .settings
