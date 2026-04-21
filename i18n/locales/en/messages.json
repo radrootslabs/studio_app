@@ -297,6 +297,7 @@
   "settings.account.activation.active": "Activated",
   "settings.account.action.add_account": "Add Account...",
   "settings.account.action.log_out": "Log Out",
+  "settings.account.action.more_actions": "More Actions",
   "settings.account.action.open_workspace": "Open Workspace...",
   "settings.view.account": "account",
   "settings.view.settings": "settings",

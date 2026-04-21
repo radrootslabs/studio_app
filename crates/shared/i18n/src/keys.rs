@@ -318,6 +318,7 @@ define_app_text_keys! {
     SettingsAccountActivationActive => "settings.account.activation.active",
     SettingsAccountAddAction => "settings.account.action.add_account",
     SettingsAccountLogOutAction => "settings.account.action.log_out",
+    SettingsAccountMoreActions => "settings.account.action.more_actions",
     SettingsAccountOpenWorkspaceAction => "settings.account.action.open_workspace",
     SettingsViewAccount => "settings.view.account",
     SettingsViewSettings => "settings.view.settings",

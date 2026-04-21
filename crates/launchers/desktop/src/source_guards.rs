@@ -500,6 +500,7 @@ const REQUIRED_WINDOW_COPY_KEYS: &[&str] = &[
     "AppTextKey::SettingsAccountActivationInactive",
     "AppTextKey::SettingsAccountAddAction",
     "AppTextKey::SettingsAccountLogOutAction",
+    "AppTextKey::SettingsAccountMoreActions",
     "AppTextKey::SettingsAccountOpenWorkspaceAction",
     "AppTextKey::SettingsNavFarm",
     "AppTextKey::SettingsFarmPanelBody",

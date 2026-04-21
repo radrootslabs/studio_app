@@ -5,10 +5,10 @@ mod text;
 mod theme;
 
 pub use primitives::{
-    AppCheckboxFieldSpec, AppFormFieldSpec, AppSegmentButtonIconSpec, LabelValueRow,
-    app_button_card, app_button_choice, app_button_compact, app_button_icon, app_button_list_row,
-    app_button_primary, app_button_primary_disabled, app_button_secondary, app_button_text,
-    app_checkbox_field, app_cluster, app_detail_row, app_divider, app_form_field,
+    AppCheckboxFieldSpec, AppFormFieldSpec, AppIconButtonSpec, AppSegmentButtonIconSpec,
+    LabelValueRow, app_button_card, app_button_choice, app_button_compact, app_button_icon,
+    app_button_list_row, app_button_primary, app_button_primary_disabled, app_button_secondary,
+    app_button_text, app_checkbox_field, app_cluster, app_detail_row, app_divider, app_form_field,
     app_form_input_text, app_form_section, app_heading_section, app_heading_view, app_input_text,
     app_scroll_panel, app_segment_button_icon, app_split_shell, app_stack_h, app_stack_v,
     app_status_indicator, app_surface_card, app_surface_card_section, app_surface_panel,

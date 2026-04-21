@@ -34,6 +34,22 @@ impl AppSegmentButtonIconSpec {
     }
 }
 
+pub struct AppIconButtonSpec {
+    pub id: &'static str,
+    pub label: SharedString,
+    pub icon: IconName,
+}
+
+impl AppIconButtonSpec {
+    pub fn new(id: &'static str, label: impl Into<SharedString>, icon: IconName) -> Self {
+        Self {
+            id,
+            label: label.into(),
+            icon,
+        }
+    }
+}
+
 pub struct AppCheckboxFieldSpec {
     pub id: &'static str,
     pub label: SharedString,
@@ -402,7 +418,7 @@ fn app_checkbox(
         );
     }
 
-    button
+    button.tab_stop(false)
 }
 
 pub fn app_checkbox_field(
@@ -545,7 +561,7 @@ pub fn app_input_text(input: &Entity<InputState>, disabled: bool) -> Input {
     Input::new(input)
         .with_size(Size::Medium)
         .disabled(disabled)
-        .focus_bordered(false)
+        .focus_bordered(true)
         .bg(rgb(background))
         .text_color(rgb(foreground))
         .border_color(rgb(tokens.border))
@@ -647,18 +663,18 @@ fn app_button_label(
 }
 
 pub fn app_button_icon(
-    id: impl Into<ElementId>,
-    icon: IconName,
+    spec: AppIconButtonSpec,
     on_click: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
     cx: &App,
 ) -> impl IntoElement {
     let sizing = APP_UI_THEME.components.app_button.sizing;
     let colors = app_button_colors(AppButtonVariant::Secondary);
 
-    app_button_base(id, AppButtonVariant::Secondary, on_click, cx)
+    app_button_base(spec.id, AppButtonVariant::Secondary, on_click, cx)
         .with_size(Size::Size(px(sizing.square_width_px)))
+        .tooltip(spec.label)
         .icon(
-            Icon::new(icon)
+            Icon::new(spec.icon)
                 .with_size(Size::Size(px(sizing.icon_size_px)))
                 .text_color(rgb(colors.foreground)),
         )
@@ -877,7 +893,9 @@ fn app_button_disabled_colors(variant: AppButtonVariant) -> crate::AppButtonColo
 mod tests {
     use gpui_component::IconName;
 
-    use super::{AppCheckboxFieldSpec, AppFormFieldSpec, AppSegmentButtonIconSpec};
+    use super::{
+        AppCheckboxFieldSpec, AppFormFieldSpec, AppIconButtonSpec, AppSegmentButtonIconSpec,
+    };
 
     #[test]
     fn icon_segment_spec_preserves_id_and_label() {
@@ -908,5 +926,14 @@ mod tests {
             spec.note.as_ref().map(|note| note.as_ref()),
             Some("Saved locally")
         );
+    }
+
+    #[test]
+    fn icon_button_spec_preserves_id_label_and_icon() {
+        let spec = AppIconButtonSpec::new("more", "More actions", IconName::ChevronDown);
+
+        assert_eq!(spec.id, "more");
+        assert_eq!(spec.label.as_ref(), "More actions");
+        assert!(matches!(spec.icon, IconName::ChevronDown));
     }
 }

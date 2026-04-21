@@ -26,8 +26,7 @@ use radroots_studio_app_models::{
     ProductsListRow, ProductsSort, RecoveryKind, RecoveryState, ReminderDeadlineProjection,
     ReminderDeliveryState, ReminderId, ReminderLogEntryProjection, ReminderLogProjection,
     ReminderSurface, ReminderUrgency, RepeatDemandEligibility, RepeatDemandHandoffProjection,
-    ShellSection,
-    TodayAgendaProjection, TodaySetupTaskKind,
+    ShellSection, TodayAgendaProjection, TodaySetupTaskKind,
 };
 use radroots_studio_app_remote_signer::{
     RadrootsAppRemoteSignerApprovedSession, RadrootsAppRemoteSignerPendingPollOutcome,
@@ -44,7 +43,7 @@ use radroots_studio_app_sync::{
     SyncConflictResolutionStatus, SyncConflictSeverity,
 };
 use radroots_studio_app_ui::{
-    APP_UI_THEME, AppCheckboxFieldSpec, AppFormFieldSpec,
+    APP_UI_THEME, AppCheckboxFieldSpec, AppFormFieldSpec, AppIconButtonSpec,
     AppSegmentButtonIconSpec as IconSegmentButtonSpec, LabelValueRow, app_button_card,
     app_button_choice as choice_button, app_button_compact as action_button_compact,
     app_button_icon as action_icon_button, app_button_list_row as list_row_button,
@@ -1293,7 +1292,10 @@ impl HomeView {
         replace_existing: bool,
         cx: &mut Context<Self>,
     ) {
-        match self.runtime.repeat_personal_order(order_id, replace_existing) {
+        match self
+            .runtime
+            .repeat_personal_order(order_id, replace_existing)
+        {
             Ok(true) => cx.notify(),
             Ok(false) => {}
             Err(runtime_error) => {
@@ -5812,8 +5814,11 @@ impl SettingsWindowView {
                                         cx,
                                     ))
                                     .child(action_icon_button(
-                                        "account-more",
-                                        IconName::ChevronDown,
+                                        AppIconButtonSpec::new(
+                                            "account-more",
+                                            app_shared_text(AppTextKey::SettingsAccountMoreActions),
+                                            IconName::ChevronDown,
+                                        ),
                                         |_, _, _| {},
                                         cx,
                                     )),
@@ -7818,9 +7823,8 @@ fn buyer_order_detail_card(
     replace_confirmation: Option<&BuyerCartReplaceConfirmationProjection>,
     cx: &mut Context<HomeView>,
 ) -> AnyElement {
-    let repeat_confirmation =
-        replace_confirmation.filter(|confirmation| confirmation.incoming_farm_display_name
-            == detail.farm_display_name);
+    let repeat_confirmation = replace_confirmation
+        .filter(|confirmation| confirmation.incoming_farm_display_name == detail.farm_display_name);
 
     home_card(
         app_shared_text(AppTextKey::PersonalOrdersDetailTitle),
@@ -7883,9 +7887,7 @@ fn buyer_order_detail_card(
                                     .child(home_body_text(format!(
                                         "{} {} {}.",
                                         replace_confirmation.current_farm_display_name,
-                                        app_shared_text(
-                                            AppTextKey::PersonalDetailReplaceCartBody,
-                                        ),
+                                        app_shared_text(AppTextKey::PersonalDetailReplaceCartBody,),
                                         replace_confirmation.incoming_farm_display_name,
                                     )))
                                     .child(
@@ -7945,9 +7947,7 @@ fn buyer_order_detail_card(
     .into_any_element()
 }
 
-fn buyer_repeat_demand_action_label(
-    repeat_demand: &RepeatDemandHandoffProjection,
-) -> SharedString {
+fn buyer_repeat_demand_action_label(repeat_demand: &RepeatDemandHandoffProjection) -> SharedString {
     match repeat_demand.eligibility {
         RepeatDemandEligibility::Eligible => {
             app_shared_text(AppTextKey::PersonalOrdersRepeatDemandActionEligible)
@@ -7961,9 +7961,7 @@ fn buyer_repeat_demand_action_label(
     }
 }
 
-fn buyer_repeat_demand_note(
-    repeat_demand: &RepeatDemandHandoffProjection,
-) -> Option<SharedString> {
+fn buyer_repeat_demand_note(repeat_demand: &RepeatDemandHandoffProjection) -> Option<SharedString> {
     match repeat_demand.eligibility {
         RepeatDemandEligibility::Eligible => None,
         RepeatDemandEligibility::Partial if repeat_demand.unavailable_item_count == 1 => Some(
