@@ -554,6 +554,7 @@ pub enum AppStateCommand {
     ReplaceOrdersList(OrdersListProjection),
     ReplaceOrdersReminders(ReminderFeedProjection),
     ReplaceOrdersRecoveryQueue(RecoveryQueueProjection),
+    ReplaceReminderLog(ReminderLogProjection),
     ReplaceOrderDetail(Option<OrderDetailProjection>),
     SetPackDayFulfillmentWindow(Option<FulfillmentWindowId>),
     ReplacePackDayProjection(PackDayProjection),
@@ -659,6 +660,10 @@ impl AppStateCommand {
 
     pub fn replace_orders_recovery_queue(projection: RecoveryQueueProjection) -> Self {
         Self::ReplaceOrdersRecoveryQueue(projection)
+    }
+
+    pub fn replace_reminder_log(projection: ReminderLogProjection) -> Self {
+        Self::ReplaceReminderLog(projection)
     }
 
     pub fn replace_order_detail(projection: Option<OrderDetailProjection>) -> Self {
@@ -830,6 +835,10 @@ impl<R: AppStateRepository> AppStateStore<R> {
 
     pub fn orders_projection(&self) -> &OrdersScreenProjection {
         &self.projection.orders
+    }
+
+    pub fn reminder_log_projection(&self) -> &ReminderLogProjection {
+        &self.projection.reminder_log
     }
 
     pub fn pack_day_projection(&self) -> &PackDayScreenProjection {
@@ -1101,6 +1110,9 @@ fn apply_command(projection: &mut AppProjection, command: AppStateCommand) -> Ap
         AppStateCommand::ReplaceOrdersRecoveryQueue(recovery_queue_projection) => {
             projection.orders.recovery_queue = recovery_queue_projection;
         }
+        AppStateCommand::ReplaceReminderLog(reminder_log_projection) => {
+            projection.reminder_log = reminder_log_projection;
+        }
         AppStateCommand::ReplaceOrderDetail(order_detail_projection) => {
             projection.orders.replace_detail(order_detail_projection);
         }
@@ -1156,6 +1168,8 @@ fn apply_command(projection: &mut AppProjection, command: AppStateCommand) -> Ap
     } else if projection.products != before.products {
         AppStateMutation::ProductsChanged
     } else if projection.orders != before.orders {
+        AppStateMutation::OrdersChanged
+    } else if projection.reminder_log != before.reminder_log {
         AppStateMutation::OrdersChanged
     } else if projection.pack_day != before.pack_day {
         AppStateMutation::PackDayChanged
@@ -1455,7 +1469,8 @@ mod tests {
         OrdersListSummary, OrdersScreenQueryState, PackDayPackListRow, PackDayProductTotalRow,
         PackDayProjection, PackDayRosterRow, PackDayScreenQueryState, PersonalEntryState,
         PersonalSection, ProductEditorDraft, ProductId, ProductPublishBlocker, ProductsFilter,
-        ProductsListProjection, ProductsSort, ReminderFeedProjection, SelectedAccountProjection,
+        ProductsListProjection, ProductsSort, ReminderDeliveryState, ReminderFeedProjection,
+        ReminderKind, ReminderLogEntryProjection, ReminderLogProjection, SelectedAccountProjection,
         SelectedSurfaceProjection, SettingsSection, ShellSection, TodayAgendaProjection,
         TodaySetupTask, TodaySetupTaskKind,
     };
@@ -1692,6 +1707,16 @@ mod tests {
                 last_updated_at: "2026-04-18T19:00:00Z".to_owned(),
             }],
         };
+        let reminder_log = ReminderLogProjection {
+            entries: vec![ReminderLogEntryProjection {
+                reminder_id: orders_reminders.items[0].reminder_id,
+                kind: ReminderKind::OrderAction,
+                title: "review order".to_owned(),
+                recorded_at: "2026-04-18T14:30:00Z".to_owned(),
+                delivery_state: ReminderDeliveryState::Presented,
+                detail: Some("Casey still needs confirmation.".to_owned()),
+            }],
+        };
         let pack_day = PackDayProjection {
             fulfillment_window: Some(radroots_studio_app_models::FulfillmentWindowSummary {
                 fulfillment_window_id,
@@ -1751,6 +1776,10 @@ mod tests {
             Ok(true)
         );
         assert_eq!(
+            store.apply(AppStateCommand::replace_reminder_log(reminder_log.clone())),
+            Ok(true)
+        );
+        assert_eq!(
             store.apply(AppStateCommand::replace_order_detail(Some(
                 order_detail.clone()
             ))),
@@ -1778,6 +1807,7 @@ mod tests {
         assert_eq!(store.projection().orders.list, orders_list);
         assert_eq!(store.projection().orders.reminders, orders_reminders);
         assert_eq!(store.projection().orders.recovery_queue, recovery_queue);
+        assert_eq!(store.projection().reminder_log, reminder_log);
         assert_eq!(store.projection().orders.detail, Some(order_detail));
         assert_eq!(
             store.projection().pack_day.query,

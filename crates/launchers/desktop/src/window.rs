@@ -23,7 +23,8 @@ use radroots_studio_app_models::{
     PackDayRosterRow, PersonalEntryState, PersonalSection, PickupLocationId, PickupLocationRecord,
     ProductAttentionState, ProductEditorDraft, ProductId, ProductListRow, ProductPricePresentation,
     ProductPublishBlocker, ProductStatus, ProductsFilter, ProductsListRow, ProductsSort,
-    ReminderDeadlineProjection, ReminderUrgency, ShellSection, TodayAgendaProjection,
+    ReminderDeadlineProjection, ReminderDeliveryState, ReminderId, ReminderLogEntryProjection,
+    ReminderLogProjection, ReminderSurface, ReminderUrgency, ShellSection, TodayAgendaProjection,
     TodaySetupTaskKind,
 };
 use radroots_studio_app_remote_signer::{
@@ -1473,6 +1474,87 @@ impl HomeView {
         }
     }
 
+    fn dismiss_presented_reminder(&mut self, reminder_id: ReminderId, cx: &mut Context<Self>) {
+        match self.runtime.acknowledge_reminder(reminder_id) {
+            Ok(true) => cx.notify(),
+            Ok(false) => {}
+            Err(runtime_error) => {
+                error!(
+                    target: "reminders",
+                    event = "reminders.ack_failed",
+                    error = %runtime_error,
+                    reminder_id = %reminder_id,
+                    "failed to acknowledge reminder"
+                );
+            }
+        }
+    }
+
+    fn open_presented_order_reminder(
+        &mut self,
+        reminder_id: ReminderId,
+        order_id: OrderId,
+        cx: &mut Context<Self>,
+    ) {
+        match self.runtime.open_order_detail(order_id) {
+            Ok(true) | Ok(false) => {
+                self.products_stock_editor = None;
+                self.product_editor_form = None;
+                self.dismiss_presented_reminder(reminder_id, cx);
+            }
+            Err(runtime_error) => {
+                error!(
+                    target: "orders",
+                    event = "orders.detail_open_failed",
+                    error = %runtime_error,
+                    order_id = %order_id,
+                    "failed to open order detail"
+                );
+            }
+        }
+    }
+
+    fn open_presented_pack_day_reminder(
+        &mut self,
+        reminder_id: ReminderId,
+        fulfillment_window_id: FulfillmentWindowId,
+        cx: &mut Context<Self>,
+    ) {
+        match self.runtime.open_pack_day(Some(fulfillment_window_id)) {
+            Ok(true) | Ok(false) => {
+                self.products_stock_editor = None;
+                self.product_editor_form = None;
+                self.dismiss_presented_reminder(reminder_id, cx);
+            }
+            Err(runtime_error) => {
+                error!(
+                    target: "pack_day",
+                    event = "pack_day.route_failed",
+                    error = %runtime_error,
+                    "failed to route into pack day view"
+                );
+            }
+        }
+    }
+
+    fn open_presented_orders_reminder(&mut self, reminder_id: ReminderId, cx: &mut Context<Self>) {
+        match self.runtime.open_orders() {
+            Ok(true) | Ok(false) => {
+                self.products_stock_editor = None;
+                self.product_editor_form = None;
+                self.dismiss_presented_reminder(reminder_id, cx);
+            }
+            Err(runtime_error) => {
+                error!(
+                    target: "orders",
+                    event = "orders.route_failed",
+                    error = %runtime_error,
+                    "failed to route into orders view"
+                );
+            }
+        }
+    }
+
     fn mark_order_packed(&mut self, order_id: OrderId, cx: &mut Context<Self>) {
         match self.runtime.mark_order_packed(order_id) {
             Ok(true) => cx.notify(),
@@ -2537,6 +2619,20 @@ impl HomeView {
                     cx.listener(|this, _, _, cx| this.open_account_entry(cx)),
                     cx,
                 ))
+                .when_some(presented_farmer_reminder(runtime), |this, reminder| {
+                    this.child(
+                        div()
+                            .w_full()
+                            .px(px(APP_UI_THEME.shells.home_window_padding_px))
+                            .child(
+                                div()
+                                    .w_full()
+                                    .max_w(px(APP_UI_THEME.shells.home_card_max_width_px))
+                                    .mx_auto()
+                                    .child(self.render_presented_reminder_banner(reminder, cx)),
+                            ),
+                    )
+                })
                 .child(
                     app_scroll_panel(
                         home_content_scroll_id(selected_farmer_section),
@@ -2751,6 +2847,7 @@ impl HomeView {
                     cx,
                 ))
             })
+            .child(self.render_orders_reminder_log_card(&runtime.reminder_log))
             .child(if projection.list.is_empty() {
                 orders_empty_state_card(projection.query.filter).into_any_element()
             } else {
@@ -2776,6 +2873,153 @@ impl HomeView {
                 },
             )
             .into_any_element()
+    }
+
+    fn render_presented_reminder_banner(
+        &mut self,
+        reminder: &ReminderDeadlineProjection,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let primary_action = self.render_presented_reminder_primary_action(reminder, cx);
+
+        home_card(
+            app_shared_text(AppTextKey::ReminderPresentationTitle),
+            app_stack_v(APP_UI_THEME.foundation.spacing.medium_px)
+                .w_full()
+                .child(
+                    div()
+                        .w_full()
+                        .min_w_0()
+                        .flex()
+                        .items_start()
+                        .justify_between()
+                        .gap(px(APP_UI_THEME.foundation.spacing.tight_px))
+                        .child(
+                            div()
+                                .flex_1()
+                                .min_w_0()
+                                .flex()
+                                .items_center()
+                                .gap(px(APP_UI_THEME.foundation.spacing.tight_px))
+                                .child(status_indicator(reminder_urgency_color(reminder.urgency)))
+                                .child(
+                                    div()
+                                        .flex_1()
+                                        .min_w_0()
+                                        .text_size(px(APP_UI_THEME
+                                            .foundation
+                                            .typography
+                                            .body_text_px))
+                                        .font_weight(gpui::FontWeight::SEMIBOLD)
+                                        .line_height(relative(1.2))
+                                        .text_color(rgb(APP_UI_THEME.foundation.text.primary))
+                                        .child(reminder.title.clone()),
+                                ),
+                        )
+                        .child(
+                            app_cluster(APP_UI_THEME.foundation.spacing.tight_px)
+                                .child(reminder_urgency_badge(reminder.urgency))
+                                .child(reminder_delivery_state_badge(reminder.delivery_state)),
+                        ),
+                )
+                .when(!reminder.detail.trim().is_empty(), |this| {
+                    this.child(home_body_text(reminder.detail.clone()))
+                })
+                .child(
+                    div()
+                        .w_full()
+                        .min_w_0()
+                        .flex()
+                        .items_center()
+                        .justify_between()
+                        .gap(px(APP_UI_THEME.foundation.spacing.medium_px))
+                        .child(
+                            div()
+                                .min_w_0()
+                                .text_size(px(APP_UI_THEME
+                                    .foundation
+                                    .typography
+                                    .utility_title_text_px))
+                                .text_color(rgb(APP_UI_THEME.foundation.text.secondary))
+                                .child(reminder_deadline_text(reminder)),
+                        )
+                        .child(
+                            div()
+                                .flex()
+                                .items_center()
+                                .gap(px(APP_UI_THEME.foundation.spacing.tight_px))
+                                .when_some(primary_action, |this, action| this.child(action))
+                                .child(text_button(
+                                    "reminder-banner-dismiss",
+                                    app_shared_text(AppTextKey::ReminderPresentationDismissAction),
+                                    cx.listener({
+                                        let reminder_id = reminder.reminder_id;
+                                        move |this, _, _, cx| {
+                                            this.dismiss_presented_reminder(reminder_id, cx)
+                                        }
+                                    }),
+                                    cx,
+                                )),
+                        ),
+                ),
+        )
+        .into_any_element()
+    }
+
+    fn render_presented_reminder_primary_action(
+        &mut self,
+        reminder: &ReminderDeadlineProjection,
+        cx: &mut Context<Self>,
+    ) -> Option<AnyElement> {
+        let label = reminder.action_label.clone()?;
+
+        match reminder_action_target(reminder) {
+            Some(ReminderActionTarget::OrderDetail(order_id)) => Some(
+                action_button_primary(
+                    "reminder-banner-action",
+                    SharedString::from(label),
+                    cx.listener({
+                        let reminder_id = reminder.reminder_id;
+                        move |this, _, _, cx| {
+                            this.open_presented_order_reminder(reminder_id, order_id, cx)
+                        }
+                    }),
+                    cx,
+                )
+                .into_any_element(),
+            ),
+            Some(ReminderActionTarget::PackDay(fulfillment_window_id)) => Some(
+                action_button_primary(
+                    "reminder-banner-action",
+                    SharedString::from(label),
+                    cx.listener({
+                        let reminder_id = reminder.reminder_id;
+                        move |this, _, _, cx| {
+                            this.open_presented_pack_day_reminder(
+                                reminder_id,
+                                fulfillment_window_id,
+                                cx,
+                            )
+                        }
+                    }),
+                    cx,
+                )
+                .into_any_element(),
+            ),
+            None if reminder.surface == ReminderSurface::Orders => Some(
+                action_button_primary(
+                    "reminder-banner-action",
+                    SharedString::from(label),
+                    cx.listener({
+                        let reminder_id = reminder.reminder_id;
+                        move |this, _, _, cx| this.open_presented_orders_reminder(reminder_id, cx)
+                    }),
+                    cx,
+                )
+                .into_any_element(),
+            ),
+            None => None,
+        }
     }
 
     fn render_pack_day_content(
@@ -2961,6 +3205,71 @@ impl HomeView {
                 .children(rows),
         )
         .into_any_element()
+    }
+
+    fn render_orders_reminder_log_card(&self, reminder_log: &ReminderLogProjection) -> AnyElement {
+        let body = if reminder_log.entries.is_empty() {
+            home_body_text(app_shared_text(AppTextKey::OrdersReminderLogEmptyBody))
+                .into_any_element()
+        } else {
+            let mut rows = Vec::with_capacity(reminder_log.entries.len().saturating_mul(2));
+            for (index, entry) in reminder_log.entries.iter().enumerate() {
+                rows.push(self.render_orders_reminder_log_row(entry));
+                if index + 1 < reminder_log.entries.len() {
+                    rows.push(section_divider().into_any_element());
+                }
+            }
+
+            div()
+                .w_full()
+                .flex()
+                .flex_col()
+                .gap(px(APP_UI_THEME.foundation.spacing.medium_px))
+                .children(rows)
+                .into_any_element()
+        };
+
+        home_card(app_shared_text(AppTextKey::OrdersReminderLogTitle), body).into_any_element()
+    }
+
+    fn render_orders_reminder_log_row(&self, entry: &ReminderLogEntryProjection) -> AnyElement {
+        app_stack_v(APP_UI_THEME.foundation.spacing.tight_px)
+            .w_full()
+            .child(
+                div()
+                    .w_full()
+                    .min_w_0()
+                    .flex()
+                    .items_start()
+                    .justify_between()
+                    .gap(px(APP_UI_THEME.foundation.spacing.tight_px))
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w_0()
+                            .text_size(px(APP_UI_THEME.foundation.typography.body_text_px))
+                            .font_weight(gpui::FontWeight::SEMIBOLD)
+                            .line_height(relative(1.2))
+                            .text_color(rgb(APP_UI_THEME.foundation.text.primary))
+                            .child(entry.title.clone()),
+                    )
+                    .child(reminder_delivery_state_badge(entry.delivery_state)),
+            )
+            .when_some(
+                entry
+                    .detail
+                    .as_ref()
+                    .map(|detail| detail.trim())
+                    .filter(|detail| !detail.is_empty()),
+                |this, detail| this.child(home_body_text(detail.to_owned())),
+            )
+            .child(
+                div()
+                    .text_size(px(APP_UI_THEME.foundation.typography.utility_title_text_px))
+                    .text_color(rgb(APP_UI_THEME.foundation.text.secondary))
+                    .child(entry.recorded_at.clone()),
+            )
+            .into_any_element()
     }
 
     fn render_reminder_feed_row(
@@ -8656,6 +8965,68 @@ fn reminder_urgency_badge(urgency: ReminderUrgency) -> AnyElement {
         .into_any_element()
 }
 
+fn reminder_delivery_state_key(delivery_state: ReminderDeliveryState) -> AppTextKey {
+    match delivery_state {
+        ReminderDeliveryState::Scheduled => AppTextKey::ReminderDeliveryStateScheduled,
+        ReminderDeliveryState::Presented => AppTextKey::ReminderDeliveryStatePresented,
+        ReminderDeliveryState::Acknowledged => AppTextKey::ReminderDeliveryStateAcknowledged,
+        ReminderDeliveryState::Resolved => AppTextKey::ReminderDeliveryStateResolved,
+    }
+}
+
+fn reminder_delivery_state_color(delivery_state: ReminderDeliveryState) -> u32 {
+    match delivery_state {
+        ReminderDeliveryState::Scheduled => APP_UI_THEME.components.app_status_indicator.offline,
+        ReminderDeliveryState::Presented => APP_UI_THEME.foundation.text.accent,
+        ReminderDeliveryState::Acknowledged => APP_UI_THEME.foundation.text.secondary,
+        ReminderDeliveryState::Resolved => APP_UI_THEME.components.app_status_indicator.online,
+    }
+}
+
+fn reminder_delivery_state_badge(delivery_state: ReminderDeliveryState) -> AnyElement {
+    div()
+        .text_size(px(APP_UI_THEME.foundation.typography.utility_title_text_px))
+        .font_weight(gpui::FontWeight::SEMIBOLD)
+        .text_color(rgb(reminder_delivery_state_color(delivery_state)))
+        .child(app_shared_text(reminder_delivery_state_key(delivery_state)))
+        .into_any_element()
+}
+
+fn presented_farmer_reminder(
+    runtime: &DesktopAppRuntimeSummary,
+) -> Option<&ReminderDeadlineProjection> {
+    runtime
+        .today_projection
+        .reminders
+        .items
+        .iter()
+        .chain(runtime.orders_projection.reminders.items.iter())
+        .chain(
+            runtime
+                .pack_day_projection
+                .projection
+                .reminders
+                .items
+                .iter(),
+        )
+        .filter(|reminder| reminder.delivery_state == ReminderDeliveryState::Presented)
+        .min_by(|left, right| {
+            reminder_urgency_priority(left.urgency)
+                .cmp(&reminder_urgency_priority(right.urgency))
+                .then_with(|| left.deadline_at.cmp(&right.deadline_at))
+                .then_with(|| left.reminder_id.cmp(&right.reminder_id))
+        })
+}
+
+fn reminder_urgency_priority(urgency: ReminderUrgency) -> u8 {
+    match urgency {
+        ReminderUrgency::Blocking => 0,
+        ReminderUrgency::Overdue => 1,
+        ReminderUrgency::DueSoon => 2,
+        ReminderUrgency::Upcoming => 3,
+    }
+}
+
 fn reminder_deadline_text(reminder: &ReminderDeadlineProjection) -> String {
     format!(
         "{}: {}",
@@ -10274,8 +10645,9 @@ mod tests {
         farmer_pack_day_available, home_content_scroll_id, home_saved_farm,
         home_sidebar_navigation_sections, home_stage, home_window_launch_size_px,
         home_window_minimum_size_px, parse_optional_product_editor_stock_input,
-        parse_product_editor_price_input, product_display_title, reminder_action_target,
-        reminder_deadline_text, reminder_urgency_color, reminder_urgency_key, startup_home_surface,
+        parse_product_editor_price_input, presented_farmer_reminder, product_display_title,
+        reminder_action_target, reminder_deadline_text, reminder_delivery_state_key,
+        reminder_urgency_color, reminder_urgency_key, startup_home_surface,
         startup_signer_preview_summary, startup_signer_preview_summary_for_connect_state,
         startup_signer_source_input_is_editable, startup_signer_status_spec,
         startup_signer_transport_failure_requires_notice,
@@ -10872,6 +11244,71 @@ mod tests {
     }
 
     #[test]
+    fn reminder_delivery_state_key_matches_the_local_presentation_contract() {
+        assert_eq!(
+            reminder_delivery_state_key(ReminderDeliveryState::Scheduled),
+            AppTextKey::ReminderDeliveryStateScheduled
+        );
+        assert_eq!(
+            reminder_delivery_state_key(ReminderDeliveryState::Presented),
+            AppTextKey::ReminderDeliveryStatePresented
+        );
+        assert_eq!(
+            reminder_delivery_state_key(ReminderDeliveryState::Acknowledged),
+            AppTextKey::ReminderDeliveryStateAcknowledged
+        );
+        assert_eq!(
+            reminder_delivery_state_key(ReminderDeliveryState::Resolved),
+            AppTextKey::ReminderDeliveryStateResolved
+        );
+    }
+
+    #[test]
+    fn presented_farmer_reminder_prefers_the_highest_priority_presented_item() {
+        let mut runtime = summary(
+            HomeRoute::Today,
+            TodayAgendaProjection::default(),
+            FarmSetupProjection::default(),
+        );
+        let due_soon = fixture_reminder(
+            None,
+            Some(FulfillmentWindowId::new()),
+            ReminderKind::FulfillmentWindow,
+            ReminderUrgency::DueSoon,
+        );
+        let blocking = fixture_reminder(
+            None,
+            None,
+            ReminderKind::SyncImpact,
+            ReminderUrgency::Blocking,
+        );
+
+        runtime
+            .today_projection
+            .reminders
+            .items
+            .push(ReminderDeadlineProjection {
+                delivery_state: ReminderDeliveryState::Presented,
+                ..due_soon
+            });
+        runtime
+            .orders_projection
+            .reminders
+            .items
+            .push(ReminderDeadlineProjection {
+                delivery_state: ReminderDeliveryState::Presented,
+                ..blocking.clone()
+            });
+
+        assert_eq!(
+            presented_farmer_reminder(&runtime)
+                .expect("presented reminder")
+                .reminder_id,
+            blocking.reminder_id
+        );
+    }
+
+    #[test]
     fn about_status_rows_disable_sync_without_a_selected_account() {
         let rows = about_status_rows(&summary(
             HomeRoute::SetupRequired,
@@ -11069,6 +11506,7 @@ mod tests {
             products_projection: Default::default(),
             orders_projection: Default::default(),
             pack_day_projection: Default::default(),
+            reminder_log: Default::default(),
             runtime_metadata: DesktopAppRuntimeMetadataSummary::default(),
             sync_status: crate::runtime::DesktopAppSyncStatusSummary::default(),
             startup_issue: None,

@@ -280,6 +280,21 @@ impl AppSqliteStore {
             .replace_reminder_schedule(account_id, farm_id, projection)
     }
 
+    pub fn apply_reminder_schedule_update(
+        &self,
+        account_id: &str,
+        farm_id: FarmId,
+        projection: &ReminderFeedProjection,
+        log_entries: &[ReminderLogEntryProjection],
+    ) -> Result<(), AppSqliteError> {
+        self.reminders_repository().apply_reminder_schedule_update(
+            account_id,
+            farm_id,
+            projection,
+            log_entries,
+        )
+    }
+
     pub fn record_reminder_log_entry(
         &self,
         account_id: &str,
@@ -694,11 +709,31 @@ mod tests {
         assert!(column_exists(connection, "orders", "buyer_email"));
         assert!(column_exists(connection, "orders", "buyer_phone"));
         assert!(column_exists(connection, "orders", "buyer_order_note"));
-        assert!(column_exists(connection, "reminder_schedules", "account_id"));
-        assert!(column_exists(connection, "reminder_schedules", "delivery_state"));
-        assert!(column_exists(connection, "reminder_log_entries", "recorded_at"));
-        assert!(column_exists(connection, "order_recovery_records", "recovery_kind"));
-        assert!(column_exists(connection, "order_recovery_records", "recovery_state"));
+        assert!(column_exists(
+            connection,
+            "reminder_schedules",
+            "account_id"
+        ));
+        assert!(column_exists(
+            connection,
+            "reminder_schedules",
+            "delivery_state"
+        ));
+        assert!(column_exists(
+            connection,
+            "reminder_log_entries",
+            "recorded_at"
+        ));
+        assert!(column_exists(
+            connection,
+            "order_recovery_records",
+            "recovery_kind"
+        ));
+        assert!(column_exists(
+            connection,
+            "order_recovery_records",
+            "recovery_state"
+        ));
         assert_eq!(row_count(connection, "sync_checkpoints"), 0);
 
         drop(store);

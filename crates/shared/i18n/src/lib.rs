@@ -172,12 +172,32 @@ mod tests {
         assert_eq!(app_text(AppTextKey::HomeTodayRemindersTitle), "Coming up");
         assert_eq!(app_text(AppTextKey::OrdersRemindersTitle), "Reminders");
         assert_eq!(
+            app_text(AppTextKey::OrdersReminderLogTitle),
+            "Reminder activity"
+        );
+        assert_eq!(
             app_text(AppTextKey::PackDayRemindersTitle),
             "Before this window"
         );
         assert_eq!(app_text(AppTextKey::ReminderDeadlineLabel), "Due");
         assert_eq!(app_text(AppTextKey::ReminderUrgencyDueSoon), "Due soon");
         assert_eq!(app_text(AppTextKey::ReminderUrgencyBlocking), "Blocking");
+        assert_eq!(
+            app_text(AppTextKey::ReminderPresentationTitle),
+            "Needs attention now"
+        );
+        assert_eq!(
+            app_text(AppTextKey::ReminderPresentationDismissAction),
+            "Dismiss"
+        );
+        assert_eq!(
+            app_text(AppTextKey::ReminderDeliveryStatePresented),
+            "Presented"
+        );
+        assert_eq!(
+            app_text(AppTextKey::ReminderDeliveryStateResolved),
+            "Resolved"
+        );
     }
 
     #[test]

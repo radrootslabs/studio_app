@@ -286,6 +286,7 @@ mod tests {
             products_projection: Default::default(),
             orders_projection: Default::default(),
             pack_day_projection: Default::default(),
+            reminder_log: Default::default(),
             runtime_metadata: crate::runtime::DesktopAppRuntimeMetadataSummary::default(),
             logged_out_startup: LoggedOutStartupProjection::default(),
             sync_status: crate::runtime::DesktopAppSyncStatusSummary::default(),

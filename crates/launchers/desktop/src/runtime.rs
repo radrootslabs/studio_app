@@ -19,8 +19,9 @@ use radroots_studio_app_models::{
     PackDayScreenQueryState, PersonalSection, PickupLocationRecord, ProductEditorDraft, ProductId,
     ProductsFilter, ProductsListProjection, ProductsSort, RecoveryKind, RecoveryQueueProjection,
     RecoveryState, ReminderDeadlineProjection, ReminderDeliveryState, ReminderFeedProjection,
-    ReminderId, ReminderKind, ReminderSurface, ReminderUrgency, SettingsAccountProjection,
-    SettingsPreference, SettingsSection, ShellSection, TodayAgendaProjection,
+    ReminderId, ReminderKind, ReminderLogEntryProjection, ReminderLogProjection, ReminderSurface,
+    ReminderUrgency, SettingsAccountProjection, SettingsPreference, SettingsSection, ShellSection,
+    TodayAgendaProjection,
 };
 use radroots_studio_app_remote_signer::{
     RadrootsAppRemoteSignerApprovedSession, RadrootsAppRemoteSignerPendingSession,
@@ -126,6 +127,7 @@ impl DesktopAppRuntime {
             products_projection: state.state_store.products_projection().clone(),
             orders_projection: state.state_store.orders_projection().clone(),
             pack_day_projection: state.state_store.pack_day_projection().clone(),
+            reminder_log: state.state_store.reminder_log_projection().clone(),
             runtime_metadata: state.runtime_metadata.clone(),
             sync_status,
             startup_issue: state.startup_issue.clone(),
@@ -509,6 +511,10 @@ impl DesktopAppRuntime {
             .resolve_sync_conflict(conflict_id, resolution)
     }
 
+    pub fn acknowledge_reminder(&self, reminder_id: ReminderId) -> Result<bool, AppSqliteError> {
+        self.lock_state_mut().acknowledge_reminder(reminder_id)
+    }
+
     pub fn record_home_opened(&self) -> bool {
         self.record_activity(AppActivityKind::HomeOpened)
     }
@@ -658,6 +664,7 @@ pub struct DesktopAppRuntimeSummary {
     pub products_projection: ProductsScreenProjection,
     pub orders_projection: OrdersScreenProjection,
     pub pack_day_projection: PackDayScreenProjection,
+    pub reminder_log: ReminderLogProjection,
     pub runtime_metadata: DesktopAppRuntimeMetadataSummary,
     pub sync_status: DesktopAppSyncStatusSummary,
     pub startup_issue: Option<String>,
@@ -683,6 +690,7 @@ struct DesktopSelectedAccountContext {
     recovery_queue: RecoveryQueueProjection,
     order_detail: Option<OrderDetailProjection>,
     pack_day_projection: PackDayProjection,
+    reminder_log: ReminderLogProjection,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -694,6 +702,7 @@ struct DesktopSellerReminderContext {
     selected_order_recovery: Option<OrderRecoveryProjection>,
     due_soon_count: u32,
     recovery_actions_open: u32,
+    reminder_log: ReminderLogProjection,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -847,6 +856,9 @@ impl DesktopAppRuntimeState {
         ));
         let _ = state_store.apply_in_memory(AppStateCommand::replace_orders_recovery_queue(
             selected_account_context.recovery_queue,
+        ));
+        let _ = state_store.apply_in_memory(AppStateCommand::replace_reminder_log(
+            selected_account_context.reminder_log,
         ));
         let _ = state_store.apply_in_memory(AppStateCommand::replace_order_detail(
             selected_account_context.order_detail,
@@ -1996,6 +2008,11 @@ impl DesktopAppRuntimeState {
                 .apply_in_memory(AppStateCommand::replace_orders_recovery_queue(
                     context.recovery_queue.clone(),
                 ));
+        let reminder_log_changed =
+            self.state_store
+                .apply_in_memory(AppStateCommand::replace_reminder_log(
+                    context.reminder_log.clone(),
+                ));
         let order_detail_changed =
             self.state_store
                 .apply_in_memory(AppStateCommand::replace_order_detail(
@@ -2021,6 +2038,7 @@ impl DesktopAppRuntimeState {
             || orders_changed
             || orders_reminders_changed
             || recovery_queue_changed
+            || reminder_log_changed
             || order_detail_changed
             || pack_day_changed
             || editor_changed
@@ -2124,6 +2142,62 @@ impl DesktopAppRuntimeState {
         }
 
         self.refresh_selected_account_sync()
+    }
+
+    fn acknowledge_reminder(&mut self, reminder_id: ReminderId) -> Result<bool, AppSqliteError> {
+        let Some(sqlite_store) = self.sqlite_store.as_ref() else {
+            return Ok(false);
+        };
+        let Some(selected_account) = self
+            .state_store
+            .identity_projection()
+            .selected_account
+            .as_ref()
+        else {
+            return Ok(false);
+        };
+        let Some(farm_id) = self.selected_farm_id() else {
+            return Ok(false);
+        };
+        let account_id = selected_account.account.account_id.clone();
+        let mut schedule = sqlite_store.load_reminder_schedule(account_id.as_str(), farm_id)?;
+        let Some(reminder) = schedule
+            .items
+            .iter_mut()
+            .find(|item| item.reminder_id == reminder_id)
+        else {
+            return Ok(false);
+        };
+        if matches!(
+            reminder.delivery_state,
+            ReminderDeliveryState::Acknowledged | ReminderDeliveryState::Resolved
+        ) {
+            return Ok(false);
+        }
+
+        reminder.delivery_state = ReminderDeliveryState::Acknowledged;
+        let reminder_log_entry =
+            build_reminder_log_entry(reminder, ReminderDeliveryState::Acknowledged);
+        sqlite_store.apply_reminder_schedule_update(
+            account_id.as_str(),
+            farm_id,
+            &schedule,
+            &[reminder_log_entry],
+        )?;
+
+        let selected_account_context = load_selected_account_context_with_options(
+            sqlite_store,
+            self.state_store.identity_projection(),
+            self.state_store.products_projection().query.clone(),
+            self.state_store.orders_projection().query.clone(),
+            self.selected_order_detail_id(),
+            self.state_store.pack_day_projection().query.clone(),
+            false,
+        )?;
+
+        let _ = self.apply_selected_account_context(&selected_account_context);
+
+        Ok(true)
     }
 
     fn attempt_sync(&mut self, trigger: SyncTrigger) -> Result<bool, AppSqliteError> {
@@ -2796,6 +2870,26 @@ fn load_selected_account_context(
     selected_order_id: Option<OrderId>,
     pack_day_query: PackDayScreenQueryState,
 ) -> Result<DesktopSelectedAccountContext, AppSqliteError> {
+    load_selected_account_context_with_options(
+        sqlite_store,
+        identity_projection,
+        products_query,
+        orders_query,
+        selected_order_id,
+        pack_day_query,
+        true,
+    )
+}
+
+fn load_selected_account_context_with_options(
+    sqlite_store: &AppSqliteStore,
+    identity_projection: &AppIdentityProjection,
+    products_query: ProductsScreenQueryState,
+    orders_query: OrdersScreenQueryState,
+    selected_order_id: Option<OrderId>,
+    pack_day_query: PackDayScreenQueryState,
+    allow_auto_present: bool,
+) -> Result<DesktopSelectedAccountContext, AppSqliteError> {
     let buyer_context = identity_projection.buyer_context();
     let buyer_fulfillment_methods = BTreeSet::new();
     let buyer_listings = sqlite_store.load_buyer_listings("", &buyer_fulfillment_methods)?;
@@ -2828,6 +2922,7 @@ fn load_selected_account_context(
             orders_list: OrdersListProjection::default(),
             orders_reminders: ReminderFeedProjection::default(),
             recovery_queue: RecoveryQueueProjection::default(),
+            reminder_log: ReminderLogProjection::default(),
             ..DesktopSelectedAccountContext::default()
         });
     };
@@ -2881,9 +2976,9 @@ fn load_selected_account_context(
         Some(farm_id) => sqlite_store.load_pack_day(farm_id, &pack_day_query)?,
         None => PackDayProjection::default(),
     };
-    let (orders_reminders, recovery_queue) = match today_farm_id {
+    let (orders_reminders, recovery_queue, reminder_log) = match today_farm_id {
         Some(farm_id) => {
-            let reminder_context = load_selected_account_reminder_context(
+            let reminder_context = load_selected_account_reminder_context_with_options(
                 sqlite_store,
                 selected_account.account.account_id.as_str(),
                 farm_id,
@@ -2891,6 +2986,7 @@ fn load_selected_account_context(
                 &canonical_orders_list,
                 &pack_day_projection,
                 order_detail.as_ref(),
+                allow_auto_present,
             )?;
             today_projection.reminders = reminder_context.today_feed;
             if let Some(summary) = today_projection.summary.as_mut() {
@@ -2905,11 +3001,13 @@ fn load_selected_account_context(
             (
                 reminder_context.orders_feed,
                 reminder_context.recovery_queue,
+                reminder_context.reminder_log,
             )
         }
         None => (
             ReminderFeedProjection::default(),
             RecoveryQueueProjection::default(),
+            ReminderLogProjection::default(),
         ),
     };
 
@@ -2922,6 +3020,7 @@ fn load_selected_account_context(
         orders_list,
         orders_reminders,
         recovery_queue,
+        reminder_log,
         order_detail,
         pack_day_projection,
     })
@@ -2936,10 +3035,32 @@ fn load_selected_account_reminder_context(
     pack_day_projection: &PackDayProjection,
     selected_order_detail: Option<&OrderDetailProjection>,
 ) -> Result<DesktopSellerReminderContext, AppSqliteError> {
+    load_selected_account_reminder_context_with_options(
+        sqlite_store,
+        account_id,
+        farm_id,
+        today_projection,
+        canonical_orders_list,
+        pack_day_projection,
+        selected_order_detail,
+        true,
+    )
+}
+
+fn load_selected_account_reminder_context_with_options(
+    sqlite_store: &AppSqliteStore,
+    account_id: &str,
+    farm_id: FarmId,
+    today_projection: &TodayAgendaProjection,
+    canonical_orders_list: &OrdersListProjection,
+    pack_day_projection: &PackDayProjection,
+    selected_order_detail: Option<&OrderDetailProjection>,
+    allow_auto_present: bool,
+) -> Result<DesktopSellerReminderContext, AppSqliteError> {
     let existing_schedule = sqlite_store.load_reminder_schedule(account_id, farm_id)?;
     let recovery_queue = sqlite_store.load_recovery_queue(account_id, farm_id)?;
     let sync_truth = load_selected_account_reminder_sync_truth(sqlite_store, account_id)?;
-    let schedule = derive_selected_account_reminder_schedule(
+    let mut schedule = derive_selected_account_reminder_schedule(
         farm_id,
         today_projection,
         canonical_orders_list,
@@ -2948,9 +3069,22 @@ fn load_selected_account_reminder_context(
         &sync_truth,
         &existing_schedule,
     );
-    if schedule != existing_schedule {
-        sqlite_store.replace_reminder_schedule(account_id, farm_id, &schedule)?;
+    let mut reminder_log_entries =
+        reconcile_resolved_reminder_log_entries(&existing_schedule, &schedule);
+    promote_desktop_reminder_presentation(
+        &mut schedule,
+        &mut reminder_log_entries,
+        allow_auto_present,
+    );
+    if schedule != existing_schedule || !reminder_log_entries.is_empty() {
+        sqlite_store.apply_reminder_schedule_update(
+            account_id,
+            farm_id,
+            &schedule,
+            &reminder_log_entries,
+        )?;
     }
+    let reminder_log = sqlite_store.load_reminder_log(account_id, farm_id, 8)?;
 
     let selected_order_recovery = selected_order_detail.and_then(|detail| {
         recovery_queue
@@ -2986,6 +3120,7 @@ fn load_selected_account_reminder_context(
         selected_order_recovery,
         due_soon_count,
         recovery_actions_open,
+        reminder_log,
     })
 }
 
@@ -3319,6 +3454,100 @@ fn filter_reminder_surface(
             .filter(|item| item.surface == surface)
             .cloned()
             .collect(),
+    }
+}
+
+fn reconcile_resolved_reminder_log_entries(
+    existing_schedule: &ReminderFeedProjection,
+    schedule: &ReminderFeedProjection,
+) -> Vec<ReminderLogEntryProjection> {
+    existing_schedule
+        .items
+        .iter()
+        .filter(|existing| {
+            existing.delivery_state != ReminderDeliveryState::Scheduled
+                && existing.delivery_state != ReminderDeliveryState::Resolved
+                && !schedule
+                    .items
+                    .iter()
+                    .any(|current| current.reminder_id == existing.reminder_id)
+        })
+        .map(|reminder| build_reminder_log_entry(reminder, ReminderDeliveryState::Resolved))
+        .collect()
+}
+
+fn promote_desktop_reminder_presentation(
+    schedule: &mut ReminderFeedProjection,
+    reminder_log_entries: &mut Vec<ReminderLogEntryProjection>,
+    allow_auto_present: bool,
+) {
+    if !allow_auto_present || schedule.items.iter().any(is_desktop_presented_reminder) {
+        return;
+    }
+
+    let Some(index) = schedule
+        .items
+        .iter()
+        .enumerate()
+        .filter(|(_, reminder)| {
+            reminder.delivery_state == ReminderDeliveryState::Scheduled
+                && is_desktop_presentation_candidate(reminder)
+        })
+        .min_by(|(_, left), (_, right)| desktop_reminder_sort(left, right))
+        .map(|(index, _)| index)
+    else {
+        return;
+    };
+
+    schedule.items[index].delivery_state = ReminderDeliveryState::Presented;
+    reminder_log_entries.push(build_reminder_log_entry(
+        &schedule.items[index],
+        ReminderDeliveryState::Presented,
+    ));
+}
+
+fn is_desktop_presented_reminder(reminder: &ReminderDeadlineProjection) -> bool {
+    reminder.delivery_state == ReminderDeliveryState::Presented
+        && is_desktop_presentation_candidate(reminder)
+}
+
+fn is_desktop_presentation_candidate(reminder: &ReminderDeadlineProjection) -> bool {
+    matches!(
+        reminder.urgency,
+        ReminderUrgency::DueSoon | ReminderUrgency::Overdue | ReminderUrgency::Blocking
+    )
+}
+
+fn desktop_reminder_sort(
+    left: &ReminderDeadlineProjection,
+    right: &ReminderDeadlineProjection,
+) -> std::cmp::Ordering {
+    desktop_reminder_priority(left.urgency)
+        .cmp(&desktop_reminder_priority(right.urgency))
+        .then_with(|| left.deadline_at.cmp(&right.deadline_at))
+        .then_with(|| left.reminder_id.cmp(&right.reminder_id))
+}
+
+fn desktop_reminder_priority(urgency: ReminderUrgency) -> u8 {
+    match urgency {
+        ReminderUrgency::Blocking => 0,
+        ReminderUrgency::Overdue => 1,
+        ReminderUrgency::DueSoon => 2,
+        ReminderUrgency::Upcoming => 3,
+    }
+}
+
+fn build_reminder_log_entry(
+    reminder: &ReminderDeadlineProjection,
+    delivery_state: ReminderDeliveryState,
+) -> ReminderLogEntryProjection {
+    ReminderLogEntryProjection {
+        reminder_id: reminder.reminder_id,
+        kind: reminder.kind,
+        title: reminder.title.clone(),
+        recorded_at: current_utc_timestamp(),
+        delivery_state,
+        detail: (!reminder.detail.trim().is_empty()).then_some(reminder.detail.clone()),
     }
 }
 
@@ -3731,9 +3960,9 @@ mod tests {
         FarmerActivationProjection, FarmerSection, FulfillmentWindowId, FulfillmentWindowRecord,
         LoggedOutStartupProjection, OrderId, OrderStatus, OrdersFilter, PersonalSection,
         PickupLocationId, PickupLocationRecord, ProductEditorDraft, ProductStatus, ProductsFilter,
-        ProductsSort, RecoveryKind, RecoveryRecordId, ReminderKind, SelectedSurfaceProjection,
-        SettingsPreference, SettingsSection, ShellSection, TodayAgendaProjection, TodaySetupTask,
-        TodaySetupTaskKind, TodaySummary,
+        ProductsSort, RecoveryKind, RecoveryRecordId, ReminderDeliveryState, ReminderKind,
+        SelectedSurfaceProjection, SettingsPreference, SettingsSection, ShellSection,
+        TodayAgendaProjection, TodaySetupTask, TodaySetupTaskKind, TodaySummary,
     };
     use radroots_studio_app_remote_signer::{
         RadrootsAppRemoteSignerPendingSession, RadrootsAppRemoteSignerSessionRecord,
@@ -5956,6 +6185,147 @@ mod tests {
                 .any(|item| item.kind == ReminderKind::SyncImpact
                     && item.title == "Pending local changes")
         );
+    }
+
+    #[test]
+    fn runtime_refresh_promotes_blocking_sync_reminders_into_presented_log_entries() {
+        let runtime = memory_runtime();
+        let (account_id, farm_id) = provision_ready_farmer_account(&runtime);
+
+        runtime
+            .lock_state()
+            .sqlite_store
+            .as_ref()
+            .expect("sqlite store")
+            .record_sync_conflict(
+                account_id.as_str(),
+                &SyncConflict {
+                    aggregate: SyncAggregateRef::Farm(farm_id),
+                    kind: SyncConflictKind::RevisionMismatch,
+                    severity: SyncConflictSeverity::Blocking,
+                    resolution: SyncConflictResolutionStatus::Unresolved,
+                    local_payload_json: "{\"farm\":\"local\"}".to_owned(),
+                    remote_payload_json: Some("{\"farm\":\"remote\"}".to_owned()),
+                    detected_at: "2026-04-20T20:10:00Z".to_owned(),
+                    resolved_at: None,
+                },
+            )
+            .expect("blocking conflict should save");
+
+        assert!(
+            runtime
+                .lock_state_mut()
+                .refresh_selected_account_sync()
+                .expect("sync status should refresh")
+        );
+
+        let summary = runtime.summary();
+        let reminder = summary
+            .orders_projection
+            .reminders
+            .items
+            .iter()
+            .find(|item| item.kind == ReminderKind::SyncImpact)
+            .expect("sync reminder");
+
+        assert_eq!(reminder.delivery_state, ReminderDeliveryState::Presented);
+        assert!(summary.reminder_log.entries.iter().any(|entry| {
+            entry.reminder_id == reminder.reminder_id
+                && entry.delivery_state == ReminderDeliveryState::Presented
+        }));
+    }
+
+    #[test]
+    fn runtime_resolving_an_acknowledged_reminder_records_the_resolved_log_entry() {
+        let runtime = memory_runtime();
+        let (account_id, farm_id) = provision_ready_farmer_account(&runtime);
+
+        let conflict_id = runtime
+            .lock_state()
+            .sqlite_store
+            .as_ref()
+            .expect("sqlite store")
+            .record_sync_conflict(
+                account_id.as_str(),
+                &SyncConflict {
+                    aggregate: SyncAggregateRef::Farm(farm_id),
+                    kind: SyncConflictKind::RevisionMismatch,
+                    severity: SyncConflictSeverity::Blocking,
+                    resolution: SyncConflictResolutionStatus::Unresolved,
+                    local_payload_json: "{\"farm\":\"local\"}".to_owned(),
+                    remote_payload_json: Some("{\"farm\":\"remote\"}".to_owned()),
+                    detected_at: "2026-04-20T20:15:00Z".to_owned(),
+                    resolved_at: None,
+                },
+            )
+            .expect("blocking conflict should save");
+        assert!(
+            runtime
+                .lock_state_mut()
+                .refresh_selected_account_sync()
+                .expect("sync status should refresh")
+        );
+
+        let reminder_id = runtime
+            .summary()
+            .orders_projection
+            .reminders
+            .items
+            .iter()
+            .find(|item| item.kind == ReminderKind::SyncImpact)
+            .expect("sync reminder")
+            .reminder_id;
+        assert!(
+            runtime
+                .acknowledge_reminder(reminder_id)
+                .expect("reminder should acknowledge")
+        );
+
+        let acknowledged_summary = runtime.summary();
+        assert!(
+            acknowledged_summary
+                .orders_projection
+                .reminders
+                .items
+                .iter()
+                .any(|item| {
+                    item.reminder_id == reminder_id
+                        && item.delivery_state == ReminderDeliveryState::Acknowledged
+                })
+        );
+        assert!(
+            acknowledged_summary
+                .reminder_log
+                .entries
+                .iter()
+                .any(|entry| {
+                    entry.reminder_id == reminder_id
+                        && entry.delivery_state == ReminderDeliveryState::Acknowledged
+                })
+        );
+
+        assert!(
+            runtime
+                .resolve_sync_conflict(
+                    conflict_id.as_str(),
+                    SyncConflictResolutionStatus::AcceptedLocal,
+                )
+                .expect("conflict resolution should succeed")
+        );
+
+        let resolved_summary = runtime.summary();
+        assert!(
+            resolved_summary
+                .orders_projection
+                .reminders
+                .items
+                .iter()
+                .all(|item| { item.reminder_id != reminder_id })
+        );
+        assert!(resolved_summary.reminder_log.entries.iter().any(|entry| {
+            entry.reminder_id == reminder_id
+                && entry.delivery_state == ReminderDeliveryState::Resolved
+        }));
     }
 
     #[test]
