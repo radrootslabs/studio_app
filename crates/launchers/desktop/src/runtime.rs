@@ -27,7 +27,8 @@ use radroots_studio_app_remote_signer::{
     RadrootsAppRemoteSignerApprovedSession, RadrootsAppRemoteSignerPendingSession,
 };
 use radroots_studio_app_sqlite::{
-    APP_ACTIVITY_CONTEXT_LIMIT, AppSqliteError, AppSqliteStore, DatabaseTarget,
+    APP_ACTIVITY_CONTEXT_LIMIT, AppSqliteError, AppSqliteStore, BuyerRepeatDemandApplyOutcome,
+    DatabaseTarget,
     StoredPendingSyncOperation, StoredSyncConflict, derive_farm_rules_readiness,
 };
 use radroots_studio_app_state::{
@@ -295,6 +296,15 @@ impl DesktopAppRuntime {
 
     pub fn open_personal_order_detail(&self, order_id: OrderId) -> Result<bool, AppSqliteError> {
         self.lock_state_mut().open_personal_order_detail(order_id)
+    }
+
+    pub fn repeat_personal_order(
+        &self,
+        order_id: OrderId,
+        replace_existing: bool,
+    ) -> Result<bool, AppSqliteError> {
+        self.lock_state_mut()
+            .repeat_personal_order(order_id, replace_existing)
     }
 
     pub fn set_personal_search_query(&self, search_query: &str) -> Result<bool, AppSqliteError> {
@@ -1335,6 +1345,67 @@ impl DesktopAppRuntimeState {
         let section_changed = self.select_personal_section(PersonalSection::Orders);
 
         Ok(detail_changed || section_changed)
+    }
+
+    fn repeat_personal_order(
+        &mut self,
+        order_id: OrderId,
+        replace_existing: bool,
+    ) -> Result<bool, AppSqliteError> {
+        let Some(sqlite_store) = self.sqlite_store.as_ref() else {
+            return Ok(false);
+        };
+        let buyer_context = self.state_store.identity_projection().buyer_context();
+
+        match sqlite_store.apply_buyer_repeat_demand_to_cart(
+            &buyer_context,
+            order_id,
+            replace_existing,
+        )? {
+            BuyerRepeatDemandApplyOutcome::Applied => {
+                let refreshed_cart = sqlite_store.load_buyer_cart(&buyer_context)?;
+                let refreshed_checkout = sqlite_store.load_buyer_checkout(&buyer_context)?;
+                let refreshed_orders = sqlite_store.load_buyer_orders(&buyer_context)?;
+                let refreshed_detail =
+                    sqlite_store.load_buyer_order_detail(&buyer_context, order_id)?;
+                let personal_changed = self.mutate_personal_projection(|projection| {
+                    let mut changed = false;
+                    if projection.cart.cart != refreshed_cart {
+                        projection.cart.cart = refreshed_cart.clone();
+                        changed = true;
+                    }
+                    if projection.cart.checkout != refreshed_checkout {
+                        projection.cart.checkout = refreshed_checkout.clone();
+                        changed = true;
+                    }
+                    if projection.orders.list != refreshed_orders {
+                        projection.orders.list = refreshed_orders.clone();
+                        changed = true;
+                    }
+                    if projection.orders.detail != refreshed_detail {
+                        projection.orders.detail = refreshed_detail.clone();
+                        changed = true;
+                    }
+
+                    changed
+                });
+                let section_changed = self.select_personal_section(PersonalSection::Cart);
+
+                Ok(personal_changed || section_changed)
+            }
+            BuyerRepeatDemandApplyOutcome::ConfirmationRequired(replace_confirmation) => {
+                Ok(self.mutate_personal_projection(|projection| {
+                    let cart = &mut projection.cart.cart;
+                    if cart.replace_confirmation.as_ref() == Some(&replace_confirmation) {
+                        return false;
+                    }
+
+                    cart.replace_confirmation = Some(replace_confirmation);
+                    true
+                }))
+            }
+            BuyerRepeatDemandApplyOutcome::Unavailable => Ok(false),
+        }
     }
 
     fn set_personal_search_query(&mut self, search_query: &str) -> Result<bool, AppSqliteError> {
@@ -6077,6 +6148,143 @@ mod tests {
                 .order_id,
             order_id
         );
+    }
+
+    #[test]
+    fn runtime_repeat_personal_order_readds_only_currently_eligible_items() {
+        let runtime = memory_runtime();
+        let (account_id, farm_id) = provision_ready_farmer_account(&runtime);
+        assert!(
+            runtime
+                .select_active_surface(ActiveSurface::Personal)
+                .expect("surface should switch into marketplace")
+        );
+        let fulfillment_window_id = seed_buyer_marketplace_support(
+            &runtime,
+            account_id.as_str(),
+            farm_id,
+            "North field farm",
+            "Friday pickup",
+        );
+        let available_product_id = seed_product(
+            &runtime,
+            farm_id,
+            "Salad mix",
+            "Spring blend",
+            "published",
+            Some(8),
+            "2026-04-20T09:00:00Z",
+        );
+        let unavailable_product_id = seed_product(
+            &runtime,
+            farm_id,
+            "Pea shoots",
+            "Tray-grown",
+            "published",
+            Some(6),
+            "2026-04-20T10:00:00Z",
+        );
+        runtime
+            .lock_state()
+            .sqlite_store
+            .as_ref()
+            .expect("sqlite store")
+            .connection()
+            .execute_batch(&format!(
+                "update products
+                 set availability_window_id = '{fulfillment_window_id}'
+                 where id in ('{available_product_id}', '{unavailable_product_id}')"
+            ))
+            .expect("buyer detail products should attach a fulfillment window");
+        assert!(
+            runtime
+                .open_personal_product_detail(PersonalSection::Browse, available_product_id)
+                .expect("available buyer detail should open")
+        );
+        assert!(
+            runtime
+                .add_personal_product_to_cart(PersonalSection::Browse, false)
+                .expect("available buyer product should add to cart")
+        );
+        assert!(
+            runtime
+                .open_personal_product_detail(PersonalSection::Browse, unavailable_product_id)
+                .expect("unavailable buyer detail should open")
+        );
+        assert!(
+            runtime
+                .add_personal_product_to_cart(PersonalSection::Browse, false)
+                .expect("second buyer product should add to cart")
+        );
+        assert!(
+            runtime
+                .save_personal_checkout_draft(BuyerCheckoutDraft {
+                    name: "Casey Buyer".to_owned(),
+                    email: "casey@example.com".to_owned(),
+                    phone: String::new(),
+                    order_note: String::new(),
+                })
+                .expect("buyer checkout draft should save")
+        );
+        assert!(
+            runtime
+                .place_personal_order()
+                .expect("buyer order should place")
+        );
+        let order_id = runtime.summary().personal_projection.orders.list.rows[0].order_id;
+
+        runtime
+            .lock_state()
+            .sqlite_store
+            .as_ref()
+            .expect("sqlite store")
+            .connection()
+            .execute(
+                "update products set status = 'archived' where id = ?1",
+                [unavailable_product_id.to_string()],
+            )
+            .expect("product should archive");
+
+        assert!(
+            runtime
+                .open_personal_order_detail(order_id)
+                .expect("buyer order detail should reopen")
+        );
+        let detail_summary = runtime.summary();
+        let repeat_demand = detail_summary
+            .personal_projection
+            .orders
+            .detail
+            .as_ref()
+            .and_then(|detail| detail.repeat_demand.as_ref())
+            .expect("repeat demand should derive from buyer order detail");
+        assert_eq!(repeat_demand.eligibility.storage_key(), "partial");
+        assert_eq!(repeat_demand.available_item_count, 1);
+        assert_eq!(repeat_demand.unavailable_item_count, 1);
+
+        assert!(
+            runtime
+                .repeat_personal_order(order_id, false)
+                .expect("repeat demand should add available items to cart")
+        );
+
+        let summary = runtime.summary();
+        assert_eq!(
+            summary.shell_projection.selected_section,
+            ShellSection::Personal(PersonalSection::Cart)
+        );
+        assert_eq!(summary.personal_projection.cart.cart.lines.len(), 1);
+        assert_eq!(
+            summary.personal_projection.cart.cart.lines[0].product_id,
+            available_product_id
+        );
+        assert_eq!(summary.personal_projection.cart.cart.lines[0].quantity, 1);
+        assert!(summary
+            .personal_projection
+            .cart
+            .cart
+            .replace_confirmation
+            .is_none());
     }
 
     #[test]

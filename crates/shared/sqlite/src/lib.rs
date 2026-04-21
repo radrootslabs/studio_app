@@ -35,7 +35,7 @@ pub use activation::AppActivationRepository;
 pub use activity::{
     APP_ACTIVITY_CONTEXT_LIMIT, APP_ACTIVITY_RETENTION_LIMIT, AppActivityRepository,
 };
-pub use buyer::AppBuyerRepository;
+pub use buyer::{AppBuyerRepository, BuyerRepeatDemandApplyOutcome};
 pub use error::AppSqliteError;
 pub use farm_rules::{AppFarmRulesRepository, derive_farm_rules_readiness};
 pub use farm_setup::AppFarmSetupRepository;
@@ -440,6 +440,16 @@ impl AppSqliteStore {
     ) -> Result<Option<BuyerOrderDetailProjection>, AppSqliteError> {
         self.buyer_repository()
             .load_buyer_order_detail(context, order_id)
+    }
+
+    pub fn apply_buyer_repeat_demand_to_cart(
+        &self,
+        context: &BuyerContext,
+        order_id: OrderId,
+        replace_existing: bool,
+    ) -> Result<BuyerRepeatDemandApplyOutcome, AppSqliteError> {
+        self.buyer_repository()
+            .apply_buyer_repeat_demand_to_cart(context, order_id, replace_existing)
     }
 
     pub fn enqueue_pending_sync_operation(

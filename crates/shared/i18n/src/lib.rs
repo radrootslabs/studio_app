@@ -400,6 +400,10 @@ mod tests {
             app_text(AppTextKey::PersonalOrdersDetailNoteLabel),
             "Order note"
         );
+        assert_eq!(
+            app_text(AppTextKey::PersonalOrdersRepeatDemandTitle),
+            "Reorder"
+        );
     }
 
     #[test]

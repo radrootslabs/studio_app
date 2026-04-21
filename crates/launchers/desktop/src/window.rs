@@ -25,7 +25,8 @@ use radroots_studio_app_models::{
     ProductListRow, ProductPricePresentation, ProductPublishBlocker, ProductStatus, ProductsFilter,
     ProductsListRow, ProductsSort, RecoveryKind, RecoveryState, ReminderDeadlineProjection,
     ReminderDeliveryState, ReminderId, ReminderLogEntryProjection, ReminderLogProjection,
-    ReminderSurface, ReminderUrgency, ShellSection, TodayAgendaProjection, TodaySetupTaskKind,
+    ReminderSurface, ReminderUrgency, RepeatDemandEligibility, ShellSection,
+    TodayAgendaProjection, TodaySetupTaskKind,
 };
 use radroots_studio_app_remote_signer::{
     RadrootsAppRemoteSignerApprovedSession, RadrootsAppRemoteSignerPendingPollOutcome,
@@ -1280,6 +1281,27 @@ impl HomeView {
                     error = %runtime_error,
                     order_id = %order_id,
                     "failed to open buyer order detail"
+                );
+            }
+        }
+    }
+
+    fn repeat_personal_order(
+        &mut self,
+        order_id: OrderId,
+        replace_existing: bool,
+        cx: &mut Context<Self>,
+    ) {
+        match self.runtime.repeat_personal_order(order_id, replace_existing) {
+            Ok(true) => cx.notify(),
+            Ok(false) => {}
+            Err(runtime_error) => {
+                error!(
+                    target: "buyer",
+                    event = "buyer.repeat_demand_failed",
+                    error = %runtime_error,
+                    order_id = %order_id,
+                    "failed to reorder buyer order"
                 );
             }
         }
@@ -2655,7 +2677,18 @@ impl HomeView {
                         orders
                             .detail
                             .as_ref()
-                            .map(buyer_order_detail_card)
+                            .map(|detail| {
+                                buyer_order_detail_card(
+                                    detail,
+                                    runtime
+                                        .personal_projection
+                                        .cart
+                                        .cart
+                                        .replace_confirmation
+                                        .as_ref(),
+                                    cx,
+                                )
+                            })
                             .unwrap_or_else(|| buyer_order_detail_empty_card().into_any_element()),
                     )
                     .into_any_element()
@@ -7779,7 +7812,15 @@ fn buyer_orders_list_entry(
     .into_any_element()
 }
 
-fn buyer_order_detail_card(detail: &BuyerOrderDetailProjection) -> AnyElement {
+fn buyer_order_detail_card(
+    detail: &BuyerOrderDetailProjection,
+    replace_confirmation: Option<&BuyerCartReplaceConfirmationProjection>,
+    cx: &mut Context<HomeView>,
+) -> AnyElement {
+    let repeat_confirmation =
+        replace_confirmation.filter(|confirmation| confirmation.incoming_farm_display_name
+            == detail.farm_display_name);
+
     home_card(
         app_shared_text(AppTextKey::PersonalOrdersDetailTitle),
         app_stack_v(APP_UI_THEME.shells.home_stack_gap_px)
@@ -7821,7 +7862,84 @@ fn buyer_order_detail_card(detail: &BuyerOrderDetailProjection) -> AnyElement {
                     .when(detail.items.is_empty(), |this| {
                         this.child(home_body_text(app_shared_text(AppTextKey::ValueNone)))
                     }),
-            )),
+            ))
+            .when_some(detail.repeat_demand.as_ref(), |this, repeat_demand| {
+                this.child(app_form_section(
+                    app_shared_text(AppTextKey::PersonalOrdersRepeatDemandTitle),
+                    app_stack_v(APP_UI_THEME.foundation.spacing.small_px)
+                        .w_full()
+                        .when_some(repeat_demand.note.clone(), |this, note| {
+                            this.child(home_body_text(note))
+                        })
+                        .when_some(repeat_confirmation, |this, replace_confirmation| {
+                            this.child(app_surface_panel(
+                                app_stack_v(APP_UI_THEME.foundation.spacing.small_px)
+                                    .w_full()
+                                    .p(px(APP_UI_THEME.shells.home_card_padding_px))
+                                    .child(app_text_label(app_shared_text(
+                                        AppTextKey::PersonalDetailReplaceCartTitle,
+                                    )))
+                                    .child(home_body_text(format!(
+                                        "{} {} {}.",
+                                        replace_confirmation.current_farm_display_name,
+                                        app_shared_text(
+                                            AppTextKey::PersonalDetailReplaceCartBody,
+                                        ),
+                                        replace_confirmation.incoming_farm_display_name,
+                                    )))
+                                    .child(
+                                        app_cluster(APP_UI_THEME.foundation.spacing.small_px)
+                                            .w_full()
+                                            .child(action_button_primary(
+                                                "buyer-order-confirm-replace",
+                                                app_shared_text(
+                                                    AppTextKey::PersonalDetailReplaceCartAction,
+                                                ),
+                                                cx.listener({
+                                                    let order_id = detail.order_id;
+                                                    move |this, _, _, cx| {
+                                                        this.repeat_personal_order(
+                                                            order_id, true, cx,
+                                                        )
+                                                    }
+                                                }),
+                                                cx,
+                                            ))
+                                            .child(action_button_compact(
+                                                "buyer-order-keep-current",
+                                                app_shared_text(
+                                                    AppTextKey::PersonalDetailKeepCurrentCartAction,
+                                                ),
+                                                cx.listener(|this, _, _, cx| {
+                                                    this.clear_personal_cart_replace_confirmation(
+                                                        cx,
+                                                    )
+                                                }),
+                                                cx,
+                                            )),
+                                    ),
+                            ))
+                        })
+                        .when(
+                            repeat_confirmation.is_none()
+                                && repeat_demand.eligibility
+                                    != RepeatDemandEligibility::Unavailable,
+                            |this| {
+                                this.child(action_button_primary(
+                                    "buyer-order-repeat-demand",
+                                    SharedString::from(repeat_demand.action_label.clone()),
+                                    cx.listener({
+                                        let order_id = detail.order_id;
+                                        move |this, _, _, cx| {
+                                            this.repeat_personal_order(order_id, false, cx)
+                                        }
+                                    }),
+                                    cx,
+                                ))
+                            },
+                        ),
+                ))
+            }),
     )
     .into_any_element()
 }

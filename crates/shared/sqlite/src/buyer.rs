@@ -1,18 +1,27 @@
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 use radroots_studio_app_models::{
-    BuyerCartLineProjection, BuyerCartProjection, BuyerCheckoutDraft, BuyerCheckoutProjection,
-    BuyerCheckoutSummaryProjection, BuyerContext, BuyerListingRow, BuyerListingsProjection,
-    BuyerOrderDetailProjection, BuyerOrderStatus, BuyerOrdersListRow, BuyerOrdersProjection,
-    BuyerProductDetailProjection, FarmId, FarmOrderMethod, FulfillmentWindowId, OrderDetailItemRow,
-    OrderId, OrderStatus, ProductAvailabilityState, ProductAvailabilitySummary, ProductId,
-    ProductPricePresentation, ProductStatus, ProductStockState, ProductStockSummary,
+    BuyerCartLineProjection, BuyerCartProjection, BuyerCartReplaceConfirmationProjection,
+    BuyerCheckoutDraft, BuyerCheckoutProjection, BuyerCheckoutSummaryProjection, BuyerContext,
+    BuyerListingRow, BuyerListingsProjection, BuyerOrderDetailProjection, BuyerOrderStatus,
+    BuyerOrdersListRow, BuyerOrdersProjection, BuyerProductDetailProjection, FarmId,
+    FarmOrderMethod, FulfillmentWindowId, OrderDetailItemRow, OrderId, OrderStatus, ProductId,
+    ProductAvailabilityState, ProductAvailabilitySummary, ProductPricePresentation, ProductStatus,
+    ProductStockState, ProductStockSummary, RepeatDemandEligibility,
+    RepeatDemandHandoffProjection,
 };
 use rusqlite::{Connection, OptionalExtension, params};
 
 use crate::AppSqliteError;
 
 const BUYER_LOW_STOCK_THRESHOLD: u32 = 3;
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum BuyerRepeatDemandApplyOutcome {
+    Applied,
+    ConfirmationRequired(BuyerCartReplaceConfirmationProjection),
+    Unavailable,
+}
 
 pub struct AppBuyerRepository<'a> {
     connection: &'a Connection,
@@ -397,6 +406,8 @@ impl<'a> AppBuyerRepository<'a> {
         &self,
         context: &BuyerContext,
     ) -> Result<BuyerOrdersProjection, AppSqliteError> {
+        let now_utc = self.current_utc_timestamp()?;
+        let visible_listings = self.visible_listing_records_by_id(&now_utc)?;
         let context_key = context.storage_key();
         let mut statement = self
             .connection
@@ -455,9 +466,15 @@ impl<'a> AppBuyerRepository<'a> {
             })?;
 
             orders.push(BuyerOrdersListRow {
-                order_id: parse_typed_id("orders.id", order_id)?,
-                farm_id: parse_typed_id("orders.farm_id", farm_id)?,
+                order_id: parse_typed_id("orders.id", order_id.clone())?,
+                farm_id: parse_typed_id("orders.farm_id", farm_id.clone())?,
                 order_number,
+                repeat_demand: self.build_repeat_demand_handoff(
+                    parse_typed_id("orders.id", order_id)?,
+                    parse_typed_id("orders.farm_id", farm_id)?,
+                    farm_display_name.as_str(),
+                    &visible_listings,
+                )?,
                 farm_display_name,
                 fulfillment_summary: format_fulfillment_summary(
                     fulfillment_label,
@@ -465,7 +482,6 @@ impl<'a> AppBuyerRepository<'a> {
                     fulfillment_ends_at,
                 ),
                 status: BuyerOrderStatus::from(parse_order_status("orders.status", status)?),
-                repeat_demand: None,
             });
         }
 
@@ -477,6 +493,8 @@ impl<'a> AppBuyerRepository<'a> {
         context: &BuyerContext,
         order_id: OrderId,
     ) -> Result<Option<BuyerOrderDetailProjection>, AppSqliteError> {
+        let now_utc = self.current_utc_timestamp()?;
+        let visible_listings = self.visible_listing_records_by_id(&now_utc)?;
         let context_key = context.storage_key();
         let record = self
             .connection
@@ -530,11 +548,13 @@ impl<'a> AppBuyerRepository<'a> {
                     fulfillment_starts_at,
                     fulfillment_ends_at,
                 )| {
+                    let order_id = parse_typed_id("orders.id", order_id)?;
+                    let farm_id = parse_typed_id("orders.farm_id", farm_id)?;
                     Ok(BuyerOrderDetailProjection {
-                        order_id: parse_typed_id("orders.id", order_id.clone())?,
-                        farm_id: parse_typed_id("orders.farm_id", farm_id)?,
+                        order_id,
+                        farm_id,
                         order_number,
-                        farm_display_name,
+                        farm_display_name: farm_display_name.clone(),
                         fulfillment_summary: format_fulfillment_summary(
                             fulfillment_label,
                             fulfillment_starts_at,
@@ -544,13 +564,84 @@ impl<'a> AppBuyerRepository<'a> {
                             "orders.status",
                             status,
                         )?),
-                        items: self.load_order_detail_items(order_id)?,
+                        items: self.load_order_detail_items(order_id.to_string())?,
                         order_note: empty_string_to_none(order_note),
-                        repeat_demand: None,
+                        repeat_demand: self.build_repeat_demand_handoff(
+                            order_id,
+                            farm_id,
+                            farm_display_name.as_str(),
+                            &visible_listings,
+                        )?,
                     })
                 },
             )
             .transpose()
+    }
+
+    pub fn apply_buyer_repeat_demand_to_cart(
+        &self,
+        context: &BuyerContext,
+        order_id: OrderId,
+        replace_existing: bool,
+    ) -> Result<BuyerRepeatDemandApplyOutcome, AppSqliteError> {
+        let Some((farm_id, farm_display_name)) = self.load_buyer_order_repeat_demand_header(
+            context,
+            order_id,
+        )?
+        else {
+            return Ok(BuyerRepeatDemandApplyOutcome::Unavailable);
+        };
+        let now_utc = self.current_utc_timestamp()?;
+        let visible_listings = self.visible_listing_records_by_id(&now_utc)?;
+        let Some(candidate) = self.build_repeat_demand_candidate(
+            order_id,
+            farm_id,
+            farm_display_name.as_str(),
+            &visible_listings,
+        )?
+        else {
+            return Ok(BuyerRepeatDemandApplyOutcome::Unavailable);
+        };
+        if candidate.available_lines.is_empty() {
+            return Ok(BuyerRepeatDemandApplyOutcome::Unavailable);
+        }
+
+        let current_cart = self.load_buyer_cart(context)?;
+        if !replace_existing
+            && !current_cart.is_empty()
+            && current_cart.farm_id != Some(candidate.farm_id)
+        {
+            let current_farm_display_name = current_cart
+                .farm_display_name
+                .clone()
+                .or_else(|| {
+                    current_cart
+                        .lines
+                        .first()
+                        .map(|line| line.farm_display_name.clone())
+                })
+                .ok_or(AppSqliteError::InvalidProjection {
+                    reason: "buyer cart farm display name is missing",
+                })?;
+
+            return Ok(BuyerRepeatDemandApplyOutcome::ConfirmationRequired(
+                BuyerCartReplaceConfirmationProjection {
+                    current_farm_display_name,
+                    incoming_farm_display_name: candidate.farm_display_name,
+                },
+            ));
+        }
+
+        let next_cart = next_buyer_cart_for_repeat_demand(
+            current_cart,
+            candidate.farm_id,
+            candidate.farm_display_name.as_str(),
+            &candidate.available_lines,
+            replace_existing,
+        )?;
+        self.replace_buyer_cart(context, &next_cart)?;
+
+        Ok(BuyerRepeatDemandApplyOutcome::Applied)
     }
 
     fn build_cart_projection(
@@ -991,6 +1082,168 @@ impl<'a> AppBuyerRepository<'a> {
             })
     }
 
+    fn load_repeat_demand_order_lines(
+        &self,
+        order_id: OrderId,
+    ) -> Result<Vec<RepeatDemandOrderLine>, AppSqliteError> {
+        let mut statement = self
+            .connection
+            .prepare(
+                "select id, quantity_value
+                 from order_lines
+                 where order_id = ?1
+                 order by sort_index asc, id asc",
+            )
+            .map_err(|source| AppSqliteError::Query {
+                operation: "prepare repeat demand order lines",
+                source,
+            })?;
+        let rows = statement
+            .query_map(params![order_id.to_string()], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
+            })
+            .map_err(|source| AppSqliteError::Query {
+                operation: "query repeat demand order lines",
+                source,
+            })?;
+        let mut order_lines = Vec::new();
+
+        for row in rows {
+            let (line_id, quantity_value) = row.map_err(|source| AppSqliteError::Query {
+                operation: "read repeat demand order lines",
+                source,
+            })?;
+            let product_id = parse_repeat_demand_product_id(line_id.as_str())?;
+            let quantity = u32::try_from(quantity_value).map_err(|_| {
+                AppSqliteError::InvalidProjection {
+                    reason: "repeat demand quantity must be non-negative",
+                }
+            })?;
+            if quantity == 0 {
+                return Err(AppSqliteError::InvalidProjection {
+                    reason: "repeat demand quantity must be positive",
+                });
+            }
+
+            order_lines.push(RepeatDemandOrderLine {
+                product_id,
+                quantity,
+            });
+        }
+
+        Ok(order_lines)
+    }
+
+    fn load_buyer_order_repeat_demand_header(
+        &self,
+        context: &BuyerContext,
+        order_id: OrderId,
+    ) -> Result<Option<(FarmId, String)>, AppSqliteError> {
+        let context_key = context.storage_key();
+
+        self.connection
+            .query_row(
+                "select o.farm_id, f.display_name
+                 from orders o
+                 inner join farms f on f.id = o.farm_id
+                 where o.buyer_context_key = ?1 and o.id = ?2
+                 limit 1",
+                params![context_key.as_str(), order_id.to_string()],
+                |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
+            )
+            .optional()
+            .map_err(|source| AppSqliteError::Query {
+                operation: "load buyer repeat demand header",
+                source,
+            })?
+            .map(|(farm_id, farm_display_name)| {
+                Ok((
+                    parse_typed_id("orders.farm_id", farm_id)?,
+                    farm_display_name,
+                ))
+            })
+            .transpose()
+    }
+
+    fn visible_listing_records_by_id(
+        &self,
+        now_utc: &str,
+    ) -> Result<BTreeMap<ProductId, BuyerListingRecord>, AppSqliteError> {
+        Ok(self
+            .load_listing_records()?
+            .into_iter()
+            .filter(|record| record.is_buyer_visible(now_utc))
+            .map(|record| (record.product_id, record))
+            .collect())
+    }
+
+    fn build_repeat_demand_handoff(
+        &self,
+        order_id: OrderId,
+        farm_id: FarmId,
+        farm_display_name: &str,
+        visible_listings: &BTreeMap<ProductId, BuyerListingRecord>,
+    ) -> Result<Option<RepeatDemandHandoffProjection>, AppSqliteError> {
+        Ok(self
+            .build_repeat_demand_candidate(order_id, farm_id, farm_display_name, visible_listings)?
+            .map(|candidate| candidate.handoff))
+    }
+
+    fn build_repeat_demand_candidate(
+        &self,
+        order_id: OrderId,
+        farm_id: FarmId,
+        farm_display_name: &str,
+        visible_listings: &BTreeMap<ProductId, BuyerListingRecord>,
+    ) -> Result<Option<RepeatDemandCandidate>, AppSqliteError> {
+        let order_lines = self.load_repeat_demand_order_lines(order_id)?;
+        if order_lines.is_empty() {
+            return Ok(None);
+        }
+
+        let mut available_lines = Vec::new();
+        let mut unavailable_item_count = 0u32;
+
+        for order_line in &order_lines {
+            if let Some(listing) = visible_listings.get(&order_line.product_id).cloned() {
+                available_lines.push(BuyerCartLineRecord {
+                    listing,
+                    quantity: order_line.quantity,
+                });
+            } else {
+                unavailable_item_count = unavailable_item_count.checked_add(1).ok_or(
+                    AppSqliteError::InvalidProjection {
+                        reason: "repeat demand unavailable count overflowed",
+                    },
+                )?;
+            }
+        }
+
+        let available_item_count = available_lines.len() as u32;
+        let eligibility = if available_item_count == 0 {
+            RepeatDemandEligibility::Unavailable
+        } else if unavailable_item_count == 0 {
+            RepeatDemandEligibility::Eligible
+        } else {
+            RepeatDemandEligibility::Partial
+        };
+
+        Ok(Some(RepeatDemandCandidate {
+            farm_id,
+            farm_display_name: farm_display_name.to_owned(),
+            available_lines,
+            handoff: RepeatDemandHandoffProjection {
+                order_id,
+                farm_id,
+                eligibility,
+                available_item_count,
+                unavailable_item_count,
+                action_label: repeat_demand_action_label(eligibility),
+                note: repeat_demand_note(available_item_count, unavailable_item_count),
+            },
+        }))
+    }
+
     fn load_farm_display_name(&self, farm_id: FarmId) -> Result<Option<String>, AppSqliteError> {
         self.connection
             .query_row(
@@ -1257,6 +1510,20 @@ impl BuyerCartLineRecord {
     }
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct RepeatDemandOrderLine {
+    product_id: ProductId,
+    quantity: u32,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct RepeatDemandCandidate {
+    farm_id: FarmId,
+    farm_display_name: String,
+    available_lines: Vec<BuyerCartLineRecord>,
+    handoff: RepeatDemandHandoffProjection,
+}
+
 fn validate_cart_projection(cart: &BuyerCartProjection) -> Result<(), AppSqliteError> {
     if cart.lines.is_empty() {
         return Ok(());
@@ -1278,6 +1545,116 @@ fn validate_cart_projection(cart: &BuyerCartProjection) -> Result<(), AppSqliteE
             });
         }
     }
+
+    Ok(())
+}
+
+fn next_buyer_cart_for_repeat_demand(
+    mut current_cart: BuyerCartProjection,
+    farm_id: FarmId,
+    farm_display_name: &str,
+    lines: &[BuyerCartLineRecord],
+    replace_existing: bool,
+) -> Result<BuyerCartProjection, AppSqliteError> {
+    if replace_existing || current_cart.is_empty() || current_cart.farm_id != Some(farm_id) {
+        current_cart.lines.clear();
+    }
+
+    current_cart.farm_id = Some(farm_id);
+    current_cart.farm_display_name = Some(farm_display_name.to_owned());
+    current_cart.replace_confirmation = None;
+
+    for line in lines {
+        let incoming_line = line.clone().into_projection()?;
+
+        if let Some(existing_line) = current_cart
+            .lines
+            .iter_mut()
+            .find(|existing| existing.product_id == incoming_line.product_id)
+        {
+            existing_line.quantity = existing_line
+                .quantity
+                .checked_add(incoming_line.quantity)
+                .ok_or(AppSqliteError::InvalidProjection {
+                    reason: "buyer cart quantity overflow",
+                })?;
+            existing_line.line_total_minor_units = existing_line
+                .unit_price
+                .amount_minor_units
+                .checked_mul(existing_line.quantity)
+                .ok_or(AppSqliteError::InvalidProjection {
+                    reason: "buyer cart line total overflow",
+                })?;
+            existing_line.fulfillment_summary = incoming_line.fulfillment_summary.clone();
+            continue;
+        }
+
+        current_cart.lines.push(incoming_line);
+    }
+
+    refresh_buyer_cart_summary(&mut current_cart)?;
+
+    Ok(current_cart)
+}
+
+fn parse_repeat_demand_product_id(line_id: &str) -> Result<ProductId, AppSqliteError> {
+    let Some((_, product_id)) = line_id.rsplit_once(':') else {
+        return Err(AppSqliteError::InvalidProjection {
+            reason: "repeat demand order line is missing a product id",
+        });
+    };
+
+    parse_typed_id("order_lines.id", product_id.to_owned())
+}
+
+fn repeat_demand_action_label(eligibility: RepeatDemandEligibility) -> String {
+    match eligibility {
+        RepeatDemandEligibility::Eligible => "Reorder".to_owned(),
+        RepeatDemandEligibility::Partial => "Reorder available items".to_owned(),
+        RepeatDemandEligibility::Unavailable => "Unavailable".to_owned(),
+    }
+}
+
+fn repeat_demand_note(
+    available_item_count: u32,
+    unavailable_item_count: u32,
+) -> Option<String> {
+    match (available_item_count, unavailable_item_count) {
+        (0, 0) => None,
+        (_, 0) => Some("All items from this order are currently available.".to_owned()),
+        (0, _) => Some("The items from this order are no longer available.".to_owned()),
+        (_, unavailable) if unavailable == 1 => {
+            Some("One item from this order is no longer available.".to_owned())
+        }
+        (_, unavailable) => Some(format!(
+            "{unavailable} items from this order are no longer available."
+        )),
+    }
+}
+
+fn refresh_buyer_cart_summary(cart: &mut BuyerCartProjection) -> Result<(), AppSqliteError> {
+    if cart.lines.is_empty() {
+        cart.subtotal_minor_units = None;
+        cart.currency_code = None;
+        cart.replace_confirmation = None;
+        return Ok(());
+    }
+
+    let mut subtotal_minor_units = 0_u32;
+    let mut currency_code = None;
+
+    for line in &cart.lines {
+        subtotal_minor_units = subtotal_minor_units
+            .checked_add(line.line_total_minor_units)
+            .ok_or(AppSqliteError::InvalidProjection {
+                reason: "buyer cart subtotal overflowed",
+            })?;
+        currency_code
+            .get_or_insert_with(|| line.unit_price.currency_code.clone());
+    }
+
+    cart.subtotal_minor_units = Some(subtotal_minor_units);
+    cart.currency_code = Some(currency_code.unwrap_or_default());
 
     Ok(())
 }
@@ -1687,6 +2064,150 @@ mod tests {
         assert_eq!(row_count(connection, "local_outbox"), 0);
         assert_eq!(row_count(connection, "local_conflicts"), 0);
         assert_eq!(row_count(connection, "sync_checkpoints"), 0);
+    }
+
+    #[test]
+    fn buyer_order_history_derives_repeat_demand_from_current_listing_truth() {
+        let store = AppSqliteStore::open(DatabaseTarget::InMemory).expect("store should open");
+        let connection = store.connection();
+        let repository = AppBuyerRepository::new(connection);
+        let context = BuyerContext::Guest;
+        let farm_id = insert_farm(connection, "Willow Farm", "ready");
+        let pickup_location_id = insert_pickup_location(connection, farm_id, "Barn pickup");
+        let future_window_id = insert_window(
+            connection,
+            farm_id,
+            Some(pickup_location_id),
+            "Friday pickup",
+            "2099-04-18T16:00:00Z",
+            "2099-04-18T18:00:00Z",
+        );
+
+        insert_farm_setup_binding(connection, "acct_farmer", farm_id, true, false, false);
+        let available_product_id = insert_product(
+            connection,
+            farm_id,
+            SeedProduct {
+                title: "Salad mix",
+                subtitle: "Spring blend",
+                status: "published",
+                unit_label: "bag",
+                price_minor_units: Some(650),
+                price_currency: "USD",
+                stock_count: Some(8),
+                availability_window_id: Some(future_window_id),
+            },
+        );
+        let unavailable_product_id = insert_product(
+            connection,
+            farm_id,
+            SeedProduct {
+                title: "Pea shoots",
+                subtitle: "Tray-grown",
+                status: "published",
+                unit_label: "bag",
+                price_minor_units: Some(450),
+                price_currency: "USD",
+                stock_count: Some(4),
+                availability_window_id: Some(future_window_id),
+            },
+        );
+        let available_listing = repository
+            .load_buyer_product_detail(available_product_id)
+            .expect("available buyer detail should load")
+            .expect("available listing should exist")
+            .listing;
+        let unavailable_listing = repository
+            .load_buyer_product_detail(unavailable_product_id)
+            .expect("unavailable buyer detail should load")
+            .expect("unavailable listing should exist")
+            .listing;
+
+        repository
+            .replace_buyer_cart(
+                &context,
+                &radroots_studio_app_models::BuyerCartProjection {
+                    farm_id: Some(farm_id),
+                    farm_display_name: Some("Willow Farm".to_owned()),
+                    lines: vec![
+                        radroots_studio_app_models::BuyerCartLineProjection {
+                            product_id: available_listing.product_id,
+                            farm_id: available_listing.farm_id,
+                            farm_display_name: available_listing.farm_display_name.clone(),
+                            title: available_listing.title.clone(),
+                            quantity: 2,
+                            unit_price: available_listing.price.clone(),
+                            line_total_minor_units: 1300,
+                            fulfillment_summary: "Friday pickup".to_owned(),
+                        },
+                        radroots_studio_app_models::BuyerCartLineProjection {
+                            product_id: unavailable_listing.product_id,
+                            farm_id: unavailable_listing.farm_id,
+                            farm_display_name: unavailable_listing.farm_display_name.clone(),
+                            title: unavailable_listing.title.clone(),
+                            quantity: 1,
+                            unit_price: unavailable_listing.price.clone(),
+                            line_total_minor_units: 450,
+                            fulfillment_summary: "Friday pickup".to_owned(),
+                        },
+                    ],
+                    subtotal_minor_units: Some(1750),
+                    currency_code: Some("USD".to_owned()),
+                    replace_confirmation: None,
+                },
+            )
+            .expect("buyer cart should save");
+        repository
+            .save_buyer_checkout_draft(
+                &context,
+                &radroots_studio_app_models::BuyerCheckoutDraft {
+                    name: "Casey Buyer".to_owned(),
+                    email: "casey@example.com".to_owned(),
+                    phone: String::new(),
+                    order_note: String::new(),
+                },
+            )
+            .expect("buyer checkout draft should save");
+        let order_id = repository
+            .place_buyer_order(&context)
+            .expect("buyer checkout should place order");
+
+        connection
+            .execute(
+                "update products set status = 'archived' where id = ?1",
+                params![unavailable_product_id.to_string()],
+            )
+            .expect("product should archive");
+
+        let buyer_orders = repository
+            .load_buyer_orders(&context)
+            .expect("buyer orders should load");
+        let buyer_order_detail = repository
+            .load_buyer_order_detail(&context, order_id)
+            .expect("buyer order detail should load")
+            .expect("buyer order detail should exist");
+        let row_repeat_demand = buyer_orders.rows[0]
+            .repeat_demand
+            .as_ref()
+            .expect("repeat demand should derive for buyer order row");
+        let detail_repeat_demand = buyer_order_detail
+            .repeat_demand
+            .as_ref()
+            .expect("repeat demand should derive for buyer order detail");
+
+        assert_eq!(buyer_orders.rows.len(), 1);
+        assert_eq!(
+            row_repeat_demand.eligibility,
+            radroots_studio_app_models::RepeatDemandEligibility::Partial
+        );
+        assert_eq!(row_repeat_demand.available_item_count, 1);
+        assert_eq!(row_repeat_demand.unavailable_item_count, 1);
+        assert_eq!(row_repeat_demand.action_label, "Reorder available items");
+        assert_eq!(
+            row_repeat_demand.note.as_deref(),
+            Some("One item from this order is no longer available.")
+        );
+        assert_eq!(detail_repeat_demand, row_repeat_demand);
     }
 
     #[test]

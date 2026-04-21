@@ -120,6 +120,7 @@ define_app_text_keys! {
     PersonalOrdersDetailFulfillmentLabel => "personal.orders.detail.fulfillment.label",
     PersonalOrdersDetailNoteLabel => "personal.orders.detail.note.label",
     PersonalOrdersDetailItemsTitle => "personal.orders.detail.items.title",
+    PersonalOrdersRepeatDemandTitle => "personal.orders.repeat_demand.title",
     PersonalOrdersStatusPlaced => "personal.orders.status.placed",
     PersonalOrdersStatusScheduled => "personal.orders.status.scheduled",
     PersonalOrdersStatusReady => "personal.orders.status.ready",
