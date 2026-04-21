@@ -1,7 +1,7 @@
 use gpui::{
-    Animation, AnimationExt, AnyElement, App, AppContext, Bounds, ClickEvent, Context, Entity,
-    InteractiveElement, IntoElement, ParentElement, Render, SharedString, Styled, Subscription,
-    Timer, Window, WindowBackgroundAppearance, WindowBounds, WindowOptions, div,
+    Animation, AnimationExt, AnyElement, App, AppContext, Bounds, ClickEvent, Context, ElementId,
+    Entity, InteractiveElement, IntoElement, ParentElement, Render, SharedString, Styled,
+    Subscription, Timer, Window, WindowBackgroundAppearance, WindowBounds, WindowOptions, div,
     prelude::FluentBuilder, px, relative, rgb, size,
 };
 use gpui_component::{
@@ -235,6 +235,51 @@ struct StartupSignerPollCycleResult {
     outcome: Result<RadrootsAppRemoteSignerPendingPollOutcome, String>,
 }
 
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+struct HomeAutoFocusState {
+    has_startup_signer_input: bool,
+    startup_signer_input_is_editable: bool,
+    has_farm_setup_form: bool,
+    has_personal_search_input: bool,
+    has_buyer_checkout_form: bool,
+    has_products_search_input: bool,
+    has_products_stock_editor: bool,
+    has_product_editor_form: bool,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum HomeAutoFocusTarget {
+    StartupContinue,
+    StartupGenerateKey,
+    StartupSignerInput,
+    StartupSignerBack,
+    BuyerSearchInput,
+    BuyerListingOpenFirst,
+    BuyerDetailBack,
+    BuyerCartOpenCheckout,
+    BuyerCheckoutNameInput,
+    BuyerOrderOpenFirst,
+    BuyerOrderConfirmReplace,
+    BuyerOrderRepeatDemand,
+    FarmerReminderPrimary,
+    FarmerReminderDismiss,
+    FarmerSetupStart,
+    FarmerSetupContinue,
+    FarmerSetupFarmNameInput,
+    FarmerTodayReminderChipFirst,
+    FarmerTodayOpenPackDay,
+    FarmerTodayOpenOrders,
+    FarmerTodayOpenProductsLowStock,
+    FarmerTodayOpenProductsDrafts,
+    ProductsSearchInput,
+    ProductsRowOpenFirst,
+    ProductsStockInput,
+    ProductEditorTitleInput,
+    OrdersRowOpenFirst,
+    OrdersDetailMarkPacked,
+    OrdersDetailMarkCompleted,
+}
+
 impl HomeView {
     pub fn new(runtime: DesktopAppRuntime) -> Self {
         Self {
@@ -252,6 +297,150 @@ impl HomeView {
             product_editor_form: None,
             relay_client: None,
         }
+    }
+
+    fn auto_focus_state(&self) -> HomeAutoFocusState {
+        HomeAutoFocusState {
+            has_startup_signer_input: self.startup_signer_entry.is_some(),
+            startup_signer_input_is_editable: startup_signer_source_input_is_editable(
+                &self.startup_signer_connect_state,
+            ),
+            has_farm_setup_form: self.farm_setup_form.is_some(),
+            has_personal_search_input: self.personal_search.is_some(),
+            has_buyer_checkout_form: self.buyer_checkout_form.is_some(),
+            has_products_search_input: self.products_search.is_some(),
+            has_products_stock_editor: self.products_stock_editor.is_some(),
+            has_product_editor_form: self.product_editor_form.is_some(),
+        }
+    }
+
+    fn apply_auto_focus(
+        &mut self,
+        runtime: &DesktopAppRuntimeSummary,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let desired_target = home_auto_focus_target(runtime, self.auto_focus_state());
+        let focus_state = window.use_state(cx, |_, _| Option::<HomeAutoFocusTarget>::None);
+        let should_focus = {
+            let last_target = focus_state.read(cx);
+            last_target.as_ref().copied() != desired_target
+        };
+
+        if !should_focus {
+            return;
+        }
+
+        if let Some(target) = desired_target {
+            match target {
+                HomeAutoFocusTarget::StartupContinue => {
+                    focus_button(window, "home-continue", cx);
+                }
+                HomeAutoFocusTarget::StartupGenerateKey => {
+                    focus_button(window, "home-generate-key", cx);
+                }
+                HomeAutoFocusTarget::StartupSignerInput => {
+                    if let Some(entry) = self.startup_signer_entry.as_ref() {
+                        entry.input.update(cx, |input, cx| input.focus(window, cx));
+                    }
+                }
+                HomeAutoFocusTarget::StartupSignerBack => {
+                    focus_button(window, "home-signer-back", cx);
+                }
+                HomeAutoFocusTarget::BuyerSearchInput => {
+                    if let Some(search) = self.personal_search.as_ref() {
+                        search.input.update(cx, |input, cx| input.focus(window, cx));
+                    }
+                }
+                HomeAutoFocusTarget::BuyerListingOpenFirst => {
+                    focus_button(window, ("buyer-listing-open", 0_usize), cx);
+                }
+                HomeAutoFocusTarget::BuyerDetailBack => {
+                    focus_button(window, "buyer-detail-back", cx);
+                }
+                HomeAutoFocusTarget::BuyerCartOpenCheckout => {
+                    focus_button(window, "buyer-cart-open-checkout", cx);
+                }
+                HomeAutoFocusTarget::BuyerCheckoutNameInput => {
+                    if let Some(form) = self.buyer_checkout_form.as_ref() {
+                        form.name_input
+                            .update(cx, |input, cx| input.focus(window, cx));
+                    }
+                }
+                HomeAutoFocusTarget::BuyerOrderOpenFirst => {
+                    focus_button(window, ("buyer-order-open", 0_usize), cx);
+                }
+                HomeAutoFocusTarget::BuyerOrderConfirmReplace => {
+                    focus_button(window, "buyer-order-confirm-replace", cx);
+                }
+                HomeAutoFocusTarget::BuyerOrderRepeatDemand => {
+                    focus_button(window, "buyer-order-repeat-demand", cx);
+                }
+                HomeAutoFocusTarget::FarmerReminderPrimary => {
+                    focus_button(window, "reminder-banner-action", cx);
+                }
+                HomeAutoFocusTarget::FarmerReminderDismiss => {
+                    focus_button(window, "reminder-banner-dismiss", cx);
+                }
+                HomeAutoFocusTarget::FarmerSetupStart => {
+                    focus_button(window, "home-farm-setup-start", cx);
+                }
+                HomeAutoFocusTarget::FarmerSetupContinue => {
+                    focus_button(window, "home-farm-setup-continue", cx);
+                }
+                HomeAutoFocusTarget::FarmerSetupFarmNameInput => {
+                    if let Some(form) = self.farm_setup_form.as_ref() {
+                        form.farm_name_input
+                            .update(cx, |input, cx| input.focus(window, cx));
+                    }
+                }
+                HomeAutoFocusTarget::FarmerTodayReminderChipFirst => {
+                    focus_button(window, ("today-reminder-chip", 0_usize), cx);
+                }
+                HomeAutoFocusTarget::FarmerTodayOpenPackDay => {
+                    focus_button(window, "home-today-open-pack-day", cx);
+                }
+                HomeAutoFocusTarget::FarmerTodayOpenOrders => {
+                    focus_button(window, "home-today-open-orders", cx);
+                }
+                HomeAutoFocusTarget::FarmerTodayOpenProductsLowStock => {
+                    focus_button(window, "home-today-open-products-low-stock", cx);
+                }
+                HomeAutoFocusTarget::FarmerTodayOpenProductsDrafts => {
+                    focus_button(window, "home-today-open-products-drafts", cx);
+                }
+                HomeAutoFocusTarget::ProductsSearchInput => {
+                    if let Some(search) = self.products_search.as_ref() {
+                        search.input.update(cx, |input, cx| input.focus(window, cx));
+                    }
+                }
+                HomeAutoFocusTarget::ProductsRowOpenFirst => {
+                    focus_button(window, ("products-row-open", 0_usize), cx);
+                }
+                HomeAutoFocusTarget::ProductsStockInput => {
+                    if let Some(editor) = self.products_stock_editor.as_ref() {
+                        editor.input.update(cx, |input, cx| input.focus(window, cx));
+                    }
+                }
+                HomeAutoFocusTarget::ProductEditorTitleInput => {
+                    if let Some(form) = self.product_editor_form.as_ref() {
+                        form.title_input
+                            .update(cx, |input, cx| input.focus(window, cx));
+                    }
+                }
+                HomeAutoFocusTarget::OrdersRowOpenFirst => {
+                    focus_button(window, ("orders-row-open", 0_usize), cx);
+                }
+                HomeAutoFocusTarget::OrdersDetailMarkPacked => {
+                    focus_button(window, "orders-detail-mark-packed", cx);
+                }
+                HomeAutoFocusTarget::OrdersDetailMarkCompleted => {
+                    focus_button(window, "orders-detail-mark-completed", cx);
+                }
+            }
+        }
+
+        focus_state.update(cx, |last_target, _| *last_target = desired_target);
     }
 
     fn generate_local_account(&mut self, cx: &mut Context<Self>) -> bool {
@@ -3948,6 +4137,7 @@ impl Render for HomeView {
         self.sync_products_search(&runtime_summary, window, cx);
         self.sync_products_stock_editor(&runtime_summary);
         self.sync_product_editor_form(&runtime_summary, window, cx);
+        self.apply_auto_focus(&runtime_summary, window, cx);
         match home_stage(&runtime_summary) {
             HomeStage::Setup => self
                 .startup_view
@@ -5381,6 +5571,15 @@ pub struct SettingsWindowView {
     about_panel_notice: Option<String>,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum SettingsAutoFocusTarget {
+    Navigation(SettingsPanelViewKey),
+    AccountAdd,
+    FarmNameInput,
+    SettingsAllowRelayConnections,
+    AboutRefresh,
+}
+
 impl SettingsWindowView {
     pub fn new(runtime: DesktopAppRuntime, initial_view: SettingsPanelViewKey) -> Self {
         let _ = initial_view;
@@ -6585,6 +6784,50 @@ impl SettingsWindowView {
             SettingsPanelViewKey::About => self.about_panel(cx).into_any_element(),
         }
     }
+
+    fn apply_auto_focus(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let runtime = self.runtime.summary();
+        let desired_target = settings_auto_focus_target(
+            self.selected_view(),
+            self.farm_panel_state.as_ref(),
+            &runtime,
+        );
+        let focus_state = window.use_state(cx, |_, _| Option::<SettingsAutoFocusTarget>::None);
+        let should_focus = {
+            let last_target = focus_state.read(cx);
+            last_target.as_ref().copied() != desired_target
+        };
+
+        if !should_focus {
+            return;
+        }
+
+        if let Some(target) = desired_target {
+            match target {
+                SettingsAutoFocusTarget::Navigation(view) => {
+                    let (navigation_id, _) = settings_panel_spec(view);
+                    focus_button(window, navigation_id, cx);
+                }
+                SettingsAutoFocusTarget::AccountAdd => {
+                    focus_button(window, "account-add", cx);
+                }
+                SettingsAutoFocusTarget::FarmNameInput => {
+                    if let Some(form) = self.farm_panel_state.as_ref() {
+                        form.farm_name_input
+                            .update(cx, |input, cx| input.focus(window, cx));
+                    }
+                }
+                SettingsAutoFocusTarget::SettingsAllowRelayConnections => {
+                    focus_button(window, "settings-allow-relay-connections", cx);
+                }
+                SettingsAutoFocusTarget::AboutRefresh => {
+                    focus_button(window, "settings-about-refresh-sync", cx);
+                }
+            }
+        }
+
+        focus_state.update(cx, |last_target, _| *last_target = desired_target);
+    }
 }
 
 fn about_status_rows(runtime: &DesktopAppRuntimeSummary) -> Vec<LabelValueRow> {
@@ -6854,6 +7097,234 @@ fn path_or_none(path: Option<&PathBuf>) -> String {
         .unwrap_or_else(|| app_text(AppTextKey::ValueNone))
 }
 
+fn focus_button<V>(window: &mut Window, id: impl Into<ElementId>, cx: &mut Context<V>) {
+    let focus_handle = window
+        .use_keyed_state(id, cx, |_, cx| cx.focus_handle())
+        .read(cx)
+        .clone();
+    focus_handle.focus(window);
+}
+
+fn home_auto_focus_target(
+    runtime: &DesktopAppRuntimeSummary,
+    state: HomeAutoFocusState,
+) -> Option<HomeAutoFocusTarget> {
+    match home_stage(runtime) {
+        HomeStage::Setup => startup_auto_focus_target(runtime, state),
+        HomeStage::BuyerWorkspace => buyer_auto_focus_target(runtime, state),
+        HomeStage::FarmerWorkspace => farmer_auto_focus_target(runtime, state),
+    }
+}
+
+fn startup_auto_focus_target(
+    runtime: &DesktopAppRuntimeSummary,
+    state: HomeAutoFocusState,
+) -> Option<HomeAutoFocusTarget> {
+    match startup_home_surface(runtime) {
+        StartupHomeSurface::ContinuePrompt => Some(HomeAutoFocusTarget::StartupContinue),
+        StartupHomeSurface::IdentityChoice => Some(HomeAutoFocusTarget::StartupGenerateKey),
+        StartupHomeSurface::GenerateKeyStarting | StartupHomeSurface::IssueCard => None,
+        StartupHomeSurface::SignerEntry => {
+            if state.has_startup_signer_input && state.startup_signer_input_is_editable {
+                Some(HomeAutoFocusTarget::StartupSignerInput)
+            } else {
+                Some(HomeAutoFocusTarget::StartupSignerBack)
+            }
+        }
+    }
+}
+
+fn buyer_auto_focus_target(
+    runtime: &DesktopAppRuntimeSummary,
+    state: HomeAutoFocusState,
+) -> Option<HomeAutoFocusTarget> {
+    match selected_personal_section(runtime) {
+        PersonalSection::Browse => {
+            if runtime.personal_projection.browse.detail.is_some() {
+                Some(HomeAutoFocusTarget::BuyerDetailBack)
+            } else if !runtime.personal_projection.browse.listings.rows.is_empty() {
+                Some(HomeAutoFocusTarget::BuyerListingOpenFirst)
+            } else {
+                None
+            }
+        }
+        PersonalSection::Search => {
+            if runtime.personal_projection.search.detail.is_some() {
+                Some(HomeAutoFocusTarget::BuyerDetailBack)
+            } else if state.has_personal_search_input {
+                Some(HomeAutoFocusTarget::BuyerSearchInput)
+            } else if !runtime.personal_projection.search.listings.rows.is_empty() {
+                Some(HomeAutoFocusTarget::BuyerListingOpenFirst)
+            } else {
+                None
+            }
+        }
+        PersonalSection::Cart => {
+            if state.has_buyer_checkout_form {
+                Some(HomeAutoFocusTarget::BuyerCheckoutNameInput)
+            } else if !runtime.personal_projection.cart.cart.lines.is_empty() {
+                Some(HomeAutoFocusTarget::BuyerCartOpenCheckout)
+            } else {
+                None
+            }
+        }
+        PersonalSection::Orders => {
+            if let Some(detail) = runtime.personal_projection.orders.detail.as_ref() {
+                let replace_confirmation = runtime
+                    .personal_projection
+                    .cart
+                    .cart
+                    .replace_confirmation
+                    .as_ref()
+                    .is_some_and(|confirmation| {
+                        confirmation.incoming_farm_display_name == detail.farm_display_name
+                    });
+                if replace_confirmation {
+                    Some(HomeAutoFocusTarget::BuyerOrderConfirmReplace)
+                } else if detail.repeat_demand.as_ref().is_some_and(|repeat_demand| {
+                    repeat_demand.eligibility != RepeatDemandEligibility::Unavailable
+                }) {
+                    Some(HomeAutoFocusTarget::BuyerOrderRepeatDemand)
+                } else if !runtime.personal_projection.orders.list.rows.is_empty() {
+                    Some(HomeAutoFocusTarget::BuyerOrderOpenFirst)
+                } else {
+                    None
+                }
+            } else if !runtime.personal_projection.orders.list.rows.is_empty() {
+                Some(HomeAutoFocusTarget::BuyerOrderOpenFirst)
+            } else {
+                None
+            }
+        }
+    }
+}
+
+fn farmer_auto_focus_target(
+    runtime: &DesktopAppRuntimeSummary,
+    state: HomeAutoFocusState,
+) -> Option<HomeAutoFocusTarget> {
+    if let Some(reminder) = presented_farmer_reminder(runtime) {
+        if reminder.action_label.is_some() {
+            return Some(HomeAutoFocusTarget::FarmerReminderPrimary);
+        }
+        return Some(HomeAutoFocusTarget::FarmerReminderDismiss);
+    }
+
+    match selected_farmer_section(runtime) {
+        FarmerSection::Today | FarmerSection::Farm => today_auto_focus_target(runtime, state),
+        FarmerSection::Products if farmer_products_available(runtime) => {
+            if state.has_product_editor_form {
+                Some(HomeAutoFocusTarget::ProductEditorTitleInput)
+            } else if state.has_products_stock_editor {
+                Some(HomeAutoFocusTarget::ProductsStockInput)
+            } else if state.has_products_search_input {
+                Some(HomeAutoFocusTarget::ProductsSearchInput)
+            } else if !runtime.products_projection.list.rows.is_empty() {
+                Some(HomeAutoFocusTarget::ProductsRowOpenFirst)
+            } else {
+                None
+            }
+        }
+        FarmerSection::Orders if farmer_products_available(runtime) => {
+            if let Some(detail) = runtime.orders_projection.detail.as_ref() {
+                match detail.primary_action {
+                    Some(OrderPrimaryAction::MarkPacked) => {
+                        Some(HomeAutoFocusTarget::OrdersDetailMarkPacked)
+                    }
+                    Some(OrderPrimaryAction::MarkCompleted) => {
+                        Some(HomeAutoFocusTarget::OrdersDetailMarkCompleted)
+                    }
+                    Some(OrderPrimaryAction::Review) | None
+                        if !runtime.orders_projection.list.rows.is_empty() =>
+                    {
+                        Some(HomeAutoFocusTarget::OrdersRowOpenFirst)
+                    }
+                    Some(OrderPrimaryAction::Review) | None => None,
+                }
+            } else if !runtime.orders_projection.list.rows.is_empty() {
+                Some(HomeAutoFocusTarget::OrdersRowOpenFirst)
+            } else {
+                None
+            }
+        }
+        FarmerSection::PackDay if farmer_pack_day_available(runtime) => None,
+        FarmerSection::Products | FarmerSection::Orders | FarmerSection::PackDay => {
+            today_auto_focus_target(runtime, state)
+        }
+    }
+}
+
+fn today_auto_focus_target(
+    runtime: &DesktopAppRuntimeSummary,
+    state: HomeAutoFocusState,
+) -> Option<HomeAutoFocusTarget> {
+    let projection = &runtime.today_projection;
+
+    if state.has_farm_setup_form {
+        return Some(HomeAutoFocusTarget::FarmerSetupFarmNameInput);
+    }
+
+    if let Some(spec) = farm_setup_onboarding_card_spec(runtime.home_route) {
+        if spec.action_key.is_some() {
+            return Some(HomeAutoFocusTarget::FarmerSetupStart);
+        }
+    } else if projection.needs_setup()
+        && farmer_home_farm_state(runtime) == FarmerHomeFarmState::IncompleteFarm
+    {
+        return Some(HomeAutoFocusTarget::FarmerSetupContinue);
+    }
+
+    if projection
+        .reminders
+        .items
+        .iter()
+        .any(|reminder| reminder_action_target(reminder).is_some())
+    {
+        return Some(HomeAutoFocusTarget::FarmerTodayReminderChipFirst);
+    }
+    if projection.next_fulfillment_window.is_some() {
+        return Some(HomeAutoFocusTarget::FarmerTodayOpenPackDay);
+    }
+    if !projection.orders_needing_action.is_empty() {
+        return Some(HomeAutoFocusTarget::FarmerTodayOpenOrders);
+    }
+    if !projection.low_stock_products.is_empty() {
+        return Some(HomeAutoFocusTarget::FarmerTodayOpenProductsLowStock);
+    }
+    if !projection.draft_products.is_empty() {
+        return Some(HomeAutoFocusTarget::FarmerTodayOpenProductsDrafts);
+    }
+
+    None
+}
+
+fn settings_auto_focus_target(
+    selected_view: SettingsPanelViewKey,
+    farm_panel_state: Option<&SettingsFarmPanelState>,
+    runtime: &DesktopAppRuntimeSummary,
+) -> Option<SettingsAutoFocusTarget> {
+    match selected_view {
+        SettingsPanelViewKey::Account => Some(SettingsAutoFocusTarget::AccountAdd),
+        SettingsPanelViewKey::Farm => farm_panel_state
+            .map(|_| SettingsAutoFocusTarget::FarmNameInput)
+            .or(Some(SettingsAutoFocusTarget::Navigation(
+                SettingsPanelViewKey::Farm,
+            ))),
+        SettingsPanelViewKey::Settings => {
+            Some(SettingsAutoFocusTarget::SettingsAllowRelayConnections)
+        }
+        SettingsPanelViewKey::About => {
+            if about_manual_refresh_enabled(&runtime.sync_status) {
+                Some(SettingsAutoFocusTarget::AboutRefresh)
+            } else {
+                Some(SettingsAutoFocusTarget::Navigation(
+                    SettingsPanelViewKey::About,
+                ))
+            }
+        }
+    }
+}
+
 impl Render for SettingsWindowView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let navigation_buttons = SETTINGS_NAVIGATION_ORDER
@@ -6861,6 +7332,8 @@ impl Render for SettingsWindowView {
             .copied()
             .map(|view| self.navigation_button(view, cx).into_any_element())
             .collect::<Vec<_>>();
+        let panel_content = self.settings_panel_content(window, cx);
+        self.apply_auto_focus(window, cx);
 
         app_window_shell(
             APP_UI_THEME.foundation.surfaces.panel_background,
@@ -6886,12 +7359,7 @@ impl Render for SettingsWindowView {
                         ),
                 )
                 .child(section_divider())
-                .child(
-                    div()
-                        .flex_1()
-                        .overflow_hidden()
-                        .child(self.settings_panel_content(window, cx)),
-                ),
+                .child(div().flex_1().overflow_hidden().child(panel_content)),
         )
     }
 }
@@ -11123,19 +11591,20 @@ fn home_farm_order_method_label_key(method: FarmOrderMethod) -> AppTextKey {
 #[cfg(test)]
 mod tests {
     use super::{
-        APP_UI_THEME, AppTextKey, FarmerHomeFarmState, HomeStage, ReminderActionTarget,
-        SETTINGS_FARM_PANEL_SECTIONS, SETTINGS_NAVIGATION_ORDER,
-        SETTINGS_OPERATIONS_PANEL_SECTIONS, SettingsInventorySectionSpec, SettingsPanelViewKey,
-        StartupHomeSurface, StartupSignerConnectState, about_conflict_action_specs,
-        about_conflict_aggregate_text, about_conflict_detail_rows, about_conflict_review_body_key,
-        about_manual_refresh_enabled, about_runtime_rows, about_status_rows, app_text,
-        buyer_orders_status_key, farm_setup_onboarding_card_spec, farmer_home_farm_state,
-        farmer_pack_day_available, home_content_scroll_id, home_saved_farm,
-        home_sidebar_navigation_sections, home_stage, home_window_launch_size_px,
-        home_window_minimum_size_px, parse_optional_product_editor_stock_input,
-        parse_product_editor_price_input, presented_farmer_reminder, product_display_title,
-        reminder_action_target, reminder_deadline_text, reminder_delivery_state_key,
-        reminder_urgency_color, reminder_urgency_key, startup_home_surface,
+        APP_UI_THEME, AppTextKey, FarmerHomeFarmState, HomeAutoFocusState, HomeAutoFocusTarget,
+        HomeStage, ReminderActionTarget, SETTINGS_FARM_PANEL_SECTIONS, SETTINGS_NAVIGATION_ORDER,
+        SETTINGS_OPERATIONS_PANEL_SECTIONS, SettingsAutoFocusTarget, SettingsInventorySectionSpec,
+        SettingsPanelViewKey, StartupHomeSurface, StartupSignerConnectState,
+        about_conflict_action_specs, about_conflict_aggregate_text, about_conflict_detail_rows,
+        about_conflict_review_body_key, about_manual_refresh_enabled, about_runtime_rows,
+        about_status_rows, app_text, buyer_orders_status_key, farm_setup_onboarding_card_spec,
+        farmer_home_farm_state, farmer_pack_day_available, home_auto_focus_target,
+        home_content_scroll_id, home_saved_farm, home_sidebar_navigation_sections, home_stage,
+        home_window_launch_size_px, home_window_minimum_size_px,
+        parse_optional_product_editor_stock_input, parse_product_editor_price_input,
+        presented_farmer_reminder, product_display_title, reminder_action_target,
+        reminder_deadline_text, reminder_delivery_state_key, reminder_urgency_color,
+        reminder_urgency_key, settings_auto_focus_target, startup_home_surface,
         startup_signer_preview_summary, startup_signer_preview_summary_for_connect_state,
         startup_signer_source_input_is_editable, startup_signer_status_spec,
         startup_signer_transport_failure_requires_notice,
@@ -11146,12 +11615,15 @@ mod tests {
     };
     use radroots_studio_app_models::SettingsAccountProjection;
     use radroots_studio_app_models::{
-        ActiveSurface, AppStartupGate, BuyerOrderStatus, FarmId, FarmOrderMethod, FarmReadiness,
-        FarmSetupDraft, FarmSetupProjection, FarmSummary, FarmerSection, FulfillmentWindowId,
+        ActiveSurface, AppStartupGate, BuyerOrderDetailProjection, BuyerOrderStatus,
+        BuyerOrdersListRow, FarmId, FarmOrderMethod, FarmReadiness, FarmSetupDraft,
+        FarmSetupProjection, FarmSummary, FarmerSection, FulfillmentWindowId,
         FulfillmentWindowSummary, LoggedOutStartupPhase, LoggedOutStartupProjection,
+        OrderDetailProjection, OrderId, OrderPrimaryAction, OrderStatus, OrdersListRow,
         PackDayProjection, PersonalSection, ReminderDeadlineProjection, ReminderDeliveryState,
-        ReminderId, ReminderKind, ReminderSurface, ReminderUrgency, ShellSection,
-        TodayAgendaProjection, TodaySetupTask, TodaySetupTaskKind,
+        ReminderId, ReminderKind, ReminderSurface, ReminderUrgency, RepeatDemandEligibility,
+        RepeatDemandHandoffProjection, ShellSection, TodayAgendaProjection, TodaySetupTask,
+        TodaySetupTaskKind,
     };
     use radroots_studio_app_remote_signer::{
         RadrootsAppRemoteSignerApprovedSession, RadrootsAppRemoteSignerPendingSession,
@@ -11341,6 +11813,279 @@ mod tests {
         );
 
         assert_eq!(home_stage(&guest_marketplace), HomeStage::BuyerWorkspace);
+    }
+
+    #[test]
+    fn home_auto_focus_target_tracks_startup_surface_contract() {
+        assert_eq!(
+            home_auto_focus_target(
+                &summary_with_logged_out_phase(LoggedOutStartupPhase::ContinuePrompt),
+                HomeAutoFocusState::default(),
+            ),
+            Some(HomeAutoFocusTarget::StartupContinue)
+        );
+        assert_eq!(
+            home_auto_focus_target(
+                &summary_with_logged_out_phase(LoggedOutStartupPhase::IdentityChoice),
+                HomeAutoFocusState::default(),
+            ),
+            Some(HomeAutoFocusTarget::StartupGenerateKey)
+        );
+        assert_eq!(
+            home_auto_focus_target(
+                &summary_with_logged_out_phase(LoggedOutStartupPhase::SignerEntry),
+                HomeAutoFocusState {
+                    has_startup_signer_input: true,
+                    startup_signer_input_is_editable: true,
+                    ..HomeAutoFocusState::default()
+                },
+            ),
+            Some(HomeAutoFocusTarget::StartupSignerInput)
+        );
+        assert_eq!(
+            home_auto_focus_target(
+                &summary_with_logged_out_phase(LoggedOutStartupPhase::SignerEntry),
+                HomeAutoFocusState {
+                    has_startup_signer_input: true,
+                    startup_signer_input_is_editable: false,
+                    ..HomeAutoFocusState::default()
+                },
+            ),
+            Some(HomeAutoFocusTarget::StartupSignerBack)
+        );
+    }
+
+    #[test]
+    fn home_auto_focus_target_tracks_buyer_surface_contract() {
+        let mut buyer_search = summary(
+            HomeRoute::Personal,
+            TodayAgendaProjection::default(),
+            FarmSetupProjection::default(),
+        );
+        buyer_search.startup_gate = AppStartupGate::Personal;
+        buyer_search.shell_projection = AppShellProjection::new(
+            ActiveSurface::Personal,
+            ShellSection::Personal(PersonalSection::Search),
+        );
+        assert_eq!(
+            home_auto_focus_target(
+                &buyer_search,
+                HomeAutoFocusState {
+                    has_personal_search_input: true,
+                    ..HomeAutoFocusState::default()
+                },
+            ),
+            Some(HomeAutoFocusTarget::BuyerSearchInput)
+        );
+
+        let mut buyer_cart_checkout = buyer_search.clone();
+        buyer_cart_checkout.shell_projection = AppShellProjection::new(
+            ActiveSurface::Personal,
+            ShellSection::Personal(PersonalSection::Cart),
+        );
+        assert_eq!(
+            home_auto_focus_target(
+                &buyer_cart_checkout,
+                HomeAutoFocusState {
+                    has_buyer_checkout_form: true,
+                    ..HomeAutoFocusState::default()
+                },
+            ),
+            Some(HomeAutoFocusTarget::BuyerCheckoutNameInput)
+        );
+
+        let order_id = OrderId::new();
+        let farm_id = FarmId::new();
+        let mut buyer_orders = buyer_search.clone();
+        buyer_orders.shell_projection = AppShellProjection::new(
+            ActiveSurface::Personal,
+            ShellSection::Personal(PersonalSection::Orders),
+        );
+        buyer_orders.personal_projection.orders.list.rows = vec![BuyerOrdersListRow {
+            order_id,
+            farm_id,
+            order_number: String::new(),
+            farm_display_name: String::new(),
+            fulfillment_summary: String::new(),
+            status: BuyerOrderStatus::Placed,
+            repeat_demand: None,
+        }];
+        buyer_orders.personal_projection.orders.detail = Some(BuyerOrderDetailProjection {
+            order_id,
+            farm_id,
+            order_number: String::new(),
+            farm_display_name: String::new(),
+            fulfillment_summary: String::new(),
+            status: BuyerOrderStatus::Placed,
+            items: Vec::new(),
+            order_note: None,
+            repeat_demand: Some(RepeatDemandHandoffProjection {
+                order_id,
+                farm_id,
+                eligibility: RepeatDemandEligibility::Eligible,
+                available_item_count: 1,
+                unavailable_item_count: 0,
+            }),
+        });
+        assert_eq!(
+            home_auto_focus_target(&buyer_orders, HomeAutoFocusState::default()),
+            Some(HomeAutoFocusTarget::BuyerOrderRepeatDemand)
+        );
+    }
+
+    #[test]
+    fn home_auto_focus_target_tracks_farmer_surface_contract() {
+        let mut onboarding = summary(
+            HomeRoute::FarmSetupOnboarding,
+            TodayAgendaProjection::default(),
+            FarmSetupProjection::default(),
+        );
+        onboarding.startup_gate = AppStartupGate::Farmer;
+        onboarding.shell_projection = AppShellProjection::new(
+            ActiveSurface::Farmer,
+            ShellSection::Farmer(FarmerSection::Today),
+        );
+        assert_eq!(
+            home_auto_focus_target(&onboarding, HomeAutoFocusState::default()),
+            Some(HomeAutoFocusTarget::FarmerSetupStart)
+        );
+
+        let farm_id = FarmId::new();
+        let incomplete_farm = FarmSummary {
+            farm_id,
+            display_name: String::new(),
+            readiness: FarmReadiness::Incomplete,
+        };
+        let incomplete_today = summary(
+            HomeRoute::Today,
+            TodayAgendaProjection {
+                farm: Some(incomplete_farm.clone()),
+                setup_checklist: vec![TodaySetupTask {
+                    kind: TodaySetupTaskKind::AddFulfillmentWindow,
+                    is_complete: false,
+                }],
+                ..TodayAgendaProjection::default()
+            },
+            FarmSetupProjection::new(
+                FarmSetupDraft::new(String::new(), String::new(), [FarmOrderMethod::Pickup]),
+                Some(incomplete_farm),
+            ),
+        );
+        assert_eq!(
+            home_auto_focus_target(&incomplete_today, HomeAutoFocusState::default()),
+            Some(HomeAutoFocusTarget::FarmerSetupContinue)
+        );
+
+        let saved_farm = FarmSummary {
+            farm_id: FarmId::new(),
+            display_name: String::new(),
+            readiness: FarmReadiness::Ready,
+        };
+        let mut products = summary(
+            HomeRoute::Today,
+            TodayAgendaProjection::default(),
+            FarmSetupProjection::from_saved_farm(saved_farm.clone()),
+        );
+        products.startup_gate = AppStartupGate::Farmer;
+        products.shell_projection = AppShellProjection::new(
+            ActiveSurface::Farmer,
+            ShellSection::Farmer(FarmerSection::Products),
+        );
+        assert_eq!(
+            home_auto_focus_target(
+                &products,
+                HomeAutoFocusState {
+                    has_products_search_input: true,
+                    ..HomeAutoFocusState::default()
+                },
+            ),
+            Some(HomeAutoFocusTarget::ProductsSearchInput)
+        );
+        assert_eq!(
+            home_auto_focus_target(
+                &products,
+                HomeAutoFocusState {
+                    has_product_editor_form: true,
+                    ..HomeAutoFocusState::default()
+                },
+            ),
+            Some(HomeAutoFocusTarget::ProductEditorTitleInput)
+        );
+
+        let mut orders = summary(
+            HomeRoute::Today,
+            TodayAgendaProjection::default(),
+            FarmSetupProjection::from_saved_farm(saved_farm),
+        );
+        orders.startup_gate = AppStartupGate::Farmer;
+        orders.shell_projection = AppShellProjection::new(
+            ActiveSurface::Farmer,
+            ShellSection::Farmer(FarmerSection::Orders),
+        );
+        orders.orders_projection.list.rows = vec![OrdersListRow {
+            order_id: OrderId::new(),
+            farm_id: FarmId::new(),
+            fulfillment_window_id: None,
+            order_number: String::new(),
+            customer_display_name: String::new(),
+            fulfillment_window_label: None,
+            pickup_location_label: None,
+            status: OrderStatus::Scheduled,
+            primary_action: Some(OrderPrimaryAction::MarkPacked),
+        }];
+        orders.orders_projection.detail = Some(OrderDetailProjection {
+            order_id: OrderId::new(),
+            farm_id: FarmId::new(),
+            order_number: String::new(),
+            customer_display_name: String::new(),
+            status: OrderStatus::Scheduled,
+            fulfillment_window_id: None,
+            fulfillment_window_label: None,
+            pickup_location_label: None,
+            items: Vec::new(),
+            primary_action: Some(OrderPrimaryAction::MarkPacked),
+            recoveries: Vec::new(),
+        });
+        assert_eq!(
+            home_auto_focus_target(&orders, HomeAutoFocusState::default()),
+            Some(HomeAutoFocusTarget::OrdersDetailMarkPacked)
+        );
+    }
+
+    #[test]
+    fn settings_auto_focus_target_tracks_panel_contract() {
+        let runtime = summary(
+            HomeRoute::Today,
+            TodayAgendaProjection::default(),
+            FarmSetupProjection::default(),
+        );
+        assert_eq!(
+            settings_auto_focus_target(SettingsPanelViewKey::Account, None, &runtime),
+            Some(SettingsAutoFocusTarget::AccountAdd)
+        );
+        assert_eq!(
+            settings_auto_focus_target(SettingsPanelViewKey::Farm, None, &runtime),
+            Some(SettingsAutoFocusTarget::Navigation(
+                SettingsPanelViewKey::Farm
+            ))
+        );
+        assert_eq!(
+            settings_auto_focus_target(SettingsPanelViewKey::Settings, None, &runtime),
+            Some(SettingsAutoFocusTarget::SettingsAllowRelayConnections)
+        );
+
+        let mut about_enabled = runtime.clone();
+        about_enabled.sync_status.account_id = Some("guest".to_owned());
+        assert_eq!(
+            settings_auto_focus_target(SettingsPanelViewKey::About, None, &about_enabled),
+            Some(SettingsAutoFocusTarget::AboutRefresh)
+        );
+        assert_eq!(
+            settings_auto_focus_target(SettingsPanelViewKey::About, None, &runtime),
+            Some(SettingsAutoFocusTarget::Navigation(
+                SettingsPanelViewKey::About
+            ))
+        );
     }
 
     #[test]
