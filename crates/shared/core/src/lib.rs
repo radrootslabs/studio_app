@@ -13,7 +13,8 @@ pub use logging::{
 pub use pack_day_export::{
     APP_EXPORTS_DIR_NAME, PACK_DAY_EXPORTS_DIR_NAME, PackDayExportDocument,
     PackDayExportWriteError, PreparedPackDayExportBundle, app_exports_root,
-    prepare_pack_day_export_bundle, write_prepared_pack_day_export_bundle,
+    app_exports_root_from_data_root, prepare_pack_day_export_bundle,
+    prepare_pack_day_export_bundle_at_data_root, write_prepared_pack_day_export_bundle,
 };
 pub use paths::{
     APP_RUNTIME_NAMESPACE, APP_RUNTIME_NAMESPACE_KIND, APP_RUNTIME_NAMESPACE_VALUE,

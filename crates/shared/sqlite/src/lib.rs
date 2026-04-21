@@ -20,11 +20,12 @@ use radroots_studio_app_models::{
     BuyerCartProjection, BuyerCheckoutDraft, BuyerCheckoutProjection, BuyerContext,
     BuyerListingsProjection, BuyerOrderDetailProjection, BuyerOrdersProjection,
     BuyerProductDetailProjection, FarmId, FarmOrderMethod, FarmRulesProjection,
-    FarmSetupProjection, FarmSummary, OrderDetailProjection, OrderId, OrderRecoveryProjection,
-    OrdersListProjection, OrdersScreenQueryState, PackDayProjection, PackDayScreenQueryState,
-    ProductEditorDraft, ProductId, ProductPublishBlocker, ProductsFilter, ProductsListProjection,
-    ProductsSort, RecoveryKind, RecoveryQueueProjection, ReminderFeedProjection,
-    ReminderLogEntryProjection, ReminderLogProjection, TodayAgendaProjection,
+    FarmSetupProjection, FarmSummary, FulfillmentWindowId, OrderDetailProjection, OrderId,
+    OrderRecoveryProjection, OrdersListProjection, OrdersScreenQueryState, PackDayOutputSource,
+    PackDayProjection, PackDayScreenQueryState, ProductEditorDraft, ProductId,
+    ProductPublishBlocker, ProductsFilter, ProductsListProjection, ProductsSort, RecoveryKind,
+    RecoveryQueueProjection, ReminderFeedProjection, ReminderLogEntryProjection, ReminderLogProjection,
+    TodayAgendaProjection,
 };
 use radroots_studio_app_sync::{
     PendingSyncOperation, SyncCheckpointStatus, SyncConflict, SyncConflictResolutionStatus,
@@ -241,6 +242,15 @@ impl AppSqliteStore {
         query: &PackDayScreenQueryState,
     ) -> Result<PackDayProjection, AppSqliteError> {
         self.orders_repository().load_pack_day(farm_id, query)
+    }
+
+    pub fn load_pack_day_output_source(
+        &self,
+        farm_id: FarmId,
+        fulfillment_window_id: FulfillmentWindowId,
+    ) -> Result<Option<PackDayOutputSource>, AppSqliteError> {
+        self.orders_repository()
+            .load_pack_day_output_source(farm_id, fulfillment_window_id)
     }
 
     pub fn mark_order_packed(

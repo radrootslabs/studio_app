@@ -52,7 +52,11 @@ pub enum PackDayExportWriteError {
 }
 
 pub fn app_exports_root(roots: &AppRuntimeRoots) -> PathBuf {
-    roots.data.join(APP_EXPORTS_DIR_NAME)
+    app_exports_root_from_data_root(roots.data.as_path())
+}
+
+pub fn app_exports_root_from_data_root(data_root: &Path) -> PathBuf {
+    data_root.join(APP_EXPORTS_DIR_NAME)
 }
 
 pub fn prepare_pack_day_export_bundle(
@@ -60,8 +64,16 @@ pub fn prepare_pack_day_export_bundle(
     source: &PackDayOutputSource,
     generated_at: DateTime<Utc>,
 ) -> PreparedPackDayExportBundle {
+    prepare_pack_day_export_bundle_at_data_root(roots.data.as_path(), source, generated_at)
+}
+
+pub fn prepare_pack_day_export_bundle_at_data_root(
+    data_root: &Path,
+    source: &PackDayOutputSource,
+    generated_at: DateTime<Utc>,
+) -> PreparedPackDayExportBundle {
     let timestamp = format_bundle_timestamp(generated_at);
-    let bundle_directory = app_exports_root(roots)
+    let bundle_directory = app_exports_root_from_data_root(data_root)
         .join(PACK_DAY_EXPORTS_DIR_NAME)
         .join(source.fulfillment_window.fulfillment_window_id.to_string())
         .join(timestamp);
@@ -259,7 +271,8 @@ mod tests {
 
     use super::{
         APP_EXPORTS_DIR_NAME, PACK_DAY_EXPORTS_DIR_NAME, app_exports_root,
-        prepare_pack_day_export_bundle, write_prepared_pack_day_export_bundle,
+        app_exports_root_from_data_root, prepare_pack_day_export_bundle,
+        prepare_pack_day_export_bundle_at_data_root, write_prepared_pack_day_export_bundle,
     };
     use crate::AppRuntimeRoots;
 
@@ -269,6 +282,10 @@ mod tests {
 
         assert_eq!(
             app_exports_root(&roots),
+            PathBuf::from("/Users/treesap/.radroots/data/apps/app").join(APP_EXPORTS_DIR_NAME)
+        );
+        assert_eq!(
+            app_exports_root_from_data_root(roots.data.as_path()),
             PathBuf::from("/Users/treesap/.radroots/data/apps/app").join(APP_EXPORTS_DIR_NAME)
         );
     }
@@ -344,6 +361,30 @@ mod tests {
                 .artifact_contents(PackDayExportArtifactKind::CustomerLabels)
                 .expect("customer labels should render"),
             "Willow farm\nCasey\nOrder: R-1001\nPickup: North barn\nWindow: 2026-04-23T16:00:00Z to 2026-04-23T19:00:00Z\n\n---\n\nWillow farm\nTaylor\nOrder: R-1002\nPickup: North barn\nWindow: 2026-04-23T16:00:00Z to 2026-04-23T19:00:00Z\n"
+        );
+    }
+
+    #[test]
+    fn prepared_bundle_can_use_the_runtime_data_root_directly() {
+        let data_root = PathBuf::from("/Users/treesap/.radroots/data/apps/app");
+        let source = sample_source();
+        let generated_at = Utc
+            .with_ymd_and_hms(2026, 4, 23, 15, 0, 0)
+            .single()
+            .expect("timestamp should build");
+
+        let prepared =
+            prepare_pack_day_export_bundle_at_data_root(data_root.as_path(), &source, generated_at);
+
+        assert_eq!(
+            prepared.bundle.bundle_directory,
+            data_root
+                .join(APP_EXPORTS_DIR_NAME)
+                .join(PACK_DAY_EXPORTS_DIR_NAME)
+                .join(source.fulfillment_window.fulfillment_window_id.to_string())
+                .join("20260423T150000Z")
+                .to_string_lossy()
+                .into_owned()
         );
     }
 

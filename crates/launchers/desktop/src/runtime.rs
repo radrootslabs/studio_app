@@ -6,7 +6,8 @@ use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use chrono::{Duration, Utc};
 use radroots_studio_app_core::{
     AppBuildIdentity, AppDesktopRuntimePaths, AppRuntimeCapture, AppRuntimeMode,
-    AppRuntimePathsError, AppRuntimeSnapshot, AppSharedAccountsPaths,
+    AppRuntimePathsError, AppRuntimeSnapshot, AppSharedAccountsPaths, PackDayExportWriteError,
+    prepare_pack_day_export_bundle_at_data_root, write_prepared_pack_day_export_bundle,
 };
 use radroots_studio_app_models::{
     ActiveSurface, AppActivityContext, AppActivityKind, AppIdentityProjection, AppStartupGate,
@@ -35,8 +36,9 @@ use radroots_studio_app_state::{
     AppStateStore, AppStateStoreError, BuyerBrowseScreenProjection, BuyerCartScreenProjection,
     BuyerOrdersScreenProjection, BuyerSearchScreenProjection, BuyerSearchScreenQueryState,
     FarmSetupFlowStage, FarmWorkspaceReadinessProjection, HomeRoute, OrdersScreenProjection,
-    PackDayScreenProjection, PersistedAppState, PersonalWorkspaceProjection,
-    ProductsScreenProjection, ProductsScreenQueryState, derive_sync_projection,
+    PackDayExportRequest, PackDayScreenProjection, PersistedAppState,
+    PersonalWorkspaceProjection, ProductsScreenProjection, ProductsScreenQueryState,
+    derive_sync_projection,
 };
 use radroots_studio_app_sync::{
     AppSyncProjection, AppSyncRequest, AppSyncResult, AppSyncTransport, AppSyncTransportError,
@@ -402,6 +404,11 @@ impl DesktopAppRuntime {
         fulfillment_window_id: Option<FulfillmentWindowId>,
     ) -> Result<bool, AppSqliteError> {
         self.lock_state_mut().open_pack_day(fulfillment_window_id)
+    }
+
+    #[allow(dead_code)]
+    pub fn export_pack_day(&self) -> Result<bool, DesktopAppRuntimeCommandError> {
+        self.lock_state_mut().export_pack_day()
     }
 
     pub fn update_product_stock(
@@ -1726,6 +1733,66 @@ impl DesktopAppRuntimeState {
         Ok(query_changed || section_changed || editor_changed)
     }
 
+    #[allow(dead_code)]
+    fn export_pack_day(&mut self) -> Result<bool, DesktopAppRuntimeCommandError> {
+        let Some(farm_id) = self.selected_farm_id() else {
+            return Ok(false);
+        };
+        let Some(fulfillment_window_id) = self
+            .state_store
+            .pack_day_projection()
+            .projection
+            .fulfillment_window
+            .as_ref()
+            .map(|window| window.fulfillment_window_id)
+        else {
+            return Ok(false);
+        };
+        let Some(data_root) = self.runtime_metadata.data_root.clone() else {
+            return Err(self.command_unavailable_error());
+        };
+
+        let source = {
+            let sqlite_store = self.sqlite_store()?;
+            sqlite_store.load_pack_day_output_source(farm_id, fulfillment_window_id)?
+        };
+        let Some(source) = source else {
+            return Ok(false);
+        };
+        if source.is_empty() {
+            return Ok(false);
+        }
+
+        let request =
+            PackDayExportRequest::for_fulfillment_window(source.fulfillment_window.fulfillment_window_id);
+        let _ = self
+            .state_store
+            .apply_in_memory(AppStateCommand::begin_pack_day_export(request.clone()));
+        let prepared =
+            prepare_pack_day_export_bundle_at_data_root(data_root.as_path(), &source, Utc::now());
+
+        match write_prepared_pack_day_export_bundle(&prepared) {
+            Ok(()) => {
+                let _ = self
+                    .state_store
+                    .apply_in_memory(AppStateCommand::succeed_pack_day_export(
+                        request,
+                        prepared.bundle,
+                    ));
+                Ok(true)
+            }
+            Err(error) => {
+                let _ = self
+                    .state_store
+                    .apply_in_memory(AppStateCommand::fail_pack_day_export(
+                        request,
+                        error.to_string(),
+                    ));
+                Err(error.into())
+            }
+        }
+    }
+
     fn update_product_stock(
         &mut self,
         product_id: ProductId,
@@ -3040,6 +3107,8 @@ pub enum DesktopAppRuntimeCommandError {
     RemoteSigner(#[from] DesktopRemoteSignerError),
     #[error(transparent)]
     Sqlite(#[from] AppSqliteError),
+    #[error(transparent)]
+    PackDayExportWrite(#[from] PackDayExportWriteError),
 }
 
 #[derive(Debug, Error)]
@@ -4369,18 +4438,20 @@ mod tests {
         FarmOperatingRulesRecord, FarmOrderMethod, FarmProfileRecord, FarmReadiness,
         FarmReadinessBlocker, FarmSetupDraft, FarmSetupProjection, FarmSummary,
         FarmerActivationProjection, FarmerSection, FulfillmentWindowId, FulfillmentWindowRecord,
-        LoggedOutStartupProjection, OrderId, OrderStatus, OrdersFilter, PersonalSection,
-        PickupLocationId, PickupLocationRecord, ProductEditorDraft, ProductStatus, ProductsFilter,
-        ProductsSort, RecoveryKind, RecoveryRecordId, ReminderDeliveryState, ReminderKind,
-        SelectedSurfaceProjection, SettingsPreference, SettingsSection, ShellSection,
-        TodayAgendaProjection, TodaySetupTask, TodaySetupTaskKind, TodaySummary,
+        LoggedOutStartupProjection, OrderId, OrderStatus, OrdersFilter, PackDayExportStatus,
+        PackDayPackListRow, PackDayProductTotalRow, PackDayProjection, PackDayRosterRow,
+        PersonalSection, PickupLocationId, PickupLocationRecord, ProductEditorDraft,
+        ProductStatus, ProductsFilter, ProductsSort, RecoveryKind, RecoveryRecordId,
+        ReminderDeliveryState, ReminderFeedProjection, ReminderKind, SelectedSurfaceProjection,
+        SettingsPreference, SettingsSection, ShellSection, TodayAgendaProjection, TodaySetupTask,
+        TodaySetupTaskKind, TodaySummary,
     };
     use radroots_studio_app_remote_signer::{
         RadrootsAppRemoteSignerPendingSession, RadrootsAppRemoteSignerSessionRecord,
     };
     use radroots_studio_app_sqlite::{AppSqliteStore, DatabaseTarget, latest_schema_version};
     use radroots_studio_app_state::{
-        APP_STATE_FILE_NAME, AppStatePersistenceRepository, AppStateRepository,
+        APP_STATE_FILE_NAME, AppStateCommand, AppStatePersistenceRepository, AppStateRepository,
         AppStateRepositoryError, AppStateStore, AppStateStoreError, FileBackedAppStateRepository,
         HomeRoute,
     };
@@ -6968,6 +7039,106 @@ mod tests {
                 .fulfillment_window_id,
             fulfillment_window_id
         );
+    }
+
+    #[test]
+    fn runtime_export_pack_day_requires_a_current_window_context() {
+        let (runtime, paths) = bootstrapped_runtime("pack_day_export_requires_context");
+        let (_, _farm_id) = provision_ready_farmer_account(&runtime);
+
+        assert!(
+            !runtime
+                .export_pack_day()
+                .expect("missing pack day context should no-op")
+        );
+        assert_eq!(
+            runtime.summary().pack_day_projection.export.status,
+            PackDayExportStatus::Idle
+        );
+
+        cleanup_bootstrapped_runtime_paths(&paths);
+    }
+
+    #[test]
+    fn runtime_export_pack_day_uses_repository_source_truth_and_writes_bundle() {
+        let (runtime, paths) = bootstrapped_runtime("pack_day_export_bundle");
+        let (_, farm_id) = provision_ready_farmer_account(&runtime);
+        let (fulfillment_window_id, order_id) = seed_order_workspace(&runtime, farm_id);
+
+        assert!(runtime.open_pack_day(None).expect("pack day should open"));
+        let fulfillment_window = runtime
+            .summary()
+            .pack_day_projection
+            .projection
+            .fulfillment_window
+            .clone()
+            .expect("pack day fulfillment window");
+        let _ = runtime
+            .lock_state_mut()
+            .state_store
+            .apply_in_memory(AppStateCommand::replace_pack_day_projection(
+                PackDayProjection {
+                    fulfillment_window: Some(fulfillment_window.clone()),
+                    reminders: ReminderFeedProjection::default(),
+                    totals_by_product: vec![PackDayProductTotalRow {
+                        title: "Bogus totals".to_owned(),
+                        quantity_display: "999 crates".to_owned(),
+                    }],
+                    pack_list: vec![PackDayPackListRow {
+                        title: "Bogus pack list".to_owned(),
+                        quantity_display: "Do not trust screen strings".to_owned(),
+                    }],
+                    pickup_roster: vec![PackDayRosterRow {
+                        order_id: OrderId::new(),
+                        order_number: "R-999".to_owned(),
+                        customer_display_name: "Bogus".to_owned(),
+                    }],
+                },
+            ));
+
+        assert!(
+            runtime
+                .export_pack_day()
+                .expect("pack day export should succeed")
+        );
+
+        let summary = runtime.summary();
+        let export = &summary.pack_day_projection.export;
+        assert_eq!(export.status, PackDayExportStatus::Succeeded);
+        assert_eq!(
+            export
+                .request
+                .as_ref()
+                .expect("export request")
+                .fulfillment_window_id,
+            fulfillment_window_id
+        );
+        let bundle = export.bundle.as_ref().expect("export bundle");
+        assert_eq!(bundle.fulfillment_window_id, fulfillment_window_id);
+        assert_eq!(bundle.artifact_count(), 3);
+
+        let pack_sheet_path = PathBuf::from(&bundle.bundle_directory).join("pack_sheet.txt");
+        let pickup_roster_path = PathBuf::from(&bundle.bundle_directory).join("pickup_roster.txt");
+        let customer_labels_path =
+            PathBuf::from(&bundle.bundle_directory).join("customer_labels.txt");
+
+        let pack_sheet = fs::read_to_string(&pack_sheet_path).expect("pack sheet should exist");
+        let pickup_roster =
+            fs::read_to_string(&pickup_roster_path).expect("pickup roster should exist");
+        let customer_labels =
+            fs::read_to_string(&customer_labels_path).expect("customer labels should exist");
+
+        assert!(pack_sheet.contains("Farm: North field farm"));
+        assert!(pack_sheet.contains("Casey | R-100 | needs_action | Salad mix | 2 bags"));
+        assert!(!pack_sheet.contains("Bogus"));
+        assert!(pickup_roster.contains("Casey | R-100 | needs_action"));
+        assert!(customer_labels.contains("North field farm"));
+        assert!(customer_labels.contains("Casey"));
+        assert!(customer_labels.contains("Order: R-100"));
+        assert!(!customer_labels.contains("Bogus"));
+        assert!(!pickup_roster.contains(&order_id.to_string()));
+
+        cleanup_bootstrapped_runtime_paths(&paths);
     }
 
     #[test]
