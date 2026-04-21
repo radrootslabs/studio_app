@@ -11341,28 +11341,6 @@ fn settings_timing_conflict_key(kind: FarmTimingConflictKind) -> AppTextKey {
     }
 }
 
-#[cfg(test)]
-fn settings_inventory_card(spec: SettingsInventorySectionSpec) -> impl IntoElement {
-    home_card(
-        app_shared_text(spec.title_key),
-        app_stack_v(8.0).w_full().children(
-            spec.field_keys
-                .iter()
-                .copied()
-                .map(|key| {
-                    app_surface_panel(
-                        div()
-                            .px(px(12.0))
-                            .py(px(10.0))
-                            .child(home_farm_setup_field_label(app_shared_text(key))),
-                    )
-                    .into_any_element()
-                })
-                .collect::<Vec<_>>(),
-        ),
-    )
-}
-
 fn home_saved_farm_summary_card(runtime: &DesktopAppRuntimeSummary) -> Option<AnyElement> {
     let saved_farm = home_saved_farm(runtime)?;
     let location_or_service_area = if runtime
