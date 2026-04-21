@@ -583,6 +583,20 @@ mod tests {
             "HomeSetupSignerPendingTitle => \"home.setup.signer.pending_title\"",
             "HomeSetupSignerAuthChallengeTitle => \"home.setup.signer.auth_challenge_title\"",
             "HomeSetupSignerApprovedTitle => \"home.setup.signer.approved_title\"",
+            "HomeSetupIssueUnavailableBody => \"home.setup.issue.unavailable_body\"",
+            "HomeSetupErrorStartupFailed => \"home.setup.error.startup_failed\"",
+            "HomeSetupSignerSourceValueBunkerUri => \"home.setup.signer.source_value.bunker_uri\"",
+            "HomeSetupSignerSourceValueDiscoveryUrl => \"home.setup.signer.source_value.discovery_url\"",
+            "HomeSetupSignerPermissionSignEventKind1 => \"home.setup.signer.permission.sign_event_kind_1\"",
+            "HomeSetupSignerPermissionSwitchRelays => \"home.setup.signer.permission.switch_relays\"",
+            "HomeSetupSignerPermissionAdditional => \"home.setup.signer.permission.additional\"",
+            "HomeSetupSignerErrorEnterSource => \"home.setup.signer.error.enter_source\"",
+            "HomeSetupSignerErrorUseSignerUri => \"home.setup.signer.error.use_signer_uri\"",
+            "HomeSetupSignerErrorMissingDiscoveryUri => \"home.setup.signer.error.missing_discovery_uri\"",
+            "HomeSetupSignerErrorInvalidDiscoveryUrl => \"home.setup.signer.error.invalid_discovery_url\"",
+            "HomeSetupSignerErrorInvalidRemoteSignerUri => \"home.setup.signer.error.invalid_remote_signer_uri\"",
+            "HomeSetupSignerErrorPendingApprovalExists => \"home.setup.signer.error.pending_approval_exists\"",
+            "HomeSetupSignerErrorConnectionFailed => \"home.setup.signer.error.connection_failed\"",
         ] {
             assert!(
                 source.contains(entry),
@@ -637,6 +651,62 @@ mod tests {
         assert_eq!(
             app_text(AppTextKey::HomeSetupSignerApprovedTitle),
             "Signer approved"
+        );
+        assert_eq!(
+            app_text(AppTextKey::HomeSetupIssueUnavailableBody),
+            "Radroots couldn't start normally on this device. Check the local setup and try again."
+        );
+        assert_eq!(
+            app_text(AppTextKey::HomeSetupErrorStartupFailed),
+            "Couldn't finish startup right now. Check the connection and try again."
+        );
+        assert_eq!(
+            app_text(AppTextKey::HomeSetupSignerSourceValueBunkerUri),
+            "Bunker URI"
+        );
+        assert_eq!(
+            app_text(AppTextKey::HomeSetupSignerSourceValueDiscoveryUrl),
+            "Discovery URL"
+        );
+        assert_eq!(
+            app_text(AppTextKey::HomeSetupSignerPermissionSignEventKind1),
+            "Sign notes"
+        );
+        assert_eq!(
+            app_text(AppTextKey::HomeSetupSignerPermissionSwitchRelays),
+            "Switch relays"
+        );
+        assert_eq!(
+            app_text(AppTextKey::HomeSetupSignerPermissionAdditional),
+            "Additional permission"
+        );
+        assert_eq!(
+            app_text(AppTextKey::HomeSetupSignerErrorEnterSource),
+            "Paste a bunker URI or discovery URL from your signer to continue."
+        );
+        assert_eq!(
+            app_text(AppTextKey::HomeSetupSignerErrorUseSignerUri),
+            "Use a bunker URI or discovery URL from your signer."
+        );
+        assert_eq!(
+            app_text(AppTextKey::HomeSetupSignerErrorMissingDiscoveryUri),
+            "The discovery URL is missing the signer address."
+        );
+        assert_eq!(
+            app_text(AppTextKey::HomeSetupSignerErrorInvalidDiscoveryUrl),
+            "That discovery URL isn't valid. Check it and try again."
+        );
+        assert_eq!(
+            app_text(AppTextKey::HomeSetupSignerErrorInvalidRemoteSignerUri),
+            "That signer address isn't valid. Check it and try again."
+        );
+        assert_eq!(
+            app_text(AppTextKey::HomeSetupSignerErrorPendingApprovalExists),
+            "A signer connection is already waiting for approval."
+        );
+        assert_eq!(
+            app_text(AppTextKey::HomeSetupSignerErrorConnectionFailed),
+            "Couldn't continue with the signer. Check the signer and try again."
         );
     }
 

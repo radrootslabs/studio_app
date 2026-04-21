@@ -30,7 +30,8 @@ use radroots_studio_app_models::{
 };
 use radroots_studio_app_remote_signer::{
     RadrootsAppRemoteSignerApprovedSession, RadrootsAppRemoteSignerPendingPollOutcome,
-    RadrootsAppRemoteSignerPendingSession, radroots_studio_app_remote_signer_connect_pending,
+    RadrootsAppRemoteSignerPendingSession, RadrootsAppRemoteSignerSource,
+    radroots_studio_app_remote_signer_connect_pending,
     radroots_studio_app_remote_signer_poll_pending_session_with_progress,
     radroots_studio_app_remote_signer_preview, radroots_studio_app_remote_signer_requested_permissions,
 };
@@ -6881,7 +6882,8 @@ fn about_status_rows(runtime: &DesktopAppRuntimeSummary) -> Vec<LabelValueRow> {
         app_shared_text(AppTextKey::MetadataStartupIssue),
         runtime
             .startup_issue
-            .clone()
+            .as_deref()
+            .map(startup_issue_summary_text)
             .unwrap_or_else(|| app_text(AppTextKey::ValueNone)),
     ));
 
@@ -8509,6 +8511,7 @@ fn startup_home_shell(
     cx: &App,
 ) -> impl IntoElement {
     let surface = startup_home_surface(runtime);
+    let startup_notice = startup_notice.map(startup_notice_text);
 
     app_window_shell(
         APP_UI_THEME.foundation.surfaces.window_background,
@@ -8552,7 +8555,7 @@ fn startup_home_shell(
                                             on_browse_marketplace,
                                             cx,
                                         ))
-                                        .when_some(startup_notice, |this, error| {
+                                        .when_some(startup_notice, |this, error: String| {
                                             this.child(
                                                 div()
                                                     .w_full()
@@ -8580,7 +8583,7 @@ fn startup_home_shell(
                                                     on_connect_signer,
                                                     cx,
                                                 ))
-                                                .when_some(startup_notice, |this, error| {
+                                                .when_some(startup_notice, |this, error: String| {
                                                     this.child(
                                                         div().w_full().text_center().child(
                                                             home_body_text(error.to_owned()),
@@ -8661,7 +8664,7 @@ fn startup_home_tagline() -> impl IntoElement {
 fn startup_signer_entry_surface(
     signer_entry: Option<&StartupSignerEntryState>,
     connect_state: &StartupSignerConnectState,
-    startup_notice: Option<&str>,
+    startup_notice: Option<String>,
     on_submit_signer: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
     on_back: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
     cx: &App,
@@ -8676,7 +8679,10 @@ fn startup_signer_entry_surface(
     {
         None
     } else {
-        preview.as_ref().err().cloned()
+        preview
+            .as_ref()
+            .err()
+            .map(|error| startup_notice_text(error))
     };
     let submit_enabled =
         preview.is_ok() && matches!(connect_state, StartupSignerConnectState::Idle);
@@ -8771,25 +8777,19 @@ fn startup_signer_entry_surface(
             on_back,
             cx,
         ))
-        .when_some(startup_notice, |this, notice| {
-            this.child(
-                div()
-                    .w_full()
-                    .text_center()
-                    .child(home_body_text(notice.to_owned())),
-            )
+        .when_some(startup_notice, |this, notice: String| {
+            this.child(div().w_full().text_center().child(home_body_text(notice)))
         })
 }
 
 fn startup_signer_preview_summary(input: &str) -> Result<StartupSignerPreviewSummary, String> {
     let target = radroots_studio_app_remote_signer_preview(input).map_err(|error| error.to_string())?;
-    let requested_permissions = target.requested_permission_labels();
 
     Ok(StartupSignerPreviewSummary {
-        source_label: target.source_label().to_owned(),
+        source_label: startup_signer_source_text(target.source),
         signer_npub: target.signer_identity.public_key_npub.clone(),
         relays_label: startup_signer_csv_or_none(target.relays.as_slice()),
-        permissions_label: startup_signer_csv_or_none(requested_permissions.as_slice()),
+        permissions_label: startup_signer_permissions_label(target.requested_permission_labels()),
     })
 }
 
@@ -8844,7 +8844,7 @@ fn startup_signer_source_input_is_editable(connect_state: &StartupSignerConnectS
 
 fn startup_signer_csv_or_none(values: &[String]) -> String {
     if values.is_empty() {
-        return "none".to_owned();
+        return app_text(AppTextKey::ValueNone);
     }
 
     values.join(", ")
@@ -8861,7 +8861,15 @@ fn startup_signer_requested_permissions_label() -> String {
 }
 
 fn startup_signer_permissions_label(permissions: Vec<String>) -> String {
-    startup_signer_csv_or_none(permissions.as_slice())
+    if permissions.is_empty() {
+        return app_text(AppTextKey::ValueNone);
+    }
+
+    permissions
+        .into_iter()
+        .map(|permission| startup_signer_permission_text(permission.as_str()))
+        .collect::<Vec<_>>()
+        .join(", ")
 }
 
 fn startup_signer_status_spec(
@@ -8894,11 +8902,57 @@ fn startup_signer_transport_failure_requires_notice(message: &str) -> bool {
     message != "remote signer did not respond yet"
 }
 
+fn startup_issue_summary_text(_startup_issue: &str) -> String {
+    app_text(AppTextKey::HomeSetupIssueUnavailableBody)
+}
+
+fn startup_signer_source_text(source: RadrootsAppRemoteSignerSource) -> String {
+    app_text(match source {
+        RadrootsAppRemoteSignerSource::BunkerUri => AppTextKey::HomeSetupSignerSourceValueBunkerUri,
+        RadrootsAppRemoteSignerSource::DiscoveryUrl => {
+            AppTextKey::HomeSetupSignerSourceValueDiscoveryUrl
+        }
+    })
+}
+
+fn startup_signer_permission_text(permission: &str) -> String {
+    app_text(match permission {
+        "sign_event:kind:1" => AppTextKey::HomeSetupSignerPermissionSignEventKind1,
+        "switch_relays" => AppTextKey::HomeSetupSignerPermissionSwitchRelays,
+        _ => AppTextKey::HomeSetupSignerPermissionAdditional,
+    })
+}
+
+fn startup_notice_text(message: &str) -> String {
+    app_text(match message {
+        "enter a bunker or discovery url to continue" => {
+            AppTextKey::HomeSetupSignerErrorEnterSource
+        }
+        "discovery url does not contain a remote signer uri" => {
+            AppTextKey::HomeSetupSignerErrorMissingDiscoveryUri
+        }
+        "a remote signer connection is already pending approval" => {
+            AppTextKey::HomeSetupSignerErrorPendingApprovalExists
+        }
+        _ if message.contains("raw nostrconnect client uris are signer-side only") => {
+            AppTextKey::HomeSetupSignerErrorUseSignerUri
+        }
+        _ if message.starts_with("invalid discovery url:") => {
+            AppTextKey::HomeSetupSignerErrorInvalidDiscoveryUrl
+        }
+        _ if message.starts_with("invalid remote signer uri:") => {
+            AppTextKey::HomeSetupSignerErrorInvalidRemoteSignerUri
+        }
+        _ if message.contains("remote signer") => AppTextKey::HomeSetupSignerErrorConnectionFailed,
+        _ => AppTextKey::HomeSetupErrorStartupFailed,
+    })
+}
+
 fn startup_home_body(runtime: &DesktopAppRuntimeSummary) -> impl IntoElement {
-    let body = runtime
-        .startup_issue
-        .clone()
-        .unwrap_or_else(|| app_shared_text(AppTextKey::HomeTodayEmptySetupBody).to_string());
+    let body = runtime.startup_issue.as_deref().map_or_else(
+        || app_shared_text(AppTextKey::HomeTodayEmptySetupBody).to_string(),
+        startup_issue_summary_text,
+    );
 
     div().w_full().text_center().child(home_body_text(body))
 }
@@ -11605,9 +11659,9 @@ mod tests {
         presented_farmer_reminder, product_display_title, reminder_action_target,
         reminder_deadline_text, reminder_delivery_state_key, reminder_urgency_color,
         reminder_urgency_key, settings_auto_focus_target, startup_home_surface,
-        startup_signer_preview_summary, startup_signer_preview_summary_for_connect_state,
-        startup_signer_source_input_is_editable, startup_signer_status_spec,
-        startup_signer_transport_failure_requires_notice,
+        startup_issue_summary_text, startup_notice_text, startup_signer_preview_summary,
+        startup_signer_preview_summary_for_connect_state, startup_signer_source_input_is_editable,
+        startup_signer_status_spec, startup_signer_transport_failure_requires_notice,
     };
     use crate::runtime::{
         DesktopAppRuntimeMetadataSummary, DesktopAppRuntimeSummary, DesktopAppSyncConflictSummary,
@@ -12275,8 +12329,14 @@ mod tests {
 
     #[test]
     fn blank_product_titles_fall_back_to_the_untitled_copy() {
-        assert_eq!(product_display_title(""), "Untitled draft");
-        assert_eq!(product_display_title("  "), "Untitled draft");
+        assert_eq!(
+            product_display_title(""),
+            app_text(AppTextKey::ProductsUntitledDraft)
+        );
+        assert_eq!(
+            product_display_title("  "),
+            app_text(AppTextKey::ProductsUntitledDraft)
+        );
         assert_eq!(product_display_title("Salad mix"), "Salad mix");
     }
 
@@ -12287,12 +12347,19 @@ mod tests {
         )
         .expect("preview");
 
-        assert_eq!(preview.source_label, "bunker uri");
+        assert_eq!(
+            preview.source_label,
+            app_text(AppTextKey::HomeSetupSignerSourceValueBunkerUri)
+        );
         assert!(preview.signer_npub.starts_with("npub1"));
         assert_eq!(preview.relays_label, "wss://relay.radroots.example");
         assert_eq!(
             preview.permissions_label,
-            "sign_event:kind:1, switch_relays"
+            format!(
+                "{}, {}",
+                app_text(AppTextKey::HomeSetupSignerPermissionSignEventKind1),
+                app_text(AppTextKey::HomeSetupSignerPermissionSwitchRelays)
+            )
         );
     }
 
@@ -12389,7 +12456,11 @@ mod tests {
         assert_eq!(preview.relays_label, "wss://relay.radroots.example");
         assert_eq!(
             preview.permissions_label,
-            "sign_event:kind:1, switch_relays"
+            format!(
+                "{}, {}",
+                app_text(AppTextKey::HomeSetupSignerPermissionSignEventKind1),
+                app_text(AppTextKey::HomeSetupSignerPermissionSwitchRelays)
+            )
         );
     }
 
@@ -12401,6 +12472,56 @@ mod tests {
         assert!(startup_signer_transport_failure_requires_notice(
             "remote signer connection failed: relay refused the request"
         ));
+    }
+
+    #[test]
+    fn startup_signer_notice_copy_maps_known_signer_failures() {
+        assert_eq!(
+            startup_notice_text("enter a bunker or discovery url to continue"),
+            app_text(AppTextKey::HomeSetupSignerErrorEnterSource)
+        );
+        assert_eq!(
+            startup_notice_text(
+                "enter a bunker or discovery url from the signer; raw nostrconnect client uris are signer-side only"
+            ),
+            app_text(AppTextKey::HomeSetupSignerErrorUseSignerUri)
+        );
+        assert_eq!(
+            startup_notice_text("discovery url does not contain a remote signer uri"),
+            app_text(AppTextKey::HomeSetupSignerErrorMissingDiscoveryUri)
+        );
+        assert_eq!(
+            startup_notice_text("invalid discovery url: relative URL without a base"),
+            app_text(AppTextKey::HomeSetupSignerErrorInvalidDiscoveryUrl)
+        );
+        assert_eq!(
+            startup_notice_text("invalid remote signer uri: invalid public key"),
+            app_text(AppTextKey::HomeSetupSignerErrorInvalidRemoteSignerUri)
+        );
+        assert_eq!(
+            startup_notice_text("a remote signer connection is already pending approval"),
+            app_text(AppTextKey::HomeSetupSignerErrorPendingApprovalExists)
+        );
+        assert_eq!(
+            startup_notice_text("remote signer connection failed: relay refused the request"),
+            app_text(AppTextKey::HomeSetupSignerErrorConnectionFailed)
+        );
+        assert_eq!(
+            startup_notice_text("failed to add relay `{relay_url}`: {error}"),
+            app_text(AppTextKey::HomeSetupErrorStartupFailed)
+        );
+    }
+
+    #[test]
+    fn startup_issue_copy_fails_closed_to_a_localized_summary() {
+        assert_eq!(
+            startup_issue_summary_text("runtime unavailable"),
+            app_text(AppTextKey::HomeSetupIssueUnavailableBody)
+        );
+        assert_eq!(
+            startup_issue_summary_text("desktop runtime roots require HOME for macos"),
+            app_text(AppTextKey::HomeSetupIssueUnavailableBody)
+        );
     }
 
     #[test]
