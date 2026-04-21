@@ -303,6 +303,23 @@ mod tests {
             "Mark completed"
         );
         assert_eq!(app_text(AppTextKey::OrdersDetailTitle), "Order detail");
+        assert_eq!(app_text(AppTextKey::OrdersRecoverySectionTitle), "Recovery");
+        assert_eq!(
+            app_text(AppTextKey::OrdersRecoveryMissedPickupTitle),
+            "Missed pickup"
+        );
+        assert_eq!(
+            app_text(AppTextKey::OrdersRecoveryRefundFollowUpTitle),
+            "Refund follow-up"
+        );
+        assert_eq!(
+            app_text(AppTextKey::OrdersRecoveryActionResolve),
+            "Mark resolved"
+        );
+        assert_eq!(
+            app_text(AppTextKey::OrdersRecoveryStateInReview),
+            "In review"
+        );
     }
 
     #[test]

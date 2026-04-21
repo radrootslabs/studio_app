@@ -18,10 +18,10 @@ use radroots_studio_app_models::{
     OrdersFilter, OrdersListProjection, OrdersScreenQueryState, PackDayProjection,
     PackDayScreenQueryState, PersonalSection, PickupLocationRecord, ProductEditorDraft, ProductId,
     ProductsFilter, ProductsListProjection, ProductsSort, RecoveryKind, RecoveryQueueProjection,
-    RecoveryState, ReminderDeadlineProjection, ReminderDeliveryState, ReminderFeedProjection,
-    ReminderId, ReminderKind, ReminderLogEntryProjection, ReminderLogProjection, ReminderSurface,
-    ReminderUrgency, SettingsAccountProjection, SettingsPreference, SettingsSection, ShellSection,
-    TodayAgendaProjection,
+    RecoveryRecordId, RecoveryState, ReminderDeadlineProjection, ReminderDeliveryState,
+    ReminderFeedProjection, ReminderId, ReminderKind, ReminderLogEntryProjection,
+    ReminderLogProjection, ReminderSurface, ReminderUrgency, SettingsAccountProjection,
+    SettingsPreference, SettingsSection, ShellSection, TodayAgendaProjection,
 };
 use radroots_studio_app_remote_signer::{
     RadrootsAppRemoteSignerApprovedSession, RadrootsAppRemoteSignerPendingSession,
@@ -354,6 +354,38 @@ impl DesktopAppRuntime {
 
     pub fn mark_order_completed(&self, order_id: OrderId) -> Result<bool, AppSqliteError> {
         self.lock_state_mut().mark_order_completed(order_id)
+    }
+
+    pub fn start_order_recovery(
+        &self,
+        order_id: OrderId,
+        kind: RecoveryKind,
+    ) -> Result<bool, AppSqliteError> {
+        self.lock_state_mut().start_order_recovery(order_id, kind)
+    }
+
+    pub fn review_order_recovery(
+        &self,
+        order_id: OrderId,
+        kind: RecoveryKind,
+    ) -> Result<bool, AppSqliteError> {
+        self.lock_state_mut().review_order_recovery(order_id, kind)
+    }
+
+    pub fn reopen_order_recovery(
+        &self,
+        order_id: OrderId,
+        kind: RecoveryKind,
+    ) -> Result<bool, AppSqliteError> {
+        self.lock_state_mut().reopen_order_recovery(order_id, kind)
+    }
+
+    pub fn resolve_order_recovery(
+        &self,
+        order_id: OrderId,
+        kind: RecoveryKind,
+    ) -> Result<bool, AppSqliteError> {
+        self.lock_state_mut().resolve_order_recovery(order_id, kind)
     }
 
     pub fn open_pack_day(
@@ -699,7 +731,7 @@ struct DesktopSellerReminderContext {
     orders_feed: ReminderFeedProjection,
     pack_day_feed: ReminderFeedProjection,
     recovery_queue: RecoveryQueueProjection,
-    selected_order_recovery: Option<OrderRecoveryProjection>,
+    selected_order_recoveries: Vec<OrderRecoveryProjection>,
     due_soon_count: u32,
     recovery_actions_open: u32,
     reminder_log: ReminderLogProjection,
@@ -1525,6 +1557,117 @@ impl DesktopAppRuntimeState {
             )])?;
 
         Ok(updated || context_changed || pending_changed)
+    }
+
+    fn start_order_recovery(
+        &mut self,
+        order_id: OrderId,
+        kind: RecoveryKind,
+    ) -> Result<bool, AppSqliteError> {
+        self.upsert_order_recovery(order_id, kind, RecoveryState::Open, "start_order_recovery")
+    }
+
+    fn review_order_recovery(
+        &mut self,
+        order_id: OrderId,
+        kind: RecoveryKind,
+    ) -> Result<bool, AppSqliteError> {
+        self.upsert_order_recovery(
+            order_id,
+            kind,
+            RecoveryState::InReview,
+            "review_order_recovery",
+        )
+    }
+
+    fn reopen_order_recovery(
+        &mut self,
+        order_id: OrderId,
+        kind: RecoveryKind,
+    ) -> Result<bool, AppSqliteError> {
+        self.upsert_order_recovery(order_id, kind, RecoveryState::Open, "reopen_order_recovery")
+    }
+
+    fn resolve_order_recovery(
+        &mut self,
+        order_id: OrderId,
+        kind: RecoveryKind,
+    ) -> Result<bool, AppSqliteError> {
+        self.upsert_order_recovery(
+            order_id,
+            kind,
+            RecoveryState::Resolved,
+            "resolve_order_recovery",
+        )
+    }
+
+    fn upsert_order_recovery(
+        &mut self,
+        order_id: OrderId,
+        kind: RecoveryKind,
+        state: RecoveryState,
+        source: &str,
+    ) -> Result<bool, AppSqliteError> {
+        let Some(sqlite_store) = self.sqlite_store.as_ref() else {
+            return Ok(false);
+        };
+        let Some(selected_account) = self
+            .state_store
+            .identity_projection()
+            .selected_account
+            .as_ref()
+        else {
+            return Ok(false);
+        };
+        let Some(farm_id) = self.selected_farm_id() else {
+            return Ok(false);
+        };
+        let Some(_) = sqlite_store.load_order_detail(farm_id, order_id)? else {
+            return Ok(false);
+        };
+
+        let account_id = selected_account.account.account_id.as_str();
+        let last_updated_at = current_utc_timestamp();
+        let summary = order_recovery_summary(kind, state).to_owned();
+        let note = Some(order_recovery_note(kind, state).to_owned());
+        let mut record = sqlite_store
+            .load_recovery_record(account_id, order_id, kind)?
+            .unwrap_or(OrderRecoveryProjection {
+                recovery_record_id: RecoveryRecordId::new(),
+                order_id,
+                kind,
+                state,
+                summary: summary.clone(),
+                note: note.clone(),
+                last_updated_at: last_updated_at.clone(),
+            });
+
+        if record.state == state && record.summary == summary && record.note == note {
+            return Ok(false);
+        }
+
+        record.state = state;
+        record.summary = summary;
+        record.note = note;
+        record.last_updated_at = last_updated_at;
+        sqlite_store.save_recovery_record(account_id, farm_id, &record)?;
+
+        let selected_account_context = load_selected_account_context(
+            sqlite_store,
+            self.state_store.identity_projection(),
+            self.state_store.products_projection().query.clone(),
+            self.state_store.orders_projection().query.clone(),
+            self.selected_order_detail_id().or(Some(order_id)),
+            self.state_store.pack_day_projection().query.clone(),
+        )?;
+        let context_changed = self.apply_selected_account_context(&selected_account_context);
+        let pending_changed =
+            self.enqueue_selected_account_sync_operations(vec![pending_sync_upsert(
+                SyncAggregateRef::Order(order_id),
+                order_recovery_sync_payload(order_id, farm_id, kind, state, source),
+            )])?;
+
+        Ok(context_changed || pending_changed)
     }
 
     fn open_pack_day(
@@ -2994,7 +3137,7 @@ fn load_selected_account_context_with_options(
                 summary.recovery_actions_open = reminder_context.recovery_actions_open;
             }
             if let Some(detail) = order_detail.as_mut() {
-                detail.recovery = reminder_context.selected_order_recovery;
+                detail.recoveries = reminder_context.selected_order_recoveries;
             }
             pack_day_projection.reminders = reminder_context.pack_day_feed;
 
@@ -3086,13 +3229,9 @@ fn load_selected_account_reminder_context_with_options(
     }
     let reminder_log = sqlite_store.load_reminder_log(account_id, farm_id, 8)?;
 
-    let selected_order_recovery = selected_order_detail.and_then(|detail| {
-        recovery_queue
-            .items
-            .iter()
-            .find(|record| record.order_id == detail.order_id)
-            .cloned()
-    });
+    let selected_order_recoveries = selected_order_detail
+        .map(|detail| ordered_order_recoveries_for_detail(&recovery_queue, detail.order_id))
+        .unwrap_or_default();
     let due_soon_count = schedule
         .items
         .iter()
@@ -3117,7 +3256,7 @@ fn load_selected_account_reminder_context_with_options(
         orders_feed: filter_reminder_surface(&schedule, ReminderSurface::Orders),
         pack_day_feed: filter_reminder_surface(&schedule, ReminderSurface::PackDay),
         recovery_queue,
-        selected_order_recovery,
+        selected_order_recoveries,
         due_soon_count,
         recovery_actions_open,
         reminder_log,
@@ -3549,6 +3688,88 @@ fn build_reminder_log_entry(
         delivery_state,
         detail: (!reminder.detail.trim().is_empty()).then_some(reminder.detail.clone()),
     }
+}
+
+fn ordered_order_recoveries_for_detail(
+    recovery_queue: &RecoveryQueueProjection,
+    order_id: OrderId,
+) -> Vec<OrderRecoveryProjection> {
+    let mut items = recovery_queue
+        .items
+        .iter()
+        .filter(|record| record.order_id == order_id)
+        .cloned()
+        .collect::<Vec<_>>();
+    items.sort_by(|left, right| {
+        order_recovery_kind_rank(left.kind)
+            .cmp(&order_recovery_kind_rank(right.kind))
+            .then_with(|| right.last_updated_at.cmp(&left.last_updated_at))
+            .then_with(|| left.recovery_record_id.cmp(&right.recovery_record_id))
+    });
+    items
+}
+
+fn order_recovery_kind_rank(kind: RecoveryKind) -> u8 {
+    match kind {
+        RecoveryKind::MissedPickup => 0,
+        RecoveryKind::RefundFollowUp => 1,
+    }
+}
+
+fn order_recovery_summary(kind: RecoveryKind, state: RecoveryState) -> &'static str {
+    match (kind, state) {
+        (RecoveryKind::MissedPickup, RecoveryState::Open) => "Missed pickup follow-up is open",
+        (RecoveryKind::MissedPickup, RecoveryState::InReview) => {
+            "Missed pickup follow-up is in review"
+        }
+        (RecoveryKind::MissedPickup, RecoveryState::Resolved) => {
+            "Missed pickup follow-up is resolved"
+        }
+        (RecoveryKind::RefundFollowUp, RecoveryState::Open) => "Refund follow-up is open",
+        (RecoveryKind::RefundFollowUp, RecoveryState::InReview) => "Refund follow-up is in review",
+        (RecoveryKind::RefundFollowUp, RecoveryState::Resolved) => "Refund follow-up is resolved",
+    }
+}
+
+fn order_recovery_note(kind: RecoveryKind, state: RecoveryState) -> &'static str {
+    match (kind, state) {
+        (RecoveryKind::MissedPickup, RecoveryState::Open) => {
+            "Check in with the buyer and agree on the next step."
+        }
+        (RecoveryKind::MissedPickup, RecoveryState::InReview) => {
+            "Use notes outside the app to confirm a new pickup or another resolution."
+        }
+        (RecoveryKind::MissedPickup, RecoveryState::Resolved) => {
+            "The seller and buyer have agreed on the next step."
+        }
+        (RecoveryKind::RefundFollowUp, RecoveryState::Open) => {
+            "Review the situation and handle any refund outside the app."
+        }
+        (RecoveryKind::RefundFollowUp, RecoveryState::InReview) => {
+            "Confirm the outcome and keep payment handling outside the app."
+        }
+        (RecoveryKind::RefundFollowUp, RecoveryState::Resolved) => {
+            "The refund follow-up was handled outside the app."
+        }
+    }
+}
+
+fn order_recovery_sync_payload(
+    order_id: OrderId,
+    farm_id: FarmId,
+    kind: RecoveryKind,
+    state: RecoveryState,
+    source: &str,
+) -> String {
+    json!({
+        "aggregate_kind": "order_recovery",
+        "order_id": order_id.to_string(),
+        "farm_id": farm_id.to_string(),
+        "recovery_kind": kind.storage_key(),
+        "recovery_state": state.storage_key(),
+        "source": source,
+    })
+    .to_string()
 }
 
 fn load_selected_account_sync_context(
@@ -6396,7 +6617,7 @@ mod tests {
                 .orders_projection
                 .detail
                 .as_ref()
-                .and_then(|detail| detail.recovery.as_ref())
+                .and_then(|detail| detail.recoveries.first())
                 .expect("order recovery")
                 .kind,
             RecoveryKind::MissedPickup

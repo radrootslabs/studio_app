@@ -1500,7 +1500,7 @@ pub struct OrderDetailProjection {
     pub pickup_location_label: Option<String>,
     pub items: Vec<OrderDetailItemRow>,
     pub primary_action: Option<OrderPrimaryAction>,
-    pub recovery: Option<OrderRecoveryProjection>,
+    pub recoveries: Vec<OrderRecoveryProjection>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -1916,9 +1916,7 @@ impl ReminderFeedProjection {
             .filter(|item| {
                 matches!(
                     item.urgency,
-                    ReminderUrgency::DueSoon
-                        | ReminderUrgency::Overdue
-                        | ReminderUrgency::Blocking
+                    ReminderUrgency::DueSoon | ReminderUrgency::Overdue | ReminderUrgency::Blocking
                 )
             })
             .count()
@@ -2151,24 +2149,24 @@ mod tests {
         FarmId, FarmOrderMethod, FarmReadinessBlocker, FarmRulesProjection, FarmRulesReadiness,
         FarmSetupBlocker, FarmSetupDraft, FarmSetupProjection, FarmSetupReadiness,
         FarmSetupSection, FarmTimingConflict, FarmTimingConflictKind, FarmerActivationProjection,
-        FarmerSection, IdentityBlockedReason, IdentityReadiness, LoggedOutStartupPhase,
-        LoggedOutStartupProjection, OrderDetailItemRow, OrderDetailProjection, OrderListRow,
-        OrderId, OrderPrimaryAction, OrderRecoveryProjection, OrderStatus, OrdersFilter,
-        OrdersListProjection, OrdersListRow, OrdersListSummary, OrdersScreenQueryState,
-        PackDayPackListRow, PackDayProductTotalRow, PackDayProjection, PackDayRosterRow,
-        PackDayScreenQueryState, ParseStartupSignerSourceError, PersonalEntryProjection,
-        PersonalEntryState, PersonalSection, PickupLocationId, ProductAttentionState,
-        ProductAvailabilityState, ProductAvailabilitySummary, ProductEditorDraft, ProductListRow,
-        ProductPricePresentation, ProductPublishBlocker, ProductStatus, ProductStockState,
-        ProductStockSummary, ProductsFilter, ProductsListProjection, ProductsListRow,
-        ProductsListSummary, ProductsSort, RecoveryKind, RecoveryQueueProjection, RecoveryRecordId,
-        RecoveryState, ReminderDeadlineProjection, ReminderDeliveryState, ReminderFeedProjection,
-        ReminderId, ReminderKind, ReminderLogEntryProjection, ReminderLogProjection,
-        ReminderSurface, ReminderUrgency, RepeatDemandEligibility, RepeatDemandHandoffProjection,
-        SelectedAccountProjection, SelectedSurfaceProjection, SettingsPreference, SettingsSection,
-        ShellSection, StartupSignerEntryProjection, StartupSignerSource, StartupSignerSourceKind,
+        FarmerSection, FulfillmentWindowId, IdentityBlockedReason, IdentityReadiness,
+        LoggedOutStartupPhase, LoggedOutStartupProjection, OrderDetailItemRow,
+        OrderDetailProjection, OrderId, OrderListRow, OrderPrimaryAction, OrderRecoveryProjection,
+        OrderStatus, OrdersFilter, OrdersListProjection, OrdersListRow, OrdersListSummary,
+        OrdersScreenQueryState, PackDayPackListRow, PackDayProductTotalRow, PackDayProjection,
+        PackDayRosterRow, PackDayScreenQueryState, ParseStartupSignerSourceError,
+        PersonalEntryProjection, PersonalEntryState, PersonalSection, PickupLocationId,
+        ProductAttentionState, ProductAvailabilityState, ProductAvailabilitySummary,
+        ProductEditorDraft, ProductListRow, ProductPricePresentation, ProductPublishBlocker,
+        ProductStatus, ProductStockState, ProductStockSummary, ProductsFilter,
+        ProductsListProjection, ProductsListRow, ProductsListSummary, ProductsSort, RecoveryKind,
+        RecoveryQueueProjection, RecoveryRecordId, RecoveryState, ReminderDeadlineProjection,
+        ReminderDeliveryState, ReminderFeedProjection, ReminderId, ReminderKind,
+        ReminderLogEntryProjection, ReminderLogProjection, ReminderSurface, ReminderUrgency,
+        RepeatDemandEligibility, RepeatDemandHandoffProjection, SelectedAccountProjection,
+        SelectedSurfaceProjection, SettingsPreference, SettingsSection, ShellSection,
+        StartupSignerEntryProjection, StartupSignerSource, StartupSignerSourceKind,
         TodayAgendaProjection, TodaySetupTask, TodaySetupTaskKind, TodaySummary,
-        FulfillmentWindowId,
     };
     use std::{collections::BTreeSet, str::FromStr};
     use uuid::Uuid;
@@ -2799,7 +2797,7 @@ mod tests {
                 quantity_display: "2 bags".to_owned(),
             }],
             primary_action: Some(OrderPrimaryAction::MarkPacked),
-            recovery: None,
+            recoveries: Vec::new(),
         };
         let pack_day = PackDayProjection {
             fulfillment_window: Some(super::FulfillmentWindowSummary {
@@ -2819,10 +2817,10 @@ mod tests {
             pickup_roster: vec![PackDayRosterRow {
                 order_id,
                 order_number: "R-1001".to_owned(),
-                    customer_display_name: "Casey".to_owned(),
-                }],
-                reminders: ReminderFeedProjection::default(),
-            };
+                customer_display_name: "Casey".to_owned(),
+            }],
+            reminders: ReminderFeedProjection::default(),
+        };
 
         assert!(orders_list.summary.has_orders());
         assert!(!orders_list.is_empty());
@@ -3050,13 +3048,19 @@ mod tests {
         };
 
         assert_eq!(ReminderSurface::PackDay.storage_key(), "pack_day");
-        assert_eq!(ReminderKind::RefundRecovery.storage_key(), "refund_recovery");
+        assert_eq!(
+            ReminderKind::RefundRecovery.storage_key(),
+            "refund_recovery"
+        );
         assert_eq!(ReminderUrgency::DueSoon.storage_key(), "due_soon");
         assert_eq!(
             ReminderDeliveryState::Acknowledged.storage_key(),
             "acknowledged"
         );
-        assert_eq!(RecoveryKind::RefundFollowUp.storage_key(), "refund_follow_up");
+        assert_eq!(
+            RecoveryKind::RefundFollowUp.storage_key(),
+            "refund_follow_up"
+        );
         assert_eq!(RecoveryState::InReview.storage_key(), "in_review");
         assert_eq!(
             RepeatDemandEligibility::Unavailable.storage_key(),

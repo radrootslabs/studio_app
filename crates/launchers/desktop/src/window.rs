@@ -19,13 +19,13 @@ use radroots_studio_app_models::{
     FarmSetupBlocker, FarmSetupDraft, FarmSummary, FarmTimingConflictKind, FarmerSection,
     FulfillmentWindowId, FulfillmentWindowRecord, FulfillmentWindowSummary, LoggedOutStartupPhase,
     OrderDetailItemRow, OrderDetailProjection, OrderId, OrderListRow, OrderPrimaryAction,
-    OrderStatus, OrdersFilter, OrdersListRow, PackDayPackListRow, PackDayProductTotalRow,
-    PackDayRosterRow, PersonalEntryState, PersonalSection, PickupLocationId, PickupLocationRecord,
-    ProductAttentionState, ProductEditorDraft, ProductId, ProductListRow, ProductPricePresentation,
-    ProductPublishBlocker, ProductStatus, ProductsFilter, ProductsListRow, ProductsSort,
-    ReminderDeadlineProjection, ReminderDeliveryState, ReminderId, ReminderLogEntryProjection,
-    ReminderLogProjection, ReminderSurface, ReminderUrgency, ShellSection, TodayAgendaProjection,
-    TodaySetupTaskKind,
+    OrderRecoveryProjection, OrderStatus, OrdersFilter, OrdersListRow, PackDayPackListRow,
+    PackDayProductTotalRow, PackDayRosterRow, PersonalEntryState, PersonalSection,
+    PickupLocationId, PickupLocationRecord, ProductAttentionState, ProductEditorDraft, ProductId,
+    ProductListRow, ProductPricePresentation, ProductPublishBlocker, ProductStatus, ProductsFilter,
+    ProductsListRow, ProductsSort, RecoveryKind, RecoveryState, ReminderDeadlineProjection,
+    ReminderDeliveryState, ReminderId, ReminderLogEntryProjection, ReminderLogProjection,
+    ReminderSurface, ReminderUrgency, ShellSection, TodayAgendaProjection, TodaySetupTaskKind,
 };
 use radroots_studio_app_remote_signer::{
     RadrootsAppRemoteSignerApprovedSession, RadrootsAppRemoteSignerPendingPollOutcome,
@@ -1582,6 +1582,94 @@ impl HomeView {
                     error = %runtime_error,
                     order_id = %order_id,
                     "failed to mark order completed"
+                );
+            }
+        }
+    }
+
+    fn start_order_recovery(
+        &mut self,
+        order_id: OrderId,
+        kind: RecoveryKind,
+        cx: &mut Context<Self>,
+    ) {
+        match self.runtime.start_order_recovery(order_id, kind) {
+            Ok(true) => cx.notify(),
+            Ok(false) => {}
+            Err(runtime_error) => {
+                error!(
+                    target: "orders",
+                    event = "orders.recovery_start_failed",
+                    error = %runtime_error,
+                    order_id = %order_id,
+                    recovery_kind = kind.storage_key(),
+                    "failed to start order recovery"
+                );
+            }
+        }
+    }
+
+    fn review_order_recovery(
+        &mut self,
+        order_id: OrderId,
+        kind: RecoveryKind,
+        cx: &mut Context<Self>,
+    ) {
+        match self.runtime.review_order_recovery(order_id, kind) {
+            Ok(true) => cx.notify(),
+            Ok(false) => {}
+            Err(runtime_error) => {
+                error!(
+                    target: "orders",
+                    event = "orders.recovery_review_failed",
+                    error = %runtime_error,
+                    order_id = %order_id,
+                    recovery_kind = kind.storage_key(),
+                    "failed to review order recovery"
+                );
+            }
+        }
+    }
+
+    fn reopen_order_recovery(
+        &mut self,
+        order_id: OrderId,
+        kind: RecoveryKind,
+        cx: &mut Context<Self>,
+    ) {
+        match self.runtime.reopen_order_recovery(order_id, kind) {
+            Ok(true) => cx.notify(),
+            Ok(false) => {}
+            Err(runtime_error) => {
+                error!(
+                    target: "orders",
+                    event = "orders.recovery_reopen_failed",
+                    error = %runtime_error,
+                    order_id = %order_id,
+                    recovery_kind = kind.storage_key(),
+                    "failed to reopen order recovery"
+                );
+            }
+        }
+    }
+
+    fn resolve_order_recovery(
+        &mut self,
+        order_id: OrderId,
+        kind: RecoveryKind,
+        cx: &mut Context<Self>,
+    ) {
+        match self.runtime.resolve_order_recovery(order_id, kind) {
+            Ok(true) => cx.notify(),
+            Ok(false) => {}
+            Err(runtime_error) => {
+                error!(
+                    target: "orders",
+                    event = "orders.recovery_resolve_failed",
+                    error = %runtime_error,
+                    order_id = %order_id,
+                    recovery_kind = kind.storage_key(),
+                    "failed to resolve order recovery"
                 );
             }
         }
@@ -3486,11 +3574,215 @@ impl HomeView {
                             this.child(home_body_text(app_shared_text(AppTextKey::ValueNone)))
                         }),
                 ))
+                .child(self.render_order_recovery_section(detail, cx))
                 .when_some(primary_action, |this, primary_action| {
                     this.child(div().child(primary_action))
                 }),
         )
         .into_any_element()
+    }
+
+    fn render_order_recovery_section(
+        &mut self,
+        detail: &OrderDetailProjection,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        app_form_section(
+            app_shared_text(AppTextKey::OrdersRecoverySectionTitle),
+            div()
+                .w_full()
+                .flex()
+                .flex_col()
+                .gap(px(APP_UI_THEME.foundation.spacing.medium_px))
+                .child(
+                    self.render_order_recovery_card(
+                        detail.order_id,
+                        RecoveryKind::MissedPickup,
+                        detail
+                            .recoveries
+                            .iter()
+                            .find(|record| record.kind == RecoveryKind::MissedPickup),
+                        cx,
+                    ),
+                )
+                .child(
+                    self.render_order_recovery_card(
+                        detail.order_id,
+                        RecoveryKind::RefundFollowUp,
+                        detail
+                            .recoveries
+                            .iter()
+                            .find(|record| record.kind == RecoveryKind::RefundFollowUp),
+                        cx,
+                    ),
+                ),
+        )
+        .into_any_element()
+    }
+
+    fn render_order_recovery_card(
+        &mut self,
+        order_id: OrderId,
+        kind: RecoveryKind,
+        recovery: Option<&OrderRecoveryProjection>,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let title_key = order_recovery_title_key(kind);
+        let body = recovery.map_or_else(
+            || {
+                home_body_text(app_shared_text(order_recovery_empty_body_key(kind)))
+                    .into_any_element()
+            },
+            |record| {
+                app_stack_v(APP_UI_THEME.foundation.spacing.tight_px)
+                    .w_full()
+                    .child(home_body_text(record.summary.clone()))
+                    .when_some(
+                        record
+                            .note
+                            .as_ref()
+                            .map(|note| note.trim())
+                            .filter(|note| !note.is_empty()),
+                        |this, note| this.child(home_body_text(note.to_owned())),
+                    )
+                    .child(
+                        div()
+                            .text_size(px(APP_UI_THEME.foundation.typography.utility_title_text_px))
+                            .text_color(rgb(APP_UI_THEME.foundation.text.secondary))
+                            .child(format!(
+                                "{}: {}",
+                                app_text(AppTextKey::OrdersRecoveryLastUpdatedLabel),
+                                record.last_updated_at
+                            )),
+                    )
+                    .into_any_element()
+            },
+        );
+
+        app_surface_card(
+            app_stack_v(APP_UI_THEME.foundation.spacing.medium_px)
+                .w_full()
+                .child(
+                    div()
+                        .w_full()
+                        .min_w_0()
+                        .flex()
+                        .items_start()
+                        .justify_between()
+                        .gap(px(APP_UI_THEME.foundation.spacing.tight_px))
+                        .child(
+                            div()
+                                .flex_1()
+                                .min_w_0()
+                                .text_size(px(APP_UI_THEME.foundation.typography.body_text_px))
+                                .font_weight(gpui::FontWeight::SEMIBOLD)
+                                .line_height(relative(1.2))
+                                .text_color(rgb(APP_UI_THEME.foundation.text.primary))
+                                .child(app_shared_text(title_key)),
+                        )
+                        .when_some(
+                            recovery.map(|record| order_recovery_state_badge(record.state)),
+                            |this, badge| this.child(badge),
+                        ),
+                )
+                .child(body)
+                .when_some(
+                    self.render_order_recovery_actions(order_id, kind, recovery, cx),
+                    |this, actions| {
+                        this.child(
+                            div()
+                                .w_full()
+                                .flex()
+                                .items_center()
+                                .justify_end()
+                                .gap(px(APP_UI_THEME.foundation.spacing.tight_px))
+                                .child(actions),
+                        )
+                    },
+                ),
+        )
+        .into_any_element()
+    }
+
+    fn render_order_recovery_actions(
+        &mut self,
+        order_id: OrderId,
+        kind: RecoveryKind,
+        recovery: Option<&OrderRecoveryProjection>,
+        cx: &mut Context<Self>,
+    ) -> Option<AnyElement> {
+        let index = order_recovery_kind_index(kind);
+
+        match recovery.map(|record| record.state) {
+            None => Some(
+                action_button_primary(
+                    ("orders-recovery-open", index),
+                    app_shared_text(AppTextKey::OrdersRecoveryActionOpenFollowUp),
+                    cx.listener(move |this, _, _, cx| {
+                        this.start_order_recovery(order_id, kind, cx)
+                    }),
+                    cx,
+                )
+                .into_any_element(),
+            ),
+            Some(RecoveryState::Open) => Some(
+                div()
+                    .flex()
+                    .items_center()
+                    .gap(px(APP_UI_THEME.foundation.spacing.tight_px))
+                    .child(action_button_compact(
+                        ("orders-recovery-review", index),
+                        app_shared_text(AppTextKey::OrdersRecoveryActionStartReview),
+                        cx.listener(move |this, _, _, cx| {
+                            this.review_order_recovery(order_id, kind, cx)
+                        }),
+                        cx,
+                    ))
+                    .child(action_button_primary(
+                        ("orders-recovery-resolve", index),
+                        app_shared_text(AppTextKey::OrdersRecoveryActionResolve),
+                        cx.listener(move |this, _, _, cx| {
+                            this.resolve_order_recovery(order_id, kind, cx)
+                        }),
+                        cx,
+                    ))
+                    .into_any_element(),
+            ),
+            Some(RecoveryState::InReview) => Some(
+                div()
+                    .flex()
+                    .items_center()
+                    .gap(px(APP_UI_THEME.foundation.spacing.tight_px))
+                    .child(action_button_compact(
+                        ("orders-recovery-reopen", index),
+                        app_shared_text(AppTextKey::OrdersRecoveryActionMarkOpen),
+                        cx.listener(move |this, _, _, cx| {
+                            this.reopen_order_recovery(order_id, kind, cx)
+                        }),
+                        cx,
+                    ))
+                    .child(action_button_primary(
+                        ("orders-recovery-resolve", index),
+                        app_shared_text(AppTextKey::OrdersRecoveryActionResolve),
+                        cx.listener(move |this, _, _, cx| {
+                            this.resolve_order_recovery(order_id, kind, cx)
+                        }),
+                        cx,
+                    ))
+                    .into_any_element(),
+            ),
+            Some(RecoveryState::Resolved) => Some(
+                action_button_compact(
+                    ("orders-recovery-reopen", index),
+                    app_shared_text(AppTextKey::OrdersRecoveryActionMarkOpen),
+                    cx.listener(move |this, _, _, cx| {
+                        this.reopen_order_recovery(order_id, kind, cx)
+                    }),
+                    cx,
+                )
+                .into_any_element(),
+            ),
+        }
     }
 
     fn render_products_table_entry(
@@ -8774,6 +9066,52 @@ fn orders_status_color(status: OrderStatus) -> u32 {
         OrderStatus::Completed | OrderStatus::Refunded => {
             APP_UI_THEME.components.app_status_indicator.offline
         }
+    }
+}
+
+fn order_recovery_title_key(kind: RecoveryKind) -> AppTextKey {
+    match kind {
+        RecoveryKind::MissedPickup => AppTextKey::OrdersRecoveryMissedPickupTitle,
+        RecoveryKind::RefundFollowUp => AppTextKey::OrdersRecoveryRefundFollowUpTitle,
+    }
+}
+
+fn order_recovery_empty_body_key(kind: RecoveryKind) -> AppTextKey {
+    match kind {
+        RecoveryKind::MissedPickup => AppTextKey::OrdersRecoveryMissedPickupBody,
+        RecoveryKind::RefundFollowUp => AppTextKey::OrdersRecoveryRefundFollowUpBody,
+    }
+}
+
+fn order_recovery_state_key(state: RecoveryState) -> AppTextKey {
+    match state {
+        RecoveryState::Open => AppTextKey::OrdersRecoveryStateOpen,
+        RecoveryState::InReview => AppTextKey::OrdersRecoveryStateInReview,
+        RecoveryState::Resolved => AppTextKey::OrdersRecoveryStateResolved,
+    }
+}
+
+fn order_recovery_state_color(state: RecoveryState) -> u32 {
+    match state {
+        RecoveryState::Open => APP_UI_THEME.components.app_status_indicator.attention,
+        RecoveryState::InReview => APP_UI_THEME.foundation.text.accent,
+        RecoveryState::Resolved => APP_UI_THEME.components.app_status_indicator.online,
+    }
+}
+
+fn order_recovery_state_badge(state: RecoveryState) -> AnyElement {
+    div()
+        .text_size(px(APP_UI_THEME.foundation.typography.utility_title_text_px))
+        .font_weight(gpui::FontWeight::SEMIBOLD)
+        .text_color(rgb(order_recovery_state_color(state)))
+        .child(app_shared_text(order_recovery_state_key(state)))
+        .into_any_element()
+}
+
+fn order_recovery_kind_index(kind: RecoveryKind) -> usize {
+    match kind {
+        RecoveryKind::MissedPickup => 0,
+        RecoveryKind::RefundFollowUp => 1,
     }
 }
 

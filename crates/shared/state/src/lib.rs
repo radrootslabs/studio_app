@@ -1678,7 +1678,7 @@ mod tests {
                 quantity_display: "2 bags".to_owned(),
             }],
             primary_action: Some(OrderPrimaryAction::Review),
-            recovery: None,
+            recoveries: Vec::new(),
         };
         let orders_reminders = ReminderFeedProjection {
             items: vec![radroots_studio_app_models::ReminderDeadlineProjection {

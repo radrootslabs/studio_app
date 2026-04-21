@@ -109,7 +109,7 @@ impl<'a> AppOrdersRepository<'a> {
                         pickup_location_label: empty_string_to_none(pickup_location_label),
                         items,
                         primary_action: primary_action_for_status(status),
-                        recovery: None,
+                        recoveries: Vec::new(),
                     })
                 },
             )
