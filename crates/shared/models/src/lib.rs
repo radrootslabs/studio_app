@@ -2025,8 +2025,6 @@ pub struct RepeatDemandHandoffProjection {
     pub eligibility: RepeatDemandEligibility,
     pub available_item_count: u32,
     pub unavailable_item_count: u32,
-    pub action_label: String,
-    pub note: Option<String>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -3026,8 +3024,6 @@ mod tests {
             eligibility: RepeatDemandEligibility::Partial,
             available_item_count: 2,
             unavailable_item_count: 1,
-            action_label: "Reorder available items".to_owned(),
-            note: Some("One prior item is no longer listed.".to_owned()),
         };
 
         let reminder_feed = ReminderFeedProjection {

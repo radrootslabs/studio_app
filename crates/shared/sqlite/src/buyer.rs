@@ -1205,7 +1205,15 @@ impl<'a> AppBuyerRepository<'a> {
         let mut unavailable_item_count = 0u32;
 
         for order_line in &order_lines {
-            if let Some(listing) = visible_listings.get(&order_line.product_id).cloned() {
+            if let Some(listing) = visible_listings
+                .get(&order_line.product_id)
+                .filter(|listing| {
+                    listing
+                        .stock_count
+                        .is_some_and(|quantity| quantity >= order_line.quantity)
+                })
+                .cloned()
+            {
                 available_lines.push(BuyerCartLineRecord {
                     listing,
                     quantity: order_line.quantity,
@@ -1238,8 +1246,6 @@ impl<'a> AppBuyerRepository<'a> {
                 eligibility,
                 available_item_count,
                 unavailable_item_count,
-                action_label: repeat_demand_action_label(eligibility),
-                note: repeat_demand_note(available_item_count, unavailable_item_count),
             },
         }))
     }
@@ -1607,31 +1613,6 @@ fn parse_repeat_demand_product_id(line_id: &str) -> Result<ProductId, AppSqliteE
     parse_typed_id("order_lines.id", product_id.to_owned())
 }
 
-fn repeat_demand_action_label(eligibility: RepeatDemandEligibility) -> String {
-    match eligibility {
-        RepeatDemandEligibility::Eligible => "Reorder".to_owned(),
-        RepeatDemandEligibility::Partial => "Reorder available items".to_owned(),
-        RepeatDemandEligibility::Unavailable => "Unavailable".to_owned(),
-    }
-}
-
-fn repeat_demand_note(
-    available_item_count: u32,
-    unavailable_item_count: u32,
-) -> Option<String> {
-    match (available_item_count, unavailable_item_count) {
-        (0, 0) => None,
-        (_, 0) => Some("All items from this order are currently available.".to_owned()),
-        (0, _) => Some("The items from this order are no longer available.".to_owned()),
-        (_, unavailable) if unavailable == 1 => {
-            Some("One item from this order is no longer available.".to_owned())
-        }
-        (_, unavailable) => Some(format!(
-            "{unavailable} items from this order are no longer available."
-        )),
-    }
-}
-
 fn refresh_buyer_cart_summary(cart: &mut BuyerCartProjection) -> Result<(), AppSqliteError> {
     if cart.lines.is_empty() {
         cart.subtotal_minor_units = None;
@@ -1856,7 +1837,7 @@ mod tests {
     };
     use rusqlite::{Connection, params};
 
-    use crate::{AppSqliteError, AppSqliteStore, DatabaseTarget};
+    use crate::{AppSqliteError, AppSqliteStore, BuyerRepeatDemandApplyOutcome, DatabaseTarget};
 
     use super::AppBuyerRepository;
 
@@ -2202,12 +2183,115 @@ mod tests {
         );
         assert_eq!(row_repeat_demand.available_item_count, 1);
         assert_eq!(row_repeat_demand.unavailable_item_count, 1);
-        assert_eq!(row_repeat_demand.action_label, "Reorder available items");
-        assert_eq!(
-            row_repeat_demand.note.as_deref(),
-            Some("One item from this order is no longer available.")
-        );
         assert_eq!(detail_repeat_demand, row_repeat_demand);
+    }
+
+    #[test]
+    fn buyer_repeat_demand_requires_current_stock_for_full_historical_quantity() {
+        let store = AppSqliteStore::open(DatabaseTarget::InMemory).expect("store should open");
+        let connection = store.connection();
+        let repository = AppBuyerRepository::new(connection);
+        let context = BuyerContext::Guest;
+        let farm_id = insert_farm(connection, "Willow Farm", "ready");
+        let pickup_location_id = insert_pickup_location(connection, farm_id, "Barn pickup");
+        let future_window_id = insert_window(
+            connection,
+            farm_id,
+            Some(pickup_location_id),
+            "Friday pickup",
+            "2099-04-18T16:00:00Z",
+            "2099-04-18T18:00:00Z",
+        );
+
+        insert_farm_setup_binding(connection, "acct_farmer", farm_id, true, false, false);
+        let product_id = insert_product(
+            connection,
+            farm_id,
+            SeedProduct {
+                title: "Salad mix",
+                subtitle: "Spring blend",
+                status: "published",
+                unit_label: "bag",
+                price_minor_units: Some(650),
+                price_currency: "USD",
+                stock_count: Some(8),
+                availability_window_id: Some(future_window_id),
+            },
+        );
+        let listing = repository
+            .load_buyer_product_detail(product_id)
+            .expect("buyer detail should load")
+            .expect("listing should exist")
+            .listing;
+
+        repository
+            .replace_buyer_cart(
+                &context,
+                &radroots_studio_app_models::BuyerCartProjection {
+                    farm_id: Some(farm_id),
+                    farm_display_name: Some("Willow Farm".to_owned()),
+                    lines: vec![radroots_studio_app_models::BuyerCartLineProjection {
+                        product_id: listing.product_id,
+                        farm_id: listing.farm_id,
+                        farm_display_name: listing.farm_display_name.clone(),
+                        title: listing.title.clone(),
+                        quantity: 2,
+                        unit_price: listing.price.clone(),
+                        line_total_minor_units: 1300,
+                        fulfillment_summary: "Friday pickup".to_owned(),
+                    }],
+                    subtotal_minor_units: Some(1300),
+                    currency_code: Some("USD".to_owned()),
+                    replace_confirmation: None,
+                },
+            )
+            .expect("buyer cart should save");
+        repository
+            .save_buyer_checkout_draft(
+                &context,
+                &radroots_studio_app_models::BuyerCheckoutDraft {
+                    name: "Casey Buyer".to_owned(),
+                    email: "casey@example.com".to_owned(),
+                    phone: String::new(),
+                    order_note: String::new(),
+                },
+            )
+            .expect("buyer checkout draft should save");
+        let order_id = repository
+            .place_buyer_order(&context)
+            .expect("buyer checkout should place order");
+
+        connection
+            .execute(
+                "update products set stock_count = 1 where id = ?1",
+                params![product_id.to_string()],
+            )
+            .expect("product stock should lower");
+
+        let repeat_demand = repository
+            .load_buyer_order_detail(&context, order_id)
+            .expect("buyer order detail should load")
+            .expect("buyer order detail should exist")
+            .repeat_demand
+            .expect("repeat demand should stay visible for unavailable reorder");
+
+        assert_eq!(
+            repeat_demand.eligibility,
+            radroots_studio_app_models::RepeatDemandEligibility::Unavailable
+        );
+        assert_eq!(repeat_demand.available_item_count, 0);
+        assert_eq!(repeat_demand.unavailable_item_count, 1);
+        assert_eq!(
+            repository
+                .apply_buyer_repeat_demand_to_cart(&context, order_id, false)
+                .expect("repeat demand apply should load"),
+            BuyerRepeatDemandApplyOutcome::Unavailable
+        );
+        assert!(repository
+            .load_buyer_cart(&context)
+            .expect("buyer cart should reload")
+            .lines
+            .is_empty());
     }
 
     #[test]

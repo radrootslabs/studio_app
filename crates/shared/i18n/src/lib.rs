@@ -404,6 +404,26 @@ mod tests {
             app_text(AppTextKey::PersonalOrdersRepeatDemandTitle),
             "Reorder"
         );
+        assert_eq!(
+            app_text(AppTextKey::PersonalOrdersRepeatDemandActionEligible),
+            "Reorder"
+        );
+        assert_eq!(
+            app_text(AppTextKey::PersonalOrdersRepeatDemandActionPartial),
+            "Reorder available items"
+        );
+        assert_eq!(
+            app_text(AppTextKey::PersonalOrdersRepeatDemandNotePartialSingle),
+            "One item from this order is currently unavailable to reorder."
+        );
+        assert_eq!(
+            app_text(AppTextKey::PersonalOrdersRepeatDemandNotePartialMultiple),
+            "Some items from this order are currently unavailable to reorder."
+        );
+        assert_eq!(
+            app_text(AppTextKey::PersonalOrdersRepeatDemandNoteUnavailable),
+            "Items from this order are currently unavailable to reorder."
+        );
     }
 
     #[test]

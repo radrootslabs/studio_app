@@ -25,7 +25,8 @@ use radroots_studio_app_models::{
     ProductListRow, ProductPricePresentation, ProductPublishBlocker, ProductStatus, ProductsFilter,
     ProductsListRow, ProductsSort, RecoveryKind, RecoveryState, ReminderDeadlineProjection,
     ReminderDeliveryState, ReminderId, ReminderLogEntryProjection, ReminderLogProjection,
-    ReminderSurface, ReminderUrgency, RepeatDemandEligibility, ShellSection,
+    ReminderSurface, ReminderUrgency, RepeatDemandEligibility, RepeatDemandHandoffProjection,
+    ShellSection,
     TodayAgendaProjection, TodaySetupTaskKind,
 };
 use radroots_studio_app_remote_signer::{
@@ -7868,7 +7869,7 @@ fn buyer_order_detail_card(
                     app_shared_text(AppTextKey::PersonalOrdersRepeatDemandTitle),
                     app_stack_v(APP_UI_THEME.foundation.spacing.small_px)
                         .w_full()
-                        .when_some(repeat_demand.note.clone(), |this, note| {
+                        .when_some(buyer_repeat_demand_note(repeat_demand), |this, note| {
                             this.child(home_body_text(note))
                         })
                         .when_some(repeat_confirmation, |this, replace_confirmation| {
@@ -7927,7 +7928,7 @@ fn buyer_order_detail_card(
                             |this| {
                                 this.child(action_button_primary(
                                     "buyer-order-repeat-demand",
-                                    SharedString::from(repeat_demand.action_label.clone()),
+                                    buyer_repeat_demand_action_label(repeat_demand),
                                     cx.listener({
                                         let order_id = detail.order_id;
                                         move |this, _, _, cx| {
@@ -7942,6 +7943,39 @@ fn buyer_order_detail_card(
             }),
     )
     .into_any_element()
+}
+
+fn buyer_repeat_demand_action_label(
+    repeat_demand: &RepeatDemandHandoffProjection,
+) -> SharedString {
+    match repeat_demand.eligibility {
+        RepeatDemandEligibility::Eligible => {
+            app_shared_text(AppTextKey::PersonalOrdersRepeatDemandActionEligible)
+        }
+        RepeatDemandEligibility::Partial => {
+            app_shared_text(AppTextKey::PersonalOrdersRepeatDemandActionPartial)
+        }
+        RepeatDemandEligibility::Unavailable => {
+            app_shared_text(AppTextKey::PersonalOrdersRepeatDemandActionEligible)
+        }
+    }
+}
+
+fn buyer_repeat_demand_note(
+    repeat_demand: &RepeatDemandHandoffProjection,
+) -> Option<SharedString> {
+    match repeat_demand.eligibility {
+        RepeatDemandEligibility::Eligible => None,
+        RepeatDemandEligibility::Partial if repeat_demand.unavailable_item_count == 1 => Some(
+            app_shared_text(AppTextKey::PersonalOrdersRepeatDemandNotePartialSingle),
+        ),
+        RepeatDemandEligibility::Partial => Some(app_shared_text(
+            AppTextKey::PersonalOrdersRepeatDemandNotePartialMultiple,
+        )),
+        RepeatDemandEligibility::Unavailable => Some(app_shared_text(
+            AppTextKey::PersonalOrdersRepeatDemandNoteUnavailable,
+        )),
+    }
 }
 
 fn buyer_order_detail_empty_card() -> impl IntoElement {
