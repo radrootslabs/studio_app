@@ -587,6 +587,23 @@ pub fn app_button_secondary(
     )
 }
 
+pub fn app_button_secondary_disabled(
+    id: impl Into<ElementId>,
+    label: impl Into<SharedString>,
+    cx: &App,
+) -> impl IntoElement {
+    app_button_label(
+        app_button_base_disabled(id, AppButtonVariant::Secondary, cx),
+        label.into(),
+        APP_UI_THEME
+            .components
+            .app_button
+            .sizing
+            .horizontal_padding_px,
+        AppButtonVariant::Secondary,
+    )
+}
+
 pub fn app_button_primary(
     id: impl Into<ElementId>,
     label: impl Into<SharedString>,

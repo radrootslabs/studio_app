@@ -475,6 +475,38 @@ mod tests {
         assert_eq!(app_text(AppTextKey::PackDayExportFolderLabel), "Folder");
         assert_eq!(app_text(AppTextKey::PackDayExportFilesLabel), "Files");
         assert_eq!(app_text(AppTextKey::PackDayExportErrorLabel), "Error");
+        assert_eq!(
+            app_text(AppTextKey::PackDayHostHandoffRevealAction),
+            "Show in Finder"
+        );
+        assert_eq!(
+            app_text(AppTextKey::PackDayHostHandoffRevealActionRunning),
+            "Showing in Finder..."
+        );
+        assert_eq!(
+            app_text(AppTextKey::PackDayHostHandoffOpenPackSheetAction),
+            "Open pack sheet"
+        );
+        assert_eq!(
+            app_text(AppTextKey::PackDayHostHandoffOpenPackSheetActionRunning),
+            "Opening pack sheet..."
+        );
+        assert_eq!(
+            app_text(AppTextKey::PackDayHostHandoffRevealSucceededTitle),
+            "Shown in Finder"
+        );
+        assert_eq!(
+            app_text(AppTextKey::PackDayHostHandoffOpenPackSheetSucceededTitle),
+            "Opened pack sheet"
+        );
+        assert_eq!(
+            app_text(AppTextKey::PackDayHostHandoffRevealFailedTitle),
+            "Couldn't show in Finder"
+        );
+        assert_eq!(
+            app_text(AppTextKey::PackDayHostHandoffOpenPackSheetFailedTitle),
+            "Couldn't open pack sheet"
+        );
     }
 
     #[test]

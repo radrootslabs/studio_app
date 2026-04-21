@@ -16,7 +16,8 @@ use radroots_studio_app_models::{
     FarmId, FarmOrderMethod, FarmProfileRecord, FarmReadiness, FarmRulesProjection, FarmSetupDraft,
     FarmSetupProjection, FarmSummary, FarmerSection, FulfillmentWindowId,
     LoggedOutStartupProjection, OrderDetailProjection, OrderId, OrderRecoveryProjection,
-    OrdersFilter, OrdersListProjection, OrdersScreenQueryState, PackDayProjection,
+    OrdersFilter, OrdersListProjection, OrdersScreenQueryState, PackDayExportBundle,
+    PackDayExportStatus, PackDayHostHandoffKind, PackDayHostHandoffStatus, PackDayProjection,
     PackDayScreenQueryState, PersonalSection, PickupLocationRecord, ProductEditorDraft, ProductId,
     ProductsFilter, ProductsListProjection, ProductsSort, RecoveryKind, RecoveryQueueProjection,
     RecoveryRecordId, RecoveryState, ReminderDeadlineProjection, ReminderDeliveryState,
@@ -36,8 +37,9 @@ use radroots_studio_app_state::{
     AppStateStore, AppStateStoreError, BuyerBrowseScreenProjection, BuyerCartScreenProjection,
     BuyerOrdersScreenProjection, BuyerSearchScreenProjection, BuyerSearchScreenQueryState,
     FarmSetupFlowStage, FarmWorkspaceReadinessProjection, HomeRoute, OrdersScreenProjection,
-    PackDayExportRequest, PackDayScreenProjection, PersistedAppState, PersonalWorkspaceProjection,
-    ProductsScreenProjection, ProductsScreenQueryState, derive_sync_projection,
+    PackDayExportRequest, PackDayHostHandoffRequest, PackDayScreenProjection, PersistedAppState,
+    PersonalWorkspaceProjection, ProductsScreenProjection, ProductsScreenQueryState,
+    derive_sync_projection,
 };
 use radroots_studio_app_sync::{
     AppSyncProjection, AppSyncRequest, AppSyncResult, AppSyncTransport, AppSyncTransportError,
@@ -55,6 +57,9 @@ use crate::accounts::{
     DesktopLocalIdentityImportRequest, bootstrap_desktop_accounts, generate_local_account,
     identity_projection_from_manager, import_local_account, remove_selected_local_key,
     reset_local_device_state, select_active_surface, select_local_account,
+};
+use crate::pack_day_host_handoff::{
+    PackDayHostHandoffCommandPlan, PackDayHostHandoffError, plan_pack_day_host_handoff,
 };
 use crate::remote_signer::{
     DesktopRemoteSignerError, DesktopRemoteSignerPaths, activate_pending_session,
@@ -407,6 +412,25 @@ impl DesktopAppRuntime {
 
     pub fn export_pack_day(&self) -> Result<bool, DesktopAppRuntimeCommandError> {
         self.lock_state_mut().export_pack_day()
+    }
+
+    pub fn prepare_pack_day_host_handoff(
+        &self,
+        kind: PackDayHostHandoffKind,
+    ) -> Result<
+        Option<(PackDayHostHandoffRequest, PackDayHostHandoffCommandPlan)>,
+        DesktopAppRuntimeCommandError,
+    > {
+        self.lock_state_mut().prepare_pack_day_host_handoff(kind)
+    }
+
+    pub fn finish_pack_day_host_handoff(
+        &self,
+        request: PackDayHostHandoffRequest,
+        result: Result<(), PackDayHostHandoffError>,
+    ) -> Result<bool, DesktopAppRuntimeCommandError> {
+        self.lock_state_mut()
+            .finish_pack_day_host_handoff(request, result)
     }
 
     pub fn update_product_stock(
@@ -1791,6 +1815,68 @@ impl DesktopAppRuntimeState {
         }
     }
 
+    fn prepare_pack_day_host_handoff(
+        &mut self,
+        kind: PackDayHostHandoffKind,
+    ) -> Result<
+        Option<(PackDayHostHandoffRequest, PackDayHostHandoffCommandPlan)>,
+        DesktopAppRuntimeCommandError,
+    > {
+        if self.state_store.pack_day_projection().host_handoff.status
+            == PackDayHostHandoffStatus::Running
+        {
+            return Ok(None);
+        }
+
+        let Some(bundle) = self.current_pack_day_export_bundle() else {
+            return Ok(None);
+        };
+        let request = PackDayHostHandoffRequest::for_bundle(kind, &bundle);
+        let _ = self
+            .state_store
+            .apply_in_memory(AppStateCommand::begin_pack_day_host_handoff(
+                request.clone(),
+            ));
+
+        match plan_pack_day_host_handoff(&bundle, kind) {
+            Ok(plan) => Ok(Some((request, plan))),
+            Err(error) => {
+                let _ =
+                    self.state_store
+                        .apply_in_memory(AppStateCommand::fail_pack_day_host_handoff(
+                            request,
+                            error.to_string(),
+                        ));
+                Err(error.into())
+            }
+        }
+    }
+
+    fn finish_pack_day_host_handoff(
+        &mut self,
+        request: PackDayHostHandoffRequest,
+        result: Result<(), PackDayHostHandoffError>,
+    ) -> Result<bool, DesktopAppRuntimeCommandError> {
+        if !self.current_pack_day_host_handoff_request_matches(&request) {
+            return Ok(false);
+        }
+
+        match result {
+            Ok(()) => Ok(self
+                .state_store
+                .apply_in_memory(AppStateCommand::succeed_pack_day_host_handoff(request))),
+            Err(error) => {
+                let _ =
+                    self.state_store
+                        .apply_in_memory(AppStateCommand::fail_pack_day_host_handoff(
+                            request,
+                            error.to_string(),
+                        ));
+                Err(error.into())
+            }
+        }
+    }
+
     fn update_product_stock(
         &mut self,
         product_id: ProductId,
@@ -3091,6 +3177,26 @@ impl DesktopAppRuntimeState {
         let _ = self;
         DesktopAppRuntimeCommandError::RuntimeUnavailable
     }
+
+    fn current_pack_day_export_bundle(&self) -> Option<PackDayExportBundle> {
+        let pack_day = self.state_store.pack_day_projection();
+        if pack_day.export.status != PackDayExportStatus::Succeeded {
+            return None;
+        }
+
+        let bundle = pack_day.export.bundle.clone()?;
+        let fulfillment_window = pack_day.projection.fulfillment_window.as_ref()?;
+        (fulfillment_window.fulfillment_window_id == bundle.fulfillment_window_id).then_some(bundle)
+    }
+
+    fn current_pack_day_host_handoff_request_matches(
+        &self,
+        request: &PackDayHostHandoffRequest,
+    ) -> bool {
+        let pack_day = self.state_store.pack_day_projection();
+        pack_day.host_handoff.status == PackDayHostHandoffStatus::Running
+            && pack_day.host_handoff.request.as_ref() == Some(request)
+    }
 }
 
 #[derive(Debug, Error)]
@@ -3107,6 +3213,8 @@ pub enum DesktopAppRuntimeCommandError {
     Sqlite(#[from] AppSqliteError),
     #[error(transparent)]
     PackDayExportWrite(#[from] PackDayExportWriteError),
+    #[error(transparent)]
+    PackDayHostHandoff(#[from] PackDayHostHandoffError),
 }
 
 #[derive(Debug, Error)]
@@ -4437,9 +4545,10 @@ mod tests {
         FarmReadinessBlocker, FarmSetupDraft, FarmSetupProjection, FarmSummary,
         FarmerActivationProjection, FarmerSection, FulfillmentWindowId, FulfillmentWindowRecord,
         LoggedOutStartupProjection, OrderId, OrderStatus, OrdersFilter, PackDayExportStatus,
-        PackDayPackListRow, PackDayProductTotalRow, PackDayProjection, PackDayRosterRow,
-        PersonalSection, PickupLocationId, PickupLocationRecord, ProductEditorDraft, ProductStatus,
-        ProductsFilter, ProductsSort, RecoveryKind, RecoveryRecordId, ReminderDeliveryState,
+        PackDayHostHandoffKind, PackDayHostHandoffStatus, PackDayPackListRow,
+        PackDayProductTotalRow, PackDayProjection, PackDayRosterRow, PersonalSection,
+        PickupLocationId, PickupLocationRecord, ProductEditorDraft, ProductStatus, ProductsFilter,
+        ProductsSort, RecoveryKind, RecoveryRecordId, ReminderDeliveryState,
         ReminderFeedProjection, ReminderKind, SelectedSurfaceProjection, SettingsPreference,
         SettingsSection, ShellSection, TodayAgendaProjection, TodaySetupTask, TodaySetupTaskKind,
         TodaySummary,
@@ -4473,6 +4582,7 @@ mod tests {
         DesktopAppSyncStatusSummary, DesktopRemoteSignerPaths, SYNC_TRANSPORT_UNAVAILABLE_MESSAGE,
         default_sync_transport,
     };
+    use crate::pack_day_host_handoff::PackDayHostHandoffError;
 
     #[derive(Clone)]
     struct SharedRecordedSyncTransport(Arc<Mutex<RecordedAppSyncTransport>>);
@@ -7132,6 +7242,138 @@ mod tests {
         assert!(customer_labels.contains("Order: R-100"));
         assert!(!customer_labels.contains("Bogus"));
         assert!(!pickup_roster.contains(&order_id.to_string()));
+
+        cleanup_bootstrapped_runtime_paths(&paths);
+    }
+
+    #[test]
+    fn runtime_prepare_pack_day_host_handoff_uses_the_current_export_bundle() {
+        let (runtime, paths) = bootstrapped_runtime("pack_day_host_handoff_prepare");
+        let (_, farm_id) = provision_ready_farmer_account(&runtime);
+
+        seed_order_workspace(&runtime, farm_id);
+        assert!(runtime.open_pack_day(None).expect("pack day should open"));
+        assert!(
+            runtime
+                .export_pack_day()
+                .expect("pack day export should succeed")
+        );
+
+        let prepared = runtime
+            .prepare_pack_day_host_handoff(PackDayHostHandoffKind::OpenPackSheet)
+            .expect("host handoff should prepare")
+            .expect("host handoff should produce a plan");
+
+        let summary = runtime.summary();
+        assert_eq!(
+            summary.pack_day_projection.host_handoff.status,
+            PackDayHostHandoffStatus::Running
+        );
+        assert_eq!(
+            summary.pack_day_projection.host_handoff.request,
+            Some(prepared.0.clone())
+        );
+        assert_eq!(prepared.0.kind, PackDayHostHandoffKind::OpenPackSheet);
+        assert_eq!(
+            prepared.0.bundle_directory,
+            summary
+                .pack_day_projection
+                .export
+                .bundle
+                .as_ref()
+                .expect("pack day export bundle")
+                .bundle_directory
+        );
+        assert_eq!(prepared.1.kind, PackDayHostHandoffKind::OpenPackSheet);
+        assert!(prepared.1.target_path.ends_with("pack_sheet.txt"));
+
+        cleanup_bootstrapped_runtime_paths(&paths);
+    }
+
+    #[test]
+    fn runtime_finish_pack_day_host_handoff_records_failures_in_state() {
+        let (runtime, paths) = bootstrapped_runtime("pack_day_host_handoff_failure");
+        let (_, farm_id) = provision_ready_farmer_account(&runtime);
+
+        seed_order_workspace(&runtime, farm_id);
+        assert!(runtime.open_pack_day(None).expect("pack day should open"));
+        assert!(
+            runtime
+                .export_pack_day()
+                .expect("pack day export should succeed")
+        );
+
+        let (request, _) = runtime
+            .prepare_pack_day_host_handoff(PackDayHostHandoffKind::RevealBundle)
+            .expect("host handoff should prepare")
+            .expect("host handoff should produce a plan");
+
+        let error = runtime
+            .finish_pack_day_host_handoff(
+                request.clone(),
+                Err(PackDayHostHandoffError::UnsupportedPlatform),
+            )
+            .expect_err("host handoff failure should surface");
+        assert!(matches!(
+            error,
+            DesktopAppRuntimeCommandError::PackDayHostHandoff(
+                PackDayHostHandoffError::UnsupportedPlatform
+            )
+        ));
+
+        let summary = runtime.summary();
+        assert_eq!(
+            summary.pack_day_projection.host_handoff.status,
+            PackDayHostHandoffStatus::Failed
+        );
+        assert_eq!(
+            summary.pack_day_projection.host_handoff.request,
+            Some(request)
+        );
+        assert_eq!(
+            summary
+                .pack_day_projection
+                .host_handoff
+                .error_message
+                .as_deref(),
+            Some("pack day host handoff is only supported on macos")
+        );
+
+        cleanup_bootstrapped_runtime_paths(&paths);
+    }
+
+    #[test]
+    fn runtime_finish_pack_day_host_handoff_ignores_stale_background_completion() {
+        let (runtime, paths) = bootstrapped_runtime("pack_day_host_handoff_stale");
+        let (_, farm_id) = provision_ready_farmer_account(&runtime);
+
+        seed_order_workspace(&runtime, farm_id);
+        assert!(runtime.open_pack_day(None).expect("pack day should open"));
+        assert!(
+            runtime
+                .export_pack_day()
+                .expect("pack day export should succeed")
+        );
+
+        let (request, _) = runtime
+            .prepare_pack_day_host_handoff(PackDayHostHandoffKind::RevealBundle)
+            .expect("host handoff should prepare")
+            .expect("host handoff should produce a plan");
+
+        let _ = runtime
+            .lock_state_mut()
+            .state_store
+            .apply_in_memory(AppStateCommand::reset_pack_day_host_handoff());
+
+        assert!(
+            !runtime
+                .finish_pack_day_host_handoff(request, Ok(()))
+                .expect("stale completion should no-op")
+        );
+        assert_eq!(
+            runtime.summary().pack_day_projection.host_handoff.status,
+            PackDayHostHandoffStatus::Idle
+        );
 
         cleanup_bootstrapped_runtime_paths(&paths);
     }

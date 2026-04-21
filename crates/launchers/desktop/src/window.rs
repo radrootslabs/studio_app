@@ -20,14 +20,14 @@ use radroots_studio_app_models::{
     FulfillmentWindowId, FulfillmentWindowRecord, FulfillmentWindowSummary, LoggedOutStartupPhase,
     OrderDetailItemRow, OrderDetailProjection, OrderId, OrderListRow, OrderPrimaryAction,
     OrderRecoveryProjection, OrderStatus, OrdersFilter, OrdersListRow, PackDayExportBundle,
-    PackDayExportStatus, PackDayPackListRow, PackDayProductTotalRow, PackDayRosterRow,
-    PersonalEntryState, PersonalSection, PickupLocationId, PickupLocationRecord,
-    ProductAttentionState, ProductEditorDraft, ProductId, ProductListRow, ProductPricePresentation,
-    ProductPublishBlocker, ProductStatus, ProductsFilter, ProductsListRow, ProductsSort,
-    RecoveryKind, RecoveryState, ReminderDeadlineProjection, ReminderDeliveryState, ReminderId,
-    ReminderLogEntryProjection, ReminderLogProjection, ReminderSurface, ReminderUrgency,
-    RepeatDemandEligibility, RepeatDemandHandoffProjection, ShellSection, TodayAgendaProjection,
-    TodaySetupTaskKind,
+    PackDayExportStatus, PackDayHostHandoffKind, PackDayHostHandoffStatus, PackDayPackListRow,
+    PackDayProductTotalRow, PackDayRosterRow, PersonalEntryState, PersonalSection,
+    PickupLocationId, PickupLocationRecord, ProductAttentionState, ProductEditorDraft, ProductId,
+    ProductListRow, ProductPricePresentation, ProductPublishBlocker, ProductStatus, ProductsFilter,
+    ProductsListRow, ProductsSort, RecoveryKind, RecoveryState, ReminderDeadlineProjection,
+    ReminderDeliveryState, ReminderId, ReminderLogEntryProjection, ReminderLogProjection,
+    ReminderSurface, ReminderUrgency, RepeatDemandEligibility, RepeatDemandHandoffProjection,
+    ShellSection, TodayAgendaProjection, TodaySetupTaskKind,
 };
 use radroots_studio_app_remote_signer::{
     RadrootsAppRemoteSignerApprovedSession, RadrootsAppRemoteSignerPendingPollOutcome,
@@ -39,7 +39,7 @@ use radroots_studio_app_remote_signer::{
 use radroots_studio_app_sqlite::derive_farm_rules_readiness;
 use radroots_studio_app_state::{
     FarmSetupFlowStage, FarmWorkspaceStatus, HomeRoute, PackDayExportProjection,
-    derive_product_publish_blockers,
+    PackDayHostHandoffRequest, derive_product_publish_blockers,
 };
 use radroots_studio_app_sync::{
     AppSyncRunStatus, SyncAggregateRef, SyncCheckpointState, SyncConflict, SyncConflictKind,
@@ -52,10 +52,10 @@ use radroots_studio_app_ui::{
     app_button_icon as action_icon_button, app_button_list_row as list_row_button,
     app_button_primary as action_button_primary,
     app_button_primary_disabled as action_button_primary_disabled,
-    app_button_secondary as action_button, app_button_text as text_button, app_checkbox_field,
-    app_cluster, app_detail_row, app_divider as section_divider, app_form_field,
-    app_form_input_text, app_form_section, app_heading_section, app_heading_view,
-    app_input_text as app_text_input, app_scroll_panel,
+    app_button_secondary as action_button, app_button_secondary_disabled as action_button_disabled,
+    app_button_text as text_button, app_checkbox_field, app_cluster, app_detail_row,
+    app_divider as section_divider, app_form_field, app_form_input_text, app_form_section,
+    app_heading_section, app_heading_view, app_input_text as app_text_input, app_scroll_panel,
     app_segment_button_icon as icon_segment_button, app_shared_label_text, app_shared_text,
     app_split_shell, app_stack_h, app_stack_v, app_status_indicator as status_indicator,
     app_surface_card, app_surface_card_section as home_card, app_surface_panel,
@@ -68,6 +68,9 @@ use radroots_nostr::prelude::RadrootsNostrClient;
 use std::{collections::BTreeSet, path::PathBuf, sync::Arc, time::Duration};
 use tracing::error;
 
+use crate::pack_day_host_handoff::{
+    PackDayHostHandoffCommandPlan, PackDayHostHandoffError, execute_pack_day_host_handoff_plan,
+};
 use crate::runtime::{
     DesktopAppRuntime, DesktopAppRuntimeSummary, DesktopAppSyncConflictSummary,
     DesktopAppSyncStatusSummary,
@@ -1638,6 +1641,63 @@ impl HomeView {
                     event = "pack_day.export_failed",
                     error = %runtime_error,
                     "failed to export pack day"
+                );
+                cx.notify();
+            }
+        }
+    }
+
+    fn start_pack_day_host_handoff(
+        &mut self,
+        kind: PackDayHostHandoffKind,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        match self.runtime.prepare_pack_day_host_handoff(kind) {
+            Ok(Some((request, plan))) => {
+                cx.notify();
+                cx.spawn_in(window, async move |this, cx| {
+                    let result = cx
+                        .background_executor()
+                        .spawn(run_pack_day_host_handoff(plan))
+                        .await;
+                    let _ = this.update(cx, |this, cx| {
+                        this.finish_pack_day_host_handoff(request, result, cx);
+                    });
+                })
+                .detach();
+            }
+            Ok(None) => {}
+            Err(runtime_error) => {
+                error!(
+                    target: "pack_day",
+                    event = "pack_day.host_handoff_prepare_failed",
+                    kind = %kind.storage_key(),
+                    error = %runtime_error,
+                    "failed to prepare pack day host handoff"
+                );
+                cx.notify();
+            }
+        }
+    }
+
+    fn finish_pack_day_host_handoff(
+        &mut self,
+        request: PackDayHostHandoffRequest,
+        result: Result<(), PackDayHostHandoffError>,
+        cx: &mut Context<Self>,
+    ) {
+        let kind = request.kind.storage_key();
+        match self.runtime.finish_pack_day_host_handoff(request, result) {
+            Ok(true) => cx.notify(),
+            Ok(false) => {}
+            Err(runtime_error) => {
+                error!(
+                    target: "pack_day",
+                    event = "pack_day.host_handoff_failed",
+                    kind = %kind,
+                    error = %runtime_error,
+                    "failed to complete pack day host handoff"
                 );
                 cx.notify();
             }
@@ -3376,6 +3436,20 @@ impl HomeView {
             .child(pack_day_export_card(
                 runtime,
                 cx.listener(|this, _, _, cx| this.export_pack_day(cx)),
+                cx.listener(|this, _, window, cx| {
+                    this.start_pack_day_host_handoff(
+                        PackDayHostHandoffKind::RevealBundle,
+                        window,
+                        cx,
+                    )
+                }),
+                cx.listener(|this, _, window, cx| {
+                    this.start_pack_day_host_handoff(
+                        PackDayHostHandoffKind::OpenPackSheet,
+                        window,
+                        cx,
+                    )
+                }),
                 cx,
             ))
             .when(!projection.reminders.is_empty(), |this| {
@@ -9006,6 +9080,12 @@ async fn run_startup_signer_connect(
         .map_err(|error| error.to_string())
 }
 
+async fn run_pack_day_host_handoff(
+    plan: PackDayHostHandoffCommandPlan,
+) -> Result<(), PackDayHostHandoffError> {
+    execute_pack_day_host_handoff_plan(&plan)
+}
+
 async fn run_startup_signer_pending_poll(
     record: radroots_studio_app_remote_signer::RadrootsAppRemoteSignerSessionRecord,
     client_secret_key_hex: String,
@@ -9817,14 +9897,39 @@ struct PackDayExportStatusPresentation {
     body_key: AppTextKey,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct PackDayHostHandoffActionPresentation {
+    kind: PackDayHostHandoffKind,
+    label_key: AppTextKey,
+    enabled: bool,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct PackDayHostHandoffStatusPresentation {
+    indicator_color: u32,
+    title_key: AppTextKey,
+}
+
 fn pack_day_export_card(
     runtime: &DesktopAppRuntimeSummary,
     on_export: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+    on_reveal_bundle: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+    on_open_pack_sheet: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
     cx: &App,
 ) -> impl IntoElement {
     let export = &runtime.pack_day_projection.export;
     let status = pack_day_export_status_presentation(runtime);
     let detail_rows = pack_day_export_detail_rows(export);
+    let host_handoff_actions = pack_day_host_handoff_action_presentations(runtime);
+    let host_handoff_status = pack_day_host_handoff_status_presentation(runtime);
+    let host_handoff_error_message = runtime
+        .pack_day_projection
+        .host_handoff
+        .error_message
+        .as_deref()
+        .map(str::trim)
+        .filter(|message| !message.is_empty())
+        .map(str::to_owned);
     let action = if pack_day_export_action_enabled(runtime) {
         action_button_primary(
             "pack-day-export",
@@ -9865,8 +9970,200 @@ fn pack_day_export_card(
             .when(!detail_rows.is_empty(), |this| {
                 this.child(label_value_list(detail_rows))
             })
-            .child(div().child(action)),
+            .child(div().child(action))
+            .when(!host_handoff_actions.is_empty(), |this| {
+                let on_reveal_bundle = Arc::new(on_reveal_bundle);
+                let on_open_pack_sheet = Arc::new(on_open_pack_sheet);
+                this.child(
+                    app_stack_v(APP_UI_THEME.foundation.spacing.small_px)
+                        .w_full()
+                        .child(
+                            app_cluster(APP_UI_THEME.foundation.spacing.small_px)
+                                .items_center()
+                                .children(host_handoff_actions.into_iter().map(move |action| {
+                                    let button = match action.kind {
+                                        PackDayHostHandoffKind::RevealBundle if action.enabled => {
+                                            action_button(
+                                                "pack-day-reveal-bundle",
+                                                app_shared_text(action.label_key),
+                                                {
+                                                    let on_reveal_bundle =
+                                                        Arc::clone(&on_reveal_bundle);
+                                                    move |event, window, cx| {
+                                                        (on_reveal_bundle)(event, window, cx)
+                                                    }
+                                                },
+                                                cx,
+                                            )
+                                            .into_any_element()
+                                        }
+                                        PackDayHostHandoffKind::OpenPackSheet if action.enabled => {
+                                            action_button(
+                                                "pack-day-open-pack-sheet",
+                                                app_shared_text(action.label_key),
+                                                {
+                                                    let on_open_pack_sheet =
+                                                        Arc::clone(&on_open_pack_sheet);
+                                                    move |event, window, cx| {
+                                                        (on_open_pack_sheet)(event, window, cx)
+                                                    }
+                                                },
+                                                cx,
+                                            )
+                                            .into_any_element()
+                                        }
+                                        PackDayHostHandoffKind::RevealBundle => {
+                                            action_button_disabled(
+                                                "pack-day-reveal-bundle",
+                                                app_shared_text(action.label_key),
+                                                cx,
+                                            )
+                                            .into_any_element()
+                                        }
+                                        PackDayHostHandoffKind::OpenPackSheet => {
+                                            action_button_disabled(
+                                                "pack-day-open-pack-sheet",
+                                                app_shared_text(action.label_key),
+                                                cx,
+                                            )
+                                            .into_any_element()
+                                        }
+                                    };
+                                    button
+                                })),
+                        )
+                        .when_some(host_handoff_status, |this, status| {
+                            this.child(pack_day_host_handoff_status_note(
+                                status,
+                                host_handoff_error_message.clone(),
+                            ))
+                        }),
+                )
+            }),
     )
+}
+
+fn pack_day_host_handoff_action_presentations(
+    runtime: &DesktopAppRuntimeSummary,
+) -> Vec<PackDayHostHandoffActionPresentation> {
+    if pack_day_export_succeeded_bundle(runtime).is_none() {
+        return Vec::new();
+    }
+
+    let host_handoff = &runtime.pack_day_projection.host_handoff;
+    let running_kind = (host_handoff.status == PackDayHostHandoffStatus::Running)
+        .then(|| host_handoff.request.as_ref().map(|request| request.kind))
+        .flatten();
+
+    PackDayHostHandoffKind::all_v1()
+        .into_iter()
+        .map(|kind| PackDayHostHandoffActionPresentation {
+            kind,
+            label_key: pack_day_host_handoff_action_label_key(kind, running_kind),
+            enabled: running_kind.is_none(),
+        })
+        .collect()
+}
+
+fn pack_day_host_handoff_action_label_key(
+    kind: PackDayHostHandoffKind,
+    running_kind: Option<PackDayHostHandoffKind>,
+) -> AppTextKey {
+    match (kind, running_kind == Some(kind)) {
+        (PackDayHostHandoffKind::RevealBundle, true) => {
+            AppTextKey::PackDayHostHandoffRevealActionRunning
+        }
+        (PackDayHostHandoffKind::RevealBundle, false) => AppTextKey::PackDayHostHandoffRevealAction,
+        (PackDayHostHandoffKind::OpenPackSheet, true) => {
+            AppTextKey::PackDayHostHandoffOpenPackSheetActionRunning
+        }
+        (PackDayHostHandoffKind::OpenPackSheet, false) => {
+            AppTextKey::PackDayHostHandoffOpenPackSheetAction
+        }
+    }
+}
+
+fn pack_day_host_handoff_status_presentation(
+    runtime: &DesktopAppRuntimeSummary,
+) -> Option<PackDayHostHandoffStatusPresentation> {
+    let host_handoff = &runtime.pack_day_projection.host_handoff;
+    let kind = host_handoff.request.as_ref()?.kind;
+
+    let status = match (host_handoff.status, kind) {
+        (PackDayHostHandoffStatus::Idle, _) => return None,
+        (PackDayHostHandoffStatus::Running, PackDayHostHandoffKind::RevealBundle) => {
+            PackDayHostHandoffStatusPresentation {
+                indicator_color: APP_UI_THEME.foundation.text.accent,
+                title_key: AppTextKey::PackDayHostHandoffRevealRunningTitle,
+            }
+        }
+        (PackDayHostHandoffStatus::Running, PackDayHostHandoffKind::OpenPackSheet) => {
+            PackDayHostHandoffStatusPresentation {
+                indicator_color: APP_UI_THEME.foundation.text.accent,
+                title_key: AppTextKey::PackDayHostHandoffOpenPackSheetRunningTitle,
+            }
+        }
+        (PackDayHostHandoffStatus::Succeeded, PackDayHostHandoffKind::RevealBundle) => {
+            PackDayHostHandoffStatusPresentation {
+                indicator_color: APP_UI_THEME.components.app_status_indicator.online,
+                title_key: AppTextKey::PackDayHostHandoffRevealSucceededTitle,
+            }
+        }
+        (PackDayHostHandoffStatus::Succeeded, PackDayHostHandoffKind::OpenPackSheet) => {
+            PackDayHostHandoffStatusPresentation {
+                indicator_color: APP_UI_THEME.components.app_status_indicator.online,
+                title_key: AppTextKey::PackDayHostHandoffOpenPackSheetSucceededTitle,
+            }
+        }
+        (PackDayHostHandoffStatus::Failed, PackDayHostHandoffKind::RevealBundle) => {
+            PackDayHostHandoffStatusPresentation {
+                indicator_color: APP_UI_THEME.components.app_status_indicator.attention,
+                title_key: AppTextKey::PackDayHostHandoffRevealFailedTitle,
+            }
+        }
+        (PackDayHostHandoffStatus::Failed, PackDayHostHandoffKind::OpenPackSheet) => {
+            PackDayHostHandoffStatusPresentation {
+                indicator_color: APP_UI_THEME.components.app_status_indicator.attention,
+                title_key: AppTextKey::PackDayHostHandoffOpenPackSheetFailedTitle,
+            }
+        }
+    };
+
+    Some(status)
+}
+
+fn pack_day_host_handoff_status_note(
+    status: PackDayHostHandoffStatusPresentation,
+    error_message: Option<String>,
+) -> impl IntoElement {
+    app_stack_v(4.0)
+        .w_full()
+        .child(
+            div()
+                .w_full()
+                .flex()
+                .items_center()
+                .gap(px(APP_UI_THEME.shells.settings_account_status_gap_px))
+                .child(status_indicator(status.indicator_color))
+                .child(
+                    div()
+                        .text_size(px(APP_UI_THEME.foundation.typography.utility_title_text_px))
+                        .font_weight(gpui::FontWeight::SEMIBOLD)
+                        .text_color(rgb(APP_UI_THEME.foundation.text.primary))
+                        .child(app_shared_text(status.title_key)),
+                ),
+        )
+        .when_some(error_message, |this, error_message| {
+            this.child(home_body_text(error_message))
+        })
+}
+
+fn pack_day_export_succeeded_bundle(
+    runtime: &DesktopAppRuntimeSummary,
+) -> Option<&PackDayExportBundle> {
+    (runtime.pack_day_projection.export.status == PackDayExportStatus::Succeeded)
+        .then_some(runtime.pack_day_projection.export.bundle.as_ref())
+        .flatten()
 }
 
 fn pack_day_export_has_exportable_context(runtime: &DesktopAppRuntimeSummary) -> bool {
@@ -11804,8 +12101,9 @@ fn home_farm_order_method_label_key(method: FarmOrderMethod) -> AppTextKey {
 mod tests {
     use super::{
         APP_UI_THEME, AppTextKey, FarmerHomeFarmState, HomeAutoFocusState, HomeAutoFocusTarget,
-        HomeStage, LabelValueRow, PackDayExportStatusPresentation, ReminderActionTarget,
-        SETTINGS_FARM_PANEL_SECTIONS, SETTINGS_NAVIGATION_ORDER,
+        HomeStage, LabelValueRow, PackDayExportStatusPresentation,
+        PackDayHostHandoffActionPresentation, PackDayHostHandoffStatusPresentation,
+        ReminderActionTarget, SETTINGS_FARM_PANEL_SECTIONS, SETTINGS_NAVIGATION_ORDER,
         SETTINGS_OPERATIONS_PANEL_SECTIONS, SettingsAutoFocusTarget, SettingsInventorySectionSpec,
         SettingsPanelViewKey, StartupHomeSurface, StartupSignerConnectState,
         about_conflict_action_specs, about_conflict_aggregate_text, about_conflict_detail_rows,
@@ -11816,6 +12114,7 @@ mod tests {
         home_window_launch_size_px, home_window_minimum_size_px, pack_day_export_action_enabled,
         pack_day_export_action_label_key, pack_day_export_artifact_names,
         pack_day_export_detail_rows, pack_day_export_status_presentation,
+        pack_day_host_handoff_action_presentations, pack_day_host_handoff_status_presentation,
         parse_optional_product_editor_stock_input, parse_product_editor_price_input,
         presented_farmer_reminder, product_display_title, reminder_action_target,
         reminder_deadline_text, reminder_delivery_state_key, reminder_urgency_color,
@@ -11836,10 +12135,11 @@ mod tests {
         FulfillmentWindowSummary, LoggedOutStartupPhase, LoggedOutStartupProjection,
         OrderDetailProjection, OrderId, OrderPrimaryAction, OrderStatus, OrdersListRow,
         PackDayExportArtifact, PackDayExportArtifactKind, PackDayExportBundle,
-        PackDayProductTotalRow, PackDayProjection, PersonalSection, ReminderDeadlineProjection,
-        ReminderDeliveryState, ReminderId, ReminderKind, ReminderSurface, ReminderUrgency,
-        RepeatDemandEligibility, RepeatDemandHandoffProjection, ShellSection,
-        TodayAgendaProjection, TodaySetupTask, TodaySetupTaskKind,
+        PackDayHostHandoffKind, PackDayHostHandoffStatus, PackDayProductTotalRow,
+        PackDayProjection, PersonalSection, ReminderDeadlineProjection, ReminderDeliveryState,
+        ReminderId, ReminderKind, ReminderSurface, ReminderUrgency, RepeatDemandEligibility,
+        RepeatDemandHandoffProjection, ShellSection, TodayAgendaProjection, TodaySetupTask,
+        TodaySetupTaskKind,
     };
     use radroots_studio_app_remote_signer::{
         RadrootsAppRemoteSignerApprovedSession, RadrootsAppRemoteSignerPendingSession,
@@ -11847,7 +12147,7 @@ mod tests {
     };
     use radroots_studio_app_state::{
         AppShellProjection, FarmWorkspaceReadinessProjection, FarmWorkspaceStatus, HomeRoute,
-        PackDayExportProjection,
+        PackDayExportProjection, PackDayHostHandoffProjection, PackDayHostHandoffRequest,
     };
     use radroots_studio_app_sync::{
         AppSyncProjection, AppSyncRunStatus, SyncAggregateRef, SyncCheckpointStatus, SyncConflict,
@@ -12554,6 +12854,114 @@ mod tests {
                 title_key: AppTextKey::PackDayExportFailedTitle,
                 body_key: AppTextKey::PackDayExportFailedBody,
             }
+        );
+    }
+
+    #[test]
+    fn pack_day_host_handoff_actions_only_surface_after_a_successful_export() {
+        let fulfillment_window_id = FulfillmentWindowId::new();
+        let bundle = PackDayExportBundle {
+            fulfillment_window_id,
+            generated_at_utc: "2026-04-23T15:00:00Z".to_owned(),
+            bundle_directory: "exports/pack_day/window-1/20260423T150000Z".to_owned(),
+            artifacts: vec![PackDayExportArtifact {
+                kind: PackDayExportArtifactKind::PackSheet,
+                relative_path: "pack_sheet.txt".to_owned(),
+            }],
+        };
+        let mut runtime = summary(
+            HomeRoute::Today,
+            TodayAgendaProjection::default(),
+            FarmSetupProjection::default(),
+        );
+
+        assert!(pack_day_host_handoff_action_presentations(&runtime).is_empty());
+
+        runtime.pack_day_projection.export = PackDayExportProjection::succeeded(
+            radroots_studio_app_state::PackDayExportRequest::for_fulfillment_window(fulfillment_window_id),
+            bundle,
+        );
+
+        assert_eq!(
+            pack_day_host_handoff_action_presentations(&runtime),
+            vec![
+                PackDayHostHandoffActionPresentation {
+                    kind: PackDayHostHandoffKind::RevealBundle,
+                    label_key: AppTextKey::PackDayHostHandoffRevealAction,
+                    enabled: true,
+                },
+                PackDayHostHandoffActionPresentation {
+                    kind: PackDayHostHandoffKind::OpenPackSheet,
+                    label_key: AppTextKey::PackDayHostHandoffOpenPackSheetAction,
+                    enabled: true,
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn pack_day_host_handoff_running_and_failure_postures_track_the_active_request() {
+        let fulfillment_window_id = FulfillmentWindowId::new();
+        let bundle = PackDayExportBundle {
+            fulfillment_window_id,
+            generated_at_utc: "2026-04-23T15:00:00Z".to_owned(),
+            bundle_directory: "exports/pack_day/window-1/20260423T150000Z".to_owned(),
+            artifacts: vec![PackDayExportArtifact {
+                kind: PackDayExportArtifactKind::PackSheet,
+                relative_path: "pack_sheet.txt".to_owned(),
+            }],
+        };
+        let export_request =
+            radroots_studio_app_state::PackDayExportRequest::for_fulfillment_window(fulfillment_window_id);
+        let reveal_request =
+            PackDayHostHandoffRequest::for_bundle(PackDayHostHandoffKind::RevealBundle, &bundle);
+        let open_request =
+            PackDayHostHandoffRequest::for_bundle(PackDayHostHandoffKind::OpenPackSheet, &bundle);
+        let mut runtime = summary(
+            HomeRoute::Today,
+            TodayAgendaProjection::default(),
+            FarmSetupProjection::default(),
+        );
+        runtime.pack_day_projection.export =
+            PackDayExportProjection::succeeded(export_request, bundle);
+
+        runtime.pack_day_projection.host_handoff =
+            PackDayHostHandoffProjection::running(reveal_request);
+        assert_eq!(
+            pack_day_host_handoff_action_presentations(&runtime),
+            vec![
+                PackDayHostHandoffActionPresentation {
+                    kind: PackDayHostHandoffKind::RevealBundle,
+                    label_key: AppTextKey::PackDayHostHandoffRevealActionRunning,
+                    enabled: false,
+                },
+                PackDayHostHandoffActionPresentation {
+                    kind: PackDayHostHandoffKind::OpenPackSheet,
+                    label_key: AppTextKey::PackDayHostHandoffOpenPackSheetAction,
+                    enabled: false,
+                },
+            ]
+        );
+        assert_eq!(
+            pack_day_host_handoff_status_presentation(&runtime),
+            Some(PackDayHostHandoffStatusPresentation {
+                indicator_color: APP_UI_THEME.foundation.text.accent,
+                title_key: AppTextKey::PackDayHostHandoffRevealRunningTitle,
+            })
+        );
+
+        runtime.pack_day_projection.host_handoff =
+            PackDayHostHandoffProjection::failed(open_request, "finder unavailable");
+        assert_eq!(
+            runtime.pack_day_projection.host_handoff.status,
+            PackDayHostHandoffStatus::Failed
+        );
+        assert_eq!(
+            pack_day_host_handoff_status_presentation(&runtime),
+            Some(PackDayHostHandoffStatusPresentation {
+                indicator_color: APP_UI_THEME.components.app_status_indicator.attention,
+                title_key: AppTextKey::PackDayHostHandoffOpenPackSheetFailedTitle,
+            })
         );
     }
 
