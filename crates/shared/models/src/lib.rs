@@ -1619,8 +1619,13 @@ pub enum PackDayHostHandoffKind {
 }
 
 impl PackDayHostHandoffKind {
-    pub const fn all_v1() -> [Self; 2] {
-        [Self::RevealBundle, Self::OpenPackSheet]
+    pub const fn all_v1() -> [Self; 4] {
+        [
+            Self::RevealBundle,
+            Self::OpenPackSheet,
+            Self::OpenPickupRoster,
+            Self::OpenCustomerLabels,
+        ]
     }
 
     pub const fn storage_key(self) -> &'static str {
@@ -3030,6 +3035,8 @@ mod tests {
             [
                 PackDayHostHandoffKind::RevealBundle,
                 PackDayHostHandoffKind::OpenPackSheet,
+                PackDayHostHandoffKind::OpenPickupRoster,
+                PackDayHostHandoffKind::OpenCustomerLabels,
             ]
         );
         assert_eq!(

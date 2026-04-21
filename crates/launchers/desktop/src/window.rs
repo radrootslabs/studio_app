@@ -65,7 +65,12 @@ use radroots_studio_app_ui::{
     runtime_metadata_rows, utility_title_row,
 };
 use radroots_nostr::prelude::RadrootsNostrClient;
-use std::{collections::BTreeSet, path::PathBuf, sync::Arc, time::Duration};
+use std::{
+    collections::BTreeSet,
+    path::{Component, Path, PathBuf},
+    sync::Arc,
+    time::Duration,
+};
 use tracing::error;
 
 use crate::pack_day_host_handoff::{
@@ -3446,6 +3451,20 @@ impl HomeView {
                 cx.listener(|this, _, window, cx| {
                     this.start_pack_day_host_handoff(
                         PackDayHostHandoffKind::OpenPackSheet,
+                        window,
+                        cx,
+                    )
+                }),
+                cx.listener(|this, _, window, cx| {
+                    this.start_pack_day_host_handoff(
+                        PackDayHostHandoffKind::OpenPickupRoster,
+                        window,
+                        cx,
+                    )
+                }),
+                cx.listener(|this, _, window, cx| {
+                    this.start_pack_day_host_handoff(
+                        PackDayHostHandoffKind::OpenCustomerLabels,
                         window,
                         cx,
                     )
@@ -9915,6 +9934,8 @@ fn pack_day_export_card(
     on_export: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
     on_reveal_bundle: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
     on_open_pack_sheet: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+    on_open_pickup_roster: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+    on_open_customer_labels: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
     cx: &App,
 ) -> impl IntoElement {
     let export = &runtime.pack_day_projection.export;
@@ -9974,6 +9995,8 @@ fn pack_day_export_card(
             .when(!host_handoff_actions.is_empty(), |this| {
                 let on_reveal_bundle = Arc::new(on_reveal_bundle);
                 let on_open_pack_sheet = Arc::new(on_open_pack_sheet);
+                let on_open_pickup_roster = Arc::new(on_open_pickup_roster);
+                let on_open_customer_labels = Arc::new(on_open_customer_labels);
                 this.child(
                     app_stack_v(APP_UI_THEME.foundation.spacing.small_px)
                         .w_full()
@@ -10006,6 +10029,40 @@ fn pack_day_export_card(
                                                         Arc::clone(&on_open_pack_sheet);
                                                     move |event, window, cx| {
                                                         (on_open_pack_sheet)(event, window, cx)
+                                                    }
+                                                },
+                                                cx,
+                                            )
+                                            .into_any_element()
+                                        }
+                                        PackDayHostHandoffKind::OpenPickupRoster
+                                            if action.enabled =>
+                                        {
+                                            action_button(
+                                                "pack-day-open-pickup-roster",
+                                                app_shared_text(action.label_key),
+                                                {
+                                                    let on_open_pickup_roster =
+                                                        Arc::clone(&on_open_pickup_roster);
+                                                    move |event, window, cx| {
+                                                        (on_open_pickup_roster)(event, window, cx)
+                                                    }
+                                                },
+                                                cx,
+                                            )
+                                            .into_any_element()
+                                        }
+                                        PackDayHostHandoffKind::OpenCustomerLabels
+                                            if action.enabled =>
+                                        {
+                                            action_button(
+                                                "pack-day-open-customer-labels",
+                                                app_shared_text(action.label_key),
+                                                {
+                                                    let on_open_customer_labels =
+                                                        Arc::clone(&on_open_customer_labels);
+                                                    move |event, window, cx| {
+                                                        (on_open_customer_labels)(event, window, cx)
                                                     }
                                                 },
                                                 cx,
@@ -10062,9 +10119,9 @@ fn pack_day_export_card(
 fn pack_day_host_handoff_action_presentations(
     runtime: &DesktopAppRuntimeSummary,
 ) -> Vec<PackDayHostHandoffActionPresentation> {
-    if pack_day_export_succeeded_bundle(runtime).is_none() {
+    let Some(bundle) = pack_day_export_succeeded_bundle(runtime) else {
         return Vec::new();
-    }
+    };
 
     let host_handoff = &runtime.pack_day_projection.host_handoff;
     let running_kind = (host_handoff.status == PackDayHostHandoffStatus::Running)
@@ -10076,9 +10133,44 @@ fn pack_day_host_handoff_action_presentations(
         .map(|kind| PackDayHostHandoffActionPresentation {
             kind,
             label_key: pack_day_host_handoff_action_label_key(kind, running_kind),
-            enabled: running_kind.is_none(),
+            enabled: running_kind.is_none()
+                && pack_day_host_handoff_action_is_available(bundle, kind),
         })
         .collect()
+}
+
+fn pack_day_host_handoff_action_is_available(
+    bundle: &PackDayExportBundle,
+    kind: PackDayHostHandoffKind,
+) -> bool {
+    match kind.artifact_kind() {
+        None => Path::new(&bundle.bundle_directory).is_dir(),
+        Some(artifact_kind) => bundle
+            .artifacts
+            .iter()
+            .find(|artifact| artifact.kind == artifact_kind)
+            .and_then(|artifact| pack_day_host_handoff_target_path(bundle, &artifact.relative_path))
+            .is_some_and(|path| path.is_file()),
+    }
+}
+
+fn pack_day_host_handoff_target_path(
+    bundle: &PackDayExportBundle,
+    relative_path: &str,
+) -> Option<PathBuf> {
+    let relative_path = Path::new(relative_path);
+    if relative_path.is_absolute()
+        || relative_path.components().any(|component| {
+            matches!(
+                component,
+                Component::ParentDir | Component::RootDir | Component::Prefix(_)
+            )
+        })
+    {
+        return None;
+    }
+
+    Some(PathBuf::from(&bundle.bundle_directory).join(relative_path))
 }
 
 fn pack_day_host_handoff_action_label_key(
@@ -12218,7 +12310,57 @@ mod tests {
         SyncConflictKind, SyncConflictResolutionStatus, SyncConflictSeverity, SyncConflictStatus,
     };
     use radroots_identity::RadrootsIdentity;
-    use std::path::PathBuf;
+    use std::{fs, path::PathBuf};
+
+    struct TestDirectory {
+        path: PathBuf,
+    }
+
+    impl TestDirectory {
+        fn new() -> Self {
+            let path = std::env::temp_dir().join(FulfillmentWindowId::new().to_string());
+            fs::create_dir_all(&path).unwrap();
+            Self { path }
+        }
+
+        fn path(&self) -> &PathBuf {
+            &self.path
+        }
+    }
+
+    impl Drop for TestDirectory {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.path);
+        }
+    }
+
+    fn write_artifact(bundle_directory: &PathBuf, file_name: &str) -> PathBuf {
+        let path = bundle_directory.join(file_name);
+        fs::write(&path, file_name).unwrap();
+        path
+    }
+
+    fn sample_pack_day_bundle(bundle_directory: &PathBuf) -> PackDayExportBundle {
+        PackDayExportBundle {
+            fulfillment_window_id: FulfillmentWindowId::new(),
+            generated_at_utc: "2026-04-23T15:00:00Z".to_owned(),
+            bundle_directory: bundle_directory.to_string_lossy().into_owned(),
+            artifacts: vec![
+                PackDayExportArtifact {
+                    kind: PackDayExportArtifactKind::PackSheet,
+                    relative_path: "pack_sheet.txt".to_owned(),
+                },
+                PackDayExportArtifact {
+                    kind: PackDayExportArtifactKind::PickupRoster,
+                    relative_path: "pickup_roster.txt".to_owned(),
+                },
+                PackDayExportArtifact {
+                    kind: PackDayExportArtifactKind::CustomerLabels,
+                    relative_path: "customer_labels.txt".to_owned(),
+                },
+            ],
+        }
+    }
 
     #[test]
     fn farm_setup_onboarding_uses_frozen_copy_and_primary_action() {
@@ -12923,16 +13065,12 @@ mod tests {
 
     #[test]
     fn pack_day_host_handoff_actions_only_surface_after_a_successful_export() {
-        let fulfillment_window_id = FulfillmentWindowId::new();
-        let bundle = PackDayExportBundle {
-            fulfillment_window_id,
-            generated_at_utc: "2026-04-23T15:00:00Z".to_owned(),
-            bundle_directory: "exports/pack_day/window-1/20260423T150000Z".to_owned(),
-            artifacts: vec![PackDayExportArtifact {
-                kind: PackDayExportArtifactKind::PackSheet,
-                relative_path: "pack_sheet.txt".to_owned(),
-            }],
-        };
+        let temp_dir = TestDirectory::new();
+        write_artifact(temp_dir.path(), "pack_sheet.txt");
+        write_artifact(temp_dir.path(), "pickup_roster.txt");
+        write_artifact(temp_dir.path(), "customer_labels.txt");
+        let bundle = sample_pack_day_bundle(temp_dir.path());
+        let fulfillment_window_id = bundle.fulfillment_window_id;
         let mut runtime = summary(
             HomeRoute::Today,
             TodayAgendaProjection::default(),
@@ -12959,28 +13097,36 @@ mod tests {
                     label_key: AppTextKey::PackDayHostHandoffOpenPackSheetAction,
                     enabled: true,
                 },
+                PackDayHostHandoffActionPresentation {
+                    kind: PackDayHostHandoffKind::OpenPickupRoster,
+                    label_key: AppTextKey::PackDayHostHandoffOpenPickupRosterAction,
+                    enabled: true,
+                },
+                PackDayHostHandoffActionPresentation {
+                    kind: PackDayHostHandoffKind::OpenCustomerLabels,
+                    label_key: AppTextKey::PackDayHostHandoffOpenCustomerLabelsAction,
+                    enabled: true,
+                },
             ]
         );
     }
 
     #[test]
     fn pack_day_host_handoff_running_and_failure_postures_track_the_active_request() {
-        let fulfillment_window_id = FulfillmentWindowId::new();
-        let bundle = PackDayExportBundle {
-            fulfillment_window_id,
-            generated_at_utc: "2026-04-23T15:00:00Z".to_owned(),
-            bundle_directory: "exports/pack_day/window-1/20260423T150000Z".to_owned(),
-            artifacts: vec![PackDayExportArtifact {
-                kind: PackDayExportArtifactKind::PackSheet,
-                relative_path: "pack_sheet.txt".to_owned(),
-            }],
-        };
+        let temp_dir = TestDirectory::new();
+        write_artifact(temp_dir.path(), "pack_sheet.txt");
+        write_artifact(temp_dir.path(), "pickup_roster.txt");
+        write_artifact(temp_dir.path(), "customer_labels.txt");
+        let bundle = sample_pack_day_bundle(temp_dir.path());
+        let fulfillment_window_id = bundle.fulfillment_window_id;
         let export_request =
             radroots_studio_app_state::PackDayExportRequest::for_fulfillment_window(fulfillment_window_id);
         let reveal_request =
             PackDayHostHandoffRequest::for_bundle(PackDayHostHandoffKind::RevealBundle, &bundle);
-        let open_request =
-            PackDayHostHandoffRequest::for_bundle(PackDayHostHandoffKind::OpenPackSheet, &bundle);
+        let open_request = PackDayHostHandoffRequest::for_bundle(
+            PackDayHostHandoffKind::OpenCustomerLabels,
+            &bundle,
+        );
         let mut runtime = summary(
             HomeRoute::Today,
             TodayAgendaProjection::default(),
@@ -13004,6 +13150,16 @@ mod tests {
                     label_key: AppTextKey::PackDayHostHandoffOpenPackSheetAction,
                     enabled: false,
                 },
+                PackDayHostHandoffActionPresentation {
+                    kind: PackDayHostHandoffKind::OpenPickupRoster,
+                    label_key: AppTextKey::PackDayHostHandoffOpenPickupRosterAction,
+                    enabled: false,
+                },
+                PackDayHostHandoffActionPresentation {
+                    kind: PackDayHostHandoffKind::OpenCustomerLabels,
+                    label_key: AppTextKey::PackDayHostHandoffOpenCustomerLabelsAction,
+                    enabled: false,
+                },
             ]
         );
         assert_eq!(
@@ -13024,8 +13180,52 @@ mod tests {
             pack_day_host_handoff_status_presentation(&runtime),
             Some(PackDayHostHandoffStatusPresentation {
                 indicator_color: APP_UI_THEME.components.app_status_indicator.attention,
-                title_key: AppTextKey::PackDayHostHandoffOpenPackSheetFailedTitle,
+                title_key: AppTextKey::PackDayHostHandoffOpenCustomerLabelsFailedTitle,
             })
+        );
+    }
+
+    #[test]
+    fn pack_day_host_handoff_actions_disable_missing_artifacts_even_after_export_success() {
+        let temp_dir = TestDirectory::new();
+        write_artifact(temp_dir.path(), "pack_sheet.txt");
+        let bundle = sample_pack_day_bundle(temp_dir.path());
+        let fulfillment_window_id = bundle.fulfillment_window_id;
+        let mut runtime = summary(
+            HomeRoute::Today,
+            TodayAgendaProjection::default(),
+            FarmSetupProjection::default(),
+        );
+
+        runtime.pack_day_projection.export = PackDayExportProjection::succeeded(
+            radroots_studio_app_state::PackDayExportRequest::for_fulfillment_window(fulfillment_window_id),
+            bundle,
+        );
+
+        assert_eq!(
+            pack_day_host_handoff_action_presentations(&runtime),
+            vec![
+                PackDayHostHandoffActionPresentation {
+                    kind: PackDayHostHandoffKind::RevealBundle,
+                    label_key: AppTextKey::PackDayHostHandoffRevealAction,
+                    enabled: true,
+                },
+                PackDayHostHandoffActionPresentation {
+                    kind: PackDayHostHandoffKind::OpenPackSheet,
+                    label_key: AppTextKey::PackDayHostHandoffOpenPackSheetAction,
+                    enabled: true,
+                },
+                PackDayHostHandoffActionPresentation {
+                    kind: PackDayHostHandoffKind::OpenPickupRoster,
+                    label_key: AppTextKey::PackDayHostHandoffOpenPickupRosterAction,
+                    enabled: false,
+                },
+                PackDayHostHandoffActionPresentation {
+                    kind: PackDayHostHandoffKind::OpenCustomerLabels,
+                    label_key: AppTextKey::PackDayHostHandoffOpenCustomerLabelsAction,
+                    enabled: false,
+                },
+            ]
         );
     }
 
