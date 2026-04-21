@@ -36,9 +36,8 @@ use radroots_studio_app_state::{
     AppStateStore, AppStateStoreError, BuyerBrowseScreenProjection, BuyerCartScreenProjection,
     BuyerOrdersScreenProjection, BuyerSearchScreenProjection, BuyerSearchScreenQueryState,
     FarmSetupFlowStage, FarmWorkspaceReadinessProjection, HomeRoute, OrdersScreenProjection,
-    PackDayExportRequest, PackDayScreenProjection, PersistedAppState,
-    PersonalWorkspaceProjection, ProductsScreenProjection, ProductsScreenQueryState,
-    derive_sync_projection,
+    PackDayExportRequest, PackDayScreenProjection, PersistedAppState, PersonalWorkspaceProjection,
+    ProductsScreenProjection, ProductsScreenQueryState, derive_sync_projection,
 };
 use radroots_studio_app_sync::{
     AppSyncProjection, AppSyncRequest, AppSyncResult, AppSyncTransport, AppSyncTransportError,
@@ -406,7 +405,6 @@ impl DesktopAppRuntime {
         self.lock_state_mut().open_pack_day(fulfillment_window_id)
     }
 
-    #[allow(dead_code)]
     pub fn export_pack_day(&self) -> Result<bool, DesktopAppRuntimeCommandError> {
         self.lock_state_mut().export_pack_day()
     }
@@ -1733,7 +1731,6 @@ impl DesktopAppRuntimeState {
         Ok(query_changed || section_changed || editor_changed)
     }
 
-    #[allow(dead_code)]
     fn export_pack_day(&mut self) -> Result<bool, DesktopAppRuntimeCommandError> {
         let Some(farm_id) = self.selected_farm_id() else {
             return Ok(false);
@@ -1763,8 +1760,9 @@ impl DesktopAppRuntimeState {
             return Ok(false);
         }
 
-        let request =
-            PackDayExportRequest::for_fulfillment_window(source.fulfillment_window.fulfillment_window_id);
+        let request = PackDayExportRequest::for_fulfillment_window(
+            source.fulfillment_window.fulfillment_window_id,
+        );
         let _ = self
             .state_store
             .apply_in_memory(AppStateCommand::begin_pack_day_export(request.clone()));
@@ -4440,11 +4438,11 @@ mod tests {
         FarmerActivationProjection, FarmerSection, FulfillmentWindowId, FulfillmentWindowRecord,
         LoggedOutStartupProjection, OrderId, OrderStatus, OrdersFilter, PackDayExportStatus,
         PackDayPackListRow, PackDayProductTotalRow, PackDayProjection, PackDayRosterRow,
-        PersonalSection, PickupLocationId, PickupLocationRecord, ProductEditorDraft,
-        ProductStatus, ProductsFilter, ProductsSort, RecoveryKind, RecoveryRecordId,
-        ReminderDeliveryState, ReminderFeedProjection, ReminderKind, SelectedSurfaceProjection,
-        SettingsPreference, SettingsSection, ShellSection, TodayAgendaProjection, TodaySetupTask,
-        TodaySetupTaskKind, TodaySummary,
+        PersonalSection, PickupLocationId, PickupLocationRecord, ProductEditorDraft, ProductStatus,
+        ProductsFilter, ProductsSort, RecoveryKind, RecoveryRecordId, ReminderDeliveryState,
+        ReminderFeedProjection, ReminderKind, SelectedSurfaceProjection, SettingsPreference,
+        SettingsSection, ShellSection, TodayAgendaProjection, TodaySetupTask, TodaySetupTaskKind,
+        TodaySummary,
     };
     use radroots_studio_app_remote_signer::{
         RadrootsAppRemoteSignerPendingSession, RadrootsAppRemoteSignerSessionRecord,
@@ -7073,28 +7071,25 @@ mod tests {
             .fulfillment_window
             .clone()
             .expect("pack day fulfillment window");
-        let _ = runtime
-            .lock_state_mut()
-            .state_store
-            .apply_in_memory(AppStateCommand::replace_pack_day_projection(
-                PackDayProjection {
-                    fulfillment_window: Some(fulfillment_window.clone()),
-                    reminders: ReminderFeedProjection::default(),
-                    totals_by_product: vec![PackDayProductTotalRow {
-                        title: "Bogus totals".to_owned(),
-                        quantity_display: "999 crates".to_owned(),
-                    }],
-                    pack_list: vec![PackDayPackListRow {
-                        title: "Bogus pack list".to_owned(),
-                        quantity_display: "Do not trust screen strings".to_owned(),
-                    }],
-                    pickup_roster: vec![PackDayRosterRow {
-                        order_id: OrderId::new(),
-                        order_number: "R-999".to_owned(),
-                        customer_display_name: "Bogus".to_owned(),
-                    }],
-                },
-            ));
+        let _ = runtime.lock_state_mut().state_store.apply_in_memory(
+            AppStateCommand::replace_pack_day_projection(PackDayProjection {
+                fulfillment_window: Some(fulfillment_window.clone()),
+                reminders: ReminderFeedProjection::default(),
+                totals_by_product: vec![PackDayProductTotalRow {
+                    title: "Bogus totals".to_owned(),
+                    quantity_display: "999 crates".to_owned(),
+                }],
+                pack_list: vec![PackDayPackListRow {
+                    title: "Bogus pack list".to_owned(),
+                    quantity_display: "Do not trust screen strings".to_owned(),
+                }],
+                pickup_roster: vec![PackDayRosterRow {
+                    order_id: OrderId::new(),
+                    order_number: "R-999".to_owned(),
+                    customer_display_name: "Bogus".to_owned(),
+                }],
+            }),
+        );
 
         assert!(
             runtime

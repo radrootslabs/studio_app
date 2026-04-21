@@ -19,14 +19,15 @@ use radroots_studio_app_models::{
     FarmSetupBlocker, FarmSetupDraft, FarmSummary, FarmTimingConflictKind, FarmerSection,
     FulfillmentWindowId, FulfillmentWindowRecord, FulfillmentWindowSummary, LoggedOutStartupPhase,
     OrderDetailItemRow, OrderDetailProjection, OrderId, OrderListRow, OrderPrimaryAction,
-    OrderRecoveryProjection, OrderStatus, OrdersFilter, OrdersListRow, PackDayPackListRow,
-    PackDayProductTotalRow, PackDayRosterRow, PersonalEntryState, PersonalSection,
-    PickupLocationId, PickupLocationRecord, ProductAttentionState, ProductEditorDraft, ProductId,
-    ProductListRow, ProductPricePresentation, ProductPublishBlocker, ProductStatus, ProductsFilter,
-    ProductsListRow, ProductsSort, RecoveryKind, RecoveryState, ReminderDeadlineProjection,
-    ReminderDeliveryState, ReminderId, ReminderLogEntryProjection, ReminderLogProjection,
-    ReminderSurface, ReminderUrgency, RepeatDemandEligibility, RepeatDemandHandoffProjection,
-    ShellSection, TodayAgendaProjection, TodaySetupTaskKind,
+    OrderRecoveryProjection, OrderStatus, OrdersFilter, OrdersListRow, PackDayExportBundle,
+    PackDayExportStatus, PackDayPackListRow, PackDayProductTotalRow, PackDayRosterRow,
+    PersonalEntryState, PersonalSection, PickupLocationId, PickupLocationRecord,
+    ProductAttentionState, ProductEditorDraft, ProductId, ProductListRow, ProductPricePresentation,
+    ProductPublishBlocker, ProductStatus, ProductsFilter, ProductsListRow, ProductsSort,
+    RecoveryKind, RecoveryState, ReminderDeadlineProjection, ReminderDeliveryState, ReminderId,
+    ReminderLogEntryProjection, ReminderLogProjection, ReminderSurface, ReminderUrgency,
+    RepeatDemandEligibility, RepeatDemandHandoffProjection, ShellSection, TodayAgendaProjection,
+    TodaySetupTaskKind,
 };
 use radroots_studio_app_remote_signer::{
     RadrootsAppRemoteSignerApprovedSession, RadrootsAppRemoteSignerPendingPollOutcome,
@@ -37,7 +38,8 @@ use radroots_studio_app_remote_signer::{
 };
 use radroots_studio_app_sqlite::derive_farm_rules_readiness;
 use radroots_studio_app_state::{
-    FarmSetupFlowStage, FarmWorkspaceStatus, HomeRoute, derive_product_publish_blockers,
+    FarmSetupFlowStage, FarmWorkspaceStatus, HomeRoute, PackDayExportProjection,
+    derive_product_publish_blockers,
 };
 use radroots_studio_app_sync::{
     AppSyncRunStatus, SyncAggregateRef, SyncCheckpointState, SyncConflict, SyncConflictKind,
@@ -1622,6 +1624,22 @@ impl HomeView {
                     error = %runtime_error,
                     "failed to route into pack day view"
                 );
+            }
+        }
+    }
+
+    fn export_pack_day(&mut self, cx: &mut Context<Self>) {
+        match self.runtime.export_pack_day() {
+            Ok(true) => cx.notify(),
+            Ok(false) => {}
+            Err(runtime_error) => {
+                error!(
+                    target: "pack_day",
+                    event = "pack_day.export_failed",
+                    error = %runtime_error,
+                    "failed to export pack day"
+                );
+                cx.notify();
             }
         }
     }
@@ -3355,6 +3373,11 @@ impl HomeView {
             .max_w(px(APP_UI_THEME.shells.home_card_max_width_px))
             .mx_auto()
             .child(pack_day_title_row(runtime))
+            .child(pack_day_export_card(
+                runtime,
+                cx.listener(|this, _, _, cx| this.export_pack_day(cx)),
+                cx,
+            ))
             .when(!projection.reminders.is_empty(), |this| {
                 this.child(self.render_reminder_feed_card(
                     "pack-day-reminders",
@@ -9787,6 +9810,163 @@ fn order_recovery_kind_index(kind: RecoveryKind) -> usize {
     }
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct PackDayExportStatusPresentation {
+    indicator_color: u32,
+    title_key: AppTextKey,
+    body_key: AppTextKey,
+}
+
+fn pack_day_export_card(
+    runtime: &DesktopAppRuntimeSummary,
+    on_export: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+    cx: &App,
+) -> impl IntoElement {
+    let export = &runtime.pack_day_projection.export;
+    let status = pack_day_export_status_presentation(runtime);
+    let detail_rows = pack_day_export_detail_rows(export);
+    let action = if pack_day_export_action_enabled(runtime) {
+        action_button_primary(
+            "pack-day-export",
+            app_shared_text(AppTextKey::PackDayExportAction),
+            on_export,
+            cx,
+        )
+        .into_any_element()
+    } else {
+        action_button_primary_disabled(
+            "pack-day-export",
+            app_shared_text(pack_day_export_action_label_key(export)),
+            cx,
+        )
+        .into_any_element()
+    };
+
+    home_card(
+        app_shared_text(AppTextKey::PackDayExportTitle),
+        app_stack_v(APP_UI_THEME.foundation.spacing.small_px)
+            .w_full()
+            .child(
+                div()
+                    .w_full()
+                    .flex()
+                    .items_center()
+                    .gap(px(APP_UI_THEME.shells.settings_account_status_gap_px))
+                    .child(status_indicator(status.indicator_color))
+                    .child(
+                        div()
+                            .text_size(px(APP_UI_THEME.foundation.typography.body_text_px))
+                            .font_weight(gpui::FontWeight::SEMIBOLD)
+                            .text_color(rgb(APP_UI_THEME.foundation.text.primary))
+                            .child(app_shared_text(status.title_key)),
+                    ),
+            )
+            .child(home_body_text(app_shared_text(status.body_key)))
+            .when(!detail_rows.is_empty(), |this| {
+                this.child(label_value_list(detail_rows))
+            })
+            .child(div().child(action)),
+    )
+}
+
+fn pack_day_export_has_exportable_context(runtime: &DesktopAppRuntimeSummary) -> bool {
+    let projection = &runtime.pack_day_projection.projection;
+    projection.fulfillment_window.is_some() && !projection.is_empty()
+}
+
+fn pack_day_export_action_enabled(runtime: &DesktopAppRuntimeSummary) -> bool {
+    pack_day_export_has_exportable_context(runtime)
+        && runtime.pack_day_projection.export.status != PackDayExportStatus::Running
+}
+
+fn pack_day_export_action_label_key(export: &PackDayExportProjection) -> AppTextKey {
+    match export.status {
+        PackDayExportStatus::Running => AppTextKey::PackDayExportActionRunning,
+        PackDayExportStatus::Idle
+        | PackDayExportStatus::Succeeded
+        | PackDayExportStatus::Failed => AppTextKey::PackDayExportAction,
+    }
+}
+
+fn pack_day_export_status_presentation(
+    runtime: &DesktopAppRuntimeSummary,
+) -> PackDayExportStatusPresentation {
+    match runtime.pack_day_projection.export.status {
+        PackDayExportStatus::Running => PackDayExportStatusPresentation {
+            indicator_color: APP_UI_THEME.foundation.text.accent,
+            title_key: AppTextKey::PackDayExportRunningTitle,
+            body_key: AppTextKey::PackDayExportRunningBody,
+        },
+        PackDayExportStatus::Succeeded => PackDayExportStatusPresentation {
+            indicator_color: APP_UI_THEME.components.app_status_indicator.online,
+            title_key: AppTextKey::PackDayExportSucceededTitle,
+            body_key: AppTextKey::PackDayExportSucceededBody,
+        },
+        PackDayExportStatus::Failed => PackDayExportStatusPresentation {
+            indicator_color: APP_UI_THEME.components.app_status_indicator.attention,
+            title_key: AppTextKey::PackDayExportFailedTitle,
+            body_key: AppTextKey::PackDayExportFailedBody,
+        },
+        PackDayExportStatus::Idle if pack_day_export_has_exportable_context(runtime) => {
+            PackDayExportStatusPresentation {
+                indicator_color: APP_UI_THEME.components.app_status_indicator.online,
+                title_key: AppTextKey::PackDayExportReadyTitle,
+                body_key: AppTextKey::PackDayExportReadyBody,
+            }
+        }
+        PackDayExportStatus::Idle => PackDayExportStatusPresentation {
+            indicator_color: APP_UI_THEME.components.app_status_indicator.offline,
+            title_key: AppTextKey::PackDayExportUnavailableTitle,
+            body_key: AppTextKey::PackDayExportUnavailableBody,
+        },
+    }
+}
+
+fn pack_day_export_detail_rows(export: &PackDayExportProjection) -> Vec<LabelValueRow> {
+    match export.status {
+        PackDayExportStatus::Succeeded => export
+            .bundle
+            .as_ref()
+            .map(pack_day_export_bundle_rows)
+            .unwrap_or_default(),
+        PackDayExportStatus::Failed => export
+            .error_message
+            .as_deref()
+            .map(str::trim)
+            .filter(|message| !message.is_empty())
+            .map(|message| {
+                vec![LabelValueRow::new(
+                    app_shared_text(AppTextKey::PackDayExportErrorLabel),
+                    message.to_owned(),
+                )]
+            })
+            .unwrap_or_default(),
+        PackDayExportStatus::Idle | PackDayExportStatus::Running => Vec::new(),
+    }
+}
+
+fn pack_day_export_bundle_rows(bundle: &PackDayExportBundle) -> Vec<LabelValueRow> {
+    vec![
+        LabelValueRow::new(
+            app_shared_text(AppTextKey::PackDayExportFolderLabel),
+            bundle.bundle_directory.clone(),
+        ),
+        LabelValueRow::new(
+            app_shared_text(AppTextKey::PackDayExportFilesLabel),
+            pack_day_export_artifact_names(bundle),
+        ),
+    ]
+}
+
+fn pack_day_export_artifact_names(bundle: &PackDayExportBundle) -> String {
+    bundle
+        .artifacts
+        .iter()
+        .map(|artifact| artifact.kind.file_name())
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
 fn pack_day_title_row(runtime: &DesktopAppRuntimeSummary) -> impl IntoElement {
     app_stack_v(4.0)
         .child(
@@ -11646,7 +11826,8 @@ fn home_farm_order_method_label_key(method: FarmOrderMethod) -> AppTextKey {
 mod tests {
     use super::{
         APP_UI_THEME, AppTextKey, FarmerHomeFarmState, HomeAutoFocusState, HomeAutoFocusTarget,
-        HomeStage, ReminderActionTarget, SETTINGS_FARM_PANEL_SECTIONS, SETTINGS_NAVIGATION_ORDER,
+        HomeStage, LabelValueRow, PackDayExportStatusPresentation, ReminderActionTarget,
+        SETTINGS_FARM_PANEL_SECTIONS, SETTINGS_NAVIGATION_ORDER,
         SETTINGS_OPERATIONS_PANEL_SECTIONS, SettingsAutoFocusTarget, SettingsInventorySectionSpec,
         SettingsPanelViewKey, StartupHomeSurface, StartupSignerConnectState,
         about_conflict_action_specs, about_conflict_aggregate_text, about_conflict_detail_rows,
@@ -11654,7 +11835,9 @@ mod tests {
         about_status_rows, app_text, buyer_orders_status_key, farm_setup_onboarding_card_spec,
         farmer_home_farm_state, farmer_pack_day_available, home_auto_focus_target,
         home_content_scroll_id, home_saved_farm, home_sidebar_navigation_sections, home_stage,
-        home_window_launch_size_px, home_window_minimum_size_px,
+        home_window_launch_size_px, home_window_minimum_size_px, pack_day_export_action_enabled,
+        pack_day_export_action_label_key, pack_day_export_artifact_names,
+        pack_day_export_detail_rows, pack_day_export_status_presentation,
         parse_optional_product_editor_stock_input, parse_product_editor_price_input,
         presented_farmer_reminder, product_display_title, reminder_action_target,
         reminder_deadline_text, reminder_delivery_state_key, reminder_urgency_color,
@@ -11674,10 +11857,11 @@ mod tests {
         FarmSetupProjection, FarmSummary, FarmerSection, FulfillmentWindowId,
         FulfillmentWindowSummary, LoggedOutStartupPhase, LoggedOutStartupProjection,
         OrderDetailProjection, OrderId, OrderPrimaryAction, OrderStatus, OrdersListRow,
-        PackDayProjection, PersonalSection, ReminderDeadlineProjection, ReminderDeliveryState,
-        ReminderId, ReminderKind, ReminderSurface, ReminderUrgency, RepeatDemandEligibility,
-        RepeatDemandHandoffProjection, ShellSection, TodayAgendaProjection, TodaySetupTask,
-        TodaySetupTaskKind,
+        PackDayExportArtifact, PackDayExportArtifactKind, PackDayExportBundle,
+        PackDayProductTotalRow, PackDayProjection, PersonalSection, ReminderDeadlineProjection,
+        ReminderDeliveryState, ReminderId, ReminderKind, ReminderSurface, ReminderUrgency,
+        RepeatDemandEligibility, RepeatDemandHandoffProjection, ShellSection,
+        TodayAgendaProjection, TodaySetupTask, TodaySetupTaskKind,
     };
     use radroots_studio_app_remote_signer::{
         RadrootsAppRemoteSignerApprovedSession, RadrootsAppRemoteSignerPendingSession,
@@ -11685,6 +11869,7 @@ mod tests {
     };
     use radroots_studio_app_state::{
         AppShellProjection, FarmWorkspaceReadinessProjection, FarmWorkspaceStatus, HomeRoute,
+        PackDayExportProjection,
     };
     use radroots_studio_app_sync::{
         AppSyncProjection, AppSyncRunStatus, SyncAggregateRef, SyncCheckpointStatus, SyncConflict,
@@ -12247,6 +12432,151 @@ mod tests {
         };
 
         assert!(farmer_pack_day_available(&runtime));
+    }
+
+    #[test]
+    fn pack_day_export_action_enabled_requires_a_window_and_exportable_rows() {
+        let farm_id = FarmId::new();
+        let fulfillment_window_id = FulfillmentWindowId::new();
+        let mut runtime = summary(
+            HomeRoute::Today,
+            TodayAgendaProjection::default(),
+            FarmSetupProjection::default(),
+        );
+
+        assert!(!pack_day_export_action_enabled(&runtime));
+        assert_eq!(
+            pack_day_export_status_presentation(&runtime),
+            PackDayExportStatusPresentation {
+                indicator_color: APP_UI_THEME.components.app_status_indicator.offline,
+                title_key: AppTextKey::PackDayExportUnavailableTitle,
+                body_key: AppTextKey::PackDayExportUnavailableBody,
+            }
+        );
+
+        runtime.pack_day_projection.projection = PackDayProjection {
+            fulfillment_window: Some(FulfillmentWindowSummary {
+                fulfillment_window_id,
+                farm_id,
+                starts_at: String::new(),
+                ends_at: String::new(),
+            }),
+            reminders: Default::default(),
+            totals_by_product: Vec::new(),
+            pack_list: Vec::new(),
+            pickup_roster: Vec::new(),
+        };
+
+        assert!(!pack_day_export_action_enabled(&runtime));
+
+        runtime.pack_day_projection.projection.totals_by_product = vec![PackDayProductTotalRow {
+            title: "Salad mix".to_owned(),
+            quantity_display: "2 bags".to_owned(),
+        }];
+
+        assert!(pack_day_export_action_enabled(&runtime));
+        assert_eq!(
+            pack_day_export_status_presentation(&runtime),
+            PackDayExportStatusPresentation {
+                indicator_color: APP_UI_THEME.components.app_status_indicator.online,
+                title_key: AppTextKey::PackDayExportReadyTitle,
+                body_key: AppTextKey::PackDayExportReadyBody,
+            }
+        );
+
+        runtime.pack_day_projection.export = PackDayExportProjection::running(
+            radroots_studio_app_state::PackDayExportRequest::for_fulfillment_window(fulfillment_window_id),
+        );
+        assert!(!pack_day_export_action_enabled(&runtime));
+        assert_eq!(
+            pack_day_export_action_label_key(&runtime.pack_day_projection.export),
+            AppTextKey::PackDayExportActionRunning
+        );
+        assert_eq!(
+            pack_day_export_status_presentation(&runtime),
+            PackDayExportStatusPresentation {
+                indicator_color: APP_UI_THEME.foundation.text.accent,
+                title_key: AppTextKey::PackDayExportRunningTitle,
+                body_key: AppTextKey::PackDayExportRunningBody,
+            }
+        );
+    }
+
+    #[test]
+    fn pack_day_export_detail_rows_surface_bundle_and_failure_details() {
+        let fulfillment_window_id = FulfillmentWindowId::new();
+        let bundle = PackDayExportBundle {
+            fulfillment_window_id,
+            generated_at_utc: "2026-04-23T15:00:00Z".to_owned(),
+            bundle_directory: "exports/pack_day/window-1/20260423T150000Z".to_owned(),
+            artifacts: vec![
+                PackDayExportArtifact {
+                    kind: PackDayExportArtifactKind::PackSheet,
+                    relative_path: "pack_sheet.txt".to_owned(),
+                },
+                PackDayExportArtifact {
+                    kind: PackDayExportArtifactKind::PickupRoster,
+                    relative_path: "pickup_roster.txt".to_owned(),
+                },
+                PackDayExportArtifact {
+                    kind: PackDayExportArtifactKind::CustomerLabels,
+                    relative_path: "customer_labels.txt".to_owned(),
+                },
+            ],
+        };
+        let request =
+            radroots_studio_app_state::PackDayExportRequest::for_fulfillment_window(fulfillment_window_id);
+
+        let rows = pack_day_export_detail_rows(&PackDayExportProjection::succeeded(
+            request.clone(),
+            bundle.clone(),
+        ));
+        assert_eq!(rows.len(), 2);
+        assert_eq!(
+            rows[0],
+            LabelValueRow::new(
+                app_text(AppTextKey::PackDayExportFolderLabel),
+                "exports/pack_day/window-1/20260423T150000Z"
+            )
+        );
+        assert_eq!(
+            rows[1],
+            LabelValueRow::new(
+                app_text(AppTextKey::PackDayExportFilesLabel),
+                "pack_sheet.txt, pickup_roster.txt, customer_labels.txt"
+            )
+        );
+        assert_eq!(
+            pack_day_export_artifact_names(&bundle),
+            "pack_sheet.txt, pickup_roster.txt, customer_labels.txt"
+        );
+
+        let failed = PackDayExportProjection::failed(request, "disk unavailable");
+        assert_eq!(
+            pack_day_export_detail_rows(&failed),
+            vec![LabelValueRow::new(
+                app_text(AppTextKey::PackDayExportErrorLabel),
+                "disk unavailable"
+            )]
+        );
+        assert_eq!(
+            pack_day_export_status_presentation(&DesktopAppRuntimeSummary {
+                pack_day_projection: radroots_studio_app_state::PackDayScreenProjection {
+                    export: failed,
+                    ..Default::default()
+                },
+                ..summary(
+                    HomeRoute::Today,
+                    TodayAgendaProjection::default(),
+                    FarmSetupProjection::default(),
+                )
+            }),
+            PackDayExportStatusPresentation {
+                indicator_color: APP_UI_THEME.components.app_status_indicator.attention,
+                title_key: AppTextKey::PackDayExportFailedTitle,
+                body_key: AppTextKey::PackDayExportFailedBody,
+            }
+        );
     }
 
     #[test]

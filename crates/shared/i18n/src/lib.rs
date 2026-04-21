@@ -446,6 +446,35 @@ mod tests {
             app_text(AppTextKey::PackDayEmptyTitle),
             "Nothing to pack yet"
         );
+        assert_eq!(app_text(AppTextKey::PackDayExportTitle), "Export pack day");
+        assert_eq!(
+            app_text(AppTextKey::PackDayExportReadyTitle),
+            "Ready to save locally"
+        );
+        assert_eq!(
+            app_text(AppTextKey::PackDayExportUnavailableTitle),
+            "Not ready yet"
+        );
+        assert_eq!(
+            app_text(AppTextKey::PackDayExportRunningTitle),
+            "Saving locally"
+        );
+        assert_eq!(
+            app_text(AppTextKey::PackDayExportSucceededTitle),
+            "Saved locally"
+        );
+        assert_eq!(
+            app_text(AppTextKey::PackDayExportFailedTitle),
+            "Couldn't save export"
+        );
+        assert_eq!(app_text(AppTextKey::PackDayExportAction), "Export pack day");
+        assert_eq!(
+            app_text(AppTextKey::PackDayExportActionRunning),
+            "Exporting..."
+        );
+        assert_eq!(app_text(AppTextKey::PackDayExportFolderLabel), "Folder");
+        assert_eq!(app_text(AppTextKey::PackDayExportFilesLabel), "Files");
+        assert_eq!(app_text(AppTextKey::PackDayExportErrorLabel), "Error");
     }
 
     #[test]
