@@ -7247,7 +7247,7 @@ mod tests {
     }
 
     #[test]
-    fn runtime_prepare_pack_day_host_handoff_uses_the_current_export_bundle() {
+    fn runtime_prepare_pack_day_host_handoff_uses_the_current_export_bundle_for_file_actions() {
         let (runtime, paths) = bootstrapped_runtime("pack_day_host_handoff_prepare");
         let (_, farm_id) = provision_ready_farmer_account(&runtime);
 
@@ -7259,33 +7259,51 @@ mod tests {
                 .expect("pack day export should succeed")
         );
 
-        let prepared = runtime
-            .prepare_pack_day_host_handoff(PackDayHostHandoffKind::OpenPackSheet)
-            .expect("host handoff should prepare")
-            .expect("host handoff should produce a plan");
+        for (kind, suffix) in [
+            (PackDayHostHandoffKind::OpenPackSheet, "pack_sheet.txt"),
+            (
+                PackDayHostHandoffKind::OpenPickupRoster,
+                "pickup_roster.txt",
+            ),
+            (
+                PackDayHostHandoffKind::OpenCustomerLabels,
+                "customer_labels.txt",
+            ),
+        ] {
+            let prepared = runtime
+                .prepare_pack_day_host_handoff(kind)
+                .expect("host handoff should prepare")
+                .expect("host handoff should produce a plan");
 
-        let summary = runtime.summary();
-        assert_eq!(
-            summary.pack_day_projection.host_handoff.status,
-            PackDayHostHandoffStatus::Running
-        );
-        assert_eq!(
-            summary.pack_day_projection.host_handoff.request,
-            Some(prepared.0.clone())
-        );
-        assert_eq!(prepared.0.kind, PackDayHostHandoffKind::OpenPackSheet);
-        assert_eq!(
-            prepared.0.bundle_directory,
-            summary
-                .pack_day_projection
-                .export
-                .bundle
-                .as_ref()
-                .expect("pack day export bundle")
-                .bundle_directory
-        );
-        assert_eq!(prepared.1.kind, PackDayHostHandoffKind::OpenPackSheet);
-        assert!(prepared.1.target_path.ends_with("pack_sheet.txt"));
+            let summary = runtime.summary();
+            assert_eq!(
+                summary.pack_day_projection.host_handoff.status,
+                PackDayHostHandoffStatus::Running
+            );
+            assert_eq!(
+                summary.pack_day_projection.host_handoff.request,
+                Some(prepared.0.clone())
+            );
+            assert_eq!(prepared.0.kind, kind);
+            assert_eq!(
+                prepared.0.bundle_directory,
+                summary
+                    .pack_day_projection
+                    .export
+                    .bundle
+                    .as_ref()
+                    .expect("pack day export bundle")
+                    .bundle_directory
+            );
+            assert_eq!(prepared.1.kind, kind);
+            assert!(prepared.1.target_path.ends_with(suffix));
+
+            assert!(
+                runtime
+                    .finish_pack_day_host_handoff(prepared.0, Ok(()))
+                    .expect("host handoff success should apply")
+            );
+        }
 
         cleanup_bootstrapped_runtime_paths(&paths);
     }

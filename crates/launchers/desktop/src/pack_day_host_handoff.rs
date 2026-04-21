@@ -366,6 +366,12 @@ mod tests {
         }
     }
 
+    fn write_artifact(bundle_directory: &PathBuf, file_name: &str) -> PathBuf {
+        let path = bundle_directory.join(file_name);
+        fs::write(&path, file_name).expect("artifact should write");
+        path
+    }
+
     #[test]
     fn reveal_bundle_plan_uses_open_reveal_for_the_bundle_directory() {
         let temp_dir = TestDirectory::new();
@@ -389,8 +395,7 @@ mod tests {
     #[test]
     fn open_pack_sheet_plan_targets_the_exported_pack_sheet() {
         let temp_dir = TestDirectory::new();
-        let pack_sheet_path = temp_dir.path().join("pack_sheet.txt");
-        fs::write(&pack_sheet_path, "pack day").expect("pack sheet should write");
+        let pack_sheet_path = write_artifact(temp_dir.path(), "pack_sheet.txt");
         let bundle = sample_bundle(temp_dir.path());
 
         let plan = plan_pack_day_host_handoff(&bundle, PackDayHostHandoffKind::OpenPackSheet)
@@ -402,6 +407,42 @@ mod tests {
         assert_eq!(
             plan.command_args,
             vec![pack_sheet_path.to_string_lossy().into_owned()]
+        );
+    }
+
+    #[test]
+    fn open_pickup_roster_plan_targets_the_exported_pickup_roster() {
+        let temp_dir = TestDirectory::new();
+        let pickup_roster_path = write_artifact(temp_dir.path(), "pickup_roster.txt");
+        let bundle = sample_bundle(temp_dir.path());
+
+        let plan = plan_pack_day_host_handoff(&bundle, PackDayHostHandoffKind::OpenPickupRoster)
+            .expect("open pickup roster plan should build");
+
+        assert_eq!(plan.kind, PackDayHostHandoffKind::OpenPickupRoster);
+        assert_eq!(plan.target_path, pickup_roster_path.clone());
+        assert_eq!(plan.command_program, "open");
+        assert_eq!(
+            plan.command_args,
+            vec![pickup_roster_path.to_string_lossy().into_owned()]
+        );
+    }
+
+    #[test]
+    fn open_customer_labels_plan_targets_the_exported_customer_labels() {
+        let temp_dir = TestDirectory::new();
+        let customer_labels_path = write_artifact(temp_dir.path(), "customer_labels.txt");
+        let bundle = sample_bundle(temp_dir.path());
+
+        let plan = plan_pack_day_host_handoff(&bundle, PackDayHostHandoffKind::OpenCustomerLabels)
+            .expect("open customer labels plan should build");
+
+        assert_eq!(plan.kind, PackDayHostHandoffKind::OpenCustomerLabels);
+        assert_eq!(plan.target_path, customer_labels_path.clone());
+        assert_eq!(plan.command_program, "open");
+        assert_eq!(
+            plan.command_args,
+            vec![customer_labels_path.to_string_lossy().into_owned()]
         );
     }
 
@@ -445,6 +486,26 @@ mod tests {
     }
 
     #[test]
+    fn planning_fails_when_pickup_roster_reference_is_missing() {
+        let temp_dir = TestDirectory::new();
+        let mut bundle = sample_bundle(temp_dir.path());
+        bundle
+            .artifacts
+            .retain(|artifact| artifact.kind != PackDayExportArtifactKind::PickupRoster);
+
+        let error = plan_pack_day_host_handoff(&bundle, PackDayHostHandoffKind::OpenPickupRoster)
+            .expect_err("missing pickup roster artifact should fail");
+
+        assert_eq!(
+            error,
+            PackDayHostHandoffError::MissingArtifactReference {
+                kind: PackDayHostHandoffKind::OpenPickupRoster,
+                artifact_kind: PackDayExportArtifactKind::PickupRoster,
+            }
+        );
+    }
+
+    #[test]
     fn planning_fails_when_pack_sheet_relative_path_is_invalid() {
         let temp_dir = TestDirectory::new();
         let mut bundle = sample_bundle(temp_dir.path());
@@ -458,6 +519,23 @@ mod tests {
             PackDayHostHandoffError::InvalidArtifactRelativePath {
                 kind: PackDayHostHandoffKind::OpenPackSheet,
                 relative_path: "../pack_sheet.txt".to_owned(),
+            }
+        );
+    }
+
+    #[test]
+    fn planning_fails_when_customer_labels_target_is_missing_on_disk() {
+        let temp_dir = TestDirectory::new();
+        let bundle = sample_bundle(temp_dir.path());
+
+        let error = plan_pack_day_host_handoff(&bundle, PackDayHostHandoffKind::OpenCustomerLabels)
+            .expect_err("missing customer labels file should fail");
+
+        assert_eq!(
+            error,
+            PackDayHostHandoffError::MissingTargetPath {
+                kind: PackDayHostHandoffKind::OpenCustomerLabels,
+                path: temp_dir.path().join("customer_labels.txt"),
             }
         );
     }
@@ -505,6 +583,33 @@ mod tests {
                 program: "open".to_owned(),
                 exit_code: Some(1),
                 stderr: "finder unavailable".to_owned(),
+            }
+        );
+    }
+
+    #[test]
+    fn execution_classifies_nonzero_exit_failures_for_customer_labels() {
+        let temp_dir = TestDirectory::new();
+        write_artifact(temp_dir.path(), "customer_labels.txt");
+        let bundle = sample_bundle(temp_dir.path());
+        let plan = plan_pack_day_host_handoff(&bundle, PackDayHostHandoffKind::OpenCustomerLabels)
+            .expect("customer labels plan should build");
+
+        let error = execute_pack_day_host_handoff_plan_with(&plan, |_| {
+            Ok(PackDayHostHandoffCommandResult::failed(
+                Some(1),
+                "labels unavailable",
+            ))
+        })
+        .expect_err("nonzero exit should classify");
+
+        assert_eq!(
+            error,
+            PackDayHostHandoffError::CommandFailed {
+                kind: PackDayHostHandoffKind::OpenCustomerLabels,
+                program: "open".to_owned(),
+                exit_code: Some(1),
+                stderr: "labels unavailable".to_owned(),
             }
         );
     }
