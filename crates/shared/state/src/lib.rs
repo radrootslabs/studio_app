@@ -2561,7 +2561,7 @@ mod tests {
         let next_window_id = FulfillmentWindowId::new();
         let request = sample_pack_day_host_handoff_request(
             fulfillment_window_id,
-            PackDayHostHandoffKind::OpenPackSheet,
+            PackDayHostHandoffKind::OpenPickupRoster,
         );
 
         assert_eq!(
@@ -2641,7 +2641,7 @@ mod tests {
         let next_window_id = FulfillmentWindowId::new();
         let request = sample_pack_day_host_handoff_request(
             current_window_id,
-            PackDayHostHandoffKind::OpenPackSheet,
+            PackDayHostHandoffKind::OpenCustomerLabels,
         );
 
         assert_eq!(

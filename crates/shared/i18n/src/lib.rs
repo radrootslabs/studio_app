@@ -492,6 +492,22 @@ mod tests {
             "Opening pack sheet..."
         );
         assert_eq!(
+            app_text(AppTextKey::PackDayHostHandoffOpenPickupRosterAction),
+            "Open pickup roster"
+        );
+        assert_eq!(
+            app_text(AppTextKey::PackDayHostHandoffOpenPickupRosterActionRunning),
+            "Opening pickup roster..."
+        );
+        assert_eq!(
+            app_text(AppTextKey::PackDayHostHandoffOpenCustomerLabelsAction),
+            "Open customer labels"
+        );
+        assert_eq!(
+            app_text(AppTextKey::PackDayHostHandoffOpenCustomerLabelsActionRunning),
+            "Opening customer labels..."
+        );
+        assert_eq!(
             app_text(AppTextKey::PackDayHostHandoffRevealSucceededTitle),
             "Shown in Finder"
         );
@@ -500,12 +516,28 @@ mod tests {
             "Opened pack sheet"
         );
         assert_eq!(
+            app_text(AppTextKey::PackDayHostHandoffOpenPickupRosterSucceededTitle),
+            "Opened pickup roster"
+        );
+        assert_eq!(
+            app_text(AppTextKey::PackDayHostHandoffOpenCustomerLabelsSucceededTitle),
+            "Opened customer labels"
+        );
+        assert_eq!(
             app_text(AppTextKey::PackDayHostHandoffRevealFailedTitle),
             "Couldn't show in Finder"
         );
         assert_eq!(
             app_text(AppTextKey::PackDayHostHandoffOpenPackSheetFailedTitle),
             "Couldn't open pack sheet"
+        );
+        assert_eq!(
+            app_text(AppTextKey::PackDayHostHandoffOpenPickupRosterFailedTitle),
+            "Couldn't open pickup roster"
+        );
+        assert_eq!(
+            app_text(AppTextKey::PackDayHostHandoffOpenCustomerLabelsFailedTitle),
+            "Couldn't open customer labels"
         );
     }
 

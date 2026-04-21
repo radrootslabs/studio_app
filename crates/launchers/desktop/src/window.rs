@@ -10028,6 +10028,22 @@ fn pack_day_export_card(
                                             )
                                             .into_any_element()
                                         }
+                                        PackDayHostHandoffKind::OpenPickupRoster => {
+                                            action_button_disabled(
+                                                "pack-day-open-pickup-roster",
+                                                app_shared_text(action.label_key),
+                                                cx,
+                                            )
+                                            .into_any_element()
+                                        }
+                                        PackDayHostHandoffKind::OpenCustomerLabels => {
+                                            action_button_disabled(
+                                                "pack-day-open-customer-labels",
+                                                app_shared_text(action.label_key),
+                                                cx,
+                                            )
+                                            .into_any_element()
+                                        }
                                     };
                                     button
                                 })),
@@ -10080,6 +10096,18 @@ fn pack_day_host_handoff_action_label_key(
         (PackDayHostHandoffKind::OpenPackSheet, false) => {
             AppTextKey::PackDayHostHandoffOpenPackSheetAction
         }
+        (PackDayHostHandoffKind::OpenPickupRoster, true) => {
+            AppTextKey::PackDayHostHandoffOpenPickupRosterActionRunning
+        }
+        (PackDayHostHandoffKind::OpenPickupRoster, false) => {
+            AppTextKey::PackDayHostHandoffOpenPickupRosterAction
+        }
+        (PackDayHostHandoffKind::OpenCustomerLabels, true) => {
+            AppTextKey::PackDayHostHandoffOpenCustomerLabelsActionRunning
+        }
+        (PackDayHostHandoffKind::OpenCustomerLabels, false) => {
+            AppTextKey::PackDayHostHandoffOpenCustomerLabelsAction
+        }
     }
 }
 
@@ -10103,6 +10131,18 @@ fn pack_day_host_handoff_status_presentation(
                 title_key: AppTextKey::PackDayHostHandoffOpenPackSheetRunningTitle,
             }
         }
+        (PackDayHostHandoffStatus::Running, PackDayHostHandoffKind::OpenPickupRoster) => {
+            PackDayHostHandoffStatusPresentation {
+                indicator_color: APP_UI_THEME.foundation.text.accent,
+                title_key: AppTextKey::PackDayHostHandoffOpenPickupRosterRunningTitle,
+            }
+        }
+        (PackDayHostHandoffStatus::Running, PackDayHostHandoffKind::OpenCustomerLabels) => {
+            PackDayHostHandoffStatusPresentation {
+                indicator_color: APP_UI_THEME.foundation.text.accent,
+                title_key: AppTextKey::PackDayHostHandoffOpenCustomerLabelsRunningTitle,
+            }
+        }
         (PackDayHostHandoffStatus::Succeeded, PackDayHostHandoffKind::RevealBundle) => {
             PackDayHostHandoffStatusPresentation {
                 indicator_color: APP_UI_THEME.components.app_status_indicator.online,
@@ -10115,6 +10155,18 @@ fn pack_day_host_handoff_status_presentation(
                 title_key: AppTextKey::PackDayHostHandoffOpenPackSheetSucceededTitle,
             }
         }
+        (PackDayHostHandoffStatus::Succeeded, PackDayHostHandoffKind::OpenPickupRoster) => {
+            PackDayHostHandoffStatusPresentation {
+                indicator_color: APP_UI_THEME.components.app_status_indicator.online,
+                title_key: AppTextKey::PackDayHostHandoffOpenPickupRosterSucceededTitle,
+            }
+        }
+        (PackDayHostHandoffStatus::Succeeded, PackDayHostHandoffKind::OpenCustomerLabels) => {
+            PackDayHostHandoffStatusPresentation {
+                indicator_color: APP_UI_THEME.components.app_status_indicator.online,
+                title_key: AppTextKey::PackDayHostHandoffOpenCustomerLabelsSucceededTitle,
+            }
+        }
         (PackDayHostHandoffStatus::Failed, PackDayHostHandoffKind::RevealBundle) => {
             PackDayHostHandoffStatusPresentation {
                 indicator_color: APP_UI_THEME.components.app_status_indicator.attention,
@@ -10125,6 +10177,18 @@ fn pack_day_host_handoff_status_presentation(
             PackDayHostHandoffStatusPresentation {
                 indicator_color: APP_UI_THEME.components.app_status_indicator.attention,
                 title_key: AppTextKey::PackDayHostHandoffOpenPackSheetFailedTitle,
+            }
+        }
+        (PackDayHostHandoffStatus::Failed, PackDayHostHandoffKind::OpenPickupRoster) => {
+            PackDayHostHandoffStatusPresentation {
+                indicator_color: APP_UI_THEME.components.app_status_indicator.attention,
+                title_key: AppTextKey::PackDayHostHandoffOpenPickupRosterFailedTitle,
+            }
+        }
+        (PackDayHostHandoffStatus::Failed, PackDayHostHandoffKind::OpenCustomerLabels) => {
+            PackDayHostHandoffStatusPresentation {
+                indicator_color: APP_UI_THEME.components.app_status_indicator.attention,
+                title_key: AppTextKey::PackDayHostHandoffOpenCustomerLabelsFailedTitle,
             }
         }
     };

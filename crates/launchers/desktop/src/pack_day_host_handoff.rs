@@ -184,18 +184,18 @@ pub fn plan_pack_day_host_handoff(
         });
     }
 
-    let target_path = match kind {
-        PackDayHostHandoffKind::RevealBundle => bundle_directory.clone(),
-        PackDayHostHandoffKind::OpenPackSheet => {
-            resolve_bundle_artifact_path(bundle, PackDayExportArtifactKind::PackSheet, kind)?
-        }
+    let target_path = match kind.artifact_kind() {
+        None => bundle_directory.clone(),
+        Some(artifact_kind) => resolve_bundle_artifact_path(bundle, artifact_kind, kind)?,
     };
 
     let command_args = match kind {
         PackDayHostHandoffKind::RevealBundle => {
             vec!["-R".to_owned(), target_path.to_string_lossy().into_owned()]
         }
-        PackDayHostHandoffKind::OpenPackSheet => {
+        PackDayHostHandoffKind::OpenPackSheet
+        | PackDayHostHandoffKind::OpenPickupRoster
+        | PackDayHostHandoffKind::OpenCustomerLabels => {
             vec![target_path.to_string_lossy().into_owned()]
         }
     };
@@ -307,8 +307,8 @@ fn run_macos_host_command(
 #[cfg(test)]
 mod tests {
     use super::{
-        execute_pack_day_host_handoff_plan_with, plan_pack_day_host_handoff,
         PackDayHostHandoffCommandResult, PackDayHostHandoffError,
+        execute_pack_day_host_handoff_plan_with, plan_pack_day_host_handoff,
     };
     use radroots_studio_app_models::{
         PackDayExportArtifact, PackDayExportArtifactKind, PackDayExportBundle,

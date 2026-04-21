@@ -1614,6 +1614,8 @@ impl PackDayExportArtifactKind {
 pub enum PackDayHostHandoffKind {
     RevealBundle,
     OpenPackSheet,
+    OpenPickupRoster,
+    OpenCustomerLabels,
 }
 
 impl PackDayHostHandoffKind {
@@ -1625,6 +1627,8 @@ impl PackDayHostHandoffKind {
         match self {
             Self::RevealBundle => "reveal_bundle",
             Self::OpenPackSheet => "open_pack_sheet",
+            Self::OpenPickupRoster => "open_pickup_roster",
+            Self::OpenCustomerLabels => "open_customer_labels",
         }
     }
 
@@ -1632,6 +1636,8 @@ impl PackDayHostHandoffKind {
         match self {
             Self::RevealBundle => None,
             Self::OpenPackSheet => Some(PackDayExportArtifactKind::PackSheet),
+            Self::OpenPickupRoster => Some(PackDayExportArtifactKind::PickupRoster),
+            Self::OpenCustomerLabels => Some(PackDayExportArtifactKind::CustomerLabels),
         }
     }
 }
@@ -3034,10 +3040,26 @@ mod tests {
             PackDayHostHandoffKind::OpenPackSheet.storage_key(),
             "open_pack_sheet"
         );
+        assert_eq!(
+            PackDayHostHandoffKind::OpenPickupRoster.storage_key(),
+            "open_pickup_roster"
+        );
+        assert_eq!(
+            PackDayHostHandoffKind::OpenCustomerLabels.storage_key(),
+            "open_customer_labels"
+        );
         assert_eq!(PackDayHostHandoffKind::RevealBundle.artifact_kind(), None);
         assert_eq!(
             PackDayHostHandoffKind::OpenPackSheet.artifact_kind(),
             Some(PackDayExportArtifactKind::PackSheet)
+        );
+        assert_eq!(
+            PackDayHostHandoffKind::OpenPickupRoster.artifact_kind(),
+            Some(PackDayExportArtifactKind::PickupRoster)
+        );
+        assert_eq!(
+            PackDayHostHandoffKind::OpenCustomerLabels.artifact_kind(),
+            Some(PackDayExportArtifactKind::CustomerLabels)
         );
         assert_eq!(
             PackDayHostHandoffStatus::default(),
