@@ -6,8 +6,8 @@ use std::path::{Component, Path, PathBuf};
 use std::process::Command;
 
 use radroots_studio_app_models::{
-    PackDayExportArtifactKind, PackDayExportBundle, PackDayExportInstanceId, PackDayPrintKind,
-    PackDayPrintLabelStock,
+    PackDayExportArtifactKind, PackDayExportBundle, PackDayExportInstanceId,
+    PackDayPrintFailureKind, PackDayPrintKind, PackDayPrintLabelStock,
 };
 use thiserror::Error;
 
@@ -108,6 +108,8 @@ pub enum PackDayPrintError {
         path: PathBuf,
         source: io::Error,
     },
+    #[error("customer label content exceeds the six-line Avery 5160 layout")]
+    CustomerLabelsAvery5160Overflow,
     #[error("pack day print is only supported on macos")]
     UnsupportedPlatform,
     #[error("failed to launch macos print command {program} for {kind:?}: {source}")]
@@ -220,6 +222,10 @@ impl PartialEq for PackDayPrintError {
                     && left_path == right_path
                     && io_errors_match(left_source, right_source)
             }
+            (
+                Self::CustomerLabelsAvery5160Overflow,
+                Self::CustomerLabelsAvery5160Overflow,
+            ) => true,
             (Self::UnsupportedPlatform, Self::UnsupportedPlatform) => true,
             (
                 Self::CommandLaunch {
@@ -263,6 +269,17 @@ impl PartialEq for PackDayPrintError {
 }
 
 impl Eq for PackDayPrintError {}
+
+impl PackDayPrintError {
+    pub(crate) const fn failure_kind(&self) -> Option<PackDayPrintFailureKind> {
+        match self {
+            Self::CustomerLabelsAvery5160Overflow => {
+                Some(PackDayPrintFailureKind::CustomerLabelsAvery5160Overflow)
+            }
+            _ => None,
+        }
+    }
+}
 
 fn io_errors_match(left: &io::Error, right: &io::Error) -> bool {
     left.kind() == right.kind() && left.to_string() == right.to_string()
@@ -400,6 +417,7 @@ fn prepare_customer_label_stock_asset(
             source,
         }
     })?;
+    let prepared_asset = render_customer_label_stock_asset(&source_contents, stock)?;
     let target_directory = prepared_customer_label_asset_directory(bundle);
     fs::create_dir_all(&target_directory).map_err(|source| {
         PackDayPrintError::CreatePreparedAssetDirectory {
@@ -409,7 +427,6 @@ fn prepare_customer_label_stock_asset(
         }
     })?;
     let target_path = prepared_customer_label_asset_path(bundle, stock);
-    let prepared_asset = render_customer_label_stock_asset(&source_contents, stock);
     fs::write(&target_path, prepared_asset).map_err(|source| {
         let _ =
             cleanup_prepared_customer_label_assets_for_export_instance(bundle.export_instance_id);
@@ -466,13 +483,11 @@ fn prepared_customer_label_asset_path(
 fn render_customer_label_stock_asset(
     source_contents: &str,
     stock: PackDayPrintLabelStock,
-) -> String {
+) -> Result<String, PackDayPrintError> {
     match stock {
-        PackDayPrintLabelStock::Avery5160Letter30Up => {
-            render_avery_5160_customer_labels_postscript(parse_customer_label_blocks(
-                source_contents,
-            ))
-        }
+        PackDayPrintLabelStock::Avery5160Letter30Up => render_avery_5160_customer_labels_postscript(
+            parse_customer_label_blocks(source_contents),
+        ),
     }
 }
 
@@ -498,7 +513,9 @@ fn parse_customer_label_blocks(source_contents: &str) -> Vec<Vec<String>> {
     }
 }
 
-fn render_avery_5160_customer_labels_postscript(blocks: Vec<Vec<String>>) -> String {
+fn render_avery_5160_customer_labels_postscript(
+    blocks: Vec<Vec<String>>,
+) -> Result<String, PackDayPrintError> {
     let page_count = blocks.len().div_ceil(AVERY_5160_LABELS_PER_PAGE);
     let mut rendered = String::new();
 
@@ -539,7 +556,7 @@ fn render_avery_5160_customer_labels_postscript(blocks: Vec<Vec<String>>) -> Str
                 - (row as f32 * AVERY_5160_ROW_PITCH_POINTS)
                 - AVERY_5160_TEXT_TOP_PADDING_POINTS;
 
-            for (line_index, line) in wrap_customer_label_block(block).into_iter().enumerate() {
+            for (line_index, line) in wrap_customer_label_block(block)?.into_iter().enumerate() {
                 let baseline = top - (line_index as f32 * AVERY_5160_TEXT_LEADING_POINTS);
                 let escaped = escape_postscript_text(&line);
                 let _ = writeln!(
@@ -552,22 +569,22 @@ fn render_avery_5160_customer_labels_postscript(blocks: Vec<Vec<String>>) -> Str
         let _ = writeln!(&mut rendered, "showpage");
     }
 
-    rendered
+    Ok(rendered)
 }
 
-fn wrap_customer_label_block(lines: &[String]) -> Vec<String> {
+fn wrap_customer_label_block(lines: &[String]) -> Result<Vec<String>, PackDayPrintError> {
     let mut wrapped = Vec::new();
 
     for line in lines {
         for segment in wrap_customer_label_line(line) {
             if wrapped.len() == AVERY_5160_MAX_LINES_PER_LABEL {
-                return wrapped;
+                return Err(PackDayPrintError::CustomerLabelsAvery5160Overflow);
             }
             wrapped.push(segment);
         }
     }
 
-    wrapped
+    Ok(wrapped)
 }
 
 fn wrap_customer_label_line(line: &str) -> Vec<String> {
@@ -919,6 +936,24 @@ mod tests {
             other => panic!("unexpected error: {other:?}"),
         }
 
+        assert!(!prepared_directory.exists());
+    }
+
+    #[test]
+    fn customer_label_planning_rejects_avery_5160_overflow_without_creating_prepared_assets() {
+        let temp_dir = TestDirectory::new();
+        fs::write(
+            temp_dir.path().join("customer_labels.txt"),
+            "Willow farm\nCasey\nOrder R-1001\nPickup barn\nThursday\nKeep cold\nOverflow note\n",
+        )
+        .expect("overflowing customer labels should write");
+        let bundle = sample_bundle(temp_dir.path());
+        let prepared_directory = prepared_customer_label_asset_directory(&bundle);
+
+        let error = plan_pack_day_print(&bundle, PackDayPrintKind::PrintCustomerLabels)
+            .expect_err("overflowing customer labels should fail");
+
+        assert_eq!(error, PackDayPrintError::CustomerLabelsAvery5160Overflow);
         assert!(!prepared_directory.exists());
     }
 

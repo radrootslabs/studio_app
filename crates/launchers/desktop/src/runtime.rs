@@ -20,11 +20,11 @@ use radroots_studio_app_models::{
     PackDayExportInstanceId, PackDayExportStatus, PackDayHostHandoffKind, PackDayHostHandoffStatus,
     PackDayPrintKind, PackDayPrintStatus, PackDayProjection, PackDayScreenQueryState,
     PersonalSection, PickupLocationRecord, ProductEditorDraft, ProductId, ProductsFilter,
-    ProductsListProjection, ProductsSort, RecoveryKind, RecoveryQueueProjection, RecoveryRecordId,
-    RecoveryState, ReminderDeadlineProjection, ReminderDeliveryState, ReminderFeedProjection,
-    ReminderId, ReminderKind, ReminderLogEntryProjection, ReminderLogProjection, ReminderSurface,
-    ReminderUrgency, SettingsAccountProjection, SettingsPreference, SettingsSection, ShellSection,
-    TodayAgendaProjection,
+    ProductsListProjection, ProductsSort, RecoveryKind, RecoveryQueueProjection,
+    RecoveryRecordId, RecoveryState, ReminderDeadlineProjection, ReminderDeliveryState,
+    ReminderFeedProjection, ReminderId, ReminderKind, ReminderLogEntryProjection,
+    ReminderLogProjection, ReminderSurface, ReminderUrgency, SettingsAccountProjection,
+    SettingsPreference, SettingsSection, ShellSection, TodayAgendaProjection,
 };
 use radroots_studio_app_remote_signer::{
     RadrootsAppRemoteSignerApprovedSession, RadrootsAppRemoteSignerPendingSession,
@@ -1911,9 +1911,16 @@ impl DesktopAppRuntimeState {
         match plan_pack_day_print(&bundle, kind) {
             Ok(plan) => Ok(Some((request, plan))),
             Err(error) => {
+                let failure_command = match error.failure_kind() {
+                    Some(failure) => AppStateCommand::fail_pack_day_print_with_kind(
+                        request,
+                        failure,
+                    ),
+                    None => AppStateCommand::fail_pack_day_print(request),
+                };
                 let _ = self
                     .state_store
-                    .apply_in_memory(AppStateCommand::fail_pack_day_print(request));
+                    .apply_in_memory(failure_command);
                 Err(error.into())
             }
         }
@@ -1945,9 +1952,16 @@ impl DesktopAppRuntimeState {
                 Ok(changed)
             }
             Err(error) => {
+                let failure_command = match error.failure_kind() {
+                    Some(failure) => AppStateCommand::fail_pack_day_print_with_kind(
+                        request,
+                        failure,
+                    ),
+                    None => AppStateCommand::fail_pack_day_print(request),
+                };
                 let _ = self
                     .state_store
-                    .apply_in_memory(AppStateCommand::fail_pack_day_print(request));
+                    .apply_in_memory(failure_command);
                 if let Some(export_instance_id) = cleanup_export_instance_id {
                     self.cleanup_prepared_pack_day_print_assets_for_export_instance(
                         export_instance_id,
@@ -4711,12 +4725,12 @@ mod tests {
         FarmerActivationProjection, FarmerSection, FulfillmentWindowId, FulfillmentWindowRecord,
         LoggedOutStartupProjection, OrderId, OrderStatus, OrdersFilter, PackDayExportInstanceId,
         PackDayExportStatus, PackDayHostHandoffKind, PackDayHostHandoffStatus, PackDayPackListRow,
-        PackDayPrintKind, PackDayPrintStatus, PackDayProductTotalRow, PackDayProjection,
-        PackDayRosterRow, PersonalSection, PickupLocationId, PickupLocationRecord,
-        ProductEditorDraft, ProductStatus, ProductsFilter, ProductsSort, RecoveryKind,
-        RecoveryRecordId, ReminderDeliveryState, ReminderFeedProjection, ReminderKind,
-        SelectedSurfaceProjection, SettingsPreference, SettingsSection, ShellSection,
-        TodayAgendaProjection, TodaySetupTask, TodaySetupTaskKind, TodaySummary,
+        PackDayPrintFailureKind, PackDayPrintKind, PackDayPrintStatus, PackDayProductTotalRow,
+        PackDayProjection, PackDayRosterRow, PersonalSection, PickupLocationId,
+        PickupLocationRecord, ProductEditorDraft, ProductStatus, ProductsFilter, ProductsSort,
+        RecoveryKind, RecoveryRecordId, ReminderDeliveryState, ReminderFeedProjection,
+        ReminderKind, SelectedSurfaceProjection, SettingsPreference, SettingsSection,
+        ShellSection, TodayAgendaProjection, TodaySetupTask, TodaySetupTaskKind, TodaySummary,
     };
     use radroots_studio_app_remote_signer::{
         RadrootsAppRemoteSignerPendingSession, RadrootsAppRemoteSignerSessionRecord,
@@ -7540,6 +7554,62 @@ mod tests {
             PackDayPrintStatus::Failed
         );
         assert_eq!(summary.pack_day_projection.print.request, Some(request));
+        assert_eq!(summary.pack_day_projection.print.failure, None);
+
+        cleanup_bootstrapped_runtime_paths(&paths);
+    }
+
+    #[test]
+    fn runtime_prepare_pack_day_print_surfaces_customer_label_overflow_as_a_typed_failure() {
+        let (runtime, paths) = bootstrapped_runtime("pack_day_print_overflow_failure");
+        let (_, farm_id) = provision_ready_farmer_account(&runtime);
+
+        seed_order_workspace(&runtime, farm_id);
+        assert!(runtime.open_pack_day(None).expect("pack day should open"));
+        assert!(runtime
+            .export_pack_day()
+            .expect("pack day export should succeed"));
+
+        let bundle = runtime
+            .summary()
+            .pack_day_projection
+            .export
+            .bundle
+            .clone()
+            .expect("pack day export bundle");
+        let customer_labels_path =
+            PathBuf::from(&bundle.bundle_directory).join("customer_labels.txt");
+        fs::write(
+            &customer_labels_path,
+            "Willow farm\nCasey\nOrder R-1001\nPickup barn\nThursday\nKeep cold\nOverflow note\n",
+        )
+        .expect("overflowing customer labels should write");
+
+        let error = runtime
+            .prepare_pack_day_print(PackDayPrintKind::PrintCustomerLabels)
+            .expect_err("overflowing customer labels should fail");
+        assert!(matches!(
+            error,
+            DesktopAppRuntimeCommandError::PackDayPrint(
+                PackDayPrintError::CustomerLabelsAvery5160Overflow
+            )
+        ));
+
+        let summary = runtime.summary();
+        let print = &summary.pack_day_projection.print;
+        assert_eq!(print.status, PackDayPrintStatus::Failed);
+        assert_eq!(
+            print.request.as_ref().map(|request| request.kind),
+            Some(PackDayPrintKind::PrintCustomerLabels)
+        );
+        assert_eq!(
+            print.request.as_ref().map(|request| request.export_instance_id),
+            Some(bundle.export_instance_id)
+        );
+        assert_eq!(
+            print.failure,
+            Some(PackDayPrintFailureKind::CustomerLabelsAvery5160Overflow)
+        );
 
         cleanup_bootstrapped_runtime_paths(&paths);
     }
