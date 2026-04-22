@@ -6,7 +6,8 @@ use std::path::{Component, Path, PathBuf};
 use std::process::Command;
 
 use radroots_studio_app_models::{
-    PackDayExportArtifactKind, PackDayExportBundle, PackDayPrintKind, PackDayPrintLabelStock,
+    PackDayExportArtifactKind, PackDayExportBundle, PackDayExportInstanceId, PackDayPrintKind,
+    PackDayPrintLabelStock,
 };
 use thiserror::Error;
 
@@ -267,6 +268,18 @@ fn io_errors_match(left: &io::Error, right: &io::Error) -> bool {
     left.kind() == right.kind() && left.to_string() == right.to_string()
 }
 
+pub(crate) fn cleanup_prepared_customer_label_asset_root() -> io::Result<()> {
+    cleanup_prepared_customer_label_assets_at_path(prepared_customer_label_asset_root())
+}
+
+pub(crate) fn cleanup_prepared_customer_label_assets_for_export_instance(
+    export_instance_id: PackDayExportInstanceId,
+) -> io::Result<()> {
+    cleanup_prepared_customer_label_assets_at_path(
+        prepared_customer_label_asset_directory_for_export_instance(export_instance_id),
+    )
+}
+
 pub fn plan_pack_day_print(
     bundle: &PackDayExportBundle,
     kind: PackDayPrintKind,
@@ -398,6 +411,8 @@ fn prepare_customer_label_stock_asset(
     let target_path = prepared_customer_label_asset_path(bundle, stock);
     let prepared_asset = render_customer_label_stock_asset(&source_contents, stock);
     fs::write(&target_path, prepared_asset).map_err(|source| {
+        let _ =
+            cleanup_prepared_customer_label_assets_for_export_instance(bundle.export_instance_id);
         PackDayPrintError::WritePreparedAsset {
             kind,
             path: target_path.clone(),
@@ -408,10 +423,36 @@ fn prepare_customer_label_stock_asset(
     Ok(target_path)
 }
 
+pub(crate) fn prepared_customer_label_asset_root() -> PathBuf {
+    let root = std::env::temp_dir().join(CUSTOMER_LABEL_PREPARED_ASSET_ROOT);
+
+    #[cfg(test)]
+    {
+        root.join(format!("{:?}", std::thread::current().id()))
+    }
+
+    #[cfg(not(test))]
+    {
+        root
+    }
+}
+
+fn cleanup_prepared_customer_label_assets_at_path(path: PathBuf) -> io::Result<()> {
+    match fs::remove_dir_all(&path) {
+        Ok(()) => Ok(()),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(error),
+    }
+}
+
+fn prepared_customer_label_asset_directory_for_export_instance(
+    export_instance_id: PackDayExportInstanceId,
+) -> PathBuf {
+    prepared_customer_label_asset_root().join(export_instance_id.to_string())
+}
+
 fn prepared_customer_label_asset_directory(bundle: &PackDayExportBundle) -> PathBuf {
-    std::env::temp_dir()
-        .join(CUSTOMER_LABEL_PREPARED_ASSET_ROOT)
-        .join(bundle.export_instance_id.to_string())
+    prepared_customer_label_asset_directory_for_export_instance(bundle.export_instance_id)
 }
 
 fn prepared_customer_label_asset_path(
@@ -642,9 +683,10 @@ fn run_macos_print_command(
 #[cfg(test)]
 mod tests {
     use super::{
-        LETTER_MEDIA_OPTION, PackDayPrintCommandResult, PackDayPrintError,
-        execute_pack_day_print_plan_with, plan_pack_day_print,
-        prepared_customer_label_asset_directory, prepared_customer_label_asset_path,
+        cleanup_prepared_customer_label_asset_root, execute_pack_day_print_plan_with,
+        plan_pack_day_print, prepared_customer_label_asset_directory,
+        prepared_customer_label_asset_path, prepared_customer_label_asset_root,
+        PackDayPrintCommandResult, PackDayPrintError, LETTER_MEDIA_OPTION,
     };
     use radroots_studio_app_models::{
         PackDayExportArtifact, PackDayExportArtifactKind, PackDayExportBundle,
@@ -774,11 +816,10 @@ mod tests {
         );
         assert!(plan.target_path.is_file());
         assert!(!plan.target_path.starts_with(temp_dir.path()));
-        assert!(
-            plan.target_path
-                .to_string_lossy()
-                .contains(bundle.export_instance_id.to_string().as_str())
-        );
+        assert!(plan
+            .target_path
+            .to_string_lossy()
+            .contains(bundle.export_instance_id.to_string().as_str()));
         assert_eq!(
             fs::read_to_string(&source_path).expect("source labels should stay untouched"),
             "Willow farm\nCasey\nOrder: R-1001\nPickup: North barn\nWindow: 2026-04-23T16:00:00Z to 2026-04-23T19:00:00Z\n\n---\n\nWillow farm\nTaylor\nOrder: R-1002\nPickup: North barn\nWindow: 2026-04-23T16:00:00Z to 2026-04-23T19:00:00Z\n"
@@ -878,7 +919,20 @@ mod tests {
             other => panic!("unexpected error: {other:?}"),
         }
 
-        let _ = fs::remove_dir_all(prepared_customer_label_asset_directory(&bundle));
+        assert!(!prepared_directory.exists());
+    }
+
+    #[test]
+    fn cleanup_prepared_customer_label_asset_root_removes_existing_directories() {
+        let root = prepared_customer_label_asset_root();
+        let stale_directory = root.join(PackDayExportInstanceId::new().to_string());
+        fs::create_dir_all(&stale_directory).expect("stale prepared directory should create");
+        fs::write(stale_directory.join("stale.ps"), "stale").expect("stale asset should write");
+
+        cleanup_prepared_customer_label_asset_root()
+            .expect("prepared customer label asset root should clean");
+
+        assert!(!root.exists());
     }
 
     #[test]
@@ -926,12 +980,10 @@ mod tests {
             .expect("pack sheet print plan should build");
 
         assert_eq!(plan.target_path, pack_sheet_path);
-        assert!(
-            execute_pack_day_print_plan_with(&plan, |_| {
-                Ok(PackDayPrintCommandResult::succeeded())
-            })
-            .is_ok()
-        );
+        assert!(execute_pack_day_print_plan_with(&plan, |_| {
+            Ok(PackDayPrintCommandResult::succeeded())
+        })
+        .is_ok());
     }
 
     #[test]
