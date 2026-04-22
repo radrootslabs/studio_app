@@ -476,6 +476,50 @@ mod tests {
         assert_eq!(app_text(AppTextKey::PackDayExportFilesLabel), "Files");
         assert_eq!(app_text(AppTextKey::PackDayExportErrorLabel), "Error");
         assert_eq!(
+            app_text(AppTextKey::PackDayPrintUnavailableTitle),
+            "Print not available yet"
+        );
+        assert_eq!(
+            app_text(AppTextKey::PackDayPrintUnavailableBody),
+            "Print actions become available after pack day files are saved locally."
+        );
+        assert_eq!(
+            app_text(AppTextKey::PackDayPrintPackSheetQueuedTitle),
+            "Queueing pack sheet"
+        );
+        assert_eq!(
+            app_text(AppTextKey::PackDayPrintPackSheetSubmittedTitle),
+            "Sent pack sheet to the printer"
+        );
+        assert_eq!(
+            app_text(AppTextKey::PackDayPrintPackSheetFailedTitle),
+            "Couldn't print pack sheet"
+        );
+        assert_eq!(
+            app_text(AppTextKey::PackDayPrintPickupRosterQueuedTitle),
+            "Queueing pickup roster"
+        );
+        assert_eq!(
+            app_text(AppTextKey::PackDayPrintPickupRosterSubmittedTitle),
+            "Sent pickup roster to the printer"
+        );
+        assert_eq!(
+            app_text(AppTextKey::PackDayPrintPickupRosterFailedTitle),
+            "Couldn't print pickup roster"
+        );
+        assert_eq!(
+            app_text(AppTextKey::PackDayPrintCustomerLabelsQueuedTitle),
+            "Queueing customer labels"
+        );
+        assert_eq!(
+            app_text(AppTextKey::PackDayPrintCustomerLabelsSubmittedTitle),
+            "Sent customer labels to the printer"
+        );
+        assert_eq!(
+            app_text(AppTextKey::PackDayPrintCustomerLabelsFailedTitle),
+            "Couldn't print customer labels"
+        );
+        assert_eq!(
             app_text(AppTextKey::PackDayHostHandoffRevealAction),
             "Show in Finder"
         );

@@ -238,6 +238,7 @@ typed_id!(BlackoutPeriodId);
 typed_id!(ProductId);
 typed_id!(OrderId);
 typed_id!(FulfillmentWindowId);
+typed_id!(PackDayExportInstanceId);
 typed_id!(ActivityEventId);
 typed_id!(ReminderId);
 typed_id!(RecoveryRecordId);
@@ -1611,6 +1612,86 @@ impl PackDayExportArtifactKind {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
+pub enum PackDayPrintKind {
+    PrintPackSheet,
+    PrintPickupRoster,
+    PrintCustomerLabels,
+}
+
+impl PackDayPrintKind {
+    pub const fn all_v1() -> [Self; 3] {
+        [
+            Self::PrintPackSheet,
+            Self::PrintPickupRoster,
+            Self::PrintCustomerLabels,
+        ]
+    }
+
+    pub const fn storage_key(self) -> &'static str {
+        match self {
+            Self::PrintPackSheet => "print_pack_sheet",
+            Self::PrintPickupRoster => "print_pickup_roster",
+            Self::PrintCustomerLabels => "print_customer_labels",
+        }
+    }
+
+    pub const fn artifact_kind(self) -> PackDayExportArtifactKind {
+        match self {
+            Self::PrintPackSheet => PackDayExportArtifactKind::PackSheet,
+            Self::PrintPickupRoster => PackDayExportArtifactKind::PickupRoster,
+            Self::PrintCustomerLabels => PackDayExportArtifactKind::CustomerLabels,
+        }
+    }
+
+    pub const fn label_stock(self) -> Option<PackDayPrintLabelStock> {
+        match self {
+            Self::PrintPackSheet | Self::PrintPickupRoster => None,
+            Self::PrintCustomerLabels => Some(PackDayPrintLabelStock::Avery5160Letter30Up),
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PackDayPrintLabelStock {
+    Avery5160Letter30Up,
+}
+
+impl PackDayPrintLabelStock {
+    pub const fn all_v1() -> [Self; 1] {
+        [Self::Avery5160Letter30Up]
+    }
+
+    pub const fn storage_key(self) -> &'static str {
+        match self {
+            Self::Avery5160Letter30Up => "avery_5160_letter_30_up",
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PackDayPrintStatus {
+    #[default]
+    Idle,
+    Running,
+    Succeeded,
+    Failed,
+}
+
+impl PackDayPrintStatus {
+    pub const fn storage_key(self) -> &'static str {
+        match self {
+            Self::Idle => "idle",
+            Self::Running => "running",
+            Self::Succeeded => "succeeded",
+            Self::Failed => "failed",
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum PackDayHostHandoffKind {
     RevealBundle,
     OpenPackSheet,
@@ -1804,6 +1885,7 @@ pub struct PackDayExportArtifact {
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct PackDayExportBundle {
     pub fulfillment_window_id: FulfillmentWindowId,
+    pub export_instance_id: PackDayExportInstanceId,
     pub generated_at_utc: String,
     pub bundle_directory: String,
     pub artifacts: Vec<PackDayExportArtifact>,
@@ -3001,7 +3083,7 @@ mod tests {
     }
 
     #[test]
-    fn pack_day_export_and_host_handoff_contracts_are_frozen_for_v1() {
+    fn pack_day_export_print_and_host_handoff_contracts_are_frozen_for_v1() {
         assert_eq!(
             PackDayExportArtifactKind::all_v1(),
             [
@@ -3030,6 +3112,56 @@ mod tests {
         assert_eq!(PackDayExportStatus::Running.storage_key(), "running");
         assert_eq!(PackDayExportStatus::Succeeded.storage_key(), "succeeded");
         assert_eq!(PackDayExportStatus::Failed.storage_key(), "failed");
+        assert_eq!(
+            PackDayPrintKind::all_v1(),
+            [
+                PackDayPrintKind::PrintPackSheet,
+                PackDayPrintKind::PrintPickupRoster,
+                PackDayPrintKind::PrintCustomerLabels,
+            ]
+        );
+        assert_eq!(
+            PackDayPrintKind::PrintPackSheet.storage_key(),
+            "print_pack_sheet"
+        );
+        assert_eq!(
+            PackDayPrintKind::PrintPickupRoster.storage_key(),
+            "print_pickup_roster"
+        );
+        assert_eq!(
+            PackDayPrintKind::PrintCustomerLabels.storage_key(),
+            "print_customer_labels"
+        );
+        assert_eq!(
+            PackDayPrintKind::PrintPackSheet.artifact_kind(),
+            PackDayExportArtifactKind::PackSheet
+        );
+        assert_eq!(
+            PackDayPrintKind::PrintPickupRoster.artifact_kind(),
+            PackDayExportArtifactKind::PickupRoster
+        );
+        assert_eq!(
+            PackDayPrintKind::PrintCustomerLabels.artifact_kind(),
+            PackDayExportArtifactKind::CustomerLabels
+        );
+        assert_eq!(PackDayPrintKind::PrintPackSheet.label_stock(), None);
+        assert_eq!(PackDayPrintKind::PrintPickupRoster.label_stock(), None);
+        assert_eq!(
+            PackDayPrintKind::PrintCustomerLabels.label_stock(),
+            Some(PackDayPrintLabelStock::Avery5160Letter30Up)
+        );
+        assert_eq!(
+            PackDayPrintLabelStock::all_v1(),
+            [PackDayPrintLabelStock::Avery5160Letter30Up]
+        );
+        assert_eq!(
+            PackDayPrintLabelStock::Avery5160Letter30Up.storage_key(),
+            "avery_5160_letter_30_up"
+        );
+        assert_eq!(PackDayPrintStatus::default(), PackDayPrintStatus::Idle);
+        assert_eq!(PackDayPrintStatus::Running.storage_key(), "running");
+        assert_eq!(PackDayPrintStatus::Succeeded.storage_key(), "succeeded");
+        assert_eq!(PackDayPrintStatus::Failed.storage_key(), "failed");
         assert_eq!(
             PackDayHostHandoffKind::all_v1(),
             [
@@ -3170,6 +3302,7 @@ mod tests {
         let fulfillment_window_id = FulfillmentWindowId::new();
         let bundle = PackDayExportBundle {
             fulfillment_window_id,
+            export_instance_id: PackDayExportInstanceId::new(),
             generated_at_utc: "2026-04-23T15:00:00Z".to_owned(),
             bundle_directory: "exports/pack_day/window-1/20260423T150000Z".to_owned(),
             artifacts: vec![

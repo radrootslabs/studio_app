@@ -5,7 +5,8 @@ use std::{
 
 use chrono::{DateTime, Utc};
 use radroots_studio_app_models::{
-    PackDayExportArtifact, PackDayExportArtifactKind, PackDayExportBundle, PackDayOutputSource,
+    PackDayExportArtifact, PackDayExportArtifactKind, PackDayExportBundle, PackDayExportInstanceId,
+    PackDayOutputSource,
 };
 use thiserror::Error;
 
@@ -86,6 +87,7 @@ pub fn prepare_pack_day_export_bundle_at_data_root(
         .collect::<Vec<_>>();
     let bundle = PackDayExportBundle {
         fulfillment_window_id: source.fulfillment_window.fulfillment_window_id,
+        export_instance_id: PackDayExportInstanceId::new(),
         generated_at_utc: generated_at.to_rfc3339_opts(chrono::SecondsFormat::Secs, true),
         bundle_directory: bundle_directory.to_string_lossy().into_owned(),
         artifacts,

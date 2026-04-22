@@ -347,6 +347,7 @@ mod tests {
     fn sample_bundle(bundle_directory: &PathBuf) -> PackDayExportBundle {
         PackDayExportBundle {
             fulfillment_window_id: radroots_studio_app_models::FulfillmentWindowId::new(),
+            export_instance_id: radroots_studio_app_models::PackDayExportInstanceId::new(),
             generated_at_utc: "2026-04-23T15:00:00Z".to_owned(),
             bundle_directory: bundle_directory.to_string_lossy().into_owned(),
             artifacts: vec![
