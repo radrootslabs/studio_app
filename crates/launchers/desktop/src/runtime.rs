@@ -7478,7 +7478,7 @@ mod tests {
     }
 
     #[test]
-    fn runtime_prepare_pack_day_print_uses_the_current_export_bundle_for_simple_documents() {
+    fn runtime_prepare_pack_day_print_uses_the_current_export_bundle_for_all_v1_documents() {
         let (runtime, paths) = bootstrapped_runtime("pack_day_print_prepare");
         let (_, farm_id) = provision_ready_farmer_account(&runtime);
 
@@ -7490,9 +7490,13 @@ mod tests {
                 .expect("pack day export should succeed")
         );
 
-        for (kind, suffix) in [
-            (PackDayPrintKind::PrintPackSheet, "pack_sheet.txt"),
-            (PackDayPrintKind::PrintPickupRoster, "pickup_roster.txt"),
+        for (kind, expected_exported_suffix) in [
+            (PackDayPrintKind::PrintPackSheet, Some("pack_sheet.txt")),
+            (
+                PackDayPrintKind::PrintPickupRoster,
+                Some("pickup_roster.txt"),
+            ),
+            (PackDayPrintKind::PrintCustomerLabels, None),
         ] {
             let prepared = runtime
                 .prepare_pack_day_print(kind)
@@ -7519,19 +7523,55 @@ mod tests {
                     .expect("pack day export bundle")
                     .export_instance_id
             );
+            assert_eq!(prepared.0.label_stock, kind.label_stock());
             assert_eq!(prepared.1.kind, kind);
             assert_eq!(prepared.1.command_program, "lp");
-            assert!(prepared.1.target_path.ends_with(suffix));
             assert_eq!(
                 prepared.1.command_args,
                 vec![prepared.1.target_path.to_string_lossy().into_owned()]
             );
+            match expected_exported_suffix {
+                Some(suffix) => assert!(prepared.1.target_path.ends_with(suffix)),
+                None => {
+                    let export_bundle = summary
+                        .pack_day_projection
+                        .export
+                        .bundle
+                        .as_ref()
+                        .expect("pack day export bundle");
+                    assert!(
+                        prepared
+                            .1
+                            .target_path
+                            .ends_with("customer_labels_avery_5160_letter_30_up.ps")
+                    );
+                    assert!(
+                        !prepared
+                            .1
+                            .target_path
+                            .starts_with(PathBuf::from(&export_bundle.bundle_directory))
+                    );
+                    assert!(
+                        prepared
+                            .1
+                            .target_path
+                            .to_string_lossy()
+                            .contains(export_bundle.export_instance_id.to_string().as_str())
+                    );
+                }
+            }
 
             assert!(
                 runtime
                     .finish_pack_day_print(prepared.0, Ok(()))
                     .expect("print success should apply")
             );
+
+            if let PackDayPrintKind::PrintCustomerLabels = kind {
+                if let Some(parent) = prepared.1.target_path.parent() {
+                    let _ = fs::remove_dir_all(parent);
+                }
+            }
         }
 
         cleanup_bootstrapped_runtime_paths(&paths);

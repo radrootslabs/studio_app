@@ -476,6 +476,30 @@ mod tests {
         assert_eq!(app_text(AppTextKey::PackDayExportFilesLabel), "Files");
         assert_eq!(app_text(AppTextKey::PackDayExportErrorLabel), "Error");
         assert_eq!(
+            app_text(AppTextKey::PackDayPrintPackSheetAction),
+            "Print pack sheet"
+        );
+        assert_eq!(
+            app_text(AppTextKey::PackDayPrintPackSheetActionRunning),
+            "Printing pack sheet..."
+        );
+        assert_eq!(
+            app_text(AppTextKey::PackDayPrintPickupRosterAction),
+            "Print pickup roster"
+        );
+        assert_eq!(
+            app_text(AppTextKey::PackDayPrintPickupRosterActionRunning),
+            "Printing pickup roster..."
+        );
+        assert_eq!(
+            app_text(AppTextKey::PackDayPrintCustomerLabelsAction),
+            "Print customer labels (Avery 5160)"
+        );
+        assert_eq!(
+            app_text(AppTextKey::PackDayPrintCustomerLabelsActionRunning),
+            "Printing customer labels (Avery 5160)..."
+        );
+        assert_eq!(
             app_text(AppTextKey::PackDayPrintUnavailableTitle),
             "Print not available yet"
         );
