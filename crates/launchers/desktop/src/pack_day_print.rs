@@ -1,10 +1,31 @@
+use std::fmt::Write as _;
+use std::fs;
 use std::io;
 use std::path::{Component, Path, PathBuf};
 #[cfg(target_os = "macos")]
 use std::process::Command;
 
-use radroots_studio_app_models::{PackDayExportArtifactKind, PackDayExportBundle, PackDayPrintKind};
+use radroots_studio_app_models::{
+    PackDayExportArtifactKind, PackDayExportBundle, PackDayPrintKind, PackDayPrintLabelStock,
+};
 use thiserror::Error;
+
+const CUSTOMER_LABEL_PREPARED_ASSET_ROOT: &str = "radroots_studio_app_pack_day_print";
+const AVERY_5160_LABELS_PER_ROW: usize = 3;
+const AVERY_5160_LABEL_ROWS_PER_PAGE: usize = 10;
+const AVERY_5160_LABELS_PER_PAGE: usize =
+    AVERY_5160_LABELS_PER_ROW * AVERY_5160_LABEL_ROWS_PER_PAGE;
+const AVERY_5160_COLUMN_PITCH_POINTS: f32 = 198.0;
+const AVERY_5160_ROW_PITCH_POINTS: f32 = 72.0;
+const AVERY_5160_LEFT_MARGIN_POINTS: f32 = 13.5;
+const AVERY_5160_TOP_MARGIN_POINTS: f32 = 36.0;
+const AVERY_5160_PAGE_HEIGHT_POINTS: f32 = 792.0;
+const AVERY_5160_TEXT_LEFT_PADDING_POINTS: f32 = 9.0;
+const AVERY_5160_TEXT_TOP_PADDING_POINTS: f32 = 11.0;
+const AVERY_5160_TEXT_LEADING_POINTS: f32 = 10.0;
+const AVERY_5160_TEXT_FONT_SIZE_POINTS: f32 = 9.0;
+const AVERY_5160_MAX_CHARS_PER_LINE: usize = 32;
+const AVERY_5160_MAX_LINES_PER_LABEL: usize = 6;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct PackDayPrintCommandPlan {
@@ -45,8 +66,6 @@ impl PackDayPrintCommandResult {
 pub enum PackDayPrintError {
     #[error("pack day export bundle directory does not exist: {path}")]
     MissingBundleDirectory { path: PathBuf },
-    #[error("pack day print kind is not supported by this launcher path yet: {kind:?}")]
-    UnsupportedKind { kind: PackDayPrintKind },
     #[error("pack day export bundle is missing required artifact {artifact_kind:?} for {kind:?}")]
     MissingArtifactReference {
         kind: PackDayPrintKind,
@@ -66,6 +85,24 @@ pub enum PackDayPrintError {
     InvalidTargetFile {
         kind: PackDayPrintKind,
         path: PathBuf,
+    },
+    #[error("failed to read pack day print source artifact {path} for {kind:?}: {source}")]
+    ReadSourceArtifact {
+        kind: PackDayPrintKind,
+        path: PathBuf,
+        source: io::Error,
+    },
+    #[error("failed to create prepared print asset directory {path} for {kind:?}: {source}")]
+    CreatePreparedAssetDirectory {
+        kind: PackDayPrintKind,
+        path: PathBuf,
+        source: io::Error,
+    },
+    #[error("failed to write prepared print asset {path} for {kind:?}: {source}")]
+    WritePreparedAsset {
+        kind: PackDayPrintKind,
+        path: PathBuf,
+        source: io::Error,
     },
     #[error("pack day print is only supported on macos")]
     UnsupportedPlatform,
@@ -91,9 +128,6 @@ impl PartialEq for PackDayPrintError {
                 Self::MissingBundleDirectory { path: left },
                 Self::MissingBundleDirectory { path: right },
             ) => left == right,
-            (Self::UnsupportedKind { kind: left }, Self::UnsupportedKind { kind: right }) => {
-                left == right
-            }
             (
                 Self::MissingArtifactReference {
                     kind: left_kind,
@@ -134,6 +168,54 @@ impl PartialEq for PackDayPrintError {
                     path: right_path,
                 },
             ) => left_kind == right_kind && left_path == right_path,
+            (
+                Self::ReadSourceArtifact {
+                    kind: left_kind,
+                    path: left_path,
+                    source: left_source,
+                },
+                Self::ReadSourceArtifact {
+                    kind: right_kind,
+                    path: right_path,
+                    source: right_source,
+                },
+            ) => {
+                left_kind == right_kind
+                    && left_path == right_path
+                    && io_errors_match(left_source, right_source)
+            }
+            (
+                Self::CreatePreparedAssetDirectory {
+                    kind: left_kind,
+                    path: left_path,
+                    source: left_source,
+                },
+                Self::CreatePreparedAssetDirectory {
+                    kind: right_kind,
+                    path: right_path,
+                    source: right_source,
+                },
+            ) => {
+                left_kind == right_kind
+                    && left_path == right_path
+                    && io_errors_match(left_source, right_source)
+            }
+            (
+                Self::WritePreparedAsset {
+                    kind: left_kind,
+                    path: left_path,
+                    source: left_source,
+                },
+                Self::WritePreparedAsset {
+                    kind: right_kind,
+                    path: right_path,
+                    source: right_source,
+                },
+            ) => {
+                left_kind == right_kind
+                    && left_path == right_path
+                    && io_errors_match(left_source, right_source)
+            }
             (Self::UnsupportedPlatform, Self::UnsupportedPlatform) => true,
             (
                 Self::CommandLaunch {
@@ -178,6 +260,10 @@ impl PartialEq for PackDayPrintError {
 
 impl Eq for PackDayPrintError {}
 
+fn io_errors_match(left: &io::Error, right: &io::Error) -> bool {
+    left.kind() == right.kind() && left.to_string() == right.to_string()
+}
+
 pub fn plan_pack_day_print(
     bundle: &PackDayExportBundle,
     kind: PackDayPrintKind,
@@ -189,14 +275,17 @@ pub fn plan_pack_day_print(
         });
     }
 
-    let artifact_kind = match kind {
-        PackDayPrintKind::PrintPackSheet => PackDayExportArtifactKind::PackSheet,
-        PackDayPrintKind::PrintPickupRoster => PackDayExportArtifactKind::PickupRoster,
+    let target_path = match kind {
+        PackDayPrintKind::PrintPackSheet => {
+            resolve_bundle_artifact_path(bundle, PackDayExportArtifactKind::PackSheet, kind)?
+        }
+        PackDayPrintKind::PrintPickupRoster => {
+            resolve_bundle_artifact_path(bundle, PackDayExportArtifactKind::PickupRoster, kind)?
+        }
         PackDayPrintKind::PrintCustomerLabels => {
-            return Err(PackDayPrintError::UnsupportedKind { kind });
+            prepare_customer_label_stock_asset(bundle, PackDayPrintLabelStock::Avery5160Letter30Up)?
         }
     };
-    let target_path = resolve_bundle_artifact_path(bundle, artifact_kind, kind)?;
 
     Ok(PackDayPrintCommandPlan {
         kind,
@@ -263,6 +352,224 @@ fn resolve_bundle_artifact_path(
     Ok(path)
 }
 
+fn prepare_customer_label_stock_asset(
+    bundle: &PackDayExportBundle,
+    stock: PackDayPrintLabelStock,
+) -> Result<PathBuf, PackDayPrintError> {
+    let kind = PackDayPrintKind::PrintCustomerLabels;
+    let source_path =
+        resolve_bundle_artifact_path(bundle, PackDayExportArtifactKind::CustomerLabels, kind)?;
+    let source_contents = fs::read_to_string(&source_path).map_err(|source| {
+        PackDayPrintError::ReadSourceArtifact {
+            kind,
+            path: source_path.clone(),
+            source,
+        }
+    })?;
+    let target_directory = prepared_customer_label_asset_directory(bundle);
+    fs::create_dir_all(&target_directory).map_err(|source| {
+        PackDayPrintError::CreatePreparedAssetDirectory {
+            kind,
+            path: target_directory.clone(),
+            source,
+        }
+    })?;
+    let target_path = prepared_customer_label_asset_path(bundle, stock);
+    let prepared_asset = render_customer_label_stock_asset(&source_contents, stock);
+    fs::write(&target_path, prepared_asset).map_err(|source| {
+        PackDayPrintError::WritePreparedAsset {
+            kind,
+            path: target_path.clone(),
+            source,
+        }
+    })?;
+
+    Ok(target_path)
+}
+
+fn prepared_customer_label_asset_directory(bundle: &PackDayExportBundle) -> PathBuf {
+    std::env::temp_dir()
+        .join(CUSTOMER_LABEL_PREPARED_ASSET_ROOT)
+        .join(bundle.export_instance_id.to_string())
+}
+
+fn prepared_customer_label_asset_path(
+    bundle: &PackDayExportBundle,
+    stock: PackDayPrintLabelStock,
+) -> PathBuf {
+    prepared_customer_label_asset_directory(bundle)
+        .join(format!("customer_labels_{}.ps", stock.storage_key()))
+}
+
+fn render_customer_label_stock_asset(
+    source_contents: &str,
+    stock: PackDayPrintLabelStock,
+) -> String {
+    match stock {
+        PackDayPrintLabelStock::Avery5160Letter30Up => {
+            render_avery_5160_customer_labels_postscript(parse_customer_label_blocks(
+                source_contents,
+            ))
+        }
+    }
+}
+
+fn parse_customer_label_blocks(source_contents: &str) -> Vec<Vec<String>> {
+    let blocks = source_contents
+        .trim()
+        .split("\n\n---\n\n")
+        .filter_map(|block| {
+            let lines = block
+                .lines()
+                .map(str::trim)
+                .filter(|line| !line.is_empty())
+                .map(ToOwned::to_owned)
+                .collect::<Vec<_>>();
+            (!lines.is_empty()).then_some(lines)
+        })
+        .collect::<Vec<_>>();
+
+    if blocks.is_empty() {
+        vec![vec!["No customer labels".to_owned()]]
+    } else {
+        blocks
+    }
+}
+
+fn render_avery_5160_customer_labels_postscript(blocks: Vec<Vec<String>>) -> String {
+    let page_count = blocks.len().div_ceil(AVERY_5160_LABELS_PER_PAGE);
+    let mut rendered = String::new();
+
+    let _ = writeln!(&mut rendered, "%!PS-Adobe-3.0");
+    let _ = writeln!(&mut rendered, "%%Creator: radroots_studio_app");
+    let _ = writeln!(&mut rendered, "%%Pages: {page_count}");
+    let _ = writeln!(&mut rendered, "%%BoundingBox: 0 0 612 792");
+    let _ = writeln!(&mut rendered, "%%EndComments");
+
+    for (page_index, page_blocks) in blocks.chunks(AVERY_5160_LABELS_PER_PAGE).enumerate() {
+        let page_number = page_index + 1;
+        let _ = writeln!(&mut rendered, "%%Page: {page_number} {page_number}");
+        let _ = writeln!(
+            &mut rendered,
+            "/Courier findfont {} scalefont setfont",
+            AVERY_5160_TEXT_FONT_SIZE_POINTS
+        );
+
+        for (slot_index, block) in page_blocks.iter().enumerate() {
+            let row = slot_index / AVERY_5160_LABELS_PER_ROW;
+            let column = slot_index % AVERY_5160_LABELS_PER_ROW;
+            let left = AVERY_5160_LEFT_MARGIN_POINTS
+                + (column as f32 * AVERY_5160_COLUMN_PITCH_POINTS)
+                + AVERY_5160_TEXT_LEFT_PADDING_POINTS;
+            let top = AVERY_5160_PAGE_HEIGHT_POINTS
+                - AVERY_5160_TOP_MARGIN_POINTS
+                - (row as f32 * AVERY_5160_ROW_PITCH_POINTS)
+                - AVERY_5160_TEXT_TOP_PADDING_POINTS;
+
+            for (line_index, line) in wrap_customer_label_block(block).into_iter().enumerate() {
+                let baseline = top - (line_index as f32 * AVERY_5160_TEXT_LEADING_POINTS);
+                let escaped = escape_postscript_text(&line);
+                let _ = writeln!(
+                    &mut rendered,
+                    "{left:.2} {baseline:.2} moveto ({escaped}) show"
+                );
+            }
+        }
+
+        let _ = writeln!(&mut rendered, "showpage");
+    }
+
+    rendered
+}
+
+fn wrap_customer_label_block(lines: &[String]) -> Vec<String> {
+    let mut wrapped = Vec::new();
+
+    for line in lines {
+        for segment in wrap_customer_label_line(line) {
+            if wrapped.len() == AVERY_5160_MAX_LINES_PER_LABEL {
+                return wrapped;
+            }
+            wrapped.push(segment);
+        }
+    }
+
+    wrapped
+}
+
+fn wrap_customer_label_line(line: &str) -> Vec<String> {
+    let trimmed = line.trim();
+    if trimmed.is_empty() {
+        return Vec::new();
+    }
+
+    let mut wrapped = Vec::new();
+    let mut current = String::new();
+
+    for word in trimmed.split_whitespace() {
+        let word_len = word.chars().count();
+        if word_len > AVERY_5160_MAX_CHARS_PER_LINE {
+            if !current.is_empty() {
+                wrapped.push(std::mem::take(&mut current));
+            }
+            push_chunked_word(word, &mut wrapped);
+            continue;
+        }
+
+        if current.is_empty() {
+            current.push_str(word);
+            continue;
+        }
+
+        if current.chars().count() + 1 + word_len <= AVERY_5160_MAX_CHARS_PER_LINE {
+            current.push(' ');
+            current.push_str(word);
+            continue;
+        }
+
+        wrapped.push(std::mem::take(&mut current));
+        current.push_str(word);
+    }
+
+    if !current.is_empty() {
+        wrapped.push(current);
+    }
+
+    wrapped
+}
+
+fn push_chunked_word(word: &str, wrapped: &mut Vec<String>) {
+    let mut chunk = String::new();
+
+    for character in word.chars() {
+        if chunk.chars().count() == AVERY_5160_MAX_CHARS_PER_LINE {
+            wrapped.push(std::mem::take(&mut chunk));
+        }
+        chunk.push(character);
+    }
+
+    if !chunk.is_empty() {
+        wrapped.push(chunk);
+    }
+}
+
+fn escape_postscript_text(line: &str) -> String {
+    let mut escaped = String::with_capacity(line.len());
+
+    for character in line.chars() {
+        match character {
+            '(' | ')' | '\\' => {
+                escaped.push('\\');
+                escaped.push(character);
+            }
+            '\n' | '\r' | '\t' => escaped.push(' '),
+            _ => escaped.push(character),
+        }
+    }
+
+    escaped
+}
+
 fn execute_pack_day_print_plan_with(
     plan: &PackDayPrintCommandPlan,
     run_command: impl FnOnce(&PackDayPrintCommandPlan) -> Result<PackDayPrintCommandResult, io::Error>,
@@ -304,11 +611,12 @@ fn run_macos_print_command(
 mod tests {
     use super::{
         PackDayPrintCommandResult, PackDayPrintError, execute_pack_day_print_plan_with,
-        plan_pack_day_print,
+        plan_pack_day_print, prepared_customer_label_asset_directory,
+        prepared_customer_label_asset_path,
     };
     use radroots_studio_app_models::{
         PackDayExportArtifact, PackDayExportArtifactKind, PackDayExportBundle,
-        PackDayExportInstanceId, PackDayPrintKind,
+        PackDayExportInstanceId, PackDayPrintKind, PackDayPrintLabelStock,
     };
     use std::fs;
     use std::io;
@@ -404,19 +712,135 @@ mod tests {
     }
 
     #[test]
-    fn customer_labels_are_deferred_to_the_stock_preparation_slice() {
+    fn customer_labels_plan_derives_a_stock_aware_asset_outside_the_export_bundle() {
         let temp_dir = TestDirectory::new();
+        let source_path = temp_dir.path().join("customer_labels.txt");
+        fs::write(
+            &source_path,
+            "Willow farm\nCasey\nOrder: R-1001\nPickup: North barn\nWindow: 2026-04-23T16:00:00Z to 2026-04-23T19:00:00Z\n\n---\n\nWillow farm\nTaylor\nOrder: R-1002\nPickup: North barn\nWindow: 2026-04-23T16:00:00Z to 2026-04-23T19:00:00Z\n",
+        )
+        .expect("customer labels should write");
         let bundle = sample_bundle(temp_dir.path());
+        let prepared_path = prepared_customer_label_asset_path(
+            &bundle,
+            PackDayPrintLabelStock::Avery5160Letter30Up,
+        );
+
+        let plan = plan_pack_day_print(&bundle, PackDayPrintKind::PrintCustomerLabels)
+            .expect("customer labels plan should build");
+
+        assert_eq!(plan.kind, PackDayPrintKind::PrintCustomerLabels);
+        assert_eq!(plan.target_path, prepared_path.clone());
+        assert_eq!(plan.command_program, "lp");
+        assert_eq!(
+            plan.command_args,
+            vec![prepared_path.to_string_lossy().into_owned()]
+        );
+        assert!(plan.target_path.is_file());
+        assert!(!plan.target_path.starts_with(temp_dir.path()));
+        assert!(
+            plan.target_path
+                .to_string_lossy()
+                .contains(bundle.export_instance_id.to_string().as_str())
+        );
+        assert_eq!(
+            fs::read_to_string(&source_path).expect("source labels should stay untouched"),
+            "Willow farm\nCasey\nOrder: R-1001\nPickup: North barn\nWindow: 2026-04-23T16:00:00Z to 2026-04-23T19:00:00Z\n\n---\n\nWillow farm\nTaylor\nOrder: R-1002\nPickup: North barn\nWindow: 2026-04-23T16:00:00Z to 2026-04-23T19:00:00Z\n"
+        );
+
+        let prepared_contents =
+            fs::read_to_string(&prepared_path).expect("prepared labels should render");
+        assert!(prepared_contents.contains("%!PS-Adobe-3.0"));
+        assert!(prepared_contents.contains("%%Pages: 1"));
+        assert!(prepared_contents.contains("(Casey) show"));
+        assert!(prepared_contents.contains("(Taylor) show"));
+        assert!(
+            prepared_contents.contains("(Order: R-1001) show")
+                || prepared_contents.contains("(Order: R-1002) show")
+        );
+
+        let _ = fs::remove_dir_all(prepared_customer_label_asset_directory(&bundle));
+    }
+
+    #[test]
+    fn customer_label_stock_assets_are_scoped_by_export_instance_id() {
+        let temp_dir = TestDirectory::new();
+        fs::write(
+            temp_dir.path().join("customer_labels.txt"),
+            "Willow farm\nCasey\nOrder: R-1001\n",
+        )
+        .expect("customer labels should write");
+        let bundle = sample_bundle(temp_dir.path());
+        let other_bundle = PackDayExportBundle {
+            export_instance_id: PackDayExportInstanceId::from(Uuid::new_v4()),
+            ..bundle.clone()
+        };
+
+        let plan = plan_pack_day_print(&bundle, PackDayPrintKind::PrintCustomerLabels)
+            .expect("first customer labels plan should build");
+        let other_plan = plan_pack_day_print(&other_bundle, PackDayPrintKind::PrintCustomerLabels)
+            .expect("second customer labels plan should build");
+
+        assert_ne!(plan.target_path, other_plan.target_path);
+        assert!(plan.target_path.is_file());
+        assert!(other_plan.target_path.is_file());
+
+        let _ = fs::remove_dir_all(prepared_customer_label_asset_directory(&bundle));
+        let _ = fs::remove_dir_all(prepared_customer_label_asset_directory(&other_bundle));
+    }
+
+    #[test]
+    fn customer_label_stock_preparation_classifies_directory_creation_failures() {
+        let temp_dir = TestDirectory::new();
+        write_artifact(temp_dir.path(), "customer_labels.txt");
+        let bundle = sample_bundle(temp_dir.path());
+        let prepared_directory = prepared_customer_label_asset_directory(&bundle);
+        if let Some(parent) = prepared_directory.parent() {
+            fs::create_dir_all(parent).expect("prepared asset parent should create");
+        }
+        fs::write(&prepared_directory, "blocked").expect("blocking file should write");
 
         let error = plan_pack_day_print(&bundle, PackDayPrintKind::PrintCustomerLabels)
-            .expect_err("customer labels should remain deferred");
+            .expect_err("prepared directory failure should surface");
 
-        assert_eq!(
-            error,
-            PackDayPrintError::UnsupportedKind {
-                kind: PackDayPrintKind::PrintCustomerLabels,
+        match error {
+            PackDayPrintError::CreatePreparedAssetDirectory { kind, path, source } => {
+                assert_eq!(kind, PackDayPrintKind::PrintCustomerLabels);
+                assert_eq!(path, prepared_directory);
+                assert_eq!(source.kind(), io::ErrorKind::AlreadyExists);
             }
+            other => panic!("unexpected error: {other:?}"),
+        }
+
+        let _ = fs::remove_file(prepared_directory);
+    }
+
+    #[test]
+    fn customer_label_stock_preparation_classifies_write_failures() {
+        let temp_dir = TestDirectory::new();
+        write_artifact(temp_dir.path(), "customer_labels.txt");
+        let bundle = sample_bundle(temp_dir.path());
+        let prepared_directory = prepared_customer_label_asset_directory(&bundle);
+        fs::create_dir_all(&prepared_directory).expect("prepared directory should create");
+        let prepared_path = prepared_customer_label_asset_path(
+            &bundle,
+            PackDayPrintLabelStock::Avery5160Letter30Up,
         );
+        fs::create_dir_all(&prepared_path).expect("prepared asset directory should block writes");
+
+        let error = plan_pack_day_print(&bundle, PackDayPrintKind::PrintCustomerLabels)
+            .expect_err("prepared asset write failure should surface");
+
+        match error {
+            PackDayPrintError::WritePreparedAsset { kind, path, source } => {
+                assert_eq!(kind, PackDayPrintKind::PrintCustomerLabels);
+                assert_eq!(path, prepared_path);
+                assert_eq!(source.kind(), io::ErrorKind::IsADirectory);
+            }
+            other => panic!("unexpected error: {other:?}"),
+        }
+
+        let _ = fs::remove_dir_all(prepared_customer_label_asset_directory(&bundle));
     }
 
     #[test]
