@@ -7526,12 +7526,14 @@ mod tests {
             assert_eq!(prepared.0.label_stock, kind.label_stock());
             assert_eq!(prepared.1.kind, kind);
             assert_eq!(prepared.1.command_program, "lp");
-            assert_eq!(
-                prepared.1.command_args,
-                vec![prepared.1.target_path.to_string_lossy().into_owned()]
-            );
             match expected_exported_suffix {
-                Some(suffix) => assert!(prepared.1.target_path.ends_with(suffix)),
+                Some(suffix) => {
+                    assert!(prepared.1.target_path.ends_with(suffix));
+                    assert_eq!(
+                        prepared.1.command_args,
+                        vec![prepared.1.target_path.to_string_lossy().into_owned()]
+                    );
+                }
                 None => {
                     let export_bundle = summary
                         .pack_day_projection
@@ -7557,6 +7559,14 @@ mod tests {
                             .target_path
                             .to_string_lossy()
                             .contains(export_bundle.export_instance_id.to_string().as_str())
+                    );
+                    assert_eq!(
+                        prepared.1.command_args,
+                        vec![
+                            "-o".to_owned(),
+                            "media=Letter".to_owned(),
+                            prepared.1.target_path.to_string_lossy().into_owned()
+                        ]
                     );
                 }
             }

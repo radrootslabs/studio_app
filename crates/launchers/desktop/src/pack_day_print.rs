@@ -11,6 +11,9 @@ use radroots_studio_app_models::{
 use thiserror::Error;
 
 const CUSTOMER_LABEL_PREPARED_ASSET_ROOT: &str = "radroots_studio_app_pack_day_print";
+const LETTER_MEDIA_OPTION: &str = "media=Letter";
+const LETTER_PAGE_WIDTH_POINTS: u16 = 612;
+const LETTER_PAGE_HEIGHT_POINTS: u16 = 792;
 const AVERY_5160_LABELS_PER_ROW: usize = 3;
 const AVERY_5160_LABEL_ROWS_PER_PAGE: usize = 10;
 const AVERY_5160_LABELS_PER_PAGE: usize =
@@ -275,23 +278,41 @@ pub fn plan_pack_day_print(
         });
     }
 
-    let target_path = match kind {
+    let (target_path, command_args) = match kind {
         PackDayPrintKind::PrintPackSheet => {
-            resolve_bundle_artifact_path(bundle, PackDayExportArtifactKind::PackSheet, kind)?
+            let target_path =
+                resolve_bundle_artifact_path(bundle, PackDayExportArtifactKind::PackSheet, kind)?;
+            let command_args = vec![target_path.to_string_lossy().into_owned()];
+            (target_path, command_args)
         }
         PackDayPrintKind::PrintPickupRoster => {
-            resolve_bundle_artifact_path(bundle, PackDayExportArtifactKind::PickupRoster, kind)?
+            let target_path = resolve_bundle_artifact_path(
+                bundle,
+                PackDayExportArtifactKind::PickupRoster,
+                kind,
+            )?;
+            let command_args = vec![target_path.to_string_lossy().into_owned()];
+            (target_path, command_args)
         }
         PackDayPrintKind::PrintCustomerLabels => {
-            prepare_customer_label_stock_asset(bundle, PackDayPrintLabelStock::Avery5160Letter30Up)?
+            let target_path = prepare_customer_label_stock_asset(
+                bundle,
+                PackDayPrintLabelStock::Avery5160Letter30Up,
+            )?;
+            let command_args = vec![
+                "-o".to_owned(),
+                LETTER_MEDIA_OPTION.to_owned(),
+                target_path.to_string_lossy().into_owned(),
+            ];
+            (target_path, command_args)
         }
     };
 
     Ok(PackDayPrintCommandPlan {
         kind,
-        target_path: target_path.clone(),
+        target_path,
         command_program: "lp",
-        command_args: vec![target_path.to_string_lossy().into_owned()],
+        command_args,
     })
 }
 
@@ -443,12 +464,23 @@ fn render_avery_5160_customer_labels_postscript(blocks: Vec<Vec<String>>) -> Str
     let _ = writeln!(&mut rendered, "%!PS-Adobe-3.0");
     let _ = writeln!(&mut rendered, "%%Creator: radroots_studio_app");
     let _ = writeln!(&mut rendered, "%%Pages: {page_count}");
-    let _ = writeln!(&mut rendered, "%%BoundingBox: 0 0 612 792");
+    let _ = writeln!(
+        &mut rendered,
+        "%%BoundingBox: 0 0 {LETTER_PAGE_WIDTH_POINTS} {LETTER_PAGE_HEIGHT_POINTS}"
+    );
+    let _ = writeln!(
+        &mut rendered,
+        "%%DocumentMedia: Letter {LETTER_PAGE_WIDTH_POINTS} {LETTER_PAGE_HEIGHT_POINTS} 0 () ()"
+    );
     let _ = writeln!(&mut rendered, "%%EndComments");
 
     for (page_index, page_blocks) in blocks.chunks(AVERY_5160_LABELS_PER_PAGE).enumerate() {
         let page_number = page_index + 1;
         let _ = writeln!(&mut rendered, "%%Page: {page_number} {page_number}");
+        let _ = writeln!(
+            &mut rendered,
+            "<< /PageSize [{LETTER_PAGE_WIDTH_POINTS} {LETTER_PAGE_HEIGHT_POINTS}] >> setpagedevice"
+        );
         let _ = writeln!(
             &mut rendered,
             "/Courier findfont {} scalefont setfont",
@@ -610,9 +642,9 @@ fn run_macos_print_command(
 #[cfg(test)]
 mod tests {
     use super::{
-        PackDayPrintCommandResult, PackDayPrintError, execute_pack_day_print_plan_with,
-        plan_pack_day_print, prepared_customer_label_asset_directory,
-        prepared_customer_label_asset_path,
+        LETTER_MEDIA_OPTION, PackDayPrintCommandResult, PackDayPrintError,
+        execute_pack_day_print_plan_with, plan_pack_day_print,
+        prepared_customer_label_asset_directory, prepared_customer_label_asset_path,
     };
     use radroots_studio_app_models::{
         PackDayExportArtifact, PackDayExportArtifactKind, PackDayExportBundle,
@@ -734,7 +766,11 @@ mod tests {
         assert_eq!(plan.command_program, "lp");
         assert_eq!(
             plan.command_args,
-            vec![prepared_path.to_string_lossy().into_owned()]
+            vec![
+                "-o".to_owned(),
+                LETTER_MEDIA_OPTION.to_owned(),
+                prepared_path.to_string_lossy().into_owned()
+            ]
         );
         assert!(plan.target_path.is_file());
         assert!(!plan.target_path.starts_with(temp_dir.path()));
@@ -752,6 +788,8 @@ mod tests {
             fs::read_to_string(&prepared_path).expect("prepared labels should render");
         assert!(prepared_contents.contains("%!PS-Adobe-3.0"));
         assert!(prepared_contents.contains("%%Pages: 1"));
+        assert!(prepared_contents.contains("%%DocumentMedia: Letter 612 792 0 () ()"));
+        assert!(prepared_contents.contains("<< /PageSize [612 792] >> setpagedevice"));
         assert!(prepared_contents.contains("(Casey) show"));
         assert!(prepared_contents.contains("(Taylor) show"));
         assert!(
