@@ -21,8 +21,8 @@ use radroots_studio_app_models::{
     OrderDetailItemRow, OrderDetailProjection, OrderId, OrderListRow, OrderPrimaryAction,
     OrderRecoveryProjection, OrderStatus, OrdersFilter, OrdersListRow, PackDayExportBundle,
     PackDayExportStatus, PackDayHostHandoffKind, PackDayHostHandoffStatus, PackDayPackListRow,
-    PackDayPrintKind, PackDayPrintStatus, PackDayProductTotalRow, PackDayRosterRow,
-    PersonalEntryState, PersonalSection, PickupLocationId, PickupLocationRecord,
+    PackDayPrintFailureKind, PackDayPrintKind, PackDayPrintStatus, PackDayProductTotalRow,
+    PackDayRosterRow, PersonalEntryState, PersonalSection, PickupLocationId, PickupLocationRecord,
     ProductAttentionState, ProductEditorDraft, ProductId, ProductListRow, ProductPricePresentation,
     ProductPublishBlocker, ProductStatus, ProductsFilter, ProductsListRow, ProductsSort,
     RecoveryKind, RecoveryState, ReminderDeadlineProjection, ReminderDeliveryState, ReminderId,
@@ -10419,58 +10419,67 @@ fn pack_day_print_status_presentation(
 ) -> Option<PackDayPrintStatusPresentation> {
     let print = &runtime.pack_day_projection.print;
     let kind = print.request.as_ref()?.kind;
+    let failure = print.failure;
 
-    let status = match (print.status, kind) {
-        (PackDayPrintStatus::Idle, _) => return None,
-        (PackDayPrintStatus::Running, PackDayPrintKind::PrintPackSheet) => {
+    let status = match (print.status, kind, failure) {
+        (PackDayPrintStatus::Idle, _, _) => return None,
+        (PackDayPrintStatus::Running, PackDayPrintKind::PrintPackSheet, _) => {
             PackDayPrintStatusPresentation {
                 indicator_color: APP_UI_THEME.foundation.text.accent,
                 title_key: AppTextKey::PackDayPrintPackSheetQueuedTitle,
             }
         }
-        (PackDayPrintStatus::Running, PackDayPrintKind::PrintPickupRoster) => {
+        (PackDayPrintStatus::Running, PackDayPrintKind::PrintPickupRoster, _) => {
             PackDayPrintStatusPresentation {
                 indicator_color: APP_UI_THEME.foundation.text.accent,
                 title_key: AppTextKey::PackDayPrintPickupRosterQueuedTitle,
             }
         }
-        (PackDayPrintStatus::Running, PackDayPrintKind::PrintCustomerLabels) => {
+        (PackDayPrintStatus::Running, PackDayPrintKind::PrintCustomerLabels, _) => {
             PackDayPrintStatusPresentation {
                 indicator_color: APP_UI_THEME.foundation.text.accent,
                 title_key: AppTextKey::PackDayPrintCustomerLabelsQueuedTitle,
             }
         }
-        (PackDayPrintStatus::Succeeded, PackDayPrintKind::PrintPackSheet) => {
+        (PackDayPrintStatus::Succeeded, PackDayPrintKind::PrintPackSheet, _) => {
             PackDayPrintStatusPresentation {
                 indicator_color: APP_UI_THEME.components.app_status_indicator.online,
                 title_key: AppTextKey::PackDayPrintPackSheetSubmittedTitle,
             }
         }
-        (PackDayPrintStatus::Succeeded, PackDayPrintKind::PrintPickupRoster) => {
+        (PackDayPrintStatus::Succeeded, PackDayPrintKind::PrintPickupRoster, _) => {
             PackDayPrintStatusPresentation {
                 indicator_color: APP_UI_THEME.components.app_status_indicator.online,
                 title_key: AppTextKey::PackDayPrintPickupRosterSubmittedTitle,
             }
         }
-        (PackDayPrintStatus::Succeeded, PackDayPrintKind::PrintCustomerLabels) => {
+        (PackDayPrintStatus::Succeeded, PackDayPrintKind::PrintCustomerLabels, _) => {
             PackDayPrintStatusPresentation {
                 indicator_color: APP_UI_THEME.components.app_status_indicator.online,
                 title_key: AppTextKey::PackDayPrintCustomerLabelsSubmittedTitle,
             }
         }
-        (PackDayPrintStatus::Failed, PackDayPrintKind::PrintPackSheet) => {
+        (PackDayPrintStatus::Failed, PackDayPrintKind::PrintPackSheet, _) => {
             PackDayPrintStatusPresentation {
                 indicator_color: APP_UI_THEME.components.app_status_indicator.attention,
                 title_key: AppTextKey::PackDayPrintPackSheetFailedTitle,
             }
         }
-        (PackDayPrintStatus::Failed, PackDayPrintKind::PrintPickupRoster) => {
+        (PackDayPrintStatus::Failed, PackDayPrintKind::PrintPickupRoster, _) => {
             PackDayPrintStatusPresentation {
                 indicator_color: APP_UI_THEME.components.app_status_indicator.attention,
                 title_key: AppTextKey::PackDayPrintPickupRosterFailedTitle,
             }
         }
-        (PackDayPrintStatus::Failed, PackDayPrintKind::PrintCustomerLabels) => {
+        (
+            PackDayPrintStatus::Failed,
+            PackDayPrintKind::PrintCustomerLabels,
+            Some(PackDayPrintFailureKind::CustomerLabelsAvery5160Overflow),
+        ) => PackDayPrintStatusPresentation {
+            indicator_color: APP_UI_THEME.components.app_status_indicator.attention,
+            title_key: AppTextKey::PackDayPrintCustomerLabelsAvery5160OverflowFailedTitle,
+        },
+        (PackDayPrintStatus::Failed, PackDayPrintKind::PrintCustomerLabels, _) => {
             PackDayPrintStatusPresentation {
                 indicator_color: APP_UI_THEME.components.app_status_indicator.attention,
                 title_key: AppTextKey::PackDayPrintCustomerLabelsFailedTitle,
@@ -12619,11 +12628,12 @@ mod tests {
         FulfillmentWindowSummary, LoggedOutStartupPhase, LoggedOutStartupProjection,
         OrderDetailProjection, OrderId, OrderPrimaryAction, OrderStatus, OrdersListRow,
         PackDayExportArtifact, PackDayExportArtifactKind, PackDayExportBundle,
-        PackDayHostHandoffKind, PackDayHostHandoffStatus, PackDayPrintKind, PackDayPrintStatus,
-        PackDayProductTotalRow, PackDayProjection, PersonalSection, ReminderDeadlineProjection,
-        ReminderDeliveryState, ReminderId, ReminderKind, ReminderSurface, ReminderUrgency,
-        RepeatDemandEligibility, RepeatDemandHandoffProjection, ShellSection,
-        TodayAgendaProjection, TodaySetupTask, TodaySetupTaskKind,
+        PackDayHostHandoffKind, PackDayHostHandoffStatus, PackDayPrintFailureKind,
+        PackDayPrintKind, PackDayPrintStatus, PackDayProductTotalRow, PackDayProjection,
+        PersonalSection, ReminderDeadlineProjection, ReminderDeliveryState, ReminderId,
+        ReminderKind, ReminderSurface, ReminderUrgency, RepeatDemandEligibility,
+        RepeatDemandHandoffProjection, ShellSection, TodayAgendaProjection, TodaySetupTask,
+        TodaySetupTaskKind,
     };
     use radroots_studio_app_remote_signer::{
         RadrootsAppRemoteSignerApprovedSession, RadrootsAppRemoteSignerPendingSession,
@@ -13689,6 +13699,20 @@ mod tests {
             Some(PackDayPrintStatusPresentation {
                 indicator_color: APP_UI_THEME.components.app_status_indicator.attention,
                 title_key: AppTextKey::PackDayPrintCustomerLabelsFailedTitle,
+            })
+        );
+
+        let overflow_request =
+            PackDayPrintRequest::for_bundle(PackDayPrintKind::PrintCustomerLabels, &bundle);
+        runtime.pack_day_projection.print = PackDayPrintProjection::failed_with_kind(
+            overflow_request,
+            PackDayPrintFailureKind::CustomerLabelsAvery5160Overflow,
+        );
+        assert_eq!(
+            pack_day_print_status_presentation(&runtime),
+            Some(PackDayPrintStatusPresentation {
+                indicator_color: APP_UI_THEME.components.app_status_indicator.attention,
+                title_key: AppTextKey::PackDayPrintCustomerLabelsAvery5160OverflowFailedTitle,
             })
         );
     }

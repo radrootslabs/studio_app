@@ -258,6 +258,7 @@ define_app_text_keys! {
     PackDayPrintCustomerLabelsQueuedTitle => "pack_day.print.customer_labels.queued.title",
     PackDayPrintCustomerLabelsSubmittedTitle => "pack_day.print.customer_labels.submitted.title",
     PackDayPrintCustomerLabelsFailedTitle => "pack_day.print.customer_labels.failed.title",
+    PackDayPrintCustomerLabelsAvery5160OverflowFailedTitle => "pack_day.print.customer_labels.avery_5160_overflow.failed.title",
     PackDayHostHandoffRevealAction => "pack_day.host_handoff.reveal.action",
     PackDayHostHandoffRevealActionRunning => "pack_day.host_handoff.reveal.action.running",
     PackDayHostHandoffOpenPackSheetAction => "pack_day.host_handoff.open_pack_sheet.action",

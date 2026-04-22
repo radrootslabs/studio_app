@@ -238,6 +238,7 @@
   "pack_day.print.customer_labels.queued.title": "Queueing customer labels",
   "pack_day.print.customer_labels.submitted.title": "Sent customer labels to the printer",
   "pack_day.print.customer_labels.failed.title": "Couldn't print customer labels",
+  "pack_day.print.customer_labels.avery_5160_overflow.failed.title": "Customer labels do not fit Avery 5160",
   "pack_day.host_handoff.reveal.action": "Show in Finder",
   "pack_day.host_handoff.reveal.action.running": "Showing in Finder...",
   "pack_day.host_handoff.open_pack_sheet.action": "Open pack sheet",

@@ -16,9 +16,9 @@ use radroots_studio_app_models::{
     LoggedOutStartupProjection, OrderDetailProjection, OrderId, OrdersFilter, OrdersListProjection,
     OrdersScreenQueryState, PackDayExportArtifactKind, PackDayExportBundle,
     PackDayExportInstanceId, PackDayExportStatus, PackDayHostHandoffKind, PackDayHostHandoffStatus,
-    PackDayPrintKind, PackDayPrintLabelStock, PackDayPrintStatus, PackDayProjection,
-    PackDayScreenQueryState, PersonalEntryProjection, ProductEditorDraft, ProductId,
-    ProductPublishBlocker, ProductsFilter, ProductsListProjection, ProductsSort,
+    PackDayPrintFailureKind, PackDayPrintKind, PackDayPrintLabelStock, PackDayPrintStatus,
+    PackDayProjection, PackDayScreenQueryState, PersonalEntryProjection, ProductEditorDraft,
+    ProductId, ProductPublishBlocker, ProductsFilter, ProductsListProjection, ProductsSort,
     RecoveryQueueProjection, ReminderFeedProjection, ReminderLogProjection,
     SelectedSurfaceProjection, SettingsAccountProjection, SettingsPreference, SettingsSection,
     ShellSection, TodayAgendaProjection, TodaySetupTask, TodaySetupTaskKind,
@@ -437,6 +437,7 @@ impl PackDayPrintRequest {
 pub struct PackDayPrintProjection {
     pub status: PackDayPrintStatus,
     pub request: Option<PackDayPrintRequest>,
+    pub failure: Option<PackDayPrintFailureKind>,
 }
 
 impl PackDayPrintProjection {
@@ -444,6 +445,7 @@ impl PackDayPrintProjection {
         Self {
             status: PackDayPrintStatus::Running,
             request: Some(request),
+            failure: None,
         }
     }
 
@@ -451,13 +453,29 @@ impl PackDayPrintProjection {
         Self {
             status: PackDayPrintStatus::Succeeded,
             request: Some(request),
+            failure: None,
         }
     }
 
     pub fn failed(request: PackDayPrintRequest) -> Self {
+        Self::failed_with_failure(request, None)
+    }
+
+    pub fn failed_with_kind(
+        request: PackDayPrintRequest,
+        failure: PackDayPrintFailureKind,
+    ) -> Self {
+        Self::failed_with_failure(request, Some(failure))
+    }
+
+    fn failed_with_failure(
+        request: PackDayPrintRequest,
+        failure: Option<PackDayPrintFailureKind>,
+    ) -> Self {
         Self {
             status: PackDayPrintStatus::Failed,
             request: Some(request),
+            failure,
         }
     }
 }
@@ -966,6 +984,10 @@ pub enum AppStateCommand {
     BeginPackDayPrint(PackDayPrintRequest),
     SucceedPackDayPrint(PackDayPrintRequest),
     FailPackDayPrint(PackDayPrintRequest),
+    FailPackDayPrintWithKind {
+        request: PackDayPrintRequest,
+        failure: PackDayPrintFailureKind,
+    },
     ResetPackDayPrint,
     BeginPackDayHostHandoff(PackDayHostHandoffRequest),
     SucceedPackDayHostHandoff(PackDayHostHandoffRequest),
@@ -1128,6 +1150,13 @@ impl AppStateCommand {
 
     pub fn fail_pack_day_print(request: PackDayPrintRequest) -> Self {
         Self::FailPackDayPrint(request)
+    }
+
+    pub fn fail_pack_day_print_with_kind(
+        request: PackDayPrintRequest,
+        failure: PackDayPrintFailureKind,
+    ) -> Self {
+        Self::FailPackDayPrintWithKind { request, failure }
     }
 
     pub const fn reset_pack_day_print() -> Self {
@@ -1680,6 +1709,11 @@ fn apply_command(projection: &mut AppProjection, command: AppStateCommand) -> Ap
                 .pack_day
                 .replace_print(PackDayPrintProjection::failed(request));
         }
+        AppStateCommand::FailPackDayPrintWithKind { request, failure } => {
+            projection
+                .pack_day
+                .replace_print(PackDayPrintProjection::failed_with_kind(request, failure));
+        }
         AppStateCommand::ResetPackDayPrint => {
             projection
                 .pack_day
@@ -2052,13 +2086,13 @@ mod tests {
         OrdersListSummary, OrdersScreenQueryState, PackDayExportArtifact,
         PackDayExportArtifactKind, PackDayExportBundle, PackDayExportInstanceId,
         PackDayExportStatus, PackDayHostHandoffKind, PackDayHostHandoffStatus, PackDayPackListRow,
-        PackDayPrintKind, PackDayPrintLabelStock, PackDayPrintStatus, PackDayProductTotalRow,
-        PackDayProjection, PackDayRosterRow, PackDayScreenQueryState, PersonalEntryState,
-        PersonalSection, ProductEditorDraft, ProductId, ProductPublishBlocker, ProductsFilter,
-        ProductsListProjection, ProductsSort, ReminderDeliveryState, ReminderFeedProjection,
-        ReminderKind, ReminderLogEntryProjection, ReminderLogProjection, SelectedAccountProjection,
-        SelectedSurfaceProjection, SettingsSection, ShellSection, TodayAgendaProjection,
-        TodaySetupTask, TodaySetupTaskKind,
+        PackDayPrintFailureKind, PackDayPrintKind, PackDayPrintLabelStock, PackDayPrintStatus,
+        PackDayProductTotalRow, PackDayProjection, PackDayRosterRow, PackDayScreenQueryState,
+        PersonalEntryState, PersonalSection, ProductEditorDraft, ProductId, ProductPublishBlocker,
+        ProductsFilter, ProductsListProjection, ProductsSort, ReminderDeliveryState,
+        ReminderFeedProjection, ReminderKind, ReminderLogEntryProjection, ReminderLogProjection,
+        SelectedAccountProjection, SelectedSurfaceProjection, SettingsSection, ShellSection,
+        TodayAgendaProjection, TodaySetupTask, TodaySetupTaskKind,
     };
     use radroots_studio_app_sync::{
         AppSyncProjection, AppSyncRunStatus, SyncCheckpointState, SyncCheckpointStatus,
@@ -2507,6 +2541,7 @@ mod tests {
             PackDayPrintProjection {
                 status: PackDayPrintStatus::Idle,
                 request: None,
+                failure: None,
             }
         );
         assert_eq!(
@@ -2616,7 +2651,22 @@ mod tests {
         );
         assert_eq!(
             store.pack_day_projection().print,
-            PackDayPrintProjection::failed(request)
+            PackDayPrintProjection::failed(request.clone())
+        );
+
+        assert_eq!(
+            store.apply(AppStateCommand::fail_pack_day_print_with_kind(
+                request.clone(),
+                PackDayPrintFailureKind::CustomerLabelsAvery5160Overflow,
+            )),
+            Ok(true)
+        );
+        assert_eq!(
+            store.pack_day_projection().print,
+            PackDayPrintProjection::failed_with_kind(
+                request,
+                PackDayPrintFailureKind::CustomerLabelsAvery5160Overflow,
+            )
         );
 
         assert_eq!(

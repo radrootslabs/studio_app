@@ -544,6 +544,10 @@ mod tests {
             "Couldn't print customer labels"
         );
         assert_eq!(
+            app_text(AppTextKey::PackDayPrintCustomerLabelsAvery5160OverflowFailedTitle),
+            "Customer labels do not fit Avery 5160"
+        );
+        assert_eq!(
             app_text(AppTextKey::PackDayHostHandoffRevealAction),
             "Show in Finder"
         );

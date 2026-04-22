@@ -1669,6 +1669,20 @@ impl PackDayPrintLabelStock {
     }
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PackDayPrintFailureKind {
+    CustomerLabelsAvery5160Overflow,
+}
+
+impl PackDayPrintFailureKind {
+    pub const fn storage_key(self) -> &'static str {
+        match self {
+            Self::CustomerLabelsAvery5160Overflow => "customer_labels_avery_5160_overflow",
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum PackDayPrintStatus {
@@ -2474,19 +2488,21 @@ mod tests {
         OrderDetailProjection, OrderId, OrderListRow, OrderPrimaryAction, OrderRecoveryProjection,
         OrderStatus, OrdersFilter, OrdersListProjection, OrdersListRow, OrdersListSummary,
         OrdersScreenQueryState, PackDayExportArtifact, PackDayExportArtifactKind,
-        PackDayExportBundle, PackDayExportStatus, PackDayHostHandoffKind, PackDayHostHandoffStatus,
-        PackDayOutputCustomerOrder, PackDayOutputOrderState, PackDayOutputPackListEntry,
-        PackDayOutputProductTotal, PackDayOutputQuantity, PackDayOutputSource, PackDayOutputWindow,
-        PackDayPackListRow, PackDayProductTotalRow, PackDayProjection, PackDayRosterRow,
-        PackDayScreenQueryState, ParseStartupSignerSourceError, PersonalEntryProjection,
-        PersonalEntryState, PersonalSection, PickupLocationId, ProductAttentionState,
-        ProductAvailabilityState, ProductAvailabilitySummary, ProductEditorDraft, ProductListRow,
-        ProductPricePresentation, ProductPublishBlocker, ProductStatus, ProductStockState,
-        ProductStockSummary, ProductsFilter, ProductsListProjection, ProductsListRow,
-        ProductsListSummary, ProductsSort, RecoveryKind, RecoveryQueueProjection, RecoveryRecordId,
-        RecoveryState, ReminderDeadlineProjection, ReminderDeliveryState, ReminderFeedProjection,
-        ReminderId, ReminderKind, ReminderLogEntryProjection, ReminderLogProjection,
-        ReminderSurface, ReminderUrgency, RepeatDemandEligibility, RepeatDemandHandoffProjection,
+        PackDayExportBundle, PackDayExportInstanceId, PackDayExportStatus, PackDayHostHandoffKind,
+        PackDayHostHandoffStatus, PackDayOutputCustomerOrder, PackDayOutputOrderState,
+        PackDayOutputPackListEntry, PackDayOutputProductTotal, PackDayOutputQuantity,
+        PackDayOutputSource, PackDayOutputWindow, PackDayPackListRow, PackDayPrintFailureKind,
+        PackDayPrintKind, PackDayPrintLabelStock, PackDayPrintStatus, PackDayProductTotalRow,
+        PackDayProjection, PackDayRosterRow, PackDayScreenQueryState,
+        ParseStartupSignerSourceError, PersonalEntryProjection, PersonalEntryState,
+        PersonalSection, PickupLocationId, ProductAttentionState, ProductAvailabilityState,
+        ProductAvailabilitySummary, ProductEditorDraft, ProductListRow, ProductPricePresentation,
+        ProductPublishBlocker, ProductStatus, ProductStockState, ProductStockSummary,
+        ProductsFilter, ProductsListProjection, ProductsListRow, ProductsListSummary, ProductsSort,
+        RecoveryKind, RecoveryQueueProjection, RecoveryRecordId, RecoveryState,
+        ReminderDeadlineProjection, ReminderDeliveryState, ReminderFeedProjection, ReminderId,
+        ReminderKind, ReminderLogEntryProjection, ReminderLogProjection, ReminderSurface,
+        ReminderUrgency, RepeatDemandEligibility, RepeatDemandHandoffProjection,
         SelectedAccountProjection, SelectedSurfaceProjection, SettingsPreference, SettingsSection,
         ShellSection, StartupSignerEntryProjection, StartupSignerSource, StartupSignerSourceKind,
         TodayAgendaProjection, TodaySetupTask, TodaySetupTaskKind, TodaySummary,
@@ -3157,6 +3173,10 @@ mod tests {
         assert_eq!(
             PackDayPrintLabelStock::Avery5160Letter30Up.storage_key(),
             "avery_5160_letter_30_up"
+        );
+        assert_eq!(
+            PackDayPrintFailureKind::CustomerLabelsAvery5160Overflow.storage_key(),
+            "customer_labels_avery_5160_overflow"
         );
         assert_eq!(PackDayPrintStatus::default(), PackDayPrintStatus::Idle);
         assert_eq!(PackDayPrintStatus::Running.storage_key(), "running");

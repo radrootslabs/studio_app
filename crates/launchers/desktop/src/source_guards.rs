@@ -486,6 +486,7 @@ const REQUIRED_WINDOW_COPY_KEYS: &[&str] = &[
     "AppTextKey::PackDayExportFolderLabel",
     "AppTextKey::PackDayExportFilesLabel",
     "AppTextKey::PackDayExportErrorLabel",
+    "AppTextKey::PackDayPrintCustomerLabelsAvery5160OverflowFailedTitle",
     "AppTextKey::PackDayHostHandoffRevealAction",
     "AppTextKey::PackDayHostHandoffRevealActionRunning",
     "AppTextKey::PackDayHostHandoffOpenPackSheetAction",
