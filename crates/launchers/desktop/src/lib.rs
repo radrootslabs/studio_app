@@ -4,6 +4,7 @@ mod accounts;
 mod app;
 mod menus;
 pub mod pack_day_host_handoff;
+pub mod pack_day_print;
 mod remote_signer;
 mod runtime;
 #[cfg(test)]
