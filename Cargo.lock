@@ -3758,6 +3758,7 @@ dependencies = [
 [[package]]
 name = "mf2_i18n"
 version = "0.1.0"
+source = "git+https://github.com/triesap/mf2_i18n.git?rev=e2ad58d5863d9dd98f2f38d1f08b2140bf34b0a1#e2ad58d5863d9dd98f2f38d1f08b2140bf34b0a1"
 dependencies = [
  "mf2_i18n_build",
  "mf2_i18n_core",
@@ -3770,6 +3771,7 @@ dependencies = [
 [[package]]
 name = "mf2_i18n_build"
 version = "0.1.0"
+source = "git+https://github.com/triesap/mf2_i18n.git?rev=e2ad58d5863d9dd98f2f38d1f08b2140bf34b0a1#e2ad58d5863d9dd98f2f38d1f08b2140bf34b0a1"
 dependencies = [
  "blake3",
  "hex",
@@ -3784,10 +3786,12 @@ dependencies = [
 [[package]]
 name = "mf2_i18n_core"
 version = "0.1.0"
+source = "git+https://github.com/triesap/mf2_i18n.git?rev=e2ad58d5863d9dd98f2f38d1f08b2140bf34b0a1#e2ad58d5863d9dd98f2f38d1f08b2140bf34b0a1"
 
 [[package]]
 name = "mf2_i18n_embedded"
 version = "0.1.0"
+source = "git+https://github.com/triesap/mf2_i18n.git?rev=e2ad58d5863d9dd98f2f38d1f08b2140bf34b0a1#e2ad58d5863d9dd98f2f38d1f08b2140bf34b0a1"
 dependencies = [
  "mf2_i18n_core",
 ]
@@ -3795,6 +3799,7 @@ dependencies = [
 [[package]]
 name = "mf2_i18n_native"
 version = "0.1.0"
+source = "git+https://github.com/triesap/mf2_i18n.git?rev=e2ad58d5863d9dd98f2f38d1f08b2140bf34b0a1#e2ad58d5863d9dd98f2f38d1f08b2140bf34b0a1"
 dependencies = [
  "mf2_i18n_core",
  "mf2_i18n_embedded",
@@ -3806,6 +3811,7 @@ dependencies = [
 [[package]]
 name = "mf2_i18n_runtime"
 version = "0.1.0"
+source = "git+https://github.com/triesap/mf2_i18n.git?rev=e2ad58d5863d9dd98f2f38d1f08b2140bf34b0a1#e2ad58d5863d9dd98f2f38d1f08b2140bf34b0a1"
 dependencies = [
  "ed25519-dalek",
  "hex",
@@ -3820,6 +3826,7 @@ dependencies = [
 [[package]]
 name = "mf2_i18n_std"
 version = "0.1.0"
+source = "git+https://github.com/triesap/mf2_i18n.git?rev=e2ad58d5863d9dd98f2f38d1f08b2140bf34b0a1#e2ad58d5863d9dd98f2f38d1f08b2140bf34b0a1"
 dependencies = [
  "chrono",
  "intl_pluralrules",
