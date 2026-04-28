@@ -165,6 +165,7 @@ stderr_file="${local_log_root}/apps/local/app/app-macos-native/raw/stderr.${date
 RADROOTS_APP_RUNTIME_MODE="${runtime_mode}" \
 RADROOTS_APP_DEFAULT_NOSTR_RELAY_URL="${default_nostr_relay_url}" \
 RADROOTS_APP_LOCAL_LOG_ROOT="${local_log_root}" \
+RADROOTS_APP_HOST_BUNDLE_PATH="${app_path}" \
 "${script_dir}/run_host.sh" &
 runner_pid="$!"
 
@@ -185,6 +186,7 @@ env -u HOME \
   RADROOTS_APP_RUNTIME_MODE="${runtime_mode}" \
   RADROOTS_APP_DEFAULT_NOSTR_RELAY_URL="${default_nostr_relay_url}" \
   RADROOTS_APP_LOCAL_LOG_ROOT="${degraded_log_root}" \
+  RADROOTS_APP_HOST_BUNDLE_PATH="${app_path}" \
   "${script_dir}/run_host.sh" &
 degraded_runner_pid="$!"
 

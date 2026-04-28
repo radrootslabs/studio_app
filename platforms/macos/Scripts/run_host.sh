@@ -34,7 +34,11 @@ require_command /usr/libexec/PlistBuddy
 require_env RADROOTS_APP_LOCAL_LOG_ROOT
 require_env RADROOTS_APP_DEFAULT_NOSTR_RELAY_URL
 
-app_path="$("${script_dir}/build_host.sh")"
+if [[ -n "${RADROOTS_APP_HOST_BUNDLE_PATH:-}" ]]; then
+  app_path="${RADROOTS_APP_HOST_BUNDLE_PATH}"
+else
+  app_path="$("${script_dir}/build_host.sh")"
+fi
 plist_path="${app_path}/Contents/Info.plist"
 executable_name="$(
   /usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "${plist_path}"
