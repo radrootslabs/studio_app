@@ -48,7 +48,7 @@ pub struct PackDayBatchPrintCommandPlan {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-struct PackDayPrintCommandResult {
+pub(crate) struct PackDayPrintCommandResult {
     success: bool,
     exit_code: Option<i32>,
     stderr: String,
@@ -56,7 +56,7 @@ struct PackDayPrintCommandResult {
 
 impl PackDayPrintCommandResult {
     #[cfg(test)]
-    fn succeeded() -> Self {
+    pub(crate) fn succeeded() -> Self {
         Self {
             success: true,
             exit_code: Some(0),
@@ -65,7 +65,7 @@ impl PackDayPrintCommandResult {
     }
 
     #[cfg(test)]
-    fn failed(exit_code: Option<i32>, stderr: impl Into<String>) -> Self {
+    pub(crate) fn failed(exit_code: Option<i32>, stderr: impl Into<String>) -> Self {
         Self {
             success: false,
             exit_code,
@@ -819,7 +819,7 @@ fn execute_pack_day_print_plan_with(
     })
 }
 
-fn execute_pack_day_batch_print_plan_with(
+pub(crate) fn execute_pack_day_batch_print_plan_with(
     plan: &PackDayBatchPrintCommandPlan,
     mut run_command: impl FnMut(
         &PackDayPrintCommandPlan,

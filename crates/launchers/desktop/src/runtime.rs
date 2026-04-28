@@ -4875,7 +4875,8 @@ mod tests {
     };
     use crate::pack_day_host_handoff::PackDayHostHandoffError;
     use crate::pack_day_print::{
-        prepared_customer_label_asset_root, PackDayBatchPrintError, PackDayPrintError,
+        execute_pack_day_batch_print_plan_with, prepared_customer_label_asset_root,
+        PackDayBatchPrintError, PackDayPrintCommandResult, PackDayPrintError,
     };
 
     #[derive(Clone)]
@@ -7842,6 +7843,108 @@ mod tests {
         assert_eq!(
             runtime.summary().pack_day_projection.batch_print.status,
             PackDayBatchPrintStatus::Idle
+        );
+
+        cleanup_bootstrapped_runtime_paths(&paths);
+    }
+
+    #[test]
+    fn pack_day_batch_workflow_success_submits_frozen_v1_and_records_success() {
+        let (runtime, paths) = bootstrapped_runtime("pack_day_batch_workflow_success");
+        let (_, farm_id) = provision_ready_farmer_account(&runtime);
+
+        seed_order_workspace(&runtime, farm_id);
+        assert!(runtime.open_pack_day(None).expect("pack day should open"));
+        assert!(runtime
+            .export_pack_day()
+            .expect("pack day export should succeed"));
+
+        let (request, plan) = runtime
+            .prepare_pack_day_batch_print()
+            .expect("batch print should prepare")
+            .expect("batch print should produce a plan");
+        let mut submitted = Vec::new();
+
+        execute_pack_day_batch_print_plan_with(&plan, |print_plan| {
+            submitted.push(PackDayBatchPrintArtifact::from_print_kind(print_plan.kind));
+            Ok(PackDayPrintCommandResult::succeeded())
+        })
+        .expect("batch print execution should succeed");
+
+        assert_eq!(submitted, Vec::from(PackDayBatchPrintArtifact::all_v1()));
+        assert!(runtime
+            .finish_pack_day_batch_print(request.clone(), Ok(()))
+            .expect("batch print success should apply"));
+
+        let summary = runtime.summary();
+        let batch_print = &summary.pack_day_projection.batch_print;
+        assert_eq!(batch_print.status, PackDayBatchPrintStatus::Succeeded);
+        assert_eq!(batch_print.request, Some(request));
+        assert_eq!(batch_print.failed_artifact, None);
+        assert_eq!(batch_print.failure, None);
+
+        cleanup_bootstrapped_runtime_paths(&paths);
+    }
+
+    #[test]
+    fn pack_day_batch_workflow_queue_failure_records_failed_artifact_state() {
+        let (runtime, paths) = bootstrapped_runtime("pack_day_batch_workflow_queue_failure");
+        let (_, farm_id) = provision_ready_farmer_account(&runtime);
+
+        seed_order_workspace(&runtime, farm_id);
+        assert!(runtime.open_pack_day(None).expect("pack day should open"));
+        assert!(runtime
+            .export_pack_day()
+            .expect("pack day export should succeed"));
+
+        let (request, plan) = runtime
+            .prepare_pack_day_batch_print()
+            .expect("batch print should prepare")
+            .expect("batch print should produce a plan");
+        let mut submitted = Vec::new();
+
+        let execution_error = execute_pack_day_batch_print_plan_with(&plan, |print_plan| {
+            submitted.push(PackDayBatchPrintArtifact::from_print_kind(print_plan.kind));
+            match print_plan.kind {
+                PackDayPrintKind::PrintPackSheet => Ok(PackDayPrintCommandResult::succeeded()),
+                PackDayPrintKind::PrintPickupRoster => Ok(PackDayPrintCommandResult::failed(
+                    Some(2),
+                    "lp stopped before submit",
+                )),
+                PackDayPrintKind::PrintCustomerLabels => {
+                    panic!("batch should stop before customer labels")
+                }
+            }
+        })
+        .expect_err("batch print execution should fail");
+
+        assert_eq!(
+            submitted,
+            vec![
+                PackDayBatchPrintArtifact::from_print_kind(PackDayPrintKind::PrintPackSheet),
+                PackDayBatchPrintArtifact::from_print_kind(PackDayPrintKind::PrintPickupRoster),
+            ]
+        );
+        let failed_artifact =
+            PackDayBatchPrintArtifact::from_print_kind(PackDayPrintKind::PrintPickupRoster);
+        let runtime_error = runtime
+            .finish_pack_day_batch_print(request.clone(), Err(execution_error))
+            .expect_err("batch print failure should surface");
+        assert!(matches!(
+            runtime_error,
+            DesktopAppRuntimeCommandError::PackDayBatchPrint(PackDayBatchPrintError::QueueExit {
+                ..
+            })
+        ));
+
+        let summary = runtime.summary();
+        let batch_print = &summary.pack_day_projection.batch_print;
+        assert_eq!(batch_print.status, PackDayBatchPrintStatus::Failed);
+        assert_eq!(batch_print.request, Some(request));
+        assert_eq!(batch_print.failed_artifact, Some(failed_artifact));
+        assert_eq!(
+            batch_print.failure,
+            Some(PackDayBatchPrintFailureKind::QueueExit)
         );
 
         cleanup_bootstrapped_runtime_paths(&paths);

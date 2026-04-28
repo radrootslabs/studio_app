@@ -13841,7 +13841,7 @@ mod tests {
     }
 
     #[test]
-    fn pack_day_batch_print_action_only_surfaces_after_a_successful_export() {
+    fn pack_day_batch_workflow_action_only_surfaces_after_a_successful_export() {
         let temp_dir = TestDirectory::new();
         write_artifact(temp_dir.path(), "pack_sheet.txt");
         write_artifact(temp_dir.path(), "pickup_roster.txt");
