@@ -42,6 +42,7 @@ pub struct PackDayPrintCommandPlan {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct PackDayBatchPrintCommandPlan {
+    pub export_instance_id: PackDayExportInstanceId,
     pub plans: Vec<PackDayPrintCommandPlan>,
 }
 
@@ -291,24 +292,44 @@ pub enum PackDayBatchPrintError {
         failed_artifact: Option<PackDayBatchPrintArtifact>,
         source: PackDayPrintError,
     },
+    #[error("pack day batch print queue launch failed for {failed_artifact:?}: {source}")]
+    QueueLaunch {
+        submitted_artifacts: Vec<PackDayBatchPrintArtifact>,
+        failed_artifact: PackDayBatchPrintArtifact,
+        source: PackDayPrintError,
+    },
+    #[error("pack day batch print queue exit failed for {failed_artifact:?}: {source}")]
+    QueueExit {
+        submitted_artifacts: Vec<PackDayBatchPrintArtifact>,
+        failed_artifact: PackDayBatchPrintArtifact,
+        source: PackDayPrintError,
+    },
 }
 
 impl PackDayBatchPrintError {
-    pub(crate) const fn failed_artifact(&self) -> Option<PackDayBatchPrintArtifact> {
+    pub(crate) fn failed_artifact(&self) -> Option<PackDayBatchPrintArtifact> {
         match self {
             Self::Preflight {
                 failed_artifact, ..
             } => *failed_artifact,
+            Self::QueueLaunch {
+                failed_artifact, ..
+            }
+            | Self::QueueExit {
+                failed_artifact, ..
+            } => Some(*failed_artifact),
         }
     }
 
-    pub(crate) const fn failure_kind(&self) -> PackDayBatchPrintFailureKind {
+    pub(crate) fn failure_kind(&self) -> PackDayBatchPrintFailureKind {
         match self {
             Self::Preflight {
                 source: PackDayPrintError::CustomerLabelsAvery5160Overflow,
                 ..
             } => PackDayBatchPrintFailureKind::CustomerLabelsAvery5160Overflow,
             Self::Preflight { .. } => PackDayBatchPrintFailureKind::Preflight,
+            Self::QueueLaunch { .. } => PackDayBatchPrintFailureKind::QueueLaunch,
+            Self::QueueExit { .. } => PackDayBatchPrintFailureKind::QueueExit,
         }
     }
 }
@@ -393,7 +414,10 @@ pub fn plan_pack_day_batch_print(
         plans.push(plan);
     }
 
-    Ok(PackDayBatchPrintCommandPlan { plans })
+    Ok(PackDayBatchPrintCommandPlan {
+        export_instance_id: bundle.export_instance_id,
+        plans,
+    })
 }
 
 const fn batch_preflight_failed_artifact(
@@ -418,6 +442,27 @@ pub fn execute_pack_day_print_plan(
     {
         let _ = plan;
         Err(PackDayPrintError::UnsupportedPlatform)
+    }
+}
+
+pub fn execute_pack_day_batch_print_plan(
+    plan: &PackDayBatchPrintCommandPlan,
+) -> Result<(), PackDayBatchPrintError> {
+    #[cfg(target_os = "macos")]
+    {
+        execute_pack_day_batch_print_plan_with(plan, run_macos_print_command)
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    {
+        let Some(first_plan) = plan.plans.first() else {
+            return Ok(());
+        };
+        Err(PackDayBatchPrintError::QueueLaunch {
+            submitted_artifacts: Vec::new(),
+            failed_artifact: PackDayBatchPrintArtifact::from_print_kind(first_plan.kind),
+            source: PackDayPrintError::UnsupportedPlatform,
+        })
     }
 }
 
@@ -744,6 +789,57 @@ fn execute_pack_day_print_plan_with(
     })
 }
 
+fn execute_pack_day_batch_print_plan_with(
+    plan: &PackDayBatchPrintCommandPlan,
+    mut run_command: impl FnMut(
+        &PackDayPrintCommandPlan,
+    ) -> Result<PackDayPrintCommandResult, io::Error>,
+) -> Result<(), PackDayBatchPrintError> {
+    let result = execute_pack_day_batch_print_sequence_with(plan, &mut run_command);
+    let _ = cleanup_prepared_customer_label_assets_for_export_instance(plan.export_instance_id);
+    result
+}
+
+fn execute_pack_day_batch_print_sequence_with(
+    plan: &PackDayBatchPrintCommandPlan,
+    run_command: &mut impl FnMut(
+        &PackDayPrintCommandPlan,
+    ) -> Result<PackDayPrintCommandResult, io::Error>,
+) -> Result<(), PackDayBatchPrintError> {
+    let mut submitted_artifacts = Vec::new();
+
+    for print_plan in &plan.plans {
+        let failed_artifact = PackDayBatchPrintArtifact::from_print_kind(print_plan.kind);
+        let result =
+            run_command(print_plan).map_err(|source| PackDayBatchPrintError::QueueLaunch {
+                submitted_artifacts: submitted_artifacts.clone(),
+                failed_artifact,
+                source: PackDayPrintError::CommandLaunch {
+                    kind: print_plan.kind,
+                    program: print_plan.command_program.to_owned(),
+                    source,
+                },
+            })?;
+
+        if !result.success {
+            return Err(PackDayBatchPrintError::QueueExit {
+                submitted_artifacts,
+                failed_artifact,
+                source: PackDayPrintError::CommandFailed {
+                    kind: print_plan.kind,
+                    program: print_plan.command_program.to_owned(),
+                    exit_code: result.exit_code,
+                    stderr: result.stderr,
+                },
+            });
+        }
+
+        submitted_artifacts.push(failed_artifact);
+    }
+
+    Ok(())
+}
+
 #[cfg(target_os = "macos")]
 fn run_macos_print_command(
     plan: &PackDayPrintCommandPlan,
@@ -762,10 +858,11 @@ fn run_macos_print_command(
 #[cfg(test)]
 mod tests {
     use super::{
-        cleanup_prepared_customer_label_asset_root, execute_pack_day_print_plan_with,
-        plan_pack_day_batch_print, plan_pack_day_print, prepared_customer_label_asset_directory,
-        prepared_customer_label_asset_path, prepared_customer_label_asset_root,
-        PackDayBatchPrintError, PackDayPrintCommandResult, PackDayPrintError, LETTER_MEDIA_OPTION,
+        cleanup_prepared_customer_label_asset_root, execute_pack_day_batch_print_plan_with,
+        execute_pack_day_print_plan_with, plan_pack_day_batch_print, plan_pack_day_print,
+        prepared_customer_label_asset_directory, prepared_customer_label_asset_path,
+        prepared_customer_label_asset_root, PackDayBatchPrintError, PackDayPrintCommandResult,
+        PackDayPrintError, LETTER_MEDIA_OPTION,
     };
     use radroots_studio_app_models::{
         PackDayBatchPrintArtifact, PackDayBatchPrintFailureKind, PackDayExportArtifact,
@@ -1038,6 +1135,7 @@ mod tests {
 
         let plan = plan_pack_day_batch_print(&bundle).expect("batch preflight should build");
 
+        assert_eq!(plan.export_instance_id, bundle.export_instance_id);
         assert_eq!(
             plan.plans.iter().map(|plan| plan.kind).collect::<Vec<_>>(),
             vec![
@@ -1161,6 +1259,147 @@ mod tests {
             PackDayBatchPrintFailureKind::CustomerLabelsAvery5160Overflow
         );
         assert!(!prepared_customer_label_asset_directory(&bundle).exists());
+    }
+
+    #[test]
+    fn batch_execution_submits_all_v1_artifacts_in_order_and_cleans_prepared_assets() {
+        let temp_dir = TestDirectory::new();
+        write_all_artifacts(temp_dir.path());
+        let bundle = sample_bundle(temp_dir.path());
+        let prepared_directory = prepared_customer_label_asset_directory(&bundle);
+        let plan = plan_pack_day_batch_print(&bundle).expect("batch preflight should build");
+        let mut submitted = Vec::new();
+
+        execute_pack_day_batch_print_plan_with(&plan, |print_plan| {
+            submitted.push(print_plan.kind);
+            Ok(PackDayPrintCommandResult::succeeded())
+        })
+        .expect("batch execution should succeed");
+
+        assert_eq!(
+            submitted,
+            vec![
+                PackDayPrintKind::PrintPackSheet,
+                PackDayPrintKind::PrintPickupRoster,
+                PackDayPrintKind::PrintCustomerLabels,
+            ]
+        );
+        assert!(!prepared_directory.exists());
+    }
+
+    #[test]
+    fn batch_execution_stops_on_first_queue_launch_failure() {
+        let temp_dir = TestDirectory::new();
+        write_all_artifacts(temp_dir.path());
+        let bundle = sample_bundle(temp_dir.path());
+        let prepared_directory = prepared_customer_label_asset_directory(&bundle);
+        let plan = plan_pack_day_batch_print(&bundle).expect("batch preflight should build");
+        let mut submitted = Vec::new();
+
+        let error = execute_pack_day_batch_print_plan_with(&plan, |print_plan| {
+            submitted.push(print_plan.kind);
+            match print_plan.kind {
+                PackDayPrintKind::PrintPackSheet => Ok(PackDayPrintCommandResult::succeeded()),
+                PackDayPrintKind::PrintPickupRoster => Err(io::Error::new(
+                    io::ErrorKind::PermissionDenied,
+                    "lp launch denied",
+                )),
+                PackDayPrintKind::PrintCustomerLabels => {
+                    panic!("batch should stop before customer labels")
+                }
+            }
+        })
+        .expect_err("launch failure should stop batch execution");
+
+        assert_eq!(
+            submitted,
+            vec![
+                PackDayPrintKind::PrintPackSheet,
+                PackDayPrintKind::PrintPickupRoster,
+            ]
+        );
+        assert_eq!(
+            error,
+            PackDayBatchPrintError::QueueLaunch {
+                submitted_artifacts: vec![PackDayBatchPrintArtifact::from_print_kind(
+                    PackDayPrintKind::PrintPackSheet,
+                )],
+                failed_artifact: PackDayBatchPrintArtifact::from_print_kind(
+                    PackDayPrintKind::PrintPickupRoster,
+                ),
+                source: PackDayPrintError::CommandLaunch {
+                    kind: PackDayPrintKind::PrintPickupRoster,
+                    program: "lp".to_owned(),
+                    source: io::Error::new(io::ErrorKind::PermissionDenied, "lp launch denied"),
+                },
+            }
+        );
+        assert_eq!(
+            error.failed_artifact(),
+            Some(PackDayBatchPrintArtifact::from_print_kind(
+                PackDayPrintKind::PrintPickupRoster,
+            ))
+        );
+        assert_eq!(
+            error.failure_kind(),
+            PackDayBatchPrintFailureKind::QueueLaunch
+        );
+        assert!(!prepared_directory.exists());
+    }
+
+    #[test]
+    fn batch_execution_stops_on_first_queue_exit_failure() {
+        let temp_dir = TestDirectory::new();
+        write_all_artifacts(temp_dir.path());
+        let bundle = sample_bundle(temp_dir.path());
+        let prepared_directory = prepared_customer_label_asset_directory(&bundle);
+        let plan = plan_pack_day_batch_print(&bundle).expect("batch preflight should build");
+        let mut submitted = Vec::new();
+
+        let error = execute_pack_day_batch_print_plan_with(&plan, |print_plan| {
+            submitted.push(print_plan.kind);
+            match print_plan.kind {
+                PackDayPrintKind::PrintPackSheet => Ok(PackDayPrintCommandResult::succeeded()),
+                PackDayPrintKind::PrintPickupRoster => Ok(PackDayPrintCommandResult::failed(
+                    Some(2),
+                    "lp stopped before submit",
+                )),
+                PackDayPrintKind::PrintCustomerLabels => {
+                    panic!("batch should stop before customer labels")
+                }
+            }
+        })
+        .expect_err("queue exit failure should stop batch execution");
+
+        assert_eq!(
+            submitted,
+            vec![
+                PackDayPrintKind::PrintPackSheet,
+                PackDayPrintKind::PrintPickupRoster,
+            ]
+        );
+        assert_eq!(
+            error,
+            PackDayBatchPrintError::QueueExit {
+                submitted_artifacts: vec![PackDayBatchPrintArtifact::from_print_kind(
+                    PackDayPrintKind::PrintPackSheet,
+                )],
+                failed_artifact: PackDayBatchPrintArtifact::from_print_kind(
+                    PackDayPrintKind::PrintPickupRoster,
+                ),
+                source: PackDayPrintError::CommandFailed {
+                    kind: PackDayPrintKind::PrintPickupRoster,
+                    program: "lp".to_owned(),
+                    exit_code: Some(2),
+                    stderr: "lp stopped before submit".to_owned(),
+                },
+            }
+        );
+        assert_eq!(
+            error.failure_kind(),
+            PackDayBatchPrintFailureKind::QueueExit
+        );
+        assert!(!prepared_directory.exists());
     }
 
     #[test]
