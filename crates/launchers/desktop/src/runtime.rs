@@ -1972,7 +1972,7 @@ impl DesktopAppRuntimeState {
             .state_store
             .apply_in_memory(AppStateCommand::begin_pack_day_batch_print(request.clone()));
 
-        match plan_pack_day_batch_print(&bundle) {
+        match plan_pack_day_batch_print(&bundle, &request) {
             Ok(plan) => Ok(Some((request, plan))),
             Err(error) => {
                 let _ =
@@ -7670,13 +7670,17 @@ mod tests {
             Some(request.clone())
         );
         assert_eq!(request.export_instance_id, bundle.export_instance_id);
+        assert_eq!(
+            request.artifacts,
+            Vec::from(PackDayBatchPrintArtifact::all_v1())
+        );
         assert_eq!(plan.export_instance_id, bundle.export_instance_id);
         assert_eq!(
             plan.plans
                 .iter()
                 .map(|plan| PackDayBatchPrintArtifact::from_print_kind(plan.kind))
                 .collect::<Vec<_>>(),
-            Vec::from(PackDayBatchPrintArtifact::all_v1())
+            request.artifacts.clone()
         );
         assert!(
             plan.plans

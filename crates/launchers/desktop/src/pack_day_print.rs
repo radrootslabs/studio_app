@@ -10,6 +10,7 @@ use radroots_studio_app_models::{
     PackDayExportBundle, PackDayExportInstanceId, PackDayPrintFailureKind, PackDayPrintKind,
     PackDayPrintLabelStock,
 };
+use radroots_studio_app_state::PackDayBatchPrintRequest;
 use thiserror::Error;
 
 const CUSTOMER_LABEL_PREPARED_ASSET_ROOT: &str = "radroots_studio_app_pack_day_print";
@@ -287,6 +288,12 @@ impl PackDayPrintError {
 
 #[derive(Debug, Error, Eq, PartialEq)]
 pub enum PackDayBatchPrintError {
+    #[error("pack day batch print request does not match the v1 artifact contract")]
+    InvalidRequest {
+        artifacts: Vec<PackDayBatchPrintArtifact>,
+    },
+    #[error("pack day batch print command plan is empty")]
+    EmptyPlan,
     #[error("pack day batch print preflight failed for {failed_artifact:?}: {source}")]
     Preflight {
         failed_artifact: Option<PackDayBatchPrintArtifact>,
@@ -309,6 +316,7 @@ pub enum PackDayBatchPrintError {
 impl PackDayBatchPrintError {
     pub(crate) fn failed_artifact(&self) -> Option<PackDayBatchPrintArtifact> {
         match self {
+            Self::InvalidRequest { .. } | Self::EmptyPlan => None,
             Self::Preflight {
                 failed_artifact, ..
             } => *failed_artifact,
@@ -323,6 +331,9 @@ impl PackDayBatchPrintError {
 
     pub(crate) fn failure_kind(&self) -> PackDayBatchPrintFailureKind {
         match self {
+            Self::InvalidRequest { .. } | Self::EmptyPlan => {
+                PackDayBatchPrintFailureKind::Preflight
+            }
             Self::Preflight {
                 source: PackDayPrintError::CustomerLabelsAvery5160Overflow,
                 ..
@@ -401,10 +412,12 @@ pub fn plan_pack_day_print(
 
 pub fn plan_pack_day_batch_print(
     bundle: &PackDayExportBundle,
+    request: &PackDayBatchPrintRequest,
 ) -> Result<PackDayBatchPrintCommandPlan, PackDayBatchPrintError> {
-    let mut plans = Vec::new();
+    validate_pack_day_batch_print_request(bundle, request)?;
+    let mut plans = Vec::with_capacity(request.artifacts.len());
 
-    for artifact in PackDayBatchPrintArtifact::all_v1() {
+    for artifact in request.artifacts.iter().copied() {
         let plan = plan_pack_day_print(bundle, artifact.print_kind).map_err(|source| {
             PackDayBatchPrintError::Preflight {
                 failed_artifact: batch_preflight_failed_artifact(&source, artifact),
@@ -415,9 +428,26 @@ pub fn plan_pack_day_batch_print(
     }
 
     Ok(PackDayBatchPrintCommandPlan {
-        export_instance_id: bundle.export_instance_id,
+        export_instance_id: request.export_instance_id,
         plans,
     })
+}
+
+fn validate_pack_day_batch_print_request(
+    bundle: &PackDayExportBundle,
+    request: &PackDayBatchPrintRequest,
+) -> Result<(), PackDayBatchPrintError> {
+    let expected_artifacts = PackDayBatchPrintArtifact::all_v1();
+    if request.fulfillment_window_id == bundle.fulfillment_window_id
+        && request.export_instance_id == bundle.export_instance_id
+        && request.artifacts.as_slice() == expected_artifacts.as_slice()
+    {
+        Ok(())
+    } else {
+        Err(PackDayBatchPrintError::InvalidRequest {
+            artifacts: request.artifacts.clone(),
+        })
+    }
 }
 
 const fn batch_preflight_failed_artifact(
@@ -456,7 +486,7 @@ pub fn execute_pack_day_batch_print_plan(
     #[cfg(not(target_os = "macos"))]
     {
         let Some(first_plan) = plan.plans.first() else {
-            return Ok(());
+            return Err(PackDayBatchPrintError::EmptyPlan);
         };
         Err(PackDayBatchPrintError::QueueLaunch {
             submitted_artifacts: Vec::new(),
@@ -806,6 +836,10 @@ fn execute_pack_day_batch_print_sequence_with(
         &PackDayPrintCommandPlan,
     ) -> Result<PackDayPrintCommandResult, io::Error>,
 ) -> Result<(), PackDayBatchPrintError> {
+    if plan.plans.is_empty() {
+        return Err(PackDayBatchPrintError::EmptyPlan);
+    }
+
     let mut submitted_artifacts = Vec::new();
 
     for print_plan in &plan.plans {
@@ -858,17 +892,18 @@ fn run_macos_print_command(
 #[cfg(test)]
 mod tests {
     use super::{
-        cleanup_prepared_customer_label_asset_root, execute_pack_day_batch_print_plan_with,
-        execute_pack_day_print_plan_with, plan_pack_day_batch_print, plan_pack_day_print,
-        prepared_customer_label_asset_directory, prepared_customer_label_asset_path,
-        prepared_customer_label_asset_root, PackDayBatchPrintError, PackDayPrintCommandResult,
-        PackDayPrintError, LETTER_MEDIA_OPTION,
+        LETTER_MEDIA_OPTION, PackDayBatchPrintCommandPlan, PackDayBatchPrintError,
+        PackDayPrintCommandResult, PackDayPrintError, cleanup_prepared_customer_label_asset_root,
+        execute_pack_day_batch_print_plan_with, execute_pack_day_print_plan_with,
+        plan_pack_day_batch_print, plan_pack_day_print, prepared_customer_label_asset_directory,
+        prepared_customer_label_asset_path, prepared_customer_label_asset_root,
     };
     use radroots_studio_app_models::{
         PackDayBatchPrintArtifact, PackDayBatchPrintFailureKind, PackDayExportArtifact,
         PackDayExportArtifactKind, PackDayExportBundle, PackDayExportInstanceId, PackDayPrintKind,
         PackDayPrintLabelStock,
     };
+    use radroots_studio_app_state::PackDayBatchPrintRequest;
     use std::fs;
     use std::io;
     use std::path::PathBuf;
@@ -918,6 +953,10 @@ mod tests {
                 },
             ],
         }
+    }
+
+    fn sample_batch_request(bundle: &PackDayExportBundle) -> PackDayBatchPrintRequest {
+        PackDayBatchPrintRequest::for_bundle(bundle)
     }
 
     fn write_artifact(bundle_directory: &PathBuf, file_name: &str) -> PathBuf {
@@ -999,10 +1038,11 @@ mod tests {
         );
         assert!(plan.target_path.is_file());
         assert!(!plan.target_path.starts_with(temp_dir.path()));
-        assert!(plan
-            .target_path
-            .to_string_lossy()
-            .contains(bundle.export_instance_id.to_string().as_str()));
+        assert!(
+            plan.target_path
+                .to_string_lossy()
+                .contains(bundle.export_instance_id.to_string().as_str())
+        );
         assert_eq!(
             fs::read_to_string(&source_path).expect("source labels should stay untouched"),
             "Willow farm\nCasey\nOrder: R-1001\nPickup: North barn\nWindow: 2026-04-23T16:00:00Z to 2026-04-23T19:00:00Z\n\n---\n\nWillow farm\nTaylor\nOrder: R-1002\nPickup: North barn\nWindow: 2026-04-23T16:00:00Z to 2026-04-23T19:00:00Z\n"
@@ -1133,16 +1173,19 @@ mod tests {
             PackDayPrintLabelStock::Avery5160Letter30Up,
         );
 
-        let plan = plan_pack_day_batch_print(&bundle).expect("batch preflight should build");
+        let request = sample_batch_request(&bundle);
+
+        let plan =
+            plan_pack_day_batch_print(&bundle, &request).expect("batch preflight should build");
 
         assert_eq!(plan.export_instance_id, bundle.export_instance_id);
         assert_eq!(
             plan.plans.iter().map(|plan| plan.kind).collect::<Vec<_>>(),
-            vec![
-                PackDayPrintKind::PrintPackSheet,
-                PackDayPrintKind::PrintPickupRoster,
-                PackDayPrintKind::PrintCustomerLabels,
-            ]
+            request
+                .artifacts
+                .iter()
+                .map(|artifact| artifact.print_kind)
+                .collect::<Vec<_>>()
         );
         assert_eq!(
             plan.plans
@@ -1165,6 +1208,97 @@ mod tests {
     }
 
     #[test]
+    fn batch_preflight_rejects_empty_request_artifacts_before_preparing_labels() {
+        let temp_dir = TestDirectory::new();
+        write_all_artifacts(temp_dir.path());
+        let bundle = sample_bundle(temp_dir.path());
+        let prepared_directory = prepared_customer_label_asset_directory(&bundle);
+        let mut request = sample_batch_request(&bundle);
+        request.artifacts.clear();
+
+        let error = plan_pack_day_batch_print(&bundle, &request)
+            .expect_err("empty request should fail preflight");
+
+        assert_eq!(
+            error,
+            PackDayBatchPrintError::InvalidRequest {
+                artifacts: Vec::new(),
+            }
+        );
+        assert_eq!(error.failed_artifact(), None);
+        assert_eq!(
+            error.failure_kind(),
+            PackDayBatchPrintFailureKind::Preflight
+        );
+        assert!(!prepared_directory.exists());
+    }
+
+    #[test]
+    fn batch_preflight_rejects_out_of_order_request_artifacts_before_preparing_labels() {
+        let temp_dir = TestDirectory::new();
+        write_all_artifacts(temp_dir.path());
+        let bundle = sample_bundle(temp_dir.path());
+        let prepared_directory = prepared_customer_label_asset_directory(&bundle);
+        let mut request = sample_batch_request(&bundle);
+        request.artifacts.swap(0, 1);
+        let artifacts = request.artifacts.clone();
+
+        let error = plan_pack_day_batch_print(&bundle, &request)
+            .expect_err("out-of-order request should fail preflight");
+
+        assert_eq!(error, PackDayBatchPrintError::InvalidRequest { artifacts });
+        assert_eq!(error.failed_artifact(), None);
+        assert_eq!(
+            error.failure_kind(),
+            PackDayBatchPrintFailureKind::Preflight
+        );
+        assert!(!prepared_directory.exists());
+    }
+
+    #[test]
+    fn batch_preflight_rejects_duplicate_request_artifacts_before_preparing_labels() {
+        let temp_dir = TestDirectory::new();
+        write_all_artifacts(temp_dir.path());
+        let bundle = sample_bundle(temp_dir.path());
+        let prepared_directory = prepared_customer_label_asset_directory(&bundle);
+        let mut request = sample_batch_request(&bundle);
+        request.artifacts[1] = request.artifacts[0];
+        let artifacts = request.artifacts.clone();
+
+        let error = plan_pack_day_batch_print(&bundle, &request)
+            .expect_err("duplicate request should fail preflight");
+
+        assert_eq!(error, PackDayBatchPrintError::InvalidRequest { artifacts });
+        assert_eq!(error.failed_artifact(), None);
+        assert_eq!(
+            error.failure_kind(),
+            PackDayBatchPrintFailureKind::Preflight
+        );
+        assert!(!prepared_directory.exists());
+    }
+
+    #[test]
+    fn batch_preflight_rejects_bundle_request_identity_mismatch() {
+        let temp_dir = TestDirectory::new();
+        write_all_artifacts(temp_dir.path());
+        let bundle = sample_bundle(temp_dir.path());
+        let mut request = sample_batch_request(&bundle);
+        request.export_instance_id = PackDayExportInstanceId::new();
+        let artifacts = request.artifacts.clone();
+
+        let error = plan_pack_day_batch_print(&bundle, &request)
+            .expect_err("request identity mismatch should fail preflight");
+
+        assert_eq!(error, PackDayBatchPrintError::InvalidRequest { artifacts });
+        assert_eq!(error.failed_artifact(), None);
+        assert_eq!(
+            error.failure_kind(),
+            PackDayBatchPrintFailureKind::Preflight
+        );
+        assert!(!prepared_customer_label_asset_directory(&bundle).exists());
+    }
+
+    #[test]
     fn batch_preflight_fails_closed_when_a_required_artifact_reference_is_missing() {
         let temp_dir = TestDirectory::new();
         write_all_artifacts(temp_dir.path());
@@ -1173,8 +1307,10 @@ mod tests {
             .artifacts
             .retain(|artifact| artifact.kind != PackDayExportArtifactKind::PickupRoster);
 
-        let error =
-            plan_pack_day_batch_print(&bundle).expect_err("missing artifact should fail preflight");
+        let request = sample_batch_request(&bundle);
+
+        let error = plan_pack_day_batch_print(&bundle, &request)
+            .expect_err("missing artifact should fail preflight");
 
         assert_eq!(
             error,
@@ -1202,8 +1338,10 @@ mod tests {
         let mut bundle = sample_bundle(temp_dir.path());
         bundle.artifacts[0].relative_path = "../pack_sheet.txt".to_owned();
 
-        let error =
-            plan_pack_day_batch_print(&bundle).expect_err("invalid artifact path should fail");
+        let request = sample_batch_request(&bundle);
+
+        let error = plan_pack_day_batch_print(&bundle, &request)
+            .expect_err("invalid artifact path should fail");
 
         assert_eq!(
             error,
@@ -1242,7 +1380,9 @@ mod tests {
         .expect("overflowing customer labels should write");
         let bundle = sample_bundle(temp_dir.path());
 
-        let error = plan_pack_day_batch_print(&bundle)
+        let request = sample_batch_request(&bundle);
+
+        let error = plan_pack_day_batch_print(&bundle, &request)
             .expect_err("overflowing customer labels should fail batch preflight");
 
         assert_eq!(
@@ -1267,7 +1407,9 @@ mod tests {
         write_all_artifacts(temp_dir.path());
         let bundle = sample_bundle(temp_dir.path());
         let prepared_directory = prepared_customer_label_asset_directory(&bundle);
-        let plan = plan_pack_day_batch_print(&bundle).expect("batch preflight should build");
+        let request = sample_batch_request(&bundle);
+        let plan =
+            plan_pack_day_batch_print(&bundle, &request).expect("batch preflight should build");
         let mut submitted = Vec::new();
 
         execute_pack_day_batch_print_plan_with(&plan, |print_plan| {
@@ -1288,12 +1430,37 @@ mod tests {
     }
 
     #[test]
+    fn batch_execution_rejects_empty_command_plan_without_submitting_artifacts() {
+        let plan = PackDayBatchPrintCommandPlan {
+            export_instance_id: PackDayExportInstanceId::new(),
+            plans: Vec::new(),
+        };
+        let mut submitted = false;
+
+        let error = execute_pack_day_batch_print_plan_with(&plan, |_| {
+            submitted = true;
+            Ok(PackDayPrintCommandResult::succeeded())
+        })
+        .expect_err("empty command plan should fail");
+
+        assert_eq!(error, PackDayBatchPrintError::EmptyPlan);
+        assert_eq!(error.failed_artifact(), None);
+        assert_eq!(
+            error.failure_kind(),
+            PackDayBatchPrintFailureKind::Preflight
+        );
+        assert!(!submitted);
+    }
+
+    #[test]
     fn batch_execution_stops_on_first_queue_launch_failure() {
         let temp_dir = TestDirectory::new();
         write_all_artifacts(temp_dir.path());
         let bundle = sample_bundle(temp_dir.path());
         let prepared_directory = prepared_customer_label_asset_directory(&bundle);
-        let plan = plan_pack_day_batch_print(&bundle).expect("batch preflight should build");
+        let request = sample_batch_request(&bundle);
+        let plan =
+            plan_pack_day_batch_print(&bundle, &request).expect("batch preflight should build");
         let mut submitted = Vec::new();
 
         let error = execute_pack_day_batch_print_plan_with(&plan, |print_plan| {
@@ -1353,7 +1520,9 @@ mod tests {
         write_all_artifacts(temp_dir.path());
         let bundle = sample_bundle(temp_dir.path());
         let prepared_directory = prepared_customer_label_asset_directory(&bundle);
-        let plan = plan_pack_day_batch_print(&bundle).expect("batch preflight should build");
+        let request = sample_batch_request(&bundle);
+        let plan =
+            plan_pack_day_batch_print(&bundle, &request).expect("batch preflight should build");
         let mut submitted = Vec::new();
 
         let error = execute_pack_day_batch_print_plan_with(&plan, |print_plan| {
@@ -1460,10 +1629,12 @@ mod tests {
             .expect("pack sheet print plan should build");
 
         assert_eq!(plan.target_path, pack_sheet_path);
-        assert!(execute_pack_day_print_plan_with(&plan, |_| {
-            Ok(PackDayPrintCommandResult::succeeded())
-        })
-        .is_ok());
+        assert!(
+            execute_pack_day_print_plan_with(&plan, |_| {
+                Ok(PackDayPrintCommandResult::succeeded())
+            })
+            .is_ok()
+        );
     }
 
     #[test]
