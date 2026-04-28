@@ -6,8 +6,9 @@ use std::path::{Component, Path, PathBuf};
 use std::process::Command;
 
 use radroots_studio_app_models::{
-    PackDayExportArtifactKind, PackDayExportBundle, PackDayExportInstanceId,
-    PackDayPrintFailureKind, PackDayPrintKind, PackDayPrintLabelStock,
+    PackDayBatchPrintArtifact, PackDayBatchPrintFailureKind, PackDayExportArtifactKind,
+    PackDayExportBundle, PackDayExportInstanceId, PackDayPrintFailureKind, PackDayPrintKind,
+    PackDayPrintLabelStock,
 };
 use thiserror::Error;
 
@@ -37,6 +38,11 @@ pub struct PackDayPrintCommandPlan {
     pub target_path: PathBuf,
     pub command_program: &'static str,
     pub command_args: Vec<String>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PackDayBatchPrintCommandPlan {
+    pub plans: Vec<PackDayPrintCommandPlan>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -222,10 +228,7 @@ impl PartialEq for PackDayPrintError {
                     && left_path == right_path
                     && io_errors_match(left_source, right_source)
             }
-            (
-                Self::CustomerLabelsAvery5160Overflow,
-                Self::CustomerLabelsAvery5160Overflow,
-            ) => true,
+            (Self::CustomerLabelsAvery5160Overflow, Self::CustomerLabelsAvery5160Overflow) => true,
             (Self::UnsupportedPlatform, Self::UnsupportedPlatform) => true,
             (
                 Self::CommandLaunch {
@@ -277,6 +280,35 @@ impl PackDayPrintError {
                 Some(PackDayPrintFailureKind::CustomerLabelsAvery5160Overflow)
             }
             _ => None,
+        }
+    }
+}
+
+#[derive(Debug, Error, Eq, PartialEq)]
+pub enum PackDayBatchPrintError {
+    #[error("pack day batch print preflight failed for {failed_artifact:?}: {source}")]
+    Preflight {
+        failed_artifact: Option<PackDayBatchPrintArtifact>,
+        source: PackDayPrintError,
+    },
+}
+
+impl PackDayBatchPrintError {
+    pub(crate) const fn failed_artifact(&self) -> Option<PackDayBatchPrintArtifact> {
+        match self {
+            Self::Preflight {
+                failed_artifact, ..
+            } => *failed_artifact,
+        }
+    }
+
+    pub(crate) const fn failure_kind(&self) -> PackDayBatchPrintFailureKind {
+        match self {
+            Self::Preflight {
+                source: PackDayPrintError::CustomerLabelsAvery5160Overflow,
+                ..
+            } => PackDayBatchPrintFailureKind::CustomerLabelsAvery5160Overflow,
+            Self::Preflight { .. } => PackDayBatchPrintFailureKind::Preflight,
         }
     }
 }
@@ -344,6 +376,34 @@ pub fn plan_pack_day_print(
         command_program: "lp",
         command_args,
     })
+}
+
+pub fn plan_pack_day_batch_print(
+    bundle: &PackDayExportBundle,
+) -> Result<PackDayBatchPrintCommandPlan, PackDayBatchPrintError> {
+    let mut plans = Vec::new();
+
+    for artifact in PackDayBatchPrintArtifact::all_v1() {
+        let plan = plan_pack_day_print(bundle, artifact.print_kind).map_err(|source| {
+            PackDayBatchPrintError::Preflight {
+                failed_artifact: batch_preflight_failed_artifact(&source, artifact),
+                source,
+            }
+        })?;
+        plans.push(plan);
+    }
+
+    Ok(PackDayBatchPrintCommandPlan { plans })
+}
+
+const fn batch_preflight_failed_artifact(
+    error: &PackDayPrintError,
+    artifact: PackDayBatchPrintArtifact,
+) -> Option<PackDayBatchPrintArtifact> {
+    match error {
+        PackDayPrintError::MissingBundleDirectory { .. } => None,
+        _ => Some(artifact),
+    }
 }
 
 pub fn execute_pack_day_print_plan(
@@ -485,9 +545,11 @@ fn render_customer_label_stock_asset(
     stock: PackDayPrintLabelStock,
 ) -> Result<String, PackDayPrintError> {
     match stock {
-        PackDayPrintLabelStock::Avery5160Letter30Up => render_avery_5160_customer_labels_postscript(
-            parse_customer_label_blocks(source_contents),
-        ),
+        PackDayPrintLabelStock::Avery5160Letter30Up => {
+            render_avery_5160_customer_labels_postscript(parse_customer_label_blocks(
+                source_contents,
+            ))
+        }
     }
 }
 
@@ -701,13 +763,14 @@ fn run_macos_print_command(
 mod tests {
     use super::{
         cleanup_prepared_customer_label_asset_root, execute_pack_day_print_plan_with,
-        plan_pack_day_print, prepared_customer_label_asset_directory,
+        plan_pack_day_batch_print, plan_pack_day_print, prepared_customer_label_asset_directory,
         prepared_customer_label_asset_path, prepared_customer_label_asset_root,
-        PackDayPrintCommandResult, PackDayPrintError, LETTER_MEDIA_OPTION,
+        PackDayBatchPrintError, PackDayPrintCommandResult, PackDayPrintError, LETTER_MEDIA_OPTION,
     };
     use radroots_studio_app_models::{
-        PackDayExportArtifact, PackDayExportArtifactKind, PackDayExportBundle,
-        PackDayExportInstanceId, PackDayPrintKind, PackDayPrintLabelStock,
+        PackDayBatchPrintArtifact, PackDayBatchPrintFailureKind, PackDayExportArtifact,
+        PackDayExportArtifactKind, PackDayExportBundle, PackDayExportInstanceId, PackDayPrintKind,
+        PackDayPrintLabelStock,
     };
     use std::fs;
     use std::io;
@@ -764,6 +827,12 @@ mod tests {
         let path = bundle_directory.join(file_name);
         fs::write(&path, file_name).expect("artifact should write");
         path
+    }
+
+    fn write_all_artifacts(bundle_directory: &PathBuf) {
+        write_artifact(bundle_directory, "pack_sheet.txt");
+        write_artifact(bundle_directory, "pickup_roster.txt");
+        write_artifact(bundle_directory, "customer_labels.txt");
     }
 
     #[test]
@@ -955,6 +1024,143 @@ mod tests {
 
         assert_eq!(error, PackDayPrintError::CustomerLabelsAvery5160Overflow);
         assert!(!prepared_directory.exists());
+    }
+
+    #[test]
+    fn batch_preflight_plans_all_v1_artifacts_in_order() {
+        let temp_dir = TestDirectory::new();
+        write_all_artifacts(temp_dir.path());
+        let bundle = sample_bundle(temp_dir.path());
+        let prepared_path = prepared_customer_label_asset_path(
+            &bundle,
+            PackDayPrintLabelStock::Avery5160Letter30Up,
+        );
+
+        let plan = plan_pack_day_batch_print(&bundle).expect("batch preflight should build");
+
+        assert_eq!(
+            plan.plans.iter().map(|plan| plan.kind).collect::<Vec<_>>(),
+            vec![
+                PackDayPrintKind::PrintPackSheet,
+                PackDayPrintKind::PrintPickupRoster,
+                PackDayPrintKind::PrintCustomerLabels,
+            ]
+        );
+        assert_eq!(
+            plan.plans
+                .iter()
+                .map(|plan| plan.command_program)
+                .collect::<Vec<_>>(),
+            vec!["lp", "lp", "lp"]
+        );
+        assert_eq!(
+            plan.plans[2].command_args,
+            vec![
+                "-o".to_owned(),
+                LETTER_MEDIA_OPTION.to_owned(),
+                prepared_path.to_string_lossy().into_owned(),
+            ]
+        );
+        assert!(prepared_path.is_file());
+
+        let _ = fs::remove_dir_all(prepared_customer_label_asset_directory(&bundle));
+    }
+
+    #[test]
+    fn batch_preflight_fails_closed_when_a_required_artifact_reference_is_missing() {
+        let temp_dir = TestDirectory::new();
+        write_all_artifacts(temp_dir.path());
+        let mut bundle = sample_bundle(temp_dir.path());
+        bundle
+            .artifacts
+            .retain(|artifact| artifact.kind != PackDayExportArtifactKind::PickupRoster);
+
+        let error =
+            plan_pack_day_batch_print(&bundle).expect_err("missing artifact should fail preflight");
+
+        assert_eq!(
+            error,
+            PackDayBatchPrintError::Preflight {
+                failed_artifact: Some(PackDayBatchPrintArtifact::from_print_kind(
+                    PackDayPrintKind::PrintPickupRoster,
+                )),
+                source: PackDayPrintError::MissingArtifactReference {
+                    kind: PackDayPrintKind::PrintPickupRoster,
+                    artifact_kind: PackDayExportArtifactKind::PickupRoster,
+                },
+            }
+        );
+        assert_eq!(
+            error.failure_kind(),
+            PackDayBatchPrintFailureKind::Preflight
+        );
+        assert!(!prepared_customer_label_asset_directory(&bundle).exists());
+    }
+
+    #[test]
+    fn batch_preflight_fails_closed_when_an_artifact_relative_path_is_invalid() {
+        let temp_dir = TestDirectory::new();
+        write_all_artifacts(temp_dir.path());
+        let mut bundle = sample_bundle(temp_dir.path());
+        bundle.artifacts[0].relative_path = "../pack_sheet.txt".to_owned();
+
+        let error =
+            plan_pack_day_batch_print(&bundle).expect_err("invalid artifact path should fail");
+
+        assert_eq!(
+            error,
+            PackDayBatchPrintError::Preflight {
+                failed_artifact: Some(PackDayBatchPrintArtifact::from_print_kind(
+                    PackDayPrintKind::PrintPackSheet,
+                )),
+                source: PackDayPrintError::InvalidArtifactRelativePath {
+                    kind: PackDayPrintKind::PrintPackSheet,
+                    relative_path: "../pack_sheet.txt".to_owned(),
+                },
+            }
+        );
+        assert_eq!(
+            error.failed_artifact(),
+            Some(PackDayBatchPrintArtifact::from_print_kind(
+                PackDayPrintKind::PrintPackSheet,
+            ))
+        );
+        assert_eq!(
+            error.failure_kind(),
+            PackDayBatchPrintFailureKind::Preflight
+        );
+        assert!(!prepared_customer_label_asset_directory(&bundle).exists());
+    }
+
+    #[test]
+    fn batch_preflight_surfaces_avery_5160_overflow_without_creating_prepared_assets() {
+        let temp_dir = TestDirectory::new();
+        write_artifact(temp_dir.path(), "pack_sheet.txt");
+        write_artifact(temp_dir.path(), "pickup_roster.txt");
+        fs::write(
+            temp_dir.path().join("customer_labels.txt"),
+            "Willow farm\nCasey\nOrder R-1001\nPickup barn\nThursday\nKeep cold\nOverflow note\n",
+        )
+        .expect("overflowing customer labels should write");
+        let bundle = sample_bundle(temp_dir.path());
+
+        let error = plan_pack_day_batch_print(&bundle)
+            .expect_err("overflowing customer labels should fail batch preflight");
+
+        assert_eq!(
+            error,
+            PackDayBatchPrintError::Preflight {
+                failed_artifact: Some(PackDayBatchPrintArtifact::from_print_kind(
+                    PackDayPrintKind::PrintCustomerLabels,
+                )),
+                source: PackDayPrintError::CustomerLabelsAvery5160Overflow,
+            }
+        );
+        assert_eq!(
+            error.failure_kind(),
+            PackDayBatchPrintFailureKind::CustomerLabelsAvery5160Overflow
+        );
+        assert!(!prepared_customer_label_asset_directory(&bundle).exists());
     }
 
     #[test]
