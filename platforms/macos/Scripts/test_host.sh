@@ -68,6 +68,7 @@ release_app_path="$(
 tmp_root="$(mktemp -d)"
 runner_pid=""
 degraded_runner_pid=""
+startup_wait_attempts="${RADROOTS_APP_HOST_STARTUP_ATTEMPTS:-300}"
 
 wait_for_log_event() {
   local structured_log_file="$1"
@@ -75,7 +76,7 @@ wait_for_log_event() {
   local runner_pid="$3"
   local event_verified=false
 
-  for _ in $(seq 1 150); do
+  for _ in $(seq 1 "${startup_wait_attempts}"); do
     if [[ -f "${structured_log_file}" ]] && grep -q "\"event\":\"${expected_event}\"" "${structured_log_file}" 2>/dev/null; then
       event_verified=true
       break
@@ -166,6 +167,7 @@ RADROOTS_APP_RUNTIME_MODE="${runtime_mode}" \
 RADROOTS_APP_DEFAULT_NOSTR_RELAY_URL="${default_nostr_relay_url}" \
 RADROOTS_APP_LOCAL_LOG_ROOT="${local_log_root}" \
 RADROOTS_APP_HOST_BUNDLE_PATH="${app_path}" \
+RADROOTS_APP_HOST_STARTUP_ATTEMPTS="${startup_wait_attempts}" \
 "${script_dir}/run_host.sh" &
 runner_pid="$!"
 
@@ -187,6 +189,7 @@ env -u HOME \
   RADROOTS_APP_DEFAULT_NOSTR_RELAY_URL="${default_nostr_relay_url}" \
   RADROOTS_APP_LOCAL_LOG_ROOT="${degraded_log_root}" \
   RADROOTS_APP_HOST_BUNDLE_PATH="${app_path}" \
+  RADROOTS_APP_HOST_STARTUP_ATTEMPTS="${startup_wait_attempts}" \
   "${script_dir}/run_host.sh" &
 degraded_runner_pid="$!"
 

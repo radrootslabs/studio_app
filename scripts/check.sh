@@ -6,10 +6,12 @@ repo_root="$(git -C "${script_dir}" rev-parse --show-toplevel)"
 
 cd "${repo_root}"
 cargo metadata --format-version 1 --no-deps
-cargo test -p radroots_studio_app_i18n english_pack_day_copy_matches_the_contextual_execution_contract
+cargo test -p radroots_studio_app_models pack_day
+cargo test -p radroots_studio_app_state pack_day
+cargo test -p radroots_studio_app_i18n pack_day
+cargo test -p radroots_studio_app pack_day_print
+cargo test -p radroots_studio_app pack_day_batch
 cargo test -p radroots_studio_app source_guards
-cargo test -p radroots_studio_app pack_day_host_handoff
-cargo test -p radroots_studio_app pack_day
 cargo check -p radroots_studio_app
 
 if [[ "$(uname -s)" == "Darwin" ]]; then

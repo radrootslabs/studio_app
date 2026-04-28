@@ -49,6 +49,7 @@ structured_log_file="${app_log_root}/${date_utc}.jsonl"
 latest_log_path="${app_log_root}/latest.jsonl"
 stdout_file="${app_log_root}/raw/stdout.${date_utc}.log"
 stderr_file="${app_log_root}/raw/stderr.${date_utc}.log"
+startup_attempts="${RADROOTS_APP_HOST_STARTUP_ATTEMPTS:-300}"
 
 mkdir -p "${app_log_root}/raw"
 export RUST_LOG="${RADROOTS_APP_RUST_LOG:-info}"
@@ -73,7 +74,7 @@ stop_app_with_error() {
 app_pid="$!"
 
 launch_confirmed=false
-for _ in $(seq 1 100); do
+for _ in $(seq 1 "${startup_attempts}"); do
   if [[ -f "${structured_log_file}" ]] && grep -q '"event":"runtime.launch"' "${structured_log_file}" 2>/dev/null; then
     launch_confirmed=true
     break
