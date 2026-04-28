@@ -547,6 +547,39 @@ mod tests {
             app_text(AppTextKey::PackDayPrintCustomerLabelsAvery5160OverflowFailedTitle),
             "Customer labels do not fit Avery 5160"
         );
+        assert_eq!(app_text(AppTextKey::PackDayBatchPrintAction), "Print all");
+        assert_eq!(
+            app_text(AppTextKey::PackDayBatchPrintActionRunning),
+            "Printing all..."
+        );
+        assert_eq!(
+            app_text(AppTextKey::PackDayBatchPrintQueuedTitle),
+            "Queueing pack day print run"
+        );
+        assert_eq!(
+            app_text(AppTextKey::PackDayBatchPrintSucceededTitle),
+            "Sent all pack day files to the printer"
+        );
+        assert_eq!(
+            app_text(AppTextKey::PackDayBatchPrintFailedTitle),
+            "Couldn't print all pack day files"
+        );
+        assert_eq!(
+            app_text(AppTextKey::PackDayBatchPrintFailedPreflightTitle),
+            "Pack day files are not ready to print"
+        );
+        assert_eq!(
+            app_text(AppTextKey::PackDayBatchPrintFailedQueueLaunchTitle),
+            "Couldn't start the print queue"
+        );
+        assert_eq!(
+            app_text(AppTextKey::PackDayBatchPrintFailedQueueExitTitle),
+            "Print queue stopped before the run finished"
+        );
+        assert_eq!(
+            app_text(AppTextKey::PackDayBatchPrintCustomerLabelsAvery5160OverflowFailedTitle),
+            "Customer labels do not fit Avery 5160"
+        );
         assert_eq!(
             app_text(AppTextKey::PackDayHostHandoffRevealAction),
             "Show in Finder"

@@ -1683,6 +1683,72 @@ impl PackDayPrintFailureKind {
     }
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct PackDayBatchPrintArtifact {
+    pub print_kind: PackDayPrintKind,
+    pub artifact_kind: PackDayExportArtifactKind,
+    pub label_stock: Option<PackDayPrintLabelStock>,
+}
+
+impl PackDayBatchPrintArtifact {
+    pub const fn all_v1() -> [Self; 3] {
+        [
+            Self::from_print_kind(PackDayPrintKind::PrintPackSheet),
+            Self::from_print_kind(PackDayPrintKind::PrintPickupRoster),
+            Self::from_print_kind(PackDayPrintKind::PrintCustomerLabels),
+        ]
+    }
+
+    pub const fn from_print_kind(print_kind: PackDayPrintKind) -> Self {
+        Self {
+            print_kind,
+            artifact_kind: print_kind.artifact_kind(),
+            label_stock: print_kind.label_stock(),
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PackDayBatchPrintFailureKind {
+    Preflight,
+    QueueLaunch,
+    QueueExit,
+    CustomerLabelsAvery5160Overflow,
+}
+
+impl PackDayBatchPrintFailureKind {
+    pub const fn storage_key(self) -> &'static str {
+        match self {
+            Self::Preflight => "preflight",
+            Self::QueueLaunch => "queue_launch",
+            Self::QueueExit => "queue_exit",
+            Self::CustomerLabelsAvery5160Overflow => "customer_labels_avery_5160_overflow",
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PackDayBatchPrintStatus {
+    #[default]
+    Idle,
+    Running,
+    Succeeded,
+    Failed,
+}
+
+impl PackDayBatchPrintStatus {
+    pub const fn storage_key(self) -> &'static str {
+        match self {
+            Self::Idle => "idle",
+            Self::Running => "running",
+            Self::Succeeded => "succeeded",
+            Self::Failed => "failed",
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum PackDayPrintStatus {
@@ -2487,7 +2553,8 @@ mod tests {
         LoggedOutStartupPhase, LoggedOutStartupProjection, OrderDetailItemRow,
         OrderDetailProjection, OrderId, OrderListRow, OrderPrimaryAction, OrderRecoveryProjection,
         OrderStatus, OrdersFilter, OrdersListProjection, OrdersListRow, OrdersListSummary,
-        OrdersScreenQueryState, PackDayExportArtifact, PackDayExportArtifactKind,
+        OrdersScreenQueryState, PackDayBatchPrintArtifact, PackDayBatchPrintFailureKind,
+        PackDayBatchPrintStatus, PackDayExportArtifact, PackDayExportArtifactKind,
         PackDayExportBundle, PackDayExportInstanceId, PackDayExportStatus, PackDayHostHandoffKind,
         PackDayHostHandoffStatus, PackDayOutputCustomerOrder, PackDayOutputOrderState,
         PackDayOutputPackListEntry, PackDayOutputProductTotal, PackDayOutputQuantity,
@@ -3178,6 +3245,60 @@ mod tests {
             PackDayPrintFailureKind::CustomerLabelsAvery5160Overflow.storage_key(),
             "customer_labels_avery_5160_overflow"
         );
+        assert_eq!(
+            PackDayBatchPrintArtifact::all_v1(),
+            [
+                PackDayBatchPrintArtifact {
+                    print_kind: PackDayPrintKind::PrintPackSheet,
+                    artifact_kind: PackDayExportArtifactKind::PackSheet,
+                    label_stock: None,
+                },
+                PackDayBatchPrintArtifact {
+                    print_kind: PackDayPrintKind::PrintPickupRoster,
+                    artifact_kind: PackDayExportArtifactKind::PickupRoster,
+                    label_stock: None,
+                },
+                PackDayBatchPrintArtifact {
+                    print_kind: PackDayPrintKind::PrintCustomerLabels,
+                    artifact_kind: PackDayExportArtifactKind::CustomerLabels,
+                    label_stock: Some(PackDayPrintLabelStock::Avery5160Letter30Up),
+                },
+            ]
+        );
+        assert_eq!(
+            PackDayBatchPrintArtifact::from_print_kind(PackDayPrintKind::PrintCustomerLabels),
+            PackDayBatchPrintArtifact {
+                print_kind: PackDayPrintKind::PrintCustomerLabels,
+                artifact_kind: PackDayExportArtifactKind::CustomerLabels,
+                label_stock: Some(PackDayPrintLabelStock::Avery5160Letter30Up),
+            }
+        );
+        assert_eq!(
+            PackDayBatchPrintFailureKind::Preflight.storage_key(),
+            "preflight"
+        );
+        assert_eq!(
+            PackDayBatchPrintFailureKind::QueueLaunch.storage_key(),
+            "queue_launch"
+        );
+        assert_eq!(
+            PackDayBatchPrintFailureKind::QueueExit.storage_key(),
+            "queue_exit"
+        );
+        assert_eq!(
+            PackDayBatchPrintFailureKind::CustomerLabelsAvery5160Overflow.storage_key(),
+            "customer_labels_avery_5160_overflow"
+        );
+        assert_eq!(
+            PackDayBatchPrintStatus::default(),
+            PackDayBatchPrintStatus::Idle
+        );
+        assert_eq!(PackDayBatchPrintStatus::Running.storage_key(), "running");
+        assert_eq!(
+            PackDayBatchPrintStatus::Succeeded.storage_key(),
+            "succeeded"
+        );
+        assert_eq!(PackDayBatchPrintStatus::Failed.storage_key(), "failed");
         assert_eq!(PackDayPrintStatus::default(), PackDayPrintStatus::Idle);
         assert_eq!(PackDayPrintStatus::Running.storage_key(), "running");
         assert_eq!(PackDayPrintStatus::Succeeded.storage_key(), "succeeded");

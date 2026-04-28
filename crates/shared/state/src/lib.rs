@@ -14,7 +14,8 @@ use radroots_studio_app_models::{
     FarmReadinessBlocker, FarmRulesProjection, FarmSetupBlocker, FarmSetupProjection,
     FarmSetupReadiness, FarmTimingConflict, FulfillmentWindowId, LoggedOutStartupPhase,
     LoggedOutStartupProjection, OrderDetailProjection, OrderId, OrdersFilter, OrdersListProjection,
-    OrdersScreenQueryState, PackDayExportArtifactKind, PackDayExportBundle,
+    OrdersScreenQueryState, PackDayBatchPrintArtifact, PackDayBatchPrintFailureKind,
+    PackDayBatchPrintStatus, PackDayExportArtifactKind, PackDayExportBundle,
     PackDayExportInstanceId, PackDayExportStatus, PackDayHostHandoffKind, PackDayHostHandoffStatus,
     PackDayPrintFailureKind, PackDayPrintKind, PackDayPrintLabelStock, PackDayPrintStatus,
     PackDayProjection, PackDayScreenQueryState, PersonalEntryProjection, ProductEditorDraft,
@@ -312,6 +313,7 @@ pub struct PackDayScreenProjection {
     pub projection: PackDayProjection,
     pub export: PackDayExportProjection,
     pub print: PackDayPrintProjection,
+    pub batch_print: PackDayBatchPrintProjection,
     pub host_handoff: PackDayHostHandoffProjection,
 }
 
@@ -320,6 +322,7 @@ impl PackDayScreenProjection {
         if self.query.fulfillment_window_id != fulfillment_window_id {
             self.export = PackDayExportProjection::default();
             self.print = PackDayPrintProjection::default();
+            self.batch_print = PackDayBatchPrintProjection::default();
             self.host_handoff = PackDayHostHandoffProjection::default();
         }
         self.query.fulfillment_window_id = fulfillment_window_id;
@@ -339,6 +342,7 @@ impl PackDayScreenProjection {
         if previous_window_id != next_window_id {
             self.export = PackDayExportProjection::default();
             self.print = PackDayPrintProjection::default();
+            self.batch_print = PackDayBatchPrintProjection::default();
             self.host_handoff = PackDayHostHandoffProjection::default();
         }
 
@@ -348,6 +352,7 @@ impl PackDayScreenProjection {
     fn replace_export(&mut self, export: PackDayExportProjection) {
         if self.export != export {
             self.print = PackDayPrintProjection::default();
+            self.batch_print = PackDayBatchPrintProjection::default();
             self.host_handoff = PackDayHostHandoffProjection::default();
         }
         self.export = export;
@@ -355,6 +360,10 @@ impl PackDayScreenProjection {
 
     fn replace_print(&mut self, print: PackDayPrintProjection) {
         self.print = print;
+    }
+
+    fn replace_batch_print(&mut self, batch_print: PackDayBatchPrintProjection) {
+        self.batch_print = batch_print;
     }
 
     fn replace_host_handoff(&mut self, host_handoff: PackDayHostHandoffProjection) {
@@ -476,6 +485,64 @@ impl PackDayPrintProjection {
             status: PackDayPrintStatus::Failed,
             request: Some(request),
             failure,
+        }
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PackDayBatchPrintRequest {
+    pub fulfillment_window_id: FulfillmentWindowId,
+    pub export_instance_id: PackDayExportInstanceId,
+    pub artifacts: Vec<PackDayBatchPrintArtifact>,
+}
+
+impl PackDayBatchPrintRequest {
+    pub fn for_bundle(bundle: &PackDayExportBundle) -> Self {
+        Self {
+            fulfillment_window_id: bundle.fulfillment_window_id,
+            export_instance_id: bundle.export_instance_id,
+            artifacts: Vec::from(PackDayBatchPrintArtifact::all_v1()),
+        }
+    }
+}
+
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct PackDayBatchPrintProjection {
+    pub status: PackDayBatchPrintStatus,
+    pub request: Option<PackDayBatchPrintRequest>,
+    pub failed_artifact: Option<PackDayBatchPrintArtifact>,
+    pub failure: Option<PackDayBatchPrintFailureKind>,
+}
+
+impl PackDayBatchPrintProjection {
+    pub fn running(request: PackDayBatchPrintRequest) -> Self {
+        Self {
+            status: PackDayBatchPrintStatus::Running,
+            request: Some(request),
+            failed_artifact: None,
+            failure: None,
+        }
+    }
+
+    pub fn succeeded(request: PackDayBatchPrintRequest) -> Self {
+        Self {
+            status: PackDayBatchPrintStatus::Succeeded,
+            request: Some(request),
+            failed_artifact: None,
+            failure: None,
+        }
+    }
+
+    pub fn failed(
+        request: PackDayBatchPrintRequest,
+        failed_artifact: Option<PackDayBatchPrintArtifact>,
+        failure: PackDayBatchPrintFailureKind,
+    ) -> Self {
+        Self {
+            status: PackDayBatchPrintStatus::Failed,
+            request: Some(request),
+            failed_artifact,
+            failure: Some(failure),
         }
     }
 }
@@ -989,6 +1056,14 @@ pub enum AppStateCommand {
         failure: PackDayPrintFailureKind,
     },
     ResetPackDayPrint,
+    BeginPackDayBatchPrint(PackDayBatchPrintRequest),
+    SucceedPackDayBatchPrint(PackDayBatchPrintRequest),
+    FailPackDayBatchPrint {
+        request: PackDayBatchPrintRequest,
+        failed_artifact: Option<PackDayBatchPrintArtifact>,
+        failure: PackDayBatchPrintFailureKind,
+    },
+    ResetPackDayBatchPrint,
     BeginPackDayHostHandoff(PackDayHostHandoffRequest),
     SucceedPackDayHostHandoff(PackDayHostHandoffRequest),
     FailPackDayHostHandoff {
@@ -1161,6 +1236,30 @@ impl AppStateCommand {
 
     pub const fn reset_pack_day_print() -> Self {
         Self::ResetPackDayPrint
+    }
+
+    pub fn begin_pack_day_batch_print(request: PackDayBatchPrintRequest) -> Self {
+        Self::BeginPackDayBatchPrint(request)
+    }
+
+    pub fn succeed_pack_day_batch_print(request: PackDayBatchPrintRequest) -> Self {
+        Self::SucceedPackDayBatchPrint(request)
+    }
+
+    pub fn fail_pack_day_batch_print(
+        request: PackDayBatchPrintRequest,
+        failed_artifact: Option<PackDayBatchPrintArtifact>,
+        failure: PackDayBatchPrintFailureKind,
+    ) -> Self {
+        Self::FailPackDayBatchPrint {
+            request,
+            failed_artifact,
+            failure,
+        }
+    }
+
+    pub const fn reset_pack_day_batch_print() -> Self {
+        Self::ResetPackDayBatchPrint
     }
 
     pub fn begin_pack_day_host_handoff(request: PackDayHostHandoffRequest) -> Self {
@@ -1719,6 +1818,34 @@ fn apply_command(projection: &mut AppProjection, command: AppStateCommand) -> Ap
                 .pack_day
                 .replace_print(PackDayPrintProjection::default());
         }
+        AppStateCommand::BeginPackDayBatchPrint(request) => {
+            projection
+                .pack_day
+                .replace_batch_print(PackDayBatchPrintProjection::running(request));
+        }
+        AppStateCommand::SucceedPackDayBatchPrint(request) => {
+            projection
+                .pack_day
+                .replace_batch_print(PackDayBatchPrintProjection::succeeded(request));
+        }
+        AppStateCommand::FailPackDayBatchPrint {
+            request,
+            failed_artifact,
+            failure,
+        } => {
+            projection
+                .pack_day
+                .replace_batch_print(PackDayBatchPrintProjection::failed(
+                    request,
+                    failed_artifact,
+                    failure,
+                ));
+        }
+        AppStateCommand::ResetPackDayBatchPrint => {
+            projection
+                .pack_day
+                .replace_batch_print(PackDayBatchPrintProjection::default());
+        }
         AppStateCommand::BeginPackDayHostHandoff(request) => {
             projection
                 .pack_day
@@ -2071,10 +2198,11 @@ mod tests {
     use super::{
         AppProjection, AppShellProjection, AppStateCommand, AppStateRepository,
         AppStateRepositoryError, AppStateStore, AppStateStoreError, FarmSetupFlowStage, HomeRoute,
-        InMemoryAppStateRepository, OrdersScreenProjection, PackDayExportProjection,
-        PackDayExportRequest, PackDayHostHandoffProjection, PackDayHostHandoffRequest,
-        PackDayPrintProjection, PackDayPrintRequest, PackDayScreenProjection, PersistedAppState,
-        ProductEditorState, ProductsScreenProjection, ProductsScreenQueryState, SettingsPreference,
+        InMemoryAppStateRepository, OrdersScreenProjection, PackDayBatchPrintProjection,
+        PackDayBatchPrintRequest, PackDayExportProjection, PackDayExportRequest,
+        PackDayHostHandoffProjection, PackDayHostHandoffRequest, PackDayPrintProjection,
+        PackDayPrintRequest, PackDayScreenProjection, PersistedAppState, ProductEditorState,
+        ProductsScreenProjection, ProductsScreenQueryState, SettingsPreference,
         derive_sync_projection, derive_sync_run_status,
     };
     use radroots_studio_app_models::{
@@ -2083,7 +2211,8 @@ mod tests {
         FarmerActivationProjection, FarmerSection, FulfillmentWindowId, LoggedOutStartupPhase,
         LoggedOutStartupProjection, OrderDetailItemRow, OrderDetailProjection, OrderId,
         OrderPrimaryAction, OrderStatus, OrdersFilter, OrdersListProjection, OrdersListRow,
-        OrdersListSummary, OrdersScreenQueryState, PackDayExportArtifact,
+        OrdersListSummary, OrdersScreenQueryState, PackDayBatchPrintArtifact,
+        PackDayBatchPrintFailureKind, PackDayBatchPrintStatus, PackDayExportArtifact,
         PackDayExportArtifactKind, PackDayExportBundle, PackDayExportInstanceId,
         PackDayExportStatus, PackDayHostHandoffKind, PackDayHostHandoffStatus, PackDayPackListRow,
         PackDayPrintFailureKind, PackDayPrintKind, PackDayPrintLabelStock, PackDayPrintStatus,
@@ -2151,6 +2280,13 @@ mod tests {
     ) -> PackDayPrintRequest {
         let bundle = sample_pack_day_export_bundle(fulfillment_window_id);
         PackDayPrintRequest::for_bundle(kind, &bundle)
+    }
+
+    fn sample_pack_day_batch_print_request(
+        fulfillment_window_id: FulfillmentWindowId,
+    ) -> PackDayBatchPrintRequest {
+        let bundle = sample_pack_day_export_bundle(fulfillment_window_id);
+        PackDayBatchPrintRequest::for_bundle(&bundle)
     }
 
     fn sample_pack_day_export_bundle(
@@ -2545,6 +2681,15 @@ mod tests {
             }
         );
         assert_eq!(
+            PackDayScreenProjection::default().batch_print,
+            PackDayBatchPrintProjection {
+                status: PackDayBatchPrintStatus::Idle,
+                request: None,
+                failed_artifact: None,
+                failure: None,
+            }
+        );
+        assert_eq!(
             PackDayScreenProjection::default().host_handoff,
             PackDayHostHandoffProjection {
                 status: PackDayHostHandoffStatus::Idle,
@@ -2676,6 +2821,95 @@ mod tests {
         assert_eq!(
             store.pack_day_projection().print,
             PackDayPrintProjection::default()
+        );
+    }
+
+    #[test]
+    fn pack_day_batch_print_state_is_restart_ephemeral_and_skips_persistence() {
+        let mut store =
+            AppStateStore::load(FailingRepository).expect("failing repository should still load");
+        let fulfillment_window_id = FulfillmentWindowId::new();
+        let request = sample_pack_day_batch_print_request(fulfillment_window_id);
+
+        assert_eq!(
+            request.artifacts,
+            Vec::from(PackDayBatchPrintArtifact::all_v1())
+        );
+        assert_eq!(
+            request
+                .artifacts
+                .last()
+                .expect("v1 batch should include customer labels")
+                .label_stock,
+            Some(PackDayPrintLabelStock::Avery5160Letter30Up)
+        );
+        assert_eq!(
+            store.apply(AppStateCommand::begin_pack_day_batch_print(request.clone(),)),
+            Ok(true)
+        );
+        assert_eq!(
+            store.pack_day_projection().batch_print,
+            PackDayBatchPrintProjection::running(request.clone())
+        );
+        assert_eq!(
+            store.persisted_state().seller.pack_day_query,
+            PackDayScreenQueryState::default()
+        );
+
+        assert_eq!(
+            store.apply(AppStateCommand::succeed_pack_day_batch_print(
+                request.clone(),
+            )),
+            Ok(true)
+        );
+        assert_eq!(
+            store.pack_day_projection().batch_print,
+            PackDayBatchPrintProjection::succeeded(request.clone())
+        );
+
+        let failed_artifact =
+            PackDayBatchPrintArtifact::from_print_kind(PackDayPrintKind::PrintCustomerLabels);
+        assert_eq!(
+            store.apply(AppStateCommand::fail_pack_day_batch_print(
+                request.clone(),
+                Some(failed_artifact),
+                PackDayBatchPrintFailureKind::CustomerLabelsAvery5160Overflow,
+            )),
+            Ok(true)
+        );
+        assert_eq!(
+            store.pack_day_projection().batch_print,
+            PackDayBatchPrintProjection::failed(
+                request.clone(),
+                Some(failed_artifact),
+                PackDayBatchPrintFailureKind::CustomerLabelsAvery5160Overflow,
+            )
+        );
+
+        assert_eq!(
+            store.apply(AppStateCommand::fail_pack_day_batch_print(
+                request.clone(),
+                None,
+                PackDayBatchPrintFailureKind::Preflight,
+            )),
+            Ok(true)
+        );
+        assert_eq!(
+            store.pack_day_projection().batch_print,
+            PackDayBatchPrintProjection::failed(
+                request,
+                None,
+                PackDayBatchPrintFailureKind::Preflight,
+            )
+        );
+
+        assert_eq!(
+            store.apply(AppStateCommand::reset_pack_day_batch_print()),
+            Ok(true)
+        );
+        assert_eq!(
+            store.pack_day_projection().batch_print,
+            PackDayBatchPrintProjection::default()
         );
     }
 
@@ -2847,6 +3081,41 @@ mod tests {
     }
 
     #[test]
+    fn changing_pack_day_window_clears_stale_batch_print_state() {
+        let mut store = AppStateStore::load(InMemoryAppStateRepository::default())
+            .expect("in-memory repository should load");
+        let fulfillment_window_id = FulfillmentWindowId::new();
+        let next_window_id = FulfillmentWindowId::new();
+        let request = sample_pack_day_batch_print_request(fulfillment_window_id);
+
+        assert_eq!(
+            store.apply(AppStateCommand::begin_pack_day_batch_print(request)),
+            Ok(true)
+        );
+        assert_eq!(
+            store.pack_day_projection().batch_print.status,
+            PackDayBatchPrintStatus::Running
+        );
+
+        assert_eq!(
+            store.apply(AppStateCommand::set_pack_day_fulfillment_window(Some(
+                next_window_id,
+            ))),
+            Ok(true)
+        );
+        assert_eq!(
+            store.pack_day_projection().query,
+            PackDayScreenQueryState {
+                fulfillment_window_id: Some(next_window_id),
+            }
+        );
+        assert_eq!(
+            store.pack_day_projection().batch_print,
+            PackDayBatchPrintProjection::default()
+        );
+    }
+
+    #[test]
     fn changing_pack_day_export_state_clears_stale_host_handoff_state() {
         let mut store = AppStateStore::load(InMemoryAppStateRepository::default())
             .expect("in-memory repository should load");
@@ -2923,6 +3192,42 @@ mod tests {
         assert_eq!(
             store.pack_day_projection().print,
             PackDayPrintProjection::default()
+        );
+    }
+
+    #[test]
+    fn changing_pack_day_export_state_clears_stale_batch_print_state() {
+        let mut store = AppStateStore::load(InMemoryAppStateRepository::default())
+            .expect("in-memory repository should load");
+        let fulfillment_window_id = FulfillmentWindowId::new();
+        let export_request = sample_pack_day_export_request(fulfillment_window_id);
+        let batch_request = sample_pack_day_batch_print_request(fulfillment_window_id);
+
+        assert_eq!(
+            store.apply(AppStateCommand::begin_pack_day_export(
+                export_request.clone(),
+            )),
+            Ok(true)
+        );
+        assert_eq!(
+            store.apply(AppStateCommand::begin_pack_day_batch_print(batch_request)),
+            Ok(true)
+        );
+        assert_eq!(
+            store.pack_day_projection().batch_print.status,
+            PackDayBatchPrintStatus::Running
+        );
+
+        assert_eq!(
+            store.apply(AppStateCommand::succeed_pack_day_export(
+                export_request,
+                sample_pack_day_export_bundle(fulfillment_window_id),
+            )),
+            Ok(true)
+        );
+        assert_eq!(
+            store.pack_day_projection().batch_print,
+            PackDayBatchPrintProjection::default()
         );
     }
 
@@ -3007,6 +3312,46 @@ mod tests {
         assert_eq!(
             store.pack_day_projection().print,
             PackDayPrintProjection::default()
+        );
+    }
+
+    #[test]
+    fn replacing_pack_day_projection_with_new_window_clears_stale_batch_print_state() {
+        let mut store = AppStateStore::load(InMemoryAppStateRepository::default())
+            .expect("in-memory repository should load");
+        let farm_id = FarmId::new();
+        let current_window_id = FulfillmentWindowId::new();
+        let next_window_id = FulfillmentWindowId::new();
+        let request = sample_pack_day_batch_print_request(current_window_id);
+
+        assert_eq!(
+            store.apply(AppStateCommand::begin_pack_day_batch_print(request)),
+            Ok(true)
+        );
+
+        let next_pack_day = PackDayProjection {
+            fulfillment_window: Some(radroots_studio_app_models::FulfillmentWindowSummary {
+                fulfillment_window_id: next_window_id,
+                farm_id,
+                starts_at: "2026-04-25T16:00:00Z".to_owned(),
+                ends_at: "2026-04-25T19:00:00Z".to_owned(),
+            }),
+            totals_by_product: Vec::new(),
+            pack_list: Vec::new(),
+            pickup_roster: Vec::new(),
+            reminders: ReminderFeedProjection::default(),
+        };
+
+        assert_eq!(
+            store.apply(AppStateCommand::replace_pack_day_projection(
+                next_pack_day.clone(),
+            )),
+            Ok(true)
+        );
+        assert_eq!(store.pack_day_projection().projection, next_pack_day);
+        assert_eq!(
+            store.pack_day_projection().batch_print,
+            PackDayBatchPrintProjection::default()
         );
     }
 

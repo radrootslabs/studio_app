@@ -12,7 +12,7 @@ macro_rules! define_app_text_keys {
 
             pub const fn id(self) -> &'static str {
                 match self {
-                    $(Self::$variant => $id,)+
+                    $(Self::$variant => concat!("messages.", $id),)+
                 }
             }
         }
@@ -259,6 +259,15 @@ define_app_text_keys! {
     PackDayPrintCustomerLabelsSubmittedTitle => "pack_day.print.customer_labels.submitted.title",
     PackDayPrintCustomerLabelsFailedTitle => "pack_day.print.customer_labels.failed.title",
     PackDayPrintCustomerLabelsAvery5160OverflowFailedTitle => "pack_day.print.customer_labels.avery_5160_overflow.failed.title",
+    PackDayBatchPrintAction => "pack_day.batch_print.action",
+    PackDayBatchPrintActionRunning => "pack_day.batch_print.action.running",
+    PackDayBatchPrintQueuedTitle => "pack_day.batch_print.queued.title",
+    PackDayBatchPrintSucceededTitle => "pack_day.batch_print.succeeded.title",
+    PackDayBatchPrintFailedTitle => "pack_day.batch_print.failed.title",
+    PackDayBatchPrintFailedPreflightTitle => "pack_day.batch_print.failed.preflight.title",
+    PackDayBatchPrintFailedQueueLaunchTitle => "pack_day.batch_print.failed.queue_launch.title",
+    PackDayBatchPrintFailedQueueExitTitle => "pack_day.batch_print.failed.queue_exit.title",
+    PackDayBatchPrintCustomerLabelsAvery5160OverflowFailedTitle => "pack_day.batch_print.customer_labels.avery_5160_overflow.failed.title",
     PackDayHostHandoffRevealAction => "pack_day.host_handoff.reveal.action",
     PackDayHostHandoffRevealActionRunning => "pack_day.host_handoff.reveal.action.running",
     PackDayHostHandoffOpenPackSheetAction => "pack_day.host_handoff.open_pack_sheet.action",
