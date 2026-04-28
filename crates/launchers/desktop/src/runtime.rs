@@ -16,11 +16,11 @@ use radroots_studio_app_models::{
     FarmId, FarmOrderMethod, FarmProfileRecord, FarmReadiness, FarmRulesProjection, FarmSetupDraft,
     FarmSetupProjection, FarmSummary, FarmerSection, FulfillmentWindowId,
     LoggedOutStartupProjection, OrderDetailProjection, OrderId, OrderRecoveryProjection,
-    OrdersFilter, OrdersListProjection, OrdersScreenQueryState, PackDayExportBundle,
-    PackDayExportInstanceId, PackDayExportStatus, PackDayHostHandoffKind, PackDayHostHandoffStatus,
-    PackDayPrintKind, PackDayPrintStatus, PackDayProjection, PackDayScreenQueryState,
-    PersonalSection, PickupLocationRecord, ProductEditorDraft, ProductId, ProductsFilter,
-    ProductsListProjection, ProductsSort, RecoveryKind, RecoveryQueueProjection,
+    OrdersFilter, OrdersListProjection, OrdersScreenQueryState, PackDayBatchPrintStatus,
+    PackDayExportBundle, PackDayExportInstanceId, PackDayExportStatus, PackDayHostHandoffKind,
+    PackDayHostHandoffStatus, PackDayPrintKind, PackDayPrintStatus, PackDayProjection,
+    PackDayScreenQueryState, PersonalSection, PickupLocationRecord, ProductEditorDraft, ProductId,
+    ProductsFilter, ProductsListProjection, ProductsSort, RecoveryKind, RecoveryQueueProjection,
     RecoveryRecordId, RecoveryState, ReminderDeadlineProjection, ReminderDeliveryState,
     ReminderFeedProjection, ReminderId, ReminderKind, ReminderLogEntryProjection,
     ReminderLogProjection, ReminderSurface, ReminderUrgency, SettingsAccountProjection,
@@ -38,9 +38,9 @@ use radroots_studio_app_state::{
     AppStateStore, AppStateStoreError, BuyerBrowseScreenProjection, BuyerCartScreenProjection,
     BuyerOrdersScreenProjection, BuyerSearchScreenProjection, BuyerSearchScreenQueryState,
     FarmSetupFlowStage, FarmWorkspaceReadinessProjection, HomeRoute, OrdersScreenProjection,
-    PackDayExportRequest, PackDayHostHandoffRequest, PackDayPrintRequest, PackDayScreenProjection,
-    PersistedAppState, PersonalWorkspaceProjection, ProductsScreenProjection,
-    ProductsScreenQueryState, APP_STATE_FILE_NAME,
+    PackDayBatchPrintRequest, PackDayExportRequest, PackDayHostHandoffRequest, PackDayPrintRequest,
+    PackDayScreenProjection, PersistedAppState, PersonalWorkspaceProjection,
+    ProductsScreenProjection, ProductsScreenQueryState, APP_STATE_FILE_NAME,
 };
 use radroots_studio_app_sync::{
     AppSyncProjection, AppSyncRequest, AppSyncResult, AppSyncTransport, AppSyncTransportError,
@@ -64,7 +64,8 @@ use crate::pack_day_host_handoff::{
 };
 use crate::pack_day_print::{
     cleanup_prepared_customer_label_asset_root,
-    cleanup_prepared_customer_label_assets_for_export_instance, plan_pack_day_print,
+    cleanup_prepared_customer_label_assets_for_export_instance, plan_pack_day_batch_print,
+    plan_pack_day_print, PackDayBatchPrintCommandPlan, PackDayBatchPrintError,
     PackDayPrintCommandPlan, PackDayPrintError,
 };
 use crate::remote_signer::{
@@ -453,6 +454,24 @@ impl DesktopAppRuntime {
         result: Result<(), PackDayPrintError>,
     ) -> Result<bool, DesktopAppRuntimeCommandError> {
         self.lock_state_mut().finish_pack_day_print(request, result)
+    }
+
+    pub fn prepare_pack_day_batch_print(
+        &self,
+    ) -> Result<
+        Option<(PackDayBatchPrintRequest, PackDayBatchPrintCommandPlan)>,
+        DesktopAppRuntimeCommandError,
+    > {
+        self.lock_state_mut().prepare_pack_day_batch_print()
+    }
+
+    pub fn finish_pack_day_batch_print(
+        &self,
+        request: PackDayBatchPrintRequest,
+        result: Result<(), PackDayBatchPrintError>,
+    ) -> Result<bool, DesktopAppRuntimeCommandError> {
+        self.lock_state_mut()
+            .finish_pack_day_batch_print(request, result)
     }
 
     pub fn update_product_stock(
@@ -1860,6 +1879,8 @@ impl DesktopAppRuntimeState {
         if self.state_store.pack_day_projection().host_handoff.status
             == PackDayHostHandoffStatus::Running
             || self.state_store.pack_day_projection().print.status == PackDayPrintStatus::Running
+            || self.state_store.pack_day_projection().batch_print.status
+                == PackDayBatchPrintStatus::Running
         {
             return Ok(None);
         }
@@ -1896,6 +1917,8 @@ impl DesktopAppRuntimeState {
         if self.state_store.pack_day_projection().print.status == PackDayPrintStatus::Running
             || self.state_store.pack_day_projection().host_handoff.status
                 == PackDayHostHandoffStatus::Running
+            || self.state_store.pack_day_projection().batch_print.status
+                == PackDayBatchPrintStatus::Running
         {
             return Ok(None);
         }
@@ -1921,6 +1944,83 @@ impl DesktopAppRuntimeState {
                 let _ = self
                     .state_store
                     .apply_in_memory(failure_command);
+                Err(error.into())
+            }
+        }
+    }
+
+    fn prepare_pack_day_batch_print(
+        &mut self,
+    ) -> Result<
+        Option<(PackDayBatchPrintRequest, PackDayBatchPrintCommandPlan)>,
+        DesktopAppRuntimeCommandError,
+    > {
+        if self.state_store.pack_day_projection().batch_print.status
+            == PackDayBatchPrintStatus::Running
+            || self.state_store.pack_day_projection().print.status == PackDayPrintStatus::Running
+            || self.state_store.pack_day_projection().host_handoff.status
+                == PackDayHostHandoffStatus::Running
+        {
+            return Ok(None);
+        }
+
+        let Some(bundle) = self.current_pack_day_export_bundle() else {
+            return Ok(None);
+        };
+        let request = PackDayBatchPrintRequest::for_bundle(&bundle);
+        let _ = self
+            .state_store
+            .apply_in_memory(AppStateCommand::begin_pack_day_batch_print(request.clone()));
+
+        match plan_pack_day_batch_print(&bundle) {
+            Ok(plan) => Ok(Some((request, plan))),
+            Err(error) => {
+                let _ =
+                    self.state_store
+                        .apply_in_memory(AppStateCommand::fail_pack_day_batch_print(
+                            request,
+                            error.failed_artifact(),
+                            error.failure_kind(),
+                        ));
+                Err(error.into())
+            }
+        }
+    }
+
+    fn finish_pack_day_batch_print(
+        &mut self,
+        request: PackDayBatchPrintRequest,
+        result: Result<(), PackDayBatchPrintError>,
+    ) -> Result<bool, DesktopAppRuntimeCommandError> {
+        if !self.current_pack_day_batch_print_request_matches(&request) {
+            return Ok(false);
+        }
+
+        let cleanup_export_instance_id = request.export_instance_id;
+
+        match result {
+            Ok(()) => {
+                let changed = self
+                    .state_store
+                    .apply_in_memory(AppStateCommand::succeed_pack_day_batch_print(request));
+                self.cleanup_prepared_pack_day_print_assets_for_export_instance(
+                    cleanup_export_instance_id,
+                    "batch_print_completion",
+                );
+                Ok(changed)
+            }
+            Err(error) => {
+                let _ =
+                    self.state_store
+                        .apply_in_memory(AppStateCommand::fail_pack_day_batch_print(
+                            request,
+                            error.failed_artifact(),
+                            error.failure_kind(),
+                        ));
+                self.cleanup_prepared_pack_day_print_assets_for_export_instance(
+                    cleanup_export_instance_id,
+                    "batch_print_completion",
+                );
                 Err(error.into())
             }
         }
@@ -3374,6 +3474,15 @@ impl DesktopAppRuntimeState {
         pack_day.print.status == PackDayPrintStatus::Running
             && pack_day.print.request.as_ref() == Some(request)
     }
+
+    fn current_pack_day_batch_print_request_matches(
+        &self,
+        request: &PackDayBatchPrintRequest,
+    ) -> bool {
+        let pack_day = self.state_store.pack_day_projection();
+        pack_day.batch_print.status == PackDayBatchPrintStatus::Running
+            && pack_day.batch_print.request.as_ref() == Some(request)
+    }
 }
 
 #[derive(Debug, Error)]
@@ -3394,6 +3503,8 @@ pub enum DesktopAppRuntimeCommandError {
     PackDayHostHandoff(#[from] PackDayHostHandoffError),
     #[error(transparent)]
     PackDayPrint(#[from] PackDayPrintError),
+    #[error(transparent)]
+    PackDayBatchPrint(#[from] PackDayBatchPrintError),
 }
 
 #[derive(Debug, Error)]
@@ -4723,7 +4834,8 @@ mod tests {
         FarmOperatingRulesRecord, FarmOrderMethod, FarmProfileRecord, FarmReadiness,
         FarmReadinessBlocker, FarmSetupDraft, FarmSetupProjection, FarmSummary,
         FarmerActivationProjection, FarmerSection, FulfillmentWindowId, FulfillmentWindowRecord,
-        LoggedOutStartupProjection, OrderId, OrderStatus, OrdersFilter, PackDayExportInstanceId,
+        LoggedOutStartupProjection, OrderId, OrderStatus, OrdersFilter, PackDayBatchPrintArtifact,
+        PackDayBatchPrintFailureKind, PackDayBatchPrintStatus, PackDayExportInstanceId,
         PackDayExportStatus, PackDayHostHandoffKind, PackDayHostHandoffStatus, PackDayPackListRow,
         PackDayPrintFailureKind, PackDayPrintKind, PackDayPrintStatus, PackDayProductTotalRow,
         PackDayProjection, PackDayRosterRow, PersonalSection, PickupLocationId,
@@ -4762,7 +4874,9 @@ mod tests {
         SYNC_TRANSPORT_UNAVAILABLE_MESSAGE,
     };
     use crate::pack_day_host_handoff::PackDayHostHandoffError;
-    use crate::pack_day_print::{prepared_customer_label_asset_root, PackDayPrintError};
+    use crate::pack_day_print::{
+        prepared_customer_label_asset_root, PackDayBatchPrintError, PackDayPrintError,
+    };
 
     #[derive(Clone)]
     struct SharedRecordedSyncTransport(Arc<Mutex<RecordedAppSyncTransport>>);
@@ -7520,6 +7634,211 @@ mod tests {
                 }
             }
         }
+
+        cleanup_bootstrapped_runtime_paths(&paths);
+    }
+
+    #[test]
+    fn runtime_prepare_pack_day_batch_print_uses_the_current_export_bundle_for_all_v1_documents() {
+        let (runtime, paths) = bootstrapped_runtime("pack_day_batch_print_prepare");
+        let (_, farm_id) = provision_ready_farmer_account(&runtime);
+
+        seed_order_workspace(&runtime, farm_id);
+        assert!(runtime.open_pack_day(None).expect("pack day should open"));
+        assert!(runtime
+            .export_pack_day()
+            .expect("pack day export should succeed"));
+
+        let (request, plan) = runtime
+            .prepare_pack_day_batch_print()
+            .expect("batch print should prepare")
+            .expect("batch print should produce a plan");
+
+        let summary = runtime.summary();
+        let bundle = summary
+            .pack_day_projection
+            .export
+            .bundle
+            .as_ref()
+            .expect("pack day export bundle");
+        assert_eq!(
+            summary.pack_day_projection.batch_print.status,
+            PackDayBatchPrintStatus::Running
+        );
+        assert_eq!(
+            summary.pack_day_projection.batch_print.request,
+            Some(request.clone())
+        );
+        assert_eq!(request.export_instance_id, bundle.export_instance_id);
+        assert_eq!(plan.export_instance_id, bundle.export_instance_id);
+        assert_eq!(
+            plan.plans
+                .iter()
+                .map(|plan| PackDayBatchPrintArtifact::from_print_kind(plan.kind))
+                .collect::<Vec<_>>(),
+            Vec::from(PackDayBatchPrintArtifact::all_v1())
+        );
+        assert!(
+            plan.plans
+                .iter()
+                .all(|plan| plan.command_program == "lp")
+        );
+
+        assert!(runtime
+            .finish_pack_day_batch_print(request, Ok(()))
+            .expect("batch print success should apply"));
+        assert_eq!(
+            runtime.summary().pack_day_projection.batch_print.status,
+            PackDayBatchPrintStatus::Succeeded
+        );
+
+        cleanup_bootstrapped_runtime_paths(&paths);
+    }
+
+    #[test]
+    fn runtime_pack_day_batch_print_blocks_conflicting_pack_day_actions() {
+        let (runtime, paths) = bootstrapped_runtime("pack_day_batch_print_conflicts");
+        let (_, farm_id) = provision_ready_farmer_account(&runtime);
+
+        seed_order_workspace(&runtime, farm_id);
+        assert!(runtime.open_pack_day(None).expect("pack day should open"));
+        assert!(runtime
+            .export_pack_day()
+            .expect("pack day export should succeed"));
+
+        let (_, _) = runtime
+            .prepare_pack_day_batch_print()
+            .expect("batch print should prepare")
+            .expect("batch print should produce a plan");
+        assert!(runtime
+            .prepare_pack_day_print(PackDayPrintKind::PrintPackSheet)
+            .expect("print prepare should not fail")
+            .is_none());
+        assert!(runtime
+            .prepare_pack_day_host_handoff(PackDayHostHandoffKind::RevealBundle)
+            .expect("host handoff prepare should not fail")
+            .is_none());
+
+        let _ = runtime
+            .lock_state_mut()
+            .state_store
+            .apply_in_memory(AppStateCommand::reset_pack_day_batch_print());
+
+        let (print_request, _) = runtime
+            .prepare_pack_day_print(PackDayPrintKind::PrintPackSheet)
+            .expect("print should prepare")
+            .expect("print should produce a plan");
+        assert!(runtime
+            .prepare_pack_day_batch_print()
+            .expect("batch print prepare should not fail")
+            .is_none());
+        assert!(runtime
+            .finish_pack_day_print(print_request, Ok(()))
+            .expect("print success should apply"));
+        let _ = runtime
+            .lock_state_mut()
+            .state_store
+            .apply_in_memory(AppStateCommand::reset_pack_day_print());
+
+        let (_, _) = runtime
+            .prepare_pack_day_host_handoff(PackDayHostHandoffKind::RevealBundle)
+            .expect("host handoff should prepare")
+            .expect("host handoff should produce a plan");
+        assert!(runtime
+            .prepare_pack_day_batch_print()
+            .expect("batch print prepare should not fail")
+            .is_none());
+
+        cleanup_bootstrapped_runtime_paths(&paths);
+    }
+
+    #[test]
+    fn runtime_finish_pack_day_batch_print_records_failures_and_cleans_prepared_assets() {
+        let (runtime, paths) = bootstrapped_runtime("pack_day_batch_print_failure_cleanup");
+        let (_, farm_id) = provision_ready_farmer_account(&runtime);
+
+        seed_order_workspace(&runtime, farm_id);
+        assert!(runtime.open_pack_day(None).expect("pack day should open"));
+        assert!(runtime
+            .export_pack_day()
+            .expect("pack day export should succeed"));
+
+        let (request, plan) = runtime
+            .prepare_pack_day_batch_print()
+            .expect("batch print should prepare")
+            .expect("batch print should produce a plan");
+        let prepared_directory = plan
+            .plans
+            .iter()
+            .find(|plan| plan.kind == PackDayPrintKind::PrintCustomerLabels)
+            .and_then(|plan| plan.target_path.parent())
+            .expect("prepared customer labels parent")
+            .to_path_buf();
+        assert!(prepared_directory.is_dir());
+
+        let failed_artifact =
+            PackDayBatchPrintArtifact::from_print_kind(PackDayPrintKind::PrintPickupRoster);
+        let error = runtime
+            .finish_pack_day_batch_print(
+                request.clone(),
+                Err(PackDayBatchPrintError::QueueExit {
+                    submitted_artifacts: vec![PackDayBatchPrintArtifact::from_print_kind(
+                        PackDayPrintKind::PrintPackSheet,
+                    )],
+                    failed_artifact,
+                    source: PackDayPrintError::UnsupportedPlatform,
+                }),
+            )
+            .expect_err("batch print failure should surface");
+        assert!(matches!(
+            error,
+            DesktopAppRuntimeCommandError::PackDayBatchPrint(
+                PackDayBatchPrintError::QueueExit { .. }
+            )
+        ));
+        assert!(!prepared_directory.exists());
+
+        let summary = runtime.summary();
+        let batch_print = &summary.pack_day_projection.batch_print;
+        assert_eq!(batch_print.status, PackDayBatchPrintStatus::Failed);
+        assert_eq!(batch_print.request, Some(request));
+        assert_eq!(batch_print.failed_artifact, Some(failed_artifact));
+        assert_eq!(
+            batch_print.failure,
+            Some(PackDayBatchPrintFailureKind::QueueExit)
+        );
+
+        cleanup_bootstrapped_runtime_paths(&paths);
+    }
+
+    #[test]
+    fn runtime_finish_pack_day_batch_print_ignores_stale_background_completion() {
+        let (runtime, paths) = bootstrapped_runtime("pack_day_batch_print_stale");
+        let (_, farm_id) = provision_ready_farmer_account(&runtime);
+
+        seed_order_workspace(&runtime, farm_id);
+        assert!(runtime.open_pack_day(None).expect("pack day should open"));
+        assert!(runtime
+            .export_pack_day()
+            .expect("pack day export should succeed"));
+
+        let (request, _) = runtime
+            .prepare_pack_day_batch_print()
+            .expect("batch print should prepare")
+            .expect("batch print should produce a plan");
+
+        let _ = runtime
+            .lock_state_mut()
+            .state_store
+            .apply_in_memory(AppStateCommand::reset_pack_day_batch_print());
+
+        assert!(!runtime
+            .finish_pack_day_batch_print(request, Ok(()))
+            .expect("stale completion should no-op"));
+        assert_eq!(
+            runtime.summary().pack_day_projection.batch_print.status,
+            PackDayBatchPrintStatus::Idle
+        );
 
         cleanup_bootstrapped_runtime_paths(&paths);
     }

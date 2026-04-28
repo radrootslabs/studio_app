@@ -19,7 +19,8 @@ use radroots_studio_app_models::{
     FarmSetupBlocker, FarmSetupDraft, FarmSummary, FarmTimingConflictKind, FarmerSection,
     FulfillmentWindowId, FulfillmentWindowRecord, FulfillmentWindowSummary, LoggedOutStartupPhase,
     OrderDetailItemRow, OrderDetailProjection, OrderId, OrderListRow, OrderPrimaryAction,
-    OrderRecoveryProjection, OrderStatus, OrdersFilter, OrdersListRow, PackDayExportBundle,
+    OrderRecoveryProjection, OrderStatus, OrdersFilter, OrdersListRow,
+    PackDayBatchPrintFailureKind, PackDayBatchPrintStatus, PackDayExportBundle,
     PackDayExportStatus, PackDayHostHandoffKind, PackDayHostHandoffStatus, PackDayPackListRow,
     PackDayPrintFailureKind, PackDayPrintKind, PackDayPrintStatus, PackDayProductTotalRow,
     PackDayRosterRow, PersonalEntryState, PersonalSection, PickupLocationId, PickupLocationRecord,
@@ -39,8 +40,9 @@ use radroots_studio_app_remote_signer::{
 };
 use radroots_studio_app_sqlite::derive_farm_rules_readiness;
 use radroots_studio_app_state::{
-    FarmSetupFlowStage, FarmWorkspaceStatus, HomeRoute, PackDayExportProjection,
-    PackDayHostHandoffRequest, PackDayPrintRequest, derive_product_publish_blockers,
+    FarmSetupFlowStage, FarmWorkspaceStatus, HomeRoute, PackDayBatchPrintRequest,
+    PackDayExportProjection, PackDayHostHandoffRequest, PackDayPrintRequest,
+    derive_product_publish_blockers,
 };
 use radroots_studio_app_sync::{
     AppSyncRunStatus, SyncAggregateRef, SyncCheckpointState, SyncConflict, SyncConflictKind,
@@ -78,7 +80,8 @@ use crate::pack_day_host_handoff::{
     PackDayHostHandoffCommandPlan, PackDayHostHandoffError, execute_pack_day_host_handoff_plan,
 };
 use crate::pack_day_print::{
-    PackDayPrintCommandPlan, PackDayPrintError, execute_pack_day_print_plan,
+    PackDayBatchPrintCommandPlan, PackDayBatchPrintError, PackDayPrintCommandPlan,
+    PackDayPrintError, execute_pack_day_batch_print_plan, execute_pack_day_print_plan,
 };
 use crate::runtime::{
     DesktopAppRuntime, DesktopAppRuntimeSummary, DesktopAppSyncConflictSummary,
@@ -1724,6 +1727,34 @@ impl HomeView {
         }
     }
 
+    fn start_pack_day_batch_print(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        match self.runtime.prepare_pack_day_batch_print() {
+            Ok(Some((request, plan))) => {
+                cx.notify();
+                cx.spawn_in(window, async move |this, cx| {
+                    let result = cx
+                        .background_executor()
+                        .spawn(run_pack_day_batch_print(plan))
+                        .await;
+                    let _ = this.update(cx, |this, cx| {
+                        this.finish_pack_day_batch_print(request, result, cx);
+                    });
+                })
+                .detach();
+            }
+            Ok(None) => {}
+            Err(runtime_error) => {
+                error!(
+                    target: "pack_day",
+                    event = "pack_day.batch_print_prepare_failed",
+                    error = %runtime_error,
+                    "failed to prepare pack day batch print"
+                );
+                cx.notify();
+            }
+        }
+    }
+
     fn finish_pack_day_host_handoff(
         &mut self,
         request: PackDayHostHandoffRequest,
@@ -1764,6 +1795,27 @@ impl HomeView {
                     kind = %kind,
                     error = %runtime_error,
                     "failed to complete pack day print"
+                );
+                cx.notify();
+            }
+        }
+    }
+
+    fn finish_pack_day_batch_print(
+        &mut self,
+        request: PackDayBatchPrintRequest,
+        result: Result<(), PackDayBatchPrintError>,
+        cx: &mut Context<Self>,
+    ) {
+        match self.runtime.finish_pack_day_batch_print(request, result) {
+            Ok(true) => cx.notify(),
+            Ok(false) => {}
+            Err(runtime_error) => {
+                error!(
+                    target: "pack_day",
+                    event = "pack_day.batch_print_failed",
+                    error = %runtime_error,
+                    "failed to complete pack day batch print"
                 );
                 cx.notify();
             }
@@ -3530,6 +3582,7 @@ impl HomeView {
                         cx,
                     )
                 }),
+                cx.listener(|this, _, window, cx| this.start_pack_day_batch_print(window, cx)),
                 cx.listener(|this, _, window, cx| {
                     this.start_pack_day_print(PackDayPrintKind::PrintPackSheet, window, cx)
                 }),
@@ -9179,6 +9232,12 @@ async fn run_pack_day_print(plan: PackDayPrintCommandPlan) -> Result<(), PackDay
     execute_pack_day_print_plan(&plan)
 }
 
+async fn run_pack_day_batch_print(
+    plan: PackDayBatchPrintCommandPlan,
+) -> Result<(), PackDayBatchPrintError> {
+    execute_pack_day_batch_print_plan(&plan)
+}
+
 async fn run_startup_signer_pending_poll(
     record: radroots_studio_app_remote_signer::RadrootsAppRemoteSignerSessionRecord,
     client_secret_key_hex: String,
@@ -10016,6 +10075,18 @@ struct PackDayPrintStatusPresentation {
     title_key: AppTextKey,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct PackDayBatchPrintActionPresentation {
+    label_key: AppTextKey,
+    enabled: bool,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct PackDayBatchPrintStatusPresentation {
+    indicator_color: u32,
+    title_key: AppTextKey,
+}
+
 fn pack_day_export_card(
     runtime: &DesktopAppRuntimeSummary,
     on_export: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
@@ -10023,6 +10094,7 @@ fn pack_day_export_card(
     on_open_pack_sheet: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
     on_open_pickup_roster: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
     on_open_customer_labels: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+    on_print_all: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
     on_print_pack_sheet: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
     on_print_pickup_roster: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
     on_print_customer_labels: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
@@ -10033,6 +10105,8 @@ fn pack_day_export_card(
     let detail_rows = pack_day_export_detail_rows(export);
     let host_handoff_actions = pack_day_host_handoff_action_presentations(runtime);
     let host_handoff_status = pack_day_host_handoff_status_presentation(runtime);
+    let batch_print_action = pack_day_batch_print_action_presentation(runtime);
+    let batch_print_status = pack_day_batch_print_status_presentation(runtime);
     let print_actions = pack_day_print_action_presentations(runtime);
     let print_status = pack_day_print_status_presentation(runtime);
     let host_handoff_error_message = runtime
@@ -10205,6 +10279,32 @@ fn pack_day_export_card(
                         }),
                 )
             })
+            .when_some(batch_print_action, |this, action| {
+                let button = if action.enabled {
+                    action_button(
+                        "pack-day-print-all",
+                        app_shared_text(action.label_key),
+                        on_print_all,
+                        cx,
+                    )
+                    .into_any_element()
+                } else {
+                    action_button_disabled(
+                        "pack-day-print-all",
+                        app_shared_text(action.label_key),
+                        cx,
+                    )
+                    .into_any_element()
+                };
+                this.child(
+                    app_stack_v(APP_UI_THEME.foundation.spacing.small_px)
+                        .w_full()
+                        .child(button)
+                        .when_some(batch_print_status, |this, status| {
+                            this.child(pack_day_batch_print_status_note(status))
+                        }),
+                )
+            })
             .when(!print_actions.is_empty(), |this| {
                 let on_print_pack_sheet = Arc::new(on_print_pack_sheet);
                 let on_print_pickup_roster = Arc::new(on_print_pickup_roster);
@@ -10309,6 +10409,8 @@ fn pack_day_host_handoff_action_presentations(
         .then(|| host_handoff.request.as_ref().map(|request| request.kind))
         .flatten();
     let print_running = runtime.pack_day_projection.print.status == PackDayPrintStatus::Running;
+    let batch_print_running =
+        runtime.pack_day_projection.batch_print.status == PackDayBatchPrintStatus::Running;
 
     PackDayHostHandoffKind::all_v1()
         .into_iter()
@@ -10317,6 +10419,7 @@ fn pack_day_host_handoff_action_presentations(
             label_key: pack_day_host_handoff_action_label_key(kind, running_kind),
             enabled: running_kind.is_none()
                 && !print_running
+                && !batch_print_running
                 && pack_day_host_handoff_action_is_available(bundle, kind),
         })
         .collect()
@@ -10356,6 +10459,94 @@ fn pack_day_export_artifact_path(
     Some(PathBuf::from(&bundle.bundle_directory).join(relative_path))
 }
 
+fn pack_day_batch_print_action_presentation(
+    runtime: &DesktopAppRuntimeSummary,
+) -> Option<PackDayBatchPrintActionPresentation> {
+    let bundle = pack_day_export_succeeded_bundle(runtime)?;
+    let batch_print = &runtime.pack_day_projection.batch_print;
+    let batch_running = batch_print.status == PackDayBatchPrintStatus::Running;
+    let print_running = runtime.pack_day_projection.print.status == PackDayPrintStatus::Running;
+    let host_handoff_running =
+        runtime.pack_day_projection.host_handoff.status == PackDayHostHandoffStatus::Running;
+    let all_artifacts_available = PackDayPrintKind::all_v1()
+        .into_iter()
+        .all(|kind| pack_day_print_action_is_available(bundle, kind));
+
+    Some(PackDayBatchPrintActionPresentation {
+        label_key: if batch_running {
+            AppTextKey::PackDayBatchPrintActionRunning
+        } else {
+            AppTextKey::PackDayBatchPrintAction
+        },
+        enabled: !batch_running
+            && !print_running
+            && !host_handoff_running
+            && all_artifacts_available,
+    })
+}
+
+fn pack_day_batch_print_status_presentation(
+    runtime: &DesktopAppRuntimeSummary,
+) -> Option<PackDayBatchPrintStatusPresentation> {
+    let batch_print = &runtime.pack_day_projection.batch_print;
+
+    let status = match (
+        batch_print.status,
+        batch_print.failed_artifact,
+        batch_print.failure,
+    ) {
+        (PackDayBatchPrintStatus::Idle, _, _) => return None,
+        (PackDayBatchPrintStatus::Running, _, _) => PackDayBatchPrintStatusPresentation {
+            indicator_color: APP_UI_THEME.foundation.text.accent,
+            title_key: AppTextKey::PackDayBatchPrintQueuedTitle,
+        },
+        (PackDayBatchPrintStatus::Succeeded, _, _) => PackDayBatchPrintStatusPresentation {
+            indicator_color: APP_UI_THEME.components.app_status_indicator.online,
+            title_key: AppTextKey::PackDayBatchPrintSucceededTitle,
+        },
+        (
+            PackDayBatchPrintStatus::Failed,
+            _,
+            Some(PackDayBatchPrintFailureKind::CustomerLabelsAvery5160Overflow),
+        ) => PackDayBatchPrintStatusPresentation {
+            indicator_color: APP_UI_THEME.components.app_status_indicator.attention,
+            title_key: AppTextKey::PackDayBatchPrintCustomerLabelsAvery5160OverflowFailedTitle,
+        },
+        (PackDayBatchPrintStatus::Failed, Some(failed_artifact), _) => {
+            PackDayBatchPrintStatusPresentation {
+                indicator_color: APP_UI_THEME.components.app_status_indicator.attention,
+                title_key: pack_day_print_failed_title_key(failed_artifact.print_kind),
+            }
+        }
+        (PackDayBatchPrintStatus::Failed, None, Some(PackDayBatchPrintFailureKind::Preflight)) => {
+            PackDayBatchPrintStatusPresentation {
+                indicator_color: APP_UI_THEME.components.app_status_indicator.attention,
+                title_key: AppTextKey::PackDayBatchPrintFailedPreflightTitle,
+            }
+        }
+        (
+            PackDayBatchPrintStatus::Failed,
+            None,
+            Some(PackDayBatchPrintFailureKind::QueueLaunch),
+        ) => PackDayBatchPrintStatusPresentation {
+            indicator_color: APP_UI_THEME.components.app_status_indicator.attention,
+            title_key: AppTextKey::PackDayBatchPrintFailedQueueLaunchTitle,
+        },
+        (PackDayBatchPrintStatus::Failed, None, Some(PackDayBatchPrintFailureKind::QueueExit)) => {
+            PackDayBatchPrintStatusPresentation {
+                indicator_color: APP_UI_THEME.components.app_status_indicator.attention,
+                title_key: AppTextKey::PackDayBatchPrintFailedQueueExitTitle,
+            }
+        }
+        (PackDayBatchPrintStatus::Failed, None, _) => PackDayBatchPrintStatusPresentation {
+            indicator_color: APP_UI_THEME.components.app_status_indicator.attention,
+            title_key: AppTextKey::PackDayBatchPrintFailedTitle,
+        },
+    };
+
+    Some(status)
+}
+
 fn pack_day_print_action_presentations(
     runtime: &DesktopAppRuntimeSummary,
 ) -> Vec<PackDayPrintActionPresentation> {
@@ -10369,6 +10560,8 @@ fn pack_day_print_action_presentations(
         .flatten();
     let host_handoff_running =
         runtime.pack_day_projection.host_handoff.status == PackDayHostHandoffStatus::Running;
+    let batch_print_running =
+        runtime.pack_day_projection.batch_print.status == PackDayBatchPrintStatus::Running;
 
     PackDayPrintKind::all_v1()
         .into_iter()
@@ -10377,6 +10570,7 @@ fn pack_day_print_action_presentations(
             label_key: pack_day_print_action_label_key(kind, running_kind),
             enabled: running_kind.is_none()
                 && !host_handoff_running
+                && !batch_print_running
                 && pack_day_print_action_is_available(bundle, kind),
         })
         .collect()
@@ -10411,6 +10605,14 @@ fn pack_day_print_action_label_key(
         (PackDayPrintKind::PrintCustomerLabels, false) => {
             AppTextKey::PackDayPrintCustomerLabelsAction
         }
+    }
+}
+
+fn pack_day_print_failed_title_key(kind: PackDayPrintKind) -> AppTextKey {
+    match kind {
+        PackDayPrintKind::PrintPackSheet => AppTextKey::PackDayPrintPackSheetFailedTitle,
+        PackDayPrintKind::PrintPickupRoster => AppTextKey::PackDayPrintPickupRosterFailedTitle,
+        PackDayPrintKind::PrintCustomerLabels => AppTextKey::PackDayPrintCustomerLabelsFailedTitle,
     }
 }
 
@@ -10632,6 +10834,26 @@ fn pack_day_host_handoff_status_note(
 }
 
 fn pack_day_print_status_note(status: PackDayPrintStatusPresentation) -> impl IntoElement {
+    app_stack_v(4.0).w_full().child(
+        div()
+            .w_full()
+            .flex()
+            .items_center()
+            .gap(px(APP_UI_THEME.shells.settings_account_status_gap_px))
+            .child(status_indicator(status.indicator_color))
+            .child(
+                div()
+                    .text_size(px(APP_UI_THEME.foundation.typography.utility_title_text_px))
+                    .font_weight(gpui::FontWeight::SEMIBOLD)
+                    .text_color(rgb(APP_UI_THEME.foundation.text.primary))
+                    .child(app_shared_text(status.title_key)),
+            ),
+    )
+}
+
+fn pack_day_batch_print_status_note(
+    status: PackDayBatchPrintStatusPresentation,
+) -> impl IntoElement {
     app_stack_v(4.0).w_full().child(
         div()
             .w_full()
@@ -12592,7 +12814,8 @@ fn home_farm_order_method_label_key(method: FarmOrderMethod) -> AppTextKey {
 mod tests {
     use super::{
         APP_UI_THEME, AppTextKey, FarmerHomeFarmState, HomeAutoFocusState, HomeAutoFocusTarget,
-        HomeStage, LabelValueRow, PackDayExportStatusPresentation,
+        HomeStage, LabelValueRow, PackDayBatchPrintActionPresentation,
+        PackDayBatchPrintStatusPresentation, PackDayExportStatusPresentation,
         PackDayHostHandoffActionPresentation, PackDayHostHandoffStatusPresentation,
         PackDayPrintActionPresentation, PackDayPrintStatusPresentation, ReminderActionTarget,
         SETTINGS_FARM_PANEL_SECTIONS, SETTINGS_NAVIGATION_ORDER,
@@ -12603,11 +12826,13 @@ mod tests {
         about_status_rows, app_text, buyer_orders_status_key, farm_setup_onboarding_card_spec,
         farmer_home_farm_state, farmer_pack_day_available, home_auto_focus_target,
         home_content_scroll_id, home_saved_farm, home_sidebar_navigation_sections, home_stage,
-        home_window_launch_size_px, home_window_minimum_size_px, pack_day_export_action_enabled,
-        pack_day_export_action_label_key, pack_day_export_artifact_names,
-        pack_day_export_detail_rows, pack_day_export_status_presentation,
-        pack_day_host_handoff_action_presentations, pack_day_host_handoff_status_presentation,
-        pack_day_print_action_presentations, pack_day_print_status_presentation,
+        home_window_launch_size_px, home_window_minimum_size_px,
+        pack_day_batch_print_action_presentation, pack_day_batch_print_status_presentation,
+        pack_day_export_action_enabled, pack_day_export_action_label_key,
+        pack_day_export_artifact_names, pack_day_export_detail_rows,
+        pack_day_export_status_presentation, pack_day_host_handoff_action_presentations,
+        pack_day_host_handoff_status_presentation, pack_day_print_action_presentations,
+        pack_day_print_status_presentation,
         parse_optional_product_editor_stock_input, parse_product_editor_price_input,
         presented_farmer_reminder, product_display_title, reminder_action_target,
         reminder_deadline_text, reminder_delivery_state_key, reminder_urgency_color,
@@ -12627,7 +12852,8 @@ mod tests {
         FarmSetupProjection, FarmSummary, FarmerSection, FulfillmentWindowId,
         FulfillmentWindowSummary, LoggedOutStartupPhase, LoggedOutStartupProjection,
         OrderDetailProjection, OrderId, OrderPrimaryAction, OrderStatus, OrdersListRow,
-        PackDayExportArtifact, PackDayExportArtifactKind, PackDayExportBundle,
+        PackDayBatchPrintArtifact, PackDayBatchPrintFailureKind, PackDayExportArtifact,
+        PackDayExportArtifactKind, PackDayExportBundle,
         PackDayHostHandoffKind, PackDayHostHandoffStatus, PackDayPrintFailureKind,
         PackDayPrintKind, PackDayPrintStatus, PackDayProductTotalRow, PackDayProjection,
         PersonalSection, ReminderDeadlineProjection, ReminderDeliveryState, ReminderId,
@@ -12641,8 +12867,9 @@ mod tests {
     };
     use radroots_studio_app_state::{
         AppShellProjection, FarmWorkspaceReadinessProjection, FarmWorkspaceStatus, HomeRoute,
-        PackDayExportProjection, PackDayHostHandoffProjection, PackDayHostHandoffRequest,
-        PackDayPrintProjection, PackDayPrintRequest,
+        PackDayBatchPrintProjection, PackDayBatchPrintRequest, PackDayExportProjection,
+        PackDayHostHandoffProjection, PackDayHostHandoffRequest, PackDayPrintProjection,
+        PackDayPrintRequest,
     };
     use radroots_studio_app_sync::{
         AppSyncProjection, AppSyncRunStatus, SyncAggregateRef, SyncCheckpointStatus, SyncConflict,
@@ -13610,6 +13837,159 @@ mod tests {
                     enabled: true,
                 },
             ]
+        );
+    }
+
+    #[test]
+    fn pack_day_batch_print_action_only_surfaces_after_a_successful_export() {
+        let temp_dir = TestDirectory::new();
+        write_artifact(temp_dir.path(), "pack_sheet.txt");
+        write_artifact(temp_dir.path(), "pickup_roster.txt");
+        write_artifact(temp_dir.path(), "customer_labels.txt");
+        let bundle = sample_pack_day_bundle(temp_dir.path());
+        let fulfillment_window_id = bundle.fulfillment_window_id;
+        let mut runtime = summary(
+            HomeRoute::Today,
+            TodayAgendaProjection::default(),
+            FarmSetupProjection::default(),
+        );
+
+        assert_eq!(pack_day_batch_print_action_presentation(&runtime), None);
+
+        runtime.pack_day_projection.export = PackDayExportProjection::succeeded(
+            radroots_studio_app_state::PackDayExportRequest::for_fulfillment_window(fulfillment_window_id),
+            bundle,
+        );
+
+        assert_eq!(
+            pack_day_batch_print_action_presentation(&runtime),
+            Some(PackDayBatchPrintActionPresentation {
+                label_key: AppTextKey::PackDayBatchPrintAction,
+                enabled: true,
+            })
+        );
+    }
+
+    #[test]
+    fn pack_day_batch_print_running_disables_conflicting_pack_day_actions() {
+        let temp_dir = TestDirectory::new();
+        write_artifact(temp_dir.path(), "pack_sheet.txt");
+        write_artifact(temp_dir.path(), "pickup_roster.txt");
+        write_artifact(temp_dir.path(), "customer_labels.txt");
+        let bundle = sample_pack_day_bundle(temp_dir.path());
+        let fulfillment_window_id = bundle.fulfillment_window_id;
+        let export_request =
+            radroots_studio_app_state::PackDayExportRequest::for_fulfillment_window(fulfillment_window_id);
+        let batch_request = PackDayBatchPrintRequest::for_bundle(&bundle);
+        let mut runtime = summary(
+            HomeRoute::Today,
+            TodayAgendaProjection::default(),
+            FarmSetupProjection::default(),
+        );
+        runtime.pack_day_projection.export =
+            PackDayExportProjection::succeeded(export_request, bundle);
+        runtime.pack_day_projection.batch_print =
+            PackDayBatchPrintProjection::running(batch_request);
+
+        assert_eq!(
+            pack_day_batch_print_action_presentation(&runtime),
+            Some(PackDayBatchPrintActionPresentation {
+                label_key: AppTextKey::PackDayBatchPrintActionRunning,
+                enabled: false,
+            })
+        );
+        assert!(
+            pack_day_print_action_presentations(&runtime)
+                .into_iter()
+                .all(|action| !action.enabled)
+        );
+        assert!(
+            pack_day_host_handoff_action_presentations(&runtime)
+                .into_iter()
+                .all(|action| !action.enabled)
+        );
+    }
+
+    #[test]
+    fn pack_day_batch_print_status_tracks_outcomes_and_failed_artifacts() {
+        let temp_dir = TestDirectory::new();
+        write_artifact(temp_dir.path(), "pack_sheet.txt");
+        write_artifact(temp_dir.path(), "pickup_roster.txt");
+        write_artifact(temp_dir.path(), "customer_labels.txt");
+        let bundle = sample_pack_day_bundle(temp_dir.path());
+        let fulfillment_window_id = bundle.fulfillment_window_id;
+        let export_request =
+            radroots_studio_app_state::PackDayExportRequest::for_fulfillment_window(fulfillment_window_id);
+        let batch_request = PackDayBatchPrintRequest::for_bundle(&bundle);
+        let mut runtime = summary(
+            HomeRoute::Today,
+            TodayAgendaProjection::default(),
+            FarmSetupProjection::default(),
+        );
+        runtime.pack_day_projection.export =
+            PackDayExportProjection::succeeded(export_request, bundle);
+
+        runtime.pack_day_projection.batch_print =
+            PackDayBatchPrintProjection::running(batch_request.clone());
+        assert_eq!(
+            pack_day_batch_print_status_presentation(&runtime),
+            Some(PackDayBatchPrintStatusPresentation {
+                indicator_color: APP_UI_THEME.foundation.text.accent,
+                title_key: AppTextKey::PackDayBatchPrintQueuedTitle,
+            })
+        );
+
+        runtime.pack_day_projection.batch_print =
+            PackDayBatchPrintProjection::succeeded(batch_request.clone());
+        assert_eq!(
+            pack_day_batch_print_status_presentation(&runtime),
+            Some(PackDayBatchPrintStatusPresentation {
+                indicator_color: APP_UI_THEME.components.app_status_indicator.online,
+                title_key: AppTextKey::PackDayBatchPrintSucceededTitle,
+            })
+        );
+
+        runtime.pack_day_projection.batch_print = PackDayBatchPrintProjection::failed(
+            batch_request.clone(),
+            Some(PackDayBatchPrintArtifact::from_print_kind(
+                PackDayPrintKind::PrintPickupRoster,
+            )),
+            PackDayBatchPrintFailureKind::QueueExit,
+        );
+        assert_eq!(
+            pack_day_batch_print_status_presentation(&runtime),
+            Some(PackDayBatchPrintStatusPresentation {
+                indicator_color: APP_UI_THEME.components.app_status_indicator.attention,
+                title_key: AppTextKey::PackDayPrintPickupRosterFailedTitle,
+            })
+        );
+
+        runtime.pack_day_projection.batch_print = PackDayBatchPrintProjection::failed(
+            batch_request.clone(),
+            None,
+            PackDayBatchPrintFailureKind::Preflight,
+        );
+        assert_eq!(
+            pack_day_batch_print_status_presentation(&runtime),
+            Some(PackDayBatchPrintStatusPresentation {
+                indicator_color: APP_UI_THEME.components.app_status_indicator.attention,
+                title_key: AppTextKey::PackDayBatchPrintFailedPreflightTitle,
+            })
+        );
+
+        runtime.pack_day_projection.batch_print = PackDayBatchPrintProjection::failed(
+            batch_request,
+            Some(PackDayBatchPrintArtifact::from_print_kind(
+                PackDayPrintKind::PrintCustomerLabels,
+            )),
+            PackDayBatchPrintFailureKind::CustomerLabelsAvery5160Overflow,
+        );
+        assert_eq!(
+            pack_day_batch_print_status_presentation(&runtime),
+            Some(PackDayBatchPrintStatusPresentation {
+                indicator_color: APP_UI_THEME.components.app_status_indicator.attention,
+                title_key: AppTextKey::PackDayBatchPrintCustomerLabelsAvery5160OverflowFailedTitle,
+            })
         );
     }
 
