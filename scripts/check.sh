@@ -9,9 +9,7 @@ cargo metadata --format-version 1 --no-deps
 cargo test -p radroots_studio_app_models pack_day
 cargo test -p radroots_studio_app_state pack_day
 cargo test -p radroots_studio_app_i18n pack_day
-cargo test -p radroots_studio_app pack_day_print
-cargo test -p radroots_studio_app pack_day_batch
-cargo test -p radroots_studio_app pack_day_batch_workflow
+cargo test -p radroots_studio_app pack_day
 cargo test -p radroots_studio_app source_guards
 cargo check -p radroots_studio_app
 
