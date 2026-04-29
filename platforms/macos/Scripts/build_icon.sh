@@ -3,7 +3,8 @@ set -euo pipefail
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 platform_root="$(cd "${script_dir}/.." && pwd -P)"
-source_artwork="${platform_root}/App/Resources/logo.png"
+source_artwork="${platform_root}/App/Resources/AppIconSource.png"
+color_profile="/System/Library/ColorSync/Profiles/sRGB Profile.icc"
 output_path="${1:-}"
 
 require_command() {
@@ -27,17 +28,22 @@ if [[ ! -f "${source_artwork}" ]]; then
   exit 1
 fi
 
+if [[ ! -f "${color_profile}" ]]; then
+  echo "missing macos icon color profile: ${color_profile}" >&2
+  exit 1
+fi
+
 tmp_dir="$(mktemp -d)"
 cleanup() {
   rm -rf "${tmp_dir}"
 }
 trap cleanup EXIT
 
-normalized_png="${tmp_dir}/logo.normalized.png"
+normalized_png="${tmp_dir}/source.normalized.png"
 iconset_dir="${tmp_dir}/AppIcon.iconset"
 
 mkdir -p "${iconset_dir}" "$(dirname "${output_path}")"
-sips -s format png "${source_artwork}" --out "${normalized_png}" >/dev/null
+sips -s format png -m "${color_profile}" "${source_artwork}" --out "${normalized_png}" >/dev/null
 
 source_width="$(
   sips -g pixelWidth "${normalized_png}" | awk '/pixelWidth/ {print $2}'
@@ -46,10 +52,14 @@ source_height="$(
   sips -g pixelHeight "${normalized_png}" | awk '/pixelHeight/ {print $2}'
 )"
 
-if [[ "${source_width}" -lt 1024 || "${source_height}" -lt 1024 ]]; then
-  printf '%s\n' \
-    "warning: macos icon source is ${source_width}x${source_height}; 1024x1024 is recommended for crisp AppIcon.icns output" \
-    >&2
+if [[ "${source_width}" != "${source_height}" ]]; then
+  echo "macos icon source must be square: ${source_width}x${source_height}" >&2
+  exit 1
+fi
+
+if [[ "${source_width}" -lt 1024 ]]; then
+  echo "macos icon source must be at least 1024x1024: ${source_width}x${source_height}" >&2
+  exit 1
 fi
 
 generate_icon() {

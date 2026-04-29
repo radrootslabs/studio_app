@@ -16,6 +16,41 @@ require_command() {
   exit 1
 }
 
+append_env_value() {
+  local var_name="$1"
+  local value="$2"
+  local current="${!var_name:-}"
+
+  if [[ -n "${current}" ]]; then
+    export "${var_name}=${value} ${current}"
+  else
+    export "${var_name}=${value}"
+  fi
+}
+
+prepare_macos_build_env() {
+  local sdk_path
+  local bindgen_args
+
+  sdk_path="$(xcrun --sdk macosx --show-sdk-path)"
+  if [[ -z "${sdk_path}" || ! -d "${sdk_path}" ]]; then
+    echo "unable to resolve macos sdk path via xcrun" >&2
+    exit 1
+  fi
+
+  if [[ ! -f "${sdk_path}/usr/include/dispatch/dispatch.h" ]]; then
+    echo "missing macos dispatch header: ${sdk_path}/usr/include/dispatch/dispatch.h" >&2
+    exit 1
+  fi
+
+  export SDKROOT="${sdk_path}"
+  bindgen_args="--sysroot=${SDKROOT} -I${SDKROOT}/usr/include"
+
+  append_env_value BINDGEN_EXTRA_CLANG_ARGS "${bindgen_args}"
+  append_env_value BINDGEN_EXTRA_CLANG_ARGS_aarch64_apple_darwin "${bindgen_args}"
+  append_env_value BINDGEN_EXTRA_CLANG_ARGS_x86_64_apple_darwin "${bindgen_args}"
+}
+
 workspace_version() {
   python3 - <<'PY' "${repo_root}/Cargo.toml"
 import re
@@ -61,8 +96,10 @@ require_command cargo
 require_command git
 require_command python3
 require_command /usr/libexec/PlistBuddy
+require_command xcrun
 
 configure_build_lane
+prepare_macos_build_env
 
 bundle_root="${platform_root}/.derived-data/Build/Products/${bundle_configuration}/${bundle_name}"
 contents_root="${bundle_root}/Contents"
