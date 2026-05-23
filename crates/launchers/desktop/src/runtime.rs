@@ -30,8 +30,9 @@ use radroots_studio_app_remote_signer::{
     RadrootsAppRemoteSignerApprovedSession, RadrootsAppRemoteSignerPendingSession,
 };
 use radroots_studio_app_sqlite::{
-    derive_farm_rules_readiness, AppSqliteError, AppSqliteStore, BuyerRepeatDemandApplyOutcome,
-    DatabaseTarget, StoredPendingSyncOperation, StoredSyncConflict, APP_ACTIVITY_CONTEXT_LIMIT,
+    APP_ACTIVITY_CONTEXT_LIMIT, AppLocalInteropImportReport, AppSqliteError, AppSqliteStore,
+    BuyerRepeatDemandApplyOutcome, DatabaseTarget, StoredPendingSyncOperation, StoredSyncConflict,
+    derive_farm_rules_readiness,
 };
 use radroots_studio_app_state::{
     derive_sync_projection, AppShellProjection, AppStateCommand, AppStatePersistenceRepository,
@@ -606,13 +607,21 @@ impl DesktopAppRuntime {
     }
 
     pub fn sync_on_foreground_resume(&self) -> Result<bool, AppSqliteError> {
-        self.lock_state_mut()
-            .attempt_sync(SyncTrigger::ForegroundResume)
+        self.lock_state_mut().sync_on_foreground_resume()
     }
 
     pub fn sync_on_manual_refresh(&self) -> Result<bool, AppSqliteError> {
         self.lock_state_mut()
             .attempt_sync(SyncTrigger::ManualRefresh)
+    }
+
+    pub fn refresh_shared_local_events(
+        &self,
+    ) -> Result<AppLocalInteropImportReport, AppSqliteError> {
+        let mut state = self.lock_state_mut();
+        let report = state.import_shared_local_events()?;
+        let _ = state.refresh_selected_account_context_after_local_events()?;
+        Ok(report)
     }
 
     pub fn resolve_sync_conflict(
@@ -2460,6 +2469,7 @@ impl DesktopAppRuntimeState {
         projection: AppIdentityProjection,
     ) -> Result<bool, DesktopAppRuntimeCommandError> {
         let projection = self.decorate_identity_projection(projection)?;
+        let _ = self.import_shared_local_events()?;
         let continuity_state = self.continuity_state();
         let selected_account_context =
             load_selected_account_context(self.sqlite_store()?, &projection, &continuity_state)?;
@@ -2478,6 +2488,7 @@ impl DesktopAppRuntimeState {
     fn refresh_selected_account_context(
         &self,
     ) -> Result<DesktopSelectedAccountContext, DesktopAppRuntimeFarmSetupError> {
+        let _ = self.import_shared_local_events()?;
         let continuity_state = self.continuity_state();
         Ok(load_selected_account_context(
             self.sqlite_store_for_farm_setup()?,
@@ -3169,17 +3180,10 @@ impl DesktopAppRuntimeState {
     }
 
     fn selected_farm_id(&self) -> Option<FarmId> {
-        self.state_store
-            .identity_projection()
-            .selected_account
-            .as_ref()
-            .and_then(|account| account.farmer_activation.farm_id)
-            .or(self
-                .state_store
-                .farm_setup_projection()
-                .saved_farm
-                .as_ref()
-                .map(|farm| farm.farm_id))
+        selected_farm_id_from_context(
+            self.state_store.identity_projection(),
+            self.state_store.farm_setup_projection(),
+        )
     }
 
     fn has_saved_farm(&self) -> bool {
@@ -3247,6 +3251,7 @@ impl DesktopAppRuntimeState {
         &self,
         query: &ProductsScreenQueryState,
     ) -> Result<ProductsListProjection, AppSqliteError> {
+        let _ = self.import_shared_local_events()?;
         let Some(sqlite_store) = self.sqlite_store.as_ref() else {
             return Ok(ProductsListProjection::default());
         };
@@ -3255,6 +3260,44 @@ impl DesktopAppRuntimeState {
         };
 
         sqlite_store.load_products(farm_id, &query.search_query, query.filter, query.sort)
+    }
+
+    fn import_shared_local_events(&self) -> Result<AppLocalInteropImportReport, AppSqliteError> {
+        let Some(sqlite_store) = self.sqlite_store.as_ref() else {
+            return Ok(AppLocalInteropImportReport::default());
+        };
+        let Some(shared_accounts_paths) = self.shared_accounts_paths.as_ref() else {
+            return Ok(AppLocalInteropImportReport::default());
+        };
+        let Some(database_path) =
+            shared_local_events_database_path_from_shared_accounts(shared_accounts_paths)
+        else {
+            return Ok(AppLocalInteropImportReport::default());
+        };
+        sqlite_store.import_shared_local_events_from_path(database_path.as_path())
+    }
+
+    fn refresh_selected_account_context_after_local_events(
+        &mut self,
+    ) -> Result<bool, AppSqliteError> {
+        let Some(sqlite_store) = self.sqlite_store.as_ref() else {
+            return Ok(false);
+        };
+        let continuity_state = self.continuity_state();
+        let identity_projection = self.state_store.identity_projection().clone();
+        let selected_account_context =
+            load_selected_account_context(sqlite_store, &identity_projection, &continuity_state)?;
+
+        Ok(self.apply_selected_account_context(&selected_account_context))
+    }
+
+    fn sync_on_foreground_resume(&mut self) -> Result<bool, AppSqliteError> {
+        let report = self.import_shared_local_events()?;
+        let local_changed = report.imported_records > 0 || report.skipped_records > 0;
+        let context_changed = self.refresh_selected_account_context_after_local_events()?;
+        let sync_changed = self.attempt_sync(SyncTrigger::ForegroundResume)?;
+
+        Ok(local_changed || context_changed || sync_changed)
     }
 
     fn replace_orders_query(
@@ -3569,6 +3612,18 @@ fn shared_local_events_database_path(
         .join(SHARED_LOCAL_EVENTS_DB_FILE_NAME))
 }
 
+fn shared_local_events_database_path_from_shared_accounts(
+    paths: &AppSharedAccountsPaths,
+) -> Option<PathBuf> {
+    Some(
+        paths
+            .data_root
+            .parent()?
+            .join(SHARED_LOCAL_EVENTS_DIR)
+            .join(SHARED_LOCAL_EVENTS_DB_FILE_NAME),
+    )
+}
+
 fn load_selected_account_context(
     sqlite_store: &AppSqliteStore,
     identity_projection: &AppIdentityProjection,
@@ -3647,13 +3702,7 @@ fn load_selected_account_context_with_options(
     };
     let farm_setup_projection =
         sqlite_store.load_farm_setup(&selected_account.account.account_id)?;
-    let today_farm_id = selected_account
-        .farmer_activation
-        .farm_id
-        .or(farm_setup_projection
-            .saved_farm
-            .as_ref()
-            .map(|farm| farm.farm_id));
+    let today_farm_id = selected_farm_id_from_context(identity_projection, &farm_setup_projection);
     let (
         farm_rules_projection,
         mut today_projection,
@@ -4631,6 +4680,22 @@ fn refresh_buyer_cart_totals(cart: &mut BuyerCartProjection) -> Result<(), AppSq
     Ok(())
 }
 
+fn selected_farm_id_from_context(
+    identity_projection: &AppIdentityProjection,
+    farm_setup_projection: &FarmSetupProjection,
+) -> Option<FarmId> {
+    farm_setup_projection
+        .saved_farm
+        .as_ref()
+        .map(|farm| farm.farm_id)
+        .or_else(|| {
+            identity_projection
+                .selected_account
+                .as_ref()
+                .and_then(|account| account.farmer_activation.farm_id)
+        })
+}
+
 fn fallback_farm_profile_for_projection(
     farm_id: FarmId,
     farm_setup_projection: &FarmSetupProjection,
@@ -4882,10 +4947,16 @@ mod tests {
         SyncConflictSeverity, SyncOperationKind, SyncTrigger,
     };
     use radroots_identity::RadrootsIdentity;
+    use radroots_local_events::{
+        LocalEventRecordInput, LocalEventsStore, LocalRecordFamily, LocalRecordStatus,
+        PublishOutboxStatus, SourceRuntime,
+    };
     use radroots_nostr_accounts::prelude::{
         RadrootsNostrAccountsManager, RadrootsNostrFileAccountStore,
         RadrootsNostrMemoryAccountStore, RadrootsNostrSecretVaultMemory,
     };
+    use radroots_sql_core::SqliteExecutor;
+    use serde_json::json;
 
     use crate::accounts::DesktopLocalIdentityImportRequest;
 
@@ -5297,6 +5368,65 @@ mod tests {
             .expect("resume sync request should record");
 
         assert_eq!(request.trigger, SyncTrigger::ForegroundResume);
+    }
+
+    #[test]
+    fn runtime_shared_local_events_refresh_reports_and_reloads_products() {
+        let (runtime, paths) = bootstrapped_runtime("shared_local_events_refresh");
+        assert!(runtime
+            .generate_local_account(Some("Farmer".to_owned()))
+            .expect("account should generate"));
+        let account_id = runtime
+            .summary()
+            .settings_account_projection
+            .selected_account
+            .as_ref()
+            .expect("selected account")
+            .account
+            .account_id
+            .clone();
+        append_cli_local_listing_records(&paths, account_id.as_str());
+
+        let report = runtime
+            .refresh_shared_local_events()
+            .expect("shared local events should refresh");
+        let summary = runtime.summary();
+
+        assert_eq!(report.scanned_records, 2);
+        assert_eq!(report.imported_records, 2);
+        assert_eq!(report.skipped_records, 0);
+        assert_eq!(summary.farm_setup_projection.draft.farm_name, "Green Farm");
+        let saved_farm_id = summary
+            .farm_setup_projection
+            .saved_farm
+            .as_ref()
+            .expect("saved farm should import")
+            .farm_id;
+        let direct_products = runtime
+            .lock_state()
+            .sqlite_store
+            .as_ref()
+            .expect("sqlite store")
+            .load_products(
+                saved_farm_id,
+                "",
+                ProductsFilter::Drafts,
+                ProductsSort::default(),
+            )
+            .expect("imported products should load directly");
+        assert_eq!(direct_products.rows.len(), 1);
+        assert!(runtime
+            .select_products_filter(ProductsFilter::Drafts)
+            .expect("draft products filter should reload"));
+        let summary = runtime.summary();
+        assert_eq!(summary.products_projection.list.rows.len(), 1);
+        assert_eq!(summary.products_projection.list.rows[0].title, "Eggs");
+        assert_eq!(
+            summary.products_projection.list.rows[0].status,
+            ProductStatus::Draft
+        );
+
+        cleanup_bootstrapped_runtime_paths(&paths);
     }
 
     #[test]
@@ -9785,6 +9915,121 @@ mod tests {
     fn cleanup_bootstrapped_runtime_paths(paths: &AppDesktopRuntimePaths) {
         if let Some(home_dir) = paths.app.data.ancestors().nth(4) {
             let _ = fs::remove_dir_all(home_dir);
+        }
+    }
+
+    fn append_cli_local_listing_records(paths: &AppDesktopRuntimePaths, account_id: &str) {
+        let database_path =
+            super::shared_local_events_database_path(paths).expect("shared local events path");
+        if let Some(parent) = database_path.parent() {
+            fs::create_dir_all(parent).expect("shared local events directory should create");
+        }
+        let executor =
+            SqliteExecutor::open(database_path.as_path()).expect("open shared local events db");
+        let store = LocalEventsStore::new(executor);
+        store.migrate_up().expect("migrate shared local events");
+        let farm_key = "AAAAAAAAAAAAAAAAAAAAAA";
+        let listing_key = "BBBBBBBBBBBBBBBBBBBBBB";
+        store
+            .append_record(&local_work_record(
+                "cli:local_work:farm",
+                account_id,
+                farm_key,
+                None,
+                json!({
+                    "record_kind": "farm_config_v1",
+                    "document": {
+                        "selection": {
+                            "account": account_id,
+                            "farm_d_tag": farm_key
+                        },
+                        "profile": {
+                            "name": "Green Farm",
+                            "display_name": "Green Farm"
+                        },
+                        "farm": {
+                            "d_tag": farm_key,
+                            "name": "Green Farm",
+                            "location": {
+                                "primary": "farmstand"
+                            }
+                        },
+                        "listing_defaults": {
+                            "delivery_method": "pickup",
+                            "location": {
+                                "primary": "farmstand"
+                            }
+                        }
+                    }
+                }),
+            ))
+            .expect("append farm local work");
+        store
+            .append_record(&local_work_record(
+                "cli:local_work:listing",
+                account_id,
+                farm_key,
+                Some(format!("30402:seller-pubkey:{listing_key}")),
+                json!({
+                    "record_kind": "listing_draft_v1",
+                    "document": {
+                        "listing": {
+                            "d_tag": listing_key,
+                            "farm_d_tag": farm_key
+                        },
+                        "seller_actor": {
+                            "account_id": account_id,
+                            "pubkey": "seller-pubkey"
+                        },
+                        "product": {
+                            "key": "eggs",
+                            "title": "Eggs",
+                            "summary": "Fresh eggs"
+                        },
+                        "primary_bin": {
+                            "quantity_unit": "each",
+                            "price_amount": "6",
+                            "price_currency": "USD"
+                        },
+                        "inventory": {
+                            "available": "10"
+                        }
+                    }
+                }),
+            ))
+            .expect("append listing local work");
+    }
+
+    fn local_work_record(
+        record_id: &str,
+        account_id: &str,
+        farm_key: &str,
+        listing_addr: Option<String>,
+        payload: serde_json::Value,
+    ) -> LocalEventRecordInput {
+        LocalEventRecordInput {
+            record_id: record_id.to_owned(),
+            family: LocalRecordFamily::LocalWork,
+            status: LocalRecordStatus::LocalSaved,
+            source_runtime: SourceRuntime::Cli,
+            created_at_ms: 1000,
+            inserted_at_ms: 1001,
+            owner_account_id: Some(account_id.to_owned()),
+            owner_pubkey: Some("seller-pubkey".to_owned()),
+            farm_id: Some(farm_key.to_owned()),
+            listing_addr,
+            local_work_json: Some(payload),
+            event_id: None,
+            event_kind: None,
+            event_pubkey: None,
+            event_created_at: None,
+            event_tags_json: None,
+            event_content: None,
+            event_sig: None,
+            raw_event_json: None,
+            outbox_status: PublishOutboxStatus::None,
+            relay_set_fingerprint: None,
+            relay_delivery_json: None,
         }
     }
 
