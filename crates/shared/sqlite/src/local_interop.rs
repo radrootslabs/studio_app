@@ -385,22 +385,35 @@ impl<'a> AppLocalInteropRepository<'a> {
         &self,
         record: &LocalEventRecord,
     ) -> Result<Option<ProjectionRecord>, AppSqliteError> {
-        let Some(content) = record.event_content.as_deref() else {
-            return Ok(None);
-        };
-        let content = parse_json_value(content)?;
-        let listing_key = string_at(&content, &["d_tag"]).or_else(|| listing_id(record));
+        let content = record
+            .event_content
+            .as_deref()
+            .and_then(parse_json_value_opt);
+        let tags = record.event_tags_json.as_ref();
+        let listing_key = content
+            .as_ref()
+            .and_then(|content| string_at(content, &["d_tag"]))
+            .or_else(|| tag_index_value(tags, "d", 1))
+            .or_else(|| listing_id(record));
         let Some(listing_key) = listing_key else {
             return Ok(None);
         };
         let farm_key = record
             .farm_id
             .clone()
-            .or_else(|| string_at(&content, &["farm", "d_tag"]));
+            .or_else(|| {
+                content
+                    .as_ref()
+                    .and_then(|content| string_at(content, &["farm", "d_tag"]))
+            })
+            .or_else(|| tag_index_value(tags, "a", 1).and_then(|addr| address_d_tag(&addr)));
         let Some(farm_key) = farm_key else {
             return Ok(None);
         };
-        let signed_farm_pubkey = string_at(&content, &["farm", "pubkey"]);
+        let signed_farm_pubkey = content
+            .as_ref()
+            .and_then(|content| string_at(content, &["farm", "pubkey"]))
+            .or_else(|| tag_index_value(tags, "a", 1).and_then(|addr| address_pubkey(&addr)));
         let owner_pubkey = record
             .owner_pubkey
             .as_deref()
@@ -409,30 +422,54 @@ impl<'a> AppLocalInteropRepository<'a> {
         let farm_id = deterministic_farm_id(owner_pubkey, farm_key.as_str());
         self.ensure_farm_exists(farm_id)?;
         let product_id = deterministic_product_id(owner_pubkey, listing_key.as_str());
-        let title = string_at(&content, &["product", "title"])
-            .or_else(|| string_at(&content, &["product", "key"]))
+        let title = content
+            .as_ref()
+            .and_then(|content| string_at(content, &["product", "title"]))
+            .or_else(|| tag_index_value(tags, "title", 1))
+            .or_else(|| {
+                content
+                    .as_ref()
+                    .and_then(|content| string_at(content, &["product", "key"]))
+            })
+            .or_else(|| tag_index_value(tags, "key", 1))
             .unwrap_or_else(|| "Local product".to_owned());
-        let subtitle = string_at(&content, &["product", "summary"]).unwrap_or_default();
-        let bin = primary_bin(&content);
+        let subtitle = content
+            .as_ref()
+            .and_then(|content| string_at(content, &["product", "summary"]))
+            .or_else(|| tag_index_value(tags, "summary", 1))
+            .unwrap_or_default();
+        let bin = content.as_ref().and_then(primary_bin);
         let unit_label = bin
             .and_then(|value| {
                 string_at(value, &["quantity", "unit"])
                     .or_else(|| string_at(value, &["display_unit"]))
                     .or_else(|| string_at(value, &["display_price_unit"]))
             })
+            .or_else(|| tag_index_value(tags, "radroots:bin", 3))
             .unwrap_or_default();
-        let price_minor_units = bin.and_then(|value| {
-            string_at(value, &["price_per_canonical_unit", "amount", "amount"])
-                .or_else(|| string_at(value, &["display_price", "amount"]))
-                .and_then(|price| parse_decimal_minor_units(price.as_str()))
-        });
+        let price_minor_units = bin
+            .and_then(|value| {
+                string_at(value, &["price_per_canonical_unit", "amount", "amount"])
+                    .or_else(|| string_at(value, &["display_price", "amount"]))
+                    .and_then(|price| parse_decimal_minor_units(price.as_str()))
+            })
+            .or_else(|| {
+                tag_index_value(tags, "radroots:price", 2)
+                    .or_else(|| tag_index_value(tags, "price", 1))
+                    .and_then(|price| parse_decimal_minor_units(price.as_str()))
+            });
         let price_currency = bin
             .and_then(|value| {
                 string_at(value, &["price_per_canonical_unit", "amount", "currency"])
                     .or_else(|| string_at(value, &["display_price", "currency"]))
             })
+            .or_else(|| tag_index_value(tags, "radroots:price", 3))
+            .or_else(|| tag_index_value(tags, "price", 2))
             .unwrap_or_else(|| "USD".to_owned());
-        let stock_count = string_at(&content, &["inventory_available"])
+        let stock_count = content
+            .as_ref()
+            .and_then(|content| string_at(content, &["inventory_available"]))
+            .or_else(|| tag_index_value(tags, "inventory", 1))
             .and_then(|quantity| parse_u32_quantity(quantity.as_str()));
         self.upsert_product(ProductProjection {
             product_id,
@@ -793,6 +830,41 @@ fn parse_json_value(raw: &str) -> Result<Value, AppSqliteError> {
     })
 }
 
+fn parse_json_value_opt(raw: &str) -> Option<Value> {
+    serde_json::from_str(raw).ok()
+}
+
+fn tag_index_value(tags: Option<&Value>, tag_name: &str, index: usize) -> Option<String> {
+    tags?.as_array()?.iter().find_map(|tag| {
+        let values = tag.as_array()?;
+        (values.first()?.as_str()? == tag_name)
+            .then(|| values.get(index).and_then(Value::as_str))
+            .flatten()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(str::to_owned)
+    })
+}
+
+fn address_d_tag(address: &str) -> Option<String> {
+    address
+        .rsplit(':')
+        .next()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_owned)
+}
+
+fn address_pubkey(address: &str) -> Option<String> {
+    let mut parts = address.split(':');
+    let _kind = parts.next()?;
+    parts
+        .next()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_owned)
+}
+
 fn farm_readiness_storage_key(readiness: FarmReadiness) -> &'static str {
     match readiness {
         FarmReadiness::Incomplete => "incomplete",
@@ -809,6 +881,7 @@ mod tests {
     use radroots_sql_core::SqliteExecutor;
     use serde_json::json;
 
+    use super::KIND_LISTING;
     use crate::{AppSqliteStore, DatabaseTarget};
 
     fn local_events_store() -> LocalEventsStore<SqliteExecutor> {
@@ -968,5 +1041,153 @@ mod tests {
             600
         );
         assert_eq!(products.rows[0].stock.quantity, Some(10));
+    }
+
+    #[test]
+    fn imports_signed_listing_tags_into_existing_local_product_projection() {
+        let app_store =
+            AppSqliteStore::open(DatabaseTarget::InMemory).expect("open app sqlite store");
+        let events = local_events_store();
+        let farm_key = "AAAAAAAAAAAAAAAAAAAAAA";
+        let listing_key = "BBBBBBBBBBBBBBBBBBBBBB";
+        events
+            .append_record(&local_work_record(
+                "cli:local_work:farm",
+                farm_key,
+                json!({
+                    "record_kind": "farm_config_v1",
+                    "document": {
+                        "selection": {
+                            "account": "seller-account",
+                            "farm_d_tag": farm_key
+                        },
+                        "profile": {
+                            "name": "Green Farm"
+                        },
+                        "farm": {
+                            "d_tag": farm_key,
+                            "name": "Green Farm",
+                            "location": {
+                                "primary": "farmstand"
+                            }
+                        }
+                    }
+                }),
+            ))
+            .expect("append farm local work");
+        let mut listing = local_work_record(
+            "cli:local_work:listing",
+            farm_key,
+            json!({
+                "record_kind": "listing_draft_v1",
+                "document": {
+                    "listing": {
+                        "d_tag": listing_key,
+                        "farm_d_tag": farm_key
+                    },
+                    "seller_actor": {
+                        "account_id": "seller-account",
+                        "pubkey": "seller-pubkey"
+                    },
+                    "product": {
+                        "key": "eggs",
+                        "title": "Eggs",
+                        "summary": "Fresh eggs"
+                    },
+                    "primary_bin": {
+                        "quantity_unit": "each",
+                        "price_amount": "6",
+                        "price_currency": "USD"
+                    },
+                    "inventory": {
+                        "available": "10"
+                    }
+                }
+            }),
+        );
+        listing.listing_addr = Some(format!("30402:seller-pubkey:{listing_key}"));
+        events
+            .append_record(&listing)
+            .expect("append listing local work");
+        app_store
+            .import_shared_local_events_from_store(&events)
+            .expect("import local work records");
+        events
+            .append_record(&LocalEventRecordInput {
+                record_id: "cli:signed_event:listing:event-1".to_owned(),
+                family: LocalRecordFamily::SignedEvent,
+                status: LocalRecordStatus::Published,
+                source_runtime: SourceRuntime::Cli,
+                created_at_ms: 1100,
+                inserted_at_ms: 1101,
+                owner_account_id: Some("seller-account".to_owned()),
+                owner_pubkey: Some("seller-pubkey".to_owned()),
+                farm_id: Some(farm_key.to_owned()),
+                listing_addr: Some(format!("30402:seller-pubkey:{listing_key}")),
+                local_work_json: None,
+                event_id: Some("event-1".to_owned()),
+                event_kind: Some(KIND_LISTING),
+                event_pubkey: Some("seller-pubkey".to_owned()),
+                event_created_at: Some(1100),
+                event_tags_json: Some(json!([
+                    ["d", listing_key],
+                    ["a", format!("30340:seller-pubkey:{farm_key}")],
+                    ["key", "eggs"],
+                    ["title", "Relay Eggs"],
+                    ["summary", "Published eggs"],
+                    ["radroots:bin", "bin-1", "1", "each"],
+                    ["radroots:price", "bin-1", "8", "USD", "1", "each"],
+                    ["inventory", "9"],
+                    ["status", "active"]
+                ])),
+                event_content: Some("# Relay Eggs\n\nPublished eggs".to_owned()),
+                event_sig: Some("signature".to_owned()),
+                raw_event_json: Some(json!({
+                    "id": "event-1",
+                    "kind": KIND_LISTING,
+                    "pubkey": "seller-pubkey",
+                    "content": "# Relay Eggs\n\nPublished eggs"
+                })),
+                outbox_status: PublishOutboxStatus::Acknowledged,
+                relay_set_fingerprint: Some("relay-set".to_owned()),
+                relay_delivery_json: Some(json!({
+                    "state": "acknowledged",
+                    "acknowledged_relays": ["ws://127.0.0.1:1234/"]
+                })),
+            })
+            .expect("append signed listing");
+
+        app_store
+            .import_shared_local_events_from_store(&events)
+            .expect("import signed listing");
+        let imported = app_store
+            .load_local_interop_records()
+            .expect("load imported records");
+        let listing_records = imported
+            .iter()
+            .filter(|record| record.projected_kind == "listing")
+            .collect::<Vec<_>>();
+        assert_eq!(listing_records.len(), 2);
+        assert_eq!(
+            listing_records[0].projected_id,
+            listing_records[1].projected_id
+        );
+        let product_count: i64 = app_store
+            .connection()
+            .query_row("SELECT COUNT(*) FROM products", [], |row| row.get(0))
+            .expect("product count");
+        let product: (String, String, Option<i64>, Option<i64>) = app_store
+            .connection()
+            .query_row(
+                "SELECT title, status, price_minor_units, stock_count FROM products",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+            )
+            .expect("load product");
+        assert_eq!(product_count, 1);
+        assert_eq!(product.0, "Relay Eggs");
+        assert_eq!(product.1, "published");
+        assert_eq!(product.2, Some(800));
+        assert_eq!(product.3, Some(9));
     }
 }
