@@ -2,7 +2,7 @@ use std::{fs, path::Path};
 
 use radroots_studio_app_models::{
     FarmId, FarmOrderMethod, FarmReadiness, FarmSetupDraft, FarmSetupProjection, FarmSummary,
-    ProductId, ProductStatus,
+    FulfillmentWindowId, PickupLocationId, ProductId, ProductStatus,
 };
 use radroots_local_events::{
     LocalEventRecord, LocalEventsStore, LocalRecordFamily, LocalRecordStatus, PublishOutboxStatus,
@@ -388,6 +388,7 @@ impl<'a> AppLocalInteropRepository<'a> {
             price_minor_units,
             price_currency,
             stock_count,
+            availability_window_id: None,
         })?;
         Ok(Some(ProjectionRecord {
             kind: "listing",
@@ -540,6 +541,26 @@ impl<'a> AppLocalInteropRepository<'a> {
         let Some(status) = signed_listing_product_status(record, content.as_ref(), tags) else {
             return Ok(None);
         };
+        let fulfillment_method = signed_listing_fulfillment_method(content.as_ref(), tags);
+        let availability_window_id = if status == ProductStatus::Published {
+            match fulfillment_method {
+                Some(method) => self.ensure_signed_listing_availability_window(
+                    farm_id,
+                    listing_key.as_str(),
+                    content.as_ref(),
+                    tags,
+                    method,
+                )?,
+                None => None,
+            }
+        } else {
+            None
+        };
+        if availability_window_id.is_some()
+            && let Some(method) = fulfillment_method
+        {
+            self.mark_farm_buyer_visible(farm_id, record, method)?;
+        }
         self.upsert_product(ProductProjection {
             product_id,
             farm_id,
@@ -550,6 +571,7 @@ impl<'a> AppLocalInteropRepository<'a> {
             price_minor_units,
             price_currency,
             stock_count,
+            availability_window_id,
         })?;
         Ok(Some(ProjectionRecord {
             kind: "listing",
@@ -579,6 +601,77 @@ impl<'a> AppLocalInteropRepository<'a> {
         Ok(())
     }
 
+    fn mark_farm_buyer_visible(
+        &self,
+        farm_id: FarmId,
+        record: &LocalEventRecord,
+        method: FarmOrderMethod,
+    ) -> Result<(), AppSqliteError> {
+        self.connection
+            .execute(
+                "UPDATE farms
+                 SET readiness = 'ready',
+                     updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now')
+                 WHERE id = ?1",
+                [farm_id.to_string()],
+            )
+            .map_err(|source| AppSqliteError::Query {
+                operation: "mark local interop farm buyer visible",
+                source,
+            })?;
+        let Some(account_id) = record
+            .owner_account_id
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+        else {
+            return Ok(());
+        };
+        let display_name = self
+            .load_farm_display_name(farm_id)?
+            .unwrap_or_else(|| "Local farm".to_owned());
+        self.connection
+            .execute(
+                "INSERT INTO account_farm_setups (
+                    account_id,
+                    farm_name,
+                    location_or_service_area,
+                    pickup_enabled,
+                    delivery_enabled,
+                    shipping_enabled,
+                    saved_farm_id,
+                    saved_farm_display_name,
+                    saved_farm_readiness,
+                    updated_at
+                 ) VALUES (?1, ?2, '', ?3, ?4, ?5, ?6, ?2, 'ready', strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
+                 ON CONFLICT(account_id) DO UPDATE SET
+                    farm_name = CASE
+                        WHEN trim(account_farm_setups.farm_name) = '' THEN excluded.farm_name
+                        ELSE account_farm_setups.farm_name
+                    END,
+                    pickup_enabled = max(account_farm_setups.pickup_enabled, excluded.pickup_enabled),
+                    delivery_enabled = max(account_farm_setups.delivery_enabled, excluded.delivery_enabled),
+                    shipping_enabled = max(account_farm_setups.shipping_enabled, excluded.shipping_enabled),
+                    saved_farm_id = excluded.saved_farm_id,
+                    saved_farm_display_name = excluded.saved_farm_display_name,
+                    saved_farm_readiness = excluded.saved_farm_readiness,
+                    updated_at = excluded.updated_at",
+                params![
+                    account_id,
+                    display_name.as_str(),
+                    i64::from(method == FarmOrderMethod::Pickup),
+                    i64::from(method == FarmOrderMethod::Delivery),
+                    i64::from(method == FarmOrderMethod::Shipping),
+                    farm_id.to_string(),
+                ],
+            )
+            .map_err(|source| AppSqliteError::Query {
+                operation: "upsert local interop buyer fulfillment method",
+                source,
+            })?;
+        Ok(())
+    }
+
     fn ensure_farm_exists(&self, farm_id: FarmId) -> Result<(), AppSqliteError> {
         let exists = self
             .connection
@@ -601,6 +694,150 @@ impl<'a> AppLocalInteropRepository<'a> {
         Ok(())
     }
 
+    fn load_farm_display_name(&self, farm_id: FarmId) -> Result<Option<String>, AppSqliteError> {
+        self.connection
+            .query_row(
+                "SELECT display_name FROM farms WHERE id = ?1 LIMIT 1",
+                [farm_id.to_string()],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()
+            .map_err(|source| AppSqliteError::Query {
+                operation: "load local interop farm display name",
+                source,
+            })
+    }
+
+    fn ensure_signed_listing_availability_window(
+        &self,
+        farm_id: FarmId,
+        listing_key: &str,
+        content: Option<&Value>,
+        tags: Option<&Value>,
+        method: FarmOrderMethod,
+    ) -> Result<Option<FulfillmentWindowId>, AppSqliteError> {
+        let Some(window) = signed_listing_availability_window(content, tags) else {
+            return Ok(None);
+        };
+        let starts_at =
+            self.unix_epoch_to_utc_timestamp(window.start, "format listing availability start")?;
+        let ends_at =
+            self.unix_epoch_to_utc_timestamp(window.end, "format listing availability end")?;
+        if ends_at <= starts_at {
+            return Ok(None);
+        }
+        let pickup_location_id = if method == FarmOrderMethod::Pickup {
+            let Some(location_primary) = signed_listing_location_primary(content, tags) else {
+                return Ok(None);
+            };
+            Some(self.upsert_signed_listing_pickup_location(farm_id, location_primary.as_str())?)
+        } else {
+            None
+        };
+        let farm_id_string = farm_id.to_string();
+        let fulfillment_window_id = FulfillmentWindowId::from(deterministic_uuid(
+            "radroots-app-local-interop-fulfillment-window",
+            Some(farm_id_string.as_str()),
+            listing_key,
+        ));
+        self.connection
+            .execute(
+                "INSERT INTO fulfillment_windows (
+                    id,
+                    farm_id,
+                    starts_at,
+                    ends_at,
+                    capacity_limit,
+                    created_at,
+                    updated_at,
+                    pickup_location_id,
+                    label,
+                    order_cutoff_at
+                 ) VALUES (?1, ?2, ?3, ?4, null, strftime('%Y-%m-%dT%H:%M:%SZ', 'now'), strftime('%Y-%m-%dT%H:%M:%SZ', 'now'), ?5, '', ?3)
+                 ON CONFLICT(id) DO UPDATE SET
+                    farm_id = excluded.farm_id,
+                    starts_at = excluded.starts_at,
+                    ends_at = excluded.ends_at,
+                    pickup_location_id = excluded.pickup_location_id,
+                    order_cutoff_at = excluded.order_cutoff_at,
+                    updated_at = excluded.updated_at",
+                params![
+                    fulfillment_window_id.to_string(),
+                    farm_id_string.as_str(),
+                    starts_at.as_str(),
+                    ends_at.as_str(),
+                    pickup_location_id.map(|id| id.to_string()),
+                ],
+            )
+            .map_err(|source| AppSqliteError::Query {
+                operation: "upsert local interop listing fulfillment window",
+                source,
+            })?;
+        Ok(Some(fulfillment_window_id))
+    }
+
+    fn upsert_signed_listing_pickup_location(
+        &self,
+        farm_id: FarmId,
+        location_primary: &str,
+    ) -> Result<PickupLocationId, AppSqliteError> {
+        let farm_id_string = farm_id.to_string();
+        let pickup_location_id = PickupLocationId::from(deterministic_uuid(
+            "radroots-app-local-interop-pickup-location",
+            Some(farm_id_string.as_str()),
+            location_primary,
+        ));
+        self.connection
+            .execute(
+                "INSERT INTO pickup_locations (
+                    id,
+                    farm_id,
+                    label,
+                    address_line,
+                    directions,
+                    is_default,
+                    created_at,
+                    updated_at
+                 ) VALUES (?1, ?2, ?3, ?3, null, 0, strftime('%Y-%m-%dT%H:%M:%SZ', 'now'), strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
+                 ON CONFLICT(id) DO UPDATE SET
+                    farm_id = excluded.farm_id,
+                    label = excluded.label,
+                    address_line = excluded.address_line,
+                    updated_at = excluded.updated_at",
+                params![
+                    pickup_location_id.to_string(),
+                    farm_id_string.as_str(),
+                    location_primary,
+                ],
+            )
+            .map_err(|source| AppSqliteError::Query {
+                operation: "upsert local interop listing pickup location",
+                source,
+            })?;
+        Ok(pickup_location_id)
+    }
+
+    fn unix_epoch_to_utc_timestamp(
+        &self,
+        seconds: u64,
+        operation: &'static str,
+    ) -> Result<String, AppSqliteError> {
+        let seconds = i64::try_from(seconds).map_err(|_| AppSqliteError::InvalidProjection {
+            reason: "listing availability timestamp is out of range",
+        })?;
+        let timestamp = self
+            .connection
+            .query_row(
+                "SELECT strftime('%Y-%m-%dT%H:%M:%SZ', ?1, 'unixepoch')",
+                [seconds],
+                |row| row.get::<_, Option<String>>(0),
+            )
+            .map_err(|source| AppSqliteError::Query { operation, source })?;
+        timestamp.ok_or(AppSqliteError::InvalidProjection {
+            reason: "listing availability timestamp is invalid",
+        })
+    }
+
     fn upsert_product(&self, projection: ProductProjection) -> Result<(), AppSqliteError> {
         self.connection
             .execute(
@@ -616,7 +853,7 @@ impl<'a> AppLocalInteropRepository<'a> {
                     stock_count,
                     availability_window_id,
                     updated_at
-                 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, NULL, strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
+                 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
                  ON CONFLICT(id) DO UPDATE SET
                     farm_id = excluded.farm_id,
                     title = excluded.title,
@@ -631,6 +868,12 @@ impl<'a> AppLocalInteropRepository<'a> {
                     price_minor_units = excluded.price_minor_units,
                     price_currency = excluded.price_currency,
                     stock_count = excluded.stock_count,
+                    availability_window_id = CASE
+                        WHEN excluded.status = 'draft'
+                            AND products.status IN ('published', 'paused', 'archived')
+                        THEN products.availability_window_id
+                        ELSE excluded.availability_window_id
+                    END,
                     updated_at = excluded.updated_at",
                 params![
                     projection.product_id.to_string(),
@@ -642,6 +885,7 @@ impl<'a> AppLocalInteropRepository<'a> {
                     projection.price_minor_units,
                     projection.price_currency.as_str(),
                     projection.stock_count,
+                    projection.availability_window_id.map(|id| id.to_string()),
                 ],
             )
             .map_err(|source| AppSqliteError::Query {
@@ -826,6 +1070,7 @@ struct ProductProjection {
     price_minor_units: Option<u32>,
     price_currency: String,
     stock_count: Option<u32>,
+    availability_window_id: Option<FulfillmentWindowId>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -974,6 +1219,15 @@ fn parse_u32_quantity(value: &str) -> Option<u32> {
     whole.parse::<u32>().ok()
 }
 
+fn parse_u64_quantity(value: &str) -> Option<u64> {
+    let value = value.trim();
+    if value.is_empty() || value.starts_with('-') {
+        return None;
+    }
+    let whole = value.split_once('.').map_or(value, |(whole, _)| whole);
+    whole.parse::<u64>().ok()
+}
+
 fn signed_listing_product_status(
     record: &LocalEventRecord,
     content: Option<&Value>,
@@ -991,6 +1245,58 @@ fn signed_listing_product_status(
         SignedListingLifecycle::Archived => Some(ProductStatus::Archived),
         SignedListingLifecycle::Sold => Some(ProductStatus::Paused),
     }
+}
+
+fn signed_listing_fulfillment_method(
+    content: Option<&Value>,
+    tags: Option<&Value>,
+) -> Option<FarmOrderMethod> {
+    content.and_then(delivery_method_from_content).or_else(|| {
+        tag_index_value(tags, "delivery", 1).and_then(|method| farm_order_method(&method))
+    })
+}
+
+fn delivery_method_from_content(content: &Value) -> Option<FarmOrderMethod> {
+    string_at(content, &["delivery_method", "kind"])
+        .or_else(|| string_at(content, &["delivery", "method"]))
+        .or_else(|| string_at(content, &["delivery_method"]))
+        .and_then(|method| farm_order_method(method.as_str()))
+}
+
+fn signed_listing_availability_window(
+    content: Option<&Value>,
+    tags: Option<&Value>,
+) -> Option<ListingAvailabilityWindow> {
+    let start = content
+        .and_then(|content| string_at(content, &["availability", "amount", "start"]))
+        .or_else(|| content.and_then(|content| string_at(content, &["availability", "start"])))
+        .or_else(|| tag_index_value(tags, "radroots:availability_start", 1))
+        .and_then(|value| parse_u64_quantity(value.as_str()));
+    let end = content
+        .and_then(|content| string_at(content, &["availability", "amount", "end"]))
+        .or_else(|| content.and_then(|content| string_at(content, &["availability", "end"])))
+        .or_else(|| tag_index_value(tags, "expires_at", 1))
+        .and_then(|value| parse_u64_quantity(value.as_str()));
+
+    match (start, end) {
+        (Some(start), Some(end)) if end > start => Some(ListingAvailabilityWindow { start, end }),
+        _ => None,
+    }
+}
+
+fn signed_listing_location_primary(
+    content: Option<&Value>,
+    tags: Option<&Value>,
+) -> Option<String> {
+    content
+        .and_then(|content| string_at(content, &["location", "primary"]))
+        .or_else(|| tag_index_value(tags, "location", 1))
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct ListingAvailabilityWindow {
+    start: u64,
+    end: u64,
 }
 
 fn signed_listing_lifecycle(
@@ -1108,6 +1414,9 @@ fn farm_readiness_storage_key(readiness: FarmReadiness) -> &'static str {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::BTreeSet;
+
+    use radroots_studio_app_models::{FarmOrderMethod, ProductAvailabilityState};
     use radroots_local_events::{
         LocalEventRecordInput, LocalEventRecordUpdate, LocalEventsStore, LocalRecordFamily,
         LocalRecordStatus, PublishOutboxStatus, SourceRuntime,
@@ -1232,6 +1541,117 @@ mod tests {
             relay_set_fingerprint: Some("relay-set".to_owned()),
             relay_delivery_json,
         }
+    }
+
+    fn signed_market_listing_record(
+        record_id: &str,
+        owner_pubkey: &str,
+        farm_key: &str,
+        listing_key: &str,
+        title: &str,
+        inventory_available: &str,
+        status_tag: &str,
+        delivery_method: &str,
+        location_primary: &str,
+        availability_start: u64,
+        availability_end: u64,
+        record_status: LocalRecordStatus,
+        outbox_status: PublishOutboxStatus,
+    ) -> LocalEventRecordInput {
+        let relay_delivery_json = match outbox_status {
+            PublishOutboxStatus::Acknowledged => Some(json!({
+                "state": "acknowledged",
+                "acknowledged_relays": ["ws://127.0.0.1:1234/"]
+            })),
+            PublishOutboxStatus::Failed => Some(json!({
+                "state": "failed",
+                "failed_relays": ["ws://127.0.0.1:1234/"]
+            })),
+            PublishOutboxStatus::Pending | PublishOutboxStatus::None => None,
+        };
+        let content = json!({
+            "d_tag": listing_key,
+            "status": status_tag,
+            "farm": {
+                "pubkey": owner_pubkey,
+                "d_tag": farm_key,
+            },
+            "product": {
+                "key": listing_key,
+                "title": title,
+                "summary": "Published local listing",
+            },
+            "availability": {
+                "kind": "window",
+                "amount": {
+                    "start": availability_start,
+                    "end": availability_end,
+                },
+            },
+            "delivery_method": {
+                "kind": delivery_method,
+            },
+            "location": {
+                "primary": location_primary,
+            },
+        });
+
+        LocalEventRecordInput {
+            record_id: record_id.to_owned(),
+            family: LocalRecordFamily::SignedEvent,
+            status: record_status,
+            source_runtime: SourceRuntime::Cli,
+            created_at_ms: 1100,
+            inserted_at_ms: 1101,
+            owner_account_id: Some("seller-account".to_owned()),
+            owner_pubkey: Some(owner_pubkey.to_owned()),
+            farm_id: Some(farm_key.to_owned()),
+            listing_addr: Some(format!("30402:{owner_pubkey}:{listing_key}")),
+            local_work_json: None,
+            event_id: Some(format!("event-{record_id}")),
+            event_kind: Some(KIND_LISTING),
+            event_pubkey: Some(owner_pubkey.to_owned()),
+            event_created_at: Some(1100),
+            event_tags_json: Some(json!([
+                ["d", listing_key],
+                ["a", format!("30340:{owner_pubkey}:{farm_key}")],
+                ["key", listing_key],
+                ["title", title],
+                ["summary", "Published local listing"],
+                ["radroots:bin", "bin-1", "1", "each"],
+                ["radroots:price", "bin-1", "8", "USD", "1", "each"],
+                ["inventory", inventory_available],
+                ["status", status_tag],
+                [
+                    "radroots:availability_start",
+                    availability_start.to_string()
+                ],
+                ["expires_at", availability_end.to_string()],
+                ["delivery", delivery_method],
+                ["location", location_primary],
+            ])),
+            event_content: Some(content.to_string()),
+            event_sig: Some("signature".to_owned()),
+            raw_event_json: Some(json!({
+                "id": format!("event-{record_id}"),
+                "kind": KIND_LISTING,
+                "pubkey": owner_pubkey,
+                "content": content.to_string(),
+            })),
+            outbox_status,
+            relay_set_fingerprint: Some("relay-set".to_owned()),
+            relay_delivery_json,
+        }
+    }
+
+    fn buyer_listing_titles(app_store: &AppSqliteStore) -> Vec<String> {
+        app_store
+            .load_buyer_listings("", &BTreeSet::new())
+            .expect("buyer listings should load")
+            .rows
+            .into_iter()
+            .map(|row| row.title)
+            .collect()
     }
 
     fn app_d_tag_from_uuid(uuid: Uuid) -> String {
@@ -1658,6 +2078,330 @@ mod tests {
         assert_eq!(product.1, "published");
         assert_eq!(product.2, Some(800));
         assert_eq!(product.3, Some(9));
+    }
+
+    #[test]
+    fn cli_origin_signed_window_listing_projects_into_buyer_browse_and_search() {
+        let app_store =
+            AppSqliteStore::open(DatabaseTarget::InMemory).expect("open app sqlite store");
+        let events = local_events_store();
+        let farm_key = "AAAAAAAAAAAAAAAAAAAAAA";
+        let listing_key = "BBBBBBBBBBBBBBBBBBBBBB";
+        events
+            .append_record(&signed_market_listing_record(
+                "buyer-visible-cli",
+                "seller-pubkey",
+                farm_key,
+                listing_key,
+                "Buyer Visible Eggs",
+                "9",
+                "active",
+                "pickup",
+                "North barn pickup",
+                4_102_444_800,
+                4_102_531_200,
+                LocalRecordStatus::Published,
+                PublishOutboxStatus::Acknowledged,
+            ))
+            .expect("append signed listing");
+
+        let report = app_store
+            .import_shared_local_events_from_store(&events)
+            .expect("import signed listing");
+        let browse = app_store
+            .load_buyer_listings("", &BTreeSet::new())
+            .expect("buyer browse should load");
+        let search = app_store
+            .load_buyer_listings("eggs", &BTreeSet::from([FarmOrderMethod::Pickup]))
+            .expect("buyer search should load");
+        let detail = app_store
+            .load_buyer_product_detail(search.rows[0].product_id)
+            .expect("buyer detail should load")
+            .expect("buyer detail should exist");
+
+        assert_eq!(report.imported_records, 1);
+        assert_eq!(browse.rows.len(), 1);
+        assert_eq!(search.rows.len(), 1);
+        assert_eq!(search.rows[0].title, "Buyer Visible Eggs");
+        assert_eq!(
+            search.rows[0].availability.state,
+            ProductAvailabilityState::Scheduled
+        );
+        assert_eq!(search.rows[0].stock.quantity, Some(9));
+        assert_eq!(
+            search.rows[0].fulfillment_methods,
+            BTreeSet::from([FarmOrderMethod::Pickup])
+        );
+        assert_eq!(detail.listing.title, "Buyer Visible Eggs");
+    }
+
+    #[test]
+    fn app_origin_signed_window_listing_converges_into_buyer_visibility() {
+        let app_store =
+            AppSqliteStore::open(DatabaseTarget::InMemory).expect("open app sqlite store");
+        let events = local_events_store();
+        let farm_uuid = Uuid::from_u128(0x55555555555545558555555555555555);
+        let product_uuid = Uuid::from_u128(0x66666666666646668666666666666666);
+        let farm_key = app_d_tag_from_uuid(farm_uuid);
+        let listing_key = app_d_tag_from_uuid(product_uuid);
+        let listing_addr = format!("30402:app-seller-pubkey:{listing_key}");
+        let app_farm_record = app_local_work_record(
+            "app:local_work:farm:buyer-visible",
+            farm_key.as_str(),
+            json!({
+                "record_kind": "farm_config_v1",
+                "document": {
+                    "selection": {
+                        "account": "seller-account",
+                        "farm_d_tag": farm_key
+                    },
+                    "profile": {
+                        "display_name": "App Farm"
+                    },
+                    "farm": {
+                        "d_tag": farm_key,
+                        "name": "App Farm",
+                        "location": {
+                            "primary": "app farmstand"
+                        }
+                    }
+                }
+            }),
+        );
+        let mut app_listing_record = app_local_work_record(
+            "app:local_work:listing:buyer-visible",
+            farm_key.as_str(),
+            json!({
+                "record_kind": "listing_draft_v1",
+                "document": {
+                    "listing": {
+                        "d_tag": listing_key,
+                        "farm_d_tag": farm_key
+                    },
+                    "seller_actor": {
+                        "account_id": "seller-account",
+                        "pubkey": "app-seller-pubkey"
+                    },
+                    "product": {
+                        "key": listing_key,
+                        "title": "App Draft Eggs",
+                        "summary": "Fresh app-origin eggs"
+                    },
+                    "primary_bin": {
+                        "quantity_unit": "each",
+                        "price_amount": "7",
+                        "price_currency": "USD"
+                    },
+                    "inventory": {
+                        "available": "12"
+                    }
+                }
+            }),
+        );
+        app_listing_record.listing_addr = Some(listing_addr);
+        events
+            .append_record(&app_farm_record)
+            .expect("append app farm local work");
+        events
+            .append_record(&app_listing_record)
+            .expect("append app listing local work");
+        app_store
+            .import_shared_local_events_from_store(&events)
+            .expect("import app local records");
+        events
+            .append_record(&signed_market_listing_record(
+                "buyer-visible-app-origin",
+                "app-seller-pubkey",
+                farm_key.as_str(),
+                listing_key.as_str(),
+                "Buyer Visible App Eggs",
+                "11",
+                "active",
+                "pickup",
+                "App farmstand pickup",
+                4_102_444_800,
+                4_102_531_200,
+                LocalRecordStatus::Published,
+                PublishOutboxStatus::Acknowledged,
+            ))
+            .expect("append signed app-origin listing");
+
+        app_store
+            .import_shared_local_events_from_store(&events)
+            .expect("import signed app-origin listing");
+        let buyer_listings = app_store
+            .load_buyer_listings("app eggs", &BTreeSet::new())
+            .expect("buyer listings should load");
+
+        assert_eq!(buyer_listings.rows.len(), 1);
+        assert_eq!(buyer_listings.rows[0].product_id.as_uuid(), product_uuid);
+        assert_eq!(buyer_listings.rows[0].title, "Buyer Visible App Eggs");
+        assert_eq!(buyer_listings.rows[0].stock.quantity, Some(11));
+    }
+
+    #[test]
+    fn buyer_visibility_rejects_incomplete_unpublished_stale_and_unsupported_records() {
+        for record in [
+            signed_market_listing_record(
+                "pending-window",
+                "seller-pubkey",
+                "AAAAAAAAAAAAAAAAAAAAAA",
+                "BBBBBBBBBBBBBBBBBBBBBB",
+                "Pending Eggs",
+                "8",
+                "active",
+                "pickup",
+                "Pending barn pickup",
+                4_102_444_800,
+                4_102_531_200,
+                LocalRecordStatus::PendingPublish,
+                PublishOutboxStatus::Pending,
+            ),
+            signed_market_listing_record(
+                "sold-out-window",
+                "seller-pubkey",
+                "CCCCCCCCCCCCCCCCCCCCCC",
+                "DDDDDDDDDDDDDDDDDDDDDD",
+                "Sold Out Eggs",
+                "0",
+                "active",
+                "pickup",
+                "South barn pickup",
+                4_102_444_800,
+                4_102_531_200,
+                LocalRecordStatus::Published,
+                PublishOutboxStatus::Acknowledged,
+            ),
+            signed_market_listing_record(
+                "expired-window",
+                "seller-pubkey",
+                "EEEEEEEEEEEEEEEEEEEEEE",
+                "FFFFFFFFFFFFFFFFFFFFFF",
+                "Expired Eggs",
+                "8",
+                "active",
+                "pickup",
+                "East barn pickup",
+                946_684_800,
+                946_771_200,
+                LocalRecordStatus::Published,
+                PublishOutboxStatus::Acknowledged,
+            ),
+            signed_market_listing_record(
+                "unsupported-fulfillment",
+                "seller-pubkey",
+                "GGGGGGGGGGGGGGGGGGGGGG",
+                "HHHHHHHHHHHHHHHHHHHHHH",
+                "Unsupported Eggs",
+                "8",
+                "active",
+                "other",
+                "Unknown exchange point",
+                4_102_444_800,
+                4_102_531_200,
+                LocalRecordStatus::Published,
+                PublishOutboxStatus::Acknowledged,
+            ),
+            signed_listing_record(
+                "status-only",
+                "IIIIIIIIIIIIIIIIIIIIII",
+                "JJJJJJJJJJJJJJJJJJJJJJ",
+                "active",
+            ),
+        ] {
+            let app_store =
+                AppSqliteStore::open(DatabaseTarget::InMemory).expect("open app sqlite store");
+            let events = local_events_store();
+            events.append_record(&record).expect("append record");
+
+            app_store
+                .import_shared_local_events_from_store(&events)
+                .expect("import hidden listing record");
+
+            assert!(buyer_listing_titles(&app_store).is_empty());
+        }
+
+        let app_store =
+            AppSqliteStore::open(DatabaseTarget::InMemory).expect("open app sqlite store");
+        let events = local_events_store();
+        let farm_key = "KKKKKKKKKKKKKKKKKKKKKK";
+        let listing_key = "LLLLLLLLLLLLLLLLLLLLLL";
+        events
+            .append_record(&local_work_record(
+                "local-only-listing",
+                farm_key,
+                json!({
+                    "record_kind": "listing_draft_v1",
+                    "document": {
+                        "listing": {
+                            "d_tag": listing_key,
+                            "farm_d_tag": farm_key
+                        },
+                        "product": {
+                            "title": "Local Only Eggs"
+                        },
+                        "primary_bin": {
+                            "quantity_unit": "each",
+                            "price_amount": "7",
+                            "price_currency": "USD"
+                        },
+                        "inventory": {
+                            "available": "7"
+                        }
+                    }
+                }),
+            ))
+            .expect("append local-only listing");
+        app_store
+            .import_shared_local_events_from_store(&events)
+            .expect("import local-only listing");
+        assert!(buyer_listing_titles(&app_store).is_empty());
+
+        let app_store =
+            AppSqliteStore::open(DatabaseTarget::InMemory).expect("open app sqlite store");
+        let events = local_events_store();
+        events
+            .append_record(&signed_market_listing_record(
+                "current-active-window",
+                "seller-pubkey",
+                farm_key,
+                listing_key,
+                "Current Eggs",
+                "8",
+                "active",
+                "pickup",
+                "West barn pickup",
+                4_102_444_800,
+                4_102_531_200,
+                LocalRecordStatus::Published,
+                PublishOutboxStatus::Acknowledged,
+            ))
+            .expect("append active listing");
+        app_store
+            .import_shared_local_events_from_store(&events)
+            .expect("import active listing");
+        assert_eq!(buyer_listing_titles(&app_store), vec!["Current Eggs"]);
+        events
+            .append_record(&signed_market_listing_record(
+                "newer-archived-window",
+                "seller-pubkey",
+                farm_key,
+                listing_key,
+                "Archived Eggs",
+                "8",
+                "archived",
+                "pickup",
+                "West barn pickup",
+                4_102_444_800,
+                4_102_531_200,
+                LocalRecordStatus::Published,
+                PublishOutboxStatus::Acknowledged,
+            ))
+            .expect("append archived listing");
+        app_store
+            .import_shared_local_events_from_store(&events)
+            .expect("import archived listing");
+        assert!(buyer_listing_titles(&app_store).is_empty());
     }
 
     #[test]
