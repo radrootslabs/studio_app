@@ -10494,7 +10494,7 @@ mod tests {
             SqliteExecutor::open(database_path.as_path()).expect("open shared local events db");
         let store = LocalEventsStore::new(executor);
         store
-            .list_records_after(0, 100)
+            .list_records_after_seq(0, 100)
             .expect("shared local records should list")
     }
 
