@@ -12,6 +12,7 @@ mod source_guards;
 mod window;
 
 pub use app::AppLaunchError;
+pub use runtime::DesktopAppRuntime;
 
 pub fn run() -> Result<(), AppLaunchError> {
     app::launch()

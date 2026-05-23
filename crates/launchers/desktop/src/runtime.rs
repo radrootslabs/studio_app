@@ -123,6 +123,23 @@ impl DesktopAppRuntime {
         Self::from_state(state)
     }
 
+    pub fn bootstrap_with_paths(
+        paths: AppDesktopRuntimePaths,
+        default_nostr_relay_url: String,
+    ) -> Self {
+        let runtime_snapshot = default_runtime_snapshot();
+        let state = match DesktopAppRuntimeState::bootstrap_from_paths(
+            paths,
+            default_nostr_relay_url,
+            runtime_snapshot.clone(),
+        ) {
+            Ok(state) => state,
+            Err(error) => DesktopAppRuntimeState::degraded_with_snapshot(error, runtime_snapshot),
+        };
+
+        Self::from_state(state)
+    }
+
     pub fn summary(&self) -> DesktopAppRuntimeSummary {
         let state = self.lock_state();
         let sync_status = DesktopAppSyncStatusSummary {
@@ -3813,8 +3830,8 @@ pub enum DesktopAppRuntimeCommandError {
     Accounts(#[from] DesktopAccountsCommandError),
     #[error(transparent)]
     Projection(#[from] DesktopAccountsProjectionError),
-    #[error(transparent)]
-    RemoteSigner(#[from] DesktopRemoteSignerError),
+    #[error("remote signer command failed: {0}")]
+    RemoteSigner(String),
     #[error(transparent)]
     Sqlite(#[from] AppSqliteError),
     #[error(transparent)]
@@ -3825,6 +3842,12 @@ pub enum DesktopAppRuntimeCommandError {
     PackDayPrint(#[from] PackDayPrintError),
     #[error(transparent)]
     PackDayBatchPrint(#[from] PackDayBatchPrintError),
+}
+
+impl From<DesktopRemoteSignerError> for DesktopAppRuntimeCommandError {
+    fn from(error: DesktopRemoteSignerError) -> Self {
+        Self::RemoteSigner(error.to_string())
+    }
 }
 
 #[derive(Debug, Error)]
