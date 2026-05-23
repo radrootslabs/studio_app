@@ -17,9 +17,10 @@ pub use pack_day_export::{
     prepare_pack_day_export_bundle_at_data_root, write_prepared_pack_day_export_bundle,
 };
 pub use paths::{
-    APP_RUNTIME_NAMESPACE, APP_RUNTIME_NAMESPACE_KIND, APP_RUNTIME_NAMESPACE_VALUE,
-    AppDesktopRuntimePaths, AppRuntimeHostEnvironment, AppRuntimePathsError, AppRuntimePlatform,
-    AppRuntimeRoots, AppSharedAccountsPaths, AppSharedIdentityPaths, SHARED_ACCOUNTS_NAMESPACE,
+    APP_PATHS_PROFILE_ENV, APP_PATHS_REPO_LOCAL_ROOT_ENV, APP_RUNTIME_NAMESPACE,
+    APP_RUNTIME_NAMESPACE_KIND, APP_RUNTIME_NAMESPACE_VALUE, AppDesktopRuntimePaths,
+    AppRuntimeHostEnvironment, AppRuntimePathsError, AppRuntimePlatform, AppRuntimeRoots,
+    AppSharedAccountsPaths, AppSharedIdentityPaths, SHARED_ACCOUNTS_NAMESPACE,
     SHARED_ACCOUNTS_NAMESPACE_KIND, SHARED_ACCOUNTS_NAMESPACE_VALUE,
     SHARED_ACCOUNTS_STORE_FILE_NAME, SHARED_IDENTITIES_NAMESPACE, SHARED_IDENTITIES_NAMESPACE_KIND,
     SHARED_IDENTITIES_NAMESPACE_VALUE, SHARED_IDENTITY_FILE_NAME,

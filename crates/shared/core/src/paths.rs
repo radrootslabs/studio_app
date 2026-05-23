@@ -16,6 +16,11 @@ pub const SHARED_IDENTITIES_NAMESPACE_KIND: &str = "shared";
 pub const SHARED_IDENTITIES_NAMESPACE_VALUE: &str = "identities";
 pub const SHARED_IDENTITIES_NAMESPACE: &str = "shared/identities";
 pub const SHARED_IDENTITY_FILE_NAME: &str = "default.json";
+pub const APP_PATHS_PROFILE_ENV: &str = "RADROOTS_APP_PATHS_PROFILE";
+pub const APP_PATHS_REPO_LOCAL_ROOT_ENV: &str = "RADROOTS_APP_PATHS_REPO_LOCAL_ROOT";
+
+const APP_INTERACTIVE_USER_PROFILE: &str = "interactive_user";
+const APP_REPO_LOCAL_PROFILE: &str = "repo_local";
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum AppRuntimePlatform {
@@ -50,6 +55,8 @@ pub struct AppRuntimeHostEnvironment {
     pub home_dir: Option<PathBuf>,
     pub appdata_dir: Option<PathBuf>,
     pub localappdata_dir: Option<PathBuf>,
+    pub paths_profile: Option<String>,
+    pub repo_local_root: Option<PathBuf>,
 }
 
 impl AppRuntimeHostEnvironment {
@@ -58,6 +65,8 @@ impl AppRuntimeHostEnvironment {
             home_dir: env::var_os("HOME").map(PathBuf::from),
             appdata_dir: env::var_os("APPDATA").map(PathBuf::from),
             localappdata_dir: env::var_os("LOCALAPPDATA").map(PathBuf::from),
+            paths_profile: env::var(APP_PATHS_PROFILE_ENV).ok(),
+            repo_local_root: env::var_os(APP_PATHS_REPO_LOCAL_ROOT_ENV).map(PathBuf::from),
         }
     }
 }
@@ -170,33 +179,21 @@ fn resolve_desktop_base_roots(
     platform: AppRuntimePlatform,
     host_environment: AppRuntimeHostEnvironment,
 ) -> Result<AppRuntimeRoots, AppRuntimePathsError> {
-    let roots = match platform {
-        AppRuntimePlatform::Linux | AppRuntimePlatform::Macos => {
-            let home_dir = host_environment
-                .home_dir
-                .ok_or(AppRuntimePathsError::MissingHomeDir { platform })?;
-            AppRuntimeRoots::from_base_root(home_dir.join(".radroots"))
-        }
-        AppRuntimePlatform::Windows => {
-            let appdata_dir = host_environment
-                .appdata_dir
-                .ok_or(AppRuntimePathsError::MissingWindowsUserDirs)?;
-            let localappdata_dir = host_environment
-                .localappdata_dir
-                .ok_or(AppRuntimePathsError::MissingWindowsUserDirs)?;
-            let config_root = appdata_dir.join("Radroots");
-            let local_root = localappdata_dir.join("Radroots");
-            AppRuntimeRoots {
-                config: config_root.join("config"),
-                data: local_root.join("data"),
-                cache: local_root.join("cache"),
-                logs: local_root.join("logs"),
-                run: local_root.join("run"),
-                secrets: config_root.join("secrets"),
+    let roots = match resolve_desktop_profile(host_environment.paths_profile.as_deref())? {
+        AppDesktopPathProfile::InteractiveUser => resolve_interactive_user_roots(
+            platform,
+            host_environment.home_dir,
+            host_environment.appdata_dir,
+            host_environment.localappdata_dir,
+        )?,
+        AppDesktopPathProfile::RepoLocal => {
+            let repo_local_root = host_environment
+                .repo_local_root
+                .ok_or(AppRuntimePathsError::MissingRepoLocalRoot)?;
+            if repo_local_root.as_os_str().is_empty() {
+                return Err(AppRuntimePathsError::EmptyRepoLocalRoot);
             }
-        }
-        AppRuntimePlatform::Other(_) => {
-            return Err(AppRuntimePathsError::UnsupportedPlatform { platform });
+            AppRuntimeRoots::from_base_root(repo_local_root)
         }
     };
 
@@ -204,9 +201,63 @@ fn resolve_desktop_base_roots(
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum AppDesktopPathProfile {
+    InteractiveUser,
+    RepoLocal,
+}
+
+fn resolve_desktop_profile(
+    profile: Option<&str>,
+) -> Result<AppDesktopPathProfile, AppRuntimePathsError> {
+    match profile {
+        None => Ok(AppDesktopPathProfile::InteractiveUser),
+        Some(value) => match value.trim().to_ascii_lowercase().as_str() {
+            APP_INTERACTIVE_USER_PROFILE => Ok(AppDesktopPathProfile::InteractiveUser),
+            APP_REPO_LOCAL_PROFILE => Ok(AppDesktopPathProfile::RepoLocal),
+            _ => Err(AppRuntimePathsError::UnsupportedPathProfile {
+                value: value.to_owned(),
+            }),
+        },
+    }
+}
+
+fn resolve_interactive_user_roots(
+    platform: AppRuntimePlatform,
+    home_dir: Option<PathBuf>,
+    appdata_dir: Option<PathBuf>,
+    localappdata_dir: Option<PathBuf>,
+) -> Result<AppRuntimeRoots, AppRuntimePathsError> {
+    match platform {
+        AppRuntimePlatform::Linux | AppRuntimePlatform::Macos => {
+            let home_dir = home_dir.ok_or(AppRuntimePathsError::MissingHomeDir { platform })?;
+            Ok(AppRuntimeRoots::from_base_root(home_dir.join(".radroots")))
+        }
+        AppRuntimePlatform::Windows => {
+            let appdata_dir = appdata_dir.ok_or(AppRuntimePathsError::MissingWindowsUserDirs)?;
+            let localappdata_dir =
+                localappdata_dir.ok_or(AppRuntimePathsError::MissingWindowsUserDirs)?;
+            let config_root = appdata_dir.join("Radroots");
+            let local_root = localappdata_dir.join("Radroots");
+            Ok(AppRuntimeRoots {
+                config: config_root.join("config"),
+                data: local_root.join("data"),
+                cache: local_root.join("cache"),
+                logs: local_root.join("logs"),
+                run: local_root.join("run"),
+                secrets: config_root.join("secrets"),
+            })
+        }
+        AppRuntimePlatform::Other(_) => Err(AppRuntimePathsError::UnsupportedPlatform { platform }),
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub enum AppRuntimePathsError {
     MissingHomeDir { platform: AppRuntimePlatform },
     MissingWindowsUserDirs,
+    MissingRepoLocalRoot,
+    EmptyRepoLocalRoot,
+    UnsupportedPathProfile { value: String },
     UnsupportedPlatform { platform: AppRuntimePlatform },
 }
 
@@ -222,6 +273,18 @@ impl fmt::Display for AppRuntimePathsError {
             }
             Self::MissingWindowsUserDirs => formatter
                 .write_str("desktop runtime roots require APPDATA and LOCALAPPDATA on windows"),
+            Self::MissingRepoLocalRoot => write!(
+                formatter,
+                "desktop runtime roots require {APP_PATHS_REPO_LOCAL_ROOT_ENV} when {APP_PATHS_PROFILE_ENV}=repo_local"
+            ),
+            Self::EmptyRepoLocalRoot => write!(
+                formatter,
+                "{APP_PATHS_REPO_LOCAL_ROOT_ENV} must not be empty when {APP_PATHS_PROFILE_ENV}=repo_local"
+            ),
+            Self::UnsupportedPathProfile { value } => write!(
+                formatter,
+                "{APP_PATHS_PROFILE_ENV} must be `interactive_user` or `repo_local`, got `{value}`"
+            ),
             Self::UnsupportedPlatform { platform } => write!(
                 formatter,
                 "desktop runtime roots are unsupported on {}",
@@ -330,6 +393,70 @@ mod tests {
                 .join("Radroots")
                 .join("data")
                 .join(APP_RUNTIME_NAMESPACE)
+        );
+    }
+
+    #[test]
+    fn desktop_runtime_roots_use_explicit_repo_local_root() {
+        let paths = AppDesktopRuntimePaths::for_desktop(
+            AppRuntimePlatform::Macos,
+            AppRuntimeHostEnvironment {
+                paths_profile: Some("repo_local".to_owned()),
+                repo_local_root: Some(PathBuf::from("/repo/infra/local/runtime/radroots")),
+                ..AppRuntimeHostEnvironment::default()
+            },
+        )
+        .expect("repo-local roots should resolve");
+
+        assert_eq!(
+            paths.app.data,
+            PathBuf::from("/repo/infra/local/runtime/radroots/data/apps/app")
+        );
+        assert_eq!(
+            paths.app.logs,
+            PathBuf::from("/repo/infra/local/runtime/radroots/logs/apps/app")
+        );
+        assert_eq!(
+            paths.shared_accounts.data_root,
+            PathBuf::from("/repo/infra/local/runtime/radroots/data/shared/accounts")
+        );
+        assert_eq!(
+            paths.shared_identity.default_identity_path,
+            PathBuf::from("/repo/infra/local/runtime/radroots/secrets/shared/identities")
+                .join(SHARED_IDENTITY_FILE_NAME)
+        );
+    }
+
+    #[test]
+    fn repo_local_profile_requires_explicit_root() {
+        let err = AppRuntimeRoots::for_desktop(
+            AppRuntimePlatform::Macos,
+            AppRuntimeHostEnvironment {
+                paths_profile: Some("repo_local".to_owned()),
+                ..AppRuntimeHostEnvironment::default()
+            },
+        )
+        .expect_err("repo-local root should be required");
+
+        assert_eq!(err, AppRuntimePathsError::MissingRepoLocalRoot);
+    }
+
+    #[test]
+    fn unsupported_path_profile_is_rejected() {
+        let err = AppRuntimeRoots::for_desktop(
+            AppRuntimePlatform::Macos,
+            AppRuntimeHostEnvironment {
+                paths_profile: Some("dev".to_owned()),
+                ..AppRuntimeHostEnvironment::default()
+            },
+        )
+        .expect_err("unsupported profile should fail");
+
+        assert_eq!(
+            err,
+            AppRuntimePathsError::UnsupportedPathProfile {
+                value: "dev".to_owned(),
+            }
         );
     }
 

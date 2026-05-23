@@ -3317,7 +3317,7 @@ impl DesktopAppRuntimeState {
         let timestamp = current_runtime_time_ms()?;
         let farm_d_tag = d_tag_from_uuid(saved_farm.farm_id.as_uuid());
         let owner_pubkey = self.local_events_owner_pubkey(account);
-        let exportability = app_local_work_exportability(owner_pubkey.as_deref());
+        let exportability = local_work_exportability(owner_pubkey.as_deref());
         let delivery_method = projection
             .draft
             .order_methods
@@ -3409,7 +3409,7 @@ impl DesktopAppRuntimeState {
         let listing_addr = owner_pubkey
             .as_ref()
             .map(|pubkey| format!("30402:{pubkey}:{listing_d_tag}"));
-        let exportability = app_local_work_exportability(owner_pubkey.as_deref());
+        let exportability = local_work_exportability(owner_pubkey.as_deref());
         let farm_setup = self.state_store.farm_setup_projection();
         let delivery_method = farm_setup
             .draft
@@ -3969,7 +3969,7 @@ fn is_hex_64(value: &str) -> bool {
     value.len() == 64 && value.bytes().all(|byte| byte.is_ascii_hexdigit())
 }
 
-fn app_local_work_exportability(owner_pubkey: Option<&str>) -> serde_json::Value {
+fn local_work_exportability(owner_pubkey: Option<&str>) -> serde_json::Value {
     match owner_pubkey {
         Some(_) => json!({
             "state": "exportable"
