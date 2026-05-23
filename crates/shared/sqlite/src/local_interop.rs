@@ -555,7 +555,12 @@ impl<'a> AppLocalInteropRepository<'a> {
                     farm_id = excluded.farm_id,
                     title = excluded.title,
                     subtitle = excluded.subtitle,
-                    status = excluded.status,
+                    status = CASE
+                        WHEN excluded.status = 'draft'
+                            AND products.status IN ('published', 'paused', 'archived')
+                        THEN products.status
+                        ELSE excluded.status
+                    END,
                     unit_label = excluded.unit_label,
                     price_minor_units = excluded.price_minor_units,
                     price_currency = excluded.price_currency,
@@ -993,10 +998,39 @@ mod tests {
         listing_key: &str,
         status_tag: &str,
     ) -> LocalEventRecordInput {
+        signed_listing_record_with_publish_state(
+            record_id,
+            farm_key,
+            listing_key,
+            status_tag,
+            LocalRecordStatus::Published,
+            PublishOutboxStatus::Acknowledged,
+        )
+    }
+
+    fn signed_listing_record_with_publish_state(
+        record_id: &str,
+        farm_key: &str,
+        listing_key: &str,
+        status_tag: &str,
+        record_status: LocalRecordStatus,
+        outbox_status: PublishOutboxStatus,
+    ) -> LocalEventRecordInput {
+        let relay_delivery_json = match outbox_status {
+            PublishOutboxStatus::Acknowledged => Some(json!({
+                "state": "acknowledged",
+                "acknowledged_relays": ["ws://127.0.0.1:1234/"]
+            })),
+            PublishOutboxStatus::Failed => Some(json!({
+                "state": "failed",
+                "failed_relays": ["ws://127.0.0.1:1234/"]
+            })),
+            PublishOutboxStatus::Pending | PublishOutboxStatus::None => None,
+        };
         LocalEventRecordInput {
             record_id: record_id.to_owned(),
             family: LocalRecordFamily::SignedEvent,
-            status: LocalRecordStatus::Published,
+            status: record_status,
             source_runtime: SourceRuntime::Cli,
             created_at_ms: 1100,
             inserted_at_ms: 1101,
@@ -1028,12 +1062,9 @@ mod tests {
                 "pubkey": "seller-pubkey",
                 "content": "# Relay Eggs\n\nPublished eggs"
             })),
-            outbox_status: PublishOutboxStatus::Acknowledged,
+            outbox_status,
             relay_set_fingerprint: Some("relay-set".to_owned()),
-            relay_delivery_json: Some(json!({
-                "state": "acknowledged",
-                "acknowledged_relays": ["ws://127.0.0.1:1234/"]
-            })),
+            relay_delivery_json,
         }
     }
 
@@ -1377,5 +1408,60 @@ mod tests {
         assert_eq!(report.skipped_records, 1);
         assert_eq!(imported[0].projected_kind, "unsupported");
         assert_eq!(product_count, 0);
+    }
+
+    #[test]
+    fn pending_or_failed_signed_listing_records_do_not_downgrade_published_product() {
+        for (record_status, outbox_status) in [
+            (
+                LocalRecordStatus::PendingPublish,
+                PublishOutboxStatus::Pending,
+            ),
+            (LocalRecordStatus::Failed, PublishOutboxStatus::Failed),
+        ] {
+            let app_store =
+                AppSqliteStore::open(DatabaseTarget::InMemory).expect("open app sqlite store");
+            let events = local_events_store();
+            let farm_key = "AAAAAAAAAAAAAAAAAAAAAA";
+            let listing_key = "BBBBBBBBBBBBBBBBBBBBBB";
+            events
+                .append_record(&signed_listing_record(
+                    "confirmed",
+                    farm_key,
+                    listing_key,
+                    "active",
+                ))
+                .expect("append confirmed signed listing");
+            app_store
+                .import_shared_local_events_from_store(&events)
+                .expect("import confirmed signed listing");
+            events
+                .append_record(&signed_listing_record_with_publish_state(
+                    record_status.as_str(),
+                    farm_key,
+                    listing_key,
+                    "active",
+                    record_status,
+                    outbox_status,
+                ))
+                .expect("append unconfirmed signed listing");
+
+            app_store
+                .import_shared_local_events_from_store(&events)
+                .expect("import unconfirmed signed listing");
+            let product_status: String = app_store
+                .connection()
+                .query_row("SELECT status FROM products", [], |row| row.get(0))
+                .expect("load product status");
+            let imported = app_store
+                .load_local_interop_records()
+                .expect("load imported records");
+
+            assert_eq!(product_status, "published");
+            assert!(imported.iter().any(|record| {
+                record.local_status == record_status.as_str()
+                    && record.outbox_status == outbox_status.as_str()
+            }));
+        }
     }
 }
