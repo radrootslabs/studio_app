@@ -1,7 +1,9 @@
 use std::collections::BTreeSet;
 use std::fmt;
+use std::fs;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use chrono::{Duration, Utc};
 use radroots_studio_app_core::{
@@ -48,7 +50,12 @@ use radroots_studio_app_sync::{
     PendingSyncOperation, SyncAggregateRef, SyncCheckpointStatus, SyncConflictSeverity,
     SyncOperationKind, SyncTrigger,
 };
+use radroots_local_events::{
+    LocalEventRecordInput, LocalEventsStore, LocalRecordFamily, LocalRecordStatus,
+    PublishOutboxStatus, SourceRuntime,
+};
 use radroots_nostr_accounts::prelude::RadrootsNostrAccountsManager;
+use radroots_sql_core::SqliteExecutor;
 use serde_json::json;
 use thiserror::Error;
 use tracing::error;
@@ -2267,6 +2274,8 @@ impl DesktopAppRuntimeState {
                 .apply_in_memory(AppStateCommand::replace_product_editor_draft(
                     reloaded_draft,
                 ));
+        let app_local_changed =
+            self.append_app_listing_local_work_record(product_id, &draft_payload)?;
         let pending_changed =
             self.enqueue_selected_account_sync_operations(vec![pending_sync_upsert(
                 SyncAggregateRef::Product(product_id),
@@ -2280,7 +2289,7 @@ impl DesktopAppRuntimeState {
                 ),
             )])?;
 
-        Ok(saved || context_changed || editor_changed || pending_changed)
+        Ok(saved || context_changed || editor_changed || app_local_changed || pending_changed)
     }
 
     fn close_product_editor(&mut self) -> bool {
@@ -2306,7 +2315,7 @@ impl DesktopAppRuntimeState {
     fn finish_farm_setup(
         &mut self,
     ) -> Result<FarmSetupProjection, DesktopAppRuntimeFarmSetupError> {
-        let account = self.selected_account_for_farm_setup()?;
+        let account = self.selected_account_for_farm_setup()?.clone();
         let sqlite_store = self.sqlite_store_for_farm_setup()?;
         let draft = self.state_store.farm_setup_projection().draft.clone();
 
@@ -2326,6 +2335,7 @@ impl DesktopAppRuntimeState {
 
         sqlite_store.save_farm_summary(&saved_farm)?;
         sqlite_store.save_farm_setup(account.account.account_id.as_str(), &projection)?;
+        let _ = self.append_app_farm_local_work_record(&account, &projection, &saved_farm)?;
 
         let selected_account_context = self.refresh_selected_account_context()?;
         self.apply_selected_account_context(&selected_account_context);
@@ -3277,6 +3287,263 @@ impl DesktopAppRuntimeState {
         sqlite_store.import_shared_local_events_from_path(database_path.as_path())
     }
 
+
+    fn append_app_farm_local_work_record(
+        &self,
+        account: &radroots_studio_app_models::SelectedAccountProjection,
+        projection: &FarmSetupProjection,
+        saved_farm: &FarmSummary,
+    ) -> Result<bool, AppSqliteError> {
+        let Some(shared_accounts_paths) = self.shared_accounts_paths.as_ref() else {
+            return Ok(false);
+        };
+        let timestamp = current_runtime_time_ms()?;
+        let farm_d_tag = d_tag_from_uuid(saved_farm.farm_id.as_uuid());
+        let owner_pubkey = self.local_events_owner_pubkey(account);
+        let delivery_method = projection
+            .draft
+            .order_methods
+            .iter()
+            .next()
+            .map(|method| method.storage_key());
+        let payload = json!({
+            "record_kind": "farm_config_v1",
+            "scope": "app",
+            "document": {
+                "version": 1,
+                "selection": {
+                    "scope": "app",
+                    "account": account.account.account_id,
+                    "farm_d_tag": farm_d_tag,
+                },
+                "profile": {
+                    "name": saved_farm.display_name,
+                    "display_name": saved_farm.display_name,
+                },
+                "farm": {
+                    "d_tag": farm_d_tag,
+                    "name": saved_farm.display_name,
+                    "location": {
+                        "primary": projection.draft.location_or_service_area,
+                    },
+                },
+                "listing_defaults": {
+                    "delivery_method": delivery_method,
+                    "location": {
+                        "primary": projection.draft.location_or_service_area,
+                    },
+                },
+            },
+        });
+        let input = LocalEventRecordInput {
+            record_id: format!("app:local_work:farm:{farm_d_tag}:{}", Uuid::now_v7()),
+            family: LocalRecordFamily::LocalWork,
+            status: LocalRecordStatus::LocalSaved,
+            source_runtime: SourceRuntime::App,
+            created_at_ms: timestamp,
+            inserted_at_ms: timestamp,
+            owner_account_id: Some(account.account.account_id.clone()),
+            owner_pubkey: Some(owner_pubkey),
+            farm_id: Some(farm_d_tag),
+            listing_addr: None,
+            local_work_json: Some(payload),
+            event_id: None,
+            event_kind: None,
+            event_pubkey: None,
+            event_created_at: None,
+            event_tags_json: None,
+            event_content: None,
+            event_sig: None,
+            raw_event_json: None,
+            outbox_status: PublishOutboxStatus::None,
+            relay_set_fingerprint: None,
+            relay_delivery_json: None,
+        };
+
+        self.append_app_local_work_record(shared_accounts_paths, &input)?;
+        Ok(true)
+    }
+
+    fn append_app_listing_local_work_record(
+        &self,
+        product_id: ProductId,
+        draft: &ProductEditorDraft,
+    ) -> Result<bool, AppSqliteError> {
+        let Some(shared_accounts_paths) = self.shared_accounts_paths.as_ref() else {
+            return Ok(false);
+        };
+        let Some(account) = self
+            .state_store
+            .identity_projection()
+            .selected_account
+            .as_ref()
+        else {
+            return Ok(false);
+        };
+        let Some(farm_id) = self.selected_farm_id() else {
+            return Ok(false);
+        };
+        let timestamp = current_runtime_time_ms()?;
+        let farm_d_tag = d_tag_from_uuid(farm_id.as_uuid());
+        let listing_d_tag = d_tag_from_uuid(product_id.as_uuid());
+        let owner_pubkey = self.local_events_owner_pubkey(account);
+        let listing_addr = format!("30402:{owner_pubkey}:{listing_d_tag}");
+        let farm_setup = self.state_store.farm_setup_projection();
+        let delivery_method = farm_setup
+            .draft
+            .order_methods
+            .iter()
+            .next()
+            .map(|method| method.storage_key())
+            .unwrap_or("pickup");
+        let location_primary = if farm_setup.draft.location_or_service_area.trim().is_empty() {
+            "local pickup"
+        } else {
+            farm_setup.draft.location_or_service_area.as_str()
+        };
+        let unit_label = if draft.unit_label.trim().is_empty() {
+            "each"
+        } else {
+            draft.unit_label.as_str()
+        };
+        let price_amount = draft
+            .price_minor_units
+            .map(decimal_from_minor_units)
+            .unwrap_or_else(|| "0".to_owned());
+        let available = draft
+            .stock_quantity
+            .map(|value| value.to_string())
+            .unwrap_or_else(|| "0".to_owned());
+        let payload = json!({
+            "record_kind": "listing_draft_v1",
+            "document": {
+                "version": 1,
+                "kind": "listing_draft_v1",
+                "listing": {
+                    "d_tag": listing_d_tag,
+                    "farm_d_tag": farm_d_tag,
+                },
+                "seller_actor": {
+                    "account_id": account.account.account_id,
+                    "pubkey": owner_pubkey,
+                    "source": "farm_config",
+                },
+                "product": {
+                    "key": listing_d_tag,
+                    "title": draft.title,
+                    "category": "produce",
+                    "summary": draft.subtitle,
+                },
+                "primary_bin": {
+                    "bin_id": "bin-1",
+                    "quantity_amount": "1",
+                    "quantity_unit": unit_label,
+                    "price_amount": price_amount,
+                    "price_currency": draft.price_currency,
+                    "price_per_amount": "1",
+                    "price_per_unit": unit_label,
+                },
+                "inventory": {
+                    "available": available,
+                },
+                "availability": {
+                    "kind": "local",
+                    "status": draft.status.storage_key(),
+                },
+                "delivery": {
+                    "method": delivery_method,
+                },
+                "location": {
+                    "primary": location_primary,
+                },
+            },
+        });
+        let input = LocalEventRecordInput {
+            record_id: format!("app:local_work:listing:{listing_d_tag}:{}", Uuid::now_v7()),
+            family: LocalRecordFamily::LocalWork,
+            status: LocalRecordStatus::LocalSaved,
+            source_runtime: SourceRuntime::App,
+            created_at_ms: timestamp,
+            inserted_at_ms: timestamp,
+            owner_account_id: Some(account.account.account_id.clone()),
+            owner_pubkey: Some(owner_pubkey),
+            farm_id: Some(farm_d_tag),
+            listing_addr: Some(listing_addr),
+            local_work_json: Some(payload),
+            event_id: None,
+            event_kind: None,
+            event_pubkey: None,
+            event_created_at: None,
+            event_tags_json: None,
+            event_content: None,
+            event_sig: None,
+            raw_event_json: None,
+            outbox_status: PublishOutboxStatus::None,
+            relay_set_fingerprint: None,
+            relay_delivery_json: None,
+        };
+
+        self.append_app_local_work_record(shared_accounts_paths, &input)?;
+        Ok(true)
+    }
+
+    fn append_app_local_work_record(
+        &self,
+        shared_accounts_paths: &AppSharedAccountsPaths,
+        input: &LocalEventRecordInput,
+    ) -> Result<(), AppSqliteError> {
+        let Some(database_path) =
+            shared_local_events_database_path_from_shared_accounts(shared_accounts_paths)
+        else {
+            return Ok(());
+        };
+        if let Some(parent) = database_path.parent() {
+            fs::create_dir_all(parent).map_err(|source| AppSqliteError::CreateParentDirectory {
+                path: parent.to_path_buf(),
+                source,
+            })?;
+        }
+        let executor = SqliteExecutor::open(database_path.as_path()).map_err(|source| {
+            AppSqliteError::LocalEventsSql {
+                operation: "open shared local events database",
+                source,
+            }
+        })?;
+        let store = LocalEventsStore::new(executor);
+        store
+            .migrate_up()
+            .map_err(|source| AppSqliteError::LocalEventsSql {
+                operation: "migrate shared local events database",
+                source,
+            })?;
+        store
+            .append_record(input)
+            .map_err(|source| AppSqliteError::LocalEvents {
+                operation: "append app local work record",
+                source,
+            })?;
+        Ok(())
+    }
+
+    fn local_events_owner_pubkey(
+        &self,
+        account: &radroots_studio_app_models::SelectedAccountProjection,
+    ) -> String {
+        if is_hex_64(account.account.account_id.as_str()) {
+            return account.account.account_id.clone();
+        }
+        self.accounts_manager
+            .as_ref()
+            .and_then(|manager| {
+                manager
+                    .resolve_account_selector(account.account.account_id.as_str())
+                    .ok()
+            })
+            .map(|record| record.public_identity.public_key_hex)
+            .filter(|pubkey| is_hex_64(pubkey))
+            .unwrap_or_else(|| account.account.npub.clone())
+    }
+
     fn refresh_selected_account_context_after_local_events(
         &mut self,
     ) -> Result<bool, AppSqliteError> {
@@ -3622,6 +3889,56 @@ fn shared_local_events_database_path_from_shared_accounts(
             .join(SHARED_LOCAL_EVENTS_DIR)
             .join(SHARED_LOCAL_EVENTS_DB_FILE_NAME),
     )
+}
+
+
+fn current_runtime_time_ms() -> Result<i64, AppSqliteError> {
+    let duration = SystemTime::now().duration_since(UNIX_EPOCH).map_err(|_| {
+        AppSqliteError::InvalidProjection {
+            reason: "current runtime timestamp must be after unix epoch",
+        }
+    })?;
+    i64::try_from(duration.as_millis()).map_err(|_| AppSqliteError::InvalidProjection {
+        reason: "current runtime timestamp must fit i64 milliseconds",
+    })
+}
+
+fn d_tag_from_uuid(uuid: Uuid) -> String {
+    base64_url_no_pad(uuid.as_bytes())
+}
+
+fn base64_url_no_pad(bytes: &[u8]) -> String {
+    const ALPHABET: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
+    let mut output = String::with_capacity((bytes.len() * 4).div_ceil(3));
+    let mut chunks = bytes.chunks_exact(3);
+    for chunk in &mut chunks {
+        output.push(ALPHABET[(chunk[0] >> 2) as usize] as char);
+        output.push(ALPHABET[(((chunk[0] & 0b0000_0011) << 4) | (chunk[1] >> 4)) as usize] as char);
+        output.push(ALPHABET[(((chunk[1] & 0b0000_1111) << 2) | (chunk[2] >> 6)) as usize] as char);
+        output.push(ALPHABET[(chunk[2] & 0b0011_1111) as usize] as char);
+    }
+    match chunks.remainder() {
+        [one] => {
+            output.push(ALPHABET[(one >> 2) as usize] as char);
+            output.push(ALPHABET[((one & 0b0000_0011) << 4) as usize] as char);
+        }
+        [one, two] => {
+            output.push(ALPHABET[(one >> 2) as usize] as char);
+            output.push(ALPHABET[(((one & 0b0000_0011) << 4) | (two >> 4)) as usize] as char);
+            output.push(ALPHABET[((two & 0b0000_1111) << 2) as usize] as char);
+        }
+        [] => {}
+        _ => {}
+    }
+    output
+}
+
+fn decimal_from_minor_units(value: u32) -> String {
+    format!("{}.{:02}", value / 100, value % 100)
+}
+
+fn is_hex_64(value: &str) -> bool {
+    value.len() == 64 && value.bytes().all(|byte| byte.is_ascii_hexdigit())
 }
 
 fn load_selected_account_context(
@@ -4948,8 +5265,8 @@ mod tests {
     };
     use radroots_identity::RadrootsIdentity;
     use radroots_local_events::{
-        LocalEventRecordInput, LocalEventsStore, LocalRecordFamily, LocalRecordStatus,
-        PublishOutboxStatus, SourceRuntime,
+        LocalEventRecord, LocalEventRecordInput, LocalEventsStore, LocalRecordFamily,
+        LocalRecordStatus, PublishOutboxStatus, SourceRuntime,
     };
     use radroots_nostr_accounts::prelude::{
         RadrootsNostrAccountsManager, RadrootsNostrFileAccountStore,
@@ -4964,7 +5281,7 @@ mod tests {
         default_sync_transport, DesktopAppRuntime, DesktopAppRuntimeActivityContextError,
         DesktopAppRuntimeCommandError, DesktopAppRuntimeMetadataSummary, DesktopAppRuntimeState,
         DesktopAppSyncStatusSummary, DesktopRemoteSignerPaths, APP_DATABASE_FILE_NAME,
-        SYNC_TRANSPORT_UNAVAILABLE_MESSAGE,
+        SYNC_TRANSPORT_UNAVAILABLE_MESSAGE, is_hex_64,
     };
     use crate::pack_day_host_handoff::PackDayHostHandoffError;
     use crate::pack_day_print::{
@@ -5425,6 +5742,142 @@ mod tests {
             summary.products_projection.list.rows[0].status,
             ProductStatus::Draft
         );
+
+        cleanup_bootstrapped_runtime_paths(&paths);
+    }
+
+
+    #[test]
+    fn runtime_app_farm_and_listing_writes_append_shared_local_work_records() {
+        let (runtime, paths) = bootstrapped_runtime("app_local_work_records");
+        assert!(
+            runtime
+                .generate_local_account(Some("Farmer".to_owned()))
+                .expect("account should generate")
+        );
+        let account_id = runtime
+            .summary()
+            .settings_account_projection
+            .selected_account
+            .as_ref()
+            .expect("selected account")
+            .account
+            .account_id
+            .clone();
+
+        runtime
+            .save_farm_setup_draft(FarmSetupDraft::new(
+                "Green Farm",
+                "farmstand",
+                [FarmOrderMethod::Pickup],
+            ))
+            .expect("farm setup draft should save");
+        runtime
+            .finish_farm_setup()
+            .expect("farm setup should finish");
+        assert!(
+            runtime
+                .open_new_product_editor()
+                .expect("product editor should open")
+        );
+        assert!(
+            runtime
+                .save_product_editor_draft(ProductEditorDraft {
+                    title: "Eggs".to_owned(),
+                    subtitle: "Fresh eggs".to_owned(),
+                    unit_label: "dozen".to_owned(),
+                    price_minor_units: Some(750),
+                    price_currency: "USD".to_owned(),
+                    stock_quantity: Some(12),
+                    availability_window_id: None,
+                    status: ProductStatus::Draft,
+                })
+                .expect("product draft should save")
+        );
+
+        let records = shared_local_event_records(&paths);
+        let app_records = records
+            .iter()
+            .filter(|record| record.source_runtime == SourceRuntime::App)
+            .collect::<Vec<_>>();
+        assert_eq!(app_records.len(), 2);
+
+        let farm_record = app_records
+            .iter()
+            .find(|record| {
+                record
+                    .local_work_json
+                    .as_ref()
+                    .and_then(|payload| payload["record_kind"].as_str())
+                    == Some("farm_config_v1")
+            })
+            .expect("farm local work record");
+        assert_eq!(farm_record.family, LocalRecordFamily::LocalWork);
+        assert_eq!(farm_record.status, LocalRecordStatus::LocalSaved);
+        assert_eq!(farm_record.outbox_status, PublishOutboxStatus::None);
+        assert_eq!(
+            farm_record.owner_account_id.as_deref(),
+            Some(account_id.as_str())
+        );
+        assert!(farm_record.owner_pubkey.as_deref().is_some_and(is_hex_64));
+        assert!(
+            farm_record
+                .farm_id
+                .as_ref()
+                .is_some_and(|value| value.len() == 22)
+        );
+        assert_eq!(farm_record.listing_addr, None);
+        let farm_payload = farm_record
+            .local_work_json
+            .as_ref()
+            .expect("farm local work payload");
+        assert_eq!(farm_payload["scope"], "app");
+        assert_eq!(farm_payload["document"]["farm"]["name"], "Green Farm");
+        assert_eq!(
+            farm_payload["document"]["listing_defaults"]["delivery_method"],
+            "pickup"
+        );
+        assert!(farm_payload.get("draft").is_none());
+        assert!(farm_payload.get("editor").is_none());
+
+        let listing_record = app_records
+            .iter()
+            .find(|record| {
+                record
+                    .local_work_json
+                    .as_ref()
+                    .and_then(|payload| payload["record_kind"].as_str())
+                    == Some("listing_draft_v1")
+            })
+            .expect("listing local work record");
+        assert_eq!(listing_record.family, LocalRecordFamily::LocalWork);
+        assert_eq!(listing_record.status, LocalRecordStatus::LocalSaved);
+        assert_eq!(listing_record.outbox_status, PublishOutboxStatus::None);
+        assert_eq!(
+            listing_record.owner_account_id.as_deref(),
+            Some(account_id.as_str())
+        );
+        assert_eq!(listing_record.farm_id, farm_record.farm_id);
+        assert!(
+            listing_record
+                .listing_addr
+                .as_deref()
+                .expect("listing address")
+                .starts_with("30402:")
+        );
+        let listing_payload = listing_record
+            .local_work_json
+            .as_ref()
+            .expect("listing local work payload");
+        assert_eq!(listing_payload["document"]["kind"], "listing_draft_v1");
+        assert_eq!(listing_payload["document"]["product"]["title"], "Eggs");
+        assert_eq!(
+            listing_payload["document"]["primary_bin"]["price_amount"],
+            "7.50"
+        );
+        assert_eq!(listing_payload["document"]["inventory"]["available"], "12");
+        assert!(listing_payload.get("draft").is_none());
+        assert!(listing_payload.get("editor").is_none());
 
         cleanup_bootstrapped_runtime_paths(&paths);
     }
@@ -10031,6 +10484,18 @@ mod tests {
             relay_set_fingerprint: None,
             relay_delivery_json: None,
         }
+    }
+
+
+    fn shared_local_event_records(paths: &AppDesktopRuntimePaths) -> Vec<LocalEventRecord> {
+        let database_path =
+            super::shared_local_events_database_path(paths).expect("shared local events path");
+        let executor =
+            SqliteExecutor::open(database_path.as_path()).expect("open shared local events db");
+        let store = LocalEventsStore::new(executor);
+        store
+            .list_records_after(0, 100)
+            .expect("shared local records should list")
     }
 
     fn fixture_pending_session() -> RadrootsAppRemoteSignerPendingSession {
