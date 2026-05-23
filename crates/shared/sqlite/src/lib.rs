@@ -6,6 +6,7 @@ mod buyer;
 mod error;
 mod farm_rules;
 mod farm_setup;
+mod local_interop;
 mod migrations;
 mod orders;
 mod products;
@@ -40,6 +41,9 @@ pub use buyer::{AppBuyerRepository, BuyerRepeatDemandApplyOutcome};
 pub use error::AppSqliteError;
 pub use farm_rules::{AppFarmRulesRepository, derive_farm_rules_readiness};
 pub use farm_setup::AppFarmSetupRepository;
+pub use local_interop::{
+    AppLocalInteropImportReport, AppLocalInteropRepository, StoredLocalInteropRecord,
+};
 pub use migrations::latest_schema_version;
 pub use orders::AppOrdersRepository;
 pub use products::AppProductsRepository;

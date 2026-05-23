@@ -1,5 +1,7 @@
 use std::{io, path::PathBuf};
 
+use radroots_local_events::LocalEventsError;
+use radroots_sql_core::SqlError;
 use thiserror::Error;
 
 #[derive(Debug, Error)]
@@ -79,4 +81,16 @@ pub enum AppSqliteError {
     DecodeEnum { field: &'static str, value: String },
     #[error("invalid farm-rules projection: {reason}")]
     InvalidProjection { reason: &'static str },
+    #[error("failed to access shared local events store during {operation}")]
+    LocalEventsSql {
+        operation: &'static str,
+        #[source]
+        source: SqlError,
+    },
+    #[error("failed to import shared local event records during {operation}")]
+    LocalEvents {
+        operation: &'static str,
+        #[source]
+        source: LocalEventsError,
+    },
 }

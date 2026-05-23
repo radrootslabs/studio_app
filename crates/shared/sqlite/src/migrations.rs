@@ -48,6 +48,10 @@ const MIGRATIONS: &[Migration] = &[
         version: 11,
         sql: include_str!("../migrations/0011_reminders_and_recovery.sql"),
     },
+    Migration {
+        version: 12,
+        sql: include_str!("../migrations/0012_local_interop_imports.sql"),
+    },
 ];
 
 pub fn latest_schema_version() -> u32 {

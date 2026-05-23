@@ -75,6 +75,8 @@ use crate::remote_signer::{
 };
 
 const APP_DATABASE_FILE_NAME: &str = "app.sqlite3";
+const SHARED_LOCAL_EVENTS_DIR: &str = "local_events";
+const SHARED_LOCAL_EVENTS_DB_FILE_NAME: &str = "local_events.sqlite";
 const SYNC_TRANSPORT_UNAVAILABLE_MESSAGE: &str = "remote sync transport is not configured";
 
 #[derive(Debug, Default)]
@@ -917,6 +919,9 @@ impl DesktopAppRuntimeState {
         }
         let database_path = paths.app.data.join(APP_DATABASE_FILE_NAME);
         let sqlite_store = AppSqliteStore::open(DatabaseTarget::Path(database_path.clone()))?;
+        let shared_local_events_database_path = shared_local_events_database_path(&paths)?;
+        let _ = sqlite_store
+            .import_shared_local_events_from_path(shared_local_events_database_path.as_path())?;
         let database_schema_version = sqlite_store.schema_version()?;
         let mut state_store = AppStateStore::load(AppStatePersistenceRepository::file_backed(
             paths.app.data.join(APP_STATE_FILE_NAME),
@@ -3545,6 +3550,23 @@ enum DesktopAppRuntimeBootstrapError {
     Sqlite(#[from] AppSqliteError),
     #[error(transparent)]
     State(#[from] AppStateStoreError),
+    #[error("desktop app data root must be nested under the Radroots data root")]
+    SharedLocalEventsPath,
+}
+
+fn shared_local_events_database_path(
+    paths: &AppDesktopRuntimePaths,
+) -> Result<PathBuf, DesktopAppRuntimeBootstrapError> {
+    let data_root = paths
+        .app
+        .data
+        .parent()
+        .and_then(|apps_root| apps_root.parent())
+        .ok_or(DesktopAppRuntimeBootstrapError::SharedLocalEventsPath)?;
+    Ok(data_root
+        .join("shared")
+        .join(SHARED_LOCAL_EVENTS_DIR)
+        .join(SHARED_LOCAL_EVENTS_DB_FILE_NAME))
 }
 
 fn load_selected_account_context(
