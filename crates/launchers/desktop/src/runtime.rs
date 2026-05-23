@@ -3300,6 +3300,7 @@ impl DesktopAppRuntimeState {
         let timestamp = current_runtime_time_ms()?;
         let farm_d_tag = d_tag_from_uuid(saved_farm.farm_id.as_uuid());
         let owner_pubkey = self.local_events_owner_pubkey(account);
+        let exportability = app_local_work_exportability(owner_pubkey.as_deref());
         let delivery_method = projection
             .draft
             .order_methods
@@ -3309,6 +3310,7 @@ impl DesktopAppRuntimeState {
         let payload = json!({
             "record_kind": "farm_config_v1",
             "scope": "app",
+            "exportability": exportability,
             "document": {
                 "version": 1,
                 "selection": {
@@ -3343,7 +3345,7 @@ impl DesktopAppRuntimeState {
             created_at_ms: timestamp,
             inserted_at_ms: timestamp,
             owner_account_id: Some(account.account.account_id.clone()),
-            owner_pubkey: Some(owner_pubkey),
+            owner_pubkey,
             farm_id: Some(farm_d_tag),
             listing_addr: None,
             local_work_json: Some(payload),
@@ -3387,7 +3389,10 @@ impl DesktopAppRuntimeState {
         let farm_d_tag = d_tag_from_uuid(farm_id.as_uuid());
         let listing_d_tag = d_tag_from_uuid(product_id.as_uuid());
         let owner_pubkey = self.local_events_owner_pubkey(account);
-        let listing_addr = format!("30402:{owner_pubkey}:{listing_d_tag}");
+        let listing_addr = owner_pubkey
+            .as_ref()
+            .map(|pubkey| format!("30402:{pubkey}:{listing_d_tag}"));
+        let exportability = app_local_work_exportability(owner_pubkey.as_deref());
         let farm_setup = self.state_store.farm_setup_projection();
         let delivery_method = farm_setup
             .draft
@@ -3416,6 +3421,7 @@ impl DesktopAppRuntimeState {
             .unwrap_or_else(|| "0".to_owned());
         let payload = json!({
             "record_kind": "listing_draft_v1",
+            "exportability": exportability,
             "document": {
                 "version": 1,
                 "kind": "listing_draft_v1",
@@ -3425,7 +3431,7 @@ impl DesktopAppRuntimeState {
                 },
                 "seller_actor": {
                     "account_id": account.account.account_id,
-                    "pubkey": owner_pubkey,
+                    "pubkey": owner_pubkey.as_deref(),
                     "source": "farm_config",
                 },
                 "product": {
@@ -3466,9 +3472,9 @@ impl DesktopAppRuntimeState {
             created_at_ms: timestamp,
             inserted_at_ms: timestamp,
             owner_account_id: Some(account.account.account_id.clone()),
-            owner_pubkey: Some(owner_pubkey),
+            owner_pubkey,
             farm_id: Some(farm_d_tag),
-            listing_addr: Some(listing_addr),
+            listing_addr,
             local_work_json: Some(payload),
             event_id: None,
             event_kind: None,
@@ -3528,9 +3534,9 @@ impl DesktopAppRuntimeState {
     fn local_events_owner_pubkey(
         &self,
         account: &radroots_studio_app_models::SelectedAccountProjection,
-    ) -> String {
+    ) -> Option<String> {
         if is_hex_64(account.account.account_id.as_str()) {
-            return account.account.account_id.clone();
+            return Some(account.account.account_id.clone());
         }
         self.accounts_manager
             .as_ref()
@@ -3541,7 +3547,6 @@ impl DesktopAppRuntimeState {
             })
             .map(|record| record.public_identity.public_key_hex)
             .filter(|pubkey| is_hex_64(pubkey))
-            .unwrap_or_else(|| account.account.npub.clone())
     }
 
     fn refresh_selected_account_context_after_local_events(
@@ -3939,6 +3944,18 @@ fn decimal_from_minor_units(value: u32) -> String {
 
 fn is_hex_64(value: &str) -> bool {
     value.len() == 64 && value.bytes().all(|byte| byte.is_ascii_hexdigit())
+}
+
+fn app_local_work_exportability(owner_pubkey: Option<&str>) -> serde_json::Value {
+    match owner_pubkey {
+        Some(_) => json!({
+            "state": "exportable"
+        }),
+        None => json!({
+            "state": "identity_unresolved",
+            "reason": "canonical_hex_pubkey_required"
+        }),
+    }
 }
 
 fn load_selected_account_context(
@@ -5233,20 +5250,22 @@ mod tests {
         AppSharedAccountsPaths, SHARED_ACCOUNTS_STORE_FILE_NAME, SHARED_IDENTITY_FILE_NAME,
     };
     use radroots_studio_app_models::{
-        AccountSurfaceActivationProjection, ActiveSurface, AppActivityKind, AppStartupGate,
-        BlackoutPeriodId, BlackoutPeriodRecord, BuyerCheckoutDraft, FarmId,
-        FarmOperatingRulesRecord, FarmOrderMethod, FarmProfileRecord, FarmReadiness,
-        FarmReadinessBlocker, FarmSetupDraft, FarmSetupProjection, FarmSummary,
-        FarmerActivationProjection, FarmerSection, FulfillmentWindowId, FulfillmentWindowRecord,
-        LoggedOutStartupProjection, OrderId, OrderStatus, OrdersFilter, PackDayBatchPrintArtifact,
-        PackDayBatchPrintFailureKind, PackDayBatchPrintStatus, PackDayExportInstanceId,
-        PackDayExportStatus, PackDayHostHandoffKind, PackDayHostHandoffStatus, PackDayPackListRow,
+        AccountCustody, AccountSummary, AccountSurfaceActivationProjection, ActiveSurface,
+        AppActivityKind, AppIdentityProjection, AppStartupGate, BlackoutPeriodId,
+        BlackoutPeriodRecord, BuyerCheckoutDraft, FarmId, FarmOperatingRulesRecord,
+        FarmOrderMethod, FarmProfileRecord, FarmReadiness, FarmReadinessBlocker, FarmSetupDraft,
+        FarmSetupProjection, FarmSummary, FarmerActivationProjection, FarmerSection,
+        FulfillmentWindowId, FulfillmentWindowRecord, LoggedOutStartupProjection, OrderId,
+        OrderStatus, OrdersFilter, PackDayBatchPrintArtifact, PackDayBatchPrintFailureKind,
+        PackDayBatchPrintStatus, PackDayExportInstanceId, PackDayExportStatus,
+        PackDayHostHandoffKind, PackDayHostHandoffStatus, PackDayPackListRow,
         PackDayPrintFailureKind, PackDayPrintKind, PackDayPrintStatus, PackDayProductTotalRow,
         PackDayProjection, PackDayRosterRow, PersonalSection, PickupLocationId,
-        PickupLocationRecord, ProductEditorDraft, ProductStatus, ProductsFilter, ProductsSort,
-        RecoveryKind, RecoveryRecordId, ReminderDeliveryState, ReminderFeedProjection,
-        ReminderKind, SelectedSurfaceProjection, SettingsPreference, SettingsSection,
-        ShellSection, TodayAgendaProjection, TodaySetupTask, TodaySetupTaskKind, TodaySummary,
+        PickupLocationRecord, ProductEditorDraft, ProductId, ProductStatus, ProductsFilter,
+        ProductsSort, RecoveryKind, RecoveryRecordId, ReminderDeliveryState,
+        ReminderFeedProjection, ReminderKind, SelectedAccountProjection, SelectedSurfaceProjection,
+        SettingsPreference, SettingsSection, ShellSection, TodayAgendaProjection, TodaySetupTask,
+        TodaySetupTaskKind, TodaySummary,
     };
     use radroots_studio_app_remote_signer::{
         RadrootsAppRemoteSignerPendingSession, RadrootsAppRemoteSignerSessionRecord,
@@ -5819,7 +5838,11 @@ mod tests {
             farm_record.owner_account_id.as_deref(),
             Some(account_id.as_str())
         );
-        assert!(farm_record.owner_pubkey.as_deref().is_some_and(is_hex_64));
+        let owner_pubkey = farm_record
+            .owner_pubkey
+            .as_deref()
+            .expect("farm owner pubkey");
+        assert!(is_hex_64(owner_pubkey));
         assert!(
             farm_record
                 .farm_id
@@ -5832,6 +5855,7 @@ mod tests {
             .as_ref()
             .expect("farm local work payload");
         assert_eq!(farm_payload["scope"], "app");
+        assert_eq!(farm_payload["exportability"]["state"], "exportable");
         assert_eq!(farm_payload["document"]["farm"]["name"], "Green Farm");
         assert_eq!(
             farm_payload["document"]["listing_defaults"]["delivery_method"],
@@ -5857,19 +5881,23 @@ mod tests {
             listing_record.owner_account_id.as_deref(),
             Some(account_id.as_str())
         );
+        assert_eq!(listing_record.owner_pubkey.as_deref(), Some(owner_pubkey));
         assert_eq!(listing_record.farm_id, farm_record.farm_id);
+        let expected_listing_addr_prefix = format!("30402:{owner_pubkey}:");
         assert!(
             listing_record
                 .listing_addr
                 .as_deref()
                 .expect("listing address")
-                .starts_with("30402:")
+                .starts_with(expected_listing_addr_prefix.as_str())
         );
         let listing_payload = listing_record
             .local_work_json
             .as_ref()
             .expect("listing local work payload");
+        assert_eq!(listing_payload["exportability"]["state"], "exportable");
         assert_eq!(listing_payload["document"]["kind"], "listing_draft_v1");
+        assert_eq!(listing_payload["document"]["seller_actor"]["pubkey"], owner_pubkey);
         assert_eq!(listing_payload["document"]["product"]["title"], "Eggs");
         assert_eq!(
             listing_payload["document"]["primary_bin"]["price_amount"],
@@ -5878,6 +5906,97 @@ mod tests {
         assert_eq!(listing_payload["document"]["inventory"]["available"], "12");
         assert!(listing_payload.get("draft").is_none());
         assert!(listing_payload.get("editor").is_none());
+
+        cleanup_bootstrapped_runtime_paths(&paths);
+    }
+
+    #[test]
+    fn runtime_app_local_work_without_resolved_pubkey_is_non_exportable() {
+        let (runtime, paths) = bootstrapped_runtime("app_local_work_unresolved_pubkey");
+        let farm_id = FarmId::new();
+        let account = SelectedAccountProjection::new(
+            AccountSummary {
+                account_id: "acct_unresolved".to_owned(),
+                npub: "npub1unresolved".to_owned(),
+                label: Some("Unresolved".to_owned()),
+                custody: AccountCustody::RemoteSigner,
+            },
+            SelectedSurfaceProjection::new(ActiveSurface::Farmer),
+            FarmerActivationProjection::active(farm_id),
+        );
+        let saved_farm = FarmSummary {
+            farm_id,
+            display_name: "Green Farm".to_owned(),
+            readiness: FarmReadiness::Ready,
+        };
+        let farm_projection = FarmSetupProjection::from_saved_farm(saved_farm.clone());
+
+        {
+            let mut state = runtime.lock_state_mut();
+            let identity =
+                AppIdentityProjection::ready(vec![account.account.clone()], account.clone());
+            let _ = state
+                .state_store
+                .apply_in_memory(AppStateCommand::replace_identity_projection(identity));
+            state
+                .append_app_farm_local_work_record(&account, &farm_projection, &saved_farm)
+                .expect("unresolved farm local work should append");
+            state
+                .append_app_listing_local_work_record(
+                    ProductId::new(),
+                    &ProductEditorDraft {
+                        title: "Eggs".to_owned(),
+                        subtitle: "Fresh eggs".to_owned(),
+                        unit_label: "dozen".to_owned(),
+                        price_minor_units: Some(750),
+                        price_currency: "USD".to_owned(),
+                        stock_quantity: Some(12),
+                        availability_window_id: None,
+                        status: ProductStatus::Draft,
+                    },
+                )
+                .expect("unresolved listing local work should append");
+        }
+
+        let records = shared_local_event_records(&paths);
+        let app_records = records
+            .iter()
+            .filter(|record| record.source_runtime == SourceRuntime::App)
+            .collect::<Vec<_>>();
+        assert_eq!(app_records.len(), 2);
+        assert!(
+            app_records
+                .iter()
+                .all(|record| record.owner_account_id.as_deref() == Some("acct_unresolved"))
+        );
+        assert!(app_records.iter().all(|record| record.owner_pubkey.is_none()));
+        assert!(
+            app_records
+                .iter()
+                .all(|record| record
+                    .local_work_json
+                    .as_ref()
+                    .is_some_and(|payload| payload["exportability"]["state"] == "identity_unresolved"
+                        && payload["exportability"]["reason"] == "canonical_hex_pubkey_required"))
+        );
+        let listing_record = app_records
+            .iter()
+            .find(|record| {
+                record
+                    .local_work_json
+                    .as_ref()
+                    .and_then(|payload| payload["record_kind"].as_str())
+                    == Some("listing_draft_v1")
+            })
+            .expect("listing local work record");
+        assert_eq!(listing_record.listing_addr, None);
+        assert!(
+            listing_record
+                .local_work_json
+                .as_ref()
+                .expect("listing payload")["document"]["seller_actor"]["pubkey"]
+                .is_null()
+        );
 
         cleanup_bootstrapped_runtime_paths(&paths);
     }
