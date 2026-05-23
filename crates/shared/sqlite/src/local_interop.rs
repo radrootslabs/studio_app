@@ -367,17 +367,17 @@ impl<'a> AppLocalInteropRepository<'a> {
             return Ok(None);
         };
         let content = parse_json_value(content)?;
-        let Some(farm_key) = record
-            .farm_id
-            .clone()
+        let tags = record.event_tags_json.as_ref();
+        let Some(farm_key) = tag_index_value(tags, "d", 1)
             .or_else(|| string_at(&content, &["d_tag"]))
+            .or_else(|| record.farm_id.clone())
         else {
             return Ok(None);
         };
         let owner_pubkey = record
-            .owner_pubkey
+            .event_pubkey
             .as_deref()
-            .or(record.event_pubkey.as_deref());
+            .or(record.owner_pubkey.as_deref());
         let farm_id = deterministic_farm_id(owner_pubkey, farm_key.as_str());
         let display_name =
             string_at(&content, &["name"]).unwrap_or_else(|| "Local farm".to_owned());
@@ -409,15 +409,11 @@ impl<'a> AppLocalInteropRepository<'a> {
         let Some(listing_key) = listing_key else {
             return Ok(None);
         };
-        let farm_key = record
-            .farm_id
-            .clone()
-            .or_else(|| {
-                content
-                    .as_ref()
-                    .and_then(|content| string_at(content, &["farm", "d_tag"]))
-            })
-            .or_else(|| tag_index_value(tags, "a", 1).and_then(|addr| address_d_tag(&addr)));
+        let farm_key = content
+            .as_ref()
+            .and_then(|content| string_at(content, &["farm", "d_tag"]))
+            .or_else(|| tag_index_value(tags, "a", 1).and_then(|addr| address_d_tag(&addr)))
+            .or_else(|| record.farm_id.clone());
         let Some(farm_key) = farm_key else {
             return Ok(None);
         };
@@ -425,14 +421,18 @@ impl<'a> AppLocalInteropRepository<'a> {
             .as_ref()
             .and_then(|content| string_at(content, &["farm", "pubkey"]))
             .or_else(|| tag_index_value(tags, "a", 1).and_then(|addr| address_pubkey(&addr)));
-        let owner_pubkey = record
-            .owner_pubkey
+        let farm_pubkey = signed_farm_pubkey
             .as_deref()
             .or(record.event_pubkey.as_deref())
-            .or(signed_farm_pubkey.as_deref());
-        let farm_id = deterministic_farm_id(owner_pubkey, farm_key.as_str());
+            .or(record.owner_pubkey.as_deref());
+        let listing_pubkey = record
+            .event_pubkey
+            .as_deref()
+            .or(signed_farm_pubkey.as_deref())
+            .or(record.owner_pubkey.as_deref());
+        let farm_id = deterministic_farm_id(farm_pubkey, farm_key.as_str());
         self.ensure_farm_exists(farm_id)?;
-        let product_id = deterministic_product_id(owner_pubkey, listing_key.as_str());
+        let product_id = deterministic_product_id(listing_pubkey, listing_key.as_str());
         let title = content
             .as_ref()
             .and_then(|content| string_at(content, &["product", "title"]))
@@ -963,7 +963,7 @@ mod tests {
     use radroots_sql_core::SqliteExecutor;
     use serde_json::json;
 
-    use super::KIND_LISTING;
+    use super::{KIND_FARM, KIND_LISTING, deterministic_farm_id, deterministic_product_id};
     use crate::{AppSqliteStore, DatabaseTarget};
 
     fn local_events_store() -> LocalEventsStore<SqliteExecutor> {
@@ -1355,6 +1355,160 @@ mod tests {
         assert_eq!(product.1, "published");
         assert_eq!(product.2, Some(800));
         assert_eq!(product.3, Some(9));
+    }
+
+    #[test]
+    fn signed_farm_import_prefers_event_identity_over_local_owner_metadata() {
+        let app_store =
+            AppSqliteStore::open(DatabaseTarget::InMemory).expect("open app sqlite store");
+        let events = local_events_store();
+        let signed_farm_key = "SIGNEDFARMAAAAAAAAAAAA";
+        let expected_farm_id = deterministic_farm_id(Some("event-pubkey"), signed_farm_key);
+        events
+            .append_record(&LocalEventRecordInput {
+                record_id: "cli:signed_event:farm:event-identity".to_owned(),
+                family: LocalRecordFamily::SignedEvent,
+                status: LocalRecordStatus::Published,
+                source_runtime: SourceRuntime::Cli,
+                created_at_ms: 1100,
+                inserted_at_ms: 1101,
+                owner_account_id: Some("seller-account".to_owned()),
+                owner_pubkey: Some("stale-owner-pubkey".to_owned()),
+                farm_id: Some("STALEFARMTAG".to_owned()),
+                listing_addr: None,
+                local_work_json: None,
+                event_id: Some("event-farm-identity".to_owned()),
+                event_kind: Some(KIND_FARM),
+                event_pubkey: Some("event-pubkey".to_owned()),
+                event_created_at: Some(1100),
+                event_tags_json: Some(json!([["d", signed_farm_key]])),
+                event_content: Some(
+                    json!({
+                        "d_tag": signed_farm_key,
+                        "name": "Signed Farm"
+                    })
+                    .to_string(),
+                ),
+                event_sig: Some("signature".to_owned()),
+                raw_event_json: Some(json!({
+                    "id": "event-farm-identity",
+                    "kind": KIND_FARM,
+                    "pubkey": "event-pubkey"
+                })),
+                outbox_status: PublishOutboxStatus::Acknowledged,
+                relay_set_fingerprint: Some("relay-set".to_owned()),
+                relay_delivery_json: Some(json!({
+                    "state": "acknowledged",
+                    "acknowledged_relays": ["ws://127.0.0.1:1234/"]
+                })),
+            })
+            .expect("append signed farm");
+
+        let report = app_store
+            .import_shared_local_events_from_store(&events)
+            .expect("import signed farm");
+        let imported = app_store
+            .load_local_interop_records()
+            .expect("load imported records");
+        let stored_farm: (String, String) = app_store
+            .connection()
+            .query_row("SELECT id, display_name FROM farms", [], |row| {
+                Ok((row.get(0)?, row.get(1)?))
+            })
+            .expect("load farm");
+
+        assert_eq!(report.imported_records, 1);
+        assert_eq!(imported[0].projected_kind, "farm");
+        assert_eq!(
+            imported[0].projected_id.as_deref(),
+            Some(expected_farm_id.to_string().as_str())
+        );
+        assert_eq!(stored_farm.0, expected_farm_id.to_string());
+        assert_eq!(stored_farm.1, "Signed Farm");
+    }
+
+    #[test]
+    fn signed_listing_import_prefers_event_and_address_tag_identity() {
+        let app_store =
+            AppSqliteStore::open(DatabaseTarget::InMemory).expect("open app sqlite store");
+        let events = local_events_store();
+        let signed_farm_key = "SIGNEDFARMAAAAAAAAAAAA";
+        let signed_listing_key = "SIGNEDLISTINGBBBBBBBB";
+        let expected_farm_id = deterministic_farm_id(Some("farm-tag-pubkey"), signed_farm_key);
+        let expected_product_id =
+            deterministic_product_id(Some("listing-event-pubkey"), signed_listing_key);
+        events
+            .append_record(&LocalEventRecordInput {
+                record_id: "cli:signed_event:listing:event-identity".to_owned(),
+                family: LocalRecordFamily::SignedEvent,
+                status: LocalRecordStatus::Published,
+                source_runtime: SourceRuntime::Cli,
+                created_at_ms: 1100,
+                inserted_at_ms: 1101,
+                owner_account_id: Some("seller-account".to_owned()),
+                owner_pubkey: Some("stale-owner-pubkey".to_owned()),
+                farm_id: Some("STALEFARMTAG".to_owned()),
+                listing_addr: Some("30402:stale-owner-pubkey:STALELISTING".to_owned()),
+                local_work_json: None,
+                event_id: Some("event-listing-identity".to_owned()),
+                event_kind: Some(KIND_LISTING),
+                event_pubkey: Some("listing-event-pubkey".to_owned()),
+                event_created_at: Some(1100),
+                event_tags_json: Some(json!([
+                    ["d", signed_listing_key],
+                    ["a", format!("30340:farm-tag-pubkey:{signed_farm_key}")],
+                    ["title", "Signed Event Eggs"],
+                    ["summary", "Signed event summary"],
+                    ["radroots:bin", "bin-1", "1", "each"],
+                    ["radroots:price", "bin-1", "8", "USD", "1", "each"],
+                    ["inventory", "9"],
+                    ["status", "active"]
+                ])),
+                event_content: Some(
+                    json!({
+                        "product": {
+                            "title": "Signed Event Eggs",
+                            "summary": "Signed event summary"
+                        }
+                    })
+                    .to_string(),
+                ),
+                event_sig: Some("signature".to_owned()),
+                raw_event_json: Some(json!({
+                    "id": "event-listing-identity",
+                    "kind": KIND_LISTING,
+                    "pubkey": "listing-event-pubkey"
+                })),
+                outbox_status: PublishOutboxStatus::Acknowledged,
+                relay_set_fingerprint: Some("relay-set".to_owned()),
+                relay_delivery_json: Some(json!({
+                    "state": "acknowledged",
+                    "acknowledged_relays": ["ws://127.0.0.1:1234/"]
+                })),
+            })
+            .expect("append signed listing");
+
+        let report = app_store
+            .import_shared_local_events_from_store(&events)
+            .expect("import signed listing");
+        let imported = app_store
+            .load_local_interop_records()
+            .expect("load imported records");
+        let product: (String, String) = app_store
+            .connection()
+            .query_row("SELECT id, farm_id FROM products", [], |row| {
+                Ok((row.get(0)?, row.get(1)?))
+            })
+            .expect("load product");
+
+        assert_eq!(report.imported_records, 1);
+        assert_eq!(imported[0].projected_kind, "listing");
+        assert_eq!(
+            imported[0].projected_id.as_deref(),
+            Some(expected_product_id.to_string().as_str())
+        );
+        assert_eq!(product.0, expected_product_id.to_string());
+        assert_eq!(product.1, expected_farm_id.to_string());
     }
 
     #[test]
