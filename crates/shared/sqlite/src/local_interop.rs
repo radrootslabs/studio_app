@@ -336,7 +336,7 @@ impl<'a> AppLocalInteropRepository<'a> {
             farm_id,
             title,
             subtitle,
-            status: product_status_for_record(record),
+            status: ProductStatus::Draft,
             unit_label,
             price_minor_units,
             price_currency,
@@ -471,12 +471,15 @@ impl<'a> AppLocalInteropRepository<'a> {
             .and_then(|content| string_at(content, &["inventory_available"]))
             .or_else(|| tag_index_value(tags, "inventory", 1))
             .and_then(|quantity| parse_u32_quantity(quantity.as_str()));
+        let Some(status) = signed_listing_product_status(record, content.as_ref(), tags) else {
+            return Ok(None);
+        };
         self.upsert_product(ProductProjection {
             product_id,
             farm_id,
             title,
             subtitle,
-            status: product_status_for_record(record),
+            status,
             unit_label,
             price_minor_units,
             price_currency,
@@ -802,13 +805,75 @@ fn parse_u32_quantity(value: &str) -> Option<u32> {
     whole.parse::<u32>().ok()
 }
 
-fn product_status_for_record(record: &LocalEventRecord) -> ProductStatus {
-    if record.status == LocalRecordStatus::Published
-        && record.outbox_status == PublishOutboxStatus::Acknowledged
+fn signed_listing_product_status(
+    record: &LocalEventRecord,
+    content: Option<&Value>,
+    tags: Option<&Value>,
+) -> Option<ProductStatus> {
+    if record.status != LocalRecordStatus::Published
+        || record.outbox_status != PublishOutboxStatus::Acknowledged
     {
-        ProductStatus::Published
-    } else {
-        ProductStatus::Draft
+        return Some(ProductStatus::Draft);
+    }
+    match signed_listing_lifecycle(content, tags)? {
+        SignedListingLifecycle::Active | SignedListingLifecycle::Window => {
+            Some(ProductStatus::Published)
+        }
+        SignedListingLifecycle::Archived => Some(ProductStatus::Archived),
+        SignedListingLifecycle::Sold => Some(ProductStatus::Paused),
+    }
+}
+
+fn signed_listing_lifecycle(
+    content: Option<&Value>,
+    tags: Option<&Value>,
+) -> Option<SignedListingLifecycle> {
+    content
+        .and_then(lifecycle_from_content)
+        .or_else(|| lifecycle_from_tags(tags))
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum SignedListingLifecycle {
+    Active,
+    Window,
+    Archived,
+    Sold,
+}
+
+fn lifecycle_from_content(content: &Value) -> Option<SignedListingLifecycle> {
+    string_at(content, &["status"])
+        .or_else(|| string_at(content, &["availability", "status"]))
+        .or_else(|| string_at(content, &["availability", "amount", "status"]))
+        .or_else(|| string_at(content, &["availability", "amount", "kind"]))
+        .or_else(|| string_at(content, &["availability", "amount", "value"]))
+        .and_then(|status| parse_listing_lifecycle(status.as_str()))
+        .or_else(|| {
+            matches!(
+                string_at(content, &["availability", "kind"]).as_deref(),
+                Some("window")
+            )
+            .then_some(SignedListingLifecycle::Window)
+        })
+}
+
+fn lifecycle_from_tags(tags: Option<&Value>) -> Option<SignedListingLifecycle> {
+    tag_index_value(tags, "status", 1)
+        .and_then(|status| parse_listing_lifecycle(status.as_str()))
+        .or_else(|| {
+            tag_index_value(tags, "radroots:availability_start", 1)
+                .or_else(|| tag_index_value(tags, "expires_at", 1))
+                .map(|_| SignedListingLifecycle::Window)
+        })
+}
+
+fn parse_listing_lifecycle(value: &str) -> Option<SignedListingLifecycle> {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "active" | "available" | "published" => Some(SignedListingLifecycle::Active),
+        "window" => Some(SignedListingLifecycle::Window),
+        "archived" => Some(SignedListingLifecycle::Archived),
+        "sold" => Some(SignedListingLifecycle::Sold),
+        _ => None,
     }
 }
 
@@ -919,6 +984,56 @@ mod tests {
             outbox_status: PublishOutboxStatus::None,
             relay_set_fingerprint: None,
             relay_delivery_json: None,
+        }
+    }
+
+    fn signed_listing_record(
+        record_id: &str,
+        farm_key: &str,
+        listing_key: &str,
+        status_tag: &str,
+    ) -> LocalEventRecordInput {
+        LocalEventRecordInput {
+            record_id: record_id.to_owned(),
+            family: LocalRecordFamily::SignedEvent,
+            status: LocalRecordStatus::Published,
+            source_runtime: SourceRuntime::Cli,
+            created_at_ms: 1100,
+            inserted_at_ms: 1101,
+            owner_account_id: Some("seller-account".to_owned()),
+            owner_pubkey: Some("seller-pubkey".to_owned()),
+            farm_id: Some(farm_key.to_owned()),
+            listing_addr: Some(format!("30402:seller-pubkey:{listing_key}")),
+            local_work_json: None,
+            event_id: Some(format!("event-{record_id}")),
+            event_kind: Some(KIND_LISTING),
+            event_pubkey: Some("seller-pubkey".to_owned()),
+            event_created_at: Some(1100),
+            event_tags_json: Some(json!([
+                ["d", listing_key],
+                ["a", format!("30340:seller-pubkey:{farm_key}")],
+                ["key", "eggs"],
+                ["title", "Relay Eggs"],
+                ["summary", "Published eggs"],
+                ["radroots:bin", "bin-1", "1", "each"],
+                ["radroots:price", "bin-1", "8", "USD", "1", "each"],
+                ["inventory", "9"],
+                ["status", status_tag]
+            ])),
+            event_content: Some("# Relay Eggs\n\nPublished eggs".to_owned()),
+            event_sig: Some("signature".to_owned()),
+            raw_event_json: Some(json!({
+                "id": format!("event-{record_id}"),
+                "kind": KIND_LISTING,
+                "pubkey": "seller-pubkey",
+                "content": "# Relay Eggs\n\nPublished eggs"
+            })),
+            outbox_status: PublishOutboxStatus::Acknowledged,
+            relay_set_fingerprint: Some("relay-set".to_owned()),
+            relay_delivery_json: Some(json!({
+                "state": "acknowledged",
+                "acknowledged_relays": ["ws://127.0.0.1:1234/"]
+            })),
         }
     }
 
@@ -1041,6 +1156,10 @@ mod tests {
             600
         );
         assert_eq!(products.rows[0].stock.quantity, Some(10));
+        assert_eq!(
+            products.rows[0].status,
+            radroots_studio_app_models::ProductStatus::Draft
+        );
     }
 
     #[test]
@@ -1189,5 +1308,74 @@ mod tests {
         assert_eq!(product.1, "published");
         assert_eq!(product.2, Some(800));
         assert_eq!(product.3, Some(9));
+    }
+
+    #[test]
+    fn maps_acknowledged_signed_listing_lifecycle_statuses() {
+        for (status_tag, expected_product_status) in [
+            ("active", "published"),
+            ("window", "published"),
+            ("archived", "archived"),
+            ("sold", "paused"),
+        ] {
+            let app_store =
+                AppSqliteStore::open(DatabaseTarget::InMemory).expect("open app sqlite store");
+            let events = local_events_store();
+            let farm_key = "AAAAAAAAAAAAAAAAAAAAAA";
+            let listing_key = "BBBBBBBBBBBBBBBBBBBBBB";
+            events
+                .append_record(&signed_listing_record(
+                    status_tag,
+                    farm_key,
+                    listing_key,
+                    status_tag,
+                ))
+                .expect("append signed listing");
+
+            let report = app_store
+                .import_shared_local_events_from_store(&events)
+                .expect("import signed listing");
+            let product_status: String = app_store
+                .connection()
+                .query_row("SELECT status FROM products", [], |row| row.get(0))
+                .expect("load product status");
+
+            assert_eq!(report.imported_records, 1);
+            assert_eq!(report.skipped_records, 0);
+            assert_eq!(product_status, expected_product_status);
+        }
+    }
+
+    #[test]
+    fn unknown_acknowledged_signed_listing_status_is_not_published() {
+        let app_store =
+            AppSqliteStore::open(DatabaseTarget::InMemory).expect("open app sqlite store");
+        let events = local_events_store();
+        let farm_key = "AAAAAAAAAAAAAAAAAAAAAA";
+        let listing_key = "BBBBBBBBBBBBBBBBBBBBBB";
+        events
+            .append_record(&signed_listing_record(
+                "unknown-status",
+                farm_key,
+                listing_key,
+                "unknown-status",
+            ))
+            .expect("append signed listing");
+
+        let report = app_store
+            .import_shared_local_events_from_store(&events)
+            .expect("import signed listing");
+        let imported = app_store
+            .load_local_interop_records()
+            .expect("load imported records");
+        let product_count: i64 = app_store
+            .connection()
+            .query_row("SELECT COUNT(*) FROM products", [], |row| row.get(0))
+            .expect("product count");
+
+        assert_eq!(report.imported_records, 0);
+        assert_eq!(report.skipped_records, 1);
+        assert_eq!(imported[0].projected_kind, "unsupported");
+        assert_eq!(product_count, 0);
     }
 }
