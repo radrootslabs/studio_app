@@ -9,7 +9,7 @@ use radroots_local_events::{
     SourceRuntime,
 };
 use radroots_sql_core::{SqlExecutor, SqliteExecutor};
-use rusqlite::{Connection, params};
+use rusqlite::{Connection, OptionalExtension, params};
 use serde_json::Value;
 use uuid::Uuid;
 
@@ -470,17 +470,24 @@ impl<'a> AppLocalInteropRepository<'a> {
             .as_deref()
             .or(signed_farm_pubkey.as_deref())
             .or(record.owner_pubkey.as_deref());
-        let Some(farm_id) =
-            projected_farm_id(record.source_runtime, farm_pubkey, farm_key.as_str())
-        else {
-            return Ok(None);
+        let existing_projection =
+            self.existing_listing_projection(record.listing_addr.as_deref())?;
+        let (farm_id, product_id) = if let Some(existing_projection) = existing_projection {
+            (existing_projection.farm_id, existing_projection.product_id)
+        } else {
+            let Some(farm_id) =
+                projected_farm_id(record.source_runtime, farm_pubkey, farm_key.as_str())
+            else {
+                return Ok(None);
+            };
+            let Some(product_id) =
+                projected_product_id(record.source_runtime, listing_pubkey, listing_key.as_str())
+            else {
+                return Ok(None);
+            };
+            (farm_id, product_id)
         };
         self.ensure_farm_exists(farm_id)?;
-        let Some(product_id) =
-            projected_product_id(record.source_runtime, listing_pubkey, listing_key.as_str())
-        else {
-            return Ok(None);
-        };
         let title = content
             .as_ref()
             .and_then(|content| string_at(content, &["product", "title"]))
@@ -644,6 +651,52 @@ impl<'a> AppLocalInteropRepository<'a> {
         Ok(())
     }
 
+    fn existing_listing_projection(
+        &self,
+        listing_addr: Option<&str>,
+    ) -> Result<Option<ExistingListingProjection>, AppSqliteError> {
+        let Some(listing_addr) = listing_addr
+            .map(str::trim)
+            .filter(|listing_addr| !listing_addr.is_empty())
+        else {
+            return Ok(None);
+        };
+        let Some((product_id, farm_id)) = self
+            .connection
+            .query_row(
+                "SELECT products.id, products.farm_id
+                 FROM local_interop_imports
+                 JOIN products ON products.id = local_interop_imports.projected_id
+                 WHERE local_interop_imports.projected_kind = 'listing'
+                    AND local_interop_imports.projected_id IS NOT NULL
+                    AND local_interop_imports.listing_addr = ?1
+                 ORDER BY local_interop_imports.local_seq DESC
+                 LIMIT 1",
+                [listing_addr],
+                |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
+            )
+            .optional()
+            .map_err(|source| AppSqliteError::Query {
+                operation: "load existing local interop listing projection",
+                source,
+            })?
+        else {
+            return Ok(None);
+        };
+        Ok(Some(ExistingListingProjection {
+            product_id: product_id
+                .parse()
+                .map_err(|_| AppSqliteError::InvalidProjection {
+                    reason: "existing listing projection product id must parse",
+                })?,
+            farm_id: farm_id
+                .parse()
+                .map_err(|_| AppSqliteError::InvalidProjection {
+                    reason: "existing listing projection farm id must parse",
+                })?,
+        }))
+    }
+
     fn record_import(
         &self,
         record: &LocalEventRecord,
@@ -773,6 +826,12 @@ struct ProductProjection {
     price_minor_units: Option<u32>,
     price_currency: String,
     stock_count: Option<u32>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct ExistingListingProjection {
+    product_id: ProductId,
+    farm_id: FarmId,
 }
 
 fn deterministic_farm_id(owner_pubkey: Option<&str>, farm_key: &str) -> FarmId {
@@ -2136,5 +2195,166 @@ mod tests {
         assert_eq!(imported.len(), 1);
         assert_eq!(imported[0].projected_kind, "unsupported");
         assert_eq!(farm_count, 0);
+    }
+
+    #[test]
+    fn signed_app_origin_listing_updates_existing_app_projection() {
+        let app_store =
+            AppSqliteStore::open(DatabaseTarget::InMemory).expect("open app sqlite store");
+        let events = local_events_store();
+        let farm_uuid = Uuid::from_u128(0x33333333333343338333333333333333);
+        let product_uuid = Uuid::from_u128(0x44444444444444448444444444444444);
+        let farm_key = app_d_tag_from_uuid(farm_uuid);
+        let listing_key = app_d_tag_from_uuid(product_uuid);
+        let listing_addr = format!("30402:app-seller-pubkey:{listing_key}");
+        let app_farm_record = app_local_work_record(
+            "app:local_work:farm:signed-convergence",
+            farm_key.as_str(),
+            json!({
+                "record_kind": "farm_config_v1",
+                "document": {
+                    "selection": {
+                        "account": "seller-account",
+                        "farm_d_tag": farm_key
+                    },
+                    "profile": {
+                        "display_name": "App Farm"
+                    },
+                    "farm": {
+                        "d_tag": farm_key,
+                        "name": "App Farm"
+                    }
+                }
+            }),
+        );
+        let mut app_listing_record = app_local_work_record(
+            "app:local_work:listing:signed-convergence",
+            farm_key.as_str(),
+            json!({
+                "record_kind": "listing_draft_v1",
+                "document": {
+                    "listing": {
+                        "d_tag": listing_key,
+                        "farm_d_tag": farm_key
+                    },
+                    "seller_actor": {
+                        "account_id": "seller-account",
+                        "pubkey": "app-seller-pubkey"
+                    },
+                    "product": {
+                        "key": listing_key,
+                        "title": "App Draft Eggs",
+                        "summary": "Fresh app-origin eggs"
+                    },
+                    "primary_bin": {
+                        "quantity_unit": "each",
+                        "price_amount": "7",
+                        "price_currency": "USD"
+                    },
+                    "inventory": {
+                        "available": "12"
+                    }
+                }
+            }),
+        );
+        app_listing_record.listing_addr = Some(listing_addr.clone());
+        events
+            .append_record(&app_farm_record)
+            .expect("append app farm local work");
+        events
+            .append_record(&app_listing_record)
+            .expect("append app listing local work");
+
+        let local_report = app_store
+            .import_shared_local_events_from_store(&events)
+            .expect("import app local work");
+        events
+            .append_record(&LocalEventRecordInput {
+                record_id: "cli:signed_event:listing:app-origin".to_owned(),
+                family: LocalRecordFamily::SignedEvent,
+                status: LocalRecordStatus::Published,
+                source_runtime: SourceRuntime::Cli,
+                created_at_ms: 1100,
+                inserted_at_ms: 1101,
+                owner_account_id: Some("seller-account".to_owned()),
+                owner_pubkey: Some("app-seller-pubkey".to_owned()),
+                farm_id: Some(farm_key.clone()),
+                listing_addr: Some(listing_addr.clone()),
+                local_work_json: None,
+                event_id: Some("event-app-origin".to_owned()),
+                event_kind: Some(KIND_LISTING),
+                event_pubkey: Some("app-seller-pubkey".to_owned()),
+                event_created_at: Some(1100),
+                event_tags_json: Some(json!([
+                    ["d", listing_key],
+                    ["a", format!("30340:app-seller-pubkey:{farm_key}")],
+                    ["title", "Relay App Eggs"],
+                    ["summary", "Published app-origin eggs"],
+                    ["radroots:bin", "bin-1", "1", "each"],
+                    ["radroots:price", "bin-1", "8", "USD", "1", "each"],
+                    ["inventory", "9"],
+                    ["status", "active"]
+                ])),
+                event_content: Some("# Relay App Eggs\n\nPublished app-origin eggs".to_owned()),
+                event_sig: Some("signature".to_owned()),
+                raw_event_json: Some(json!({
+                    "id": "event-app-origin",
+                    "kind": KIND_LISTING,
+                    "pubkey": "app-seller-pubkey",
+                    "content": "# Relay App Eggs\n\nPublished app-origin eggs"
+                })),
+                outbox_status: PublishOutboxStatus::Acknowledged,
+                relay_set_fingerprint: Some("relay-set".to_owned()),
+                relay_delivery_json: Some(json!({
+                    "state": "acknowledged",
+                    "acknowledged_relays": ["ws://127.0.0.1:1234/"]
+                })),
+            })
+            .expect("append signed app-origin listing");
+        let signed_report = app_store
+            .import_shared_local_events_from_store(&events)
+            .expect("import signed app-origin listing");
+        let imported = app_store
+            .load_local_interop_records()
+            .expect("load imported records");
+        let listing_records = imported
+            .iter()
+            .filter(|record| record.projected_kind == "listing")
+            .collect::<Vec<_>>();
+        let product_count: i64 = app_store
+            .connection()
+            .query_row("SELECT COUNT(*) FROM products", [], |row| row.get(0))
+            .expect("product count");
+        let product: (String, String, String, Option<i64>, Option<i64>) = app_store
+            .connection()
+            .query_row(
+                "SELECT id, farm_id, status, price_minor_units, stock_count FROM products",
+                [],
+                |row| {
+                    Ok((
+                        row.get(0)?,
+                        row.get(1)?,
+                        row.get(2)?,
+                        row.get(3)?,
+                        row.get(4)?,
+                    ))
+                },
+            )
+            .expect("load product");
+
+        assert_eq!(local_report.imported_records, 2);
+        assert_eq!(signed_report.scanned_records, 1);
+        assert_eq!(signed_report.imported_records, 1);
+        assert_eq!(listing_records.len(), 2);
+        assert_eq!(
+            listing_records[0].projected_id,
+            listing_records[1].projected_id
+        );
+        assert_eq!(product_count, 1);
+        assert_eq!(product.0, product_uuid.to_string());
+        assert_eq!(product.1, farm_uuid.to_string());
+        assert_eq!(product.2, "published");
+        assert_eq!(product.3, Some(800));
+        assert_eq!(product.4, Some(9));
     }
 }
