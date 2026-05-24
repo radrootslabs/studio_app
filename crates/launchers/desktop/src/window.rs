@@ -222,6 +222,7 @@ pub struct HomeView {
     products_stock_editor: Option<ProductsStockEditorState>,
     product_editor_form: Option<ProductEditorFormState>,
     relay_client: Option<RadrootsNostrClient>,
+    buyer_workspace_notice: Option<String>,
 }
 
 #[derive(Clone, Debug)]
@@ -314,6 +315,7 @@ impl HomeView {
             products_stock_editor: None,
             product_editor_form: None,
             relay_client: None,
+            buyer_workspace_notice: None,
         }
     }
 
@@ -1133,9 +1135,14 @@ impl HomeView {
             Ok(true) => {
                 self.products_stock_editor = None;
                 self.product_editor_form = None;
+                self.clear_buyer_workspace_notice();
                 cx.notify();
             }
-            Ok(false) => {}
+            Ok(false) => {
+                if self.clear_buyer_workspace_notice() {
+                    cx.notify();
+                }
+            }
             Err(runtime_error) => {
                 error!(
                     target: "shell",
@@ -1144,6 +1151,8 @@ impl HomeView {
                     error = %runtime_error,
                     "failed to select buyer section"
                 );
+                self.set_buyer_workspace_notice(runtime_error.to_string());
+                cx.notify();
             }
         }
     }
@@ -1354,8 +1363,15 @@ impl HomeView {
             .runtime
             .open_personal_product_detail(section, product_id)
         {
-            Ok(true) => cx.notify(),
-            Ok(false) => {}
+            Ok(true) => {
+                self.clear_buyer_workspace_notice();
+                cx.notify();
+            }
+            Ok(false) => {
+                if self.clear_buyer_workspace_notice() {
+                    cx.notify();
+                }
+            }
             Err(runtime_error) => {
                 error!(
                     target: "buyer",
@@ -1363,8 +1379,20 @@ impl HomeView {
                     error = %runtime_error,
                     "failed to open buyer product detail"
                 );
+                self.set_buyer_workspace_notice(runtime_error.to_string());
+                cx.notify();
             }
         }
+    }
+
+    fn set_buyer_workspace_notice(&mut self, notice: String) -> bool {
+        let changed = self.buyer_workspace_notice.as_deref() != Some(notice.as_str());
+        self.buyer_workspace_notice = Some(notice);
+        changed
+    }
+
+    fn clear_buyer_workspace_notice(&mut self) -> bool {
+        self.buyer_workspace_notice.take().is_some()
     }
 
     fn close_personal_product_detail(&mut self, section: PersonalSection, cx: &mut Context<Self>) {
@@ -2721,6 +2749,9 @@ impl HomeView {
                     cx.listener(|this, _, _, cx| this.open_account_entry(cx)),
                     cx,
                 ))
+                .when_some(self.buyer_workspace_notice.as_deref(), |this, notice| {
+                    this.child(buyer_workspace_notice_card(notice.to_owned()))
+                })
                 .child(
                     app_scroll_panel(
                         buyer_content_scroll_id(selected_personal_section),
@@ -12688,6 +12719,10 @@ fn home_empty_state_card(title_key: AppTextKey, body_key: AppTextKey) -> impl In
     )
 }
 
+fn buyer_workspace_notice_card(notice: String) -> impl IntoElement {
+    app_surface_card(home_body_text(notice))
+}
+
 fn farm_setup_onboarding_card_spec(home_route: HomeRoute) -> Option<FarmSetupOnboardingCardSpec> {
     match home_route {
         HomeRoute::FarmSetupOnboarding => Some(FarmSetupOnboardingCardSpec {
@@ -12826,7 +12861,7 @@ fn home_farm_order_method_label_key(method: FarmOrderMethod) -> AppTextKey {
 mod tests {
     use super::{
         APP_UI_THEME, AppTextKey, FarmerHomeFarmState, HomeAutoFocusState, HomeAutoFocusTarget,
-        HomeStage, LabelValueRow, PackDayBatchPrintActionPresentation,
+        HomeStage, HomeView, LabelValueRow, PackDayBatchPrintActionPresentation,
         PackDayBatchPrintStatusPresentation, PackDayExportStatusPresentation,
         PackDayHostHandoffActionPresentation, PackDayHostHandoffStatusPresentation,
         PackDayPrintActionPresentation, PackDayPrintStatusPresentation, ReminderActionTarget,
@@ -12856,6 +12891,9 @@ mod tests {
     use crate::runtime::{
         DesktopAppRuntimeMetadataSummary, DesktopAppRuntimeSummary, DesktopAppSyncConflictSummary,
         DesktopAppSyncStatusSummary,
+    };
+    use radroots_studio_app_core::{
+        AppDesktopRuntimePaths, AppRuntimeHostEnvironment, AppRuntimePlatform,
     };
     use radroots_studio_app_models::SettingsAccountProjection;
     use radroots_studio_app_models::{
@@ -12887,7 +12925,11 @@ mod tests {
         SyncConflictKind, SyncConflictResolutionStatus, SyncConflictSeverity, SyncConflictStatus,
     };
     use radroots_identity::RadrootsIdentity;
-    use std::{fs, path::PathBuf};
+    use std::{
+        fs,
+        path::PathBuf,
+        time::{SystemTime, UNIX_EPOCH},
+    };
 
     struct TestDirectory {
         path: PathBuf,
@@ -12915,6 +12957,48 @@ mod tests {
         let path = bundle_directory.join(file_name);
         fs::write(&path, file_name).unwrap();
         path
+    }
+
+    fn test_home_view(label: &str) -> (HomeView, PathBuf) {
+        let suffix = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("clock")
+            .as_nanos();
+        let home_dir = std::env::temp_dir().join(format!("radroots_home_view_{label}_{suffix}"));
+        let paths = AppDesktopRuntimePaths::for_desktop(
+            AppRuntimePlatform::Macos,
+            AppRuntimeHostEnvironment {
+                home_dir: Some(home_dir.clone()),
+                ..AppRuntimeHostEnvironment::default()
+            },
+        )
+        .expect("desktop runtime paths should resolve");
+        let runtime = crate::runtime::DesktopAppRuntime::bootstrap_with_paths(
+            paths,
+            "wss://relay.example".to_owned(),
+        );
+
+        (HomeView::new(runtime), home_dir)
+    }
+
+    #[test]
+    fn buyer_workspace_notice_tracks_visible_buyer_runtime_errors() {
+        let (mut view, home_dir) = test_home_view("buyer_notice");
+
+        assert!(
+            view.set_buyer_workspace_notice("open shared local events database failed".to_owned())
+        );
+        assert_eq!(
+            view.buyer_workspace_notice.as_deref(),
+            Some("open shared local events database failed")
+        );
+        assert!(
+            !view.set_buyer_workspace_notice("open shared local events database failed".to_owned())
+        );
+        assert!(view.clear_buyer_workspace_notice());
+        assert_eq!(view.buyer_workspace_notice, None);
+
+        let _ = fs::remove_dir_all(home_dir);
     }
 
     fn sample_pack_day_bundle(bundle_directory: &PathBuf) -> PackDayExportBundle {

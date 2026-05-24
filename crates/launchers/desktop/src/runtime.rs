@@ -1182,6 +1182,12 @@ impl DesktopAppRuntimeState {
         } else {
             false
         };
+        let section_changed = self.apply_personal_section_selection(section);
+
+        Ok(freshness_changed || section_changed)
+    }
+
+    fn apply_personal_section_selection(&mut self, section: PersonalSection) -> bool {
         let section_changed = self
             .state_store
             .apply_in_memory(AppStateCommand::SelectSection(ShellSection::Personal(
@@ -1189,7 +1195,7 @@ impl DesktopAppRuntimeState {
             )));
         let editor_changed = self.close_product_editor();
 
-        Ok(freshness_changed || section_changed || editor_changed)
+        section_changed || editor_changed
     }
 
     fn refresh_personal_browse_navigation(&mut self) -> Result<bool, AppSqliteError> {
@@ -1205,22 +1211,28 @@ impl DesktopAppRuntimeState {
         section: PersonalSection,
         product_id: ProductId,
     ) -> Result<bool, AppSqliteError> {
+        let should_refresh_before_lookup =
+            matches!(section, PersonalSection::Browse | PersonalSection::Search);
+        let freshness_changed = if should_refresh_before_lookup {
+            self.refresh_personal_browse_navigation()?
+        } else {
+            false
+        };
+        let section_changed = if should_refresh_before_lookup {
+            self.apply_personal_section_selection(section)
+        } else {
+            false
+        };
         let Some(sqlite_store) = self.sqlite_store.as_ref() else {
-            return Ok(false);
+            return Ok(freshness_changed || section_changed);
         };
         let Some(detail) = sqlite_store.load_buyer_product_detail(product_id)? else {
-            return Ok(false);
+            return Ok(freshness_changed || section_changed);
         };
 
-        let section_changed =
-            if matches!(section, PersonalSection::Browse | PersonalSection::Search) {
-                self.select_personal_section(section)?
-            } else {
-                false
-            };
         let detail_changed = self.set_personal_product_detail(section, Some(detail));
 
-        Ok(section_changed || detail_changed)
+        Ok(freshness_changed || section_changed || detail_changed)
     }
 
     fn close_personal_product_detail(&mut self, section: PersonalSection) -> bool {
@@ -6078,6 +6090,18 @@ mod tests {
         }
 
         cleanup_bootstrapped_runtime_paths(&paths);
+    }
+
+    #[test]
+    fn runtime_buyer_detail_open_imports_shared_local_events_before_lookup() {
+        assert_detail_open_imports_shared_local_events_before_lookup(
+            "buyer_browse_detail_shared_local_events_refresh",
+            PersonalSection::Browse,
+        );
+        assert_detail_open_imports_shared_local_events_before_lookup(
+            "buyer_search_detail_shared_local_events_refresh",
+            PersonalSection::Search,
+        );
     }
 
     #[test]
@@ -11340,6 +11364,73 @@ mod tests {
                 })),
             })
             .expect("append signed buyer listing");
+    }
+
+    fn deterministic_cli_listing_product_id(
+        owner_pubkey: Option<&str>,
+        listing_key: &str,
+    ) -> ProductId {
+        let seed = format!(
+            "radroots-cli-listing:{}:{}",
+            owner_pubkey.unwrap_or("unknown-owner"),
+            listing_key.trim()
+        );
+
+        ProductId::from(uuid::Uuid::new_v5(
+            &uuid::Uuid::NAMESPACE_URL,
+            seed.as_bytes(),
+        ))
+    }
+
+    fn assert_detail_open_imports_shared_local_events_before_lookup(
+        label: &str,
+        section: PersonalSection,
+    ) {
+        let (runtime, paths) = bootstrapped_runtime(label);
+        assert!(
+            runtime
+                .generate_local_account(Some("Buyer".to_owned()))
+                .expect("account should generate")
+        );
+        assert_eq!(
+            runtime
+                .summary()
+                .personal_projection
+                .browse
+                .listings
+                .rows
+                .len(),
+            0
+        );
+
+        let listing_key = "DDDDDDDDDDDDDDDDDDDDDD";
+        append_cli_signed_buyer_listing_record_with(
+            &paths,
+            "detail-open-pending-listing",
+            listing_key,
+            "Buyer Visible Eggs",
+            1100,
+        );
+        let product_id =
+            deterministic_cli_listing_product_id(Some("buyer-visible-seller-pubkey"), listing_key);
+
+        assert!(
+            runtime
+                .open_personal_product_detail(section, product_id)
+                .expect("buyer detail should import before lookup")
+        );
+        let summary = runtime.summary();
+        let detail = match section {
+            PersonalSection::Browse => summary.personal_projection.browse.detail,
+            PersonalSection::Search => summary.personal_projection.search.detail,
+            _ => None,
+        }
+        .expect("buyer detail should open from imported shared local events");
+
+        assert_eq!(detail.listing.product_id, product_id);
+        assert_eq!(detail.listing.title, "Buyer Visible Eggs");
+
+        cleanup_bootstrapped_runtime_paths(&paths);
     }
 
     fn local_work_record(
