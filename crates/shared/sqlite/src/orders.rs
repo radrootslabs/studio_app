@@ -478,7 +478,14 @@ impl<'a> AppOrdersRepository<'a> {
                 source,
             })?
             .map(
-                |(window_id, row_farm_id, farm_display_name, pickup_location_label, starts_at, ends_at)| {
+                |(
+                    window_id,
+                    row_farm_id,
+                    farm_display_name,
+                    pickup_location_label,
+                    starts_at,
+                    ends_at,
+                )| {
                     Ok(PackDayOutputWindow {
                         fulfillment_window_id: parse_typed_id("fulfillment_windows.id", window_id)?,
                         farm_id: parse_typed_id("fulfillment_windows.farm_id", row_farm_id)?,
@@ -1455,7 +1462,10 @@ mod tests {
         assert_eq!(source.totals_by_product[1].quantity.unit_label, "bags");
         assert_eq!(source.pack_list.len(), 3);
         assert_eq!(source.pack_list[0].customer_display_name, "Taylor");
-        assert_eq!(source.pack_list[0].order_state, PackDayOutputOrderState::Packed);
+        assert_eq!(
+            source.pack_list[0].order_state,
+            PackDayOutputOrderState::Packed
+        );
         assert_eq!(source.pack_list[0].quantity.value, 3);
         assert_eq!(source.pack_list[1].customer_display_name, "Casey");
         assert_eq!(source.pack_list[1].quantity.value, 2);
@@ -1471,10 +1481,12 @@ mod tests {
                 PackDayOutputOrderState::Packed,
             ]
         );
-        assert!(source
-            .pack_list
-            .iter()
-            .all(|row| row.order_number != "R-102"));
+        assert!(
+            source
+                .pack_list
+                .iter()
+                .all(|row| row.order_number != "R-102")
+        );
     }
 
     #[test]

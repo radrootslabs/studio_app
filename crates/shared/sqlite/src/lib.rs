@@ -25,8 +25,8 @@ use radroots_studio_app_models::{
     OrderRecoveryProjection, OrdersListProjection, OrdersScreenQueryState, PackDayOutputSource,
     PackDayProjection, PackDayScreenQueryState, ProductEditorDraft, ProductId,
     ProductPublishBlocker, ProductsFilter, ProductsListProjection, ProductsSort, RecoveryKind,
-    RecoveryQueueProjection, ReminderFeedProjection, ReminderLogEntryProjection, ReminderLogProjection,
-    TodayAgendaProjection,
+    RecoveryQueueProjection, ReminderFeedProjection, ReminderLogEntryProjection,
+    ReminderLogProjection, TodayAgendaProjection,
 };
 use radroots_studio_app_sync::{
     PendingSyncOperation, SyncCheckpointStatus, SyncConflict, SyncConflictResolutionStatus,
@@ -462,8 +462,11 @@ impl AppSqliteStore {
         order_id: OrderId,
         replace_existing: bool,
     ) -> Result<BuyerRepeatDemandApplyOutcome, AppSqliteError> {
-        self.buyer_repository()
-            .apply_buyer_repeat_demand_to_cart(context, order_id, replace_existing)
+        self.buyer_repository().apply_buyer_repeat_demand_to_cart(
+            context,
+            order_id,
+            replace_existing,
+        )
     }
 
     pub fn enqueue_pending_sync_operation(

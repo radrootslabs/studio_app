@@ -7,9 +7,9 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use chrono::{Duration, Utc};
 use radroots_studio_app_core::{
-    prepare_pack_day_export_bundle_at_data_root, write_prepared_pack_day_export_bundle,
     AppBuildIdentity, AppDesktopRuntimePaths, AppRuntimeCapture, AppRuntimeMode,
     AppRuntimePathsError, AppRuntimeSnapshot, AppSharedAccountsPaths, PackDayExportWriteError,
+    prepare_pack_day_export_bundle_at_data_root, write_prepared_pack_day_export_bundle,
 };
 use radroots_studio_app_models::{
     ActiveSurface, AppActivityContext, AppActivityKind, AppIdentityProjection, AppStartupGate,
@@ -37,13 +37,13 @@ use radroots_studio_app_sqlite::{
     derive_farm_rules_readiness,
 };
 use radroots_studio_app_state::{
-    derive_sync_projection, AppShellProjection, AppStateCommand, AppStatePersistenceRepository,
+    APP_STATE_FILE_NAME, AppShellProjection, AppStateCommand, AppStatePersistenceRepository,
     AppStateStore, AppStateStoreError, BuyerBrowseScreenProjection, BuyerCartScreenProjection,
     BuyerOrdersScreenProjection, BuyerSearchScreenProjection, BuyerSearchScreenQueryState,
     FarmSetupFlowStage, FarmWorkspaceReadinessProjection, HomeRoute, OrdersScreenProjection,
     PackDayBatchPrintRequest, PackDayExportRequest, PackDayHostHandoffRequest, PackDayPrintRequest,
     PackDayScreenProjection, PersistedAppState, PersonalWorkspaceProjection,
-    ProductsScreenProjection, ProductsScreenQueryState, APP_STATE_FILE_NAME,
+    ProductsScreenProjection, ProductsScreenQueryState, derive_sync_projection,
 };
 use radroots_studio_app_sync::{
     AppSyncProjection, AppSyncRequest, AppSyncResult, AppSyncTransport, AppSyncTransportError,
@@ -62,24 +62,24 @@ use tracing::error;
 use uuid::Uuid;
 
 use crate::accounts::{
-    bootstrap_desktop_accounts, generate_local_account, identity_projection_from_manager,
-    import_local_account, remove_selected_local_key, reset_local_device_state,
-    select_active_surface, select_local_account, DesktopAccountsBootstrapError,
-    DesktopAccountsCommandError, DesktopAccountsProjectionError, DesktopLocalIdentityImportRequest,
+    DesktopAccountsBootstrapError, DesktopAccountsCommandError, DesktopAccountsProjectionError,
+    DesktopLocalIdentityImportRequest, bootstrap_desktop_accounts, generate_local_account,
+    identity_projection_from_manager, import_local_account, remove_selected_local_key,
+    reset_local_device_state, select_active_surface, select_local_account,
 };
 use crate::pack_day_host_handoff::{
-    plan_pack_day_host_handoff, PackDayHostHandoffCommandPlan, PackDayHostHandoffError,
+    PackDayHostHandoffCommandPlan, PackDayHostHandoffError, plan_pack_day_host_handoff,
 };
 use crate::pack_day_print::{
-    cleanup_prepared_customer_label_asset_root,
+    PackDayBatchPrintCommandPlan, PackDayBatchPrintError, PackDayPrintCommandPlan,
+    PackDayPrintError, cleanup_prepared_customer_label_asset_root,
     cleanup_prepared_customer_label_assets_for_export_instance, plan_pack_day_batch_print,
-    plan_pack_day_print, PackDayBatchPrintCommandPlan, PackDayBatchPrintError,
-    PackDayPrintCommandPlan, PackDayPrintError,
+    plan_pack_day_print,
 };
 use crate::remote_signer::{
-    activate_pending_session, apply_remote_signer_custody, clear_pending_session,
-    load_pending_session, purge_all_state, reconcile_startup, store_pending_session,
-    DesktopRemoteSignerError, DesktopRemoteSignerPaths,
+    DesktopRemoteSignerError, DesktopRemoteSignerPaths, activate_pending_session,
+    apply_remote_signer_custody, clear_pending_session, load_pending_session, purge_all_state,
+    reconcile_startup, store_pending_session,
 };
 
 const APP_DATABASE_FILE_NAME: &str = "app.sqlite3";
@@ -1973,15 +1973,12 @@ impl DesktopAppRuntimeState {
             Ok(plan) => Ok(Some((request, plan))),
             Err(error) => {
                 let failure_command = match error.failure_kind() {
-                    Some(failure) => AppStateCommand::fail_pack_day_print_with_kind(
-                        request,
-                        failure,
-                    ),
+                    Some(failure) => {
+                        AppStateCommand::fail_pack_day_print_with_kind(request, failure)
+                    }
                     None => AppStateCommand::fail_pack_day_print(request),
                 };
-                let _ = self
-                    .state_store
-                    .apply_in_memory(failure_command);
+                let _ = self.state_store.apply_in_memory(failure_command);
                 Err(error.into())
             }
         }
@@ -2091,15 +2088,12 @@ impl DesktopAppRuntimeState {
             }
             Err(error) => {
                 let failure_command = match error.failure_kind() {
-                    Some(failure) => AppStateCommand::fail_pack_day_print_with_kind(
-                        request,
-                        failure,
-                    ),
+                    Some(failure) => {
+                        AppStateCommand::fail_pack_day_print_with_kind(request, failure)
+                    }
                     None => AppStateCommand::fail_pack_day_print(request),
                 };
-                let _ = self
-                    .state_store
-                    .apply_in_memory(failure_command);
+                let _ = self.state_store.apply_in_memory(failure_command);
                 if let Some(export_instance_id) = cleanup_export_instance_id {
                     self.cleanup_prepared_pack_day_print_assets_for_export_instance(
                         export_instance_id,
@@ -3305,7 +3299,6 @@ impl DesktopAppRuntimeState {
         sqlite_store.import_shared_local_events_from_path(database_path.as_path())
     }
 
-
     fn append_app_farm_local_work_record(
         &self,
         account: &radroots_studio_app_models::SelectedAccountProjection,
@@ -3919,7 +3912,6 @@ fn shared_local_events_database_path_from_shared_accounts(
             .join(SHARED_LOCAL_EVENTS_DB_FILE_NAME),
     )
 }
-
 
 fn current_runtime_time_ms() -> Result<i64, AppSqliteError> {
     let duration = SystemTime::now().duration_since(UNIX_EPOCH).map_err(|_| {
@@ -5294,11 +5286,11 @@ mod tests {
     use radroots_studio_app_remote_signer::{
         RadrootsAppRemoteSignerPendingSession, RadrootsAppRemoteSignerSessionRecord,
     };
-    use radroots_studio_app_sqlite::{latest_schema_version, AppSqliteStore, DatabaseTarget};
+    use radroots_studio_app_sqlite::{AppSqliteStore, DatabaseTarget, latest_schema_version};
     use radroots_studio_app_state::{
-        AppStateCommand, AppStatePersistenceRepository, AppStateRepository,
+        APP_STATE_FILE_NAME, AppStateCommand, AppStatePersistenceRepository, AppStateRepository,
         AppStateRepositoryError, AppStateStore, AppStateStoreError, FileBackedAppStateRepository,
-        HomeRoute, APP_STATE_FILE_NAME,
+        HomeRoute,
     };
     use radroots_studio_app_sync::{
         AppSyncRequest, AppSyncResult, AppSyncRunStatus, AppSyncTransport, AppSyncTransportError,
@@ -5321,15 +5313,15 @@ mod tests {
     use crate::accounts::DesktopLocalIdentityImportRequest;
 
     use super::{
-        default_sync_transport, DesktopAppRuntime, DesktopAppRuntimeActivityContextError,
+        APP_DATABASE_FILE_NAME, DesktopAppRuntime, DesktopAppRuntimeActivityContextError,
         DesktopAppRuntimeCommandError, DesktopAppRuntimeMetadataSummary, DesktopAppRuntimeState,
-        DesktopAppSyncStatusSummary, DesktopRemoteSignerPaths, APP_DATABASE_FILE_NAME,
-        SYNC_TRANSPORT_UNAVAILABLE_MESSAGE, is_hex_64,
+        DesktopAppSyncStatusSummary, DesktopRemoteSignerPaths, SYNC_TRANSPORT_UNAVAILABLE_MESSAGE,
+        default_sync_transport, is_hex_64,
     };
     use crate::pack_day_host_handoff::PackDayHostHandoffError;
     use crate::pack_day_print::{
-        execute_pack_day_batch_print_plan_with, prepared_customer_label_asset_root,
         PackDayBatchPrintError, PackDayPrintCommandResult, PackDayPrintError,
+        execute_pack_day_batch_print_plan_with, prepared_customer_label_asset_root,
     };
 
     #[derive(Clone)]
@@ -5442,10 +5434,12 @@ mod tests {
         assert_eq!(summary.startup_gate, AppStartupGate::SetupRequired);
         assert_eq!(summary.home_route, HomeRoute::SetupRequired);
         assert!(summary.settings_account_projection.roster.is_empty());
-        assert!(summary
-            .settings_account_projection
-            .selected_account
-            .is_none());
+        assert!(
+            summary
+                .settings_account_projection
+                .selected_account
+                .is_none()
+        );
         assert_eq!(
             summary.logged_out_startup,
             LoggedOutStartupProjection::default()
@@ -5553,10 +5547,12 @@ mod tests {
                 .expect("pending sync operation should save");
         }
 
-        assert!(runtime
-            .lock_state_mut()
-            .refresh_selected_account_sync()
-            .expect("sync status should refresh"));
+        assert!(
+            runtime
+                .lock_state_mut()
+                .refresh_selected_account_sync()
+                .expect("sync status should refresh")
+        );
 
         let summary = runtime.summary();
 
@@ -5610,9 +5606,11 @@ mod tests {
             }),
         );
 
-        assert!(runtime
-            .open_new_product_editor()
-            .expect("new product editor should open"));
+        assert!(
+            runtime
+                .open_new_product_editor()
+                .expect("new product editor should open")
+        );
 
         let summary = runtime.summary();
         let pending_operations = runtime
@@ -5637,9 +5635,11 @@ mod tests {
         let runtime = memory_runtime();
         let (account_id, _) = provision_ready_farmer_account(&runtime);
 
-        assert!(runtime
-            .open_new_product_editor()
-            .expect("new product editor should open"));
+        assert!(
+            runtime
+                .open_new_product_editor()
+                .expect("new product editor should open")
+        );
 
         let recorded = install_recorded_sync_transport(
             &runtime,
@@ -5656,9 +5656,11 @@ mod tests {
             }),
         );
 
-        assert!(runtime
-            .sync_on_app_launch()
-            .expect("launch sync should succeed"));
+        assert!(
+            runtime
+                .sync_on_app_launch()
+                .expect("launch sync should succeed")
+        );
 
         let summary = runtime.summary();
         let recorded = recorded.lock().expect("recorded transport");
@@ -5697,9 +5699,11 @@ mod tests {
         let runtime = memory_runtime();
         let (_, _) = provision_ready_farmer_account(&runtime);
 
-        assert!(runtime
-            .open_new_product_editor()
-            .expect("new product editor should open"));
+        assert!(
+            runtime
+                .open_new_product_editor()
+                .expect("new product editor should open")
+        );
 
         let recorded = install_recorded_sync_transport(
             &runtime,
@@ -5716,9 +5720,11 @@ mod tests {
             }),
         );
 
-        assert!(runtime
-            .sync_on_foreground_resume()
-            .expect("resume sync should succeed"));
+        assert!(
+            runtime
+                .sync_on_foreground_resume()
+                .expect("resume sync should succeed")
+        );
 
         let request = recorded
             .lock()
@@ -5733,9 +5739,11 @@ mod tests {
     #[test]
     fn runtime_shared_local_events_refresh_reports_and_reloads_products() {
         let (runtime, paths) = bootstrapped_runtime("shared_local_events_refresh");
-        assert!(runtime
-            .generate_local_account(Some("Farmer".to_owned()))
-            .expect("account should generate"));
+        assert!(
+            runtime
+                .generate_local_account(Some("Farmer".to_owned()))
+                .expect("account should generate")
+        );
         let account_id = runtime
             .summary()
             .settings_account_projection
@@ -5775,9 +5783,11 @@ mod tests {
             )
             .expect("imported products should load directly");
         assert_eq!(direct_products.rows.len(), 1);
-        assert!(runtime
-            .select_products_filter(ProductsFilter::Drafts)
-            .expect("draft products filter should reload"));
+        assert!(
+            runtime
+                .select_products_filter(ProductsFilter::Drafts)
+                .expect("draft products filter should reload")
+        );
         let summary = runtime.summary();
         assert_eq!(summary.products_projection.list.rows.len(), 1);
         assert_eq!(summary.products_projection.list.rows[0].title, "Eggs");
@@ -6003,7 +6013,10 @@ mod tests {
             .expect("listing local work payload");
         assert_eq!(listing_payload["exportability"]["state"], "exportable");
         assert_eq!(listing_payload["document"]["kind"], "listing_draft_v1");
-        assert_eq!(listing_payload["document"]["seller_actor"]["pubkey"], owner_pubkey);
+        assert_eq!(
+            listing_payload["document"]["seller_actor"]["pubkey"],
+            owner_pubkey
+        );
         assert_eq!(listing_payload["document"]["product"]["title"], "Eggs");
         assert_eq!(
             listing_payload["document"]["primary_bin"]["price_amount"],
@@ -6075,14 +6088,19 @@ mod tests {
                 .iter()
                 .all(|record| record.owner_account_id.as_deref() == Some("acct_unresolved"))
         );
-        assert!(app_records.iter().all(|record| record.owner_pubkey.is_none()));
+        assert!(
+            app_records
+                .iter()
+                .all(|record| record.owner_pubkey.is_none())
+        );
         assert!(
             app_records
                 .iter()
                 .all(|record| record
                     .local_work_json
                     .as_ref()
-                    .is_some_and(|payload| payload["exportability"]["state"] == "identity_unresolved"
+                    .is_some_and(|payload| payload["exportability"]["state"]
+                        == "identity_unresolved"
                         && payload["exportability"]["reason"] == "canonical_hex_pubkey_required"))
         );
         let listing_record = app_records
@@ -6112,13 +6130,17 @@ mod tests {
         let runtime = memory_runtime();
         let (account_id, _) = provision_ready_farmer_account(&runtime);
 
-        assert!(runtime
-            .open_new_product_editor()
-            .expect("new product editor should open"));
+        assert!(
+            runtime
+                .open_new_product_editor()
+                .expect("new product editor should open")
+        );
 
-        assert!(runtime
-            .sync_on_manual_refresh()
-            .expect("manual refresh should complete"));
+        assert!(
+            runtime
+                .sync_on_manual_refresh()
+                .expect("manual refresh should complete")
+        );
 
         let summary = runtime.summary();
         let pending_operations = runtime
@@ -6138,13 +6160,15 @@ mod tests {
             SyncCheckpointState::Failed
         );
         assert_eq!(summary.sync_status.pending_write_count, 1);
-        assert!(summary
-            .sync_status
-            .projection
-            .checkpoint
-            .last_error_message
-            .as_deref()
-            .is_some_and(|message| { message.contains(SYNC_TRANSPORT_UNAVAILABLE_MESSAGE) }));
+        assert!(
+            summary
+                .sync_status
+                .projection
+                .checkpoint
+                .last_error_message
+                .as_deref()
+                .is_some_and(|message| { message.contains(SYNC_TRANSPORT_UNAVAILABLE_MESSAGE) })
+        );
         assert_eq!(pending_operations.len(), 1);
         assert_eq!(pending_operations[0].operation.attempt_count, 1);
     }
@@ -6154,9 +6178,11 @@ mod tests {
         let runtime = memory_runtime();
         let (account_id, farm_id) = provision_ready_farmer_account(&runtime);
 
-        assert!(runtime
-            .open_new_product_editor()
-            .expect("new product editor should open"));
+        assert!(
+            runtime
+                .open_new_product_editor()
+                .expect("new product editor should open")
+        );
 
         runtime
             .lock_state()
@@ -6177,10 +6203,12 @@ mod tests {
                 },
             )
             .expect("blocking conflict should save");
-        assert!(runtime
-            .lock_state_mut()
-            .refresh_selected_account_sync()
-            .expect("sync status should refresh"));
+        assert!(
+            runtime
+                .lock_state_mut()
+                .refresh_selected_account_sync()
+                .expect("sync status should refresh")
+        );
 
         let recorded = install_recorded_sync_transport(
             &runtime,
@@ -6197,9 +6225,11 @@ mod tests {
             }),
         );
 
-        assert!(!runtime
-            .sync_on_app_launch()
-            .expect("blocked launch sync should skip"));
+        assert!(
+            !runtime
+                .sync_on_app_launch()
+                .expect("blocked launch sync should skip")
+        );
 
         let summary = runtime.summary();
 
@@ -6243,17 +6273,21 @@ mod tests {
                 },
             )
             .expect("blocking conflict should save");
-        assert!(runtime
-            .lock_state_mut()
-            .refresh_selected_account_sync()
-            .expect("sync status should refresh"));
+        assert!(
+            runtime
+                .lock_state_mut()
+                .refresh_selected_account_sync()
+                .expect("sync status should refresh")
+        );
 
-        assert!(runtime
-            .resolve_sync_conflict(
-                conflict_id.as_str(),
-                SyncConflictResolutionStatus::AcceptedLocal,
-            )
-            .expect("conflict resolution should succeed"));
+        assert!(
+            runtime
+                .resolve_sync_conflict(
+                    conflict_id.as_str(),
+                    SyncConflictResolutionStatus::AcceptedLocal,
+                )
+                .expect("conflict resolution should succeed")
+        );
 
         let summary = runtime.summary();
 
@@ -6278,11 +6312,13 @@ mod tests {
             summary.sync_status.conflicts[0].conflict.resolution,
             SyncConflictResolutionStatus::AcceptedLocal
         );
-        assert!(summary.sync_status.conflicts[0]
-            .conflict
-            .resolved_at
-            .as_deref()
-            .is_some());
+        assert!(
+            summary.sync_status.conflicts[0]
+                .conflict
+                .resolved_at
+                .as_deref()
+                .is_some()
+        );
     }
 
     #[test]
@@ -6290,9 +6326,11 @@ mod tests {
         let runtime = memory_runtime();
         let (account_id, farm_id) = provision_ready_farmer_account(&runtime);
 
-        assert!(runtime
-            .open_new_product_editor()
-            .expect("new product editor should open"));
+        assert!(
+            runtime
+                .open_new_product_editor()
+                .expect("new product editor should open")
+        );
 
         runtime
             .lock_state()
@@ -6313,10 +6351,12 @@ mod tests {
                 },
             )
             .expect("review-required conflict should save");
-        assert!(runtime
-            .lock_state_mut()
-            .refresh_selected_account_sync()
-            .expect("sync status should refresh"));
+        assert!(
+            runtime
+                .lock_state_mut()
+                .refresh_selected_account_sync()
+                .expect("sync status should refresh")
+        );
 
         let recorded = install_recorded_sync_transport(
             &runtime,
@@ -6333,9 +6373,11 @@ mod tests {
             }),
         );
 
-        assert!(runtime
-            .sync_on_manual_refresh()
-            .expect("manual refresh should succeed"));
+        assert!(
+            runtime
+                .sync_on_manual_refresh()
+                .expect("manual refresh should succeed")
+        );
 
         let recorded = recorded.lock().expect("recorded transport");
         let request = recorded
@@ -6428,9 +6470,11 @@ mod tests {
             startup_issue: None,
         });
 
-        assert!(runtime
-            .clear_startup_pending_remote_signer_session()
-            .expect("clear pending should succeed"));
+        assert!(
+            runtime
+                .clear_startup_pending_remote_signer_session()
+                .expect("clear pending should succeed")
+        );
         assert!(runtime.begin_generate_key_startup());
         assert_eq!(
             runtime.summary().logged_out_startup.phase,
@@ -6445,9 +6489,11 @@ mod tests {
         let (runtime, paths) = bootstrapped_runtime("restart_pending_recovery");
         let pending_session = fixture_pending_session();
 
-        assert!(runtime
-            .store_startup_pending_remote_signer_session(&pending_session)
-            .expect("store pending should succeed"));
+        assert!(
+            runtime
+                .store_startup_pending_remote_signer_session(&pending_session)
+                .expect("store pending should succeed")
+        );
 
         let restarted = restart_runtime(paths.clone());
         let restored = restarted
@@ -6476,12 +6522,16 @@ mod tests {
         let (runtime, paths) = bootstrapped_runtime("restart_after_explicit_cancel");
         let pending_session = fixture_pending_session();
 
-        assert!(runtime
-            .store_startup_pending_remote_signer_session(&pending_session)
-            .expect("store pending should succeed"));
-        assert!(runtime
-            .clear_startup_pending_remote_signer_session()
-            .expect("clear pending should succeed"));
+        assert!(
+            runtime
+                .store_startup_pending_remote_signer_session(&pending_session)
+                .expect("store pending should succeed")
+        );
+        assert!(
+            runtime
+                .clear_startup_pending_remote_signer_session()
+                .expect("clear pending should succeed")
+        );
 
         let restarted = restart_runtime(paths.clone());
 
@@ -6547,9 +6597,11 @@ mod tests {
         let (runtime, paths) = bootstrapped_runtime("restart_buyer_search_detail");
         let (account_id, farm_id) = provision_ready_farmer_account(&runtime);
 
-        assert!(runtime
-            .select_active_surface(ActiveSurface::Personal)
-            .expect("surface should switch into marketplace"));
+        assert!(
+            runtime
+                .select_active_surface(ActiveSurface::Personal)
+                .expect("surface should switch into marketplace")
+        );
         let fulfillment_window_id = seed_buyer_marketplace_support(
             &runtime,
             account_id.as_str(),
@@ -6579,12 +6631,16 @@ mod tests {
             ))
             .expect("buyer detail product should attach a fulfillment window");
 
-        assert!(runtime
-            .set_personal_search_query("salad")
-            .expect("buyer search query should update"));
-        assert!(runtime
-            .open_personal_product_detail(PersonalSection::Search, product_id)
-            .expect("buyer search detail should open"));
+        assert!(
+            runtime
+                .set_personal_search_query("salad")
+                .expect("buyer search query should update")
+        );
+        assert!(
+            runtime
+                .open_personal_product_detail(PersonalSection::Search, product_id)
+                .expect("buyer search detail should open")
+        );
 
         let restarted = restart_runtime(paths.clone());
         let summary = restarted.summary();
@@ -6624,18 +6680,26 @@ mod tests {
             "2026-04-20T09:30:00Z",
         );
 
-        assert!(runtime
-            .set_products_search_query("pea")
-            .expect("products query should update"));
-        assert!(runtime
-            .select_products_filter(ProductsFilter::Drafts)
-            .expect("products filter should update"));
-        assert!(runtime
-            .select_products_sort(ProductsSort::Name)
-            .expect("products sort should update"));
-        assert!(runtime
-            .open_existing_product_editor(product_id)
-            .expect("product editor should open"));
+        assert!(
+            runtime
+                .set_products_search_query("pea")
+                .expect("products query should update")
+        );
+        assert!(
+            runtime
+                .select_products_filter(ProductsFilter::Drafts)
+                .expect("products filter should update")
+        );
+        assert!(
+            runtime
+                .select_products_sort(ProductsSort::Name)
+                .expect("products sort should update")
+        );
+        assert!(
+            runtime
+                .open_existing_product_editor(product_id)
+                .expect("product editor should open")
+        );
 
         let restarted = restart_runtime(paths.clone());
         let summary = restarted.summary();
@@ -6681,12 +6745,16 @@ mod tests {
             ))
             .expect("order should update to packed");
 
-        assert!(runtime
-            .select_orders_filter(OrdersFilter::Packed)
-            .expect("orders filter should update"));
-        assert!(runtime
-            .open_order_detail(order_id)
-            .expect("order detail should open"));
+        assert!(
+            runtime
+                .select_orders_filter(OrdersFilter::Packed)
+                .expect("orders filter should update")
+        );
+        assert!(
+            runtime
+                .open_order_detail(order_id)
+                .expect("order detail should open")
+        );
 
         let restarted = restart_runtime(paths.clone());
         let summary = restarted.summary();
@@ -6714,9 +6782,11 @@ mod tests {
         let (_, farm_id) = provision_ready_farmer_account(&runtime);
         let (fulfillment_window_id, _) = seed_order_workspace(&runtime, farm_id);
 
-        assert!(runtime
-            .open_orders_fulfillment_window(fulfillment_window_id)
-            .expect("orders window should open"));
+        assert!(
+            runtime
+                .open_orders_fulfillment_window(fulfillment_window_id)
+                .expect("orders window should open")
+        );
         let mut persisted_state = runtime.lock_state().state_store.persisted_state().clone();
         persisted_state.seller.orders_query.fulfillment_window_id =
             Some(FulfillmentWindowId::new());
@@ -6734,12 +6804,14 @@ mod tests {
             ShellSection::Farmer(FarmerSection::Orders)
         );
         assert_eq!(summary.orders_projection.query.fulfillment_window_id, None);
-        assert!(summary
-            .orders_projection
-            .list
-            .rows
-            .iter()
-            .any(|row| { row.fulfillment_window_id == Some(fulfillment_window_id) }));
+        assert!(
+            summary
+                .orders_projection
+                .list
+                .rows
+                .iter()
+                .any(|row| { row.fulfillment_window_id == Some(fulfillment_window_id) })
+        );
 
         cleanup_bootstrapped_runtime_paths(&paths);
     }
@@ -6772,11 +6844,13 @@ mod tests {
             summary.pack_day_projection.query.fulfillment_window_id,
             None
         );
-        assert!(summary
-            .pack_day_projection
-            .projection
-            .fulfillment_window
-            .is_some());
+        assert!(
+            summary
+                .pack_day_projection
+                .projection
+                .fulfillment_window
+                .is_some()
+        );
         assert_ne!(
             summary.pack_day_projection.query.fulfillment_window_id,
             Some(stale_fulfillment_window_id)
@@ -7047,28 +7121,34 @@ mod tests {
         let _ = provision_ready_farmer_account(&runtime);
 
         assert!(!runtime.select_farmer_section(FarmerSection::PackDay));
-        assert!(!runtime
-            .open_pack_day(None)
-            .expect("pack day route should stay blocked"));
+        assert!(
+            !runtime
+                .open_pack_day(None)
+                .expect("pack day route should stay blocked")
+        );
         assert_eq!(
             runtime.summary().shell_projection.selected_section,
             ShellSection::Farmer(FarmerSection::Today)
         );
-        assert!(runtime
-            .summary()
-            .pack_day_projection
-            .projection
-            .fulfillment_window
-            .is_none());
+        assert!(
+            runtime
+                .summary()
+                .pack_day_projection
+                .projection
+                .fulfillment_window
+                .is_none()
+        );
     }
 
     #[test]
     fn runtime_routes_between_farmer_home_and_products_through_explicit_methods() {
         let runtime = memory_runtime();
 
-        assert!(runtime
-            .generate_local_account(Some("Farmer".to_owned()))
-            .expect("account should generate"));
+        assert!(
+            runtime
+                .generate_local_account(Some("Farmer".to_owned()))
+                .expect("account should generate")
+        );
         let account_id = runtime
             .summary()
             .settings_account_projection
@@ -7104,9 +7184,11 @@ mod tests {
             .expect("sqlite store")
             .save_farm_setup(account_id.as_str(), &farm_setup_projection)
             .expect("farm setup should save");
-        assert!(runtime
-            .select_local_account(account_id.as_str())
-            .expect("account should select"));
+        assert!(
+            runtime
+                .select_local_account(account_id.as_str())
+                .expect("account should select")
+        );
 
         assert!(runtime.select_farmer_section(FarmerSection::Products));
         assert_eq!(
@@ -7243,16 +7325,20 @@ mod tests {
             .expect("account should refresh after buyer workspace seeding");
         let summary = runtime.summary();
         assert_eq!(summary.personal_projection.search.listings.rows.len(), 2);
-        assert!(summary
-            .personal_projection
-            .search
-            .query
-            .fulfillment_methods
-            .is_empty());
+        assert!(
+            summary
+                .personal_projection
+                .search
+                .query
+                .fulfillment_methods
+                .is_empty()
+        );
 
-        assert!(runtime
-            .set_personal_search_query("pea")
-            .expect("buyer search query should apply"));
+        assert!(
+            runtime
+                .set_personal_search_query("pea")
+                .expect("buyer search query should apply")
+        );
         let searched = runtime.summary();
         assert_eq!(searched.personal_projection.search.listings.rows.len(), 1);
         assert_eq!(
@@ -7260,9 +7346,11 @@ mod tests {
             "Pea shoots"
         );
 
-        assert!(runtime
-            .set_personal_search_fulfillment_method(FarmOrderMethod::Pickup, true)
-            .expect("buyer fulfillment filter should apply"));
+        assert!(
+            runtime
+                .set_personal_search_fulfillment_method(FarmOrderMethod::Pickup, true)
+                .expect("buyer fulfillment filter should apply")
+        );
         let filtered = runtime.summary();
         assert_eq!(
             filtered
@@ -7285,9 +7373,11 @@ mod tests {
     fn runtime_personal_product_detail_adds_to_cart_and_routes_into_cart() {
         let runtime = memory_runtime();
         let (account_id, farm_id) = provision_ready_farmer_account(&runtime);
-        assert!(runtime
-            .select_active_surface(ActiveSurface::Personal)
-            .expect("surface should switch into marketplace"));
+        assert!(
+            runtime
+                .select_active_surface(ActiveSurface::Personal)
+                .expect("surface should switch into marketplace")
+        );
         let fulfillment_window_id = seed_buyer_marketplace_support(
             &runtime,
             account_id.as_str(),
@@ -7317,13 +7407,17 @@ mod tests {
             ))
             .expect("buyer detail product should attach a fulfillment window");
 
-        assert!(runtime
-            .open_personal_product_detail(PersonalSection::Browse, product_id)
-            .expect("buyer detail should open"));
+        assert!(
+            runtime
+                .open_personal_product_detail(PersonalSection::Browse, product_id)
+                .expect("buyer detail should open")
+        );
         assert!(runtime.increase_personal_product_quantity(PersonalSection::Browse));
-        assert!(runtime
-            .add_personal_product_to_cart(PersonalSection::Browse, false)
-            .expect("buyer product should add to cart"));
+        assert!(
+            runtime
+                .add_personal_product_to_cart(PersonalSection::Browse, false)
+                .expect("buyer product should add to cart")
+        );
 
         let summary = runtime.summary();
         assert_eq!(
@@ -7349,12 +7443,14 @@ mod tests {
                 .as_deref(),
             Some("North field farm")
         );
-        assert!(summary
-            .personal_projection
-            .cart
-            .cart
-            .replace_confirmation
-            .is_none());
+        assert!(
+            summary
+                .personal_projection
+                .cart
+                .cart
+                .replace_confirmation
+                .is_none()
+        );
         assert_eq!(
             summary
                 .personal_projection
@@ -7371,9 +7467,11 @@ mod tests {
     fn runtime_cross_farm_buyer_add_requires_replace_confirmation() {
         let runtime = memory_runtime();
         let (account_id, farm_id) = provision_ready_farmer_account(&runtime);
-        assert!(runtime
-            .select_active_surface(ActiveSurface::Personal)
-            .expect("surface should switch into marketplace"));
+        assert!(
+            runtime
+                .select_active_surface(ActiveSurface::Personal)
+                .expect("surface should switch into marketplace")
+        );
         let first_window_id = seed_buyer_marketplace_support(
             &runtime,
             account_id.as_str(),
@@ -7402,12 +7500,16 @@ mod tests {
                  where id = '{first_product_id}'"
             ))
             .expect("first product should attach a fulfillment window");
-        assert!(runtime
-            .open_personal_product_detail(PersonalSection::Browse, first_product_id)
-            .expect("first buyer detail should open"));
-        assert!(runtime
-            .add_personal_product_to_cart(PersonalSection::Browse, false)
-            .expect("first buyer product should add to cart"));
+        assert!(
+            runtime
+                .open_personal_product_detail(PersonalSection::Browse, first_product_id)
+                .expect("first buyer detail should open")
+        );
+        assert!(
+            runtime
+                .add_personal_product_to_cart(PersonalSection::Browse, false)
+                .expect("first buyer product should add to cart")
+        );
 
         let other_farm_id = FarmId::new();
         runtime
@@ -7450,12 +7552,16 @@ mod tests {
             ))
             .expect("second product should attach a fulfillment window");
 
-        assert!(runtime
-            .open_personal_product_detail(PersonalSection::Browse, second_product_id)
-            .expect("second buyer detail should open"));
-        assert!(runtime
-            .add_personal_product_to_cart(PersonalSection::Browse, false)
-            .expect("cross-farm add should require confirmation"));
+        assert!(
+            runtime
+                .open_personal_product_detail(PersonalSection::Browse, second_product_id)
+                .expect("second buyer detail should open")
+        );
+        assert!(
+            runtime
+                .add_personal_product_to_cart(PersonalSection::Browse, false)
+                .expect("cross-farm add should require confirmation")
+        );
 
         let confirmation_summary = runtime.summary();
         assert_eq!(
@@ -7487,9 +7593,11 @@ mod tests {
             "Willow Farm"
         );
 
-        assert!(runtime
-            .add_personal_product_to_cart(PersonalSection::Browse, true)
-            .expect("confirmed cross-farm add should replace the cart"));
+        assert!(
+            runtime
+                .add_personal_product_to_cart(PersonalSection::Browse, true)
+                .expect("confirmed cross-farm add should replace the cart")
+        );
         let replaced_summary = runtime.summary();
         assert_eq!(
             replaced_summary.shell_projection.selected_section,
@@ -7512,21 +7620,25 @@ mod tests {
                 .as_deref(),
             Some("Willow Farm")
         );
-        assert!(replaced_summary
-            .personal_projection
-            .cart
-            .cart
-            .replace_confirmation
-            .is_none());
+        assert!(
+            replaced_summary
+                .personal_projection
+                .cart
+                .cart
+                .replace_confirmation
+                .is_none()
+        );
     }
 
     #[test]
     fn runtime_removing_buyer_cart_line_clears_cart_and_checkout_readiness() {
         let runtime = memory_runtime();
         let (account_id, farm_id) = provision_ready_farmer_account(&runtime);
-        assert!(runtime
-            .select_active_surface(ActiveSurface::Personal)
-            .expect("surface should switch into marketplace"));
+        assert!(
+            runtime
+                .select_active_surface(ActiveSurface::Personal)
+                .expect("surface should switch into marketplace")
+        );
         let fulfillment_window_id = seed_buyer_marketplace_support(
             &runtime,
             account_id.as_str(),
@@ -7555,16 +7667,22 @@ mod tests {
                  where id = '{product_id}'"
             ))
             .expect("buyer detail product should attach a fulfillment window");
-        assert!(runtime
-            .open_personal_product_detail(PersonalSection::Browse, product_id)
-            .expect("buyer detail should open"));
-        assert!(runtime
-            .add_personal_product_to_cart(PersonalSection::Browse, false)
-            .expect("buyer product should add to cart"));
+        assert!(
+            runtime
+                .open_personal_product_detail(PersonalSection::Browse, product_id)
+                .expect("buyer detail should open")
+        );
+        assert!(
+            runtime
+                .add_personal_product_to_cart(PersonalSection::Browse, false)
+                .expect("buyer product should add to cart")
+        );
 
-        assert!(runtime
-            .remove_personal_cart_line(product_id)
-            .expect("buyer cart line should remove"));
+        assert!(
+            runtime
+                .remove_personal_cart_line(product_id)
+                .expect("buyer cart line should remove")
+        );
 
         let summary = runtime.summary();
         assert!(summary.personal_projection.cart.cart.lines.is_empty());
@@ -7580,9 +7698,11 @@ mod tests {
     fn runtime_places_buyer_order_and_routes_into_personal_orders() {
         let runtime = memory_runtime();
         let (account_id, farm_id) = provision_ready_farmer_account(&runtime);
-        assert!(runtime
-            .select_active_surface(ActiveSurface::Personal)
-            .expect("surface should switch into marketplace"));
+        assert!(
+            runtime
+                .select_active_surface(ActiveSurface::Personal)
+                .expect("surface should switch into marketplace")
+        );
         let fulfillment_window_id = seed_buyer_marketplace_support(
             &runtime,
             account_id.as_str(),
@@ -7611,23 +7731,31 @@ mod tests {
                  where id = '{product_id}'"
             ))
             .expect("buyer detail product should attach a fulfillment window");
-        assert!(runtime
-            .open_personal_product_detail(PersonalSection::Browse, product_id)
-            .expect("buyer detail should open"));
-        assert!(runtime
-            .add_personal_product_to_cart(PersonalSection::Browse, false)
-            .expect("buyer product should add to cart"));
-        assert!(runtime
-            .save_personal_checkout_draft(BuyerCheckoutDraft {
-                name: "Casey Buyer".to_owned(),
-                email: "casey@example.com".to_owned(),
-                phone: "555-0101".to_owned(),
-                order_note: "Leave by the cooler".to_owned(),
-            })
-            .expect("buyer checkout draft should save"));
-        assert!(runtime
-            .place_personal_order()
-            .expect("buyer order should place"));
+        assert!(
+            runtime
+                .open_personal_product_detail(PersonalSection::Browse, product_id)
+                .expect("buyer detail should open")
+        );
+        assert!(
+            runtime
+                .add_personal_product_to_cart(PersonalSection::Browse, false)
+                .expect("buyer product should add to cart")
+        );
+        assert!(
+            runtime
+                .save_personal_checkout_draft(BuyerCheckoutDraft {
+                    name: "Casey Buyer".to_owned(),
+                    email: "casey@example.com".to_owned(),
+                    phone: "555-0101".to_owned(),
+                    order_note: "Leave by the cooler".to_owned(),
+                })
+                .expect("buyer checkout draft should save")
+        );
+        assert!(
+            runtime
+                .place_personal_order()
+                .expect("buyer order should place")
+        );
 
         let summary = runtime.summary();
         assert_eq!(
@@ -7674,9 +7802,11 @@ mod tests {
     fn runtime_opens_buyer_order_detail_from_personal_orders() {
         let runtime = memory_runtime();
         let (account_id, farm_id) = provision_ready_farmer_account(&runtime);
-        assert!(runtime
-            .select_active_surface(ActiveSurface::Personal)
-            .expect("surface should switch into marketplace"));
+        assert!(
+            runtime
+                .select_active_surface(ActiveSurface::Personal)
+                .expect("surface should switch into marketplace")
+        );
         let fulfillment_window_id = seed_buyer_marketplace_support(
             &runtime,
             account_id.as_str(),
@@ -7705,30 +7835,40 @@ mod tests {
                  where id = '{product_id}'"
             ))
             .expect("buyer detail product should attach a fulfillment window");
-        assert!(runtime
-            .open_personal_product_detail(PersonalSection::Browse, product_id)
-            .expect("buyer detail should open"));
-        assert!(runtime
-            .add_personal_product_to_cart(PersonalSection::Browse, false)
-            .expect("buyer product should add to cart"));
-        assert!(runtime
-            .save_personal_checkout_draft(BuyerCheckoutDraft {
-                name: "Casey Buyer".to_owned(),
-                email: "casey@example.com".to_owned(),
-                phone: String::new(),
-                order_note: String::new(),
-            })
-            .expect("buyer checkout draft should save"));
-        assert!(runtime
-            .place_personal_order()
-            .expect("buyer order should place"));
+        assert!(
+            runtime
+                .open_personal_product_detail(PersonalSection::Browse, product_id)
+                .expect("buyer detail should open")
+        );
+        assert!(
+            runtime
+                .add_personal_product_to_cart(PersonalSection::Browse, false)
+                .expect("buyer product should add to cart")
+        );
+        assert!(
+            runtime
+                .save_personal_checkout_draft(BuyerCheckoutDraft {
+                    name: "Casey Buyer".to_owned(),
+                    email: "casey@example.com".to_owned(),
+                    phone: String::new(),
+                    order_note: String::new(),
+                })
+                .expect("buyer checkout draft should save")
+        );
+        assert!(
+            runtime
+                .place_personal_order()
+                .expect("buyer order should place")
+        );
         let order_id = runtime.summary().personal_projection.orders.list.rows[0].order_id;
         assert!(runtime.select_personal_section(PersonalSection::Browse));
         assert!(runtime.lock_state_mut().set_personal_order_detail(None));
 
-        assert!(runtime
-            .open_personal_order_detail(order_id)
-            .expect("buyer order detail should open"));
+        assert!(
+            runtime
+                .open_personal_order_detail(order_id)
+                .expect("buyer order detail should open")
+        );
 
         let summary = runtime.summary();
         assert_eq!(
@@ -7751,9 +7891,11 @@ mod tests {
     fn runtime_repeat_personal_order_readds_only_currently_eligible_items() {
         let runtime = memory_runtime();
         let (account_id, farm_id) = provision_ready_farmer_account(&runtime);
-        assert!(runtime
-            .select_active_surface(ActiveSurface::Personal)
-            .expect("surface should switch into marketplace"));
+        assert!(
+            runtime
+                .select_active_surface(ActiveSurface::Personal)
+                .expect("surface should switch into marketplace")
+        );
         let fulfillment_window_id = seed_buyer_marketplace_support(
             &runtime,
             account_id.as_str(),
@@ -7791,29 +7933,41 @@ mod tests {
                  where id in ('{available_product_id}', '{unavailable_product_id}')"
             ))
             .expect("buyer detail products should attach a fulfillment window");
-        assert!(runtime
-            .open_personal_product_detail(PersonalSection::Browse, available_product_id)
-            .expect("available buyer detail should open"));
-        assert!(runtime
-            .add_personal_product_to_cart(PersonalSection::Browse, false)
-            .expect("available buyer product should add to cart"));
-        assert!(runtime
-            .open_personal_product_detail(PersonalSection::Browse, unavailable_product_id)
-            .expect("unavailable buyer detail should open"));
-        assert!(runtime
-            .add_personal_product_to_cart(PersonalSection::Browse, false)
-            .expect("second buyer product should add to cart"));
-        assert!(runtime
-            .save_personal_checkout_draft(BuyerCheckoutDraft {
-                name: "Casey Buyer".to_owned(),
-                email: "casey@example.com".to_owned(),
-                phone: String::new(),
-                order_note: String::new(),
-            })
-            .expect("buyer checkout draft should save"));
-        assert!(runtime
-            .place_personal_order()
-            .expect("buyer order should place"));
+        assert!(
+            runtime
+                .open_personal_product_detail(PersonalSection::Browse, available_product_id)
+                .expect("available buyer detail should open")
+        );
+        assert!(
+            runtime
+                .add_personal_product_to_cart(PersonalSection::Browse, false)
+                .expect("available buyer product should add to cart")
+        );
+        assert!(
+            runtime
+                .open_personal_product_detail(PersonalSection::Browse, unavailable_product_id)
+                .expect("unavailable buyer detail should open")
+        );
+        assert!(
+            runtime
+                .add_personal_product_to_cart(PersonalSection::Browse, false)
+                .expect("second buyer product should add to cart")
+        );
+        assert!(
+            runtime
+                .save_personal_checkout_draft(BuyerCheckoutDraft {
+                    name: "Casey Buyer".to_owned(),
+                    email: "casey@example.com".to_owned(),
+                    phone: String::new(),
+                    order_note: String::new(),
+                })
+                .expect("buyer checkout draft should save")
+        );
+        assert!(
+            runtime
+                .place_personal_order()
+                .expect("buyer order should place")
+        );
         let order_id = runtime.summary().personal_projection.orders.list.rows[0].order_id;
 
         runtime
@@ -7828,9 +7982,11 @@ mod tests {
             )
             .expect("product should archive");
 
-        assert!(runtime
-            .open_personal_order_detail(order_id)
-            .expect("buyer order detail should reopen"));
+        assert!(
+            runtime
+                .open_personal_order_detail(order_id)
+                .expect("buyer order detail should reopen")
+        );
         let detail_summary = runtime.summary();
         let repeat_demand = detail_summary
             .personal_projection
@@ -7843,9 +7999,11 @@ mod tests {
         assert_eq!(repeat_demand.available_item_count, 1);
         assert_eq!(repeat_demand.unavailable_item_count, 1);
 
-        assert!(runtime
-            .repeat_personal_order(order_id, false)
-            .expect("repeat demand should add available items to cart"));
+        assert!(
+            runtime
+                .repeat_personal_order(order_id, false)
+                .expect("repeat demand should add available items to cart")
+        );
 
         let summary = runtime.summary();
         assert_eq!(
@@ -7858,21 +8016,25 @@ mod tests {
             available_product_id
         );
         assert_eq!(summary.personal_projection.cart.cart.lines[0].quantity, 1);
-        assert!(summary
-            .personal_projection
-            .cart
-            .cart
-            .replace_confirmation
-            .is_none());
+        assert!(
+            summary
+                .personal_projection
+                .cart
+                .cart
+                .replace_confirmation
+                .is_none()
+        );
     }
 
     #[test]
     fn runtime_products_queries_refresh_the_repository_backed_projection() {
         let runtime = memory_runtime();
 
-        assert!(runtime
-            .generate_local_account(Some("Farmer".to_owned()))
-            .expect("account should generate"));
+        assert!(
+            runtime
+                .generate_local_account(Some("Farmer".to_owned()))
+                .expect("account should generate")
+        );
         let account_id = runtime
             .summary()
             .settings_account_projection
@@ -7927,9 +8089,11 @@ mod tests {
             "2026-04-18T09:00:00Z",
         );
 
-        assert!(runtime
-            .select_local_account(account_id.as_str())
-            .expect("account should select"));
+        assert!(
+            runtime
+                .select_local_account(account_id.as_str())
+                .expect("account should select")
+        );
 
         let summary = runtime.summary();
         assert_eq!(summary.products_projection.list.summary.total_products, 2);
@@ -7943,14 +8107,18 @@ mod tests {
             ProductsSort::default()
         );
 
-        assert!(runtime
-            .select_products_filter(ProductsFilter::NeedAttention)
-            .expect("filter should apply"));
+        assert!(
+            runtime
+                .select_products_filter(ProductsFilter::NeedAttention)
+                .expect("filter should apply")
+        );
         assert_eq!(runtime.summary().products_projection.list.rows.len(), 2);
 
-        assert!(runtime
-            .set_products_search_query("pea")
-            .expect("search should apply"));
+        assert!(
+            runtime
+                .set_products_search_query("pea")
+                .expect("search should apply")
+        );
         let searched = runtime.summary();
         assert_eq!(searched.products_projection.list.rows.len(), 1);
         assert_eq!(
@@ -7958,9 +8126,11 @@ mod tests {
             "Pea shoots"
         );
 
-        assert!(runtime
-            .select_products_sort(ProductsSort::Name)
-            .expect("sort should apply"));
+        assert!(
+            runtime
+                .select_products_sort(ProductsSort::Name)
+                .expect("sort should apply")
+        );
         assert_eq!(
             runtime.summary().products_projection.query.sort,
             ProductsSort::Name
@@ -7971,9 +8141,11 @@ mod tests {
     fn runtime_open_products_filter_routes_today_follow_ons_into_products() {
         let runtime = memory_runtime();
 
-        assert!(runtime
-            .generate_local_account(Some("Farmer".to_owned()))
-            .expect("account should generate"));
+        assert!(
+            runtime
+                .generate_local_account(Some("Farmer".to_owned()))
+                .expect("account should generate")
+        );
         let account_id = runtime
             .summary()
             .settings_account_projection
@@ -8010,17 +8182,21 @@ mod tests {
             .save_farm_setup(account_id.as_str(), &farm_setup_projection)
             .expect("farm setup should save");
 
-        assert!(runtime
-            .select_local_account(account_id.as_str())
-            .expect("account should select"));
+        assert!(
+            runtime
+                .select_local_account(account_id.as_str())
+                .expect("account should select")
+        );
         assert_eq!(
             runtime.summary().shell_projection.selected_section,
             ShellSection::Farmer(FarmerSection::Today)
         );
 
-        assert!(runtime
-            .open_products_filter(ProductsFilter::Drafts)
-            .expect("products follow-on should route"));
+        assert!(
+            runtime
+                .open_products_filter(ProductsFilter::Drafts)
+                .expect("products follow-on should route")
+        );
         let summary = runtime.summary();
 
         assert_eq!(
@@ -8057,9 +8233,11 @@ mod tests {
         );
         assert!(orders_summary.orders_projection.detail.is_none());
 
-        assert!(runtime
-            .open_order_detail(order_id)
-            .expect("order detail should open"));
+        assert!(
+            runtime
+                .open_order_detail(order_id)
+                .expect("order detail should open")
+        );
         let detail_summary = runtime.summary();
         assert_eq!(
             detail_summary.shell_projection.selected_section,
@@ -8105,9 +8283,11 @@ mod tests {
         let (runtime, paths) = bootstrapped_runtime("pack_day_export_requires_context");
         let (_, _farm_id) = provision_ready_farmer_account(&runtime);
 
-        assert!(!runtime
-            .export_pack_day()
-            .expect("missing pack day context should no-op"));
+        assert!(
+            !runtime
+                .export_pack_day()
+                .expect("missing pack day context should no-op")
+        );
         assert_eq!(
             runtime.summary().pack_day_projection.export.status,
             PackDayExportStatus::Idle
@@ -8150,9 +8330,11 @@ mod tests {
             }),
         );
 
-        assert!(runtime
-            .export_pack_day()
-            .expect("pack day export should succeed"));
+        assert!(
+            runtime
+                .export_pack_day()
+                .expect("pack day export should succeed")
+        );
 
         let summary = runtime.summary();
         let export = &summary.pack_day_projection.export;
@@ -8236,9 +8418,11 @@ mod tests {
 
         seed_order_workspace(&runtime, farm_id);
         assert!(runtime.open_pack_day(None).expect("pack day should open"));
-        assert!(runtime
-            .export_pack_day()
-            .expect("pack day export should succeed"));
+        assert!(
+            runtime
+                .export_pack_day()
+                .expect("pack day export should succeed")
+        );
 
         for (kind, suffix) in [
             (PackDayHostHandoffKind::OpenPackSheet, "pack_sheet.txt"),
@@ -8279,9 +8463,11 @@ mod tests {
             assert_eq!(prepared.1.kind, kind);
             assert!(prepared.1.target_path.ends_with(suffix));
 
-            assert!(runtime
-                .finish_pack_day_host_handoff(prepared.0, Ok(()))
-                .expect("host handoff success should apply"));
+            assert!(
+                runtime
+                    .finish_pack_day_host_handoff(prepared.0, Ok(()))
+                    .expect("host handoff success should apply")
+            );
         }
 
         cleanup_bootstrapped_runtime_paths(&paths);
@@ -8294,9 +8480,11 @@ mod tests {
 
         seed_order_workspace(&runtime, farm_id);
         assert!(runtime.open_pack_day(None).expect("pack day should open"));
-        assert!(runtime
-            .export_pack_day()
-            .expect("pack day export should succeed"));
+        assert!(
+            runtime
+                .export_pack_day()
+                .expect("pack day export should succeed")
+        );
 
         let (request, _) = runtime
             .prepare_pack_day_host_handoff(PackDayHostHandoffKind::RevealBundle)
@@ -8344,9 +8532,11 @@ mod tests {
 
         seed_order_workspace(&runtime, farm_id);
         assert!(runtime.open_pack_day(None).expect("pack day should open"));
-        assert!(runtime
-            .export_pack_day()
-            .expect("pack day export should succeed"));
+        assert!(
+            runtime
+                .export_pack_day()
+                .expect("pack day export should succeed")
+        );
 
         let (request, _) = runtime
             .prepare_pack_day_host_handoff(PackDayHostHandoffKind::RevealBundle)
@@ -8358,9 +8548,11 @@ mod tests {
             .state_store
             .apply_in_memory(AppStateCommand::reset_pack_day_host_handoff());
 
-        assert!(!runtime
-            .finish_pack_day_host_handoff(request, Ok(()))
-            .expect("stale completion should no-op"));
+        assert!(
+            !runtime
+                .finish_pack_day_host_handoff(request, Ok(()))
+                .expect("stale completion should no-op")
+        );
         assert_eq!(
             runtime.summary().pack_day_projection.host_handoff.status,
             PackDayHostHandoffStatus::Idle
@@ -8376,9 +8568,11 @@ mod tests {
 
         seed_order_workspace(&runtime, farm_id);
         assert!(runtime.open_pack_day(None).expect("pack day should open"));
-        assert!(runtime
-            .export_pack_day()
-            .expect("pack day export should succeed"));
+        assert!(
+            runtime
+                .export_pack_day()
+                .expect("pack day export should succeed")
+        );
 
         for (kind, expected_exported_suffix) in [
             (PackDayPrintKind::PrintPackSheet, Some("pack_sheet.txt")),
@@ -8431,19 +8625,25 @@ mod tests {
                         .bundle
                         .as_ref()
                         .expect("pack day export bundle");
-                    assert!(prepared
-                        .1
-                        .target_path
-                        .ends_with("customer_labels_avery_5160_letter_30_up.ps"));
-                    assert!(!prepared
-                        .1
-                        .target_path
-                        .starts_with(PathBuf::from(&export_bundle.bundle_directory)));
-                    assert!(prepared
-                        .1
-                        .target_path
-                        .to_string_lossy()
-                        .contains(export_bundle.export_instance_id.to_string().as_str()));
+                    assert!(
+                        prepared
+                            .1
+                            .target_path
+                            .ends_with("customer_labels_avery_5160_letter_30_up.ps")
+                    );
+                    assert!(
+                        !prepared
+                            .1
+                            .target_path
+                            .starts_with(PathBuf::from(&export_bundle.bundle_directory))
+                    );
+                    assert!(
+                        prepared
+                            .1
+                            .target_path
+                            .to_string_lossy()
+                            .contains(export_bundle.export_instance_id.to_string().as_str())
+                    );
                     assert_eq!(
                         prepared.1.command_args,
                         vec![
@@ -8455,9 +8655,11 @@ mod tests {
                 }
             }
 
-            assert!(runtime
-                .finish_pack_day_print(prepared.0, Ok(()))
-                .expect("print success should apply"));
+            assert!(
+                runtime
+                    .finish_pack_day_print(prepared.0, Ok(()))
+                    .expect("print success should apply")
+            );
 
             if let PackDayPrintKind::PrintCustomerLabels = kind {
                 if let Some(parent) = prepared.1.target_path.parent() {
@@ -8476,9 +8678,11 @@ mod tests {
 
         seed_order_workspace(&runtime, farm_id);
         assert!(runtime.open_pack_day(None).expect("pack day should open"));
-        assert!(runtime
-            .export_pack_day()
-            .expect("pack day export should succeed"));
+        assert!(
+            runtime
+                .export_pack_day()
+                .expect("pack day export should succeed")
+        );
 
         let (request, plan) = runtime
             .prepare_pack_day_batch_print()
@@ -8513,15 +8717,13 @@ mod tests {
                 .collect::<Vec<_>>(),
             request.artifacts.clone()
         );
-        assert!(
-            plan.plans
-                .iter()
-                .all(|plan| plan.command_program == "lp")
-        );
+        assert!(plan.plans.iter().all(|plan| plan.command_program == "lp"));
 
-        assert!(runtime
-            .finish_pack_day_batch_print(request, Ok(()))
-            .expect("batch print success should apply"));
+        assert!(
+            runtime
+                .finish_pack_day_batch_print(request, Ok(()))
+                .expect("batch print success should apply")
+        );
         assert_eq!(
             runtime.summary().pack_day_projection.batch_print.status,
             PackDayBatchPrintStatus::Succeeded
@@ -8537,22 +8739,28 @@ mod tests {
 
         seed_order_workspace(&runtime, farm_id);
         assert!(runtime.open_pack_day(None).expect("pack day should open"));
-        assert!(runtime
-            .export_pack_day()
-            .expect("pack day export should succeed"));
+        assert!(
+            runtime
+                .export_pack_day()
+                .expect("pack day export should succeed")
+        );
 
         let (_, _) = runtime
             .prepare_pack_day_batch_print()
             .expect("batch print should prepare")
             .expect("batch print should produce a plan");
-        assert!(runtime
-            .prepare_pack_day_print(PackDayPrintKind::PrintPackSheet)
-            .expect("print prepare should not fail")
-            .is_none());
-        assert!(runtime
-            .prepare_pack_day_host_handoff(PackDayHostHandoffKind::RevealBundle)
-            .expect("host handoff prepare should not fail")
-            .is_none());
+        assert!(
+            runtime
+                .prepare_pack_day_print(PackDayPrintKind::PrintPackSheet)
+                .expect("print prepare should not fail")
+                .is_none()
+        );
+        assert!(
+            runtime
+                .prepare_pack_day_host_handoff(PackDayHostHandoffKind::RevealBundle)
+                .expect("host handoff prepare should not fail")
+                .is_none()
+        );
 
         let _ = runtime
             .lock_state_mut()
@@ -8563,13 +8771,17 @@ mod tests {
             .prepare_pack_day_print(PackDayPrintKind::PrintPackSheet)
             .expect("print should prepare")
             .expect("print should produce a plan");
-        assert!(runtime
-            .prepare_pack_day_batch_print()
-            .expect("batch print prepare should not fail")
-            .is_none());
-        assert!(runtime
-            .finish_pack_day_print(print_request, Ok(()))
-            .expect("print success should apply"));
+        assert!(
+            runtime
+                .prepare_pack_day_batch_print()
+                .expect("batch print prepare should not fail")
+                .is_none()
+        );
+        assert!(
+            runtime
+                .finish_pack_day_print(print_request, Ok(()))
+                .expect("print success should apply")
+        );
         let _ = runtime
             .lock_state_mut()
             .state_store
@@ -8579,10 +8791,12 @@ mod tests {
             .prepare_pack_day_host_handoff(PackDayHostHandoffKind::RevealBundle)
             .expect("host handoff should prepare")
             .expect("host handoff should produce a plan");
-        assert!(runtime
-            .prepare_pack_day_batch_print()
-            .expect("batch print prepare should not fail")
-            .is_none());
+        assert!(
+            runtime
+                .prepare_pack_day_batch_print()
+                .expect("batch print prepare should not fail")
+                .is_none()
+        );
 
         cleanup_bootstrapped_runtime_paths(&paths);
     }
@@ -8594,9 +8808,11 @@ mod tests {
 
         seed_order_workspace(&runtime, farm_id);
         assert!(runtime.open_pack_day(None).expect("pack day should open"));
-        assert!(runtime
-            .export_pack_day()
-            .expect("pack day export should succeed"));
+        assert!(
+            runtime
+                .export_pack_day()
+                .expect("pack day export should succeed")
+        );
 
         let (request, plan) = runtime
             .prepare_pack_day_batch_print()
@@ -8653,9 +8869,11 @@ mod tests {
 
         seed_order_workspace(&runtime, farm_id);
         assert!(runtime.open_pack_day(None).expect("pack day should open"));
-        assert!(runtime
-            .export_pack_day()
-            .expect("pack day export should succeed"));
+        assert!(
+            runtime
+                .export_pack_day()
+                .expect("pack day export should succeed")
+        );
 
         let (request, _) = runtime
             .prepare_pack_day_batch_print()
@@ -8667,9 +8885,11 @@ mod tests {
             .state_store
             .apply_in_memory(AppStateCommand::reset_pack_day_batch_print());
 
-        assert!(!runtime
-            .finish_pack_day_batch_print(request, Ok(()))
-            .expect("stale completion should no-op"));
+        assert!(
+            !runtime
+                .finish_pack_day_batch_print(request, Ok(()))
+                .expect("stale completion should no-op")
+        );
         assert_eq!(
             runtime.summary().pack_day_projection.batch_print.status,
             PackDayBatchPrintStatus::Idle
@@ -8685,9 +8905,11 @@ mod tests {
 
         seed_order_workspace(&runtime, farm_id);
         assert!(runtime.open_pack_day(None).expect("pack day should open"));
-        assert!(runtime
-            .export_pack_day()
-            .expect("pack day export should succeed"));
+        assert!(
+            runtime
+                .export_pack_day()
+                .expect("pack day export should succeed")
+        );
 
         let (request, plan) = runtime
             .prepare_pack_day_batch_print()
@@ -8702,9 +8924,11 @@ mod tests {
         .expect("batch print execution should succeed");
 
         assert_eq!(submitted, Vec::from(PackDayBatchPrintArtifact::all_v1()));
-        assert!(runtime
-            .finish_pack_day_batch_print(request.clone(), Ok(()))
-            .expect("batch print success should apply"));
+        assert!(
+            runtime
+                .finish_pack_day_batch_print(request.clone(), Ok(()))
+                .expect("batch print success should apply")
+        );
 
         let summary = runtime.summary();
         let batch_print = &summary.pack_day_projection.batch_print;
@@ -8723,9 +8947,11 @@ mod tests {
 
         seed_order_workspace(&runtime, farm_id);
         assert!(runtime.open_pack_day(None).expect("pack day should open"));
-        assert!(runtime
-            .export_pack_day()
-            .expect("pack day export should succeed"));
+        assert!(
+            runtime
+                .export_pack_day()
+                .expect("pack day export should succeed")
+        );
 
         let (request, plan) = runtime
             .prepare_pack_day_batch_print()
@@ -8762,9 +8988,9 @@ mod tests {
             .expect_err("batch print failure should surface");
         assert!(matches!(
             runtime_error,
-            DesktopAppRuntimeCommandError::PackDayBatchPrint(PackDayBatchPrintError::QueueExit {
-                ..
-            })
+            DesktopAppRuntimeCommandError::PackDayBatchPrint(
+                PackDayBatchPrintError::QueueExit { .. }
+            )
         ));
 
         let summary = runtime.summary();
@@ -8787,9 +9013,11 @@ mod tests {
 
         seed_order_workspace(&runtime, farm_id);
         assert!(runtime.open_pack_day(None).expect("pack day should open"));
-        assert!(runtime
-            .export_pack_day()
-            .expect("pack day export should succeed"));
+        assert!(
+            runtime
+                .export_pack_day()
+                .expect("pack day export should succeed")
+        );
 
         let (request, _) = runtime
             .prepare_pack_day_print(PackDayPrintKind::PrintPackSheet)
@@ -8822,9 +9050,11 @@ mod tests {
 
         seed_order_workspace(&runtime, farm_id);
         assert!(runtime.open_pack_day(None).expect("pack day should open"));
-        assert!(runtime
-            .export_pack_day()
-            .expect("pack day export should succeed"));
+        assert!(
+            runtime
+                .export_pack_day()
+                .expect("pack day export should succeed")
+        );
 
         let bundle = runtime
             .summary()
@@ -8859,7 +9089,10 @@ mod tests {
             Some(PackDayPrintKind::PrintCustomerLabels)
         );
         assert_eq!(
-            print.request.as_ref().map(|request| request.export_instance_id),
+            print
+                .request
+                .as_ref()
+                .map(|request| request.export_instance_id),
             Some(bundle.export_instance_id)
         );
         assert_eq!(
@@ -8871,16 +9104,18 @@ mod tests {
     }
 
     #[test]
-    fn runtime_finish_pack_day_print_cleans_customer_label_assets_and_keeps_cleanup_failures_best_effort(
-    ) {
+    fn runtime_finish_pack_day_print_cleans_customer_label_assets_and_keeps_cleanup_failures_best_effort()
+     {
         let (runtime, paths) = bootstrapped_runtime("pack_day_print_cleanup");
         let (_, farm_id) = provision_ready_farmer_account(&runtime);
 
         seed_order_workspace(&runtime, farm_id);
         assert!(runtime.open_pack_day(None).expect("pack day should open"));
-        assert!(runtime
-            .export_pack_day()
-            .expect("pack day export should succeed"));
+        assert!(
+            runtime
+                .export_pack_day()
+                .expect("pack day export should succeed")
+        );
 
         let (success_request, success_plan) = runtime
             .prepare_pack_day_print(PackDayPrintKind::PrintCustomerLabels)
@@ -8893,9 +9128,11 @@ mod tests {
             .to_path_buf();
         assert!(success_directory.is_dir());
 
-        assert!(runtime
-            .finish_pack_day_print(success_request, Ok(()))
-            .expect("print success should apply"));
+        assert!(
+            runtime
+                .finish_pack_day_print(success_request, Ok(()))
+                .expect("print success should apply")
+        );
         assert!(!success_directory.exists());
 
         let (failure_request, failure_plan) = runtime
@@ -8944,9 +9181,11 @@ mod tests {
 
         seed_order_workspace(&runtime, farm_id);
         assert!(runtime.open_pack_day(None).expect("pack day should open"));
-        assert!(runtime
-            .export_pack_day()
-            .expect("initial pack day export should succeed"));
+        assert!(
+            runtime
+                .export_pack_day()
+                .expect("initial pack day export should succeed")
+        );
         let first_bundle = runtime
             .summary()
             .pack_day_projection
@@ -8970,9 +9209,11 @@ mod tests {
             .state_store
             .apply_in_memory(AppStateCommand::reset_pack_day_print());
 
-        assert!(runtime
-            .export_pack_day()
-            .expect("replacement pack day export should succeed"));
+        assert!(
+            runtime
+                .export_pack_day()
+                .expect("replacement pack day export should succeed")
+        );
 
         let summary = runtime.summary();
         let replacement_bundle = summary
@@ -8998,12 +9239,16 @@ mod tests {
         let (other_fulfillment_window_id, _) =
             seed_second_order_workspace(&runtime, farm_id, fulfillment_window_id);
 
-        assert!(runtime
-            .open_pack_day(Some(fulfillment_window_id))
-            .expect("first pack day window should open"));
-        assert!(runtime
-            .export_pack_day()
-            .expect("initial pack day export should succeed"));
+        assert!(
+            runtime
+                .open_pack_day(Some(fulfillment_window_id))
+                .expect("first pack day window should open")
+        );
+        assert!(
+            runtime
+                .export_pack_day()
+                .expect("initial pack day export should succeed")
+        );
 
         let (_request, plan) = runtime
             .prepare_pack_day_print(PackDayPrintKind::PrintCustomerLabels)
@@ -9020,9 +9265,11 @@ mod tests {
             .state_store
             .apply_in_memory(AppStateCommand::reset_pack_day_print());
 
-        assert!(runtime
-            .open_pack_day(Some(other_fulfillment_window_id))
-            .expect("second pack day window should open"));
+        assert!(
+            runtime
+                .open_pack_day(Some(other_fulfillment_window_id))
+                .expect("second pack day window should open")
+        );
 
         let summary = runtime.summary();
         assert_eq!(
@@ -9045,9 +9292,11 @@ mod tests {
 
         seed_order_workspace(&runtime, farm_id);
         assert!(runtime.open_pack_day(None).expect("pack day should open"));
-        assert!(runtime
-            .export_pack_day()
-            .expect("pack day export should succeed"));
+        assert!(
+            runtime
+                .export_pack_day()
+                .expect("pack day export should succeed")
+        );
 
         let (request, _) = runtime
             .prepare_pack_day_print(PackDayPrintKind::PrintPickupRoster)
@@ -9059,9 +9308,11 @@ mod tests {
             .state_store
             .apply_in_memory(AppStateCommand::reset_pack_day_print());
 
-        assert!(!runtime
-            .finish_pack_day_print(request, Ok(()))
-            .expect("stale completion should no-op"));
+        assert!(
+            !runtime
+                .finish_pack_day_print(request, Ok(()))
+                .expect("stale completion should no-op")
+        );
         assert_eq!(
             runtime.summary().pack_day_projection.print.status,
             PackDayPrintStatus::Idle
@@ -9128,19 +9379,23 @@ mod tests {
             .expect("order should update to scheduled");
 
         assert!(runtime.open_orders().expect("orders should open"));
-        assert!(runtime
-            .mark_order_packed(order_id)
-            .expect("mark packed should succeed"));
+        assert!(
+            runtime
+                .mark_order_packed(order_id)
+                .expect("mark packed should succeed")
+        );
         let summary = runtime.summary();
 
         assert_eq!(summary.sync_status.pending_write_count, 1);
-        assert!(summary
-            .orders_projection
-            .reminders
-            .items
-            .iter()
-            .any(|item| item.kind == ReminderKind::SyncImpact
-                && item.title == "Pending local changes"));
+        assert!(
+            summary
+                .orders_projection
+                .reminders
+                .items
+                .iter()
+                .any(|item| item.kind == ReminderKind::SyncImpact
+                    && item.title == "Pending local changes")
+        );
     }
 
     #[test]
@@ -9168,10 +9423,12 @@ mod tests {
             )
             .expect("blocking conflict should save");
 
-        assert!(runtime
-            .lock_state_mut()
-            .refresh_selected_account_sync()
-            .expect("sync status should refresh"));
+        assert!(
+            runtime
+                .lock_state_mut()
+                .refresh_selected_account_sync()
+                .expect("sync status should refresh")
+        );
 
         let summary = runtime.summary();
         let reminder = summary
@@ -9213,10 +9470,12 @@ mod tests {
                 },
             )
             .expect("blocking conflict should save");
-        assert!(runtime
-            .lock_state_mut()
-            .refresh_selected_account_sync()
-            .expect("sync status should refresh"));
+        assert!(
+            runtime
+                .lock_state_mut()
+                .refresh_selected_account_sync()
+                .expect("sync status should refresh")
+        );
 
         let reminder_id = runtime
             .summary()
@@ -9227,43 +9486,53 @@ mod tests {
             .find(|item| item.kind == ReminderKind::SyncImpact)
             .expect("sync reminder")
             .reminder_id;
-        assert!(runtime
-            .acknowledge_reminder(reminder_id)
-            .expect("reminder should acknowledge"));
+        assert!(
+            runtime
+                .acknowledge_reminder(reminder_id)
+                .expect("reminder should acknowledge")
+        );
 
         let acknowledged_summary = runtime.summary();
-        assert!(acknowledged_summary
-            .orders_projection
-            .reminders
-            .items
-            .iter()
-            .any(|item| {
-                item.reminder_id == reminder_id
-                    && item.delivery_state == ReminderDeliveryState::Acknowledged
-            }));
-        assert!(acknowledged_summary
-            .reminder_log
-            .entries
-            .iter()
-            .any(|entry| {
-                entry.reminder_id == reminder_id
-                    && entry.delivery_state == ReminderDeliveryState::Acknowledged
-            }));
+        assert!(
+            acknowledged_summary
+                .orders_projection
+                .reminders
+                .items
+                .iter()
+                .any(|item| {
+                    item.reminder_id == reminder_id
+                        && item.delivery_state == ReminderDeliveryState::Acknowledged
+                })
+        );
+        assert!(
+            acknowledged_summary
+                .reminder_log
+                .entries
+                .iter()
+                .any(|entry| {
+                    entry.reminder_id == reminder_id
+                        && entry.delivery_state == ReminderDeliveryState::Acknowledged
+                })
+        );
 
-        assert!(runtime
-            .resolve_sync_conflict(
-                conflict_id.as_str(),
-                SyncConflictResolutionStatus::AcceptedLocal,
-            )
-            .expect("conflict resolution should succeed"));
+        assert!(
+            runtime
+                .resolve_sync_conflict(
+                    conflict_id.as_str(),
+                    SyncConflictResolutionStatus::AcceptedLocal,
+                )
+                .expect("conflict resolution should succeed")
+        );
 
         let resolved_summary = runtime.summary();
-        assert!(resolved_summary
-            .orders_projection
-            .reminders
-            .items
-            .iter()
-            .all(|item| { item.reminder_id != reminder_id }));
+        assert!(
+            resolved_summary
+                .orders_projection
+                .reminders
+                .items
+                .iter()
+                .all(|item| { item.reminder_id != reminder_id })
+        );
         assert!(resolved_summary.reminder_log.entries.iter().any(|entry| {
             entry.reminder_id == reminder_id
                 && entry.delivery_state == ReminderDeliveryState::Resolved
@@ -9316,9 +9585,11 @@ mod tests {
             .execute_batch(&sql)
             .expect("recovery record should seed");
 
-        assert!(runtime
-            .open_order_detail(order_id)
-            .expect("order detail should open"));
+        assert!(
+            runtime
+                .open_order_detail(order_id)
+                .expect("order detail should open")
+        );
         let summary = runtime.summary();
 
         assert_eq!(summary.orders_projection.recovery_queue.items.len(), 1);
@@ -9368,12 +9639,16 @@ mod tests {
         let (_, farm_id) = provision_ready_farmer_account(&runtime);
         let (_, order_id) = seed_order_workspace(&runtime, farm_id);
 
-        assert!(runtime
-            .select_orders_filter(OrdersFilter::Packed)
-            .expect("orders filter should update"));
-        assert!(runtime
-            .open_order_detail(order_id)
-            .expect("order detail should open"));
+        assert!(
+            runtime
+                .select_orders_filter(OrdersFilter::Packed)
+                .expect("orders filter should update")
+        );
+        assert!(
+            runtime
+                .open_order_detail(order_id)
+                .expect("order detail should open")
+        );
 
         assert!(runtime.open_orders().expect("orders should reopen"));
         let summary = runtime.summary();
@@ -9450,9 +9725,11 @@ mod tests {
             .execute_batch(&sql)
             .expect("second orders workspace should seed");
 
-        assert!(runtime
-            .open_orders_fulfillment_window(fulfillment_window_id)
-            .expect("orders window follow-on should route"));
+        assert!(
+            runtime
+                .open_orders_fulfillment_window(fulfillment_window_id)
+                .expect("orders window follow-on should route")
+        );
         let summary = runtime.summary();
 
         assert_eq!(
@@ -9489,21 +9766,27 @@ mod tests {
             .execute_batch(&sql)
             .expect("order should update to scheduled");
 
-        assert!(runtime
-            .select_orders_filter(OrdersFilter::Scheduled)
-            .expect("scheduled filter should apply"));
+        assert!(
+            runtime
+                .select_orders_filter(OrdersFilter::Scheduled)
+                .expect("scheduled filter should apply")
+        );
         assert_eq!(runtime.summary().orders_projection.list.rows.len(), 1);
         assert_eq!(
             runtime.summary().orders_projection.list.rows[0].status,
             OrderStatus::Scheduled
         );
 
-        assert!(runtime
-            .open_order_detail(order_id)
-            .expect("order detail should open"));
-        assert!(runtime
-            .mark_order_packed(order_id)
-            .expect("order should mark packed"));
+        assert!(
+            runtime
+                .open_order_detail(order_id)
+                .expect("order detail should open")
+        );
+        assert!(
+            runtime
+                .mark_order_packed(order_id)
+                .expect("order should mark packed")
+        );
         let packed_summary = runtime.summary();
         assert_eq!(
             packed_summary
@@ -9528,21 +9811,27 @@ mod tests {
             1
         );
 
-        assert!(runtime
-            .select_orders_filter(OrdersFilter::Packed)
-            .expect("packed filter should apply"));
+        assert!(
+            runtime
+                .select_orders_filter(OrdersFilter::Packed)
+                .expect("packed filter should apply")
+        );
         assert_eq!(runtime.summary().orders_projection.list.rows.len(), 1);
         assert_eq!(
             runtime.summary().orders_projection.list.rows[0].status,
             OrderStatus::Packed
         );
 
-        assert!(runtime
-            .open_order_detail(order_id)
-            .expect("packed detail should open"));
-        assert!(runtime
-            .mark_order_completed(order_id)
-            .expect("order should mark completed"));
+        assert!(
+            runtime
+                .open_order_detail(order_id)
+                .expect("packed detail should open")
+        );
+        assert!(
+            runtime
+                .mark_order_completed(order_id)
+                .expect("order should mark completed")
+        );
         let completed_summary = runtime.summary();
         assert_eq!(
             completed_summary
@@ -9554,9 +9843,11 @@ mod tests {
             OrderStatus::Completed
         );
 
-        assert!(runtime
-            .select_orders_filter(OrdersFilter::Completed)
-            .expect("completed filter should apply"));
+        assert!(
+            runtime
+                .select_orders_filter(OrdersFilter::Completed)
+                .expect("completed filter should apply")
+        );
         assert_eq!(runtime.summary().orders_projection.list.rows.len(), 1);
         assert_eq!(
             runtime.summary().orders_projection.list.rows[0].status,
@@ -9568,9 +9859,11 @@ mod tests {
     fn runtime_stock_updates_refresh_today_and_products_projections() {
         let runtime = memory_runtime();
 
-        assert!(runtime
-            .generate_local_account(Some("Farmer".to_owned()))
-            .expect("account should generate"));
+        assert!(
+            runtime
+                .generate_local_account(Some("Farmer".to_owned()))
+                .expect("account should generate")
+        );
         let account_id = runtime
             .summary()
             .settings_account_projection
@@ -9616,18 +9909,22 @@ mod tests {
             "2026-04-18T10:00:00Z",
         );
 
-        assert!(runtime
-            .select_local_account(account_id.as_str())
-            .expect("account should select"));
+        assert!(
+            runtime
+                .select_local_account(account_id.as_str())
+                .expect("account should select")
+        );
         let product_id = runtime.summary().products_projection.list.rows[0].product_id;
 
         assert_eq!(
             runtime.summary().today_projection.low_stock_products.len(),
             1
         );
-        assert!(runtime
-            .update_product_stock(product_id, 12)
-            .expect("stock update should succeed"));
+        assert!(
+            runtime
+                .update_product_stock(product_id, 12)
+                .expect("stock update should succeed")
+        );
 
         let summary = runtime.summary();
         assert_eq!(
@@ -9641,9 +9938,11 @@ mod tests {
     fn runtime_open_new_product_editor_creates_a_local_draft_and_opens_it() {
         let runtime = memory_runtime();
 
-        assert!(runtime
-            .generate_local_account(Some("Farmer".to_owned()))
-            .expect("account should generate"));
+        assert!(
+            runtime
+                .generate_local_account(Some("Farmer".to_owned()))
+                .expect("account should generate")
+        );
         let account_id = runtime
             .summary()
             .settings_account_projection
@@ -9680,9 +9979,11 @@ mod tests {
             .save_farm_setup(account_id.as_str(), &farm_setup_projection)
             .expect("farm setup should save");
 
-        assert!(runtime
-            .select_local_account(account_id.as_str())
-            .expect("account should select"));
+        assert!(
+            runtime
+                .select_local_account(account_id.as_str())
+                .expect("account should select")
+        );
         assert_eq!(
             runtime
                 .summary()
@@ -9693,9 +9994,11 @@ mod tests {
             0
         );
 
-        assert!(runtime
-            .open_new_product_editor()
-            .expect("new product editor should open"));
+        assert!(
+            runtime
+                .open_new_product_editor()
+                .expect("new product editor should open")
+        );
 
         let summary = runtime.summary();
         assert_eq!(summary.products_projection.list.summary.total_products, 1);
@@ -9713,9 +10016,11 @@ mod tests {
     fn runtime_open_existing_and_save_product_editor_refreshes_products_projection() {
         let runtime = memory_runtime();
 
-        assert!(runtime
-            .generate_local_account(Some("Farmer".to_owned()))
-            .expect("account should generate"));
+        assert!(
+            runtime
+                .generate_local_account(Some("Farmer".to_owned()))
+                .expect("account should generate")
+        );
         let account_id = runtime
             .summary()
             .settings_account_projection
@@ -9761,12 +10066,16 @@ mod tests {
             "2026-04-18T10:00:00Z",
         );
 
-        assert!(runtime
-            .select_local_account(account_id.as_str())
-            .expect("account should select"));
-        assert!(runtime
-            .open_existing_product_editor(product_id)
-            .expect("existing product editor should open"));
+        assert!(
+            runtime
+                .select_local_account(account_id.as_str())
+                .expect("account should select")
+        );
+        assert!(
+            runtime
+                .open_existing_product_editor(product_id)
+                .expect("existing product editor should open")
+        );
 
         let saved_draft = ProductEditorDraft {
             title: "Salad mix".to_owned(),
@@ -9779,9 +10088,11 @@ mod tests {
             status: radroots_studio_app_models::ProductStatus::Published,
         };
 
-        assert!(runtime
-            .save_product_editor_draft(saved_draft.clone())
-            .expect("product editor draft should save"));
+        assert!(
+            runtime
+                .save_product_editor_draft(saved_draft.clone())
+                .expect("product editor draft should save")
+        );
 
         let summary = runtime.summary();
         assert_eq!(
@@ -9818,9 +10129,11 @@ mod tests {
     fn runtime_account_commands_refresh_identity_projection() {
         let runtime = memory_runtime();
 
-        assert!(runtime
-            .generate_local_account(Some("First".to_owned()))
-            .expect("first account should generate"));
+        assert!(
+            runtime
+                .generate_local_account(Some("First".to_owned()))
+                .expect("first account should generate")
+        );
         let first_summary = runtime.summary();
         let first_account_id = first_summary
             .settings_account_projection
@@ -9831,9 +10144,11 @@ mod tests {
             .account_id
             .clone();
 
-        assert!(runtime
-            .generate_local_account(Some("Second".to_owned()))
-            .expect("second account should generate"));
+        assert!(
+            runtime
+                .generate_local_account(Some("Second".to_owned()))
+                .expect("second account should generate")
+        );
         let second_summary = runtime.summary();
         let second_account_id = second_summary
             .settings_account_projection
@@ -9859,9 +10174,11 @@ mod tests {
             ActiveSurface::Farmer,
             true,
         );
-        assert!(runtime
-            .select_local_account(second_account_id.as_str())
-            .expect("selection should succeed"));
+        assert!(
+            runtime
+                .select_local_account(second_account_id.as_str())
+                .expect("selection should succeed")
+        );
         let selected_summary = runtime.summary();
         assert_eq!(selected_summary.startup_gate, AppStartupGate::Farmer);
         assert_eq!(selected_summary.home_route, HomeRoute::FarmSetupOnboarding);
@@ -9874,9 +10191,11 @@ mod tests {
             Some(ActiveSurface::Farmer)
         );
 
-        assert!(runtime
-            .remove_selected_local_key()
-            .expect("selected local key should remove"));
+        assert!(
+            runtime
+                .remove_selected_local_key()
+                .expect("selected local key should remove")
+        );
         let removed_summary = runtime.summary();
         assert_eq!(removed_summary.settings_account_projection.roster.len(), 1);
         assert_eq!(
@@ -9899,11 +10218,13 @@ mod tests {
         );
 
         let imported_identity = RadrootsIdentity::generate();
-        assert!(runtime
-            .import_local_account(DesktopLocalIdentityImportRequest::raw_secret_key(
-                imported_identity.nsec(),
-            ))
-            .expect("raw import should succeed"));
+        assert!(
+            runtime
+                .import_local_account(DesktopLocalIdentityImportRequest::raw_secret_key(
+                    imported_identity.nsec(),
+                ))
+                .expect("raw import should succeed")
+        );
         let imported_summary = runtime.summary();
         assert_eq!(imported_summary.settings_account_projection.roster.len(), 2);
         assert_eq!(
@@ -9920,9 +10241,11 @@ mod tests {
     fn runtime_select_active_surface_persists_selected_surface() {
         let runtime = memory_runtime();
 
-        assert!(runtime
-            .generate_local_account(Some("Farmer".to_owned()))
-            .expect("account should generate"));
+        assert!(
+            runtime
+                .generate_local_account(Some("Farmer".to_owned()))
+                .expect("account should generate")
+        );
         let account_id = runtime
             .summary()
             .settings_account_projection
@@ -9933,14 +10256,18 @@ mod tests {
             .account_id
             .clone();
         save_surface_activation(&runtime, account_id.as_str(), ActiveSurface::Farmer, true);
-        assert!(runtime
-            .select_local_account(account_id.as_str())
-            .expect("account should select"));
+        assert!(
+            runtime
+                .select_local_account(account_id.as_str())
+                .expect("account should select")
+        );
         assert_eq!(runtime.summary().startup_gate, AppStartupGate::Farmer);
 
-        assert!(runtime
-            .select_active_surface(ActiveSurface::Personal)
-            .expect("surface should select"));
+        assert!(
+            runtime
+                .select_active_surface(ActiveSurface::Personal)
+                .expect("surface should select")
+        );
         let personal_summary = runtime.summary();
         assert_eq!(personal_summary.startup_gate, AppStartupGate::Personal);
         assert_eq!(
@@ -9964,9 +10291,11 @@ mod tests {
             ActiveSurface::Personal
         );
 
-        assert!(runtime
-            .select_active_surface(ActiveSurface::Farmer)
-            .expect("surface should reselect"));
+        assert!(
+            runtime
+                .select_active_surface(ActiveSurface::Farmer)
+                .expect("surface should reselect")
+        );
         let farmer_summary = runtime.summary();
         assert_eq!(farmer_summary.startup_gate, AppStartupGate::Farmer);
         assert_eq!(
@@ -9995,9 +10324,11 @@ mod tests {
     fn selecting_farmer_account_loads_persisted_farm_setup_draft() {
         let runtime = memory_runtime();
 
-        assert!(runtime
-            .generate_local_account(Some("Farmer".to_owned()))
-            .expect("account should generate"));
+        assert!(
+            runtime
+                .generate_local_account(Some("Farmer".to_owned()))
+                .expect("account should generate")
+        );
         let account_id = runtime
             .summary()
             .settings_account_projection
@@ -10021,9 +10352,11 @@ mod tests {
             .expect("farm setup should save");
         save_surface_activation(&runtime, account_id.as_str(), ActiveSurface::Farmer, true);
 
-        assert!(runtime
-            .select_local_account(account_id.as_str())
-            .expect("account should select"));
+        assert!(
+            runtime
+                .select_local_account(account_id.as_str())
+                .expect("account should select")
+        );
         let summary = runtime.summary();
 
         assert_eq!(summary.startup_gate, AppStartupGate::Farmer);
@@ -10035,9 +10368,11 @@ mod tests {
     fn finishing_farm_setup_persists_saved_farm_and_today_projection() {
         let runtime = memory_runtime();
 
-        assert!(runtime
-            .generate_local_account(Some("Farmer".to_owned()))
-            .expect("account should generate"));
+        assert!(
+            runtime
+                .generate_local_account(Some("Farmer".to_owned()))
+                .expect("account should generate")
+        );
         let account_id = runtime
             .summary()
             .settings_account_projection
@@ -10049,9 +10384,11 @@ mod tests {
             .clone();
         let farm_id =
             save_farmer_surface_activation(&runtime, account_id.as_str(), ActiveSurface::Farmer);
-        assert!(runtime
-            .select_local_account(account_id.as_str())
-            .expect("account should select"));
+        assert!(
+            runtime
+                .select_local_account(account_id.as_str())
+                .expect("account should select")
+        );
         assert_eq!(runtime.summary().home_route, HomeRoute::FarmSetupOnboarding);
 
         let draft = FarmSetupDraft::new(
@@ -10114,9 +10451,11 @@ mod tests {
     fn loading_farm_rules_projection_seeds_profile_from_saved_farm() {
         let runtime = memory_runtime();
 
-        assert!(runtime
-            .generate_local_account(Some("Farmer".to_owned()))
-            .expect("account should generate"));
+        assert!(
+            runtime
+                .generate_local_account(Some("Farmer".to_owned()))
+                .expect("account should generate")
+        );
         let account_id = runtime
             .summary()
             .settings_account_projection
@@ -10153,9 +10492,11 @@ mod tests {
             .save_farm_setup(account_id.as_str(), &farm_setup_projection)
             .expect("farm setup should save");
 
-        assert!(runtime
-            .select_local_account(account_id.as_str())
-            .expect("account should select"));
+        assert!(
+            runtime
+                .select_local_account(account_id.as_str())
+                .expect("account should select")
+        );
 
         let projection = runtime
             .load_farm_rules_projection()
@@ -10184,9 +10525,11 @@ mod tests {
     fn saving_farm_rules_projection_refreshes_saved_farm_summary_and_pickup_defaults() {
         let runtime = memory_runtime();
 
-        assert!(runtime
-            .generate_local_account(Some("Farmer".to_owned()))
-            .expect("account should generate"));
+        assert!(
+            runtime
+                .generate_local_account(Some("Farmer".to_owned()))
+                .expect("account should generate")
+        );
         let account_id = runtime
             .summary()
             .settings_account_projection
@@ -10223,9 +10566,11 @@ mod tests {
             .save_farm_setup(account_id.as_str(), &farm_setup_projection)
             .expect("farm setup should save");
 
-        assert!(runtime
-            .select_local_account(account_id.as_str())
-            .expect("account should select"));
+        assert!(
+            runtime
+                .select_local_account(account_id.as_str())
+                .expect("account should select")
+        );
 
         let default_pickup_location_id = PickupLocationId::new();
         let market_pickup_location_id = PickupLocationId::new();
@@ -10358,9 +10703,11 @@ mod tests {
     fn runtime_reset_local_device_state_clears_store_file_and_projection() {
         let (runtime, paths) = file_backed_runtime("reset");
 
-        assert!(runtime
-            .generate_local_account(Some("First".to_owned()))
-            .expect("first account should generate"));
+        assert!(
+            runtime
+                .generate_local_account(Some("First".to_owned()))
+                .expect("first account should generate")
+        );
         let first_account_id = runtime
             .summary()
             .settings_account_projection
@@ -10370,9 +10717,11 @@ mod tests {
             .account
             .account_id
             .clone();
-        assert!(runtime
-            .generate_local_account(Some("Second".to_owned()))
-            .expect("second account should generate"));
+        assert!(
+            runtime
+                .generate_local_account(Some("Second".to_owned()))
+                .expect("second account should generate")
+        );
         let second_account_id = runtime
             .summary()
             .settings_account_projection
@@ -10396,17 +10745,21 @@ mod tests {
         );
         assert!(paths.store_path.exists());
 
-        assert!(runtime
-            .reset_local_device_state()
-            .expect("device state should reset"));
+        assert!(
+            runtime
+                .reset_local_device_state()
+                .expect("device state should reset")
+        );
         let summary = runtime.summary();
 
         assert_eq!(summary.startup_gate, AppStartupGate::SetupRequired);
         assert!(summary.settings_account_projection.roster.is_empty());
-        assert!(summary
-            .settings_account_projection
-            .selected_account
-            .is_none());
+        assert!(
+            summary
+                .settings_account_projection
+                .selected_account
+                .is_none()
+        );
         assert!(!paths.store_path.exists());
         assert_eq!(
             runtime
@@ -10801,7 +11154,6 @@ mod tests {
         }
     }
 
-
     fn shared_local_event_records(paths: &AppDesktopRuntimePaths) -> Vec<LocalEventRecord> {
         let database_path =
             super::shared_local_events_database_path(paths).expect("shared local events path");
@@ -11036,9 +11388,11 @@ mod tests {
     }
 
     fn provision_ready_farmer_account(runtime: &DesktopAppRuntime) -> (String, FarmId) {
-        assert!(runtime
-            .generate_local_account(Some("Farmer".to_owned()))
-            .expect("account should generate"));
+        assert!(
+            runtime
+                .generate_local_account(Some("Farmer".to_owned()))
+                .expect("account should generate")
+        );
         let account_id = runtime
             .summary()
             .settings_account_projection
@@ -11074,9 +11428,11 @@ mod tests {
             .expect("sqlite store")
             .save_farm_setup(account_id.as_str(), &farm_setup_projection)
             .expect("farm setup should save");
-        assert!(runtime
-            .select_local_account(account_id.as_str())
-            .expect("account should select"));
+        assert!(
+            runtime
+                .select_local_account(account_id.as_str())
+                .expect("account should select")
+        );
 
         (account_id, farm_id)
     }

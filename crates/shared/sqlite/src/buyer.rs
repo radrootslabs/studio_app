@@ -5,9 +5,9 @@ use radroots_studio_app_models::{
     BuyerCheckoutDraft, BuyerCheckoutProjection, BuyerCheckoutSummaryProjection, BuyerContext,
     BuyerListingRow, BuyerListingsProjection, BuyerOrderDetailProjection, BuyerOrderStatus,
     BuyerOrdersListRow, BuyerOrdersProjection, BuyerProductDetailProjection, FarmId,
-    FarmOrderMethod, FulfillmentWindowId, OrderDetailItemRow, OrderId, OrderStatus, ProductId,
-    ProductAvailabilityState, ProductAvailabilitySummary, ProductPricePresentation, ProductStatus,
-    ProductStockState, ProductStockSummary, RepeatDemandEligibility,
+    FarmOrderMethod, FulfillmentWindowId, OrderDetailItemRow, OrderId, OrderStatus,
+    ProductAvailabilityState, ProductAvailabilitySummary, ProductId, ProductPricePresentation,
+    ProductStatus, ProductStockState, ProductStockSummary, RepeatDemandEligibility,
     RepeatDemandHandoffProjection,
 };
 use rusqlite::{Connection, OptionalExtension, params};
@@ -584,10 +584,8 @@ impl<'a> AppBuyerRepository<'a> {
         order_id: OrderId,
         replace_existing: bool,
     ) -> Result<BuyerRepeatDemandApplyOutcome, AppSqliteError> {
-        let Some((farm_id, farm_display_name)) = self.load_buyer_order_repeat_demand_header(
-            context,
-            order_id,
-        )?
+        let Some((farm_id, farm_display_name)) =
+            self.load_buyer_order_repeat_demand_header(context, order_id)?
         else {
             return Ok(BuyerRepeatDemandApplyOutcome::Unavailable);
         };
@@ -1114,11 +1112,10 @@ impl<'a> AppBuyerRepository<'a> {
                 source,
             })?;
             let product_id = parse_repeat_demand_product_id(line_id.as_str())?;
-            let quantity = u32::try_from(quantity_value).map_err(|_| {
-                AppSqliteError::InvalidProjection {
+            let quantity =
+                u32::try_from(quantity_value).map_err(|_| AppSqliteError::InvalidProjection {
                     reason: "repeat demand quantity must be non-negative",
-                }
-            })?;
+                })?;
             if quantity == 0 {
                 return Err(AppSqliteError::InvalidProjection {
                     reason: "repeat demand quantity must be positive",
@@ -1630,8 +1627,7 @@ fn refresh_buyer_cart_summary(cart: &mut BuyerCartProjection) -> Result<(), AppS
             .ok_or(AppSqliteError::InvalidProjection {
                 reason: "buyer cart subtotal overflowed",
             })?;
-        currency_code
-            .get_or_insert_with(|| line.unit_price.currency_code.clone());
+        currency_code.get_or_insert_with(|| line.unit_price.currency_code.clone());
     }
 
     cart.subtotal_minor_units = Some(subtotal_minor_units);
@@ -2287,11 +2283,13 @@ mod tests {
                 .expect("repeat demand apply should load"),
             BuyerRepeatDemandApplyOutcome::Unavailable
         );
-        assert!(repository
-            .load_buyer_cart(&context)
-            .expect("buyer cart should reload")
-            .lines
-            .is_empty());
+        assert!(
+            repository
+                .load_buyer_cart(&context)
+                .expect("buyer cart should reload")
+                .lines
+                .is_empty()
+        );
     }
 
     #[test]
