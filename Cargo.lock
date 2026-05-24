@@ -5159,7 +5159,9 @@ name = "radroots_studio_app_sync"
 version = "0.1.0"
 dependencies = [
  "radroots_studio_app_models",
+ "radroots_sdk",
  "serde",
+ "serde_json",
  "thiserror 2.0.18",
 ]
 
@@ -5188,6 +5190,17 @@ version = "0.1.0-alpha.2"
 dependencies = [
  "radroots_core",
  "serde",
+]
+
+[[package]]
+name = "radroots_events_codec"
+version = "0.1.0-alpha.2"
+dependencies = [
+ "nostr",
+ "radroots_core",
+ "radroots_events",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]
@@ -5326,6 +5339,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "radroots_sdk"
+version = "0.1.0-alpha.2"
+dependencies = [
+ "radroots_events",
+ "radroots_events_codec",
+ "radroots_identity",
+ "radroots_nostr",
+ "radroots_trade",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "radroots_secret_vault"
 version = "0.1.0-alpha.2"
 
@@ -5339,6 +5365,21 @@ dependencies = [
  "serde_json",
  "thiserror 1.0.69",
  "uuid",
+]
+
+[[package]]
+name = "radroots_trade"
+version = "0.1.0-alpha.2"
+dependencies = [
+ "base64 0.22.1",
+ "hex",
+ "radroots_core",
+ "radroots_events",
+ "radroots_events_codec",
+ "serde",
+ "serde_json",
+ "sha2",
+ "thiserror 1.0.69",
 ]
 
 [[package]]

@@ -36,6 +36,7 @@ radroots_nostr_connect = { path = "../lib/crates/nostr_connect" }
 radroots_protected_store = { path = "../lib/crates/protected_store" }
 radroots_runtime_paths = { path = "../lib/crates/runtime_paths" }
 radroots_secret_vault = { path = "../lib/crates/secret_vault", default-features = false, features = ["std"] }
+radroots_sdk = { path = "../lib/crates/sdk", features = ["relay-client", "signing"] }
 radroots_sql_core = { path = "../lib/crates/sql_core", features = ["native"] }
 radroots_studio_app_core = { path = "crates/shared/core", version = "0.1.0" }
 radroots_studio_app_i18n = { path = "crates/shared/i18n", version = "0.1.0" }

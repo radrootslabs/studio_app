@@ -1,5 +1,14 @@
 #![forbid(unsafe_code)]
 
+mod publish;
+
+pub use publish::{
+    AppFarmProfilePublishPayload, AppListingPublishPayload, AppOrderRequestItemPayload,
+    AppOrderRequestPublishPayload, AppPublishContext, AppPublishPayload,
+    AppPublishPayloadJsonError, AppPublishValidationFailure, AppPublishValidationFailureSet,
+    AppPublishWorkKind,
+};
+
 use radroots_studio_app_models::{FarmId, FulfillmentWindowId, OrderId, ProductId};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
