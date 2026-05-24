@@ -1501,34 +1501,125 @@ impl DesktopAppRuntimeState {
     }
 
     fn retry_pending_personal_order_coordination(&mut self) -> Result<bool, AppSqliteError> {
-        let Some(sqlite_store) = self.sqlite_store.as_ref() else {
-            return Ok(false);
-        };
         let buyer_context = self.state_store.identity_projection().buyer_context();
-        let records =
-            sqlite_store.load_recoverable_buyer_order_coordination_records(&buyer_context)?;
+        let records = {
+            let Some(sqlite_store) = self.sqlite_store.as_ref() else {
+                return Ok(false);
+            };
+            sqlite_store.load_recoverable_buyer_order_coordination_records(&buyer_context)?
+        };
         let mut changed = false;
+        let mut refreshed_order_id = None;
 
         for record in records {
-            let Some(order_export) = sqlite_store
-                .load_buyer_order_local_event_export(&buyer_context, record.order_id)?
-            else {
-                let _ = sqlite_store.mark_buyer_order_coordination_failed(
-                    &buyer_context,
-                    record.order_id,
-                    "buyer order local event export is unavailable",
-                )?;
-                continue;
+            let order_export = {
+                let Some(sqlite_store) = self.sqlite_store.as_ref() else {
+                    return Ok(changed);
+                };
+                let Some(order_export) = sqlite_store
+                    .load_buyer_order_local_event_export(&buyer_context, record.order_id)?
+                else {
+                    changed |= sqlite_store.mark_buyer_order_coordination_failed(
+                        &buyer_context,
+                        record.order_id,
+                        "buyer order local event export is unavailable",
+                    )?;
+                    continue;
+                };
+                order_export
             };
 
-            changed |= self.append_app_buyer_order_request_local_work_record(
-                sqlite_store,
-                &buyer_context,
-                &order_export,
-            )?;
+            let order_changed = {
+                let Some(sqlite_store) = self.sqlite_store.as_ref() else {
+                    return Ok(changed);
+                };
+                self.append_app_buyer_order_request_local_work_record(
+                    sqlite_store,
+                    &buyer_context,
+                    &order_export,
+                )?
+            };
+            if order_changed {
+                refreshed_order_id.get_or_insert(record.order_id);
+                changed = true;
+            }
+        }
+
+        if changed {
+            changed |=
+                self.refresh_personal_orders_projection(&buyer_context, refreshed_order_id)?;
         }
 
         Ok(changed)
+    }
+
+    fn refresh_personal_orders_projection(
+        &mut self,
+        buyer_context: &BuyerContext,
+        preferred_order_id: Option<OrderId>,
+    ) -> Result<bool, AppSqliteError> {
+        let current_detail_order_id = self
+            .state_store
+            .personal_projection()
+            .orders
+            .detail
+            .as_ref()
+            .map(|detail| detail.order_id);
+        let (refreshed_cart, refreshed_checkout, refreshed_orders, refreshed_order_detail) = {
+            let Some(sqlite_store) = self.sqlite_store.as_ref() else {
+                return Ok(false);
+            };
+            let refreshed_cart = sqlite_store.load_buyer_cart(buyer_context)?;
+            let refreshed_checkout = sqlite_store.load_buyer_checkout(buyer_context)?;
+            let refreshed_orders = sqlite_store.load_buyer_orders(buyer_context)?;
+            let detail_order_id = current_detail_order_id
+                .filter(|order_id| {
+                    refreshed_orders
+                        .rows
+                        .iter()
+                        .any(|row| row.order_id == *order_id)
+                })
+                .or_else(|| {
+                    preferred_order_id.filter(|order_id| {
+                        refreshed_orders
+                            .rows
+                            .iter()
+                            .any(|row| row.order_id == *order_id)
+                    })
+                });
+            let refreshed_order_detail = match detail_order_id {
+                Some(order_id) => sqlite_store.load_buyer_order_detail(buyer_context, order_id)?,
+                None => None,
+            };
+            (
+                refreshed_cart,
+                refreshed_checkout,
+                refreshed_orders,
+                refreshed_order_detail,
+            )
+        };
+
+        Ok(self.mutate_personal_projection(|projection| {
+            let mut changed = false;
+            if projection.cart.cart != refreshed_cart {
+                projection.cart.cart = refreshed_cart.clone();
+                changed = true;
+            }
+            if projection.cart.checkout != refreshed_checkout {
+                projection.cart.checkout = refreshed_checkout.clone();
+                changed = true;
+            }
+            if projection.orders.list != refreshed_orders {
+                projection.orders.list = refreshed_orders.clone();
+                changed = true;
+            }
+            if projection.orders.detail != refreshed_order_detail {
+                projection.orders.detail = refreshed_order_detail.clone();
+                changed = true;
+            }
+
+            changed
+        }))
     }
 
     fn open_personal_order_detail(&mut self, order_id: OrderId) -> Result<bool, AppSqliteError> {
@@ -5772,13 +5863,13 @@ mod tests {
     use radroots_studio_app_models::{
         AccountCustody, AccountSummary, AccountSurfaceActivationProjection, ActiveSurface,
         AppActivityKind, AppIdentityProjection, AppStartupGate, BlackoutPeriodId,
-        BlackoutPeriodRecord, BuyerCheckoutDraft, FarmId, FarmOperatingRulesRecord,
-        FarmOrderMethod, FarmProfileRecord, FarmReadiness, FarmReadinessBlocker, FarmSetupDraft,
-        FarmSetupProjection, FarmSummary, FarmerActivationProjection, FarmerSection,
-        FulfillmentWindowId, FulfillmentWindowRecord, LoggedOutStartupProjection, OrderId,
-        OrderStatus, OrdersFilter, PackDayBatchPrintArtifact, PackDayBatchPrintFailureKind,
-        PackDayBatchPrintStatus, PackDayExportInstanceId, PackDayExportStatus,
-        PackDayHostHandoffKind, PackDayHostHandoffStatus, PackDayPackListRow,
+        BlackoutPeriodRecord, BuyerCheckoutDraft, BuyerOrderStatus, FarmId,
+        FarmOperatingRulesRecord, FarmOrderMethod, FarmProfileRecord, FarmReadiness,
+        FarmReadinessBlocker, FarmSetupDraft, FarmSetupProjection, FarmSummary,
+        FarmerActivationProjection, FarmerSection, FulfillmentWindowId, FulfillmentWindowRecord,
+        LoggedOutStartupProjection, OrderId, OrderStatus, OrdersFilter, PackDayBatchPrintArtifact,
+        PackDayBatchPrintFailureKind, PackDayBatchPrintStatus, PackDayExportInstanceId,
+        PackDayExportStatus, PackDayHostHandoffKind, PackDayHostHandoffStatus, PackDayPackListRow,
         PackDayPrintFailureKind, PackDayPrintKind, PackDayPrintStatus, PackDayProductTotalRow,
         PackDayProjection, PackDayRosterRow, PersonalSection, PickupLocationId,
         PickupLocationRecord, ProductEditorDraft, ProductId, ProductStatus, ProductsFilter,
@@ -8781,8 +8872,86 @@ mod tests {
             assert!(coordination.last_error_message.is_some());
             order_id
         };
-        drop(runtime);
+        {
+            let state = runtime.lock_state_mut();
+            let sqlite_store = state.sqlite_store.as_ref().expect("sqlite store");
+            sqlite_store
+                .connection()
+                .execute(
+                    "update orders set status = 'scheduled' where id = ?1",
+                    [order_id.to_string()],
+                )
+                .expect("buyer order status should mutate before retry refresh");
+        }
         unblock_shared_local_events_database(&paths);
+        assert!(
+            runtime
+                .retry_pending_personal_order_coordination()
+                .expect("same-session buyer order recovery retry should sync")
+        );
+        let summary_after_retry = runtime.summary();
+        assert_eq!(
+            summary_after_retry
+                .personal_projection
+                .orders
+                .list
+                .rows
+                .len(),
+            1
+        );
+        assert_eq!(
+            summary_after_retry.personal_projection.orders.list.rows[0].order_id,
+            order_id
+        );
+        assert_eq!(
+            summary_after_retry.personal_projection.orders.list.rows[0].status,
+            BuyerOrderStatus::Scheduled
+        );
+        assert_eq!(
+            summary_after_retry
+                .personal_projection
+                .orders
+                .detail
+                .as_ref()
+                .expect("buyer order detail should refresh after same-session retry")
+                .status,
+            BuyerOrderStatus::Scheduled
+        );
+        let records = shared_local_event_records(&paths);
+        let order_records = records
+            .iter()
+            .filter(|record| {
+                record.source_runtime == SourceRuntime::App
+                    && record
+                        .local_work_json
+                        .as_ref()
+                        .and_then(|payload| payload["record_kind"].as_str())
+                        == Some(BUYER_ORDER_REQUEST_LOCAL_WORK_RECORD_KIND)
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(order_records.len(), 1);
+        assert_eq!(
+            order_records[0].record_id,
+            format!("app:local_work:order_request:{order_id}")
+        );
+        {
+            let state = runtime.lock_state_mut();
+            let buyer_context = state.state_store.identity_projection().buyer_context();
+            let sqlite_store = state.sqlite_store.as_ref().expect("sqlite store");
+            let coordination = sqlite_store
+                .load_buyer_order_coordination_record(&buyer_context, order_id)
+                .expect("buyer order coordination should reload")
+                .expect("buyer order coordination should still exist");
+            assert_eq!(coordination.state, BuyerOrderCoordinationState::Synced);
+            assert_eq!(coordination.attempt_count, 2);
+            assert_eq!(coordination.last_error_message, None);
+        }
+        assert!(
+            !runtime
+                .retry_pending_personal_order_coordination()
+                .expect("same-session synced buyer order recovery retry should be idempotent")
+        );
+        drop(runtime);
 
         let restarted_runtime = restart_runtime(paths.clone());
         let records = shared_local_event_records(&paths);
