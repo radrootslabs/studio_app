@@ -40,9 +40,9 @@ use radroots_studio_app_remote_signer::{
 };
 use radroots_studio_app_sqlite::{AppSqliteError, derive_farm_rules_readiness};
 use radroots_studio_app_state::{
-    FarmSetupFlowStage, FarmWorkspaceStatus, HomeRoute, PackDayBatchPrintRequest,
-    PackDayExportProjection, PackDayHostHandoffRequest, PackDayPrintRequest,
-    derive_product_publish_blockers,
+    BuyerOrdersScreenProjection, FarmSetupFlowStage, FarmWorkspaceStatus, HomeRoute,
+    PackDayBatchPrintRequest, PackDayExportProjection, PackDayHostHandoffRequest,
+    PackDayPrintRequest, derive_product_publish_blockers,
 };
 use radroots_studio_app_sync::{
     AppSyncRunStatus, SyncAggregateRef, SyncCheckpointState, SyncConflict, SyncConflictKind,
@@ -1570,7 +1570,35 @@ impl HomeView {
                     error = %runtime_error,
                     "failed to place buyer order"
                 );
-                self.set_buyer_workspace_notice(notice)
+                let notice_changed = self.set_buyer_workspace_notice(notice);
+                buyer_order_coordination_notice_forces_redraw(notice) || notice_changed
+            }
+        }
+    }
+
+    fn retry_pending_personal_order_coordination(&mut self, cx: &mut Context<Self>) {
+        if self.retry_pending_personal_order_coordination_update() {
+            cx.notify();
+        }
+    }
+
+    fn retry_pending_personal_order_coordination_update(&mut self) -> bool {
+        match self.runtime.retry_pending_personal_order_coordination() {
+            Ok(true) => {
+                let _ = self.clear_buyer_workspace_notice();
+                true
+            }
+            Ok(false) => false,
+            Err(runtime_error) => {
+                error!(
+                    target: "buyer",
+                    event = "buyer.order_coordination_retry_failed",
+                    error = %runtime_error,
+                    "failed to retry buyer order coordination"
+                );
+                let notice = BuyerWorkspaceNotice::OrderCoordinationFailed;
+                let notice_changed = self.set_buyer_workspace_notice(notice);
+                buyer_order_coordination_notice_forces_redraw(notice) || notice_changed
             }
         }
     }
@@ -3149,6 +3177,9 @@ impl HomeView {
                 AppTextKey::HomeNavOrders,
                 AppTextKey::PersonalOrdersSurfaceBody,
             ))
+            .when(buyer_orders_retry_action_visible(orders), |this| {
+                this.child(buyer_orders_retry_card(cx))
+            })
             .child(if orders.list.rows.is_empty() {
                 home_empty_state_card(
                     AppTextKey::PersonalOrdersEmptyTitle,
@@ -8569,6 +8600,28 @@ fn buyer_orders_list_card(
     .into_any_element()
 }
 
+fn buyer_orders_retry_action_visible(orders: &BuyerOrdersScreenProjection) -> bool {
+    orders.has_recoverable_coordination
+}
+
+fn buyer_orders_retry_card(cx: &mut Context<HomeView>) -> AnyElement {
+    home_card(
+        app_shared_text(AppTextKey::PersonalOrdersCoordinationRetryTitle),
+        app_stack_v(APP_UI_THEME.foundation.spacing.small_px)
+            .w_full()
+            .child(home_body_text(app_shared_text(
+                AppTextKey::PersonalOrdersCoordinationRetryBody,
+            )))
+            .child(action_button_primary(
+                "buyer-orders-retry-coordination",
+                app_shared_text(AppTextKey::PersonalOrdersCoordinationRetryAction),
+                cx.listener(|this, _, _, cx| this.retry_pending_personal_order_coordination(cx)),
+                cx,
+            )),
+    )
+    .into_any_element()
+}
+
 fn buyer_orders_list_entry(
     index: usize,
     row: &BuyerOrdersListRow,
@@ -12786,6 +12839,10 @@ fn buyer_order_place_failure_notice(error: &AppSqliteError) -> BuyerWorkspaceNot
     }
 }
 
+fn buyer_order_coordination_notice_forces_redraw(notice: BuyerWorkspaceNotice) -> bool {
+    notice == BuyerWorkspaceNotice::OrderCoordinationFailed
+}
+
 fn buyer_workspace_notice_card(notice: String) -> impl IntoElement {
     app_surface_card(home_body_text(notice))
 }
@@ -12937,9 +12994,10 @@ mod tests {
         SettingsInventorySectionSpec, SettingsPanelViewKey, StartupHomeSurface,
         StartupSignerConnectState, about_conflict_action_specs, about_conflict_aggregate_text,
         about_conflict_detail_rows, about_conflict_review_body_key, about_manual_refresh_enabled,
-        about_runtime_rows, about_status_rows, app_text, buyer_orders_status_key,
-        farm_setup_onboarding_card_spec, farmer_home_farm_state, farmer_pack_day_available,
-        home_auto_focus_target, home_content_scroll_id, home_saved_farm,
+        about_runtime_rows, about_status_rows, app_text,
+        buyer_order_coordination_notice_forces_redraw, buyer_orders_retry_action_visible,
+        buyer_orders_status_key, farm_setup_onboarding_card_spec, farmer_home_farm_state,
+        farmer_pack_day_available, home_auto_focus_target, home_content_scroll_id, home_saved_farm,
         home_sidebar_navigation_sections, home_stage, home_window_launch_size_px,
         home_window_minimum_size_px, pack_day_batch_print_action_presentation,
         pack_day_batch_print_status_presentation, pack_day_export_action_enabled,
@@ -12982,10 +13040,10 @@ mod tests {
         RadrootsAppRemoteSignerSessionRecord,
     };
     use radroots_studio_app_state::{
-        AppShellProjection, FarmWorkspaceReadinessProjection, FarmWorkspaceStatus, HomeRoute,
-        PackDayBatchPrintProjection, PackDayBatchPrintRequest, PackDayExportProjection,
-        PackDayHostHandoffProjection, PackDayHostHandoffRequest, PackDayPrintProjection,
-        PackDayPrintRequest,
+        AppShellProjection, BuyerOrdersScreenProjection, FarmWorkspaceReadinessProjection,
+        FarmWorkspaceStatus, HomeRoute, PackDayBatchPrintProjection, PackDayBatchPrintRequest,
+        PackDayExportProjection, PackDayHostHandoffProjection, PackDayHostHandoffRequest,
+        PackDayPrintProjection, PackDayPrintRequest,
     };
     use radroots_studio_app_sync::{
         AppSyncProjection, AppSyncRunStatus, SyncAggregateRef, SyncCheckpointStatus, SyncConflict,
@@ -13098,6 +13156,25 @@ mod tests {
         );
 
         let _ = fs::remove_dir_all(home_dir);
+    }
+
+    #[test]
+    fn buyer_order_coordination_failure_forces_redraw_when_notice_is_unchanged() {
+        assert!(buyer_order_coordination_notice_forces_redraw(
+            BuyerWorkspaceNotice::OrderCoordinationFailed
+        ));
+        assert!(!buyer_order_coordination_notice_forces_redraw(
+            BuyerWorkspaceNotice::OrderPlaceFailed
+        ));
+    }
+
+    #[test]
+    fn buyer_orders_retry_action_tracks_recoverable_coordination() {
+        let mut orders = BuyerOrdersScreenProjection::default();
+        assert!(!buyer_orders_retry_action_visible(&orders));
+
+        orders.has_recoverable_coordination = true;
+        assert!(buyer_orders_retry_action_visible(&orders));
     }
 
     #[test]

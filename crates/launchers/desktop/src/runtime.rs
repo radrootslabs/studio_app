@@ -1466,6 +1466,10 @@ impl DesktopAppRuntimeState {
                 projection.orders.detail = Some(order_detail.clone());
                 changed = true;
             }
+            if !projection.orders.has_recoverable_coordination {
+                projection.orders.has_recoverable_coordination = true;
+                changed = true;
+            }
 
             changed
         });
@@ -1488,8 +1492,10 @@ impl DesktopAppRuntimeState {
         } else {
             false
         };
+        let coordination_changed =
+            self.refresh_personal_orders_coordination_retry_state(&buyer_context)?;
 
-        Ok(personal_changed || section_changed || pending_changed)
+        Ok(personal_changed || section_changed || pending_changed || coordination_changed)
     }
 
     fn retry_pending_personal_order_coordination(&mut self) -> Result<bool, AppSqliteError> {
@@ -1500,6 +1506,9 @@ impl DesktopAppRuntimeState {
             };
             sqlite_store.load_recoverable_buyer_order_coordination_records(&buyer_context)?
         };
+        if records.is_empty() {
+            return self.refresh_personal_orders_coordination_retry_state(&buyer_context);
+        }
         let mut changed = false;
         let mut refreshed_order_id = None;
 
@@ -1551,6 +1560,26 @@ impl DesktopAppRuntimeState {
         Ok(changed)
     }
 
+    fn refresh_personal_orders_coordination_retry_state(
+        &mut self,
+        buyer_context: &BuyerContext,
+    ) -> Result<bool, AppSqliteError> {
+        let Some(sqlite_store) = self.sqlite_store.as_ref() else {
+            return Ok(false);
+        };
+        let has_recoverable_coordination = !sqlite_store
+            .load_recoverable_buyer_order_coordination_records(buyer_context)?
+            .is_empty();
+        Ok(self.mutate_personal_projection(|projection| {
+            if projection.orders.has_recoverable_coordination == has_recoverable_coordination {
+                false
+            } else {
+                projection.orders.has_recoverable_coordination = has_recoverable_coordination;
+                true
+            }
+        }))
+    }
+
     fn refresh_personal_orders_projection(
         &mut self,
         buyer_context: &BuyerContext,
@@ -1563,13 +1592,22 @@ impl DesktopAppRuntimeState {
             .detail
             .as_ref()
             .map(|detail| detail.order_id);
-        let (refreshed_cart, refreshed_checkout, refreshed_orders, refreshed_order_detail) = {
+        let (
+            refreshed_cart,
+            refreshed_checkout,
+            refreshed_orders,
+            refreshed_order_detail,
+            has_recoverable_coordination,
+        ) = {
             let Some(sqlite_store) = self.sqlite_store.as_ref() else {
                 return Ok(false);
             };
             let refreshed_cart = sqlite_store.load_buyer_cart(buyer_context)?;
             let refreshed_checkout = sqlite_store.load_buyer_checkout(buyer_context)?;
             let refreshed_orders = sqlite_store.load_buyer_orders(buyer_context)?;
+            let has_recoverable_coordination = !sqlite_store
+                .load_recoverable_buyer_order_coordination_records(buyer_context)?
+                .is_empty();
             let detail_order_id = current_detail_order_id
                 .filter(|order_id| {
                     refreshed_orders
@@ -1594,6 +1632,7 @@ impl DesktopAppRuntimeState {
                 refreshed_checkout,
                 refreshed_orders,
                 refreshed_order_detail,
+                has_recoverable_coordination,
             )
         };
 
@@ -1613,6 +1652,10 @@ impl DesktopAppRuntimeState {
             }
             if projection.orders.detail != refreshed_order_detail {
                 projection.orders.detail = refreshed_order_detail.clone();
+                changed = true;
+            }
+            if projection.orders.has_recoverable_coordination != has_recoverable_coordination {
+                projection.orders.has_recoverable_coordination = has_recoverable_coordination;
                 changed = true;
             }
 
@@ -4652,6 +4695,9 @@ fn load_selected_account_context_with_options(
     let buyer_cart = sqlite_store.load_buyer_cart(&buyer_context)?;
     let buyer_checkout = sqlite_store.load_buyer_checkout(&buyer_context)?;
     let buyer_orders = sqlite_store.load_buyer_orders(&buyer_context)?;
+    let has_recoverable_coordination = !sqlite_store
+        .load_recoverable_buyer_order_coordination_records(&buyer_context)?
+        .is_empty();
     let buyer_order_detail = match continuity_state.buyer.orders_detail_order_id {
         Some(order_id) => sqlite_store.load_buyer_order_detail(&buyer_context, order_id)?,
         None => None,
@@ -4673,6 +4719,7 @@ fn load_selected_account_context_with_options(
         orders: BuyerOrdersScreenProjection {
             list: buyer_orders,
             detail: buyer_order_detail,
+            has_recoverable_coordination,
         },
         ..PersonalWorkspaceProjection::default()
     };
@@ -8872,6 +8919,12 @@ mod tests {
                 .expect("same-session buyer order recovery retry should sync")
         );
         let summary_after_retry = runtime.summary();
+        assert!(
+            !summary_after_retry
+                .personal_projection
+                .orders
+                .has_recoverable_coordination
+        );
         assert_eq!(
             pending_order_sync_payloads(&runtime, buyer_account_id.as_str(), order_id),
             vec![expected_order_sync_payload.clone()]
@@ -8955,6 +9008,12 @@ mod tests {
             vec![format!("app:local_work:order_request:{order_id}")]
         );
         let summary = restarted_runtime.summary();
+        assert!(
+            !summary
+                .personal_projection
+                .orders
+                .has_recoverable_coordination
+        );
         assert_eq!(summary.personal_projection.orders.list.rows.len(), 1);
         assert_eq!(
             summary.personal_projection.orders.list.rows[0].order_id,
@@ -12579,6 +12638,12 @@ mod tests {
         assert_eq!(
             summary.shell_projection.selected_section,
             ShellSection::Personal(PersonalSection::Orders)
+        );
+        assert!(
+            summary
+                .personal_projection
+                .orders
+                .has_recoverable_coordination
         );
         assert!(summary.personal_projection.cart.cart.lines.is_empty());
         assert!(!summary.personal_projection.cart.checkout.can_place_order);

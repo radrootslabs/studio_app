@@ -440,6 +440,18 @@ mod tests {
             app_text(AppTextKey::PersonalOrdersRepeatDemandNoteUnavailable),
             "Items from this order are currently unavailable to reorder."
         );
+        assert_eq!(
+            app_text(AppTextKey::PersonalOrdersCoordinationRetryTitle),
+            "Finish sharing saved orders"
+        );
+        assert_eq!(
+            app_text(AppTextKey::PersonalOrdersCoordinationRetryBody),
+            "A saved order still needs to be shared with your order tools."
+        );
+        assert_eq!(
+            app_text(AppTextKey::PersonalOrdersCoordinationRetryAction),
+            "Try sharing again"
+        );
     }
 
     #[test]

@@ -132,6 +132,7 @@ pub struct BuyerCartScreenProjection {
 pub struct BuyerOrdersScreenProjection {
     pub list: BuyerOrdersProjection,
     pub detail: Option<BuyerOrderDetailProjection>,
+    pub has_recoverable_coordination: bool,
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
