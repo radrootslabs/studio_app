@@ -8845,114 +8845,9 @@ mod tests {
     }
 
     #[test]
-    fn runtime_buyer_order_shared_append_failure_is_recoverable_after_restart() {
-        let (runtime, paths) = bootstrapped_runtime("buyer_order_append_failure");
-        assert!(
-            runtime
-                .generate_local_account(Some("Buyer".to_owned()))
-                .expect("account should generate")
-        );
-        let buyer_account_id = runtime
-            .summary()
-            .settings_account_projection
-            .selected_account
-            .as_ref()
-            .expect("selected account")
-            .account
-            .account_id
-            .clone();
-        assert!(
-            runtime
-                .select_active_surface(ActiveSurface::Personal)
-                .expect("surface should switch into marketplace")
-        );
-        let listing_key = "DDDDDDDDDDDDDDDDDDDDDD";
-        append_cli_signed_buyer_listing_record_with(
-            &paths,
-            "buyer-order-append-failure-listing",
-            listing_key,
-            "Buyer Visible Eggs",
-            1100,
-        );
-        let product_id =
-            deterministic_cli_listing_product_id(Some("buyer-visible-seller-pubkey"), listing_key);
-        assert!(
-            runtime
-                .open_personal_product_detail(PersonalSection::Browse, product_id)
-                .expect("buyer detail should import before lookup")
-        );
-        assert!(
-            runtime
-                .add_personal_product_to_cart(PersonalSection::Browse, false)
-                .expect("buyer product should add to cart")
-        );
-        assert!(
-            runtime
-                .save_personal_checkout_draft(BuyerCheckoutDraft {
-                    name: "Casey Buyer".to_owned(),
-                    email: "casey@example.com".to_owned(),
-                    phone: String::new(),
-                    order_note: String::new(),
-                })
-                .expect("buyer checkout draft should save")
-        );
-        block_shared_local_events_database(&paths);
-
-        let error = runtime
-            .place_personal_order()
-            .expect_err("blocked local events should fail order completion");
-
-        assert!(matches!(error, AppSqliteError::LocalEventsSql { .. }));
-        let summary = runtime.summary();
-        assert_eq!(
-            summary.shell_projection.selected_section,
-            ShellSection::Personal(PersonalSection::Orders)
-        );
-        assert!(summary.personal_projection.cart.cart.lines.is_empty());
-        assert!(!summary.personal_projection.cart.checkout.can_place_order);
-        assert_eq!(summary.personal_projection.orders.list.rows.len(), 1);
-        let (order_id, order_farm_id) = {
-            let visible_order_id = summary.personal_projection.orders.list.rows[0].order_id;
-            let order_farm_id = summary
-                .personal_projection
-                .orders
-                .detail
-                .as_ref()
-                .expect("buyer order detail should remain visible after coordination failure")
-                .farm_id;
-            assert_eq!(
-                summary
-                    .personal_projection
-                    .orders
-                    .detail
-                    .as_ref()
-                    .expect("buyer order detail should remain visible after coordination failure")
-                    .order_id,
-                visible_order_id
-            );
-            let state = runtime.lock_state_mut();
-            let buyer_context = state.state_store.identity_projection().buyer_context();
-            let sqlite_store = state.sqlite_store.as_ref().expect("sqlite store");
-            let buyer_orders = sqlite_store
-                .load_buyer_orders(&buyer_context)
-                .expect("buyer order should persist after coordination failure");
-            assert_eq!(buyer_orders.rows.len(), 1);
-            let order_id = buyer_orders.rows[0].order_id;
-            assert_eq!(order_id, visible_order_id);
-            let coordination = sqlite_store
-                .load_buyer_order_coordination_record(&buyer_context, order_id)
-                .expect("buyer order coordination should load")
-                .expect("buyer order coordination should exist");
-            assert_eq!(coordination.state, BuyerOrderCoordinationState::Failed);
-            assert_eq!(coordination.attempt_count, 1);
-            assert!(coordination.record_id.is_some());
-            assert!(coordination.payload_json.is_some());
-            assert!(coordination.last_error_message.is_some());
-            (order_id, order_farm_id)
-        };
-        assert!(
-            pending_order_sync_payloads(&runtime, buyer_account_id.as_str(), order_id).is_empty()
-        );
+    fn runtime_buyer_order_shared_append_failure_is_recoverable_in_same_session() {
+        let (runtime, paths, buyer_account_id, order_id, order_farm_id) =
+            blocked_buyer_order_runtime("buyer_order_append_failure_same_session");
         let expected_order_sync_payload = super::order_sync_payload(
             order_id,
             order_farm_id,
@@ -9008,27 +8903,18 @@ mod tests {
                 .status,
             BuyerOrderStatus::Scheduled
         );
-        let records = shared_local_event_records(&paths);
-        let order_records = records
-            .iter()
-            .filter(|record| {
-                record.source_runtime == SourceRuntime::App
-                    && record
-                        .local_work_json
-                        .as_ref()
-                        .and_then(|payload| payload["record_kind"].as_str())
-                        == Some(BUYER_ORDER_REQUEST_LOCAL_WORK_RECORD_KIND)
-            })
-            .collect::<Vec<_>>();
-        assert_eq!(order_records.len(), 1);
         assert_eq!(
-            order_records[0].record_id,
-            format!("app:local_work:order_request:{order_id}")
+            app_buyer_order_local_work_record_ids(&paths),
+            vec![format!("app:local_work:order_request:{order_id}")]
         );
         {
             let state = runtime.lock_state_mut();
             let buyer_context = state.state_store.identity_projection().buyer_context();
             let sqlite_store = state.sqlite_store.as_ref().expect("sqlite store");
+            let buyer_orders = sqlite_store
+                .load_buyer_orders(&buyer_context)
+                .expect("buyer orders should reload");
+            assert_eq!(buyer_orders.rows.len(), 1);
             let coordination = sqlite_store
                 .load_buyer_order_coordination_record(&buyer_context, order_id)
                 .expect("buyer order coordination should reload")
@@ -9046,46 +8932,68 @@ mod tests {
             pending_order_sync_payloads(&runtime, buyer_account_id.as_str(), order_id),
             vec![expected_order_sync_payload]
         );
+
+        cleanup_bootstrapped_runtime_paths(&paths);
+    }
+
+    #[test]
+    fn runtime_buyer_order_shared_append_failure_is_recoverable_after_restart() {
+        let (runtime, paths, buyer_account_id, order_id, order_farm_id) =
+            blocked_buyer_order_runtime("buyer_order_append_failure_restart");
+        let expected_order_sync_payload = super::order_sync_payload(
+            order_id,
+            order_farm_id,
+            "place_personal_order",
+            Some("needs_action"),
+        );
+        unblock_shared_local_events_database(&paths);
         drop(runtime);
 
         let restarted_runtime = restart_runtime(paths.clone());
-        let records = shared_local_event_records(&paths);
-        let order_records = records
-            .iter()
-            .filter(|record| {
-                record.source_runtime == SourceRuntime::App
-                    && record
-                        .local_work_json
-                        .as_ref()
-                        .and_then(|payload| payload["record_kind"].as_str())
-                        == Some(BUYER_ORDER_REQUEST_LOCAL_WORK_RECORD_KIND)
-            })
-            .collect::<Vec<_>>();
-        assert_eq!(order_records.len(), 1);
         assert_eq!(
-            order_records[0].record_id,
-            format!("app:local_work:order_request:{order_id}")
+            app_buyer_order_local_work_record_ids(&paths),
+            vec![format!("app:local_work:order_request:{order_id}")]
         );
-        let state = restarted_runtime.lock_state_mut();
-        let buyer_context = state.state_store.identity_projection().buyer_context();
-        let sqlite_store = state.sqlite_store.as_ref().expect("sqlite store");
-        let coordination = sqlite_store
-            .load_buyer_order_coordination_record(&buyer_context, order_id)
-            .expect("buyer order coordination should reload")
-            .expect("buyer order coordination should still exist");
-        assert_eq!(coordination.state, BuyerOrderCoordinationState::Synced);
-        assert_eq!(coordination.attempt_count, 2);
-        assert_eq!(coordination.last_error_message, None);
-        drop(state);
+        let summary = restarted_runtime.summary();
+        assert_eq!(summary.personal_projection.orders.list.rows.len(), 1);
+        assert_eq!(
+            summary.personal_projection.orders.list.rows[0].order_id,
+            order_id
+        );
+        assert_eq!(
+            summary
+                .personal_projection
+                .orders
+                .detail
+                .as_ref()
+                .expect("buyer order detail should reload after restart")
+                .order_id,
+            order_id
+        );
+        {
+            let state = restarted_runtime.lock_state_mut();
+            let buyer_context = state.state_store.identity_projection().buyer_context();
+            let sqlite_store = state.sqlite_store.as_ref().expect("sqlite store");
+            let buyer_orders = sqlite_store
+                .load_buyer_orders(&buyer_context)
+                .expect("buyer orders should reload");
+            assert_eq!(buyer_orders.rows.len(), 1);
+            let coordination = sqlite_store
+                .load_buyer_order_coordination_record(&buyer_context, order_id)
+                .expect("buyer order coordination should reload")
+                .expect("buyer order coordination should still exist");
+            assert_eq!(coordination.state, BuyerOrderCoordinationState::Synced);
+            assert_eq!(coordination.attempt_count, 2);
+            assert_eq!(coordination.last_error_message, None);
+        }
         assert!(
             !restarted_runtime
                 .retry_pending_personal_order_coordination()
                 .expect("synced buyer order recovery retry should be idempotent")
         );
         assert_eq!(
-            pending_order_sync_payloads(&restarted_runtime, buyer_account_id.as_str(), order_id)
-                .len(),
-            1
+            pending_order_sync_payloads(&restarted_runtime, buyer_account_id.as_str(), order_id),
+            vec![expected_order_sync_payload]
         );
 
         cleanup_bootstrapped_runtime_paths(&paths);
@@ -12584,6 +12492,138 @@ mod tests {
             })
             .map(|pending| pending.operation.payload_json)
             .collect()
+    }
+
+    fn app_buyer_order_local_work_record_ids(paths: &AppDesktopRuntimePaths) -> Vec<String> {
+        shared_local_event_records(paths)
+            .into_iter()
+            .filter(|record| {
+                record.source_runtime == SourceRuntime::App
+                    && record
+                        .local_work_json
+                        .as_ref()
+                        .and_then(|payload| payload["record_kind"].as_str())
+                        == Some(BUYER_ORDER_REQUEST_LOCAL_WORK_RECORD_KIND)
+            })
+            .map(|record| record.record_id)
+            .collect()
+    }
+
+    fn blocked_buyer_order_runtime(
+        label: &str,
+    ) -> (
+        DesktopAppRuntime,
+        AppDesktopRuntimePaths,
+        String,
+        OrderId,
+        FarmId,
+    ) {
+        let (runtime, paths) = bootstrapped_runtime(label);
+        assert!(
+            runtime
+                .generate_local_account(Some("Buyer".to_owned()))
+                .expect("account should generate")
+        );
+        let buyer_account_id = runtime
+            .summary()
+            .settings_account_projection
+            .selected_account
+            .as_ref()
+            .expect("selected account")
+            .account
+            .account_id
+            .clone();
+        assert!(
+            runtime
+                .select_active_surface(ActiveSurface::Personal)
+                .expect("surface should switch into marketplace")
+        );
+        let listing_key = "DDDDDDDDDDDDDDDDDDDDDD";
+        append_cli_signed_buyer_listing_record_with(
+            &paths,
+            "buyer-order-append-failure-listing",
+            listing_key,
+            "Buyer Visible Eggs",
+            1100,
+        );
+        let product_id =
+            deterministic_cli_listing_product_id(Some("buyer-visible-seller-pubkey"), listing_key);
+        assert!(
+            runtime
+                .open_personal_product_detail(PersonalSection::Browse, product_id)
+                .expect("buyer detail should import before lookup")
+        );
+        assert!(
+            runtime
+                .add_personal_product_to_cart(PersonalSection::Browse, false)
+                .expect("buyer product should add to cart")
+        );
+        assert!(
+            runtime
+                .save_personal_checkout_draft(BuyerCheckoutDraft {
+                    name: "Casey Buyer".to_owned(),
+                    email: "casey@example.com".to_owned(),
+                    phone: String::new(),
+                    order_note: String::new(),
+                })
+                .expect("buyer checkout draft should save")
+        );
+        block_shared_local_events_database(&paths);
+
+        let error = runtime
+            .place_personal_order()
+            .expect_err("blocked local events should fail order completion");
+
+        assert!(matches!(error, AppSqliteError::LocalEventsSql { .. }));
+        let summary = runtime.summary();
+        assert_eq!(
+            summary.shell_projection.selected_section,
+            ShellSection::Personal(PersonalSection::Orders)
+        );
+        assert!(summary.personal_projection.cart.cart.lines.is_empty());
+        assert!(!summary.personal_projection.cart.checkout.can_place_order);
+        assert_eq!(summary.personal_projection.orders.list.rows.len(), 1);
+        let visible_order_id = summary.personal_projection.orders.list.rows[0].order_id;
+        let order_detail = summary
+            .personal_projection
+            .orders
+            .detail
+            .as_ref()
+            .expect("buyer order detail should remain visible after coordination failure");
+        assert_eq!(order_detail.order_id, visible_order_id);
+        let order_farm_id = order_detail.farm_id;
+        {
+            let state = runtime.lock_state_mut();
+            let buyer_context = state.state_store.identity_projection().buyer_context();
+            let sqlite_store = state.sqlite_store.as_ref().expect("sqlite store");
+            let buyer_orders = sqlite_store
+                .load_buyer_orders(&buyer_context)
+                .expect("buyer order should persist after coordination failure");
+            assert_eq!(buyer_orders.rows.len(), 1);
+            let order_id = buyer_orders.rows[0].order_id;
+            assert_eq!(order_id, visible_order_id);
+            let coordination = sqlite_store
+                .load_buyer_order_coordination_record(&buyer_context, order_id)
+                .expect("buyer order coordination should load")
+                .expect("buyer order coordination should exist");
+            assert_eq!(coordination.state, BuyerOrderCoordinationState::Failed);
+            assert_eq!(coordination.attempt_count, 1);
+            assert!(coordination.record_id.is_some());
+            assert!(coordination.payload_json.is_some());
+            assert!(coordination.last_error_message.is_some());
+        }
+        assert!(
+            pending_order_sync_payloads(&runtime, buyer_account_id.as_str(), visible_order_id)
+                .is_empty()
+        );
+
+        (
+            runtime,
+            paths,
+            buyer_account_id,
+            visible_order_id,
+            order_farm_id,
+        )
     }
 
     fn block_shared_local_events_database(paths: &AppDesktopRuntimePaths) {
