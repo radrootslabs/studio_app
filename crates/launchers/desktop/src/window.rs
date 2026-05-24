@@ -303,6 +303,7 @@ enum HomeAutoFocusTarget {
 enum BuyerWorkspaceNotice {
     MarketplaceRefreshFailed,
     DetailOpenFailed,
+    OrderPlaceFailed,
 }
 
 impl BuyerWorkspaceNotice {
@@ -310,6 +311,7 @@ impl BuyerWorkspaceNotice {
         match self {
             Self::MarketplaceRefreshFailed => AppTextKey::PersonalMarketplaceRefreshFailedNotice,
             Self::DetailOpenFailed => AppTextKey::PersonalDetailOpenFailedNotice,
+            Self::OrderPlaceFailed => AppTextKey::PersonalOrderPlaceFailedNotice,
         }
     }
 
@@ -1542,12 +1544,19 @@ impl HomeView {
     }
 
     fn place_personal_order(&mut self, cx: &mut Context<Self>) {
+        if self.place_personal_order_update() {
+            cx.notify();
+        }
+    }
+
+    fn place_personal_order_update(&mut self) -> bool {
         match self.runtime.place_personal_order() {
             Ok(true) => {
                 self.buyer_checkout_form = None;
-                cx.notify();
+                let _ = self.clear_buyer_workspace_notice();
+                true
             }
-            Ok(false) => {}
+            Ok(false) => false,
             Err(runtime_error) => {
                 error!(
                     target: "buyer",
@@ -1555,6 +1564,7 @@ impl HomeView {
                     error = %runtime_error,
                     "failed to place buyer order"
                 );
+                self.set_buyer_workspace_notice(BuyerWorkspaceNotice::OrderPlaceFailed)
             }
         }
     }
@@ -13046,8 +13056,26 @@ mod tests {
             Some(app_text(AppTextKey::PersonalMarketplaceRefreshFailedNotice).as_str())
         );
         assert!(!view.set_buyer_workspace_notice(BuyerWorkspaceNotice::MarketplaceRefreshFailed));
+        assert!(view.set_buyer_workspace_notice(BuyerWorkspaceNotice::OrderPlaceFailed));
+        assert_eq!(
+            view.buyer_workspace_notice.as_deref(),
+            Some(app_text(AppTextKey::PersonalOrderPlaceFailedNotice).as_str())
+        );
         assert!(view.clear_buyer_workspace_notice());
         assert_eq!(view.buyer_workspace_notice, None);
+
+        let _ = fs::remove_dir_all(home_dir);
+    }
+
+    #[test]
+    fn buyer_order_place_failure_uses_typed_visible_notice() {
+        let (mut view, _, home_dir) = test_home_view("buyer_notice");
+
+        assert!(view.place_personal_order_update());
+        assert_eq!(
+            view.buyer_workspace_notice.as_deref(),
+            Some(app_text(AppTextKey::PersonalOrderPlaceFailedNotice).as_str())
+        );
 
         let _ = fs::remove_dir_all(home_dir);
     }

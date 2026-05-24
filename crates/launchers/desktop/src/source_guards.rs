@@ -380,6 +380,7 @@ const REQUIRED_WINDOW_COPY_KEYS: &[&str] = &[
     "AppTextKey::PersonalSearchPlaceholderBody",
     "AppTextKey::PersonalMarketplaceRefreshFailedNotice",
     "AppTextKey::PersonalDetailOpenFailedNotice",
+    "AppTextKey::PersonalOrderPlaceFailedNotice",
     "AppTextKey::PersonalCartPlaceholderBody",
     "AppTextKey::PersonalOrdersSurfaceBody",
     "AppTextKey::PersonalOrdersEmptyTitle",

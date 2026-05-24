@@ -23,6 +23,41 @@ pub enum BuyerRepeatDemandApplyOutcome {
     Unavailable,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct BuyerOrderLocalEventExport {
+    pub order_id: OrderId,
+    pub farm_id: FarmId,
+    pub farm_display_name: String,
+    pub order_number: String,
+    pub status: String,
+    pub buyer_context_key: String,
+    pub buyer_name: String,
+    pub buyer_email: String,
+    pub buyer_phone: String,
+    pub buyer_order_note: String,
+    pub updated_at: String,
+    pub fulfillment_window_id: Option<FulfillmentWindowId>,
+    pub fulfillment_window_label: Option<String>,
+    pub fulfillment_starts_at: Option<String>,
+    pub fulfillment_ends_at: Option<String>,
+    pub lines: Vec<BuyerOrderLocalEventLine>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct BuyerOrderLocalEventLine {
+    pub product_id: ProductId,
+    pub title: String,
+    pub quantity: u32,
+    pub quantity_unit_label: String,
+    pub quantity_display: String,
+    pub unit_price_minor_units: Option<u32>,
+    pub price_currency: String,
+    pub farm_key: Option<String>,
+    pub listing_addr: Option<String>,
+    pub listing_event_id: Option<String>,
+    pub seller_pubkey: Option<String>,
+}
+
 pub struct AppBuyerRepository<'a> {
     connection: &'a Connection,
 }
@@ -578,6 +613,109 @@ impl<'a> AppBuyerRepository<'a> {
             .transpose()
     }
 
+    pub fn load_buyer_order_local_event_export(
+        &self,
+        context: &BuyerContext,
+        order_id: OrderId,
+    ) -> Result<Option<BuyerOrderLocalEventExport>, AppSqliteError> {
+        let context_key = context.storage_key();
+        let Some(record) = self
+            .connection
+            .query_row(
+                "select
+                    o.id,
+                    o.farm_id,
+                    o.order_number,
+                    o.status,
+                    o.buyer_context_key,
+                    o.customer_display_name,
+                    o.buyer_email,
+                    o.buyer_phone,
+                    o.buyer_order_note,
+                    o.updated_at,
+                    f.display_name,
+                    fw.id,
+                    fw.label,
+                    fw.starts_at,
+                    fw.ends_at
+                 from orders o
+                 inner join farms f on f.id = o.farm_id
+                 left join fulfillment_windows fw on fw.id = o.fulfillment_window_id
+                 where o.buyer_context_key = ?1 and o.id = ?2
+                 limit 1",
+                params![context_key.as_str(), order_id.to_string()],
+                |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, String>(2)?,
+                        row.get::<_, String>(3)?,
+                        row.get::<_, Option<String>>(4)?,
+                        row.get::<_, String>(5)?,
+                        row.get::<_, String>(6)?,
+                        row.get::<_, String>(7)?,
+                        row.get::<_, String>(8)?,
+                        row.get::<_, String>(9)?,
+                        row.get::<_, String>(10)?,
+                        row.get::<_, Option<String>>(11)?,
+                        row.get::<_, Option<String>>(12)?,
+                        row.get::<_, Option<String>>(13)?,
+                        row.get::<_, Option<String>>(14)?,
+                    ))
+                },
+            )
+            .optional()
+            .map_err(|source| AppSqliteError::Query {
+                operation: "load buyer order local event export header",
+                source,
+            })?
+        else {
+            return Ok(None);
+        };
+        let (
+            order_id,
+            farm_id,
+            order_number,
+            status,
+            buyer_context_key,
+            buyer_name,
+            buyer_email,
+            buyer_phone,
+            buyer_order_note,
+            updated_at,
+            farm_display_name,
+            fulfillment_window_id,
+            fulfillment_window_label,
+            fulfillment_starts_at,
+            fulfillment_ends_at,
+        ) = record;
+        let order_id = parse_typed_id("orders.id", order_id)?;
+        let farm_id = parse_typed_id("orders.farm_id", farm_id)?;
+        let lines = self.load_buyer_order_local_event_lines(order_id)?;
+
+        Ok(Some(BuyerOrderLocalEventExport {
+            order_id,
+            farm_id,
+            farm_display_name,
+            order_number,
+            status,
+            buyer_context_key: buyer_context_key.unwrap_or_else(|| context_key.clone()),
+            buyer_name,
+            buyer_email,
+            buyer_phone,
+            buyer_order_note,
+            updated_at,
+            fulfillment_window_id: parse_optional_typed_id(
+                "orders.fulfillment_window_id",
+                fulfillment_window_id,
+            )?,
+            fulfillment_window_label: empty_string_to_none_option(fulfillment_window_label),
+            fulfillment_starts_at,
+            fulfillment_ends_at,
+            lines,
+        }))
+    }
+
     pub fn apply_buyer_repeat_demand_to_cart(
         &self,
         context: &BuyerContext,
@@ -1078,6 +1216,137 @@ impl<'a> AppBuyerRepository<'a> {
                 operation: "read buyer order detail items",
                 source,
             })
+    }
+
+    fn load_buyer_order_local_event_lines(
+        &self,
+        order_id: OrderId,
+    ) -> Result<Vec<BuyerOrderLocalEventLine>, AppSqliteError> {
+        let order_id_string = order_id.to_string();
+        let mut statement = self
+            .connection
+            .prepare(
+                "select
+                    ol.id,
+                    ol.title,
+                    ol.quantity_value,
+                    ol.quantity_unit_label,
+                    ol.quantity_display,
+                    p.price_minor_units,
+                    p.price_currency,
+                    (
+                        select li.farm_key
+                        from local_interop_imports li
+                        where li.projected_kind = 'listing'
+                           and li.projected_id = p.id
+                        order by li.local_seq desc
+                        limit 1
+                    ),
+                    (
+                        select li.listing_addr
+                        from local_interop_imports li
+                        where li.projected_kind = 'listing'
+                           and li.projected_id = p.id
+                           and li.listing_addr is not null
+                           and trim(li.listing_addr) <> ''
+                        order by li.local_seq desc
+                        limit 1
+                    ),
+                    (
+                        select li.event_id
+                        from local_interop_imports li
+                        where li.projected_kind = 'listing'
+                           and li.projected_id = p.id
+                           and li.event_id is not null
+                           and trim(li.event_id) <> ''
+                        order by li.local_seq desc
+                        limit 1
+                    ),
+                    (
+                        select li.owner_pubkey
+                        from local_interop_imports li
+                        where li.projected_kind = 'listing'
+                           and li.projected_id = p.id
+                           and li.owner_pubkey is not null
+                           and trim(li.owner_pubkey) <> ''
+                        order by li.local_seq desc
+                        limit 1
+                    )
+                 from order_lines ol
+                 left join products p on p.id = substr(ol.id, length(?1) + 2)
+                 where ol.order_id = ?1
+                 order by ol.sort_index asc, ol.id asc",
+            )
+            .map_err(|source| AppSqliteError::Query {
+                operation: "prepare buyer order local event lines",
+                source,
+            })?;
+        let rows = statement
+            .query_map(params![order_id_string.as_str()], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, i64>(2)?,
+                    row.get::<_, String>(3)?,
+                    row.get::<_, String>(4)?,
+                    row.get::<_, Option<u32>>(5)?,
+                    row.get::<_, Option<String>>(6)?,
+                    row.get::<_, Option<String>>(7)?,
+                    row.get::<_, Option<String>>(8)?,
+                    row.get::<_, Option<String>>(9)?,
+                    row.get::<_, Option<String>>(10)?,
+                ))
+            })
+            .map_err(|source| AppSqliteError::Query {
+                operation: "query buyer order local event lines",
+                source,
+            })?;
+        let mut lines = Vec::new();
+
+        for row in rows {
+            let (
+                line_id,
+                title,
+                quantity,
+                quantity_unit_label,
+                quantity_display,
+                unit_price_minor_units,
+                price_currency,
+                farm_key,
+                listing_addr,
+                listing_event_id,
+                seller_pubkey,
+            ) = row.map_err(|source| AppSqliteError::Query {
+                operation: "read buyer order local event line",
+                source,
+            })?;
+            let product_id = parse_order_line_product_id(line_id.as_str(), order_id)?;
+            let quantity =
+                u32::try_from(quantity).map_err(|_| AppSqliteError::InvalidProjection {
+                    reason: "buyer order local event quantity must be non-negative",
+                })?;
+            if quantity == 0 {
+                return Err(AppSqliteError::InvalidProjection {
+                    reason: "buyer order local event quantity must be positive",
+                });
+            }
+
+            lines.push(BuyerOrderLocalEventLine {
+                product_id,
+                title,
+                quantity,
+                quantity_unit_label,
+                quantity_display,
+                unit_price_minor_units,
+                price_currency: price_currency.unwrap_or_else(|| "USD".to_owned()),
+                farm_key: farm_key.and_then(empty_string_to_none),
+                listing_addr: listing_addr.and_then(empty_string_to_none),
+                listing_event_id: listing_event_id.and_then(empty_string_to_none),
+                seller_pubkey: seller_pubkey.and_then(empty_string_to_none),
+            });
+        }
+
+        Ok(lines)
     }
 
     fn load_repeat_demand_order_lines(
@@ -1604,6 +1873,21 @@ fn parse_repeat_demand_product_id(line_id: &str) -> Result<ProductId, AppSqliteE
     let Some((_, product_id)) = line_id.rsplit_once(':') else {
         return Err(AppSqliteError::InvalidProjection {
             reason: "repeat demand order line is missing a product id",
+        });
+    };
+
+    parse_typed_id("order_lines.id", product_id.to_owned())
+}
+
+fn parse_order_line_product_id(
+    line_id: &str,
+    order_id: OrderId,
+) -> Result<ProductId, AppSqliteError> {
+    let order_id = order_id.to_string();
+    let prefix = format!("{order_id}:");
+    let Some(product_id) = line_id.strip_prefix(prefix.as_str()) else {
+        return Err(AppSqliteError::InvalidProjection {
+            reason: "buyer order local event line is missing its order id prefix",
         });
     };
 

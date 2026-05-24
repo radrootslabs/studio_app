@@ -362,6 +362,10 @@ mod tests {
             app_text(AppTextKey::PersonalCheckoutLocalOnlyBody),
             "This places a local order on this device. It does not charge a card."
         );
+        assert_eq!(
+            app_text(AppTextKey::PersonalOrderPlaceFailedNotice),
+            "Couldn't place that order. Nothing was sent; check the order and try again."
+        );
     }
 
     #[test]

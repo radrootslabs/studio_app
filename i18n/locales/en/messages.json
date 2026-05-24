@@ -104,6 +104,7 @@
   "personal.search.placeholder.body": "Search will use the same marketplace listings and stay focused on products, farms, and pickup options.",
   "personal.marketplace.refresh_failed.notice": "Couldn't refresh marketplace listings. Your saved local state is still here; try again in a moment.",
   "personal.detail.open_failed.notice": "Couldn't open that listing. Refresh the marketplace and try again.",
+  "personal.order_place_failed.notice": "Couldn't place that order. Nothing was sent; check the order and try again.",
   "personal.cart.placeholder.body": "Add items from one farm to start an order.",
   "personal.orders.surface.body": "Review orders placed on this device.",
   "personal.orders.empty.title": "No orders yet",

@@ -34,8 +34,8 @@ use radroots_studio_app_remote_signer::{
 };
 use radroots_studio_app_sqlite::{
     APP_ACTIVITY_CONTEXT_LIMIT, AppLocalInteropImportReport, AppSqliteError, AppSqliteStore,
-    BuyerRepeatDemandApplyOutcome, DatabaseTarget, StoredPendingSyncOperation, StoredSyncConflict,
-    derive_farm_rules_readiness,
+    BuyerOrderLocalEventExport, BuyerOrderLocalEventLine, BuyerRepeatDemandApplyOutcome,
+    DatabaseTarget, StoredPendingSyncOperation, StoredSyncConflict, derive_farm_rules_readiness,
 };
 use radroots_studio_app_state::{
     APP_STATE_FILE_NAME, AppShellProjection, AppStateCommand, AppStatePersistenceRepository,
@@ -52,8 +52,11 @@ use radroots_studio_app_sync::{
     SyncOperationKind, SyncTrigger,
 };
 use radroots_local_events::{
-    LocalEventRecordInput, LocalEventsStore, LocalRecordFamily, LocalRecordStatus,
-    PublishOutboxStatus, SourceRuntime,
+    BUYER_ORDER_REQUEST_ACTOR_SOURCE_RESOLVED_ACCOUNT,
+    BUYER_ORDER_REQUEST_ACTOR_SOURCE_UNRESOLVED_APP, BUYER_ORDER_REQUEST_DOCUMENT_KIND,
+    BUYER_ORDER_REQUEST_LOCAL_WORK_RECORD_KIND, LocalEventRecordInput, LocalEventsStore,
+    LocalRecordFamily, LocalRecordStatus, PublishOutboxStatus, SourceRuntime,
+    buyer_order_request_local_work_record_id, validate_buyer_order_request_local_work_payload,
 };
 use radroots_nostr_accounts::prelude::RadrootsNostrAccountsManager;
 use radroots_sql_core::SqliteExecutor;
@@ -1407,6 +1410,14 @@ impl DesktopAppRuntimeState {
                 reason: "buyer order write did not surface in buyer order detail",
             });
         };
+        let Some(order_export) =
+            sqlite_store.load_buyer_order_local_event_export(&buyer_context, order_id)?
+        else {
+            return Err(AppSqliteError::InvalidProjection {
+                reason: "buyer order write did not surface in buyer order local event export",
+            });
+        };
+        self.append_app_buyer_order_request_local_work_record(&buyer_context, &order_export)?;
 
         let personal_changed = self.mutate_personal_projection(|projection| {
             let mut changed = false;
@@ -3538,6 +3549,69 @@ impl DesktopAppRuntimeState {
         Ok(true)
     }
 
+    fn append_app_buyer_order_request_local_work_record(
+        &self,
+        buyer_context: &BuyerContext,
+        order: &BuyerOrderLocalEventExport,
+    ) -> Result<bool, AppSqliteError> {
+        let Some(shared_accounts_paths) = self.shared_accounts_paths.as_ref() else {
+            return Ok(false);
+        };
+        let timestamp = current_runtime_time_ms()?;
+        let record_id = buyer_order_request_local_work_record_id(
+            order.order_id.to_string().as_str(),
+        )
+        .map_err(|source| AppSqliteError::LocalEvents {
+            operation: "build app buyer order request record id",
+            source,
+        })?;
+        let buyer_account = self.selected_buyer_account(buyer_context);
+        let owner_account_id = buyer_account.map(|account| account.account.account_id.clone());
+        let buyer_pubkey =
+            buyer_account.and_then(|account| self.local_events_owner_pubkey(account));
+        let export = AppBuyerOrderRequestExport::from_order(order, buyer_pubkey.as_deref())?;
+        let payload = buyer_order_request_local_work_payload(
+            order,
+            buyer_context,
+            &record_id,
+            &export,
+            timestamp,
+        );
+        validate_buyer_order_request_local_work_payload(&payload).map_err(|source| {
+            AppSqliteError::LocalEvents {
+                operation: "validate app buyer order request local work payload",
+                source,
+            }
+        })?;
+        let input = LocalEventRecordInput {
+            record_id,
+            family: LocalRecordFamily::LocalWork,
+            status: LocalRecordStatus::LocalSaved,
+            source_runtime: SourceRuntime::App,
+            created_at_ms: timestamp,
+            inserted_at_ms: timestamp,
+            owner_account_id,
+            owner_pubkey: buyer_pubkey,
+            farm_id: export.farm_key.clone(),
+            listing_addr: export.listing_addr.clone(),
+            local_work_json: Some(payload),
+            event_id: None,
+            event_kind: None,
+            event_pubkey: None,
+            event_created_at: None,
+            event_tags_json: None,
+            event_content: None,
+            event_sig: None,
+            raw_event_json: None,
+            outbox_status: PublishOutboxStatus::None,
+            relay_set_fingerprint: None,
+            relay_delivery_json: None,
+        };
+
+        self.append_app_local_work_record(shared_accounts_paths, &input)?;
+        Ok(true)
+    }
+
     fn append_app_local_work_record(
         &self,
         shared_accounts_paths: &AppSharedAccountsPaths,
@@ -3592,6 +3666,20 @@ impl DesktopAppRuntimeState {
             })
             .map(|record| record.public_identity.public_key_hex)
             .filter(|pubkey| is_hex_64(pubkey))
+    }
+
+    fn selected_buyer_account(
+        &self,
+        buyer_context: &BuyerContext,
+    ) -> Option<&radroots_studio_app_models::SelectedAccountProjection> {
+        let BuyerContext::Account(account_id) = buyer_context else {
+            return None;
+        };
+        self.state_store
+            .identity_projection()
+            .selected_account
+            .as_ref()
+            .filter(|account| account.account.account_id == *account_id)
     }
 
     fn refresh_selected_account_context_after_local_events(
@@ -3963,6 +4051,15 @@ fn decimal_from_minor_units(value: u32) -> String {
     format!("{}.{:02}", value / 100, value % 100)
 }
 
+fn normalize_currency_code(value: &str) -> String {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        "USD".to_owned()
+    } else {
+        trimmed.to_ascii_uppercase()
+    }
+}
+
 fn is_hex_64(value: &str) -> bool {
     value.len() == 64 && value.bytes().all(|byte| byte.is_ascii_hexdigit())
 }
@@ -3976,6 +4073,294 @@ fn local_work_exportability(owner_pubkey: Option<&str>) -> serde_json::Value {
             "state": "identity_unresolved",
             "reason": "canonical_hex_pubkey_required"
         }),
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct AppBuyerOrderRequestExport {
+    buyer_pubkey: Option<String>,
+    seller_pubkey: Option<String>,
+    listing_addr: Option<String>,
+    listing_event_id: Option<String>,
+    farm_key: Option<String>,
+    order_items: Vec<serde_json::Value>,
+    line_refs: Vec<serde_json::Value>,
+    economics: Option<serde_json::Value>,
+    support_issues: Vec<&'static str>,
+}
+
+impl AppBuyerOrderRequestExport {
+    fn from_order(
+        order: &BuyerOrderLocalEventExport,
+        buyer_pubkey: Option<&str>,
+    ) -> Result<Self, AppSqliteError> {
+        let mut support_issues = Vec::new();
+        if buyer_pubkey.is_none() {
+            support_issues.push("buyer_pubkey_required");
+        }
+        if order.lines.is_empty() {
+            support_issues.push("order_lines_required");
+        }
+        let listing_addr =
+            shared_optional_line_value(&order.lines, |line| line.listing_addr.as_deref());
+        let listing_event_id =
+            shared_optional_line_value(&order.lines, |line| line.listing_event_id.as_deref());
+        let seller_pubkey =
+            shared_optional_line_value(&order.lines, |line| line.seller_pubkey.as_deref());
+        let farm_key = shared_optional_line_value(&order.lines, |line| line.farm_key.as_deref())
+            .or_else(|| Some(d_tag_from_uuid(order.farm_id.as_uuid())));
+
+        if listing_addr.is_none() {
+            support_issues.push("single_listing_addr_required");
+        }
+        if listing_event_id.is_none() {
+            support_issues.push("listing_event_id_required");
+        }
+        if seller_pubkey.is_none() {
+            support_issues.push("seller_pubkey_required");
+        }
+
+        let mut order_items = Vec::with_capacity(order.lines.len());
+        let mut line_refs = Vec::with_capacity(order.lines.len());
+        for line in &order.lines {
+            order_items.push(json!({
+                "bin_id": "bin-1",
+                "bin_count": line.quantity,
+            }));
+            line_refs.push(json!({
+                "product_id": line.product_id.to_string(),
+                "title": line.title,
+                "quantity": {
+                    "count": line.quantity,
+                    "display": line.quantity_display,
+                    "unit_label": line.quantity_unit_label,
+                },
+                "listing_addr": line.listing_addr,
+                "listing_event_id": line.listing_event_id,
+                "seller_pubkey": line.seller_pubkey,
+                "farm_key": line.farm_key,
+            }));
+        }
+
+        let economics = order_economics_json(order, &mut support_issues)?;
+
+        Ok(Self {
+            buyer_pubkey: buyer_pubkey.map(str::to_owned),
+            seller_pubkey,
+            listing_addr,
+            listing_event_id,
+            farm_key,
+            order_items,
+            line_refs,
+            economics,
+            support_issues,
+        })
+    }
+
+    fn is_supported(&self) -> bool {
+        self.support_issues.is_empty()
+    }
+}
+
+fn buyer_order_request_local_work_payload(
+    order: &BuyerOrderLocalEventExport,
+    buyer_context: &BuyerContext,
+    record_id: &str,
+    export: &AppBuyerOrderRequestExport,
+    timestamp: i64,
+) -> serde_json::Value {
+    let buyer_account_id = match buyer_context {
+        BuyerContext::Account(account_id) => account_id.as_str(),
+        BuyerContext::Guest => "",
+    };
+    let buyer_actor_source = if export.buyer_pubkey.is_some() {
+        BUYER_ORDER_REQUEST_ACTOR_SOURCE_RESOLVED_ACCOUNT
+    } else {
+        BUYER_ORDER_REQUEST_ACTOR_SOURCE_UNRESOLVED_APP
+    };
+
+    json!({
+        "record_kind": BUYER_ORDER_REQUEST_LOCAL_WORK_RECORD_KIND,
+        "scope": "app",
+        "exportability": local_work_exportability(export.buyer_pubkey.as_deref()),
+        "support_status": {
+            "state": if export.is_supported() { "supported" } else { "unsupported" },
+            "issues": export.support_issues.clone(),
+        },
+        "currentness": {
+            "current": true,
+            "source": "app_sqlite_order",
+            "record_id": record_id,
+            "order_id": order.order_id.to_string(),
+            "order_updated_at": order.updated_at,
+            "created_at_ms": timestamp,
+        },
+        "no_payment": {
+            "payment_required": false,
+            "settlement_deferred": true,
+            "payment_state": "not_applicable",
+        },
+        "document": {
+            "version": 1,
+            "kind": BUYER_ORDER_REQUEST_DOCUMENT_KIND,
+            "order": {
+                "order_id": order.order_id.to_string(),
+                "listing_addr": export.listing_addr.as_deref().unwrap_or_default(),
+                "listing_event_id": export.listing_event_id.as_deref().unwrap_or_default(),
+                "buyer_pubkey": export.buyer_pubkey.as_deref().unwrap_or_default(),
+                "seller_pubkey": export.seller_pubkey.as_deref().unwrap_or_default(),
+                "items": export.order_items.clone(),
+                "economics": export.economics.clone(),
+            },
+            "buyer_actor": {
+                "account_id": buyer_account_id,
+                "pubkey": export.buyer_pubkey.as_deref().unwrap_or_default(),
+                "source": buyer_actor_source,
+            },
+            "listing_lookup": export.listing_addr.clone(),
+        },
+        "app_order": {
+            "order_id": order.order_id.to_string(),
+            "order_number": order.order_number,
+            "farm_id": order.farm_id.to_string(),
+            "farm_display_name": order.farm_display_name,
+            "farm_key": export.farm_key.clone(),
+            "status": order.status,
+            "buyer_context_key": order.buyer_context_key,
+            "buyer_name": order.buyer_name,
+            "buyer_email": order.buyer_email,
+            "buyer_phone": order.buyer_phone,
+            "buyer_order_note": order.buyer_order_note,
+            "fulfillment": {
+                "window_id": order.fulfillment_window_id.map(|id| id.to_string()),
+                "label": order.fulfillment_window_label,
+                "starts_at": order.fulfillment_starts_at,
+                "ends_at": order.fulfillment_ends_at,
+            },
+            "lines": export.line_refs.clone(),
+        },
+    })
+}
+
+fn order_economics_json(
+    order: &BuyerOrderLocalEventExport,
+    support_issues: &mut Vec<&'static str>,
+) -> Result<Option<serde_json::Value>, AppSqliteError> {
+    let mut economics_items = Vec::with_capacity(order.lines.len());
+    let mut subtotal_minor_units = 0_u32;
+    let mut currency = None::<String>;
+
+    for line in &order.lines {
+        let Some(quantity_unit) = canonical_quantity_unit(line.quantity_unit_label.as_str()) else {
+            support_issues.push("canonical_quantity_unit_required");
+            continue;
+        };
+        let Some(unit_price_minor_units) = line.unit_price_minor_units else {
+            support_issues.push("unit_price_required");
+            continue;
+        };
+        if unit_price_minor_units == 0 {
+            support_issues.push("positive_unit_price_required");
+            continue;
+        }
+        let line_currency = normalize_currency_code(line.price_currency.as_str());
+        if line_currency.len() != 3 || !line_currency.bytes().all(|byte| byte.is_ascii_uppercase())
+        {
+            support_issues.push("canonical_currency_required");
+            continue;
+        }
+        if let Some(existing_currency) = currency.as_deref() {
+            if existing_currency != line_currency {
+                support_issues.push("single_currency_required");
+                continue;
+            }
+        } else {
+            currency = Some(line_currency.clone());
+        }
+        let line_subtotal_minor_units = unit_price_minor_units.checked_mul(line.quantity).ok_or(
+            AppSqliteError::InvalidProjection {
+                reason: "buyer order local event line subtotal overflowed",
+            },
+        )?;
+        subtotal_minor_units = subtotal_minor_units
+            .checked_add(line_subtotal_minor_units)
+            .ok_or(AppSqliteError::InvalidProjection {
+                reason: "buyer order local event subtotal overflowed",
+            })?;
+        economics_items.push(json!({
+            "bin_id": "bin-1",
+            "bin_count": line.quantity,
+            "quantity_amount": line.quantity.to_string(),
+            "quantity_unit": quantity_unit,
+            "unit_price_amount": decimal_from_minor_units(unit_price_minor_units),
+            "unit_price_currency": line_currency,
+            "line_subtotal": {
+                "amount": decimal_from_minor_units(line_subtotal_minor_units),
+                "currency": line_currency,
+            },
+        }));
+    }
+
+    if economics_items.len() != order.lines.len() || economics_items.is_empty() {
+        return Ok(None);
+    }
+
+    let currency = currency.unwrap_or_else(|| "USD".to_owned());
+    let subtotal = json!({
+        "amount": decimal_from_minor_units(subtotal_minor_units),
+        "currency": currency,
+    });
+    Ok(Some(json!({
+        "quote_id": format!("app-order:{}", order.order_id),
+        "quote_version": 1,
+        "pricing_basis": "listing_event",
+        "currency": currency,
+        "items": economics_items,
+        "discounts": [],
+        "adjustments": [],
+        "subtotal": subtotal,
+        "discount_total": {
+            "amount": "0",
+            "currency": currency,
+        },
+        "adjustment_total": {
+            "amount": "0",
+            "currency": currency,
+        },
+        "total": subtotal,
+    })))
+}
+
+fn shared_optional_line_value(
+    lines: &[BuyerOrderLocalEventLine],
+    value: impl Fn(&BuyerOrderLocalEventLine) -> Option<&str>,
+) -> Option<String> {
+    let mut resolved = None::<String>;
+    for line in lines {
+        let Some(next) = value(line).map(str::trim).filter(|next| !next.is_empty()) else {
+            return None;
+        };
+        if let Some(existing) = resolved.as_deref() {
+            if existing != next {
+                return None;
+            }
+        } else {
+            resolved = Some(next.to_owned());
+        }
+    }
+    resolved
+}
+
+fn canonical_quantity_unit(unit_label: &str) -> Option<&'static str> {
+    match unit_label.trim().to_ascii_lowercase().as_str() {
+        "each" | "ea" | "count" => Some("each"),
+        "kg" | "kilogram" | "kilograms" => Some("kg"),
+        "g" | "gram" | "grams" => Some("g"),
+        "oz" | "ounce" | "ounces" => Some("oz"),
+        "lb" | "pound" | "pounds" => Some("lb"),
+        "l" | "liter" | "litre" | "liters" | "litres" => Some("l"),
+        "ml" | "milliliter" | "millilitre" | "milliliters" | "millilitres" => Some("ml"),
+        _ => None,
     }
 }
 
@@ -5307,8 +5692,8 @@ mod tests {
     };
     use radroots_identity::RadrootsIdentity;
     use radroots_local_events::{
-        LocalEventRecord, LocalEventRecordInput, LocalEventsStore, LocalRecordFamily,
-        LocalRecordStatus, PublishOutboxStatus, SourceRuntime,
+        BUYER_ORDER_REQUEST_LOCAL_WORK_RECORD_KIND, LocalEventRecord, LocalEventRecordInput,
+        LocalEventsStore, LocalRecordFamily, LocalRecordStatus, PublishOutboxStatus, SourceRuntime,
     };
     use radroots_nostr_accounts::prelude::{
         RadrootsNostrAccountsManager, RadrootsNostrFileAccountStore,
@@ -7993,6 +8378,213 @@ mod tests {
                 .as_deref(),
             Some("Leave by the cooler")
         );
+    }
+
+    #[test]
+    fn runtime_places_supported_buyer_order_into_shared_local_events() {
+        let (runtime, paths) = bootstrapped_runtime("buyer_order_local_event");
+        assert!(
+            runtime
+                .generate_local_account(Some("Buyer".to_owned()))
+                .expect("account should generate")
+        );
+        assert!(
+            runtime
+                .select_active_surface(ActiveSurface::Personal)
+                .expect("surface should switch into marketplace")
+        );
+        let buyer_account_id = runtime
+            .summary()
+            .settings_account_projection
+            .selected_account
+            .as_ref()
+            .expect("selected account")
+            .account
+            .account_id
+            .clone();
+        let listing_key = "DDDDDDDDDDDDDDDDDDDDDD";
+        append_cli_signed_buyer_listing_record_with(
+            &paths,
+            "buyer-order-supported-listing",
+            listing_key,
+            "Buyer Visible Eggs",
+            1100,
+        );
+        let product_id =
+            deterministic_cli_listing_product_id(Some("buyer-visible-seller-pubkey"), listing_key);
+
+        assert!(
+            runtime
+                .open_personal_product_detail(PersonalSection::Browse, product_id)
+                .expect("buyer detail should import before lookup")
+        );
+        assert!(
+            runtime
+                .add_personal_product_to_cart(PersonalSection::Browse, false)
+                .expect("buyer product should add to cart")
+        );
+        assert!(
+            runtime
+                .save_personal_checkout_draft(BuyerCheckoutDraft {
+                    name: "Casey Buyer".to_owned(),
+                    email: "casey@example.com".to_owned(),
+                    phone: "555-0101".to_owned(),
+                    order_note: "Leave by the cooler".to_owned(),
+                })
+                .expect("buyer checkout draft should save")
+        );
+        assert!(
+            runtime
+                .place_personal_order()
+                .expect("buyer order should place")
+        );
+        let order_id = runtime.summary().personal_projection.orders.list.rows[0].order_id;
+
+        {
+            let state = runtime.lock_state_mut();
+            let buyer_context = state.state_store.identity_projection().buyer_context();
+            let order_export = state
+                .sqlite_store
+                .as_ref()
+                .expect("sqlite store")
+                .load_buyer_order_local_event_export(&buyer_context, order_id)
+                .expect("order export should load")
+                .expect("order export should exist");
+            assert!(
+                state
+                    .append_app_buyer_order_request_local_work_record(&buyer_context, &order_export)
+                    .expect("order local event reappend should be idempotent")
+            );
+        }
+
+        let records = shared_local_event_records(&paths);
+        let order_records = records
+            .iter()
+            .filter(|record| {
+                record.source_runtime == SourceRuntime::App
+                    && record
+                        .local_work_json
+                        .as_ref()
+                        .and_then(|payload| payload["record_kind"].as_str())
+                        == Some(BUYER_ORDER_REQUEST_LOCAL_WORK_RECORD_KIND)
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(order_records.len(), 1);
+        let order_record = order_records[0];
+        assert_eq!(order_record.family, LocalRecordFamily::LocalWork);
+        assert_eq!(order_record.status, LocalRecordStatus::LocalSaved);
+        assert_eq!(order_record.outbox_status, PublishOutboxStatus::None);
+        assert_eq!(
+            order_record.record_id,
+            format!("app:local_work:order_request:{order_id}")
+        );
+        assert_eq!(
+            order_record.owner_account_id.as_deref(),
+            Some(buyer_account_id.as_str())
+        );
+        assert!(order_record.owner_pubkey.as_deref().is_some_and(is_hex_64));
+        assert_eq!(
+            order_record.listing_addr.as_deref(),
+            Some(format!("30402:buyer-visible-seller-pubkey:{listing_key}").as_str())
+        );
+        let payload = order_record
+            .local_work_json
+            .as_ref()
+            .expect("order local work payload");
+        assert_eq!(payload["support_status"]["state"], "supported");
+        assert_eq!(payload["no_payment"]["payment_required"], false);
+        assert_eq!(payload["no_payment"]["settlement_deferred"], true);
+        assert_eq!(payload["currentness"]["current"], true);
+        assert_eq!(payload["document"]["kind"], "order_draft_v1");
+        assert_eq!(
+            payload["document"]["order"]["order_id"],
+            order_id.to_string()
+        );
+        assert_eq!(
+            payload["document"]["order"]["listing_event_id"],
+            "event-cli:signed_event:buyer-order-supported-listing"
+        );
+        assert_eq!(
+            payload["document"]["order"]["seller_pubkey"],
+            "buyer-visible-seller-pubkey"
+        );
+        assert_eq!(payload["document"]["order"]["items"][0]["bin_id"], "bin-1");
+        assert_eq!(payload["document"]["order"]["items"][0]["bin_count"], 1);
+        assert_eq!(
+            payload["document"]["order"]["economics"]["pricing_basis"],
+            "listing_event"
+        );
+        assert_eq!(
+            payload["document"]["order"]["economics"]["total"]["amount"],
+            "8.00"
+        );
+        assert_eq!(
+            payload["app_order"]["buyer_order_note"],
+            "Leave by the cooler"
+        );
+
+        cleanup_bootstrapped_runtime_paths(&paths);
+    }
+
+    #[test]
+    fn runtime_buyer_order_shared_append_failure_blocks_visible_completion() {
+        let (runtime, paths) = bootstrapped_runtime("buyer_order_append_failure");
+        assert!(
+            runtime
+                .generate_local_account(Some("Buyer".to_owned()))
+                .expect("account should generate")
+        );
+        assert!(
+            runtime
+                .select_active_surface(ActiveSurface::Personal)
+                .expect("surface should switch into marketplace")
+        );
+        let listing_key = "DDDDDDDDDDDDDDDDDDDDDD";
+        append_cli_signed_buyer_listing_record_with(
+            &paths,
+            "buyer-order-append-failure-listing",
+            listing_key,
+            "Buyer Visible Eggs",
+            1100,
+        );
+        let product_id =
+            deterministic_cli_listing_product_id(Some("buyer-visible-seller-pubkey"), listing_key);
+        assert!(
+            runtime
+                .open_personal_product_detail(PersonalSection::Browse, product_id)
+                .expect("buyer detail should import before lookup")
+        );
+        assert!(
+            runtime
+                .add_personal_product_to_cart(PersonalSection::Browse, false)
+                .expect("buyer product should add to cart")
+        );
+        assert!(
+            runtime
+                .save_personal_checkout_draft(BuyerCheckoutDraft {
+                    name: "Casey Buyer".to_owned(),
+                    email: "casey@example.com".to_owned(),
+                    phone: String::new(),
+                    order_note: String::new(),
+                })
+                .expect("buyer checkout draft should save")
+        );
+        block_shared_local_events_database(&paths);
+
+        let error = runtime
+            .place_personal_order()
+            .expect_err("blocked local events should fail order completion");
+
+        assert!(matches!(error, AppSqliteError::LocalEventsSql { .. }));
+        let summary = runtime.summary();
+        assert_ne!(
+            summary.shell_projection.selected_section,
+            ShellSection::Personal(PersonalSection::Orders)
+        );
+        assert!(summary.personal_projection.orders.list.rows.is_empty());
+        assert!(summary.personal_projection.orders.detail.is_none());
+
+        cleanup_bootstrapped_runtime_paths(&paths);
     }
 
     #[test]
@@ -11449,6 +12041,22 @@ mod tests {
         store
             .list_records_after_seq(0, 100)
             .expect("shared local records should list")
+    }
+
+    fn block_shared_local_events_database(paths: &AppDesktopRuntimePaths) {
+        let database_path = paths
+            .shared_local_events_database_path()
+            .expect("shared local events path");
+        if let Some(parent) = database_path.parent() {
+            fs::create_dir_all(parent).expect("shared local events directory should create");
+        }
+        if database_path.is_file() {
+            fs::remove_file(&database_path).expect("shared local events file should remove");
+        } else if database_path.is_dir() {
+            fs::remove_dir_all(&database_path)
+                .expect("shared local events directory should remove");
+        }
+        fs::create_dir(&database_path).expect("blocking directory should create");
     }
 
     fn fixture_pending_session() -> RadrootsAppRemoteSignerPendingSession {
