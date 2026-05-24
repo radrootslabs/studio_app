@@ -1,6 +1,7 @@
 use std::{
     env,
     error::Error,
+    ffi::OsString,
     fmt,
     path::{Path, PathBuf},
 };
@@ -61,12 +62,20 @@ pub struct AppRuntimeHostEnvironment {
 
 impl AppRuntimeHostEnvironment {
     pub fn from_current_process() -> Self {
+        Self::from_env_reader(|name| env::var_os(name))
+    }
+
+    pub fn from_env_reader<F>(mut read_env: F) -> Self
+    where
+        F: FnMut(&str) -> Option<OsString>,
+    {
         Self {
-            home_dir: env::var_os("HOME").map(PathBuf::from),
-            appdata_dir: env::var_os("APPDATA").map(PathBuf::from),
-            localappdata_dir: env::var_os("LOCALAPPDATA").map(PathBuf::from),
-            paths_profile: env::var(APP_PATHS_PROFILE_ENV).ok(),
-            repo_local_root: env::var_os(APP_PATHS_REPO_LOCAL_ROOT_ENV).map(PathBuf::from),
+            home_dir: read_env("HOME").map(PathBuf::from),
+            appdata_dir: read_env("APPDATA").map(PathBuf::from),
+            localappdata_dir: read_env("LOCALAPPDATA").map(PathBuf::from),
+            paths_profile: read_env(APP_PATHS_PROFILE_ENV)
+                .and_then(|value| value.into_string().ok()),
+            repo_local_root: read_env(APP_PATHS_REPO_LOCAL_ROOT_ENV).map(PathBuf::from),
         }
     }
 }
@@ -298,11 +307,12 @@ impl Error for AppRuntimePathsError {}
 
 #[cfg(test)]
 mod tests {
-    use std::path::PathBuf;
+    use std::{collections::BTreeMap, ffi::OsString, path::PathBuf};
 
     use super::{
-        APP_RUNTIME_NAMESPACE, AppDesktopRuntimePaths, AppRuntimeHostEnvironment,
-        AppRuntimePathsError, AppRuntimePlatform, AppRuntimeRoots, SHARED_ACCOUNTS_NAMESPACE,
+        APP_PATHS_PROFILE_ENV, APP_PATHS_REPO_LOCAL_ROOT_ENV, APP_RUNTIME_NAMESPACE,
+        AppDesktopRuntimePaths, AppRuntimeHostEnvironment, AppRuntimePathsError,
+        AppRuntimePlatform, AppRuntimeRoots, SHARED_ACCOUNTS_NAMESPACE,
         SHARED_ACCOUNTS_STORE_FILE_NAME, SHARED_IDENTITIES_NAMESPACE, SHARED_IDENTITY_FILE_NAME,
     };
 
@@ -424,6 +434,27 @@ mod tests {
             paths.shared_identity.default_identity_path,
             PathBuf::from("/repo/infra/local/runtime/radroots/secrets/shared/identities")
                 .join(SHARED_IDENTITY_FILE_NAME)
+        );
+    }
+
+    #[test]
+    fn host_environment_can_resolve_from_env_reader() {
+        let env = BTreeMap::from([
+            (APP_PATHS_PROFILE_ENV, OsString::from("repo_local")),
+            (
+                APP_PATHS_REPO_LOCAL_ROOT_ENV,
+                OsString::from("/repo/infra/local/runtime/radroots"),
+            ),
+        ]);
+        let paths = AppDesktopRuntimePaths::for_desktop(
+            AppRuntimePlatform::Linux,
+            AppRuntimeHostEnvironment::from_env_reader(|name| env.get(name).cloned()),
+        )
+        .expect("repo-local env-backed roots should resolve");
+
+        assert_eq!(
+            paths.app.data,
+            PathBuf::from("/repo/infra/local/runtime/radroots/data/apps/app")
         );
     }
 
