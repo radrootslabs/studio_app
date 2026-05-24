@@ -1484,15 +1484,7 @@ impl DesktopAppRuntimeState {
             )?;
         }
         let pending_changed = if matches!(buyer_context, BuyerContext::Account(_)) {
-            self.enqueue_selected_account_sync_operations(vec![pending_sync_upsert(
-                SyncAggregateRef::Order(order_id),
-                order_sync_payload(
-                    order_id,
-                    order_detail.farm_id,
-                    "place_personal_order",
-                    Some("needs_action"),
-                ),
-            )])?
+            self.enqueue_selected_account_order_sync_operation(order_id, order_detail.farm_id)?
         } else {
             false
         };
@@ -1540,6 +1532,12 @@ impl DesktopAppRuntimeState {
                 )?
             };
             if order_changed {
+                if matches!(buyer_context, BuyerContext::Account(_)) {
+                    let _ = self.enqueue_selected_account_order_sync_operation(
+                        order_export.order_id,
+                        order_export.farm_id,
+                    )?;
+                }
                 refreshed_order_id.get_or_insert(record.order_id);
                 changed = true;
             }
@@ -3222,6 +3220,53 @@ impl DesktopAppRuntimeState {
         }
 
         self.refresh_selected_account_sync()
+    }
+
+    fn enqueue_selected_account_order_sync_operation(
+        &mut self,
+        order_id: OrderId,
+        farm_id: FarmId,
+    ) -> Result<bool, AppSqliteError> {
+        self.enqueue_selected_account_sync_operation_once(pending_sync_upsert(
+            SyncAggregateRef::Order(order_id),
+            order_sync_payload(
+                order_id,
+                farm_id,
+                "place_personal_order",
+                Some("needs_action"),
+            ),
+        ))
+    }
+
+    fn enqueue_selected_account_sync_operation_once(
+        &mut self,
+        operation: PendingSyncOperation,
+    ) -> Result<bool, AppSqliteError> {
+        let Some(account_id) = self
+            .state_store
+            .identity_projection()
+            .selected_account
+            .as_ref()
+            .map(|account| account.account.account_id.clone())
+        else {
+            return Ok(false);
+        };
+        let already_enqueued = {
+            let Some(sqlite_store) = self.sqlite_store.as_ref() else {
+                return Ok(false);
+            };
+            let existing = sqlite_store.load_pending_sync_operations(account_id.as_str())?;
+            existing.iter().any(|pending| {
+                pending.operation.aggregate == operation.aggregate
+                    && pending.operation.operation == operation.operation
+                    && pending.operation.payload_json == operation.payload_json
+            })
+        };
+        if already_enqueued {
+            return self.refresh_selected_account_sync();
+        }
+
+        self.enqueue_selected_account_sync_operations(vec![operation])
     }
 
     fn selected_account_id(&self) -> Result<String, DesktopAppRuntimeFarmSetupError> {
@@ -8658,6 +8703,23 @@ mod tests {
                 .expect("buyer order should place")
         );
         let order_id = runtime.summary().personal_projection.orders.list.rows[0].order_id;
+        let order_farm_id = runtime
+            .summary()
+            .personal_projection
+            .orders
+            .detail
+            .as_ref()
+            .expect("buyer order detail")
+            .farm_id;
+        assert_eq!(
+            pending_order_sync_payloads(&runtime, buyer_account_id.as_str(), order_id),
+            vec![super::order_sync_payload(
+                order_id,
+                order_farm_id,
+                "place_personal_order",
+                Some("needs_action")
+            )]
+        );
 
         {
             let state = runtime.lock_state_mut();
@@ -8790,6 +8852,15 @@ mod tests {
                 .generate_local_account(Some("Buyer".to_owned()))
                 .expect("account should generate")
         );
+        let buyer_account_id = runtime
+            .summary()
+            .settings_account_projection
+            .selected_account
+            .as_ref()
+            .expect("selected account")
+            .account
+            .account_id
+            .clone();
         assert!(
             runtime
                 .select_active_surface(ActiveSurface::Personal)
@@ -8840,8 +8911,15 @@ mod tests {
         assert!(summary.personal_projection.cart.cart.lines.is_empty());
         assert!(!summary.personal_projection.cart.checkout.can_place_order);
         assert_eq!(summary.personal_projection.orders.list.rows.len(), 1);
-        let order_id = {
+        let (order_id, order_farm_id) = {
             let visible_order_id = summary.personal_projection.orders.list.rows[0].order_id;
+            let order_farm_id = summary
+                .personal_projection
+                .orders
+                .detail
+                .as_ref()
+                .expect("buyer order detail should remain visible after coordination failure")
+                .farm_id;
             assert_eq!(
                 summary
                     .personal_projection
@@ -8870,8 +8948,17 @@ mod tests {
             assert!(coordination.record_id.is_some());
             assert!(coordination.payload_json.is_some());
             assert!(coordination.last_error_message.is_some());
-            order_id
+            (order_id, order_farm_id)
         };
+        assert!(
+            pending_order_sync_payloads(&runtime, buyer_account_id.as_str(), order_id).is_empty()
+        );
+        let expected_order_sync_payload = super::order_sync_payload(
+            order_id,
+            order_farm_id,
+            "place_personal_order",
+            Some("needs_action"),
+        );
         {
             let state = runtime.lock_state_mut();
             let sqlite_store = state.sqlite_store.as_ref().expect("sqlite store");
@@ -8890,6 +8977,10 @@ mod tests {
                 .expect("same-session buyer order recovery retry should sync")
         );
         let summary_after_retry = runtime.summary();
+        assert_eq!(
+            pending_order_sync_payloads(&runtime, buyer_account_id.as_str(), order_id),
+            vec![expected_order_sync_payload.clone()]
+        );
         assert_eq!(
             summary_after_retry
                 .personal_projection
@@ -8951,6 +9042,10 @@ mod tests {
                 .retry_pending_personal_order_coordination()
                 .expect("same-session synced buyer order recovery retry should be idempotent")
         );
+        assert_eq!(
+            pending_order_sync_payloads(&runtime, buyer_account_id.as_str(), order_id),
+            vec![expected_order_sync_payload]
+        );
         drop(runtime);
 
         let restarted_runtime = restart_runtime(paths.clone());
@@ -8986,6 +9081,11 @@ mod tests {
             !restarted_runtime
                 .retry_pending_personal_order_coordination()
                 .expect("synced buyer order recovery retry should be idempotent")
+        );
+        assert_eq!(
+            pending_order_sync_payloads(&restarted_runtime, buyer_account_id.as_str(), order_id)
+                .len(),
+            1
         );
 
         cleanup_bootstrapped_runtime_paths(&paths);
@@ -12463,6 +12563,27 @@ mod tests {
         store
             .list_records_after_seq(0, 100)
             .expect("shared local records should list")
+    }
+
+    fn pending_order_sync_payloads(
+        runtime: &DesktopAppRuntime,
+        account_id: &str,
+        order_id: OrderId,
+    ) -> Vec<String> {
+        runtime
+            .lock_state()
+            .sqlite_store
+            .as_ref()
+            .expect("sqlite store")
+            .load_pending_sync_operations(account_id)
+            .expect("pending sync operations should load")
+            .into_iter()
+            .filter(|pending| {
+                pending.operation.operation == SyncOperationKind::Upsert
+                    && matches!(pending.operation.aggregate, SyncAggregateRef::Order(id) if id == order_id)
+            })
+            .map(|pending| pending.operation.payload_json)
+            .collect()
     }
 
     fn block_shared_local_events_database(paths: &AppDesktopRuntimePaths) {
