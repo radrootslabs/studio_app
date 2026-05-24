@@ -381,6 +381,7 @@ const REQUIRED_WINDOW_COPY_KEYS: &[&str] = &[
     "AppTextKey::PersonalMarketplaceRefreshFailedNotice",
     "AppTextKey::PersonalDetailOpenFailedNotice",
     "AppTextKey::PersonalOrderPlaceFailedNotice",
+    "AppTextKey::PersonalOrderCoordinationFailedNotice",
     "AppTextKey::PersonalCartPlaceholderBody",
     "AppTextKey::PersonalOrdersSurfaceBody",
     "AppTextKey::PersonalOrdersEmptyTitle",

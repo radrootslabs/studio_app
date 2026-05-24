@@ -1400,42 +1400,54 @@ impl DesktopAppRuntimeState {
     }
 
     fn place_personal_order(&mut self) -> Result<bool, AppSqliteError> {
-        let Some(sqlite_store) = self.sqlite_store.as_ref() else {
-            return Ok(false);
-        };
         let buyer_context = self.state_store.identity_projection().buyer_context();
-        let order_id = sqlite_store.place_buyer_order(&buyer_context)?;
-        let refreshed_cart = sqlite_store.load_buyer_cart(&buyer_context)?;
-        let refreshed_checkout = sqlite_store.load_buyer_checkout(&buyer_context)?;
-        let refreshed_orders = sqlite_store.load_buyer_orders(&buyer_context)?;
-        if !refreshed_orders
-            .rows
-            .iter()
-            .any(|row| row.order_id == order_id)
-        {
-            return Err(AppSqliteError::InvalidProjection {
-                reason: "buyer order write did not surface in buyer order history",
-            });
-        }
-        let Some(order_detail) = sqlite_store.load_buyer_order_detail(&buyer_context, order_id)?
-        else {
-            return Err(AppSqliteError::InvalidProjection {
-                reason: "buyer order write did not surface in buyer order detail",
-            });
+        let (
+            order_id,
+            refreshed_cart,
+            refreshed_checkout,
+            refreshed_orders,
+            order_detail,
+            order_export,
+        ) = {
+            let Some(sqlite_store) = self.sqlite_store.as_ref() else {
+                return Ok(false);
+            };
+            let order_id = sqlite_store.place_buyer_order(&buyer_context)?;
+            let refreshed_cart = sqlite_store.load_buyer_cart(&buyer_context)?;
+            let refreshed_checkout = sqlite_store.load_buyer_checkout(&buyer_context)?;
+            let refreshed_orders = sqlite_store.load_buyer_orders(&buyer_context)?;
+            if !refreshed_orders
+                .rows
+                .iter()
+                .any(|row| row.order_id == order_id)
+            {
+                return Err(AppSqliteError::InvalidProjection {
+                    reason: "buyer order write did not surface in buyer order history",
+                });
+            }
+            let Some(order_detail) =
+                sqlite_store.load_buyer_order_detail(&buyer_context, order_id)?
+            else {
+                return Err(AppSqliteError::InvalidProjection {
+                    reason: "buyer order write did not surface in buyer order detail",
+                });
+            };
+            let Some(order_export) =
+                sqlite_store.load_buyer_order_local_event_export(&buyer_context, order_id)?
+            else {
+                return Err(AppSqliteError::InvalidProjection {
+                    reason: "buyer order write did not surface in buyer order local event export",
+                });
+            };
+            (
+                order_id,
+                refreshed_cart,
+                refreshed_checkout,
+                refreshed_orders,
+                order_detail,
+                order_export,
+            )
         };
-        let Some(order_export) =
-            sqlite_store.load_buyer_order_local_event_export(&buyer_context, order_id)?
-        else {
-            return Err(AppSqliteError::InvalidProjection {
-                reason: "buyer order write did not surface in buyer order local event export",
-            });
-        };
-        self.append_app_buyer_order_request_local_work_record(
-            sqlite_store,
-            &buyer_context,
-            &order_export,
-        )?;
-
         let personal_changed = self.mutate_personal_projection(|projection| {
             let mut changed = false;
             if projection.cart.cart != refreshed_cart {
@@ -1458,6 +1470,19 @@ impl DesktopAppRuntimeState {
             changed
         });
         let section_changed = self.select_personal_section(PersonalSection::Orders)?;
+        {
+            let sqlite_store =
+                self.sqlite_store
+                    .as_ref()
+                    .ok_or_else(|| AppSqliteError::InvalidProjection {
+                        reason: "sqlite store became unavailable during buyer order placement",
+                    })?;
+            self.append_app_buyer_order_request_local_work_record(
+                sqlite_store,
+                &buyer_context,
+                &order_export,
+            )?;
+        }
         let pending_changed = if matches!(buyer_context, BuyerContext::Account(_)) {
             self.enqueue_selected_account_sync_operations(vec![pending_sync_upsert(
                 SyncAggregateRef::Order(order_id),
@@ -8717,13 +8742,25 @@ mod tests {
 
         assert!(matches!(error, AppSqliteError::LocalEventsSql { .. }));
         let summary = runtime.summary();
-        assert_ne!(
+        assert_eq!(
             summary.shell_projection.selected_section,
             ShellSection::Personal(PersonalSection::Orders)
         );
-        assert!(summary.personal_projection.orders.list.rows.is_empty());
-        assert!(summary.personal_projection.orders.detail.is_none());
+        assert!(summary.personal_projection.cart.cart.lines.is_empty());
+        assert!(!summary.personal_projection.cart.checkout.can_place_order);
+        assert_eq!(summary.personal_projection.orders.list.rows.len(), 1);
         let order_id = {
+            let visible_order_id = summary.personal_projection.orders.list.rows[0].order_id;
+            assert_eq!(
+                summary
+                    .personal_projection
+                    .orders
+                    .detail
+                    .as_ref()
+                    .expect("buyer order detail should remain visible after coordination failure")
+                    .order_id,
+                visible_order_id
+            );
             let state = runtime.lock_state_mut();
             let buyer_context = state.state_store.identity_projection().buyer_context();
             let sqlite_store = state.sqlite_store.as_ref().expect("sqlite store");
@@ -8732,6 +8769,7 @@ mod tests {
                 .expect("buyer order should persist after coordination failure");
             assert_eq!(buyer_orders.rows.len(), 1);
             let order_id = buyer_orders.rows[0].order_id;
+            assert_eq!(order_id, visible_order_id);
             let coordination = sqlite_store
                 .load_buyer_order_coordination_record(&buyer_context, order_id)
                 .expect("buyer order coordination should load")

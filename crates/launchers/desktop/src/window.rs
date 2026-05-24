@@ -38,7 +38,7 @@ use radroots_studio_app_remote_signer::{
     radroots_studio_app_remote_signer_poll_pending_session_with_progress,
     radroots_studio_app_remote_signer_preview, radroots_studio_app_remote_signer_requested_permissions,
 };
-use radroots_studio_app_sqlite::derive_farm_rules_readiness;
+use radroots_studio_app_sqlite::{AppSqliteError, derive_farm_rules_readiness};
 use radroots_studio_app_state::{
     FarmSetupFlowStage, FarmWorkspaceStatus, HomeRoute, PackDayBatchPrintRequest,
     PackDayExportProjection, PackDayHostHandoffRequest, PackDayPrintRequest,
@@ -304,6 +304,7 @@ enum BuyerWorkspaceNotice {
     MarketplaceRefreshFailed,
     DetailOpenFailed,
     OrderPlaceFailed,
+    OrderCoordinationFailed,
 }
 
 impl BuyerWorkspaceNotice {
@@ -312,6 +313,7 @@ impl BuyerWorkspaceNotice {
             Self::MarketplaceRefreshFailed => AppTextKey::PersonalMarketplaceRefreshFailedNotice,
             Self::DetailOpenFailed => AppTextKey::PersonalDetailOpenFailedNotice,
             Self::OrderPlaceFailed => AppTextKey::PersonalOrderPlaceFailedNotice,
+            Self::OrderCoordinationFailed => AppTextKey::PersonalOrderCoordinationFailedNotice,
         }
     }
 
@@ -1558,13 +1560,17 @@ impl HomeView {
             }
             Ok(false) => false,
             Err(runtime_error) => {
+                let notice = buyer_order_place_failure_notice(&runtime_error);
+                if notice == BuyerWorkspaceNotice::OrderCoordinationFailed {
+                    self.buyer_checkout_form = None;
+                }
                 error!(
                     target: "buyer",
                     event = "buyer.checkout_place_failed",
                     error = %runtime_error,
                     "failed to place buyer order"
                 );
-                self.set_buyer_workspace_notice(BuyerWorkspaceNotice::OrderPlaceFailed)
+                self.set_buyer_workspace_notice(notice)
             }
         }
     }
@@ -12771,6 +12777,15 @@ fn home_empty_state_card(title_key: AppTextKey, body_key: AppTextKey) -> impl In
     )
 }
 
+fn buyer_order_place_failure_notice(error: &AppSqliteError) -> BuyerWorkspaceNotice {
+    match error {
+        AppSqliteError::LocalEventsSql { .. } | AppSqliteError::LocalEvents { .. } => {
+            BuyerWorkspaceNotice::OrderCoordinationFailed
+        }
+        _ => BuyerWorkspaceNotice::OrderPlaceFailed,
+    }
+}
+
 fn buyer_workspace_notice_card(notice: String) -> impl IntoElement {
     app_surface_card(home_body_text(notice))
 }
@@ -13060,6 +13075,11 @@ mod tests {
         assert_eq!(
             view.buyer_workspace_notice.as_deref(),
             Some(app_text(AppTextKey::PersonalOrderPlaceFailedNotice).as_str())
+        );
+        assert!(view.set_buyer_workspace_notice(BuyerWorkspaceNotice::OrderCoordinationFailed));
+        assert_eq!(
+            view.buyer_workspace_notice.as_deref(),
+            Some(app_text(AppTextKey::PersonalOrderCoordinationFailedNotice).as_str())
         );
         assert!(view.clear_buyer_workspace_notice());
         assert_eq!(view.buyer_workspace_notice, None);

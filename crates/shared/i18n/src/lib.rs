@@ -366,6 +366,10 @@ mod tests {
             app_text(AppTextKey::PersonalOrderPlaceFailedNotice),
             "Couldn't place that order. Nothing was sent; check the order and try again."
         );
+        assert_eq!(
+            app_text(AppTextKey::PersonalOrderCoordinationFailedNotice),
+            "Order saved locally. It still needs to be shared with your order tools; open Orders and try again."
+        );
     }
 
     #[test]
