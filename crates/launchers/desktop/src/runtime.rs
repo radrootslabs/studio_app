@@ -338,6 +338,11 @@ impl DesktopAppRuntime {
         self.lock_state_mut().place_personal_order()
     }
 
+    pub fn retry_pending_personal_order_coordination(&self) -> Result<bool, AppSqliteError> {
+        self.lock_state_mut()
+            .retry_pending_personal_order_coordination()
+    }
+
     pub fn open_personal_order_detail(&self, order_id: OrderId) -> Result<bool, AppSqliteError> {
         self.lock_state_mut().open_personal_order_detail(order_id)
     }
@@ -1016,6 +1021,14 @@ impl DesktopAppRuntimeState {
             startup_issue: None,
         };
         let _ = state.apply_selected_account_context(&selected_account_context);
+        if let Err(error) = state.retry_pending_personal_order_coordination() {
+            error!(
+                target: "buyer_order",
+                event = "buyer_order.coordination_bootstrap_retry_failed",
+                error = %error,
+                "failed to retry pending buyer order coordination during bootstrap"
+            );
+        }
 
         Ok(state)
     }
@@ -1417,7 +1430,11 @@ impl DesktopAppRuntimeState {
                 reason: "buyer order write did not surface in buyer order local event export",
             });
         };
-        self.append_app_buyer_order_request_local_work_record(&buyer_context, &order_export)?;
+        self.append_app_buyer_order_request_local_work_record(
+            sqlite_store,
+            &buyer_context,
+            &order_export,
+        )?;
 
         let personal_changed = self.mutate_personal_projection(|projection| {
             let mut changed = false;
@@ -1456,6 +1473,37 @@ impl DesktopAppRuntimeState {
         };
 
         Ok(personal_changed || section_changed || pending_changed)
+    }
+
+    fn retry_pending_personal_order_coordination(&mut self) -> Result<bool, AppSqliteError> {
+        let Some(sqlite_store) = self.sqlite_store.as_ref() else {
+            return Ok(false);
+        };
+        let buyer_context = self.state_store.identity_projection().buyer_context();
+        let records =
+            sqlite_store.load_recoverable_buyer_order_coordination_records(&buyer_context)?;
+        let mut changed = false;
+
+        for record in records {
+            let Some(order_export) = sqlite_store
+                .load_buyer_order_local_event_export(&buyer_context, record.order_id)?
+            else {
+                let _ = sqlite_store.mark_buyer_order_coordination_failed(
+                    &buyer_context,
+                    record.order_id,
+                    "buyer order local event export is unavailable",
+                )?;
+                continue;
+            };
+
+            changed |= self.append_app_buyer_order_request_local_work_record(
+                sqlite_store,
+                &buyer_context,
+                &order_export,
+            )?;
+        }
+
+        Ok(changed)
     }
 
     fn open_personal_order_detail(&mut self, order_id: OrderId) -> Result<bool, AppSqliteError> {
@@ -3551,12 +3599,16 @@ impl DesktopAppRuntimeState {
 
     fn append_app_buyer_order_request_local_work_record(
         &self,
+        sqlite_store: &AppSqliteStore,
         buyer_context: &BuyerContext,
         order: &BuyerOrderLocalEventExport,
     ) -> Result<bool, AppSqliteError> {
         let Some(shared_accounts_paths) = self.shared_accounts_paths.as_ref() else {
             return Ok(false);
         };
+        if sqlite_store.buyer_order_coordination_is_synced(buyer_context, order.order_id)? {
+            return Ok(true);
+        }
         let timestamp = current_runtime_time_ms()?;
         let record_id = buyer_order_request_local_work_record_id(
             order.order_id.to_string().as_str(),
@@ -3583,8 +3635,18 @@ impl DesktopAppRuntimeState {
                 source,
             }
         })?;
+        let payload_json =
+            serde_json::to_string(&payload).map_err(|_| AppSqliteError::InvalidProjection {
+                reason: "buyer order request local work payload must encode",
+            })?;
+        sqlite_store.prepare_buyer_order_coordination_attempt(
+            buyer_context,
+            order.order_id,
+            record_id.as_str(),
+            payload_json.as_str(),
+        )?;
         let input = LocalEventRecordInput {
-            record_id,
+            record_id: record_id.clone(),
             family: LocalRecordFamily::LocalWork,
             status: LocalRecordStatus::LocalSaved,
             source_runtime: SourceRuntime::App,
@@ -3608,7 +3670,16 @@ impl DesktopAppRuntimeState {
             relay_delivery_json: None,
         };
 
-        self.append_app_local_work_record(shared_accounts_paths, &input)?;
+        if let Err(error) = self.append_app_local_work_record(shared_accounts_paths, &input) {
+            let failure_message = error.to_string();
+            let _ = sqlite_store.mark_buyer_order_coordination_failed(
+                buyer_context,
+                order.order_id,
+                failure_message.as_str(),
+            );
+            return Err(error);
+        }
+        sqlite_store.mark_buyer_order_coordination_synced(buyer_context, order.order_id)?;
         Ok(true)
     }
 
@@ -5677,7 +5748,8 @@ mod tests {
         RadrootsAppRemoteSignerPendingSession, RadrootsAppRemoteSignerSessionRecord,
     };
     use radroots_studio_app_sqlite::{
-        AppSqliteError, AppSqliteStore, DatabaseTarget, latest_schema_version,
+        AppSqliteError, AppSqliteStore, BuyerOrderCoordinationState, DatabaseTarget,
+        latest_schema_version,
     };
     use radroots_studio_app_state::{
         APP_STATE_FILE_NAME, AppStateCommand, AppStatePersistenceRepository, AppStateRepository,
@@ -8444,6 +8516,7 @@ mod tests {
         {
             let state = runtime.lock_state_mut();
             let buyer_context = state.state_store.identity_projection().buyer_context();
+            let sqlite_store = state.sqlite_store.as_ref().expect("sqlite store");
             let order_export = state
                 .sqlite_store
                 .as_ref()
@@ -8451,11 +8524,32 @@ mod tests {
                 .load_buyer_order_local_event_export(&buyer_context, order_id)
                 .expect("order export should load")
                 .expect("order export should exist");
+            let coordination = sqlite_store
+                .load_buyer_order_coordination_record(&buyer_context, order_id)
+                .expect("order coordination should load")
+                .expect("order coordination should exist");
+            assert_eq!(coordination.state, BuyerOrderCoordinationState::Synced);
+            assert_eq!(
+                coordination.record_id.as_deref(),
+                Some(format!("app:local_work:order_request:{order_id}").as_str())
+            );
+            assert!(coordination.payload_json.is_some());
+            assert_eq!(coordination.attempt_count, 1);
+            assert_eq!(coordination.last_error_message, None);
             assert!(
                 state
-                    .append_app_buyer_order_request_local_work_record(&buyer_context, &order_export)
+                    .append_app_buyer_order_request_local_work_record(
+                        sqlite_store,
+                        &buyer_context,
+                        &order_export,
+                    )
                     .expect("order local event reappend should be idempotent")
             );
+            let coordination_after = sqlite_store
+                .load_buyer_order_coordination_record(&buyer_context, order_id)
+                .expect("order coordination should reload")
+                .expect("order coordination should still exist");
+            assert_eq!(coordination_after.attempt_count, 1);
         }
 
         let records = shared_local_event_records(&paths);
@@ -8532,7 +8626,7 @@ mod tests {
     }
 
     #[test]
-    fn runtime_buyer_order_shared_append_failure_blocks_visible_completion() {
+    fn runtime_buyer_order_shared_append_failure_is_recoverable_after_restart() {
         let (runtime, paths) = bootstrapped_runtime("buyer_order_append_failure");
         assert!(
             runtime
@@ -8588,6 +8682,63 @@ mod tests {
         );
         assert!(summary.personal_projection.orders.list.rows.is_empty());
         assert!(summary.personal_projection.orders.detail.is_none());
+        let order_id = {
+            let state = runtime.lock_state_mut();
+            let buyer_context = state.state_store.identity_projection().buyer_context();
+            let sqlite_store = state.sqlite_store.as_ref().expect("sqlite store");
+            let buyer_orders = sqlite_store
+                .load_buyer_orders(&buyer_context)
+                .expect("buyer order should persist after coordination failure");
+            assert_eq!(buyer_orders.rows.len(), 1);
+            let order_id = buyer_orders.rows[0].order_id;
+            let coordination = sqlite_store
+                .load_buyer_order_coordination_record(&buyer_context, order_id)
+                .expect("buyer order coordination should load")
+                .expect("buyer order coordination should exist");
+            assert_eq!(coordination.state, BuyerOrderCoordinationState::Failed);
+            assert_eq!(coordination.attempt_count, 1);
+            assert!(coordination.record_id.is_some());
+            assert!(coordination.payload_json.is_some());
+            assert!(coordination.last_error_message.is_some());
+            order_id
+        };
+        drop(runtime);
+        unblock_shared_local_events_database(&paths);
+
+        let restarted_runtime = restart_runtime(paths.clone());
+        let records = shared_local_event_records(&paths);
+        let order_records = records
+            .iter()
+            .filter(|record| {
+                record.source_runtime == SourceRuntime::App
+                    && record
+                        .local_work_json
+                        .as_ref()
+                        .and_then(|payload| payload["record_kind"].as_str())
+                        == Some(BUYER_ORDER_REQUEST_LOCAL_WORK_RECORD_KIND)
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(order_records.len(), 1);
+        assert_eq!(
+            order_records[0].record_id,
+            format!("app:local_work:order_request:{order_id}")
+        );
+        let state = restarted_runtime.lock_state_mut();
+        let buyer_context = state.state_store.identity_projection().buyer_context();
+        let sqlite_store = state.sqlite_store.as_ref().expect("sqlite store");
+        let coordination = sqlite_store
+            .load_buyer_order_coordination_record(&buyer_context, order_id)
+            .expect("buyer order coordination should reload")
+            .expect("buyer order coordination should still exist");
+        assert_eq!(coordination.state, BuyerOrderCoordinationState::Synced);
+        assert_eq!(coordination.attempt_count, 2);
+        assert_eq!(coordination.last_error_message, None);
+        drop(state);
+        assert!(
+            !restarted_runtime
+                .retry_pending_personal_order_coordination()
+                .expect("synced buyer order recovery retry should be idempotent")
+        );
 
         cleanup_bootstrapped_runtime_paths(&paths);
     }
@@ -12062,6 +12213,15 @@ mod tests {
                 .expect("shared local events directory should remove");
         }
         fs::create_dir(&database_path).expect("blocking directory should create");
+    }
+
+    fn unblock_shared_local_events_database(paths: &AppDesktopRuntimePaths) {
+        let database_path = paths
+            .shared_local_events_database_path()
+            .expect("shared local events path");
+        if database_path.is_dir() {
+            fs::remove_dir_all(&database_path).expect("blocking directory should remove");
+        }
     }
 
     fn fixture_pending_session() -> RadrootsAppRemoteSignerPendingSession {

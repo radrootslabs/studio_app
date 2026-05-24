@@ -56,6 +56,10 @@ const MIGRATIONS: &[Migration] = &[
         version: 13,
         sql: include_str!("../migrations/0013_local_interop_projection_cursor.sql"),
     },
+    Migration {
+        version: 14,
+        sql: include_str!("../migrations/0014_buyer_order_coordination.sql"),
+    },
 ];
 
 pub fn latest_schema_version() -> u32 {

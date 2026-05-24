@@ -58,6 +58,35 @@ pub struct BuyerOrderLocalEventLine {
     pub seller_pubkey: Option<String>,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum BuyerOrderCoordinationState {
+    Pending,
+    Synced,
+    Failed,
+}
+
+impl BuyerOrderCoordinationState {
+    fn from_storage_key(field: &'static str, value: String) -> Result<Self, AppSqliteError> {
+        match value.as_str() {
+            "pending" => Ok(Self::Pending),
+            "synced" => Ok(Self::Synced),
+            "failed" => Ok(Self::Failed),
+            _ => Err(AppSqliteError::DecodeEnum { field, value }),
+        }
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct BuyerOrderCoordinationRecord {
+    pub order_id: OrderId,
+    pub buyer_context_key: String,
+    pub record_id: Option<String>,
+    pub state: BuyerOrderCoordinationState,
+    pub payload_json: Option<String>,
+    pub attempt_count: u32,
+    pub last_error_message: Option<String>,
+}
+
 pub struct AppBuyerRepository<'a> {
     connection: &'a Connection,
 }
@@ -416,6 +445,7 @@ impl<'a> AppBuyerRepository<'a> {
                     operation: "reset buyer cart header after checkout",
                     source,
                 })?;
+            self.insert_pending_buyer_order_coordination(context_key.as_str(), order_id)?;
 
             Ok(order_id)
         })();
@@ -435,6 +465,222 @@ impl<'a> AppBuyerRepository<'a> {
                 Err(error)
             }
         }
+    }
+
+    pub fn load_buyer_order_coordination_record(
+        &self,
+        context: &BuyerContext,
+        order_id: OrderId,
+    ) -> Result<Option<BuyerOrderCoordinationRecord>, AppSqliteError> {
+        let context_key = context.storage_key();
+
+        self.connection
+            .query_row(
+                "select
+                    order_id,
+                    buyer_context_key,
+                    record_id,
+                    state,
+                    payload_json,
+                    attempt_count,
+                    last_error_message
+                 from buyer_order_coordination_records
+                 where buyer_context_key = ?1 and order_id = ?2
+                 limit 1",
+                params![context_key.as_str(), order_id.to_string()],
+                |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, Option<String>>(2)?,
+                        row.get::<_, String>(3)?,
+                        row.get::<_, Option<String>>(4)?,
+                        row.get::<_, i64>(5)?,
+                        row.get::<_, Option<String>>(6)?,
+                    ))
+                },
+            )
+            .optional()
+            .map_err(|source| AppSqliteError::Query {
+                operation: "load buyer order coordination record",
+                source,
+            })?
+            .map(buyer_order_coordination_record_from_row)
+            .transpose()
+    }
+
+    pub fn load_recoverable_buyer_order_coordination_records(
+        &self,
+        context: &BuyerContext,
+    ) -> Result<Vec<BuyerOrderCoordinationRecord>, AppSqliteError> {
+        let context_key = context.storage_key();
+        let mut statement = self
+            .connection
+            .prepare(
+                "select
+                    order_id,
+                    buyer_context_key,
+                    record_id,
+                    state,
+                    payload_json,
+                    attempt_count,
+                    last_error_message
+                 from buyer_order_coordination_records
+                 where buyer_context_key = ?1 and state in ('pending', 'failed')
+                 order by updated_at asc, order_id asc",
+            )
+            .map_err(|source| AppSqliteError::Query {
+                operation: "prepare recoverable buyer order coordination records",
+                source,
+            })?;
+        let rows = statement
+            .query_map(params![context_key.as_str()], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, Option<String>>(2)?,
+                    row.get::<_, String>(3)?,
+                    row.get::<_, Option<String>>(4)?,
+                    row.get::<_, i64>(5)?,
+                    row.get::<_, Option<String>>(6)?,
+                ))
+            })
+            .map_err(|source| AppSqliteError::Query {
+                operation: "query recoverable buyer order coordination records",
+                source,
+            })?;
+
+        rows.map(|row| {
+            buyer_order_coordination_record_from_row(row.map_err(|source| {
+                AppSqliteError::Query {
+                    operation: "read recoverable buyer order coordination record",
+                    source,
+                }
+            })?)
+        })
+        .collect()
+    }
+
+    pub fn buyer_order_coordination_is_synced(
+        &self,
+        context: &BuyerContext,
+        order_id: OrderId,
+    ) -> Result<bool, AppSqliteError> {
+        Ok(self
+            .load_buyer_order_coordination_record(context, order_id)?
+            .is_some_and(|record| record.state == BuyerOrderCoordinationState::Synced))
+    }
+
+    pub fn prepare_buyer_order_coordination_attempt(
+        &self,
+        context: &BuyerContext,
+        order_id: OrderId,
+        record_id: &str,
+        payload_json: &str,
+    ) -> Result<bool, AppSqliteError> {
+        let context_key = context.storage_key();
+        let changed = self
+            .connection
+            .execute(
+                "insert into buyer_order_coordination_records (
+                    order_id,
+                    buyer_context_key,
+                    record_id,
+                    state,
+                    payload_json,
+                    attempt_count,
+                    last_error_message,
+                    created_at,
+                    updated_at,
+                    synced_at
+                 ) values (
+                    ?1,
+                    ?2,
+                    ?3,
+                    'pending',
+                    ?4,
+                    1,
+                    null,
+                    strftime('%Y-%m-%dT%H:%M:%SZ', 'now'),
+                    strftime('%Y-%m-%dT%H:%M:%SZ', 'now'),
+                    null
+                 )
+                 on conflict(order_id) do update set
+                    record_id = excluded.record_id,
+                    state = 'pending',
+                    payload_json = excluded.payload_json,
+                    attempt_count = buyer_order_coordination_records.attempt_count + 1,
+                    last_error_message = null,
+                    updated_at = excluded.updated_at,
+                    synced_at = null
+                 where buyer_order_coordination_records.buyer_context_key = excluded.buyer_context_key
+                    and buyer_order_coordination_records.state <> 'synced'",
+                params![
+                    order_id.to_string(),
+                    context_key.as_str(),
+                    record_id,
+                    payload_json
+                ],
+            )
+            .map_err(|source| AppSqliteError::Query {
+                operation: "prepare buyer order coordination attempt",
+                source,
+            })?;
+
+        Ok(changed == 1)
+    }
+
+    pub fn mark_buyer_order_coordination_synced(
+        &self,
+        context: &BuyerContext,
+        order_id: OrderId,
+    ) -> Result<bool, AppSqliteError> {
+        let context_key = context.storage_key();
+        let changed = self
+            .connection
+            .execute(
+                "update buyer_order_coordination_records
+                 set
+                    state = 'synced',
+                    last_error_message = null,
+                    updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now'),
+                    synced_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now')
+                 where buyer_context_key = ?1 and order_id = ?2",
+                params![context_key.as_str(), order_id.to_string()],
+            )
+            .map_err(|source| AppSqliteError::Query {
+                operation: "mark buyer order coordination synced",
+                source,
+            })?;
+
+        Ok(changed == 1)
+    }
+
+    pub fn mark_buyer_order_coordination_failed(
+        &self,
+        context: &BuyerContext,
+        order_id: OrderId,
+        error_message: &str,
+    ) -> Result<bool, AppSqliteError> {
+        let context_key = context.storage_key();
+        let changed = self
+            .connection
+            .execute(
+                "update buyer_order_coordination_records
+                 set
+                    state = 'failed',
+                    last_error_message = ?3,
+                    updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now'),
+                    synced_at = null
+                 where buyer_context_key = ?1 and order_id = ?2",
+                params![context_key.as_str(), order_id.to_string(), error_message],
+            )
+            .map_err(|source| AppSqliteError::Query {
+                operation: "mark buyer order coordination failed",
+                source,
+            })?;
+
+        Ok(changed == 1)
     }
 
     pub fn load_buyer_orders(
@@ -837,6 +1083,38 @@ impl<'a> AppBuyerRepository<'a> {
                 operation: "load buyer current utc timestamp",
                 source,
             })
+    }
+
+    fn insert_pending_buyer_order_coordination(
+        &self,
+        context_key: &str,
+        order_id: OrderId,
+    ) -> Result<(), AppSqliteError> {
+        self.connection
+            .execute(
+                "insert into buyer_order_coordination_records (
+                    order_id,
+                    buyer_context_key,
+                    state,
+                    attempt_count,
+                    created_at,
+                    updated_at
+                 ) values (
+                    ?1,
+                    ?2,
+                    'pending',
+                    0,
+                    strftime('%Y-%m-%dT%H:%M:%SZ', 'now'),
+                    strftime('%Y-%m-%dT%H:%M:%SZ', 'now')
+                 )",
+                params![order_id.to_string(), context_key],
+            )
+            .map_err(|source| AppSqliteError::Query {
+                operation: "insert pending buyer order coordination record",
+                source,
+            })?;
+
+        Ok(())
     }
 
     fn load_listing_records(&self) -> Result<Vec<BuyerListingRecord>, AppSqliteError> {
@@ -2049,6 +2327,38 @@ where
         .map_err(|_| AppSqliteError::DecodeId { field, value })
 }
 
+fn buyer_order_coordination_record_from_row(
+    row: (
+        String,
+        String,
+        Option<String>,
+        String,
+        Option<String>,
+        i64,
+        Option<String>,
+    ),
+) -> Result<BuyerOrderCoordinationRecord, AppSqliteError> {
+    let (order_id, buyer_context_key, record_id, state, payload_json, attempt_count, last_error) =
+        row;
+    let attempt_count =
+        u32::try_from(attempt_count).map_err(|_| AppSqliteError::InvalidProjection {
+            reason: "buyer order coordination attempt count must be non-negative",
+        })?;
+
+    Ok(BuyerOrderCoordinationRecord {
+        order_id: parse_typed_id("buyer_order_coordination_records.order_id", order_id)?,
+        buyer_context_key,
+        record_id: record_id.and_then(empty_string_to_none),
+        state: BuyerOrderCoordinationState::from_storage_key(
+            "buyer_order_coordination_records.state",
+            state,
+        )?,
+        payload_json: payload_json.and_then(empty_string_to_none),
+        attempt_count,
+        last_error_message: last_error.and_then(empty_string_to_none),
+    })
+}
+
 fn parse_optional_typed_id<T>(
     field: &'static str,
     value: Option<String>,
@@ -2117,7 +2427,10 @@ mod tests {
     };
     use rusqlite::{Connection, params};
 
-    use crate::{AppSqliteError, AppSqliteStore, BuyerRepeatDemandApplyOutcome, DatabaseTarget};
+    use crate::{
+        AppSqliteError, AppSqliteStore, BuyerOrderCoordinationState, BuyerRepeatDemandApplyOutcome,
+        DatabaseTarget,
+    };
 
     use super::AppBuyerRepository;
 
@@ -2290,6 +2603,10 @@ mod tests {
         let cart_after_checkout = repository
             .load_buyer_cart(&context)
             .expect("buyer cart should load after checkout");
+        let coordination = repository
+            .load_buyer_order_coordination_record(&context, order_id)
+            .expect("buyer order coordination should load")
+            .expect("buyer order coordination should exist");
 
         assert!(checkout.can_place_order);
         assert_eq!(checkout.summary.line_count, 1);
@@ -2322,6 +2639,13 @@ mod tests {
                 "Leave by the cooler".to_owned(),
             )
         );
+        assert_eq!(coordination.order_id, order_id);
+        assert_eq!(coordination.buyer_context_key, "guest");
+        assert_eq!(coordination.state, BuyerOrderCoordinationState::Pending);
+        assert_eq!(coordination.record_id, None);
+        assert_eq!(coordination.payload_json, None);
+        assert_eq!(coordination.attempt_count, 0);
+        assert_eq!(coordination.last_error_message, None);
         assert_eq!(row_count(connection, "local_outbox"), 0);
         assert_eq!(row_count(connection, "local_conflicts"), 0);
         assert_eq!(row_count(connection, "sync_checkpoints"), 0);

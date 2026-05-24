@@ -38,8 +38,8 @@ pub use activity::{
     APP_ACTIVITY_CONTEXT_LIMIT, APP_ACTIVITY_RETENTION_LIMIT, AppActivityRepository,
 };
 pub use buyer::{
-    AppBuyerRepository, BuyerOrderLocalEventExport, BuyerOrderLocalEventLine,
-    BuyerRepeatDemandApplyOutcome,
+    AppBuyerRepository, BuyerOrderCoordinationRecord, BuyerOrderCoordinationState,
+    BuyerOrderLocalEventExport, BuyerOrderLocalEventLine, BuyerRepeatDemandApplyOutcome,
 };
 pub use error::AppSqliteError;
 pub use farm_rules::{AppFarmRulesRepository, derive_farm_rules_readiness};
@@ -468,6 +468,62 @@ impl AppSqliteStore {
             .load_buyer_order_local_event_export(context, order_id)
     }
 
+    pub fn load_buyer_order_coordination_record(
+        &self,
+        context: &BuyerContext,
+        order_id: OrderId,
+    ) -> Result<Option<BuyerOrderCoordinationRecord>, AppSqliteError> {
+        self.buyer_repository()
+            .load_buyer_order_coordination_record(context, order_id)
+    }
+
+    pub fn load_recoverable_buyer_order_coordination_records(
+        &self,
+        context: &BuyerContext,
+    ) -> Result<Vec<BuyerOrderCoordinationRecord>, AppSqliteError> {
+        self.buyer_repository()
+            .load_recoverable_buyer_order_coordination_records(context)
+    }
+
+    pub fn buyer_order_coordination_is_synced(
+        &self,
+        context: &BuyerContext,
+        order_id: OrderId,
+    ) -> Result<bool, AppSqliteError> {
+        self.buyer_repository()
+            .buyer_order_coordination_is_synced(context, order_id)
+    }
+
+    pub fn prepare_buyer_order_coordination_attempt(
+        &self,
+        context: &BuyerContext,
+        order_id: OrderId,
+        record_id: &str,
+        payload_json: &str,
+    ) -> Result<bool, AppSqliteError> {
+        self.buyer_repository()
+            .prepare_buyer_order_coordination_attempt(context, order_id, record_id, payload_json)
+    }
+
+    pub fn mark_buyer_order_coordination_synced(
+        &self,
+        context: &BuyerContext,
+        order_id: OrderId,
+    ) -> Result<bool, AppSqliteError> {
+        self.buyer_repository()
+            .mark_buyer_order_coordination_synced(context, order_id)
+    }
+
+    pub fn mark_buyer_order_coordination_failed(
+        &self,
+        context: &BuyerContext,
+        order_id: OrderId,
+        error_message: &str,
+    ) -> Result<bool, AppSqliteError> {
+        self.buyer_repository()
+            .mark_buyer_order_coordination_failed(context, order_id, error_message)
+    }
+
     pub fn apply_buyer_repeat_demand_to_cart(
         &self,
         context: &BuyerContext,
@@ -711,6 +767,7 @@ mod tests {
         assert!(table_exists(connection, "reminder_schedules"));
         assert!(table_exists(connection, "reminder_log_entries"));
         assert!(table_exists(connection, "order_recovery_records"));
+        assert!(table_exists(connection, "buyer_order_coordination_records"));
         assert!(column_exists(connection, "farms", "timezone"));
         assert!(column_exists(connection, "farms", "currency_code"));
         assert!(column_exists(connection, "local_outbox", "account_id"));
@@ -767,6 +824,21 @@ mod tests {
             connection,
             "order_recovery_records",
             "recovery_kind"
+        ));
+        assert!(column_exists(
+            connection,
+            "buyer_order_coordination_records",
+            "state"
+        ));
+        assert!(column_exists(
+            connection,
+            "buyer_order_coordination_records",
+            "payload_json"
+        ));
+        assert!(column_exists(
+            connection,
+            "buyer_order_coordination_records",
+            "last_error_message"
         ));
         assert!(column_exists(
             connection,
