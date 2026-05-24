@@ -4290,7 +4290,7 @@ fn order_economics_json(
         economics_items.push(json!({
             "bin_id": "bin-1",
             "bin_count": line.quantity,
-            "quantity_amount": line.quantity.to_string(),
+            "quantity_amount": "1",
             "quantity_unit": quantity_unit,
             "unit_price_amount": decimal_from_minor_units(unit_price_minor_units),
             "unit_price_currency": line_currency,
@@ -8418,6 +8418,7 @@ mod tests {
                 .open_personal_product_detail(PersonalSection::Browse, product_id)
                 .expect("buyer detail should import before lookup")
         );
+        assert!(runtime.increase_personal_product_quantity(PersonalSection::Browse));
         assert!(
             runtime
                 .add_personal_product_to_cart(PersonalSection::Browse, false)
@@ -8509,14 +8510,18 @@ mod tests {
             "buyer-visible-seller-pubkey"
         );
         assert_eq!(payload["document"]["order"]["items"][0]["bin_id"], "bin-1");
-        assert_eq!(payload["document"]["order"]["items"][0]["bin_count"], 1);
+        assert_eq!(payload["document"]["order"]["items"][0]["bin_count"], 2);
+        assert_eq!(
+            payload["document"]["order"]["economics"]["items"][0]["quantity_amount"],
+            "1"
+        );
         assert_eq!(
             payload["document"]["order"]["economics"]["pricing_basis"],
             "listing_event"
         );
         assert_eq!(
             payload["document"]["order"]["economics"]["total"]["amount"],
-            "8.00"
+            "16.00"
         );
         assert_eq!(
             payload["app_order"]["buyer_order_note"],
