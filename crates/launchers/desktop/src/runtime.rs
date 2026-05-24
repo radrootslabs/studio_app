@@ -1492,7 +1492,7 @@ impl DesktopAppRuntimeState {
     fn set_personal_search_query(&mut self, search_query: &str) -> Result<bool, AppSqliteError> {
         let query = self.state_store.personal_projection().search.query.clone();
         if query.search_query == search_query {
-            return Ok(false);
+            return self.replace_personal_search_query(query);
         }
 
         self.replace_personal_search_query(BuyerSearchScreenQueryState::new(
@@ -5834,6 +5834,71 @@ mod tests {
         assert_eq!(
             summary.personal_projection.search.listings.rows[0].fulfillment_methods,
             BTreeSet::from([FarmOrderMethod::Pickup])
+        );
+
+        cleanup_bootstrapped_runtime_paths(&paths);
+    }
+
+    #[test]
+    fn runtime_buyer_search_repeated_query_refreshes_shared_local_events() {
+        let (runtime, paths) =
+            bootstrapped_runtime("buyer_search_same_query_shared_local_events_refresh");
+        assert!(
+            runtime
+                .generate_local_account(Some("Buyer".to_owned()))
+                .expect("account should generate")
+        );
+
+        append_cli_signed_buyer_listing_record_with(
+            &paths,
+            "first-buyer-visible-listing",
+            "DDDDDDDDDDDDDDDDDDDDDD",
+            "Buyer Visible Eggs",
+            1100,
+        );
+
+        assert!(
+            runtime
+                .set_personal_search_query("eggs")
+                .expect("buyer search query should refresh")
+        );
+        let first_summary = runtime.summary();
+        assert_eq!(
+            first_summary.personal_projection.search.listings.rows.len(),
+            1
+        );
+
+        append_cli_signed_buyer_listing_record_with(
+            &paths,
+            "second-buyer-visible-listing",
+            "EEEEEEEEEEEEEEEEEEEEEE",
+            "Buyer Visible Eggs Two",
+            1200,
+        );
+
+        assert!(
+            runtime
+                .set_personal_search_query("eggs")
+                .expect("same buyer search query should refresh")
+        );
+        let refreshed_summary = runtime.summary();
+        let titles = refreshed_summary
+            .personal_projection
+            .search
+            .listings
+            .rows
+            .iter()
+            .map(|row| row.title.as_str())
+            .collect::<BTreeSet<_>>();
+        assert_eq!(
+            titles,
+            BTreeSet::from(["Buyer Visible Eggs", "Buyer Visible Eggs Two"])
+        );
+
+        assert!(
+            !runtime
+                .set_personal_search_query("eggs")
+                .expect("idempotent same buyer search query should refresh")
         );
 
         cleanup_bootstrapped_runtime_paths(&paths);
@@ -11032,6 +11097,22 @@ mod tests {
     }
 
     fn append_cli_signed_buyer_listing_record(paths: &AppDesktopRuntimePaths) {
+        append_cli_signed_buyer_listing_record_with(
+            paths,
+            "buyer-visible-listing",
+            "DDDDDDDDDDDDDDDDDDDDDD",
+            "Buyer Visible Eggs",
+            1100,
+        );
+    }
+
+    fn append_cli_signed_buyer_listing_record_with(
+        paths: &AppDesktopRuntimePaths,
+        record_suffix: &str,
+        listing_key: &str,
+        title: &str,
+        created_at_ms: i64,
+    ) {
         let database_path =
             super::shared_local_events_database_path(paths).expect("shared local events path");
         if let Some(parent) = database_path.parent() {
@@ -11042,9 +11123,8 @@ mod tests {
         let store = LocalEventsStore::new(executor);
         store.migrate_up().expect("migrate shared local events");
         let farm_key = "CCCCCCCCCCCCCCCCCCCCCC";
-        let listing_key = "DDDDDDDDDDDDDDDDDDDDDD";
         let owner_pubkey = "buyer-visible-seller-pubkey";
-        let record_id = "cli:signed_event:buyer-visible-listing";
+        let record_id = format!("cli:signed_event:{record_suffix}");
         let content = json!({
             "d_tag": listing_key,
             "status": "active",
@@ -11054,7 +11134,7 @@ mod tests {
             },
             "product": {
                 "key": listing_key,
-                "title": "Buyer Visible Eggs",
+                "title": title,
                 "summary": "Published local eggs"
             },
             "availability": {
@@ -11077,8 +11157,8 @@ mod tests {
                 family: LocalRecordFamily::SignedEvent,
                 status: LocalRecordStatus::Published,
                 source_runtime: SourceRuntime::Cli,
-                created_at_ms: 1100,
-                inserted_at_ms: 1101,
+                created_at_ms,
+                inserted_at_ms: created_at_ms + 1,
                 owner_account_id: Some("seller-account".to_owned()),
                 owner_pubkey: Some(owner_pubkey.to_owned()),
                 farm_id: Some(farm_key.to_owned()),
@@ -11087,12 +11167,12 @@ mod tests {
                 event_id: Some(format!("event-{record_id}")),
                 event_kind: Some(30402),
                 event_pubkey: Some(owner_pubkey.to_owned()),
-                event_created_at: Some(1100),
+                event_created_at: Some(created_at_ms),
                 event_tags_json: Some(json!([
                     ["d", listing_key],
                     ["a", format!("30340:{owner_pubkey}:{farm_key}")],
                     ["key", listing_key],
-                    ["title", "Buyer Visible Eggs"],
+                    ["title", title],
                     ["summary", "Published local eggs"],
                     ["radroots:bin", "bin-1", "1", "each"],
                     ["radroots:price", "bin-1", "8", "USD", "1", "each"],
