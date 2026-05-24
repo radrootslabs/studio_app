@@ -9,7 +9,8 @@ use chrono::{Duration, Utc};
 use radroots_studio_app_core::{
     AppBuildIdentity, AppDesktopRuntimePaths, AppRuntimeCapture, AppRuntimeMode,
     AppRuntimePathsError, AppRuntimeSnapshot, AppSharedAccountsPaths, PackDayExportWriteError,
-    prepare_pack_day_export_bundle_at_data_root, write_prepared_pack_day_export_bundle,
+    prepare_pack_day_export_bundle_at_data_root,
+    shared_local_events_database_path_from_shared_accounts, write_prepared_pack_day_export_bundle,
 };
 use radroots_studio_app_models::{
     ActiveSurface, AppActivityContext, AppActivityKind, AppIdentityProjection, AppStartupGate,
@@ -83,8 +84,6 @@ use crate::remote_signer::{
 };
 
 const APP_DATABASE_FILE_NAME: &str = "app.sqlite3";
-const SHARED_LOCAL_EVENTS_DIR: &str = "local_events";
-const SHARED_LOCAL_EVENTS_DB_FILE_NAME: &str = "local_events.sqlite";
 const SYNC_TRANSPORT_UNAVAILABLE_MESSAGE: &str = "remote sync transport is not configured";
 
 #[derive(Debug, Default)]
@@ -955,7 +954,7 @@ impl DesktopAppRuntimeState {
         }
         let database_path = paths.app.data.join(APP_DATABASE_FILE_NAME);
         let sqlite_store = AppSqliteStore::open(DatabaseTarget::Path(database_path.clone()))?;
-        let shared_local_events_database_path = shared_local_events_database_path(&paths)?;
+        let shared_local_events_database_path = paths.shared_local_events_database_path()?;
         let _ = sqlite_store
             .import_shared_local_events_from_path(shared_local_events_database_path.as_path())?;
         let database_schema_version = sqlite_store.schema_version()?;
@@ -3917,35 +3916,6 @@ enum DesktopAppRuntimeBootstrapError {
     Sqlite(#[from] AppSqliteError),
     #[error(transparent)]
     State(#[from] AppStateStoreError),
-    #[error("desktop app data root must be nested under the Radroots data root")]
-    SharedLocalEventsPath,
-}
-
-fn shared_local_events_database_path(
-    paths: &AppDesktopRuntimePaths,
-) -> Result<PathBuf, DesktopAppRuntimeBootstrapError> {
-    let data_root = paths
-        .app
-        .data
-        .parent()
-        .and_then(|apps_root| apps_root.parent())
-        .ok_or(DesktopAppRuntimeBootstrapError::SharedLocalEventsPath)?;
-    Ok(data_root
-        .join("shared")
-        .join(SHARED_LOCAL_EVENTS_DIR)
-        .join(SHARED_LOCAL_EVENTS_DB_FILE_NAME))
-}
-
-fn shared_local_events_database_path_from_shared_accounts(
-    paths: &AppSharedAccountsPaths,
-) -> Option<PathBuf> {
-    Some(
-        paths
-            .data_root
-            .parent()?
-            .join(SHARED_LOCAL_EVENTS_DIR)
-            .join(SHARED_LOCAL_EVENTS_DB_FILE_NAME),
-    )
 }
 
 fn current_runtime_time_ms() -> Result<i64, AppSqliteError> {
@@ -6066,8 +6036,9 @@ mod tests {
                 .generate_local_account(Some("Buyer".to_owned()))
                 .expect("account should generate")
         );
-        let database_path =
-            super::shared_local_events_database_path(&paths).expect("shared local events path");
+        let database_path = paths
+            .shared_local_events_database_path()
+            .expect("shared local events path");
         if let Some(parent) = database_path.parent() {
             fs::create_dir_all(parent).expect("shared local events parent directory");
         }
@@ -11180,8 +11151,9 @@ mod tests {
     }
 
     fn append_cli_local_listing_records(paths: &AppDesktopRuntimePaths, account_id: &str) {
-        let database_path =
-            super::shared_local_events_database_path(paths).expect("shared local events path");
+        let database_path = paths
+            .shared_local_events_database_path()
+            .expect("shared local events path");
         if let Some(parent) = database_path.parent() {
             fs::create_dir_all(parent).expect("shared local events directory should create");
         }
@@ -11278,8 +11250,9 @@ mod tests {
         title: &str,
         created_at_ms: i64,
     ) {
-        let database_path =
-            super::shared_local_events_database_path(paths).expect("shared local events path");
+        let database_path = paths
+            .shared_local_events_database_path()
+            .expect("shared local events path");
         if let Some(parent) = database_path.parent() {
             fs::create_dir_all(parent).expect("shared local events directory should create");
         }
@@ -11467,8 +11440,9 @@ mod tests {
     }
 
     fn shared_local_event_records(paths: &AppDesktopRuntimePaths) -> Vec<LocalEventRecord> {
-        let database_path =
-            super::shared_local_events_database_path(paths).expect("shared local events path");
+        let database_path = paths
+            .shared_local_events_database_path()
+            .expect("shared local events path");
         let executor =
             SqliteExecutor::open(database_path.as_path()).expect("open shared local events db");
         let store = LocalEventsStore::new(executor);

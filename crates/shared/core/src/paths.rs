@@ -17,6 +17,10 @@ pub const SHARED_IDENTITIES_NAMESPACE_KIND: &str = "shared";
 pub const SHARED_IDENTITIES_NAMESPACE_VALUE: &str = "identities";
 pub const SHARED_IDENTITIES_NAMESPACE: &str = "shared/identities";
 pub const SHARED_IDENTITY_FILE_NAME: &str = "default.json";
+pub const SHARED_LOCAL_EVENTS_NAMESPACE_KIND: &str = "shared";
+pub const SHARED_LOCAL_EVENTS_NAMESPACE_VALUE: &str = "local_events";
+pub const SHARED_LOCAL_EVENTS_NAMESPACE: &str = "shared/local_events";
+pub const SHARED_LOCAL_EVENTS_DB_FILE_NAME: &str = "local_events.sqlite";
 pub const APP_PATHS_PROFILE_ENV: &str = "RADROOTS_APP_PATHS_PROFILE";
 pub const APP_PATHS_REPO_LOCAL_ROOT_ENV: &str = "RADROOTS_APP_PATHS_REPO_LOCAL_ROOT";
 
@@ -74,7 +78,7 @@ impl AppRuntimeHostEnvironment {
             appdata_dir: read_env("APPDATA").map(PathBuf::from),
             localappdata_dir: read_env("LOCALAPPDATA").map(PathBuf::from),
             paths_profile: read_env(APP_PATHS_PROFILE_ENV)
-                .and_then(|value| value.into_string().ok()),
+                .map(|value| value.to_string_lossy().into_owned()),
             repo_local_root: read_env(APP_PATHS_REPO_LOCAL_ROOT_ENV).map(PathBuf::from),
         }
     }
@@ -107,6 +111,12 @@ pub struct AppDesktopRuntimePaths {
     pub app: AppRuntimeRoots,
     pub shared_accounts: AppSharedAccountsPaths,
     pub shared_identity: AppSharedIdentityPaths,
+}
+
+impl AppSharedAccountsPaths {
+    pub fn shared_local_events_database_path(&self) -> Option<PathBuf> {
+        shared_local_events_database_path_from_shared_accounts(self)
+    }
 }
 
 impl AppRuntimeRoots {
@@ -182,6 +192,36 @@ impl AppDesktopRuntimePaths {
             },
         })
     }
+
+    pub fn shared_local_events_database_path(&self) -> Result<PathBuf, AppRuntimePathsError> {
+        let data_root = self
+            .app
+            .data
+            .parent()
+            .and_then(|apps_root| apps_root.parent())
+            .ok_or(AppRuntimePathsError::SharedLocalEventsPath)?;
+
+        Ok(shared_local_events_database_path_from_data_root(data_root))
+    }
+}
+
+pub fn shared_local_events_database_path_from_shared_accounts(
+    paths: &AppSharedAccountsPaths,
+) -> Option<PathBuf> {
+    Some(
+        paths
+            .data_root
+            .parent()?
+            .join(SHARED_LOCAL_EVENTS_NAMESPACE_VALUE)
+            .join(SHARED_LOCAL_EVENTS_DB_FILE_NAME),
+    )
+}
+
+fn shared_local_events_database_path_from_data_root(data_root: &Path) -> PathBuf {
+    data_root
+        .join(SHARED_LOCAL_EVENTS_NAMESPACE_KIND)
+        .join(SHARED_LOCAL_EVENTS_NAMESPACE_VALUE)
+        .join(SHARED_LOCAL_EVENTS_DB_FILE_NAME)
 }
 
 fn resolve_desktop_base_roots(
@@ -268,6 +308,7 @@ pub enum AppRuntimePathsError {
     EmptyRepoLocalRoot,
     UnsupportedPathProfile { value: String },
     UnsupportedPlatform { platform: AppRuntimePlatform },
+    SharedLocalEventsPath,
 }
 
 impl fmt::Display for AppRuntimePathsError {
@@ -299,6 +340,8 @@ impl fmt::Display for AppRuntimePathsError {
                 "desktop runtime roots are unsupported on {}",
                 platform.label()
             ),
+            Self::SharedLocalEventsPath => formatter
+                .write_str("desktop app data root must be nested under the Radroots data root"),
         }
     }
 }
@@ -314,6 +357,7 @@ mod tests {
         AppDesktopRuntimePaths, AppRuntimeHostEnvironment, AppRuntimePathsError,
         AppRuntimePlatform, AppRuntimeRoots, SHARED_ACCOUNTS_NAMESPACE,
         SHARED_ACCOUNTS_STORE_FILE_NAME, SHARED_IDENTITIES_NAMESPACE, SHARED_IDENTITY_FILE_NAME,
+        SHARED_LOCAL_EVENTS_DB_FILE_NAME, SHARED_LOCAL_EVENTS_NAMESPACE,
     };
 
     #[test]
@@ -354,6 +398,14 @@ mod tests {
             PathBuf::from("/Users/treesap/.radroots/secrets")
                 .join(SHARED_IDENTITIES_NAMESPACE)
                 .join(SHARED_IDENTITY_FILE_NAME)
+        );
+        assert_eq!(
+            paths
+                .shared_local_events_database_path()
+                .expect("shared local events path"),
+            PathBuf::from("/Users/treesap/.radroots/data")
+                .join(SHARED_LOCAL_EVENTS_NAMESPACE)
+                .join(SHARED_LOCAL_EVENTS_DB_FILE_NAME)
         );
     }
 
@@ -435,6 +487,15 @@ mod tests {
             PathBuf::from("/repo/infra/local/runtime/radroots/secrets/shared/identities")
                 .join(SHARED_IDENTITY_FILE_NAME)
         );
+        assert_eq!(
+            paths
+                .shared_accounts
+                .shared_local_events_database_path()
+                .expect("shared local events path"),
+            PathBuf::from("/repo/infra/local/runtime/radroots/data")
+                .join(SHARED_LOCAL_EVENTS_NAMESPACE)
+                .join(SHARED_LOCAL_EVENTS_DB_FILE_NAME)
+        );
     }
 
     #[test]
@@ -489,6 +550,30 @@ mod tests {
                 value: "dev".to_owned(),
             }
         );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn malformed_env_profile_fails_closed() {
+        use std::os::unix::ffi::OsStringExt;
+
+        let env = BTreeMap::from([(
+            APP_PATHS_PROFILE_ENV,
+            OsString::from_vec(vec![0xff, b'd', b'e', b'v']),
+        )]);
+        let err = AppRuntimeRoots::for_desktop(
+            AppRuntimePlatform::Macos,
+            AppRuntimeHostEnvironment::from_env_reader(|name| env.get(name).cloned()),
+        )
+        .expect_err("malformed configured profile should fail closed");
+
+        match err {
+            AppRuntimePathsError::UnsupportedPathProfile { value } => {
+                assert!(value.contains('\u{fffd}'));
+                assert!(value.ends_with("dev"));
+            }
+            unexpected => panic!("unexpected malformed profile error: {unexpected:?}"),
+        }
     }
 
     #[test]
