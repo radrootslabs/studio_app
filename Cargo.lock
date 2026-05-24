@@ -5088,6 +5088,7 @@ version = "0.1.0"
 dependencies = [
  "chrono",
  "radroots_studio_app_models",
+ "radroots_runtime_paths",
  "serde",
  "serde_json",
  "thiserror 2.0.18",

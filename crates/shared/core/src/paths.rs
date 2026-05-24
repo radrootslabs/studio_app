@@ -6,6 +6,17 @@ use std::{
     path::{Path, PathBuf},
 };
 
+pub use radroots_runtime_paths::{
+    DEFAULT_SHARED_LOCAL_EVENTS_DB_FILE_NAME as SHARED_LOCAL_EVENTS_DB_FILE_NAME,
+    DEFAULT_SHARED_LOCAL_EVENTS_NAMESPACE as SHARED_LOCAL_EVENTS_NAMESPACE,
+    DEFAULT_SHARED_LOCAL_EVENTS_NAMESPACE_KIND as SHARED_LOCAL_EVENTS_NAMESPACE_KIND,
+    DEFAULT_SHARED_LOCAL_EVENTS_NAMESPACE_VALUE as SHARED_LOCAL_EVENTS_NAMESPACE_VALUE,
+};
+use radroots_runtime_paths::{
+    default_shared_local_events_database_path_from_data_root,
+    default_shared_local_events_database_path_from_shared_accounts_data_root,
+};
+
 pub const APP_RUNTIME_NAMESPACE_KIND: &str = "apps";
 pub const APP_RUNTIME_NAMESPACE_VALUE: &str = "app";
 pub const APP_RUNTIME_NAMESPACE: &str = "apps/app";
@@ -17,10 +28,6 @@ pub const SHARED_IDENTITIES_NAMESPACE_KIND: &str = "shared";
 pub const SHARED_IDENTITIES_NAMESPACE_VALUE: &str = "identities";
 pub const SHARED_IDENTITIES_NAMESPACE: &str = "shared/identities";
 pub const SHARED_IDENTITY_FILE_NAME: &str = "default.json";
-pub const SHARED_LOCAL_EVENTS_NAMESPACE_KIND: &str = "shared";
-pub const SHARED_LOCAL_EVENTS_NAMESPACE_VALUE: &str = "local_events";
-pub const SHARED_LOCAL_EVENTS_NAMESPACE: &str = "shared/local_events";
-pub const SHARED_LOCAL_EVENTS_DB_FILE_NAME: &str = "local_events.sqlite";
 pub const APP_PATHS_PROFILE_ENV: &str = "RADROOTS_APP_PATHS_PROFILE";
 pub const APP_PATHS_REPO_LOCAL_ROOT_ENV: &str = "RADROOTS_APP_PATHS_REPO_LOCAL_ROOT";
 
@@ -208,20 +215,11 @@ impl AppDesktopRuntimePaths {
 pub fn shared_local_events_database_path_from_shared_accounts(
     paths: &AppSharedAccountsPaths,
 ) -> Option<PathBuf> {
-    Some(
-        paths
-            .data_root
-            .parent()?
-            .join(SHARED_LOCAL_EVENTS_NAMESPACE_VALUE)
-            .join(SHARED_LOCAL_EVENTS_DB_FILE_NAME),
-    )
+    default_shared_local_events_database_path_from_shared_accounts_data_root(&paths.data_root).ok()
 }
 
 fn shared_local_events_database_path_from_data_root(data_root: &Path) -> PathBuf {
-    data_root
-        .join(SHARED_LOCAL_EVENTS_NAMESPACE_KIND)
-        .join(SHARED_LOCAL_EVENTS_NAMESPACE_VALUE)
-        .join(SHARED_LOCAL_EVENTS_DB_FILE_NAME)
+    default_shared_local_events_database_path_from_data_root(data_root)
 }
 
 fn resolve_desktop_base_roots(
