@@ -3975,9 +3975,10 @@ impl DesktopAppRuntimeState {
         let report = self.import_shared_local_events()?;
         let local_changed = report.imported_records > 0 || report.skipped_records > 0;
         let context_changed = self.refresh_selected_account_context_after_local_events()?;
+        let coordination_changed = self.retry_pending_personal_order_coordination()?;
         let sync_changed = self.attempt_sync(SyncTrigger::ForegroundResume)?;
 
-        Ok(local_changed || context_changed || sync_changed)
+        Ok(local_changed || context_changed || coordination_changed || sync_changed)
     }
 
     fn replace_orders_query(
@@ -9131,6 +9132,59 @@ mod tests {
         assert_eq!(
             pending_order_sync_payloads(&restarted_runtime, buyer_account_id.as_str(), order_id),
             vec![expected_order_sync_payload]
+        );
+
+        cleanup_bootstrapped_runtime_paths(&paths);
+    }
+
+    #[test]
+    fn runtime_outbox_recovery_buyer_order_shared_append_failure_is_recoverable_on_foreground_resume()
+     {
+        let (runtime, paths, buyer_account_id, order_id, order_farm_id) =
+            blocked_buyer_order_runtime("buyer_order_append_failure_foreground_resume");
+        let expected_order_sync_payload = super::order_sync_payload(
+            order_id,
+            order_farm_id,
+            "place_personal_order",
+            Some("needs_action"),
+        );
+        unblock_shared_local_events_database(&paths);
+        assert!(
+            runtime
+                .sync_on_foreground_resume()
+                .expect("foreground resume should repair buyer order coordination")
+        );
+        let summary = runtime.summary();
+        assert!(
+            !summary
+                .personal_projection
+                .orders
+                .has_recoverable_coordination
+        );
+        assert_eq!(
+            app_buyer_order_local_work_record_ids(&paths),
+            vec![format!("app:local_work:order_request:{order_id}")]
+        );
+        assert_eq!(
+            pending_order_sync_payloads(&runtime, buyer_account_id.as_str(), order_id),
+            vec![expected_order_sync_payload]
+        );
+        {
+            let state = runtime.lock_state_mut();
+            let buyer_context = state.state_store.identity_projection().buyer_context();
+            let sqlite_store = state.sqlite_store.as_ref().expect("sqlite store");
+            let coordination = sqlite_store
+                .load_buyer_order_coordination_record(&buyer_context, order_id)
+                .expect("buyer order coordination should reload")
+                .expect("buyer order coordination should still exist");
+            assert_eq!(coordination.state, BuyerOrderCoordinationState::Synced);
+            assert_eq!(coordination.attempt_count, 2);
+            assert_eq!(coordination.last_error_message, None);
+        }
+        assert!(
+            !runtime
+                .retry_pending_personal_order_coordination()
+                .expect("foreground-resumed buyer order retry should be idempotent")
         );
 
         cleanup_bootstrapped_runtime_paths(&paths);
