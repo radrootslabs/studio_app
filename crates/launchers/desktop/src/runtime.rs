@@ -4194,8 +4194,16 @@ impl AppBuyerOrderRequestExport {
         let mut order_items = Vec::with_capacity(order.lines.len());
         let mut line_refs = Vec::with_capacity(order.lines.len());
         for line in &order.lines {
+            let line_bin_id = line
+                .listing_bin_id
+                .as_deref()
+                .map(str::trim)
+                .filter(|value| !value.is_empty());
+            if line_bin_id.is_none() && !support_issues.contains(&"listing_bin_id_required") {
+                support_issues.push("listing_bin_id_required");
+            }
             order_items.push(json!({
-                "bin_id": "bin-1",
+                "bin_id": line_bin_id.unwrap_or_default(),
                 "bin_count": line.quantity,
             }));
             line_refs.push(json!({
@@ -4208,6 +4216,7 @@ impl AppBuyerOrderRequestExport {
                 },
                 "listing_addr": line.listing_addr,
                 "listing_event_id": line.listing_event_id,
+                "listing_bin_id": line.listing_bin_id,
                 "seller_pubkey": line.seller_pubkey,
                 "farm_key": line.farm_key,
             }));
@@ -4322,6 +4331,15 @@ fn order_economics_json(
     let mut currency = None::<String>;
 
     for line in &order.lines {
+        let line_bin_id = line
+            .listing_bin_id
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty());
+        if line_bin_id.is_none() && !support_issues.contains(&"listing_bin_id_required") {
+            support_issues.push("listing_bin_id_required");
+            continue;
+        }
         let Some(quantity_unit) = canonical_quantity_unit(line.quantity_unit_label.as_str()) else {
             support_issues.push("canonical_quantity_unit_required");
             continue;
@@ -4359,7 +4377,7 @@ fn order_economics_json(
                 reason: "buyer order local event subtotal overflowed",
             })?;
         economics_items.push(json!({
-            "bin_id": "bin-1",
+            "bin_id": line_bin_id.unwrap_or_default(),
             "bin_count": line.quantity,
             "quantity_amount": "1",
             "quantity_unit": quantity_unit,
@@ -8475,12 +8493,13 @@ mod tests {
             .account_id
             .clone();
         let listing_key = "DDDDDDDDDDDDDDDDDDDDDD";
-        append_cli_signed_buyer_listing_record_with(
+        append_cli_signed_buyer_listing_record_with_bin(
             &paths,
             "buyer-order-supported-listing",
             listing_key,
             "Buyer Visible Eggs",
             1100,
+            "dozen-eggs",
         );
         let product_id =
             deterministic_cli_listing_product_id(Some("buyer-visible-seller-pubkey"), listing_key);
@@ -8496,6 +8515,17 @@ mod tests {
                 .add_personal_product_to_cart(PersonalSection::Browse, false)
                 .expect("buyer product should add to cart")
         );
+        runtime
+            .lock_state()
+            .sqlite_store
+            .as_ref()
+            .expect("sqlite store")
+            .connection()
+            .execute(
+                "update products set listing_bin_id = 'mutated-bin' where id = ?1",
+                [product_id.to_string()],
+            )
+            .expect("listing projection should mutate after cart snapshot");
         assert!(
             runtime
                 .save_personal_checkout_draft(BuyerCheckoutDraft {
@@ -8603,11 +8633,18 @@ mod tests {
             payload["document"]["order"]["seller_pubkey"],
             "buyer-visible-seller-pubkey"
         );
-        assert_eq!(payload["document"]["order"]["items"][0]["bin_id"], "bin-1");
+        assert_eq!(
+            payload["document"]["order"]["items"][0]["bin_id"],
+            "dozen-eggs"
+        );
         assert_eq!(payload["document"]["order"]["items"][0]["bin_count"], 2);
         assert_eq!(
             payload["document"]["order"]["economics"]["items"][0]["quantity_amount"],
             "1"
+        );
+        assert_eq!(
+            payload["document"]["order"]["economics"]["items"][0]["bin_id"],
+            "dozen-eggs"
         );
         assert_eq!(
             payload["document"]["order"]["economics"]["pricing_basis"],
@@ -8620,6 +8657,10 @@ mod tests {
         assert_eq!(
             payload["app_order"]["buyer_order_note"],
             "Leave by the cooler"
+        );
+        assert_eq!(
+            payload["app_order"]["lines"][0]["listing_bin_id"],
+            "dozen-eggs"
         );
 
         cleanup_bootstrapped_runtime_paths(&paths);
@@ -11998,6 +12039,24 @@ mod tests {
         title: &str,
         created_at_ms: i64,
     ) {
+        append_cli_signed_buyer_listing_record_with_bin(
+            paths,
+            record_suffix,
+            listing_key,
+            title,
+            created_at_ms,
+            "bin-1",
+        );
+    }
+
+    fn append_cli_signed_buyer_listing_record_with_bin(
+        paths: &AppDesktopRuntimePaths,
+        record_suffix: &str,
+        listing_key: &str,
+        title: &str,
+        created_at_ms: i64,
+        bin_id: &str,
+    ) {
         let database_path = paths
             .shared_local_events_database_path()
             .expect("shared local events path");
@@ -12060,8 +12119,8 @@ mod tests {
                     ["key", listing_key],
                     ["title", title],
                     ["summary", "Published local eggs"],
-                    ["radroots:bin", "bin-1", "1", "each"],
-                    ["radroots:price", "bin-1", "8", "USD", "1", "each"],
+                    ["radroots:bin", bin_id, "1", "each"],
+                    ["radroots:price", bin_id, "8", "USD", "1", "each"],
                     ["inventory", "9"],
                     ["status", "active"],
                     ["radroots:availability_start", "4102444800"],

@@ -798,9 +798,39 @@ mod tests {
             "quantity_unit_label"
         ));
         assert!(column_exists(connection, "order_lines", "quantity_display"));
+        assert!(column_exists(connection, "order_lines", "listing_bin_id"));
+        assert!(column_exists(
+            connection,
+            "order_lines",
+            "unit_price_minor_units"
+        ));
+        assert!(column_exists(connection, "order_lines", "price_currency"));
+        assert!(column_exists(connection, "order_lines", "listing_addr"));
+        assert!(column_exists(connection, "products", "listing_bin_id"));
         assert!(column_exists(connection, "buyer_carts", "buyer_email"));
         assert!(column_exists(connection, "buyer_carts", "buyer_phone"));
         assert!(column_exists(connection, "buyer_carts", "buyer_order_note"));
+        assert!(column_exists(
+            connection,
+            "buyer_cart_lines",
+            "listing_bin_id"
+        ));
+        assert!(column_exists(
+            connection,
+            "buyer_cart_lines",
+            "quantity_unit_label"
+        ));
+        assert!(column_exists(
+            connection,
+            "buyer_cart_lines",
+            "unit_price_minor_units"
+        ));
+        assert!(column_exists(connection, "buyer_cart_lines", "farm_key"));
+        assert!(column_exists(
+            connection,
+            "buyer_cart_lines",
+            "listing_event_id"
+        ));
         assert!(column_exists(connection, "orders", "buyer_context_key"));
         assert!(column_exists(connection, "orders", "buyer_email"));
         assert!(column_exists(connection, "orders", "buyer_phone"));

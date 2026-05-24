@@ -372,6 +372,7 @@ impl<'a> AppLocalInteropRepository<'a> {
         let unit_label = string_at(document, &["primary_bin", "quantity_unit"])
             .or_else(|| string_at(document, &["primary_bin", "price_per_unit"]))
             .unwrap_or_default();
+        let listing_bin_id = string_at(document, &["primary_bin", "bin_id"]);
         let price_minor_units = string_at(document, &["primary_bin", "price_amount"])
             .and_then(|price| parse_decimal_minor_units(price.as_str()));
         let price_currency = string_at(document, &["primary_bin", "price_currency"])
@@ -389,6 +390,7 @@ impl<'a> AppLocalInteropRepository<'a> {
             price_currency,
             stock_count,
             availability_window_id: None,
+            listing_bin_id,
         })?;
         Ok(Some(ProjectionRecord {
             kind: "listing",
@@ -506,6 +508,9 @@ impl<'a> AppLocalInteropRepository<'a> {
             .or_else(|| tag_index_value(tags, "summary", 1))
             .unwrap_or_default();
         let bin = content.as_ref().and_then(primary_bin);
+        let listing_bin_id = bin
+            .and_then(|value| string_at(value, &["bin_id"]))
+            .or_else(|| tag_index_value(tags, "radroots:bin", 1));
         let unit_label = bin
             .and_then(|value| {
                 string_at(value, &["quantity", "unit"])
@@ -572,6 +577,7 @@ impl<'a> AppLocalInteropRepository<'a> {
             price_currency,
             stock_count,
             availability_window_id,
+            listing_bin_id,
         })?;
         Ok(Some(ProjectionRecord {
             kind: "listing",
@@ -852,8 +858,9 @@ impl<'a> AppLocalInteropRepository<'a> {
                     price_currency,
                     stock_count,
                     availability_window_id,
+                    listing_bin_id,
                     updated_at
-                 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
+                 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
                  ON CONFLICT(id) DO UPDATE SET
                     farm_id = excluded.farm_id,
                     title = excluded.title,
@@ -874,6 +881,7 @@ impl<'a> AppLocalInteropRepository<'a> {
                         THEN products.availability_window_id
                         ELSE excluded.availability_window_id
                     END,
+                    listing_bin_id = coalesce(excluded.listing_bin_id, products.listing_bin_id),
                     updated_at = excluded.updated_at",
                 params![
                     projection.product_id.to_string(),
@@ -886,6 +894,7 @@ impl<'a> AppLocalInteropRepository<'a> {
                     projection.price_currency.as_str(),
                     projection.stock_count,
                     projection.availability_window_id.map(|id| id.to_string()),
+                    projection.listing_bin_id.as_deref(),
                 ],
             )
             .map_err(|source| AppSqliteError::Query {
@@ -1071,6 +1080,7 @@ struct ProductProjection {
     price_currency: String,
     stock_count: Option<u32>,
     availability_window_id: Option<FulfillmentWindowId>,
+    listing_bin_id: Option<String>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

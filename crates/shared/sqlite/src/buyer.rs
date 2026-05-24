@@ -52,6 +52,7 @@ pub struct BuyerOrderLocalEventLine {
     pub quantity_display: String,
     pub unit_price_minor_units: Option<u32>,
     pub price_currency: String,
+    pub listing_bin_id: Option<String>,
     pub farm_key: Option<String>,
     pub listing_addr: Option<String>,
     pub listing_event_id: Option<String>,
@@ -189,18 +190,35 @@ impl<'a> AppBuyerRepository<'a> {
             })?;
 
         for line in &cart.lines {
+            let snapshot = self.load_buyer_cart_line_snapshot(line.product_id)?;
             self.connection
                 .execute(
                     "insert into buyer_cart_lines (
                         buyer_context_key,
                         product_id,
                         quantity,
+                        listing_bin_id,
+                        quantity_unit_label,
+                        unit_price_minor_units,
+                        price_currency,
+                        farm_key,
+                        listing_addr,
+                        listing_event_id,
+                        seller_pubkey,
                         updated_at
-                     ) values (?1, ?2, ?3, strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))",
+                     ) values (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))",
                     params![
                         context_key.as_str(),
                         line.product_id.to_string(),
                         i64::from(line.quantity),
+                        snapshot.listing_bin_id.as_deref(),
+                        line.unit_price.unit_label.as_str(),
+                        line.unit_price.amount_minor_units,
+                        normalize_currency_code(&line.unit_price.currency_code),
+                        snapshot.farm_key.as_deref(),
+                        snapshot.listing_addr.as_deref(),
+                        snapshot.listing_event_id.as_deref(),
+                        snapshot.seller_pubkey.as_deref(),
                     ],
                 )
                 .map_err(|source| AppSqliteError::Query {
@@ -404,8 +422,15 @@ impl<'a> AppBuyerRepository<'a> {
                             quantity_value,
                             quantity_unit_label,
                             quantity_display,
+                            listing_bin_id,
+                            unit_price_minor_units,
+                            price_currency,
+                            farm_key,
+                            listing_addr,
+                            listing_event_id,
+                            seller_pubkey,
                             sort_index
-                         ) values (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+                         ) values (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)",
                         params![
                             format!("{}:{}", order_id, line.listing.product_id),
                             order_id.to_string(),
@@ -413,6 +438,13 @@ impl<'a> AppBuyerRepository<'a> {
                             i64::from(line.quantity),
                             line.listing.unit_label.as_str(),
                             format_quantity_display(line.quantity, &line.listing.unit_label),
+                            line.listing.listing_bin_id.as_deref(),
+                            line.listing.price_minor_units,
+                            normalize_currency_code(&line.listing.price_currency),
+                            line.listing.farm_key.as_deref(),
+                            line.listing.listing_addr.as_deref(),
+                            line.listing.listing_event_id.as_deref(),
+                            line.listing.seller_pubkey.as_deref(),
                             index as i64,
                         ],
                     )
@@ -1132,6 +1164,45 @@ impl<'a> AppBuyerRepository<'a> {
                     p.unit_label,
                     p.price_minor_units,
                     p.price_currency,
+                    p.listing_bin_id,
+                    (
+                        select li.farm_key
+                        from local_interop_imports li
+                        where li.projected_kind = 'listing'
+                           and li.projected_id = p.id
+                        order by li.local_seq desc
+                        limit 1
+                    ),
+                    (
+                        select li.listing_addr
+                        from local_interop_imports li
+                        where li.projected_kind = 'listing'
+                           and li.projected_id = p.id
+                           and li.listing_addr is not null
+                           and trim(li.listing_addr) <> ''
+                        order by li.local_seq desc
+                        limit 1
+                    ),
+                    (
+                        select li.event_id
+                        from local_interop_imports li
+                        where li.projected_kind = 'listing'
+                           and li.projected_id = p.id
+                           and li.event_id is not null
+                           and trim(li.event_id) <> ''
+                        order by li.local_seq desc
+                        limit 1
+                    ),
+                    (
+                        select li.owner_pubkey
+                        from local_interop_imports li
+                        where li.projected_kind = 'listing'
+                           and li.projected_id = p.id
+                           and li.owner_pubkey is not null
+                           and trim(li.owner_pubkey) <> ''
+                        order by li.local_seq desc
+                        limit 1
+                    ),
                     p.stock_count,
                     fw.id,
                     fw.label,
@@ -1174,15 +1245,20 @@ impl<'a> AppBuyerRepository<'a> {
                     row.get::<_, String>(7)?,
                     row.get::<_, Option<u32>>(8)?,
                     row.get::<_, String>(9)?,
-                    row.get::<_, Option<u32>>(10)?,
+                    row.get::<_, Option<String>>(10)?,
                     row.get::<_, Option<String>>(11)?,
                     row.get::<_, Option<String>>(12)?,
                     row.get::<_, Option<String>>(13)?,
                     row.get::<_, Option<String>>(14)?,
-                    row.get::<_, Option<String>>(15)?,
-                    row.get::<_, i64>(16)?,
-                    row.get::<_, i64>(17)?,
-                    row.get::<_, i64>(18)?,
+                    row.get::<_, Option<u32>>(15)?,
+                    row.get::<_, Option<String>>(16)?,
+                    row.get::<_, Option<String>>(17)?,
+                    row.get::<_, Option<String>>(18)?,
+                    row.get::<_, Option<String>>(19)?,
+                    row.get::<_, Option<String>>(20)?,
+                    row.get::<_, i64>(21)?,
+                    row.get::<_, i64>(22)?,
+                    row.get::<_, i64>(23)?,
                 ))
             })
             .map_err(|source| AppSqliteError::Query {
@@ -1203,6 +1279,11 @@ impl<'a> AppBuyerRepository<'a> {
                 unit_label,
                 price_minor_units,
                 price_currency,
+                listing_bin_id,
+                farm_key,
+                listing_addr,
+                listing_event_id,
+                seller_pubkey,
                 stock_count,
                 fulfillment_window_id,
                 fulfillment_window_label,
@@ -1228,6 +1309,11 @@ impl<'a> AppBuyerRepository<'a> {
                 unit_label,
                 price_minor_units,
                 price_currency,
+                listing_bin_id: listing_bin_id.and_then(empty_string_to_none),
+                farm_key: farm_key.and_then(empty_string_to_none),
+                listing_addr: listing_addr.and_then(empty_string_to_none),
+                listing_event_id: listing_event_id.and_then(empty_string_to_none),
+                seller_pubkey: seller_pubkey.and_then(empty_string_to_none),
                 stock_count,
                 fulfillment_window_id: parse_optional_typed_id(
                     "products.availability_window_id",
@@ -1263,6 +1349,22 @@ impl<'a> AppBuyerRepository<'a> {
             .load_listing_records()?
             .into_iter()
             .find(|record| record.product_id == product_id))
+    }
+
+    fn load_buyer_cart_line_snapshot(
+        &self,
+        product_id: ProductId,
+    ) -> Result<BuyerCartLineSnapshot, AppSqliteError> {
+        Ok(self
+            .load_listing_record_by_id(product_id)?
+            .map(|listing| BuyerCartLineSnapshot {
+                listing_bin_id: listing.listing_bin_id,
+                farm_key: listing.farm_key,
+                listing_addr: listing.listing_addr,
+                listing_event_id: listing.listing_event_id,
+                seller_pubkey: listing.seller_pubkey,
+            })
+            .unwrap_or_default())
     }
 
     fn load_cart_header(
@@ -1327,9 +1429,48 @@ impl<'a> AppBuyerRepository<'a> {
                     p.title,
                     p.subtitle,
                     p.status,
-                    p.unit_label,
-                    p.price_minor_units,
-                    p.price_currency,
+                    coalesce(nullif(bcl.quantity_unit_label, ''), p.unit_label),
+                    coalesce(bcl.unit_price_minor_units, p.price_minor_units),
+                    coalesce(nullif(bcl.price_currency, ''), p.price_currency),
+                    coalesce(nullif(bcl.listing_bin_id, ''), p.listing_bin_id),
+                    coalesce(nullif(bcl.farm_key, ''), (
+                        select li.farm_key
+                        from local_interop_imports li
+                        where li.projected_kind = 'listing'
+                           and li.projected_id = p.id
+                        order by li.local_seq desc
+                        limit 1
+                    )),
+                    coalesce(nullif(bcl.listing_addr, ''), (
+                        select li.listing_addr
+                        from local_interop_imports li
+                        where li.projected_kind = 'listing'
+                           and li.projected_id = p.id
+                           and li.listing_addr is not null
+                           and trim(li.listing_addr) <> ''
+                        order by li.local_seq desc
+                        limit 1
+                    )),
+                    coalesce(nullif(bcl.listing_event_id, ''), (
+                        select li.event_id
+                        from local_interop_imports li
+                        where li.projected_kind = 'listing'
+                           and li.projected_id = p.id
+                           and li.event_id is not null
+                           and trim(li.event_id) <> ''
+                        order by li.local_seq desc
+                        limit 1
+                    )),
+                    coalesce(nullif(bcl.seller_pubkey, ''), (
+                        select li.owner_pubkey
+                        from local_interop_imports li
+                        where li.projected_kind = 'listing'
+                           and li.projected_id = p.id
+                           and li.owner_pubkey is not null
+                           and trim(li.owner_pubkey) <> ''
+                        order by li.local_seq desc
+                        limit 1
+                    )),
                     p.stock_count,
                     fw.id,
                     fw.label,
@@ -1376,15 +1517,20 @@ impl<'a> AppBuyerRepository<'a> {
                     row.get::<_, String>(8)?,
                     row.get::<_, Option<u32>>(9)?,
                     row.get::<_, String>(10)?,
-                    row.get::<_, Option<u32>>(11)?,
+                    row.get::<_, Option<String>>(11)?,
                     row.get::<_, Option<String>>(12)?,
                     row.get::<_, Option<String>>(13)?,
                     row.get::<_, Option<String>>(14)?,
                     row.get::<_, Option<String>>(15)?,
-                    row.get::<_, Option<String>>(16)?,
-                    row.get::<_, i64>(17)?,
-                    row.get::<_, i64>(18)?,
-                    row.get::<_, i64>(19)?,
+                    row.get::<_, Option<u32>>(16)?,
+                    row.get::<_, Option<String>>(17)?,
+                    row.get::<_, Option<String>>(18)?,
+                    row.get::<_, Option<String>>(19)?,
+                    row.get::<_, Option<String>>(20)?,
+                    row.get::<_, Option<String>>(21)?,
+                    row.get::<_, i64>(22)?,
+                    row.get::<_, i64>(23)?,
+                    row.get::<_, i64>(24)?,
                 ))
             })
             .map_err(|source| AppSqliteError::Query {
@@ -1406,6 +1552,11 @@ impl<'a> AppBuyerRepository<'a> {
                 unit_label,
                 price_minor_units,
                 price_currency,
+                listing_bin_id,
+                farm_key,
+                listing_addr,
+                listing_event_id,
+                seller_pubkey,
                 stock_count,
                 fulfillment_window_id,
                 fulfillment_window_label,
@@ -1430,6 +1581,11 @@ impl<'a> AppBuyerRepository<'a> {
                 unit_label,
                 price_minor_units,
                 price_currency,
+                listing_bin_id: listing_bin_id.and_then(empty_string_to_none),
+                farm_key: farm_key.and_then(empty_string_to_none),
+                listing_addr: listing_addr.and_then(empty_string_to_none),
+                listing_event_id: listing_event_id.and_then(empty_string_to_none),
+                seller_pubkey: seller_pubkey.and_then(empty_string_to_none),
                 stock_count,
                 fulfillment_window_id: parse_optional_typed_id(
                     "products.availability_window_id",
@@ -1510,48 +1666,14 @@ impl<'a> AppBuyerRepository<'a> {
                     ol.quantity_value,
                     ol.quantity_unit_label,
                     ol.quantity_display,
-                    p.price_minor_units,
-                    p.price_currency,
-                    (
-                        select li.farm_key
-                        from local_interop_imports li
-                        where li.projected_kind = 'listing'
-                           and li.projected_id = p.id
-                        order by li.local_seq desc
-                        limit 1
-                    ),
-                    (
-                        select li.listing_addr
-                        from local_interop_imports li
-                        where li.projected_kind = 'listing'
-                           and li.projected_id = p.id
-                           and li.listing_addr is not null
-                           and trim(li.listing_addr) <> ''
-                        order by li.local_seq desc
-                        limit 1
-                    ),
-                    (
-                        select li.event_id
-                        from local_interop_imports li
-                        where li.projected_kind = 'listing'
-                           and li.projected_id = p.id
-                           and li.event_id is not null
-                           and trim(li.event_id) <> ''
-                        order by li.local_seq desc
-                        limit 1
-                    ),
-                    (
-                        select li.owner_pubkey
-                        from local_interop_imports li
-                        where li.projected_kind = 'listing'
-                           and li.projected_id = p.id
-                           and li.owner_pubkey is not null
-                           and trim(li.owner_pubkey) <> ''
-                        order by li.local_seq desc
-                        limit 1
-                    )
+                    ol.unit_price_minor_units,
+                    ol.price_currency,
+                    ol.listing_bin_id,
+                    ol.farm_key,
+                    ol.listing_addr,
+                    ol.listing_event_id,
+                    ol.seller_pubkey
                  from order_lines ol
-                 left join products p on p.id = substr(ol.id, length(?1) + 2)
                  where ol.order_id = ?1
                  order by ol.sort_index asc, ol.id asc",
             )
@@ -1573,6 +1695,7 @@ impl<'a> AppBuyerRepository<'a> {
                     row.get::<_, Option<String>>(8)?,
                     row.get::<_, Option<String>>(9)?,
                     row.get::<_, Option<String>>(10)?,
+                    row.get::<_, Option<String>>(11)?,
                 ))
             })
             .map_err(|source| AppSqliteError::Query {
@@ -1590,6 +1713,7 @@ impl<'a> AppBuyerRepository<'a> {
                 quantity_display,
                 unit_price_minor_units,
                 price_currency,
+                listing_bin_id,
                 farm_key,
                 listing_addr,
                 listing_event_id,
@@ -1617,6 +1741,7 @@ impl<'a> AppBuyerRepository<'a> {
                 quantity_display,
                 unit_price_minor_units,
                 price_currency: price_currency.unwrap_or_else(|| "USD".to_owned()),
+                listing_bin_id: listing_bin_id.and_then(empty_string_to_none),
                 farm_key: farm_key.and_then(empty_string_to_none),
                 listing_addr: listing_addr.and_then(empty_string_to_none),
                 listing_event_id: listing_event_id.and_then(empty_string_to_none),
@@ -1861,6 +1986,11 @@ struct BuyerListingRecord {
     unit_label: String,
     price_minor_units: Option<u32>,
     price_currency: String,
+    listing_bin_id: Option<String>,
+    farm_key: Option<String>,
+    listing_addr: Option<String>,
+    listing_event_id: Option<String>,
+    seller_pubkey: Option<String>,
     stock_count: Option<u32>,
     fulfillment_window_id: Option<FulfillmentWindowId>,
     fulfillment_window_label: Option<String>,
@@ -2030,6 +2160,15 @@ impl BuyerListingRecord {
 struct BuyerCartLineRecord {
     listing: BuyerListingRecord,
     quantity: u32,
+}
+
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+struct BuyerCartLineSnapshot {
+    listing_bin_id: Option<String>,
+    farm_key: Option<String>,
+    listing_addr: Option<String>,
+    listing_event_id: Option<String>,
+    seller_pubkey: Option<String>,
 }
 
 impl BuyerCartLineRecord {
