@@ -5838,27 +5838,23 @@ fn current_utc_timestamp() -> String {
 fn pending_sync_upsert(aggregate: SyncAggregateRef, payload_json: String) -> PendingSyncOperation {
     let created_at = current_utc_timestamp();
 
-    PendingSyncOperation {
+    PendingSyncOperation::new(
         aggregate,
-        operation: SyncOperationKind::Upsert,
+        SyncOperationKind::Upsert,
         payload_json,
-        created_at: created_at.clone(),
-        available_at: created_at,
-        attempt_count: 0,
-    }
+        created_at,
+    )
 }
 
 fn pending_sync_delete(aggregate: SyncAggregateRef, payload_json: String) -> PendingSyncOperation {
     let created_at = current_utc_timestamp();
 
-    PendingSyncOperation {
+    PendingSyncOperation::new(
         aggregate,
-        operation: SyncOperationKind::Delete,
+        SyncOperationKind::Delete,
         payload_json,
-        created_at: created_at.clone(),
-        available_at: created_at,
-        attempt_count: 0,
-    }
+        created_at,
+    )
 }
 
 fn farm_sync_payload(
@@ -5984,9 +5980,10 @@ mod tests {
     };
     use radroots_studio_app_sync::{
         AppSyncRequest, AppSyncResult, AppSyncRunStatus, AppSyncTransport, AppSyncTransportError,
-        PendingSyncOperation, RecordedAppSyncTransport, SyncAggregateRef, SyncCheckpointState,
-        SyncCheckpointStatus, SyncConflict, SyncConflictKind, SyncConflictResolutionStatus,
-        SyncConflictSeverity, SyncOperationKind, SyncTrigger,
+        PendingSyncOperation, PendingSyncOperationState, RecordedAppSyncTransport,
+        SyncAggregateRef, SyncCheckpointState, SyncCheckpointStatus, SyncConflict,
+        SyncConflictKind, SyncConflictResolutionStatus, SyncConflictSeverity, SyncOperationKind,
+        SyncTrigger,
     };
     use radroots_identity::RadrootsIdentity;
     use radroots_local_events::{
@@ -6225,14 +6222,12 @@ mod tests {
             sqlite_store
                 .enqueue_pending_sync_operation(
                     &account_id,
-                    &PendingSyncOperation {
-                        aggregate: SyncAggregateRef::Farm(farm_id),
-                        operation: SyncOperationKind::Upsert,
-                        payload_json: "{\"farm\":\"queued\"}".to_owned(),
-                        created_at: "2026-04-20T19:02:00Z".to_owned(),
-                        available_at: "2026-04-20T19:02:00Z".to_owned(),
-                        attempt_count: 0,
-                    },
+                    &PendingSyncOperation::new(
+                        SyncAggregateRef::Farm(farm_id),
+                        SyncOperationKind::Upsert,
+                        "{\"farm\":\"queued\"}",
+                        "2026-04-20T19:02:00Z",
+                    ),
                 )
                 .expect("pending sync operation should save");
         }
@@ -6275,6 +6270,89 @@ mod tests {
         );
 
         cleanup_bootstrapped_runtime_paths(&paths);
+    }
+
+    #[test]
+    fn runtime_outbox_repeated_product_save_deduplicates_active_pending_sync() {
+        let runtime = memory_runtime();
+        let (account_id, farm_id) = provision_ready_farmer_account(&runtime);
+
+        assert!(
+            runtime
+                .open_new_product_editor()
+                .expect("new product editor should open")
+        );
+        let product_id = match runtime.summary().products_projection.editor {
+            radroots_studio_app_state::ProductEditorState::Open(session) => session
+                .selected_product_id
+                .expect("open product editor should select a product"),
+            radroots_studio_app_state::ProductEditorState::Closed => {
+                panic!("product editor should be open")
+            }
+        };
+        let first_draft = ProductEditorDraft {
+            title: "Salad mix".to_owned(),
+            subtitle: "Spring blend".to_owned(),
+            unit_label: "bag".to_owned(),
+            price_minor_units: Some(700),
+            price_currency: "USD".to_owned(),
+            stock_quantity: Some(8),
+            availability_window_id: None,
+            status: ProductStatus::Draft,
+        };
+        let second_draft = ProductEditorDraft {
+            title: "Winter greens".to_owned(),
+            subtitle: "Cut this morning".to_owned(),
+            unit_label: "bag".to_owned(),
+            price_minor_units: Some(900),
+            price_currency: "USD".to_owned(),
+            stock_quantity: Some(11),
+            availability_window_id: None,
+            status: ProductStatus::Published,
+        };
+
+        assert!(
+            runtime
+                .save_product_editor_draft(first_draft)
+                .expect("first product editor save should succeed")
+        );
+        assert!(
+            runtime
+                .save_product_editor_draft(second_draft.clone())
+                .expect("second product editor save should succeed")
+        );
+
+        let pending_operations = runtime
+            .lock_state()
+            .sqlite_store
+            .as_ref()
+            .expect("sqlite store")
+            .load_pending_sync_operations(account_id.as_str())
+            .expect("pending sync operations should load");
+        let expected_payload = super::product_sync_payload(
+            product_id,
+            Some(farm_id),
+            "save_product_editor_draft",
+            Some(&second_draft),
+            second_draft.stock_quantity,
+            None,
+        );
+
+        assert_eq!(pending_operations.len(), 1);
+        assert_eq!(
+            pending_operations[0].operation.operation_key,
+            format!("product:{product_id}:upsert")
+        );
+        assert_eq!(
+            pending_operations[0].operation.payload_json,
+            expected_payload
+        );
+        assert_eq!(
+            pending_operations[0].operation.state,
+            PendingSyncOperationState::Pending
+        );
+        assert_eq!(pending_operations[0].operation.attempt_count, 0);
+        assert_eq!(pending_operations[0].operation.last_error_message, None);
     }
 
     #[test]

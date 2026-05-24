@@ -5,7 +5,7 @@ use radroots_sdk::SdkTransportMode;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-use crate::{PendingSyncOperation, SyncAggregateRef, SyncOperationKind};
+use crate::{PendingSyncOperation, PendingSyncOperationState, SyncAggregateRef, SyncOperationKind};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -313,13 +313,18 @@ impl PendingSyncOperation {
         created_at: impl Into<String>,
     ) -> Result<Self, AppPublishPayloadJsonError> {
         let created_at = created_at.into();
+        let aggregate = payload.aggregate_ref();
+        let operation = payload.operation_kind();
         Ok(Self {
-            aggregate: payload.aggregate_ref(),
-            operation: payload.operation_kind(),
+            operation_key: PendingSyncOperation::deterministic_operation_key(&aggregate, operation),
+            aggregate,
+            operation,
             payload_json: payload.to_payload_json()?,
             created_at: created_at.clone(),
             available_at: created_at,
             attempt_count: 0,
+            state: PendingSyncOperationState::Pending,
+            last_error_message: None,
         })
     }
 
@@ -339,7 +344,9 @@ mod tests {
         AppOrderRequestPublishPayload, AppPublishContext, AppPublishPayload,
         AppPublishValidationFailure,
     };
-    use crate::{PendingSyncOperation, SyncAggregateRef, SyncOperationKind};
+    use crate::{
+        PendingSyncOperation, PendingSyncOperationState, SyncAggregateRef, SyncOperationKind,
+    };
     use radroots_studio_app_models::{FarmId, FarmReadiness, OrderId, ProductId, ProductStatus};
 
     #[test]
@@ -369,7 +376,10 @@ mod tests {
                 .expect("typed publish payload should serialize");
 
         assert_eq!(operation.aggregate, SyncAggregateRef::Farm(farm_id));
+        assert_eq!(operation.operation_key, format!("farm:{farm_id}:upsert"));
         assert_eq!(operation.operation, SyncOperationKind::Upsert);
+        assert_eq!(operation.state, PendingSyncOperationState::Pending);
+        assert_eq!(operation.last_error_message, None);
         assert_eq!(operation.created_at, operation.available_at);
         assert_eq!(
             operation.publish_payload().expect("payload should parse"),
@@ -460,12 +470,15 @@ mod tests {
     #[test]
     fn existing_raw_payload_outbox_work_remains_local_save_compatible() {
         let pending_operation = PendingSyncOperation {
+            operation_key: "product:greens:upsert".to_owned(),
             aggregate: SyncAggregateRef::Product(ProductId::new()),
             operation: SyncOperationKind::Upsert,
             payload_json: "{\"title\":\"greens\"}".to_owned(),
             created_at: "2026-04-17T19:32:00Z".to_owned(),
             available_at: "2026-04-17T19:32:00Z".to_owned(),
             attempt_count: 0,
+            state: PendingSyncOperationState::Pending,
+            last_error_message: None,
         };
 
         assert!(!pending_operation.is_retry());

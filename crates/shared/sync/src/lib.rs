@@ -35,6 +35,15 @@ impl SyncAggregateRef {
             Self::Order(_) => "order",
         }
     }
+
+    pub fn aggregate_id(&self) -> String {
+        match self {
+            Self::Farm(farm_id) => farm_id.to_string(),
+            Self::FulfillmentWindow(fulfillment_window_id) => fulfillment_window_id.to_string(),
+            Self::Product(product_id) => product_id.to_string(),
+            Self::Order(order_id) => order_id.to_string(),
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
@@ -63,17 +72,81 @@ impl SyncOperationKind {
     }
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PendingSyncOperationState {
+    Pending,
+    InProgress,
+    Succeeded,
+    Failed,
+    Blocked,
+    Retryable,
+}
+
+impl PendingSyncOperationState {
+    pub const fn storage_key(self) -> &'static str {
+        match self {
+            Self::Pending => "pending",
+            Self::InProgress => "in_progress",
+            Self::Succeeded => "succeeded",
+            Self::Failed => "failed",
+            Self::Blocked => "blocked",
+            Self::Retryable => "retryable",
+        }
+    }
+
+    pub const fn is_active(self) -> bool {
+        !matches!(self, Self::Succeeded)
+    }
+}
+
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct PendingSyncOperation {
+    pub operation_key: String,
     pub aggregate: SyncAggregateRef,
     pub operation: SyncOperationKind,
     pub payload_json: String,
     pub created_at: String,
     pub available_at: String,
     pub attempt_count: u32,
+    pub state: PendingSyncOperationState,
+    pub last_error_message: Option<String>,
 }
 
 impl PendingSyncOperation {
+    pub fn new(
+        aggregate: SyncAggregateRef,
+        operation: SyncOperationKind,
+        payload_json: impl Into<String>,
+        created_at: impl Into<String>,
+    ) -> Self {
+        let operation_key = Self::deterministic_operation_key(&aggregate, operation);
+        let created_at = created_at.into();
+        Self {
+            operation_key,
+            aggregate,
+            operation,
+            payload_json: payload_json.into(),
+            created_at: created_at.clone(),
+            available_at: created_at,
+            attempt_count: 0,
+            state: PendingSyncOperationState::Pending,
+            last_error_message: None,
+        }
+    }
+
+    pub fn deterministic_operation_key(
+        aggregate: &SyncAggregateRef,
+        operation: SyncOperationKind,
+    ) -> String {
+        format!(
+            "{}:{}:{}",
+            aggregate.aggregate_kind(),
+            aggregate.aggregate_id(),
+            operation.storage_key()
+        )
+    }
+
     pub const fn is_retry(&self) -> bool {
         self.attempt_count > 0
     }
@@ -469,14 +542,13 @@ mod tests {
 
     #[test]
     fn request_and_result_surface_conflict_status_through_typed_contracts() {
-        let pending_operation = PendingSyncOperation {
-            aggregate: SyncAggregateRef::Product(ProductId::new()),
-            operation: SyncOperationKind::Upsert,
-            payload_json: "{\"title\":\"greens\"}".to_owned(),
-            created_at: "2026-04-17T19:32:00Z".to_owned(),
-            available_at: "2026-04-17T19:32:00Z".to_owned(),
-            attempt_count: 1,
-        };
+        let mut pending_operation = PendingSyncOperation::new(
+            SyncAggregateRef::Product(ProductId::new()),
+            SyncOperationKind::Upsert,
+            "{\"title\":\"greens\"}",
+            "2026-04-17T19:32:00Z",
+        );
+        pending_operation.attempt_count = 1;
         let conflict = SyncConflict {
             aggregate: SyncAggregateRef::Product(ProductId::new()),
             kind: SyncConflictKind::RevisionMismatch,

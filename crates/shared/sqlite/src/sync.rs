@@ -1,8 +1,8 @@
 use radroots_studio_app_models::{FarmId, FulfillmentWindowId, OrderId, ProductId};
 use radroots_studio_app_sync::{
-    PendingSyncOperation, SyncAggregateRef, SyncCheckpointState, SyncCheckpointStatus,
-    SyncConflict, SyncConflictKind, SyncConflictResolutionStatus, SyncConflictSeverity,
-    SyncOperationKind,
+    PendingSyncOperation, PendingSyncOperationState, SyncAggregateRef, SyncCheckpointState,
+    SyncCheckpointStatus, SyncConflict, SyncConflictKind, SyncConflictResolutionStatus,
+    SyncConflictSeverity, SyncOperationKind,
 };
 use rusqlite::{Connection, OptionalExtension, params};
 use uuid::Uuid;
@@ -42,24 +42,42 @@ impl<'a> AppSyncRepository<'a> {
                 "INSERT INTO local_outbox (
                     id,
                     account_id,
+                    operation_key,
                     aggregate_kind,
                     aggregate_id,
                     operation_kind,
                     payload_json,
                     created_at,
                     available_at,
-                    attempt_count
-                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+                    attempt_count,
+                    state,
+                    last_error_message
+                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)
+                ON CONFLICT(account_id, operation_key)
+                WHERE state IN ('pending', 'in_progress', 'failed', 'blocked', 'retryable')
+                DO UPDATE SET
+                    aggregate_kind = excluded.aggregate_kind,
+                    aggregate_id = excluded.aggregate_id,
+                    operation_kind = excluded.operation_kind,
+                    payload_json = excluded.payload_json,
+                    created_at = excluded.created_at,
+                    available_at = excluded.available_at,
+                    attempt_count = 0,
+                    state = 'pending',
+                    last_error_message = NULL",
                 params![
                     operation_id,
                     account_id,
+                    operation.operation_key.as_str(),
                     operation.aggregate.aggregate_kind(),
                     aggregate_id_value(&operation.aggregate),
                     operation.operation.storage_key(),
-                    operation.payload_json,
-                    operation.created_at,
-                    operation.available_at,
+                    operation.payload_json.as_str(),
+                    operation.created_at.as_str(),
+                    operation.available_at.as_str(),
                     i64::from(operation.attempt_count),
+                    operation.state.storage_key(),
+                    operation.last_error_message.as_deref(),
                 ],
             )
             .map_err(|source| AppSqliteError::Query {
@@ -67,7 +85,21 @@ impl<'a> AppSyncRepository<'a> {
                 source,
             })?;
 
-        Ok(operation_id)
+        self.connection
+            .query_row(
+                "SELECT id
+                 FROM local_outbox
+                 WHERE account_id = ?1
+                    AND operation_key = ?2
+                    AND state IN ('pending', 'in_progress', 'failed', 'blocked', 'retryable')
+                 LIMIT 1",
+                params![account_id, operation.operation_key.as_str()],
+                |row| row.get::<_, String>(0),
+            )
+            .map_err(|source| AppSqliteError::Query {
+                operation: "load pending sync operation id after enqueue",
+                source,
+            })
     }
 
     pub fn load_pending_operations(
@@ -79,15 +111,19 @@ impl<'a> AppSyncRepository<'a> {
             .prepare(
                 "SELECT
                     id,
+                    operation_key,
                     aggregate_kind,
                     aggregate_id,
                     operation_kind,
                     payload_json,
                     created_at,
                     available_at,
-                    attempt_count
+                    attempt_count,
+                    state,
+                    last_error_message
                  FROM local_outbox
                  WHERE account_id = ?1
+                    AND state IN ('pending', 'in_progress', 'failed', 'blocked', 'retryable')
                  ORDER BY available_at ASC, created_at ASC, id ASC",
             )
             .map_err(|source| AppSqliteError::Query {
@@ -104,7 +140,10 @@ impl<'a> AppSyncRepository<'a> {
                     row.get::<_, String>(4)?,
                     row.get::<_, String>(5)?,
                     row.get::<_, String>(6)?,
-                    row.get::<_, u32>(7)?,
+                    row.get::<_, String>(7)?,
+                    row.get::<_, u32>(8)?,
+                    row.get::<_, String>(9)?,
+                    row.get::<_, Option<String>>(10)?,
                 ))
             })
             .map_err(|source| AppSqliteError::Query {
@@ -115,6 +154,7 @@ impl<'a> AppSyncRepository<'a> {
         rows.map(|row| {
             let (
                 operation_id,
+                operation_key,
                 aggregate_kind,
                 aggregate_id,
                 operation_kind,
@@ -122,6 +162,8 @@ impl<'a> AppSyncRepository<'a> {
                 created_at,
                 available_at,
                 attempt_count,
+                state,
+                last_error_message,
             ) = row.map_err(|source| AppSqliteError::Query {
                 operation: "read pending sync operation row",
                 source,
@@ -130,6 +172,7 @@ impl<'a> AppSyncRepository<'a> {
             Ok(StoredPendingSyncOperation {
                 operation_id,
                 operation: PendingSyncOperation {
+                    operation_key,
                     aggregate: parse_sync_aggregate_ref(
                         "local_outbox.aggregate_kind",
                         "local_outbox.aggregate_id",
@@ -141,6 +184,8 @@ impl<'a> AppSyncRepository<'a> {
                     created_at,
                     available_at,
                     attempt_count,
+                    state: parse_pending_sync_operation_state(state)?,
+                    last_error_message,
                 },
             })
         })
@@ -158,7 +203,9 @@ impl<'a> AppSyncRepository<'a> {
             .connection
             .execute(
                 "UPDATE local_outbox
-                 SET available_at = ?3, attempt_count = ?4
+                 SET available_at = ?3,
+                    attempt_count = ?4,
+                    state = 'retryable'
                  WHERE account_id = ?1 AND id = ?2",
                 params![
                     account_id,
@@ -539,6 +586,23 @@ fn parse_sync_operation_kind(value: String) -> Result<SyncOperationKind, AppSqli
     }
 }
 
+fn parse_pending_sync_operation_state(
+    value: String,
+) -> Result<PendingSyncOperationState, AppSqliteError> {
+    match value.as_str() {
+        "pending" => Ok(PendingSyncOperationState::Pending),
+        "in_progress" => Ok(PendingSyncOperationState::InProgress),
+        "succeeded" => Ok(PendingSyncOperationState::Succeeded),
+        "failed" => Ok(PendingSyncOperationState::Failed),
+        "blocked" => Ok(PendingSyncOperationState::Blocked),
+        "retryable" => Ok(PendingSyncOperationState::Retryable),
+        _ => Err(AppSqliteError::DecodeEnum {
+            field: "local_outbox.state",
+            value,
+        }),
+    }
+}
+
 fn parse_sync_conflict_kind(value: String) -> Result<SyncConflictKind, AppSqliteError> {
     match value.as_str() {
         "revision_mismatch" => Ok(SyncConflictKind::RevisionMismatch),
@@ -619,8 +683,9 @@ fn sync_conflict_resolution_status_value(resolution: SyncConflictResolutionStatu
 mod tests {
     use radroots_studio_app_models::{FarmId, ProductId};
     use radroots_studio_app_sync::{
-        PendingSyncOperation, SyncAggregateRef, SyncCheckpointStatus, SyncConflict,
-        SyncConflictKind, SyncConflictResolutionStatus, SyncConflictSeverity, SyncOperationKind,
+        PendingSyncOperation, PendingSyncOperationState, SyncAggregateRef, SyncCheckpointStatus,
+        SyncConflict, SyncConflictKind, SyncConflictResolutionStatus, SyncConflictSeverity,
+        SyncOperationKind,
     };
 
     use crate::{AppSqliteStore, DatabaseTarget};
@@ -661,22 +726,18 @@ mod tests {
     fn pending_operations_are_account_scoped_and_retryable() {
         let store = AppSqliteStore::open(DatabaseTarget::InMemory).expect("store should open");
         let repository = store.sync_repository();
-        let first = PendingSyncOperation {
-            aggregate: SyncAggregateRef::Farm(FarmId::new()),
-            operation: SyncOperationKind::Upsert,
-            payload_json: "{\"farm\":\"a\"}".to_owned(),
-            created_at: "2026-04-20T18:00:00Z".to_owned(),
-            available_at: "2026-04-20T18:00:00Z".to_owned(),
-            attempt_count: 0,
-        };
-        let second = PendingSyncOperation {
-            aggregate: SyncAggregateRef::Product(ProductId::new()),
-            operation: SyncOperationKind::Delete,
-            payload_json: "{\"product\":\"b\"}".to_owned(),
-            created_at: "2026-04-20T18:05:00Z".to_owned(),
-            available_at: "2026-04-20T18:05:00Z".to_owned(),
-            attempt_count: 0,
-        };
+        let first = PendingSyncOperation::new(
+            SyncAggregateRef::Farm(FarmId::new()),
+            SyncOperationKind::Upsert,
+            "{\"farm\":\"a\"}",
+            "2026-04-20T18:00:00Z",
+        );
+        let second = PendingSyncOperation::new(
+            SyncAggregateRef::Product(ProductId::new()),
+            SyncOperationKind::Delete,
+            "{\"product\":\"b\"}",
+            "2026-04-20T18:05:00Z",
+        );
 
         let first_id = repository
             .enqueue_pending_operation("acct_a", &first)
@@ -722,10 +783,62 @@ mod tests {
         assert_eq!(acct_a[0].operation_id, first_id);
         assert_eq!(acct_a[0].operation.attempt_count, 2);
         assert_eq!(
+            acct_a[0].operation.state,
+            PendingSyncOperationState::Retryable
+        );
+        assert_eq!(
             acct_a[0].operation.available_at,
             "2026-04-20T18:10:00Z".to_owned()
         );
         assert_eq!(acct_b.len(), 1);
+    }
+
+    #[test]
+    fn outbox_enqueue_upserts_active_operation_by_deterministic_key() {
+        let store = AppSqliteStore::open(DatabaseTarget::InMemory).expect("store should open");
+        let repository = store.sync_repository();
+        let product_id = ProductId::new();
+        let first = PendingSyncOperation::new(
+            SyncAggregateRef::Product(product_id),
+            SyncOperationKind::Upsert,
+            "{\"title\":\"greens\"}",
+            "2026-04-20T18:00:00Z",
+        );
+        let mut replacement = PendingSyncOperation::new(
+            SyncAggregateRef::Product(product_id),
+            SyncOperationKind::Upsert,
+            "{\"title\":\"winter greens\"}",
+            "2026-04-20T18:05:00Z",
+        );
+        replacement.attempt_count = 3;
+        replacement.state = PendingSyncOperationState::Failed;
+        replacement.last_error_message = Some("stale relay state".to_owned());
+
+        let first_id = repository
+            .enqueue_pending_operation("acct_a", &first)
+            .expect("first operation should save");
+        let replacement_id = repository
+            .enqueue_pending_operation("acct_a", &replacement)
+            .expect("replacement operation should upsert");
+
+        let pending = repository
+            .load_pending_operations("acct_a")
+            .expect("pending operations should load");
+
+        assert_eq!(replacement_id, first_id);
+        assert_eq!(pending.len(), 1);
+        assert_eq!(pending[0].operation_id, first_id);
+        assert_eq!(pending[0].operation.operation_key, first.operation_key);
+        assert_eq!(
+            pending[0].operation.payload_json,
+            "{\"title\":\"winter greens\"}"
+        );
+        assert_eq!(pending[0].operation.attempt_count, 0);
+        assert_eq!(
+            pending[0].operation.state,
+            PendingSyncOperationState::Pending
+        );
+        assert_eq!(pending[0].operation.last_error_message, None);
     }
 
     #[test]

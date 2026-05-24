@@ -771,6 +771,13 @@ mod tests {
         assert!(column_exists(connection, "farms", "timezone"));
         assert!(column_exists(connection, "farms", "currency_code"));
         assert!(column_exists(connection, "local_outbox", "account_id"));
+        assert!(column_exists(connection, "local_outbox", "operation_key"));
+        assert!(column_exists(connection, "local_outbox", "state"));
+        assert!(column_exists(
+            connection,
+            "local_outbox",
+            "last_error_message"
+        ));
         assert!(column_exists(connection, "local_conflicts", "account_id"));
         assert!(column_exists(connection, "local_conflicts", "severity"));
         assert!(column_exists(
@@ -939,6 +946,8 @@ mod tests {
             latest_schema_version()
         );
         assert!(column_exists(connection, "local_outbox", "account_id"));
+        assert!(column_exists(connection, "local_outbox", "operation_key"));
+        assert!(column_exists(connection, "local_outbox", "state"));
         assert!(column_exists(connection, "local_conflicts", "severity"));
         assert!(column_exists(
             connection,
