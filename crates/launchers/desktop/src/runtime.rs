@@ -3156,6 +3156,7 @@ impl DesktopAppRuntimeState {
         &self,
         query: &BuyerSearchScreenQueryState,
     ) -> Result<radroots_studio_app_models::BuyerListingsProjection, AppSqliteError> {
+        let _ = self.import_shared_local_events()?;
         let Some(sqlite_store) = self.sqlite_store.as_ref() else {
             return Ok(Default::default());
         };
@@ -5788,6 +5789,88 @@ mod tests {
         cleanup_bootstrapped_runtime_paths(&paths);
     }
 
+    #[test]
+    fn runtime_buyer_search_imports_shared_local_events_before_read() {
+        let (runtime, paths) = bootstrapped_runtime("buyer_search_shared_local_events_refresh");
+        assert!(
+            runtime
+                .generate_local_account(Some("Buyer".to_owned()))
+                .expect("account should generate")
+        );
+        assert_eq!(
+            runtime
+                .summary()
+                .personal_projection
+                .search
+                .listings
+                .rows
+                .len(),
+            0
+        );
+
+        append_cli_signed_buyer_listing_record(&paths);
+
+        assert!(
+            runtime
+                .set_personal_search_query("eggs")
+                .expect("buyer search query should refresh")
+        );
+        let summary = runtime.summary();
+        assert_eq!(summary.personal_projection.search.listings.rows.len(), 1);
+        assert_eq!(
+            summary.personal_projection.search.listings.rows[0].title,
+            "Buyer Visible Eggs"
+        );
+        assert_eq!(
+            summary.personal_projection.search.listings.rows[0].fulfillment_methods,
+            BTreeSet::from([FarmOrderMethod::Pickup])
+        );
+
+        cleanup_bootstrapped_runtime_paths(&paths);
+    }
+
+    #[test]
+    fn runtime_shared_local_events_refresh_reloads_buyer_browse_idempotently() {
+        let (runtime, paths) = bootstrapped_runtime("buyer_browse_shared_local_events_refresh");
+        assert!(
+            runtime
+                .generate_local_account(Some("Buyer".to_owned()))
+                .expect("account should generate")
+        );
+        append_cli_signed_buyer_listing_record(&paths);
+
+        let report = runtime
+            .refresh_shared_local_events()
+            .expect("shared local events should refresh");
+        let summary = runtime.summary();
+        assert_eq!(report.scanned_records, 1);
+        assert_eq!(report.imported_records, 1);
+        assert_eq!(report.skipped_records, 0);
+        assert_eq!(summary.personal_projection.browse.listings.rows.len(), 1);
+        assert_eq!(
+            summary.personal_projection.browse.listings.rows[0].title,
+            "Buyer Visible Eggs"
+        );
+
+        let second_report = runtime
+            .refresh_shared_local_events()
+            .expect("second shared local events refresh should succeed");
+        assert_eq!(second_report.scanned_records, 0);
+        assert_eq!(second_report.imported_records, 0);
+        assert_eq!(second_report.skipped_records, 0);
+        assert_eq!(
+            runtime
+                .summary()
+                .personal_projection
+                .browse
+                .listings
+                .rows
+                .len(),
+            1
+        );
+
+        cleanup_bootstrapped_runtime_paths(&paths);
+    }
 
     #[test]
     fn runtime_app_farm_and_listing_writes_append_shared_local_work_records() {
@@ -10593,6 +10676,96 @@ mod tests {
                 }),
             ))
             .expect("append listing local work");
+    }
+
+    fn append_cli_signed_buyer_listing_record(paths: &AppDesktopRuntimePaths) {
+        let database_path =
+            super::shared_local_events_database_path(paths).expect("shared local events path");
+        if let Some(parent) = database_path.parent() {
+            fs::create_dir_all(parent).expect("shared local events directory should create");
+        }
+        let executor =
+            SqliteExecutor::open(database_path.as_path()).expect("open shared local events db");
+        let store = LocalEventsStore::new(executor);
+        store.migrate_up().expect("migrate shared local events");
+        let farm_key = "CCCCCCCCCCCCCCCCCCCCCC";
+        let listing_key = "DDDDDDDDDDDDDDDDDDDDDD";
+        let owner_pubkey = "buyer-visible-seller-pubkey";
+        let record_id = "cli:signed_event:buyer-visible-listing";
+        let content = json!({
+            "d_tag": listing_key,
+            "status": "active",
+            "farm": {
+                "pubkey": owner_pubkey,
+                "d_tag": farm_key
+            },
+            "product": {
+                "key": listing_key,
+                "title": "Buyer Visible Eggs",
+                "summary": "Published local eggs"
+            },
+            "availability": {
+                "kind": "window",
+                "amount": {
+                    "start": 4_102_444_800u64,
+                    "end": 4_102_531_200u64
+                }
+            },
+            "delivery_method": {
+                "kind": "pickup"
+            },
+            "location": {
+                "primary": "North barn pickup"
+            }
+        });
+        store
+            .append_record(&LocalEventRecordInput {
+                record_id: record_id.to_owned(),
+                family: LocalRecordFamily::SignedEvent,
+                status: LocalRecordStatus::Published,
+                source_runtime: SourceRuntime::Cli,
+                created_at_ms: 1100,
+                inserted_at_ms: 1101,
+                owner_account_id: Some("seller-account".to_owned()),
+                owner_pubkey: Some(owner_pubkey.to_owned()),
+                farm_id: Some(farm_key.to_owned()),
+                listing_addr: Some(format!("30402:{owner_pubkey}:{listing_key}")),
+                local_work_json: None,
+                event_id: Some(format!("event-{record_id}")),
+                event_kind: Some(30402),
+                event_pubkey: Some(owner_pubkey.to_owned()),
+                event_created_at: Some(1100),
+                event_tags_json: Some(json!([
+                    ["d", listing_key],
+                    ["a", format!("30340:{owner_pubkey}:{farm_key}")],
+                    ["key", listing_key],
+                    ["title", "Buyer Visible Eggs"],
+                    ["summary", "Published local eggs"],
+                    ["radroots:bin", "bin-1", "1", "each"],
+                    ["radroots:price", "bin-1", "8", "USD", "1", "each"],
+                    ["inventory", "9"],
+                    ["status", "active"],
+                    ["radroots:availability_start", "4102444800"],
+                    ["expires_at", "4102531200"],
+                    ["delivery", "pickup"],
+                    ["location", "North barn pickup"]
+                ])),
+                event_content: Some(content.to_string()),
+                event_sig: Some("signature".to_owned()),
+                raw_event_json: Some(json!({
+                    "id": format!("event-{record_id}"),
+                    "kind": 30402,
+                    "pubkey": owner_pubkey,
+                    "content": content.to_string()
+                })),
+                outbox_status: PublishOutboxStatus::Acknowledged,
+                relay_set_fingerprint: Some("relay-set".to_owned()),
+                relay_delivery_json: Some(json!({
+                    "state": "acknowledged",
+                    "acknowledged_relays": ["ws://127.0.0.1:1234/"]
+                })),
+            })
+            .expect("append signed buyer listing");
     }
 
     fn local_work_record(
