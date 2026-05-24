@@ -1,5 +1,5 @@
 CREATE TABLE reminder_schedules (
-    reminder_id TEXT PRIMARY KEY NOT NULL,
+    reminder_id TEXT NOT NULL,
     account_id TEXT NOT NULL,
     farm_id TEXT NOT NULL,
     order_id TEXT,
@@ -25,7 +25,8 @@ CREATE TABLE reminder_schedules (
     action_label TEXT,
     delivery_state TEXT NOT NULL CHECK (
         delivery_state IN ('scheduled', 'presented', 'acknowledged', 'resolved')
-    )
+    ),
+    PRIMARY KEY (account_id, farm_id, reminder_id)
 );
 
 CREATE TABLE reminder_log_entries (

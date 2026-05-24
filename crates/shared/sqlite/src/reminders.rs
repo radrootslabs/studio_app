@@ -668,7 +668,12 @@ mod tests {
             .replace_reminder_schedule(
                 "acct_other",
                 other_farm_id,
-                &ReminderFeedProjection::default(),
+                &ReminderFeedProjection {
+                    items: vec![ReminderDeadlineProjection {
+                        farm_id: other_farm_id,
+                        ..reminder.clone()
+                    }],
+                },
             )
             .expect("other schedule should save");
 
@@ -680,7 +685,9 @@ mod tests {
             .expect("other schedule should load");
 
         assert_eq!(loaded.items, vec![reminder]);
-        assert!(other.is_empty());
+        assert_eq!(other.items.len(), 1);
+        assert_eq!(other.items[0].reminder_id, loaded.items[0].reminder_id);
+        assert_eq!(other.items[0].farm_id, other_farm_id);
     }
 
     #[test]
