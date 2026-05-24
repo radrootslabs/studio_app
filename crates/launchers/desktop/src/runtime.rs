@@ -273,7 +273,10 @@ impl DesktopAppRuntime {
         section_changed || editor_changed
     }
 
-    pub fn select_personal_section(&self, section: PersonalSection) -> bool {
+    pub fn select_personal_section(
+        &self,
+        section: PersonalSection,
+    ) -> Result<bool, AppSqliteError> {
         self.lock_state_mut().select_personal_section(section)
     }
 
@@ -1170,7 +1173,15 @@ impl DesktopAppRuntimeState {
         }
     }
 
-    fn select_personal_section(&mut self, section: PersonalSection) -> bool {
+    fn select_personal_section(
+        &mut self,
+        section: PersonalSection,
+    ) -> Result<bool, AppSqliteError> {
+        let freshness_changed = if section == PersonalSection::Browse {
+            self.refresh_personal_browse_navigation()?
+        } else {
+            false
+        };
         let section_changed = self
             .state_store
             .apply_in_memory(AppStateCommand::SelectSection(ShellSection::Personal(
@@ -1178,7 +1189,15 @@ impl DesktopAppRuntimeState {
             )));
         let editor_changed = self.close_product_editor();
 
-        section_changed || editor_changed
+        Ok(freshness_changed || section_changed || editor_changed)
+    }
+
+    fn refresh_personal_browse_navigation(&mut self) -> Result<bool, AppSqliteError> {
+        let report = self.import_shared_local_events()?;
+        let local_changed = report.imported_records > 0 || report.skipped_records > 0;
+        let context_changed = self.refresh_selected_account_context_after_local_events()?;
+
+        Ok(local_changed || context_changed)
     }
 
     fn open_personal_product_detail(
@@ -1193,8 +1212,12 @@ impl DesktopAppRuntimeState {
             return Ok(false);
         };
 
-        let section_changed = matches!(section, PersonalSection::Browse | PersonalSection::Search)
-            && self.select_personal_section(section);
+        let section_changed =
+            if matches!(section, PersonalSection::Browse | PersonalSection::Search) {
+                self.select_personal_section(section)?
+            } else {
+                false
+            };
         let detail_changed = self.set_personal_product_detail(section, Some(detail));
 
         Ok(section_changed || detail_changed)
@@ -1290,7 +1313,7 @@ impl DesktopAppRuntimeState {
             }
             changed
         });
-        let section_changed = self.select_personal_section(PersonalSection::Cart);
+        let section_changed = self.select_personal_section(PersonalSection::Cart)?;
 
         Ok(cart_changed || section_changed)
     }
@@ -1395,7 +1418,7 @@ impl DesktopAppRuntimeState {
 
             changed
         });
-        let section_changed = self.select_personal_section(PersonalSection::Orders);
+        let section_changed = self.select_personal_section(PersonalSection::Orders)?;
         let pending_changed = if matches!(buyer_context, BuyerContext::Account(_)) {
             self.enqueue_selected_account_sync_operations(vec![pending_sync_upsert(
                 SyncAggregateRef::Order(order_id),
@@ -1424,7 +1447,7 @@ impl DesktopAppRuntimeState {
         };
 
         let detail_changed = self.set_personal_order_detail(Some(order_detail));
-        let section_changed = self.select_personal_section(PersonalSection::Orders);
+        let section_changed = self.select_personal_section(PersonalSection::Orders)?;
 
         Ok(detail_changed || section_changed)
     }
@@ -1471,7 +1494,7 @@ impl DesktopAppRuntimeState {
 
                     changed
                 });
-                let section_changed = self.select_personal_section(PersonalSection::Cart);
+                let section_changed = self.select_personal_section(PersonalSection::Cart)?;
 
                 Ok(personal_changed || section_changed)
             }
@@ -5286,7 +5309,9 @@ mod tests {
     use radroots_studio_app_remote_signer::{
         RadrootsAppRemoteSignerPendingSession, RadrootsAppRemoteSignerSessionRecord,
     };
-    use radroots_studio_app_sqlite::{AppSqliteStore, DatabaseTarget, latest_schema_version};
+    use radroots_studio_app_sqlite::{
+        AppSqliteError, AppSqliteStore, DatabaseTarget, latest_schema_version,
+    };
     use radroots_studio_app_state::{
         APP_STATE_FILE_NAME, AppStateCommand, AppStatePersistenceRepository, AppStateRepository,
         AppStateRepositoryError, AppStateStore, AppStateStoreError, FileBackedAppStateRepository,
@@ -5943,6 +5968,114 @@ mod tests {
                 .len(),
             1
         );
+
+        cleanup_bootstrapped_runtime_paths(&paths);
+    }
+
+    #[test]
+    fn runtime_buyer_browse_selection_refreshes_shared_local_events() {
+        let (runtime, paths) = bootstrapped_runtime("buyer_browse_selection_shared_events_refresh");
+        assert!(
+            runtime
+                .generate_local_account(Some("Buyer".to_owned()))
+                .expect("account should generate")
+        );
+        assert_eq!(
+            runtime
+                .summary()
+                .personal_projection
+                .browse
+                .listings
+                .rows
+                .len(),
+            0
+        );
+
+        append_cli_signed_buyer_listing_record_with(
+            &paths,
+            "browse-selection-first-listing",
+            "DDDDDDDDDDDDDDDDDDDDDD",
+            "Buyer Visible Eggs",
+            1100,
+        );
+
+        assert!(
+            runtime
+                .select_personal_section(PersonalSection::Browse)
+                .expect("buyer Browse selection should refresh")
+        );
+        let first_summary = runtime.summary();
+        assert_eq!(
+            first_summary.personal_projection.browse.listings.rows.len(),
+            1
+        );
+
+        append_cli_signed_buyer_listing_record_with(
+            &paths,
+            "browse-selection-second-listing",
+            "EEEEEEEEEEEEEEEEEEEEEE",
+            "Buyer Visible Eggs Two",
+            1200,
+        );
+
+        assert!(
+            runtime
+                .select_personal_section(PersonalSection::Browse)
+                .expect("same buyer Browse selection should refresh")
+        );
+        let refreshed_summary = runtime.summary();
+        let titles = refreshed_summary
+            .personal_projection
+            .browse
+            .listings
+            .rows
+            .iter()
+            .map(|row| row.title.as_str())
+            .collect::<BTreeSet<_>>();
+        assert_eq!(
+            titles,
+            BTreeSet::from(["Buyer Visible Eggs", "Buyer Visible Eggs Two"])
+        );
+
+        assert!(
+            !runtime
+                .select_personal_section(PersonalSection::Browse)
+                .expect("idempotent buyer Browse selection should refresh")
+        );
+
+        cleanup_bootstrapped_runtime_paths(&paths);
+    }
+
+    #[test]
+    fn runtime_buyer_browse_selection_surfaces_shared_local_events_import_errors() {
+        let (runtime, paths) = bootstrapped_runtime("buyer_browse_selection_import_error");
+        assert!(
+            runtime
+                .generate_local_account(Some("Buyer".to_owned()))
+                .expect("account should generate")
+        );
+        let database_path =
+            super::shared_local_events_database_path(&paths).expect("shared local events path");
+        if let Some(parent) = database_path.parent() {
+            fs::create_dir_all(parent).expect("shared local events parent directory");
+        }
+        if database_path.is_file() {
+            fs::remove_file(&database_path).expect("shared local events file should be removable");
+        } else if database_path.is_dir() {
+            fs::remove_dir_all(&database_path)
+                .expect("shared local events directory should be removable");
+        }
+        fs::create_dir(&database_path).expect("directory should block sqlite open");
+
+        let error = runtime
+            .select_personal_section(PersonalSection::Browse)
+            .expect_err("buyer Browse selection should surface import errors");
+        match error {
+            AppSqliteError::LocalEventsSql { operation, .. } => {
+                assert_eq!(operation, "open shared local events database");
+            }
+            unexpected => panic!("unexpected Browse selection error: {unexpected:?}"),
+        }
 
         cleanup_bootstrapped_runtime_paths(&paths);
     }
@@ -7272,7 +7405,11 @@ mod tests {
     fn guest_marketplace_entry_selects_personal_browse_without_an_account() {
         let runtime = memory_runtime();
 
-        assert!(runtime.select_personal_section(PersonalSection::Browse));
+        assert!(
+            runtime
+                .select_personal_section(PersonalSection::Browse)
+                .expect("guest Browse selection should succeed")
+        );
 
         let summary = runtime.summary();
         assert_eq!(summary.startup_gate, AppStartupGate::SetupRequired);
@@ -7926,7 +8063,11 @@ mod tests {
                 .expect("buyer order should place")
         );
         let order_id = runtime.summary().personal_projection.orders.list.rows[0].order_id;
-        assert!(runtime.select_personal_section(PersonalSection::Browse));
+        assert!(
+            runtime
+                .select_personal_section(PersonalSection::Browse)
+                .expect("buyer Browse selection should succeed")
+        );
         assert!(runtime.lock_state_mut().set_personal_order_detail(None));
 
         assert!(

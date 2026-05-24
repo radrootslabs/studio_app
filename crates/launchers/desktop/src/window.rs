@@ -1129,10 +1129,22 @@ impl HomeView {
     }
 
     fn select_personal_section(&mut self, section: PersonalSection, cx: &mut Context<Self>) {
-        if self.runtime.select_personal_section(section) {
-            self.products_stock_editor = None;
-            self.product_editor_form = None;
-            cx.notify();
+        match self.runtime.select_personal_section(section) {
+            Ok(true) => {
+                self.products_stock_editor = None;
+                self.product_editor_form = None;
+                cx.notify();
+            }
+            Ok(false) => {}
+            Err(runtime_error) => {
+                error!(
+                    target: "shell",
+                    event = "buyer.section_select_failed",
+                    section = ?section,
+                    error = %runtime_error,
+                    "failed to select buyer section"
+                );
+            }
         }
     }
 
