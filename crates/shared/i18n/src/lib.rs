@@ -337,6 +337,14 @@ mod tests {
             app_text(AppTextKey::PersonalDetailReplaceCartAction),
             "Replace cart"
         );
+        assert_eq!(
+            app_text(AppTextKey::PersonalMarketplaceRefreshFailedNotice),
+            "Couldn't refresh marketplace listings. Your saved local state is still here; try again in a moment."
+        );
+        assert_eq!(
+            app_text(AppTextKey::PersonalDetailOpenFailedNotice),
+            "Couldn't open that listing. Refresh the marketplace and try again."
+        );
     }
 
     #[test]

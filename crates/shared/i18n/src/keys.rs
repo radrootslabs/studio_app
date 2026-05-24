@@ -122,6 +122,8 @@ define_app_text_keys! {
     PersonalSearchEmptyBody => "personal.search.empty.body",
     PersonalBrowsePlaceholderBody => "personal.browse.placeholder.body",
     PersonalSearchPlaceholderBody => "personal.search.placeholder.body",
+    PersonalMarketplaceRefreshFailedNotice => "personal.marketplace.refresh_failed.notice",
+    PersonalDetailOpenFailedNotice => "personal.detail.open_failed.notice",
     PersonalCartPlaceholderBody => "personal.cart.placeholder.body",
     PersonalOrdersSurfaceBody => "personal.orders.surface.body",
     PersonalOrdersEmptyTitle => "personal.orders.empty.title",

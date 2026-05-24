@@ -299,6 +299,25 @@ enum HomeAutoFocusTarget {
     OrdersDetailMarkCompleted,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum BuyerWorkspaceNotice {
+    MarketplaceRefreshFailed,
+    DetailOpenFailed,
+}
+
+impl BuyerWorkspaceNotice {
+    fn text_key(self) -> AppTextKey {
+        match self {
+            Self::MarketplaceRefreshFailed => AppTextKey::PersonalMarketplaceRefreshFailedNotice,
+            Self::DetailOpenFailed => AppTextKey::PersonalDetailOpenFailedNotice,
+        }
+    }
+
+    fn text(self) -> String {
+        app_text(self.text_key())
+    }
+}
+
 impl HomeView {
     pub fn new(runtime: DesktopAppRuntime) -> Self {
         Self {
@@ -1131,18 +1150,20 @@ impl HomeView {
     }
 
     fn select_personal_section(&mut self, section: PersonalSection, cx: &mut Context<Self>) {
+        if self.select_personal_section_update(section) {
+            cx.notify();
+        }
+    }
+
+    fn select_personal_section_update(&mut self, section: PersonalSection) -> bool {
         match self.runtime.select_personal_section(section) {
             Ok(true) => {
                 self.products_stock_editor = None;
                 self.product_editor_form = None;
                 self.clear_buyer_workspace_notice();
-                cx.notify();
+                true
             }
-            Ok(false) => {
-                if self.clear_buyer_workspace_notice() {
-                    cx.notify();
-                }
-            }
+            Ok(false) => self.clear_buyer_workspace_notice(),
             Err(runtime_error) => {
                 error!(
                     target: "shell",
@@ -1151,8 +1172,7 @@ impl HomeView {
                     error = %runtime_error,
                     "failed to select buyer section"
                 );
-                self.set_buyer_workspace_notice(runtime_error.to_string());
-                cx.notify();
+                self.set_buyer_workspace_notice(BuyerWorkspaceNotice::MarketplaceRefreshFailed)
             }
         }
     }
@@ -1276,9 +1296,14 @@ impl HomeView {
         }
 
         let value = state.read(cx).value().to_string();
-        match self.runtime.set_personal_search_query(value.as_str()) {
-            Ok(true) => cx.notify(),
-            Ok(false) => {}
+        if self.set_personal_search_query_update(value.as_str()) {
+            cx.notify();
+        }
+    }
+
+    fn set_personal_search_query_update(&mut self, value: &str) -> bool {
+        match self.runtime.set_personal_search_query(value) {
+            Ok(changed) => self.clear_buyer_workspace_notice() || changed,
             Err(runtime_error) => {
                 error!(
                     target: "buyer",
@@ -1286,6 +1311,7 @@ impl HomeView {
                     error = %runtime_error,
                     "failed to update buyer search query"
                 );
+                self.set_buyer_workspace_notice(BuyerWorkspaceNotice::MarketplaceRefreshFailed)
             }
         }
     }
@@ -1335,12 +1361,21 @@ impl HomeView {
         enabled: bool,
         cx: &mut Context<Self>,
     ) {
+        if self.set_personal_search_fulfillment_method_update(method, enabled) {
+            cx.notify();
+        }
+    }
+
+    fn set_personal_search_fulfillment_method_update(
+        &mut self,
+        method: FarmOrderMethod,
+        enabled: bool,
+    ) -> bool {
         match self
             .runtime
             .set_personal_search_fulfillment_method(method, enabled)
         {
-            Ok(true) => cx.notify(),
-            Ok(false) => {}
+            Ok(changed) => self.clear_buyer_workspace_notice() || changed,
             Err(runtime_error) => {
                 error!(
                     target: "buyer",
@@ -1349,6 +1384,7 @@ impl HomeView {
                     method = method.storage_key(),
                     "failed to update buyer fulfillment filter"
                 );
+                self.set_buyer_workspace_notice(BuyerWorkspaceNotice::MarketplaceRefreshFailed)
             }
         }
     }
@@ -1359,19 +1395,25 @@ impl HomeView {
         product_id: ProductId,
         cx: &mut Context<Self>,
     ) {
+        if self.open_personal_product_detail_update(section, product_id) {
+            cx.notify();
+        }
+    }
+
+    fn open_personal_product_detail_update(
+        &mut self,
+        section: PersonalSection,
+        product_id: ProductId,
+    ) -> bool {
         match self
             .runtime
             .open_personal_product_detail(section, product_id)
         {
             Ok(true) => {
                 self.clear_buyer_workspace_notice();
-                cx.notify();
+                true
             }
-            Ok(false) => {
-                if self.clear_buyer_workspace_notice() {
-                    cx.notify();
-                }
-            }
+            Ok(false) => self.clear_buyer_workspace_notice(),
             Err(runtime_error) => {
                 error!(
                     target: "buyer",
@@ -1379,13 +1421,13 @@ impl HomeView {
                     error = %runtime_error,
                     "failed to open buyer product detail"
                 );
-                self.set_buyer_workspace_notice(runtime_error.to_string());
-                cx.notify();
+                self.set_buyer_workspace_notice(BuyerWorkspaceNotice::DetailOpenFailed)
             }
         }
     }
 
-    fn set_buyer_workspace_notice(&mut self, notice: String) -> bool {
+    fn set_buyer_workspace_notice(&mut self, notice: BuyerWorkspaceNotice) -> bool {
+        let notice = notice.text();
         let changed = self.buyer_workspace_notice.as_deref() != Some(notice.as_str());
         self.buyer_workspace_notice = Some(notice);
         changed
@@ -12860,33 +12902,33 @@ fn home_farm_order_method_label_key(method: FarmOrderMethod) -> AppTextKey {
 #[cfg(test)]
 mod tests {
     use super::{
-        APP_UI_THEME, AppTextKey, FarmerHomeFarmState, HomeAutoFocusState, HomeAutoFocusTarget,
-        HomeStage, HomeView, LabelValueRow, PackDayBatchPrintActionPresentation,
-        PackDayBatchPrintStatusPresentation, PackDayExportStatusPresentation,
-        PackDayHostHandoffActionPresentation, PackDayHostHandoffStatusPresentation,
-        PackDayPrintActionPresentation, PackDayPrintStatusPresentation, ReminderActionTarget,
-        SETTINGS_FARM_PANEL_SECTIONS, SETTINGS_NAVIGATION_ORDER,
-        SETTINGS_OPERATIONS_PANEL_SECTIONS, SettingsAutoFocusTarget, SettingsInventorySectionSpec,
-        SettingsPanelViewKey, StartupHomeSurface, StartupSignerConnectState,
-        about_conflict_action_specs, about_conflict_aggregate_text, about_conflict_detail_rows,
-        about_conflict_review_body_key, about_manual_refresh_enabled, about_runtime_rows,
-        about_status_rows, app_text, buyer_orders_status_key, farm_setup_onboarding_card_spec,
-        farmer_home_farm_state, farmer_pack_day_available, home_auto_focus_target,
-        home_content_scroll_id, home_saved_farm, home_sidebar_navigation_sections, home_stage,
-        home_window_launch_size_px, home_window_minimum_size_px,
-        pack_day_batch_print_action_presentation, pack_day_batch_print_status_presentation,
-        pack_day_export_action_enabled, pack_day_export_action_label_key,
-        pack_day_export_artifact_names, pack_day_export_detail_rows,
-        pack_day_export_status_presentation, pack_day_host_handoff_action_presentations,
-        pack_day_host_handoff_status_presentation, pack_day_print_action_presentations,
-        pack_day_print_status_presentation, parse_optional_product_editor_stock_input,
-        parse_product_editor_price_input, presented_farmer_reminder, product_display_title,
-        reminder_action_target, reminder_deadline_text, reminder_delivery_state_key,
-        reminder_urgency_color, reminder_urgency_key, settings_auto_focus_target,
-        startup_home_surface, startup_issue_summary_text, startup_notice_text,
-        startup_signer_preview_summary, startup_signer_preview_summary_for_connect_state,
-        startup_signer_source_input_is_editable, startup_signer_status_spec,
-        startup_signer_transport_failure_requires_notice,
+        APP_UI_THEME, AppTextKey, BuyerWorkspaceNotice, FarmerHomeFarmState, HomeAutoFocusState,
+        HomeAutoFocusTarget, HomeStage, HomeView, LabelValueRow,
+        PackDayBatchPrintActionPresentation, PackDayBatchPrintStatusPresentation,
+        PackDayExportStatusPresentation, PackDayHostHandoffActionPresentation,
+        PackDayHostHandoffStatusPresentation, PackDayPrintActionPresentation,
+        PackDayPrintStatusPresentation, ReminderActionTarget, SETTINGS_FARM_PANEL_SECTIONS,
+        SETTINGS_NAVIGATION_ORDER, SETTINGS_OPERATIONS_PANEL_SECTIONS, SettingsAutoFocusTarget,
+        SettingsInventorySectionSpec, SettingsPanelViewKey, StartupHomeSurface,
+        StartupSignerConnectState, about_conflict_action_specs, about_conflict_aggregate_text,
+        about_conflict_detail_rows, about_conflict_review_body_key, about_manual_refresh_enabled,
+        about_runtime_rows, about_status_rows, app_text, buyer_orders_status_key,
+        farm_setup_onboarding_card_spec, farmer_home_farm_state, farmer_pack_day_available,
+        home_auto_focus_target, home_content_scroll_id, home_saved_farm,
+        home_sidebar_navigation_sections, home_stage, home_window_launch_size_px,
+        home_window_minimum_size_px, pack_day_batch_print_action_presentation,
+        pack_day_batch_print_status_presentation, pack_day_export_action_enabled,
+        pack_day_export_action_label_key, pack_day_export_artifact_names,
+        pack_day_export_detail_rows, pack_day_export_status_presentation,
+        pack_day_host_handoff_action_presentations, pack_day_host_handoff_status_presentation,
+        pack_day_print_action_presentations, pack_day_print_status_presentation,
+        parse_optional_product_editor_stock_input, parse_product_editor_price_input,
+        presented_farmer_reminder, product_display_title, reminder_action_target,
+        reminder_deadline_text, reminder_delivery_state_key, reminder_urgency_color,
+        reminder_urgency_key, settings_auto_focus_target, startup_home_surface,
+        startup_issue_summary_text, startup_notice_text, startup_signer_preview_summary,
+        startup_signer_preview_summary_for_connect_state, startup_signer_source_input_is_editable,
+        startup_signer_status_spec, startup_signer_transport_failure_requires_notice,
     };
     use crate::runtime::{
         DesktopAppRuntimeMetadataSummary, DesktopAppRuntimeSummary, DesktopAppSyncConflictSummary,
@@ -12905,10 +12947,10 @@ mod tests {
         PackDayBatchPrintArtifact, PackDayBatchPrintFailureKind, PackDayExportArtifact,
         PackDayExportArtifactKind, PackDayExportBundle, PackDayHostHandoffKind,
         PackDayHostHandoffStatus, PackDayPrintFailureKind, PackDayPrintKind, PackDayPrintStatus,
-        PackDayProductTotalRow, PackDayProjection, PersonalSection, ReminderDeadlineProjection,
-        ReminderDeliveryState, ReminderId, ReminderKind, ReminderSurface, ReminderUrgency,
-        RepeatDemandEligibility, RepeatDemandHandoffProjection, ShellSection,
-        TodayAgendaProjection, TodaySetupTask, TodaySetupTaskKind,
+        PackDayProductTotalRow, PackDayProjection, PersonalSection, ProductId,
+        ReminderDeadlineProjection, ReminderDeliveryState, ReminderId, ReminderKind,
+        ReminderSurface, ReminderUrgency, RepeatDemandEligibility, RepeatDemandHandoffProjection,
+        ShellSection, TodayAgendaProjection, TodaySetupTask, TodaySetupTaskKind,
     };
     use radroots_studio_app_remote_signer::{
         RadrootsAppRemoteSignerApprovedSession, RadrootsAppRemoteSignerPendingSession,
@@ -12959,7 +13001,7 @@ mod tests {
         path
     }
 
-    fn test_home_view(label: &str) -> (HomeView, PathBuf) {
+    fn test_home_view(label: &str) -> (HomeView, AppDesktopRuntimePaths, PathBuf) {
         let suffix = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .expect("clock")
@@ -12974,29 +13016,82 @@ mod tests {
         )
         .expect("desktop runtime paths should resolve");
         let runtime = crate::runtime::DesktopAppRuntime::bootstrap_with_paths(
-            paths,
+            paths.clone(),
             "wss://relay.example".to_owned(),
         );
 
-        (HomeView::new(runtime), home_dir)
+        (HomeView::new(runtime), paths, home_dir)
+    }
+
+    fn block_shared_local_events_database(paths: &AppDesktopRuntimePaths) {
+        let database_path = paths.shared_local_events_database_path().unwrap();
+        if let Some(parent) = database_path.parent() {
+            fs::create_dir_all(parent).unwrap();
+        }
+        if database_path.is_file() {
+            fs::remove_file(&database_path).unwrap();
+        } else if database_path.is_dir() {
+            fs::remove_dir_all(&database_path).unwrap();
+        }
+        fs::create_dir(&database_path).unwrap();
     }
 
     #[test]
     fn buyer_workspace_notice_tracks_visible_buyer_runtime_errors() {
-        let (mut view, home_dir) = test_home_view("buyer_notice");
+        let (mut view, _, home_dir) = test_home_view("buyer_notice");
+
+        assert!(view.set_buyer_workspace_notice(BuyerWorkspaceNotice::MarketplaceRefreshFailed));
+        assert_eq!(
+            view.buyer_workspace_notice.as_deref(),
+            Some(app_text(AppTextKey::PersonalMarketplaceRefreshFailedNotice).as_str())
+        );
+        assert!(!view.set_buyer_workspace_notice(BuyerWorkspaceNotice::MarketplaceRefreshFailed));
+        assert!(view.clear_buyer_workspace_notice());
+        assert_eq!(view.buyer_workspace_notice, None);
+
+        let _ = fs::remove_dir_all(home_dir);
+    }
+
+    #[test]
+    fn buyer_browse_refresh_failure_uses_typed_visible_notice() {
+        let (mut view, paths, home_dir) = test_home_view("buyer_notice");
+        block_shared_local_events_database(&paths);
+
+        assert!(view.select_personal_section_update(PersonalSection::Browse));
+        assert_eq!(
+            view.buyer_workspace_notice.as_deref(),
+            Some(app_text(AppTextKey::PersonalMarketplaceRefreshFailedNotice).as_str())
+        );
+
+        let _ = fs::remove_dir_all(home_dir);
+    }
+
+    #[test]
+    fn buyer_search_refresh_failure_uses_typed_visible_notice() {
+        let (mut view, paths, home_dir) = test_home_view("buyer_notice");
+        block_shared_local_events_database(&paths);
+
+        assert!(view.set_personal_search_query_update("eggs"));
+        assert_eq!(
+            view.buyer_workspace_notice.as_deref(),
+            Some(app_text(AppTextKey::PersonalMarketplaceRefreshFailedNotice).as_str())
+        );
+
+        let _ = fs::remove_dir_all(home_dir);
+    }
+
+    #[test]
+    fn buyer_detail_open_failure_uses_typed_visible_notice() {
+        let (mut view, paths, home_dir) = test_home_view("buyer_notice");
+        block_shared_local_events_database(&paths);
 
         assert!(
-            view.set_buyer_workspace_notice("open shared local events database failed".to_owned())
+            view.open_personal_product_detail_update(PersonalSection::Browse, ProductId::new())
         );
         assert_eq!(
             view.buyer_workspace_notice.as_deref(),
-            Some("open shared local events database failed")
+            Some(app_text(AppTextKey::PersonalDetailOpenFailedNotice).as_str())
         );
-        assert!(
-            !view.set_buyer_workspace_notice("open shared local events database failed".to_owned())
-        );
-        assert!(view.clear_buyer_workspace_notice());
-        assert_eq!(view.buyer_workspace_notice, None);
 
         let _ = fs::remove_dir_all(home_dir);
     }
