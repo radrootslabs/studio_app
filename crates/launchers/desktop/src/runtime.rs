@@ -65,7 +65,8 @@ use radroots_local_events::{
     BUYER_ORDER_REQUEST_ACTOR_SOURCE_UNRESOLVED_APP, BUYER_ORDER_REQUEST_DOCUMENT_KIND,
     BUYER_ORDER_REQUEST_LOCAL_WORK_RECORD_KIND, LocalEventRecordInput, LocalEventRecordUpdate,
     LocalEventsStore, LocalRecordFamily, LocalRecordStatus, PublishOutboxStatus, SourceRuntime,
-    buyer_order_request_local_work_record_id, validate_buyer_order_request_local_work_payload,
+    buyer_order_request_local_work_record_id, canonical_relay_set_fingerprint,
+    validate_buyer_order_request_local_work_payload,
 };
 use radroots_nostr_accounts::prelude::RadrootsNostrAccountsManager;
 use radroots_sdk::farm::{RadrootsFarm, RadrootsFarmRef};
@@ -5315,6 +5316,10 @@ fn published_operation_receipt(
         "content": relay_receipt.event.content.clone(),
         "sig": relay_receipt.event.sig.clone(),
     });
+    let relay_set_fingerprint = canonical_relay_set_fingerprint(&relay_receipt.target_relays)
+        .ok_or_else(|| {
+            AppSyncTransportError::failed("direct relay publish requires a non-empty relay set")
+        })?;
 
     Ok(AppPublishedOperationReceipt {
         operation_key: operation_key.to_owned(),
@@ -5328,7 +5333,7 @@ fn published_operation_receipt(
         event_content: relay_receipt.event.content.clone(),
         event_sig: relay_receipt.signature,
         raw_event_json,
-        relay_set_fingerprint: relay_receipt.target_relays.join("|"),
+        relay_set_fingerprint,
         relay_delivery_json: json!({
             "target_relays": relay_receipt.target_relays,
             "connected_relays": relay_receipt.connected_relays,
@@ -7077,8 +7082,9 @@ mod tests {
     };
     use radroots_identity::RadrootsIdentity;
     use radroots_local_events::{
-        BUYER_ORDER_REQUEST_LOCAL_WORK_RECORD_KIND, LocalEventRecord, LocalEventRecordInput,
-        LocalEventsStore, LocalRecordFamily, LocalRecordStatus, PublishOutboxStatus, SourceRuntime,
+        BUYER_ORDER_REQUEST_LOCAL_WORK_RECORD_KIND, CANONICAL_RELAY_SET_FINGERPRINT_VERSION,
+        LocalEventRecord, LocalEventRecordInput, LocalEventsStore, LocalRecordFamily,
+        LocalRecordStatus, PublishOutboxStatus, SourceRuntime, canonical_relay_set_fingerprint,
     };
     use radroots_nostr_accounts::prelude::{
         RadrootsNostrAccountsManager, RadrootsNostrFileAccountStore,
@@ -7261,6 +7267,15 @@ mod tests {
         assert_eq!(
             result.published_receipts[0].source_account_id,
             account_id.to_string()
+        );
+        assert_eq!(
+            result.published_receipts[0].relay_set_fingerprint,
+            canonical_relay_set_fingerprint([relay_a.url(), relay_b.url()]).expect("fingerprint")
+        );
+        assert!(
+            result.published_receipts[0]
+                .relay_set_fingerprint
+                .starts_with(CANONICAL_RELAY_SET_FINGERPRINT_VERSION)
         );
         assert_eq!(
             result.published_receipts[0]
