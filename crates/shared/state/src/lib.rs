@@ -3437,6 +3437,7 @@ mod tests {
         let ready_draft = ProductEditorDraft {
             title: "Heirloom tomatoes".to_owned(),
             subtitle: "Brandywine".to_owned(),
+            category: "vegetables".to_owned(),
             unit_label: "lb".to_owned(),
             price_minor_units: Some(450),
             price_currency: "USD".to_owned(),
@@ -3456,8 +3457,10 @@ mod tests {
                 draft: ProductEditorDraft::default(),
                 publish_blockers: vec![
                     ProductPublishBlocker::AddProductName,
+                    ProductPublishBlocker::ChooseCategory,
                     ProductPublishBlocker::ChooseUnit,
                     ProductPublishBlocker::SetPrice,
+                    ProductPublishBlocker::SetStock,
                     ProductPublishBlocker::AttachAvailability,
                 ],
             })

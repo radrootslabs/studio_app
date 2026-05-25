@@ -1168,8 +1168,10 @@ impl ProductsListProjection {
 #[serde(rename_all = "snake_case")]
 pub enum ProductPublishBlocker {
     AddProductName,
+    ChooseCategory,
     ChooseUnit,
     SetPrice,
+    SetStock,
     AttachAvailability,
     CompleteFarmProfile,
     AddPickupLocation,
@@ -1182,8 +1184,10 @@ impl ProductPublishBlocker {
     pub const fn storage_key(self) -> &'static str {
         match self {
             Self::AddProductName => "add_product_name",
+            Self::ChooseCategory => "choose_category",
             Self::ChooseUnit => "choose_unit",
             Self::SetPrice => "set_price",
+            Self::SetStock => "set_stock",
             Self::AttachAvailability => "attach_availability",
             Self::CompleteFarmProfile => "complete_farm_profile",
             Self::AddPickupLocation => "add_pickup_location",
@@ -1198,6 +1202,7 @@ impl ProductPublishBlocker {
 pub struct ProductEditorDraft {
     pub title: String,
     pub subtitle: String,
+    pub category: String,
     pub unit_label: String,
     pub price_minor_units: Option<u32>,
     pub price_currency: String,
@@ -1211,6 +1216,7 @@ impl Default for ProductEditorDraft {
         Self {
             title: String::new(),
             subtitle: String::new(),
+            category: String::new(),
             unit_label: String::new(),
             price_minor_units: None,
             price_currency: "USD".to_owned(),
@@ -1229,12 +1235,20 @@ impl ProductEditorDraft {
             blockers.push(ProductPublishBlocker::AddProductName);
         }
 
+        if self.category.trim().is_empty() {
+            blockers.push(ProductPublishBlocker::ChooseCategory);
+        }
+
         if self.unit_label.trim().is_empty() {
             blockers.push(ProductPublishBlocker::ChooseUnit);
         }
 
         if self.price_minor_units.is_none_or(|value| value == 0) {
             blockers.push(ProductPublishBlocker::SetPrice);
+        }
+
+        if self.stock_quantity.is_none() {
+            blockers.push(ProductPublishBlocker::SetStock);
         }
 
         if self.availability_window_id.is_none() {
@@ -3084,6 +3098,7 @@ mod tests {
         let ready_draft = ProductEditorDraft {
             title: "Heirloom tomatoes".to_owned(),
             subtitle: "Brandywine".to_owned(),
+            category: "vegetables".to_owned(),
             unit_label: "lb".to_owned(),
             price_minor_units: Some(450),
             price_currency: "USD".to_owned(),
@@ -3096,8 +3111,10 @@ mod tests {
             empty_draft.publish_blockers(),
             vec![
                 ProductPublishBlocker::AddProductName,
+                ProductPublishBlocker::ChooseCategory,
                 ProductPublishBlocker::ChooseUnit,
                 ProductPublishBlocker::SetPrice,
+                ProductPublishBlocker::SetStock,
                 ProductPublishBlocker::AttachAvailability,
             ]
         );

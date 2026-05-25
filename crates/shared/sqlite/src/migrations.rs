@@ -68,6 +68,10 @@ const MIGRATIONS: &[Migration] = &[
         version: 16,
         sql: include_str!("../migrations/0016_deterministic_outbox.sql"),
     },
+    Migration {
+        version: 17,
+        sql: include_str!("../migrations/0017_product_category.sql"),
+    },
 ];
 
 pub fn latest_schema_version() -> u32 {

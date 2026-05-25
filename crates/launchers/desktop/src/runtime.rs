@@ -45,10 +45,11 @@ use radroots_studio_app_state::{
     FarmSetupFlowStage, FarmWorkspaceReadinessProjection, HomeRoute, OrdersScreenProjection,
     PackDayBatchPrintRequest, PackDayExportRequest, PackDayHostHandoffRequest, PackDayPrintRequest,
     PackDayScreenProjection, PersistedAppState, PersonalWorkspaceProjection,
-    ProductsScreenProjection, ProductsScreenQueryState, derive_sync_projection,
+    ProductsScreenProjection, ProductsScreenQueryState, derive_product_publish_blockers,
+    derive_sync_projection,
 };
 use radroots_studio_app_sync::{
-    AppListingPublishPayload, AppOrderRequestPublishPayload, AppPublishPayload,
+    AppListingPublishPayload, AppOrderRequestPublishPayload, AppPublishContext, AppPublishPayload,
     AppPublishedOperationReceipt, AppSyncProjection, AppSyncRequest, AppSyncResult,
     AppSyncTransport, AppSyncTransportError, PendingSyncOperation, SyncAggregateRef,
     SyncCheckpointStatus, SyncConflictSeverity, SyncOperationKind, SyncTrigger,
@@ -2515,7 +2516,7 @@ impl DesktopAppRuntimeState {
         let Some(sqlite_store) = self.sqlite_store.as_ref() else {
             return Ok(false);
         };
-        let Some(farm_id) = self.selected_farm_id() else {
+        let Some(_) = self.selected_farm_id() else {
             return Ok(false);
         };
         if self
@@ -2540,20 +2541,13 @@ impl DesktopAppRuntimeState {
             &continuity_state,
         )?;
         let context_changed = self.apply_selected_account_context(&selected_account_context);
-        let pending_changed =
-            self.enqueue_selected_account_sync_operations(vec![pending_sync_upsert(
-                SyncAggregateRef::Product(product_id),
-                product_sync_payload(
-                    product_id,
-                    Some(farm_id),
-                    "update_product_stock",
-                    None,
-                    Some(stock_quantity),
-                    None,
-                ),
-            )])?;
+        let publish_changed = self.enqueue_selected_account_product_publish_operation(
+            product_id,
+            "update_product_stock",
+            None,
+        )?;
 
-        Ok(updated || context_changed || pending_changed)
+        Ok(updated || context_changed || publish_changed)
     }
 
     fn open_new_product_editor(&mut self) -> Result<bool, AppSqliteError> {
@@ -2576,26 +2570,13 @@ impl DesktopAppRuntimeState {
         )?;
         let context_changed = self.apply_selected_account_context(&selected_account_context);
         let section_changed = self.select_farmer_section(FarmerSection::Products);
-        let draft_payload = draft.clone();
         let editor_changed =
             self.state_store
                 .apply_in_memory(AppStateCommand::open_existing_product_editor(
                     product_id, draft,
                 ));
-        let pending_changed =
-            self.enqueue_selected_account_sync_operations(vec![pending_sync_upsert(
-                SyncAggregateRef::Product(product_id),
-                product_sync_payload(
-                    product_id,
-                    Some(farm_id),
-                    "open_new_product_editor",
-                    Some(&draft_payload),
-                    draft_payload.stock_quantity,
-                    None,
-                ),
-            )])?;
 
-        Ok(context_changed || section_changed || editor_changed || pending_changed)
+        Ok(context_changed || section_changed || editor_changed)
     }
 
     fn open_existing_product_editor(
@@ -2662,22 +2643,19 @@ impl DesktopAppRuntimeState {
                 .apply_in_memory(AppStateCommand::replace_product_editor_draft(
                     reloaded_draft,
                 ));
-        let app_local_changed =
+        let source_local_event_id =
             self.append_app_listing_local_work_record(product_id, &draft_payload)?;
-        let pending_changed =
-            self.enqueue_selected_account_sync_operations(vec![pending_sync_upsert(
-                SyncAggregateRef::Product(product_id),
-                product_sync_payload(
-                    product_id,
-                    self.selected_farm_id(),
-                    "save_product_editor_draft",
-                    Some(&draft_payload),
-                    draft_payload.stock_quantity,
-                    None,
-                ),
-            )])?;
+        let pending_changed = self.enqueue_selected_account_product_publish_operation(
+            product_id,
+            "save_product_editor_draft",
+            source_local_event_id.as_deref(),
+        )?;
 
-        Ok(saved || context_changed || editor_changed || app_local_changed || pending_changed)
+        Ok(saved
+            || context_changed
+            || editor_changed
+            || source_local_event_id.is_some()
+            || pending_changed)
     }
 
     fn close_product_editor(&mut self) -> bool {
@@ -3440,6 +3418,102 @@ impl DesktopAppRuntimeState {
         self.enqueue_selected_account_sync_operations(vec![operation])
     }
 
+    fn enqueue_selected_account_product_publish_operation(
+        &mut self,
+        product_id: ProductId,
+        source: &str,
+        source_local_event_id: Option<&str>,
+    ) -> Result<bool, AppSqliteError> {
+        let Some(operation) =
+            self.product_publish_operation(product_id, source, source_local_event_id)?
+        else {
+            return self.refresh_selected_account_sync();
+        };
+
+        self.enqueue_selected_account_sync_operations(vec![operation])
+    }
+
+    fn product_publish_operation(
+        &self,
+        product_id: ProductId,
+        source: &str,
+        source_local_event_id: Option<&str>,
+    ) -> Result<Option<PendingSyncOperation>, AppSqliteError> {
+        let Some(sqlite_store) = self.sqlite_store.as_ref() else {
+            return Ok(None);
+        };
+        let Some(selected_account) = self
+            .state_store
+            .identity_projection()
+            .selected_account
+            .as_ref()
+        else {
+            return Ok(None);
+        };
+        let Some(draft) = sqlite_store.load_product_editor_draft(product_id)? else {
+            return Ok(None);
+        };
+        if !product_status_needs_relay_publish(draft.status) {
+            return Ok(None);
+        }
+        if !derive_product_publish_blockers(&draft, self.state_store.farm_readiness_projection())
+            .is_empty()
+        {
+            return Ok(None);
+        }
+        let Some(farm_id) = self.selected_farm_id() else {
+            return Ok(None);
+        };
+        let Some(farm_pubkey) = self.local_events_owner_pubkey(selected_account) else {
+            return Ok(None);
+        };
+        let farm_setup = self.state_store.farm_setup_projection();
+        let listing_d_tag = d_tag_from_uuid(product_id.as_uuid());
+        let mut context = AppPublishContext::new(
+            selected_account.account.account_id.clone(),
+            source.to_owned(),
+        );
+        if let Some(source_local_event_id) = source_local_event_id {
+            context = context.with_source_local_event_id(source_local_event_id.to_owned());
+        }
+        let payload = AppPublishPayload::Listing(AppListingPublishPayload {
+            context,
+            product_id,
+            listing_d_tag: Some(listing_d_tag),
+            farm_id: Some(farm_id),
+            farm_pubkey: Some(farm_pubkey),
+            farm_d_tag: Some(d_tag_from_uuid(farm_id.as_uuid())),
+            title: draft.title.trim().to_owned(),
+            subtitle: non_empty_string(draft.subtitle.as_str()),
+            category: non_empty_string(draft.category.as_str()),
+            unit_label: draft.unit_label.trim().to_owned(),
+            price_minor_units: draft.price_minor_units,
+            price_currency: draft.price_currency.trim().to_uppercase(),
+            stock_quantity: draft.stock_quantity,
+            availability_window_id: draft.availability_window_id,
+            fulfillment_method: listing_fulfillment_method(
+                &draft,
+                farm_setup,
+                self.state_store.farm_rules_projection(),
+            ),
+            fulfillment_location: listing_fulfillment_location(
+                &draft,
+                farm_setup,
+                self.state_store.farm_rules_projection(),
+            ),
+            status: draft.status,
+        });
+        if payload.validate().is_err() {
+            return Ok(None);
+        }
+
+        PendingSyncOperation::from_publish_payload(payload, current_utc_timestamp())
+            .map(Some)
+            .map_err(|_| AppSqliteError::InvalidProjection {
+                reason: "product publish payload must serialize",
+            })
+    }
+
     fn selected_account_id(&self) -> Result<String, DesktopAppRuntimeFarmSetupError> {
         self.selected_account_for_farm_setup()
             .map(|account| account.account.account_id.clone())
@@ -3806,9 +3880,9 @@ impl DesktopAppRuntimeState {
         &self,
         product_id: ProductId,
         draft: &ProductEditorDraft,
-    ) -> Result<bool, AppSqliteError> {
+    ) -> Result<Option<String>, AppSqliteError> {
         let Some(shared_accounts_paths) = self.shared_accounts_paths.as_ref() else {
-            return Ok(false);
+            return Ok(None);
         };
         let Some(account) = self
             .state_store
@@ -3816,48 +3890,40 @@ impl DesktopAppRuntimeState {
             .selected_account
             .as_ref()
         else {
-            return Ok(false);
+            return Ok(None);
         };
         let Some(farm_id) = self.selected_farm_id() else {
-            return Ok(false);
+            return Ok(None);
         };
         let timestamp = current_runtime_time_ms()?;
         let farm_d_tag = d_tag_from_uuid(farm_id.as_uuid());
         let listing_d_tag = d_tag_from_uuid(product_id.as_uuid());
+        let primary_bin_id = listing_primary_bin_id(listing_d_tag.as_str());
         let owner_pubkey = self.local_events_owner_pubkey(account);
         let listing_addr = owner_pubkey
             .as_ref()
             .map(|pubkey| format!("30402:{pubkey}:{listing_d_tag}"));
         let exportability = local_work_exportability(owner_pubkey.as_deref());
         let farm_setup = self.state_store.farm_setup_projection();
-        let delivery_method = farm_setup
-            .draft
-            .order_methods
-            .iter()
-            .next()
-            .map(|method| method.storage_key())
-            .unwrap_or("pickup");
-        let location_primary = if farm_setup.draft.location_or_service_area.trim().is_empty() {
-            "local pickup"
-        } else {
-            farm_setup.draft.location_or_service_area.as_str()
-        };
-        let unit_label = if draft.unit_label.trim().is_empty() {
-            "each"
-        } else {
-            draft.unit_label.as_str()
-        };
-        let price_amount = draft
-            .price_minor_units
-            .map(decimal_from_minor_units)
-            .unwrap_or_else(|| "0".to_owned());
-        let available = draft
-            .stock_quantity
-            .map(|value| value.to_string())
-            .unwrap_or_else(|| "0".to_owned());
+        let farm_rules = self.state_store.farm_rules_projection();
+        let delivery_method = listing_fulfillment_method(draft, farm_setup, farm_rules);
+        let location_primary = listing_fulfillment_location(draft, farm_setup, farm_rules);
+        let category = non_empty_string(draft.category.as_str());
+        let unit_label = non_empty_string(draft.unit_label.as_str());
+        let price_amount = draft.price_minor_units.map(decimal_from_minor_units);
+        let available = draft.stock_quantity.map(|value| value.to_string());
+        let publish_blockers =
+            derive_product_publish_blockers(draft, self.state_store.farm_readiness_projection())
+                .into_iter()
+                .map(|blocker| blocker.storage_key())
+                .collect::<Vec<_>>();
         let payload = json!({
             "record_kind": "listing_draft_v1",
             "exportability": exportability,
+            "publishability": {
+                "state": if publish_blockers.is_empty() { "publishable" } else { "blocked" },
+                "blockers": publish_blockers,
+            },
             "document": {
                 "version": 1,
                 "kind": "listing_draft_v1",
@@ -3873,11 +3939,11 @@ impl DesktopAppRuntimeState {
                 "product": {
                     "key": listing_d_tag,
                     "title": draft.title,
-                    "category": "produce",
+                    "category": category,
                     "summary": draft.subtitle,
                 },
                 "primary_bin": {
-                    "bin_id": "bin-1",
+                    "bin_id": primary_bin_id,
                     "quantity_amount": "1",
                     "quantity_unit": unit_label,
                     "price_amount": price_amount,
@@ -3900,8 +3966,9 @@ impl DesktopAppRuntimeState {
                 },
             },
         });
+        let record_id = format!("app:local_work:listing:{listing_d_tag}:{}", Uuid::now_v7());
         let input = LocalEventRecordInput {
-            record_id: format!("app:local_work:listing:{listing_d_tag}:{}", Uuid::now_v7()),
+            record_id: record_id.clone(),
             family: LocalRecordFamily::LocalWork,
             status: LocalRecordStatus::LocalSaved,
             source_runtime: SourceRuntime::App,
@@ -3926,7 +3993,7 @@ impl DesktopAppRuntimeState {
         };
 
         self.append_app_local_work_record(shared_accounts_paths, &input)?;
-        Ok(true)
+        Ok(Some(record_id))
     }
 
     fn append_app_buyer_order_request_local_work_record(
@@ -4531,6 +4598,67 @@ fn normalized_app_sync_relay_urls(
     Ok(normalized)
 }
 
+fn non_empty_string(value: &str) -> Option<String> {
+    let trimmed = value.trim();
+    (!trimmed.is_empty()).then(|| trimmed.to_owned())
+}
+
+fn product_status_needs_relay_publish(status: ProductStatus) -> bool {
+    !matches!(status, ProductStatus::Draft)
+}
+
+fn listing_primary_bin_id(listing_d_tag: &str) -> String {
+    format!("{listing_d_tag}:primary")
+}
+
+fn listing_fulfillment_method(
+    draft: &ProductEditorDraft,
+    farm_setup: &FarmSetupProjection,
+    farm_rules: &FarmRulesProjection,
+) -> Option<String> {
+    if draft.availability_window_id.is_some_and(|window_id| {
+        farm_rules
+            .fulfillment_windows
+            .iter()
+            .any(|window| window.fulfillment_window_id == window_id)
+    }) {
+        return Some(FarmOrderMethod::Pickup.storage_key().to_owned());
+    }
+
+    farm_setup
+        .draft
+        .order_methods
+        .iter()
+        .next()
+        .map(|method| method.storage_key().to_owned())
+}
+
+fn listing_fulfillment_location(
+    draft: &ProductEditorDraft,
+    farm_setup: &FarmSetupProjection,
+    farm_rules: &FarmRulesProjection,
+) -> Option<String> {
+    draft
+        .availability_window_id
+        .and_then(|window_id| {
+            farm_rules
+                .fulfillment_windows
+                .iter()
+                .find(|window| window.fulfillment_window_id == window_id)
+        })
+        .and_then(|window| {
+            farm_rules
+                .pickup_locations
+                .iter()
+                .find(|location| location.pickup_location_id == window.pickup_location_id)
+        })
+        .and_then(|location| {
+            non_empty_string(location.address_line.as_str())
+                .or_else(|| non_empty_string(location.label.as_str()))
+        })
+        .or_else(|| non_empty_string(farm_setup.draft.location_or_service_area.as_str()))
+}
+
 fn direct_relay_sdk_client(
     relay_urls: Vec<String>,
     timeout_ms: u64,
@@ -4624,15 +4752,16 @@ fn listing_publish_payload_to_sdk_listing(
         .ok_or_else(|| AppSyncTransportError::failed("publishable listing requires farm pubkey"))?
         .trim()
         .to_owned();
-    let bin_id = "default".to_owned();
+    let d_tag = payload
+        .listing_d_tag
+        .as_deref()
+        .filter(|value| !value.trim().is_empty())
+        .map(str::to_owned)
+        .unwrap_or_else(|| d_tag_from_uuid(payload.product_id.as_uuid()));
+    let bin_id = listing_primary_bin_id(d_tag.as_str());
 
     Ok(RadrootsListing {
-        d_tag: payload
-            .listing_d_tag
-            .as_deref()
-            .filter(|value| !value.trim().is_empty())
-            .map(str::to_owned)
-            .unwrap_or_else(|| d_tag_from_uuid(payload.product_id.as_uuid())),
+        d_tag,
         farm: RadrootsFarmRef {
             pubkey: farm_pubkey,
             d_tag: payload
@@ -6440,33 +6569,6 @@ fn fulfillment_window_sync_payload(
     .to_string()
 }
 
-fn product_sync_payload(
-    product_id: ProductId,
-    farm_id: Option<FarmId>,
-    source: &str,
-    draft: Option<&ProductEditorDraft>,
-    stock_quantity: Option<u32>,
-    status: Option<&str>,
-) -> String {
-    json!({
-        "aggregate_kind": "product",
-        "product_id": product_id.to_string(),
-        "farm_id": farm_id.map(|value| value.to_string()),
-        "title": draft.map(|value| value.title.clone()),
-        "subtitle": draft.map(|value| value.subtitle.clone()),
-        "unit_label": draft.map(|value| value.unit_label.clone()),
-        "price_minor_units": draft.and_then(|value| value.price_minor_units),
-        "price_currency": draft.map(|value| value.price_currency.clone()),
-        "stock_quantity": stock_quantity.or_else(|| draft.and_then(|value| value.stock_quantity)),
-        "availability_window_id": draft
-            .and_then(|value| value.availability_window_id)
-            .map(|value| value.to_string()),
-        "status": status.or_else(|| draft.map(|value| value.status.storage_key())),
-        "source": source,
-    })
-    .to_string()
-}
-
 fn order_sync_payload(
     order_id: OrderId,
     farm_id: FarmId,
@@ -6506,18 +6608,18 @@ mod tests {
         AppActivityKind, AppIdentityProjection, AppStartupGate, BlackoutPeriodId,
         BlackoutPeriodRecord, BuyerCheckoutDraft, BuyerOrderStatus, FarmId,
         FarmOperatingRulesRecord, FarmOrderMethod, FarmProfileRecord, FarmReadiness,
-        FarmReadinessBlocker, FarmSetupDraft, FarmSetupProjection, FarmSummary,
-        FarmerActivationProjection, FarmerSection, FulfillmentWindowId, FulfillmentWindowRecord,
-        LoggedOutStartupProjection, OrderId, OrderStatus, OrdersFilter, PackDayBatchPrintArtifact,
-        PackDayBatchPrintFailureKind, PackDayBatchPrintStatus, PackDayExportInstanceId,
-        PackDayExportStatus, PackDayHostHandoffKind, PackDayHostHandoffStatus, PackDayPackListRow,
-        PackDayPrintFailureKind, PackDayPrintKind, PackDayPrintStatus, PackDayProductTotalRow,
-        PackDayProjection, PackDayRosterRow, PersonalSection, PickupLocationId,
-        PickupLocationRecord, ProductEditorDraft, ProductId, ProductStatus, ProductsFilter,
-        ProductsSort, RecoveryKind, RecoveryRecordId, ReminderDeliveryState,
-        ReminderFeedProjection, ReminderKind, SelectedAccountProjection, SelectedSurfaceProjection,
-        SettingsPreference, SettingsSection, ShellSection, TodayAgendaProjection, TodaySetupTask,
-        TodaySetupTaskKind, TodaySummary,
+        FarmReadinessBlocker, FarmRulesProjection, FarmSetupDraft, FarmSetupProjection,
+        FarmSummary, FarmerActivationProjection, FarmerSection, FulfillmentWindowId,
+        FulfillmentWindowRecord, LoggedOutStartupProjection, OrderId, OrderStatus, OrdersFilter,
+        PackDayBatchPrintArtifact, PackDayBatchPrintFailureKind, PackDayBatchPrintStatus,
+        PackDayExportInstanceId, PackDayExportStatus, PackDayHostHandoffKind,
+        PackDayHostHandoffStatus, PackDayPackListRow, PackDayPrintFailureKind, PackDayPrintKind,
+        PackDayPrintStatus, PackDayProductTotalRow, PackDayProjection, PackDayRosterRow,
+        PersonalSection, PickupLocationId, PickupLocationRecord, ProductEditorDraft, ProductId,
+        ProductStatus, ProductsFilter, ProductsSort, RecoveryKind, RecoveryRecordId,
+        ReminderDeliveryState, ReminderFeedProjection, ReminderKind, SelectedAccountProjection,
+        SelectedSurfaceProjection, SettingsPreference, SettingsSection, ShellSection,
+        TodayAgendaProjection, TodaySetupTask, TodaySetupTaskKind, TodaySummary,
     };
     use radroots_studio_app_remote_signer::{
         RadrootsAppRemoteSignerPendingSession, RadrootsAppRemoteSignerSessionRecord,
@@ -6560,7 +6662,8 @@ mod tests {
         APP_DATABASE_FILE_NAME, DesktopAppRuntime, DesktopAppRuntimeActivityContextError,
         DesktopAppRuntimeCommandError, DesktopAppRuntimeMetadataSummary, DesktopAppRuntimeState,
         DesktopAppSyncStatusSummary, DesktopRemoteSignerPaths, SYNC_TRANSPORT_UNAVAILABLE_MESSAGE,
-        SdkDirectRelayAppSyncTransport, TokioRuntimeBuilder, default_sync_transport, is_hex_64,
+        SdkDirectRelayAppSyncTransport, TokioRuntimeBuilder, default_sync_transport,
+        farm_sync_payload, is_hex_64, pending_sync_upsert,
     };
     use crate::pack_day_host_handoff::PackDayHostHandoffError;
     use crate::pack_day_print::{
@@ -6999,9 +7102,9 @@ mod tests {
     }
 
     #[test]
-    fn runtime_outbox_repeated_product_save_deduplicates_active_pending_sync() {
+    fn runtime_product_incomplete_save_does_not_enqueue_publish_work() {
         let runtime = memory_runtime();
-        let (account_id, farm_id) = provision_ready_farmer_account(&runtime);
+        let (account_id, _) = provision_ready_farmer_account(&runtime);
 
         assert!(
             runtime
@@ -7019,6 +7122,7 @@ mod tests {
         let first_draft = ProductEditorDraft {
             title: "Salad mix".to_owned(),
             subtitle: "Spring blend".to_owned(),
+            category: String::new(),
             unit_label: "bag".to_owned(),
             price_minor_units: Some(700),
             price_currency: "USD".to_owned(),
@@ -7029,6 +7133,7 @@ mod tests {
         let second_draft = ProductEditorDraft {
             title: "Winter greens".to_owned(),
             subtitle: "Cut this morning".to_owned(),
+            category: "greens".to_owned(),
             unit_label: "bag".to_owned(),
             price_minor_units: Some(900),
             price_currency: "USD".to_owned(),
@@ -7055,34 +7160,181 @@ mod tests {
             .expect("sqlite store")
             .load_pending_sync_operations(account_id.as_str())
             .expect("pending sync operations should load");
-        let expected_payload = super::product_sync_payload(
-            product_id,
-            Some(farm_id),
-            "save_product_editor_draft",
-            Some(&second_draft),
-            second_draft.stock_quantity,
-            None,
-        );
 
-        assert_eq!(pending_operations.len(), 1);
+        assert_eq!(pending_operations.len(), 0);
         assert_eq!(
-            pending_operations[0].operation.operation_key,
-            format!("product:{product_id}:upsert")
+            runtime
+                .lock_state()
+                .sqlite_store
+                .as_ref()
+                .expect("sqlite store")
+                .load_product_editor_draft(product_id)
+                .expect("saved product draft should load"),
+            Some(second_draft)
         );
-        assert_eq!(
-            pending_operations[0].operation.payload_json,
-            expected_payload
-        );
-        assert_eq!(
-            pending_operations[0].operation.state,
-            PendingSyncOperationState::Pending
-        );
-        assert_eq!(pending_operations[0].operation.attempt_count, 0);
-        assert_eq!(pending_operations[0].operation.last_error_message, None);
     }
 
     #[test]
-    fn runtime_local_product_mutations_enqueue_pending_sync_without_transport_calls() {
+    fn runtime_product_publishable_save_enqueues_typed_listing_publish_work() {
+        let (runtime, paths) = bootstrapped_runtime("publishable_product_listing_work");
+        let (account_id, farm_id) = provision_ready_farmer_account(&runtime);
+        let pickup_location_id = PickupLocationId::new();
+        let fulfillment_window_id = FulfillmentWindowId::new();
+
+        runtime
+            .save_farm_rules_projection(FarmRulesProjection {
+                farm_profile: Some(FarmProfileRecord {
+                    farm_id,
+                    display_name: "North field farm".to_owned(),
+                    timezone: "UTC".to_owned(),
+                    currency_code: "USD".to_owned(),
+                }),
+                pickup_locations: vec![PickupLocationRecord {
+                    pickup_location_id,
+                    farm_id,
+                    label: "Barn pickup".to_owned(),
+                    address_line: "14 Orchard Lane".to_owned(),
+                    directions: None,
+                    is_default: true,
+                }],
+                operating_rules: Some(FarmOperatingRulesRecord {
+                    farm_id,
+                    promise_lead_hours: 24,
+                    substitution_policy: "ask_customer".to_owned(),
+                    missed_pickup_policy: "hold_next_window".to_owned(),
+                }),
+                fulfillment_windows: vec![FulfillmentWindowRecord {
+                    fulfillment_window_id,
+                    farm_id,
+                    pickup_location_id,
+                    label: "Friday pickup".to_owned(),
+                    starts_at: "2099-04-25T14:00:00Z".to_owned(),
+                    ends_at: "2099-04-25T18:00:00Z".to_owned(),
+                    order_cutoff_at: "2099-04-24T18:00:00Z".to_owned(),
+                }],
+                blackout_periods: Vec::new(),
+                ..runtime
+                    .load_farm_rules_projection()
+                    .expect("farm rules projection should load")
+            })
+            .expect("farm rules should save");
+
+        assert!(
+            runtime
+                .open_new_product_editor()
+                .expect("new product editor should open")
+        );
+        let product_id = match runtime.summary().products_projection.editor {
+            radroots_studio_app_state::ProductEditorState::Open(session) => session
+                .selected_product_id
+                .expect("open product editor should select a product"),
+            radroots_studio_app_state::ProductEditorState::Closed => {
+                panic!("product editor should be open")
+            }
+        };
+
+        assert!(
+            runtime
+                .save_product_editor_draft(ProductEditorDraft {
+                    title: "Salad mix".to_owned(),
+                    subtitle: "Cut this morning".to_owned(),
+                    category: "greens".to_owned(),
+                    unit_label: "bag".to_owned(),
+                    price_minor_units: Some(900),
+                    price_currency: "usd".to_owned(),
+                    stock_quantity: Some(11),
+                    availability_window_id: Some(fulfillment_window_id),
+                    status: ProductStatus::Published,
+                })
+                .expect("publishable product save should succeed")
+        );
+
+        let pending_operations = runtime
+            .lock_state()
+            .sqlite_store
+            .as_ref()
+            .expect("sqlite store")
+            .load_pending_sync_operations(account_id.as_str())
+            .expect("pending sync operations should load");
+        let product_pending_operations = pending_operations
+            .iter()
+            .filter(|pending| pending.operation.aggregate == SyncAggregateRef::Product(product_id))
+            .collect::<Vec<_>>();
+        assert_eq!(product_pending_operations.len(), 1);
+        assert_eq!(
+            product_pending_operations[0].operation.operation_key,
+            format!("product:{product_id}:upsert")
+        );
+        assert_eq!(
+            product_pending_operations[0].operation.state,
+            PendingSyncOperationState::Pending
+        );
+        let publish_payload = product_pending_operations[0]
+            .operation
+            .publish_payload()
+            .expect("product publish operation should be typed");
+        let AppPublishPayload::Listing(payload) = publish_payload else {
+            panic!("product publish operation should carry listing payload")
+        };
+        assert_eq!(payload.product_id, product_id);
+        assert_eq!(payload.category.as_deref(), Some("greens"));
+        assert_eq!(payload.unit_label, "bag");
+        assert_eq!(payload.price_minor_units, Some(900));
+        assert_eq!(payload.price_currency, "USD");
+        assert_eq!(payload.stock_quantity, Some(11));
+        assert_eq!(payload.fulfillment_method.as_deref(), Some("pickup"));
+        assert_eq!(
+            payload.fulfillment_location.as_deref(),
+            Some("14 Orchard Lane")
+        );
+        assert!(payload.farm_pubkey.as_deref().is_some_and(super::is_hex_64));
+        assert!(
+            payload
+                .context
+                .source_local_event_id
+                .as_deref()
+                .is_some_and(|value| value.starts_with("app:local_work:listing:"))
+        );
+
+        let records = shared_local_event_records(&paths);
+        let listing_record = records
+            .iter()
+            .find(|record| {
+                record
+                    .local_work_json
+                    .as_ref()
+                    .and_then(|payload| payload["record_kind"].as_str())
+                    == Some("listing_draft_v1")
+            })
+            .expect("listing local work record");
+        let listing_payload = listing_record
+            .local_work_json
+            .as_ref()
+            .expect("listing local work payload");
+        assert_eq!(listing_payload["publishability"]["state"], "publishable");
+        assert_eq!(listing_payload["document"]["product"]["category"], "greens");
+        assert_eq!(
+            listing_payload["document"]["primary_bin"]["bin_id"]
+                .as_str()
+                .expect("primary bin id should be present"),
+            super::listing_primary_bin_id(
+                payload
+                    .listing_d_tag
+                    .as_deref()
+                    .expect("listing d tag should exist")
+            )
+        );
+        assert_eq!(listing_payload["document"]["delivery"]["method"], "pickup");
+        assert_eq!(
+            listing_payload["document"]["location"]["primary"],
+            "14 Orchard Lane"
+        );
+
+        cleanup_bootstrapped_runtime_paths(&paths);
+    }
+
+    #[test]
+    fn runtime_product_local_drafts_do_not_enqueue_publish_work_without_required_fields() {
         let runtime = memory_runtime();
         let (account_id, _) = provision_ready_farmer_account(&runtime);
         let recorded = install_recorded_sync_transport(
@@ -7117,24 +7369,26 @@ mod tests {
             .expect("pending sync operations should load");
 
         assert_eq!(recorded.lock().expect("recorded transport").call_count(), 0);
-        assert_eq!(summary.sync_status.pending_write_count, 1);
-        assert_eq!(pending_operations.len(), 1);
-        assert!(matches!(
-            pending_operations[0].operation.aggregate,
-            SyncAggregateRef::Product(_)
-        ));
+        assert_eq!(summary.sync_status.pending_write_count, 0);
+        assert_eq!(pending_operations.len(), 0);
     }
 
     #[test]
     fn runtime_launch_sync_attempt_dequeues_pushed_operations() {
         let runtime = memory_runtime();
-        let (account_id, _) = provision_ready_farmer_account(&runtime);
-
-        assert!(
-            runtime
-                .open_new_product_editor()
-                .expect("new product editor should open")
-        );
+        let (account_id, farm_id) = provision_ready_farmer_account(&runtime);
+        runtime
+            .lock_state_mut()
+            .enqueue_selected_account_sync_operations(vec![pending_sync_upsert(
+                SyncAggregateRef::Farm(farm_id),
+                farm_sync_payload(
+                    farm_id,
+                    "North field farm",
+                    Some(FarmReadiness::Ready),
+                    "launch_sync_attempt_dequeues_pushed_operations",
+                ),
+            )])
+            .expect("pending farm sync should enqueue");
 
         let recorded = install_recorded_sync_transport(
             &runtime,
@@ -7603,6 +7857,7 @@ mod tests {
                 .save_product_editor_draft(ProductEditorDraft {
                     title: "Eggs".to_owned(),
                     subtitle: "Fresh eggs".to_owned(),
+                    category: "eggs".to_owned(),
                     unit_label: "dozen".to_owned(),
                     price_minor_units: Some(750),
                     price_currency: "USD".to_owned(),
@@ -7695,17 +7950,29 @@ mod tests {
             .as_ref()
             .expect("listing local work payload");
         assert_eq!(listing_payload["exportability"]["state"], "exportable");
+        assert_eq!(listing_payload["publishability"]["state"], "blocked");
         assert_eq!(listing_payload["document"]["kind"], "listing_draft_v1");
         assert_eq!(
             listing_payload["document"]["seller_actor"]["pubkey"],
             owner_pubkey
         );
         assert_eq!(listing_payload["document"]["product"]["title"], "Eggs");
+        assert_eq!(listing_payload["document"]["product"]["category"], "eggs");
+        assert!(
+            listing_payload["document"]["primary_bin"]["bin_id"]
+                .as_str()
+                .is_some_and(|value| value.ends_with(":primary"))
+        );
         assert_eq!(
             listing_payload["document"]["primary_bin"]["price_amount"],
             "7.50"
         );
         assert_eq!(listing_payload["document"]["inventory"]["available"], "12");
+        assert_eq!(listing_payload["document"]["delivery"]["method"], "pickup");
+        assert_eq!(
+            listing_payload["document"]["location"]["primary"],
+            "farmstand"
+        );
         assert!(listing_payload.get("draft").is_none());
         assert!(listing_payload.get("editor").is_none());
 
@@ -7749,6 +8016,7 @@ mod tests {
                     &ProductEditorDraft {
                         title: "Eggs".to_owned(),
                         subtitle: "Fresh eggs".to_owned(),
+                        category: "eggs".to_owned(),
                         unit_label: "dozen".to_owned(),
                         price_minor_units: Some(750),
                         price_currency: "USD".to_owned(),
@@ -7811,13 +8079,19 @@ mod tests {
     #[test]
     fn runtime_manual_refresh_marks_failed_checkpoint_when_transport_is_unavailable() {
         let runtime = memory_runtime();
-        let (account_id, _) = provision_ready_farmer_account(&runtime);
-
-        assert!(
-            runtime
-                .open_new_product_editor()
-                .expect("new product editor should open")
-        );
+        let (account_id, farm_id) = provision_ready_farmer_account(&runtime);
+        runtime
+            .lock_state_mut()
+            .enqueue_selected_account_sync_operations(vec![pending_sync_upsert(
+                SyncAggregateRef::Farm(farm_id),
+                farm_sync_payload(
+                    farm_id,
+                    "North field farm",
+                    Some(FarmReadiness::Ready),
+                    "manual_refresh_unavailable_transport",
+                ),
+            )])
+            .expect("pending farm sync should enqueue");
 
         assert!(
             runtime
@@ -7860,12 +8134,18 @@ mod tests {
     fn runtime_sync_attempts_stop_when_blocking_conflicts_are_present() {
         let runtime = memory_runtime();
         let (account_id, farm_id) = provision_ready_farmer_account(&runtime);
-
-        assert!(
-            runtime
-                .open_new_product_editor()
-                .expect("new product editor should open")
-        );
+        runtime
+            .lock_state_mut()
+            .enqueue_selected_account_sync_operations(vec![pending_sync_upsert(
+                SyncAggregateRef::Farm(farm_id),
+                farm_sync_payload(
+                    farm_id,
+                    "North field farm",
+                    Some(FarmReadiness::Ready),
+                    "blocking_conflict_stops_sync",
+                ),
+            )])
+            .expect("pending farm sync should enqueue");
 
         runtime
             .lock_state()
@@ -12206,6 +12486,7 @@ mod tests {
         let saved_draft = ProductEditorDraft {
             title: "Salad mix".to_owned(),
             subtitle: "Washed and boxed".to_owned(),
+            category: "greens".to_owned(),
             unit_label: "box".to_owned(),
             price_minor_units: Some(900),
             price_currency: "usd".to_owned(),

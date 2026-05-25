@@ -4862,11 +4862,13 @@ struct ProductEditorFormState {
     status: ProductStatus,
     title_input: Entity<InputState>,
     subtitle_input: Entity<InputState>,
+    category_input: Entity<InputState>,
     unit_input: Entity<InputState>,
     price_input: Entity<InputState>,
     stock_input: Entity<InputState>,
     _title_subscription: Subscription,
     _subtitle_subscription: Subscription,
+    _category_subscription: Subscription,
     _unit_subscription: Subscription,
     _price_subscription: Subscription,
     _stock_subscription: Subscription,
@@ -4885,6 +4887,8 @@ impl ProductEditorFormState {
             cx.new(|cx| InputState::new(window, cx).default_value(draft.title.clone()));
         let subtitle_input =
             cx.new(|cx| InputState::new(window, cx).default_value(draft.subtitle.clone()));
+        let category_input =
+            cx.new(|cx| InputState::new(window, cx).default_value(draft.category.clone()));
         let unit_input =
             cx.new(|cx| InputState::new(window, cx).default_value(draft.unit_label.clone()));
         let price_input = cx.new(|cx| {
@@ -4906,6 +4910,11 @@ impl ProductEditorFormState {
         );
         let subtitle_subscription = cx.subscribe_in(
             &subtitle_input,
+            window,
+            HomeView::handle_product_editor_input_event,
+        );
+        let category_subscription = cx.subscribe_in(
+            &category_input,
             window,
             HomeView::handle_product_editor_input_event,
         );
@@ -4932,11 +4941,13 @@ impl ProductEditorFormState {
             initial_draft: draft,
             title_input,
             subtitle_input,
+            category_input,
             unit_input,
             price_input,
             stock_input,
             _title_subscription: title_subscription,
             _subtitle_subscription: subtitle_subscription,
+            _category_subscription: category_subscription,
             _unit_subscription: unit_subscription,
             _price_subscription: price_subscription,
             _stock_subscription: stock_subscription,
@@ -4948,6 +4959,7 @@ impl ProductEditorFormState {
         Some(ProductEditorDraft {
             title: self.title_input.read(cx).value().to_string(),
             subtitle: self.subtitle_input.read(cx).value().to_string(),
+            category: self.category_input.read(cx).value().to_string(),
             unit_label: self.unit_input.read(cx).value().to_string(),
             price_minor_units: parse_product_editor_price_input(
                 self.price_input.read(cx).value().as_ref(),
@@ -11622,6 +11634,14 @@ fn products_editor_surface(
                 ))
                 .child(app_form_input_text(
                     AppFormFieldSpec::new(
+                        app_shared_text(AppTextKey::ProductsEditorFieldCategory),
+                        Option::<SharedString>::None,
+                    ),
+                    &form.category_input,
+                    false,
+                ))
+                .child(app_form_input_text(
+                    AppFormFieldSpec::new(
                         app_shared_text(AppTextKey::ProductsEditorFieldUnit),
                         Option::<SharedString>::None,
                     ),
@@ -11819,8 +11839,10 @@ fn products_editor_publish_blocker_row(blocker: ProductPublishBlocker) -> AnyEle
 fn products_editor_publish_blocker_key(blocker: ProductPublishBlocker) -> AppTextKey {
     match blocker {
         ProductPublishBlocker::AddProductName => AppTextKey::ProductsEditorBlockerAddProductName,
+        ProductPublishBlocker::ChooseCategory => AppTextKey::ProductsEditorBlockerChooseCategory,
         ProductPublishBlocker::ChooseUnit => AppTextKey::ProductsEditorBlockerChooseUnit,
         ProductPublishBlocker::SetPrice => AppTextKey::ProductsEditorBlockerSetPrice,
+        ProductPublishBlocker::SetStock => AppTextKey::ProductsEditorBlockerSetStock,
         ProductPublishBlocker::AttachAvailability => {
             AppTextKey::ProductsEditorBlockerAttachAvailability
         }

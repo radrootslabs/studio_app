@@ -946,6 +946,10 @@ mod tests {
         );
         assert_eq!(app_text(AppTextKey::ProductsEditorFieldTitle), "Name");
         assert_eq!(app_text(AppTextKey::ProductsEditorFieldSubtitle), "Details");
+        assert_eq!(
+            app_text(AppTextKey::ProductsEditorFieldCategory),
+            "Category"
+        );
         assert_eq!(app_text(AppTextKey::ProductsEditorFieldUnit), "Unit");
         assert_eq!(
             app_text(AppTextKey::ProductsEditorFieldPrice),
@@ -971,12 +975,20 @@ mod tests {
             "Add a product name."
         );
         assert_eq!(
+            app_text(AppTextKey::ProductsEditorBlockerChooseCategory),
+            "Choose a category."
+        );
+        assert_eq!(
             app_text(AppTextKey::ProductsEditorBlockerChooseUnit),
             "Choose a unit."
         );
         assert_eq!(
             app_text(AppTextKey::ProductsEditorBlockerSetPrice),
             "Set a price."
+        );
+        assert_eq!(
+            app_text(AppTextKey::ProductsEditorBlockerSetStock),
+            "Set available stock."
         );
         assert_eq!(
             app_text(AppTextKey::ProductsEditorBlockerAttachAvailability),

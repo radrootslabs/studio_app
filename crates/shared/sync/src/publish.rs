@@ -195,12 +195,22 @@ impl AppPublishPayload {
                 if payload.availability_window_id.is_none() {
                     failures.push(AppPublishValidationFailure::MissingListingAvailability);
                 }
+                if payload.stock_quantity.is_none() {
+                    failures.push(AppPublishValidationFailure::MissingListingStock);
+                }
                 if payload
                     .fulfillment_method
                     .as_deref()
                     .is_none_or(|value| value.trim().is_empty())
                 {
                     failures.push(AppPublishValidationFailure::MissingListingFulfillmentMethod);
+                }
+                if payload
+                    .fulfillment_location
+                    .as_deref()
+                    .is_none_or(|value| value.trim().is_empty())
+                {
+                    failures.push(AppPublishValidationFailure::MissingListingFulfillmentLocation);
                 }
             }
             Self::OrderRequest(payload) => {
@@ -292,7 +302,9 @@ pub enum AppPublishValidationFailure {
     MissingListingPrice,
     MissingListingCurrency,
     MissingListingAvailability,
+    MissingListingStock,
     MissingListingFulfillmentMethod,
+    MissingListingFulfillmentLocation,
     MissingOrderDocument,
     MissingOrderListingAddress,
     MissingOrderListingEventId,
@@ -318,7 +330,9 @@ impl AppPublishValidationFailure {
             Self::MissingListingPrice => "missing_listing_price",
             Self::MissingListingCurrency => "missing_listing_currency",
             Self::MissingListingAvailability => "missing_listing_availability",
+            Self::MissingListingStock => "missing_listing_stock",
             Self::MissingListingFulfillmentMethod => "missing_listing_fulfillment_method",
+            Self::MissingListingFulfillmentLocation => "missing_listing_fulfillment_location",
             Self::MissingOrderDocument => "missing_order_document",
             Self::MissingOrderListingAddress => "missing_order_listing_address",
             Self::MissingOrderListingEventId => "missing_order_listing_event_id",
@@ -468,6 +482,7 @@ mod tests {
                 "missing_listing_currency",
                 "missing_listing_availability",
                 "missing_listing_fulfillment_method",
+                "missing_listing_fulfillment_location",
             ]
         );
         assert!(payload.validate().is_err());
