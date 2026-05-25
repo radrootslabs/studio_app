@@ -59,7 +59,7 @@ use radroots_core::{
     RadrootsCoreCurrency, RadrootsCoreDecimal, RadrootsCoreMoney, RadrootsCoreQuantity,
     RadrootsCoreQuantityPrice, RadrootsCoreUnit,
 };
-use radroots_identity::RadrootsIdentity;
+use radroots_identity::{RadrootsIdentity, RadrootsIdentityId};
 use radroots_local_events::{
     BUYER_ORDER_REQUEST_ACTOR_SOURCE_RESOLVED_ACCOUNT,
     BUYER_ORDER_REQUEST_ACTOR_SOURCE_UNRESOLVED_APP, BUYER_ORDER_REQUEST_DOCUMENT_KIND,
@@ -159,21 +159,17 @@ impl SdkDirectRelayAppSyncTransport {
         request: AppSyncRequest,
     ) -> Result<AppSyncResult, AppSyncTransportError> {
         let run_started_at = current_utc_timestamp();
-        let identity = self
-            .accounts_manager
-            .default_signing_identity()
-            .map_err(|error| AppSyncTransportError::failed(error.to_string()))?
-            .ok_or_else(|| {
-                AppSyncTransportError::unavailable(
-                    "selected account is not backed by a local signing key",
-                )
-            })?;
         let relay_urls = normalized_app_sync_relay_urls(&self.relay_urls)?;
         let client = direct_relay_sdk_client(relay_urls.clone(), self.timeout_ms)?;
         let mut published_receipts = Vec::new();
 
         for operation in &request.pending_operations {
-            match publish_pending_sync_operation(&client, &identity, operation, &relay_urls) {
+            match publish_pending_sync_operation(
+                &client,
+                &self.accounts_manager,
+                operation,
+                &relay_urls,
+            ) {
                 Ok(receipt) => published_receipts.push(receipt),
                 Err(error) => {
                     if published_receipts.is_empty() {
@@ -206,7 +202,7 @@ impl SdkDirectRelayAppSyncTransport {
 
 fn publish_pending_sync_operation(
     client: &RadrootsSdkClient,
-    identity: &RadrootsIdentity,
+    accounts_manager: &RadrootsNostrAccountsManager,
     operation: &PendingSyncOperation,
     relay_urls: &[String],
 ) -> Result<AppPublishedOperationReceipt, AppSyncTransportError> {
@@ -231,8 +227,53 @@ fn publish_pending_sync_operation(
             "pending app publish work is blocked: {reason_codes}"
         ))
     })?;
-    let receipt = publish_app_payload_sync(client, identity, &publish_payload, relay_urls)?;
+    let identity = signing_identity_for_publish_payload(accounts_manager, &publish_payload)?;
+    let receipt = publish_app_payload_sync(client, &identity, &publish_payload, relay_urls)?;
     published_operation_receipt(operation.operation_key.as_str(), &publish_payload, receipt)
+}
+
+fn signing_identity_for_publish_payload(
+    accounts_manager: &RadrootsNostrAccountsManager,
+    publish_payload: &AppPublishPayload,
+) -> Result<RadrootsIdentity, AppSyncTransportError> {
+    let context = publish_payload_context(publish_payload);
+    let account_id = RadrootsIdentityId::parse(context.account_id.trim()).map_err(|error| {
+        AppSyncTransportError::failed(format!(
+            "pending app publish work has invalid account context: {error}"
+        ))
+    })?;
+    let record = accounts_manager
+        .list_accounts()
+        .map_err(|error| AppSyncTransportError::failed(error.to_string()))?
+        .into_iter()
+        .find(|record| record.account_id == account_id)
+        .ok_or_else(|| {
+            AppSyncTransportError::unavailable(format!(
+                "publish account is not configured locally: {account_id}"
+            ))
+        })?;
+    let identity = accounts_manager
+        .get_signing_identity(&account_id)
+        .map_err(|error| AppSyncTransportError::failed(error.to_string()))?
+        .ok_or_else(|| {
+            AppSyncTransportError::unavailable(format!(
+                "publish account is not backed by a local signing key: {account_id}"
+            ))
+        })?;
+    if identity.public_key_hex() != record.public_identity.public_key_hex {
+        return Err(AppSyncTransportError::failed(
+            "publish account signing key does not match account context",
+        ));
+    }
+    Ok(identity)
+}
+
+fn publish_payload_context(publish_payload: &AppPublishPayload) -> &AppPublishContext {
+    match publish_payload {
+        AppPublishPayload::FarmProfile(payload) => &payload.context,
+        AppPublishPayload::Listing(payload) => &payload.context,
+        AppPublishPayload::OrderRequest(payload) => &payload.context,
+    }
 }
 
 fn partial_failed_sync_result(
@@ -7019,7 +7060,8 @@ mod tests {
     };
     use radroots_nostr_accounts::prelude::{
         RadrootsNostrAccountsManager, RadrootsNostrFileAccountStore,
-        RadrootsNostrMemoryAccountStore, RadrootsNostrSecretVaultMemory,
+        RadrootsNostrMemoryAccountStore, RadrootsNostrSecretVaultMemory, RadrootsSecretVault,
+        account_secret_slot,
     };
     use radroots_sql_core::SqliteExecutor;
     use serde_json::json;
@@ -7287,12 +7329,63 @@ mod tests {
     }
 
     #[test]
-    fn runtime_direct_relay_transport_requires_local_signing_custody() {
+    fn runtime_direct_relay_transport_signs_with_payload_account_context() {
+        let relay = ThreadedAckRelay::spawn();
+        let manager = RadrootsNostrAccountsManager::new_in_memory();
+        let first_account_id = manager
+            .generate_identity(Some("First".to_owned()), true)
+            .expect("first account");
+        let second_account_id = manager
+            .generate_identity(Some("Second".to_owned()), true)
+            .expect("second account");
+        let first_identity = manager
+            .get_signing_identity(&first_account_id)
+            .expect("first signer")
+            .expect("first local signer");
+        let second_identity = manager
+            .get_signing_identity(&second_account_id)
+            .expect("second signer")
+            .expect("second local signer");
+        let payload = AppPublishPayload::FarmProfile(AppFarmProfilePublishPayload {
+            context: AppPublishContext::new(first_account_id.to_string(), "farm_setup"),
+            farm_id: FarmId::new(),
+            display_name: "North field farm".to_owned(),
+            readiness: Some(FarmReadiness::Ready),
+        });
+        let operation = PendingSyncOperation::from_publish_payload(payload, "2026-05-24T12:00:00Z")
+            .expect("typed farm publish work should serialize");
+        let mut transport =
+            SdkDirectRelayAppSyncTransport::with_relay_urls(manager, vec![relay.url().to_owned()]);
+
+        let result = transport
+            .sync(AppSyncRequest {
+                trigger: SyncTrigger::ManualRefresh,
+                checkpoint: SyncCheckpointStatus::never_synced(),
+                pending_operations: vec![operation],
+                known_conflicts: Vec::new(),
+            })
+            .expect("payload account signer should publish");
+
+        assert_eq!(result.run_status, AppSyncRunStatus::Succeeded);
+        assert_eq!(result.published_receipts.len(), 1);
+        assert_eq!(
+            result.published_receipts[0].event_pubkey,
+            first_identity.public_key_hex()
+        );
+        assert_ne!(
+            result.published_receipts[0].event_pubkey,
+            second_identity.public_key_hex()
+        );
+    }
+
+    #[test]
+    fn runtime_direct_relay_transport_rejects_missing_account_context() {
         let relay = ThreadedAckRelay::spawn();
         let manager = RadrootsNostrAccountsManager::new_in_memory();
         let farm_id = FarmId::new();
+        let missing_account_id = RadrootsIdentity::generate().id();
         let payload = AppPublishPayload::FarmProfile(AppFarmProfilePublishPayload {
-            context: AppPublishContext::new("missing", "farm_setup"),
+            context: AppPublishContext::new(missing_account_id.to_string(), "farm_setup"),
             farm_id,
             display_name: "North field farm".to_owned(),
             readiness: Some(FarmReadiness::Ready),
@@ -7315,7 +7408,93 @@ mod tests {
         assert!(
             error
                 .to_string()
-                .contains("selected account is not backed by a local signing key")
+                .contains("publish account is not configured locally")
+        );
+    }
+
+    #[test]
+    fn runtime_direct_relay_transport_rejects_watch_only_account_context() {
+        let relay = ThreadedAckRelay::spawn();
+        let manager = RadrootsNostrAccountsManager::new_in_memory();
+        let identity = RadrootsIdentity::generate();
+        let account_id = manager
+            .upsert_public_identity(identity.to_public(), Some("Watch".to_owned()), true)
+            .expect("watch-only account");
+        let payload = AppPublishPayload::FarmProfile(AppFarmProfilePublishPayload {
+            context: AppPublishContext::new(account_id.to_string(), "farm_setup"),
+            farm_id: FarmId::new(),
+            display_name: "North field farm".to_owned(),
+            readiness: Some(FarmReadiness::Ready),
+        });
+        let operation = PendingSyncOperation::from_publish_payload(payload, "2026-05-24T12:00:00Z")
+            .expect("typed farm publish work should serialize");
+        let mut transport =
+            SdkDirectRelayAppSyncTransport::with_relay_urls(manager, vec![relay.url().to_owned()]);
+
+        let error = transport
+            .sync(AppSyncRequest {
+                trigger: SyncTrigger::ManualRefresh,
+                checkpoint: SyncCheckpointStatus::never_synced(),
+                pending_operations: vec![operation],
+                known_conflicts: Vec::new(),
+            })
+            .expect_err("watch-only account should not publish");
+
+        assert!(matches!(error, AppSyncTransportError::Unavailable { .. }));
+        assert!(
+            error
+                .to_string()
+                .contains("publish account is not backed by a local signing key")
+        );
+    }
+
+    #[test]
+    fn runtime_direct_relay_transport_rejects_mismatched_local_signing_custody() {
+        let relay = ThreadedAckRelay::spawn();
+        let store = Arc::new(RadrootsNostrMemoryAccountStore::new());
+        let vault = Arc::new(RadrootsNostrSecretVaultMemory::new());
+        let manager =
+            RadrootsNostrAccountsManager::new(store, vault.clone()).expect("accounts manager");
+        let account_identity = RadrootsIdentity::generate();
+        let secret_identity = RadrootsIdentity::generate();
+        let account_id = manager
+            .upsert_public_identity(
+                account_identity.to_public(),
+                Some("Mismatched".to_owned()),
+                true,
+            )
+            .expect("public account");
+        vault
+            .store_secret(
+                account_secret_slot(&account_id).as_str(),
+                secret_identity.secret_key_hex().as_str(),
+            )
+            .expect("mismatched secret");
+        let payload = AppPublishPayload::FarmProfile(AppFarmProfilePublishPayload {
+            context: AppPublishContext::new(account_id.to_string(), "farm_setup"),
+            farm_id: FarmId::new(),
+            display_name: "North field farm".to_owned(),
+            readiness: Some(FarmReadiness::Ready),
+        });
+        let operation = PendingSyncOperation::from_publish_payload(payload, "2026-05-24T12:00:00Z")
+            .expect("typed farm publish work should serialize");
+        let mut transport =
+            SdkDirectRelayAppSyncTransport::with_relay_urls(manager, vec![relay.url().to_owned()]);
+
+        let error = transport
+            .sync(AppSyncRequest {
+                trigger: SyncTrigger::ManualRefresh,
+                checkpoint: SyncCheckpointStatus::never_synced(),
+                pending_operations: vec![operation],
+                known_conflicts: Vec::new(),
+            })
+            .expect_err("mismatched custody should not publish");
+
+        assert!(matches!(error, AppSyncTransportError::Failed { .. }));
+        assert!(
+            error
+                .to_string()
+                .contains("public key does not match secret key")
         );
     }
 
