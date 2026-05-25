@@ -2624,15 +2624,17 @@ fn listing_relays_from_json(value: Option<String>) -> Result<Vec<String>, AppSql
         return Ok(relays_from_json_array(relays));
     }
 
-    for key in ["acknowledged_relays", "target_relays", "connected_relays"] {
-        let relays = value
+    let relay_key = match value.get("state").and_then(Value::as_str) {
+        Some("acknowledged") => Some("acknowledged_relays"),
+        Some("observed") => Some("observed_relays"),
+        _ => None,
+    };
+    if let Some(key) = relay_key {
+        return Ok(value
             .get(key)
             .and_then(Value::as_array)
             .map(|relays| relays_from_json_array(relays))
-            .unwrap_or_default();
-        if !relays.is_empty() {
-            return Ok(relays);
-        }
+            .unwrap_or_default());
     }
 
     Ok(Vec::new())
@@ -2663,6 +2665,7 @@ mod tests {
         PickupLocationId, ProductId,
     };
     use rusqlite::{Connection, params};
+    use serde_json::json;
 
     use crate::{
         AppSqliteError, AppSqliteStore, BuyerOrderCoordinationState, BuyerRepeatDemandApplyOutcome,
@@ -2670,6 +2673,61 @@ mod tests {
     };
 
     use super::AppBuyerRepository;
+
+    #[test]
+    fn listing_relays_from_json_uses_only_acknowledged_or_observed_relays() {
+        assert_eq!(
+            super::listing_relays_from_json(Some(
+                json!({
+                    "state": "acknowledged",
+                    "target_relays": ["wss://target.example"],
+                    "connected_relays": ["wss://connected.example"],
+                    "acknowledged_relays": ["wss://ack.example"]
+                })
+                .to_string()
+            ))
+            .expect("acknowledged relays"),
+            vec!["wss://ack.example"]
+        );
+        assert_eq!(
+            super::listing_relays_from_json(Some(
+                json!({
+                    "state": "observed",
+                    "target_relays": ["wss://target.example"],
+                    "connected_relays": ["wss://connected.example"],
+                    "observed_relays": ["wss://observed.example"]
+                })
+                .to_string()
+            ))
+            .expect("observed relays"),
+            vec!["wss://observed.example"]
+        );
+        assert!(
+            super::listing_relays_from_json(Some(
+                json!({
+                    "state": "observed",
+                    "target_relays": ["wss://target.example"],
+                    "connected_relays": ["wss://connected.example"],
+                    "observed_relays": []
+                })
+                .to_string()
+            ))
+            .expect("unknown observed relays")
+            .is_empty()
+        );
+        assert!(
+            super::listing_relays_from_json(Some(
+                json!({
+                    "state": "pending",
+                    "target_relays": ["wss://target.example"],
+                    "connected_relays": ["wss://connected.example"]
+                })
+                .to_string()
+            ))
+            .expect("pending relays")
+            .is_empty()
+        );
+    }
 
     #[test]
     fn buyer_listings_and_product_detail_follow_catalog_truth() {

@@ -5176,10 +5176,15 @@ fn direct_relay_event_records(
     receipt: &AppDirectRelayFetchReceipt,
     inserted_at_ms: i64,
 ) -> Result<Vec<LocalEventRecord>, AppDirectRelayIngestError> {
-    let delivery_evidence = RelayDeliveryEvidence::acknowledged(
+    let observed_relays = if receipt.connected_relays.len() == 1 {
+        receipt.connected_relays.clone()
+    } else {
+        Vec::new()
+    };
+    let delivery_evidence = RelayDeliveryEvidence::observed(
         &receipt.target_relays,
         &receipt.connected_relays,
-        &receipt.connected_relays,
+        observed_relays,
         receipt.failed_relays.clone(),
     )
     .map_err(|source| AppSyncTransportError::failed(source.to_string()))?;
@@ -5228,7 +5233,7 @@ fn direct_relay_event_records(
             event_content: Some(event.content.clone()),
             event_sig: Some(event.sig.to_string()),
             raw_event_json: Some(relay_raw_event_json(event)?),
-            outbox_status: PublishOutboxStatus::Acknowledged,
+            outbox_status: PublishOutboxStatus::None,
             relay_set_fingerprint: Some(relay_set_fingerprint.clone()),
             relay_delivery_json: Some(relay_delivery_json.clone()),
         });
@@ -7889,6 +7894,73 @@ mod tests {
         );
     }
 
+    #[test]
+    fn runtime_relay_ingest_does_not_use_connected_relays_as_listing_provenance() {
+        let listing_relay = ThreadedAckRelay::spawn();
+        let empty_relay = ThreadedAckRelay::spawn();
+        let product_id = publish_relay_ingest_listing_fixture(&listing_relay);
+        let (runtime, paths) = bootstrapped_runtime("relay_ingest_connected_not_provenance");
+        assert!(
+            runtime
+                .generate_local_account(Some("Buyer".to_owned()))
+                .expect("buyer account should generate")
+        );
+        runtime.lock_state_mut().nostr_relay_urls =
+            vec![listing_relay.url().to_owned(), empty_relay.url().to_owned()];
+
+        assert!(
+            runtime
+                .sync_on_manual_refresh()
+                .expect("manual relay ingest should complete")
+        );
+
+        let summary = runtime.summary();
+        let listing = summary
+            .personal_projection
+            .browse
+            .listings
+            .rows
+            .iter()
+            .find(|listing| listing.product_id == product_id)
+            .expect("fresh buyer app should project relay listing");
+        assert_eq!(listing.title, "Relay ingest lettuce");
+        assert!(listing.listing_relays.is_empty());
+
+        let product_id_string = product_id.to_string();
+        let imports = runtime
+            .lock_state()
+            .sqlite_store
+            .as_ref()
+            .expect("sqlite store")
+            .load_local_interop_records()
+            .expect("local interop records should load");
+        let listing_import = imports
+            .iter()
+            .find(|record| {
+                record.projected_kind == "listing"
+                    && record.projected_id.as_deref() == Some(product_id_string.as_str())
+            })
+            .expect("listing import");
+        let delivery = serde_json::from_str::<serde_json::Value>(
+            listing_import
+                .relay_delivery_json
+                .as_deref()
+                .expect("listing delivery evidence"),
+        )
+        .expect("delivery json");
+
+        assert_eq!(listing_import.outbox_status, "none");
+        assert_eq!(delivery["state"], json!("observed"));
+        assert_eq!(delivery["acknowledged_relays"], json!([]));
+        assert_eq!(delivery["observed_relays"], serde_json::Value::Null);
+        assert_eq!(
+            delivery["target_relays"],
+            json!([listing_relay.url(), empty_relay.url()])
+        );
+
+        cleanup_bootstrapped_runtime_paths(&paths);
+    }
+
     fn publish_relay_ingest_listing_fixture(relay: &ThreadedAckRelay) -> ProductId {
         let manager = RadrootsNostrAccountsManager::new_in_memory();
         let account_id = manager
@@ -8003,6 +8075,25 @@ mod tests {
             .expect("sqlite store")
             .load_local_interop_records()
             .expect("local interop records should load");
+        let listing_import = imports
+            .iter()
+            .find(|record| {
+                record.projected_kind == "listing"
+                    && record.projected_id.as_deref() == Some(product_id_string.as_str())
+            })
+            .expect("listing import");
+        let delivery = serde_json::from_str::<serde_json::Value>(
+            listing_import
+                .relay_delivery_json
+                .as_deref()
+                .expect("listing delivery evidence"),
+        )
+        .expect("delivery json");
+
+        assert_eq!(listing_import.outbox_status, "none");
+        assert_eq!(delivery["state"], json!("observed"));
+        assert_eq!(delivery["acknowledged_relays"], json!([]));
+        assert_eq!(delivery["observed_relays"], json!([relay_url]));
         assert_eq!(
             imports
                 .iter()

@@ -16,7 +16,7 @@ use radroots_events_codec::trade::{
 };
 use radroots_local_events::{
     LocalEventRecord, LocalEventsStore, LocalRecordFamily, LocalRecordStatus, PublishOutboxStatus,
-    SourceRuntime,
+    RelayDeliveryEvidence, RelayDeliveryState, SourceRuntime,
 };
 use radroots_sql_core::{SqlExecutor, SqliteExecutor};
 use rusqlite::{Connection, OptionalExtension, params};
@@ -1759,9 +1759,7 @@ fn signed_listing_product_status(
     content: Option<&Value>,
     tags: Option<&Value>,
 ) -> Option<ProductStatus> {
-    if record.status != LocalRecordStatus::Published
-        || record.outbox_status != PublishOutboxStatus::Acknowledged
-    {
+    if !signed_listing_has_public_evidence(record) {
         return Some(ProductStatus::Draft);
     }
     match signed_listing_lifecycle(content, tags)? {
@@ -1771,6 +1769,20 @@ fn signed_listing_product_status(
         SignedListingLifecycle::Archived => Some(ProductStatus::Archived),
         SignedListingLifecycle::Sold => Some(ProductStatus::Paused),
     }
+}
+
+fn signed_listing_has_public_evidence(record: &LocalEventRecord) -> bool {
+    if record.status != LocalRecordStatus::Published {
+        return false;
+    }
+    if record.outbox_status == PublishOutboxStatus::Acknowledged {
+        return true;
+    }
+    record
+        .relay_delivery_json
+        .as_ref()
+        .and_then(|delivery| RelayDeliveryEvidence::from_json_value(delivery).ok())
+        .is_some_and(|delivery| delivery.state == RelayDeliveryState::Observed)
 }
 
 fn signed_farm_readiness(content: &Value, tags: Option<&Value>) -> Option<FarmReadiness> {
@@ -3847,6 +3859,46 @@ mod tests {
             assert_eq!(report.skipped_records, 0);
             assert_eq!(product_status, expected_product_status);
         }
+    }
+
+    #[test]
+    fn maps_observed_signed_listing_as_published_without_outbox_acknowledgement() {
+        let app_store =
+            AppSqliteStore::open(DatabaseTarget::InMemory).expect("open app sqlite store");
+        let events = local_events_store();
+        let farm_key = "AAAAAAAAAAAAAAAAAAAAAA";
+        let listing_key = "BBBBBBBBBBBBBBBBBBBBBB";
+        let mut record = signed_listing_record_with_publish_state(
+            "observed-listing",
+            farm_key,
+            listing_key,
+            "active",
+            LocalRecordStatus::Published,
+            PublishOutboxStatus::None,
+        );
+        record.relay_delivery_json = Some(json!({
+            "state": "observed",
+            "target_relays": ["ws://127.0.0.1:1234"],
+            "connected_relays": ["ws://127.0.0.1:1234"],
+            "acknowledged_relays": [],
+            "observed_relays": ["ws://127.0.0.1:1234"],
+            "failed_relays": []
+        }));
+        events
+            .append_record(&record)
+            .expect("append observed signed listing");
+
+        let report = app_store
+            .import_shared_local_events_from_store(&events)
+            .expect("import observed signed listing");
+        let product_status: String = app_store
+            .connection()
+            .query_row("SELECT status FROM products", [], |row| row.get(0))
+            .expect("load product status");
+
+        assert_eq!(report.imported_records, 1);
+        assert_eq!(report.skipped_records, 0);
+        assert_eq!(product_status, "published");
     }
 
     #[test]
