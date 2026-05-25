@@ -76,6 +76,10 @@ const MIGRATIONS: &[Migration] = &[
         version: 18,
         sql: include_str!("../migrations/0018_listing_relay_provenance.sql"),
     },
+    Migration {
+        version: 19,
+        sql: include_str!("../migrations/0019_relay_ingest_freshness.sql"),
+    },
 ];
 
 pub fn latest_schema_version() -> u32 {

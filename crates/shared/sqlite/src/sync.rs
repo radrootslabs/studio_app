@@ -1,8 +1,9 @@
 use radroots_studio_app_models::{FarmId, FulfillmentWindowId, OrderId, ProductId};
 use radroots_studio_app_sync::{
-    PendingSyncOperation, PendingSyncOperationState, SyncAggregateRef, SyncCheckpointState,
-    SyncCheckpointStatus, SyncConflict, SyncConflictKind, SyncConflictResolutionStatus,
-    SyncConflictSeverity, SyncOperationKind,
+    AppRelayIngestFreshnessState, AppRelayIngestRelayFreshness, AppRelayIngestScopeFreshness,
+    AppRelayIngestScopeStatus, PendingSyncOperation, PendingSyncOperationState, SyncAggregateRef,
+    SyncCheckpointState, SyncCheckpointStatus, SyncConflict, SyncConflictKind,
+    SyncConflictResolutionStatus, SyncConflictSeverity, SyncOperationKind,
 };
 use rusqlite::{Connection, OptionalExtension, params};
 use uuid::Uuid;
@@ -19,6 +20,12 @@ pub struct StoredPendingSyncOperation {
 pub struct StoredSyncConflict {
     pub conflict_id: String,
     pub conflict: SyncConflict,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct StoredRelayIngestCursor {
+    pub relay_url: String,
+    pub cursor_since_unix_seconds: Option<i64>,
 }
 
 pub struct AppSyncRepository<'a> {
@@ -333,6 +340,267 @@ impl<'a> AppSyncRepository<'a> {
             })?;
 
         Ok(())
+    }
+
+    pub fn load_relay_ingest_cursors(
+        &self,
+        scope_key: &str,
+        relay_urls: &[String],
+    ) -> Result<Vec<StoredRelayIngestCursor>, AppSqliteError> {
+        relay_urls
+            .iter()
+            .map(|relay_url| {
+                let cursor_since_unix_seconds = self
+                    .connection
+                    .query_row(
+                        "SELECT cursor_since_unix_seconds
+                         FROM app_relay_ingest_freshness
+                         WHERE scope_key = ?1 AND relay_url = ?2
+                         LIMIT 1",
+                        params![scope_key, relay_url.as_str()],
+                        |row| row.get::<_, Option<i64>>(0),
+                    )
+                    .optional()
+                    .map_err(|source| AppSqliteError::Query {
+                        operation: "load relay ingest cursor",
+                        source,
+                    })?
+                    .flatten();
+
+                Ok(StoredRelayIngestCursor {
+                    relay_url: relay_url.clone(),
+                    cursor_since_unix_seconds,
+                })
+            })
+            .collect()
+    }
+
+    pub fn load_relay_ingest_freshness(
+        &self,
+        scope_key: &str,
+        relay_urls: &[String],
+        now_unix_seconds: i64,
+        stale_after_seconds: i64,
+    ) -> Result<AppRelayIngestScopeFreshness, AppSqliteError> {
+        let relays = relay_urls
+            .iter()
+            .map(|relay_url| {
+                self.load_relay_ingest_relay_freshness(
+                    scope_key,
+                    relay_url,
+                    now_unix_seconds,
+                    stale_after_seconds,
+                )
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        let status = relay_ingest_scope_status(relays.as_slice());
+
+        Ok(AppRelayIngestScopeFreshness {
+            scope_key: scope_key.to_owned(),
+            status,
+            relays,
+        })
+    }
+
+    pub fn record_relay_ingest_success(
+        &self,
+        scope_key: &str,
+        relay_url: &str,
+        cursor_since_unix_seconds: i64,
+        last_event_created_at_unix_seconds: Option<i64>,
+        started_at: &str,
+        started_unix_seconds: i64,
+        completed_at: &str,
+        completed_unix_seconds: i64,
+    ) -> Result<(), AppSqliteError> {
+        self.connection
+            .execute(
+                "INSERT INTO app_relay_ingest_freshness (
+                    scope_key,
+                    relay_url,
+                    state,
+                    cursor_since_unix_seconds,
+                    last_event_created_at_unix_seconds,
+                    last_fetch_started_at,
+                    last_fetch_started_unix_seconds,
+                    last_fetch_completed_at,
+                    last_fetch_completed_unix_seconds,
+                    last_success_at,
+                    last_success_unix_seconds,
+                    last_error_message,
+                    updated_at
+                ) VALUES (?1, ?2, 'fresh', ?3, ?4, ?5, ?6, ?7, ?8, ?7, ?8, NULL, ?7)
+                ON CONFLICT(scope_key, relay_url) DO UPDATE SET
+                    state = 'fresh',
+                    cursor_since_unix_seconds = excluded.cursor_since_unix_seconds,
+                    last_event_created_at_unix_seconds = excluded.last_event_created_at_unix_seconds,
+                    last_fetch_started_at = excluded.last_fetch_started_at,
+                    last_fetch_started_unix_seconds = excluded.last_fetch_started_unix_seconds,
+                    last_fetch_completed_at = excluded.last_fetch_completed_at,
+                    last_fetch_completed_unix_seconds = excluded.last_fetch_completed_unix_seconds,
+                    last_success_at = excluded.last_success_at,
+                    last_success_unix_seconds = excluded.last_success_unix_seconds,
+                    last_error_message = NULL,
+                    updated_at = excluded.updated_at",
+                params![
+                    scope_key,
+                    relay_url,
+                    cursor_since_unix_seconds,
+                    last_event_created_at_unix_seconds,
+                    started_at,
+                    started_unix_seconds,
+                    completed_at,
+                    completed_unix_seconds,
+                ],
+            )
+            .map_err(|source| AppSqliteError::Query {
+                operation: "record relay ingest success",
+                source,
+            })?;
+
+        Ok(())
+    }
+
+    pub fn record_relay_ingest_failure(
+        &self,
+        scope_key: &str,
+        relay_url: &str,
+        started_at: &str,
+        started_unix_seconds: i64,
+        completed_at: &str,
+        completed_unix_seconds: i64,
+        error_message: &str,
+    ) -> Result<(), AppSqliteError> {
+        self.connection
+            .execute(
+                "INSERT INTO app_relay_ingest_freshness (
+                    scope_key,
+                    relay_url,
+                    state,
+                    cursor_since_unix_seconds,
+                    last_event_created_at_unix_seconds,
+                    last_fetch_started_at,
+                    last_fetch_started_unix_seconds,
+                    last_fetch_completed_at,
+                    last_fetch_completed_unix_seconds,
+                    last_success_at,
+                    last_success_unix_seconds,
+                    last_error_message,
+                    updated_at
+                ) VALUES (?1, ?2, 'failed', NULL, NULL, ?3, ?4, ?5, ?6, NULL, NULL, ?7, ?5)
+                ON CONFLICT(scope_key, relay_url) DO UPDATE SET
+                    state = 'failed',
+                    last_fetch_started_at = excluded.last_fetch_started_at,
+                    last_fetch_started_unix_seconds = excluded.last_fetch_started_unix_seconds,
+                    last_fetch_completed_at = excluded.last_fetch_completed_at,
+                    last_fetch_completed_unix_seconds = excluded.last_fetch_completed_unix_seconds,
+                    last_error_message = excluded.last_error_message,
+                    updated_at = excluded.updated_at",
+                params![
+                    scope_key,
+                    relay_url,
+                    started_at,
+                    started_unix_seconds,
+                    completed_at,
+                    completed_unix_seconds,
+                    error_message,
+                ],
+            )
+            .map_err(|source| AppSqliteError::Query {
+                operation: "record relay ingest failure",
+                source,
+            })?;
+
+        Ok(())
+    }
+
+    fn load_relay_ingest_relay_freshness(
+        &self,
+        scope_key: &str,
+        relay_url: &str,
+        now_unix_seconds: i64,
+        stale_after_seconds: i64,
+    ) -> Result<AppRelayIngestRelayFreshness, AppSqliteError> {
+        let row = self
+            .connection
+            .query_row(
+                "SELECT
+                    state,
+                    cursor_since_unix_seconds,
+                    last_event_created_at_unix_seconds,
+                    last_fetch_started_at,
+                    last_fetch_completed_at,
+                    last_fetch_completed_unix_seconds,
+                    last_success_at,
+                    last_error_message
+                 FROM app_relay_ingest_freshness
+                 WHERE scope_key = ?1 AND relay_url = ?2
+                 LIMIT 1",
+                params![scope_key, relay_url],
+                |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, Option<i64>>(1)?,
+                        row.get::<_, Option<i64>>(2)?,
+                        row.get::<_, Option<String>>(3)?,
+                        row.get::<_, Option<String>>(4)?,
+                        row.get::<_, Option<i64>>(5)?,
+                        row.get::<_, Option<String>>(6)?,
+                        row.get::<_, Option<String>>(7)?,
+                    ))
+                },
+            )
+            .optional()
+            .map_err(|source| AppSqliteError::Query {
+                operation: "load relay ingest freshness",
+                source,
+            })?;
+
+        row.map_or_else(
+            || {
+                Ok(AppRelayIngestRelayFreshness {
+                    relay_url: relay_url.to_owned(),
+                    state: AppRelayIngestFreshnessState::Stale,
+                    cursor_since_unix_seconds: None,
+                    last_event_created_at_unix_seconds: None,
+                    last_fetch_started_at: None,
+                    last_fetch_completed_at: None,
+                    last_success_at: None,
+                    last_error_message: None,
+                })
+            },
+            |(
+                state,
+                cursor_since_unix_seconds,
+                last_event_created_at_unix_seconds,
+                last_fetch_started_at,
+                last_fetch_completed_at,
+                last_fetch_completed_unix_seconds,
+                last_success_at,
+                last_error_message,
+            )| {
+                let mut state = parse_relay_ingest_freshness_state(state)?;
+                if state == AppRelayIngestFreshnessState::Fresh
+                    && relay_ingest_is_stale(
+                        last_fetch_completed_unix_seconds,
+                        now_unix_seconds,
+                        stale_after_seconds,
+                    )
+                {
+                    state = AppRelayIngestFreshnessState::Stale;
+                }
+                Ok(AppRelayIngestRelayFreshness {
+                    relay_url: relay_url.to_owned(),
+                    state,
+                    cursor_since_unix_seconds,
+                    last_event_created_at_unix_seconds,
+                    last_fetch_started_at,
+                    last_fetch_completed_at,
+                    last_success_at,
+                    last_error_message,
+                })
+            },
+        )
     }
 
     pub fn record_conflict(
@@ -682,13 +950,62 @@ fn sync_conflict_resolution_status_value(resolution: SyncConflictResolutionStatu
     }
 }
 
+fn parse_relay_ingest_freshness_state(
+    value: String,
+) -> Result<AppRelayIngestFreshnessState, AppSqliteError> {
+    match value.as_str() {
+        "fresh" => Ok(AppRelayIngestFreshnessState::Fresh),
+        "stale" => Ok(AppRelayIngestFreshnessState::Stale),
+        "failed" => Ok(AppRelayIngestFreshnessState::Failed),
+        _ => Err(AppSqliteError::DecodeEnum {
+            field: "app_relay_ingest_freshness.state",
+            value,
+        }),
+    }
+}
+
+fn relay_ingest_is_stale(
+    last_fetch_completed_unix_seconds: Option<i64>,
+    now_unix_seconds: i64,
+    stale_after_seconds: i64,
+) -> bool {
+    let Some(last_fetch_completed_unix_seconds) = last_fetch_completed_unix_seconds else {
+        return true;
+    };
+    now_unix_seconds.saturating_sub(last_fetch_completed_unix_seconds) > stale_after_seconds
+}
+
+fn relay_ingest_scope_status(relays: &[AppRelayIngestRelayFreshness]) -> AppRelayIngestScopeStatus {
+    if relays.is_empty() {
+        return AppRelayIngestScopeStatus::Stale;
+    }
+    let failed_count = relays
+        .iter()
+        .filter(|relay| relay.state == AppRelayIngestFreshnessState::Failed)
+        .count();
+    if failed_count == relays.len() {
+        return AppRelayIngestScopeStatus::Failed;
+    }
+    if failed_count > 0 {
+        return AppRelayIngestScopeStatus::Partial;
+    }
+    if relays
+        .iter()
+        .all(|relay| relay.state == AppRelayIngestFreshnessState::Fresh)
+    {
+        AppRelayIngestScopeStatus::Fresh
+    } else {
+        AppRelayIngestScopeStatus::Stale
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use radroots_studio_app_models::{FarmId, ProductId};
     use radroots_studio_app_sync::{
-        PendingSyncOperation, PendingSyncOperationState, SyncAggregateRef, SyncCheckpointStatus,
-        SyncConflict, SyncConflictKind, SyncConflictResolutionStatus, SyncConflictSeverity,
-        SyncOperationKind,
+        AppRelayIngestFreshnessState, AppRelayIngestScopeStatus, PendingSyncOperation,
+        PendingSyncOperationState, SyncAggregateRef, SyncCheckpointStatus, SyncConflict,
+        SyncConflictKind, SyncConflictResolutionStatus, SyncConflictSeverity, SyncOperationKind,
     };
 
     use crate::{AppSqliteStore, DatabaseTarget};
@@ -723,6 +1040,84 @@ mod tests {
                 .expect("other account checkpoint should load"),
             SyncCheckpointStatus::never_synced()
         );
+    }
+
+    #[test]
+    fn relay_ingest_freshness_tracks_cursors_and_scope_status() {
+        let store = AppSqliteStore::open(DatabaseTarget::InMemory).expect("store should open");
+        let repository = store.sync_repository();
+        let relay_urls = vec![
+            "wss://relay-a.example".to_owned(),
+            "wss://relay-b.example".to_owned(),
+        ];
+
+        let initial = repository
+            .load_relay_ingest_freshness("direct_relay_ingest", &relay_urls, 1_000, 60)
+            .expect("freshness should load");
+        assert_eq!(initial.status, AppRelayIngestScopeStatus::Stale);
+        assert_eq!(initial.relays.len(), 2);
+        assert!(
+            initial
+                .relays
+                .iter()
+                .all(|relay| relay.state == AppRelayIngestFreshnessState::Stale)
+        );
+
+        repository
+            .record_relay_ingest_success(
+                "direct_relay_ingest",
+                "wss://relay-a.example",
+                1_010,
+                Some(1_009),
+                "2026-05-25T20:00:00Z",
+                1_000,
+                "2026-05-25T20:00:02Z",
+                1_002,
+            )
+            .expect("success should record");
+        repository
+            .record_relay_ingest_failure(
+                "direct_relay_ingest",
+                "wss://relay-b.example",
+                "2026-05-25T20:00:00Z",
+                1_000,
+                "2026-05-25T20:00:02Z",
+                1_002,
+                "relay timeout",
+            )
+            .expect("failure should record");
+
+        let cursors = repository
+            .load_relay_ingest_cursors("direct_relay_ingest", &relay_urls)
+            .expect("cursors should load");
+        assert_eq!(cursors[0].cursor_since_unix_seconds, Some(1_010));
+        assert_eq!(cursors[1].cursor_since_unix_seconds, None);
+
+        let partial = repository
+            .load_relay_ingest_freshness("direct_relay_ingest", &relay_urls, 1_005, 60)
+            .expect("partial freshness should load");
+        assert_eq!(partial.status, AppRelayIngestScopeStatus::Partial);
+        assert_eq!(partial.relays[0].state, AppRelayIngestFreshnessState::Fresh);
+        assert_eq!(
+            partial.relays[1].state,
+            AppRelayIngestFreshnessState::Failed
+        );
+        assert_eq!(
+            partial.relays[1].last_error_message.as_deref(),
+            Some("relay timeout")
+        );
+
+        let stale = repository
+            .load_relay_ingest_freshness(
+                "direct_relay_ingest",
+                &["wss://relay-a.example".to_owned()],
+                1_100,
+                60,
+            )
+            .expect("stale freshness should load");
+        assert_eq!(stale.status, AppRelayIngestScopeStatus::Stale);
+        assert_eq!(stale.relays[0].state, AppRelayIngestFreshnessState::Stale);
+        assert_eq!(stale.relays[0].cursor_since_unix_seconds, Some(1_010));
     }
 
     #[test]

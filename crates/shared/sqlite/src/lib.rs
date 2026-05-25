@@ -29,7 +29,8 @@ use radroots_studio_app_models::{
     ReminderLogProjection, TodayAgendaProjection,
 };
 use radroots_studio_app_sync::{
-    PendingSyncOperation, SyncCheckpointStatus, SyncConflict, SyncConflictResolutionStatus,
+    AppRelayIngestScopeFreshness, PendingSyncOperation, SyncCheckpointStatus, SyncConflict,
+    SyncConflictResolutionStatus,
 };
 use rusqlite::Connection;
 
@@ -51,7 +52,9 @@ pub use migrations::latest_schema_version;
 pub use orders::AppOrdersRepository;
 pub use products::AppProductsRepository;
 pub use reminders::AppRemindersRepository;
-pub use sync::{AppSyncRepository, StoredPendingSyncOperation, StoredSyncConflict};
+pub use sync::{
+    AppSyncRepository, StoredPendingSyncOperation, StoredRelayIngestCursor, StoredSyncConflict,
+};
 pub use today::{
     AppTodayAgendaRepository, TODAY_AGENDA_LIST_LIMIT, TODAY_AGENDA_LOW_STOCK_THRESHOLD,
 };
@@ -595,6 +598,74 @@ impl AppSqliteStore {
             .save_checkpoint(account_id, checkpoint)
     }
 
+    pub fn load_relay_ingest_cursors(
+        &self,
+        scope_key: &str,
+        relay_urls: &[String],
+    ) -> Result<Vec<StoredRelayIngestCursor>, AppSqliteError> {
+        self.sync_repository()
+            .load_relay_ingest_cursors(scope_key, relay_urls)
+    }
+
+    pub fn load_relay_ingest_freshness(
+        &self,
+        scope_key: &str,
+        relay_urls: &[String],
+        now_unix_seconds: i64,
+        stale_after_seconds: i64,
+    ) -> Result<AppRelayIngestScopeFreshness, AppSqliteError> {
+        self.sync_repository().load_relay_ingest_freshness(
+            scope_key,
+            relay_urls,
+            now_unix_seconds,
+            stale_after_seconds,
+        )
+    }
+
+    pub fn record_relay_ingest_success(
+        &self,
+        scope_key: &str,
+        relay_url: &str,
+        cursor_since_unix_seconds: i64,
+        last_event_created_at_unix_seconds: Option<i64>,
+        started_at: &str,
+        started_unix_seconds: i64,
+        completed_at: &str,
+        completed_unix_seconds: i64,
+    ) -> Result<(), AppSqliteError> {
+        self.sync_repository().record_relay_ingest_success(
+            scope_key,
+            relay_url,
+            cursor_since_unix_seconds,
+            last_event_created_at_unix_seconds,
+            started_at,
+            started_unix_seconds,
+            completed_at,
+            completed_unix_seconds,
+        )
+    }
+
+    pub fn record_relay_ingest_failure(
+        &self,
+        scope_key: &str,
+        relay_url: &str,
+        started_at: &str,
+        started_unix_seconds: i64,
+        completed_at: &str,
+        completed_unix_seconds: i64,
+        error_message: &str,
+    ) -> Result<(), AppSqliteError> {
+        self.sync_repository().record_relay_ingest_failure(
+            scope_key,
+            relay_url,
+            started_at,
+            started_unix_seconds,
+            completed_at,
+            completed_unix_seconds,
+            error_message,
+        )
+    }
+
     pub fn record_sync_conflict(
         &self,
         account_id: &str,
@@ -757,6 +828,7 @@ mod tests {
         assert!(table_exists(connection, "local_outbox"));
         assert!(table_exists(connection, "local_conflicts"));
         assert!(table_exists(connection, "sync_checkpoints"));
+        assert!(table_exists(connection, "app_relay_ingest_freshness"));
         assert!(table_exists(connection, "activity_events"));
         assert!(table_exists(connection, "account_surface_activations"));
         assert!(table_exists(connection, "account_farm_setups"));
@@ -789,6 +861,21 @@ mod tests {
         ));
         assert!(column_exists(connection, "sync_checkpoints", "account_id"));
         assert!(column_exists(connection, "sync_checkpoints", "state"));
+        assert!(column_exists(
+            connection,
+            "app_relay_ingest_freshness",
+            "scope_key"
+        ));
+        assert!(column_exists(
+            connection,
+            "app_relay_ingest_freshness",
+            "relay_url"
+        ));
+        assert!(column_exists(
+            connection,
+            "app_relay_ingest_freshness",
+            "cursor_since_unix_seconds"
+        ));
         assert!(column_exists(
             connection,
             "fulfillment_windows",
@@ -968,6 +1055,7 @@ mod tests {
             "resolution_status"
         ));
         assert!(column_exists(connection, "sync_checkpoints", "state"));
+        assert!(table_exists(connection, "app_relay_ingest_freshness"));
         assert_eq!(row_count(connection, "sync_checkpoints"), 0);
 
         drop(store);

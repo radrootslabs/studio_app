@@ -356,6 +356,54 @@ impl Default for AppSyncProjection {
     }
 }
 
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AppRelayIngestFreshnessState {
+    Fresh,
+    #[default]
+    Stale,
+    Failed,
+}
+
+impl AppRelayIngestFreshnessState {
+    pub const fn storage_key(self) -> &'static str {
+        match self {
+            Self::Fresh => "fresh",
+            Self::Stale => "stale",
+            Self::Failed => "failed",
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AppRelayIngestScopeStatus {
+    Fresh,
+    #[default]
+    Stale,
+    Partial,
+    Failed,
+}
+
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+pub struct AppRelayIngestRelayFreshness {
+    pub relay_url: String,
+    pub state: AppRelayIngestFreshnessState,
+    pub cursor_since_unix_seconds: Option<i64>,
+    pub last_event_created_at_unix_seconds: Option<i64>,
+    pub last_fetch_started_at: Option<String>,
+    pub last_fetch_completed_at: Option<String>,
+    pub last_success_at: Option<String>,
+    pub last_error_message: Option<String>,
+}
+
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+pub struct AppRelayIngestScopeFreshness {
+    pub scope_key: String,
+    pub status: AppRelayIngestScopeStatus,
+    pub relays: Vec<AppRelayIngestRelayFreshness>,
+}
+
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct AppSyncRequest {
     pub trigger: SyncTrigger,
