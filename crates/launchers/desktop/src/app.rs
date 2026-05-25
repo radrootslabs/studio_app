@@ -10,10 +10,7 @@ use tracing::{error, info};
 
 use crate::menus::install_native_app_menu;
 use crate::runtime::{DesktopAppRuntime, DesktopAppRuntimeSummary};
-use crate::window::{
-    PrimaryWindowTarget, SettingsPanelViewKey, home_window_options, open_home_window,
-    open_settings_window, primary_window_target, settings_window_options,
-};
+use crate::window::{home_window_options, open_home_window};
 
 #[derive(Debug, Error)]
 pub enum AppLaunchError {
@@ -44,7 +41,6 @@ pub fn launch() -> Result<(), AppLaunchError> {
     }
     let runtime_summary = runtime.summary();
     emit_runtime_events(&snapshot, &runtime_summary);
-    let launch_target = primary_window_target(&runtime_summary);
 
     let app = Application::new().with_assets(gpui_component_assets::Assets);
 
@@ -63,32 +59,13 @@ pub fn launch() -> Result<(), AppLaunchError> {
 
         let snapshot = snapshot.clone();
         let runtime = runtime.clone();
-        let launch_target = launch_target;
-        let mut primary_window_options = match launch_target {
-            PrimaryWindowTarget::Home => home_window_options(cx),
-            PrimaryWindowTarget::SettingsAccount => settings_window_options(cx),
-        };
+        let mut primary_window_options = home_window_options(cx);
         primary_window_options.app_id = Some(snapshot.host.app_identifier.clone());
         cx.spawn(async move |cx| {
-            let open_result = match launch_target {
-                PrimaryWindowTarget::Home => {
-                    cx.open_window(primary_window_options, |window, cx| {
-                        window.activate_window();
-                        open_home_window(window, cx, runtime.clone())
-                    })
-                }
-                PrimaryWindowTarget::SettingsAccount => {
-                    cx.open_window(primary_window_options, |window, cx| {
-                        window.activate_window();
-                        open_settings_window(
-                            window,
-                            cx,
-                            runtime.clone(),
-                            SettingsPanelViewKey::Account,
-                        )
-                    })
-                }
-            };
+            let open_result = cx.open_window(primary_window_options, |window, cx| {
+                window.activate_window();
+                open_home_window(window, cx, runtime.clone())
+            });
 
             if let Err(error) = open_result {
                 error!(

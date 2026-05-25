@@ -107,10 +107,10 @@ pub fn settings_titlebar_options() -> gpui::TitlebarOptions {
     }
 }
 
+#[cfg(test)]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum PrimaryWindowTarget {
     Home,
-    SettingsAccount,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -120,6 +120,7 @@ pub enum HomeStage {
     FarmerWorkspace,
 }
 
+#[cfg(test)]
 pub fn primary_window_target(_: &DesktopAppRuntimeSummary) -> PrimaryWindowTarget {
     PrimaryWindowTarget::Home
 }
@@ -4977,12 +4978,6 @@ impl ProductEditorFormState {
         self.current_draft(cx)
             .map(|draft| draft != self.initial_draft)
             .unwrap_or(false)
-    }
-
-    fn publish_blockers(&self, cx: &App) -> Vec<ProductPublishBlocker> {
-        self.current_draft(cx)
-            .map(|draft| draft.publish_blockers())
-            .unwrap_or_default()
     }
 }
 

@@ -22,7 +22,6 @@ use thiserror::Error;
 
 pub struct DesktopAccountsBootstrap {
     pub accounts_manager: Option<RadrootsNostrAccountsManager>,
-    pub identity_projection: AppIdentityProjection,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -73,13 +72,9 @@ impl DesktopLocalIdentityImportRequest {
 
 pub fn bootstrap_desktop_accounts(
     paths: &AppSharedAccountsPaths,
-    sqlite_store: &AppSqliteStore,
+    _sqlite_store: &AppSqliteStore,
 ) -> Result<DesktopAccountsBootstrap, DesktopAccountsBootstrapError> {
-    bootstrap_desktop_accounts_with_availability(
-        paths,
-        sqlite_store,
-        secret_backend_availability()?,
-    )
+    bootstrap_desktop_accounts_with_availability(paths, secret_backend_availability()?)
 }
 
 pub fn generate_local_account(
@@ -173,7 +168,6 @@ pub fn reset_local_device_state(
 
 fn bootstrap_desktop_accounts_with_availability(
     paths: &AppSharedAccountsPaths,
-    sqlite_store: &AppSqliteStore,
     availability: RadrootsSecretBackendAvailability,
 ) -> Result<DesktopAccountsBootstrap, DesktopAccountsBootstrapError> {
     ensure_directory(paths.data_root.as_path())?;
@@ -187,11 +181,8 @@ fn bootstrap_desktop_accounts_with_availability(
         availability,
         "radroots_studio_app_encrypted_file",
     )?;
-    let identity_projection = identity_projection_from_manager(&accounts_manager, sqlite_store)?;
-
     Ok(DesktopAccountsBootstrap {
         accounts_manager: Some(accounts_manager),
-        identity_projection,
     })
 }
 
@@ -418,10 +409,8 @@ mod tests {
         let paths = temp_shared_accounts_paths("blocked");
         fs::create_dir_all(paths.data_root.as_path()).expect("data root should create");
         fs::create_dir_all(paths.secrets_root.as_path()).expect("secrets root should create");
-        let sqlite_store = AppSqliteStore::open(DatabaseTarget::InMemory).expect("sqlite store");
         match bootstrap_desktop_accounts_with_availability(
             &paths,
-            &sqlite_store,
             unavailable_secret_backend_availability(),
         ) {
             Err(super::DesktopAccountsBootstrapError::Accounts(_)) => {}

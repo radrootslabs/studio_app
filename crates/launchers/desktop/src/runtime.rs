@@ -1162,6 +1162,7 @@ impl DesktopAppRuntimeState {
         Ok(state)
     }
 
+    #[cfg(test)]
     fn degraded(error: DesktopAppRuntimeBootstrapError) -> Self {
         Self::degraded_with_snapshot(error, default_runtime_snapshot())
     }
@@ -5917,27 +5918,6 @@ fn sanitize_pack_day_query(
     Ok((default_query, default_projection))
 }
 
-fn load_selected_account_reminder_context(
-    sqlite_store: &AppSqliteStore,
-    account_id: &str,
-    farm_id: FarmId,
-    today_projection: &TodayAgendaProjection,
-    canonical_orders_list: &OrdersListProjection,
-    pack_day_projection: &PackDayProjection,
-    selected_order_detail: Option<&OrderDetailProjection>,
-) -> Result<DesktopSellerReminderContext, AppSqliteError> {
-    load_selected_account_reminder_context_with_options(
-        sqlite_store,
-        account_id,
-        farm_id,
-        today_projection,
-        canonical_orders_list,
-        pack_day_projection,
-        selected_order_detail,
-        true,
-    )
-}
-
 fn load_selected_account_reminder_context_with_options(
     sqlite_store: &AppSqliteStore,
     account_id: &str,
@@ -6831,17 +6811,7 @@ fn pending_sync_upsert(aggregate: SyncAggregateRef, payload_json: String) -> Pen
     )
 }
 
-fn pending_sync_delete(aggregate: SyncAggregateRef, payload_json: String) -> PendingSyncOperation {
-    let created_at = current_utc_timestamp();
-
-    PendingSyncOperation::new(
-        aggregate,
-        SyncOperationKind::Delete,
-        payload_json,
-        created_at,
-    )
-}
-
+#[cfg(test)]
 fn farm_sync_payload(
     farm_id: FarmId,
     display_name: &str,
@@ -6856,20 +6826,6 @@ fn farm_sync_payload(
             FarmReadiness::Incomplete => "incomplete",
             FarmReadiness::Ready => "ready",
         }),
-        "source": source,
-    })
-    .to_string()
-}
-
-fn fulfillment_window_sync_payload(
-    fulfillment_window_id: FulfillmentWindowId,
-    farm_id: FarmId,
-    source: &str,
-) -> String {
-    json!({
-        "aggregate_kind": "fulfillment_window",
-        "fulfillment_window_id": fulfillment_window_id.to_string(),
-        "farm_id": farm_id.to_string(),
         "source": source,
     })
     .to_string()
