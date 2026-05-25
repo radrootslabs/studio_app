@@ -427,7 +427,7 @@ impl<'a> AppLocalInteropRepository<'a> {
         self.upsert_farm_summary(&FarmSummary {
             farm_id,
             display_name,
-            readiness: FarmReadiness::Incomplete,
+            readiness: signed_farm_readiness(&content, tags).unwrap_or(FarmReadiness::Incomplete),
         })?;
         Ok(Some(ProjectionRecord {
             kind: "farm",
@@ -1255,6 +1255,40 @@ fn signed_listing_product_status(
         SignedListingLifecycle::Archived => Some(ProductStatus::Archived),
         SignedListingLifecycle::Sold => Some(ProductStatus::Paused),
     }
+}
+
+fn signed_farm_readiness(content: &Value, tags: Option<&Value>) -> Option<FarmReadiness> {
+    string_at(content, &["readiness"])
+        .or_else(|| {
+            content
+                .get("tags")?
+                .as_array()?
+                .iter()
+                .filter_map(Value::as_str)
+                .find_map(readiness_tag_value)
+        })
+        .or_else(|| {
+            tags?.as_array()?.iter().find_map(|tag| {
+                let values = tag.as_array()?;
+                (values.first()?.as_str()? == "t")
+                    .then(|| values.get(1).and_then(Value::as_str))
+                    .flatten()
+                    .and_then(readiness_tag_value)
+            })
+        })
+        .and_then(|value| match value.as_str() {
+            "ready" => Some(FarmReadiness::Ready),
+            "incomplete" => Some(FarmReadiness::Incomplete),
+            _ => None,
+        })
+}
+
+fn readiness_tag_value(value: &str) -> Option<String> {
+    value
+        .strip_prefix("radroots:readiness:")
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_owned)
 }
 
 fn signed_listing_fulfillment_method(

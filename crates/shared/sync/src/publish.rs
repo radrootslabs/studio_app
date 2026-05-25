@@ -89,6 +89,8 @@ pub struct AppListingPublishPayload {
     pub price_currency: String,
     pub stock_quantity: Option<u32>,
     pub availability_window_id: Option<FulfillmentWindowId>,
+    pub availability_starts_at: Option<String>,
+    pub availability_ends_at: Option<String>,
     pub fulfillment_method: Option<String>,
     pub fulfillment_location: Option<String>,
     pub status: ProductStatus,
@@ -192,7 +194,16 @@ impl AppPublishPayload {
                 if payload.price_currency.trim().is_empty() {
                     failures.push(AppPublishValidationFailure::MissingListingCurrency);
                 }
-                if payload.availability_window_id.is_none() {
+                if payload.availability_window_id.is_none()
+                    || payload
+                        .availability_starts_at
+                        .as_deref()
+                        .is_none_or(|value| value.trim().is_empty())
+                    || payload
+                        .availability_ends_at
+                        .as_deref()
+                        .is_none_or(|value| value.trim().is_empty())
+                {
                     failures.push(AppPublishValidationFailure::MissingListingAvailability);
                 }
                 if payload.stock_quantity.is_none() {
@@ -457,6 +468,8 @@ mod tests {
             price_currency: String::new(),
             stock_quantity: Some(4),
             availability_window_id: None,
+            availability_starts_at: None,
+            availability_ends_at: None,
             fulfillment_method: None,
             fulfillment_location: None,
             status: ProductStatus::Published,
