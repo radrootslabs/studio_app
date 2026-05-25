@@ -256,6 +256,7 @@ mod tests {
             home_route,
             personal_projection: Default::default(),
             farm_setup_projection: Default::default(),
+            farm_rules_projection: Default::default(),
             farm_readiness_projection: FarmWorkspaceReadinessProjection::default(),
             today_projection: TodayAgendaProjection::default(),
             products_projection: Default::default(),

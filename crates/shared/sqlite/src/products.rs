@@ -168,8 +168,8 @@ impl<'a> AppProductsRepository<'a> {
         &self,
         product_id: ProductId,
     ) -> Result<Option<Vec<ProductPublishBlocker>>, AppSqliteError> {
-        self.load_product_editor_draft(product_id)?
-            .map(|draft| Ok(draft.publish_blockers()))
+        self.load_product_record_by_id(product_id)?
+            .map(|record| Ok(record.editor_draft_publish_blockers()))
             .transpose()
     }
 
@@ -479,7 +479,7 @@ impl ProductRecord {
 
     fn attention_state(
         &self,
-        now_utc: &str,
+        _now_utc: &str,
         availability: &ProductAvailabilitySummary,
     ) -> ProductAttentionState {
         if matches!(self.status, ProductStatus::Paused | ProductStatus::Archived) {
@@ -508,7 +508,7 @@ impl ProductRecord {
         }
 
         if self
-            .editor_draft_publish_blockers(now_utc)
+            .editor_draft_publish_blockers()
             .into_iter()
             .any(|blocker| blocker != ProductPublishBlocker::AttachAvailability)
         {
@@ -548,8 +548,15 @@ impl ProductRecord {
             )
     }
 
-    fn editor_draft_publish_blockers(&self, _now_utc: &str) -> Vec<ProductPublishBlocker> {
-        self.clone().into_editor_draft().publish_blockers()
+    fn editor_draft_publish_blockers(&self) -> Vec<ProductPublishBlocker> {
+        let mut blockers = self.clone().into_editor_draft().publish_blockers();
+        if self.availability_window_id.is_some()
+            && (self.availability_starts_at.is_none() || self.availability_ends_at.is_none())
+            && !blockers.contains(&ProductPublishBlocker::AttachAvailability)
+        {
+            blockers.push(ProductPublishBlocker::AttachAvailability);
+        }
+        blockers
     }
 }
 
@@ -977,6 +984,37 @@ mod tests {
                 .expect("ready blockers should load"),
             Some(Vec::new())
         );
+        let stale_window_id = FulfillmentWindowId::new();
+        connection
+            .execute_batch("PRAGMA foreign_keys = OFF;")
+            .expect("foreign keys should disable for stale fixture");
+        connection
+            .execute(
+                "update products set availability_window_id = ?2 where id = ?1",
+                params![product_id.to_string(), stale_window_id.to_string()],
+            )
+            .expect("stale availability id should write");
+        connection
+            .execute_batch("PRAGMA foreign_keys = ON;")
+            .expect("foreign keys should restore");
+        assert_eq!(
+            repository
+                .evaluate_product_publish_blockers(product_id)
+                .expect("stale blockers should load"),
+            Some(vec![ProductPublishBlocker::AttachAvailability])
+        );
+        connection
+            .execute_batch("PRAGMA foreign_keys = OFF;")
+            .expect("foreign keys should disable for fixture restore");
+        connection
+            .execute(
+                "update products set availability_window_id = ?2 where id = ?1",
+                params![product_id.to_string(), window_id.to_string()],
+            )
+            .expect("ready availability id should restore");
+        connection
+            .execute_batch("PRAGMA foreign_keys = ON;")
+            .expect("foreign keys should restore");
 
         assert!(
             repository

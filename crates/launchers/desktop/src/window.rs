@@ -11787,7 +11787,13 @@ fn products_editor_publish_readiness_section(
 ) -> impl IntoElement {
     let blockers = form
         .current_draft(cx)
-        .map(|draft| derive_product_publish_blockers(&draft, &runtime.farm_readiness_projection))
+        .map(|draft| {
+            derive_product_publish_blockers(
+                &draft,
+                &runtime.farm_readiness_projection,
+                &runtime.farm_rules_projection,
+            )
+        })
         .unwrap_or_default();
 
     div()
@@ -15099,6 +15105,7 @@ mod tests {
             logged_out_startup: LoggedOutStartupProjection::default(),
             home_route,
             personal_projection: Default::default(),
+            farm_rules_projection: Default::default(),
             farm_readiness_projection,
             farm_setup_projection,
             today_projection,

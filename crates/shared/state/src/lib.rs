@@ -195,24 +195,34 @@ pub struct ProductEditorSession {
 }
 
 impl ProductEditorSession {
-    fn new_draft(farm_readiness: &FarmWorkspaceReadinessProjection) -> Self {
-        Self::from_selection(None, ProductEditorDraft::default(), farm_readiness)
+    fn new_draft(
+        farm_readiness: &FarmWorkspaceReadinessProjection,
+        farm_rules: &FarmRulesProjection,
+    ) -> Self {
+        Self::from_selection(
+            None,
+            ProductEditorDraft::default(),
+            farm_readiness,
+            farm_rules,
+        )
     }
 
     fn existing(
         product_id: ProductId,
         draft: ProductEditorDraft,
         farm_readiness: &FarmWorkspaceReadinessProjection,
+        farm_rules: &FarmRulesProjection,
     ) -> Self {
-        Self::from_selection(Some(product_id), draft, farm_readiness)
+        Self::from_selection(Some(product_id), draft, farm_readiness, farm_rules)
     }
 
     fn from_selection(
         selected_product_id: Option<ProductId>,
         draft: ProductEditorDraft,
         farm_readiness: &FarmWorkspaceReadinessProjection,
+        farm_rules: &FarmRulesProjection,
     ) -> Self {
-        let publish_blockers = derive_product_publish_blockers(&draft, farm_readiness);
+        let publish_blockers = derive_product_publish_blockers(&draft, farm_readiness, farm_rules);
 
         Self {
             selected_product_id,
@@ -225,8 +235,9 @@ impl ProductEditorSession {
         &mut self,
         draft: ProductEditorDraft,
         farm_readiness: &FarmWorkspaceReadinessProjection,
+        farm_rules: &FarmRulesProjection,
     ) {
-        self.publish_blockers = derive_product_publish_blockers(&draft, farm_readiness);
+        self.publish_blockers = derive_product_publish_blockers(&draft, farm_readiness, farm_rules);
         self.draft = draft;
     }
 }
@@ -244,8 +255,12 @@ impl Default for ProductEditorState {
 }
 
 impl ProductEditorState {
-    fn open_new_draft(&mut self, farm_readiness: &FarmWorkspaceReadinessProjection) {
-        *self = Self::Open(ProductEditorSession::new_draft(farm_readiness));
+    fn open_new_draft(
+        &mut self,
+        farm_readiness: &FarmWorkspaceReadinessProjection,
+        farm_rules: &FarmRulesProjection,
+    ) {
+        *self = Self::Open(ProductEditorSession::new_draft(farm_readiness, farm_rules));
     }
 
     fn open_existing(
@@ -253,11 +268,13 @@ impl ProductEditorState {
         product_id: ProductId,
         draft: ProductEditorDraft,
         farm_readiness: &FarmWorkspaceReadinessProjection,
+        farm_rules: &FarmRulesProjection,
     ) {
         *self = Self::Open(ProductEditorSession::existing(
             product_id,
             draft,
             farm_readiness,
+            farm_rules,
         ));
     }
 
@@ -265,9 +282,10 @@ impl ProductEditorState {
         &mut self,
         draft: ProductEditorDraft,
         farm_readiness: &FarmWorkspaceReadinessProjection,
+        farm_rules: &FarmRulesProjection,
     ) {
         if let Self::Open(session) = self {
-            session.replace_draft(draft, farm_readiness);
+            session.replace_draft(draft, farm_readiness, farm_rules);
         }
     }
 
@@ -976,6 +994,7 @@ impl PersistedAppState {
         sync_product_editor_publish_blockers(
             &mut projection.products.editor,
             &projection.farm_readiness,
+            &projection.farm_rules,
         );
         projection.startup_gate = projection.identity.startup_gate();
         projection.personal.entry = projection.identity.personal_entry();
@@ -1871,19 +1890,22 @@ fn apply_command(projection: &mut AppProjection, command: AppStateCommand) -> Ap
             projection
                 .products
                 .editor
-                .open_new_draft(&projection.farm_readiness);
+                .open_new_draft(&projection.farm_readiness, &projection.farm_rules);
         }
         AppStateCommand::OpenExistingProductEditor { product_id, draft } => {
-            projection
-                .products
-                .editor
-                .open_existing(product_id, draft, &projection.farm_readiness);
+            projection.products.editor.open_existing(
+                product_id,
+                draft,
+                &projection.farm_readiness,
+                &projection.farm_rules,
+            );
         }
         AppStateCommand::ReplaceProductEditorDraft(draft) => {
-            projection
-                .products
-                .editor
-                .replace_draft(draft, &projection.farm_readiness);
+            projection.products.editor.replace_draft(
+                draft,
+                &projection.farm_readiness,
+                &projection.farm_rules,
+            );
         }
         AppStateCommand::CloseProductEditor => {
             projection.products.editor.close();
@@ -1936,6 +1958,7 @@ fn sync_projection(projection: &mut AppProjection) {
     sync_product_editor_publish_blockers(
         &mut projection.products.editor,
         &projection.farm_readiness,
+        &projection.farm_rules,
     );
     projection.startup_gate = projection.identity.startup_gate();
     projection.personal.entry = projection.identity.personal_entry();
@@ -2076,8 +2099,15 @@ pub fn derive_today_setup_checklist(
 pub fn derive_product_publish_blockers(
     draft: &ProductEditorDraft,
     farm_readiness: &FarmWorkspaceReadinessProjection,
+    farm_rules: &FarmRulesProjection,
 ) -> Vec<ProductPublishBlocker> {
     let mut blockers = draft.publish_blockers();
+
+    if draft.availability_window_id.is_some()
+        && !product_availability_window_exists(draft, farm_rules)
+    {
+        push_unique_product_blocker(&mut blockers, ProductPublishBlocker::AttachAvailability);
+    }
 
     if farm_readiness.has_saved_farm {
         replace_availability_blocker(&mut blockers, farm_readiness);
@@ -2109,6 +2139,18 @@ pub fn derive_product_publish_blockers(
     blockers
 }
 
+fn product_availability_window_exists(
+    draft: &ProductEditorDraft,
+    farm_rules: &FarmRulesProjection,
+) -> bool {
+    draft.availability_window_id.is_some_and(|window_id| {
+        farm_rules
+            .fulfillment_windows
+            .iter()
+            .any(|window| window.fulfillment_window_id == window_id)
+    })
+}
+
 fn sync_coarse_farm_readiness(
     farm_setup: &mut FarmSetupProjection,
     today: &mut TodayAgendaProjection,
@@ -2130,9 +2172,11 @@ fn sync_coarse_farm_readiness(
 fn sync_product_editor_publish_blockers(
     editor: &mut ProductEditorState,
     farm_readiness: &FarmWorkspaceReadinessProjection,
+    farm_rules: &FarmRulesProjection,
 ) {
     if let ProductEditorState::Open(session) = editor {
-        session.publish_blockers = derive_product_publish_blockers(&session.draft, farm_readiness);
+        session.publish_blockers =
+            derive_product_publish_blockers(&session.draft, farm_readiness, farm_rules);
     }
 }
 
@@ -2208,21 +2252,23 @@ mod tests {
     };
     use radroots_studio_app_models::{
         AccountCustody, AccountSummary, ActiveSurface, AppIdentityProjection, AppStartupGate,
-        FarmId, FarmOrderMethod, FarmReadiness, FarmSetupDraft, FarmSetupProjection,
-        FarmerActivationProjection, FarmerSection, FulfillmentWindowId, LoggedOutStartupPhase,
-        LoggedOutStartupProjection, OrderDetailItemRow, OrderDetailProjection, OrderId,
-        OrderPrimaryAction, OrderStatus, OrdersFilter, OrdersListProjection, OrdersListRow,
-        OrdersListSummary, OrdersScreenQueryState, PackDayBatchPrintArtifact,
-        PackDayBatchPrintFailureKind, PackDayBatchPrintStatus, PackDayExportArtifact,
-        PackDayExportArtifactKind, PackDayExportBundle, PackDayExportInstanceId,
-        PackDayExportStatus, PackDayHostHandoffKind, PackDayHostHandoffStatus, PackDayPackListRow,
-        PackDayPrintFailureKind, PackDayPrintKind, PackDayPrintLabelStock, PackDayPrintStatus,
-        PackDayProductTotalRow, PackDayProjection, PackDayRosterRow, PackDayScreenQueryState,
-        PersonalEntryState, PersonalSection, ProductEditorDraft, ProductId, ProductPublishBlocker,
-        ProductsFilter, ProductsListProjection, ProductsSort, ReminderDeliveryState,
-        ReminderFeedProjection, ReminderKind, ReminderLogEntryProjection, ReminderLogProjection,
-        SelectedAccountProjection, SelectedSurfaceProjection, SettingsSection, ShellSection,
-        TodayAgendaProjection, TodaySetupTask, TodaySetupTaskKind,
+        FarmId, FarmOperatingRulesRecord, FarmOrderMethod, FarmProfileRecord, FarmReadiness,
+        FarmRulesProjection, FarmRulesReadiness, FarmSetupDraft, FarmSetupProjection, FarmSummary,
+        FarmerActivationProjection, FarmerSection, FulfillmentWindowId, FulfillmentWindowRecord,
+        LoggedOutStartupPhase, LoggedOutStartupProjection, OrderDetailItemRow,
+        OrderDetailProjection, OrderId, OrderPrimaryAction, OrderStatus, OrdersFilter,
+        OrdersListProjection, OrdersListRow, OrdersListSummary, OrdersScreenQueryState,
+        PackDayBatchPrintArtifact, PackDayBatchPrintFailureKind, PackDayBatchPrintStatus,
+        PackDayExportArtifact, PackDayExportArtifactKind, PackDayExportBundle,
+        PackDayExportInstanceId, PackDayExportStatus, PackDayHostHandoffKind,
+        PackDayHostHandoffStatus, PackDayPackListRow, PackDayPrintFailureKind, PackDayPrintKind,
+        PackDayPrintLabelStock, PackDayPrintStatus, PackDayProductTotalRow, PackDayProjection,
+        PackDayRosterRow, PackDayScreenQueryState, PersonalEntryState, PersonalSection,
+        PickupLocationId, PickupLocationRecord, ProductEditorDraft, ProductId,
+        ProductPublishBlocker, ProductsFilter, ProductsListProjection, ProductsSort,
+        ReminderDeliveryState, ReminderFeedProjection, ReminderKind, ReminderLogEntryProjection,
+        ReminderLogProjection, SelectedAccountProjection, SelectedSurfaceProjection,
+        SettingsSection, ShellSection, TodayAgendaProjection, TodaySetupTask, TodaySetupTaskKind,
     };
     use radroots_studio_app_sync::{
         AppSyncProjection, AppSyncRunStatus, SyncCheckpointState, SyncCheckpointStatus,
@@ -3477,7 +3523,7 @@ mod tests {
             ProductEditorState::Open(super::ProductEditorSession {
                 selected_product_id: None,
                 draft: ready_draft.clone(),
-                publish_blockers: Vec::new(),
+                publish_blockers: vec![ProductPublishBlocker::AttachAvailability],
             })
         );
 
@@ -3493,7 +3539,7 @@ mod tests {
             ProductEditorState::Open(super::ProductEditorSession {
                 selected_product_id: Some(product_id),
                 draft: ready_draft,
-                publish_blockers: Vec::new(),
+                publish_blockers: vec![ProductPublishBlocker::AttachAvailability],
             })
         );
 
@@ -3510,6 +3556,122 @@ mod tests {
                 ProductEditorDraft::default(),
             )),
             Ok(false)
+        );
+    }
+
+    #[test]
+    fn product_editor_publish_blockers_require_current_fulfillment_window() {
+        let mut store = AppStateStore::load(InMemoryAppStateRepository::default())
+            .expect("in-memory repository should load");
+        let farm_id = FarmId::new();
+        let pickup_location_id = PickupLocationId::new();
+        let active_window_id = FulfillmentWindowId::new();
+        let stale_window_id = FulfillmentWindowId::new();
+        let product_id = ProductId::new();
+        let publishable_draft = ProductEditorDraft {
+            title: "Salad mix".to_owned(),
+            subtitle: "Spring blend".to_owned(),
+            category: "greens".to_owned(),
+            unit_label: "bag".to_owned(),
+            price_minor_units: Some(900),
+            price_currency: "USD".to_owned(),
+            stock_quantity: Some(12),
+            availability_window_id: Some(active_window_id),
+            status: radroots_studio_app_models::ProductStatus::Published,
+        };
+        let stale_draft = ProductEditorDraft {
+            availability_window_id: Some(stale_window_id),
+            ..publishable_draft.clone()
+        };
+
+        assert_eq!(
+            store.apply(AppStateCommand::replace_farm_setup_projection(
+                FarmSetupProjection::from_saved_farm(FarmSummary {
+                    farm_id,
+                    display_name: "North field farm".to_owned(),
+                    readiness: FarmReadiness::Ready,
+                }),
+            )),
+            Ok(true)
+        );
+        assert_eq!(
+            store.apply(AppStateCommand::replace_farm_rules_projection(
+                FarmRulesProjection {
+                    farm_profile: Some(FarmProfileRecord {
+                        farm_id,
+                        display_name: "North field farm".to_owned(),
+                        timezone: "UTC".to_owned(),
+                        currency_code: "USD".to_owned(),
+                    }),
+                    pickup_locations: vec![PickupLocationRecord {
+                        pickup_location_id,
+                        farm_id,
+                        label: "Barn pickup".to_owned(),
+                        address_line: "14 Orchard Lane".to_owned(),
+                        directions: None,
+                        is_default: true,
+                    }],
+                    operating_rules: Some(FarmOperatingRulesRecord {
+                        farm_id,
+                        promise_lead_hours: 24,
+                        substitution_policy: "ask_customer".to_owned(),
+                        missed_pickup_policy: "hold_next_window".to_owned(),
+                    }),
+                    fulfillment_windows: vec![FulfillmentWindowRecord {
+                        fulfillment_window_id: active_window_id,
+                        farm_id,
+                        pickup_location_id,
+                        label: "Friday pickup".to_owned(),
+                        starts_at: "2099-04-25T14:00:00Z".to_owned(),
+                        ends_at: "2099-04-25T18:00:00Z".to_owned(),
+                        order_cutoff_at: "2099-04-24T18:00:00Z".to_owned(),
+                    }],
+                    blackout_periods: Vec::new(),
+                    readiness: FarmRulesReadiness::ready(),
+                },
+            )),
+            Ok(true)
+        );
+
+        assert_eq!(
+            store.apply(AppStateCommand::open_existing_product_editor(
+                product_id,
+                publishable_draft,
+            )),
+            Ok(true)
+        );
+        assert_eq!(
+            store.projection().products.editor,
+            ProductEditorState::Open(super::ProductEditorSession {
+                selected_product_id: Some(product_id),
+                draft: ProductEditorDraft {
+                    title: "Salad mix".to_owned(),
+                    subtitle: "Spring blend".to_owned(),
+                    category: "greens".to_owned(),
+                    unit_label: "bag".to_owned(),
+                    price_minor_units: Some(900),
+                    price_currency: "USD".to_owned(),
+                    stock_quantity: Some(12),
+                    availability_window_id: Some(active_window_id),
+                    status: radroots_studio_app_models::ProductStatus::Published,
+                },
+                publish_blockers: Vec::new(),
+            })
+        );
+
+        assert_eq!(
+            store.apply(AppStateCommand::replace_product_editor_draft(
+                stale_draft.clone(),
+            )),
+            Ok(true)
+        );
+        assert_eq!(
+            store.projection().products.editor,
+            ProductEditorState::Open(super::ProductEditorSession {
+                selected_product_id: Some(product_id),
+                draft: stale_draft,
+                publish_blockers: vec![ProductPublishBlocker::AttachAvailability],
+            })
         );
     }
 

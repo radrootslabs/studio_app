@@ -361,6 +361,7 @@ impl DesktopAppRuntime {
             home_route: state.state_store.home_route(),
             personal_projection: state.state_store.personal_projection().clone(),
             farm_setup_projection: state.state_store.farm_setup_projection().clone(),
+            farm_rules_projection: state.state_store.farm_rules_projection().clone(),
             farm_readiness_projection: state.state_store.farm_readiness_projection().clone(),
             today_projection: state.state_store.today_projection().clone(),
             products_projection: state.state_store.products_projection().clone(),
@@ -1012,6 +1013,7 @@ pub struct DesktopAppRuntimeSummary {
     pub home_route: HomeRoute,
     pub personal_projection: PersonalWorkspaceProjection,
     pub farm_setup_projection: FarmSetupProjection,
+    pub farm_rules_projection: FarmRulesProjection,
     pub farm_readiness_projection: FarmWorkspaceReadinessProjection,
     pub today_projection: TodayAgendaProjection,
     pub products_projection: ProductsScreenProjection,
@@ -3631,8 +3633,13 @@ impl DesktopAppRuntimeState {
         if !product_status_needs_relay_publish(draft.status) {
             return Ok(None);
         }
-        if !derive_product_publish_blockers(&draft, self.state_store.farm_readiness_projection())
-            .is_empty()
+        let farm_rules = self.state_store.farm_rules_projection();
+        if !derive_product_publish_blockers(
+            &draft,
+            self.state_store.farm_readiness_projection(),
+            farm_rules,
+        )
+        .is_empty()
         {
             return Ok(None);
         }
@@ -3643,7 +3650,6 @@ impl DesktopAppRuntimeState {
             return Ok(None);
         };
         let farm_setup = self.state_store.farm_setup_projection();
-        let farm_rules = self.state_store.farm_rules_projection();
         let (availability_starts_at, availability_ends_at) =
             listing_availability_window_times(&draft, farm_rules);
         let listing_d_tag = d_tag_from_uuid(product_id.as_uuid());
@@ -4144,11 +4150,14 @@ impl DesktopAppRuntimeState {
         let unit_label = non_empty_string(draft.unit_label.as_str());
         let price_amount = draft.price_minor_units.map(decimal_from_minor_units);
         let available = draft.stock_quantity.map(|value| value.to_string());
-        let publish_blockers =
-            derive_product_publish_blockers(draft, self.state_store.farm_readiness_projection())
-                .into_iter()
-                .map(|blocker| blocker.storage_key())
-                .collect::<Vec<_>>();
+        let publish_blockers = derive_product_publish_blockers(
+            draft,
+            self.state_store.farm_readiness_projection(),
+            farm_rules,
+        )
+        .into_iter()
+        .map(|blocker| blocker.storage_key())
+        .collect::<Vec<_>>();
         let payload = json!({
             "record_kind": "listing_draft_v1",
             "exportability": exportability,
@@ -7028,10 +7037,10 @@ mod tests {
         PackDayHostHandoffStatus, PackDayPackListRow, PackDayPrintFailureKind, PackDayPrintKind,
         PackDayPrintStatus, PackDayProductTotalRow, PackDayProjection, PackDayRosterRow,
         PersonalSection, PickupLocationId, PickupLocationRecord, ProductEditorDraft, ProductId,
-        ProductStatus, ProductsFilter, ProductsSort, RecoveryKind, RecoveryRecordId,
-        ReminderDeliveryState, ReminderFeedProjection, ReminderKind, SelectedAccountProjection,
-        SelectedSurfaceProjection, SettingsPreference, SettingsSection, ShellSection,
-        TodayAgendaProjection, TodaySetupTask, TodaySetupTaskKind, TodaySummary,
+        ProductPublishBlocker, ProductStatus, ProductsFilter, ProductsSort, RecoveryKind,
+        RecoveryRecordId, ReminderDeliveryState, ReminderFeedProjection, ReminderKind,
+        SelectedAccountProjection, SelectedSurfaceProjection, SettingsPreference, SettingsSection,
+        ShellSection, TodayAgendaProjection, TodaySetupTask, TodaySetupTaskKind, TodaySummary,
     };
     use radroots_studio_app_remote_signer::{
         RadrootsAppRemoteSignerPendingSession, RadrootsAppRemoteSignerSessionRecord,
@@ -7969,6 +7978,143 @@ mod tests {
         assert_eq!(
             listing_payload["document"]["location"]["primary"],
             "14 Orchard Lane"
+        );
+
+        cleanup_bootstrapped_runtime_paths(&paths);
+    }
+
+    #[test]
+    fn runtime_product_stale_availability_save_records_blocker_without_publish_work() {
+        let (runtime, paths) = bootstrapped_runtime("stale_product_listing_work");
+        let (account_id, farm_id) = provision_ready_farmer_account(&runtime);
+        let pickup_location_id = PickupLocationId::new();
+        let active_window_id = FulfillmentWindowId::new();
+        let stale_window_id = FulfillmentWindowId::new();
+
+        runtime
+            .save_farm_rules_projection(FarmRulesProjection {
+                farm_profile: Some(FarmProfileRecord {
+                    farm_id,
+                    display_name: "North field farm".to_owned(),
+                    timezone: "UTC".to_owned(),
+                    currency_code: "USD".to_owned(),
+                }),
+                pickup_locations: vec![PickupLocationRecord {
+                    pickup_location_id,
+                    farm_id,
+                    label: "Barn pickup".to_owned(),
+                    address_line: "14 Orchard Lane".to_owned(),
+                    directions: None,
+                    is_default: true,
+                }],
+                operating_rules: Some(FarmOperatingRulesRecord {
+                    farm_id,
+                    promise_lead_hours: 24,
+                    substitution_policy: "ask_customer".to_owned(),
+                    missed_pickup_policy: "hold_next_window".to_owned(),
+                }),
+                fulfillment_windows: vec![FulfillmentWindowRecord {
+                    fulfillment_window_id: active_window_id,
+                    farm_id,
+                    pickup_location_id,
+                    label: "Friday pickup".to_owned(),
+                    starts_at: "2099-04-25T14:00:00Z".to_owned(),
+                    ends_at: "2099-04-25T18:00:00Z".to_owned(),
+                    order_cutoff_at: "2099-04-24T18:00:00Z".to_owned(),
+                }],
+                blackout_periods: Vec::new(),
+                ..runtime
+                    .load_farm_rules_projection()
+                    .expect("farm rules projection should load")
+            })
+            .expect("farm rules should save");
+
+        assert!(
+            runtime
+                .open_new_product_editor()
+                .expect("new product editor should open")
+        );
+        let product_id = match runtime.summary().products_projection.editor {
+            radroots_studio_app_state::ProductEditorState::Open(session) => session
+                .selected_product_id
+                .expect("open product editor should select a product"),
+            radroots_studio_app_state::ProductEditorState::Closed => {
+                panic!("product editor should be open")
+            }
+        };
+
+        runtime
+            .lock_state()
+            .sqlite_store
+            .as_ref()
+            .expect("sqlite store")
+            .connection()
+            .execute_batch("PRAGMA foreign_keys = OFF;")
+            .expect("foreign keys should disable for stale fixture");
+        let save_result = runtime.save_product_editor_draft(ProductEditorDraft {
+            title: "Salad mix".to_owned(),
+            subtitle: "Cut this morning".to_owned(),
+            category: "greens".to_owned(),
+            unit_label: "bag".to_owned(),
+            price_minor_units: Some(900),
+            price_currency: "usd".to_owned(),
+            stock_quantity: Some(11),
+            availability_window_id: Some(stale_window_id),
+            status: ProductStatus::Published,
+        });
+        runtime
+            .lock_state()
+            .sqlite_store
+            .as_ref()
+            .expect("sqlite store")
+            .connection()
+            .execute_batch("PRAGMA foreign_keys = ON;")
+            .expect("foreign keys should restore");
+        assert!(save_result.expect("stale product editor save should succeed"));
+
+        let summary = runtime.summary();
+        let radroots_studio_app_state::ProductEditorState::Open(session) =
+            summary.products_projection.editor
+        else {
+            panic!("product editor should stay open")
+        };
+        assert_eq!(
+            session.publish_blockers,
+            vec![ProductPublishBlocker::AttachAvailability]
+        );
+
+        let pending_operations = runtime
+            .lock_state()
+            .sqlite_store
+            .as_ref()
+            .expect("sqlite store")
+            .load_pending_sync_operations(account_id.as_str())
+            .expect("pending sync operations should load");
+        let product_pending_operations = pending_operations
+            .iter()
+            .filter(|pending| pending.operation.aggregate == SyncAggregateRef::Product(product_id))
+            .collect::<Vec<_>>();
+        assert!(product_pending_operations.is_empty());
+
+        let records = shared_local_event_records(&paths);
+        let listing_record = records
+            .iter()
+            .find(|record| {
+                record
+                    .local_work_json
+                    .as_ref()
+                    .and_then(|payload| payload["record_kind"].as_str())
+                    == Some("listing_draft_v1")
+            })
+            .expect("listing local work record");
+        let listing_payload = listing_record
+            .local_work_json
+            .as_ref()
+            .expect("listing local work payload");
+        assert_eq!(listing_payload["publishability"]["state"], "blocked");
+        assert_eq!(
+            listing_payload["publishability"]["blockers"],
+            json!(["attach_availability"])
         );
 
         cleanup_bootstrapped_runtime_paths(&paths);
