@@ -134,6 +134,10 @@ impl AppSyncTransport for UnavailableAppSyncTransport {
             SYNC_TRANSPORT_UNAVAILABLE_MESSAGE,
         ))
     }
+
+    fn supports_empty_sync_request(&self) -> bool {
+        false
+    }
 }
 
 fn default_sync_transport() -> Box<dyn AppSyncTransport + Send> {
@@ -3345,7 +3349,10 @@ impl DesktopAppRuntimeState {
         request: AppSyncRequest,
         started_at: &str,
     ) -> Result<AppSyncResult, AppSyncTransportError> {
-        if request.pending_operations.is_empty() && self.has_configured_relay_ingest() {
+        if request.pending_operations.is_empty()
+            && self.has_configured_relay_ingest()
+            && !self.sync_transport.supports_empty_sync_request()
+        {
             return Ok(AppSyncResult {
                 run_status: AppSyncRunStatus::Succeeded,
                 checkpoint: SyncCheckpointStatus::current(

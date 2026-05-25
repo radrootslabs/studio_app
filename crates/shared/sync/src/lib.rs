@@ -480,6 +480,10 @@ impl AppSyncTransportError {
 
 pub trait AppSyncTransport {
     fn sync(&mut self, request: AppSyncRequest) -> Result<AppSyncResult, AppSyncTransportError>;
+
+    fn supports_empty_sync_request(&self) -> bool {
+        true
+    }
 }
 
 #[derive(Clone, Debug)]
