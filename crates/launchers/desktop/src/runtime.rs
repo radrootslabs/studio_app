@@ -5690,10 +5690,7 @@ fn order_request_listing_event_ptr(
         })?
         .trim()
         .to_owned();
-    let listing_relay = selected_listing_relay(&payload.listing_relays, configured_relay_urls)
-        .ok_or_else(|| {
-            AppSyncTransportError::failed("order request publish requires listing relay")
-        })?;
+    let listing_relay = selected_listing_relay(&payload.listing_relays, configured_relay_urls)?;
 
     Ok(RadrootsNostrEventPtr {
         id: listing_event_id,
@@ -5704,7 +5701,7 @@ fn order_request_listing_event_ptr(
 fn selected_listing_relay(
     listing_relays: &[String],
     configured_relay_urls: &[String],
-) -> Option<String> {
+) -> Result<String, AppSyncTransportError> {
     let mut seen = BTreeSet::new();
     let mut known_relays = Vec::new();
     for relay in listing_relays {
@@ -5713,15 +5710,30 @@ fn selected_listing_relay(
             known_relays.push(relay.to_owned());
         }
     }
+    if known_relays.is_empty() {
+        return Err(AppSyncTransportError::failed(
+            "order request publish requires listing relay",
+        ));
+    }
     for configured_relay in configured_relay_urls {
         let configured_relay = configured_relay.trim();
         if !configured_relay.is_empty()
             && known_relays.iter().any(|relay| relay == configured_relay)
         {
-            return Some(configured_relay.to_owned());
+            return Ok(configured_relay.to_owned());
         }
     }
-    known_relays.into_iter().next()
+    Err(missing_listing_provenance_relay_error(&known_relays))
+}
+
+fn missing_listing_provenance_relay_error(known_relays: &[String]) -> AppSyncTransportError {
+    AppSyncTransportError::failed(
+        json!({
+            "code": "missing_listing_provenance_relay",
+            "missing_provenance_relays": known_relays,
+        })
+        .to_string(),
+    )
 }
 
 fn order_request_publish_payload_to_sdk_order(
@@ -7542,13 +7554,13 @@ mod tests {
         HomeRoute,
     };
     use radroots_studio_app_sync::{
-        AppFarmProfilePublishPayload, AppListingPublishPayload, AppOrderRequestPublishPayload,
-        AppPublishContext, AppPublishPayload, AppPublishedOperationReceipt, AppSyncRequest,
-        AppSyncResult, AppSyncRunStatus, AppSyncTransport, AppSyncTransportError,
-        PendingSyncOperation, PendingSyncOperationState, RecordedAppSyncTransport,
-        SyncAggregateRef, SyncCheckpointState, SyncCheckpointStatus, SyncConflict,
-        SyncConflictKind, SyncConflictResolutionStatus, SyncConflictSeverity, SyncOperationKind,
-        SyncTrigger,
+        AppFarmProfilePublishPayload, AppListingPublishPayload, AppOrderRequestItemPayload,
+        AppOrderRequestPublishPayload, AppPublishContext, AppPublishPayload,
+        AppPublishedOperationReceipt, AppSyncRequest, AppSyncResult, AppSyncRunStatus,
+        AppSyncTransport, AppSyncTransportError, PendingSyncOperation, PendingSyncOperationState,
+        RecordedAppSyncTransport, SyncAggregateRef, SyncCheckpointState, SyncCheckpointStatus,
+        SyncConflict, SyncConflictKind, SyncConflictResolutionStatus, SyncConflictSeverity,
+        SyncOperationKind, SyncTrigger,
     };
     use radroots_identity::RadrootsIdentity;
     use radroots_local_events::{
@@ -7599,6 +7611,7 @@ mod tests {
 
     struct ThreadedAckRelay {
         url: String,
+        events: Arc<Mutex<Vec<serde_json::Value>>>,
         shutdown_tx: Option<oneshot::Sender<()>>,
         join_handle: Option<thread::JoinHandle<()>>,
     }
@@ -7608,6 +7621,7 @@ mod tests {
             let (url_tx, url_rx) = mpsc::channel();
             let (shutdown_tx, shutdown_rx) = oneshot::channel();
             let events: Arc<Mutex<Vec<serde_json::Value>>> = Arc::new(Mutex::new(Vec::new()));
+            let thread_events = events.clone();
             let join_handle = thread::spawn(move || {
                 let runtime = TokioRuntimeBuilder::new_current_thread()
                     .enable_all()
@@ -7630,7 +7644,7 @@ mod tests {
                                 let Ok((stream, _)) = accepted else {
                                     break;
                                 };
-                                let events = events.clone();
+                                let events = thread_events.clone();
                                 tokio::spawn(async move {
                                     let Ok(websocket) = tokio_tungstenite::accept_async(stream).await else {
                                         return;
@@ -7687,6 +7701,7 @@ mod tests {
 
             Self {
                 url,
+                events,
                 shutdown_tx: Some(shutdown_tx),
                 join_handle: Some(join_handle),
             }
@@ -7694,6 +7709,10 @@ mod tests {
 
         fn url(&self) -> &str {
             self.url.as_str()
+        }
+
+        fn event_count(&self) -> usize {
+            self.events.lock().expect("relay events lock").len()
         }
     }
 
@@ -7726,6 +7745,19 @@ mod tests {
         }
 
         true
+    }
+
+    fn assert_missing_listing_provenance_relay_error(
+        error: &AppSyncTransportError,
+        relay_url: &str,
+    ) {
+        let AppSyncTransportError::Failed { message } = error else {
+            panic!("unexpected error: {error}");
+        };
+        let value =
+            serde_json::from_str::<serde_json::Value>(message).expect("structured relay error");
+        assert_eq!(value["code"], "missing_listing_provenance_relay");
+        assert_eq!(value["missing_provenance_relays"], json!([relay_url]));
     }
 
     impl Drop for ThreadedAckRelay {
@@ -8051,9 +8083,70 @@ mod tests {
                 "wss://relay-a.example".to_owned(),
                 "wss://relay-c.example".to_owned(),
             ],
-        );
+        )
+        .expect("configured listing relay should be selected");
 
-        assert_eq!(selected.as_deref(), Some("wss://relay-a.example"));
+        assert_eq!(selected.as_str(), "wss://relay-a.example");
+    }
+
+    #[test]
+    fn order_request_listing_pointer_rejects_missing_configured_provenance_relay() {
+        let error = super::selected_listing_relay(
+            &["wss://listing.example".to_owned()],
+            &["wss://target.example".to_owned()],
+        )
+        .expect_err("missing listing provenance relay should fail");
+
+        assert_missing_listing_provenance_relay_error(&error, "wss://listing.example");
+    }
+
+    #[test]
+    fn runtime_direct_relay_transport_rejects_order_request_missing_listing_provenance_target() {
+        let relay = ThreadedAckRelay::spawn();
+        let manager = RadrootsNostrAccountsManager::new_in_memory();
+        let account_id = manager
+            .generate_identity(Some("Buyer".to_owned()), true)
+            .expect("buyer account should generate");
+        let identity = manager
+            .get_signing_identity(&account_id)
+            .expect("buyer signer lookup should succeed")
+            .expect("buyer account should have local signer");
+        let seller_pubkey = "2222222222222222222222222222222222222222222222222222222222222222";
+        let payload = AppPublishPayload::OrderRequest(AppOrderRequestPublishPayload {
+            context: AppPublishContext::new(account_id.to_string(), "order_missing_listing_relay"),
+            order_id: OrderId::new(),
+            farm_id: FarmId::new(),
+            status: Some("needs_action".to_owned()),
+            order_document_json: Some(json!({"document": {"order": {}}})),
+            listing_addr: Some(format!("30402:{seller_pubkey}:listing-key")),
+            listing_event_id: Some("listing-event-id".to_owned()),
+            listing_relays: vec!["wss://listing.example".to_owned()],
+            buyer_pubkey: Some(identity.public_key_hex()),
+            seller_pubkey: Some(seller_pubkey.to_owned()),
+            items: vec![AppOrderRequestItemPayload {
+                product_id: ProductId::new(),
+                quantity: 1,
+            }],
+            currency_code: Some("USD".to_owned()),
+            total_minor_units: Some(450),
+            note: None,
+        });
+        let operation = PendingSyncOperation::from_publish_payload(payload, "2026-05-25T07:00:00Z")
+            .expect("order publish payload should serialize");
+        let mut transport =
+            SdkDirectRelayAppSyncTransport::with_relay_urls(manager, vec![relay.url().to_owned()]);
+
+        let error = transport
+            .sync(AppSyncRequest {
+                trigger: SyncTrigger::ManualRefresh,
+                checkpoint: SyncCheckpointStatus::never_synced(),
+                pending_operations: vec![operation],
+                known_conflicts: Vec::new(),
+            })
+            .expect_err("missing listing provenance relay should fail");
+
+        assert_missing_listing_provenance_relay_error(&error, "wss://listing.example");
+        assert_eq!(relay.event_count(), 0);
     }
 
     #[test]
