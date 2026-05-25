@@ -91,6 +91,8 @@ pub enum AppRuntimeConfigError {
     UnsupportedRuntimeMode(String),
     #[error("missing required runtime config field: {0}")]
     MissingField(&'static str),
+    #[error("invalid runtime relay url in {field}: {value}")]
+    InvalidRelayUrl { field: &'static str, value: String },
 }
 
 impl AppRuntimeConfig {
@@ -225,8 +227,11 @@ fn parse_relay_url_set(
     let mut relays = Vec::new();
     for relay in value.split(',') {
         let relay = relay.trim();
-        if !relay.is_empty() && seen.insert(relay.to_owned()) {
-            relays.push(relay.to_owned());
+        if !relay.is_empty() {
+            validate_relay_url(field, relay)?;
+            if seen.insert(relay.to_owned()) {
+                relays.push(relay.to_owned());
+            }
         }
     }
 
@@ -235,6 +240,20 @@ fn parse_relay_url_set(
     }
 
     Ok(relays)
+}
+
+fn validate_relay_url(field: &'static str, relay: &str) -> Result<(), AppRuntimeConfigError> {
+    let url = url::Url::parse(relay).map_err(|_| AppRuntimeConfigError::InvalidRelayUrl {
+        field,
+        value: relay.to_owned(),
+    })?;
+    if !matches!(url.scheme(), "ws" | "wss") || url.host_str().is_none() {
+        return Err(AppRuntimeConfigError::InvalidRelayUrl {
+            field,
+            value: relay.to_owned(),
+        });
+    }
+    Ok(())
 }
 
 fn require_path_value(
@@ -409,6 +428,78 @@ mod tests {
         assert_eq!(
             config.nostr_relay_urls,
             vec!["ws://127.0.0.1:8080", "ws://127.0.0.1:8081"]
+        );
+    }
+
+    #[test]
+    fn runtime_config_rejects_malformed_nostr_relay_urls() {
+        let env = BTreeMap::from([
+            (APP_RUNTIME_MODE_ENV, "localhost-dev".to_owned()),
+            (APP_NOSTR_RELAY_URLS_ENV, "not-a-url".to_owned()),
+        ]);
+        let error = AppRuntimeConfig::from_env_with(
+            |name| env.get(name).cloned(),
+            Some(PathBuf::from("/tmp/default-logs")),
+        )
+        .expect_err("malformed relay url should fail");
+
+        assert!(
+            matches!(
+                error,
+                AppRuntimeConfigError::InvalidRelayUrl {
+                    field: APP_NOSTR_RELAY_URLS_ENV,
+                    ref value
+                } if value == "not-a-url"
+            ),
+            "unexpected error: {error}"
+        );
+    }
+
+    #[test]
+    fn runtime_config_rejects_non_websocket_nostr_relay_urls() {
+        let env = BTreeMap::from([
+            (APP_RUNTIME_MODE_ENV, "localhost-dev".to_owned()),
+            (APP_NOSTR_RELAY_URLS_ENV, "https://relay.example".to_owned()),
+        ]);
+        let error = AppRuntimeConfig::from_env_with(
+            |name| env.get(name).cloned(),
+            Some(PathBuf::from("/tmp/default-logs")),
+        )
+        .expect_err("non-websocket relay url should fail");
+
+        assert!(
+            matches!(
+                error,
+                AppRuntimeConfigError::InvalidRelayUrl {
+                    field: APP_NOSTR_RELAY_URLS_ENV,
+                    ref value
+                } if value == "https://relay.example"
+            ),
+            "unexpected error: {error}"
+        );
+    }
+
+    #[test]
+    fn runtime_config_rejects_hostless_nostr_relay_urls() {
+        let env = BTreeMap::from([
+            (APP_RUNTIME_MODE_ENV, "localhost-dev".to_owned()),
+            (APP_NOSTR_RELAY_URLS_ENV, "wss://".to_owned()),
+        ]);
+        let error = AppRuntimeConfig::from_env_with(
+            |name| env.get(name).cloned(),
+            Some(PathBuf::from("/tmp/default-logs")),
+        )
+        .expect_err("hostless relay url should fail");
+
+        assert!(
+            matches!(
+                error,
+                AppRuntimeConfigError::InvalidRelayUrl {
+                    field: APP_NOSTR_RELAY_URLS_ENV,
+                    ref value
+                } if value == "wss://"
+            ),
+            "unexpected error: {error}"
         );
     }
 
