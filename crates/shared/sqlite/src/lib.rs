@@ -559,12 +559,14 @@ impl AppSqliteStore {
         operation_id: &str,
         available_at: &str,
         attempt_count: u32,
+        last_error_message: Option<&str>,
     ) -> Result<bool, AppSqliteError> {
         self.sync_repository().update_pending_operation_retry(
             account_id,
             operation_id,
             available_at,
             attempt_count,
+            last_error_message,
         )
     }
 

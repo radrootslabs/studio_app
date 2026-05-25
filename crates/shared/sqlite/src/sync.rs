@@ -198,6 +198,7 @@ impl<'a> AppSyncRepository<'a> {
         operation_id: &str,
         available_at: &str,
         attempt_count: u32,
+        last_error_message: Option<&str>,
     ) -> Result<bool, AppSqliteError> {
         let updated = self
             .connection
@@ -205,13 +206,15 @@ impl<'a> AppSyncRepository<'a> {
                 "UPDATE local_outbox
                  SET available_at = ?3,
                     attempt_count = ?4,
-                    state = 'retryable'
+                    state = 'retryable',
+                    last_error_message = ?5
                  WHERE account_id = ?1 AND id = ?2",
                 params![
                     account_id,
                     operation_id,
                     available_at,
-                    i64::from(attempt_count)
+                    i64::from(attempt_count),
+                    last_error_message
                 ],
             )
             .map_err(|source| AppSqliteError::Query {
@@ -758,12 +761,24 @@ mod tests {
 
         assert!(
             repository
-                .update_pending_operation_retry("acct_a", &first_id, "2026-04-20T18:10:00Z", 2,)
+                .update_pending_operation_retry(
+                    "acct_a",
+                    &first_id,
+                    "2026-04-20T18:10:00Z",
+                    2,
+                    Some("relay timeout"),
+                )
                 .expect("retry update should succeed")
         );
         assert!(
             !repository
-                .update_pending_operation_retry("acct_b", &first_id, "2026-04-20T18:10:00Z", 3,)
+                .update_pending_operation_retry(
+                    "acct_b",
+                    &first_id,
+                    "2026-04-20T18:10:00Z",
+                    3,
+                    Some("wrong account"),
+                )
                 .expect("wrong-account retry update should not succeed")
         );
         assert!(
@@ -789,6 +804,10 @@ mod tests {
         assert_eq!(
             acct_a[0].operation.available_at,
             "2026-04-20T18:10:00Z".to_owned()
+        );
+        assert_eq!(
+            acct_a[0].operation.last_error_message.as_deref(),
+            Some("relay timeout")
         );
         assert_eq!(acct_b.len(), 1);
     }
