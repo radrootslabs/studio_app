@@ -394,6 +394,7 @@ impl AppSyncResult {
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct AppPublishedOperationReceipt {
     pub operation_key: String,
+    pub source_account_id: String,
     pub source_local_event_id: Option<String>,
     pub event_id: String,
     pub event_kind: u32,

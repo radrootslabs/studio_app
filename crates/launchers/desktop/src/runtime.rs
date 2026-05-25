@@ -4396,12 +4396,6 @@ impl DesktopAppRuntimeState {
                 source,
             })?;
         let timestamp = current_runtime_time_ms()?;
-        let owner_account_id = self
-            .state_store
-            .identity_projection()
-            .selected_account
-            .as_ref()
-            .map(|account| account.account.account_id.clone());
 
         for receipt in receipts {
             let source_record = receipt
@@ -4417,6 +4411,15 @@ impl DesktopAppRuntimeState {
                 })
                 .transpose()?
                 .flatten();
+            if source_record
+                .as_ref()
+                .and_then(|record| record.owner_account_id.as_deref())
+                .is_some_and(|owner_account_id| owner_account_id != receipt.source_account_id)
+            {
+                return Err(AppSqliteError::InvalidProjection {
+                    reason: "published operation source account does not match local event owner",
+                });
+            }
             let farm_id = source_record
                 .as_ref()
                 .and_then(|record| record.farm_id.clone())
@@ -4432,7 +4435,7 @@ impl DesktopAppRuntimeState {
                 source_runtime: SourceRuntime::App,
                 created_at_ms: i64::from(receipt.event_created_at) * 1_000,
                 inserted_at_ms: timestamp,
-                owner_account_id: owner_account_id.clone(),
+                owner_account_id: Some(receipt.source_account_id.clone()),
                 owner_pubkey: Some(receipt.event_pubkey.clone()),
                 farm_id,
                 listing_addr,
@@ -5279,10 +5282,19 @@ fn published_operation_receipt(
             "direct relay app sync received non-relay receipt",
         ));
     };
-    let source_local_event_id = match payload {
-        AppPublishPayload::FarmProfile(payload) => payload.context.source_local_event_id.clone(),
-        AppPublishPayload::Listing(payload) => payload.context.source_local_event_id.clone(),
-        AppPublishPayload::OrderRequest(payload) => payload.context.source_local_event_id.clone(),
+    let (source_account_id, source_local_event_id) = match payload {
+        AppPublishPayload::FarmProfile(payload) => (
+            payload.context.account_id.clone(),
+            payload.context.source_local_event_id.clone(),
+        ),
+        AppPublishPayload::Listing(payload) => (
+            payload.context.account_id.clone(),
+            payload.context.source_local_event_id.clone(),
+        ),
+        AppPublishPayload::OrderRequest(payload) => (
+            payload.context.account_id.clone(),
+            payload.context.source_local_event_id.clone(),
+        ),
     };
     let failed_relays = relay_receipt
         .failed_relays
@@ -5306,6 +5318,7 @@ fn published_operation_receipt(
 
     Ok(AppPublishedOperationReceipt {
         operation_key: operation_key.to_owned(),
+        source_account_id,
         source_local_event_id,
         event_id: relay_receipt.event_id,
         event_kind: relay_receipt.event_kind,
@@ -7056,11 +7069,11 @@ mod tests {
     };
     use radroots_studio_app_sync::{
         AppFarmProfilePublishPayload, AppOrderRequestPublishPayload, AppPublishContext,
-        AppPublishPayload, AppSyncRequest, AppSyncResult, AppSyncRunStatus, AppSyncTransport,
-        AppSyncTransportError, PendingSyncOperation, PendingSyncOperationState,
-        RecordedAppSyncTransport, SyncAggregateRef, SyncCheckpointState, SyncCheckpointStatus,
-        SyncConflict, SyncConflictKind, SyncConflictResolutionStatus, SyncConflictSeverity,
-        SyncOperationKind, SyncTrigger,
+        AppPublishPayload, AppPublishedOperationReceipt, AppSyncRequest, AppSyncResult,
+        AppSyncRunStatus, AppSyncTransport, AppSyncTransportError, PendingSyncOperation,
+        PendingSyncOperationState, RecordedAppSyncTransport, SyncAggregateRef, SyncCheckpointState,
+        SyncCheckpointStatus, SyncConflict, SyncConflictKind, SyncConflictResolutionStatus,
+        SyncConflictSeverity, SyncOperationKind, SyncTrigger,
     };
     use radroots_identity::RadrootsIdentity;
     use radroots_local_events::{
@@ -7245,6 +7258,10 @@ mod tests {
         assert_eq!(result.pushed_operation_count, 1);
         assert_eq!(result.published_receipts.len(), 1);
         assert_eq!(result.published_receipts[0].event_kind, 30340);
+        assert_eq!(
+            result.published_receipts[0].source_account_id,
+            account_id.to_string()
+        );
         assert_eq!(
             result.published_receipts[0]
                 .source_local_event_id
@@ -8840,6 +8857,104 @@ mod tests {
         );
         assert!(listing_payload.get("draft").is_none());
         assert!(listing_payload.get("editor").is_none());
+
+        cleanup_bootstrapped_runtime_paths(&paths);
+    }
+
+    #[test]
+    fn runtime_published_receipts_record_payload_account_owner() {
+        let (runtime, paths) = bootstrapped_runtime("published_receipt_payload_owner");
+        assert!(
+            runtime
+                .generate_local_account(Some("First".to_owned()))
+                .expect("first account should generate")
+        );
+        let payload_account_id = runtime
+            .summary()
+            .settings_account_projection
+            .selected_account
+            .as_ref()
+            .expect("first selected account")
+            .account
+            .account_id
+            .clone();
+        assert!(
+            runtime
+                .generate_local_account(Some("Second".to_owned()))
+                .expect("second account should generate")
+        );
+        let selected_account_id = runtime
+            .summary()
+            .settings_account_projection
+            .selected_account
+            .as_ref()
+            .expect("second selected account")
+            .account
+            .account_id
+            .clone();
+        assert_ne!(payload_account_id, selected_account_id);
+
+        let receipt =
+            app_published_operation_receipt(payload_account_id.clone(), None, "event-app-owner");
+        runtime
+            .lock_state()
+            .record_published_sync_receipts(&[receipt])
+            .expect("published receipt should record");
+
+        let records = shared_local_event_records(&paths);
+        let signed_record = records
+            .iter()
+            .find(|record| record.record_id == "app:signed_event:event-app-owner")
+            .expect("signed event record");
+        assert_eq!(
+            signed_record.owner_account_id.as_deref(),
+            Some(payload_account_id.as_str())
+        );
+
+        cleanup_bootstrapped_runtime_paths(&paths);
+    }
+
+    #[test]
+    fn runtime_published_receipts_reject_conflicting_source_owner() {
+        let (runtime, paths) = bootstrapped_runtime("published_receipt_owner_conflict");
+        let database_path = paths
+            .shared_local_events_database_path()
+            .expect("shared local events path");
+        let executor =
+            SqliteExecutor::open(database_path.as_path()).expect("open shared local events db");
+        let store = LocalEventsStore::new(executor);
+        store.migrate_up().expect("migrate shared local events");
+        store
+            .append_record(&local_work_record(
+                "app:local_work:conflict-source",
+                "other-account",
+                "farm-key",
+                None,
+                json!({"record_kind": "farm_config_v1"}),
+            ))
+            .expect("append conflicting source record");
+        let receipt = app_published_operation_receipt(
+            "payload-account".to_owned(),
+            Some("app:local_work:conflict-source".to_owned()),
+            "event-app-owner-conflict",
+        );
+
+        let error = runtime
+            .lock_state()
+            .record_published_sync_receipts(&[receipt])
+            .expect_err("conflicting source owner should fail closed");
+
+        assert!(matches!(
+            error,
+            AppSqliteError::InvalidProjection {
+                reason: "published operation source account does not match local event owner"
+            }
+        ));
+        assert!(
+            shared_local_event_records(&paths)
+                .iter()
+                .all(|record| record.record_id != "app:signed_event:event-app-owner-conflict")
+        );
 
         cleanup_bootstrapped_runtime_paths(&paths);
     }
@@ -14552,6 +14667,37 @@ mod tests {
             outbox_status: PublishOutboxStatus::None,
             relay_set_fingerprint: None,
             relay_delivery_json: None,
+        }
+    }
+
+    fn app_published_operation_receipt(
+        source_account_id: String,
+        source_local_event_id: Option<String>,
+        event_id: &str,
+    ) -> AppPublishedOperationReceipt {
+        let event_pubkey = "1111111111111111111111111111111111111111111111111111111111111111";
+        AppPublishedOperationReceipt {
+            operation_key: "farm:upsert".to_owned(),
+            source_account_id,
+            source_local_event_id,
+            event_id: event_id.to_owned(),
+            event_kind: 30340,
+            event_pubkey: event_pubkey.to_owned(),
+            event_created_at: 1_774_000_000,
+            event_tags_json: json!([["d", "farm-key"]]),
+            event_content: "{}".to_owned(),
+            event_sig: "signature".to_owned(),
+            raw_event_json: json!({
+                "id": event_id,
+                "kind": 30340,
+                "pubkey": event_pubkey,
+                "content": "{}"
+            }),
+            relay_set_fingerprint: "relay-set".to_owned(),
+            relay_delivery_json: json!({
+                "state": "acknowledged",
+                "acknowledged_relays": ["ws://127.0.0.1:1234/"]
+            }),
         }
     }
 
