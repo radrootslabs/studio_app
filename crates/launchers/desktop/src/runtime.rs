@@ -4857,18 +4857,9 @@ fn current_runtime_time_ms() -> Result<i64, AppSqliteError> {
 fn normalized_app_sync_relay_urls(
     relay_urls: &[String],
 ) -> Result<Vec<String>, AppSyncTransportError> {
-    let mut seen = BTreeSet::new();
-    let normalized = relay_urls
-        .iter()
-        .filter_map(|relay| {
-            let relay = relay.trim();
-            if relay.is_empty() || !seen.insert(relay.to_owned()) {
-                None
-            } else {
-                Some(relay.to_owned())
-            }
-        })
-        .collect::<Vec<_>>();
+    let normalized = radroots_local_events::normalize_relay_urls(relay_urls).map_err(|error| {
+        AppSyncTransportError::failed(format!("invalid direct relay app sync relay url: {error}"))
+    })?;
     if normalized.is_empty() {
         return Err(AppSyncTransportError::unavailable(
             "direct relay app sync requires at least one configured relay",
@@ -7349,7 +7340,6 @@ mod tests {
             " ws://127.0.0.1:8081 ".to_owned(),
             "ws://127.0.0.1:8080".to_owned(),
             "ws://127.0.0.1:8081".to_owned(),
-            " ".to_owned(),
         ])
         .expect("relay set should normalize");
 
@@ -7357,6 +7347,24 @@ mod tests {
             relay_urls,
             vec!["ws://127.0.0.1:8081", "ws://127.0.0.1:8080"]
         );
+    }
+
+    #[test]
+    fn runtime_direct_relay_transport_rejects_invalid_configured_relay_urls() {
+        for relay_url in [
+            " ",
+            "https://relay.example",
+            "wss://",
+            "wss://user@relay.example",
+            "wss://relay.example:abc",
+        ] {
+            let error = super::normalized_app_sync_relay_urls(&[relay_url.to_owned()])
+                .expect_err("invalid app sync relay url");
+            assert!(
+                error.to_string().contains("relay url"),
+                "unexpected error for {relay_url}: {error}"
+            );
+        }
     }
 
     #[test]

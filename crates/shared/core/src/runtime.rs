@@ -1,9 +1,9 @@
 use std::{
-    collections::BTreeSet,
     path::PathBuf,
     time::{SystemTime, UNIX_EPOCH},
 };
 
+use radroots_local_events::normalize_relay_url;
 use serde::Serialize;
 use thiserror::Error;
 
@@ -223,15 +223,23 @@ fn parse_relay_url_set(
     field: &'static str,
     value: String,
 ) -> Result<Vec<String>, AppRuntimeConfigError> {
-    let mut seen = BTreeSet::new();
     let mut relays = Vec::new();
     for relay in value.split(',') {
         let relay = relay.trim();
-        if !relay.is_empty() {
-            validate_relay_url(field, relay)?;
-            if seen.insert(relay.to_owned()) {
-                relays.push(relay.to_owned());
+        if relay.is_empty() {
+            return Err(AppRuntimeConfigError::InvalidRelayUrl {
+                field,
+                value: relay.to_owned(),
+            });
+        }
+        let normalized = normalize_app_relay_url(field, relay).map_err(|_| {
+            AppRuntimeConfigError::InvalidRelayUrl {
+                field,
+                value: relay.to_owned(),
             }
+        })?;
+        if !relays.iter().any(|existing| existing == &normalized) {
+            relays.push(normalized);
         }
     }
 
@@ -242,18 +250,14 @@ fn parse_relay_url_set(
     Ok(relays)
 }
 
-fn validate_relay_url(field: &'static str, relay: &str) -> Result<(), AppRuntimeConfigError> {
-    let url = url::Url::parse(relay).map_err(|_| AppRuntimeConfigError::InvalidRelayUrl {
+fn normalize_app_relay_url(
+    field: &'static str,
+    relay: &str,
+) -> Result<String, AppRuntimeConfigError> {
+    normalize_relay_url(relay).map_err(|_| AppRuntimeConfigError::InvalidRelayUrl {
         field,
         value: relay.to_owned(),
-    })?;
-    if !matches!(url.scheme(), "ws" | "wss") || url.host_str().is_none() {
-        return Err(AppRuntimeConfigError::InvalidRelayUrl {
-            field,
-            value: relay.to_owned(),
-        });
-    }
-    Ok(())
+    })
 }
 
 fn require_path_value(
@@ -500,6 +504,58 @@ mod tests {
                 } if value == "wss://"
             ),
             "unexpected error: {error}"
+        );
+    }
+
+    #[test]
+    fn runtime_config_rejects_malformed_nostr_relay_authority() {
+        for relay_url in [
+            "wss://user@relay.example",
+            "wss://relay.example:abc",
+            "wss://2001:db8::1",
+            "wss://relay.example,,wss://relay-two.example",
+        ] {
+            let env = BTreeMap::from([
+                (APP_RUNTIME_MODE_ENV, "localhost-dev".to_owned()),
+                (APP_NOSTR_RELAY_URLS_ENV, relay_url.to_owned()),
+            ]);
+            let error = AppRuntimeConfig::from_env_with(
+                |name| env.get(name).cloned(),
+                Some(PathBuf::from("/tmp/default-logs")),
+            )
+            .expect_err("malformed relay authority should fail");
+
+            assert!(
+                matches!(
+                    error,
+                    AppRuntimeConfigError::InvalidRelayUrl {
+                        field: APP_NOSTR_RELAY_URLS_ENV,
+                        ..
+                    }
+                ),
+                "unexpected error for {relay_url}: {error}"
+            );
+        }
+    }
+
+    #[test]
+    fn runtime_config_accepts_bracketed_ipv6_nostr_relay_urls() {
+        let env = BTreeMap::from([
+            (APP_RUNTIME_MODE_ENV, "localhost-dev".to_owned()),
+            (
+                APP_NOSTR_RELAY_URLS_ENV,
+                " wss://[2001:db8::1]:443/relay ".to_owned(),
+            ),
+        ]);
+        let config = AppRuntimeConfig::from_env_with(
+            |name| env.get(name).cloned(),
+            Some(PathBuf::from("/tmp/default-logs")),
+        )
+        .expect("ipv6 relay url should resolve");
+
+        assert_eq!(
+            config.nostr_relay_urls,
+            vec!["wss://[2001:db8::1]:443/relay"]
         );
     }
 

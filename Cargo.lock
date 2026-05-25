@@ -5093,6 +5093,7 @@ version = "0.1.0"
 dependencies = [
  "chrono",
  "radroots_studio_app_models",
+ "radroots_local_events",
  "radroots_runtime_paths",
  "serde",
  "serde_json",
@@ -5100,7 +5101,6 @@ dependencies = [
  "tracing",
  "tracing-appender",
  "tracing-subscriber",
- "url",
 ]
 
 [[package]]
