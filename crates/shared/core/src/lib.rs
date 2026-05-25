@@ -28,7 +28,7 @@ pub use paths::{
     SHARED_LOCAL_EVENTS_NAMESPACE_VALUE, shared_local_events_database_path_from_shared_accounts,
 };
 pub use runtime::{
-    APP_DEFAULT_NOSTR_RELAY_URL_ENV, APP_HOST_PLATFORM, APP_ID, APP_LOCAL_LOG_ROOT_ENV, APP_NAME,
+    APP_HOST_PLATFORM, APP_ID, APP_LOCAL_LOG_ROOT_ENV, APP_NAME, APP_NOSTR_RELAY_URLS_ENV,
     APP_PLATFORM_RUNTIME, APP_PROJECTION_SOURCE, APP_RUNTIME_MODE_ENV, APP_RUNTIME_ORIGIN,
     AppBuildIdentity, AppCoreRuntimeMetadata, AppHostRuntimeMetadata, AppRuntimeCapture,
     AppRuntimeConfig, AppRuntimeConfigError, AppRuntimeMode, AppRuntimeSnapshot,

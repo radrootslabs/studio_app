@@ -7,16 +7,16 @@ repo_root="$(git -C "${script_dir}" rev-parse --show-toplevel)"
 cd "${repo_root}"
 
 runtime_mode="${RADROOTS_APP_RUNTIME_MODE:-localhost-dev}"
-default_nostr_relay_url="${RADROOTS_APP_DEFAULT_NOSTR_RELAY_URL:-}"
+nostr_relay_urls="${RADROOTS_APP_NOSTR_RELAY_URLS:-}"
 local_log_root="${RADROOTS_APP_LOCAL_LOG_ROOT:-${repo_root}/logs}"
 
-if [[ -z "${default_nostr_relay_url}" ]]; then
-  echo "missing required env: RADROOTS_APP_DEFAULT_NOSTR_RELAY_URL" >&2
+if [[ -z "${nostr_relay_urls}" ]]; then
+  echo "missing required env: RADROOTS_APP_NOSTR_RELAY_URLS" >&2
   exit 1
 fi
 
 export RADROOTS_APP_RUNTIME_MODE="${runtime_mode}"
-export RADROOTS_APP_DEFAULT_NOSTR_RELAY_URL="${default_nostr_relay_url}"
+export RADROOTS_APP_NOSTR_RELAY_URLS="${nostr_relay_urls}"
 export RADROOTS_APP_LOCAL_LOG_ROOT="${local_log_root}"
 export RUST_LOG="${RADROOTS_APP_RUST_LOG:-info}"
 

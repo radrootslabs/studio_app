@@ -559,12 +559,12 @@ impl HomeView {
         }
 
         self.startup_view.clear_notice();
-        let relay_url = self.runtime.default_nostr_relay_url();
+        let relay_urls = self.runtime.nostr_relay_urls();
         cx.notify();
         cx.spawn_in(window, async move |this, cx| {
             let startup_task = cx
                 .background_executor()
-                .spawn(run_startup_app_init(relay_url));
+                .spawn(run_startup_app_init(relay_urls));
             Timer::after(Duration::from_secs(1)).await;
             let startup_result = startup_task.await;
             let _ = this.update(cx, |this, cx| {
@@ -9357,12 +9357,14 @@ fn startup_home_body(runtime: &DesktopAppRuntimeSummary) -> impl IntoElement {
     div().w_full().text_center().child(home_body_text(body))
 }
 
-async fn connect_default_relay(relay_url: String) -> Result<RadrootsNostrClient, String> {
+async fn connect_configured_relays(relay_urls: Vec<String>) -> Result<RadrootsNostrClient, String> {
     let client = RadrootsNostrClient::new_signerless();
-    client
-        .add_relay(relay_url.as_str())
-        .await
-        .map_err(|error| format!("failed to add relay `{relay_url}`: {error}"))?;
+    for relay_url in relay_urls {
+        client
+            .add_relay(relay_url.as_str())
+            .await
+            .map_err(|error| format!("failed to add relay `{relay_url}`: {error}"))?;
+    }
     client.connect().await;
     Ok(client)
 }
@@ -9371,8 +9373,8 @@ struct StartupAppInitResult {
     relay_client: RadrootsNostrClient,
 }
 
-async fn run_startup_app_init(relay_url: String) -> Result<StartupAppInitResult, String> {
-    let relay_client = connect_default_relay(relay_url).await?;
+async fn run_startup_app_init(relay_urls: Vec<String>) -> Result<StartupAppInitResult, String> {
+    let relay_client = connect_configured_relays(relay_urls).await?;
     Ok(StartupAppInitResult { relay_client })
 }
 
@@ -13117,7 +13119,7 @@ mod tests {
         .expect("desktop runtime paths should resolve");
         let runtime = crate::runtime::DesktopAppRuntime::bootstrap_with_paths(
             paths.clone(),
-            "wss://relay.example".to_owned(),
+            vec!["wss://relay.example".to_owned()],
         );
 
         (HomeView::new(runtime), paths, home_dir)

@@ -27,10 +27,8 @@ pub fn launch() -> Result<(), AppLaunchError> {
     bootstrap_logging(&snapshot, runtime_config.local_log_root.as_path())?;
     install_panic_hook();
 
-    let runtime = DesktopAppRuntime::bootstrap(
-        runtime_config.default_nostr_relay_url.clone(),
-        snapshot.clone(),
-    );
+    let runtime =
+        DesktopAppRuntime::bootstrap(runtime_config.nostr_relay_urls.clone(), snapshot.clone());
     if let Err(error) = runtime.sync_on_app_launch() {
         error!(
             target: "sync",

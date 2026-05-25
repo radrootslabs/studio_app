@@ -1,4 +1,5 @@
 use std::{
+    collections::BTreeSet,
     path::PathBuf,
     time::{SystemTime, UNIX_EPOCH},
 };
@@ -15,7 +16,7 @@ pub const APP_PROJECTION_SOURCE: &str = "gpui-native";
 pub const APP_RUNTIME_ORIGIN: &str = "gpui://localhost";
 pub const APP_HOST_PLATFORM: &str = "desktop";
 pub const APP_RUNTIME_MODE_ENV: &str = "RADROOTS_APP_RUNTIME_MODE";
-pub const APP_DEFAULT_NOSTR_RELAY_URL_ENV: &str = "RADROOTS_APP_DEFAULT_NOSTR_RELAY_URL";
+pub const APP_NOSTR_RELAY_URLS_ENV: &str = "RADROOTS_APP_NOSTR_RELAY_URLS";
 pub const APP_LOCAL_LOG_ROOT_ENV: &str = "RADROOTS_APP_LOCAL_LOG_ROOT";
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -28,7 +29,7 @@ pub enum AppRuntimeMode {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct AppRuntimeConfig {
     pub runtime_mode: AppRuntimeMode,
-    pub default_nostr_relay_url: String,
+    pub nostr_relay_urls: Vec<String>,
     pub local_log_root: PathBuf,
 }
 
@@ -106,8 +107,10 @@ impl AppRuntimeConfig {
     {
         let runtime_mode =
             parse_config_runtime_mode(&require_env_value(&mut read_env, APP_RUNTIME_MODE_ENV)?)?;
-        let default_nostr_relay_url =
-            require_env_value(&mut read_env, APP_DEFAULT_NOSTR_RELAY_URL_ENV)?;
+        let nostr_relay_urls = parse_relay_url_set(
+            APP_NOSTR_RELAY_URLS_ENV,
+            require_env_value(&mut read_env, APP_NOSTR_RELAY_URLS_ENV)?,
+        )?;
         let local_log_root = read_env(APP_LOCAL_LOG_ROOT_ENV)
             .map(|value| require_path_value(APP_LOCAL_LOG_ROOT_ENV, value))
             .transpose()?;
@@ -121,7 +124,7 @@ impl AppRuntimeConfig {
 
         Ok(Self {
             runtime_mode,
-            default_nostr_relay_url,
+            nostr_relay_urls,
             local_log_root,
         })
     }
@@ -214,6 +217,26 @@ fn parse_config_runtime_mode(value: &str) -> Result<AppRuntimeMode, AppRuntimeCo
     }
 }
 
+fn parse_relay_url_set(
+    field: &'static str,
+    value: String,
+) -> Result<Vec<String>, AppRuntimeConfigError> {
+    let mut seen = BTreeSet::new();
+    let mut relays = Vec::new();
+    for relay in value.split(',') {
+        let relay = relay.trim();
+        if !relay.is_empty() && seen.insert(relay.to_owned()) {
+            relays.push(relay.to_owned());
+        }
+    }
+
+    if relays.is_empty() {
+        return Err(AppRuntimeConfigError::MissingField(field));
+    }
+
+    Ok(relays)
+}
+
 fn require_path_value(
     field: &'static str,
     value: String,
@@ -283,10 +306,10 @@ mod tests {
     use std::{collections::BTreeMap, path::PathBuf};
 
     use super::{
-        APP_DEFAULT_NOSTR_RELAY_URL_ENV, APP_HOST_PLATFORM, APP_ID, APP_LOCAL_LOG_ROOT_ENV,
-        APP_NAME, APP_PROJECTION_SOURCE, APP_RUNTIME_MODE_ENV, APP_RUNTIME_ORIGIN,
-        AppBuildIdentity, AppRuntimeCapture, AppRuntimeConfig, AppRuntimeConfigError,
-        AppRuntimeMode, AppRuntimeSnapshot, runtime_mode_label,
+        APP_HOST_PLATFORM, APP_ID, APP_LOCAL_LOG_ROOT_ENV, APP_NAME, APP_NOSTR_RELAY_URLS_ENV,
+        APP_PROJECTION_SOURCE, APP_RUNTIME_MODE_ENV, APP_RUNTIME_ORIGIN, AppBuildIdentity,
+        AppRuntimeCapture, AppRuntimeConfig, AppRuntimeConfigError, AppRuntimeMode,
+        AppRuntimeSnapshot, runtime_mode_label,
     };
 
     fn test_build_identity() -> AppBuildIdentity {
@@ -304,8 +327,8 @@ mod tests {
         BTreeMap::from([
             (APP_RUNTIME_MODE_ENV, "localhost-dev".to_owned()),
             (
-                APP_DEFAULT_NOSTR_RELAY_URL_ENV,
-                "ws://127.0.0.1:8080".to_owned(),
+                APP_NOSTR_RELAY_URLS_ENV,
+                " ws://127.0.0.1:8080 , ws://127.0.0.1:8081 , ws://127.0.0.1:8080 ".to_owned(),
             ),
         ])
     }
@@ -343,10 +366,7 @@ mod tests {
 
     #[test]
     fn runtime_config_requires_explicit_runtime_mode_env() {
-        let env = BTreeMap::from([(
-            APP_DEFAULT_NOSTR_RELAY_URL_ENV,
-            "ws://127.0.0.1:8080".to_owned(),
-        )]);
+        let env = BTreeMap::from([(APP_NOSTR_RELAY_URLS_ENV, "ws://127.0.0.1:8080".to_owned())]);
         let error = AppRuntimeConfig::from_env_with(
             |name| env.get(name).cloned(),
             Some(PathBuf::from("/tmp/default-logs")),
@@ -363,10 +383,7 @@ mod tests {
     fn runtime_config_surfaces_explicit_local_log_root() {
         let env = BTreeMap::from([
             (APP_RUNTIME_MODE_ENV, "localhost-dev".to_owned()),
-            (
-                APP_DEFAULT_NOSTR_RELAY_URL_ENV,
-                "ws://127.0.0.1:8080".to_owned(),
-            ),
+            (APP_NOSTR_RELAY_URLS_ENV, "ws://127.0.0.1:8080".to_owned()),
             (APP_LOCAL_LOG_ROOT_ENV, "/tmp/radroots/logs".to_owned()),
         ]);
         let config = AppRuntimeConfig::from_env_with(
@@ -376,8 +393,23 @@ mod tests {
         .expect("valid env config");
 
         assert_eq!(config.runtime_mode, AppRuntimeMode::LocalhostDev);
-        assert_eq!(config.default_nostr_relay_url, "ws://127.0.0.1:8080");
+        assert_eq!(config.nostr_relay_urls, vec!["ws://127.0.0.1:8080"]);
         assert_eq!(config.local_log_root, PathBuf::from("/tmp/radroots/logs"));
+    }
+
+    #[test]
+    fn runtime_config_normalizes_configured_nostr_relay_urls() {
+        let env = test_runtime_env();
+        let config = AppRuntimeConfig::from_env_with(
+            |name| env.get(name).cloned(),
+            Some(PathBuf::from("/tmp/default-logs")),
+        )
+        .expect("valid env config");
+
+        assert_eq!(
+            config.nostr_relay_urls,
+            vec!["ws://127.0.0.1:8080", "ws://127.0.0.1:8081"]
+        );
     }
 
     #[test]
@@ -396,10 +428,7 @@ mod tests {
     fn runtime_config_accepts_explicit_log_root_without_default_runtime_paths() {
         let env = BTreeMap::from([
             (APP_RUNTIME_MODE_ENV, "localhost-dev".to_owned()),
-            (
-                APP_DEFAULT_NOSTR_RELAY_URL_ENV,
-                "ws://127.0.0.1:8080".to_owned(),
-            ),
+            (APP_NOSTR_RELAY_URLS_ENV, "ws://127.0.0.1:8080".to_owned()),
             (APP_LOCAL_LOG_ROOT_ENV, "/tmp/explicit-logs".to_owned()),
         ]);
         let config = AppRuntimeConfig::from_env_with(|name| env.get(name).cloned(), None)
@@ -451,7 +480,7 @@ mod tests {
     fn runtime_config_rejects_empty_required_fields() {
         let env = BTreeMap::from([
             (APP_RUNTIME_MODE_ENV, "localhost-dev".to_owned()),
-            (APP_DEFAULT_NOSTR_RELAY_URL_ENV, "".to_owned()),
+            (APP_NOSTR_RELAY_URLS_ENV, "".to_owned()),
         ]);
         let error = AppRuntimeConfig::from_env_with(
             |name| env.get(name).cloned(),
@@ -462,25 +491,25 @@ mod tests {
         assert!(
             matches!(
                 error,
-                AppRuntimeConfigError::MissingField(APP_DEFAULT_NOSTR_RELAY_URL_ENV)
+                AppRuntimeConfigError::MissingField(APP_NOSTR_RELAY_URLS_ENV)
             ),
             "unexpected error: {error}"
         );
     }
 
     #[test]
-    fn runtime_config_rejects_missing_default_nostr_relay_url() {
+    fn runtime_config_rejects_missing_nostr_relay_urls() {
         let env = BTreeMap::from([(APP_RUNTIME_MODE_ENV, "localhost-dev".to_owned())]);
         let error = AppRuntimeConfig::from_env_with(
             |name| env.get(name).cloned(),
             Some(PathBuf::from("/tmp/default-logs")),
         )
-        .expect_err("missing default relay url should fail");
+        .expect_err("missing relay urls should fail");
 
         assert!(
             matches!(
                 error,
-                AppRuntimeConfigError::MissingEnv(APP_DEFAULT_NOSTR_RELAY_URL_ENV)
+                AppRuntimeConfigError::MissingEnv(APP_NOSTR_RELAY_URLS_ENV)
             ),
             "unexpected error: {error}"
         );

@@ -134,13 +134,10 @@ struct SdkDirectRelayAppSyncTransport {
 }
 
 impl SdkDirectRelayAppSyncTransport {
-    fn new(
-        accounts_manager: RadrootsNostrAccountsManager,
-        default_nostr_relay_url: String,
-    ) -> Self {
+    fn new(accounts_manager: RadrootsNostrAccountsManager, nostr_relay_urls: Vec<String>) -> Self {
         Self {
             accounts_manager,
-            relay_urls: vec![default_nostr_relay_url],
+            relay_urls: nostr_relay_urls,
             timeout_ms: APP_DIRECT_RELAY_SYNC_TIMEOUT_MS,
         }
     }
@@ -231,29 +228,27 @@ pub struct DesktopAppRuntime {
 }
 
 impl DesktopAppRuntime {
-    pub fn bootstrap(
-        default_nostr_relay_url: String,
-        runtime_snapshot: AppRuntimeSnapshot,
-    ) -> Self {
-        let state = match DesktopAppRuntimeState::try_bootstrap(
-            default_nostr_relay_url,
-            runtime_snapshot.clone(),
-        ) {
-            Ok(state) => state,
-            Err(error) => DesktopAppRuntimeState::degraded_with_snapshot(error, runtime_snapshot),
-        };
+    pub fn bootstrap(nostr_relay_urls: Vec<String>, runtime_snapshot: AppRuntimeSnapshot) -> Self {
+        let state =
+            match DesktopAppRuntimeState::try_bootstrap(nostr_relay_urls, runtime_snapshot.clone())
+            {
+                Ok(state) => state,
+                Err(error) => {
+                    DesktopAppRuntimeState::degraded_with_snapshot(error, runtime_snapshot)
+                }
+            };
 
         Self::from_state(state)
     }
 
     pub fn bootstrap_with_paths(
         paths: AppDesktopRuntimePaths,
-        default_nostr_relay_url: String,
+        nostr_relay_urls: Vec<String>,
     ) -> Self {
         let runtime_snapshot = default_runtime_snapshot();
         let state = match DesktopAppRuntimeState::bootstrap_from_paths(
             paths,
-            default_nostr_relay_url,
+            nostr_relay_urls,
             runtime_snapshot.clone(),
         ) {
             Ok(state) => state,
@@ -297,8 +292,8 @@ impl DesktopAppRuntime {
         }
     }
 
-    pub fn default_nostr_relay_url(&self) -> String {
-        self.lock_state().default_nostr_relay_url.clone()
+    pub fn nostr_relay_urls(&self) -> Vec<String> {
+        self.lock_state().nostr_relay_urls.clone()
     }
 
     pub fn selected_settings_section(&self) -> SettingsSection {
@@ -1011,7 +1006,7 @@ struct DesktopPreparedSyncRequest {
 
 struct DesktopAppRuntimeState {
     state_store: AppStateStore<AppStatePersistenceRepository>,
-    default_nostr_relay_url: String,
+    nostr_relay_urls: Vec<String>,
     shared_accounts_paths: Option<AppSharedAccountsPaths>,
     remote_signer_paths: Option<DesktopRemoteSignerPaths>,
     accounts_manager: Option<RadrootsNostrAccountsManager>,
@@ -1061,16 +1056,16 @@ impl fmt::Debug for DesktopAppRuntimeState {
 
 impl DesktopAppRuntimeState {
     fn try_bootstrap(
-        default_nostr_relay_url: String,
+        nostr_relay_urls: Vec<String>,
         runtime_snapshot: AppRuntimeSnapshot,
     ) -> Result<Self, DesktopAppRuntimeBootstrapError> {
         let paths = AppDesktopRuntimePaths::current_desktop()?;
-        Self::bootstrap_from_paths(paths, default_nostr_relay_url, runtime_snapshot)
+        Self::bootstrap_from_paths(paths, nostr_relay_urls, runtime_snapshot)
     }
 
     fn bootstrap_from_paths(
         paths: AppDesktopRuntimePaths,
-        default_nostr_relay_url: String,
+        nostr_relay_urls: Vec<String>,
         runtime_snapshot: AppRuntimeSnapshot,
     ) -> Result<Self, DesktopAppRuntimeBootstrapError> {
         if let Err(error) = cleanup_prepared_customer_label_asset_root() {
@@ -1127,13 +1122,13 @@ impl DesktopAppRuntimeState {
             match accounts_bootstrap.accounts_manager.as_ref() {
                 Some(accounts_manager) => Box::new(SdkDirectRelayAppSyncTransport::new(
                     accounts_manager.clone(),
-                    default_nostr_relay_url.clone(),
+                    nostr_relay_urls.clone(),
                 )),
                 None => default_sync_transport(),
             };
         let mut state = Self {
             state_store,
-            default_nostr_relay_url,
+            nostr_relay_urls,
             shared_accounts_paths: Some(paths.shared_accounts.clone()),
             remote_signer_paths: Some(remote_signer_paths),
             accounts_manager: accounts_bootstrap.accounts_manager,
@@ -1174,7 +1169,7 @@ impl DesktopAppRuntimeState {
         Self {
             state_store: AppStateStore::load(AppStatePersistenceRepository::in_memory())
                 .expect("in-memory state store should load"),
-            default_nostr_relay_url: String::new(),
+            nostr_relay_urls: Vec::new(),
             shared_accounts_paths: None,
             remote_signer_paths: None,
             accounts_manager: None,
@@ -3621,7 +3616,7 @@ impl DesktopAppRuntimeState {
             order_document_json: Some(local_work.payload.clone()),
             listing_addr: export.listing_addr,
             listing_event_id: export.listing_event_id,
-            listing_relays: vec![self.default_nostr_relay_url.clone()],
+            listing_relays: self.nostr_relay_urls.clone(),
             buyer_pubkey: export.buyer_pubkey,
             seller_pubkey: export.seller_pubkey,
             items: order
@@ -4746,10 +4741,17 @@ fn current_runtime_time_ms() -> Result<i64, AppSqliteError> {
 fn normalized_app_sync_relay_urls(
     relay_urls: &[String],
 ) -> Result<Vec<String>, AppSyncTransportError> {
+    let mut seen = BTreeSet::new();
     let normalized = relay_urls
         .iter()
-        .map(|relay| relay.trim().to_owned())
-        .filter(|relay| !relay.is_empty())
+        .filter_map(|relay| {
+            let relay = relay.trim();
+            if relay.is_empty() || !seen.insert(relay.to_owned()) {
+                None
+            } else {
+                Some(relay.to_owned())
+            }
+        })
         .collect::<Vec<_>>();
     if normalized.is_empty() {
         return Err(AppSyncTransportError::unavailable(
@@ -7051,7 +7053,8 @@ mod tests {
 
     #[test]
     fn runtime_direct_relay_transport_publishes_typed_farm_work() {
-        let relay = ThreadedAckRelay::spawn();
+        let relay_a = ThreadedAckRelay::spawn();
+        let relay_b = ThreadedAckRelay::spawn();
         let manager = RadrootsNostrAccountsManager::new_in_memory();
         let account_id = manager
             .generate_identity(Some("Farmer".to_owned()), true)
@@ -7066,8 +7069,10 @@ mod tests {
         });
         let operation = PendingSyncOperation::from_publish_payload(payload, "2026-05-24T12:00:00Z")
             .expect("typed farm publish work should serialize");
-        let mut transport =
-            SdkDirectRelayAppSyncTransport::with_relay_urls(manager, vec![relay.url().to_owned()]);
+        let mut transport = SdkDirectRelayAppSyncTransport::with_relay_urls(
+            manager,
+            vec![relay_a.url().to_owned(), relay_b.url().to_owned()],
+        );
 
         let result = transport
             .sync(AppSyncRequest {
@@ -7090,7 +7095,23 @@ mod tests {
         );
         assert_eq!(
             result.published_receipts[0].relay_delivery_json["acknowledged_relays"],
-            json!([relay.url()])
+            json!([relay_a.url(), relay_b.url()])
+        );
+    }
+
+    #[test]
+    fn runtime_direct_relay_transport_normalizes_configured_relay_set() {
+        let relay_urls = super::normalized_app_sync_relay_urls(&[
+            " ws://127.0.0.1:8081 ".to_owned(),
+            "ws://127.0.0.1:8080".to_owned(),
+            "ws://127.0.0.1:8081".to_owned(),
+            " ".to_owned(),
+        ])
+        .expect("relay set should normalize");
+
+        assert_eq!(
+            relay_urls,
+            vec!["ws://127.0.0.1:8081", "ws://127.0.0.1:8080"]
         );
     }
 
@@ -7175,7 +7196,7 @@ mod tests {
         let runtime = DesktopAppRuntime::from_state(DesktopAppRuntimeState {
             state_store: AppStateStore::load(AppStatePersistenceRepository::in_memory())
                 .expect("in-memory state store should load"),
-            default_nostr_relay_url: "ws://127.0.0.1:8080".to_owned(),
+            nostr_relay_urls: vec!["ws://127.0.0.1:8080".to_owned()],
             shared_accounts_paths: None,
             remote_signer_paths: None,
             accounts_manager: None,
@@ -7229,7 +7250,7 @@ mod tests {
         let runtime = DesktopAppRuntime::from_state(DesktopAppRuntimeState {
             state_store: AppStateStore::load(AppStatePersistenceRepository::in_memory())
                 .expect("in-memory state store should load"),
-            default_nostr_relay_url: "ws://127.0.0.1:8080".to_owned(),
+            nostr_relay_urls: vec!["ws://127.0.0.1:8080".to_owned()],
             shared_accounts_paths: None,
             remote_signer_paths: None,
             accounts_manager: None,
@@ -8659,7 +8680,7 @@ mod tests {
         let runtime = DesktopAppRuntime::from_state(DesktopAppRuntimeState {
             state_store: AppStateStore::load(AppStatePersistenceRepository::in_memory())
                 .expect("in-memory state store should load"),
-            default_nostr_relay_url: "ws://127.0.0.1:8080".to_owned(),
+            nostr_relay_urls: vec!["ws://127.0.0.1:8080".to_owned()],
             shared_accounts_paths: None,
             remote_signer_paths: Some(paths.clone()),
             accounts_manager: None,
@@ -8690,7 +8711,7 @@ mod tests {
         let runtime = DesktopAppRuntime::from_state(DesktopAppRuntimeState {
             state_store: AppStateStore::load(AppStatePersistenceRepository::in_memory())
                 .expect("in-memory state store should load"),
-            default_nostr_relay_url: "ws://127.0.0.1:8080".to_owned(),
+            nostr_relay_urls: vec!["ws://127.0.0.1:8080".to_owned()],
             shared_accounts_paths: None,
             remote_signer_paths: Some(paths.clone()),
             accounts_manager: None,
@@ -9099,7 +9120,7 @@ mod tests {
         let runtime = DesktopAppRuntime::from_state(DesktopAppRuntimeState {
             state_store: AppStateStore::load(AppStatePersistenceRepository::in_memory())
                 .expect("in-memory state store should load"),
-            default_nostr_relay_url: "ws://127.0.0.1:8080".to_owned(),
+            nostr_relay_urls: vec!["ws://127.0.0.1:8080".to_owned()],
             shared_accounts_paths: None,
             remote_signer_paths: None,
             accounts_manager: None,
@@ -9201,7 +9222,7 @@ mod tests {
         let runtime = DesktopAppRuntime::from_state(DesktopAppRuntimeState {
             state_store: AppStateStore::load(AppStatePersistenceRepository::in_memory())
                 .expect("in-memory state store should load"),
-            default_nostr_relay_url: "ws://127.0.0.1:8080".to_owned(),
+            nostr_relay_urls: vec!["ws://127.0.0.1:8080".to_owned()],
             shared_accounts_paths: None,
             remote_signer_paths: None,
             accounts_manager: None,
@@ -9254,7 +9275,7 @@ mod tests {
         let runtime = DesktopAppRuntime::from_state(DesktopAppRuntimeState {
             state_store: AppStateStore::load(AppStatePersistenceRepository::in_memory())
                 .expect("in-memory state store should load"),
-            default_nostr_relay_url: "ws://127.0.0.1:8080".to_owned(),
+            nostr_relay_urls: vec!["ws://127.0.0.1:8080".to_owned()],
             shared_accounts_paths: None,
             remote_signer_paths: None,
             accounts_manager: None,
@@ -9291,7 +9312,7 @@ mod tests {
         let runtime = DesktopAppRuntime::from_state(DesktopAppRuntimeState {
             state_store: AppStateStore::load(AppStatePersistenceRepository::in_memory())
                 .expect("in-memory state store should load"),
-            default_nostr_relay_url: "ws://127.0.0.1:8080".to_owned(),
+            nostr_relay_urls: vec!["ws://127.0.0.1:8080".to_owned()],
             shared_accounts_paths: None,
             remote_signer_paths: None,
             accounts_manager: None,
@@ -9326,7 +9347,7 @@ mod tests {
         let runtime = DesktopAppRuntime::from_state(DesktopAppRuntimeState {
             state_store: AppStateStore::load(AppStatePersistenceRepository::in_memory())
                 .expect("in-memory state store should load"),
-            default_nostr_relay_url: "ws://127.0.0.1:8080".to_owned(),
+            nostr_relay_urls: vec!["ws://127.0.0.1:8080".to_owned()],
             shared_accounts_paths: None,
             remote_signer_paths: None,
             accounts_manager: None,
@@ -13490,7 +13511,7 @@ mod tests {
         let runtime = DesktopAppRuntime::from_state(DesktopAppRuntimeState {
             state_store: AppStateStore::load(AppStatePersistenceRepository::in_memory())
                 .expect("in-memory state store should load"),
-            default_nostr_relay_url: "ws://127.0.0.1:8080".to_owned(),
+            nostr_relay_urls: vec!["ws://127.0.0.1:8080".to_owned()],
             shared_accounts_paths: Some(paths),
             remote_signer_paths: None,
             accounts_manager: None,
@@ -13519,7 +13540,7 @@ mod tests {
         DesktopAppRuntime::from_state(DesktopAppRuntimeState {
             state_store: AppStateStore::load(AppStatePersistenceRepository::in_memory())
                 .expect("in-memory state store should load"),
-            default_nostr_relay_url: "ws://127.0.0.1:8080".to_owned(),
+            nostr_relay_urls: vec!["ws://127.0.0.1:8080".to_owned()],
             shared_accounts_paths: None,
             remote_signer_paths: None,
             accounts_manager: Some(
@@ -13550,7 +13571,7 @@ mod tests {
             DesktopAppRuntime::from_state(DesktopAppRuntimeState {
                 state_store: AppStateStore::load(AppStatePersistenceRepository::in_memory())
                     .expect("in-memory state store should load"),
-                default_nostr_relay_url: "ws://127.0.0.1:8080".to_owned(),
+                nostr_relay_urls: vec!["ws://127.0.0.1:8080".to_owned()],
                 shared_accounts_paths: Some(paths.clone()),
                 remote_signer_paths: None,
                 accounts_manager: Some(
@@ -13586,7 +13607,7 @@ mod tests {
         DesktopAppRuntime::from_state(
             DesktopAppRuntimeState::bootstrap_from_paths(
                 paths,
-                "ws://127.0.0.1:8080".to_owned(),
+                vec!["ws://127.0.0.1:8080".to_owned()],
                 super::default_runtime_snapshot(),
             )
             .expect("runtime bootstrap should succeed"),
