@@ -355,7 +355,7 @@ impl<'a> AppLocalInteropRepository<'a> {
             display_name: display_name.clone(),
             readiness: FarmReadiness::Incomplete,
         };
-        self.upsert_farm_summary(&saved_farm)?;
+        self.upsert_local_work_farm_summary(&saved_farm)?;
         let owner_account_id = record
             .owner_account_id
             .clone()
@@ -472,10 +472,16 @@ impl<'a> AppLocalInteropRepository<'a> {
         };
         let display_name =
             string_at(&content, &["name"]).unwrap_or_else(|| "Local farm".to_owned());
+        let readiness = match signed_farm_readiness(&content, tags) {
+            Some(readiness) => readiness,
+            None => self
+                .load_farm_readiness(farm_id)?
+                .unwrap_or(FarmReadiness::Incomplete),
+        };
         self.upsert_farm_summary(&FarmSummary {
             farm_id,
             display_name,
-            readiness: signed_farm_readiness(&content, tags).unwrap_or(FarmReadiness::Incomplete),
+            readiness,
         })?;
         Ok(Some(ProjectionRecord {
             kind: "farm",
@@ -655,6 +661,32 @@ impl<'a> AppLocalInteropRepository<'a> {
         Ok(())
     }
 
+    fn upsert_local_work_farm_summary(&self, farm: &FarmSummary) -> Result<(), AppSqliteError> {
+        self.connection
+            .execute(
+                "INSERT INTO farms (id, display_name, readiness, created_at, updated_at)
+                 VALUES (?1, ?2, ?3, strftime('%Y-%m-%dT%H:%M:%SZ', 'now'), strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
+                 ON CONFLICT(id) DO UPDATE SET
+                    display_name = excluded.display_name,
+                    readiness = CASE
+                        WHEN farms.readiness = 'ready' AND excluded.readiness = 'incomplete'
+                        THEN farms.readiness
+                        ELSE excluded.readiness
+                    END,
+                    updated_at = excluded.updated_at",
+                params![
+                    farm.farm_id.to_string(),
+                    farm.display_name.as_str(),
+                    farm_readiness_storage_key(farm.readiness),
+                ],
+            )
+            .map_err(|source| AppSqliteError::Query {
+                operation: "upsert local interop local work farm summary",
+                source,
+            })?;
+        Ok(())
+    }
+
     fn mark_farm_buyer_visible(
         &self,
         farm_id: FarmId,
@@ -760,6 +792,25 @@ impl<'a> AppLocalInteropRepository<'a> {
                 operation: "load local interop farm display name",
                 source,
             })
+    }
+
+    fn load_farm_readiness(
+        &self,
+        farm_id: FarmId,
+    ) -> Result<Option<FarmReadiness>, AppSqliteError> {
+        self.connection
+            .query_row(
+                "SELECT readiness FROM farms WHERE id = ?1 LIMIT 1",
+                [farm_id.to_string()],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()
+            .map_err(|source| AppSqliteError::Query {
+                operation: "load local interop farm readiness",
+                source,
+            })?
+            .map(|readiness| farm_readiness_from_storage_key(readiness.as_str()))
+            .transpose()
     }
 
     fn ensure_signed_listing_availability_window(
@@ -1511,6 +1562,16 @@ fn farm_readiness_storage_key(readiness: FarmReadiness) -> &'static str {
     }
 }
 
+fn farm_readiness_from_storage_key(readiness: &str) -> Result<FarmReadiness, AppSqliteError> {
+    match readiness {
+        "incomplete" => Ok(FarmReadiness::Incomplete),
+        "ready" => Ok(FarmReadiness::Ready),
+        _ => Err(AppSqliteError::InvalidProjection {
+            reason: "farm readiness storage key is invalid",
+        }),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::collections::BTreeSet;
@@ -1563,6 +1624,58 @@ mod tests {
             outbox_status: PublishOutboxStatus::None,
             relay_set_fingerprint: None,
             relay_delivery_json: None,
+        }
+    }
+
+    fn signed_farm_record(
+        record_id: &str,
+        event_id: &str,
+        source_runtime: SourceRuntime,
+        owner_pubkey: &str,
+        farm_key: &str,
+        readiness: &str,
+        display_name: &str,
+    ) -> LocalEventRecordInput {
+        LocalEventRecordInput {
+            record_id: record_id.to_owned(),
+            family: LocalRecordFamily::SignedEvent,
+            status: LocalRecordStatus::Published,
+            source_runtime,
+            created_at_ms: 1100,
+            inserted_at_ms: 1101,
+            owner_account_id: Some("seller-account".to_owned()),
+            owner_pubkey: Some(owner_pubkey.to_owned()),
+            farm_id: Some(farm_key.to_owned()),
+            listing_addr: None,
+            local_work_json: None,
+            event_id: Some(event_id.to_owned()),
+            event_kind: Some(KIND_FARM),
+            event_pubkey: Some(owner_pubkey.to_owned()),
+            event_created_at: Some(1100),
+            event_tags_json: Some(json!([
+                ["d", farm_key],
+                ["t", format!("radroots:readiness:{readiness}")]
+            ])),
+            event_content: Some(
+                json!({
+                    "d_tag": farm_key,
+                    "name": display_name,
+                    "tags": [format!("radroots:readiness:{readiness}")]
+                })
+                .to_string(),
+            ),
+            event_sig: Some("signature".to_owned()),
+            raw_event_json: Some(json!({
+                "id": event_id,
+                "kind": KIND_FARM,
+                "pubkey": owner_pubkey,
+            })),
+            outbox_status: PublishOutboxStatus::Acknowledged,
+            relay_set_fingerprint: Some("relay-set".to_owned()),
+            relay_delivery_json: Some(json!({
+                "state": "acknowledged",
+                "acknowledged_relays": ["ws://127.0.0.1:1234/"]
+            })),
         }
     }
 
@@ -2695,6 +2808,164 @@ mod tests {
                 .count(),
             1
         );
+    }
+
+    #[test]
+    fn local_work_farm_import_preserves_duplicate_relay_signed_ready_farm() {
+        let app_store =
+            AppSqliteStore::open(DatabaseTarget::InMemory).expect("open app sqlite store");
+        let relay_events = local_events_store();
+        let shared_events = local_events_store();
+        let farm_uuid = Uuid::from_u128(0x55555555555545558555555555555555);
+        let farm_key = app_d_tag_from_uuid(farm_uuid);
+        let signed_event_id = "event-app-relay-ready-farm";
+        let relay_record = relay_events
+            .append_record(&signed_farm_record(
+                "app:relay_event:farm-ready",
+                signed_event_id,
+                SourceRuntime::App,
+                "app-seller-pubkey",
+                farm_key.as_str(),
+                "ready",
+                "Relay Ready Farm",
+            ))
+            .expect("append relay farm");
+        let direct_report = app_store
+            .import_local_event_records(&[relay_record])
+            .expect("direct relay import");
+        let local_farm_record = app_local_work_record(
+            "app:local_work:farm:ready-preserve",
+            farm_key.as_str(),
+            json!({
+                "record_kind": "farm_config_v1",
+                "document": {
+                    "selection": {
+                        "account": "seller-account",
+                        "farm_d_tag": farm_key
+                    },
+                    "profile": {
+                        "display_name": "Draft Farm"
+                    },
+                    "farm": {
+                        "d_tag": farm_key,
+                        "name": "Draft Farm"
+                    }
+                }
+            }),
+        );
+        shared_events
+            .append_record(&local_farm_record)
+            .expect("append local farm work");
+        shared_events
+            .append_record(&signed_farm_record(
+                "app:signed_event:farm-ready",
+                signed_event_id,
+                SourceRuntime::App,
+                "app-seller-pubkey",
+                farm_key.as_str(),
+                "ready",
+                "Relay Ready Farm",
+            ))
+            .expect("append duplicate signed farm");
+
+        let shared_report = app_store
+            .import_shared_local_events_from_store(&shared_events)
+            .expect("import shared local work after relay");
+        let stored_farm: (String, String, String) = app_store
+            .connection()
+            .query_row("SELECT id, display_name, readiness FROM farms", [], |row| {
+                Ok((row.get(0)?, row.get(1)?, row.get(2)?))
+            })
+            .expect("load farm");
+
+        assert_eq!(direct_report.imported_records, 1);
+        assert_eq!(shared_report.imported_records, 1);
+        assert_eq!(shared_report.skipped_records, 1);
+        assert_eq!(stored_farm.0, farm_uuid.to_string());
+        assert_eq!(stored_farm.1, "Draft Farm");
+        assert_eq!(stored_farm.2, "ready");
+    }
+
+    #[test]
+    fn signed_farm_without_readiness_preserves_listing_visible_farm() {
+        let app_store =
+            AppSqliteStore::open(DatabaseTarget::InMemory).expect("open app sqlite store");
+        let events = local_events_store();
+        let farm_key = "SIGNEDFARMAAAAAAAAAAAA";
+        let listing_key = "SIGNEDLISTINGBBBBBBBB";
+        let expected_farm_id = deterministic_farm_id(Some("seller-pubkey"), farm_key);
+        events
+            .append_record(&signed_market_listing_record(
+                "visible-listing",
+                "seller-pubkey",
+                farm_key,
+                listing_key,
+                "Relay Ready Eggs",
+                "8",
+                "active",
+                "pickup",
+                "West barn pickup",
+                4_102_444_800,
+                4_102_531_200,
+                LocalRecordStatus::Published,
+                PublishOutboxStatus::Acknowledged,
+            ))
+            .expect("append visible listing");
+        events
+            .append_record(&LocalEventRecordInput {
+                record_id: "cli:signed_event:farm:no-readiness".to_owned(),
+                family: LocalRecordFamily::SignedEvent,
+                status: LocalRecordStatus::Published,
+                source_runtime: SourceRuntime::Cli,
+                created_at_ms: 1200,
+                inserted_at_ms: 1201,
+                owner_account_id: Some("seller-account".to_owned()),
+                owner_pubkey: Some("seller-pubkey".to_owned()),
+                farm_id: Some(farm_key.to_owned()),
+                listing_addr: None,
+                local_work_json: None,
+                event_id: Some("event-farm-no-readiness".to_owned()),
+                event_kind: Some(KIND_FARM),
+                event_pubkey: Some("seller-pubkey".to_owned()),
+                event_created_at: Some(1200),
+                event_tags_json: Some(json!([["d", farm_key]])),
+                event_content: Some(
+                    json!({
+                        "d_tag": farm_key,
+                        "name": "Relay Ready Farm"
+                    })
+                    .to_string(),
+                ),
+                event_sig: Some("signature".to_owned()),
+                raw_event_json: Some(json!({
+                    "id": "event-farm-no-readiness",
+                    "kind": KIND_FARM,
+                    "pubkey": "seller-pubkey"
+                })),
+                outbox_status: PublishOutboxStatus::Acknowledged,
+                relay_set_fingerprint: Some("relay-set".to_owned()),
+                relay_delivery_json: Some(json!({
+                    "state": "acknowledged",
+                    "acknowledged_relays": ["ws://127.0.0.1:1234/"]
+                })),
+            })
+            .expect("append farm without readiness");
+
+        let report = app_store
+            .import_shared_local_events_from_store(&events)
+            .expect("import listing and farm");
+        let stored_farm: (String, String, String) = app_store
+            .connection()
+            .query_row("SELECT id, display_name, readiness FROM farms", [], |row| {
+                Ok((row.get(0)?, row.get(1)?, row.get(2)?))
+            })
+            .expect("load farm");
+
+        assert_eq!(report.imported_records, 2);
+        assert_eq!(stored_farm.0, expected_farm_id.to_string());
+        assert_eq!(stored_farm.1, "Relay Ready Farm");
+        assert_eq!(stored_farm.2, "ready");
+        assert_eq!(buyer_listing_titles(&app_store), vec!["Relay Ready Eggs"]);
     }
 
     #[test]
