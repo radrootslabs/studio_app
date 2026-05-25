@@ -77,14 +77,20 @@ pub struct AppFarmProfilePublishPayload {
 pub struct AppListingPublishPayload {
     pub context: AppPublishContext,
     pub product_id: ProductId,
+    pub listing_d_tag: Option<String>,
     pub farm_id: Option<FarmId>,
+    pub farm_pubkey: Option<String>,
+    pub farm_d_tag: Option<String>,
     pub title: String,
     pub subtitle: Option<String>,
+    pub category: Option<String>,
     pub unit_label: String,
     pub price_minor_units: Option<u32>,
     pub price_currency: String,
     pub stock_quantity: Option<u32>,
     pub availability_window_id: Option<FulfillmentWindowId>,
+    pub fulfillment_method: Option<String>,
+    pub fulfillment_location: Option<String>,
     pub status: ProductStatus,
 }
 
@@ -100,6 +106,7 @@ pub struct AppOrderRequestPublishPayload {
     pub order_id: OrderId,
     pub farm_id: FarmId,
     pub status: Option<String>,
+    pub order_document_json: Option<serde_json::Value>,
     pub listing_addr: Option<String>,
     pub listing_event_id: Option<String>,
     pub listing_relays: Vec<String>,
@@ -159,6 +166,20 @@ impl AppPublishPayload {
                 if payload.farm_id.is_none() {
                     failures.push(AppPublishValidationFailure::MissingListingFarmId);
                 }
+                if payload
+                    .farm_pubkey
+                    .as_deref()
+                    .is_none_or(|value| value.trim().is_empty())
+                {
+                    failures.push(AppPublishValidationFailure::MissingListingFarmPubkey);
+                }
+                if payload
+                    .category
+                    .as_deref()
+                    .is_none_or(|value| value.trim().is_empty())
+                {
+                    failures.push(AppPublishValidationFailure::MissingListingCategory);
+                }
                 if payload.title.trim().is_empty() {
                     failures.push(AppPublishValidationFailure::MissingListingTitle);
                 }
@@ -174,9 +195,19 @@ impl AppPublishPayload {
                 if payload.availability_window_id.is_none() {
                     failures.push(AppPublishValidationFailure::MissingListingAvailability);
                 }
+                if payload
+                    .fulfillment_method
+                    .as_deref()
+                    .is_none_or(|value| value.trim().is_empty())
+                {
+                    failures.push(AppPublishValidationFailure::MissingListingFulfillmentMethod);
+                }
             }
             Self::OrderRequest(payload) => {
                 payload.context.validation_failures(&mut failures);
+                if payload.order_document_json.is_none() {
+                    failures.push(AppPublishValidationFailure::MissingOrderDocument);
+                }
                 if payload
                     .listing_addr
                     .as_deref()
@@ -254,11 +285,15 @@ pub enum AppPublishValidationFailure {
     MissingSource,
     MissingFarmDisplayName,
     MissingListingFarmId,
+    MissingListingFarmPubkey,
+    MissingListingCategory,
     MissingListingTitle,
     MissingListingUnit,
     MissingListingPrice,
     MissingListingCurrency,
     MissingListingAvailability,
+    MissingListingFulfillmentMethod,
+    MissingOrderDocument,
     MissingOrderListingAddress,
     MissingOrderListingEventId,
     MissingOrderListingRelay,
@@ -276,11 +311,15 @@ impl AppPublishValidationFailure {
             Self::MissingSource => "missing_source",
             Self::MissingFarmDisplayName => "missing_farm_display_name",
             Self::MissingListingFarmId => "missing_listing_farm_id",
+            Self::MissingListingFarmPubkey => "missing_listing_farm_pubkey",
+            Self::MissingListingCategory => "missing_listing_category",
             Self::MissingListingTitle => "missing_listing_title",
             Self::MissingListingUnit => "missing_listing_unit",
             Self::MissingListingPrice => "missing_listing_price",
             Self::MissingListingCurrency => "missing_listing_currency",
             Self::MissingListingAvailability => "missing_listing_availability",
+            Self::MissingListingFulfillmentMethod => "missing_listing_fulfillment_method",
+            Self::MissingOrderDocument => "missing_order_document",
             Self::MissingOrderListingAddress => "missing_order_listing_address",
             Self::MissingOrderListingEventId => "missing_order_listing_event_id",
             Self::MissingOrderListingRelay => "missing_order_listing_relay",
@@ -392,14 +431,20 @@ mod tests {
         let payload = AppPublishPayload::Listing(AppListingPublishPayload {
             context: AppPublishContext::new("", ""),
             product_id: ProductId::new(),
+            listing_d_tag: None,
             farm_id: None,
+            farm_pubkey: None,
+            farm_d_tag: None,
             title: " ".to_owned(),
             subtitle: None,
+            category: None,
             unit_label: String::new(),
             price_minor_units: Some(0),
             price_currency: String::new(),
             stock_quantity: Some(4),
             availability_window_id: None,
+            fulfillment_method: None,
+            fulfillment_location: None,
             status: ProductStatus::Published,
         });
 
@@ -415,11 +460,14 @@ mod tests {
                 "missing_account_id",
                 "missing_source",
                 "missing_listing_farm_id",
+                "missing_listing_farm_pubkey",
+                "missing_listing_category",
                 "missing_listing_title",
                 "missing_listing_unit",
                 "missing_listing_price",
                 "missing_listing_currency",
                 "missing_listing_availability",
+                "missing_listing_fulfillment_method",
             ]
         );
         assert!(payload.validate().is_err());
@@ -432,6 +480,7 @@ mod tests {
             order_id: OrderId::new(),
             farm_id: FarmId::new(),
             status: Some("needs_action".to_owned()),
+            order_document_json: None,
             listing_addr: Some(String::new()),
             listing_event_id: None,
             listing_relays: vec![],
@@ -455,6 +504,7 @@ mod tests {
         assert_eq!(
             reason_codes,
             vec![
+                "missing_order_document",
                 "missing_order_listing_address",
                 "missing_order_listing_event_id",
                 "missing_order_listing_relay",

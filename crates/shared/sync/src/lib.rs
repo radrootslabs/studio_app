@@ -377,6 +377,8 @@ pub struct AppSyncResult {
     pub pushed_operation_count: usize,
     pub pulled_record_count: usize,
     pub conflicts: Vec<SyncConflict>,
+    #[serde(default)]
+    pub published_receipts: Vec<AppPublishedOperationReceipt>,
 }
 
 impl AppSyncResult {
@@ -387,6 +389,22 @@ impl AppSyncResult {
             conflict_status: SyncConflictStatus::from_conflicts(&self.conflicts),
         }
     }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct AppPublishedOperationReceipt {
+    pub operation_key: String,
+    pub source_local_event_id: Option<String>,
+    pub event_id: String,
+    pub event_kind: u32,
+    pub event_pubkey: String,
+    pub event_created_at: u32,
+    pub event_tags_json: serde_json::Value,
+    pub event_content: String,
+    pub event_sig: String,
+    pub raw_event_json: serde_json::Value,
+    pub relay_set_fingerprint: String,
+    pub relay_delivery_json: serde_json::Value,
 }
 
 #[derive(Clone, Debug, Eq, Error, PartialEq)]
@@ -575,6 +593,7 @@ mod tests {
             pushed_operation_count: 1,
             pulled_record_count: 3,
             conflicts: vec![conflict],
+            published_receipts: Vec::new(),
         };
 
         assert_eq!(request.conflict_status().unresolved_count, 1);
@@ -608,6 +627,7 @@ mod tests {
             pushed_operation_count: 0,
             pulled_record_count: 2,
             conflicts: vec![],
+            published_receipts: Vec::new(),
         };
         let mut transport = RecordedAppSyncTransport::succeed(expected_result.clone());
 

@@ -10,14 +10,17 @@ publish = false
 
 [dependencies]
 chrono.workspace = true
+futures-util.workspace = true
 gpui.workspace = true
 gpui-component.workspace = true
 gpui-component-assets.workspace = true
+radroots_core.workspace = true
 radroots_identity.workspace = true
 radroots_nostr.workspace = true
 radroots_nostr_accounts.workspace = true
 radroots_protected_store.workspace = true
 radroots_secret_vault.workspace = true
+radroots_sdk.workspace = true
 radroots_studio_app_core.workspace = true
 radroots_studio_app_i18n.workspace = true
 radroots_studio_app_models.workspace = true
@@ -30,6 +33,8 @@ radroots_local_events.workspace = true
 radroots_sql_core.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
+tokio.workspace = true
+tokio-tungstenite.workspace = true
 tracing.workspace = true
 uuid.workspace = true
 
