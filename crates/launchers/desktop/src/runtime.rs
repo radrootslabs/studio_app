@@ -64,9 +64,9 @@ use radroots_local_events::{
     BUYER_ORDER_REQUEST_ACTOR_SOURCE_RESOLVED_ACCOUNT,
     BUYER_ORDER_REQUEST_ACTOR_SOURCE_UNRESOLVED_APP, BUYER_ORDER_REQUEST_DOCUMENT_KIND,
     BUYER_ORDER_REQUEST_LOCAL_WORK_RECORD_KIND, LocalEventRecordInput, LocalEventRecordUpdate,
-    LocalEventsStore, LocalRecordFamily, LocalRecordStatus, PublishOutboxStatus, SourceRuntime,
-    buyer_order_request_local_work_record_id, canonical_relay_set_fingerprint,
-    validate_buyer_order_request_local_work_payload,
+    LocalEventsStore, LocalRecordFamily, LocalRecordStatus, PublishOutboxStatus,
+    RelayDeliveryEvidence, RelayDeliveryFailure, SourceRuntime,
+    buyer_order_request_local_work_record_id, validate_buyer_order_request_local_work_payload,
 };
 use radroots_nostr_accounts::prelude::RadrootsNostrAccountsManager;
 use radroots_sdk::farm::{RadrootsFarm, RadrootsFarmRef};
@@ -5301,12 +5301,23 @@ fn published_operation_receipt(
         .failed_relays
         .iter()
         .map(|failure| {
-            json!({
-                "relay_url": failure.relay_url,
-                "error": failure.error,
-            })
+            RelayDeliveryFailure::new(failure.relay_url.as_str(), failure.error.as_str())
+                .map_err(|source| AppSyncTransportError::failed(source.to_string()))
         })
-        .collect::<Vec<_>>();
+        .collect::<Result<Vec<_>, _>>()?;
+    let delivery_evidence = RelayDeliveryEvidence::acknowledged(
+        &relay_receipt.target_relays,
+        &relay_receipt.connected_relays,
+        &relay_receipt.acknowledged_relays,
+        failed_relays,
+    )
+    .map_err(|source| AppSyncTransportError::failed(source.to_string()))?;
+    let relay_set_fingerprint = delivery_evidence.relay_set_fingerprint().ok_or_else(|| {
+        AppSyncTransportError::failed("direct relay publish requires a non-empty relay set")
+    })?;
+    let relay_delivery_json = delivery_evidence
+        .to_json_value()
+        .map_err(|source| AppSyncTransportError::failed(source.to_string()))?;
     let raw_event_json = json!({
         "id": relay_receipt.event.id.clone(),
         "pubkey": relay_receipt.event.author.clone(),
@@ -5316,10 +5327,6 @@ fn published_operation_receipt(
         "content": relay_receipt.event.content.clone(),
         "sig": relay_receipt.event.sig.clone(),
     });
-    let relay_set_fingerprint = canonical_relay_set_fingerprint(&relay_receipt.target_relays)
-        .ok_or_else(|| {
-            AppSyncTransportError::failed("direct relay publish requires a non-empty relay set")
-        })?;
 
     Ok(AppPublishedOperationReceipt {
         operation_key: operation_key.to_owned(),
@@ -5334,12 +5341,7 @@ fn published_operation_receipt(
         event_sig: relay_receipt.signature,
         raw_event_json,
         relay_set_fingerprint,
-        relay_delivery_json: json!({
-            "target_relays": relay_receipt.target_relays,
-            "connected_relays": relay_receipt.connected_relays,
-            "acknowledged_relays": relay_receipt.acknowledged_relays,
-            "failed_relays": failed_relays,
-        }),
+        relay_delivery_json,
     })
 }
 
@@ -7286,6 +7288,10 @@ mod tests {
         assert_eq!(
             result.published_receipts[0].relay_delivery_json["acknowledged_relays"],
             json!([relay_a.url(), relay_b.url()])
+        );
+        assert_eq!(
+            result.published_receipts[0].relay_delivery_json["state"],
+            json!("acknowledged")
         );
     }
 
