@@ -2,7 +2,17 @@ use std::{fs, path::Path};
 
 use radroots_studio_app_models::{
     FarmId, FarmOrderMethod, FarmReadiness, FarmSetupDraft, FarmSetupProjection, FarmSummary,
-    FulfillmentWindowId, PickupLocationId, ProductId, ProductStatus,
+    FulfillmentWindowId, OrderId, PickupLocationId, ProductId, ProductStatus,
+};
+use radroots_events::{
+    RadrootsNostrEvent,
+    kinds::{KIND_TRADE_ORDER_REQUEST, KIND_TRADE_ORDER_RESPONSE},
+    trade::{
+        RadrootsTradeOrderDecision, RadrootsTradeOrderDecisionEvent, RadrootsTradeOrderRequested,
+    },
+};
+use radroots_events_codec::trade::{
+    active_trade_order_decision_from_event, active_trade_order_request_from_event,
 };
 use radroots_local_events::{
     LocalEventRecord, LocalEventsStore, LocalRecordFamily, LocalRecordStatus, PublishOutboxStatus,
@@ -21,6 +31,8 @@ const APP_LOCAL_INTEROP_CURSOR_ID: &str = "radroots_studio_app_sqlite_projection
 const KIND_FARM: i64 = 30340;
 const KIND_LISTING: i64 = 30402;
 const KIND_LISTING_DRAFT: i64 = 30403;
+const KIND_ORDER_REQUEST: i64 = KIND_TRADE_ORDER_REQUEST as i64;
+const KIND_ORDER_DECISION: i64 = KIND_TRADE_ORDER_RESPONSE as i64;
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct AppLocalInteropImportReport {
@@ -308,6 +320,8 @@ impl<'a> AppLocalInteropRepository<'a> {
         match record.event_kind {
             Some(KIND_FARM) => self.import_signed_farm(record),
             Some(KIND_LISTING | KIND_LISTING_DRAFT) => self.import_signed_listing(record),
+            Some(KIND_ORDER_REQUEST) => self.import_signed_order_request(record),
+            Some(KIND_ORDER_DECISION) => self.import_signed_order_decision(record),
             _ => Ok(Some(ProjectionRecord {
                 kind: "signed_event",
                 projected_id: record.event_id.clone(),
@@ -637,6 +651,206 @@ impl<'a> AppLocalInteropRepository<'a> {
             kind: "listing",
             projected_id: Some(product_id.to_string()),
         }))
+    }
+
+    fn import_signed_order_request(
+        &self,
+        record: &LocalEventRecord,
+    ) -> Result<Option<ProjectionRecord>, AppSqliteError> {
+        let Some(event) = signed_event_from_record(record)? else {
+            return Ok(Some(signed_event_projection(record)));
+        };
+        let Ok(envelope) = active_trade_order_request_from_event(&event) else {
+            return Ok(Some(signed_event_projection(record)));
+        };
+        self.upsert_order_request(record, &envelope.payload)?;
+        Ok(Some(signed_event_projection(record)))
+    }
+
+    fn import_signed_order_decision(
+        &self,
+        record: &LocalEventRecord,
+    ) -> Result<Option<ProjectionRecord>, AppSqliteError> {
+        let Some(event) = signed_event_from_record(record)? else {
+            return Ok(Some(signed_event_projection(record)));
+        };
+        let Ok(envelope) = active_trade_order_decision_from_event(&event) else {
+            return Ok(Some(signed_event_projection(record)));
+        };
+        self.apply_order_decision(&envelope.payload)?;
+        Ok(Some(signed_event_projection(record)))
+    }
+
+    fn upsert_order_request(
+        &self,
+        record: &LocalEventRecord,
+        payload: &RadrootsTradeOrderRequested,
+    ) -> Result<OrderId, AppSqliteError> {
+        let existing_listing =
+            self.existing_listing_projection(Some(payload.listing_addr.as_str()))?;
+        let farm_id = if let Some(existing_listing) = existing_listing.as_ref() {
+            existing_listing.farm_id
+        } else {
+            deterministic_farm_id(
+                Some(payload.seller_pubkey.as_str()),
+                payload.listing_addr.as_str(),
+            )
+        };
+        self.ensure_farm_exists(farm_id)?;
+        let order_id = projected_order_id(payload.order_id.as_str(), payload.buyer_pubkey.as_str());
+        let order_number = existing_order_number(self.connection, order_id)?
+            .unwrap_or_else(|| deterministic_order_number(payload.order_id.as_str()));
+        self.connection
+            .execute(
+                "INSERT INTO orders (
+                    id,
+                    farm_id,
+                    fulfillment_window_id,
+                    order_number,
+                    customer_display_name,
+                    status,
+                    updated_at,
+                    buyer_context_key,
+                    buyer_email,
+                    buyer_phone,
+                    buyer_order_note
+                 ) VALUES (?1, ?2, null, ?3, ?4, 'needs_action', strftime('%Y-%m-%dT%H:%M:%SZ', 'now'), ?5, '', '', '')
+                 ON CONFLICT(id) DO UPDATE SET
+                    farm_id = excluded.farm_id,
+                    order_number = excluded.order_number,
+                    customer_display_name = excluded.customer_display_name,
+                    status = CASE
+                        WHEN orders.status IN ('scheduled', 'packed', 'completed', 'refunded')
+                        THEN orders.status
+                        ELSE excluded.status
+                    END,
+                    buyer_context_key = coalesce(orders.buyer_context_key, excluded.buyer_context_key),
+                    updated_at = excluded.updated_at",
+                params![
+                    order_id.to_string(),
+                    farm_id.to_string(),
+                    order_number.as_str(),
+                    order_customer_display_name(payload.buyer_pubkey.as_str()),
+                    order_buyer_context_key(record, payload.buyer_pubkey.as_str()),
+                ],
+            )
+            .map_err(|source| AppSqliteError::Query {
+                operation: "upsert local interop order request",
+                source,
+            })?;
+        self.replace_order_request_lines(order_id, payload, existing_listing.as_ref(), record)?;
+        Ok(order_id)
+    }
+
+    fn apply_order_decision(
+        &self,
+        payload: &RadrootsTradeOrderDecisionEvent,
+    ) -> Result<(), AppSqliteError> {
+        let order_id = projected_order_id(payload.order_id.as_str(), payload.buyer_pubkey.as_str());
+        match &payload.decision {
+            RadrootsTradeOrderDecision::Accepted { .. } => {
+                self.connection
+                    .execute(
+                        "UPDATE orders
+                         SET status = CASE
+                            WHEN status IN ('packed', 'completed', 'refunded') THEN status
+                            ELSE 'scheduled'
+                         END,
+                         updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now')
+                         WHERE id = ?1",
+                        params![order_id.to_string()],
+                    )
+                    .map_err(|source| AppSqliteError::Query {
+                        operation: "apply local interop order decision",
+                        source,
+                    })?;
+            }
+            RadrootsTradeOrderDecision::Declined { .. } => {}
+        }
+        Ok(())
+    }
+
+    fn replace_order_request_lines(
+        &self,
+        order_id: OrderId,
+        payload: &RadrootsTradeOrderRequested,
+        existing_listing: Option<&ExistingListingProjection>,
+        record: &LocalEventRecord,
+    ) -> Result<(), AppSqliteError> {
+        self.connection
+            .execute(
+                "DELETE FROM order_lines WHERE order_id = ?1",
+                params![order_id.to_string()],
+            )
+            .map_err(|source| AppSqliteError::Query {
+                operation: "replace local interop order lines",
+                source,
+            })?;
+        for (index, item) in payload.items.iter().enumerate() {
+            let economics_item = payload
+                .economics
+                .items
+                .iter()
+                .find(|candidate| candidate.bin_id == item.bin_id);
+            let unit_label = economics_item
+                .map(|item| item.quantity_unit.to_string())
+                .or_else(|| existing_listing.map(|listing| listing.unit_label.clone()))
+                .unwrap_or_else(|| "item".to_owned());
+            let unit_price_minor_units = economics_item.and_then(|item| {
+                parse_decimal_minor_units(item.unit_price_amount.to_string().as_str())
+            });
+            let price_currency = economics_item
+                .map(|item| item.unit_price_currency.to_string())
+                .unwrap_or_else(|| payload.economics.currency.to_string());
+            let title = existing_listing
+                .map(|listing| listing.title.clone())
+                .unwrap_or_else(|| item.bin_id.clone());
+            self.connection
+                .execute(
+                    "INSERT INTO order_lines (
+                        id,
+                        order_id,
+                        title,
+                        quantity_value,
+                        quantity_unit_label,
+                        quantity_display,
+                        listing_bin_id,
+                        unit_price_minor_units,
+                        price_currency,
+                        farm_key,
+                        listing_addr,
+                        listing_event_id,
+                        listing_relays_json,
+                        seller_pubkey,
+                        sort_index
+                     ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, null, ?13, ?14)",
+                    params![
+                        format!(
+                            "{}:{}",
+                            order_id,
+                            order_line_product_id(payload, existing_listing, item)
+                        ),
+                        order_id.to_string(),
+                        title.as_str(),
+                        i64::from(item.bin_count),
+                        unit_label.as_str(),
+                        format_quantity_display(item.bin_count, unit_label.as_str()),
+                        item.bin_id.as_str(),
+                        unit_price_minor_units,
+                        price_currency.as_str(),
+                        existing_listing.and_then(|listing| listing.farm_key.as_deref()),
+                        payload.listing_addr.as_str(),
+                        listing_event_id_from_order_record(record).as_deref(),
+                        payload.seller_pubkey.as_str(),
+                        index as i64,
+                    ],
+                )
+                .map_err(|source| AppSqliteError::Query {
+                    operation: "insert local interop order line",
+                    source,
+                })?;
+        }
+        Ok(())
     }
 
     fn upsert_farm_summary(&self, farm: &FarmSummary) -> Result<(), AppSqliteError> {
@@ -1013,10 +1227,16 @@ impl<'a> AppLocalInteropRepository<'a> {
         else {
             return Ok(None);
         };
-        let Some((product_id, farm_id)) = self
+        let Some((product_id, farm_id, title, unit_label, listing_bin_id, farm_key)) = self
             .connection
             .query_row(
-                "SELECT products.id, products.farm_id
+                "SELECT
+                    products.id,
+                    products.farm_id,
+                    products.title,
+                    products.unit_label,
+                    products.listing_bin_id,
+                    local_interop_imports.farm_key
                  FROM local_interop_imports
                  JOIN products ON products.id = local_interop_imports.projected_id
                  WHERE local_interop_imports.projected_kind = 'listing'
@@ -1025,7 +1245,16 @@ impl<'a> AppLocalInteropRepository<'a> {
                  ORDER BY local_interop_imports.local_seq DESC
                  LIMIT 1",
                 [listing_addr],
-                |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
+                |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, String>(2)?,
+                        row.get::<_, String>(3)?,
+                        row.get::<_, Option<String>>(4)?,
+                        row.get::<_, Option<String>>(5)?,
+                    ))
+                },
             )
             .optional()
             .map_err(|source| AppSqliteError::Query {
@@ -1046,6 +1275,10 @@ impl<'a> AppLocalInteropRepository<'a> {
                 .map_err(|_| AppSqliteError::InvalidProjection {
                     reason: "existing listing projection farm id must parse",
                 })?,
+            title,
+            unit_label,
+            listing_bin_id,
+            farm_key,
         }))
     }
 
@@ -1189,10 +1422,14 @@ struct ProductProjection {
     listing_bin_id: Option<String>,
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 struct ExistingListingProjection {
     product_id: ProductId,
     farm_id: FarmId,
+    title: String,
+    unit_label: String,
+    listing_bin_id: Option<String>,
+    farm_key: Option<String>,
 }
 
 fn deterministic_farm_id(owner_pubkey: Option<&str>, farm_key: &str) -> FarmId {
@@ -1264,6 +1501,179 @@ fn parse_app_d_tag_uuid(value: &str) -> Option<Uuid> {
     } else {
         None
     }
+}
+
+fn signed_event_projection(record: &LocalEventRecord) -> ProjectionRecord {
+    ProjectionRecord {
+        kind: "signed_event",
+        projected_id: record.event_id.clone(),
+    }
+}
+
+fn signed_event_from_record(
+    record: &LocalEventRecord,
+) -> Result<Option<RadrootsNostrEvent>, AppSqliteError> {
+    let Some(id) = record
+        .event_id
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    else {
+        return Ok(None);
+    };
+    let Some(author) = record
+        .event_pubkey
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    else {
+        return Ok(None);
+    };
+    let Some(kind) = record.event_kind.and_then(|kind| u32::try_from(kind).ok()) else {
+        return Ok(None);
+    };
+    let Some(created_at) = record
+        .event_created_at
+        .and_then(|created_at| u32::try_from(created_at).ok())
+    else {
+        return Ok(None);
+    };
+    let Some(sig) = record
+        .event_sig
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    else {
+        return Ok(None);
+    };
+    let Some(tags) = record.event_tags_json.as_ref().and_then(tags_from_json) else {
+        return Ok(None);
+    };
+    Ok(Some(RadrootsNostrEvent {
+        id: id.to_owned(),
+        author: author.to_owned(),
+        created_at,
+        kind,
+        tags,
+        content: record.event_content.clone().unwrap_or_default(),
+        sig: sig.to_owned(),
+    }))
+}
+
+fn tags_from_json(value: &Value) -> Option<Vec<Vec<String>>> {
+    value.as_array().map(|tags| {
+        tags.iter()
+            .filter_map(|tag| {
+                tag.as_array().map(|values| {
+                    values
+                        .iter()
+                        .filter_map(|value| value.as_str().map(str::to_owned))
+                        .collect::<Vec<_>>()
+                })
+            })
+            .collect::<Vec<_>>()
+    })
+}
+
+fn projected_order_id(order_id: &str, buyer_pubkey: &str) -> OrderId {
+    order_id.parse().unwrap_or_else(|_| {
+        OrderId::from(deterministic_uuid(
+            "radroots-cli-order",
+            Some(buyer_pubkey),
+            order_id,
+        ))
+    })
+}
+
+fn order_line_product_id(
+    payload: &RadrootsTradeOrderRequested,
+    existing_listing: Option<&ExistingListingProjection>,
+    item: &radroots_events::trade::RadrootsTradeOrderItem,
+) -> ProductId {
+    if let Some(existing_listing) = existing_listing
+        && existing_listing
+            .listing_bin_id
+            .as_deref()
+            .is_none_or(|listing_bin_id| listing_bin_id == item.bin_id)
+    {
+        return existing_listing.product_id;
+    }
+    let product_key = format!("{}:{}", payload.listing_addr, item.bin_id);
+    deterministic_product_id(Some(payload.seller_pubkey.as_str()), product_key.as_str())
+}
+
+fn deterministic_order_number(order_id: &str) -> String {
+    let trimmed = order_id.trim();
+    let suffix = trimmed
+        .chars()
+        .filter(|ch| ch.is_ascii_alphanumeric())
+        .take(8)
+        .collect::<String>();
+    if suffix.is_empty() {
+        "R-RELAY".to_owned()
+    } else {
+        format!("R-{suffix}")
+    }
+}
+
+fn existing_order_number(
+    connection: &Connection,
+    order_id: OrderId,
+) -> Result<Option<String>, AppSqliteError> {
+    connection
+        .query_row(
+            "SELECT order_number FROM orders WHERE id = ?1 LIMIT 1",
+            params![order_id.to_string()],
+            |row| row.get::<_, String>(0),
+        )
+        .optional()
+        .map_err(|source| AppSqliteError::Query {
+            operation: "load existing local interop order number",
+            source,
+        })
+}
+
+fn order_customer_display_name(buyer_pubkey: &str) -> String {
+    let prefix = buyer_pubkey.trim().chars().take(12).collect::<String>();
+    if prefix.is_empty() {
+        "Relay buyer".to_owned()
+    } else {
+        format!("Relay buyer {prefix}")
+    }
+}
+
+fn order_buyer_context_key(record: &LocalEventRecord, buyer_pubkey: &str) -> String {
+    if record.source_runtime == SourceRuntime::App
+        && record
+            .event_pubkey
+            .as_deref()
+            .map(str::trim)
+            .is_some_and(|event_pubkey| event_pubkey == buyer_pubkey.trim())
+        && let Some(owner_account_id) = record
+            .owner_account_id
+            .as_deref()
+            .map(str::trim)
+            .filter(|owner_account_id| !owner_account_id.is_empty())
+    {
+        return format!("account:{owner_account_id}");
+    }
+    format!("nostr:{}", buyer_pubkey.trim())
+}
+
+fn format_quantity_display(quantity: u32, unit_label: &str) -> String {
+    let unit_label = unit_label.trim();
+    if unit_label.is_empty() {
+        quantity.to_string()
+    } else {
+        format!("{quantity} {unit_label}")
+    }
+}
+
+fn listing_event_id_from_order_record(record: &LocalEventRecord) -> Option<String> {
+    record
+        .event_tags_json
+        .as_ref()
+        .and_then(|tags| tag_index_value(Some(tags), "listing_event", 1))
 }
 
 fn base64_url_digit(byte: u8) -> Option<u8> {
@@ -1576,7 +1986,26 @@ fn farm_readiness_from_storage_key(readiness: &str) -> Result<FarmReadiness, App
 mod tests {
     use std::collections::BTreeSet;
 
-    use radroots_studio_app_models::{FarmOrderMethod, ProductAvailabilityState};
+    use radroots_studio_app_models::{
+        BuyerContext, BuyerOrderStatus, FarmOrderMethod, OrderStatus, OrdersFilter,
+        OrdersScreenQueryState, ProductAvailabilityState,
+    };
+    use radroots_core::{
+        RadrootsCoreCurrency, RadrootsCoreDecimal, RadrootsCoreMoney, RadrootsCoreUnit,
+    };
+    use radroots_events::{
+        RadrootsNostrEvent, RadrootsNostrEventPtr,
+        trade::{
+            RadrootsTradeInventoryCommitment, RadrootsTradeOrderDecision,
+            RadrootsTradeOrderDecisionEvent, RadrootsTradeOrderEconomicItem,
+            RadrootsTradeOrderEconomicLine, RadrootsTradeOrderEconomics, RadrootsTradeOrderItem,
+            RadrootsTradeOrderRequested, RadrootsTradePricingBasis,
+        },
+    };
+    use radroots_events_codec::{
+        trade::{active_trade_order_decision_event_build, active_trade_order_request_event_build},
+        wire::WireEventParts,
+    };
     use radroots_local_events::{
         LocalEventRecordInput, LocalEventRecordUpdate, LocalEventsStore, LocalRecordFamily,
         LocalRecordStatus, PublishOutboxStatus, SourceRuntime,
@@ -1586,7 +2015,10 @@ mod tests {
     use serde_json::json;
     use uuid::Uuid;
 
-    use super::{KIND_FARM, KIND_LISTING, deterministic_farm_id, deterministic_product_id};
+    use super::{
+        KIND_FARM, KIND_LISTING, KIND_ORDER_REQUEST, deterministic_farm_id,
+        deterministic_product_id, projected_order_id,
+    };
     use crate::{AppSqliteStore, DatabaseTarget};
 
     fn local_events_store() -> LocalEventsStore<SqliteExecutor> {
@@ -1949,6 +2381,419 @@ mod tests {
                 params![product_id.to_string(), farm_id.to_string()],
             )
             .expect("seed origin product");
+    }
+
+    fn decimal(raw: &str) -> RadrootsCoreDecimal {
+        raw.parse().expect("valid decimal")
+    }
+
+    fn usd(raw: &str) -> RadrootsCoreMoney {
+        RadrootsCoreMoney::new(decimal(raw), RadrootsCoreCurrency::USD)
+    }
+
+    fn listing_event_ptr(event_id: &str) -> RadrootsNostrEventPtr {
+        RadrootsNostrEventPtr {
+            id: event_id.to_owned(),
+            relays: Some("ws://127.0.0.1:1234/".to_owned()),
+        }
+    }
+
+    fn order_request_payload(
+        order_id: &str,
+        listing_addr: &str,
+        buyer_pubkey: &str,
+        seller_pubkey: &str,
+    ) -> RadrootsTradeOrderRequested {
+        RadrootsTradeOrderRequested {
+            order_id: order_id.to_owned(),
+            listing_addr: listing_addr.to_owned(),
+            buyer_pubkey: buyer_pubkey.to_owned(),
+            seller_pubkey: seller_pubkey.to_owned(),
+            items: vec![RadrootsTradeOrderItem {
+                bin_id: "bin-1".to_owned(),
+                bin_count: 2,
+            }],
+            economics: RadrootsTradeOrderEconomics {
+                quote_id: format!("quote-{order_id}"),
+                quote_version: 1,
+                pricing_basis: RadrootsTradePricingBasis::ListingEvent,
+                currency: RadrootsCoreCurrency::USD,
+                items: vec![RadrootsTradeOrderEconomicItem {
+                    bin_id: "bin-1".to_owned(),
+                    bin_count: 2,
+                    quantity_amount: decimal("1"),
+                    quantity_unit: RadrootsCoreUnit::Each,
+                    unit_price_amount: decimal("8"),
+                    unit_price_currency: RadrootsCoreCurrency::USD,
+                    line_subtotal: usd("16"),
+                }],
+                discounts: Vec::<RadrootsTradeOrderEconomicLine>::new(),
+                adjustments: Vec::<RadrootsTradeOrderEconomicLine>::new(),
+                subtotal: usd("16"),
+                discount_total: usd("0"),
+                adjustment_total: usd("0"),
+                total: usd("16"),
+            },
+        }
+    }
+
+    fn order_decision_payload(
+        order_id: &str,
+        listing_addr: &str,
+        buyer_pubkey: &str,
+        seller_pubkey: &str,
+    ) -> RadrootsTradeOrderDecisionEvent {
+        RadrootsTradeOrderDecisionEvent {
+            order_id: order_id.to_owned(),
+            listing_addr: listing_addr.to_owned(),
+            buyer_pubkey: buyer_pubkey.to_owned(),
+            seller_pubkey: seller_pubkey.to_owned(),
+            decision: RadrootsTradeOrderDecision::Accepted {
+                inventory_commitments: vec![RadrootsTradeInventoryCommitment {
+                    bin_id: "bin-1".to_owned(),
+                    bin_count: 2,
+                }],
+            },
+        }
+    }
+
+    fn event_from_parts(event_id: &str, author: &str, parts: WireEventParts) -> RadrootsNostrEvent {
+        RadrootsNostrEvent {
+            id: event_id.to_owned(),
+            author: author.to_owned(),
+            created_at: 1_777_665_600,
+            kind: parts.kind,
+            tags: parts.tags,
+            content: parts.content,
+            sig: format!("sig-{event_id}"),
+        }
+    }
+
+    fn signed_order_event_record(
+        record_id: &str,
+        event: &RadrootsNostrEvent,
+        listing_addr: &str,
+        source_runtime: SourceRuntime,
+        owner_account_id: Option<&str>,
+    ) -> LocalEventRecordInput {
+        LocalEventRecordInput {
+            record_id: record_id.to_owned(),
+            family: LocalRecordFamily::SignedEvent,
+            status: LocalRecordStatus::Published,
+            source_runtime,
+            created_at_ms: i64::from(event.created_at) * 1_000,
+            inserted_at_ms: i64::from(event.created_at) * 1_000 + 1,
+            owner_account_id: owner_account_id.map(str::to_owned),
+            owner_pubkey: Some(event.author.clone()),
+            farm_id: None,
+            listing_addr: Some(listing_addr.to_owned()),
+            local_work_json: None,
+            event_id: Some(event.id.clone()),
+            event_kind: Some(i64::from(event.kind)),
+            event_pubkey: Some(event.author.clone()),
+            event_created_at: Some(i64::from(event.created_at)),
+            event_tags_json: Some(json!(event.tags)),
+            event_content: Some(event.content.clone()),
+            event_sig: Some(event.sig.clone()),
+            raw_event_json: Some(json!({
+                "id": event.id,
+                "kind": event.kind,
+                "pubkey": event.author,
+                "created_at": event.created_at,
+                "tags": event.tags,
+                "content": event.content,
+                "sig": event.sig,
+            })),
+            outbox_status: PublishOutboxStatus::Acknowledged,
+            relay_set_fingerprint: Some("relay-set".to_owned()),
+            relay_delivery_json: Some(json!({
+                "state": "acknowledged",
+                "acknowledged_relays": ["ws://127.0.0.1:1234/"]
+            })),
+        }
+    }
+
+    #[test]
+    fn imports_signed_order_request_into_seller_order_projection() {
+        let app_store =
+            AppSqliteStore::open(DatabaseTarget::InMemory).expect("open app sqlite store");
+        let events = local_events_store();
+        let farm_key = "AAAAAAAAAAAAAAAAAAAAAA";
+        let listing_key = "AAAAAAAAAAAAAAAAAAAAAg";
+        let seller_pubkey = "seller-pubkey";
+        let buyer_pubkey = "buyer-pubkey";
+        let order_id_raw = "relay-order-1";
+        let listing_addr = format!("30402:{seller_pubkey}:{listing_key}");
+        events
+            .append_record(&signed_market_listing_record(
+                "order-visible-listing",
+                seller_pubkey,
+                farm_key,
+                listing_key,
+                "Order Visible Eggs",
+                "9",
+                "active",
+                "pickup",
+                "North barn pickup",
+                4_102_444_800,
+                4_102_531_200,
+                LocalRecordStatus::Published,
+                PublishOutboxStatus::Acknowledged,
+            ))
+            .expect("append signed listing");
+        app_store
+            .import_shared_local_events_from_store(&events)
+            .expect("import signed listing");
+        let payload = order_request_payload(
+            order_id_raw,
+            listing_addr.as_str(),
+            buyer_pubkey,
+            seller_pubkey,
+        );
+        let parts =
+            active_trade_order_request_event_build(&listing_event_ptr("listing-event-1"), &payload)
+                .expect("build order request event");
+        let event = event_from_parts("order-request-event-1", buyer_pubkey, parts);
+        events
+            .append_record(&signed_order_event_record(
+                "cli:signed_event:order-request:1",
+                &event,
+                listing_addr.as_str(),
+                SourceRuntime::Cli,
+                None,
+            ))
+            .expect("append order request");
+
+        let report = app_store
+            .import_shared_local_events_from_store(&events)
+            .expect("import signed order request");
+        let farm_id = deterministic_farm_id(Some(seller_pubkey), farm_key);
+        let order_id = projected_order_id(order_id_raw, buyer_pubkey);
+        let orders = app_store
+            .load_orders_list(
+                farm_id,
+                &OrdersScreenQueryState {
+                    filter: OrdersFilter::All,
+                    fulfillment_window_id: None,
+                },
+            )
+            .expect("load seller orders");
+        let detail = app_store
+            .load_order_detail(farm_id, order_id)
+            .expect("load order detail")
+            .expect("order detail");
+        let imported = app_store
+            .load_local_interop_records()
+            .expect("load imported records");
+        let buyer_context_key: String = app_store
+            .connection()
+            .query_row(
+                "SELECT buyer_context_key FROM orders WHERE id = ?1",
+                [order_id.to_string()],
+                |row| row.get(0),
+            )
+            .expect("load buyer context key");
+
+        assert_eq!(report.imported_records, 1);
+        assert!(
+            imported
+                .iter()
+                .any(|record| record.projected_kind == "signed_event"
+                    && record.event_kind == Some(KIND_ORDER_REQUEST)
+                    && record.event_id.as_deref() == Some("order-request-event-1"))
+        );
+        assert_eq!(orders.rows.len(), 1);
+        assert_eq!(orders.rows[0].order_id, order_id);
+        assert_eq!(orders.rows[0].status, OrderStatus::NeedsAction);
+        assert_eq!(
+            orders.rows[0].customer_display_name,
+            "Relay buyer buyer-pubkey"
+        );
+        assert_eq!(detail.items.len(), 1);
+        assert_eq!(detail.items[0].title, "Order Visible Eggs");
+        assert_eq!(detail.items[0].quantity_display, "2 each");
+        assert_eq!(buyer_context_key, "nostr:buyer-pubkey");
+    }
+
+    #[test]
+    fn app_origin_signed_order_request_and_decision_project_to_buyer_orders() {
+        let app_store =
+            AppSqliteStore::open(DatabaseTarget::InMemory).expect("open app sqlite store");
+        let events = local_events_store();
+        let farm_key = "CCCCCCCCCCCCCCCCCCCCCC";
+        let listing_key = "AAAAAAAAAAAAAAAAAAAAAg";
+        let seller_pubkey = "seller-pubkey";
+        let buyer_pubkey = "app-buyer-pubkey";
+        let order_id_raw = "app-relay-order-1";
+        let listing_addr = format!("30402:{seller_pubkey}:{listing_key}");
+        events
+            .append_record(&signed_market_listing_record(
+                "buyer-order-listing",
+                seller_pubkey,
+                farm_key,
+                listing_key,
+                "Buyer Order Eggs",
+                "9",
+                "active",
+                "pickup",
+                "North barn pickup",
+                4_102_444_800,
+                4_102_531_200,
+                LocalRecordStatus::Published,
+                PublishOutboxStatus::Acknowledged,
+            ))
+            .expect("append signed listing");
+        app_store
+            .import_shared_local_events_from_store(&events)
+            .expect("import signed listing");
+        let request_payload = order_request_payload(
+            order_id_raw,
+            listing_addr.as_str(),
+            buyer_pubkey,
+            seller_pubkey,
+        );
+        let request_parts = active_trade_order_request_event_build(
+            &listing_event_ptr("buyer-order-listing-event"),
+            &request_payload,
+        )
+        .expect("build order request event");
+        let request_event =
+            event_from_parts("buyer-order-request-event", buyer_pubkey, request_parts);
+        events
+            .append_record(&signed_order_event_record(
+                "app:signed_event:order-request:buyer",
+                &request_event,
+                listing_addr.as_str(),
+                SourceRuntime::App,
+                Some("acct_buyer"),
+            ))
+            .expect("append app order request");
+
+        let request_report = app_store
+            .import_shared_local_events_from_store(&events)
+            .expect("import app order request");
+        let buyer_context = BuyerContext::account("acct_buyer");
+        let order_id = projected_order_id(order_id_raw, buyer_pubkey);
+        let buyer_orders = app_store
+            .load_buyer_orders(&buyer_context)
+            .expect("load buyer orders after request");
+
+        assert_eq!(request_report.imported_records, 1);
+        assert_eq!(buyer_orders.rows.len(), 1);
+        assert_eq!(buyer_orders.rows[0].order_id, order_id);
+        assert_eq!(buyer_orders.rows[0].status, BuyerOrderStatus::Placed);
+
+        let decision_payload = order_decision_payload(
+            order_id_raw,
+            listing_addr.as_str(),
+            buyer_pubkey,
+            seller_pubkey,
+        );
+        let decision_parts = active_trade_order_decision_event_build(
+            request_event.id.as_str(),
+            request_event.id.as_str(),
+            &decision_payload,
+        )
+        .expect("build order decision event");
+        let decision_event =
+            event_from_parts("buyer-order-decision-event", seller_pubkey, decision_parts);
+        events
+            .append_record(&signed_order_event_record(
+                "cli:signed_event:order-decision:buyer",
+                &decision_event,
+                listing_addr.as_str(),
+                SourceRuntime::Cli,
+                None,
+            ))
+            .expect("append order decision");
+
+        let decision_report = app_store
+            .import_shared_local_events_from_store(&events)
+            .expect("import order decision");
+        let buyer_orders = app_store
+            .load_buyer_orders(&buyer_context)
+            .expect("load buyer orders after decision");
+        let buyer_detail = app_store
+            .load_buyer_order_detail(&buyer_context, order_id)
+            .expect("load buyer order detail")
+            .expect("buyer order detail");
+        let seller_orders = app_store
+            .load_orders_list(
+                deterministic_farm_id(Some(seller_pubkey), farm_key),
+                &OrdersScreenQueryState {
+                    filter: OrdersFilter::All,
+                    fulfillment_window_id: None,
+                },
+            )
+            .expect("load seller orders after decision");
+
+        assert_eq!(decision_report.imported_records, 1);
+        assert_eq!(buyer_orders.rows.len(), 1);
+        assert_eq!(buyer_orders.rows[0].status, BuyerOrderStatus::Scheduled);
+        assert_eq!(buyer_detail.status, BuyerOrderStatus::Scheduled);
+        assert_eq!(seller_orders.rows[0].status, OrderStatus::Scheduled);
+    }
+
+    #[test]
+    fn malformed_order_event_remains_signed_event_evidence_without_projection() {
+        let app_store =
+            AppSqliteStore::open(DatabaseTarget::InMemory).expect("open app sqlite store");
+        let events = local_events_store();
+        events
+            .append_record(&LocalEventRecordInput {
+                record_id: "cli:signed_event:order-request:malformed".to_owned(),
+                family: LocalRecordFamily::SignedEvent,
+                status: LocalRecordStatus::Published,
+                source_runtime: SourceRuntime::Cli,
+                created_at_ms: 1100,
+                inserted_at_ms: 1101,
+                owner_account_id: None,
+                owner_pubkey: Some("buyer-pubkey".to_owned()),
+                farm_id: None,
+                listing_addr: Some("30402:seller-pubkey:listing-key".to_owned()),
+                local_work_json: None,
+                event_id: Some("malformed-order-event".to_owned()),
+                event_kind: Some(KIND_ORDER_REQUEST),
+                event_pubkey: Some("buyer-pubkey".to_owned()),
+                event_created_at: Some(1100),
+                event_tags_json: Some(json!([["d", "bad-order"]])),
+                event_content: Some("not-json".to_owned()),
+                event_sig: Some("signature".to_owned()),
+                raw_event_json: Some(json!({
+                    "id": "malformed-order-event",
+                    "kind": KIND_ORDER_REQUEST,
+                    "pubkey": "buyer-pubkey",
+                    "content": "not-json"
+                })),
+                outbox_status: PublishOutboxStatus::Acknowledged,
+                relay_set_fingerprint: Some("relay-set".to_owned()),
+                relay_delivery_json: Some(json!({
+                    "state": "acknowledged",
+                    "acknowledged_relays": ["ws://127.0.0.1:1234/"]
+                })),
+            })
+            .expect("append malformed order event");
+
+        let report = app_store
+            .import_shared_local_events_from_store(&events)
+            .expect("import malformed order event");
+        let imported = app_store
+            .load_local_interop_records()
+            .expect("load imported records");
+        let order_count: i64 = app_store
+            .connection()
+            .query_row("SELECT COUNT(*) FROM orders", [], |row| row.get(0))
+            .expect("load order count");
+
+        assert_eq!(report.imported_records, 1);
+        assert_eq!(report.skipped_records, 0);
+        assert_eq!(imported.len(), 1);
+        assert_eq!(imported[0].projected_kind, "signed_event");
+        assert_eq!(
+            imported[0].event_id.as_deref(),
+            Some("malformed-order-event")
+        );
+        assert_eq!(order_count, 0);
     }
 
     #[test]
