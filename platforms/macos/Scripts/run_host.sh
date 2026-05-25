@@ -32,7 +32,7 @@ forward_signal() {
 require_command grep
 require_command /usr/libexec/PlistBuddy
 require_env RADROOTS_APP_LOCAL_LOG_ROOT
-require_env RADROOTS_APP_DEFAULT_NOSTR_RELAY_URL
+require_env RADROOTS_APP_NOSTR_RELAY_URLS
 
 if [[ -n "${RADROOTS_APP_HOST_BUNDLE_PATH:-}" ]]; then
   app_path="${RADROOTS_APP_HOST_BUNDLE_PATH}"
@@ -109,7 +109,7 @@ grep -q '"event":"logging.initialized"' "${structured_log_file}" 2>/dev/null || 
 }
 
 printf 'radroots_studio_app run: ready\n'
-printf 'relay=%s\n' "${RADROOTS_APP_DEFAULT_NOSTR_RELAY_URL}"
+printf 'relays=%s\n' "${RADROOTS_APP_NOSTR_RELAY_URLS}"
 printf 'structured_log=%s\n' "${structured_log_file}"
 printf 'latest_log=%s\n' "${latest_log_path}"
 printf 'stdout_log=%s\n' "${stdout_file}"

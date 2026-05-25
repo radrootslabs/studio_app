@@ -156,7 +156,7 @@ cleanup() {
 trap cleanup EXIT
 
 runtime_mode="localhost-dev"
-default_nostr_relay_url="${RADROOTS_APP_DEFAULT_NOSTR_RELAY_URL:-ws://127.0.0.1:8080}"
+nostr_relay_urls="${RADROOTS_APP_NOSTR_RELAY_URLS:-ws://127.0.0.1:8080}"
 local_log_root="${tmp_root}/logs"
 structured_log_file="${local_log_root}/apps/local/app/app-macos-native/${date_utc}.jsonl"
 latest_log_path="${local_log_root}/apps/local/app/app-macos-native/latest.jsonl"
@@ -164,7 +164,7 @@ stdout_file="${local_log_root}/apps/local/app/app-macos-native/raw/stdout.${date
 stderr_file="${local_log_root}/apps/local/app/app-macos-native/raw/stderr.${date_utc}.log"
 
 RADROOTS_APP_RUNTIME_MODE="${runtime_mode}" \
-RADROOTS_APP_DEFAULT_NOSTR_RELAY_URL="${default_nostr_relay_url}" \
+RADROOTS_APP_NOSTR_RELAY_URLS="${nostr_relay_urls}" \
 RADROOTS_APP_LOCAL_LOG_ROOT="${local_log_root}" \
 RADROOTS_APP_HOST_BUNDLE_PATH="${app_path}" \
 RADROOTS_APP_HOST_STARTUP_ATTEMPTS="${startup_wait_attempts}" \
@@ -186,7 +186,7 @@ degraded_stderr_file="${degraded_log_root}/apps/local/app/app-macos-native/raw/s
 
 env -u HOME \
   RADROOTS_APP_RUNTIME_MODE="${runtime_mode}" \
-  RADROOTS_APP_DEFAULT_NOSTR_RELAY_URL="${default_nostr_relay_url}" \
+  RADROOTS_APP_NOSTR_RELAY_URLS="${nostr_relay_urls}" \
   RADROOTS_APP_LOCAL_LOG_ROOT="${degraded_log_root}" \
   RADROOTS_APP_HOST_BUNDLE_PATH="${app_path}" \
   RADROOTS_APP_HOST_STARTUP_ATTEMPTS="${startup_wait_attempts}" \

@@ -3357,7 +3357,7 @@ impl DesktopAppRuntimeState {
         if receipt.events.is_empty() {
             return Ok(AppLocalInteropImportReport::default());
         }
-        let records = app_relay_event_records(&receipt, current_runtime_time_ms()?)?;
+        let records = direct_relay_event_records(&receipt, current_runtime_time_ms()?)?;
         sqlite_store
             .import_local_event_records(records.as_slice())
             .map_err(AppDirectRelayIngestError::from)
@@ -4981,7 +4981,7 @@ fn normalized_app_relay_ingest_urls(relay_urls: &[String]) -> Result<Vec<String>
 fn fetch_app_events_from_relays_windowed(
     relay_urls: &[String],
 ) -> Result<AppDirectRelayFetchReceipt, AppSyncTransportError> {
-    let base_filter = app_direct_relay_ingest_filter();
+    let base_filter = direct_relay_ingest_filter();
     let mut next_filter = base_filter.clone();
     let mut merged: Option<AppDirectRelayFetchReceipt> = None;
 
@@ -5051,7 +5051,7 @@ async fn fetch_app_events_from_relays_async(
     }
 
     let connection_output = client.try_connect(APP_DIRECT_RELAY_CONNECT_TIMEOUT).await;
-    let failed_relays = app_relay_failures_from_output(&connection_output)?;
+    let failed_relays = direct_relay_failures_from_output(&connection_output)?;
     if connection_output.success.is_empty() {
         return Err(AppSyncTransportError::unavailable(format!(
             "direct relay app ingest connection failed: {}",
@@ -5079,7 +5079,7 @@ async fn fetch_app_events_from_relays_async(
     })
 }
 
-fn app_direct_relay_ingest_filter() -> RadrootsNostrFilter {
+fn direct_relay_ingest_filter() -> RadrootsNostrFilter {
     RadrootsNostrFilter::new()
         .kinds(
             APP_DIRECT_RELAY_INGEST_KINDS
@@ -5090,7 +5090,7 @@ fn app_direct_relay_ingest_filter() -> RadrootsNostrFilter {
         .limit(APP_DIRECT_RELAY_INGEST_LIMIT)
 }
 
-fn app_relay_failures_from_output<T: fmt::Debug>(
+fn direct_relay_failures_from_output<T: fmt::Debug>(
     output: &RadrootsNostrOutput<T>,
 ) -> Result<Vec<RelayDeliveryFailure>, AppSyncTransportError> {
     output
@@ -5154,7 +5154,7 @@ fn append_unique_relays(target: &mut Vec<String>, relays: Vec<String>) {
     }
 }
 
-fn app_relay_event_records(
+fn direct_relay_event_records(
     receipt: &AppDirectRelayFetchReceipt,
     inserted_at_ms: i64,
 ) -> Result<Vec<LocalEventRecord>, AppDirectRelayIngestError> {
@@ -5174,14 +5174,14 @@ fn app_relay_event_records(
     let mut records = Vec::with_capacity(receipt.events.len());
 
     for (index, event) in receipt.events.iter().enumerate() {
-        let tags = app_event_tags(event);
-        let kind = app_event_kind(event);
+        let tags = relay_event_tags(event);
+        let kind = relay_event_kind(event);
         let event_pubkey = event.pubkey.to_string();
-        let listing_d_tag = app_event_tag_value(&tags, "d", 1);
-        let farm_id = app_relay_event_farm_id(kind, &tags);
+        let listing_d_tag = relay_event_tag_value(&tags, "d", 1);
+        let farm_id = direct_relay_event_farm_id(kind, &tags);
         let listing_addr =
-            app_relay_event_listing_addr(kind, &event_pubkey, listing_d_tag.as_deref());
-        let created_at_ms = app_event_created_at_ms(event)?;
+            direct_relay_event_listing_addr(kind, &event_pubkey, listing_d_tag.as_deref());
+        let created_at_ms = relay_event_created_at_ms(event)?;
         let local_seq = created_at_ms.saturating_add(i64::try_from(index).map_err(|_| {
             AppSqliteError::InvalidProjection {
                 reason: "app relay ingest sequence must fit i64",
@@ -5193,7 +5193,7 @@ fn app_relay_event_records(
             record_id: format!("app:relay_event:{}", event.id.to_hex()),
             family: LocalRecordFamily::SignedEvent,
             status: LocalRecordStatus::Published,
-            source_runtime: app_relay_event_source_runtime(kind, listing_d_tag.as_deref()),
+            source_runtime: direct_relay_event_source_runtime(kind, listing_d_tag.as_deref()),
             created_at_ms,
             inserted_at_ms,
             updated_at_ms: inserted_at_ms,
@@ -5205,11 +5205,11 @@ fn app_relay_event_records(
             event_id: Some(event.id.to_hex()),
             event_kind: Some(i64::from(kind)),
             event_pubkey: Some(event_pubkey),
-            event_created_at: Some(app_event_created_at_i64(event)?),
+            event_created_at: Some(relay_event_created_at_i64(event)?),
             event_tags_json: Some(json!(tags)),
             event_content: Some(event.content.clone()),
             event_sig: Some(event.sig.to_string()),
-            raw_event_json: Some(app_raw_event_json(event)?),
+            raw_event_json: Some(relay_raw_event_json(event)?),
             outbox_status: PublishOutboxStatus::Acknowledged,
             relay_set_fingerprint: Some(relay_set_fingerprint.clone()),
             relay_delivery_json: Some(relay_delivery_json.clone()),
@@ -5219,17 +5219,17 @@ fn app_relay_event_records(
     Ok(records)
 }
 
-fn app_relay_event_farm_id(kind: u16, tags: &[Vec<String>]) -> Option<String> {
+fn direct_relay_event_farm_id(kind: u16, tags: &[Vec<String>]) -> Option<String> {
     match kind {
-        30340 => app_event_tag_value(tags, "d", 1),
+        30340 => relay_event_tag_value(tags, "d", 1),
         30402 | 30403 => {
-            app_event_tag_value(tags, "a", 1).and_then(|address| app_address_d_tag(&address))
+            relay_event_tag_value(tags, "a", 1).and_then(|address| relay_address_d_tag(&address))
         }
         _ => None,
     }
 }
 
-fn app_relay_event_listing_addr(
+fn direct_relay_event_listing_addr(
     kind: u16,
     event_pubkey: &str,
     listing_d_tag: Option<&str>,
@@ -5240,7 +5240,7 @@ fn app_relay_event_listing_addr(
     }
 }
 
-fn app_relay_event_source_runtime(kind: u16, d_tag: Option<&str>) -> SourceRuntime {
+fn direct_relay_event_source_runtime(kind: u16, d_tag: Option<&str>) -> SourceRuntime {
     if matches!(kind, 30340 | 30402 | 30403)
         && d_tag.is_some_and(|d_tag| decode_app_d_tag_uuid(d_tag).is_some())
     {
@@ -5250,25 +5250,25 @@ fn app_relay_event_source_runtime(kind: u16, d_tag: Option<&str>) -> SourceRunti
     }
 }
 
-fn app_event_kind(event: &RadrootsNostrEvent) -> u16 {
+fn relay_event_kind(event: &RadrootsNostrEvent) -> u16 {
     event.kind.as_u16()
 }
 
-fn app_event_created_at_i64(event: &RadrootsNostrEvent) -> Result<i64, AppSqliteError> {
+fn relay_event_created_at_i64(event: &RadrootsNostrEvent) -> Result<i64, AppSqliteError> {
     i64::try_from(event.created_at.as_secs()).map_err(|_| AppSqliteError::InvalidProjection {
         reason: "app relay ingest event timestamp must fit i64",
     })
 }
 
-fn app_event_created_at_ms(event: &RadrootsNostrEvent) -> Result<i64, AppSqliteError> {
-    app_event_created_at_i64(event)?
+fn relay_event_created_at_ms(event: &RadrootsNostrEvent) -> Result<i64, AppSqliteError> {
+    relay_event_created_at_i64(event)?
         .checked_mul(1_000)
         .ok_or(AppSqliteError::InvalidProjection {
             reason: "app relay ingest event timestamp milliseconds must fit i64",
         })
 }
 
-fn app_event_tags(event: &RadrootsNostrEvent) -> Vec<Vec<String>> {
+fn relay_event_tags(event: &RadrootsNostrEvent) -> Vec<Vec<String>> {
     event
         .tags
         .iter()
@@ -5276,7 +5276,7 @@ fn app_event_tags(event: &RadrootsNostrEvent) -> Vec<Vec<String>> {
         .collect()
 }
 
-fn app_event_tag_value(tags: &[Vec<String>], tag_name: &str, index: usize) -> Option<String> {
+fn relay_event_tag_value(tags: &[Vec<String>], tag_name: &str, index: usize) -> Option<String> {
     tags.iter().find_map(|tag| {
         (tag.first().map(String::as_str) == Some(tag_name))
             .then(|| tag.get(index))
@@ -5288,19 +5288,19 @@ fn app_event_tag_value(tags: &[Vec<String>], tag_name: &str, index: usize) -> Op
     })
 }
 
-fn app_raw_event_json(event: &RadrootsNostrEvent) -> Result<serde_json::Value, AppSqliteError> {
+fn relay_raw_event_json(event: &RadrootsNostrEvent) -> Result<serde_json::Value, AppSqliteError> {
     Ok(json!({
         "id": event.id.to_hex(),
         "pubkey": event.pubkey.to_string(),
-        "created_at": app_event_created_at_i64(event)?,
+        "created_at": relay_event_created_at_i64(event)?,
         "kind": u32::from(event.kind.as_u16()),
-        "tags": app_event_tags(event),
+        "tags": relay_event_tags(event),
         "content": event.content.clone(),
         "sig": event.sig.to_string(),
     }))
 }
 
-fn app_address_d_tag(address: &str) -> Option<String> {
+fn relay_address_d_tag(address: &str) -> Option<String> {
     address
         .rsplit(':')
         .next()
@@ -9689,8 +9689,11 @@ mod tests {
             .clone();
         assert_ne!(payload_account_id, selected_account_id);
 
-        let receipt =
-            app_published_operation_receipt(payload_account_id.clone(), None, "event-app-owner");
+        let receipt = published_operation_receipt_fixture(
+            payload_account_id.clone(),
+            None,
+            "event-app-owner",
+        );
         runtime
             .lock_state()
             .record_published_sync_receipts(&[receipt])
@@ -9728,7 +9731,7 @@ mod tests {
                 json!({"record_kind": "farm_config_v1"}),
             ))
             .expect("append conflicting source record");
-        let receipt = app_published_operation_receipt(
+        let receipt = published_operation_receipt_fixture(
             "payload-account".to_owned(),
             Some("app:local_work:conflict-source".to_owned()),
             "event-app-owner-conflict",
@@ -15465,7 +15468,7 @@ mod tests {
         }
     }
 
-    fn app_published_operation_receipt(
+    fn published_operation_receipt_fixture(
         source_account_id: String,
         source_local_event_id: Option<String>,
         event_id: &str,
