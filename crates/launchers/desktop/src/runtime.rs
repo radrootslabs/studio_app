@@ -168,7 +168,7 @@ impl SdkDirectRelayAppSyncTransport {
                 )
             })?;
         let relay_urls = normalized_app_sync_relay_urls(&self.relay_urls)?;
-        let client = direct_relay_sdk_client(relay_urls, self.timeout_ms)?;
+        let client = direct_relay_sdk_client(relay_urls.clone(), self.timeout_ms)?;
         let mut published_receipts = Vec::new();
 
         for operation in &request.pending_operations {
@@ -193,7 +193,8 @@ impl SdkDirectRelayAppSyncTransport {
                     "pending app publish work is blocked: {reason_codes}"
                 ))
             })?;
-            let receipt = publish_app_payload_sync(&client, &identity, &publish_payload)?;
+            let receipt =
+                publish_app_payload_sync(&client, &identity, &publish_payload, &relay_urls)?;
             published_receipts.push(published_operation_receipt(
                 operation.operation_key.as_str(),
                 &publish_payload,
@@ -3616,7 +3617,7 @@ impl DesktopAppRuntimeState {
             order_document_json: Some(local_work.payload.clone()),
             listing_addr: export.listing_addr,
             listing_event_id: export.listing_event_id,
-            listing_relays: self.nostr_relay_urls.clone(),
+            listing_relays: export.listing_relays,
             buyer_pubkey: export.buyer_pubkey,
             seller_pubkey: export.seller_pubkey,
             items: order
@@ -4855,18 +4856,22 @@ fn publish_app_payload_sync(
     client: &RadrootsSdkClient,
     identity: &RadrootsIdentity,
     payload: &AppPublishPayload,
+    configured_relay_urls: &[String],
 ) -> Result<SdkPublishReceipt, AppSyncTransportError> {
     let runtime = TokioRuntimeBuilder::new_current_thread()
         .enable_all()
         .build()
         .map_err(|error| AppSyncTransportError::failed(error.to_string()))?;
-    runtime.block_on(async { publish_app_payload(client, identity, payload).await })
+    runtime.block_on(async {
+        publish_app_payload(client, identity, payload, configured_relay_urls).await
+    })
 }
 
 async fn publish_app_payload(
     client: &RadrootsSdkClient,
     identity: &RadrootsIdentity,
     payload: &AppPublishPayload,
+    configured_relay_urls: &[String],
 ) -> Result<SdkPublishReceipt, AppSyncTransportError> {
     match payload {
         AppPublishPayload::FarmProfile(payload) => {
@@ -4900,7 +4905,7 @@ async fn publish_app_payload(
                 .map_err(|error| AppSyncTransportError::failed(error.to_string()))
         }
         AppPublishPayload::OrderRequest(payload) => {
-            let listing_event = order_request_listing_event_ptr(payload)?;
+            let listing_event = order_request_listing_event_ptr(payload, configured_relay_urls)?;
             let order = order_request_publish_payload_to_sdk_order(payload)?;
             client
                 .trade()
@@ -5093,6 +5098,7 @@ fn parse_app_listing_delivery_method(
 
 fn order_request_listing_event_ptr(
     payload: &AppOrderRequestPublishPayload,
+    configured_relay_urls: &[String],
 ) -> Result<RadrootsNostrEventPtr, AppSyncTransportError> {
     let listing_event_id = payload
         .listing_event_id
@@ -5102,20 +5108,38 @@ fn order_request_listing_event_ptr(
         })?
         .trim()
         .to_owned();
-    let listing_relay = payload
-        .listing_relays
-        .iter()
-        .map(|relay| relay.trim())
-        .find(|relay| !relay.is_empty())
+    let listing_relay = selected_listing_relay(&payload.listing_relays, configured_relay_urls)
         .ok_or_else(|| {
             AppSyncTransportError::failed("order request publish requires listing relay")
-        })?
-        .to_owned();
+        })?;
 
     Ok(RadrootsNostrEventPtr {
         id: listing_event_id,
         relays: Some(listing_relay),
     })
+}
+
+fn selected_listing_relay(
+    listing_relays: &[String],
+    configured_relay_urls: &[String],
+) -> Option<String> {
+    let mut seen = BTreeSet::new();
+    let mut known_relays = Vec::new();
+    for relay in listing_relays {
+        let relay = relay.trim();
+        if !relay.is_empty() && seen.insert(relay.to_owned()) {
+            known_relays.push(relay.to_owned());
+        }
+    }
+    for configured_relay in configured_relay_urls {
+        let configured_relay = configured_relay.trim();
+        if !configured_relay.is_empty()
+            && known_relays.iter().any(|relay| relay == configured_relay)
+        {
+            return Some(configured_relay.to_owned());
+        }
+    }
+    known_relays.into_iter().next()
 }
 
 fn order_request_publish_payload_to_sdk_order(
@@ -5301,6 +5325,7 @@ struct AppBuyerOrderRequestExport {
     seller_pubkey: Option<String>,
     listing_addr: Option<String>,
     listing_event_id: Option<String>,
+    listing_relays: Vec<String>,
     farm_key: Option<String>,
     order_items: Vec<serde_json::Value>,
     line_refs: Vec<serde_json::Value>,
@@ -5330,6 +5355,7 @@ impl AppBuyerOrderRequestExport {
             shared_optional_line_value(&order.lines, |line| line.listing_addr.as_deref());
         let listing_event_id =
             shared_optional_line_value(&order.lines, |line| line.listing_event_id.as_deref());
+        let listing_relays = shared_listing_relays(&order.lines);
         let seller_pubkey =
             shared_optional_line_value(&order.lines, |line| line.seller_pubkey.as_deref());
         let farm_key = shared_optional_line_value(&order.lines, |line| line.farm_key.as_deref())
@@ -5340,6 +5366,9 @@ impl AppBuyerOrderRequestExport {
         }
         if listing_event_id.is_none() {
             support_issues.push("listing_event_id_required");
+        }
+        if listing_relays.is_empty() {
+            support_issues.push("listing_relays_required");
         }
         if seller_pubkey.is_none() {
             support_issues.push("seller_pubkey_required");
@@ -5370,6 +5399,7 @@ impl AppBuyerOrderRequestExport {
                 },
                 "listing_addr": line.listing_addr,
                 "listing_event_id": line.listing_event_id,
+                "listing_relays": line.listing_relays,
                 "listing_bin_id": line.listing_bin_id,
                 "seller_pubkey": line.seller_pubkey,
                 "farm_key": line.farm_key,
@@ -5383,6 +5413,7 @@ impl AppBuyerOrderRequestExport {
             seller_pubkey,
             listing_addr,
             listing_event_id,
+            listing_relays,
             farm_key,
             order_items,
             line_refs,
@@ -5441,6 +5472,7 @@ fn buyer_order_request_local_work_payload(
                 "order_id": order.order_id.to_string(),
                 "listing_addr": export.listing_addr.as_deref().unwrap_or_default(),
                 "listing_event_id": export.listing_event_id.as_deref().unwrap_or_default(),
+                "listing_relays": export.listing_relays.clone(),
                 "buyer_pubkey": export.buyer_pubkey.as_deref().unwrap_or_default(),
                 "seller_pubkey": export.seller_pubkey.as_deref().unwrap_or_default(),
                 "items": export.order_items.clone(),
@@ -5630,6 +5662,20 @@ fn shared_optional_line_value(
         }
     }
     resolved
+}
+
+fn shared_listing_relays(lines: &[BuyerOrderLocalEventLine]) -> Vec<String> {
+    let mut seen = BTreeSet::new();
+    let mut relays = Vec::new();
+    for line in lines {
+        for relay in &line.listing_relays {
+            let relay = relay.trim();
+            if !relay.is_empty() && seen.insert(relay.to_owned()) {
+                relays.push(relay.to_owned());
+            }
+        }
+    }
+    relays
 }
 
 fn canonical_quantity_unit(unit_label: &str) -> Option<&'static str> {
@@ -7113,6 +7159,22 @@ mod tests {
             relay_urls,
             vec!["ws://127.0.0.1:8081", "ws://127.0.0.1:8080"]
         );
+    }
+
+    #[test]
+    fn order_request_listing_pointer_prefers_configured_listing_relay() {
+        let selected = super::selected_listing_relay(
+            &[
+                "wss://relay-b.example".to_owned(),
+                "wss://relay-a.example".to_owned(),
+            ],
+            &[
+                "wss://relay-a.example".to_owned(),
+                "wss://relay-c.example".to_owned(),
+            ],
+        );
+
+        assert_eq!(selected.as_deref(), Some("wss://relay-a.example"));
     }
 
     #[test]
@@ -10157,6 +10219,7 @@ mod tests {
             pending_payload.listing_event_id.as_deref(),
             Some("event-cli:signed_event:buyer-order-supported-listing")
         );
+        assert_eq!(pending_payload.listing_relays, vec!["ws://127.0.0.1:1234/"]);
         assert_eq!(
             pending_payload.seller_pubkey.as_deref(),
             Some("buyer-visible-seller-pubkey")
@@ -10261,6 +10324,10 @@ mod tests {
         assert_eq!(
             payload["document"]["order"]["listing_event_id"],
             "event-cli:signed_event:buyer-order-supported-listing"
+        );
+        assert_eq!(
+            payload["document"]["order"]["listing_relays"],
+            json!(["ws://127.0.0.1:1234/"])
         );
         assert_eq!(
             payload["document"]["order"]["seller_pubkey"],

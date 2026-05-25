@@ -1268,6 +1268,7 @@ pub struct BuyerListingRow {
     pub product_id: ProductId,
     pub farm_id: FarmId,
     pub farm_display_name: String,
+    pub listing_relays: Vec<String>,
     pub title: String,
     pub subtitle: Option<String>,
     pub price: ProductPricePresentation,
@@ -3565,6 +3566,7 @@ mod tests {
             product_id,
             farm_id,
             farm_display_name: "Cedar Grove Farm".to_owned(),
+            listing_relays: vec!["wss://relay.example".to_owned()],
             title: "Spring salad mix".to_owned(),
             subtitle: Some("Tender leaves".to_owned()),
             price: ProductPricePresentation {

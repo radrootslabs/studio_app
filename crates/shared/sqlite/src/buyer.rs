@@ -11,6 +11,7 @@ use radroots_studio_app_models::{
     RepeatDemandHandoffProjection,
 };
 use rusqlite::{Connection, OptionalExtension, params};
+use serde_json::Value;
 
 use crate::AppSqliteError;
 
@@ -56,6 +57,7 @@ pub struct BuyerOrderLocalEventLine {
     pub farm_key: Option<String>,
     pub listing_addr: Option<String>,
     pub listing_event_id: Option<String>,
+    pub listing_relays: Vec<String>,
     pub seller_pubkey: Option<String>,
 }
 
@@ -191,6 +193,7 @@ impl<'a> AppBuyerRepository<'a> {
 
         for line in &cart.lines {
             let snapshot = self.load_buyer_cart_line_snapshot(line.product_id)?;
+            let listing_relays_json = encode_listing_relays(&snapshot.listing_relays)?;
             self.connection
                 .execute(
                     "insert into buyer_cart_lines (
@@ -204,9 +207,10 @@ impl<'a> AppBuyerRepository<'a> {
                         farm_key,
                         listing_addr,
                         listing_event_id,
+                        listing_relays_json,
                         seller_pubkey,
                         updated_at
-                     ) values (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))",
+                     ) values (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))",
                     params![
                         context_key.as_str(),
                         line.product_id.to_string(),
@@ -218,6 +222,7 @@ impl<'a> AppBuyerRepository<'a> {
                         snapshot.farm_key.as_deref(),
                         snapshot.listing_addr.as_deref(),
                         snapshot.listing_event_id.as_deref(),
+                        listing_relays_json.as_deref(),
                         snapshot.seller_pubkey.as_deref(),
                     ],
                 )
@@ -413,6 +418,7 @@ impl<'a> AppBuyerRepository<'a> {
                 })?;
 
             for (index, line) in line_records.iter().enumerate() {
+                let listing_relays_json = encode_listing_relays(&line.listing.listing_relays)?;
                 self.connection
                     .execute(
                         "insert into order_lines (
@@ -428,9 +434,10 @@ impl<'a> AppBuyerRepository<'a> {
                             farm_key,
                             listing_addr,
                             listing_event_id,
+                            listing_relays_json,
                             seller_pubkey,
                             sort_index
-                         ) values (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)",
+                         ) values (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)",
                         params![
                             format!("{}:{}", order_id, line.listing.product_id),
                             order_id.to_string(),
@@ -444,6 +451,7 @@ impl<'a> AppBuyerRepository<'a> {
                             line.listing.farm_key.as_deref(),
                             line.listing.listing_addr.as_deref(),
                             line.listing.listing_event_id.as_deref(),
+                            listing_relays_json.as_deref(),
                             line.listing.seller_pubkey.as_deref(),
                             index as i64,
                         ],
@@ -1203,6 +1211,16 @@ impl<'a> AppBuyerRepository<'a> {
                         order by li.local_seq desc
                         limit 1
                     ),
+                    (
+                        select li.relay_delivery_json
+                        from local_interop_imports li
+                        where li.projected_kind = 'listing'
+                           and li.projected_id = p.id
+                           and li.relay_delivery_json is not null
+                           and trim(li.relay_delivery_json) <> ''
+                        order by li.local_seq desc
+                        limit 1
+                    ),
                     p.stock_count,
                     fw.id,
                     fw.label,
@@ -1250,15 +1268,16 @@ impl<'a> AppBuyerRepository<'a> {
                     row.get::<_, Option<String>>(12)?,
                     row.get::<_, Option<String>>(13)?,
                     row.get::<_, Option<String>>(14)?,
-                    row.get::<_, Option<u32>>(15)?,
-                    row.get::<_, Option<String>>(16)?,
+                    row.get::<_, Option<String>>(15)?,
+                    row.get::<_, Option<u32>>(16)?,
                     row.get::<_, Option<String>>(17)?,
                     row.get::<_, Option<String>>(18)?,
                     row.get::<_, Option<String>>(19)?,
                     row.get::<_, Option<String>>(20)?,
-                    row.get::<_, i64>(21)?,
+                    row.get::<_, Option<String>>(21)?,
                     row.get::<_, i64>(22)?,
                     row.get::<_, i64>(23)?,
+                    row.get::<_, i64>(24)?,
                 ))
             })
             .map_err(|source| AppSqliteError::Query {
@@ -1284,6 +1303,7 @@ impl<'a> AppBuyerRepository<'a> {
                 listing_addr,
                 listing_event_id,
                 seller_pubkey,
+                listing_relay_delivery_json,
                 stock_count,
                 fulfillment_window_id,
                 fulfillment_window_label,
@@ -1313,6 +1333,7 @@ impl<'a> AppBuyerRepository<'a> {
                 farm_key: farm_key.and_then(empty_string_to_none),
                 listing_addr: listing_addr.and_then(empty_string_to_none),
                 listing_event_id: listing_event_id.and_then(empty_string_to_none),
+                listing_relays: listing_relays_from_json(listing_relay_delivery_json)?,
                 seller_pubkey: seller_pubkey.and_then(empty_string_to_none),
                 stock_count,
                 fulfillment_window_id: parse_optional_typed_id(
@@ -1362,6 +1383,7 @@ impl<'a> AppBuyerRepository<'a> {
                 farm_key: listing.farm_key,
                 listing_addr: listing.listing_addr,
                 listing_event_id: listing.listing_event_id,
+                listing_relays: listing.listing_relays,
                 seller_pubkey: listing.seller_pubkey,
             })
             .unwrap_or_default())
@@ -1461,6 +1483,16 @@ impl<'a> AppBuyerRepository<'a> {
                         order by li.local_seq desc
                         limit 1
                     )),
+                    coalesce(nullif(bcl.listing_relays_json, ''), (
+                        select li.relay_delivery_json
+                        from local_interop_imports li
+                        where li.projected_kind = 'listing'
+                           and li.projected_id = p.id
+                           and li.relay_delivery_json is not null
+                           and trim(li.relay_delivery_json) <> ''
+                        order by li.local_seq desc
+                        limit 1
+                    )),
                     coalesce(nullif(bcl.seller_pubkey, ''), (
                         select li.owner_pubkey
                         from local_interop_imports li
@@ -1522,15 +1554,16 @@ impl<'a> AppBuyerRepository<'a> {
                     row.get::<_, Option<String>>(13)?,
                     row.get::<_, Option<String>>(14)?,
                     row.get::<_, Option<String>>(15)?,
-                    row.get::<_, Option<u32>>(16)?,
-                    row.get::<_, Option<String>>(17)?,
+                    row.get::<_, Option<String>>(16)?,
+                    row.get::<_, Option<u32>>(17)?,
                     row.get::<_, Option<String>>(18)?,
                     row.get::<_, Option<String>>(19)?,
                     row.get::<_, Option<String>>(20)?,
                     row.get::<_, Option<String>>(21)?,
-                    row.get::<_, i64>(22)?,
+                    row.get::<_, Option<String>>(22)?,
                     row.get::<_, i64>(23)?,
                     row.get::<_, i64>(24)?,
+                    row.get::<_, i64>(25)?,
                 ))
             })
             .map_err(|source| AppSqliteError::Query {
@@ -1556,6 +1589,7 @@ impl<'a> AppBuyerRepository<'a> {
                 farm_key,
                 listing_addr,
                 listing_event_id,
+                listing_relays_json,
                 seller_pubkey,
                 stock_count,
                 fulfillment_window_id,
@@ -1585,6 +1619,7 @@ impl<'a> AppBuyerRepository<'a> {
                 farm_key: farm_key.and_then(empty_string_to_none),
                 listing_addr: listing_addr.and_then(empty_string_to_none),
                 listing_event_id: listing_event_id.and_then(empty_string_to_none),
+                listing_relays: listing_relays_from_json(listing_relays_json)?,
                 seller_pubkey: seller_pubkey.and_then(empty_string_to_none),
                 stock_count,
                 fulfillment_window_id: parse_optional_typed_id(
@@ -1672,6 +1707,7 @@ impl<'a> AppBuyerRepository<'a> {
                     ol.farm_key,
                     ol.listing_addr,
                     ol.listing_event_id,
+                    ol.listing_relays_json,
                     ol.seller_pubkey
                  from order_lines ol
                  where ol.order_id = ?1
@@ -1696,6 +1732,7 @@ impl<'a> AppBuyerRepository<'a> {
                     row.get::<_, Option<String>>(9)?,
                     row.get::<_, Option<String>>(10)?,
                     row.get::<_, Option<String>>(11)?,
+                    row.get::<_, Option<String>>(12)?,
                 ))
             })
             .map_err(|source| AppSqliteError::Query {
@@ -1717,6 +1754,7 @@ impl<'a> AppBuyerRepository<'a> {
                 farm_key,
                 listing_addr,
                 listing_event_id,
+                listing_relays_json,
                 seller_pubkey,
             ) = row.map_err(|source| AppSqliteError::Query {
                 operation: "read buyer order local event line",
@@ -1745,6 +1783,7 @@ impl<'a> AppBuyerRepository<'a> {
                 farm_key: farm_key.and_then(empty_string_to_none),
                 listing_addr: listing_addr.and_then(empty_string_to_none),
                 listing_event_id: listing_event_id.and_then(empty_string_to_none),
+                listing_relays: listing_relays_from_json(listing_relays_json)?,
                 seller_pubkey: seller_pubkey.and_then(empty_string_to_none),
             });
         }
@@ -1990,6 +2029,7 @@ struct BuyerListingRecord {
     farm_key: Option<String>,
     listing_addr: Option<String>,
     listing_event_id: Option<String>,
+    listing_relays: Vec<String>,
     seller_pubkey: Option<String>,
     stock_count: Option<u32>,
     fulfillment_window_id: Option<FulfillmentWindowId>,
@@ -2057,6 +2097,7 @@ impl BuyerListingRecord {
             product_id: self.product_id,
             farm_id: self.farm_id,
             farm_display_name: self.farm_display_name,
+            listing_relays: self.listing_relays,
             title: self.title,
             subtitle: self.subtitle,
             price,
@@ -2168,6 +2209,7 @@ struct BuyerCartLineSnapshot {
     farm_key: Option<String>,
     listing_addr: Option<String>,
     listing_event_id: Option<String>,
+    listing_relays: Vec<String>,
     seller_pubkey: Option<String>,
 }
 
@@ -2554,6 +2596,62 @@ fn empty_string_to_none(value: String) -> Option<String> {
 
 fn empty_string_to_none_option(value: Option<String>) -> Option<String> {
     value.and_then(empty_string_to_none)
+}
+
+fn encode_listing_relays(relays: &[String]) -> Result<Option<String>, AppSqliteError> {
+    let relays = normalized_listing_relays(relays.iter().map(String::as_str));
+    if relays.is_empty() {
+        return Ok(None);
+    }
+
+    serde_json::to_string(&relays)
+        .map(Some)
+        .map_err(|_| AppSqliteError::InvalidProjection {
+            reason: "listing relay provenance must encode",
+        })
+}
+
+fn listing_relays_from_json(value: Option<String>) -> Result<Vec<String>, AppSqliteError> {
+    let Some(value) = empty_string_to_none_option(value) else {
+        return Ok(Vec::new());
+    };
+    let value = serde_json::from_str::<Value>(value.as_str()).map_err(|_| {
+        AppSqliteError::InvalidProjection {
+            reason: "listing relay provenance json must decode",
+        }
+    })?;
+    if let Some(relays) = value.as_array() {
+        return Ok(relays_from_json_array(relays));
+    }
+
+    for key in ["acknowledged_relays", "target_relays", "connected_relays"] {
+        let relays = value
+            .get(key)
+            .and_then(Value::as_array)
+            .map(|relays| relays_from_json_array(relays))
+            .unwrap_or_default();
+        if !relays.is_empty() {
+            return Ok(relays);
+        }
+    }
+
+    Ok(Vec::new())
+}
+
+fn relays_from_json_array(relays: &[Value]) -> Vec<String> {
+    normalized_listing_relays(relays.iter().filter_map(Value::as_str))
+}
+
+fn normalized_listing_relays<'a>(relays: impl IntoIterator<Item = &'a str>) -> Vec<String> {
+    let mut seen = BTreeSet::new();
+    let mut normalized = Vec::new();
+    for relay in relays {
+        let relay = relay.trim();
+        if !relay.is_empty() && seen.insert(relay.to_owned()) {
+            normalized.push(relay.to_owned());
+        }
+    }
+    normalized
 }
 
 #[cfg(test)]

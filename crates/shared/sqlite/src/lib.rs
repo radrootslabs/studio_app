@@ -813,6 +813,11 @@ mod tests {
         ));
         assert!(column_exists(connection, "order_lines", "price_currency"));
         assert!(column_exists(connection, "order_lines", "listing_addr"));
+        assert!(column_exists(
+            connection,
+            "order_lines",
+            "listing_relays_json"
+        ));
         assert!(column_exists(connection, "products", "category"));
         assert!(column_exists(connection, "products", "listing_bin_id"));
         assert!(column_exists(connection, "buyer_carts", "buyer_email"));
@@ -838,6 +843,11 @@ mod tests {
             connection,
             "buyer_cart_lines",
             "listing_event_id"
+        ));
+        assert!(column_exists(
+            connection,
+            "buyer_cart_lines",
+            "listing_relays_json"
         ));
         assert!(column_exists(connection, "orders", "buyer_context_key"));
         assert!(column_exists(connection, "orders", "buyer_email"));
