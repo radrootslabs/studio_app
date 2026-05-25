@@ -121,6 +121,22 @@ impl<'a> AppLocalInteropRepository<'a> {
         Ok(report)
     }
 
+    pub fn import_records(
+        &self,
+        records: &[LocalEventRecord],
+    ) -> Result<AppLocalInteropImportReport, AppSqliteError> {
+        let mut report = AppLocalInteropImportReport::default();
+        for record in records {
+            report.scanned_records += 1;
+            report.last_change_seq = Some(record.change_seq);
+            match self.import_record(record)? {
+                ImportOutcome::Imported => report.imported_records += 1,
+                ImportOutcome::Skipped => report.skipped_records += 1,
+            }
+        }
+        Ok(report)
+    }
+
     pub fn load_records(&self) -> Result<Vec<StoredLocalInteropRecord>, AppSqliteError> {
         let mut statement = self
             .connection
@@ -223,6 +239,9 @@ impl<'a> AppLocalInteropRepository<'a> {
     }
 
     fn import_record(&self, record: &LocalEventRecord) -> Result<ImportOutcome, AppSqliteError> {
+        if self.is_duplicate_signed_event(record)? {
+            return Ok(ImportOutcome::Skipped);
+        }
         let projection = match record.family {
             LocalRecordFamily::LocalWork => self.import_local_work(record)?,
             LocalRecordFamily::SignedEvent => self.import_signed_event(record)?,
@@ -237,6 +256,35 @@ impl<'a> AppLocalInteropRepository<'a> {
                 Ok(ImportOutcome::Skipped)
             }
         }
+    }
+
+    fn is_duplicate_signed_event(&self, record: &LocalEventRecord) -> Result<bool, AppSqliteError> {
+        if record.family != LocalRecordFamily::SignedEvent {
+            return Ok(false);
+        }
+        let Some(event_id) = record
+            .event_id
+            .as_deref()
+            .map(str::trim)
+            .filter(|event_id| !event_id.is_empty())
+        else {
+            return Ok(false);
+        };
+        self.connection
+            .query_row(
+                "SELECT EXISTS(
+                    SELECT 1
+                    FROM local_interop_imports
+                    WHERE event_id = ?1
+                      AND record_id <> ?2
+                 )",
+                params![event_id, record.record_id.as_str()],
+                |row| row.get::<_, bool>(0),
+            )
+            .map_err(|source| AppSqliteError::Query {
+                operation: "check duplicate local interop signed event",
+                source,
+            })
     }
 
     fn import_local_work(
@@ -1047,6 +1095,13 @@ impl AppSqliteStore {
         E: SqlExecutor,
     {
         self.local_interop_repository().import_from_store(store)
+    }
+
+    pub fn import_local_event_records(
+        &self,
+        records: &[LocalEventRecord],
+    ) -> Result<AppLocalInteropImportReport, AppSqliteError> {
+        self.local_interop_repository().import_records(records)
     }
 
     pub fn load_local_interop_records(
@@ -2600,6 +2655,46 @@ mod tests {
         );
         assert_eq!(product.0, expected_product_id.to_string());
         assert_eq!(product.1, expected_farm_id.to_string());
+    }
+
+    #[test]
+    fn direct_record_import_dedupes_signed_events_by_event_id() {
+        let app_store =
+            AppSqliteStore::open(DatabaseTarget::InMemory).expect("open app sqlite store");
+        let events = local_events_store();
+        let farm_key = "SIGNEDFARMAAAAAAAAAAAA";
+        let listing_key = "SIGNEDLISTINGBBBBBBBB";
+        let first = events
+            .append_record(&signed_listing_record(
+                "shared-record",
+                farm_key,
+                listing_key,
+                "active",
+            ))
+            .expect("append shared signed listing");
+        let mut duplicate = signed_listing_record("relay-record", farm_key, listing_key, "active");
+        duplicate.event_id = first.event_id.clone();
+        let duplicate = events
+            .append_record(&duplicate)
+            .expect("append relay signed listing");
+
+        let report = app_store
+            .import_local_event_records(&[first, duplicate])
+            .expect("direct records should import");
+        let imported = app_store
+            .load_local_interop_records()
+            .expect("load imported records");
+
+        assert_eq!(report.scanned_records, 2);
+        assert_eq!(report.imported_records, 1);
+        assert_eq!(report.skipped_records, 1);
+        assert_eq!(
+            imported
+                .iter()
+                .filter(|record| record.projected_kind == "listing")
+                .count(),
+            1
+        );
     }
 
     #[test]
