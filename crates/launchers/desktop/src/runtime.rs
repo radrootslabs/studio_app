@@ -5851,14 +5851,8 @@ fn direct_relay_event_listing_addr(
     }
 }
 
-fn direct_relay_event_source_runtime(kind: u16, d_tag: Option<&str>) -> SourceRuntime {
-    if matches!(kind, 30340 | 30402 | 30403)
-        && d_tag.is_some_and(|d_tag| decode_app_d_tag_uuid(d_tag).is_some())
-    {
-        SourceRuntime::App
-    } else {
-        SourceRuntime::Cli
-    }
+fn direct_relay_event_source_runtime(_kind: u16, _d_tag: Option<&str>) -> SourceRuntime {
+    SourceRuntime::Cli
 }
 
 fn relay_event_kind(event: &RadrootsNostrEvent) -> u16 {
@@ -5925,41 +5919,6 @@ fn relay_address_d_tag(address: &str) -> Option<String> {
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .map(str::to_owned)
-}
-
-fn decode_app_d_tag_uuid(value: &str) -> Option<Uuid> {
-    let mut decoded = Vec::with_capacity(16);
-    let mut buffer = 0u32;
-    let mut bits = 0u8;
-    for byte in value.trim().bytes() {
-        let digit = base64_url_digit(byte)?;
-        buffer = (buffer << 6) | u32::from(digit);
-        bits += 6;
-        while bits >= 8 {
-            bits -= 8;
-            decoded.push(((buffer >> bits) & 0xff) as u8);
-            buffer &= (1u32 << bits) - 1;
-        }
-    }
-    if bits > 0 && buffer != 0 {
-        return None;
-    }
-    if decoded.len() == 16 {
-        Uuid::from_slice(decoded.as_slice()).ok()
-    } else {
-        None
-    }
-}
-
-fn base64_url_digit(byte: u8) -> Option<u8> {
-    match byte {
-        b'A'..=b'Z' => Some(byte - b'A'),
-        b'a'..=b'z' => Some(byte - b'a' + 26),
-        b'0'..=b'9' => Some(byte - b'0' + 52),
-        b'-' => Some(62),
-        b'_' => Some(63),
-        _ => None,
-    }
 }
 
 fn non_empty_string(value: &str) -> Option<String> {
@@ -8431,6 +8390,7 @@ mod tests {
     use tokio::net::TcpListener;
     use tokio::sync::oneshot;
     use tokio_tungstenite::tungstenite::Message;
+    use uuid::Uuid;
 
     use crate::accounts::DesktopLocalIdentityImportRequest;
 
@@ -8439,8 +8399,8 @@ mod tests {
         DesktopAppRuntimeCommandError, DesktopAppRuntimeMetadataSummary, DesktopAppRuntimeState,
         DesktopAppSyncStatusSummary, DesktopRemoteSignerPaths, SYNC_TRANSPORT_UNAVAILABLE_MESSAGE,
         SdkDirectRelayAppSyncTransport, TokioRuntimeBuilder, default_sync_transport,
-        farm_sync_payload, is_hex_64, order_decision_publish_payload_to_sdk_decision,
-        pending_sync_upsert,
+        direct_relay_event_source_runtime, farm_sync_payload, is_hex_64,
+        order_decision_publish_payload_to_sdk_decision, pending_sync_upsert,
     };
     use crate::pack_day_host_handoff::PackDayHostHandoffError;
     use crate::pack_day_print::{
@@ -8461,6 +8421,25 @@ mod tests {
                 .expect("recorded sync transport lock")
                 .sync(request)
         }
+    }
+
+    #[test]
+    fn direct_relay_trade_events_keep_cli_source_runtime_for_app_shaped_d_tags() {
+        let app_shaped_d_tag =
+            super::d_tag_from_uuid(Uuid::from_u128(0x12345678123446789123456781234567));
+
+        assert_eq!(
+            direct_relay_event_source_runtime(30340, Some(app_shaped_d_tag.as_str())),
+            SourceRuntime::Cli
+        );
+        assert_eq!(
+            direct_relay_event_source_runtime(30402, Some(app_shaped_d_tag.as_str())),
+            SourceRuntime::Cli
+        );
+        assert_eq!(
+            direct_relay_event_source_runtime(30403, Some(app_shaped_d_tag.as_str())),
+            SourceRuntime::Cli
+        );
     }
 
     struct ThreadedAckRelay {

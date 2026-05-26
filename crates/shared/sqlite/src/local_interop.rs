@@ -4178,15 +4178,18 @@ mod tests {
     }
 
     #[test]
-    fn signed_listing_import_prefers_event_and_address_tag_identity() {
+    fn cli_signed_listing_import_uses_cli_identity_for_app_shaped_keys() {
         let app_store =
             AppSqliteStore::open(DatabaseTarget::InMemory).expect("open app sqlite store");
         let events = local_events_store();
-        let signed_farm_key = "SIGNEDFARMAAAAAAAAAAAA";
-        let signed_listing_key = "SIGNEDLISTINGBBBBBBBB";
-        let expected_farm_id = deterministic_farm_id(Some("farm-tag-pubkey"), signed_farm_key);
+        let signed_farm_key =
+            app_d_tag_from_uuid(Uuid::from_u128(0x77777777777747778777777777777777));
+        let signed_listing_key =
+            app_d_tag_from_uuid(Uuid::from_u128(0x88888888888848888888888888888888));
+        let expected_farm_id =
+            deterministic_farm_id(Some("farm-tag-pubkey"), signed_farm_key.as_str());
         let expected_product_id =
-            deterministic_product_id(Some("listing-event-pubkey"), signed_listing_key);
+            deterministic_product_id(Some("listing-event-pubkey"), signed_listing_key.as_str());
         events
             .append_record(&LocalEventRecordInput {
                 record_id: "cli:signed_event:listing:event-identity".to_owned(),
