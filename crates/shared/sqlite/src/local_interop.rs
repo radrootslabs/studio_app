@@ -209,6 +209,59 @@ impl<'a> AppLocalInteropRepository<'a> {
         .collect()
     }
 
+    pub fn load_signed_events_by_kind(
+        &self,
+        event_kind: i64,
+    ) -> Result<Vec<RadrootsNostrEvent>, AppSqliteError> {
+        let mut statement = self
+            .connection
+            .prepare(
+                "SELECT
+                    event_id,
+                    event_kind,
+                    event_pubkey,
+                    event_created_at,
+                    event_tags_json,
+                    event_content,
+                    event_sig
+                 FROM local_interop_imports
+                 WHERE record_family = 'signed_event'
+                    AND event_kind = ?1
+                 ORDER BY local_seq ASC, record_id ASC",
+            )
+            .map_err(|source| AppSqliteError::Query {
+                operation: "prepare local interop signed event evidence query",
+                source,
+            })?;
+        let rows = statement
+            .query_map(params![event_kind], |row| {
+                Ok(StoredLocalInteropSignedEventEvidence {
+                    event_id: row.get(0)?,
+                    event_kind: row.get(1)?,
+                    event_pubkey: row.get(2)?,
+                    event_created_at: row.get(3)?,
+                    event_tags_json: row.get(4)?,
+                    event_content: row.get(5)?,
+                    event_sig: row.get(6)?,
+                })
+            })
+            .map_err(|source| AppSqliteError::Query {
+                operation: "query local interop signed event evidence",
+                source,
+            })?;
+        let mut events = Vec::new();
+        for row in rows {
+            let evidence = row.map_err(|source| AppSqliteError::Query {
+                operation: "read local interop signed event evidence row",
+                source,
+            })?;
+            if let Some(event) = signed_event_from_local_interop_evidence(&evidence)? {
+                events.push(event);
+            }
+        }
+        Ok(events)
+    }
+
     fn last_imported_change_seq(&self) -> Result<i64, AppSqliteError> {
         match self.connection.query_row(
             "SELECT last_change_seq
@@ -1304,6 +1357,22 @@ impl<'a> AppLocalInteropRepository<'a> {
         projected_kind: &str,
         projected_id: Option<String>,
     ) -> Result<(), AppSqliteError> {
+        let event_tags_json = record
+            .event_tags_json
+            .as_ref()
+            .map(serde_json::to_string)
+            .transpose()
+            .map_err(|_| AppSqliteError::InvalidProjection {
+                reason: "local interop event tags json must encode",
+            })?;
+        let raw_event_json = record
+            .raw_event_json
+            .as_ref()
+            .map(serde_json::to_string)
+            .transpose()
+            .map_err(|_| AppSqliteError::InvalidProjection {
+                reason: "local interop raw event json must encode",
+            })?;
         let relay_delivery_json = record
             .relay_delivery_json
             .as_ref()
@@ -1328,10 +1397,16 @@ impl<'a> AppLocalInteropRepository<'a> {
                     projected_id,
                     event_id,
                     event_kind,
+                    event_pubkey,
+                    event_created_at,
+                    event_tags_json,
+                    event_content,
+                    event_sig,
+                    raw_event_json,
                     outbox_status,
                     relay_delivery_json,
                     imported_at
-                 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
+                 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
                  ON CONFLICT(record_id) DO UPDATE SET
                     local_seq = excluded.local_seq,
                     record_family = excluded.record_family,
@@ -1345,6 +1420,12 @@ impl<'a> AppLocalInteropRepository<'a> {
                     projected_id = excluded.projected_id,
                     event_id = excluded.event_id,
                     event_kind = excluded.event_kind,
+                    event_pubkey = excluded.event_pubkey,
+                    event_created_at = excluded.event_created_at,
+                    event_tags_json = excluded.event_tags_json,
+                    event_content = excluded.event_content,
+                    event_sig = excluded.event_sig,
+                    raw_event_json = excluded.raw_event_json,
                     outbox_status = excluded.outbox_status,
                     relay_delivery_json = excluded.relay_delivery_json,
                     imported_at = excluded.imported_at",
@@ -1362,6 +1443,12 @@ impl<'a> AppLocalInteropRepository<'a> {
                     projected_id.as_deref(),
                     record.event_id.as_deref(),
                     record.event_kind,
+                    record.event_pubkey.as_deref(),
+                    record.event_created_at,
+                    event_tags_json.as_deref(),
+                    record.event_content.as_deref(),
+                    record.event_sig.as_deref(),
+                    raw_event_json.as_deref(),
                     record.outbox_status.as_str(),
                     relay_delivery_json.as_deref(),
                 ],
@@ -1409,6 +1496,14 @@ impl AppSqliteStore {
     ) -> Result<Vec<StoredLocalInteropRecord>, AppSqliteError> {
         self.local_interop_repository().load_records()
     }
+
+    pub fn load_local_interop_signed_events_by_kind(
+        &self,
+        event_kind: i64,
+    ) -> Result<Vec<RadrootsNostrEvent>, AppSqliteError> {
+        self.local_interop_repository()
+            .load_signed_events_by_kind(event_kind)
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -1421,6 +1516,17 @@ enum ImportOutcome {
 struct ProjectionRecord {
     kind: &'static str,
     projected_id: Option<String>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct StoredLocalInteropSignedEventEvidence {
+    event_id: Option<String>,
+    event_kind: Option<i64>,
+    event_pubkey: Option<String>,
+    event_created_at: Option<i64>,
+    event_tags_json: Option<String>,
+    event_content: Option<String>,
+    event_sig: Option<String>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -1572,6 +1678,69 @@ fn signed_event_from_record(
         kind,
         tags,
         content: record.event_content.clone().unwrap_or_default(),
+        sig: sig.to_owned(),
+    }))
+}
+
+fn signed_event_from_local_interop_evidence(
+    evidence: &StoredLocalInteropSignedEventEvidence,
+) -> Result<Option<RadrootsNostrEvent>, AppSqliteError> {
+    let Some(id) = evidence
+        .event_id
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    else {
+        return Ok(None);
+    };
+    let Some(author) = evidence
+        .event_pubkey
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    else {
+        return Ok(None);
+    };
+    let Some(kind) = evidence
+        .event_kind
+        .and_then(|kind| u32::try_from(kind).ok())
+    else {
+        return Ok(None);
+    };
+    let Some(created_at) = evidence
+        .event_created_at
+        .and_then(|created_at| u32::try_from(created_at).ok())
+    else {
+        return Ok(None);
+    };
+    let Some(sig) = evidence
+        .event_sig
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    else {
+        return Ok(None);
+    };
+    let Some(tags_json) = evidence.event_tags_json.as_deref() else {
+        return Ok(None);
+    };
+    let tags_value = serde_json::from_str::<Value>(tags_json).map_err(|_| {
+        AppSqliteError::InvalidProjection {
+            reason: "local interop signed event tags must decode",
+        }
+    })?;
+    let Some(tags) = tags_from_json(&tags_value) else {
+        return Err(AppSqliteError::InvalidProjection {
+            reason: "local interop signed event tags must be an array",
+        });
+    };
+    Ok(Some(RadrootsNostrEvent {
+        id: id.to_owned(),
+        author: author.to_owned(),
+        created_at,
+        kind,
+        tags,
+        content: evidence.event_content.clone().unwrap_or_default(),
         sig: sig.to_owned(),
     }))
 }
@@ -2634,6 +2803,9 @@ mod tests {
         let imported = app_store
             .load_local_interop_records()
             .expect("load imported records");
+        let signed_evidence = app_store
+            .load_local_interop_signed_events_by_kind(KIND_ORDER_REQUEST)
+            .expect("load signed event evidence");
         let buyer_context_key: String = app_store
             .connection()
             .query_row(
@@ -2651,6 +2823,7 @@ mod tests {
                     && record.event_kind == Some(KIND_ORDER_REQUEST)
                     && record.event_id.as_deref() == Some("order-request-event-1"))
         );
+        assert_eq!(signed_evidence, vec![event.clone()]);
         assert_eq!(orders.rows.len(), 1);
         assert_eq!(orders.rows[0].order_id, order_id);
         assert_eq!(orders.rows[0].status, OrderStatus::NeedsAction);

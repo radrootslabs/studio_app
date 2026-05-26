@@ -2342,7 +2342,7 @@ impl DesktopAppRuntimeState {
                 reason: "seller order decision requires an undecided order",
             });
         }
-        let request = self.resolve_seller_order_request_from_shared_events(order_id)?;
+        let request = self.resolve_seller_order_request_evidence(order_id)?;
         if request.payload.seller_pubkey.trim() != seller_pubkey.as_str() {
             return Err(AppSqliteError::InvalidProjection {
                 reason: "seller order decision seller account does not match order seller",
@@ -4470,17 +4470,43 @@ impl DesktopAppRuntimeState {
         sqlite_store.import_shared_local_events_from_path(database_path.as_path())
     }
 
-    fn resolve_seller_order_request_from_shared_events(
+    fn resolve_seller_order_request_evidence(
         &self,
         order_id: OrderId,
     ) -> Result<ResolvedAppSellerOrderRequest, AppSqliteError> {
+        let mut matched_requests = BTreeMap::new();
+        self.collect_seller_order_request_evidence_from_shared_events(
+            &order_id,
+            &mut matched_requests,
+        )?;
+        self.collect_seller_order_request_evidence_from_local_interop(
+            &order_id,
+            &mut matched_requests,
+        )?;
+
+        if matched_requests.len() > 1 {
+            return Err(AppSqliteError::InvalidProjection {
+                reason: "seller order decision found multiple signed order requests",
+            });
+        }
+
+        matched_requests
+            .into_values()
+            .next()
+            .ok_or(AppSqliteError::InvalidProjection {
+                reason: "seller order decision requires signed order request evidence",
+            })
+    }
+
+    fn collect_seller_order_request_evidence_from_shared_events(
+        &self,
+        order_id: &OrderId,
+        matched_requests: &mut BTreeMap<String, ResolvedAppSellerOrderRequest>,
+    ) -> Result<(), AppSqliteError> {
         let store = self.open_shared_local_events_store()?;
         let Some(store) = store else {
-            return Err(AppSqliteError::InvalidProjection {
-                reason: "seller order decision requires shared signed order request evidence",
-            });
+            return Ok(());
         };
-        let mut matched_request = None;
         let mut before = None;
 
         loop {
@@ -4525,23 +4551,12 @@ impl DesktopAppRuntimeState {
                 let Ok(envelope) = radroots_sdk::trade::parse_order_request(&event) else {
                     continue;
                 };
-                let app_order_id = projected_order_id_from_trade_request(
-                    envelope.payload.order_id.as_str(),
-                    envelope.payload.buyer_pubkey.as_str(),
+                insert_seller_order_request_evidence(
+                    order_id,
+                    &event,
+                    envelope.payload,
+                    matched_requests,
                 );
-                if app_order_id != order_id {
-                    continue;
-                }
-                if matched_request.is_some() {
-                    return Err(AppSqliteError::InvalidProjection {
-                        reason: "seller order decision found multiple signed order requests",
-                    });
-                }
-                matched_request = Some(ResolvedAppSellerOrderRequest {
-                    request_event_id: event.id,
-                    listing_event_id: listing_event_id_from_tags(&event.tags),
-                    payload: envelope.payload,
-                });
             }
 
             if before.is_none() || is_last_page {
@@ -4549,9 +4564,34 @@ impl DesktopAppRuntimeState {
             }
         }
 
-        matched_request.ok_or(AppSqliteError::InvalidProjection {
-            reason: "seller order decision requires signed order request evidence",
-        })
+        Ok(())
+    }
+
+    fn collect_seller_order_request_evidence_from_local_interop(
+        &self,
+        order_id: &OrderId,
+        matched_requests: &mut BTreeMap<String, ResolvedAppSellerOrderRequest>,
+    ) -> Result<(), AppSqliteError> {
+        let Some(sqlite_store) = self.sqlite_store.as_ref() else {
+            return Ok(());
+        };
+        let events = sqlite_store.load_local_interop_signed_events_by_kind(i64::from(
+            radroots_sdk::trade::RadrootsActiveTradeMessageType::TradeOrderRequested.kind(),
+        ))?;
+
+        for event in events {
+            let Ok(envelope) = radroots_sdk::trade::parse_order_request(&event) else {
+                continue;
+            };
+            insert_seller_order_request_evidence(
+                order_id,
+                &event,
+                envelope.payload,
+                matched_requests,
+            );
+        }
+
+        Ok(())
     }
 
     fn open_shared_local_events_store(
@@ -4980,6 +5020,7 @@ impl DesktopAppRuntimeState {
             let listing_addr = source_record
                 .as_ref()
                 .and_then(|record| record.listing_addr.clone())
+                .or_else(|| receipt.listing_addr.clone())
                 .or_else(|| signed_event_listing_addr(receipt));
             let event_record = LocalEventRecordInput {
                 record_id: format!("app:signed_event:{}", receipt.event_id),
@@ -6328,22 +6369,26 @@ fn published_operation_receipt(
             "direct relay app sync received non-relay receipt",
         ));
     };
-    let (source_account_id, source_local_event_id) = match payload {
+    let (source_account_id, source_local_event_id, listing_addr) = match payload {
         AppPublishPayload::FarmProfile(payload) => (
             payload.context.account_id.clone(),
             payload.context.source_local_event_id.clone(),
+            None,
         ),
         AppPublishPayload::Listing(payload) => (
             payload.context.account_id.clone(),
             payload.context.source_local_event_id.clone(),
+            None,
         ),
         AppPublishPayload::OrderRequest(payload) => (
             payload.context.account_id.clone(),
             payload.context.source_local_event_id.clone(),
+            payload.listing_addr.clone(),
         ),
         AppPublishPayload::OrderDecision(payload) => (
             payload.context.account_id.clone(),
             payload.context.source_local_event_id.clone(),
+            Some(payload.listing_addr.clone()),
         ),
     };
     let failed_relays = relay_receipt
@@ -6381,6 +6426,7 @@ fn published_operation_receipt(
         operation_key: operation_key.to_owned(),
         source_account_id,
         source_local_event_id,
+        listing_addr,
         event_id: relay_receipt.event_id,
         event_kind: relay_receipt.event_kind,
         event_pubkey: relay_receipt.event.author.clone(),
@@ -8106,6 +8152,28 @@ fn event_tags_from_value(
                 .collect()
         })
         .collect()
+}
+
+fn insert_seller_order_request_evidence(
+    order_id: &OrderId,
+    event: &radroots_sdk::RadrootsNostrEvent,
+    payload: RadrootsTradeOrderRequested,
+    matched_requests: &mut BTreeMap<String, ResolvedAppSellerOrderRequest>,
+) {
+    let app_order_id = projected_order_id_from_trade_request(
+        payload.order_id.as_str(),
+        payload.buyer_pubkey.as_str(),
+    );
+    if app_order_id != *order_id {
+        return;
+    }
+    matched_requests
+        .entry(event.id.clone())
+        .or_insert_with(|| ResolvedAppSellerOrderRequest {
+            request_event_id: event.id.clone(),
+            listing_event_id: listing_event_id_from_tags(&event.tags),
+            payload,
+        });
 }
 
 fn listing_event_id_from_tags(tags: &[Vec<String>]) -> Option<String> {
@@ -17243,6 +17311,7 @@ mod tests {
             operation_key: "farm:upsert".to_owned(),
             source_account_id,
             source_local_event_id,
+            listing_addr: None,
             event_id: event_id.to_owned(),
             event_kind: 30340,
             event_pubkey: event_pubkey.to_owned(),

@@ -84,6 +84,10 @@ const MIGRATIONS: &[Migration] = &[
         version: 20,
         sql: include_str!("../migrations/0020_declined_order_status.sql"),
     },
+    Migration {
+        version: 21,
+        sql: include_str!("../migrations/0021_local_interop_signed_event_evidence.sql"),
+    },
 ];
 
 pub fn latest_schema_version() -> u32 {
