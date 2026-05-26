@@ -1591,7 +1591,7 @@ fn tags_from_json(value: &Value) -> Option<Vec<Vec<String>>> {
     })
 }
 
-fn projected_order_id(order_id: &str, buyer_pubkey: &str) -> OrderId {
+pub fn projected_order_id_from_trade_request(order_id: &str, buyer_pubkey: &str) -> OrderId {
     order_id.parse().unwrap_or_else(|_| {
         OrderId::from(deterministic_uuid(
             "radroots-cli-order",
@@ -1599,6 +1599,10 @@ fn projected_order_id(order_id: &str, buyer_pubkey: &str) -> OrderId {
             order_id,
         ))
     })
+}
+
+fn projected_order_id(order_id: &str, buyer_pubkey: &str) -> OrderId {
+    projected_order_id_from_trade_request(order_id, buyer_pubkey)
 }
 
 fn order_line_product_id(

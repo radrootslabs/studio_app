@@ -47,9 +47,10 @@ pub use farm_rules::{AppFarmRulesRepository, derive_farm_rules_readiness};
 pub use farm_setup::AppFarmSetupRepository;
 pub use local_interop::{
     AppLocalInteropImportReport, AppLocalInteropRepository, StoredLocalInteropRecord,
+    projected_order_id_from_trade_request,
 };
 pub use migrations::latest_schema_version;
-pub use orders::AppOrdersRepository;
+pub use orders::{AppOrdersRepository, SellerOrderDecisionExport, SellerOrderDecisionLineExport};
 pub use products::AppProductsRepository;
 pub use reminders::AppRemindersRepository;
 pub use sync::{
@@ -244,6 +245,15 @@ impl AppSqliteStore {
     ) -> Result<Option<OrderDetailProjection>, AppSqliteError> {
         self.orders_repository()
             .load_order_detail(farm_id, order_id)
+    }
+
+    pub fn load_seller_order_decision_export(
+        &self,
+        farm_id: FarmId,
+        order_id: OrderId,
+    ) -> Result<Option<SellerOrderDecisionExport>, AppSqliteError> {
+        self.orders_repository()
+            .load_seller_order_decision_export(farm_id, order_id)
     }
 
     pub fn load_pack_day(

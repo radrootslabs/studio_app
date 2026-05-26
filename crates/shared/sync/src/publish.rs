@@ -13,6 +13,7 @@ pub enum AppPublishWorkKind {
     FarmProfile,
     Listing,
     OrderRequest,
+    OrderDecision,
 }
 
 impl AppPublishWorkKind {
@@ -21,6 +22,7 @@ impl AppPublishWorkKind {
             Self::FarmProfile => "farm_profile",
             Self::Listing => "listing",
             Self::OrderRequest => "order_request",
+            Self::OrderDecision => "order_decision",
         }
     }
 
@@ -29,6 +31,7 @@ impl AppPublishWorkKind {
             Self::FarmProfile => "farm.publish_draft_with_identity",
             Self::Listing => "listing.publish_draft_with_identity",
             Self::OrderRequest => "trade.publish_order_request_with_identity",
+            Self::OrderDecision => "trade.publish_order_decision_with_identity",
         }
     }
 }
@@ -121,11 +124,52 @@ pub struct AppOrderRequestPublishPayload {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct AppOrderDecisionInventoryCommitment {
+    pub bin_id: String,
+    pub bin_count: u32,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case", tag = "decision")]
+pub enum AppOrderDecisionPayload {
+    Accepted {
+        inventory_commitments: Vec<AppOrderDecisionInventoryCommitment>,
+    },
+    Declined {
+        reason: String,
+    },
+}
+
+impl AppOrderDecisionPayload {
+    pub const fn storage_key(&self) -> &'static str {
+        match self {
+            Self::Accepted { .. } => "accepted",
+            Self::Declined { .. } => "declined",
+        }
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct AppOrderDecisionPublishPayload {
+    pub context: AppPublishContext,
+    pub app_order_id: OrderId,
+    pub farm_id: FarmId,
+    pub trade_order_id: String,
+    pub request_event_id: String,
+    pub listing_event_id: Option<String>,
+    pub listing_addr: String,
+    pub buyer_pubkey: String,
+    pub seller_pubkey: String,
+    pub decision: AppOrderDecisionPayload,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "publish_kind", content = "payload", rename_all = "snake_case")]
 pub enum AppPublishPayload {
     FarmProfile(AppFarmProfilePublishPayload),
     Listing(AppListingPublishPayload),
     OrderRequest(AppOrderRequestPublishPayload),
+    OrderDecision(AppOrderDecisionPublishPayload),
 }
 
 impl AppPublishPayload {
@@ -134,6 +178,7 @@ impl AppPublishPayload {
             Self::FarmProfile(_) => AppPublishWorkKind::FarmProfile,
             Self::Listing(_) => AppPublishWorkKind::Listing,
             Self::OrderRequest(_) => AppPublishWorkKind::OrderRequest,
+            Self::OrderDecision(_) => AppPublishWorkKind::OrderDecision,
         }
     }
 
@@ -150,6 +195,7 @@ impl AppPublishPayload {
             Self::FarmProfile(payload) => SyncAggregateRef::Farm(payload.farm_id),
             Self::Listing(payload) => SyncAggregateRef::Product(payload.product_id),
             Self::OrderRequest(payload) => SyncAggregateRef::Order(payload.order_id),
+            Self::OrderDecision(payload) => SyncAggregateRef::Order(payload.app_order_id),
         }
     }
 
@@ -278,6 +324,43 @@ impl AppPublishPayload {
                     failures.push(AppPublishValidationFailure::MissingOrderTotal);
                 }
             }
+            Self::OrderDecision(payload) => {
+                payload.context.validation_failures(&mut failures);
+                if payload.trade_order_id.trim().is_empty() {
+                    failures.push(AppPublishValidationFailure::MissingOrderTradeOrderId);
+                }
+                if payload.request_event_id.trim().is_empty() {
+                    failures.push(AppPublishValidationFailure::MissingOrderRequestEventId);
+                }
+                if payload.listing_addr.trim().is_empty() {
+                    failures.push(AppPublishValidationFailure::MissingOrderListingAddress);
+                }
+                if payload.buyer_pubkey.trim().is_empty() {
+                    failures.push(AppPublishValidationFailure::MissingOrderBuyerPubkey);
+                }
+                if payload.seller_pubkey.trim().is_empty() {
+                    failures.push(AppPublishValidationFailure::MissingOrderSellerPubkey);
+                }
+                match &payload.decision {
+                    AppOrderDecisionPayload::Accepted {
+                        inventory_commitments,
+                    } => {
+                        if inventory_commitments.is_empty()
+                            || inventory_commitments.iter().any(|commitment| {
+                                commitment.bin_id.trim().is_empty() || commitment.bin_count == 0
+                            })
+                        {
+                            failures
+                                .push(AppPublishValidationFailure::MissingOrderDecisionInventory);
+                        }
+                    }
+                    AppOrderDecisionPayload::Declined { reason } => {
+                        if reason.trim().is_empty() {
+                            failures.push(AppPublishValidationFailure::MissingOrderDeclineReason);
+                        }
+                    }
+                }
+            }
         }
 
         failures
@@ -325,6 +408,10 @@ pub enum AppPublishValidationFailure {
     MissingOrderItems,
     MissingOrderCurrency,
     MissingOrderTotal,
+    MissingOrderTradeOrderId,
+    MissingOrderRequestEventId,
+    MissingOrderDecisionInventory,
+    MissingOrderDeclineReason,
 }
 
 impl AppPublishValidationFailure {
@@ -353,6 +440,10 @@ impl AppPublishValidationFailure {
             Self::MissingOrderItems => "missing_order_items",
             Self::MissingOrderCurrency => "missing_order_currency",
             Self::MissingOrderTotal => "missing_order_total",
+            Self::MissingOrderTradeOrderId => "missing_order_trade_order_id",
+            Self::MissingOrderRequestEventId => "missing_order_request_event_id",
+            Self::MissingOrderDecisionInventory => "missing_order_decision_inventory",
+            Self::MissingOrderDeclineReason => "missing_order_decline_reason",
         }
     }
 }
@@ -404,9 +495,9 @@ impl PendingSyncOperation {
 #[cfg(test)]
 mod tests {
     use super::{
-        AppFarmProfilePublishPayload, AppListingPublishPayload, AppOrderRequestItemPayload,
-        AppOrderRequestPublishPayload, AppPublishContext, AppPublishPayload,
-        AppPublishValidationFailure,
+        AppFarmProfilePublishPayload, AppListingPublishPayload, AppOrderDecisionPayload,
+        AppOrderDecisionPublishPayload, AppOrderRequestItemPayload, AppOrderRequestPublishPayload,
+        AppPublishContext, AppPublishPayload, AppPublishValidationFailure,
     };
     use crate::{
         PendingSyncOperation, PendingSyncOperationState, SyncAggregateRef, SyncOperationKind,
@@ -541,6 +632,49 @@ mod tests {
                 "missing_order_items",
                 "missing_order_currency",
                 "missing_order_total",
+            ]
+        );
+    }
+
+    #[test]
+    fn order_decision_publish_payload_reports_stable_validation_reason_codes() {
+        let payload = AppPublishPayload::OrderDecision(AppOrderDecisionPublishPayload {
+            context: AppPublishContext::new("", ""),
+            app_order_id: OrderId::new(),
+            farm_id: FarmId::new(),
+            trade_order_id: " ".to_owned(),
+            request_event_id: String::new(),
+            listing_event_id: None,
+            listing_addr: String::new(),
+            buyer_pubkey: String::new(),
+            seller_pubkey: String::new(),
+            decision: AppOrderDecisionPayload::Declined {
+                reason: " ".to_owned(),
+            },
+        });
+
+        assert_eq!(payload.work_kind().storage_key(), "order_decision");
+        assert_eq!(
+            payload.work_kind().sdk_operation(),
+            "trade.publish_order_decision_with_identity"
+        );
+        let reason_codes: Vec<&str> = payload
+            .validation_failures()
+            .into_iter()
+            .map(AppPublishValidationFailure::storage_key)
+            .collect();
+
+        assert_eq!(
+            reason_codes,
+            vec![
+                "missing_account_id",
+                "missing_source",
+                "missing_order_trade_order_id",
+                "missing_order_request_event_id",
+                "missing_order_listing_address",
+                "missing_order_buyer_pubkey",
+                "missing_order_seller_pubkey",
+                "missing_order_decline_reason",
             ]
         );
     }

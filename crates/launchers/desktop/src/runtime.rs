@@ -19,15 +19,15 @@ use radroots_studio_app_models::{
     FarmId, FarmOrderMethod, FarmProfileRecord, FarmReadiness, FarmRulesProjection, FarmSetupDraft,
     FarmSetupProjection, FarmSummary, FarmerSection, FulfillmentWindowId,
     LoggedOutStartupProjection, OrderDetailProjection, OrderId, OrderRecoveryProjection,
-    OrdersFilter, OrdersListProjection, OrdersScreenQueryState, PackDayBatchPrintStatus,
-    PackDayExportBundle, PackDayExportInstanceId, PackDayExportStatus, PackDayHostHandoffKind,
-    PackDayHostHandoffStatus, PackDayPrintKind, PackDayPrintStatus, PackDayProjection,
-    PackDayScreenQueryState, PersonalSection, PickupLocationRecord, ProductEditorDraft, ProductId,
-    ProductStatus, ProductsFilter, ProductsListProjection, ProductsSort, RecoveryKind,
-    RecoveryQueueProjection, RecoveryRecordId, RecoveryState, ReminderDeadlineProjection,
-    ReminderDeliveryState, ReminderFeedProjection, ReminderId, ReminderKind,
-    ReminderLogEntryProjection, ReminderLogProjection, ReminderSurface, ReminderUrgency,
-    SettingsAccountProjection, SettingsPreference, SettingsSection, ShellSection,
+    OrderStatus, OrdersFilter, OrdersListProjection, OrdersScreenQueryState,
+    PackDayBatchPrintStatus, PackDayExportBundle, PackDayExportInstanceId, PackDayExportStatus,
+    PackDayHostHandoffKind, PackDayHostHandoffStatus, PackDayPrintKind, PackDayPrintStatus,
+    PackDayProjection, PackDayScreenQueryState, PersonalSection, PickupLocationRecord,
+    ProductEditorDraft, ProductId, ProductStatus, ProductsFilter, ProductsListProjection,
+    ProductsSort, RecoveryKind, RecoveryQueueProjection, RecoveryRecordId, RecoveryState,
+    ReminderDeadlineProjection, ReminderDeliveryState, ReminderFeedProjection, ReminderId,
+    ReminderKind, ReminderLogEntryProjection, ReminderLogProjection, ReminderSurface,
+    ReminderUrgency, SettingsAccountProjection, SettingsPreference, SettingsSection, ShellSection,
     TodayAgendaProjection,
 };
 use radroots_studio_app_remote_signer::{
@@ -36,8 +36,8 @@ use radroots_studio_app_remote_signer::{
 use radroots_studio_app_sqlite::{
     APP_ACTIVITY_CONTEXT_LIMIT, AppLocalInteropImportReport, AppSqliteError, AppSqliteStore,
     BuyerOrderLocalEventExport, BuyerOrderLocalEventLine, BuyerRepeatDemandApplyOutcome,
-    DatabaseTarget, StoredPendingSyncOperation, StoredRelayIngestCursor, StoredSyncConflict,
-    derive_farm_rules_readiness,
+    DatabaseTarget, SellerOrderDecisionExport, StoredPendingSyncOperation, StoredRelayIngestCursor,
+    StoredSyncConflict, derive_farm_rules_readiness, projected_order_id_from_trade_request,
 };
 use radroots_studio_app_state::{
     APP_STATE_FILE_NAME, AppShellProjection, AppStateCommand, AppStatePersistenceRepository,
@@ -50,7 +50,8 @@ use radroots_studio_app_state::{
     derive_sync_projection,
 };
 use radroots_studio_app_sync::{
-    AppFarmProfilePublishPayload, AppListingPublishPayload, AppOrderRequestItemPayload,
+    AppFarmProfilePublishPayload, AppListingPublishPayload, AppOrderDecisionInventoryCommitment,
+    AppOrderDecisionPayload, AppOrderDecisionPublishPayload, AppOrderRequestItemPayload,
     AppOrderRequestPublishPayload, AppPublishContext, AppPublishPayload,
     AppPublishedOperationReceipt, AppRelayIngestScopeFreshness, AppSyncProjection, AppSyncRequest,
     AppSyncResult, AppSyncRunStatus, AppSyncTransport, AppSyncTransportError, PendingSyncOperation,
@@ -80,7 +81,10 @@ use radroots_sdk::listing::{
     RadrootsListingDeliveryMethod, RadrootsListingLocation, RadrootsListingProduct,
     RadrootsListingStatus,
 };
-use radroots_sdk::trade::RadrootsTradeOrderRequested;
+use radroots_sdk::trade::{
+    RadrootsTradeInventoryCommitment, RadrootsTradeOrderDecision, RadrootsTradeOrderDecisionEvent,
+    RadrootsTradeOrderRequested,
+};
 use radroots_sdk::{
     RadrootsNostrEventPtr, RadrootsSdkClient, RadrootsSdkConfig, RelayConfig, SdkEnvironment,
     SdkPublishReceipt, SdkTransportMode, SdkTransportReceipt, SignerConfig,
@@ -121,6 +125,7 @@ const APP_DIRECT_RELAY_INGEST_LIMIT: usize = 1_000;
 const APP_DIRECT_RELAY_INGEST_MAX_PAGES: usize = 5;
 const APP_DIRECT_RELAY_INGEST_SCOPE_KEY: &str = "direct_relay_ingest";
 const APP_DIRECT_RELAY_INGEST_STALE_AFTER_SECONDS: i64 = 900;
+const APP_SELLER_ORDER_DECISION_EVIDENCE_PAGE_SIZE: u32 = 250;
 const APP_DIRECT_RELAY_INGEST_KINDS: &[u16] = &[
     0, 30340, 30402, 30403, 3422, 3423, 3424, 3425, 3432, 3433, 3434,
 ];
@@ -158,6 +163,19 @@ struct AppDirectRelayFetchReceipt {
 struct AppDirectRelayFetchedRelay {
     relay_url: String,
     last_event_created_at_unix_seconds: Option<i64>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum AppSellerOrderDecisionCommand {
+    Accept,
+    Decline { reason: String },
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct ResolvedAppSellerOrderRequest {
+    request_event_id: String,
+    listing_event_id: Option<String>,
+    payload: RadrootsTradeOrderRequested,
 }
 
 #[derive(Debug, Default)]
@@ -321,6 +339,7 @@ fn publish_payload_context(publish_payload: &AppPublishPayload) -> &AppPublishCo
         AppPublishPayload::FarmProfile(payload) => &payload.context,
         AppPublishPayload::Listing(payload) => &payload.context,
         AppPublishPayload::OrderRequest(payload) => &payload.context,
+        AppPublishPayload::OrderDecision(payload) => &payload.context,
     }
 }
 
@@ -659,6 +678,27 @@ impl DesktopAppRuntime {
 
     pub fn mark_order_completed(&self, order_id: OrderId) -> Result<bool, AppSqliteError> {
         self.lock_state_mut().mark_order_completed(order_id)
+    }
+
+    pub fn prepare_order_accept(
+        &self,
+        order_id: OrderId,
+    ) -> Result<AppOrderDecisionPublishPayload, AppSqliteError> {
+        self.lock_state_mut()
+            .prepare_seller_order_decision(order_id, AppSellerOrderDecisionCommand::Accept)
+    }
+
+    pub fn prepare_order_decline(
+        &self,
+        order_id: OrderId,
+        reason: &str,
+    ) -> Result<AppOrderDecisionPublishPayload, AppSqliteError> {
+        self.lock_state_mut().prepare_seller_order_decision(
+            order_id,
+            AppSellerOrderDecisionCommand::Decline {
+                reason: reason.to_owned(),
+            },
+        )
     }
 
     pub fn start_order_recovery(
@@ -2228,6 +2268,114 @@ impl DesktopAppRuntimeState {
             )])?;
 
         Ok(updated || context_changed || pending_changed)
+    }
+
+    fn prepare_seller_order_decision(
+        &mut self,
+        order_id: OrderId,
+        command: AppSellerOrderDecisionCommand,
+    ) -> Result<AppOrderDecisionPublishPayload, AppSqliteError> {
+        let _ = self.import_shared_local_events()?;
+        let relay_urls = normalized_app_sync_relay_urls(&self.nostr_relay_urls).map_err(|_| {
+            AppSqliteError::InvalidProjection {
+                reason: "seller order decision requires valid configured relays",
+            }
+        })?;
+        if relay_urls.is_empty() {
+            return Err(AppSqliteError::InvalidProjection {
+                reason: "seller order decision requires configured relays",
+            });
+        }
+        let Some(sqlite_store) = self.sqlite_store.as_ref() else {
+            return Err(AppSqliteError::InvalidProjection {
+                reason: "seller order decision requires local state",
+            });
+        };
+        let Some(farm_id) = self.selected_farm_id() else {
+            return Err(AppSqliteError::InvalidProjection {
+                reason: "seller order decision requires a selected farm",
+            });
+        };
+        let Some(selected_account) = self
+            .state_store
+            .identity_projection()
+            .selected_account
+            .as_ref()
+        else {
+            return Err(AppSqliteError::InvalidProjection {
+                reason: "seller order decision requires a selected seller account",
+            });
+        };
+        let account_id = selected_account.account.account_id.clone();
+        let seller_pubkey = self.local_events_owner_pubkey(selected_account).ok_or(
+            AppSqliteError::InvalidProjection {
+                reason: "seller order decision requires a selected seller public key",
+            },
+        )?;
+        let Some(order_export) =
+            sqlite_store.load_seller_order_decision_export(farm_id, order_id)?
+        else {
+            return Err(AppSqliteError::InvalidProjection {
+                reason: "seller order decision requires a visible seller order",
+            });
+        };
+        if order_export.status != OrderStatus::NeedsAction {
+            return Err(AppSqliteError::InvalidProjection {
+                reason: "seller order decision requires an undecided order",
+            });
+        }
+        let request = self.resolve_seller_order_request_from_shared_events(order_id)?;
+        if request.payload.seller_pubkey.trim() != seller_pubkey.as_str() {
+            return Err(AppSqliteError::InvalidProjection {
+                reason: "seller order decision seller account does not match order seller",
+            });
+        }
+        let listing_address =
+            radroots_sdk::trade::parse_listing_address(request.payload.listing_addr.as_str())
+                .map_err(|_| AppSqliteError::InvalidProjection {
+                    reason: "seller order decision listing address is invalid",
+                })?;
+        if listing_address.seller_pubkey != seller_pubkey {
+            return Err(AppSqliteError::InvalidProjection {
+                reason: "seller order decision listing address is outside seller authority",
+            });
+        }
+
+        let decision = match command {
+            AppSellerOrderDecisionCommand::Accept => AppOrderDecisionPayload::Accepted {
+                inventory_commitments: seller_order_inventory_commitments(&order_export)?,
+            },
+            AppSellerOrderDecisionCommand::Decline { reason } => {
+                let reason = reason.trim();
+                if reason.is_empty() {
+                    return Err(AppSqliteError::InvalidProjection {
+                        reason: "seller order decline requires a non-empty reason",
+                    });
+                }
+                AppOrderDecisionPayload::Declined {
+                    reason: reason.to_owned(),
+                }
+            }
+        };
+        let payload = AppOrderDecisionPublishPayload {
+            context: AppPublishContext::new(account_id, "seller_order_decision"),
+            app_order_id: order_id,
+            farm_id,
+            trade_order_id: request.payload.order_id.clone(),
+            request_event_id: request.request_event_id,
+            listing_event_id: request.listing_event_id,
+            listing_addr: request.payload.listing_addr,
+            buyer_pubkey: request.payload.buyer_pubkey,
+            seller_pubkey: request.payload.seller_pubkey,
+            decision,
+        };
+        AppPublishPayload::OrderDecision(payload.clone())
+            .validate()
+            .map_err(|_| AppSqliteError::InvalidProjection {
+                reason: "seller order decision publish payload is invalid",
+            })?;
+
+        Ok(payload)
     }
 
     fn start_order_recovery(
@@ -4280,6 +4428,124 @@ impl DesktopAppRuntimeState {
         sqlite_store.import_shared_local_events_from_path(database_path.as_path())
     }
 
+    fn resolve_seller_order_request_from_shared_events(
+        &self,
+        order_id: OrderId,
+    ) -> Result<ResolvedAppSellerOrderRequest, AppSqliteError> {
+        let store = self.open_shared_local_events_store()?;
+        let Some(store) = store else {
+            return Err(AppSqliteError::InvalidProjection {
+                reason: "seller order decision requires shared signed order request evidence",
+            });
+        };
+        let mut matched_request = None;
+        let mut before = None;
+
+        loop {
+            let records = match before {
+                Some((before_change_seq, before_seq)) => store
+                    .list_records_changed_before(
+                        before_change_seq,
+                        before_seq,
+                        APP_SELLER_ORDER_DECISION_EVIDENCE_PAGE_SIZE,
+                    )
+                    .map_err(|source| AppSqliteError::LocalEvents {
+                        operation: "load shared order request evidence",
+                        source,
+                    })?,
+                None => store
+                    .list_records_changed_latest(APP_SELLER_ORDER_DECISION_EVIDENCE_PAGE_SIZE)
+                    .map_err(|source| AppSqliteError::LocalEvents {
+                        operation: "load shared order request evidence",
+                        source,
+                    })?,
+            };
+            if records.is_empty() {
+                break;
+            }
+            let is_last_page =
+                records.len() < APP_SELLER_ORDER_DECISION_EVIDENCE_PAGE_SIZE as usize;
+            before = records.last().map(|record| (record.change_seq, record.seq));
+
+            for record in records {
+                if record.family != LocalRecordFamily::SignedEvent
+                    || record.event_kind
+                        != Some(i64::from(
+                            radroots_sdk::trade::RadrootsActiveTradeMessageType::TradeOrderRequested
+                                .kind(),
+                        ))
+                {
+                    continue;
+                }
+                let Some(event) = signed_event_from_local_record(&record)? else {
+                    continue;
+                };
+                let Ok(envelope) = radroots_sdk::trade::parse_order_request(&event) else {
+                    continue;
+                };
+                let app_order_id = projected_order_id_from_trade_request(
+                    envelope.payload.order_id.as_str(),
+                    envelope.payload.buyer_pubkey.as_str(),
+                );
+                if app_order_id != order_id {
+                    continue;
+                }
+                if matched_request.is_some() {
+                    return Err(AppSqliteError::InvalidProjection {
+                        reason: "seller order decision found multiple signed order requests",
+                    });
+                }
+                matched_request = Some(ResolvedAppSellerOrderRequest {
+                    request_event_id: event.id,
+                    listing_event_id: listing_event_id_from_tags(&event.tags),
+                    payload: envelope.payload,
+                });
+            }
+
+            if before.is_none() || is_last_page {
+                break;
+            }
+        }
+
+        matched_request.ok_or(AppSqliteError::InvalidProjection {
+            reason: "seller order decision requires signed order request evidence",
+        })
+    }
+
+    fn open_shared_local_events_store(
+        &self,
+    ) -> Result<Option<LocalEventsStore<SqliteExecutor>>, AppSqliteError> {
+        let Some(shared_accounts_paths) = self.shared_accounts_paths.as_ref() else {
+            return Ok(None);
+        };
+        let Some(database_path) =
+            shared_local_events_database_path_from_shared_accounts(shared_accounts_paths)
+        else {
+            return Ok(None);
+        };
+        if let Some(parent) = database_path.parent() {
+            fs::create_dir_all(parent).map_err(|source| AppSqliteError::CreateParentDirectory {
+                path: parent.to_path_buf(),
+                source,
+            })?;
+        }
+        let executor = SqliteExecutor::open(database_path.as_path()).map_err(|source| {
+            AppSqliteError::LocalEventsSql {
+                operation: "open shared local events database",
+                source,
+            }
+        })?;
+        let store = LocalEventsStore::new(executor);
+        store
+            .migrate_up()
+            .map_err(|source| AppSqliteError::LocalEventsSql {
+                operation: "migrate shared local events database",
+                source,
+            })?;
+
+        Ok(Some(store))
+    }
+
     fn append_app_farm_local_work_record(
         &self,
         account: &radroots_studio_app_models::SelectedAccountProjection,
@@ -5740,6 +6006,12 @@ async fn publish_app_payload(
                 .await
                 .map_err(|error| AppSyncTransportError::failed(error.to_string()))
         }
+        AppPublishPayload::OrderDecision(payload) => {
+            let _decision = order_decision_publish_payload_to_sdk_decision(payload);
+            Err(AppSyncTransportError::failed(
+                "order decision direct relay publish is not wired",
+            ))
+        }
     }
 }
 
@@ -6017,6 +6289,10 @@ fn published_operation_receipt(
             payload.context.source_local_event_id.clone(),
         ),
         AppPublishPayload::OrderRequest(payload) => (
+            payload.context.account_id.clone(),
+            payload.context.source_local_event_id.clone(),
+        ),
+        AppPublishPayload::OrderDecision(payload) => (
             payload.context.account_id.clone(),
             payload.context.source_local_event_id.clone(),
         ),
@@ -7712,6 +7988,159 @@ fn current_utc_timestamp() -> String {
     Utc::now().format("%Y-%m-%dT%H:%M:%SZ").to_string()
 }
 
+fn signed_event_from_local_record(
+    record: &LocalEventRecord,
+) -> Result<Option<radroots_sdk::RadrootsNostrEvent>, AppSqliteError> {
+    let Some(id) = record.event_id.as_deref().map(str::trim) else {
+        return Ok(None);
+    };
+    let Some(author) = record.event_pubkey.as_deref().map(str::trim) else {
+        return Ok(None);
+    };
+    let Some(kind) = record.event_kind else {
+        return Ok(None);
+    };
+    let Some(content) = record.event_content.as_ref() else {
+        return Ok(None);
+    };
+    let Some(sig) = record.event_sig.as_deref().map(str::trim) else {
+        return Ok(None);
+    };
+    let created_at = record.event_created_at.unwrap_or_default();
+    let created_at = u32::try_from(created_at).map_err(|_| AppSqliteError::InvalidProjection {
+        reason: "signed local event created_at must fit u32",
+    })?;
+    let kind = u32::try_from(kind).map_err(|_| AppSqliteError::InvalidProjection {
+        reason: "signed local event kind must fit u32",
+    })?;
+
+    Ok(Some(radroots_sdk::RadrootsNostrEvent {
+        id: id.to_owned(),
+        author: author.to_owned(),
+        created_at,
+        kind,
+        tags: event_tags_from_value(record.event_tags_json.as_ref())?,
+        content: content.clone(),
+        sig: sig.to_owned(),
+    }))
+}
+
+fn event_tags_from_value(
+    value: Option<&serde_json::Value>,
+) -> Result<Vec<Vec<String>>, AppSqliteError> {
+    let Some(value) = value else {
+        return Ok(Vec::new());
+    };
+    let Some(tags) = value.as_array() else {
+        return Err(AppSqliteError::InvalidProjection {
+            reason: "signed local event tags must be an array",
+        });
+    };
+
+    tags.iter()
+        .map(|tag| {
+            let Some(values) = tag.as_array() else {
+                return Err(AppSqliteError::InvalidProjection {
+                    reason: "signed local event tag must be an array",
+                });
+            };
+            values
+                .iter()
+                .map(|value| {
+                    value
+                        .as_str()
+                        .map(str::to_owned)
+                        .ok_or(AppSqliteError::InvalidProjection {
+                            reason: "signed local event tag values must be strings",
+                        })
+                })
+                .collect()
+        })
+        .collect()
+}
+
+fn listing_event_id_from_tags(tags: &[Vec<String>]) -> Option<String> {
+    tags.iter().find_map(|tag| {
+        if tag.first().map(String::as_str) == Some("listing_event") {
+            tag.get(1)
+                .map(String::as_str)
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .map(str::to_owned)
+        } else {
+            None
+        }
+    })
+}
+
+fn seller_order_inventory_commitments(
+    order: &SellerOrderDecisionExport,
+) -> Result<Vec<AppOrderDecisionInventoryCommitment>, AppSqliteError> {
+    if order.lines.is_empty() {
+        return Err(AppSqliteError::InvalidProjection {
+            reason: "seller order decision requires order lines",
+        });
+    }
+
+    order
+        .lines
+        .iter()
+        .map(|line| {
+            let bin_id =
+                line.listing_bin_id
+                    .as_deref()
+                    .ok_or(AppSqliteError::InvalidProjection {
+                        reason: "seller order decision requires listing bin evidence",
+                    })?;
+            let stock_count = line.stock_count.ok_or(AppSqliteError::InvalidProjection {
+                reason: "seller order decision requires current product stock",
+            })?;
+            let available_quantity = stock_count.checked_sub(line.reserved_quantity).ok_or(
+                AppSqliteError::InvalidProjection {
+                    reason: "seller order decision inventory is over-reserved",
+                },
+            )?;
+            if line.quantity > available_quantity {
+                return Err(AppSqliteError::InvalidProjection {
+                    reason: "seller order decision would over-reserve inventory",
+                });
+            }
+
+            Ok(AppOrderDecisionInventoryCommitment {
+                bin_id: bin_id.to_owned(),
+                bin_count: line.quantity,
+            })
+        })
+        .collect()
+}
+
+fn order_decision_publish_payload_to_sdk_decision(
+    payload: &AppOrderDecisionPublishPayload,
+) -> RadrootsTradeOrderDecisionEvent {
+    RadrootsTradeOrderDecisionEvent {
+        order_id: payload.trade_order_id.clone(),
+        listing_addr: payload.listing_addr.clone(),
+        buyer_pubkey: payload.buyer_pubkey.clone(),
+        seller_pubkey: payload.seller_pubkey.clone(),
+        decision: match &payload.decision {
+            AppOrderDecisionPayload::Accepted {
+                inventory_commitments,
+            } => RadrootsTradeOrderDecision::Accepted {
+                inventory_commitments: inventory_commitments
+                    .iter()
+                    .map(|commitment| RadrootsTradeInventoryCommitment {
+                        bin_id: commitment.bin_id.clone(),
+                        bin_count: commitment.bin_count,
+                    })
+                    .collect(),
+            },
+            AppOrderDecisionPayload::Declined { reason } => RadrootsTradeOrderDecision::Declined {
+                reason: reason.clone(),
+            },
+        },
+    }
+}
+
 fn pending_sync_upsert(aggregate: SyncAggregateRef, payload_json: String) -> PendingSyncOperation {
     let created_at = current_utc_timestamp();
 
@@ -7800,7 +8229,7 @@ mod tests {
     };
     use radroots_studio_app_sqlite::{
         AppSqliteError, AppSqliteStore, BuyerOrderCoordinationState, DatabaseTarget,
-        latest_schema_version,
+        latest_schema_version, projected_order_id_from_trade_request,
     };
     use radroots_studio_app_state::{
         APP_STATE_FILE_NAME, AppStateCommand, AppStatePersistenceRepository, AppStateRepository,
@@ -7808,14 +8237,17 @@ mod tests {
         HomeRoute,
     };
     use radroots_studio_app_sync::{
-        AppFarmProfilePublishPayload, AppListingPublishPayload, AppOrderRequestItemPayload,
-        AppOrderRequestPublishPayload, AppPublishContext, AppPublishPayload,
-        AppPublishedOperationReceipt, AppRelayIngestScopeFreshness, AppRelayIngestScopeStatus,
-        AppSyncRequest, AppSyncResult, AppSyncRunStatus, AppSyncTransport, AppSyncTransportError,
-        PendingSyncOperation, PendingSyncOperationState, RecordedAppSyncTransport,
-        SyncAggregateRef, SyncCheckpointState, SyncCheckpointStatus, SyncConflict,
-        SyncConflictKind, SyncConflictResolutionStatus, SyncConflictSeverity, SyncOperationKind,
-        SyncTrigger,
+        AppFarmProfilePublishPayload, AppListingPublishPayload, AppOrderDecisionPayload,
+        AppOrderRequestItemPayload, AppOrderRequestPublishPayload, AppPublishContext,
+        AppPublishPayload, AppPublishedOperationReceipt, AppRelayIngestScopeFreshness,
+        AppRelayIngestScopeStatus, AppSyncRequest, AppSyncResult, AppSyncRunStatus,
+        AppSyncTransport, AppSyncTransportError, PendingSyncOperation, PendingSyncOperationState,
+        RecordedAppSyncTransport, SyncAggregateRef, SyncCheckpointState, SyncCheckpointStatus,
+        SyncConflict, SyncConflictKind, SyncConflictResolutionStatus, SyncConflictSeverity,
+        SyncOperationKind, SyncTrigger,
+    };
+    use radroots_core::{
+        RadrootsCoreCurrency, RadrootsCoreDecimal, RadrootsCoreMoney, RadrootsCoreUnit,
     };
     use radroots_identity::RadrootsIdentity;
     use radroots_local_events::{
@@ -7827,6 +8259,11 @@ mod tests {
         RadrootsNostrAccountsManager, RadrootsNostrFileAccountStore,
         RadrootsNostrMemoryAccountStore, RadrootsNostrSecretVaultMemory, RadrootsSecretVault,
         account_secret_slot,
+    };
+    use radroots_sdk::RadrootsNostrEventPtr;
+    use radroots_sdk::trade::{
+        RadrootsTradeOrderDecision, RadrootsTradeOrderEconomicItem, RadrootsTradeOrderEconomics,
+        RadrootsTradeOrderItem, RadrootsTradeOrderRequested, RadrootsTradePricingBasis,
     };
     use radroots_sql_core::SqliteExecutor;
     use serde_json::json;
@@ -7841,7 +8278,8 @@ mod tests {
         DesktopAppRuntimeCommandError, DesktopAppRuntimeMetadataSummary, DesktopAppRuntimeState,
         DesktopAppSyncStatusSummary, DesktopRemoteSignerPaths, SYNC_TRANSPORT_UNAVAILABLE_MESSAGE,
         SdkDirectRelayAppSyncTransport, TokioRuntimeBuilder, default_sync_transport,
-        farm_sync_payload, is_hex_64, pending_sync_upsert,
+        farm_sync_payload, is_hex_64, order_decision_publish_payload_to_sdk_decision,
+        pending_sync_upsert,
     };
     use crate::pack_day_host_handoff::PackDayHostHandoffError;
     use crate::pack_day_print::{
@@ -12202,6 +12640,121 @@ mod tests {
     }
 
     #[test]
+    fn runtime_prepares_seller_order_accept_payload_from_signed_request() {
+        let (runtime, paths, order_id, _product_id, seller_pubkey, buyer_pubkey) =
+            seller_order_decision_runtime("seller_order_accept_payload", 6, 2);
+
+        let payload = runtime
+            .prepare_order_accept(order_id)
+            .expect("seller order accept payload should prepare");
+        let decision = order_decision_publish_payload_to_sdk_decision(&payload);
+
+        assert_eq!(payload.app_order_id, order_id);
+        assert_eq!(payload.trade_order_id, "seller-order-decision-1");
+        assert_eq!(
+            payload.request_event_id,
+            "event-app:signed_event:order-request:seller-order-decision-1"
+        );
+        assert_eq!(
+            payload.listing_event_id.as_deref(),
+            Some("event-app:signed_event:listing:seller-order-decision")
+        );
+        assert_eq!(payload.buyer_pubkey, buyer_pubkey);
+        assert_eq!(payload.seller_pubkey, seller_pubkey);
+        assert_eq!(decision.order_id, "seller-order-decision-1");
+        let RadrootsTradeOrderDecision::Accepted {
+            inventory_commitments,
+        } = decision.decision
+        else {
+            panic!("expected accepted decision");
+        };
+        assert_eq!(inventory_commitments.len(), 1);
+        assert_eq!(inventory_commitments[0].bin_id, "seller-order-primary-bin");
+        assert_eq!(inventory_commitments[0].bin_count, 2);
+
+        cleanup_bootstrapped_runtime_paths(&paths);
+    }
+
+    #[test]
+    fn runtime_prepares_seller_order_decline_payload_with_trimmed_reason() {
+        let (runtime, paths, order_id, _product_id, seller_pubkey, buyer_pubkey) =
+            seller_order_decision_runtime("seller_order_decline_payload", 6, 2);
+
+        let payload = runtime
+            .prepare_order_decline(order_id, "  out of stock  ")
+            .expect("seller order decline payload should prepare");
+        let decision = order_decision_publish_payload_to_sdk_decision(&payload);
+
+        assert_eq!(payload.buyer_pubkey, buyer_pubkey);
+        assert_eq!(payload.seller_pubkey, seller_pubkey);
+        assert_eq!(
+            payload.decision,
+            AppOrderDecisionPayload::Declined {
+                reason: "out of stock".to_owned()
+            }
+        );
+        let RadrootsTradeOrderDecision::Declined { reason } = decision.decision else {
+            panic!("expected declined decision");
+        };
+        assert_eq!(reason, "out of stock");
+
+        cleanup_bootstrapped_runtime_paths(&paths);
+    }
+
+    #[test]
+    fn runtime_finds_seller_order_request_evidence_past_first_local_events_page() {
+        let (runtime, paths, order_id, _product_id, _seller_pubkey, _buyer_pubkey) =
+            seller_order_decision_runtime("seller_order_old_request_evidence", 6, 2);
+        append_unrelated_signed_event_records(&paths, 1_005);
+
+        let payload = runtime
+            .prepare_order_accept(order_id)
+            .expect("seller order accept payload should prepare from older evidence");
+
+        assert_eq!(payload.trade_order_id, "seller-order-decision-1");
+        assert_eq!(
+            payload.request_event_id,
+            "event-app:signed_event:order-request:seller-order-decision-1"
+        );
+
+        cleanup_bootstrapped_runtime_paths(&paths);
+    }
+
+    #[test]
+    fn runtime_rejects_seller_order_decision_for_wrong_selected_account() {
+        let (runtime, paths, order_id, _product_id, _seller_pubkey, _buyer_pubkey) =
+            seller_order_decision_runtime("seller_order_wrong_account", 6, 2);
+        assert!(
+            runtime
+                .generate_local_account(Some("Other seller".to_owned()))
+                .expect("other account should generate")
+        );
+        runtime.lock_state_mut().nostr_relay_urls = vec!["wss://relay.example".to_owned()];
+
+        let error = runtime
+            .prepare_order_accept(order_id)
+            .expect_err("wrong seller account should fail preflight");
+
+        assert!(matches!(error, AppSqliteError::InvalidProjection { .. }));
+
+        cleanup_bootstrapped_runtime_paths(&paths);
+    }
+
+    #[test]
+    fn runtime_rejects_seller_order_accept_that_would_over_reserve_inventory() {
+        let (runtime, paths, order_id, _product_id, _seller_pubkey, _buyer_pubkey) =
+            seller_order_decision_runtime("seller_order_over_reserved", 1, 2);
+
+        let error = runtime
+            .prepare_order_accept(order_id)
+            .expect_err("over-reserved seller order should fail preflight");
+
+        assert!(matches!(error, AppSqliteError::InvalidProjection { .. }));
+
+        cleanup_bootstrapped_runtime_paths(&paths);
+    }
+
+    #[test]
     fn runtime_places_supported_buyer_order_into_shared_local_events() {
         let (runtime, paths) = bootstrapped_runtime("buyer_order_local_event");
         assert!(
@@ -16025,6 +16578,328 @@ mod tests {
                 })),
             })
             .expect("append signed buyer listing");
+    }
+
+    fn seller_order_decision_runtime(
+        label: &str,
+        stock_count: u32,
+        order_quantity: u32,
+    ) -> (
+        DesktopAppRuntime,
+        AppDesktopRuntimePaths,
+        OrderId,
+        ProductId,
+        String,
+        String,
+    ) {
+        let (runtime, paths) = bootstrapped_runtime(label);
+        let (account_id, farm_id) = provision_ready_farmer_account(&runtime);
+        runtime.lock_state_mut().nostr_relay_urls = vec!["wss://relay.example".to_owned()];
+        let seller_pubkey = runtime
+            .lock_state()
+            .accounts_manager
+            .as_ref()
+            .expect("accounts manager")
+            .resolve_account_selector(account_id.as_str())
+            .expect("selected seller account should resolve")
+            .public_identity
+            .public_key_hex;
+        let buyer_pubkey =
+            "1111111111111111111111111111111111111111111111111111111111111111".to_owned();
+        let product_id = ProductId::new();
+        let trade_order_id = "seller-order-decision-1";
+        let order_id = projected_order_id_from_trade_request(trade_order_id, buyer_pubkey.as_str());
+        let farm_key = super::d_tag_from_uuid(farm_id.as_uuid());
+        let listing_key = super::d_tag_from_uuid(product_id.as_uuid());
+        let listing_addr = format!("30402:{seller_pubkey}:{listing_key}");
+        let listing_event_id = "event-app:signed_event:listing:seller-order-decision";
+        append_app_signed_listing_record(
+            &paths,
+            account_id.as_str(),
+            seller_pubkey.as_str(),
+            farm_key.as_str(),
+            listing_key.as_str(),
+            listing_event_id,
+            stock_count,
+        );
+        append_signed_order_request_record(
+            &paths,
+            trade_order_id,
+            listing_addr.as_str(),
+            listing_event_id,
+            buyer_pubkey.as_str(),
+            seller_pubkey.as_str(),
+            order_quantity,
+        );
+
+        (
+            runtime,
+            paths,
+            order_id,
+            product_id,
+            seller_pubkey,
+            buyer_pubkey,
+        )
+    }
+
+    fn append_app_signed_listing_record(
+        paths: &AppDesktopRuntimePaths,
+        account_id: &str,
+        seller_pubkey: &str,
+        farm_key: &str,
+        listing_key: &str,
+        listing_event_id: &str,
+        stock_count: u32,
+    ) {
+        let database_path = paths
+            .shared_local_events_database_path()
+            .expect("shared local events path");
+        if let Some(parent) = database_path.parent() {
+            fs::create_dir_all(parent).expect("shared local events directory should create");
+        }
+        let executor =
+            SqliteExecutor::open(database_path.as_path()).expect("open shared local events db");
+        let store = LocalEventsStore::new(executor);
+        store.migrate_up().expect("migrate shared local events");
+        let listing_addr = format!("30402:{seller_pubkey}:{listing_key}");
+        let content = json!({
+            "d_tag": listing_key,
+            "status": "active",
+            "farm": {
+                "pubkey": seller_pubkey,
+                "d_tag": farm_key
+            },
+            "product": {
+                "key": listing_key,
+                "title": "Seller decision lettuce",
+                "summary": "Signed listing for seller decision tests"
+            },
+            "availability": {
+                "kind": "window",
+                "amount": {
+                    "start": 4_102_444_800u64,
+                    "end": 4_102_531_200u64
+                }
+            },
+            "delivery_method": {
+                "kind": "pickup"
+            },
+            "location": {
+                "primary": "North barn pickup"
+            }
+        });
+        store
+            .append_record(&LocalEventRecordInput {
+                record_id: "app:signed_event:listing:seller-order-decision".to_owned(),
+                family: LocalRecordFamily::SignedEvent,
+                status: LocalRecordStatus::Published,
+                source_runtime: SourceRuntime::App,
+                created_at_ms: 1_774_000_000_000,
+                inserted_at_ms: 1_774_000_000_001,
+                owner_account_id: Some(account_id.to_owned()),
+                owner_pubkey: Some(seller_pubkey.to_owned()),
+                farm_id: Some(farm_key.to_owned()),
+                listing_addr: Some(listing_addr),
+                local_work_json: None,
+                event_id: Some(listing_event_id.to_owned()),
+                event_kind: Some(30402),
+                event_pubkey: Some(seller_pubkey.to_owned()),
+                event_created_at: Some(1_774_000_000),
+                event_tags_json: Some(json!([
+                    ["d", listing_key],
+                    ["a", format!("30340:{seller_pubkey}:{farm_key}")],
+                    ["key", listing_key],
+                    ["title", "Seller decision lettuce"],
+                    ["summary", "Signed listing for seller decision tests"],
+                    ["radroots:bin", "seller-order-primary-bin", "1", "each"],
+                    [
+                        "radroots:price",
+                        "seller-order-primary-bin",
+                        "8",
+                        "USD",
+                        "1",
+                        "each"
+                    ],
+                    ["inventory", stock_count.to_string()],
+                    ["status", "active"],
+                    ["radroots:availability_start", "4102444800"],
+                    ["expires_at", "4102531200"],
+                    ["delivery", "pickup"],
+                    ["location", "North barn pickup"]
+                ])),
+                event_content: Some(content.to_string()),
+                event_sig: Some("signature".to_owned()),
+                raw_event_json: Some(json!({
+                    "id": listing_event_id,
+                    "kind": 30402,
+                    "pubkey": seller_pubkey,
+                    "content": content.to_string()
+                })),
+                outbox_status: PublishOutboxStatus::Acknowledged,
+                relay_set_fingerprint: Some("relay-set".to_owned()),
+                relay_delivery_json: Some(json!({
+                    "state": "acknowledged",
+                    "acknowledged_relays": ["wss://relay.example"]
+                })),
+            })
+            .expect("append app signed listing");
+    }
+
+    fn append_signed_order_request_record(
+        paths: &AppDesktopRuntimePaths,
+        trade_order_id: &str,
+        listing_addr: &str,
+        listing_event_id: &str,
+        buyer_pubkey: &str,
+        seller_pubkey: &str,
+        order_quantity: u32,
+    ) {
+        let database_path = paths
+            .shared_local_events_database_path()
+            .expect("shared local events path");
+        if let Some(parent) = database_path.parent() {
+            fs::create_dir_all(parent).expect("shared local events directory should create");
+        }
+        let executor =
+            SqliteExecutor::open(database_path.as_path()).expect("open shared local events db");
+        let store = LocalEventsStore::new(executor);
+        store.migrate_up().expect("migrate shared local events");
+        let currency = RadrootsCoreCurrency::USD;
+        let unit_price_minor_units = 800_u32;
+        let total_minor_units = unit_price_minor_units
+            .checked_mul(order_quantity)
+            .expect("order total should fit");
+        let order = RadrootsTradeOrderRequested {
+            order_id: trade_order_id.to_owned(),
+            listing_addr: listing_addr.to_owned(),
+            buyer_pubkey: buyer_pubkey.to_owned(),
+            seller_pubkey: seller_pubkey.to_owned(),
+            items: vec![RadrootsTradeOrderItem {
+                bin_id: "seller-order-primary-bin".to_owned(),
+                bin_count: order_quantity,
+            }],
+            economics: RadrootsTradeOrderEconomics {
+                quote_id: format!("{trade_order_id}-quote"),
+                quote_version: 1,
+                pricing_basis: RadrootsTradePricingBasis::ListingEvent,
+                currency,
+                items: vec![RadrootsTradeOrderEconomicItem {
+                    bin_id: "seller-order-primary-bin".to_owned(),
+                    bin_count: order_quantity,
+                    quantity_amount: RadrootsCoreDecimal::from(1u32),
+                    quantity_unit: RadrootsCoreUnit::Each,
+                    unit_price_amount: RadrootsCoreDecimal::from(8u32),
+                    unit_price_currency: currency,
+                    line_subtotal: RadrootsCoreMoney::from_minor_units_u32(
+                        total_minor_units,
+                        currency,
+                    ),
+                }],
+                discounts: Vec::new(),
+                adjustments: Vec::new(),
+                subtotal: RadrootsCoreMoney::from_minor_units_u32(total_minor_units, currency),
+                discount_total: RadrootsCoreMoney::zero(currency),
+                adjustment_total: RadrootsCoreMoney::zero(currency),
+                total: RadrootsCoreMoney::from_minor_units_u32(total_minor_units, currency),
+            },
+        };
+        let parts = radroots_sdk::trade::build_order_request_draft(
+            &RadrootsNostrEventPtr {
+                id: listing_event_id.to_owned(),
+                relays: Some("wss://relay.example".to_owned()),
+            },
+            &order,
+        )
+        .expect("order request draft should build")
+        .into_wire_parts();
+        let record_id = format!("app:signed_event:order-request:{trade_order_id}");
+        let event_id = format!("event-{record_id}");
+        store
+            .append_record(&LocalEventRecordInput {
+                record_id,
+                family: LocalRecordFamily::SignedEvent,
+                status: LocalRecordStatus::Published,
+                source_runtime: SourceRuntime::Test,
+                created_at_ms: 1_774_000_010_000,
+                inserted_at_ms: 1_774_000_010_001,
+                owner_account_id: None,
+                owner_pubkey: Some(buyer_pubkey.to_owned()),
+                farm_id: None,
+                listing_addr: Some(listing_addr.to_owned()),
+                local_work_json: None,
+                event_id: Some(event_id.clone()),
+                event_kind: Some(i64::from(parts.kind)),
+                event_pubkey: Some(buyer_pubkey.to_owned()),
+                event_created_at: Some(1_774_000_010),
+                event_tags_json: Some(json!(parts.tags)),
+                event_content: Some(parts.content.clone()),
+                event_sig: Some("signature".to_owned()),
+                raw_event_json: Some(json!({
+                    "id": event_id,
+                    "kind": parts.kind,
+                    "pubkey": buyer_pubkey,
+                    "content": parts.content
+                })),
+                outbox_status: PublishOutboxStatus::Acknowledged,
+                relay_set_fingerprint: Some("relay-set".to_owned()),
+                relay_delivery_json: Some(json!({
+                    "state": "acknowledged",
+                    "acknowledged_relays": ["wss://relay.example"]
+                })),
+            })
+            .expect("append signed order request");
+    }
+
+    fn append_unrelated_signed_event_records(paths: &AppDesktopRuntimePaths, count: usize) {
+        let database_path = paths
+            .shared_local_events_database_path()
+            .expect("shared local events path");
+        let executor =
+            SqliteExecutor::open(database_path.as_path()).expect("open shared local events db");
+        let store = LocalEventsStore::new(executor);
+        store.migrate_up().expect("migrate shared local events");
+        let pubkey = "2222222222222222222222222222222222222222222222222222222222222222";
+
+        for index in 0..count {
+            let record_id = format!("app:signed_event:unrelated:{index}");
+            let event_id = format!("event-{record_id}");
+            store
+                .append_record(&LocalEventRecordInput {
+                    record_id,
+                    family: LocalRecordFamily::SignedEvent,
+                    status: LocalRecordStatus::Published,
+                    source_runtime: SourceRuntime::Test,
+                    created_at_ms: 1_774_000_100_000 + i64::try_from(index).unwrap_or_default(),
+                    inserted_at_ms: 1_774_000_100_001 + i64::try_from(index).unwrap_or_default(),
+                    owner_account_id: None,
+                    owner_pubkey: Some(pubkey.to_owned()),
+                    farm_id: None,
+                    listing_addr: None,
+                    local_work_json: None,
+                    event_id: Some(event_id.clone()),
+                    event_kind: Some(1),
+                    event_pubkey: Some(pubkey.to_owned()),
+                    event_created_at: Some(
+                        1_774_000_100 + i64::try_from(index).unwrap_or_default(),
+                    ),
+                    event_tags_json: Some(json!([])),
+                    event_content: Some("{}".to_owned()),
+                    event_sig: Some("signature".to_owned()),
+                    raw_event_json: Some(json!({
+                        "id": event_id,
+                        "kind": 1,
+                        "pubkey": pubkey,
+                        "content": "{}"
+                    })),
+                    outbox_status: PublishOutboxStatus::Acknowledged,
+                    relay_set_fingerprint: Some("relay-set".to_owned()),
+                    relay_delivery_json: Some(json!({
+                        "state": "acknowledged",
+                        "acknowledged_relays": ["wss://relay.example"]
+                    })),
+                })
+                .expect("append unrelated signed event");
+        }
     }
 
     fn deterministic_cli_listing_product_id(

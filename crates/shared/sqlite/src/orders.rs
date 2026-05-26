@@ -7,7 +7,7 @@ use radroots_studio_app_models::{
     PackDayOutputCustomerOrder, PackDayOutputOrderState, PackDayOutputPackListEntry,
     PackDayOutputProductTotal, PackDayOutputQuantity, PackDayOutputSource, PackDayOutputWindow,
     PackDayPackListRow, PackDayProductTotalRow, PackDayProjection, PackDayRosterRow,
-    PackDayScreenQueryState,
+    PackDayScreenQueryState, ProductId,
 };
 use rusqlite::{Connection, OptionalExtension, params};
 
@@ -15,6 +15,23 @@ use crate::AppSqliteError;
 
 pub struct AppOrdersRepository<'a> {
     connection: &'a Connection,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct SellerOrderDecisionExport {
+    pub order_id: OrderId,
+    pub farm_id: FarmId,
+    pub status: OrderStatus,
+    pub lines: Vec<SellerOrderDecisionLineExport>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct SellerOrderDecisionLineExport {
+    pub product_id: ProductId,
+    pub listing_bin_id: Option<String>,
+    pub quantity: u32,
+    pub stock_count: Option<u32>,
+    pub reserved_quantity: u32,
 }
 
 impl<'a> AppOrdersRepository<'a> {
@@ -116,6 +133,48 @@ impl<'a> AppOrdersRepository<'a> {
                 },
             )
             .transpose()
+    }
+
+    pub fn load_seller_order_decision_export(
+        &self,
+        farm_id: FarmId,
+        order_id: OrderId,
+    ) -> Result<Option<SellerOrderDecisionExport>, AppSqliteError> {
+        let Some((order_id, farm_id, status)) = self
+            .connection
+            .query_row(
+                "select id, farm_id, status
+                 from orders
+                 where farm_id = ?1 and id = ?2
+                 limit 1",
+                params![farm_id.to_string(), order_id.to_string()],
+                |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, String>(2)?,
+                    ))
+                },
+            )
+            .optional()
+            .map_err(|source| AppSqliteError::Query {
+                operation: "load seller order decision export",
+                source,
+            })?
+        else {
+            return Ok(None);
+        };
+        let order_id = parse_typed_id("orders.id", order_id)?;
+        let farm_id = parse_typed_id("orders.farm_id", farm_id)?;
+        let status = parse_order_status("orders.status", status)?;
+        let lines = self.load_seller_order_decision_lines(order_id)?;
+
+        Ok(Some(SellerOrderDecisionExport {
+            order_id,
+            farm_id,
+            status,
+            lines,
+        }))
     }
 
     pub fn load_pack_day(
@@ -320,6 +379,145 @@ impl<'a> AppOrdersRepository<'a> {
                 operation: "read order detail items",
                 source,
             })
+    }
+
+    fn load_seller_order_decision_lines(
+        &self,
+        order_id: OrderId,
+    ) -> Result<Vec<SellerOrderDecisionLineExport>, AppSqliteError> {
+        let mut statement = self
+            .connection
+            .prepare(
+                "select id, quantity_value, listing_bin_id
+                 from order_lines
+                 where order_id = ?1
+                 order by sort_index asc, id asc",
+            )
+            .map_err(|source| AppSqliteError::Query {
+                operation: "prepare seller order decision lines",
+                source,
+            })?;
+        let rows = statement
+            .query_map(params![order_id.to_string()], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, i64>(1)?,
+                    row.get::<_, Option<String>>(2)?,
+                ))
+            })
+            .map_err(|source| AppSqliteError::Query {
+                operation: "query seller order decision lines",
+                source,
+            })?;
+        let mut lines = Vec::new();
+
+        for row in rows {
+            let (line_id, quantity, listing_bin_id) =
+                row.map_err(|source| AppSqliteError::Query {
+                    operation: "read seller order decision line",
+                    source,
+                })?;
+            let product_id = parse_order_line_product_id(line_id.as_str(), order_id)?;
+            let quantity =
+                u32::try_from(quantity).map_err(|_| AppSqliteError::InvalidProjection {
+                    reason: "seller order decision quantity must be non-negative",
+                })?;
+            if quantity == 0 {
+                return Err(AppSqliteError::InvalidProjection {
+                    reason: "seller order decision quantity must be positive",
+                });
+            }
+            lines.push(SellerOrderDecisionLineExport {
+                product_id,
+                listing_bin_id: empty_string_to_none(listing_bin_id),
+                quantity,
+                stock_count: self.load_product_stock_count(product_id)?,
+                reserved_quantity: self.load_reserved_product_quantity(product_id, order_id)?,
+            });
+        }
+
+        Ok(lines)
+    }
+
+    fn load_product_stock_count(
+        &self,
+        product_id: ProductId,
+    ) -> Result<Option<u32>, AppSqliteError> {
+        let stock_count = self
+            .connection
+            .query_row(
+                "select stock_count from products where id = ?1 limit 1",
+                params![product_id.to_string()],
+                |row| row.get::<_, Option<i64>>(0),
+            )
+            .optional()
+            .map_err(|source| AppSqliteError::Query {
+                operation: "load seller order decision product stock",
+                source,
+            })?
+            .flatten();
+
+        stock_count
+            .map(|value| {
+                u32::try_from(value).map_err(|_| AppSqliteError::InvalidProjection {
+                    reason: "seller order decision product stock must be non-negative",
+                })
+            })
+            .transpose()
+    }
+
+    fn load_reserved_product_quantity(
+        &self,
+        product_id: ProductId,
+        excluding_order_id: OrderId,
+    ) -> Result<u32, AppSqliteError> {
+        let mut statement = self
+            .connection
+            .prepare(
+                "select ol.id, ol.quantity_value
+                 from order_lines ol
+                 inner join orders o on o.id = ol.order_id
+                 where o.status in ('scheduled', 'packed')
+                   and o.id <> ?1",
+            )
+            .map_err(|source| AppSqliteError::Query {
+                operation: "prepare seller order decision reservations",
+                source,
+            })?;
+        let rows = statement
+            .query_map(params![excluding_order_id.to_string()], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
+            })
+            .map_err(|source| AppSqliteError::Query {
+                operation: "query seller order decision reservations",
+                source,
+            })?;
+        let mut reserved_quantity = 0_u32;
+
+        for row in rows {
+            let (line_id, quantity) = row.map_err(|source| AppSqliteError::Query {
+                operation: "read seller order decision reservation",
+                source,
+            })?;
+            let Some(reserved_product_id) = parse_order_line_product_id_lossy(line_id.as_str())
+            else {
+                continue;
+            };
+            if reserved_product_id != product_id {
+                continue;
+            }
+            let quantity =
+                u32::try_from(quantity).map_err(|_| AppSqliteError::InvalidProjection {
+                    reason: "seller order decision reserved quantity must be non-negative",
+                })?;
+            reserved_quantity = reserved_quantity.checked_add(quantity).ok_or(
+                AppSqliteError::InvalidProjection {
+                    reason: "seller order decision reserved quantity overflowed",
+                },
+            )?;
+        }
+
+        Ok(reserved_quantity)
     }
 
     fn load_fulfillment_window_by_id(
@@ -961,6 +1159,26 @@ where
     T: std::str::FromStr,
 {
     value.map(|value| parse_typed_id(field, value)).transpose()
+}
+
+fn parse_order_line_product_id(
+    line_id: &str,
+    order_id: OrderId,
+) -> Result<ProductId, AppSqliteError> {
+    let prefix = format!("{order_id}:");
+    let Some(product_id) = line_id.strip_prefix(prefix.as_str()) else {
+        return Err(AppSqliteError::InvalidProjection {
+            reason: "seller order decision line id must include order id prefix",
+        });
+    };
+
+    parse_typed_id("order_lines.product_id", product_id.to_owned())
+}
+
+fn parse_order_line_product_id_lossy(line_id: &str) -> Option<ProductId> {
+    line_id
+        .rsplit_once(':')
+        .and_then(|(_, product_id)| product_id.parse().ok())
 }
 
 fn parse_order_status(field: &'static str, value: String) -> Result<OrderStatus, AppSqliteError> {

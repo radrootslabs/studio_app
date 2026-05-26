@@ -3,7 +3,8 @@
 mod publish;
 
 pub use publish::{
-    AppFarmProfilePublishPayload, AppListingPublishPayload, AppOrderRequestItemPayload,
+    AppFarmProfilePublishPayload, AppListingPublishPayload, AppOrderDecisionInventoryCommitment,
+    AppOrderDecisionPayload, AppOrderDecisionPublishPayload, AppOrderRequestItemPayload,
     AppOrderRequestPublishPayload, AppPublishContext, AppPublishPayload,
     AppPublishPayloadJsonError, AppPublishValidationFailure, AppPublishValidationFailureSet,
     AppPublishWorkKind,
