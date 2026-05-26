@@ -9,8 +9,7 @@ fn main() {
     let app_root = manifest_dir
         .parent()
         .and_then(Path::parent)
-        .and_then(Path::parent)
-        .expect("app root should be discoverable from shared i18n crate");
+        .expect("app root should be discoverable from i18n crate");
     let config_path = app_root.join("i18n").join("mf2_i18n.toml");
     let out_dir = PathBuf::from(env::var("OUT_DIR").expect("out dir should exist"));
 
