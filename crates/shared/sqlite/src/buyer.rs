@@ -2,13 +2,13 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use radroots_studio_app_models::{
     BuyerCartLineProjection, BuyerCartProjection, BuyerCartReplaceConfirmationProjection,
-    BuyerCheckoutDraft, BuyerCheckoutProjection, BuyerCheckoutSummaryProjection, BuyerContext,
-    BuyerListingRow, BuyerListingsProjection, BuyerOrderDetailProjection, BuyerOrderStatus,
-    BuyerOrdersListRow, BuyerOrdersProjection, BuyerProductDetailProjection, FarmId,
-    FarmOrderMethod, FulfillmentWindowId, OrderDetailItemRow, OrderId, OrderStatus,
-    ProductAvailabilityState, ProductAvailabilitySummary, ProductId, ProductPricePresentation,
-    ProductStatus, ProductStockState, ProductStockSummary, RepeatDemandEligibility,
-    RepeatDemandHandoffProjection,
+    BuyerCheckoutDisabledReason, BuyerCheckoutDraft, BuyerCheckoutProjection,
+    BuyerCheckoutSummaryProjection, BuyerContext, BuyerListingRow, BuyerListingsProjection,
+    BuyerOrderDetailProjection, BuyerOrderStatus, BuyerOrdersListRow, BuyerOrdersProjection,
+    BuyerProductDetailProjection, FarmId, FarmOrderMethod, FulfillmentWindowId, OrderDetailItemRow,
+    OrderId, OrderStatus, ProductAvailabilityState, ProductAvailabilitySummary, ProductId,
+    ProductPricePresentation, ProductStatus, ProductStockState, ProductStockSummary,
+    RepeatDemandEligibility, RepeatDemandHandoffProjection,
 };
 use rusqlite::{Connection, OptionalExtension, params};
 use serde_json::Value;
@@ -277,6 +277,8 @@ impl<'a> AppBuyerRepository<'a> {
             .map(BuyerCartHeader::into_checkout_draft)
             .unwrap_or_default();
         let fulfillment_summary = shared_fulfillment_summary(&cart.lines);
+        let place_order_disabled_reason =
+            buyer_checkout_disabled_reason(context, &cart, fulfillment_summary.as_ref(), &draft);
 
         Ok(BuyerCheckoutProjection {
             draft: draft.clone(),
@@ -287,10 +289,8 @@ impl<'a> AppBuyerRepository<'a> {
                 subtotal_minor_units: cart.subtotal_minor_units,
                 currency_code: cart.currency_code.clone(),
             },
-            can_place_order: !cart.lines.is_empty()
-                && fulfillment_summary.is_some()
-                && !draft.name.trim().is_empty()
-                && !draft.email.trim().is_empty(),
+            can_place_order: place_order_disabled_reason.is_none(),
+            place_order_disabled_reason,
         })
     }
 
@@ -352,9 +352,9 @@ impl<'a> AppBuyerRepository<'a> {
         let cart = self.build_cart_projection(Some(header.clone()), line_records.clone())?;
         let checkout = self.load_buyer_checkout(context)?;
 
-        if !checkout.can_place_order {
+        if let Some(disabled_reason) = checkout.place_order_disabled_reason {
             return Err(AppSqliteError::InvalidProjection {
-                reason: "buyer checkout is not ready",
+                reason: buyer_checkout_disabled_error(disabled_reason),
             });
         }
 
@@ -2388,6 +2388,44 @@ fn shared_fulfillment_summary(lines: &[BuyerCartLineProjection]) -> Option<Strin
         .then_some(first)
 }
 
+fn buyer_checkout_disabled_reason(
+    context: &BuyerContext,
+    cart: &BuyerCartProjection,
+    fulfillment_summary: Option<&String>,
+    draft: &BuyerCheckoutDraft,
+) -> Option<BuyerCheckoutDisabledReason> {
+    if cart.lines.is_empty() {
+        return Some(BuyerCheckoutDisabledReason::EmptyCart);
+    }
+    if fulfillment_summary.is_none() {
+        return Some(BuyerCheckoutDisabledReason::MissingFulfillment);
+    }
+    if draft.name.trim().is_empty() {
+        return Some(BuyerCheckoutDisabledReason::MissingName);
+    }
+    if draft.email.trim().is_empty() {
+        return Some(BuyerCheckoutDisabledReason::MissingEmail);
+    }
+    if matches!(context, BuyerContext::Guest) {
+        return Some(BuyerCheckoutDisabledReason::AccountRequired);
+    }
+    None
+}
+
+fn buyer_checkout_disabled_error(reason: BuyerCheckoutDisabledReason) -> &'static str {
+    match reason {
+        BuyerCheckoutDisabledReason::EmptyCart => "buyer checkout cart is empty",
+        BuyerCheckoutDisabledReason::MissingFulfillment => {
+            "buyer checkout fulfillment is unavailable"
+        }
+        BuyerCheckoutDisabledReason::MissingName => "buyer checkout buyer name is missing",
+        BuyerCheckoutDisabledReason::MissingEmail => "buyer checkout buyer email is missing",
+        BuyerCheckoutDisabledReason::AccountRequired => {
+            "buyer checkout requires a selected account"
+        }
+    }
+}
+
 fn shared_fulfillment_window_id(
     lines: &[BuyerCartLineRecord],
 ) -> Result<Option<FulfillmentWindowId>, AppSqliteError> {
@@ -2662,16 +2700,13 @@ mod tests {
     use std::collections::BTreeSet;
 
     use radroots_studio_app_models::{
-        BuyerContext, FarmId, FarmOrderMethod, FulfillmentWindowId, OrderId, OrderStatus,
-        PickupLocationId, ProductId,
+        BuyerCheckoutDisabledReason, BuyerContext, FarmId, FarmOrderMethod, FulfillmentWindowId,
+        OrderId, PickupLocationId, ProductId,
     };
     use rusqlite::{Connection, params};
     use serde_json::json;
 
-    use crate::{
-        AppSqliteError, AppSqliteStore, BuyerOrderCoordinationState, BuyerRepeatDemandApplyOutcome,
-        DatabaseTarget,
-    };
+    use crate::{AppSqliteError, AppSqliteStore, BuyerRepeatDemandApplyOutcome, DatabaseTarget};
 
     use super::AppBuyerRepository;
 
@@ -2812,7 +2847,7 @@ mod tests {
     }
 
     #[test]
-    fn buyer_cart_checkout_and_order_history_round_trip_for_guest_context() {
+    fn buyer_checkout_requires_account_before_order_write() {
         let store = AppSqliteStore::open(DatabaseTarget::InMemory).expect("store should open");
         let connection = store.connection();
         let repository = AppBuyerRepository::new(connection);
@@ -2886,62 +2921,25 @@ mod tests {
         let checkout = repository
             .load_buyer_checkout(&context)
             .expect("buyer checkout should load");
-        let order_id = repository
+        let error = repository
             .place_buyer_order(&context)
-            .expect("buyer checkout should place order");
-        let buyer_orders = repository
-            .load_buyer_orders(&context)
-            .expect("buyer orders should load");
-        let buyer_order_detail = repository
-            .load_buyer_order_detail(&context, order_id)
-            .expect("buyer order detail should load")
-            .expect("buyer order detail should exist");
+            .expect_err("guest checkout should require an account");
         let cart_after_checkout = repository
             .load_buyer_cart(&context)
-            .expect("buyer cart should load after checkout");
-        let coordination = repository
-            .load_buyer_order_coordination_record(&context, order_id)
-            .expect("buyer order coordination should load")
-            .expect("buyer order coordination should exist");
+            .expect("buyer cart should remain after blocked checkout");
 
-        assert!(checkout.can_place_order);
+        assert!(matches!(error, AppSqliteError::InvalidProjection { .. }));
+        assert!(!checkout.can_place_order);
+        assert_eq!(
+            checkout.place_order_disabled_reason,
+            Some(BuyerCheckoutDisabledReason::AccountRequired)
+        );
         assert_eq!(checkout.summary.line_count, 1);
-        assert_eq!(buyer_orders.rows.len(), 1);
-        assert_eq!(
-            buyer_orders.rows[0].status,
-            radroots_studio_app_models::BuyerOrderStatus::Placed
-        );
-        assert_eq!(buyer_order_detail.items.len(), 1);
-        assert_eq!(
-            buyer_order_detail.order_note.as_deref(),
-            Some("Leave by the cooler")
-        );
-        assert!(cart_after_checkout.lines.is_empty());
-        assert_eq!(cart_after_checkout.farm_id, None);
-        assert_eq!(
-            read_order_status(connection, order_id),
-            OrderStatus::NeedsAction
-        );
-        assert_eq!(
-            read_order_context_key(connection, order_id).as_deref(),
-            Some("guest")
-        );
-        assert_eq!(
-            read_order_contact(connection, order_id),
-            (
-                "Casey Buyer".to_owned(),
-                "casey@example.com".to_owned(),
-                "555-0101".to_owned(),
-                "Leave by the cooler".to_owned(),
-            )
-        );
-        assert_eq!(coordination.order_id, order_id);
-        assert_eq!(coordination.buyer_context_key, "guest");
-        assert_eq!(coordination.state, BuyerOrderCoordinationState::Pending);
-        assert_eq!(coordination.record_id, None);
-        assert_eq!(coordination.payload_json, None);
-        assert_eq!(coordination.attempt_count, 0);
-        assert_eq!(coordination.last_error_message, None);
+        assert_eq!(cart_after_checkout.lines.len(), 1);
+        assert_eq!(cart_after_checkout.farm_id, Some(farm_id));
+        assert_eq!(row_count(connection, "orders"), 0);
+        assert_eq!(row_count(connection, "order_lines"), 0);
+        assert_eq!(row_count(connection, "buyer_order_coordination_records"), 0);
         assert_eq!(row_count(connection, "local_outbox"), 0);
         assert_eq!(row_count(connection, "local_conflicts"), 0);
         assert_eq!(row_count(connection, "sync_checkpoints"), 0);
@@ -2952,7 +2950,7 @@ mod tests {
         let store = AppSqliteStore::open(DatabaseTarget::InMemory).expect("store should open");
         let connection = store.connection();
         let repository = AppBuyerRepository::new(connection);
-        let context = BuyerContext::Guest;
+        let context = BuyerContext::account("acct_buyer");
         let farm_id = insert_farm(connection, "Willow Farm", "ready");
         let pickup_location_id = insert_pickup_location(connection, farm_id, "Barn pickup");
         let future_window_id = insert_window(
@@ -3091,7 +3089,7 @@ mod tests {
         let store = AppSqliteStore::open(DatabaseTarget::InMemory).expect("store should open");
         let connection = store.connection();
         let repository = AppBuyerRepository::new(connection);
-        let context = BuyerContext::Guest;
+        let context = BuyerContext::account("acct_buyer");
         let farm_id = insert_farm(connection, "Willow Farm", "ready");
         let pickup_location_id = insert_pickup_location(connection, farm_id, "Barn pickup");
         let future_window_id = insert_window(
@@ -3501,49 +3499,6 @@ mod tests {
                 ],
             )
             .expect("order insert should succeed");
-    }
-
-    fn read_order_status(connection: &Connection, order_id: OrderId) -> OrderStatus {
-        let status = connection
-            .query_row(
-                "select status from orders where id = ?1 limit 1",
-                params![order_id.to_string()],
-                |row| row.get::<_, String>(0),
-            )
-            .expect("order status should load");
-
-        super::parse_order_status("orders.status", status).expect("order status should parse")
-    }
-
-    fn read_order_context_key(connection: &Connection, order_id: OrderId) -> Option<String> {
-        connection
-            .query_row(
-                "select buyer_context_key from orders where id = ?1 limit 1",
-                params![order_id.to_string()],
-                |row| row.get::<_, Option<String>>(0),
-            )
-            .expect("order context should load")
-    }
-
-    fn read_order_contact(
-        connection: &Connection,
-        order_id: OrderId,
-    ) -> (String, String, String, String) {
-        connection
-            .query_row(
-                "select customer_display_name, buyer_email, buyer_phone, buyer_order_note
-                 from orders where id = ?1 limit 1",
-                params![order_id.to_string()],
-                |row| {
-                    Ok((
-                        row.get::<_, String>(0)?,
-                        row.get::<_, String>(1)?,
-                        row.get::<_, String>(2)?,
-                        row.get::<_, String>(3)?,
-                    ))
-                },
-            )
-            .expect("order contact should load")
     }
 
     fn row_count(connection: &Connection, table_name: &str) -> i64 {

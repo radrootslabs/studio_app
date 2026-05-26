@@ -1347,11 +1347,34 @@ pub struct BuyerCheckoutSummaryProjection {
     pub currency_code: Option<String>,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum BuyerCheckoutDisabledReason {
+    EmptyCart,
+    MissingFulfillment,
+    MissingName,
+    MissingEmail,
+    AccountRequired,
+}
+
+impl BuyerCheckoutDisabledReason {
+    pub const fn storage_key(self) -> &'static str {
+        match self {
+            Self::EmptyCart => "empty_cart",
+            Self::MissingFulfillment => "missing_fulfillment",
+            Self::MissingName => "missing_name",
+            Self::MissingEmail => "missing_email",
+            Self::AccountRequired => "account_required",
+        }
+    }
+}
+
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
 pub struct BuyerCheckoutProjection {
     pub draft: BuyerCheckoutDraft,
     pub summary: BuyerCheckoutSummaryProjection,
     pub can_place_order: bool,
+    pub place_order_disabled_reason: Option<BuyerCheckoutDisabledReason>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -2563,14 +2586,14 @@ mod tests {
         AccountCustody, AccountSummary, AccountSurfaceActivationProjection, ActiveSurface,
         ActivityEventId, AppActivityContext, AppActivityEvent, AppActivityKind,
         AppIdentityProjection, AppStartupGate, BlackoutPeriodId, BuyerCartLineProjection,
-        BuyerCartProjection, BuyerCheckoutDraft, BuyerCheckoutProjection,
-        BuyerCheckoutSummaryProjection, BuyerContext, BuyerListingRow, BuyerListingsProjection,
-        BuyerOrderDetailProjection, BuyerOrderStatus, BuyerOrdersListRow, BuyerOrdersProjection,
-        FarmId, FarmOrderMethod, FarmReadinessBlocker, FarmRulesProjection, FarmRulesReadiness,
-        FarmSetupBlocker, FarmSetupDraft, FarmSetupProjection, FarmSetupReadiness,
-        FarmSetupSection, FarmTimingConflict, FarmTimingConflictKind, FarmerActivationProjection,
-        FarmerSection, FulfillmentWindowId, IdentityBlockedReason, IdentityReadiness,
-        LoggedOutStartupPhase, LoggedOutStartupProjection, OrderDetailItemRow,
+        BuyerCartProjection, BuyerCheckoutDisabledReason, BuyerCheckoutDraft,
+        BuyerCheckoutProjection, BuyerCheckoutSummaryProjection, BuyerContext, BuyerListingRow,
+        BuyerListingsProjection, BuyerOrderDetailProjection, BuyerOrderStatus, BuyerOrdersListRow,
+        BuyerOrdersProjection, FarmId, FarmOrderMethod, FarmReadinessBlocker, FarmRulesProjection,
+        FarmRulesReadiness, FarmSetupBlocker, FarmSetupDraft, FarmSetupProjection,
+        FarmSetupReadiness, FarmSetupSection, FarmTimingConflict, FarmTimingConflictKind,
+        FarmerActivationProjection, FarmerSection, FulfillmentWindowId, IdentityBlockedReason,
+        IdentityReadiness, LoggedOutStartupPhase, LoggedOutStartupProjection, OrderDetailItemRow,
         OrderDetailProjection, OrderId, OrderListRow, OrderPrimaryAction, OrderRecoveryProjection,
         OrderStatus, OrdersFilter, OrdersListProjection, OrdersListRow, OrdersListSummary,
         OrdersScreenQueryState, PackDayBatchPrintArtifact, PackDayBatchPrintFailureKind,
@@ -3044,6 +3067,30 @@ mod tests {
         assert_eq!(ProductsSort::Availability.storage_key(), "availability");
         assert_eq!(ProductsSort::Stock.storage_key(), "stock");
         assert_eq!(ProductsSort::Price.storage_key(), "price");
+    }
+
+    #[test]
+    fn buyer_checkout_disabled_reason_storage_keys_are_stable() {
+        assert_eq!(
+            BuyerCheckoutDisabledReason::EmptyCart.storage_key(),
+            "empty_cart"
+        );
+        assert_eq!(
+            BuyerCheckoutDisabledReason::MissingFulfillment.storage_key(),
+            "missing_fulfillment"
+        );
+        assert_eq!(
+            BuyerCheckoutDisabledReason::MissingName.storage_key(),
+            "missing_name"
+        );
+        assert_eq!(
+            BuyerCheckoutDisabledReason::MissingEmail.storage_key(),
+            "missing_email"
+        );
+        assert_eq!(
+            BuyerCheckoutDisabledReason::AccountRequired.storage_key(),
+            "account_required"
+        );
     }
 
     #[test]
@@ -3640,6 +3687,7 @@ mod tests {
                 currency_code: Some("USD".to_owned()),
             },
             can_place_order: true,
+            place_order_disabled_reason: None,
         };
         let orders = BuyerOrdersProjection {
             rows: vec![BuyerOrdersListRow {

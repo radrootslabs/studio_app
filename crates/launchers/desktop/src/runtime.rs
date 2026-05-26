@@ -1670,6 +1670,11 @@ impl DesktopAppRuntimeState {
 
     fn place_personal_order(&mut self) -> Result<bool, AppSqliteError> {
         let buyer_context = self.state_store.identity_projection().buyer_context();
+        if matches!(buyer_context, BuyerContext::Guest) {
+            return Err(AppSqliteError::InvalidProjection {
+                reason: "buyer checkout requires a selected account",
+            });
+        }
         let (refreshed_cart, refreshed_checkout, refreshed_orders, order_detail, order_export) = {
             let Some(sqlite_store) = self.sqlite_store.as_ref() else {
                 return Ok(false);
@@ -7775,8 +7780,8 @@ mod tests {
     use radroots_studio_app_models::{
         AccountCustody, AccountSummary, AccountSurfaceActivationProjection, ActiveSurface,
         AppActivityKind, AppIdentityProjection, AppStartupGate, BlackoutPeriodId,
-        BlackoutPeriodRecord, BuyerCheckoutDraft, BuyerOrderStatus, FarmId,
-        FarmOperatingRulesRecord, FarmOrderMethod, FarmProfileRecord, FarmReadiness,
+        BlackoutPeriodRecord, BuyerCheckoutDisabledReason, BuyerCheckoutDraft, BuyerOrderStatus,
+        FarmId, FarmOperatingRulesRecord, FarmOrderMethod, FarmProfileRecord, FarmReadiness,
         FarmReadinessBlocker, FarmRulesProjection, FarmSetupDraft, FarmSetupProjection,
         FarmSummary, FarmerActivationProjection, FarmerSection, FulfillmentWindowId,
         FulfillmentWindowRecord, LoggedOutStartupProjection, OrderId, OrderStatus, OrdersFilter,
@@ -12007,6 +12012,9 @@ mod tests {
                 })
                 .expect("buyer checkout draft should save")
         );
+        let checkout = runtime.summary().personal_projection.cart.checkout;
+        assert!(checkout.can_place_order);
+        assert_eq!(checkout.place_order_disabled_reason, None);
         assert!(
             runtime
                 .place_personal_order()
@@ -12020,6 +12028,14 @@ mod tests {
         );
         assert!(summary.personal_projection.cart.cart.lines.is_empty());
         assert!(!summary.personal_projection.cart.checkout.can_place_order);
+        assert_eq!(
+            summary
+                .personal_projection
+                .cart
+                .checkout
+                .place_order_disabled_reason,
+            Some(BuyerCheckoutDisabledReason::EmptyCart)
+        );
         assert_eq!(summary.personal_projection.orders.list.rows.len(), 1);
         assert_eq!(
             summary.personal_projection.orders.list.rows[0].farm_display_name,
@@ -12052,6 +12068,137 @@ mod tests {
                 .as_deref(),
             Some("Leave by the cooler")
         );
+    }
+
+    #[test]
+    fn runtime_guest_checkout_requires_account_before_order_write() {
+        let runtime = memory_runtime();
+        let farm_id = FarmId::new();
+        runtime
+            .lock_state()
+            .sqlite_store
+            .as_ref()
+            .expect("sqlite store")
+            .save_farm_summary(&FarmSummary {
+                farm_id,
+                display_name: "North field farm".to_owned(),
+                readiness: FarmReadiness::Ready,
+            })
+            .expect("farm summary should save");
+        assert!(
+            runtime
+                .select_active_surface(ActiveSurface::Personal)
+                .expect("surface should switch into marketplace")
+        );
+        let fulfillment_window_id = seed_buyer_marketplace_support(
+            &runtime,
+            "acct_farmer",
+            farm_id,
+            "North field farm",
+            "Friday pickup",
+        );
+        let product_id = seed_product(
+            &runtime,
+            farm_id,
+            "Salad mix",
+            "Spring blend",
+            "published",
+            Some(8),
+            "2026-04-20T09:00:00Z",
+        );
+        runtime
+            .lock_state()
+            .sqlite_store
+            .as_ref()
+            .expect("sqlite store")
+            .connection()
+            .execute_batch(&format!(
+                "update products
+                 set availability_window_id = '{fulfillment_window_id}'
+                 where id = '{product_id}'"
+            ))
+            .expect("buyer detail product should attach a fulfillment window");
+        assert!(
+            runtime
+                .open_personal_product_detail(PersonalSection::Browse, product_id)
+                .expect("buyer detail should open")
+        );
+        assert!(
+            runtime
+                .add_personal_product_to_cart(PersonalSection::Browse, false)
+                .expect("buyer product should add to cart")
+        );
+        assert!(
+            runtime
+                .save_personal_checkout_draft(BuyerCheckoutDraft {
+                    name: "Casey Buyer".to_owned(),
+                    email: "casey@example.com".to_owned(),
+                    phone: "555-0101".to_owned(),
+                    order_note: "Leave by the cooler".to_owned(),
+                })
+                .expect("buyer checkout draft should save")
+        );
+
+        let ready_summary = runtime.summary();
+        assert!(
+            !ready_summary
+                .personal_projection
+                .cart
+                .checkout
+                .can_place_order
+        );
+        assert_eq!(
+            ready_summary
+                .personal_projection
+                .cart
+                .checkout
+                .place_order_disabled_reason,
+            Some(BuyerCheckoutDisabledReason::AccountRequired)
+        );
+        assert_eq!(
+            ready_summary
+                .personal_projection
+                .cart
+                .checkout
+                .summary
+                .line_count,
+            1
+        );
+
+        let error = runtime
+            .place_personal_order()
+            .expect_err("guest checkout should require an account");
+        assert!(matches!(error, AppSqliteError::InvalidProjection { .. }));
+
+        let summary = runtime.summary();
+        assert_eq!(
+            summary.shell_projection.selected_section,
+            ShellSection::Personal(PersonalSection::Cart)
+        );
+        assert_eq!(summary.personal_projection.cart.cart.lines.len(), 1);
+        assert_eq!(summary.personal_projection.orders.list.rows.len(), 0);
+        let order_count: i64 = runtime
+            .lock_state()
+            .sqlite_store
+            .as_ref()
+            .expect("sqlite store")
+            .connection()
+            .query_row("select count(*) from orders", [], |row| row.get(0))
+            .expect("order count should load");
+        let coordination_count: i64 = runtime
+            .lock_state()
+            .sqlite_store
+            .as_ref()
+            .expect("sqlite store")
+            .connection()
+            .query_row(
+                "select count(*) from buyer_order_coordination_records",
+                [],
+                |row| row.get(0),
+            )
+            .expect("coordination count should load");
+        assert_eq!(order_count, 0);
+        assert_eq!(coordination_count, 0);
     }
 
     #[test]
