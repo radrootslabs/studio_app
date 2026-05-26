@@ -728,7 +728,7 @@ impl<'a> AppBuyerRepository<'a> {
         context: &BuyerContext,
     ) -> Result<BuyerOrdersProjection, AppSqliteError> {
         let now_utc = self.current_utc_timestamp()?;
-        let visible_listings = self.visible_listing_records_by_id(&now_utc)?;
+        let visible_listings = self.visible_listing_index(&now_utc)?;
         let context_key = context.storage_key();
         let mut statement = self
             .connection
@@ -815,7 +815,7 @@ impl<'a> AppBuyerRepository<'a> {
         order_id: OrderId,
     ) -> Result<Option<BuyerOrderDetailProjection>, AppSqliteError> {
         let now_utc = self.current_utc_timestamp()?;
-        let visible_listings = self.visible_listing_records_by_id(&now_utc)?;
+        let visible_listings = self.visible_listing_index(&now_utc)?;
         let context_key = context.storage_key();
         let record = self
             .connection
@@ -1014,7 +1014,7 @@ impl<'a> AppBuyerRepository<'a> {
             return Ok(BuyerRepeatDemandApplyOutcome::Unavailable);
         };
         let now_utc = self.current_utc_timestamp()?;
-        let visible_listings = self.visible_listing_records_by_id(&now_utc)?;
+        let visible_listings = self.visible_listing_index(&now_utc)?;
         let Some(candidate) = self.build_repeat_demand_candidate(
             order_id,
             farm_id,
@@ -1798,7 +1798,7 @@ impl<'a> AppBuyerRepository<'a> {
         let mut statement = self
             .connection
             .prepare(
-                "select id, quantity_value
+                "select id, quantity_value, listing_addr
                  from order_lines
                  where order_id = ?1
                  order by sort_index asc, id asc",
@@ -1809,7 +1809,11 @@ impl<'a> AppBuyerRepository<'a> {
             })?;
         let rows = statement
             .query_map(params![order_id.to_string()], |row| {
-                Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, i64>(1)?,
+                    row.get::<_, Option<String>>(2)?,
+                ))
             })
             .map_err(|source| AppSqliteError::Query {
                 operation: "query repeat demand order lines",
@@ -1818,10 +1822,11 @@ impl<'a> AppBuyerRepository<'a> {
         let mut order_lines = Vec::new();
 
         for row in rows {
-            let (line_id, quantity_value) = row.map_err(|source| AppSqliteError::Query {
-                operation: "read repeat demand order lines",
-                source,
-            })?;
+            let (line_id, quantity_value, listing_addr) =
+                row.map_err(|source| AppSqliteError::Query {
+                    operation: "read repeat demand order lines",
+                    source,
+                })?;
             let product_id = parse_repeat_demand_product_id(line_id.as_str())?;
             let quantity =
                 u32::try_from(quantity_value).map_err(|_| AppSqliteError::InvalidProjection {
@@ -1836,6 +1841,7 @@ impl<'a> AppBuyerRepository<'a> {
             order_lines.push(RepeatDemandOrderLine {
                 product_id,
                 quantity,
+                listing_addr: listing_addr.and_then(empty_string_to_none),
             });
         }
 
@@ -1873,16 +1879,12 @@ impl<'a> AppBuyerRepository<'a> {
             .transpose()
     }
 
-    fn visible_listing_records_by_id(
-        &self,
-        now_utc: &str,
-    ) -> Result<BTreeMap<ProductId, BuyerListingRecord>, AppSqliteError> {
-        Ok(self
-            .load_listing_records()?
-            .into_iter()
-            .filter(|record| record.is_buyer_visible(now_utc))
-            .map(|record| (record.product_id, record))
-            .collect())
+    fn visible_listing_index(&self, now_utc: &str) -> Result<VisibleListingIndex, AppSqliteError> {
+        Ok(VisibleListingIndex::from_records(
+            self.load_listing_records()?
+                .into_iter()
+                .filter(|record| record.is_buyer_visible(now_utc)),
+        ))
     }
 
     fn build_repeat_demand_handoff(
@@ -1890,7 +1892,7 @@ impl<'a> AppBuyerRepository<'a> {
         order_id: OrderId,
         farm_id: FarmId,
         farm_display_name: &str,
-        visible_listings: &BTreeMap<ProductId, BuyerListingRecord>,
+        visible_listings: &VisibleListingIndex,
     ) -> Result<Option<RepeatDemandHandoffProjection>, AppSqliteError> {
         Ok(self
             .build_repeat_demand_candidate(order_id, farm_id, farm_display_name, visible_listings)?
@@ -1902,7 +1904,7 @@ impl<'a> AppBuyerRepository<'a> {
         order_id: OrderId,
         farm_id: FarmId,
         farm_display_name: &str,
-        visible_listings: &BTreeMap<ProductId, BuyerListingRecord>,
+        visible_listings: &VisibleListingIndex,
     ) -> Result<Option<RepeatDemandCandidate>, AppSqliteError> {
         let order_lines = self.load_repeat_demand_order_lines(order_id)?;
         if order_lines.is_empty() {
@@ -1913,15 +1915,11 @@ impl<'a> AppBuyerRepository<'a> {
         let mut unavailable_item_count = 0u32;
 
         for order_line in &order_lines {
-            if let Some(listing) = visible_listings
-                .get(&order_line.product_id)
-                .filter(|listing| {
-                    listing
-                        .stock_count
-                        .is_some_and(|quantity| quantity >= order_line.quantity)
-                })
-                .cloned()
-            {
+            if let Some(listing) = visible_listings.resolve(order_line).filter(|listing| {
+                listing
+                    .stock_count
+                    .is_some_and(|quantity| quantity >= order_line.quantity)
+            }) {
                 available_lines.push(BuyerCartLineRecord {
                     listing,
                     quantity: order_line.quantity,
@@ -1943,14 +1941,19 @@ impl<'a> AppBuyerRepository<'a> {
         } else {
             RepeatDemandEligibility::Partial
         };
+        let current_farm = available_lines
+            .first()
+            .map(|line| (line.listing.farm_id, line.listing.farm_display_name.clone()))
+            .unwrap_or_else(|| (farm_id, farm_display_name.to_owned()));
+        let (current_farm_id, current_farm_display_name) = current_farm;
 
         Ok(Some(RepeatDemandCandidate {
-            farm_id,
-            farm_display_name: farm_display_name.to_owned(),
+            farm_id: current_farm_id,
+            farm_display_name: current_farm_display_name,
             available_lines,
             handoff: RepeatDemandHandoffProjection {
                 order_id,
-                farm_id,
+                farm_id: current_farm_id,
                 eligibility,
                 available_item_count,
                 unavailable_item_count,
@@ -2204,6 +2207,39 @@ struct BuyerCartLineRecord {
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
+struct VisibleListingIndex {
+    by_product_id: BTreeMap<ProductId, BuyerListingRecord>,
+    by_listing_addr: BTreeMap<String, BuyerListingRecord>,
+}
+
+impl VisibleListingIndex {
+    fn from_records(records: impl IntoIterator<Item = BuyerListingRecord>) -> Self {
+        let mut index = Self::default();
+        for record in records {
+            if let Some(listing_addr) = record.listing_addr.as_deref() {
+                index
+                    .by_listing_addr
+                    .insert(listing_addr.to_owned(), record.clone());
+            }
+            index.by_product_id.insert(record.product_id, record);
+        }
+        index
+    }
+
+    fn resolve(&self, order_line: &RepeatDemandOrderLine) -> Option<BuyerListingRecord> {
+        self.by_product_id
+            .get(&order_line.product_id)
+            .or_else(|| {
+                order_line
+                    .listing_addr
+                    .as_deref()
+                    .and_then(|listing_addr| self.by_listing_addr.get(listing_addr))
+            })
+            .cloned()
+    }
+}
+
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
 struct BuyerCartLineSnapshot {
     listing_bin_id: Option<String>,
     farm_key: Option<String>,
@@ -2241,10 +2277,11 @@ impl BuyerCartLineRecord {
     }
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 struct RepeatDemandOrderLine {
     product_id: ProductId,
     quantity: u32,
+    listing_addr: Option<String>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]

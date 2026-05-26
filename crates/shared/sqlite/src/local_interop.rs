@@ -314,20 +314,32 @@ impl<'a> AppLocalInteropRepository<'a> {
     }
 
     fn import_record(&self, record: &LocalEventRecord) -> Result<ImportOutcome, AppSqliteError> {
-        match self.duplicate_signed_event_action(record)? {
-            DuplicateSignedEventAction::Import => {}
-            DuplicateSignedEventAction::ReplaceExisting(event_id) => {
-                self.delete_duplicate_signed_events(event_id.as_str(), record.record_id.as_str())?;
-            }
+        let superseded_listing_ids = match self.duplicate_signed_event_action(record)? {
+            DuplicateSignedEventAction::Import => Vec::new(),
+            DuplicateSignedEventAction::ReplaceExisting(event_id) => self
+                .delete_duplicate_signed_event_imports(
+                    event_id.as_str(),
+                    record.record_id.as_str(),
+                )?,
             DuplicateSignedEventAction::Skip => return Ok(ImportOutcome::Skipped),
-        }
+        };
         let projection = match record.family {
             LocalRecordFamily::LocalWork => self.import_local_work(record)?,
             LocalRecordFamily::SignedEvent => self.import_signed_event(record)?,
         };
         match projection {
             Some(projection) => {
-                self.record_import(record, projection.kind, projection.projected_id)?;
+                let projected_kind = projection.kind;
+                let projected_id = projection.projected_id;
+                self.record_import(record, projected_kind, projected_id.clone())?;
+                if projected_kind == "listing" {
+                    if let Some(projected_id) = projected_id.as_deref() {
+                        self.finish_duplicate_listing_replacement(
+                            &superseded_listing_ids,
+                            projected_id,
+                        )?;
+                    }
+                }
                 Ok(ImportOutcome::Imported)
             }
             None => {
@@ -411,11 +423,11 @@ impl<'a> AppLocalInteropRepository<'a> {
         }
     }
 
-    fn delete_duplicate_signed_events(
+    fn delete_duplicate_signed_event_imports(
         &self,
         event_id: &str,
         record_id: &str,
-    ) -> Result<(), AppSqliteError> {
+    ) -> Result<Vec<String>, AppSqliteError> {
         let superseded_listing_ids =
             self.superseded_duplicate_listing_projection_ids(event_id, record_id)?;
         self.connection
@@ -430,7 +442,19 @@ impl<'a> AppLocalInteropRepository<'a> {
                 operation: "delete superseded duplicate local interop signed event",
                 source,
             })?;
-        self.delete_unreferenced_listing_products(&superseded_listing_ids)?;
+        Ok(superseded_listing_ids)
+    }
+
+    fn finish_duplicate_listing_replacement(
+        &self,
+        superseded_listing_ids: &[String],
+        canonical_listing_product_id: &str,
+    ) -> Result<(), AppSqliteError> {
+        self.migrate_duplicate_buyer_cart_lines(
+            superseded_listing_ids,
+            canonical_listing_product_id,
+        )?;
+        self.delete_unreferenced_listing_products(superseded_listing_ids)?;
         Ok(())
     }
 
@@ -488,6 +512,80 @@ impl<'a> AppLocalInteropRepository<'a> {
                 )
                 .map_err(|source| AppSqliteError::Query {
                     operation: "delete unreferenced superseded listing product",
+                    source,
+                })?;
+        }
+        Ok(())
+    }
+
+    fn migrate_duplicate_buyer_cart_lines(
+        &self,
+        product_ids: &[String],
+        canonical_product_id: &str,
+    ) -> Result<(), AppSqliteError> {
+        for product_id in product_ids {
+            if product_id == canonical_product_id {
+                continue;
+            }
+            self.connection
+                .execute(
+                    "INSERT INTO buyer_cart_lines (
+                        buyer_context_key,
+                        product_id,
+                        quantity,
+                        listing_bin_id,
+                        quantity_unit_label,
+                        unit_price_minor_units,
+                        price_currency,
+                        farm_key,
+                        listing_addr,
+                        listing_event_id,
+                        seller_pubkey,
+                        listing_relays_json,
+                        updated_at
+                     )
+                     SELECT
+                        buyer_context_key,
+                        ?2,
+                        quantity,
+                        listing_bin_id,
+                        quantity_unit_label,
+                        unit_price_minor_units,
+                        price_currency,
+                        farm_key,
+                        listing_addr,
+                        listing_event_id,
+                        seller_pubkey,
+                        listing_relays_json,
+                        strftime('%Y-%m-%dT%H:%M:%SZ', 'now')
+                     FROM buyer_cart_lines
+                     WHERE product_id = ?1
+                     ON CONFLICT(buyer_context_key, product_id) DO UPDATE SET
+                        quantity = buyer_cart_lines.quantity + excluded.quantity,
+                        listing_bin_id = coalesce(nullif(buyer_cart_lines.listing_bin_id, ''), excluded.listing_bin_id),
+                        quantity_unit_label = coalesce(nullif(buyer_cart_lines.quantity_unit_label, ''), excluded.quantity_unit_label),
+                        unit_price_minor_units = coalesce(buyer_cart_lines.unit_price_minor_units, excluded.unit_price_minor_units),
+                        price_currency = coalesce(nullif(buyer_cart_lines.price_currency, ''), excluded.price_currency),
+                        farm_key = coalesce(nullif(buyer_cart_lines.farm_key, ''), excluded.farm_key),
+                        listing_addr = coalesce(nullif(buyer_cart_lines.listing_addr, ''), excluded.listing_addr),
+                        listing_event_id = coalesce(nullif(buyer_cart_lines.listing_event_id, ''), excluded.listing_event_id),
+                        seller_pubkey = coalesce(nullif(buyer_cart_lines.seller_pubkey, ''), excluded.seller_pubkey),
+                        listing_relays_json = coalesce(nullif(buyer_cart_lines.listing_relays_json, ''), excluded.listing_relays_json),
+                        updated_at = excluded.updated_at",
+                    params![product_id, canonical_product_id],
+                )
+                .map_err(|source| AppSqliteError::Query {
+                    operation: "migrate duplicate listing buyer cart lines",
+                    source,
+                })?;
+            self.connection
+                .execute(
+                    "DELETE FROM buyer_cart_lines
+                     WHERE product_id = ?1",
+                    params![product_id],
+                )
+                .map_err(|source| AppSqliteError::Query {
+                    operation: "delete migrated duplicate listing buyer cart lines",
                     source,
                 })?;
         }
@@ -2871,7 +2969,7 @@ mod tests {
         KIND_FARM, KIND_LISTING, KIND_ORDER_REQUEST, deterministic_farm_id,
         deterministic_product_id, projected_farm_id, projected_order_id, projected_product_id,
     };
-    use crate::{AppSqliteStore, DatabaseTarget};
+    use crate::{AppSqliteStore, BuyerRepeatDemandApplyOutcome, DatabaseTarget};
 
     fn local_events_store() -> LocalEventsStore<SqliteExecutor> {
         let executor = SqliteExecutor::open_memory().expect("open local events memory db");
@@ -4925,6 +5023,75 @@ mod tests {
             .expect("network product count");
         assert_eq!(network_product_count, 1);
         assert_ne!(network_product_id.as_uuid(), product_uuid);
+        let buyer_context = BuyerContext::account("acct_buyer");
+        let network_listing = app_store
+            .load_buyer_product_detail(network_product_id)
+            .expect("network buyer detail should load")
+            .expect("network listing should exist")
+            .listing;
+        app_store
+            .replace_buyer_cart(
+                &buyer_context,
+                &radroots_studio_app_models::BuyerCartProjection {
+                    farm_id: Some(network_listing.farm_id),
+                    farm_display_name: Some(network_listing.farm_display_name.clone()),
+                    lines: vec![radroots_studio_app_models::BuyerCartLineProjection {
+                        product_id: network_listing.product_id,
+                        farm_id: network_listing.farm_id,
+                        farm_display_name: network_listing.farm_display_name.clone(),
+                        title: network_listing.title.clone(),
+                        quantity: 2,
+                        unit_price: network_listing.price.clone(),
+                        line_total_minor_units: 1600,
+                        fulfillment_summary: network_listing
+                            .next_fulfillment_window_label
+                            .clone()
+                            .expect("network listing fulfillment summary"),
+                    }],
+                    subtotal_minor_units: Some(1600),
+                    currency_code: Some("USD".to_owned()),
+                    replace_confirmation: None,
+                },
+            )
+            .expect("buyer cart should save");
+        app_store
+            .save_buyer_checkout_draft(
+                &buyer_context,
+                &radroots_studio_app_models::BuyerCheckoutDraft {
+                    name: "Casey Buyer".to_owned(),
+                    email: "casey@example.test".to_owned(),
+                    phone: String::new(),
+                    order_note: String::new(),
+                },
+            )
+            .expect("checkout draft should save");
+        let order_id = app_store
+            .place_buyer_order(&buyer_context)
+            .expect("buyer order should place");
+        app_store
+            .replace_buyer_cart(
+                &buyer_context,
+                &radroots_studio_app_models::BuyerCartProjection {
+                    farm_id: Some(network_listing.farm_id),
+                    farm_display_name: Some(network_listing.farm_display_name.clone()),
+                    lines: vec![radroots_studio_app_models::BuyerCartLineProjection {
+                        product_id: network_listing.product_id,
+                        farm_id: network_listing.farm_id,
+                        farm_display_name: network_listing.farm_display_name.clone(),
+                        title: network_listing.title.clone(),
+                        quantity: 3,
+                        unit_price: network_listing.price,
+                        line_total_minor_units: 2400,
+                        fulfillment_summary: network_listing
+                            .next_fulfillment_window_label
+                            .expect("network listing fulfillment summary"),
+                    }],
+                    subtotal_minor_units: Some(2400),
+                    currency_code: Some("USD".to_owned()),
+                    replace_confirmation: None,
+                },
+            )
+            .expect("buyer cart should save again");
 
         seed_app_projection(&app_store, farm_uuid, product_uuid);
         let mut app_listing = signed_market_listing_record(
@@ -4971,9 +5138,24 @@ mod tests {
             .iter()
             .find(|record| record.record_id == "app:signed_event:duplicate-app-origin")
             .expect("app signed duplicate listing import");
+        let migrated_cart = app_store
+            .load_buyer_cart(&buyer_context)
+            .expect("buyer cart should load after duplicate convergence");
+        let order_line_id: String = app_store
+            .connection()
+            .query_row(
+                "SELECT id FROM order_lines WHERE order_id = ?1",
+                [order_id.to_string()],
+                |row| row.get(0),
+            )
+            .expect("order line id should load");
 
         assert_eq!(product_count, 1);
         assert_eq!(stale_product_count, 0);
+        assert_eq!(migrated_cart.lines.len(), 1);
+        assert_eq!(migrated_cart.lines[0].product_id.as_uuid(), product_uuid);
+        assert_eq!(migrated_cart.lines[0].quantity, 3);
+        assert!(order_line_id.contains(network_product_id.to_string().as_str()));
         assert_eq!(listing_import.source_runtime, SourceRuntime::App.as_str());
         assert_eq!(
             listing_import.projected_id.as_deref(),
@@ -4984,6 +5166,21 @@ mod tests {
                 .iter()
                 .all(|record| record.record_id != "app:relay_event:duplicate-app-origin")
         );
+        app_store
+            .clear_buyer_cart(&buyer_context)
+            .expect("buyer cart should clear");
+        assert_eq!(
+            app_store
+                .apply_buyer_repeat_demand_to_cart(&buyer_context, order_id, false)
+                .expect("repeat demand should apply"),
+            BuyerRepeatDemandApplyOutcome::Applied
+        );
+        let repeated_cart = app_store
+            .load_buyer_cart(&buyer_context)
+            .expect("buyer cart should load after repeat demand");
+        assert_eq!(repeated_cart.lines.len(), 1);
+        assert_eq!(repeated_cart.lines[0].product_id.as_uuid(), product_uuid);
+        assert_eq!(repeated_cart.lines[0].quantity, 2);
     }
 
     #[test]
