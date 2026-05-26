@@ -673,8 +673,15 @@ impl<'a> AppLocalInteropRepository<'a> {
             .as_deref()
             .or(signed_farm_pubkey.as_deref())
             .or(record.owner_pubkey.as_deref());
-        let existing_projection =
+        let mut existing_projection =
             self.existing_listing_projection(record.listing_addr.as_deref())?;
+        if existing_projection.is_none() {
+            existing_projection = self.existing_app_origin_listing_projection(
+                record.source_runtime,
+                farm_key.as_str(),
+                listing_key.as_str(),
+            )?;
+        }
         let (farm_id, product_id) = if let Some(existing_projection) = existing_projection {
             (existing_projection.farm_id, existing_projection.product_id)
         } else {
@@ -1427,6 +1434,66 @@ impl<'a> AppLocalInteropRepository<'a> {
             unit_label,
             listing_bin_id,
             farm_key,
+        }))
+    }
+
+    fn existing_app_origin_listing_projection(
+        &self,
+        source_runtime: SourceRuntime,
+        farm_key: &str,
+        listing_key: &str,
+    ) -> Result<Option<ExistingListingProjection>, AppSqliteError> {
+        if source_runtime != SourceRuntime::Network {
+            return Ok(None);
+        }
+        let Some(farm_id) = parse_app_d_tag_uuid(farm_key).map(FarmId::from) else {
+            return Ok(None);
+        };
+        let Some(product_id) = parse_app_d_tag_uuid(listing_key).map(ProductId::from) else {
+            return Ok(None);
+        };
+        let Some((product_id, farm_id, title, unit_label, listing_bin_id)) = self
+            .connection
+            .query_row(
+                "SELECT id, farm_id, title, unit_label, listing_bin_id
+                 FROM products
+                 WHERE id = ?1
+                    AND farm_id = ?2
+                 LIMIT 1",
+                params![product_id.to_string(), farm_id.to_string()],
+                |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, String>(2)?,
+                        row.get::<_, String>(3)?,
+                        row.get::<_, Option<String>>(4)?,
+                    ))
+                },
+            )
+            .optional()
+            .map_err(|source| AppSqliteError::Query {
+                operation: "load existing app-origin listing projection",
+                source,
+            })?
+        else {
+            return Ok(None);
+        };
+        Ok(Some(ExistingListingProjection {
+            product_id: product_id
+                .parse()
+                .map_err(|_| AppSqliteError::InvalidProjection {
+                    reason: "existing app-origin listing projection product id must parse",
+                })?,
+            farm_id: farm_id
+                .parse()
+                .map_err(|_| AppSqliteError::InvalidProjection {
+                    reason: "existing app-origin listing projection farm id must parse",
+                })?,
+            title,
+            unit_label,
+            listing_bin_id,
+            farm_key: Some(farm_key.to_owned()),
         }))
     }
 
@@ -3977,6 +4044,86 @@ mod tests {
         assert_eq!(buyer_listings.rows[0].product_id.as_uuid(), product_uuid);
         assert_eq!(buyer_listings.rows[0].title, "Buyer Visible App Eggs");
         assert_eq!(buyer_listings.rows[0].stock.quantity, Some(11));
+    }
+
+    #[test]
+    fn network_app_origin_listing_reuses_existing_app_product_without_local_interop_import() {
+        let app_store =
+            AppSqliteStore::open(DatabaseTarget::InMemory).expect("open app sqlite store");
+        let events = local_events_store();
+        let farm_uuid = Uuid::from_u128(0x77777777777747778777777777777777);
+        let product_uuid = Uuid::from_u128(0x88888888888848888888888888888888);
+        let farm_key = app_d_tag_from_uuid(farm_uuid);
+        let listing_key = app_d_tag_from_uuid(product_uuid);
+        let listing_addr = format!("30402:app-seller-pubkey:{listing_key}");
+        seed_app_projection(&app_store, farm_uuid, product_uuid);
+        let mut network_listing = signed_market_listing_record(
+            "network-app-origin",
+            "app-seller-pubkey",
+            farm_key.as_str(),
+            listing_key.as_str(),
+            "Relay App Eggs",
+            "11",
+            "active",
+            "pickup",
+            "App farmstand pickup",
+            4_102_444_800,
+            4_102_531_200,
+            LocalRecordStatus::Published,
+            PublishOutboxStatus::Acknowledged,
+        );
+        network_listing.source_runtime = SourceRuntime::Network;
+        network_listing.owner_account_id = None;
+        events
+            .append_record(&network_listing)
+            .expect("append network app-origin listing");
+
+        let report = app_store
+            .import_shared_local_events_from_store(&events)
+            .expect("import network app-origin listing");
+        let imported = app_store
+            .load_local_interop_records()
+            .expect("load imported records");
+        let product_count: i64 = app_store
+            .connection()
+            .query_row("SELECT COUNT(*) FROM products", [], |row| row.get(0))
+            .expect("product count");
+        let product: (String, String, String, Option<i64>) = app_store
+            .connection()
+            .query_row(
+                "SELECT id, farm_id, title, stock_count FROM products",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+            )
+            .expect("load product");
+        let buyer_listings = app_store
+            .load_buyer_listings("relay app", &BTreeSet::new())
+            .expect("buyer listings should load");
+        let listing_import = imported
+            .iter()
+            .find(|record| record.record_id == "network-app-origin")
+            .expect("network app-origin listing import");
+
+        assert_eq!(report.imported_records, 1);
+        assert_eq!(product_count, 1);
+        assert_eq!(product.0, product_uuid.to_string());
+        assert_eq!(product.1, farm_uuid.to_string());
+        assert_eq!(product.2, "Relay App Eggs");
+        assert_eq!(product.3, Some(11));
+        assert_eq!(buyer_listings.rows.len(), 1);
+        assert_eq!(buyer_listings.rows[0].product_id.as_uuid(), product_uuid);
+        assert_eq!(
+            listing_import.source_runtime,
+            SourceRuntime::Network.as_str()
+        );
+        assert_eq!(
+            listing_import.listing_addr.as_deref(),
+            Some(listing_addr.as_str())
+        );
+        assert_eq!(
+            listing_import.projected_id.as_deref(),
+            Some(product_uuid.to_string().as_str())
+        );
     }
 
     #[test]
