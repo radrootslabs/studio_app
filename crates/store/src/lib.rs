@@ -1,18 +1,10 @@
 #![forbid(unsafe_code)]
 
-mod activation;
-mod activity;
-mod buyer;
 mod error;
-mod farm_rules;
-mod farm_setup;
-mod local_interop;
+mod interop;
 mod migrations;
-mod orders;
-mod products;
-mod reminders;
+mod repo;
 mod sync;
-mod today;
 
 use std::{collections::BTreeSet, fs, path::PathBuf, time::Duration};
 
@@ -34,30 +26,23 @@ use radroots_studio_app_view::{
 };
 use rusqlite::Connection;
 
-pub use activation::AppActivationRepository;
-pub use activity::{
-    APP_ACTIVITY_CONTEXT_LIMIT, APP_ACTIVITY_RETENTION_LIMIT, AppActivityRepository,
-};
-pub use buyer::{
-    AppBuyerRepository, BuyerOrderCoordinationRecord, BuyerOrderCoordinationState,
-    BuyerOrderLocalEventExport, BuyerOrderLocalEventLine, BuyerRepeatDemandApplyOutcome,
-};
 pub use error::AppSqliteError;
-pub use farm_rules::{AppFarmRulesRepository, derive_farm_rules_readiness};
-pub use farm_setup::AppFarmSetupRepository;
-pub use local_interop::{
+pub use interop::{
     AppLocalInteropImportReport, AppLocalInteropRepository, StoredLocalInteropRecord,
     projected_order_id_from_trade_request,
 };
 pub use migrations::latest_schema_version;
-pub use orders::{AppOrdersRepository, SellerOrderDecisionExport, SellerOrderDecisionLineExport};
-pub use products::AppProductsRepository;
-pub use reminders::AppRemindersRepository;
+pub use repo::{
+    APP_ACTIVITY_CONTEXT_LIMIT, APP_ACTIVITY_RETENTION_LIMIT, AppActivationRepository,
+    AppActivityRepository, AppBuyerRepository, AppFarmRulesRepository, AppFarmSetupRepository,
+    AppOrdersRepository, AppProductsRepository, AppRemindersRepository, AppTodayAgendaRepository,
+    BuyerOrderCoordinationRecord, BuyerOrderCoordinationState, BuyerOrderLocalEventExport,
+    BuyerOrderLocalEventLine, BuyerRepeatDemandApplyOutcome, SellerOrderDecisionExport,
+    SellerOrderDecisionLineExport, TODAY_AGENDA_LIST_LIMIT, TODAY_AGENDA_LOW_STOCK_THRESHOLD,
+    derive_farm_rules_readiness,
+};
 pub use sync::{
     AppSyncRepository, StoredPendingSyncOperation, StoredRelayIngestCursor, StoredSyncConflict,
-};
-pub use today::{
-    AppTodayAgendaRepository, TODAY_AGENDA_LIST_LIMIT, TODAY_AGENDA_LOW_STOCK_THRESHOLD,
 };
 
 const SQLITE_BUSY_TIMEOUT_MS: u64 = 5_000;

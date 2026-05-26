@@ -332,10 +332,10 @@ mod tests {
     fn activity_repository_trims_events_to_retention_limit() {
         let connection = Connection::open_in_memory().expect("open in-memory connection");
         connection
-            .execute_batch(include_str!("../migrations/0001_init.sql"))
+            .execute_batch(include_str!("../../migrations/0001_init.sql"))
             .expect("apply init migration");
         connection
-            .execute_batch(include_str!("../migrations/0002_activity_journal.sql"))
+            .execute_batch(include_str!("../../migrations/0002_activity_journal.sql"))
             .expect("apply activity migration");
         let repository = AppActivityRepository::new(&connection);
 

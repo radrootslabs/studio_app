@@ -23,7 +23,7 @@ use rusqlite::{Connection, OptionalExtension, params};
 use serde_json::Value;
 use uuid::Uuid;
 
-use crate::farm_setup::AppFarmSetupRepository;
+use crate::repo::farm_setup::AppFarmSetupRepository;
 use crate::{AppSqliteError, AppSqliteStore};
 
 const LOCAL_EVENTS_BATCH_LIMIT: u32 = 500;
