@@ -2,7 +2,8 @@
 members = [
     "crates/runtime",
     "crates/i18n",
-    "crates/shared/models",
+    "crates/types",
+    "crates/view",
     "crates/signer",
     "crates/store",
     "crates/state",
@@ -44,7 +45,8 @@ radroots_sdk = { path = "../lib/crates/sdk", features = ["relay-client", "signin
 radroots_sql_core = { path = "../lib/crates/sql_core", features = ["native"] }
 radroots_studio_app_core = { path = "crates/runtime", version = "0.1.0" }
 radroots_studio_app_i18n = { path = "crates/i18n", version = "0.1.0" }
-radroots_studio_app_models = { path = "crates/shared/models", version = "0.1.0" }
+radroots_studio_app_types = { path = "crates/types", version = "0.1.0" }
+radroots_studio_app_view = { path = "crates/view", version = "0.1.0" }
 radroots_studio_app_sqlite = { path = "crates/store", version = "0.1.0" }
 radroots_studio_app_state = { path = "crates/state", version = "0.1.0" }
 radroots_studio_app_sync = { path = "crates/sync", version = "0.1.0" }

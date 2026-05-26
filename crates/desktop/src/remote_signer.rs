@@ -3,13 +3,13 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use radroots_studio_app_core::AppDesktopRuntimePaths;
-use radroots_studio_app_models::{AccountCustody, AppIdentityProjection};
 use radroots_studio_app_remote_signer::{
     RadrootsAppRemoteSignerApprovedSession, RadrootsAppRemoteSignerError,
     RadrootsAppRemoteSignerPendingSession, RadrootsAppRemoteSignerSessionRecord,
     RadrootsAppRemoteSignerSessionStatus, RadrootsAppRemoteSignerSessionStoreLoadResult,
     RadrootsAppRemoteSignerSessionStoreState,
 };
+use radroots_studio_app_view::{AccountCustody, AppIdentityProjection};
 use radroots_identity::{IdentityError, RadrootsIdentityId};
 use radroots_nostr_accounts::prelude::{
     RadrootsNostrAccountRecord, RadrootsNostrAccountsError, RadrootsNostrAccountsManager,
@@ -503,22 +503,22 @@ mod tests {
         assert_eq!(selected.label.as_deref(), Some("remote signer"));
 
         let projection = apply_remote_signer_custody(
-            radroots_studio_app_models::AppIdentityProjection::ready(
-                vec![radroots_studio_app_models::AccountSummary {
+            radroots_studio_app_view::AppIdentityProjection::ready(
+                vec![radroots_studio_app_view::AccountSummary {
                     account_id: approved.user_identity.id.to_string(),
                     npub: approved.user_identity.public_key_npub.clone(),
                     label: Some("remote signer".to_owned()),
-                    custody: radroots_studio_app_models::AccountCustody::LocalManaged,
+                    custody: radroots_studio_app_view::AccountCustody::LocalManaged,
                 }],
-                radroots_studio_app_models::SelectedAccountProjection::new(
-                    radroots_studio_app_models::AccountSummary {
+                radroots_studio_app_view::SelectedAccountProjection::new(
+                    radroots_studio_app_view::AccountSummary {
                         account_id: approved.user_identity.id.to_string(),
                         npub: approved.user_identity.public_key_npub.clone(),
                         label: Some("remote signer".to_owned()),
-                        custody: radroots_studio_app_models::AccountCustody::LocalManaged,
+                        custody: radroots_studio_app_view::AccountCustody::LocalManaged,
                     },
-                    radroots_studio_app_models::SelectedSurfaceProjection::default(),
-                    radroots_studio_app_models::FarmerActivationProjection::inactive(),
+                    radroots_studio_app_view::SelectedSurfaceProjection::default(),
+                    radroots_studio_app_view::FarmerActivationProjection::inactive(),
                 ),
             ),
             &paths,
@@ -531,7 +531,7 @@ mod tests {
                 .expect("selected")
                 .account
                 .custody,
-            radroots_studio_app_models::AccountCustody::RemoteSigner
+            radroots_studio_app_view::AccountCustody::RemoteSigner
         );
     }
 

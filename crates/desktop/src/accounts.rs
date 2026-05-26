@@ -4,11 +4,11 @@ use std::{
 };
 
 use radroots_studio_app_core::AppSharedAccountsPaths;
-use radroots_studio_app_models::{
+use radroots_studio_app_sqlite::{AppSqliteError, AppSqliteStore};
+use radroots_studio_app_view::{
     AccountSummary, AccountSurfaceActivationProjection, ActiveSurface, AppIdentityProjection,
     FarmId, FarmerActivationProjection, SelectedAccountProjection, SelectedSurfaceProjection,
 };
-use radroots_studio_app_sqlite::{AppSqliteError, AppSqliteStore};
 use radroots_identity::{IdentityError, RadrootsIdentity, RadrootsIdentityId};
 use radroots_nostr_accounts::prelude::{
     RadrootsNostrAccountRecord, RadrootsNostrAccountStatus, RadrootsNostrAccountsError,
@@ -306,7 +306,7 @@ fn account_summary_from_record(record: &RadrootsNostrAccountRecord) -> AccountSu
         account_id: record.account_id.to_string(),
         npub: record.public_identity.public_key_npub.clone(),
         label: record.label.clone(),
-        custody: radroots_studio_app_models::AccountCustody::LocalManaged,
+        custody: radroots_studio_app_view::AccountCustody::LocalManaged,
     }
 }
 
@@ -360,11 +360,11 @@ mod tests {
     };
 
     use radroots_studio_app_core::AppSharedAccountsPaths;
-    use radroots_studio_app_models::{
+    use radroots_studio_app_sqlite::{AppSqliteStore, DatabaseTarget};
+    use radroots_studio_app_view::{
         AccountSurfaceActivationProjection, ActiveSurface, AppStartupGate, IdentityReadiness,
         SelectedSurfaceProjection,
     };
-    use radroots_studio_app_sqlite::{AppSqliteStore, DatabaseTarget};
     use radroots_identity::RadrootsIdentity;
     use radroots_nostr_accounts::prelude::{
         RadrootsNostrAccountsManager, RadrootsNostrFileAccountStore,
@@ -453,9 +453,7 @@ mod tests {
         let activation = AccountSurfaceActivationProjection::new(
             account_id.as_str(),
             SelectedSurfaceProjection::new(ActiveSurface::Farmer),
-            radroots_studio_app_models::FarmerActivationProjection::active(
-                radroots_studio_app_models::FarmId::new(),
-            ),
+            radroots_studio_app_view::FarmerActivationProjection::active(radroots_studio_app_view::FarmId::new()),
         );
         sqlite_store
             .save_surface_activation(&activation)
@@ -591,9 +589,7 @@ mod tests {
         let activation = AccountSurfaceActivationProjection::new(
             second_account_id.as_str(),
             SelectedSurfaceProjection::new(ActiveSurface::Farmer),
-            radroots_studio_app_models::FarmerActivationProjection::active(
-                radroots_studio_app_models::FarmId::new(),
-            ),
+            radroots_studio_app_view::FarmerActivationProjection::active(radroots_studio_app_view::FarmId::new()),
         );
         sqlite_store
             .save_surface_activation(&activation)
@@ -652,9 +648,7 @@ mod tests {
         let activation = AccountSurfaceActivationProjection::new(
             first_account_id.as_str(),
             SelectedSurfaceProjection::new(ActiveSurface::Farmer),
-            radroots_studio_app_models::FarmerActivationProjection::active(
-                radroots_studio_app_models::FarmId::new(),
-            ),
+            radroots_studio_app_view::FarmerActivationProjection::active(radroots_studio_app_view::FarmId::new()),
         );
         sqlite_store
             .save_surface_activation(&activation)
@@ -702,8 +696,8 @@ mod tests {
             .save_surface_activation(&AccountSurfaceActivationProjection::new(
                 first_account_id.as_str(),
                 SelectedSurfaceProjection::new(ActiveSurface::Farmer),
-                radroots_studio_app_models::FarmerActivationProjection::active(
-                    radroots_studio_app_models::FarmId::new(),
+                radroots_studio_app_view::FarmerActivationProjection::active(
+                    radroots_studio_app_view::FarmId::new(),
                 ),
             ))
             .expect("first activation should save");
@@ -711,8 +705,8 @@ mod tests {
             .save_surface_activation(&AccountSurfaceActivationProjection::new(
                 second_account_id.as_str(),
                 SelectedSurfaceProjection::new(ActiveSurface::Farmer),
-                radroots_studio_app_models::FarmerActivationProjection::active(
-                    radroots_studio_app_models::FarmId::new(),
+                radroots_studio_app_view::FarmerActivationProjection::active(
+                    radroots_studio_app_view::FarmId::new(),
                 ),
             ))
             .expect("second activation should save");

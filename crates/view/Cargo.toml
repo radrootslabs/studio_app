@@ -1,5 +1,6 @@
 [package]
-name = "radroots_studio_app_models"
+name = "radroots_studio_app_view"
+description = "View-model layer for Radroots Studio"
 version.workspace = true
 edition.workspace = true
 authors.workspace = true
@@ -8,8 +9,11 @@ license.workspace = true
 publish = false
 
 [dependencies]
+radroots_studio_app_types.workspace = true
 serde.workspace = true
 url = "2"
+
+[dev-dependencies]
 uuid.workspace = true
 
 [lints]

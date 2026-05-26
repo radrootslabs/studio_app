@@ -1,6 +1,6 @@
 use std::{fmt, str::FromStr};
 
-use radroots_studio_app_models::{
+use radroots_studio_app_view::{
     BlackoutPeriodRecord, FarmId, FarmOperatingRulesRecord, FarmProfileRecord,
     FarmReadinessBlocker, FarmRulesProjection, FarmRulesReadiness, FarmTimingConflict,
     FarmTimingConflictKind, FulfillmentWindowRecord, PickupLocationRecord,
@@ -939,7 +939,7 @@ mod tests {
         time::{SystemTime, UNIX_EPOCH},
     };
 
-    use radroots_studio_app_models::{
+    use radroots_studio_app_view::{
         BlackoutPeriodId, BlackoutPeriodRecord, FarmId, FarmOperatingRulesRecord,
         FarmProfileRecord, FarmReadinessBlocker, FarmRulesProjection, FarmRulesReadiness,
         FarmTimingConflictKind, FulfillmentWindowId, FulfillmentWindowRecord, PickupLocationId,

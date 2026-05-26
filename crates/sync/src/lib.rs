@@ -10,7 +10,7 @@ pub use publish::{
     AppPublishWorkKind,
 };
 
-use radroots_studio_app_models::{FarmId, FulfillmentWindowId, OrderId, ProductId};
+use radroots_studio_app_view::{FarmId, FulfillmentWindowId, OrderId, ProductId};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
@@ -539,7 +539,7 @@ mod tests {
         SyncConflictResolutionStatus, SyncConflictSeverity, SyncConflictStatus, SyncOperationKind,
         SyncTrigger,
     };
-    use radroots_studio_app_models::{FarmId, ProductId};
+    use radroots_studio_app_view::{FarmId, ProductId};
 
     #[test]
     fn default_projection_starts_idle_and_clear() {

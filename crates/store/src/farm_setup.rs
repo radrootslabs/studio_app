@@ -1,6 +1,6 @@
 use std::collections::BTreeSet;
 
-use radroots_studio_app_models::{
+use radroots_studio_app_view::{
     FarmOrderMethod, FarmReadiness, FarmSetupDraft, FarmSetupProjection, FarmSummary,
 };
 use rusqlite::{Connection, OptionalExtension, params};
@@ -245,7 +245,7 @@ mod tests {
         time::{SystemTime, UNIX_EPOCH},
     };
 
-    use radroots_studio_app_models::{
+    use radroots_studio_app_view::{
         FarmId, FarmOrderMethod, FarmReadiness, FarmSetupDraft, FarmSetupProjection, FarmSummary,
     };
 

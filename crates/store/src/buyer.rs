@@ -1,6 +1,6 @@
 use std::collections::{BTreeMap, BTreeSet};
 
-use radroots_studio_app_models::{
+use radroots_studio_app_view::{
     BuyerCartLineProjection, BuyerCartProjection, BuyerCartReplaceConfirmationProjection,
     BuyerCheckoutDisabledReason, BuyerCheckoutDraft, BuyerCheckoutProjection,
     BuyerCheckoutSummaryProjection, BuyerContext, BuyerListingRow, BuyerListingsProjection,
@@ -2736,7 +2736,7 @@ fn normalized_listing_relays<'a>(relays: impl IntoIterator<Item = &'a str>) -> V
 mod tests {
     use std::collections::BTreeSet;
 
-    use radroots_studio_app_models::{
+    use radroots_studio_app_view::{
         BuyerCheckoutDisabledReason, BuyerContext, FarmId, FarmOrderMethod, FulfillmentWindowId,
         OrderId, PickupLocationId, ProductId,
     };
@@ -2924,10 +2924,10 @@ mod tests {
         repository
             .replace_buyer_cart(
                 &context,
-                &radroots_studio_app_models::BuyerCartProjection {
+                &radroots_studio_app_view::BuyerCartProjection {
                     farm_id: Some(farm_id),
                     farm_display_name: Some("Willow Farm".to_owned()),
-                    lines: vec![radroots_studio_app_models::BuyerCartLineProjection {
+                    lines: vec![radroots_studio_app_view::BuyerCartLineProjection {
                         product_id: listing.product_id,
                         farm_id: listing.farm_id,
                         farm_display_name: listing.farm_display_name.clone(),
@@ -2946,7 +2946,7 @@ mod tests {
         repository
             .save_buyer_checkout_draft(
                 &context,
-                &radroots_studio_app_models::BuyerCheckoutDraft {
+                &radroots_studio_app_view::BuyerCheckoutDraft {
                     name: "Casey Buyer".to_owned(),
                     email: "casey@example.com".to_owned(),
                     phone: "555-0101".to_owned(),
@@ -3042,11 +3042,11 @@ mod tests {
         repository
             .replace_buyer_cart(
                 &context,
-                &radroots_studio_app_models::BuyerCartProjection {
+                &radroots_studio_app_view::BuyerCartProjection {
                     farm_id: Some(farm_id),
                     farm_display_name: Some("Willow Farm".to_owned()),
                     lines: vec![
-                        radroots_studio_app_models::BuyerCartLineProjection {
+                        radroots_studio_app_view::BuyerCartLineProjection {
                             product_id: available_listing.product_id,
                             farm_id: available_listing.farm_id,
                             farm_display_name: available_listing.farm_display_name.clone(),
@@ -3056,7 +3056,7 @@ mod tests {
                             line_total_minor_units: 1300,
                             fulfillment_summary: "Friday pickup".to_owned(),
                         },
-                        radroots_studio_app_models::BuyerCartLineProjection {
+                        radroots_studio_app_view::BuyerCartLineProjection {
                             product_id: unavailable_listing.product_id,
                             farm_id: unavailable_listing.farm_id,
                             farm_display_name: unavailable_listing.farm_display_name.clone(),
@@ -3076,7 +3076,7 @@ mod tests {
         repository
             .save_buyer_checkout_draft(
                 &context,
-                &radroots_studio_app_models::BuyerCheckoutDraft {
+                &radroots_studio_app_view::BuyerCheckoutDraft {
                     name: "Casey Buyer".to_owned(),
                     email: "casey@example.com".to_owned(),
                     phone: String::new(),
@@ -3114,7 +3114,7 @@ mod tests {
         assert_eq!(buyer_orders.rows.len(), 1);
         assert_eq!(
             row_repeat_demand.eligibility,
-            radroots_studio_app_models::RepeatDemandEligibility::Partial
+            radroots_studio_app_view::RepeatDemandEligibility::Partial
         );
         assert_eq!(row_repeat_demand.available_item_count, 1);
         assert_eq!(row_repeat_demand.unavailable_item_count, 1);
@@ -3162,10 +3162,10 @@ mod tests {
         repository
             .replace_buyer_cart(
                 &context,
-                &radroots_studio_app_models::BuyerCartProjection {
+                &radroots_studio_app_view::BuyerCartProjection {
                     farm_id: Some(farm_id),
                     farm_display_name: Some("Willow Farm".to_owned()),
-                    lines: vec![radroots_studio_app_models::BuyerCartLineProjection {
+                    lines: vec![radroots_studio_app_view::BuyerCartLineProjection {
                         product_id: listing.product_id,
                         farm_id: listing.farm_id,
                         farm_display_name: listing.farm_display_name.clone(),
@@ -3184,7 +3184,7 @@ mod tests {
         repository
             .save_buyer_checkout_draft(
                 &context,
-                &radroots_studio_app_models::BuyerCheckoutDraft {
+                &radroots_studio_app_view::BuyerCheckoutDraft {
                     name: "Casey Buyer".to_owned(),
                     email: "casey@example.com".to_owned(),
                     phone: String::new(),
@@ -3212,7 +3212,7 @@ mod tests {
 
         assert_eq!(
             repeat_demand.eligibility,
-            radroots_studio_app_models::RepeatDemandEligibility::Unavailable
+            radroots_studio_app_view::RepeatDemandEligibility::Unavailable
         );
         assert_eq!(repeat_demand.available_item_count, 0);
         assert_eq!(repeat_demand.unavailable_item_count, 1);
@@ -3304,16 +3304,16 @@ mod tests {
         AppBuyerRepository::new(store.connection())
             .replace_buyer_cart(
                 &BuyerContext::Guest,
-                &radroots_studio_app_models::BuyerCartProjection {
+                &radroots_studio_app_view::BuyerCartProjection {
                     farm_id: Some(farm_id),
                     farm_display_name: Some("Willow Farm".to_owned()),
-                    lines: vec![radroots_studio_app_models::BuyerCartLineProjection {
+                    lines: vec![radroots_studio_app_view::BuyerCartLineProjection {
                         product_id: ProductId::new(),
                         farm_id: other_farm_id,
                         farm_display_name: "Other Farm".to_owned(),
                         title: "Mismatch".to_owned(),
                         quantity: 1,
-                        unit_price: radroots_studio_app_models::ProductPricePresentation {
+                        unit_price: radroots_studio_app_view::ProductPricePresentation {
                             amount_minor_units: 500,
                             currency_code: "USD".to_owned(),
                             unit_label: "bag".to_owned(),

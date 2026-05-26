@@ -16,7 +16,11 @@ mod today;
 
 use std::{collections::BTreeSet, fs, path::PathBuf, time::Duration};
 
-use radroots_studio_app_models::{
+use radroots_studio_app_sync::{
+    AppRelayIngestScopeFreshness, PendingSyncOperation, SyncCheckpointStatus, SyncConflict,
+    SyncConflictResolutionStatus,
+};
+use radroots_studio_app_view::{
     AccountSurfaceActivationProjection, AppActivityContext, AppActivityEvent, AppActivityKind,
     BuyerCartProjection, BuyerCheckoutDraft, BuyerCheckoutProjection, BuyerContext,
     BuyerListingsProjection, BuyerOrderDetailProjection, BuyerOrdersProjection,
@@ -27,10 +31,6 @@ use radroots_studio_app_models::{
     ProductPublishBlocker, ProductsFilter, ProductsListProjection, ProductsSort, RecoveryKind,
     RecoveryQueueProjection, ReminderFeedProjection, ReminderLogEntryProjection,
     ReminderLogProjection, TodayAgendaProjection,
-};
-use radroots_studio_app_sync::{
-    AppRelayIngestScopeFreshness, PendingSyncOperation, SyncCheckpointStatus, SyncConflict,
-    SyncConflictResolutionStatus,
 };
 use rusqlite::Connection;
 

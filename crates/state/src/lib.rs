@@ -7,7 +7,11 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use radroots_studio_app_models::{
+use radroots_studio_app_sync::{
+    AppSyncProjection, AppSyncRunStatus, SyncCheckpointState, SyncCheckpointStatus, SyncConflict,
+    SyncConflictStatus,
+};
+use radroots_studio_app_view::{
     ActiveSurface, AppIdentityProjection, AppStartupGate, BuyerCartProjection,
     BuyerCheckoutProjection, BuyerListingsProjection, BuyerOrderDetailProjection,
     BuyerOrdersProjection, BuyerProductDetailProjection, FarmOrderMethod, FarmReadiness,
@@ -23,10 +27,6 @@ use radroots_studio_app_models::{
     RecoveryQueueProjection, ReminderFeedProjection, ReminderLogProjection,
     SelectedSurfaceProjection, SettingsAccountProjection, SettingsPreference, SettingsSection,
     ShellSection, TodayAgendaProjection, TodaySetupTask, TodaySetupTaskKind,
-};
-use radroots_studio_app_sync::{
-    AppSyncProjection, AppSyncRunStatus, SyncCheckpointState, SyncCheckpointStatus, SyncConflict,
-    SyncConflictStatus,
 };
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -2250,7 +2250,12 @@ mod tests {
         ProductsScreenProjection, ProductsScreenQueryState, SettingsPreference,
         derive_sync_projection, derive_sync_run_status,
     };
-    use radroots_studio_app_models::{
+    use radroots_studio_app_sync::{
+        AppSyncProjection, AppSyncRunStatus, SyncCheckpointState, SyncCheckpointStatus,
+        SyncConflict, SyncConflictKind, SyncConflictResolutionStatus, SyncConflictSeverity,
+        SyncConflictStatus,
+    };
+    use radroots_studio_app_view::{
         AccountCustody, AccountSummary, ActiveSurface, AppIdentityProjection, AppStartupGate,
         FarmId, FarmOperatingRulesRecord, FarmOrderMethod, FarmProfileRecord, FarmReadiness,
         FarmRulesProjection, FarmRulesReadiness, FarmSetupDraft, FarmSetupProjection, FarmSummary,
@@ -2269,11 +2274,6 @@ mod tests {
         ReminderDeliveryState, ReminderFeedProjection, ReminderKind, ReminderLogEntryProjection,
         ReminderLogProjection, SelectedAccountProjection, SelectedSurfaceProjection,
         SettingsSection, ShellSection, TodayAgendaProjection, TodaySetupTask, TodaySetupTaskKind,
-    };
-    use radroots_studio_app_sync::{
-        AppSyncProjection, AppSyncRunStatus, SyncCheckpointState, SyncCheckpointStatus,
-        SyncConflict, SyncConflictKind, SyncConflictResolutionStatus, SyncConflictSeverity,
-        SyncConflictStatus,
     };
 
     struct FailingRepository;
@@ -2443,7 +2443,7 @@ mod tests {
         let mut store = AppStateStore::load(InMemoryAppStateRepository::default())
             .expect("in-memory repository should load");
         let products_list = ProductsListProjection {
-            summary: radroots_studio_app_models::ProductsListSummary {
+            summary: radroots_studio_app_view::ProductsListSummary {
                 total_products: 2,
                 live_products: 1,
                 draft_products: 1,
@@ -2535,27 +2535,27 @@ mod tests {
             recoveries: Vec::new(),
         };
         let orders_reminders = ReminderFeedProjection {
-            items: vec![radroots_studio_app_models::ReminderDeadlineProjection {
-                reminder_id: radroots_studio_app_models::ReminderId::new(),
+            items: vec![radroots_studio_app_view::ReminderDeadlineProjection {
+                reminder_id: radroots_studio_app_view::ReminderId::new(),
                 farm_id,
                 order_id: Some(order_id),
                 fulfillment_window_id: Some(fulfillment_window_id),
-                kind: radroots_studio_app_models::ReminderKind::OrderAction,
-                surface: radroots_studio_app_models::ReminderSurface::Orders,
-                urgency: radroots_studio_app_models::ReminderUrgency::DueSoon,
+                kind: radroots_studio_app_view::ReminderKind::OrderAction,
+                surface: radroots_studio_app_view::ReminderSurface::Orders,
+                urgency: radroots_studio_app_view::ReminderUrgency::DueSoon,
                 title: "review order".to_owned(),
                 detail: "Casey still needs confirmation.".to_owned(),
                 deadline_at: "2026-04-18T15:00:00Z".to_owned(),
                 action_label: Some("Review".to_owned()),
-                delivery_state: radroots_studio_app_models::ReminderDeliveryState::Scheduled,
+                delivery_state: radroots_studio_app_view::ReminderDeliveryState::Scheduled,
             }],
         };
-        let recovery_queue = radroots_studio_app_models::RecoveryQueueProjection {
-            items: vec![radroots_studio_app_models::OrderRecoveryProjection {
-                recovery_record_id: radroots_studio_app_models::RecoveryRecordId::new(),
+        let recovery_queue = radroots_studio_app_view::RecoveryQueueProjection {
+            items: vec![radroots_studio_app_view::OrderRecoveryProjection {
+                recovery_record_id: radroots_studio_app_view::RecoveryRecordId::new(),
                 order_id,
-                kind: radroots_studio_app_models::RecoveryKind::MissedPickup,
-                state: radroots_studio_app_models::RecoveryState::Open,
+                kind: radroots_studio_app_view::RecoveryKind::MissedPickup,
+                state: radroots_studio_app_view::RecoveryState::Open,
                 summary: "Follow up on pickup".to_owned(),
                 note: None,
                 last_updated_at: "2026-04-18T19:00:00Z".to_owned(),
@@ -2572,7 +2572,7 @@ mod tests {
             }],
         };
         let pack_day = PackDayProjection {
-            fulfillment_window: Some(radroots_studio_app_models::FulfillmentWindowSummary {
+            fulfillment_window: Some(radroots_studio_app_view::FulfillmentWindowSummary {
                 fulfillment_window_id,
                 farm_id,
                 starts_at: "2026-04-18T16:00:00Z".to_owned(),
@@ -3296,7 +3296,7 @@ mod tests {
         );
 
         let next_pack_day = PackDayProjection {
-            fulfillment_window: Some(radroots_studio_app_models::FulfillmentWindowSummary {
+            fulfillment_window: Some(radroots_studio_app_view::FulfillmentWindowSummary {
                 fulfillment_window_id: next_window_id,
                 farm_id,
                 starts_at: "2026-04-25T16:00:00Z".to_owned(),
@@ -3337,7 +3337,7 @@ mod tests {
         );
 
         let next_pack_day = PackDayProjection {
-            fulfillment_window: Some(radroots_studio_app_models::FulfillmentWindowSummary {
+            fulfillment_window: Some(radroots_studio_app_view::FulfillmentWindowSummary {
                 fulfillment_window_id: next_window_id,
                 farm_id,
                 starts_at: "2026-04-25T16:00:00Z".to_owned(),
@@ -3377,7 +3377,7 @@ mod tests {
         );
 
         let next_pack_day = PackDayProjection {
-            fulfillment_window: Some(radroots_studio_app_models::FulfillmentWindowSummary {
+            fulfillment_window: Some(radroots_studio_app_view::FulfillmentWindowSummary {
                 fulfillment_window_id: next_window_id,
                 farm_id,
                 starts_at: "2026-04-25T16:00:00Z".to_owned(),
@@ -3489,7 +3489,7 @@ mod tests {
             price_currency: "USD".to_owned(),
             stock_quantity: Some(12),
             availability_window_id: Some(FulfillmentWindowId::new()),
-            status: radroots_studio_app_models::ProductStatus::Draft,
+            status: radroots_studio_app_view::ProductStatus::Draft,
         };
 
         assert_eq!(
@@ -3577,7 +3577,7 @@ mod tests {
             price_currency: "USD".to_owned(),
             stock_quantity: Some(12),
             availability_window_id: Some(active_window_id),
-            status: radroots_studio_app_models::ProductStatus::Published,
+            status: radroots_studio_app_view::ProductStatus::Published,
         };
         let stale_draft = ProductEditorDraft {
             availability_window_id: Some(stale_window_id),
@@ -3653,7 +3653,7 @@ mod tests {
                     price_currency: "USD".to_owned(),
                     stock_quantity: Some(12),
                     availability_window_id: Some(active_window_id),
-                    status: radroots_studio_app_models::ProductStatus::Published,
+                    status: radroots_studio_app_view::ProductStatus::Published,
                 },
                 publish_blockers: Vec::new(),
             })
@@ -3995,7 +3995,7 @@ mod tests {
             AppStateStore::load(FailingRepository).expect("failing repository should still load");
         let farm_id = FarmId::new();
         let today = TodayAgendaProjection {
-            farm: Some(radroots_studio_app_models::FarmSummary {
+            farm: Some(radroots_studio_app_view::FarmSummary {
                 farm_id,
                 display_name: "North field farm".to_owned(),
                 readiness: FarmReadiness::Incomplete,
@@ -4097,7 +4097,7 @@ mod tests {
 
         let changed = store.apply(AppStateCommand::replace_today_agenda(
             TodayAgendaProjection {
-                farm: Some(radroots_studio_app_models::FarmSummary {
+                farm: Some(radroots_studio_app_view::FarmSummary {
                     farm_id,
                     display_name: "North field farm".to_owned(),
                     readiness: FarmReadiness::Ready,

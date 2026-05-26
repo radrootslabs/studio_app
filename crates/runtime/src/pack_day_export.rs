@@ -4,7 +4,7 @@ use std::{
 };
 
 use chrono::{DateTime, Utc};
-use radroots_studio_app_models::{
+use radroots_studio_app_view::{
     PackDayExportArtifact, PackDayExportArtifactKind, PackDayExportBundle, PackDayExportInstanceId,
     PackDayOutputSource,
 };
@@ -247,7 +247,7 @@ fn finalize_export_lines(lines: Vec<String>) -> String {
     format!("{}\n", lines.join("\n"))
 }
 
-fn format_quantity(quantity: &radroots_studio_app_models::PackDayOutputQuantity) -> String {
+fn format_quantity(quantity: &radroots_studio_app_view::PackDayOutputQuantity) -> String {
     let unit_label = quantity.unit_label.trim();
     if unit_label.is_empty() {
         quantity.value.to_string()
@@ -265,7 +265,7 @@ mod tests {
     };
 
     use chrono::{TimeZone, Utc};
-    use radroots_studio_app_models::{
+    use radroots_studio_app_view::{
         FarmId, FulfillmentWindowId, OrderId, PackDayExportArtifactKind,
         PackDayOutputCustomerOrder, PackDayOutputOrderState, PackDayOutputPackListEntry,
         PackDayOutputProductTotal, PackDayOutputQuantity, PackDayOutputSource, PackDayOutputWindow,

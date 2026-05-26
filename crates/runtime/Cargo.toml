@@ -10,7 +10,7 @@ publish = false
 
 [dependencies]
 chrono.workspace = true
-radroots_studio_app_models.workspace = true
+radroots_studio_app_view.workspace = true
 radroots_local_events.workspace = true
 radroots_runtime_paths.workspace = true
 serde.workspace = true

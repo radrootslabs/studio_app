@@ -1,10 +1,10 @@
-use radroots_studio_app_models::{FarmId, FulfillmentWindowId, OrderId, ProductId};
 use radroots_studio_app_sync::{
     AppRelayIngestFreshnessState, AppRelayIngestRelayFreshness, AppRelayIngestScopeFreshness,
     AppRelayIngestScopeStatus, PendingSyncOperation, PendingSyncOperationState, SyncAggregateRef,
     SyncCheckpointState, SyncCheckpointStatus, SyncConflict, SyncConflictKind,
     SyncConflictResolutionStatus, SyncConflictSeverity, SyncOperationKind,
 };
+use radroots_studio_app_view::{FarmId, FulfillmentWindowId, OrderId, ProductId};
 use rusqlite::{Connection, OptionalExtension, params};
 use uuid::Uuid;
 
@@ -1001,12 +1001,12 @@ fn relay_ingest_scope_status(relays: &[AppRelayIngestRelayFreshness]) -> AppRela
 
 #[cfg(test)]
 mod tests {
-    use radroots_studio_app_models::{FarmId, ProductId};
     use radroots_studio_app_sync::{
         AppRelayIngestFreshnessState, AppRelayIngestScopeStatus, PendingSyncOperation,
         PendingSyncOperationState, SyncAggregateRef, SyncCheckpointStatus, SyncConflict,
         SyncConflictKind, SyncConflictResolutionStatus, SyncConflictSeverity, SyncOperationKind,
     };
+    use radroots_studio_app_view::{FarmId, ProductId};
 
     use crate::{AppSqliteStore, DatabaseTarget};
 

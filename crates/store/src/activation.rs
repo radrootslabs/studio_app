@@ -1,4 +1,4 @@
-use radroots_studio_app_models::{
+use radroots_studio_app_view::{
     AccountSurfaceActivationProjection, ActiveSurface, FarmId, FarmerActivationProjection,
     SelectedSurfaceProjection,
 };
@@ -133,7 +133,7 @@ fn parse_optional_farm_id(
 
 #[cfg(test)]
 mod tests {
-    use radroots_studio_app_models::{
+    use radroots_studio_app_view::{
         AccountSurfaceActivationProjection, ActiveSurface, FarmId, FarmerActivationProjection,
         SelectedSurfaceProjection,
     };

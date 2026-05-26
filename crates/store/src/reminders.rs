@@ -1,4 +1,4 @@
-use radroots_studio_app_models::{
+use radroots_studio_app_view::{
     FarmId, OrderId, OrderRecoveryProjection, RecoveryKind, RecoveryQueueProjection, RecoveryState,
     ReminderDeadlineProjection, ReminderDeliveryState, ReminderFeedProjection, ReminderKind,
     ReminderLogEntryProjection, ReminderLogProjection, ReminderSurface, ReminderUrgency,
@@ -627,7 +627,7 @@ where
 mod tests {
     use super::AppRemindersRepository;
     use crate::{AppSqliteStore, DatabaseTarget};
-    use radroots_studio_app_models::{
+    use radroots_studio_app_view::{
         FarmId, OrderId, OrderRecoveryProjection, RecoveryKind, RecoveryRecordId, RecoveryState,
         ReminderDeadlineProjection, ReminderDeliveryState, ReminderFeedProjection, ReminderId,
         ReminderKind, ReminderLogEntryProjection, ReminderSurface, ReminderUrgency,

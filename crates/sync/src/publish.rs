@@ -1,4 +1,4 @@
-use radroots_studio_app_models::{
+use radroots_studio_app_view::{
     FarmId, FarmReadiness, FulfillmentWindowId, OrderId, ProductId, ProductStatus,
 };
 use radroots_sdk::SdkTransportMode;
@@ -502,7 +502,7 @@ mod tests {
     use crate::{
         PendingSyncOperation, PendingSyncOperationState, SyncAggregateRef, SyncOperationKind,
     };
-    use radroots_studio_app_models::{FarmId, FarmReadiness, OrderId, ProductId, ProductStatus};
+    use radroots_studio_app_view::{FarmId, FarmReadiness, OrderId, ProductId, ProductStatus};
 
     #[test]
     fn publish_payload_serializes_with_stable_kind_and_sdk_target() {

@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 
-use radroots_studio_app_models::{
+use radroots_studio_app_view::{
     FarmId, FulfillmentWindowId, FulfillmentWindowSummary, OrderDetailItemRow,
     OrderDetailProjection, OrderId, OrderPrimaryAction, OrderStatus, OrdersFilter,
     OrdersListProjection, OrdersListRow, OrdersListSummary, OrdersScreenQueryState,
@@ -1216,7 +1216,7 @@ fn empty_string_to_none(value: Option<String>) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
-    use radroots_studio_app_models::{
+    use radroots_studio_app_view::{
         FarmId, FulfillmentWindowId, OrderId, OrderPrimaryAction, OrderStatus, OrdersFilter,
         OrdersScreenQueryState, PackDayOutputOrderState, PackDayProductTotalRow,
         PackDayScreenQueryState, PickupLocationId,

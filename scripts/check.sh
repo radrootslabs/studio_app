@@ -6,7 +6,8 @@ repo_root="$(git -C "${script_dir}" rev-parse --show-toplevel)"
 
 cd "${repo_root}"
 cargo metadata --format-version 1 --no-deps
-cargo test -p radroots_studio_app_models pack_day
+cargo test -p radroots_studio_app_types pack_day
+cargo test -p radroots_studio_app_view pack_day
 cargo test -p radroots_studio_app_state pack_day
 cargo test -p radroots_studio_app_i18n pack_day
 cargo test -p radroots_studio_app pack_day

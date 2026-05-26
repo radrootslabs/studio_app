@@ -12,24 +12,6 @@ use radroots_studio_app_core::{
     prepare_pack_day_export_bundle_at_data_root,
     shared_local_events_database_path_from_shared_accounts, write_prepared_pack_day_export_bundle,
 };
-use radroots_studio_app_models::{
-    ActiveSurface, AppActivityContext, AppActivityKind, AppIdentityProjection, AppStartupGate,
-    BuyerCartLineProjection, BuyerCartProjection, BuyerCartReplaceConfirmationProjection,
-    BuyerCheckoutDraft, BuyerContext, BuyerOrderDetailProjection, BuyerProductDetailProjection,
-    FarmId, FarmOrderMethod, FarmProfileRecord, FarmReadiness, FarmRulesProjection, FarmSetupDraft,
-    FarmSetupProjection, FarmSummary, FarmerSection, FulfillmentWindowId,
-    LoggedOutStartupProjection, OrderDetailProjection, OrderId, OrderRecoveryProjection,
-    OrderStatus, OrdersFilter, OrdersListProjection, OrdersScreenQueryState,
-    PackDayBatchPrintStatus, PackDayExportBundle, PackDayExportInstanceId, PackDayExportStatus,
-    PackDayHostHandoffKind, PackDayHostHandoffStatus, PackDayPrintKind, PackDayPrintStatus,
-    PackDayProjection, PackDayScreenQueryState, PersonalSection, PickupLocationRecord,
-    ProductEditorDraft, ProductId, ProductStatus, ProductsFilter, ProductsListProjection,
-    ProductsSort, RecoveryKind, RecoveryQueueProjection, RecoveryRecordId, RecoveryState,
-    ReminderDeadlineProjection, ReminderDeliveryState, ReminderFeedProjection, ReminderId,
-    ReminderKind, ReminderLogEntryProjection, ReminderLogProjection, ReminderSurface,
-    ReminderUrgency, SettingsAccountProjection, SettingsPreference, SettingsSection, ShellSection,
-    TodayAgendaProjection,
-};
 use radroots_studio_app_remote_signer::{
     RadrootsAppRemoteSignerApprovedSession, RadrootsAppRemoteSignerPendingSession,
 };
@@ -56,6 +38,24 @@ use radroots_studio_app_sync::{
     AppPublishedOperationReceipt, AppRelayIngestScopeFreshness, AppSyncProjection, AppSyncRequest,
     AppSyncResult, AppSyncRunStatus, AppSyncTransport, AppSyncTransportError, PendingSyncOperation,
     SyncAggregateRef, SyncCheckpointStatus, SyncConflictSeverity, SyncOperationKind, SyncTrigger,
+};
+use radroots_studio_app_view::{
+    ActiveSurface, AppActivityContext, AppActivityKind, AppIdentityProjection, AppStartupGate,
+    BuyerCartLineProjection, BuyerCartProjection, BuyerCartReplaceConfirmationProjection,
+    BuyerCheckoutDraft, BuyerContext, BuyerOrderDetailProjection, BuyerProductDetailProjection,
+    FarmId, FarmOrderMethod, FarmProfileRecord, FarmReadiness, FarmRulesProjection, FarmSetupDraft,
+    FarmSetupProjection, FarmSummary, FarmerSection, FulfillmentWindowId,
+    LoggedOutStartupProjection, OrderDetailProjection, OrderId, OrderRecoveryProjection,
+    OrderStatus, OrdersFilter, OrdersListProjection, OrdersScreenQueryState,
+    PackDayBatchPrintStatus, PackDayExportBundle, PackDayExportInstanceId, PackDayExportStatus,
+    PackDayHostHandoffKind, PackDayHostHandoffStatus, PackDayPrintKind, PackDayPrintStatus,
+    PackDayProjection, PackDayScreenQueryState, PersonalSection, PickupLocationRecord,
+    ProductEditorDraft, ProductId, ProductStatus, ProductsFilter, ProductsListProjection,
+    ProductsSort, RecoveryKind, RecoveryQueueProjection, RecoveryRecordId, RecoveryState,
+    ReminderDeadlineProjection, ReminderDeliveryState, ReminderFeedProjection, ReminderId,
+    ReminderKind, ReminderLogEntryProjection, ReminderLogProjection, ReminderSurface,
+    ReminderUrgency, SettingsAccountProjection, SettingsPreference, SettingsSection, ShellSection,
+    TodayAgendaProjection,
 };
 use radroots_core::{
     RadrootsCoreCurrency, RadrootsCoreDecimal, RadrootsCoreMoney, RadrootsCoreQuantity,
@@ -4223,7 +4223,7 @@ impl DesktopAppRuntimeState {
 
     fn selected_account_for_farm_setup(
         &self,
-    ) -> Result<&radroots_studio_app_models::SelectedAccountProjection, DesktopAppRuntimeFarmSetupError>
+    ) -> Result<&radroots_studio_app_view::SelectedAccountProjection, DesktopAppRuntimeFarmSetupError>
     {
         self.state_store
             .identity_projection()
@@ -4234,7 +4234,7 @@ impl DesktopAppRuntimeState {
 
     fn selected_account_for_farm_rules(
         &self,
-    ) -> Result<&radroots_studio_app_models::SelectedAccountProjection, DesktopAppRuntimeFarmRulesError>
+    ) -> Result<&radroots_studio_app_view::SelectedAccountProjection, DesktopAppRuntimeFarmRulesError>
     {
         self.state_store
             .identity_projection()
@@ -4343,7 +4343,7 @@ impl DesktopAppRuntimeState {
     fn load_personal_listings_for_query(
         &self,
         query: &BuyerSearchScreenQueryState,
-    ) -> Result<radroots_studio_app_models::BuyerListingsProjection, AppSqliteError> {
+    ) -> Result<radroots_studio_app_view::BuyerListingsProjection, AppSqliteError> {
         let _ = self.import_shared_local_events()?;
         let Some(sqlite_store) = self.sqlite_store.as_ref() else {
             return Ok(Default::default());
@@ -4355,7 +4355,7 @@ impl DesktopAppRuntimeState {
     fn refresh_personal_cart_and_checkout(
         &mut self,
         refreshed_cart: BuyerCartProjection,
-        refreshed_checkout: radroots_studio_app_models::BuyerCheckoutProjection,
+        refreshed_checkout: radroots_studio_app_view::BuyerCheckoutProjection,
     ) -> bool {
         self.mutate_personal_projection(|projection| {
             let mut changed = false;
@@ -4654,7 +4654,7 @@ impl DesktopAppRuntimeState {
 
     fn append_app_farm_local_work_record(
         &self,
-        account: &radroots_studio_app_models::SelectedAccountProjection,
+        account: &radroots_studio_app_view::SelectedAccountProjection,
         projection: &FarmSetupProjection,
         saved_farm: &FarmSummary,
     ) -> Result<Option<String>, AppSqliteError> {
@@ -5105,7 +5105,7 @@ impl DesktopAppRuntimeState {
 
     fn local_events_owner_pubkey(
         &self,
-        account: &radroots_studio_app_models::SelectedAccountProjection,
+        account: &radroots_studio_app_view::SelectedAccountProjection,
     ) -> Option<String> {
         if is_hex_64(account.account.account_id.as_str()) {
             return Some(account.account.account_id.clone());
@@ -5124,7 +5124,7 @@ impl DesktopAppRuntimeState {
     fn selected_buyer_account(
         &self,
         buyer_context: &BuyerContext,
-    ) -> Option<&radroots_studio_app_models::SelectedAccountProjection> {
+    ) -> Option<&radroots_studio_app_view::SelectedAccountProjection> {
         let BuyerContext::Account(account_id) = buyer_context else {
             return None;
         };
@@ -8324,24 +8324,6 @@ mod tests {
         AppDesktopRuntimePaths, AppRuntimeHostEnvironment, AppRuntimePlatform,
         AppSharedAccountsPaths, SHARED_ACCOUNTS_STORE_FILE_NAME, SHARED_IDENTITY_FILE_NAME,
     };
-    use radroots_studio_app_models::{
-        AccountCustody, AccountSummary, AccountSurfaceActivationProjection, ActiveSurface,
-        AppActivityKind, AppIdentityProjection, AppStartupGate, BlackoutPeriodId,
-        BlackoutPeriodRecord, BuyerCheckoutDisabledReason, BuyerCheckoutDraft, BuyerOrderStatus,
-        FarmId, FarmOperatingRulesRecord, FarmOrderMethod, FarmProfileRecord, FarmReadiness,
-        FarmReadinessBlocker, FarmRulesProjection, FarmSetupDraft, FarmSetupProjection,
-        FarmSummary, FarmerActivationProjection, FarmerSection, FulfillmentWindowId,
-        FulfillmentWindowRecord, LoggedOutStartupProjection, OrderId, OrderStatus, OrdersFilter,
-        PackDayBatchPrintArtifact, PackDayBatchPrintFailureKind, PackDayBatchPrintStatus,
-        PackDayExportInstanceId, PackDayExportStatus, PackDayHostHandoffKind,
-        PackDayHostHandoffStatus, PackDayPackListRow, PackDayPrintFailureKind, PackDayPrintKind,
-        PackDayPrintStatus, PackDayProductTotalRow, PackDayProjection, PackDayRosterRow,
-        PersonalSection, PickupLocationId, PickupLocationRecord, ProductEditorDraft, ProductId,
-        ProductPublishBlocker, ProductStatus, ProductsFilter, ProductsSort, RecoveryKind,
-        RecoveryRecordId, ReminderDeliveryState, ReminderFeedProjection, ReminderKind,
-        SelectedAccountProjection, SelectedSurfaceProjection, SettingsPreference, SettingsSection,
-        ShellSection, TodayAgendaProjection, TodaySetupTask, TodaySetupTaskKind, TodaySummary,
-    };
     use radroots_studio_app_remote_signer::{
         RadrootsAppRemoteSignerPendingSession, RadrootsAppRemoteSignerSessionRecord,
     };
@@ -8364,6 +8346,24 @@ mod tests {
         PendingSyncOperationState, RecordedAppSyncTransport, SyncAggregateRef, SyncCheckpointState,
         SyncCheckpointStatus, SyncConflict, SyncConflictKind, SyncConflictResolutionStatus,
         SyncConflictSeverity, SyncOperationKind, SyncTrigger,
+    };
+    use radroots_studio_app_view::{
+        AccountCustody, AccountSummary, AccountSurfaceActivationProjection, ActiveSurface,
+        AppActivityKind, AppIdentityProjection, AppStartupGate, BlackoutPeriodId,
+        BlackoutPeriodRecord, BuyerCheckoutDisabledReason, BuyerCheckoutDraft, BuyerOrderStatus,
+        FarmId, FarmOperatingRulesRecord, FarmOrderMethod, FarmProfileRecord, FarmReadiness,
+        FarmReadinessBlocker, FarmRulesProjection, FarmSetupDraft, FarmSetupProjection,
+        FarmSummary, FarmerActivationProjection, FarmerSection, FulfillmentWindowId,
+        FulfillmentWindowRecord, LoggedOutStartupProjection, OrderId, OrderStatus, OrdersFilter,
+        PackDayBatchPrintArtifact, PackDayBatchPrintFailureKind, PackDayBatchPrintStatus,
+        PackDayExportInstanceId, PackDayExportStatus, PackDayHostHandoffKind,
+        PackDayHostHandoffStatus, PackDayPackListRow, PackDayPrintFailureKind, PackDayPrintKind,
+        PackDayPrintStatus, PackDayProductTotalRow, PackDayProjection, PackDayRosterRow,
+        PersonalSection, PickupLocationId, PickupLocationRecord, ProductEditorDraft, ProductId,
+        ProductPublishBlocker, ProductStatus, ProductsFilter, ProductsSort, RecoveryKind,
+        RecoveryRecordId, ReminderDeliveryState, ReminderFeedProjection, ReminderKind,
+        SelectedAccountProjection, SelectedSurfaceProjection, SettingsPreference, SettingsSection,
+        ShellSection, TodayAgendaProjection, TodaySetupTask, TodaySetupTaskKind, TodaySummary,
     };
     use radroots_core::{
         RadrootsCoreCurrency, RadrootsCoreDecimal, RadrootsCoreMoney, RadrootsCoreUnit,
@@ -9620,7 +9620,7 @@ mod tests {
 
         assert_eq!(
             summary.logged_out_startup.phase,
-            radroots_studio_app_models::LoggedOutStartupPhase::GenerateKeyStarting
+            radroots_studio_app_view::LoggedOutStartupPhase::GenerateKeyStarting
         );
         assert_eq!(
             summary.logged_out_startup.signer_entry.source_input,
@@ -11459,7 +11459,7 @@ mod tests {
         assert!(runtime.begin_generate_key_startup());
         assert_eq!(
             runtime.summary().logged_out_startup.phase,
-            radroots_studio_app_models::LoggedOutStartupPhase::GenerateKeyStarting
+            radroots_studio_app_view::LoggedOutStartupPhase::GenerateKeyStarting
         );
 
         cleanup_remote_signer_paths(&paths);
@@ -11484,7 +11484,7 @@ mod tests {
 
         assert_eq!(
             restarted.summary().logged_out_startup.phase,
-            radroots_studio_app_models::LoggedOutStartupPhase::SignerEntry
+            radroots_studio_app_view::LoggedOutStartupPhase::SignerEntry
         );
         assert_eq!(
             restored.record.client_account_id(),
@@ -11518,7 +11518,7 @@ mod tests {
 
         assert_eq!(
             restarted.summary().logged_out_startup.phase,
-            radroots_studio_app_models::LoggedOutStartupPhase::ContinuePrompt
+            radroots_studio_app_view::LoggedOutStartupPhase::ContinuePrompt
         );
         assert!(
             restarted
@@ -11546,7 +11546,7 @@ mod tests {
 
         assert_eq!(
             summary.logged_out_startup.phase,
-            radroots_studio_app_models::LoggedOutStartupPhase::SignerEntry
+            radroots_studio_app_view::LoggedOutStartupPhase::SignerEntry
         );
         assert_eq!(
             summary.logged_out_startup.signer_entry.source_input,
@@ -11567,7 +11567,7 @@ mod tests {
 
         assert_eq!(
             restarted.summary().logged_out_startup.phase,
-            radroots_studio_app_models::LoggedOutStartupPhase::IdentityChoice
+            radroots_studio_app_view::LoggedOutStartupPhase::IdentityChoice
         );
 
         cleanup_bootstrapped_runtime_paths(&paths);
@@ -11863,12 +11863,12 @@ mod tests {
         let cloned_runtime = runtime.clone();
         let today_agenda = TodayAgendaProjection {
             farm: Some(FarmSummary {
-                farm_id: radroots_studio_app_models::FarmId::new(),
+                farm_id: radroots_studio_app_view::FarmId::new(),
                 display_name: "North field farm".to_owned(),
                 readiness: FarmReadiness::Incomplete,
             }),
             summary: Some(TodaySummary {
-                farm_id: radroots_studio_app_models::FarmId::new(),
+                farm_id: radroots_studio_app_view::FarmId::new(),
                 orders_needing_action: 2,
                 low_stock_products: 1,
                 draft_products: 3,
@@ -11894,7 +11894,7 @@ mod tests {
         assert_eq!(summary.home_route, HomeRoute::SetupRequired);
         assert_eq!(
             summary.shell_projection.active_surface,
-            radroots_studio_app_models::ActiveSurface::Personal
+            radroots_studio_app_view::ActiveSurface::Personal
         );
         assert_eq!(
             summary.shell_projection.selected_section,
@@ -11919,7 +11919,7 @@ mod tests {
 
         assert_eq!(
             summary.shell_projection.active_surface,
-            radroots_studio_app_models::ActiveSurface::Personal
+            radroots_studio_app_view::ActiveSurface::Personal
         );
         assert_eq!(
             summary.shell_projection.selected_section,
@@ -12207,7 +12207,7 @@ mod tests {
         );
         assert_eq!(
             summary.personal_projection.entry.state,
-            radroots_studio_app_models::PersonalEntryState::Guest
+            radroots_studio_app_view::PersonalEntryState::Guest
         );
     }
 
@@ -15929,7 +15929,7 @@ mod tests {
             price_currency: "usd".to_owned(),
             stock_quantity: Some(14),
             availability_window_id: None,
-            status: radroots_studio_app_models::ProductStatus::Published,
+            status: radroots_studio_app_view::ProductStatus::Published,
         };
 
         assert!(
@@ -16422,7 +16422,7 @@ mod tests {
         let blackout_period_id = BlackoutPeriodId::new();
 
         let saved_projection = runtime
-            .save_farm_rules_projection(radroots_studio_app_models::FarmRulesProjection {
+            .save_farm_rules_projection(radroots_studio_app_view::FarmRulesProjection {
                 farm_profile: Some(FarmProfileRecord {
                     farm_id,
                     display_name: "Harbor farm".to_owned(),
@@ -17880,8 +17880,8 @@ mod tests {
         status: &str,
         stock_count: Option<u32>,
         updated_at: &str,
-    ) -> radroots_studio_app_models::ProductId {
-        let product_id = radroots_studio_app_models::ProductId::new();
+    ) -> radroots_studio_app_view::ProductId {
+        let product_id = radroots_studio_app_view::ProductId::new();
         let stock_count = stock_count
             .map(|value| value.to_string())
             .unwrap_or_else(|| "null".to_owned());

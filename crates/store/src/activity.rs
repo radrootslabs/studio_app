@@ -1,4 +1,4 @@
-use radroots_studio_app_models::{
+use radroots_studio_app_view::{
     ActivityEventId, AppActivityContext, AppActivityEvent, AppActivityKind, SettingsPreference,
     SettingsSection,
 };
@@ -265,7 +265,7 @@ fn preference_enabled_value(kind: &AppActivityKind) -> Option<i64> {
 
 #[cfg(test)]
 mod tests {
-    use radroots_studio_app_models::{AppActivityKind, SettingsPreference, SettingsSection};
+    use radroots_studio_app_view::{AppActivityKind, SettingsPreference, SettingsSection};
     use rusqlite::Connection;
 
     use crate::{AppSqliteStore, DatabaseTarget};

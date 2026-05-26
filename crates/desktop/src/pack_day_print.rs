@@ -5,12 +5,12 @@ use std::path::{Component, Path, PathBuf};
 #[cfg(target_os = "macos")]
 use std::process::Command;
 
-use radroots_studio_app_models::{
+use radroots_studio_app_state::PackDayBatchPrintRequest;
+use radroots_studio_app_view::{
     PackDayBatchPrintArtifact, PackDayBatchPrintFailureKind, PackDayExportArtifactKind,
     PackDayExportBundle, PackDayExportInstanceId, PackDayPrintFailureKind, PackDayPrintKind,
     PackDayPrintLabelStock,
 };
-use radroots_studio_app_state::PackDayBatchPrintRequest;
 use thiserror::Error;
 
 const CUSTOMER_LABEL_PREPARED_ASSET_ROOT: &str = "radroots_studio_app_pack_day_print";
@@ -898,12 +898,12 @@ mod tests {
         plan_pack_day_batch_print, plan_pack_day_print, prepared_customer_label_asset_directory,
         prepared_customer_label_asset_path, prepared_customer_label_asset_root,
     };
-    use radroots_studio_app_models::{
+    use radroots_studio_app_state::PackDayBatchPrintRequest;
+    use radroots_studio_app_view::{
         PackDayBatchPrintArtifact, PackDayBatchPrintFailureKind, PackDayExportArtifact,
         PackDayExportArtifactKind, PackDayExportBundle, PackDayExportInstanceId, PackDayPrintKind,
         PackDayPrintLabelStock,
     };
-    use radroots_studio_app_state::PackDayBatchPrintRequest;
     use std::fs;
     use std::io;
     use std::path::PathBuf;
@@ -934,7 +934,7 @@ mod tests {
 
     fn sample_bundle(bundle_directory: &PathBuf) -> PackDayExportBundle {
         PackDayExportBundle {
-            fulfillment_window_id: radroots_studio_app_models::FulfillmentWindowId::new(),
+            fulfillment_window_id: radroots_studio_app_view::FulfillmentWindowId::new(),
             export_instance_id: PackDayExportInstanceId::new(),
             generated_at_utc: "2026-04-23T15:00:00Z".to_owned(),
             bundle_directory: bundle_directory.to_string_lossy().into_owned(),

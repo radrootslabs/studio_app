@@ -1,6 +1,6 @@
 use std::cmp::Ordering;
 
-use radroots_studio_app_models::{
+use radroots_studio_app_view::{
     FarmId, FulfillmentWindowId, ProductAttentionState, ProductAvailabilityState,
     ProductAvailabilitySummary, ProductEditorDraft, ProductId, ProductPricePresentation,
     ProductPublishBlocker, ProductStatus, ProductStockState, ProductStockSummary, ProductsFilter,
@@ -728,7 +728,7 @@ fn parse_product_status(
 
 #[cfg(test)]
 mod tests {
-    use radroots_studio_app_models::{
+    use radroots_studio_app_view::{
         FarmId, FulfillmentWindowId, ProductAttentionState, ProductAvailabilityState,
         ProductEditorDraft, ProductId, ProductPublishBlocker, ProductStatus, ProductStockState,
         ProductsFilter, ProductsSort,

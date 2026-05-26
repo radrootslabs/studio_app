@@ -1,6 +1,6 @@
 use std::{fs, path::Path};
 
-use radroots_studio_app_models::{
+use radroots_studio_app_view::{
     FarmId, FarmOrderMethod, FarmReadiness, FarmSetupDraft, FarmSetupProjection, FarmSummary,
     FulfillmentWindowId, OrderId, PickupLocationId, ProductId, ProductStatus,
 };
@@ -2981,7 +2981,7 @@ fn farm_readiness_from_storage_key(readiness: &str) -> Result<FarmReadiness, App
 mod tests {
     use std::collections::BTreeSet;
 
-    use radroots_studio_app_models::{
+    use radroots_studio_app_view::{
         BuyerContext, BuyerOrderStatus, FarmId, FarmOrderMethod, OrderStatus, OrdersFilter,
         OrdersScreenQueryState, ProductAvailabilityState, ProductId,
     };
@@ -4305,7 +4305,7 @@ mod tests {
         assert_eq!(products.rows[0].stock.quantity, Some(10));
         assert_eq!(
             products.rows[0].status,
-            radroots_studio_app_models::ProductStatus::Draft
+            radroots_studio_app_view::ProductStatus::Draft
         );
     }
 
@@ -5077,10 +5077,10 @@ mod tests {
         app_store
             .replace_buyer_cart(
                 &buyer_context,
-                &radroots_studio_app_models::BuyerCartProjection {
+                &radroots_studio_app_view::BuyerCartProjection {
                     farm_id: Some(network_listing.farm_id),
                     farm_display_name: Some(network_listing.farm_display_name.clone()),
-                    lines: vec![radroots_studio_app_models::BuyerCartLineProjection {
+                    lines: vec![radroots_studio_app_view::BuyerCartLineProjection {
                         product_id: network_listing.product_id,
                         farm_id: network_listing.farm_id,
                         farm_display_name: network_listing.farm_display_name.clone(),
@@ -5102,7 +5102,7 @@ mod tests {
         app_store
             .save_buyer_checkout_draft(
                 &buyer_context,
-                &radroots_studio_app_models::BuyerCheckoutDraft {
+                &radroots_studio_app_view::BuyerCheckoutDraft {
                     name: "Casey Buyer".to_owned(),
                     email: "casey@example.test".to_owned(),
                     phone: String::new(),
@@ -5116,10 +5116,10 @@ mod tests {
         app_store
             .replace_buyer_cart(
                 &buyer_context,
-                &radroots_studio_app_models::BuyerCartProjection {
+                &radroots_studio_app_view::BuyerCartProjection {
                     farm_id: Some(network_listing.farm_id),
                     farm_display_name: Some(network_listing.farm_display_name.clone()),
-                    lines: vec![radroots_studio_app_models::BuyerCartLineProjection {
+                    lines: vec![radroots_studio_app_view::BuyerCartLineProjection {
                         product_id: network_listing.product_id,
                         farm_id: network_listing.farm_id,
                         farm_display_name: network_listing.farm_display_name.clone(),

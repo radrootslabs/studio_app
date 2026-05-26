@@ -1,4 +1,4 @@
-use radroots_studio_app_models::{
+use radroots_studio_app_view::{
     FarmId, FarmReadiness, FarmSummary, FulfillmentWindowSummary, OrderListRow, OrderStatus,
     ProductListRow, ProductStatus, TodayAgendaProjection, TodaySetupTask, TodaySetupTaskKind,
     TodaySummary,
@@ -434,7 +434,7 @@ fn farm_readiness_storage_key(readiness: FarmReadiness) -> &'static str {
 
 #[cfg(test)]
 mod tests {
-    use radroots_studio_app_models::{FarmId, FulfillmentWindowId, ProductId, TodaySetupTaskKind};
+    use radroots_studio_app_view::{FarmId, FulfillmentWindowId, ProductId, TodaySetupTaskKind};
     use rusqlite::{Connection, params};
 
     use crate::{AppSqliteStore, DatabaseTarget};
@@ -451,7 +451,7 @@ mod tests {
 
         assert_eq!(
             projection,
-            radroots_studio_app_models::TodayAgendaProjection::default()
+            radroots_studio_app_view::TodayAgendaProjection::default()
         );
     }
 
@@ -674,10 +674,10 @@ mod tests {
     #[test]
     fn saved_farm_summary_round_trips_into_today_projection() {
         let store = AppSqliteStore::open(DatabaseTarget::InMemory).expect("store should open");
-        let farm = radroots_studio_app_models::FarmSummary {
+        let farm = radroots_studio_app_view::FarmSummary {
             farm_id: FarmId::new(),
             display_name: "North field farm".to_owned(),
-            readiness: radroots_studio_app_models::FarmReadiness::Incomplete,
+            readiness: radroots_studio_app_view::FarmReadiness::Incomplete,
         };
 
         store
@@ -775,7 +775,7 @@ mod tests {
                 "insert into orders (id, farm_id, fulfillment_window_id, order_number, customer_display_name, status, updated_at) \
                  values (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
                 params![
-                    radroots_studio_app_models::OrderId::new().to_string(),
+                    radroots_studio_app_view::OrderId::new().to_string(),
                     farm_id.to_string(),
                     fulfillment_window_id.map(|id| id.to_string()),
                     order_number,

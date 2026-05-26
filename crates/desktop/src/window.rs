@@ -9,28 +9,6 @@ use gpui_component::{
     input::{InputEvent, InputState},
 };
 use radroots_studio_app_i18n::{AppTextKey, app_text};
-pub use radroots_studio_app_models::SettingsSection as SettingsPanelViewKey;
-use radroots_studio_app_models::{
-    AppStartupGate, BlackoutPeriodId, BlackoutPeriodRecord, BuyerCartProjection,
-    BuyerCartReplaceConfirmationProjection, BuyerCheckoutDraft, BuyerCheckoutSummaryProjection,
-    BuyerListingRow, BuyerOrderDetailProjection, BuyerOrderStatus, BuyerOrdersListRow,
-    BuyerProductDetailProjection, FarmId, FarmOperatingRulesRecord, FarmOrderMethod,
-    FarmProfileRecord, FarmReadinessBlocker, FarmRulesProjection, FarmRulesReadiness,
-    FarmSetupBlocker, FarmSetupDraft, FarmSummary, FarmTimingConflictKind, FarmerSection,
-    FulfillmentWindowId, FulfillmentWindowRecord, FulfillmentWindowSummary, LoggedOutStartupPhase,
-    OrderDetailItemRow, OrderDetailProjection, OrderId, OrderListRow, OrderPrimaryAction,
-    OrderRecoveryProjection, OrderStatus, OrdersFilter, OrdersListRow,
-    PackDayBatchPrintFailureKind, PackDayBatchPrintStatus, PackDayExportBundle,
-    PackDayExportStatus, PackDayHostHandoffKind, PackDayHostHandoffStatus, PackDayPackListRow,
-    PackDayPrintFailureKind, PackDayPrintKind, PackDayPrintStatus, PackDayProductTotalRow,
-    PackDayRosterRow, PersonalEntryState, PersonalSection, PickupLocationId, PickupLocationRecord,
-    ProductAttentionState, ProductEditorDraft, ProductId, ProductListRow, ProductPricePresentation,
-    ProductPublishBlocker, ProductStatus, ProductsFilter, ProductsListRow, ProductsSort,
-    RecoveryKind, RecoveryState, ReminderDeadlineProjection, ReminderDeliveryState, ReminderId,
-    ReminderLogEntryProjection, ReminderLogProjection, ReminderSurface, ReminderUrgency,
-    RepeatDemandEligibility, RepeatDemandHandoffProjection, ShellSection, TodayAgendaProjection,
-    TodaySetupTaskKind,
-};
 use radroots_studio_app_remote_signer::{
     RadrootsAppRemoteSignerApprovedSession, RadrootsAppRemoteSignerPendingPollOutcome,
     RadrootsAppRemoteSignerPendingSession, RadrootsAppRemoteSignerSource,
@@ -66,6 +44,28 @@ use radroots_studio_app_ui::{
     app_text_badge as settings_badge_text, app_text_body_subtle as home_body_text, app_text_label,
     app_text_label as home_farm_setup_field_label, app_text_value, label_value_list,
     runtime_metadata_rows, utility_title_row,
+};
+pub use radroots_studio_app_view::SettingsSection as SettingsPanelViewKey;
+use radroots_studio_app_view::{
+    AppStartupGate, BlackoutPeriodId, BlackoutPeriodRecord, BuyerCartProjection,
+    BuyerCartReplaceConfirmationProjection, BuyerCheckoutDraft, BuyerCheckoutSummaryProjection,
+    BuyerListingRow, BuyerOrderDetailProjection, BuyerOrderStatus, BuyerOrdersListRow,
+    BuyerProductDetailProjection, FarmId, FarmOperatingRulesRecord, FarmOrderMethod,
+    FarmProfileRecord, FarmReadinessBlocker, FarmRulesProjection, FarmRulesReadiness,
+    FarmSetupBlocker, FarmSetupDraft, FarmSummary, FarmTimingConflictKind, FarmerSection,
+    FulfillmentWindowId, FulfillmentWindowRecord, FulfillmentWindowSummary, LoggedOutStartupPhase,
+    OrderDetailItemRow, OrderDetailProjection, OrderId, OrderListRow, OrderPrimaryAction,
+    OrderRecoveryProjection, OrderStatus, OrdersFilter, OrdersListRow,
+    PackDayBatchPrintFailureKind, PackDayBatchPrintStatus, PackDayExportBundle,
+    PackDayExportStatus, PackDayHostHandoffKind, PackDayHostHandoffStatus, PackDayPackListRow,
+    PackDayPrintFailureKind, PackDayPrintKind, PackDayPrintStatus, PackDayProductTotalRow,
+    PackDayRosterRow, PersonalEntryState, PersonalSection, PickupLocationId, PickupLocationRecord,
+    ProductAttentionState, ProductEditorDraft, ProductId, ProductListRow, ProductPricePresentation,
+    ProductPublishBlocker, ProductStatus, ProductsFilter, ProductsListRow, ProductsSort,
+    RecoveryKind, RecoveryState, ReminderDeadlineProjection, ReminderDeliveryState, ReminderId,
+    ReminderLogEntryProjection, ReminderLogProjection, ReminderSurface, ReminderUrgency,
+    RepeatDemandEligibility, RepeatDemandHandoffProjection, ShellSection, TodayAgendaProjection,
+    TodaySetupTaskKind,
 };
 use radroots_nostr::prelude::RadrootsNostrClient;
 use std::{
@@ -1185,7 +1185,7 @@ impl HomeView {
     fn switch_to_marketplace(&mut self, cx: &mut Context<Self>) {
         match self
             .runtime
-            .select_active_surface(radroots_studio_app_models::ActiveSurface::Personal)
+            .select_active_surface(radroots_studio_app_view::ActiveSurface::Personal)
         {
             Ok(true) => {
                 self.products_stock_editor = None;
@@ -1207,7 +1207,7 @@ impl HomeView {
     fn switch_to_farmer_workspace(&mut self, cx: &mut Context<Self>) {
         match self
             .runtime
-            .select_active_surface(radroots_studio_app_models::ActiveSurface::Farmer)
+            .select_active_surface(radroots_studio_app_view::ActiveSurface::Farmer)
         {
             Ok(true) => {
                 self.products_stock_editor = None;
@@ -7877,7 +7877,7 @@ fn shared_shell_header(
 ) -> impl IntoElement {
     let can_enter_farmer_workspace = runtime.personal_projection.entry.can_enter_farmer_workspace;
     let is_marketplace_active =
-        runtime.shell_projection.active_surface != radroots_studio_app_models::ActiveSurface::Farmer;
+        runtime.shell_projection.active_surface != radroots_studio_app_view::ActiveSurface::Farmer;
     let farm_name = home_saved_farm(runtime).map(|farm| farm.display_name.clone());
     let account_label = shell_account_label(runtime);
 
@@ -8379,7 +8379,7 @@ fn buyer_cart_card(
 
 fn buyer_cart_line_card(
     index: usize,
-    line: &radroots_studio_app_models::BuyerCartLineProjection,
+    line: &radroots_studio_app_view::BuyerCartLineProjection,
     cx: &mut Context<HomeView>,
 ) -> impl IntoElement {
     app_surface_panel(
@@ -8433,7 +8433,7 @@ fn buyer_cart_line_card(
 
 fn buyer_checkout_card(
     form: &BuyerCheckoutFormState,
-    checkout: &radroots_studio_app_models::BuyerCheckoutProjection,
+    checkout: &radroots_studio_app_view::BuyerCheckoutProjection,
     on_close: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
     on_place_order: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
     cx: &App,
@@ -12582,7 +12582,7 @@ fn home_status_row(status: &HomeStatusPresentation) -> impl IntoElement {
         )
 }
 
-fn home_summary_card(summary: &radroots_studio_app_models::TodaySummary) -> impl IntoElement {
+fn home_summary_card(summary: &radroots_studio_app_view::TodaySummary) -> impl IntoElement {
     home_card(
         app_shared_text(AppTextKey::HomeTodayTitle),
         div()
@@ -12819,7 +12819,7 @@ fn home_draft_row(product: &ProductListRow) -> AnyElement {
         .into_any_element()
 }
 
-fn home_setup_task_row(task: &radroots_studio_app_models::TodaySetupTask) -> AnyElement {
+fn home_setup_task_row(task: &radroots_studio_app_view::TodaySetupTask) -> AnyElement {
     let is_complete = task.is_complete;
 
     div()
@@ -13047,21 +13047,6 @@ mod tests {
     use radroots_studio_app_core::{
         AppDesktopRuntimePaths, AppRuntimeHostEnvironment, AppRuntimePlatform,
     };
-    use radroots_studio_app_models::SettingsAccountProjection;
-    use radroots_studio_app_models::{
-        ActiveSurface, AppStartupGate, BuyerOrderDetailProjection, BuyerOrderStatus,
-        BuyerOrdersListRow, FarmId, FarmOrderMethod, FarmReadiness, FarmSetupDraft,
-        FarmSetupProjection, FarmSummary, FarmerSection, FulfillmentWindowId,
-        FulfillmentWindowSummary, LoggedOutStartupPhase, LoggedOutStartupProjection,
-        OrderDetailProjection, OrderId, OrderPrimaryAction, OrderStatus, OrdersListRow,
-        PackDayBatchPrintArtifact, PackDayBatchPrintFailureKind, PackDayExportArtifact,
-        PackDayExportArtifactKind, PackDayExportBundle, PackDayHostHandoffKind,
-        PackDayHostHandoffStatus, PackDayPrintFailureKind, PackDayPrintKind, PackDayPrintStatus,
-        PackDayProductTotalRow, PackDayProjection, PersonalSection, ProductId,
-        ReminderDeadlineProjection, ReminderDeliveryState, ReminderId, ReminderKind,
-        ReminderSurface, ReminderUrgency, RepeatDemandEligibility, RepeatDemandHandoffProjection,
-        ShellSection, TodayAgendaProjection, TodaySetupTask, TodaySetupTaskKind,
-    };
     use radroots_studio_app_remote_signer::{
         RadrootsAppRemoteSignerApprovedSession, RadrootsAppRemoteSignerPendingSession,
         RadrootsAppRemoteSignerSessionRecord,
@@ -13075,6 +13060,21 @@ mod tests {
     use radroots_studio_app_sync::{
         AppSyncProjection, AppSyncRunStatus, SyncAggregateRef, SyncCheckpointStatus, SyncConflict,
         SyncConflictKind, SyncConflictResolutionStatus, SyncConflictSeverity, SyncConflictStatus,
+    };
+    use radroots_studio_app_view::SettingsAccountProjection;
+    use radroots_studio_app_view::{
+        ActiveSurface, AppStartupGate, BuyerOrderDetailProjection, BuyerOrderStatus,
+        BuyerOrdersListRow, FarmId, FarmOrderMethod, FarmReadiness, FarmSetupDraft,
+        FarmSetupProjection, FarmSummary, FarmerSection, FulfillmentWindowId,
+        FulfillmentWindowSummary, LoggedOutStartupPhase, LoggedOutStartupProjection,
+        OrderDetailProjection, OrderId, OrderPrimaryAction, OrderStatus, OrdersListRow,
+        PackDayBatchPrintArtifact, PackDayBatchPrintFailureKind, PackDayExportArtifact,
+        PackDayExportArtifactKind, PackDayExportBundle, PackDayHostHandoffKind,
+        PackDayHostHandoffStatus, PackDayPrintFailureKind, PackDayPrintKind, PackDayPrintStatus,
+        PackDayProductTotalRow, PackDayProjection, PersonalSection, ProductId,
+        ReminderDeadlineProjection, ReminderDeliveryState, ReminderId, ReminderKind,
+        ReminderSurface, ReminderUrgency, RepeatDemandEligibility, RepeatDemandHandoffProjection,
+        ShellSection, TodayAgendaProjection, TodaySetupTask, TodaySetupTaskKind,
     };
     use radroots_identity::RadrootsIdentity;
     use std::{
@@ -13251,7 +13251,7 @@ mod tests {
     fn sample_pack_day_bundle(bundle_directory: &PathBuf) -> PackDayExportBundle {
         PackDayExportBundle {
             fulfillment_window_id: FulfillmentWindowId::new(),
-            export_instance_id: radroots_studio_app_models::PackDayExportInstanceId::new(),
+            export_instance_id: radroots_studio_app_view::PackDayExportInstanceId::new(),
             generated_at_utc: "2026-04-23T15:00:00Z".to_owned(),
             bundle_directory: bundle_directory.to_string_lossy().into_owned(),
             artifacts: vec![
@@ -13900,7 +13900,7 @@ mod tests {
         let fulfillment_window_id = FulfillmentWindowId::new();
         let bundle = PackDayExportBundle {
             fulfillment_window_id,
-            export_instance_id: radroots_studio_app_models::PackDayExportInstanceId::new(),
+            export_instance_id: radroots_studio_app_view::PackDayExportInstanceId::new(),
             generated_at_utc: "2026-04-23T15:00:00Z".to_owned(),
             bundle_directory: "exports/pack_day/window-1/20260423T150000Z".to_owned(),
             artifacts: vec![
@@ -14779,7 +14779,7 @@ mod tests {
 
     #[test]
     fn reminder_action_target_prefers_order_detail_before_pack_day() {
-        let order_id = radroots_studio_app_models::OrderId::new();
+        let order_id = radroots_studio_app_view::OrderId::new();
         let fulfillment_window_id = FulfillmentWindowId::new();
 
         assert_eq!(
@@ -14959,7 +14959,7 @@ mod tests {
         let review_conflict = DesktopAppSyncConflictSummary {
             conflict_id: String::new(),
             conflict: SyncConflict {
-                aggregate: SyncAggregateRef::Order(radroots_studio_app_models::OrderId::new()),
+                aggregate: SyncAggregateRef::Order(radroots_studio_app_view::OrderId::new()),
                 kind: SyncConflictKind::RemoteValidationReject,
                 severity: SyncConflictSeverity::ReviewRequired,
                 resolution: SyncConflictResolutionStatus::Unresolved,
@@ -15158,7 +15158,7 @@ mod tests {
     }
 
     fn fixture_reminder(
-        order_id: Option<radroots_studio_app_models::OrderId>,
+        order_id: Option<radroots_studio_app_view::OrderId>,
         fulfillment_window_id: Option<FulfillmentWindowId>,
         kind: ReminderKind,
         urgency: ReminderUrgency,

@@ -5063,12 +5063,12 @@ dependencies = [
  "gpui-component-assets",
  "radroots_studio_app_core",
  "radroots_studio_app_i18n",
- "radroots_studio_app_models",
  "radroots_studio_app_remote_signer",
  "radroots_studio_app_sqlite",
  "radroots_studio_app_state",
  "radroots_studio_app_sync",
  "radroots_studio_app_ui",
+ "radroots_studio_app_view",
  "radroots_core",
  "radroots_identity",
  "radroots_local_events",
@@ -5092,7 +5092,7 @@ name = "radroots_studio_app_core"
 version = "0.1.0"
 dependencies = [
  "chrono",
- "radroots_studio_app_models",
+ "radroots_studio_app_view",
  "radroots_local_events",
  "radroots_runtime_paths",
  "serde",
@@ -5108,15 +5108,6 @@ name = "radroots_studio_app_i18n"
 version = "0.1.0"
 dependencies = [
  "mf2_i18n",
-]
-
-[[package]]
-name = "radroots_studio_app_models"
-version = "0.1.0"
-dependencies = [
- "serde",
- "url",
- "uuid",
 ]
 
 [[package]]
@@ -5138,8 +5129,8 @@ dependencies = [
 name = "radroots_studio_app_sqlite"
 version = "0.1.0"
 dependencies = [
- "radroots_studio_app_models",
  "radroots_studio_app_sync",
+ "radroots_studio_app_view",
  "radroots_core",
  "radroots_events",
  "radroots_events_codec",
@@ -5155,8 +5146,8 @@ dependencies = [
 name = "radroots_studio_app_state"
 version = "0.1.0"
 dependencies = [
- "radroots_studio_app_models",
  "radroots_studio_app_sync",
+ "radroots_studio_app_view",
  "serde",
  "serde_json",
  "thiserror 2.0.18",
@@ -5167,11 +5158,19 @@ dependencies = [
 name = "radroots_studio_app_sync"
 version = "0.1.0"
 dependencies = [
- "radroots_studio_app_models",
+ "radroots_studio_app_view",
  "radroots_sdk",
  "serde",
  "serde_json",
  "thiserror 2.0.18",
+]
+
+[[package]]
+name = "radroots_studio_app_types"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "uuid",
 ]
 
 [[package]]
@@ -5182,6 +5181,16 @@ dependencies = [
  "gpui-component",
  "radroots_studio_app_core",
  "radroots_studio_app_i18n",
+]
+
+[[package]]
+name = "radroots_studio_app_view"
+version = "0.1.0"
+dependencies = [
+ "radroots_studio_app_types",
+ "serde",
+ "url",
+ "uuid",
 ]
 
 [[package]]
