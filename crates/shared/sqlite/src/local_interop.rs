@@ -219,6 +219,9 @@ impl<'a> AppLocalInteropRepository<'a> {
                 "SELECT
                     event_id,
                     event_kind,
+                    local_status,
+                    outbox_status,
+                    relay_delivery_json,
                     event_pubkey,
                     event_created_at,
                     event_tags_json,
@@ -226,6 +229,7 @@ impl<'a> AppLocalInteropRepository<'a> {
                     event_sig
                  FROM local_interop_imports
                  WHERE record_family = 'signed_event'
+                    AND local_status = 'published'
                     AND event_kind = ?1
                  ORDER BY local_seq ASC, record_id ASC",
             )
@@ -238,11 +242,14 @@ impl<'a> AppLocalInteropRepository<'a> {
                 Ok(StoredLocalInteropSignedEventEvidence {
                     event_id: row.get(0)?,
                     event_kind: row.get(1)?,
-                    event_pubkey: row.get(2)?,
-                    event_created_at: row.get(3)?,
-                    event_tags_json: row.get(4)?,
-                    event_content: row.get(5)?,
-                    event_sig: row.get(6)?,
+                    local_status: row.get(2)?,
+                    outbox_status: row.get(3)?,
+                    relay_delivery_json: row.get(4)?,
+                    event_pubkey: row.get(5)?,
+                    event_created_at: row.get(6)?,
+                    event_tags_json: row.get(7)?,
+                    event_content: row.get(8)?,
+                    event_sig: row.get(9)?,
                 })
             })
             .map_err(|source| AppSqliteError::Query {
@@ -255,6 +262,9 @@ impl<'a> AppLocalInteropRepository<'a> {
                 operation: "read local interop signed event evidence row",
                 source,
             })?;
+            if !signed_event_local_interop_evidence_is_usable(&evidence) {
+                continue;
+            }
             if let Some(event) = signed_event_from_local_interop_evidence(&evidence)? {
                 events.push(event);
             }
@@ -1606,6 +1616,9 @@ struct StoredSignedEventDuplicate {
 struct StoredLocalInteropSignedEventEvidence {
     event_id: Option<String>,
     event_kind: Option<i64>,
+    local_status: String,
+    outbox_status: String,
+    relay_delivery_json: Option<String>,
     event_pubkey: Option<String>,
     event_created_at: Option<i64>,
     event_tags_json: Option<String>,
@@ -1791,6 +1804,29 @@ fn signed_event_from_record(
     }))
 }
 
+fn signed_event_local_interop_evidence_is_usable(
+    evidence: &StoredLocalInteropSignedEventEvidence,
+) -> bool {
+    if evidence.local_status != LocalRecordStatus::Published.as_str()
+        || matches!(evidence.outbox_status.as_str(), "pending" | "failed")
+    {
+        return false;
+    }
+    let Some(relay_delivery_json) = evidence.relay_delivery_json.as_deref() else {
+        return false;
+    };
+    let Ok(relay_delivery_value) = serde_json::from_str::<Value>(relay_delivery_json) else {
+        return false;
+    };
+    let Ok(relay_delivery) = RelayDeliveryEvidence::from_json_value(&relay_delivery_value) else {
+        return false;
+    };
+    matches!(
+        relay_delivery.state,
+        RelayDeliveryState::Acknowledged | RelayDeliveryState::Observed
+    )
+}
+
 fn signed_event_from_local_interop_evidence(
     evidence: &StoredLocalInteropSignedEventEvidence,
 ) -> Result<Option<RadrootsNostrEvent>, AppSqliteError> {
@@ -1833,15 +1869,11 @@ fn signed_event_from_local_interop_evidence(
     let Some(tags_json) = evidence.event_tags_json.as_deref() else {
         return Ok(None);
     };
-    let tags_value = serde_json::from_str::<Value>(tags_json).map_err(|_| {
-        AppSqliteError::InvalidProjection {
-            reason: "local interop signed event tags must decode",
-        }
-    })?;
+    let Ok(tags_value) = serde_json::from_str::<Value>(tags_json) else {
+        return Ok(None);
+    };
     let Some(tags) = tags_from_json(&tags_value) else {
-        return Err(AppSqliteError::InvalidProjection {
-            reason: "local interop signed event tags must be an array",
-        });
+        return Ok(None);
     };
     Ok(Some(RadrootsNostrEvent {
         id: id.to_owned(),
@@ -2318,7 +2350,7 @@ mod tests {
     };
     use radroots_local_events::{
         LocalEventRecordInput, LocalEventRecordUpdate, LocalEventsStore, LocalRecordFamily,
-        LocalRecordStatus, PublishOutboxStatus, SourceRuntime,
+        LocalRecordStatus, PublishOutboxStatus, RelayDeliveryEvidence, SourceRuntime,
     };
     use radroots_sql_core::SqliteExecutor;
     use rusqlite::params;
@@ -2416,7 +2448,9 @@ mod tests {
             relay_set_fingerprint: Some("relay-set".to_owned()),
             relay_delivery_json: Some(json!({
                 "state": "acknowledged",
-                "acknowledged_relays": ["ws://127.0.0.1:1234/"]
+                "target_relays": ["ws://127.0.0.1:1234"],
+                "connected_relays": ["ws://127.0.0.1:1234"],
+                "acknowledged_relays": ["ws://127.0.0.1:1234"]
             })),
         }
     }
@@ -2803,6 +2837,15 @@ mod tests {
         source_runtime: SourceRuntime,
         owner_account_id: Option<&str>,
     ) -> LocalEventRecordInput {
+        let relay_delivery_json = RelayDeliveryEvidence::acknowledged(
+            ["ws://127.0.0.1:1234"],
+            ["ws://127.0.0.1:1234"],
+            ["ws://127.0.0.1:1234"],
+            Vec::new(),
+        )
+        .expect("acknowledged relay evidence")
+        .to_json_value()
+        .expect("acknowledged relay evidence json");
         LocalEventRecordInput {
             record_id: record_id.to_owned(),
             family: LocalRecordFamily::SignedEvent,
@@ -2833,10 +2876,7 @@ mod tests {
             })),
             outbox_status: PublishOutboxStatus::Acknowledged,
             relay_set_fingerprint: Some("relay-set".to_owned()),
-            relay_delivery_json: Some(json!({
-                "state": "acknowledged",
-                "acknowledged_relays": ["ws://127.0.0.1:1234/"]
-            })),
+            relay_delivery_json: Some(relay_delivery_json),
         }
     }
 
@@ -2944,6 +2984,152 @@ mod tests {
         assert_eq!(detail.items[0].title, "Order Visible Eggs");
         assert_eq!(detail.items[0].quantity_display, "2 each");
         assert_eq!(buyer_context_key, "nostr:buyer-pubkey");
+    }
+
+    #[test]
+    fn local_interop_order_request_evidence_requires_usable_delivery_state() {
+        let app_store =
+            AppSqliteStore::open(DatabaseTarget::InMemory).expect("open app sqlite store");
+        let events = local_events_store();
+        let listing_addr = "30402:seller-pubkey:AAAAAAAAAAAAAAAAAAAAAg";
+        let buyer_pubkey = "buyer-pubkey";
+        let seller_pubkey = "seller-pubkey";
+        let relay_url = "ws://127.0.0.1:1234";
+        let build_event = |event_id: &str, order_id_raw: &str| {
+            let payload =
+                order_request_payload(order_id_raw, listing_addr, buyer_pubkey, seller_pubkey);
+            let parts = active_trade_order_request_event_build(
+                &listing_event_ptr("listing-event-1"),
+                &payload,
+            )
+            .expect("build order request event");
+            event_from_parts(event_id, buyer_pubkey, parts)
+        };
+        let acknowledged_event = build_event("order-request-evidence-ack", "usable-ack");
+        events
+            .append_record(&signed_order_event_record(
+                "cli:signed_event:order-request:evidence-ack",
+                &acknowledged_event,
+                listing_addr,
+                SourceRuntime::Cli,
+                None,
+            ))
+            .expect("append acknowledged order request evidence");
+
+        let observed_event = build_event("order-request-evidence-observed", "usable-observed");
+        let mut observed_record = signed_order_event_record(
+            "cli:signed_event:order-request:evidence-observed",
+            &observed_event,
+            listing_addr,
+            SourceRuntime::Cli,
+            None,
+        );
+        observed_record.outbox_status = PublishOutboxStatus::None;
+        observed_record.relay_delivery_json = Some(
+            RelayDeliveryEvidence::observed([relay_url], [relay_url], [relay_url], Vec::new())
+                .expect("observed relay evidence")
+                .to_json_value()
+                .expect("observed relay evidence json"),
+        );
+        events
+            .append_record(&observed_record)
+            .expect("append observed order request evidence");
+
+        let pending_event = build_event("order-request-evidence-pending", "pending");
+        let mut pending_record = signed_order_event_record(
+            "cli:signed_event:order-request:evidence-pending",
+            &pending_event,
+            listing_addr,
+            SourceRuntime::Cli,
+            None,
+        );
+        pending_record.status = LocalRecordStatus::PendingPublish;
+        pending_record.outbox_status = PublishOutboxStatus::Pending;
+        pending_record.relay_delivery_json = Some(
+            RelayDeliveryEvidence::pending([relay_url])
+                .expect("pending relay evidence")
+                .to_json_value()
+                .expect("pending relay evidence json"),
+        );
+        events
+            .append_record(&pending_record)
+            .expect("append pending order request evidence");
+
+        let failed_event = build_event("order-request-evidence-failed", "failed");
+        let mut failed_record = signed_order_event_record(
+            "cli:signed_event:order-request:evidence-failed",
+            &failed_event,
+            listing_addr,
+            SourceRuntime::Cli,
+            None,
+        );
+        failed_record.outbox_status = PublishOutboxStatus::Failed;
+        failed_record.relay_delivery_json = Some(json!({
+            "state": "failed",
+            "target_relays": [relay_url],
+            "connected_relays": [relay_url],
+            "acknowledged_relays": [],
+            "failed_relays": [{"relay_url": relay_url, "error": "relay rejected event"}]
+        }));
+        events
+            .append_record(&failed_record)
+            .expect("append failed order request evidence");
+
+        let local_only_event = build_event("order-request-evidence-local-only", "local-only");
+        let mut local_only_record = signed_order_event_record(
+            "cli:signed_event:order-request:evidence-local-only",
+            &local_only_event,
+            listing_addr,
+            SourceRuntime::Cli,
+            None,
+        );
+        local_only_record.outbox_status = PublishOutboxStatus::None;
+        local_only_record.relay_set_fingerprint = None;
+        local_only_record.relay_delivery_json = None;
+        events
+            .append_record(&local_only_record)
+            .expect("append local-only order request evidence");
+
+        let malformed_delivery_event = build_event(
+            "order-request-evidence-malformed-delivery",
+            "malformed-delivery",
+        );
+        let mut malformed_delivery_record = signed_order_event_record(
+            "cli:signed_event:order-request:evidence-malformed-delivery",
+            &malformed_delivery_event,
+            listing_addr,
+            SourceRuntime::Cli,
+            None,
+        );
+        malformed_delivery_record.relay_delivery_json = Some(json!({
+            "state": "acknowledged"
+        }));
+        events
+            .append_record(&malformed_delivery_record)
+            .expect("append malformed delivery order request evidence");
+
+        let malformed_event =
+            build_event("order-request-evidence-malformed-event", "malformed-event");
+        let mut malformed_record = signed_order_event_record(
+            "cli:signed_event:order-request:evidence-malformed-event",
+            &malformed_event,
+            listing_addr,
+            SourceRuntime::Cli,
+            None,
+        );
+        malformed_record.event_tags_json = Some(json!({"invalid": "tags"}));
+        events
+            .append_record(&malformed_record)
+            .expect("append malformed order request evidence");
+
+        app_store
+            .import_shared_local_events_from_store(&events)
+            .expect("import signed evidence records");
+        let signed_evidence = app_store
+            .load_local_interop_signed_events_by_kind(KIND_ORDER_REQUEST)
+            .expect("load filtered signed event evidence");
+
+        assert_eq!(signed_evidence, vec![acknowledged_event, observed_event]);
     }
 
     #[test]

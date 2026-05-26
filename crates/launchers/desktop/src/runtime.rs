@@ -4565,6 +4565,7 @@ impl DesktopAppRuntimeState {
                             radroots_sdk::trade::RadrootsActiveTradeMessageType::TradeOrderRequested
                                 .kind(),
                         ))
+                    || !signed_order_request_evidence_record_is_usable(&record)
                 {
                     continue;
                 }
@@ -8328,6 +8329,24 @@ fn order_sync_payload(
     .to_string()
 }
 
+fn signed_order_request_evidence_record_is_usable(record: &LocalEventRecord) -> bool {
+    if record.status != LocalRecordStatus::Published
+        || matches!(
+            record.outbox_status,
+            PublishOutboxStatus::Pending | PublishOutboxStatus::Failed
+        )
+    {
+        return false;
+    }
+    let Some(relay_delivery_json) = record.relay_delivery_json.as_ref() else {
+        return false;
+    };
+    let Ok(relay_delivery) = RelayDeliveryEvidence::from_json_value(relay_delivery_json) else {
+        return false;
+    };
+    matches!(relay_delivery.state.as_str(), "acknowledged" | "observed")
+}
+
 #[cfg(test)]
 mod tests {
     use std::{
@@ -8394,7 +8413,8 @@ mod tests {
     use radroots_local_events::{
         BUYER_ORDER_REQUEST_LOCAL_WORK_RECORD_KIND, CANONICAL_RELAY_SET_FINGERPRINT_VERSION,
         LocalEventRecord, LocalEventRecordInput, LocalEventsStore, LocalRecordFamily,
-        LocalRecordStatus, PublishOutboxStatus, SourceRuntime, canonical_relay_set_fingerprint,
+        LocalRecordStatus, PublishOutboxStatus, RelayDeliveryEvidence, SourceRuntime,
+        canonical_relay_set_fingerprint,
     };
     use radroots_nostr_accounts::prelude::{
         RadrootsNostrAccountsManager, RadrootsNostrFileAccountStore,
@@ -8406,7 +8426,7 @@ mod tests {
         RadrootsTradeOrderDecision, RadrootsTradeOrderEconomicItem, RadrootsTradeOrderEconomics,
         RadrootsTradeOrderItem, RadrootsTradeOrderRequested, RadrootsTradePricingBasis,
     };
-    use radroots_sql_core::SqliteExecutor;
+    use radroots_sql_core::{SqlExecutor, SqliteExecutor};
     use serde_json::json;
     use tokio::net::TcpListener;
     use tokio::sync::oneshot;
@@ -13005,6 +13025,28 @@ mod tests {
     }
 
     #[test]
+    fn runtime_rejects_seller_order_decision_with_unusable_request_evidence() {
+        let relay = ThreadedAckRelay::spawn();
+        let (runtime, paths, order_id, _product_id, _seller_pubkey, _buyer_pubkey) =
+            seller_order_decision_runtime("seller_order_unusable_request_evidence", 6, 2);
+        configure_runtime_relay_ingest(&runtime, &relay);
+        mark_shared_seller_order_request_evidence_pending(&paths);
+
+        let error = runtime
+            .prepare_order_accept(order_id)
+            .expect_err("seller order decision should require usable request evidence");
+
+        assert!(matches!(
+            error,
+            AppSqliteError::InvalidProjection {
+                reason: "seller order decision requires signed order request evidence"
+            }
+        ));
+
+        cleanup_bootstrapped_runtime_paths(&paths);
+    }
+
+    #[test]
     fn runtime_refreshes_configured_relay_before_seller_order_decision_signing() {
         let relay = ThreadedAckRelay::spawn();
         let (runtime, paths, order_id, product_id, seller_pubkey, buyer_pubkey) =
@@ -17193,6 +17235,8 @@ mod tests {
                 relay_set_fingerprint: Some("relay-set".to_owned()),
                 relay_delivery_json: Some(json!({
                     "state": "acknowledged",
+                    "target_relays": ["wss://relay.example"],
+                    "connected_relays": ["wss://relay.example"],
                     "acknowledged_relays": ["wss://relay.example"]
                 })),
             })
@@ -17268,6 +17312,15 @@ mod tests {
         .into_wire_parts();
         let record_id = format!("app:signed_event:order-request:{trade_order_id}");
         let event_id = format!("event-{record_id}");
+        let relay_delivery_json = RelayDeliveryEvidence::acknowledged(
+            ["wss://relay.example"],
+            ["wss://relay.example"],
+            ["wss://relay.example"],
+            Vec::new(),
+        )
+        .expect("acknowledged relay delivery evidence")
+        .to_json_value()
+        .expect("acknowledged relay delivery json");
         store
             .append_record(&LocalEventRecordInput {
                 record_id,
@@ -17296,12 +17349,28 @@ mod tests {
                 })),
                 outbox_status: PublishOutboxStatus::Acknowledged,
                 relay_set_fingerprint: Some("relay-set".to_owned()),
-                relay_delivery_json: Some(json!({
-                    "state": "acknowledged",
-                    "acknowledged_relays": ["wss://relay.example"]
-                })),
+                relay_delivery_json: Some(relay_delivery_json),
             })
             .expect("append signed order request");
+    }
+
+    fn mark_shared_seller_order_request_evidence_pending(paths: &AppDesktopRuntimePaths) {
+        let database_path = paths
+            .shared_local_events_database_path()
+            .expect("shared local events path");
+        let executor =
+            SqliteExecutor::open(database_path.as_path()).expect("open shared local events db");
+        executor
+            .exec(
+                "UPDATE local_event_record
+                 SET status = 'pending_publish',
+                     outbox_status = 'pending',
+                     relay_set_fingerprint = NULL,
+                     relay_delivery_json = NULL
+                 WHERE record_id = 'app:signed_event:order-request:seller-order-decision-1'",
+                "[]",
+            )
+            .expect("mark shared order request evidence pending");
     }
 
     fn append_unrelated_signed_event_records(paths: &AppDesktopRuntimePaths, count: usize) {
