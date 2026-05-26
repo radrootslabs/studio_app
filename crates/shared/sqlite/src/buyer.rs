@@ -2580,6 +2580,7 @@ fn parse_order_status(field: &'static str, value: String) -> Result<OrderStatus,
         "scheduled" => Ok(OrderStatus::Scheduled),
         "packed" => Ok(OrderStatus::Packed),
         "completed" => Ok(OrderStatus::Completed),
+        "declined" => Ok(OrderStatus::Declined),
         "refunded" => Ok(OrderStatus::Refunded),
         _ => Err(AppSqliteError::DecodeEnum { field, value }),
     }

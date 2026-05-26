@@ -1361,6 +1361,7 @@ pub enum OrderStatus {
     Scheduled,
     Packed,
     Completed,
+    Declined,
     Refunded,
 }
 
@@ -1371,6 +1372,7 @@ impl OrderStatus {
             Self::Scheduled => "scheduled",
             Self::Packed => "packed",
             Self::Completed => "completed",
+            Self::Declined => "declined",
             Self::Refunded => "refunded",
         }
     }
@@ -1383,6 +1385,7 @@ pub enum BuyerOrderStatus {
     Scheduled,
     Ready,
     Completed,
+    Declined,
     Refunded,
 }
 
@@ -1393,6 +1396,7 @@ impl BuyerOrderStatus {
             Self::Scheduled => "scheduled",
             Self::Ready => "ready",
             Self::Completed => "completed",
+            Self::Declined => "declined",
             Self::Refunded => "refunded",
         }
     }
@@ -1405,6 +1409,7 @@ impl From<OrderStatus> for BuyerOrderStatus {
             OrderStatus::Scheduled => Self::Scheduled,
             OrderStatus::Packed => Self::Ready,
             OrderStatus::Completed => Self::Completed,
+            OrderStatus::Declined => Self::Declined,
             OrderStatus::Refunded => Self::Refunded,
         }
     }
@@ -1891,7 +1896,7 @@ impl PackDayOutputOrderState {
             OrderStatus::NeedsAction => Some(Self::NeedsAction),
             OrderStatus::Scheduled => Some(Self::Scheduled),
             OrderStatus::Packed => Some(Self::Packed),
-            OrderStatus::Completed | OrderStatus::Refunded => None,
+            OrderStatus::Completed | OrderStatus::Declined | OrderStatus::Refunded => None,
         }
     }
 }
@@ -3135,11 +3140,13 @@ mod tests {
         assert_eq!(OrderStatus::Scheduled.storage_key(), "scheduled");
         assert_eq!(OrderStatus::Packed.storage_key(), "packed");
         assert_eq!(OrderStatus::Completed.storage_key(), "completed");
+        assert_eq!(OrderStatus::Declined.storage_key(), "declined");
         assert_eq!(OrderStatus::Refunded.storage_key(), "refunded");
         assert_eq!(BuyerOrderStatus::Placed.storage_key(), "placed");
         assert_eq!(BuyerOrderStatus::Scheduled.storage_key(), "scheduled");
         assert_eq!(BuyerOrderStatus::Ready.storage_key(), "ready");
         assert_eq!(BuyerOrderStatus::Completed.storage_key(), "completed");
+        assert_eq!(BuyerOrderStatus::Declined.storage_key(), "declined");
         assert_eq!(BuyerOrderStatus::Refunded.storage_key(), "refunded");
         assert_eq!(
             BuyerOrderStatus::from(OrderStatus::NeedsAction),
@@ -3148,6 +3155,10 @@ mod tests {
         assert_eq!(
             BuyerOrderStatus::from(OrderStatus::Packed),
             BuyerOrderStatus::Ready
+        );
+        assert_eq!(
+            BuyerOrderStatus::from(OrderStatus::Declined),
+            BuyerOrderStatus::Declined
         );
 
         assert_eq!(OrdersFilter::default(), OrdersFilter::NeedsAction);
@@ -3395,6 +3406,10 @@ mod tests {
         );
         assert_eq!(
             PackDayOutputOrderState::from_order_status(OrderStatus::Completed),
+            None
+        );
+        assert_eq!(
+            PackDayOutputOrderState::from_order_status(OrderStatus::Declined),
             None
         );
         assert_eq!(

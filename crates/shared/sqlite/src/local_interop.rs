@@ -720,7 +720,7 @@ impl<'a> AppLocalInteropRepository<'a> {
                     order_number = excluded.order_number,
                     customer_display_name = excluded.customer_display_name,
                     status = CASE
-                        WHEN orders.status IN ('scheduled', 'packed', 'completed', 'refunded')
+                        WHEN orders.status IN ('scheduled', 'packed', 'completed', 'declined', 'refunded')
                         THEN orders.status
                         ELSE excluded.status
                     END,
@@ -753,7 +753,7 @@ impl<'a> AppLocalInteropRepository<'a> {
                     .execute(
                         "UPDATE orders
                          SET status = CASE
-                            WHEN status IN ('packed', 'completed', 'refunded') THEN status
+                            WHEN status IN ('packed', 'completed', 'declined', 'refunded') THEN status
                             ELSE 'scheduled'
                          END,
                          updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now')
@@ -765,7 +765,23 @@ impl<'a> AppLocalInteropRepository<'a> {
                         source,
                     })?;
             }
-            RadrootsTradeOrderDecision::Declined { .. } => {}
+            RadrootsTradeOrderDecision::Declined { .. } => {
+                self.connection
+                    .execute(
+                        "UPDATE orders
+                         SET status = CASE
+                            WHEN status IN ('packed', 'completed', 'refunded') THEN status
+                            ELSE 'declined'
+                         END,
+                         updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now')
+                         WHERE id = ?1",
+                        params![order_id.to_string()],
+                    )
+                    .map_err(|source| AppSqliteError::Query {
+                        operation: "apply local interop order decision",
+                        source,
+                    })?;
+            }
         }
         Ok(())
     }
@@ -2449,7 +2465,7 @@ mod tests {
         }
     }
 
-    fn order_decision_payload(
+    fn accepted_order_decision_payload(
         order_id: &str,
         listing_addr: &str,
         buyer_pubkey: &str,
@@ -2465,6 +2481,23 @@ mod tests {
                     bin_id: "bin-1".to_owned(),
                     bin_count: 2,
                 }],
+            },
+        }
+    }
+
+    fn declined_order_decision_payload(
+        order_id: &str,
+        listing_addr: &str,
+        buyer_pubkey: &str,
+        seller_pubkey: &str,
+    ) -> RadrootsTradeOrderDecisionEvent {
+        RadrootsTradeOrderDecisionEvent {
+            order_id: order_id.to_owned(),
+            listing_addr: listing_addr.to_owned(),
+            buyer_pubkey: buyer_pubkey.to_owned(),
+            seller_pubkey: seller_pubkey.to_owned(),
+            decision: RadrootsTradeOrderDecision::Declined {
+                reason: "not available for this pickup".to_owned(),
             },
         }
     }
@@ -2695,7 +2728,7 @@ mod tests {
         assert_eq!(buyer_orders.rows[0].order_id, order_id);
         assert_eq!(buyer_orders.rows[0].status, BuyerOrderStatus::Placed);
 
-        let decision_payload = order_decision_payload(
+        let decision_payload = accepted_order_decision_payload(
             order_id_raw,
             listing_addr.as_str(),
             buyer_pubkey,
@@ -2744,6 +2777,135 @@ mod tests {
         assert_eq!(buyer_orders.rows[0].status, BuyerOrderStatus::Scheduled);
         assert_eq!(buyer_detail.status, BuyerOrderStatus::Scheduled);
         assert_eq!(seller_orders.rows[0].status, OrderStatus::Scheduled);
+    }
+
+    #[test]
+    fn app_origin_signed_order_request_and_decline_project_to_buyer_orders() {
+        let app_store =
+            AppSqliteStore::open(DatabaseTarget::InMemory).expect("open app sqlite store");
+        let events = local_events_store();
+        let farm_key = "CCCCCCCCCCCCCCCCCCCCCC";
+        let listing_key = "AAAAAAAAAAAAAAAAAAAAAg";
+        let seller_pubkey = "seller-pubkey";
+        let buyer_pubkey = "app-buyer-pubkey";
+        let order_id_raw = "app-relay-order-declined-1";
+        let listing_addr = format!("30402:{seller_pubkey}:{listing_key}");
+        events
+            .append_record(&signed_market_listing_record(
+                "buyer-order-decline-listing",
+                seller_pubkey,
+                farm_key,
+                listing_key,
+                "Buyer Order Eggs",
+                "9",
+                "active",
+                "pickup",
+                "North barn pickup",
+                4_102_444_800,
+                4_102_531_200,
+                LocalRecordStatus::Published,
+                PublishOutboxStatus::Acknowledged,
+            ))
+            .expect("append signed listing");
+        app_store
+            .import_shared_local_events_from_store(&events)
+            .expect("import signed listing");
+        let request_payload = order_request_payload(
+            order_id_raw,
+            listing_addr.as_str(),
+            buyer_pubkey,
+            seller_pubkey,
+        );
+        let request_parts = active_trade_order_request_event_build(
+            &listing_event_ptr("buyer-order-decline-listing-event"),
+            &request_payload,
+        )
+        .expect("build order request event");
+        let request_event = event_from_parts(
+            "buyer-order-decline-request-event",
+            buyer_pubkey,
+            request_parts,
+        );
+        events
+            .append_record(&signed_order_event_record(
+                "app:signed_event:order-request:buyer-declined",
+                &request_event,
+                listing_addr.as_str(),
+                SourceRuntime::App,
+                Some("acct_buyer"),
+            ))
+            .expect("append app order request");
+
+        let request_report = app_store
+            .import_shared_local_events_from_store(&events)
+            .expect("import app order request");
+        let buyer_context = BuyerContext::account("acct_buyer");
+        let order_id = projected_order_id(order_id_raw, buyer_pubkey);
+        let buyer_orders = app_store
+            .load_buyer_orders(&buyer_context)
+            .expect("load buyer orders after request");
+
+        assert_eq!(request_report.imported_records, 1);
+        assert_eq!(buyer_orders.rows.len(), 1);
+        assert_eq!(buyer_orders.rows[0].order_id, order_id);
+        assert_eq!(buyer_orders.rows[0].status, BuyerOrderStatus::Placed);
+
+        let decision_payload = declined_order_decision_payload(
+            order_id_raw,
+            listing_addr.as_str(),
+            buyer_pubkey,
+            seller_pubkey,
+        );
+        let decision_parts = active_trade_order_decision_event_build(
+            request_event.id.as_str(),
+            request_event.id.as_str(),
+            &decision_payload,
+        )
+        .expect("build declined order decision event");
+        let decision_event = event_from_parts(
+            "buyer-order-decline-decision-event",
+            seller_pubkey,
+            decision_parts,
+        );
+        events
+            .append_record(&signed_order_event_record(
+                "cli:signed_event:order-decision:buyer-declined",
+                &decision_event,
+                listing_addr.as_str(),
+                SourceRuntime::Cli,
+                None,
+            ))
+            .expect("append declined order decision");
+
+        let decision_report = app_store
+            .import_shared_local_events_from_store(&events)
+            .expect("import declined order decision");
+        let buyer_orders = app_store
+            .load_buyer_orders(&buyer_context)
+            .expect("load buyer orders after declined decision");
+        let buyer_detail = app_store
+            .load_buyer_order_detail(&buyer_context, order_id)
+            .expect("load buyer order detail")
+            .expect("buyer order detail");
+        let seller_orders = app_store
+            .load_orders_list(
+                deterministic_farm_id(Some(seller_pubkey), farm_key),
+                &OrdersScreenQueryState {
+                    filter: OrdersFilter::All,
+                    fulfillment_window_id: None,
+                },
+            )
+            .expect("load seller orders after declined decision");
+
+        assert_eq!(decision_report.imported_records, 1);
+        assert_eq!(buyer_orders.rows.len(), 1);
+        assert_eq!(buyer_orders.rows[0].status, BuyerOrderStatus::Declined);
+        assert_eq!(buyer_detail.status, BuyerOrderStatus::Declined);
+        assert_eq!(seller_orders.rows[0].status, OrderStatus::Declined);
+        assert_eq!(seller_orders.summary.needs_action_orders, 0);
+        assert_eq!(seller_orders.summary.scheduled_orders, 0);
+        assert_eq!(seller_orders.summary.packed_orders, 0);
+        assert!(seller_orders.rows[0].primary_action.is_none());
     }
 
     #[test]

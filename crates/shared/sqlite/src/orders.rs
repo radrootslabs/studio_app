@@ -920,7 +920,7 @@ fn summarize_orders(records: &[OrderRecord]) -> OrdersListSummary {
             OrderStatus::NeedsAction => summary.needs_action_orders += 1,
             OrderStatus::Scheduled => summary.scheduled_orders += 1,
             OrderStatus::Packed => summary.packed_orders += 1,
-            OrderStatus::Completed | OrderStatus::Refunded => {}
+            OrderStatus::Completed | OrderStatus::Declined | OrderStatus::Refunded => {}
         }
     }
 
@@ -932,7 +932,7 @@ fn primary_action_for_status(status: OrderStatus) -> Option<OrderPrimaryAction> 
         OrderStatus::NeedsAction => Some(OrderPrimaryAction::Review),
         OrderStatus::Scheduled => Some(OrderPrimaryAction::MarkPacked),
         OrderStatus::Packed => Some(OrderPrimaryAction::MarkCompleted),
-        OrderStatus::Completed | OrderStatus::Refunded => None,
+        OrderStatus::Completed | OrderStatus::Declined | OrderStatus::Refunded => None,
     }
 }
 
@@ -969,6 +969,7 @@ fn parse_order_status(field: &'static str, value: String) -> Result<OrderStatus,
         "scheduled" => Ok(OrderStatus::Scheduled),
         "packed" => Ok(OrderStatus::Packed),
         "completed" => Ok(OrderStatus::Completed),
+        "declined" => Ok(OrderStatus::Declined),
         "refunded" => Ok(OrderStatus::Refunded),
         _ => Err(AppSqliteError::DecodeEnum { field, value }),
     }

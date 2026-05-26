@@ -8859,6 +8859,7 @@ fn buyer_orders_status_key(status: BuyerOrderStatus) -> AppTextKey {
         BuyerOrderStatus::Scheduled => AppTextKey::PersonalOrdersStatusScheduled,
         BuyerOrderStatus::Ready => AppTextKey::PersonalOrdersStatusReady,
         BuyerOrderStatus::Completed => AppTextKey::PersonalOrdersStatusCompleted,
+        BuyerOrderStatus::Declined => AppTextKey::PersonalOrdersStatusDeclined,
         BuyerOrderStatus::Refunded => AppTextKey::PersonalOrdersStatusRefunded,
     }
 }
@@ -8869,7 +8870,7 @@ fn buyer_orders_status_color(status: BuyerOrderStatus) -> u32 {
         BuyerOrderStatus::Scheduled | BuyerOrderStatus::Ready => {
             APP_UI_THEME.components.app_status_indicator.online
         }
-        BuyerOrderStatus::Completed | BuyerOrderStatus::Refunded => {
+        BuyerOrderStatus::Completed | BuyerOrderStatus::Declined | BuyerOrderStatus::Refunded => {
             APP_UI_THEME.components.app_status_indicator.offline
         }
     }
@@ -10143,6 +10144,7 @@ fn orders_status_key(status: OrderStatus) -> AppTextKey {
         OrderStatus::Scheduled => AppTextKey::OrdersStatusScheduled,
         OrderStatus::Packed => AppTextKey::OrdersStatusPacked,
         OrderStatus::Completed => AppTextKey::OrdersStatusCompleted,
+        OrderStatus::Declined => AppTextKey::OrdersStatusDeclined,
         OrderStatus::Refunded => AppTextKey::OrdersStatusRefunded,
     }
 }
@@ -10153,7 +10155,7 @@ fn orders_status_color(status: OrderStatus) -> u32 {
         OrderStatus::Scheduled | OrderStatus::Packed => {
             APP_UI_THEME.components.app_status_indicator.online
         }
-        OrderStatus::Completed | OrderStatus::Refunded => {
+        OrderStatus::Completed | OrderStatus::Declined | OrderStatus::Refunded => {
             APP_UI_THEME.components.app_status_indicator.offline
         }
     }

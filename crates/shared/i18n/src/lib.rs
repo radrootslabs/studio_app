@@ -297,6 +297,7 @@ mod tests {
             app_text(AppTextKey::OrdersStatusNeedsAction),
             "Needs action"
         );
+        assert_eq!(app_text(AppTextKey::OrdersStatusDeclined), "Declined");
         assert_eq!(app_text(AppTextKey::OrdersActionMarkPacked), "Mark packed");
         assert_eq!(
             app_text(AppTextKey::OrdersActionMarkCompleted),
@@ -395,6 +396,10 @@ mod tests {
         assert_eq!(
             app_text(AppTextKey::PersonalOrdersStatusCompleted),
             "Completed"
+        );
+        assert_eq!(
+            app_text(AppTextKey::PersonalOrdersStatusDeclined),
+            "Declined"
         );
         assert_eq!(
             app_text(AppTextKey::PersonalOrdersStatusRefunded),
