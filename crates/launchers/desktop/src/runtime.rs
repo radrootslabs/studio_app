@@ -2304,6 +2304,7 @@ impl DesktopAppRuntimeState {
                 reason: "seller order decision requires configured relays",
             });
         }
+        self.refresh_configured_relay_state_before_seller_order_decision()?;
         let Some(sqlite_store) = self.sqlite_store.as_ref() else {
             return Err(AppSqliteError::InvalidProjection {
                 reason: "seller order decision requires local state",
@@ -2394,6 +2395,28 @@ impl DesktopAppRuntimeState {
             })?;
 
         Ok(payload)
+    }
+
+    fn refresh_configured_relay_state_before_seller_order_decision(
+        &mut self,
+    ) -> Result<(), AppSqliteError> {
+        match self.ingest_configured_relay_events() {
+            Ok(report) => {
+                if report.freshness_changed
+                    || report.local_import.imported_records > 0
+                    || report.local_import.skipped_records > 0
+                {
+                    let _ = self.refresh_selected_account_context_after_local_events()?;
+                }
+                Ok(())
+            }
+            Err(AppDirectRelayIngestError::Sqlite(error)) => Err(error),
+            Err(AppDirectRelayIngestError::Transport(_)) => {
+                Err(AppSqliteError::InvalidProjection {
+                    reason: "seller order decision requires fresh configured relay state",
+                })
+            }
+        }
     }
 
     fn publish_seller_order_decision(
@@ -8607,6 +8630,10 @@ mod tests {
             ));
     }
 
+    fn configure_runtime_relay_ingest(runtime: &DesktopAppRuntime, relay: &ThreadedAckRelay) {
+        runtime.lock_state_mut().nostr_relay_urls = vec![relay.url().to_owned()];
+    }
+
     #[test]
     fn runtime_direct_relay_transport_publishes_typed_farm_work() {
         let relay_a = ThreadedAckRelay::spawn();
@@ -12892,8 +12919,10 @@ mod tests {
 
     #[test]
     fn runtime_prepares_seller_order_accept_payload_from_signed_request() {
+        let relay = ThreadedAckRelay::spawn();
         let (runtime, paths, order_id, _product_id, seller_pubkey, buyer_pubkey) =
             seller_order_decision_runtime("seller_order_accept_payload", 6, 2);
+        configure_runtime_relay_ingest(&runtime, &relay);
 
         let payload = runtime
             .prepare_order_accept(order_id)
@@ -12928,8 +12957,10 @@ mod tests {
 
     #[test]
     fn runtime_prepares_seller_order_decline_payload_with_trimmed_reason() {
+        let relay = ThreadedAckRelay::spawn();
         let (runtime, paths, order_id, _product_id, seller_pubkey, buyer_pubkey) =
             seller_order_decision_runtime("seller_order_decline_payload", 6, 2);
+        configure_runtime_relay_ingest(&runtime, &relay);
 
         let payload = runtime
             .prepare_order_decline(order_id, "  out of stock  ")
@@ -12954,8 +12985,10 @@ mod tests {
 
     #[test]
     fn runtime_finds_seller_order_request_evidence_past_first_local_events_page() {
+        let relay = ThreadedAckRelay::spawn();
         let (runtime, paths, order_id, _product_id, _seller_pubkey, _buyer_pubkey) =
             seller_order_decision_runtime("seller_order_old_request_evidence", 6, 2);
+        configure_runtime_relay_ingest(&runtime, &relay);
         append_unrelated_signed_event_records(&paths, 1_005);
 
         let payload = runtime
@@ -12972,15 +13005,69 @@ mod tests {
     }
 
     #[test]
+    fn runtime_refreshes_configured_relay_before_seller_order_decision_signing() {
+        let relay = ThreadedAckRelay::spawn();
+        let (runtime, paths, order_id, product_id, seller_pubkey, buyer_pubkey) =
+            seller_order_decision_runtime("seller_order_relay_freshness_pre_sign", 6, 2);
+        configure_runtime_relay_ingest(&runtime, &relay);
+        publish_prior_relay_seller_order_accept(
+            &runtime,
+            &relay,
+            order_id,
+            product_id,
+            seller_pubkey.as_str(),
+            buyer_pubkey.as_str(),
+        );
+
+        let error = runtime
+            .prepare_order_accept(order_id)
+            .expect_err("stale seller order decision should fail pre-signing");
+
+        assert!(matches!(
+            error,
+            AppSqliteError::InvalidProjection {
+                reason: "seller order decision requires an undecided order"
+            }
+        ));
+        assert_eq!(persisted_order_status(&runtime, order_id), "scheduled");
+        assert_eq!(relay.event_count(), 1);
+
+        cleanup_bootstrapped_runtime_paths(&paths);
+    }
+
+    #[test]
+    fn runtime_rejects_seller_order_decision_when_relay_freshness_fails() {
+        let (runtime, paths, order_id, _product_id, _seller_pubkey, _buyer_pubkey) =
+            seller_order_decision_runtime("seller_order_relay_freshness_failure", 6, 2);
+        runtime.lock_state_mut().nostr_relay_urls = vec!["ws://127.0.0.1:9".to_owned()];
+
+        let error = runtime
+            .prepare_order_accept(order_id)
+            .expect_err("seller order decision should require fresh relay state");
+
+        assert!(matches!(
+            error,
+            AppSqliteError::InvalidProjection {
+                reason: "seller order decision requires fresh configured relay state"
+            }
+        ));
+        assert_eq!(persisted_order_status(&runtime, order_id), "needs_action");
+
+        cleanup_bootstrapped_runtime_paths(&paths);
+    }
+
+    #[test]
     fn runtime_rejects_seller_order_decision_for_wrong_selected_account() {
+        let relay = ThreadedAckRelay::spawn();
         let (runtime, paths, order_id, _product_id, _seller_pubkey, _buyer_pubkey) =
             seller_order_decision_runtime("seller_order_wrong_account", 6, 2);
+        configure_runtime_relay_ingest(&runtime, &relay);
         assert!(
             runtime
                 .generate_local_account(Some("Other seller".to_owned()))
                 .expect("other account should generate")
         );
-        runtime.lock_state_mut().nostr_relay_urls = vec!["wss://relay.example".to_owned()];
+        configure_runtime_relay_ingest(&runtime, &relay);
 
         let error = runtime
             .prepare_order_accept(order_id)
@@ -12993,8 +13080,10 @@ mod tests {
 
     #[test]
     fn runtime_rejects_seller_order_accept_that_would_over_reserve_inventory() {
+        let relay = ThreadedAckRelay::spawn();
         let (runtime, paths, order_id, _product_id, _seller_pubkey, _buyer_pubkey) =
             seller_order_decision_runtime("seller_order_over_reserved", 1, 2);
+        configure_runtime_relay_ingest(&runtime, &relay);
 
         let error = runtime
             .prepare_order_accept(order_id)
@@ -16939,6 +17028,72 @@ mod tests {
             seller_pubkey,
             buyer_pubkey,
         )
+    }
+
+    fn publish_prior_relay_seller_order_accept(
+        runtime: &DesktopAppRuntime,
+        relay: &ThreadedAckRelay,
+        order_id: OrderId,
+        product_id: ProductId,
+        seller_pubkey: &str,
+        buyer_pubkey: &str,
+    ) {
+        let (account_id, farm_id, accounts_manager) = {
+            let state = runtime.lock_state();
+            let selected_account = state
+                .state_store
+                .identity_projection()
+                .selected_account
+                .as_ref()
+                .expect("selected seller account");
+            (
+                selected_account.account.account_id.clone(),
+                state.selected_farm_id().expect("selected farm"),
+                state
+                    .accounts_manager
+                    .as_ref()
+                    .expect("accounts manager")
+                    .clone(),
+            )
+        };
+        let listing_key = super::d_tag_from_uuid(product_id.as_uuid());
+        let payload = AppPublishPayload::OrderDecision(AppOrderDecisionPublishPayload {
+            context: AppPublishContext::new(account_id, "seller_order_decision"),
+            app_order_id: order_id,
+            farm_id,
+            trade_order_id: "seller-order-decision-1".to_owned(),
+            request_event_id: "event-app:signed_event:order-request:seller-order-decision-1"
+                .to_owned(),
+            listing_event_id: Some(
+                "event-app:signed_event:listing:seller-order-decision".to_owned(),
+            ),
+            listing_addr: format!("30402:{seller_pubkey}:{listing_key}"),
+            buyer_pubkey: buyer_pubkey.to_owned(),
+            seller_pubkey: seller_pubkey.to_owned(),
+            decision: AppOrderDecisionPayload::Accepted {
+                inventory_commitments: vec![AppOrderDecisionInventoryCommitment {
+                    bin_id: "seller-order-primary-bin".to_owned(),
+                    bin_count: 2,
+                }],
+            },
+        });
+        let operation = PendingSyncOperation::from_publish_payload(payload, "2026-05-24T12:00:00Z")
+            .expect("prior order decision publish work should serialize");
+        let mut transport = SdkDirectRelayAppSyncTransport::with_relay_urls(
+            accounts_manager,
+            vec![relay.url().to_owned()],
+        );
+        let result = transport
+            .sync(AppSyncRequest {
+                trigger: SyncTrigger::ManualRefresh,
+                checkpoint: SyncCheckpointStatus::never_synced(),
+                pending_operations: vec![operation],
+                known_conflicts: Vec::new(),
+            })
+            .expect("prior seller decision relay publish should succeed");
+
+        assert_eq!(result.run_status, AppSyncRunStatus::Succeeded);
+        assert_eq!(result.pushed_operation_count, 1);
     }
 
     fn append_app_signed_listing_record(
