@@ -701,6 +701,24 @@ impl DesktopAppRuntime {
         )
     }
 
+    pub fn publish_order_accept(&self, order_id: OrderId) -> Result<bool, AppSqliteError> {
+        self.lock_state_mut()
+            .publish_seller_order_decision(order_id, AppSellerOrderDecisionCommand::Accept)
+    }
+
+    pub fn publish_order_decline(
+        &self,
+        order_id: OrderId,
+        reason: &str,
+    ) -> Result<bool, AppSqliteError> {
+        self.lock_state_mut().publish_seller_order_decision(
+            order_id,
+            AppSellerOrderDecisionCommand::Decline {
+                reason: reason.to_owned(),
+            },
+        )
+    }
+
     pub fn start_order_recovery(
         &self,
         order_id: OrderId,
@@ -2378,6 +2396,23 @@ impl DesktopAppRuntimeState {
         Ok(payload)
     }
 
+    fn publish_seller_order_decision(
+        &mut self,
+        order_id: OrderId,
+        command: AppSellerOrderDecisionCommand,
+    ) -> Result<bool, AppSqliteError> {
+        let payload = self.prepare_seller_order_decision(order_id, command)?;
+        let operation = PendingSyncOperation::from_publish_payload(
+            AppPublishPayload::OrderDecision(payload),
+            current_utc_timestamp(),
+        )
+        .map_err(|_| AppSqliteError::InvalidProjection {
+            reason: "seller order decision publish payload must serialize",
+        })?;
+        let _ = self.enqueue_selected_account_sync_operation_once(operation)?;
+        self.attempt_sync(SyncTrigger::ManualRefresh)
+    }
+
     fn start_order_recovery(
         &mut self,
         order_id: OrderId,
@@ -3725,6 +3760,12 @@ impl DesktopAppRuntimeState {
         result: &AppSyncResult,
     ) -> Result<bool, AppSqliteError> {
         self.record_published_sync_receipts(result.published_receipts.as_slice())?;
+        let receipt_import_changed = if result.published_receipts.is_empty() {
+            false
+        } else {
+            let report = self.import_shared_local_events()?;
+            report.imported_records > 0 || report.skipped_records > 0
+        };
         {
             let Some(sqlite_store) = self.sqlite_store.as_ref() else {
                 return Ok(false);
@@ -3761,7 +3802,7 @@ impl DesktopAppRuntimeState {
             }
         }
 
-        self.refresh_selected_account_sync()
+        Ok(receipt_import_changed || self.refresh_selected_account_sync()?)
     }
 
     fn apply_sync_transport_error(
@@ -6007,10 +6048,17 @@ async fn publish_app_payload(
                 .map_err(|error| AppSyncTransportError::failed(error.to_string()))
         }
         AppPublishPayload::OrderDecision(payload) => {
-            let _decision = order_decision_publish_payload_to_sdk_decision(payload);
-            Err(AppSyncTransportError::failed(
-                "order decision direct relay publish is not wired",
-            ))
+            let decision = order_decision_publish_payload_to_sdk_decision(payload);
+            client
+                .trade()
+                .publish_order_decision_with_identity(
+                    identity,
+                    payload.request_event_id.as_str(),
+                    payload.request_event_id.as_str(),
+                    &decision,
+                )
+                .await
+                .map_err(|error| AppSyncTransportError::failed(error.to_string()))
         }
     }
 }
@@ -8237,14 +8285,15 @@ mod tests {
         HomeRoute,
     };
     use radroots_studio_app_sync::{
-        AppFarmProfilePublishPayload, AppListingPublishPayload, AppOrderDecisionPayload,
-        AppOrderRequestItemPayload, AppOrderRequestPublishPayload, AppPublishContext,
-        AppPublishPayload, AppPublishedOperationReceipt, AppRelayIngestScopeFreshness,
-        AppRelayIngestScopeStatus, AppSyncRequest, AppSyncResult, AppSyncRunStatus,
-        AppSyncTransport, AppSyncTransportError, PendingSyncOperation, PendingSyncOperationState,
-        RecordedAppSyncTransport, SyncAggregateRef, SyncCheckpointState, SyncCheckpointStatus,
-        SyncConflict, SyncConflictKind, SyncConflictResolutionStatus, SyncConflictSeverity,
-        SyncOperationKind, SyncTrigger,
+        AppFarmProfilePublishPayload, AppListingPublishPayload,
+        AppOrderDecisionInventoryCommitment, AppOrderDecisionPayload,
+        AppOrderDecisionPublishPayload, AppOrderRequestItemPayload, AppOrderRequestPublishPayload,
+        AppPublishContext, AppPublishPayload, AppPublishedOperationReceipt,
+        AppRelayIngestScopeFreshness, AppRelayIngestScopeStatus, AppSyncRequest, AppSyncResult,
+        AppSyncRunStatus, AppSyncTransport, AppSyncTransportError, PendingSyncOperation,
+        PendingSyncOperationState, RecordedAppSyncTransport, SyncAggregateRef, SyncCheckpointState,
+        SyncCheckpointStatus, SyncConflict, SyncConflictKind, SyncConflictResolutionStatus,
+        SyncConflictSeverity, SyncOperationKind, SyncTrigger,
     };
     use radroots_core::{
         RadrootsCoreCurrency, RadrootsCoreDecimal, RadrootsCoreMoney, RadrootsCoreUnit,
@@ -8474,6 +8523,21 @@ mod tests {
         shared
     }
 
+    fn install_direct_relay_sync_transport(runtime: &DesktopAppRuntime, relay: &ThreadedAckRelay) {
+        let accounts_manager = runtime
+            .lock_state()
+            .accounts_manager
+            .as_ref()
+            .expect("accounts manager")
+            .clone();
+        runtime.lock_state_mut().nostr_relay_urls = vec![relay.url().to_owned()];
+        runtime.lock_state_mut().sync_transport =
+            Box::new(SdkDirectRelayAppSyncTransport::with_relay_urls(
+                accounts_manager,
+                vec![relay.url().to_owned()],
+            ));
+    }
+
     #[test]
     fn runtime_direct_relay_transport_publishes_typed_farm_work() {
         let relay_a = ThreadedAckRelay::spawn();
@@ -8537,6 +8601,60 @@ mod tests {
             result.published_receipts[0].relay_delivery_json["state"],
             json!("acknowledged")
         );
+    }
+
+    #[test]
+    fn runtime_direct_relay_transport_publishes_typed_order_decision_work() {
+        let relay = ThreadedAckRelay::spawn();
+        let manager = RadrootsNostrAccountsManager::new_in_memory();
+        let account_id = manager
+            .generate_identity(Some("Seller".to_owned()), true)
+            .expect("local signing account should generate");
+        let identity = manager
+            .get_signing_identity(&account_id)
+            .expect("seller signer lookup should succeed")
+            .expect("seller account should have local signer");
+        let buyer_pubkey = "1111111111111111111111111111111111111111111111111111111111111111";
+        let payload = AppPublishPayload::OrderDecision(AppOrderDecisionPublishPayload {
+            context: AppPublishContext::new(account_id.to_string(), "seller_order_decision"),
+            app_order_id: OrderId::new(),
+            farm_id: FarmId::new(),
+            trade_order_id: "order-1".to_owned(),
+            request_event_id: "order-request-event-1".to_owned(),
+            listing_event_id: Some("listing-event-1".to_owned()),
+            listing_addr: format!("30402:{}:listing-key", identity.public_key_hex()),
+            buyer_pubkey: buyer_pubkey.to_owned(),
+            seller_pubkey: identity.public_key_hex(),
+            decision: AppOrderDecisionPayload::Accepted {
+                inventory_commitments: vec![AppOrderDecisionInventoryCommitment {
+                    bin_id: "bin-1".to_owned(),
+                    bin_count: 2,
+                }],
+            },
+        });
+        let operation = PendingSyncOperation::from_publish_payload(payload, "2026-05-24T12:00:00Z")
+            .expect("typed order decision publish work should serialize");
+        let mut transport =
+            SdkDirectRelayAppSyncTransport::with_relay_urls(manager, vec![relay.url().to_owned()]);
+
+        let result = transport
+            .sync(AppSyncRequest {
+                trigger: SyncTrigger::ManualRefresh,
+                checkpoint: SyncCheckpointStatus::never_synced(),
+                pending_operations: vec![operation],
+                known_conflicts: Vec::new(),
+            })
+            .expect("direct relay order decision publish should succeed");
+
+        assert_eq!(result.run_status, AppSyncRunStatus::Succeeded);
+        assert_eq!(result.pushed_operation_count, 1);
+        assert_eq!(result.published_receipts.len(), 1);
+        assert_eq!(result.published_receipts[0].event_kind, 3423);
+        assert_eq!(
+            result.published_receipts[0].event_pubkey,
+            identity.public_key_hex()
+        );
+        assert_eq!(relay.event_count(), 1);
     }
 
     #[test]
@@ -12750,6 +12868,54 @@ mod tests {
             .expect_err("over-reserved seller order should fail preflight");
 
         assert!(matches!(error, AppSqliteError::InvalidProjection { .. }));
+
+        cleanup_bootstrapped_runtime_paths(&paths);
+    }
+
+    #[test]
+    fn runtime_publishes_seller_order_accept_and_projects_signed_evidence() {
+        let relay = ThreadedAckRelay::spawn();
+        let (runtime, paths, order_id, _product_id, seller_pubkey, _buyer_pubkey) =
+            seller_order_decision_runtime("seller_order_accept_publish", 6, 2);
+        install_direct_relay_sync_transport(&runtime, &relay);
+
+        assert!(
+            runtime
+                .publish_order_accept(order_id)
+                .expect("seller order accept should publish")
+        );
+
+        assert_eq!(persisted_order_status(&runtime, order_id), "scheduled");
+        assert_eq!(relay.event_count(), 1);
+        assert!(shared_local_event_records(&paths).iter().any(|record| {
+            record.family == LocalRecordFamily::SignedEvent
+                && record.event_kind == Some(3423)
+                && record.event_pubkey.as_deref() == Some(seller_pubkey.as_str())
+        }));
+
+        cleanup_bootstrapped_runtime_paths(&paths);
+    }
+
+    #[test]
+    fn runtime_publishes_seller_order_decline_and_projects_signed_evidence() {
+        let relay = ThreadedAckRelay::spawn();
+        let (runtime, paths, order_id, _product_id, seller_pubkey, _buyer_pubkey) =
+            seller_order_decision_runtime("seller_order_decline_publish", 6, 2);
+        install_direct_relay_sync_transport(&runtime, &relay);
+
+        assert!(
+            runtime
+                .publish_order_decline(order_id, "not available")
+                .expect("seller order decline should publish")
+        );
+
+        assert_eq!(persisted_order_status(&runtime, order_id), "declined");
+        assert_eq!(relay.event_count(), 1);
+        assert!(shared_local_event_records(&paths).iter().any(|record| {
+            record.family == LocalRecordFamily::SignedEvent
+                && record.event_kind == Some(3423)
+                && record.event_pubkey.as_deref() == Some(seller_pubkey.as_str())
+        }));
 
         cleanup_bootstrapped_runtime_paths(&paths);
     }
@@ -17043,6 +17209,21 @@ mod tests {
         store
             .list_records_after_seq(0, 100)
             .expect("shared local records should list")
+    }
+
+    fn persisted_order_status(runtime: &DesktopAppRuntime, order_id: OrderId) -> String {
+        runtime
+            .lock_state()
+            .sqlite_store
+            .as_ref()
+            .expect("sqlite store")
+            .connection()
+            .query_row(
+                "select status from orders where id = ?1 limit 1",
+                [order_id.to_string()],
+                |row| row.get::<_, String>(0),
+            )
+            .expect("order status should load")
     }
 
     fn pending_order_sync_payloads(
