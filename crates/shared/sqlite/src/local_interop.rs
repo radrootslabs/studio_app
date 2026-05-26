@@ -416,6 +416,8 @@ impl<'a> AppLocalInteropRepository<'a> {
         event_id: &str,
         record_id: &str,
     ) -> Result<(), AppSqliteError> {
+        let superseded_listing_ids =
+            self.superseded_duplicate_listing_projection_ids(event_id, record_id)?;
         self.connection
             .execute(
                 "DELETE FROM local_interop_imports
@@ -428,6 +430,67 @@ impl<'a> AppLocalInteropRepository<'a> {
                 operation: "delete superseded duplicate local interop signed event",
                 source,
             })?;
+        self.delete_unreferenced_listing_products(&superseded_listing_ids)?;
+        Ok(())
+    }
+
+    fn superseded_duplicate_listing_projection_ids(
+        &self,
+        event_id: &str,
+        record_id: &str,
+    ) -> Result<Vec<String>, AppSqliteError> {
+        let mut statement = self
+            .connection
+            .prepare(
+                "SELECT projected_id
+                 FROM local_interop_imports
+                 WHERE event_id = ?1
+                    AND record_id <> ?2
+                    AND record_family = 'signed_event'
+                    AND projected_kind = 'listing'
+                    AND projected_id IS NOT NULL",
+            )
+            .map_err(|source| AppSqliteError::Query {
+                operation: "prepare superseded duplicate listing projection query",
+                source,
+            })?;
+        let rows = statement
+            .query_map(params![event_id, record_id], |row| row.get::<_, String>(0))
+            .map_err(|source| AppSqliteError::Query {
+                operation: "query superseded duplicate listing projections",
+                source,
+            })?;
+        rows.map(|row| {
+            row.map_err(|source| AppSqliteError::Query {
+                operation: "read superseded duplicate listing projection",
+                source,
+            })
+        })
+        .collect()
+    }
+
+    fn delete_unreferenced_listing_products(
+        &self,
+        product_ids: &[String],
+    ) -> Result<(), AppSqliteError> {
+        for product_id in product_ids {
+            self.connection
+                .execute(
+                    "DELETE FROM products
+                     WHERE id = ?1
+                        AND NOT EXISTS (
+                            SELECT 1
+                            FROM local_interop_imports
+                            WHERE projected_kind = 'listing'
+                               AND projected_id = ?1
+                        )",
+                    params![product_id],
+                )
+                .map_err(|source| AppSqliteError::Query {
+                    operation: "delete unreferenced superseded listing product",
+                    source,
+                })?;
+        }
         Ok(())
     }
 
@@ -4123,6 +4186,112 @@ mod tests {
         assert_eq!(
             listing_import.projected_id.as_deref(),
             Some(product_uuid.to_string().as_str())
+        );
+    }
+
+    #[test]
+    fn app_signed_duplicate_replaces_network_listing_product_projection() {
+        let app_store =
+            AppSqliteStore::open(DatabaseTarget::InMemory).expect("open app sqlite store");
+        let events = local_events_store();
+        let farm_uuid = Uuid::from_u128(0x99999999999949999999999999999999);
+        let product_uuid = Uuid::from_u128(0xaaaaaaaaaaaa4aaaaaaaaaaaaaaaaaaa);
+        let farm_key = app_d_tag_from_uuid(farm_uuid);
+        let listing_key = app_d_tag_from_uuid(product_uuid);
+        let seller_pubkey = "app-seller-pubkey";
+        let duplicate_event_id = "duplicate-app-origin-listing-event";
+        let mut network_listing = signed_market_listing_record(
+            "duplicate-network-app-origin",
+            seller_pubkey,
+            farm_key.as_str(),
+            listing_key.as_str(),
+            "Relay App Eggs",
+            "11",
+            "active",
+            "pickup",
+            "App farmstand pickup",
+            4_102_444_800,
+            4_102_531_200,
+            LocalRecordStatus::Published,
+            PublishOutboxStatus::Acknowledged,
+        );
+        network_listing.source_runtime = SourceRuntime::Network;
+        network_listing.owner_account_id = None;
+        network_listing.record_id = "app:relay_event:duplicate-app-origin".to_owned();
+        network_listing.event_id = Some(duplicate_event_id.to_owned());
+        events
+            .append_record(&network_listing)
+            .expect("append network app-origin listing");
+
+        app_store
+            .import_shared_local_events_from_store(&events)
+            .expect("import network app-origin listing");
+        let network_product_id =
+            deterministic_product_id(Some(seller_pubkey), listing_key.as_str());
+        let network_product_count: i64 = app_store
+            .connection()
+            .query_row("SELECT COUNT(*) FROM products", [], |row| row.get(0))
+            .expect("network product count");
+        assert_eq!(network_product_count, 1);
+        assert_ne!(network_product_id.as_uuid(), product_uuid);
+
+        seed_app_projection(&app_store, farm_uuid, product_uuid);
+        let mut app_listing = signed_market_listing_record(
+            "duplicate-app-signed-origin",
+            seller_pubkey,
+            farm_key.as_str(),
+            listing_key.as_str(),
+            "Relay App Eggs",
+            "11",
+            "active",
+            "pickup",
+            "App farmstand pickup",
+            4_102_444_800,
+            4_102_531_200,
+            LocalRecordStatus::Published,
+            PublishOutboxStatus::Acknowledged,
+        );
+        app_listing.source_runtime = SourceRuntime::App;
+        app_listing.record_id = "app:signed_event:duplicate-app-origin".to_owned();
+        app_listing.event_id = Some(duplicate_event_id.to_owned());
+        events
+            .append_record(&app_listing)
+            .expect("append app signed duplicate listing");
+
+        app_store
+            .import_shared_local_events_from_store(&events)
+            .expect("import app signed duplicate listing");
+        let imported = app_store
+            .load_local_interop_records()
+            .expect("load imported records");
+        let product_count: i64 = app_store
+            .connection()
+            .query_row("SELECT COUNT(*) FROM products", [], |row| row.get(0))
+            .expect("product count");
+        let stale_product_count: i64 = app_store
+            .connection()
+            .query_row(
+                "SELECT COUNT(*) FROM products WHERE id = ?1",
+                [network_product_id.to_string()],
+                |row| row.get(0),
+            )
+            .expect("stale product count");
+        let listing_import = imported
+            .iter()
+            .find(|record| record.record_id == "app:signed_event:duplicate-app-origin")
+            .expect("app signed duplicate listing import");
+
+        assert_eq!(product_count, 1);
+        assert_eq!(stale_product_count, 0);
+        assert_eq!(listing_import.source_runtime, SourceRuntime::App.as_str());
+        assert_eq!(
+            listing_import.projected_id.as_deref(),
+            Some(product_uuid.to_string().as_str())
+        );
+        assert!(
+            imported
+                .iter()
+                .all(|record| record.record_id != "app:relay_event:duplicate-app-origin")
         );
     }
 
