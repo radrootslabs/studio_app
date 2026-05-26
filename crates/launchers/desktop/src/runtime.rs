@@ -8755,25 +8755,25 @@ mod tests {
     #[test]
     fn runtime_configured_relay_sync_triggers_ingest_listing_into_fresh_buyer_projection() {
         let relay = ThreadedAckRelay::spawn();
-        let product_id = publish_relay_ingest_listing_fixture(&relay);
+        let projected_product_id = publish_relay_ingest_listing_fixture(&relay);
 
         assert_fresh_buyer_relay_ingest(
             relay.url(),
             "relay_ingest_manual_refresh",
             SyncTrigger::ManualRefresh,
-            product_id,
+            projected_product_id,
         );
         assert_fresh_buyer_relay_ingest(
             relay.url(),
             "relay_ingest_app_launch",
             SyncTrigger::AppLaunch,
-            product_id,
+            projected_product_id,
         );
         assert_fresh_buyer_relay_ingest(
             relay.url(),
             "relay_ingest_foreground_resume",
             SyncTrigger::ForegroundResume,
-            product_id,
+            projected_product_id,
         );
     }
 
@@ -8781,7 +8781,7 @@ mod tests {
     fn runtime_relay_ingest_does_not_use_connected_relays_as_listing_provenance() {
         let listing_relay = ThreadedAckRelay::spawn();
         let empty_relay = ThreadedAckRelay::spawn();
-        let product_id = publish_relay_ingest_listing_fixture(&listing_relay);
+        let projected_product_id = publish_relay_ingest_listing_fixture(&listing_relay);
         let (runtime, paths) = bootstrapped_runtime("relay_ingest_connected_not_provenance");
         assert!(
             runtime
@@ -8804,12 +8804,12 @@ mod tests {
             .listings
             .rows
             .iter()
-            .find(|listing| listing.product_id == product_id)
+            .find(|listing| listing.product_id == projected_product_id)
             .expect("fresh buyer app should project relay listing");
         assert_eq!(listing.title, "Relay ingest lettuce");
         assert_eq!(listing.listing_relays, vec![listing_relay.url().to_owned()]);
 
-        let product_id_string = product_id.to_string();
+        let product_id_string = projected_product_id.to_string();
         let imports = runtime
             .lock_state()
             .sqlite_store
@@ -8832,6 +8832,7 @@ mod tests {
         )
         .expect("delivery json");
 
+        assert_eq!(listing_import.source_runtime, SourceRuntime::Cli.as_str());
         assert_eq!(listing_import.outbox_status, "none");
         assert_eq!(delivery["state"], json!("observed"));
         assert_eq!(delivery["acknowledged_relays"], json!([]));
@@ -8853,8 +8854,14 @@ mod tests {
             .get_signing_identity(&account_id)
             .expect("seller signing lookup should succeed")
             .expect("seller account should have local signer");
+        let seller_pubkey = identity.public_key_hex();
         let farm_id = FarmId::new();
         let product_id = ProductId::new();
+        let listing_d_tag = super::d_tag_from_uuid(product_id.as_uuid());
+        let projected_product_id = deterministic_cli_listing_product_id(
+            Some(seller_pubkey.as_str()),
+            listing_d_tag.as_str(),
+        );
         let farm_payload = AppPublishPayload::FarmProfile(AppFarmProfilePublishPayload {
             context: AppPublishContext::new(account_id.to_string(), "relay_ingest_farm"),
             farm_id,
@@ -8864,9 +8871,9 @@ mod tests {
         let listing_payload = AppPublishPayload::Listing(AppListingPublishPayload {
             context: AppPublishContext::new(account_id.to_string(), "relay_ingest_listing"),
             product_id,
-            listing_d_tag: Some(super::d_tag_from_uuid(product_id.as_uuid())),
+            listing_d_tag: Some(listing_d_tag),
             farm_id: Some(farm_id),
-            farm_pubkey: Some(identity.public_key_hex()),
+            farm_pubkey: Some(seller_pubkey),
             farm_d_tag: Some(super::d_tag_from_uuid(farm_id.as_uuid())),
             title: "Relay ingest lettuce".to_owned(),
             subtitle: Some("Pulled into a fresh buyer app".to_owned()),
@@ -8906,14 +8913,14 @@ mod tests {
         assert_eq!(result.run_status, AppSyncRunStatus::Succeeded);
         assert_eq!(result.published_receipts.len(), 2);
 
-        product_id
+        projected_product_id
     }
 
     fn assert_fresh_buyer_relay_ingest(
         relay_url: &str,
         label: &str,
         trigger: SyncTrigger,
-        product_id: ProductId,
+        projected_product_id: ProductId,
     ) {
         let (runtime, paths) = bootstrapped_runtime(label);
         assert!(
@@ -8944,7 +8951,7 @@ mod tests {
             .listings
             .rows
             .iter()
-            .find(|listing| listing.product_id == product_id)
+            .find(|listing| listing.product_id == projected_product_id)
             .expect("fresh buyer app should project relay listing");
         assert_eq!(listing.title, "Relay ingest lettuce");
         assert_eq!(listing.farm_display_name, "Relay test farm");
@@ -8958,7 +8965,7 @@ mod tests {
         assert_eq!(relay_ingest.relays[0].relay_url, relay_url);
         assert!(relay_ingest.relays[0].cursor_since_unix_seconds.is_some());
 
-        let product_id_string = product_id.to_string();
+        let product_id_string = projected_product_id.to_string();
         let imports = runtime
             .lock_state()
             .sqlite_store
@@ -8981,6 +8988,7 @@ mod tests {
         )
         .expect("delivery json");
 
+        assert_eq!(listing_import.source_runtime, SourceRuntime::Cli.as_str());
         assert_eq!(listing_import.outbox_status, "none");
         assert_eq!(delivery["state"], json!("observed"));
         assert_eq!(delivery["acknowledged_relays"], json!([]));
@@ -9020,25 +9028,25 @@ mod tests {
     #[test]
     fn runtime_relay_ingest_runs_after_outbound_sync_failure() {
         let relay = ThreadedAckRelay::spawn();
-        let product_id = publish_relay_ingest_listing_fixture(&relay);
+        let projected_product_id = publish_relay_ingest_listing_fixture(&relay);
 
         assert_relay_ingest_after_outbound_failure(
             relay.url(),
             "relay_ingest_after_manual_failure",
             SyncTrigger::ManualRefresh,
-            product_id,
+            projected_product_id,
         );
         assert_relay_ingest_after_outbound_failure(
             relay.url(),
             "relay_ingest_after_launch_failure",
             SyncTrigger::AppLaunch,
-            product_id,
+            projected_product_id,
         );
         assert_relay_ingest_after_outbound_failure(
             relay.url(),
             "relay_ingest_after_foreground_failure",
             SyncTrigger::ForegroundResume,
-            product_id,
+            projected_product_id,
         );
     }
 
@@ -9046,7 +9054,7 @@ mod tests {
         relay_url: &str,
         label: &str,
         trigger: SyncTrigger,
-        product_id: ProductId,
+        projected_product_id: ProductId,
     ) {
         let (runtime, paths) = bootstrapped_runtime(label);
         assert!(
@@ -9122,7 +9130,7 @@ mod tests {
             .listings
             .rows
             .iter()
-            .find(|listing| listing.product_id == product_id)
+            .find(|listing| listing.product_id == projected_product_id)
             .expect("relay listing should still project after outbound failure");
         assert_eq!(listing.title, "Relay ingest lettuce");
         assert_eq!(listing.listing_relays, vec![relay_url.to_owned()]);
