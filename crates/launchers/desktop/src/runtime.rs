@@ -3802,7 +3802,8 @@ impl DesktopAppRuntimeState {
             }
         }
 
-        Ok(receipt_import_changed || self.refresh_selected_account_sync()?)
+        let sync_changed = self.refresh_selected_account_sync()?;
+        Ok(receipt_import_changed || sync_changed)
     }
 
     fn apply_sync_transport_error(
@@ -10104,6 +10105,70 @@ mod tests {
                 .len(),
             0
         );
+    }
+
+    #[test]
+    fn runtime_sync_result_refreshes_sync_status_after_receipt_import_changes() {
+        let (runtime, paths) = bootstrapped_runtime("sync_status_after_receipt_import");
+        let (account_id, farm_id) = provision_ready_farmer_account(&runtime);
+        runtime
+            .lock_state_mut()
+            .enqueue_selected_account_sync_operations(vec![pending_sync_upsert(
+                SyncAggregateRef::Farm(farm_id),
+                farm_sync_payload(
+                    farm_id,
+                    "Receipt import farm",
+                    Some(FarmReadiness::Ready),
+                    "sync_result_refreshes_after_receipt_import",
+                ),
+            )])
+            .expect("pending farm sync should enqueue");
+
+        install_recorded_sync_transport(
+            &runtime,
+            RecordedAppSyncTransport::succeed(AppSyncResult {
+                run_status: AppSyncRunStatus::Succeeded,
+                checkpoint: SyncCheckpointStatus::current(
+                    Some("2026-04-20T19:41:00Z".to_owned()),
+                    "2026-04-20T19:41:05Z",
+                    Some("cursor-receipt-import".to_owned()),
+                ),
+                pushed_operation_count: 1,
+                pulled_record_count: 0,
+                conflicts: Vec::new(),
+                published_receipts: vec![published_operation_receipt_fixture(
+                    account_id.to_string(),
+                    None,
+                    "1111111111111111111111111111111111111111111111111111111111111111",
+                )],
+            }),
+        );
+
+        assert!(
+            runtime
+                .sync_on_app_launch()
+                .expect("launch sync should import published receipt")
+        );
+
+        let summary = runtime.summary();
+        assert_eq!(summary.sync_status.pending_write_count, 0);
+        assert_eq!(
+            summary.sync_status.projection.run_status,
+            AppSyncRunStatus::Succeeded
+        );
+        assert_eq!(
+            summary.sync_status.projection.checkpoint.state,
+            SyncCheckpointState::Current
+        );
+        assert_eq!(
+            shared_local_event_records(&paths)
+                .into_iter()
+                .filter(|record| record.family == LocalRecordFamily::SignedEvent)
+                .count(),
+            1
+        );
+
+        cleanup_bootstrapped_runtime_paths(&paths);
     }
 
     #[test]
