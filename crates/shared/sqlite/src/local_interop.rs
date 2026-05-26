@@ -2329,8 +2329,8 @@ mod tests {
     use std::collections::BTreeSet;
 
     use radroots_studio_app_models::{
-        BuyerContext, BuyerOrderStatus, FarmOrderMethod, OrderStatus, OrdersFilter,
-        OrdersScreenQueryState, ProductAvailabilityState,
+        BuyerContext, BuyerOrderStatus, FarmId, FarmOrderMethod, OrderStatus, OrdersFilter,
+        OrdersScreenQueryState, ProductAvailabilityState, ProductId,
     };
     use radroots_core::{
         RadrootsCoreCurrency, RadrootsCoreDecimal, RadrootsCoreMoney, RadrootsCoreUnit,
@@ -2359,7 +2359,7 @@ mod tests {
 
     use super::{
         KIND_FARM, KIND_LISTING, KIND_ORDER_REQUEST, deterministic_farm_id,
-        deterministic_product_id, projected_order_id,
+        deterministic_product_id, projected_farm_id, projected_order_id, projected_product_id,
     };
     use crate::{AppSqliteStore, DatabaseTarget};
 
@@ -2672,6 +2672,43 @@ mod tests {
             _ => unreachable!(),
         }
         output
+    }
+
+    #[test]
+    fn app_shaped_keys_use_uuid_projection_only_for_app_runtime() {
+        let owner_pubkey = "projection-owner-pubkey";
+        let farm_uuid = Uuid::from_u128(0x11111111111141118111111111111111);
+        let product_uuid = Uuid::from_u128(0x22222222222242228222222222222222);
+        let farm_key = app_d_tag_from_uuid(farm_uuid);
+        let listing_key = app_d_tag_from_uuid(product_uuid);
+
+        assert_eq!(
+            projected_farm_id(SourceRuntime::App, Some(owner_pubkey), farm_key.as_str()),
+            Some(FarmId::from(farm_uuid))
+        );
+        assert_eq!(
+            projected_product_id(SourceRuntime::App, Some(owner_pubkey), listing_key.as_str()),
+            Some(ProductId::from(product_uuid))
+        );
+        assert_eq!(
+            projected_farm_id(
+                SourceRuntime::Network,
+                Some(owner_pubkey),
+                farm_key.as_str()
+            ),
+            Some(deterministic_farm_id(Some(owner_pubkey), farm_key.as_str()))
+        );
+        assert_eq!(
+            projected_product_id(
+                SourceRuntime::Network,
+                Some(owner_pubkey),
+                listing_key.as_str()
+            ),
+            Some(deterministic_product_id(
+                Some(owner_pubkey),
+                listing_key.as_str()
+            ))
+        );
     }
 
     fn app_local_work_record(

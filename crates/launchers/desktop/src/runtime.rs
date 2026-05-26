@@ -5852,7 +5852,7 @@ fn direct_relay_event_listing_addr(
 }
 
 fn direct_relay_event_source_runtime(_kind: u16, _d_tag: Option<&str>) -> SourceRuntime {
-    SourceRuntime::Cli
+    SourceRuntime::Network
 }
 
 fn relay_event_kind(event: &RadrootsNostrEvent) -> u16 {
@@ -8424,21 +8424,21 @@ mod tests {
     }
 
     #[test]
-    fn direct_relay_trade_events_keep_cli_source_runtime_for_app_shaped_d_tags() {
+    fn direct_relay_trade_events_use_network_source_runtime_for_app_shaped_d_tags() {
         let app_shaped_d_tag =
             super::d_tag_from_uuid(Uuid::from_u128(0x12345678123446789123456781234567));
 
         assert_eq!(
             direct_relay_event_source_runtime(30340, Some(app_shaped_d_tag.as_str())),
-            SourceRuntime::Cli
+            SourceRuntime::Network
         );
         assert_eq!(
             direct_relay_event_source_runtime(30402, Some(app_shaped_d_tag.as_str())),
-            SourceRuntime::Cli
+            SourceRuntime::Network
         );
         assert_eq!(
             direct_relay_event_source_runtime(30403, Some(app_shaped_d_tag.as_str())),
-            SourceRuntime::Cli
+            SourceRuntime::Network
         );
     }
 
@@ -8832,7 +8832,10 @@ mod tests {
         )
         .expect("delivery json");
 
-        assert_eq!(listing_import.source_runtime, SourceRuntime::Cli.as_str());
+        assert_eq!(
+            listing_import.source_runtime,
+            SourceRuntime::Network.as_str()
+        );
         assert_eq!(listing_import.outbox_status, "none");
         assert_eq!(delivery["state"], json!("observed"));
         assert_eq!(delivery["acknowledged_relays"], json!([]));
@@ -8988,7 +8991,10 @@ mod tests {
         )
         .expect("delivery json");
 
-        assert_eq!(listing_import.source_runtime, SourceRuntime::Cli.as_str());
+        assert_eq!(
+            listing_import.source_runtime,
+            SourceRuntime::Network.as_str()
+        );
         assert_eq!(listing_import.outbox_status, "none");
         assert_eq!(delivery["state"], json!("observed"));
         assert_eq!(delivery["acknowledged_relays"], json!([]));
