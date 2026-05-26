@@ -8699,6 +8699,173 @@ mod tests {
     }
 
     #[test]
+    fn runtime_direct_relay_transport_publishes_typed_listing_work() {
+        let relay = ThreadedAckRelay::spawn();
+        let manager = RadrootsNostrAccountsManager::new_in_memory();
+        let account_id = manager
+            .generate_identity(Some("Farmer".to_owned()), true)
+            .expect("local signing account should generate");
+        let identity = manager
+            .get_signing_identity(&account_id)
+            .expect("seller signer lookup should succeed")
+            .expect("seller account should have local signer");
+        let farm_id = FarmId::new();
+        let product_id = ProductId::new();
+        let payload = AppPublishPayload::Listing(AppListingPublishPayload {
+            context: AppPublishContext::new(account_id.to_string(), "listing_publish")
+                .with_source_local_event_id("app:local_work:listing:direct"),
+            product_id,
+            listing_d_tag: Some(super::d_tag_from_uuid(product_id.as_uuid())),
+            farm_id: Some(farm_id),
+            farm_pubkey: Some(identity.public_key_hex()),
+            farm_d_tag: Some(super::d_tag_from_uuid(farm_id.as_uuid())),
+            title: "North field eggs".to_owned(),
+            subtitle: Some("Pasture raised".to_owned()),
+            category: Some("eggs".to_owned()),
+            unit_label: "each".to_owned(),
+            price_minor_units: Some(750),
+            price_currency: "USD".to_owned(),
+            stock_quantity: Some(12),
+            availability_window_id: Some(FulfillmentWindowId::new()),
+            availability_starts_at: Some("2099-05-25T14:00:00Z".to_owned()),
+            availability_ends_at: Some("2099-05-25T18:00:00Z".to_owned()),
+            fulfillment_method: Some("pickup".to_owned()),
+            fulfillment_location: Some("farmstand".to_owned()),
+            status: ProductStatus::Published,
+        });
+        let operation = PendingSyncOperation::from_publish_payload(payload, "2026-05-24T12:00:00Z")
+            .expect("typed listing publish work should serialize");
+        let mut transport =
+            SdkDirectRelayAppSyncTransport::with_relay_urls(manager, vec![relay.url().to_owned()]);
+
+        let result = transport
+            .sync(AppSyncRequest {
+                trigger: SyncTrigger::ManualRefresh,
+                checkpoint: SyncCheckpointStatus::never_synced(),
+                pending_operations: vec![operation],
+                known_conflicts: Vec::new(),
+            })
+            .expect("direct relay listing publish should succeed");
+
+        assert_eq!(result.run_status, AppSyncRunStatus::Succeeded);
+        assert_eq!(result.pushed_operation_count, 1);
+        assert_eq!(result.published_receipts.len(), 1);
+        assert_eq!(result.published_receipts[0].event_kind, 30402);
+        assert_eq!(
+            result.published_receipts[0].event_pubkey,
+            identity.public_key_hex()
+        );
+        assert_eq!(
+            result.published_receipts[0]
+                .source_local_event_id
+                .as_deref(),
+            Some("app:local_work:listing:direct")
+        );
+        assert_eq!(relay.event_count(), 1);
+    }
+
+    #[test]
+    fn runtime_direct_relay_transport_publishes_typed_order_request_work() {
+        let relay = ThreadedAckRelay::spawn();
+        let manager = RadrootsNostrAccountsManager::new_in_memory();
+        let account_id = manager
+            .generate_identity(Some("Buyer".to_owned()), true)
+            .expect("local signing account should generate");
+        let buyer_identity = manager
+            .get_signing_identity(&account_id)
+            .expect("buyer signer lookup should succeed")
+            .expect("buyer account should have local signer");
+        let seller_identity = RadrootsIdentity::generate();
+        let product_id = ProductId::new();
+        let order_id = OrderId::new();
+        let listing_event_id = "1".repeat(64);
+        let listing_addr = format!("30402:{}:listing-key", seller_identity.public_key_hex());
+        let order_document = RadrootsTradeOrderRequested {
+            order_id: order_id.to_string(),
+            listing_addr: listing_addr.clone(),
+            buyer_pubkey: buyer_identity.public_key_hex(),
+            seller_pubkey: seller_identity.public_key_hex(),
+            items: vec![RadrootsTradeOrderItem {
+                bin_id: "bin-1".to_owned(),
+                bin_count: 1,
+            }],
+            economics: RadrootsTradeOrderEconomics {
+                quote_id: format!("quote-{order_id}"),
+                quote_version: 1,
+                pricing_basis: RadrootsTradePricingBasis::ListingEvent,
+                currency: RadrootsCoreCurrency::USD,
+                items: vec![RadrootsTradeOrderEconomicItem {
+                    bin_id: "bin-1".to_owned(),
+                    bin_count: 1,
+                    quantity_amount: RadrootsCoreDecimal::from(1u32),
+                    quantity_unit: RadrootsCoreUnit::Each,
+                    unit_price_amount: RadrootsCoreDecimal::from(5u32),
+                    unit_price_currency: RadrootsCoreCurrency::USD,
+                    line_subtotal: RadrootsCoreMoney::from_minor_units_u32(
+                        500,
+                        RadrootsCoreCurrency::USD,
+                    ),
+                }],
+                discounts: Vec::new(),
+                adjustments: Vec::new(),
+                subtotal: RadrootsCoreMoney::from_minor_units_u32(500, RadrootsCoreCurrency::USD),
+                discount_total: RadrootsCoreMoney::zero(RadrootsCoreCurrency::USD),
+                adjustment_total: RadrootsCoreMoney::zero(RadrootsCoreCurrency::USD),
+                total: RadrootsCoreMoney::from_minor_units_u32(500, RadrootsCoreCurrency::USD),
+            },
+        };
+        let payload = AppPublishPayload::OrderRequest(AppOrderRequestPublishPayload {
+            context: AppPublishContext::new(account_id.to_string(), "place_personal_order")
+                .with_source_local_event_id("app:local_work:order_request:direct"),
+            order_id,
+            farm_id: FarmId::new(),
+            status: Some("needs_action".to_owned()),
+            order_document_json: Some(json!({"document": {"order": order_document}})),
+            listing_addr: Some(listing_addr),
+            listing_event_id: Some(listing_event_id),
+            listing_relays: vec![relay.url().to_owned()],
+            buyer_pubkey: Some(buyer_identity.public_key_hex()),
+            seller_pubkey: Some(seller_identity.public_key_hex()),
+            items: vec![AppOrderRequestItemPayload {
+                product_id,
+                quantity: 1,
+            }],
+            currency_code: Some("USD".to_owned()),
+            total_minor_units: Some(500),
+            note: Some("coordinate pickup".to_owned()),
+        });
+        let operation = PendingSyncOperation::from_publish_payload(payload, "2026-05-24T12:00:00Z")
+            .expect("typed order request publish work should serialize");
+        let mut transport =
+            SdkDirectRelayAppSyncTransport::with_relay_urls(manager, vec![relay.url().to_owned()]);
+
+        let result = transport
+            .sync(AppSyncRequest {
+                trigger: SyncTrigger::ManualRefresh,
+                checkpoint: SyncCheckpointStatus::never_synced(),
+                pending_operations: vec![operation],
+                known_conflicts: Vec::new(),
+            })
+            .expect("direct relay order request publish should succeed");
+
+        assert_eq!(result.run_status, AppSyncRunStatus::Succeeded);
+        assert_eq!(result.pushed_operation_count, 1);
+        assert_eq!(result.published_receipts.len(), 1);
+        assert_eq!(result.published_receipts[0].event_kind, 3422);
+        assert_eq!(
+            result.published_receipts[0].event_pubkey,
+            buyer_identity.public_key_hex()
+        );
+        assert_eq!(
+            result.published_receipts[0]
+                .source_local_event_id
+                .as_deref(),
+            Some("app:local_work:order_request:direct")
+        );
+        assert_eq!(relay.event_count(), 1);
+    }
+
+    #[test]
     fn runtime_direct_relay_transport_publishes_typed_order_decision_work() {
         let relay = ThreadedAckRelay::spawn();
         let manager = RadrootsNostrAccountsManager::new_in_memory();
