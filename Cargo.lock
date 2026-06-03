@@ -5189,6 +5189,9 @@ name = "radroots_studio_app_view"
 version = "0.1.0"
 dependencies = [
  "radroots_studio_app_types",
+ "radroots_core",
+ "radroots_events",
+ "radroots_trade",
  "serde",
  "url",
  "uuid",

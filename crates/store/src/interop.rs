@@ -2,8 +2,9 @@ use std::{fs, path::Path};
 
 use radroots_studio_app_view::{
     FarmId, FarmOrderMethod, FarmReadiness, FarmSetupDraft, FarmSetupProjection, FarmSummary,
-    FulfillmentWindowId, OrderId, OrderStatus, PickupLocationId, ProductId, ProductStatus,
-    TradeRevisionStatus,
+    FulfillmentWindowId, OrderId, PickupLocationId, ProductId, ProductStatus,
+    TradeProvenanceProjection, TradeRevisionStatus, TradeWorkflowProjection, TradeWorkflowSource,
+    order_status_from_active_order_projection,
 };
 use radroots_events::{
     RadrootsNostrEvent,
@@ -13,8 +14,8 @@ use radroots_events::{
         KIND_TRADE_RECEIPT,
     },
     trade::{
-        RadrootsActiveTradeFulfillmentState, RadrootsTradeOrderEconomics, RadrootsTradeOrderItem,
-        RadrootsTradeOrderRequested, RadrootsTradeOrderRevisionDecision,
+        RadrootsTradeOrderEconomics, RadrootsTradeOrderItem, RadrootsTradeOrderRequested,
+        RadrootsTradeOrderRevisionDecision,
     },
 };
 use radroots_events_codec::trade::{
@@ -34,7 +35,7 @@ use radroots_trade::order::{
     RadrootsActiveOrderFulfillmentRecord, RadrootsActiveOrderProjection,
     RadrootsActiveOrderReceiptRecord, RadrootsActiveOrderRequestRecord,
     RadrootsActiveOrderRevisionDecisionRecord, RadrootsActiveOrderRevisionProposalRecord,
-    RadrootsActiveOrderStatus, reduce_active_order_events,
+    reduce_active_order_events,
 };
 use rusqlite::{Connection, OptionalExtension, params};
 use serde_json::Value;
@@ -1181,7 +1182,13 @@ impl<'a> AppLocalInteropRepository<'a> {
         revision: TradeRevisionStatus,
         agreement_source: Option<&ActiveOrderAgreementSource>,
     ) -> Result<(), AppSqliteError> {
-        let Some(status) = order_status_from_active_projection(projection) else {
+        let workflow = TradeWorkflowProjection::from_active_order_projection(
+            order_id,
+            projection,
+            revision,
+            TradeProvenanceProjection::from_primary_source(TradeWorkflowSource::LocalEvents),
+        );
+        let Some(status) = order_status_from_active_order_projection(projection) else {
             return Ok(());
         };
         self.connection
@@ -1192,9 +1199,9 @@ impl<'a> AppLocalInteropRepository<'a> {
                      updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now')
                  WHERE id = ?1",
                 params![
-                    order_id.to_string(),
+                    workflow.order_id.to_string(),
                     status.storage_key(),
-                    revision.storage_key()
+                    workflow.revision.storage_key()
                 ],
             )
             .map_err(|source| AppSqliteError::Query {
@@ -1204,7 +1211,7 @@ impl<'a> AppLocalInteropRepository<'a> {
         if projection.economics.is_some()
             && let Some(agreement_source) = agreement_source
         {
-            self.replace_active_order_agreement_lines(order_id, agreement_source)?;
+            self.replace_active_order_agreement_lines(workflow.order_id, agreement_source)?;
         }
         Ok(())
     }
@@ -2812,33 +2819,6 @@ fn active_order_evidence_from_event(event: &RadrootsNostrEvent) -> Option<Active
 fn dedupe_active_order_evidence(evidence: &mut Vec<ActiveOrderEvidence>) {
     evidence.sort_by(|left, right| left.event_id().cmp(right.event_id()));
     evidence.dedup_by(|left, right| left.event_id() == right.event_id());
-}
-
-fn order_status_from_active_projection(
-    projection: &RadrootsActiveOrderProjection,
-) -> Option<OrderStatus> {
-    match projection.status {
-        RadrootsActiveOrderStatus::Missing => None,
-        RadrootsActiveOrderStatus::Requested => Some(OrderStatus::NeedsAction),
-        RadrootsActiveOrderStatus::Accepted => match projection.fulfillment_status {
-            Some(RadrootsActiveTradeFulfillmentState::ReadyForPickup)
-            | Some(RadrootsActiveTradeFulfillmentState::OutForDelivery)
-            | Some(RadrootsActiveTradeFulfillmentState::Delivered) => Some(OrderStatus::Packed),
-            Some(RadrootsActiveTradeFulfillmentState::SellerCancelled) => {
-                Some(OrderStatus::Declined)
-            }
-            Some(RadrootsActiveTradeFulfillmentState::Preparing)
-            | Some(RadrootsActiveTradeFulfillmentState::AcceptedNotFulfilled)
-            | None => Some(OrderStatus::Scheduled),
-        },
-        RadrootsActiveOrderStatus::Declined | RadrootsActiveOrderStatus::Cancelled => {
-            Some(OrderStatus::Declined)
-        }
-        RadrootsActiveOrderStatus::Completed => Some(OrderStatus::Completed),
-        RadrootsActiveOrderStatus::Disputed | RadrootsActiveOrderStatus::Invalid => {
-            Some(OrderStatus::NeedsAction)
-        }
-    }
 }
 
 fn signed_event_projection(record: &LocalEventRecord) -> ProjectionRecord {

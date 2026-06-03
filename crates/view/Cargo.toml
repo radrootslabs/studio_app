@@ -9,7 +9,10 @@ license.workspace = true
 publish = false
 
 [dependencies]
+radroots_core.workspace = true
+radroots_events.workspace = true
 radroots_studio_app_types.workspace = true
+radroots_trade.workspace = true
 serde.workspace = true
 url = "2"
 
