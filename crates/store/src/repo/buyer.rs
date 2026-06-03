@@ -9,7 +9,7 @@ use radroots_studio_app_view::{
     OrderId, OrderStatus, ProductAvailabilityState, ProductAvailabilitySummary, ProductId,
     ProductPricePresentation, ProductStatus, ProductStockState, ProductStockSummary,
     RepeatDemandEligibility, RepeatDemandHandoffProjection, TradePaymentDisplayStatus,
-    TradeWorkflowProjection,
+    TradeRevisionStatus, TradeWorkflowProjection,
 };
 use rusqlite::{Connection, OptionalExtension, params};
 use serde_json::Value;
@@ -740,6 +740,7 @@ impl<'a> AppBuyerRepository<'a> {
                     o.farm_id,
                     o.order_number,
                     o.status,
+                    o.workflow_revision,
                     f.display_name,
                     fw.label,
                     fw.starts_at,
@@ -762,9 +763,10 @@ impl<'a> AppBuyerRepository<'a> {
                     row.get::<_, String>(2)?,
                     row.get::<_, String>(3)?,
                     row.get::<_, String>(4)?,
-                    row.get::<_, Option<String>>(5)?,
+                    row.get::<_, String>(5)?,
                     row.get::<_, Option<String>>(6)?,
                     row.get::<_, Option<String>>(7)?,
+                    row.get::<_, Option<String>>(8)?,
                 ))
             })
             .map_err(|source| AppSqliteError::Query {
@@ -779,6 +781,7 @@ impl<'a> AppBuyerRepository<'a> {
                 farm_id,
                 order_number,
                 status,
+                workflow_revision,
                 farm_display_name,
                 fulfillment_label,
                 fulfillment_starts_at,
@@ -808,7 +811,10 @@ impl<'a> AppBuyerRepository<'a> {
                     fulfillment_ends_at,
                 ),
                 status: buyer_status,
-                workflow: TradeWorkflowProjection::from_buyer_order_status(order_id, buyer_status),
+                workflow: TradeWorkflowProjection::from_buyer_order_status(order_id, buyer_status)
+                    .with_revision(TradeRevisionStatus::from_storage_key(
+                        workflow_revision.as_str(),
+                    )),
             });
         }
 
@@ -832,6 +838,7 @@ impl<'a> AppBuyerRepository<'a> {
                     o.order_number,
                     o.status,
                     o.buyer_order_note,
+                    o.workflow_revision,
                     f.display_name,
                     fw.label,
                     fw.starts_at,
@@ -850,9 +857,10 @@ impl<'a> AppBuyerRepository<'a> {
                         row.get::<_, String>(3)?,
                         row.get::<_, String>(4)?,
                         row.get::<_, String>(5)?,
-                        row.get::<_, Option<String>>(6)?,
+                        row.get::<_, String>(6)?,
                         row.get::<_, Option<String>>(7)?,
                         row.get::<_, Option<String>>(8)?,
+                        row.get::<_, Option<String>>(9)?,
                     ))
                 },
             )
@@ -870,6 +878,7 @@ impl<'a> AppBuyerRepository<'a> {
                     order_number,
                     status,
                     order_note,
+                    workflow_revision,
                     farm_display_name,
                     fulfillment_label,
                     fulfillment_starts_at,
@@ -884,6 +893,9 @@ impl<'a> AppBuyerRepository<'a> {
                     let payment = TradePaymentDisplayStatus::NotRecorded;
                     let workflow =
                         TradeWorkflowProjection::from_buyer_order_status(order_id, status)
+                            .with_revision(TradeRevisionStatus::from_storage_key(
+                                workflow_revision.as_str(),
+                            ))
                             .with_economics_and_payment(economics.clone(), payment);
                     Ok(BuyerOrderDetailProjection {
                         order_id,

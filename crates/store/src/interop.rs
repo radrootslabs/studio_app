@@ -3,6 +3,7 @@ use std::{fs, path::Path};
 use radroots_studio_app_view::{
     FarmId, FarmOrderMethod, FarmReadiness, FarmSetupDraft, FarmSetupProjection, FarmSummary,
     FulfillmentWindowId, OrderId, OrderStatus, PickupLocationId, ProductId, ProductStatus,
+    TradeRevisionStatus,
 };
 use radroots_events::{
     RadrootsNostrEvent,
@@ -11,7 +12,10 @@ use radroots_events::{
         KIND_TRADE_ORDER_RESPONSE, KIND_TRADE_ORDER_REVISION, KIND_TRADE_ORDER_REVISION_RESPONSE,
         KIND_TRADE_RECEIPT,
     },
-    trade::{RadrootsActiveTradeFulfillmentState, RadrootsTradeOrderRequested},
+    trade::{
+        RadrootsActiveTradeFulfillmentState, RadrootsTradeOrderEconomics, RadrootsTradeOrderItem,
+        RadrootsTradeOrderRequested, RadrootsTradeOrderRevisionDecision,
+    },
 };
 use radroots_events_codec::trade::{
     active_trade_buyer_receipt_from_event, active_trade_event_context_from_tags,
@@ -1074,6 +1078,9 @@ impl<'a> AppLocalInteropRepository<'a> {
         let buyer_pubkey = buyer_pubkey.to_owned();
         let order_id = projected_order_id(raw_order_id.as_str(), buyer_pubkey.as_str());
         let buckets = ActiveOrderEvidenceBuckets::from_evidence(evidence);
+        let requests = buckets.requests.clone();
+        let revision_proposals = buckets.revision_proposals.clone();
+        let revision_decisions = buckets.revision_decisions.clone();
         let projection = reduce_active_order_events(
             raw_order_id.as_str(),
             buckets.requests,
@@ -1086,7 +1093,28 @@ impl<'a> AppLocalInteropRepository<'a> {
             [],
             [],
         );
-        self.apply_active_order_projection(order_id, &projection)
+        let request_payload = projection.request_event_id.as_deref().and_then(|event_id| {
+            requests
+                .iter()
+                .find(|request| request.event_id == event_id)
+                .map(|request| &request.payload)
+        });
+        let revision =
+            active_order_revision_status(&projection, &revision_proposals, &revision_decisions);
+        let agreement_source = request_payload.map(|request| {
+            active_order_agreement_source(
+                request,
+                &projection,
+                &revision_proposals,
+                &revision_decisions,
+            )
+        });
+        self.apply_active_order_projection(
+            order_id,
+            &projection,
+            revision,
+            agreement_source.as_ref(),
+        )
     }
 
     fn upsert_order_request(
@@ -1150,6 +1178,8 @@ impl<'a> AppLocalInteropRepository<'a> {
         &self,
         order_id: OrderId,
         projection: &RadrootsActiveOrderProjection,
+        revision: TradeRevisionStatus,
+        agreement_source: Option<&ActiveOrderAgreementSource>,
     ) -> Result<(), AppSqliteError> {
         let Some(status) = order_status_from_active_projection(projection) else {
             return Ok(());
@@ -1158,14 +1188,24 @@ impl<'a> AppLocalInteropRepository<'a> {
             .execute(
                 "UPDATE orders
                  SET status = ?2,
+                     workflow_revision = ?3,
                      updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now')
                  WHERE id = ?1",
-                params![order_id.to_string(), status.storage_key()],
+                params![
+                    order_id.to_string(),
+                    status.storage_key(),
+                    revision.storage_key()
+                ],
             )
             .map_err(|source| AppSqliteError::Query {
                 operation: "apply local interop active order projection",
                 source,
             })?;
+        if projection.economics.is_some()
+            && let Some(agreement_source) = agreement_source
+        {
+            self.replace_active_order_agreement_lines(order_id, agreement_source)?;
+        }
         Ok(())
     }
 
@@ -1268,6 +1308,139 @@ impl<'a> AppLocalInteropRepository<'a> {
                 })?;
         }
         Ok(())
+    }
+
+    fn replace_active_order_agreement_lines(
+        &self,
+        order_id: OrderId,
+        source: &ActiveOrderAgreementSource,
+    ) -> Result<(), AppSqliteError> {
+        let existing_listing =
+            self.existing_listing_projection(Some(source.listing_addr.as_str()))?;
+        let metadata = self.existing_order_line_metadata(order_id)?;
+        self.connection
+            .execute(
+                "DELETE FROM order_lines WHERE order_id = ?1",
+                params![order_id.to_string()],
+            )
+            .map_err(|source| AppSqliteError::Query {
+                operation: "replace local interop active order agreement lines",
+                source,
+            })?;
+        for (index, item) in source.items.iter().enumerate() {
+            let economics_item = source
+                .economics
+                .items
+                .iter()
+                .find(|candidate| candidate.bin_id == item.bin_id);
+            let unit_label = economics_item
+                .map(|item| item.quantity_unit.to_string())
+                .or_else(|| {
+                    existing_listing
+                        .as_ref()
+                        .map(|listing| listing.unit_label.clone())
+                })
+                .unwrap_or_else(|| "item".to_owned());
+            let unit_price_minor_units = economics_item.and_then(|item| {
+                parse_decimal_minor_units(item.unit_price_amount.to_string().as_str())
+            });
+            let price_currency = economics_item
+                .map(|item| item.unit_price_currency.to_string())
+                .unwrap_or_else(|| source.economics.currency.to_string());
+            let title = existing_listing
+                .as_ref()
+                .filter(|listing| {
+                    listing
+                        .listing_bin_id
+                        .as_deref()
+                        .is_none_or(|listing_bin_id| listing_bin_id == item.bin_id)
+                })
+                .map(|listing| listing.title.clone())
+                .unwrap_or_else(|| item.bin_id.clone());
+            self.connection
+                .execute(
+                    "INSERT INTO order_lines (
+                        id,
+                        order_id,
+                        title,
+                        quantity_value,
+                        quantity_unit_label,
+                        quantity_display,
+                        listing_bin_id,
+                        unit_price_minor_units,
+                        price_currency,
+                        farm_key,
+                        listing_addr,
+                        listing_event_id,
+                        listing_relays_json,
+                        seller_pubkey,
+                        sort_index
+                     ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)",
+                    params![
+                        format!(
+                            "{}:{}",
+                            order_id,
+                            order_agreement_line_product_id(
+                                source.listing_addr.as_str(),
+                                source.seller_pubkey.as_str(),
+                                existing_listing.as_ref(),
+                                item,
+                            )
+                        ),
+                        order_id.to_string(),
+                        title.as_str(),
+                        i64::from(item.bin_count),
+                        unit_label.as_str(),
+                        format_quantity_display(item.bin_count, unit_label.as_str()),
+                        item.bin_id.as_str(),
+                        unit_price_minor_units,
+                        price_currency.as_str(),
+                        existing_listing
+                            .as_ref()
+                            .and_then(|listing| listing.farm_key.as_deref()),
+                        source.listing_addr.as_str(),
+                        metadata
+                            .as_ref()
+                            .and_then(|metadata| metadata.listing_event_id.as_deref()),
+                        metadata
+                            .as_ref()
+                            .and_then(|metadata| metadata.listing_relays_json.as_deref()),
+                        source.seller_pubkey.as_str(),
+                        index as i64,
+                    ],
+                )
+                .map_err(|source| AppSqliteError::Query {
+                    operation: "insert local interop active order agreement line",
+                    source,
+                })?;
+        }
+        Ok(())
+    }
+
+    fn existing_order_line_metadata(
+        &self,
+        order_id: OrderId,
+    ) -> Result<Option<ExistingOrderLineMetadata>, AppSqliteError> {
+        self.connection
+            .query_row(
+                "SELECT listing_event_id, listing_relays_json
+                 FROM order_lines
+                 WHERE order_id = ?1
+                 ORDER BY sort_index ASC, id ASC
+                 LIMIT 1",
+                params![order_id.to_string()],
+                |row| {
+                    Ok(ExistingOrderLineMetadata {
+                        listing_event_id: row.get::<_, Option<String>>(0)?,
+                        listing_relays_json: row.get::<_, Option<String>>(1)?,
+                    })
+                },
+            )
+            .optional()
+            .map_err(|source| AppSqliteError::Query {
+                operation: "load existing local interop order line metadata",
+                source,
+            })
     }
 
     fn upsert_farm_summary(&self, farm: &FarmSummary) -> Result<(), AppSqliteError> {
@@ -2254,6 +2427,20 @@ struct ExistingListingProjection {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
+struct ActiveOrderAgreementSource {
+    listing_addr: String,
+    seller_pubkey: String,
+    items: Vec<RadrootsTradeOrderItem>,
+    economics: RadrootsTradeOrderEconomics,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct ExistingOrderLineMetadata {
+    listing_event_id: Option<String>,
+    listing_relays_json: Option<String>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
 enum ActiveOrderEvidence {
     Request(RadrootsActiveOrderRequestRecord),
     Decision(RadrootsActiveOrderDecisionRecord),
@@ -2843,10 +3030,100 @@ fn projected_order_id(order_id: &str, buyer_pubkey: &str) -> OrderId {
     projected_order_id_from_trade_request(order_id, buyer_pubkey)
 }
 
+fn active_order_revision_status(
+    projection: &RadrootsActiveOrderProjection,
+    revision_proposals: &[RadrootsActiveOrderRevisionProposalRecord],
+    revision_decisions: &[RadrootsActiveOrderRevisionDecisionRecord],
+) -> TradeRevisionStatus {
+    let Some(mut parent_event_id) = projection.decision_event_id.clone() else {
+        return TradeRevisionStatus::None;
+    };
+    let mut status = TradeRevisionStatus::None;
+    loop {
+        let matching_proposals = revision_proposals
+            .iter()
+            .filter(|proposal| proposal.prev_event_id == parent_event_id)
+            .collect::<Vec<_>>();
+        let proposal = match matching_proposals.as_slice() {
+            [] => return status,
+            [proposal] => *proposal,
+            _ => return TradeRevisionStatus::None,
+        };
+        let matching_decisions = revision_decisions
+            .iter()
+            .filter(|decision| decision.prev_event_id == proposal.event_id)
+            .collect::<Vec<_>>();
+        let decision = match matching_decisions.as_slice() {
+            [] => return TradeRevisionStatus::ChangeProposed,
+            [decision] => *decision,
+            _ => return TradeRevisionStatus::None,
+        };
+        if decision.payload.revision_id != proposal.payload.revision_id {
+            return TradeRevisionStatus::None;
+        }
+        status = match &decision.payload.decision {
+            RadrootsTradeOrderRevisionDecision::Accepted => TradeRevisionStatus::Updated,
+            RadrootsTradeOrderRevisionDecision::Declined { .. } => {
+                TradeRevisionStatus::KeptAsPlaced
+            }
+        };
+        parent_event_id.clone_from(&decision.event_id);
+    }
+}
+
+fn active_order_agreement_source(
+    request: &RadrootsTradeOrderRequested,
+    projection: &RadrootsActiveOrderProjection,
+    revision_proposals: &[RadrootsActiveOrderRevisionProposalRecord],
+    revision_decisions: &[RadrootsActiveOrderRevisionDecisionRecord],
+) -> ActiveOrderAgreementSource {
+    if let Some(agreement_event_id) = projection.agreement_event_id.as_deref()
+        && projection.decision_event_id.as_deref() != Some(agreement_event_id)
+        && let Some(revision_decision) = revision_decisions.iter().find(|decision| {
+            decision.event_id == agreement_event_id
+                && matches!(
+                    &decision.payload.decision,
+                    RadrootsTradeOrderRevisionDecision::Accepted
+                )
+        })
+        && let Some(revision_proposal) = revision_proposals.iter().find(|proposal| {
+            proposal.event_id == revision_decision.prev_event_id
+                && proposal.payload.revision_id == revision_decision.payload.revision_id
+        })
+    {
+        return ActiveOrderAgreementSource {
+            listing_addr: revision_proposal.payload.listing_addr.clone(),
+            seller_pubkey: revision_proposal.payload.seller_pubkey.clone(),
+            items: revision_proposal.payload.items.clone(),
+            economics: revision_proposal.payload.economics.clone(),
+        };
+    }
+    ActiveOrderAgreementSource {
+        listing_addr: request.listing_addr.clone(),
+        seller_pubkey: request.seller_pubkey.clone(),
+        items: request.items.clone(),
+        economics: request.economics.clone(),
+    }
+}
+
 fn order_line_product_id(
     payload: &RadrootsTradeOrderRequested,
     existing_listing: Option<&ExistingListingProjection>,
     item: &radroots_events::trade::RadrootsTradeOrderItem,
+) -> ProductId {
+    order_agreement_line_product_id(
+        payload.listing_addr.as_str(),
+        payload.seller_pubkey.as_str(),
+        existing_listing,
+        item,
+    )
+}
+
+fn order_agreement_line_product_id(
+    listing_addr: &str,
+    seller_pubkey: &str,
+    existing_listing: Option<&ExistingListingProjection>,
+    item: &RadrootsTradeOrderItem,
 ) -> ProductId {
     if let Some(existing_listing) = existing_listing
         && existing_listing
@@ -2856,8 +3133,8 @@ fn order_line_product_id(
     {
         return existing_listing.product_id;
     }
-    let product_key = format!("{}:{}", payload.listing_addr, item.bin_id);
-    deterministic_product_id(Some(payload.seller_pubkey.as_str()), product_key.as_str())
+    let product_key = format!("{listing_addr}:{}", item.bin_id);
+    deterministic_product_id(Some(seller_pubkey), product_key.as_str())
 }
 
 fn deterministic_order_number(order_id: &str) -> String {
@@ -3305,7 +3582,7 @@ mod tests {
 
     use radroots_studio_app_view::{
         BuyerContext, BuyerOrderStatus, FarmId, FarmOrderMethod, OrderStatus, OrdersFilter,
-        OrdersScreenQueryState, ProductAvailabilityState, ProductId,
+        OrdersScreenQueryState, ProductAvailabilityState, ProductId, TradeRevisionStatus,
     };
     use radroots_core::{
         RadrootsCoreCurrency, RadrootsCoreDecimal, RadrootsCoreMoney, RadrootsCoreUnit,
@@ -3891,7 +4168,15 @@ mod tests {
         root_event_id: &str,
         prev_event_id: &str,
     ) -> RadrootsTradeOrderRevisionProposed {
-        let request = order_request_payload(order_id, listing_addr, buyer_pubkey, seller_pubkey);
+        let mut request =
+            order_request_payload(order_id, listing_addr, buyer_pubkey, seller_pubkey);
+        request.items[0].bin_count = 3;
+        request.economics.quote_id = format!("quote-{order_id}-{revision_id}");
+        request.economics.quote_version = 2;
+        request.economics.items[0].bin_count = 3;
+        request.economics.items[0].line_subtotal = usd("24");
+        request.economics.subtotal = usd("24");
+        request.economics.total = usd("24");
         RadrootsTradeOrderRevisionProposed {
             revision_id: revision_id.to_owned(),
             order_id: order_id.to_owned(),
@@ -4858,6 +5143,7 @@ mod tests {
 
         let seller_farm_id = deterministic_farm_id(Some(seller_pubkey), farm_key);
         let order_id = projected_order_id(order_id_raw, buyer_pubkey);
+        let buyer_context = BuyerContext::account("acct_revision");
         let seller_orders = app_store
             .load_orders_list(
                 seller_farm_id,
@@ -4868,6 +5154,19 @@ mod tests {
             )
             .expect("load revision seller orders after proposal");
         assert_eq!(seller_orders.rows[0].status, OrderStatus::Scheduled);
+        assert_eq!(
+            seller_orders.rows[0].workflow.revision,
+            TradeRevisionStatus::ChangeProposed
+        );
+        let buyer_detail = app_store
+            .load_buyer_order_detail(&buyer_context, order_id)
+            .expect("load revision buyer detail after proposal")
+            .expect("revision buyer detail after proposal");
+        assert_eq!(
+            buyer_detail.workflow.revision,
+            TradeRevisionStatus::ChangeProposed
+        );
+        assert_eq!(buyer_detail.economics.total_minor_units, Some(1600));
 
         let revision_decision_payload = revision_decision_payload(
             "revision-1",
@@ -4912,6 +5211,25 @@ mod tests {
             )
             .expect("load revision seller orders after decision");
         assert_eq!(seller_orders.rows[0].status, OrderStatus::Scheduled);
+        assert_eq!(
+            seller_orders.rows[0].workflow.revision,
+            TradeRevisionStatus::Updated
+        );
+        let seller_detail = app_store
+            .load_order_detail(seller_farm_id, order_id)
+            .expect("load revision seller detail after decision")
+            .expect("revision seller detail after decision");
+        let buyer_detail = app_store
+            .load_buyer_order_detail(&buyer_context, order_id)
+            .expect("load revision buyer detail after decision")
+            .expect("revision buyer detail after decision");
+        assert_eq!(
+            seller_detail.workflow.revision,
+            TradeRevisionStatus::Updated
+        );
+        assert_eq!(seller_detail.economics.total_minor_units, Some(2400));
+        assert_eq!(buyer_detail.workflow.revision, TradeRevisionStatus::Updated);
+        assert_eq!(buyer_detail.economics.total_minor_units, Some(2400));
 
         let cancel_payload = order_cancel_payload(
             order_id_raw,
@@ -4940,7 +5258,7 @@ mod tests {
             .import_shared_local_events_from_store(&events)
             .expect("import revision cancellation");
         let buyer_detail = app_store
-            .load_buyer_order_detail(&BuyerContext::account("acct_revision"), order_id)
+            .load_buyer_order_detail(&buyer_context, order_id)
             .expect("load revision buyer detail")
             .expect("revision buyer detail");
         let seller_orders = app_store
@@ -4953,6 +5271,7 @@ mod tests {
             )
             .expect("load revision seller orders after cancellation");
         assert_eq!(buyer_detail.status, BuyerOrderStatus::Declined);
+        assert_eq!(buyer_detail.workflow.revision, TradeRevisionStatus::Updated);
         assert_eq!(seller_orders.rows[0].status, OrderStatus::Declined);
     }
 

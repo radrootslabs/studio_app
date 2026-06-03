@@ -7,6 +7,7 @@ pub use publish::{
     AppOrderDecisionInventoryCommitment, AppOrderDecisionPayload, AppOrderDecisionPublishPayload,
     AppOrderFulfillmentPublishPayload, AppOrderFulfillmentPublishStatus,
     AppOrderReceiptPublishPayload, AppOrderRequestItemPayload, AppOrderRequestPublishPayload,
+    AppOrderRevisionDecisionPublishPayload, AppOrderRevisionProposalPublishPayload,
     AppPublishContext, AppPublishPayload, AppPublishPayloadJsonError, AppPublishValidationFailure,
     AppPublishValidationFailureSet, AppPublishWorkKind,
 };

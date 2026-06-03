@@ -1196,6 +1196,15 @@ impl TradeRevisionStatus {
             TradeReducerRevisionStatus::Declined => Self::KeptAsPlaced,
         }
     }
+
+    pub fn from_storage_key(value: &str) -> Self {
+        match value.trim() {
+            "change_proposed" => Self::ChangeProposed,
+            "updated" => Self::Updated,
+            "kept_as_placed" => Self::KeptAsPlaced,
+            _ => Self::None,
+        }
+    }
 }
 
 impl From<TradeReducerRevisionStatus> for TradeRevisionStatus {
@@ -1528,6 +1537,11 @@ impl TradeWorkflowProjection {
 
     pub fn with_payment(mut self, payment: TradePaymentDisplayStatus) -> Self {
         self.payment = payment;
+        self
+    }
+
+    pub fn with_revision(mut self, revision: TradeRevisionStatus) -> Self {
+        self.revision = revision;
         self
     }
 

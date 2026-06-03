@@ -2,6 +2,9 @@ use radroots_studio_app_view::{
     FarmId, FarmReadiness, FulfillmentWindowId, OrderId, ProductId, ProductStatus,
 };
 use radroots_sdk::SdkTransportMode;
+use radroots_sdk::trade::{
+    RadrootsTradeOrderEconomics, RadrootsTradeOrderItem, RadrootsTradeOrderRevisionDecision,
+};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
@@ -14,6 +17,8 @@ pub enum AppPublishWorkKind {
     Listing,
     OrderRequest,
     OrderDecision,
+    OrderRevisionProposal,
+    OrderRevisionDecision,
     OrderCancellation,
     OrderFulfillment,
     OrderReceipt,
@@ -26,6 +31,8 @@ impl AppPublishWorkKind {
             Self::Listing => "listing",
             Self::OrderRequest => "order_request",
             Self::OrderDecision => "order_decision",
+            Self::OrderRevisionProposal => "order_revision_proposal",
+            Self::OrderRevisionDecision => "order_revision_decision",
             Self::OrderCancellation => "order_cancellation",
             Self::OrderFulfillment => "order_fulfillment",
             Self::OrderReceipt => "order_receipt",
@@ -38,6 +45,8 @@ impl AppPublishWorkKind {
             Self::Listing => "listing.publish_draft_with_identity",
             Self::OrderRequest => "trade.publish_order_request_with_identity",
             Self::OrderDecision => "trade.publish_order_decision_with_identity",
+            Self::OrderRevisionProposal => "trade.publish_order_revision_proposal_with_identity",
+            Self::OrderRevisionDecision => "trade.publish_order_revision_decision_with_identity",
             Self::OrderCancellation => "trade.publish_order_cancellation_with_identity",
             Self::OrderFulfillment => "trade.publish_fulfillment_update_with_identity",
             Self::OrderReceipt => "trade.publish_buyer_receipt_with_identity",
@@ -172,6 +181,38 @@ pub struct AppOrderDecisionPublishPayload {
     pub decision: AppOrderDecisionPayload,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct AppOrderRevisionProposalPublishPayload {
+    pub context: AppPublishContext,
+    pub app_order_id: OrderId,
+    pub farm_id: FarmId,
+    pub trade_order_id: String,
+    pub request_event_id: String,
+    pub prev_event_id: String,
+    pub revision_id: String,
+    pub listing_addr: String,
+    pub buyer_pubkey: String,
+    pub seller_pubkey: String,
+    pub items: Vec<RadrootsTradeOrderItem>,
+    pub economics: RadrootsTradeOrderEconomics,
+    pub reason: String,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct AppOrderRevisionDecisionPublishPayload {
+    pub context: AppPublishContext,
+    pub app_order_id: OrderId,
+    pub farm_id: FarmId,
+    pub trade_order_id: String,
+    pub request_event_id: String,
+    pub prev_event_id: String,
+    pub revision_id: String,
+    pub listing_addr: String,
+    pub buyer_pubkey: String,
+    pub seller_pubkey: String,
+    pub decision: RadrootsTradeOrderRevisionDecision,
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum AppOrderFulfillmentPublishStatus {
@@ -233,6 +274,8 @@ pub enum AppPublishPayload {
     Listing(AppListingPublishPayload),
     OrderRequest(AppOrderRequestPublishPayload),
     OrderDecision(AppOrderDecisionPublishPayload),
+    OrderRevisionProposal(AppOrderRevisionProposalPublishPayload),
+    OrderRevisionDecision(AppOrderRevisionDecisionPublishPayload),
     OrderCancellation(AppOrderCancellationPublishPayload),
     OrderFulfillment(AppOrderFulfillmentPublishPayload),
     OrderReceipt(AppOrderReceiptPublishPayload),
@@ -245,6 +288,8 @@ impl AppPublishPayload {
             Self::Listing(_) => AppPublishWorkKind::Listing,
             Self::OrderRequest(_) => AppPublishWorkKind::OrderRequest,
             Self::OrderDecision(_) => AppPublishWorkKind::OrderDecision,
+            Self::OrderRevisionProposal(_) => AppPublishWorkKind::OrderRevisionProposal,
+            Self::OrderRevisionDecision(_) => AppPublishWorkKind::OrderRevisionDecision,
             Self::OrderCancellation(_) => AppPublishWorkKind::OrderCancellation,
             Self::OrderFulfillment(_) => AppPublishWorkKind::OrderFulfillment,
             Self::OrderReceipt(_) => AppPublishWorkKind::OrderReceipt,
@@ -265,6 +310,8 @@ impl AppPublishPayload {
             Self::Listing(payload) => SyncAggregateRef::Product(payload.product_id),
             Self::OrderRequest(payload) => SyncAggregateRef::Order(payload.order_id),
             Self::OrderDecision(payload) => SyncAggregateRef::Order(payload.app_order_id),
+            Self::OrderRevisionProposal(payload) => SyncAggregateRef::Order(payload.app_order_id),
+            Self::OrderRevisionDecision(payload) => SyncAggregateRef::Order(payload.app_order_id),
             Self::OrderCancellation(payload) => SyncAggregateRef::Order(payload.app_order_id),
             Self::OrderFulfillment(payload) => SyncAggregateRef::Order(payload.app_order_id),
             Self::OrderReceipt(payload) => SyncAggregateRef::Order(payload.app_order_id),
@@ -433,6 +480,53 @@ impl AppPublishPayload {
                     }
                 }
             }
+            Self::OrderRevisionProposal(payload) => {
+                validate_lifecycle_order_fields(
+                    &payload.context,
+                    payload.trade_order_id.as_str(),
+                    payload.request_event_id.as_str(),
+                    payload.prev_event_id.as_str(),
+                    payload.listing_addr.as_str(),
+                    payload.buyer_pubkey.as_str(),
+                    payload.seller_pubkey.as_str(),
+                    &mut failures,
+                );
+                if payload.revision_id.trim().is_empty() {
+                    failures.push(AppPublishValidationFailure::MissingOrderRevisionId);
+                }
+                if payload.items.is_empty()
+                    || payload
+                        .items
+                        .iter()
+                        .any(|item| item.bin_id.trim().is_empty() || item.bin_count == 0)
+                {
+                    failures.push(AppPublishValidationFailure::MissingOrderRevisionItems);
+                }
+                if payload.economics.validate().is_err() {
+                    failures.push(AppPublishValidationFailure::InvalidOrderRevisionEconomics);
+                }
+                if payload.reason.trim().is_empty() {
+                    failures.push(AppPublishValidationFailure::MissingOrderRevisionReason);
+                }
+            }
+            Self::OrderRevisionDecision(payload) => {
+                validate_lifecycle_order_fields(
+                    &payload.context,
+                    payload.trade_order_id.as_str(),
+                    payload.request_event_id.as_str(),
+                    payload.prev_event_id.as_str(),
+                    payload.listing_addr.as_str(),
+                    payload.buyer_pubkey.as_str(),
+                    payload.seller_pubkey.as_str(),
+                    &mut failures,
+                );
+                if payload.revision_id.trim().is_empty() {
+                    failures.push(AppPublishValidationFailure::MissingOrderRevisionId);
+                }
+                if payload.decision.validate().is_err() {
+                    failures.push(AppPublishValidationFailure::MissingOrderRevisionDecisionReason);
+                }
+            }
             Self::OrderCancellation(payload) => {
                 validate_lifecycle_order_fields(
                     &payload.context,
@@ -564,6 +658,11 @@ pub enum AppPublishValidationFailure {
     MissingOrderPreviousEventId,
     MissingOrderDecisionInventory,
     MissingOrderDeclineReason,
+    MissingOrderRevisionId,
+    MissingOrderRevisionItems,
+    InvalidOrderRevisionEconomics,
+    MissingOrderRevisionReason,
+    MissingOrderRevisionDecisionReason,
     MissingOrderCancellationReason,
     MissingOrderReceiptIssue,
     UnexpectedOrderReceiptIssue,
@@ -600,6 +699,11 @@ impl AppPublishValidationFailure {
             Self::MissingOrderPreviousEventId => "missing_order_previous_event_id",
             Self::MissingOrderDecisionInventory => "missing_order_decision_inventory",
             Self::MissingOrderDeclineReason => "missing_order_decline_reason",
+            Self::MissingOrderRevisionId => "missing_order_revision_id",
+            Self::MissingOrderRevisionItems => "missing_order_revision_items",
+            Self::InvalidOrderRevisionEconomics => "invalid_order_revision_economics",
+            Self::MissingOrderRevisionReason => "missing_order_revision_reason",
+            Self::MissingOrderRevisionDecisionReason => "missing_order_revision_decision_reason",
             Self::MissingOrderCancellationReason => "missing_order_cancellation_reason",
             Self::MissingOrderReceiptIssue => "missing_order_receipt_issue",
             Self::UnexpectedOrderReceiptIssue => "unexpected_order_receipt_issue",
@@ -657,13 +761,18 @@ mod tests {
         AppFarmProfilePublishPayload, AppListingPublishPayload, AppOrderCancellationPublishPayload,
         AppOrderDecisionPayload, AppOrderDecisionPublishPayload, AppOrderFulfillmentPublishPayload,
         AppOrderFulfillmentPublishStatus, AppOrderReceiptPublishPayload,
-        AppOrderRequestItemPayload, AppOrderRequestPublishPayload, AppPublishContext,
-        AppPublishPayload, AppPublishValidationFailure,
+        AppOrderRequestItemPayload, AppOrderRequestPublishPayload,
+        AppOrderRevisionDecisionPublishPayload, AppOrderRevisionProposalPublishPayload,
+        AppPublishContext, AppPublishPayload, AppPublishValidationFailure,
     };
     use crate::{
         PendingSyncOperation, PendingSyncOperationState, SyncAggregateRef, SyncOperationKind,
     };
     use radroots_studio_app_view::{FarmId, FarmReadiness, OrderId, ProductId, ProductStatus};
+    use radroots_sdk::trade::{
+        RadrootsTradeOrderEconomics, RadrootsTradeOrderItem, RadrootsTradeOrderRevisionDecision,
+    };
+    use serde_json::json;
 
     #[test]
     fn publish_payload_serializes_with_stable_kind_and_sdk_target() {
@@ -963,6 +1072,117 @@ mod tests {
     }
 
     #[test]
+    fn order_revision_publish_payloads_report_stable_validation_reason_codes() {
+        let order_id = OrderId::new();
+        let farm_id = FarmId::new();
+        let economics = revision_economics();
+        let valid_proposal =
+            AppPublishPayload::OrderRevisionProposal(AppOrderRevisionProposalPublishPayload {
+                context: AppPublishContext::new("acct_seller", "seller_order_revision_proposal"),
+                app_order_id: order_id,
+                farm_id,
+                trade_order_id: "order-1".to_owned(),
+                request_event_id: "request-event-1".to_owned(),
+                prev_event_id: "decision-event-1".to_owned(),
+                revision_id: "revision-1".to_owned(),
+                listing_addr: "30402:seller:listing".to_owned(),
+                buyer_pubkey: "buyer".to_owned(),
+                seller_pubkey: "seller".to_owned(),
+                items: vec![RadrootsTradeOrderItem {
+                    bin_id: "bin-1".to_owned(),
+                    bin_count: 2,
+                }],
+                economics: economics.clone(),
+                reason: "harvest count updated".to_owned(),
+            });
+        let invalid_proposal =
+            AppPublishPayload::OrderRevisionProposal(AppOrderRevisionProposalPublishPayload {
+                context: AppPublishContext::new("", ""),
+                app_order_id: order_id,
+                farm_id,
+                trade_order_id: " ".to_owned(),
+                request_event_id: String::new(),
+                prev_event_id: String::new(),
+                revision_id: String::new(),
+                listing_addr: String::new(),
+                buyer_pubkey: String::new(),
+                seller_pubkey: String::new(),
+                items: Vec::new(),
+                economics: economics.clone(),
+                reason: " ".to_owned(),
+            });
+        let invalid_decision =
+            AppPublishPayload::OrderRevisionDecision(AppOrderRevisionDecisionPublishPayload {
+                context: AppPublishContext::new("", ""),
+                app_order_id: order_id,
+                farm_id,
+                trade_order_id: " ".to_owned(),
+                request_event_id: String::new(),
+                prev_event_id: String::new(),
+                revision_id: String::new(),
+                listing_addr: String::new(),
+                buyer_pubkey: String::new(),
+                seller_pubkey: String::new(),
+                decision: RadrootsTradeOrderRevisionDecision::Declined {
+                    reason: " ".to_owned(),
+                },
+            });
+
+        assert_eq!(
+            valid_proposal.work_kind().sdk_operation(),
+            "trade.publish_order_revision_proposal_with_identity"
+        );
+        assert_eq!(valid_proposal.validation_failures(), Vec::new());
+        assert_eq!(
+            invalid_decision.work_kind().sdk_operation(),
+            "trade.publish_order_revision_decision_with_identity"
+        );
+
+        let proposal_reason_codes: Vec<&str> = invalid_proposal
+            .validation_failures()
+            .into_iter()
+            .map(AppPublishValidationFailure::storage_key)
+            .collect();
+        let decision_reason_codes: Vec<&str> = invalid_decision
+            .validation_failures()
+            .into_iter()
+            .map(AppPublishValidationFailure::storage_key)
+            .collect();
+
+        assert_eq!(
+            proposal_reason_codes,
+            vec![
+                "missing_account_id",
+                "missing_source",
+                "missing_order_trade_order_id",
+                "missing_order_request_event_id",
+                "missing_order_previous_event_id",
+                "missing_order_listing_address",
+                "missing_order_buyer_pubkey",
+                "missing_order_seller_pubkey",
+                "missing_order_revision_id",
+                "missing_order_revision_items",
+                "missing_order_revision_reason",
+            ]
+        );
+        assert_eq!(
+            decision_reason_codes,
+            vec![
+                "missing_account_id",
+                "missing_source",
+                "missing_order_trade_order_id",
+                "missing_order_request_event_id",
+                "missing_order_previous_event_id",
+                "missing_order_listing_address",
+                "missing_order_buyer_pubkey",
+                "missing_order_seller_pubkey",
+                "missing_order_revision_id",
+                "missing_order_revision_decision_reason",
+            ]
+        );
+    }
+
+    #[test]
     fn existing_raw_payload_outbox_work_remains_local_save_compatible() {
         let pending_operation = PendingSyncOperation {
             operation_key: "product:greens:upsert".to_owned(),
@@ -978,5 +1198,45 @@ mod tests {
 
         assert!(!pending_operation.is_retry());
         assert!(pending_operation.publish_payload().is_err());
+    }
+
+    fn revision_economics() -> RadrootsTradeOrderEconomics {
+        serde_json::from_value(json!({
+            "quote_id": "quote-revision-1",
+            "quote_version": 2,
+            "pricing_basis": "listing_event",
+            "currency": "USD",
+            "items": [{
+                "bin_id": "bin-1",
+                "bin_count": 2,
+                "quantity_amount": "1",
+                "quantity_unit": "each",
+                "unit_price_amount": "8",
+                "unit_price_currency": "USD",
+                "line_subtotal": {
+                    "amount": "16",
+                    "currency": "USD"
+                }
+            }],
+            "discounts": [],
+            "adjustments": [],
+            "subtotal": {
+                "amount": "16",
+                "currency": "USD"
+            },
+            "discount_total": {
+                "amount": "0",
+                "currency": "USD"
+            },
+            "adjustment_total": {
+                "amount": "0",
+                "currency": "USD"
+            },
+            "total": {
+                "amount": "16",
+                "currency": "USD"
+            }
+        }))
+        .expect("revision economics fixture should decode")
     }
 }

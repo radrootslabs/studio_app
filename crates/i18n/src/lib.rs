@@ -485,6 +485,14 @@ mod tests {
             "Cancel order"
         );
         assert_eq!(
+            app_text(AppTextKey::PersonalOrdersActionAcceptChange),
+            "Accept change"
+        );
+        assert_eq!(
+            app_text(AppTextKey::PersonalOrdersActionKeepOrder),
+            "Keep order"
+        );
+        assert_eq!(
             app_text(AppTextKey::PersonalOrdersActionMarkReceived),
             "Mark received"
         );

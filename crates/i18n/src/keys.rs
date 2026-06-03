@@ -141,6 +141,8 @@ define_app_text_keys! {
     PersonalOrdersDetailNoteLabel => "personal.orders.detail.note.label",
     PersonalOrdersDetailItemsTitle => "personal.orders.detail.items.title",
     PersonalOrdersActionCancel => "personal.orders.action.cancel",
+    PersonalOrdersActionAcceptChange => "personal.orders.action.accept_change",
+    PersonalOrdersActionKeepOrder => "personal.orders.action.keep_order",
     PersonalOrdersActionMarkReceived => "personal.orders.action.mark_received",
     PersonalOrdersRepeatDemandTitle => "personal.orders.repeat_demand.title",
     PersonalOrdersRepeatDemandActionEligible => "personal.orders.repeat_demand.action.eligible",

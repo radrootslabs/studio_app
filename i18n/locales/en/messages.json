@@ -121,6 +121,8 @@
   "personal.orders.detail.note.label": "Order note",
   "personal.orders.detail.items.title": "Items",
   "personal.orders.action.cancel": "Cancel order",
+  "personal.orders.action.accept_change": "Accept change",
+  "personal.orders.action.keep_order": "Keep order",
   "personal.orders.action.mark_received": "Mark received",
   "personal.orders.repeat_demand.title": "Reorder",
   "personal.orders.repeat_demand.action.eligible": "Reorder",

@@ -7,7 +7,8 @@ use radroots_studio_app_view::{
     PackDayOutputCustomerOrder, PackDayOutputOrderState, PackDayOutputPackListEntry,
     PackDayOutputProductTotal, PackDayOutputQuantity, PackDayOutputSource, PackDayOutputWindow,
     PackDayPackListRow, PackDayProductTotalRow, PackDayProjection, PackDayRosterRow,
-    PackDayScreenQueryState, ProductId, TradePaymentDisplayStatus, TradeWorkflowProjection,
+    PackDayScreenQueryState, ProductId, TradePaymentDisplayStatus, TradeRevisionStatus,
+    TradeWorkflowProjection,
 };
 use rusqlite::{Connection, OptionalExtension, params};
 
@@ -74,6 +75,7 @@ impl<'a> AppOrdersRepository<'a> {
                     o.customer_display_name,
                     o.status,
                     o.fulfillment_window_id,
+                    o.workflow_revision,
                     fw.label,
                     pl.label
                  from orders o
@@ -90,8 +92,9 @@ impl<'a> AppOrdersRepository<'a> {
                         row.get::<_, String>(3)?,
                         row.get::<_, String>(4)?,
                         row.get::<_, Option<String>>(5)?,
-                        row.get::<_, Option<String>>(6)?,
+                        row.get::<_, String>(6)?,
                         row.get::<_, Option<String>>(7)?,
+                        row.get::<_, Option<String>>(8)?,
                     ))
                 },
             )
@@ -110,6 +113,7 @@ impl<'a> AppOrdersRepository<'a> {
                     customer_display_name,
                     status,
                     fulfillment_window_id,
+                    workflow_revision,
                     fulfillment_window_label,
                     pickup_location_label,
                 )| {
@@ -120,6 +124,9 @@ impl<'a> AppOrdersRepository<'a> {
                     let economics = order_detail_economics(&items)?;
                     let payment = TradePaymentDisplayStatus::NotRecorded;
                     let workflow = TradeWorkflowProjection::from_order_status(order_id, status)
+                        .with_revision(TradeRevisionStatus::from_storage_key(
+                            workflow_revision.as_str(),
+                        ))
                         .with_economics_and_payment(economics.clone(), payment);
                     Ok(OrderDetailProjection {
                         order_id,
@@ -285,6 +292,7 @@ impl<'a> AppOrdersRepository<'a> {
                     o.order_number,
                     o.customer_display_name,
                     o.status,
+                    o.workflow_revision,
                     fw.label,
                     pl.label
                  from orders o
@@ -312,8 +320,9 @@ impl<'a> AppOrdersRepository<'a> {
                         row.get::<_, String>(3)?,
                         row.get::<_, String>(4)?,
                         row.get::<_, String>(5)?,
-                        row.get::<_, Option<String>>(6)?,
+                        row.get::<_, String>(6)?,
                         row.get::<_, Option<String>>(7)?,
+                        row.get::<_, Option<String>>(8)?,
                     ))
                 },
             )
@@ -331,6 +340,7 @@ impl<'a> AppOrdersRepository<'a> {
                 order_number,
                 customer_display_name,
                 status,
+                workflow_revision,
                 fulfillment_window_label,
                 pickup_location_label,
             ) = row.map_err(|source| AppSqliteError::Query {
@@ -350,6 +360,7 @@ impl<'a> AppOrdersRepository<'a> {
                 fulfillment_window_label: empty_string_to_none(fulfillment_window_label),
                 pickup_location_label: empty_string_to_none(pickup_location_label),
                 status: parse_order_status("orders.status", status)?,
+                revision: TradeRevisionStatus::from_storage_key(workflow_revision.as_str()),
             });
         }
 
@@ -1117,6 +1128,7 @@ struct OrderRecord {
     fulfillment_window_label: Option<String>,
     pickup_location_label: Option<String>,
     status: OrderStatus,
+    revision: TradeRevisionStatus,
 }
 
 impl OrderRecord {
@@ -1132,7 +1144,8 @@ impl OrderRecord {
     }
 
     fn into_list_row(self) -> OrdersListRow {
-        let workflow = TradeWorkflowProjection::from_order_status(self.order_id, self.status);
+        let workflow = TradeWorkflowProjection::from_order_status(self.order_id, self.status)
+            .with_revision(self.revision);
 
         OrdersListRow {
             order_id: self.order_id,

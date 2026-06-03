@@ -2143,6 +2143,38 @@ impl HomeView {
         }
     }
 
+    fn accept_buyer_order_revision(&mut self, order_id: OrderId, cx: &mut Context<Self>) {
+        match self.runtime.publish_buyer_order_revision_accept(order_id) {
+            Ok(true) => cx.notify(),
+            Ok(false) => {}
+            Err(runtime_error) => {
+                error!(
+                    target: "personal_orders",
+                    event = "buyer.order_revision_accept_failed",
+                    error = %runtime_error,
+                    order_id = %order_id,
+                    "failed to accept buyer order change"
+                );
+            }
+        }
+    }
+
+    fn decline_buyer_order_revision(&mut self, order_id: OrderId, cx: &mut Context<Self>) {
+        match self.runtime.publish_buyer_order_revision_decline(order_id) {
+            Ok(true) => cx.notify(),
+            Ok(false) => {}
+            Err(runtime_error) => {
+                error!(
+                    target: "personal_orders",
+                    event = "buyer.order_revision_decline_failed",
+                    error = %runtime_error,
+                    order_id = %order_id,
+                    "failed to keep buyer order"
+                );
+            }
+        }
+    }
+
     fn mark_buyer_order_received(&mut self, order_id: OrderId, cx: &mut Context<Self>) {
         match self.runtime.publish_buyer_order_receipt(order_id) {
             Ok(true) => cx.notify(),
@@ -8938,6 +8970,38 @@ fn buyer_order_detail_card(
                         this.child(home_body_text(app_shared_text(AppTextKey::ValueNone)))
                     }),
             ))
+            .when(
+                detail.status == BuyerOrderStatus::Scheduled
+                    && detail.workflow.revision == TradeRevisionStatus::ChangeProposed,
+                |this| {
+                    this.child(
+                        app_stack_h(APP_UI_THEME.foundation.spacing.small_px)
+                            .w_full()
+                            .child(action_button_primary(
+                                "buyer-order-accept-change",
+                                app_shared_text(AppTextKey::PersonalOrdersActionAcceptChange),
+                                cx.listener({
+                                    let order_id = detail.order_id;
+                                    move |this, _, _, cx| {
+                                        this.accept_buyer_order_revision(order_id, cx)
+                                    }
+                                }),
+                                cx,
+                            ))
+                            .child(action_button_compact(
+                                "buyer-order-keep-order",
+                                app_shared_text(AppTextKey::PersonalOrdersActionKeepOrder),
+                                cx.listener({
+                                    let order_id = detail.order_id;
+                                    move |this, _, _, cx| {
+                                        this.decline_buyer_order_revision(order_id, cx)
+                                    }
+                                }),
+                                cx,
+                            )),
+                    )
+                },
+            )
             .when(
                 matches!(
                     detail.status,
