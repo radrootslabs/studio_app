@@ -16,6 +16,7 @@ radroots_local_events.workspace = true
 radroots_studio_app_view.workspace = true
 radroots_studio_app_sync.workspace = true
 radroots_sql_core.workspace = true
+radroots_trade.workspace = true
 rusqlite.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true

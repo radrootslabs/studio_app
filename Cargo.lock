@@ -5136,6 +5136,7 @@ dependencies = [
  "radroots_events_codec",
  "radroots_local_events",
  "radroots_sql_core",
+ "radroots_trade",
  "rusqlite",
  "serde_json",
  "thiserror 2.0.18",

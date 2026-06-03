@@ -43,6 +43,7 @@ radroots_runtime_paths = { path = "../lib/crates/runtime_paths" }
 radroots_secret_vault = { path = "../lib/crates/secret_vault", default-features = false, features = ["std"] }
 radroots_sdk = { path = "../lib/crates/sdk", features = ["relay-client", "signing"] }
 radroots_sql_core = { path = "../lib/crates/sql_core", features = ["native"] }
+radroots_trade = { path = "../lib/crates/trade", default-features = false, features = ["std", "serde", "serde_json"] }
 radroots_studio_app_core = { path = "crates/runtime", version = "0.1.0" }
 radroots_studio_app_i18n = { path = "crates/i18n", version = "0.1.0" }
 radroots_studio_app_types = { path = "crates/types", version = "0.1.0" }
