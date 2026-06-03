@@ -32,28 +32,30 @@ use radroots_studio_app_state::{
     derive_sync_projection,
 };
 use radroots_studio_app_sync::{
-    AppFarmProfilePublishPayload, AppListingPublishPayload, AppOrderDecisionInventoryCommitment,
-    AppOrderDecisionPayload, AppOrderDecisionPublishPayload, AppOrderRequestItemPayload,
-    AppOrderRequestPublishPayload, AppPublishContext, AppPublishPayload,
-    AppPublishedOperationReceipt, AppRelayIngestScopeFreshness, AppSyncProjection, AppSyncRequest,
-    AppSyncResult, AppSyncRunStatus, AppSyncTransport, AppSyncTransportError, PendingSyncOperation,
+    AppFarmProfilePublishPayload, AppListingPublishPayload, AppOrderCancellationPublishPayload,
+    AppOrderDecisionInventoryCommitment, AppOrderDecisionPayload, AppOrderDecisionPublishPayload,
+    AppOrderFulfillmentPublishPayload, AppOrderFulfillmentPublishStatus,
+    AppOrderReceiptPublishPayload, AppOrderRequestItemPayload, AppOrderRequestPublishPayload,
+    AppPublishContext, AppPublishPayload, AppPublishedOperationReceipt,
+    AppRelayIngestScopeFreshness, AppSyncProjection, AppSyncRequest, AppSyncResult,
+    AppSyncRunStatus, AppSyncTransport, AppSyncTransportError, PendingSyncOperation,
     SyncAggregateRef, SyncCheckpointStatus, SyncConflictSeverity, SyncOperationKind, SyncTrigger,
 };
 use radroots_studio_app_view::{
     ActiveSurface, AppActivityContext, AppActivityKind, AppIdentityProjection, AppStartupGate,
     BuyerCartLineProjection, BuyerCartProjection, BuyerCartReplaceConfirmationProjection,
-    BuyerCheckoutDraft, BuyerContext, BuyerOrderDetailProjection, BuyerProductDetailProjection,
-    FarmId, FarmOrderMethod, FarmProfileRecord, FarmReadiness, FarmRulesProjection, FarmSetupDraft,
-    FarmSetupProjection, FarmSummary, FarmerSection, FulfillmentWindowId,
-    LoggedOutStartupProjection, OrderDetailProjection, OrderId, OrderRecoveryProjection,
-    OrderStatus, OrdersFilter, OrdersListProjection, OrdersScreenQueryState,
-    PackDayBatchPrintStatus, PackDayExportBundle, PackDayExportInstanceId, PackDayExportStatus,
-    PackDayHostHandoffKind, PackDayHostHandoffStatus, PackDayPrintKind, PackDayPrintStatus,
-    PackDayProjection, PackDayScreenQueryState, PersonalSection, PickupLocationRecord,
-    ProductEditorDraft, ProductId, ProductStatus, ProductsFilter, ProductsListProjection,
-    ProductsSort, RecoveryKind, RecoveryQueueProjection, RecoveryRecordId, RecoveryState,
-    ReminderDeadlineProjection, ReminderDeliveryState, ReminderFeedProjection, ReminderId,
-    ReminderKind, ReminderLogEntryProjection, ReminderLogProjection, ReminderSurface,
+    BuyerCheckoutDraft, BuyerContext, BuyerOrderDetailProjection, BuyerOrderStatus,
+    BuyerProductDetailProjection, FarmId, FarmOrderMethod, FarmProfileRecord, FarmReadiness,
+    FarmRulesProjection, FarmSetupDraft, FarmSetupProjection, FarmSummary, FarmerSection,
+    FulfillmentWindowId, LoggedOutStartupProjection, OrderDetailProjection, OrderId,
+    OrderRecoveryProjection, OrderStatus, OrdersFilter, OrdersListProjection,
+    OrdersScreenQueryState, PackDayBatchPrintStatus, PackDayExportBundle, PackDayExportInstanceId,
+    PackDayExportStatus, PackDayHostHandoffKind, PackDayHostHandoffStatus, PackDayPrintKind,
+    PackDayPrintStatus, PackDayProjection, PackDayScreenQueryState, PersonalSection,
+    PickupLocationRecord, ProductEditorDraft, ProductId, ProductStatus, ProductsFilter,
+    ProductsListProjection, ProductsSort, RecoveryKind, RecoveryQueueProjection, RecoveryRecordId,
+    RecoveryState, ReminderDeadlineProjection, ReminderDeliveryState, ReminderFeedProjection,
+    ReminderId, ReminderKind, ReminderLogEntryProjection, ReminderLogProjection, ReminderSurface,
     ReminderUrgency, SettingsAccountProjection, SettingsPreference, SettingsSection, ShellSection,
     TodayAgendaProjection,
 };
@@ -82,8 +84,9 @@ use radroots_sdk::listing::{
     RadrootsListingStatus,
 };
 use radroots_sdk::trade::{
-    RadrootsTradeInventoryCommitment, RadrootsTradeOrderDecision, RadrootsTradeOrderDecisionEvent,
-    RadrootsTradeOrderRequested,
+    RadrootsActiveTradeFulfillmentState, RadrootsTradeBuyerReceipt,
+    RadrootsTradeFulfillmentUpdated, RadrootsTradeInventoryCommitment, RadrootsTradeOrderCancelled,
+    RadrootsTradeOrderDecision, RadrootsTradeOrderDecisionEvent, RadrootsTradeOrderRequested,
 };
 use radroots_sdk::{
     RadrootsNostrEventPtr, RadrootsSdkClient, RadrootsSdkConfig, RelayConfig, SdkEnvironment,
@@ -176,6 +179,26 @@ struct ResolvedAppSellerOrderRequest {
     request_event_id: String,
     listing_event_id: Option<String>,
     payload: RadrootsTradeOrderRequested,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct ResolvedAppOrderDecisionEvidence {
+    event_id: String,
+    payload: RadrootsTradeOrderDecisionEvent,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct ResolvedAppOrderFulfillmentEvidence {
+    event_id: String,
+    status: RadrootsActiveTradeFulfillmentState,
+}
+
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+struct ResolvedAppOrderLifecycleEvidence {
+    decision: Option<ResolvedAppOrderDecisionEvidence>,
+    latest_fulfillment: Option<ResolvedAppOrderFulfillmentEvidence>,
+    cancellation_event_id: Option<String>,
+    receipt_event_id: Option<String>,
 }
 
 #[derive(Debug, Default)]
@@ -340,6 +363,9 @@ fn publish_payload_context(publish_payload: &AppPublishPayload) -> &AppPublishCo
         AppPublishPayload::Listing(payload) => &payload.context,
         AppPublishPayload::OrderRequest(payload) => &payload.context,
         AppPublishPayload::OrderDecision(payload) => &payload.context,
+        AppPublishPayload::OrderCancellation(payload) => &payload.context,
+        AppPublishPayload::OrderFulfillment(payload) => &payload.context,
+        AppPublishPayload::OrderReceipt(payload) => &payload.context,
     }
 }
 
@@ -717,6 +743,30 @@ impl DesktopAppRuntime {
                 reason: reason.to_owned(),
             },
         )
+    }
+
+    pub fn publish_order_ready_for_pickup(
+        &self,
+        order_id: OrderId,
+    ) -> Result<bool, AppSqliteError> {
+        self.lock_state_mut().publish_seller_order_fulfillment(
+            order_id,
+            AppOrderFulfillmentPublishStatus::ReadyForPickup,
+        )
+    }
+
+    pub fn publish_order_delivered(&self, order_id: OrderId) -> Result<bool, AppSqliteError> {
+        self.lock_state_mut()
+            .publish_seller_order_fulfillment(order_id, AppOrderFulfillmentPublishStatus::Delivered)
+    }
+
+    pub fn publish_buyer_order_cancel(&self, order_id: OrderId) -> Result<bool, AppSqliteError> {
+        self.lock_state_mut()
+            .publish_buyer_order_cancellation(order_id)
+    }
+
+    pub fn publish_buyer_order_receipt(&self, order_id: OrderId) -> Result<bool, AppSqliteError> {
+        self.lock_state_mut().publish_buyer_order_receipt(order_id)
     }
 
     pub fn start_order_recovery(
@@ -2304,7 +2354,7 @@ impl DesktopAppRuntimeState {
                 reason: "seller order decision requires configured relays",
             });
         }
-        self.refresh_configured_relay_state_before_seller_order_decision()?;
+        self.refresh_configured_relay_state_before_order_lifecycle()?;
         let Some(sqlite_store) = self.sqlite_store.as_ref() else {
             return Err(AppSqliteError::InvalidProjection {
                 reason: "seller order decision requires local state",
@@ -2397,7 +2447,7 @@ impl DesktopAppRuntimeState {
         Ok(payload)
     }
 
-    fn refresh_configured_relay_state_before_seller_order_decision(
+    fn refresh_configured_relay_state_before_order_lifecycle(
         &mut self,
     ) -> Result<(), AppSqliteError> {
         match self.ingest_configured_relay_events() {
@@ -2413,7 +2463,7 @@ impl DesktopAppRuntimeState {
             Err(AppDirectRelayIngestError::Sqlite(error)) => Err(error),
             Err(AppDirectRelayIngestError::Transport(_)) => {
                 Err(AppSqliteError::InvalidProjection {
-                    reason: "seller order decision requires fresh configured relay state",
+                    reason: "order lifecycle publish requires fresh configured relay state",
                 })
             }
         }
@@ -2431,6 +2481,400 @@ impl DesktopAppRuntimeState {
         )
         .map_err(|_| AppSqliteError::InvalidProjection {
             reason: "seller order decision publish payload must serialize",
+        })?;
+        let _ = self.enqueue_selected_account_sync_operation_once(operation)?;
+        self.attempt_sync(SyncTrigger::ManualRefresh)
+    }
+
+    fn prepare_seller_order_fulfillment(
+        &mut self,
+        order_id: OrderId,
+        status: AppOrderFulfillmentPublishStatus,
+    ) -> Result<AppOrderFulfillmentPublishPayload, AppSqliteError> {
+        let _ = self.import_shared_local_events()?;
+        let relay_urls = normalized_app_sync_relay_urls(&self.nostr_relay_urls).map_err(|_| {
+            AppSqliteError::InvalidProjection {
+                reason: "seller order fulfillment requires valid configured relays",
+            }
+        })?;
+        if relay_urls.is_empty() {
+            return Err(AppSqliteError::InvalidProjection {
+                reason: "seller order fulfillment requires configured relays",
+            });
+        }
+        self.refresh_configured_relay_state_before_order_lifecycle()?;
+        let Some(sqlite_store) = self.sqlite_store.as_ref() else {
+            return Err(AppSqliteError::InvalidProjection {
+                reason: "seller order fulfillment requires local state",
+            });
+        };
+        let Some(farm_id) = self.selected_farm_id() else {
+            return Err(AppSqliteError::InvalidProjection {
+                reason: "seller order fulfillment requires a selected farm",
+            });
+        };
+        let Some(selected_account) = self
+            .state_store
+            .identity_projection()
+            .selected_account
+            .as_ref()
+        else {
+            return Err(AppSqliteError::InvalidProjection {
+                reason: "seller order fulfillment requires a selected seller account",
+            });
+        };
+        let account_id = selected_account.account.account_id.clone();
+        let seller_pubkey = self.local_events_owner_pubkey(selected_account).ok_or(
+            AppSqliteError::InvalidProjection {
+                reason: "seller order fulfillment requires a selected seller public key",
+            },
+        )?;
+        let request = self.resolve_seller_order_request_evidence(order_id)?;
+        if request.payload.seller_pubkey.trim() != seller_pubkey.as_str() {
+            return Err(AppSqliteError::InvalidProjection {
+                reason: "seller order fulfillment seller account does not match order seller",
+            });
+        }
+        let lifecycle = self.resolve_order_lifecycle_evidence(&request)?;
+        let Some(decision) = lifecycle.decision.as_ref() else {
+            return Err(AppSqliteError::InvalidProjection {
+                reason: "seller order fulfillment requires accepted order decision evidence",
+            });
+        };
+        if !matches!(
+            decision.payload.decision,
+            RadrootsTradeOrderDecision::Accepted { .. }
+        ) {
+            return Err(AppSqliteError::InvalidProjection {
+                reason: "seller order fulfillment requires accepted order decision evidence",
+            });
+        }
+        if lifecycle.cancellation_event_id.is_some() || lifecycle.receipt_event_id.is_some() {
+            return Err(AppSqliteError::InvalidProjection {
+                reason: "seller order fulfillment requires an active order",
+            });
+        }
+        if lifecycle
+            .latest_fulfillment
+            .as_ref()
+            .is_some_and(|fulfillment| {
+                matches!(
+                    fulfillment.status,
+                    RadrootsActiveTradeFulfillmentState::Delivered
+                        | RadrootsActiveTradeFulfillmentState::SellerCancelled
+                )
+            })
+        {
+            return Err(AppSqliteError::InvalidProjection {
+                reason: "seller order fulfillment is already terminal",
+            });
+        }
+        let Some(order_detail) = sqlite_store.load_order_detail(farm_id, order_id)? else {
+            return Err(AppSqliteError::InvalidProjection {
+                reason: "seller order fulfillment requires a visible seller order",
+            });
+        };
+        let prev_event_id = match status {
+            AppOrderFulfillmentPublishStatus::ReadyForPickup
+            | AppOrderFulfillmentPublishStatus::Preparing
+            | AppOrderFulfillmentPublishStatus::OutForDelivery => {
+                if order_detail.status != OrderStatus::Scheduled {
+                    return Err(AppSqliteError::InvalidProjection {
+                        reason: "seller order fulfillment requires a scheduled order",
+                    });
+                }
+                lifecycle
+                    .latest_fulfillment
+                    .as_ref()
+                    .map(|fulfillment| fulfillment.event_id.clone())
+                    .unwrap_or_else(|| decision.event_id.clone())
+            }
+            AppOrderFulfillmentPublishStatus::Delivered => {
+                if order_detail.status != OrderStatus::Packed {
+                    return Err(AppSqliteError::InvalidProjection {
+                        reason: "seller order delivery requires a ready order",
+                    });
+                }
+                lifecycle
+                    .latest_fulfillment
+                    .as_ref()
+                    .map(|fulfillment| fulfillment.event_id.clone())
+                    .ok_or(AppSqliteError::InvalidProjection {
+                        reason: "seller order delivery requires fulfillment evidence",
+                    })?
+            }
+            AppOrderFulfillmentPublishStatus::SellerCancelled => lifecycle
+                .latest_fulfillment
+                .as_ref()
+                .map(|fulfillment| fulfillment.event_id.clone())
+                .unwrap_or_else(|| decision.event_id.clone()),
+        };
+        let payload = AppOrderFulfillmentPublishPayload {
+            context: AppPublishContext::new(account_id, "seller_order_fulfillment"),
+            app_order_id: order_id,
+            farm_id,
+            trade_order_id: request.payload.order_id,
+            request_event_id: request.request_event_id,
+            prev_event_id,
+            listing_addr: request.payload.listing_addr,
+            buyer_pubkey: request.payload.buyer_pubkey,
+            seller_pubkey: request.payload.seller_pubkey,
+            status,
+        };
+        AppPublishPayload::OrderFulfillment(payload.clone())
+            .validate()
+            .map_err(|_| AppSqliteError::InvalidProjection {
+                reason: "seller order fulfillment publish payload is invalid",
+            })?;
+        Ok(payload)
+    }
+
+    fn publish_seller_order_fulfillment(
+        &mut self,
+        order_id: OrderId,
+        status: AppOrderFulfillmentPublishStatus,
+    ) -> Result<bool, AppSqliteError> {
+        let payload = self.prepare_seller_order_fulfillment(order_id, status)?;
+        let operation = PendingSyncOperation::from_publish_payload(
+            AppPublishPayload::OrderFulfillment(payload),
+            current_utc_timestamp(),
+        )
+        .map_err(|_| AppSqliteError::InvalidProjection {
+            reason: "seller order fulfillment publish payload must serialize",
+        })?;
+        let _ = self.enqueue_selected_account_sync_operation_once(operation)?;
+        self.attempt_sync(SyncTrigger::ManualRefresh)
+    }
+
+    fn prepare_buyer_order_cancellation(
+        &mut self,
+        order_id: OrderId,
+    ) -> Result<AppOrderCancellationPublishPayload, AppSqliteError> {
+        let _ = self.import_shared_local_events()?;
+        let relay_urls = normalized_app_sync_relay_urls(&self.nostr_relay_urls).map_err(|_| {
+            AppSqliteError::InvalidProjection {
+                reason: "buyer order cancellation requires valid configured relays",
+            }
+        })?;
+        if relay_urls.is_empty() {
+            return Err(AppSqliteError::InvalidProjection {
+                reason: "buyer order cancellation requires configured relays",
+            });
+        }
+        self.refresh_configured_relay_state_before_order_lifecycle()?;
+        let buyer_context = self.state_store.identity_projection().buyer_context();
+        let BuyerContext::Account(account_id) = &buyer_context else {
+            return Err(AppSqliteError::InvalidProjection {
+                reason: "buyer order cancellation requires a selected buyer account",
+            });
+        };
+        let Some(selected_account) = self.selected_buyer_account(&buyer_context) else {
+            return Err(AppSqliteError::InvalidProjection {
+                reason: "buyer order cancellation requires a selected buyer account",
+            });
+        };
+        let buyer_pubkey = self.local_events_owner_pubkey(selected_account).ok_or(
+            AppSqliteError::InvalidProjection {
+                reason: "buyer order cancellation requires a selected buyer public key",
+            },
+        )?;
+        let Some(sqlite_store) = self.sqlite_store.as_ref() else {
+            return Err(AppSqliteError::InvalidProjection {
+                reason: "buyer order cancellation requires local state",
+            });
+        };
+        let Some(detail) = sqlite_store.load_buyer_order_detail(&buyer_context, order_id)? else {
+            return Err(AppSqliteError::InvalidProjection {
+                reason: "buyer order cancellation requires a visible buyer order",
+            });
+        };
+        if !matches!(
+            detail.status,
+            BuyerOrderStatus::Placed | BuyerOrderStatus::Scheduled
+        ) {
+            return Err(AppSqliteError::InvalidProjection {
+                reason: "buyer order cancellation requires an open order",
+            });
+        }
+        let request = self.resolve_seller_order_request_evidence(order_id)?;
+        if request.payload.buyer_pubkey.trim() != buyer_pubkey.as_str() {
+            return Err(AppSqliteError::InvalidProjection {
+                reason: "buyer order cancellation buyer account does not match order buyer",
+            });
+        }
+        let lifecycle = self.resolve_order_lifecycle_evidence(&request)?;
+        if lifecycle.cancellation_event_id.is_some()
+            || lifecycle.receipt_event_id.is_some()
+            || lifecycle.latest_fulfillment.is_some()
+        {
+            return Err(AppSqliteError::InvalidProjection {
+                reason: "buyer order cancellation requires an unfulfilled order",
+            });
+        }
+        let prev_event_id = match detail.status {
+            BuyerOrderStatus::Placed => request.request_event_id.clone(),
+            BuyerOrderStatus::Scheduled => lifecycle
+                .decision
+                .as_ref()
+                .map(|decision| decision.event_id.clone())
+                .ok_or(AppSqliteError::InvalidProjection {
+                    reason: "buyer order cancellation requires order decision evidence",
+                })?,
+            BuyerOrderStatus::Ready
+            | BuyerOrderStatus::Completed
+            | BuyerOrderStatus::Declined
+            | BuyerOrderStatus::Refunded => {
+                return Err(AppSqliteError::InvalidProjection {
+                    reason: "buyer order cancellation requires an open order",
+                });
+            }
+        };
+        let payload = AppOrderCancellationPublishPayload {
+            context: AppPublishContext::new(account_id.clone(), "buyer_order_cancellation"),
+            app_order_id: order_id,
+            farm_id: detail.farm_id,
+            trade_order_id: request.payload.order_id,
+            request_event_id: request.request_event_id,
+            prev_event_id,
+            listing_addr: request.payload.listing_addr,
+            buyer_pubkey: request.payload.buyer_pubkey,
+            seller_pubkey: request.payload.seller_pubkey,
+            reason: "buyer cancelled order".to_owned(),
+        };
+        AppPublishPayload::OrderCancellation(payload.clone())
+            .validate()
+            .map_err(|_| AppSqliteError::InvalidProjection {
+                reason: "buyer order cancellation publish payload is invalid",
+            })?;
+        Ok(payload)
+    }
+
+    fn publish_buyer_order_cancellation(
+        &mut self,
+        order_id: OrderId,
+    ) -> Result<bool, AppSqliteError> {
+        let payload = self.prepare_buyer_order_cancellation(order_id)?;
+        let operation = PendingSyncOperation::from_publish_payload(
+            AppPublishPayload::OrderCancellation(payload),
+            current_utc_timestamp(),
+        )
+        .map_err(|_| AppSqliteError::InvalidProjection {
+            reason: "buyer order cancellation publish payload must serialize",
+        })?;
+        let _ = self.enqueue_selected_account_sync_operation_once(operation)?;
+        self.attempt_sync(SyncTrigger::ManualRefresh)
+    }
+
+    fn prepare_buyer_order_receipt(
+        &mut self,
+        order_id: OrderId,
+    ) -> Result<AppOrderReceiptPublishPayload, AppSqliteError> {
+        let _ = self.import_shared_local_events()?;
+        let relay_urls = normalized_app_sync_relay_urls(&self.nostr_relay_urls).map_err(|_| {
+            AppSqliteError::InvalidProjection {
+                reason: "buyer order receipt requires valid configured relays",
+            }
+        })?;
+        if relay_urls.is_empty() {
+            return Err(AppSqliteError::InvalidProjection {
+                reason: "buyer order receipt requires configured relays",
+            });
+        }
+        self.refresh_configured_relay_state_before_order_lifecycle()?;
+        let buyer_context = self.state_store.identity_projection().buyer_context();
+        let BuyerContext::Account(account_id) = &buyer_context else {
+            return Err(AppSqliteError::InvalidProjection {
+                reason: "buyer order receipt requires a selected buyer account",
+            });
+        };
+        let Some(selected_account) = self.selected_buyer_account(&buyer_context) else {
+            return Err(AppSqliteError::InvalidProjection {
+                reason: "buyer order receipt requires a selected buyer account",
+            });
+        };
+        let buyer_pubkey = self.local_events_owner_pubkey(selected_account).ok_or(
+            AppSqliteError::InvalidProjection {
+                reason: "buyer order receipt requires a selected buyer public key",
+            },
+        )?;
+        let Some(sqlite_store) = self.sqlite_store.as_ref() else {
+            return Err(AppSqliteError::InvalidProjection {
+                reason: "buyer order receipt requires local state",
+            });
+        };
+        let Some(detail) = sqlite_store.load_buyer_order_detail(&buyer_context, order_id)? else {
+            return Err(AppSqliteError::InvalidProjection {
+                reason: "buyer order receipt requires a visible buyer order",
+            });
+        };
+        if detail.status != BuyerOrderStatus::Ready {
+            return Err(AppSqliteError::InvalidProjection {
+                reason: "buyer order receipt requires a ready order",
+            });
+        }
+        let request = self.resolve_seller_order_request_evidence(order_id)?;
+        if request.payload.buyer_pubkey.trim() != buyer_pubkey.as_str() {
+            return Err(AppSqliteError::InvalidProjection {
+                reason: "buyer order receipt buyer account does not match order buyer",
+            });
+        }
+        let lifecycle = self.resolve_order_lifecycle_evidence(&request)?;
+        if lifecycle.cancellation_event_id.is_some() || lifecycle.receipt_event_id.is_some() {
+            return Err(AppSqliteError::InvalidProjection {
+                reason: "buyer order receipt requires an active ready order",
+            });
+        }
+        let fulfillment =
+            lifecycle
+                .latest_fulfillment
+                .as_ref()
+                .ok_or(AppSqliteError::InvalidProjection {
+                    reason: "buyer order receipt requires fulfillment evidence",
+                })?;
+        if !matches!(
+            fulfillment.status,
+            RadrootsActiveTradeFulfillmentState::ReadyForPickup
+                | RadrootsActiveTradeFulfillmentState::Delivered
+        ) {
+            return Err(AppSqliteError::InvalidProjection {
+                reason: "buyer order receipt requires ready fulfillment evidence",
+            });
+        }
+        let received_at = u64::try_from(current_runtime_time_seconds()?).map_err(|_| {
+            AppSqliteError::InvalidProjection {
+                reason: "buyer order receipt timestamp must be non-negative",
+            }
+        })?;
+        let payload = AppOrderReceiptPublishPayload {
+            context: AppPublishContext::new(account_id.clone(), "buyer_order_receipt"),
+            app_order_id: order_id,
+            farm_id: detail.farm_id,
+            trade_order_id: request.payload.order_id,
+            request_event_id: request.request_event_id,
+            prev_event_id: fulfillment.event_id.clone(),
+            listing_addr: request.payload.listing_addr,
+            buyer_pubkey: request.payload.buyer_pubkey,
+            seller_pubkey: request.payload.seller_pubkey,
+            received: true,
+            issue: None,
+            received_at,
+        };
+        AppPublishPayload::OrderReceipt(payload.clone())
+            .validate()
+            .map_err(|_| AppSqliteError::InvalidProjection {
+                reason: "buyer order receipt publish payload is invalid",
+            })?;
+        Ok(payload)
+    }
+
+    fn publish_buyer_order_receipt(&mut self, order_id: OrderId) -> Result<bool, AppSqliteError> {
+        let payload = self.prepare_buyer_order_receipt(order_id)?;
+        let operation = PendingSyncOperation::from_publish_payload(
+            AppPublishPayload::OrderReceipt(payload),
+            current_utc_timestamp(),
+        )
+        .map_err(|_| AppSqliteError::InvalidProjection {
+            reason: "buyer order receipt publish payload must serialize",
         })?;
         let _ = self.enqueue_selected_account_sync_operation_once(operation)?;
         self.attempt_sync(SyncTrigger::ManualRefresh)
@@ -4618,6 +5062,149 @@ impl DesktopAppRuntimeState {
         Ok(())
     }
 
+    fn resolve_order_lifecycle_evidence(
+        &self,
+        request: &ResolvedAppSellerOrderRequest,
+    ) -> Result<ResolvedAppOrderLifecycleEvidence, AppSqliteError> {
+        let mut events = self.collect_order_lifecycle_signed_events()?;
+        events.sort_by(|left, right| {
+            left.created_at
+                .cmp(&right.created_at)
+                .then_with(|| left.id.cmp(&right.id))
+        });
+
+        let mut evidence = ResolvedAppOrderLifecycleEvidence::default();
+        for event in events {
+            if trade_chain_tag_value(&event, "e_root").as_deref()
+                != Some(request.request_event_id.as_str())
+            {
+                continue;
+            }
+            match event.kind {
+                3423 => {
+                    let Ok(envelope) = radroots_sdk::trade::parse_order_decision(&event) else {
+                        continue;
+                    };
+                    if !trade_decision_matches_request(&envelope.payload, &request.payload) {
+                        continue;
+                    }
+                    evidence.decision = Some(ResolvedAppOrderDecisionEvidence {
+                        event_id: event.id,
+                        payload: envelope.payload,
+                    });
+                }
+                3432 => {
+                    let Ok(envelope) = radroots_sdk::trade::parse_order_cancellation(&event) else {
+                        continue;
+                    };
+                    if !trade_cancellation_matches_request(&envelope.payload, &request.payload) {
+                        continue;
+                    }
+                    evidence.cancellation_event_id = Some(event.id);
+                }
+                3433 => {
+                    let Ok(envelope) = radroots_sdk::trade::parse_fulfillment_update(&event) else {
+                        continue;
+                    };
+                    if !trade_fulfillment_matches_request(&envelope.payload, &request.payload) {
+                        continue;
+                    }
+                    evidence.latest_fulfillment = Some(ResolvedAppOrderFulfillmentEvidence {
+                        event_id: event.id,
+                        status: envelope.payload.status,
+                    });
+                }
+                3434 => {
+                    let Ok(envelope) = radroots_sdk::trade::parse_buyer_receipt(&event) else {
+                        continue;
+                    };
+                    if !trade_receipt_matches_request(&envelope.payload, &request.payload) {
+                        continue;
+                    }
+                    evidence.receipt_event_id = Some(event.id);
+                }
+                _ => {}
+            }
+        }
+
+        Ok(evidence)
+    }
+
+    fn collect_order_lifecycle_signed_events(
+        &self,
+    ) -> Result<Vec<radroots_sdk::RadrootsNostrEvent>, AppSqliteError> {
+        let mut events = Vec::new();
+        let mut seen_event_ids = BTreeSet::new();
+        let kinds = [3423_u32, 3432, 3433, 3434];
+
+        if let Some(sqlite_store) = self.sqlite_store.as_ref() {
+            for kind in kinds {
+                for event in
+                    sqlite_store.load_local_interop_signed_events_by_kind(i64::from(kind))?
+                {
+                    if seen_event_ids.insert(event.id.clone()) {
+                        events.push(event);
+                    }
+                }
+            }
+        }
+
+        let Some(store) = self.open_shared_local_events_store()? else {
+            return Ok(events);
+        };
+        let mut before = None;
+        loop {
+            let records = match before {
+                Some((before_change_seq, before_seq)) => store
+                    .list_records_changed_before(
+                        before_change_seq,
+                        before_seq,
+                        APP_SELLER_ORDER_DECISION_EVIDENCE_PAGE_SIZE,
+                    )
+                    .map_err(|source| AppSqliteError::LocalEvents {
+                        operation: "load shared order lifecycle evidence",
+                        source,
+                    })?,
+                None => store
+                    .list_records_changed_latest(APP_SELLER_ORDER_DECISION_EVIDENCE_PAGE_SIZE)
+                    .map_err(|source| AppSqliteError::LocalEvents {
+                        operation: "load shared order lifecycle evidence",
+                        source,
+                    })?,
+            };
+            if records.is_empty() {
+                break;
+            }
+            let is_last_page =
+                records.len() < APP_SELLER_ORDER_DECISION_EVIDENCE_PAGE_SIZE as usize;
+            before = records.last().map(|record| (record.change_seq, record.seq));
+
+            for record in records {
+                let Some(kind) = record.event_kind else {
+                    continue;
+                };
+                if record.family != LocalRecordFamily::SignedEvent
+                    || !kinds.contains(&u32::try_from(kind).unwrap_or_default())
+                    || !signed_order_request_evidence_record_is_usable(&record)
+                {
+                    continue;
+                }
+                let Some(event) = signed_event_from_local_record(&record)? else {
+                    continue;
+                };
+                if seen_event_ids.insert(event.id.clone()) {
+                    events.push(event);
+                }
+            }
+
+            if before.is_none() || is_last_page {
+                break;
+            }
+        }
+
+        Ok(events)
+    }
+
     fn open_shared_local_events_store(
         &self,
     ) -> Result<Option<LocalEventsStore<SqliteExecutor>>, AppSqliteError> {
@@ -6085,6 +6672,45 @@ async fn publish_app_payload(
                 .await
                 .map_err(|error| AppSyncTransportError::failed(error.to_string()))
         }
+        AppPublishPayload::OrderCancellation(payload) => {
+            let cancellation = order_cancellation_publish_payload_to_sdk_cancellation(payload);
+            client
+                .trade()
+                .publish_order_cancellation_with_identity(
+                    identity,
+                    payload.request_event_id.as_str(),
+                    payload.prev_event_id.as_str(),
+                    &cancellation,
+                )
+                .await
+                .map_err(|error| AppSyncTransportError::failed(error.to_string()))
+        }
+        AppPublishPayload::OrderFulfillment(payload) => {
+            let fulfillment = order_fulfillment_publish_payload_to_sdk_fulfillment(payload);
+            client
+                .trade()
+                .publish_fulfillment_update_with_identity(
+                    identity,
+                    payload.request_event_id.as_str(),
+                    payload.prev_event_id.as_str(),
+                    &fulfillment,
+                )
+                .await
+                .map_err(|error| AppSyncTransportError::failed(error.to_string()))
+        }
+        AppPublishPayload::OrderReceipt(payload) => {
+            let receipt = order_receipt_publish_payload_to_sdk_receipt(payload);
+            client
+                .trade()
+                .publish_buyer_receipt_with_identity(
+                    identity,
+                    payload.request_event_id.as_str(),
+                    payload.prev_event_id.as_str(),
+                    &receipt,
+                )
+                .await
+                .map_err(|error| AppSyncTransportError::failed(error.to_string()))
+        }
     }
 }
 
@@ -6369,6 +6995,21 @@ fn published_operation_receipt(
             payload.listing_addr.clone(),
         ),
         AppPublishPayload::OrderDecision(payload) => (
+            payload.context.account_id.clone(),
+            payload.context.source_local_event_id.clone(),
+            Some(payload.listing_addr.clone()),
+        ),
+        AppPublishPayload::OrderCancellation(payload) => (
+            payload.context.account_id.clone(),
+            payload.context.source_local_event_id.clone(),
+            Some(payload.listing_addr.clone()),
+        ),
+        AppPublishPayload::OrderFulfillment(payload) => (
+            payload.context.account_id.clone(),
+            payload.context.source_local_event_id.clone(),
+            Some(payload.listing_addr.clone()),
+        ),
+        AppPublishPayload::OrderReceipt(payload) => (
             payload.context.account_id.clone(),
             payload.context.source_local_event_id.clone(),
             Some(payload.listing_addr.clone()),
@@ -8136,6 +8777,60 @@ fn event_tags_from_value(
         .collect()
 }
 
+fn trade_chain_tag_value(event: &radroots_sdk::RadrootsNostrEvent, key: &str) -> Option<String> {
+    event.tags.iter().find_map(|tag| {
+        if tag.first().map(String::as_str) == Some(key) {
+            tag.get(1)
+                .map(String::as_str)
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .map(str::to_owned)
+        } else {
+            None
+        }
+    })
+}
+
+fn trade_decision_matches_request(
+    decision: &RadrootsTradeOrderDecisionEvent,
+    request: &RadrootsTradeOrderRequested,
+) -> bool {
+    decision.order_id == request.order_id
+        && decision.listing_addr == request.listing_addr
+        && decision.buyer_pubkey == request.buyer_pubkey
+        && decision.seller_pubkey == request.seller_pubkey
+}
+
+fn trade_fulfillment_matches_request(
+    fulfillment: &RadrootsTradeFulfillmentUpdated,
+    request: &RadrootsTradeOrderRequested,
+) -> bool {
+    fulfillment.order_id == request.order_id
+        && fulfillment.listing_addr == request.listing_addr
+        && fulfillment.buyer_pubkey == request.buyer_pubkey
+        && fulfillment.seller_pubkey == request.seller_pubkey
+}
+
+fn trade_cancellation_matches_request(
+    cancellation: &RadrootsTradeOrderCancelled,
+    request: &RadrootsTradeOrderRequested,
+) -> bool {
+    cancellation.order_id == request.order_id
+        && cancellation.listing_addr == request.listing_addr
+        && cancellation.buyer_pubkey == request.buyer_pubkey
+        && cancellation.seller_pubkey == request.seller_pubkey
+}
+
+fn trade_receipt_matches_request(
+    receipt: &RadrootsTradeBuyerReceipt,
+    request: &RadrootsTradeOrderRequested,
+) -> bool {
+    receipt.order_id == request.order_id
+        && receipt.listing_addr == request.listing_addr
+        && receipt.buyer_pubkey == request.buyer_pubkey
+        && receipt.seller_pubkey == request.seller_pubkey
+}
+
 fn insert_seller_order_request_evidence(
     order_id: &OrderId,
     event: &radroots_sdk::RadrootsNostrEvent,
@@ -8240,6 +8935,60 @@ fn order_decision_publish_payload_to_sdk_decision(
     }
 }
 
+fn order_fulfillment_publish_payload_to_sdk_fulfillment(
+    payload: &AppOrderFulfillmentPublishPayload,
+) -> RadrootsTradeFulfillmentUpdated {
+    RadrootsTradeFulfillmentUpdated {
+        order_id: payload.trade_order_id.clone(),
+        listing_addr: payload.listing_addr.clone(),
+        buyer_pubkey: payload.buyer_pubkey.clone(),
+        seller_pubkey: payload.seller_pubkey.clone(),
+        status: match payload.status {
+            AppOrderFulfillmentPublishStatus::Preparing => {
+                RadrootsActiveTradeFulfillmentState::Preparing
+            }
+            AppOrderFulfillmentPublishStatus::ReadyForPickup => {
+                RadrootsActiveTradeFulfillmentState::ReadyForPickup
+            }
+            AppOrderFulfillmentPublishStatus::OutForDelivery => {
+                RadrootsActiveTradeFulfillmentState::OutForDelivery
+            }
+            AppOrderFulfillmentPublishStatus::Delivered => {
+                RadrootsActiveTradeFulfillmentState::Delivered
+            }
+            AppOrderFulfillmentPublishStatus::SellerCancelled => {
+                RadrootsActiveTradeFulfillmentState::SellerCancelled
+            }
+        },
+    }
+}
+
+fn order_cancellation_publish_payload_to_sdk_cancellation(
+    payload: &AppOrderCancellationPublishPayload,
+) -> RadrootsTradeOrderCancelled {
+    RadrootsTradeOrderCancelled {
+        order_id: payload.trade_order_id.clone(),
+        listing_addr: payload.listing_addr.clone(),
+        buyer_pubkey: payload.buyer_pubkey.clone(),
+        seller_pubkey: payload.seller_pubkey.clone(),
+        reason: payload.reason.clone(),
+    }
+}
+
+fn order_receipt_publish_payload_to_sdk_receipt(
+    payload: &AppOrderReceiptPublishPayload,
+) -> RadrootsTradeBuyerReceipt {
+    RadrootsTradeBuyerReceipt {
+        order_id: payload.trade_order_id.clone(),
+        listing_addr: payload.listing_addr.clone(),
+        buyer_pubkey: payload.buyer_pubkey.clone(),
+        seller_pubkey: payload.seller_pubkey.clone(),
+        received: payload.received,
+        issue: payload.issue.clone(),
+        received_at: payload.received_at,
+    }
+}
+
 fn pending_sync_upsert(aggregate: SyncAggregateRef, payload_json: String) -> PendingSyncOperation {
     let created_at = current_utc_timestamp();
 
@@ -8336,15 +9085,17 @@ mod tests {
         HomeRoute,
     };
     use radroots_studio_app_sync::{
-        AppFarmProfilePublishPayload, AppListingPublishPayload,
+        AppFarmProfilePublishPayload, AppListingPublishPayload, AppOrderCancellationPublishPayload,
         AppOrderDecisionInventoryCommitment, AppOrderDecisionPayload,
-        AppOrderDecisionPublishPayload, AppOrderRequestItemPayload, AppOrderRequestPublishPayload,
-        AppPublishContext, AppPublishPayload, AppPublishedOperationReceipt,
-        AppRelayIngestScopeFreshness, AppRelayIngestScopeStatus, AppSyncRequest, AppSyncResult,
-        AppSyncRunStatus, AppSyncTransport, AppSyncTransportError, PendingSyncOperation,
-        PendingSyncOperationState, RecordedAppSyncTransport, SyncAggregateRef, SyncCheckpointState,
-        SyncCheckpointStatus, SyncConflict, SyncConflictKind, SyncConflictResolutionStatus,
-        SyncConflictSeverity, SyncOperationKind, SyncTrigger,
+        AppOrderDecisionPublishPayload, AppOrderFulfillmentPublishPayload,
+        AppOrderFulfillmentPublishStatus, AppOrderReceiptPublishPayload,
+        AppOrderRequestItemPayload, AppOrderRequestPublishPayload, AppPublishContext,
+        AppPublishPayload, AppPublishedOperationReceipt, AppRelayIngestScopeFreshness,
+        AppRelayIngestScopeStatus, AppSyncRequest, AppSyncResult, AppSyncRunStatus,
+        AppSyncTransport, AppSyncTransportError, PendingSyncOperation, PendingSyncOperationState,
+        RecordedAppSyncTransport, SyncAggregateRef, SyncCheckpointState, SyncCheckpointStatus,
+        SyncConflict, SyncConflictKind, SyncConflictResolutionStatus, SyncConflictSeverity,
+        SyncOperationKind, SyncTrigger,
     };
     use radroots_studio_app_view::{
         AccountCustody, AccountSummary, AccountSurfaceActivationProjection, ActiveSurface,
@@ -8381,8 +9132,9 @@ mod tests {
     };
     use radroots_sdk::RadrootsNostrEventPtr;
     use radroots_sdk::trade::{
-        RadrootsTradeOrderDecision, RadrootsTradeOrderEconomicItem, RadrootsTradeOrderEconomics,
-        RadrootsTradeOrderItem, RadrootsTradeOrderRequested, RadrootsTradePricingBasis,
+        RadrootsActiveTradeFulfillmentState, RadrootsTradeOrderDecision,
+        RadrootsTradeOrderEconomicItem, RadrootsTradeOrderEconomics, RadrootsTradeOrderItem,
+        RadrootsTradeOrderRequested, RadrootsTradePricingBasis,
     };
     use radroots_sql_core::{SqlExecutor, SqliteExecutor};
     use serde_json::json;
@@ -8779,7 +9531,11 @@ mod tests {
         let product_id = ProductId::new();
         let order_id = OrderId::new();
         let listing_event_id = "1".repeat(64);
-        let listing_addr = format!("30402:{}:listing-key", seller_identity.public_key_hex());
+        let listing_addr = format!(
+            "30402:{}:{}",
+            seller_identity.public_key_hex(),
+            super::d_tag_from_uuid(ProductId::new().as_uuid())
+        );
         let order_document = RadrootsTradeOrderRequested {
             order_id: order_id.to_string(),
             listing_addr: listing_addr.clone(),
@@ -8917,6 +9673,138 @@ mod tests {
             identity.public_key_hex()
         );
         assert_eq!(relay.event_count(), 1);
+    }
+
+    #[test]
+    fn runtime_direct_relay_transport_publishes_typed_order_lifecycle_work() {
+        let relay = ThreadedAckRelay::spawn();
+        let manager = RadrootsNostrAccountsManager::new_in_memory();
+        let buyer_account_id = manager
+            .generate_identity(Some("Buyer".to_owned()), true)
+            .expect("buyer account should generate");
+        let seller_account_id = manager
+            .generate_identity(Some("Seller".to_owned()), true)
+            .expect("seller account should generate");
+        let buyer_identity = manager
+            .get_signing_identity(&buyer_account_id)
+            .expect("buyer signer lookup should succeed")
+            .expect("buyer account should have local signer");
+        let seller_identity = manager
+            .get_signing_identity(&seller_account_id)
+            .expect("seller signer lookup should succeed")
+            .expect("seller account should have local signer");
+        let app_order_id = OrderId::new();
+        let farm_id = FarmId::new();
+        let listing_addr = format!(
+            "30402:{}:AAAAAAAAAAAAAAAAAAAAAg",
+            seller_identity.public_key_hex()
+        );
+        let common = (
+            app_order_id,
+            farm_id,
+            "order-1".to_owned(),
+            "order-request-event-1".to_owned(),
+            listing_addr,
+            buyer_identity.public_key_hex(),
+            seller_identity.public_key_hex(),
+        );
+        let cancellation =
+            AppPublishPayload::OrderCancellation(AppOrderCancellationPublishPayload {
+                context: AppPublishContext::new(
+                    buyer_account_id.to_string(),
+                    "buyer_order_cancellation",
+                ),
+                app_order_id: common.0,
+                farm_id: common.1,
+                trade_order_id: common.2.clone(),
+                request_event_id: common.3.clone(),
+                prev_event_id: common.3.clone(),
+                listing_addr: common.4.clone(),
+                buyer_pubkey: common.5.clone(),
+                seller_pubkey: common.6.clone(),
+                reason: "buyer cancelled order".to_owned(),
+            });
+        let fulfillment = AppPublishPayload::OrderFulfillment(AppOrderFulfillmentPublishPayload {
+            context: AppPublishContext::new(
+                seller_account_id.to_string(),
+                "seller_order_fulfillment",
+            ),
+            app_order_id: common.0,
+            farm_id: common.1,
+            trade_order_id: common.2.clone(),
+            request_event_id: common.3.clone(),
+            prev_event_id: "order-decision-event-1".to_owned(),
+            listing_addr: common.4.clone(),
+            buyer_pubkey: common.5.clone(),
+            seller_pubkey: common.6.clone(),
+            status: AppOrderFulfillmentPublishStatus::ReadyForPickup,
+        });
+        let receipt = AppPublishPayload::OrderReceipt(AppOrderReceiptPublishPayload {
+            context: AppPublishContext::new(buyer_account_id.to_string(), "buyer_order_receipt"),
+            app_order_id: common.0,
+            farm_id: common.1,
+            trade_order_id: common.2.clone(),
+            request_event_id: common.3.clone(),
+            prev_event_id: "fulfillment-event-1".to_owned(),
+            listing_addr: common.4.clone(),
+            buyer_pubkey: common.5.clone(),
+            seller_pubkey: common.6.clone(),
+            received: true,
+            issue: None,
+            received_at: 1_785_000_000,
+        });
+        let operations = [cancellation, fulfillment, receipt]
+            .into_iter()
+            .map(|payload| {
+                PendingSyncOperation::from_publish_payload(payload, "2026-05-24T12:00:00Z")
+                    .expect("typed lifecycle publish work should serialize")
+            })
+            .collect::<Vec<_>>();
+        let mut transport =
+            SdkDirectRelayAppSyncTransport::with_relay_urls(manager, vec![relay.url().to_owned()]);
+
+        let result = transport
+            .sync(AppSyncRequest {
+                trigger: SyncTrigger::ManualRefresh,
+                checkpoint: SyncCheckpointStatus::never_synced(),
+                pending_operations: operations,
+                known_conflicts: Vec::new(),
+            })
+            .expect("direct relay lifecycle publish should succeed");
+
+        assert_eq!(result.run_status, AppSyncRunStatus::Succeeded);
+        assert_eq!(result.pushed_operation_count, 3);
+        assert_eq!(relay.event_count(), 3);
+        let kinds = result
+            .published_receipts
+            .iter()
+            .map(|receipt| receipt.event_kind)
+            .collect::<Vec<_>>();
+        assert_eq!(kinds, vec![3432, 3433, 3434]);
+        for receipt in &result.published_receipts {
+            let event = published_receipt_event(receipt);
+            match receipt.event_kind {
+                3432 => {
+                    let envelope = radroots_sdk::trade::parse_order_cancellation(&event)
+                        .expect("order cancellation should parse");
+                    assert_eq!(envelope.payload.reason, "buyer cancelled order");
+                }
+                3433 => {
+                    let envelope = radroots_sdk::trade::parse_fulfillment_update(&event)
+                        .expect("fulfillment update should parse");
+                    assert_eq!(
+                        envelope.payload.status,
+                        RadrootsActiveTradeFulfillmentState::ReadyForPickup
+                    );
+                }
+                3434 => {
+                    let envelope = radroots_sdk::trade::parse_buyer_receipt(&event)
+                        .expect("buyer receipt should parse");
+                    assert!(envelope.payload.received);
+                }
+                _ => panic!("unexpected lifecycle event kind"),
+            }
+        }
     }
 
     #[test]
@@ -13250,7 +14138,7 @@ mod tests {
         assert!(matches!(
             error,
             AppSqliteError::InvalidProjection {
-                reason: "seller order decision requires fresh configured relay state"
+                reason: "order lifecycle publish requires fresh configured relay state"
             }
         ));
         assert_eq!(persisted_order_status(&runtime, order_id), "needs_action");
@@ -13375,6 +14263,64 @@ mod tests {
             "e_prev",
             "event-app:signed_event:order-request:seller-order-decision-1"
         ));
+
+        cleanup_bootstrapped_runtime_paths(&paths);
+    }
+
+    #[test]
+    fn runtime_publishes_seller_fulfillment_updates_and_projects_signed_evidence() {
+        let relay = ThreadedAckRelay::spawn();
+        let (runtime, paths, order_id, product_id, seller_pubkey, buyer_pubkey) =
+            seller_order_decision_runtime("seller_order_fulfillment_publish", 6, 2);
+        install_direct_relay_sync_transport(&runtime, &relay);
+        publish_prior_relay_seller_order_accept(
+            &runtime,
+            &relay,
+            order_id,
+            product_id,
+            seller_pubkey.as_str(),
+            buyer_pubkey.as_str(),
+        );
+
+        assert!(
+            runtime
+                .publish_order_ready_for_pickup(order_id)
+                .expect("seller order ready update should publish")
+        );
+
+        assert_eq!(persisted_order_status(&runtime, order_id), "packed");
+        assert_eq!(relay.event_count(), 2);
+        let fulfillment_events = shared_order_events_by_kind(&paths, 3433, seller_pubkey.as_str());
+        assert_eq!(fulfillment_events.len(), 1);
+        let ready_event = fulfillment_events.first().expect("ready event");
+        let ready_envelope = radroots_sdk::trade::parse_fulfillment_update(ready_event)
+            .expect("ready fulfillment should parse");
+        assert_eq!(
+            ready_envelope.payload.status,
+            RadrootsActiveTradeFulfillmentState::ReadyForPickup
+        );
+        assert!(event_has_tag(
+            ready_event,
+            "e_root",
+            "event-app:signed_event:order-request:seller-order-decision-1"
+        ));
+
+        assert!(
+            runtime
+                .publish_order_delivered(order_id)
+                .expect("seller order delivered update should publish")
+        );
+
+        assert_eq!(relay.event_count(), 3);
+        let fulfillment_events = shared_order_events_by_kind(&paths, 3433, seller_pubkey.as_str());
+        assert_eq!(fulfillment_events.len(), 2);
+        assert!(fulfillment_events.iter().any(|event| {
+            radroots_sdk::trade::parse_fulfillment_update(event)
+                .map(|envelope| {
+                    envelope.payload.status == RadrootsActiveTradeFulfillmentState::Delivered
+                })
+                .unwrap_or(false)
+        }));
 
         cleanup_bootstrapped_runtime_paths(&paths);
     }
@@ -17752,6 +18698,21 @@ mod tests {
         }
     }
 
+    fn published_receipt_event(
+        receipt: &AppPublishedOperationReceipt,
+    ) -> radroots_sdk::RadrootsNostrEvent {
+        radroots_sdk::RadrootsNostrEvent {
+            id: receipt.event_id.clone(),
+            author: receipt.event_pubkey.clone(),
+            created_at: receipt.event_created_at,
+            kind: receipt.event_kind,
+            tags: serde_json::from_value(receipt.event_tags_json.clone())
+                .expect("receipt event tags should decode"),
+            content: receipt.event_content.clone(),
+            sig: receipt.event_sig.clone(),
+        }
+    }
+
     fn shared_local_event_records(paths: &AppDesktopRuntimePaths) -> Vec<LocalEventRecord> {
         let database_path = paths
             .shared_local_events_database_path()
@@ -17779,6 +18740,25 @@ mod tests {
         signed_event_from_local_record(&record)
             .expect("shared seller order decision record should decode")
             .expect("shared seller order decision record should contain signed event")
+    }
+
+    fn shared_order_events_by_kind(
+        paths: &AppDesktopRuntimePaths,
+        kind: i64,
+        pubkey: &str,
+    ) -> Vec<radroots_sdk::RadrootsNostrEvent> {
+        shared_local_event_records(paths)
+            .into_iter()
+            .filter(|record| {
+                record.family == LocalRecordFamily::SignedEvent
+                    && record.event_kind == Some(kind)
+                    && record.event_pubkey.as_deref() == Some(pubkey)
+            })
+            .filter_map(|record| {
+                signed_event_from_local_record(&record)
+                    .expect("shared signed event record should decode")
+            })
+            .collect()
     }
 
     fn event_has_tag(event: &radroots_sdk::RadrootsNostrEvent, key: &str, value: &str) -> bool {

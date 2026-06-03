@@ -14,6 +14,9 @@ pub enum AppPublishWorkKind {
     Listing,
     OrderRequest,
     OrderDecision,
+    OrderCancellation,
+    OrderFulfillment,
+    OrderReceipt,
 }
 
 impl AppPublishWorkKind {
@@ -23,6 +26,9 @@ impl AppPublishWorkKind {
             Self::Listing => "listing",
             Self::OrderRequest => "order_request",
             Self::OrderDecision => "order_decision",
+            Self::OrderCancellation => "order_cancellation",
+            Self::OrderFulfillment => "order_fulfillment",
+            Self::OrderReceipt => "order_receipt",
         }
     }
 
@@ -32,6 +38,9 @@ impl AppPublishWorkKind {
             Self::Listing => "listing.publish_draft_with_identity",
             Self::OrderRequest => "trade.publish_order_request_with_identity",
             Self::OrderDecision => "trade.publish_order_decision_with_identity",
+            Self::OrderCancellation => "trade.publish_order_cancellation_with_identity",
+            Self::OrderFulfillment => "trade.publish_fulfillment_update_with_identity",
+            Self::OrderReceipt => "trade.publish_buyer_receipt_with_identity",
         }
     }
 }
@@ -163,6 +172,60 @@ pub struct AppOrderDecisionPublishPayload {
     pub decision: AppOrderDecisionPayload,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AppOrderFulfillmentPublishStatus {
+    Preparing,
+    ReadyForPickup,
+    OutForDelivery,
+    Delivered,
+    SellerCancelled,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct AppOrderFulfillmentPublishPayload {
+    pub context: AppPublishContext,
+    pub app_order_id: OrderId,
+    pub farm_id: FarmId,
+    pub trade_order_id: String,
+    pub request_event_id: String,
+    pub prev_event_id: String,
+    pub listing_addr: String,
+    pub buyer_pubkey: String,
+    pub seller_pubkey: String,
+    pub status: AppOrderFulfillmentPublishStatus,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct AppOrderCancellationPublishPayload {
+    pub context: AppPublishContext,
+    pub app_order_id: OrderId,
+    pub farm_id: FarmId,
+    pub trade_order_id: String,
+    pub request_event_id: String,
+    pub prev_event_id: String,
+    pub listing_addr: String,
+    pub buyer_pubkey: String,
+    pub seller_pubkey: String,
+    pub reason: String,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct AppOrderReceiptPublishPayload {
+    pub context: AppPublishContext,
+    pub app_order_id: OrderId,
+    pub farm_id: FarmId,
+    pub trade_order_id: String,
+    pub request_event_id: String,
+    pub prev_event_id: String,
+    pub listing_addr: String,
+    pub buyer_pubkey: String,
+    pub seller_pubkey: String,
+    pub received: bool,
+    pub issue: Option<String>,
+    pub received_at: u64,
+}
+
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "publish_kind", content = "payload", rename_all = "snake_case")]
 pub enum AppPublishPayload {
@@ -170,6 +233,9 @@ pub enum AppPublishPayload {
     Listing(AppListingPublishPayload),
     OrderRequest(AppOrderRequestPublishPayload),
     OrderDecision(AppOrderDecisionPublishPayload),
+    OrderCancellation(AppOrderCancellationPublishPayload),
+    OrderFulfillment(AppOrderFulfillmentPublishPayload),
+    OrderReceipt(AppOrderReceiptPublishPayload),
 }
 
 impl AppPublishPayload {
@@ -179,6 +245,9 @@ impl AppPublishPayload {
             Self::Listing(_) => AppPublishWorkKind::Listing,
             Self::OrderRequest(_) => AppPublishWorkKind::OrderRequest,
             Self::OrderDecision(_) => AppPublishWorkKind::OrderDecision,
+            Self::OrderCancellation(_) => AppPublishWorkKind::OrderCancellation,
+            Self::OrderFulfillment(_) => AppPublishWorkKind::OrderFulfillment,
+            Self::OrderReceipt(_) => AppPublishWorkKind::OrderReceipt,
         }
     }
 
@@ -196,6 +265,9 @@ impl AppPublishPayload {
             Self::Listing(payload) => SyncAggregateRef::Product(payload.product_id),
             Self::OrderRequest(payload) => SyncAggregateRef::Order(payload.order_id),
             Self::OrderDecision(payload) => SyncAggregateRef::Order(payload.app_order_id),
+            Self::OrderCancellation(payload) => SyncAggregateRef::Order(payload.app_order_id),
+            Self::OrderFulfillment(payload) => SyncAggregateRef::Order(payload.app_order_id),
+            Self::OrderReceipt(payload) => SyncAggregateRef::Order(payload.app_order_id),
         }
     }
 
@@ -361,6 +433,54 @@ impl AppPublishPayload {
                     }
                 }
             }
+            Self::OrderCancellation(payload) => {
+                validate_lifecycle_order_fields(
+                    &payload.context,
+                    payload.trade_order_id.as_str(),
+                    payload.request_event_id.as_str(),
+                    payload.prev_event_id.as_str(),
+                    payload.listing_addr.as_str(),
+                    payload.buyer_pubkey.as_str(),
+                    payload.seller_pubkey.as_str(),
+                    &mut failures,
+                );
+                if payload.reason.trim().is_empty() {
+                    failures.push(AppPublishValidationFailure::MissingOrderCancellationReason);
+                }
+            }
+            Self::OrderFulfillment(payload) => validate_lifecycle_order_fields(
+                &payload.context,
+                payload.trade_order_id.as_str(),
+                payload.request_event_id.as_str(),
+                payload.prev_event_id.as_str(),
+                payload.listing_addr.as_str(),
+                payload.buyer_pubkey.as_str(),
+                payload.seller_pubkey.as_str(),
+                &mut failures,
+            ),
+            Self::OrderReceipt(payload) => {
+                validate_lifecycle_order_fields(
+                    &payload.context,
+                    payload.trade_order_id.as_str(),
+                    payload.request_event_id.as_str(),
+                    payload.prev_event_id.as_str(),
+                    payload.listing_addr.as_str(),
+                    payload.buyer_pubkey.as_str(),
+                    payload.seller_pubkey.as_str(),
+                    &mut failures,
+                );
+                if payload.received {
+                    if payload.issue.is_some() {
+                        failures.push(AppPublishValidationFailure::UnexpectedOrderReceiptIssue);
+                    }
+                } else if payload
+                    .issue
+                    .as_deref()
+                    .is_none_or(|value| value.trim().is_empty())
+                {
+                    failures.push(AppPublishValidationFailure::MissingOrderReceiptIssue);
+                }
+            }
         }
 
         failures
@@ -379,6 +499,37 @@ impl AppPublishPayload {
         serde_json::to_string(self).map_err(|source| AppPublishPayloadJsonError::Serialize {
             message: source.to_string(),
         })
+    }
+}
+
+fn validate_lifecycle_order_fields(
+    context: &AppPublishContext,
+    trade_order_id: &str,
+    request_event_id: &str,
+    prev_event_id: &str,
+    listing_addr: &str,
+    buyer_pubkey: &str,
+    seller_pubkey: &str,
+    failures: &mut Vec<AppPublishValidationFailure>,
+) {
+    context.validation_failures(failures);
+    if trade_order_id.trim().is_empty() {
+        failures.push(AppPublishValidationFailure::MissingOrderTradeOrderId);
+    }
+    if request_event_id.trim().is_empty() {
+        failures.push(AppPublishValidationFailure::MissingOrderRequestEventId);
+    }
+    if prev_event_id.trim().is_empty() {
+        failures.push(AppPublishValidationFailure::MissingOrderPreviousEventId);
+    }
+    if listing_addr.trim().is_empty() {
+        failures.push(AppPublishValidationFailure::MissingOrderListingAddress);
+    }
+    if buyer_pubkey.trim().is_empty() {
+        failures.push(AppPublishValidationFailure::MissingOrderBuyerPubkey);
+    }
+    if seller_pubkey.trim().is_empty() {
+        failures.push(AppPublishValidationFailure::MissingOrderSellerPubkey);
     }
 }
 
@@ -410,8 +561,12 @@ pub enum AppPublishValidationFailure {
     MissingOrderTotal,
     MissingOrderTradeOrderId,
     MissingOrderRequestEventId,
+    MissingOrderPreviousEventId,
     MissingOrderDecisionInventory,
     MissingOrderDeclineReason,
+    MissingOrderCancellationReason,
+    MissingOrderReceiptIssue,
+    UnexpectedOrderReceiptIssue,
 }
 
 impl AppPublishValidationFailure {
@@ -442,8 +597,12 @@ impl AppPublishValidationFailure {
             Self::MissingOrderTotal => "missing_order_total",
             Self::MissingOrderTradeOrderId => "missing_order_trade_order_id",
             Self::MissingOrderRequestEventId => "missing_order_request_event_id",
+            Self::MissingOrderPreviousEventId => "missing_order_previous_event_id",
             Self::MissingOrderDecisionInventory => "missing_order_decision_inventory",
             Self::MissingOrderDeclineReason => "missing_order_decline_reason",
+            Self::MissingOrderCancellationReason => "missing_order_cancellation_reason",
+            Self::MissingOrderReceiptIssue => "missing_order_receipt_issue",
+            Self::UnexpectedOrderReceiptIssue => "unexpected_order_receipt_issue",
         }
     }
 }
@@ -495,9 +654,11 @@ impl PendingSyncOperation {
 #[cfg(test)]
 mod tests {
     use super::{
-        AppFarmProfilePublishPayload, AppListingPublishPayload, AppOrderDecisionPayload,
-        AppOrderDecisionPublishPayload, AppOrderRequestItemPayload, AppOrderRequestPublishPayload,
-        AppPublishContext, AppPublishPayload, AppPublishValidationFailure,
+        AppFarmProfilePublishPayload, AppListingPublishPayload, AppOrderCancellationPublishPayload,
+        AppOrderDecisionPayload, AppOrderDecisionPublishPayload, AppOrderFulfillmentPublishPayload,
+        AppOrderFulfillmentPublishStatus, AppOrderReceiptPublishPayload,
+        AppOrderRequestItemPayload, AppOrderRequestPublishPayload, AppPublishContext,
+        AppPublishPayload, AppPublishValidationFailure,
     };
     use crate::{
         PendingSyncOperation, PendingSyncOperationState, SyncAggregateRef, SyncOperationKind,
@@ -676,6 +837,128 @@ mod tests {
                 "missing_order_seller_pubkey",
                 "missing_order_decline_reason",
             ]
+        );
+    }
+
+    #[test]
+    fn lifecycle_publish_payloads_report_stable_validation_reason_codes() {
+        let order_id = OrderId::new();
+        let farm_id = FarmId::new();
+        let cancellation =
+            AppPublishPayload::OrderCancellation(AppOrderCancellationPublishPayload {
+                context: AppPublishContext::new("", ""),
+                app_order_id: order_id,
+                farm_id,
+                trade_order_id: " ".to_owned(),
+                request_event_id: String::new(),
+                prev_event_id: String::new(),
+                listing_addr: String::new(),
+                buyer_pubkey: String::new(),
+                seller_pubkey: String::new(),
+                reason: " ".to_owned(),
+            });
+        let fulfillment = AppPublishPayload::OrderFulfillment(AppOrderFulfillmentPublishPayload {
+            context: AppPublishContext::new("acct_local", "seller_order_fulfillment"),
+            app_order_id: order_id,
+            farm_id,
+            trade_order_id: "order-1".to_owned(),
+            request_event_id: "request-event-1".to_owned(),
+            prev_event_id: "decision-event-1".to_owned(),
+            listing_addr: "30402:seller:listing".to_owned(),
+            buyer_pubkey: "buyer".to_owned(),
+            seller_pubkey: "seller".to_owned(),
+            status: AppOrderFulfillmentPublishStatus::ReadyForPickup,
+        });
+        let receipt = AppPublishPayload::OrderReceipt(AppOrderReceiptPublishPayload {
+            context: AppPublishContext::new("acct_local", "buyer_order_receipt"),
+            app_order_id: order_id,
+            farm_id,
+            trade_order_id: "order-1".to_owned(),
+            request_event_id: "request-event-1".to_owned(),
+            prev_event_id: "fulfillment-event-1".to_owned(),
+            listing_addr: "30402:seller:listing".to_owned(),
+            buyer_pubkey: "buyer".to_owned(),
+            seller_pubkey: "seller".to_owned(),
+            received: true,
+            issue: Some("late".to_owned()),
+            received_at: 1_785_000_000,
+        });
+
+        assert_eq!(
+            cancellation.work_kind().sdk_operation(),
+            "trade.publish_order_cancellation_with_identity"
+        );
+        assert_eq!(
+            fulfillment.work_kind().sdk_operation(),
+            "trade.publish_fulfillment_update_with_identity"
+        );
+        assert_eq!(
+            receipt.work_kind().sdk_operation(),
+            "trade.publish_buyer_receipt_with_identity"
+        );
+        assert_eq!(fulfillment.validation_failures(), Vec::new());
+
+        let cancellation_reason_codes: Vec<&str> = cancellation
+            .validation_failures()
+            .into_iter()
+            .map(AppPublishValidationFailure::storage_key)
+            .collect();
+        let receipt_reason_codes: Vec<&str> = receipt
+            .validation_failures()
+            .into_iter()
+            .map(AppPublishValidationFailure::storage_key)
+            .collect();
+
+        assert_eq!(
+            cancellation_reason_codes,
+            vec![
+                "missing_account_id",
+                "missing_source",
+                "missing_order_trade_order_id",
+                "missing_order_request_event_id",
+                "missing_order_previous_event_id",
+                "missing_order_listing_address",
+                "missing_order_buyer_pubkey",
+                "missing_order_seller_pubkey",
+                "missing_order_cancellation_reason",
+            ]
+        );
+        assert_eq!(receipt_reason_codes, vec!["unexpected_order_receipt_issue"]);
+
+        let operation = PendingSyncOperation::from_publish_payload(
+            AppPublishPayload::OrderFulfillment(AppOrderFulfillmentPublishPayload {
+                context: AppPublishContext::new("acct_local", "seller_order_fulfillment"),
+                app_order_id: order_id,
+                farm_id,
+                trade_order_id: "order-1".to_owned(),
+                request_event_id: "request-event-1".to_owned(),
+                prev_event_id: "decision-event-1".to_owned(),
+                listing_addr: "30402:seller:listing".to_owned(),
+                buyer_pubkey: "buyer".to_owned(),
+                seller_pubkey: "seller".to_owned(),
+                status: AppOrderFulfillmentPublishStatus::Delivered,
+            }),
+            "2026-04-20T18:00:00Z",
+        )
+        .expect("typed lifecycle payload should serialize");
+
+        assert_eq!(operation.aggregate, SyncAggregateRef::Order(order_id));
+        assert_eq!(operation.operation_key, format!("order:{order_id}:upsert"));
+        assert_eq!(operation.operation, SyncOperationKind::Upsert);
+        assert_eq!(
+            operation.publish_payload().expect("payload should parse"),
+            AppPublishPayload::OrderFulfillment(AppOrderFulfillmentPublishPayload {
+                context: AppPublishContext::new("acct_local", "seller_order_fulfillment"),
+                app_order_id: order_id,
+                farm_id,
+                trade_order_id: "order-1".to_owned(),
+                request_event_id: "request-event-1".to_owned(),
+                prev_event_id: "decision-event-1".to_owned(),
+                listing_addr: "30402:seller:listing".to_owned(),
+                buyer_pubkey: "buyer".to_owned(),
+                seller_pubkey: "seller".to_owned(),
+                status: AppOrderFulfillmentPublishStatus::Delivered,
+            })
         );
     }
 

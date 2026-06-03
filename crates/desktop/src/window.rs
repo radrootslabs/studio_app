@@ -2096,32 +2096,64 @@ impl HomeView {
     }
 
     fn mark_order_packed(&mut self, order_id: OrderId, cx: &mut Context<Self>) {
-        match self.runtime.mark_order_packed(order_id) {
+        match self.runtime.publish_order_ready_for_pickup(order_id) {
             Ok(true) => cx.notify(),
             Ok(false) => {}
             Err(runtime_error) => {
                 error!(
                     target: "orders",
-                    event = "orders.mark_packed_failed",
+                    event = "orders.ready_for_pickup_failed",
                     error = %runtime_error,
                     order_id = %order_id,
-                    "failed to mark order packed"
+                    "failed to mark order ready"
                 );
             }
         }
     }
 
     fn mark_order_completed(&mut self, order_id: OrderId, cx: &mut Context<Self>) {
-        match self.runtime.mark_order_completed(order_id) {
+        match self.runtime.publish_order_delivered(order_id) {
             Ok(true) => cx.notify(),
             Ok(false) => {}
             Err(runtime_error) => {
                 error!(
                     target: "orders",
-                    event = "orders.mark_completed_failed",
+                    event = "orders.mark_delivered_failed",
                     error = %runtime_error,
                     order_id = %order_id,
-                    "failed to mark order completed"
+                    "failed to mark order delivered"
+                );
+            }
+        }
+    }
+
+    fn cancel_buyer_order(&mut self, order_id: OrderId, cx: &mut Context<Self>) {
+        match self.runtime.publish_buyer_order_cancel(order_id) {
+            Ok(true) => cx.notify(),
+            Ok(false) => {}
+            Err(runtime_error) => {
+                error!(
+                    target: "personal_orders",
+                    event = "buyer.order_cancel_failed",
+                    error = %runtime_error,
+                    order_id = %order_id,
+                    "failed to cancel buyer order"
+                );
+            }
+        }
+    }
+
+    fn mark_buyer_order_received(&mut self, order_id: OrderId, cx: &mut Context<Self>) {
+        match self.runtime.publish_buyer_order_receipt(order_id) {
+            Ok(true) => cx.notify(),
+            Ok(false) => {}
+            Err(runtime_error) => {
+                error!(
+                    target: "personal_orders",
+                    event = "buyer.order_receipt_failed",
+                    error = %runtime_error,
+                    order_id = %order_id,
+                    "failed to mark buyer order received"
                 );
             }
         }
@@ -8906,6 +8938,34 @@ fn buyer_order_detail_card(
                         this.child(home_body_text(app_shared_text(AppTextKey::ValueNone)))
                     }),
             ))
+            .when(
+                matches!(
+                    detail.status,
+                    BuyerOrderStatus::Placed | BuyerOrderStatus::Scheduled
+                ),
+                |this| {
+                    this.child(action_button_compact(
+                        "buyer-order-cancel",
+                        app_shared_text(AppTextKey::PersonalOrdersActionCancel),
+                        cx.listener({
+                            let order_id = detail.order_id;
+                            move |this, _, _, cx| this.cancel_buyer_order(order_id, cx)
+                        }),
+                        cx,
+                    ))
+                },
+            )
+            .when(detail.status == BuyerOrderStatus::Ready, |this| {
+                this.child(action_button_primary(
+                    "buyer-order-mark-received",
+                    app_shared_text(AppTextKey::PersonalOrdersActionMarkReceived),
+                    cx.listener({
+                        let order_id = detail.order_id;
+                        move |this, _, _, cx| this.mark_buyer_order_received(order_id, cx)
+                    }),
+                    cx,
+                ))
+            })
             .when_some(detail.repeat_demand.as_ref(), |this, repeat_demand| {
                 this.child(app_form_section(
                     app_shared_text(AppTextKey::PersonalOrdersRepeatDemandTitle),

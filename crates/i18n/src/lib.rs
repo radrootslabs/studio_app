@@ -301,7 +301,7 @@ mod tests {
         assert_eq!(app_text(AppTextKey::OrdersActionMarkPacked), "Mark packed");
         assert_eq!(
             app_text(AppTextKey::OrdersActionMarkCompleted),
-            "Mark completed"
+            "Mark delivered"
         );
         assert_eq!(app_text(AppTextKey::OrdersDetailTitle), "Order detail");
         assert_eq!(app_text(AppTextKey::OrdersRecoverySectionTitle), "Recovery");
@@ -479,6 +479,14 @@ mod tests {
         assert_eq!(
             app_text(AppTextKey::PersonalOrdersDetailNoteLabel),
             "Order note"
+        );
+        assert_eq!(
+            app_text(AppTextKey::PersonalOrdersActionCancel),
+            "Cancel order"
+        );
+        assert_eq!(
+            app_text(AppTextKey::PersonalOrdersActionMarkReceived),
+            "Mark received"
         );
         assert_eq!(
             app_text(AppTextKey::PersonalOrdersRepeatDemandTitle),
