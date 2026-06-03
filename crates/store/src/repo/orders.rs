@@ -12,7 +12,10 @@ use radroots_studio_app_view::{
 };
 use rusqlite::{Connection, OptionalExtension, params};
 
-use super::order_detail::{order_detail_economics, order_detail_item_row};
+use super::{
+    order_detail::{order_detail_economics, order_detail_item_row},
+    parse_trade_revision_status,
+};
 use crate::AppSqliteError;
 
 pub struct AppOrdersRepository<'a> {
@@ -120,13 +123,13 @@ impl<'a> AppOrdersRepository<'a> {
                     let order_id: OrderId = parse_typed_id("orders.id", order_id)?;
                     let farm_id: FarmId = parse_typed_id("orders.farm_id", farm_id)?;
                     let status = parse_order_status("orders.status", status)?;
+                    let revision =
+                        parse_trade_revision_status("orders.workflow_revision", workflow_revision)?;
                     let items = self.load_order_detail_items(order_id.to_string())?;
                     let economics = order_detail_economics(&items)?;
                     let payment = TradePaymentDisplayStatus::NotRecorded;
                     let workflow = TradeWorkflowProjection::from_order_status(order_id, status)
-                        .with_revision(TradeRevisionStatus::from_storage_key(
-                            workflow_revision.as_str(),
-                        ))
+                        .with_revision(revision)
                         .with_economics_and_payment(economics.clone(), payment);
                     Ok(OrderDetailProjection {
                         order_id,
@@ -360,7 +363,10 @@ impl<'a> AppOrdersRepository<'a> {
                 fulfillment_window_label: empty_string_to_none(fulfillment_window_label),
                 pickup_location_label: empty_string_to_none(pickup_location_label),
                 status: parse_order_status("orders.status", status)?,
-                revision: TradeRevisionStatus::from_storage_key(workflow_revision.as_str()),
+                revision: parse_trade_revision_status(
+                    "orders.workflow_revision",
+                    workflow_revision,
+                )?,
             });
         }
 
@@ -1274,11 +1280,11 @@ mod tests {
     use radroots_studio_app_view::{
         FarmId, FulfillmentWindowId, OrderId, OrderPrimaryAction, OrderStatus, OrdersFilter,
         OrdersScreenQueryState, PackDayOutputOrderState, PackDayProductTotalRow,
-        PackDayScreenQueryState, PickupLocationId, TradePaymentDisplayStatus,
+        PackDayScreenQueryState, PickupLocationId, TradePaymentDisplayStatus, TradeRevisionStatus,
     };
     use rusqlite::{Connection, params};
 
-    use crate::{AppSqliteStore, DatabaseTarget};
+    use crate::{AppSqliteError, AppSqliteStore, DatabaseTarget};
 
     #[test]
     fn orders_list_loads_summary_rows_and_window_filter_truthfully() {
@@ -1494,6 +1500,72 @@ mod tests {
         assert_eq!(detail.economics.currency_code.as_deref(), Some("USD"));
         assert_eq!(detail.payment, TradePaymentDisplayStatus::NotRecorded);
         assert_eq!(detail.primary_action, Some(OrderPrimaryAction::MarkPacked));
+    }
+
+    #[test]
+    fn seller_order_projections_fail_closed_for_invalid_workflow_revision() {
+        let store = AppSqliteStore::open(DatabaseTarget::InMemory).expect("store should open");
+        let connection = store.connection();
+        let farm_id = FarmId::new();
+        let order_id = OrderId::new();
+
+        insert_farm(
+            connection,
+            farm_id,
+            "Willow farm",
+            "ready",
+            "2026-04-17T08:00:00Z",
+        );
+        insert_order(
+            connection,
+            order_id,
+            farm_id,
+            None,
+            "R-100",
+            "Casey",
+            "scheduled",
+            "2026-04-17T10:00:00Z",
+        );
+        set_order_workflow_revision(
+            connection,
+            order_id,
+            TradeRevisionStatus::Updated.storage_key(),
+        );
+
+        let list = store
+            .load_orders_list(
+                farm_id,
+                &OrdersScreenQueryState {
+                    filter: OrdersFilter::All,
+                    fulfillment_window_id: None,
+                },
+            )
+            .expect("valid revision should load in seller list");
+        let detail = store
+            .load_order_detail(farm_id, order_id)
+            .expect("valid revision should load in seller detail")
+            .expect("seller detail should exist");
+
+        assert_eq!(list.rows[0].workflow.revision, TradeRevisionStatus::Updated);
+        assert_eq!(detail.workflow.revision, TradeRevisionStatus::Updated);
+
+        corrupt_order_workflow_revision(connection, order_id, "future_revision");
+
+        let list_error = store
+            .load_orders_list(
+                farm_id,
+                &OrdersScreenQueryState {
+                    filter: OrdersFilter::All,
+                    fulfillment_window_id: None,
+                },
+            )
+            .expect_err("invalid revision should fail seller list projection");
+        let detail_error = store
+            .load_order_detail(farm_id, order_id)
+            .expect_err("invalid revision should fail seller detail projection");
+
+        assert_decode_enum(list_error, "orders.workflow_revision", "future_revision");
+        assert_decode_enum(detail_error, "orders.workflow_revision", "future_revision");
     }
 
     #[test]
@@ -2025,6 +2097,43 @@ mod tests {
                 ],
             )
             .expect("order insert should succeed");
+    }
+
+    fn set_order_workflow_revision(
+        connection: &Connection,
+        order_id: OrderId,
+        workflow_revision: &str,
+    ) {
+        connection
+            .execute(
+                "update orders set workflow_revision = ?1 where id = ?2",
+                params![workflow_revision, order_id.to_string()],
+            )
+            .expect("order workflow revision update should succeed");
+    }
+
+    fn corrupt_order_workflow_revision(
+        connection: &Connection,
+        order_id: OrderId,
+        workflow_revision: &str,
+    ) {
+        connection
+            .execute_batch("pragma ignore_check_constraints = on")
+            .expect("check constraints should disable");
+        set_order_workflow_revision(connection, order_id, workflow_revision);
+        connection
+            .execute_batch("pragma ignore_check_constraints = off")
+            .expect("check constraints should re-enable");
+    }
+
+    fn assert_decode_enum(error: AppSqliteError, expected_field: &str, expected_value: &str) {
+        match error {
+            AppSqliteError::DecodeEnum { field, value } => {
+                assert_eq!(field, expected_field);
+                assert_eq!(value, expected_value);
+            }
+            other => panic!("expected DecodeEnum error, got {other:?}"),
+        }
     }
 
     fn insert_order_line(

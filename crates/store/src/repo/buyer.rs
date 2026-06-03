@@ -9,12 +9,15 @@ use radroots_studio_app_view::{
     OrderId, OrderStatus, ProductAvailabilityState, ProductAvailabilitySummary, ProductId,
     ProductPricePresentation, ProductStatus, ProductStockState, ProductStockSummary,
     RepeatDemandEligibility, RepeatDemandHandoffProjection, TradePaymentDisplayStatus,
-    TradeRevisionStatus, TradeWorkflowProjection,
+    TradeWorkflowProjection,
 };
 use rusqlite::{Connection, OptionalExtension, params};
 use serde_json::Value;
 
-use super::order_detail::{order_detail_economics, order_detail_item_row};
+use super::{
+    order_detail::{order_detail_economics, order_detail_item_row},
+    parse_trade_revision_status,
+};
 use crate::AppSqliteError;
 
 const BUYER_LOW_STOCK_THRESHOLD: u32 = 3;
@@ -793,6 +796,8 @@ impl<'a> AppBuyerRepository<'a> {
             let order_id = parse_typed_id("orders.id", order_id)?;
             let farm_id = parse_typed_id("orders.farm_id", farm_id)?;
             let buyer_status = BuyerOrderStatus::from(parse_order_status("orders.status", status)?);
+            let revision =
+                parse_trade_revision_status("orders.workflow_revision", workflow_revision)?;
 
             orders.push(BuyerOrdersListRow {
                 order_id,
@@ -812,9 +817,7 @@ impl<'a> AppBuyerRepository<'a> {
                 ),
                 status: buyer_status,
                 workflow: TradeWorkflowProjection::from_buyer_order_status(order_id, buyer_status)
-                    .with_revision(TradeRevisionStatus::from_storage_key(
-                        workflow_revision.as_str(),
-                    )),
+                    .with_revision(revision),
             });
         }
 
@@ -888,14 +891,14 @@ impl<'a> AppBuyerRepository<'a> {
                     let farm_id: FarmId = parse_typed_id("orders.farm_id", farm_id)?;
                     let status =
                         BuyerOrderStatus::from(parse_order_status("orders.status", status)?);
+                    let revision =
+                        parse_trade_revision_status("orders.workflow_revision", workflow_revision)?;
                     let items = self.load_order_detail_items(order_id.to_string())?;
                     let economics = order_detail_economics(&items)?;
                     let payment = TradePaymentDisplayStatus::NotRecorded;
                     let workflow =
                         TradeWorkflowProjection::from_buyer_order_status(order_id, status)
-                            .with_revision(TradeRevisionStatus::from_storage_key(
-                                workflow_revision.as_str(),
-                            ))
+                            .with_revision(revision)
                             .with_economics_and_payment(economics.clone(), payment);
                     Ok(BuyerOrderDetailProjection {
                         order_id,
@@ -2793,7 +2796,7 @@ mod tests {
 
     use radroots_studio_app_view::{
         BuyerCheckoutDisabledReason, BuyerContext, FarmId, FarmOrderMethod, FulfillmentWindowId,
-        OrderId, PickupLocationId, ProductId, TradePaymentDisplayStatus,
+        OrderId, PickupLocationId, ProductId, TradePaymentDisplayStatus, TradeRevisionStatus,
     };
     use rusqlite::{Connection, params};
     use serde_json::json;
@@ -3363,6 +3366,59 @@ mod tests {
     }
 
     #[test]
+    fn buyer_order_projections_fail_closed_for_invalid_workflow_revision() {
+        let store = AppSqliteStore::open(DatabaseTarget::InMemory).expect("store should open");
+        let connection = store.connection();
+        let repository = AppBuyerRepository::new(connection);
+        let context = BuyerContext::Guest;
+        let farm_id = insert_farm(connection, "Willow Farm", "ready");
+        let order_id = OrderId::new();
+
+        insert_order(
+            connection,
+            order_id,
+            farm_id,
+            "R-100",
+            "scheduled",
+            Some("guest"),
+            "guest@example.com",
+            "",
+            "",
+        );
+        set_order_workflow_revision(
+            connection,
+            order_id,
+            TradeRevisionStatus::KeptAsPlaced.storage_key(),
+        );
+
+        let list = repository
+            .load_buyer_orders(&context)
+            .expect("valid revision should load in buyer list");
+        let detail = repository
+            .load_buyer_order_detail(&context, order_id)
+            .expect("valid revision should load in buyer detail")
+            .expect("buyer detail should exist");
+
+        assert_eq!(
+            list.rows[0].workflow.revision,
+            TradeRevisionStatus::KeptAsPlaced
+        );
+        assert_eq!(detail.workflow.revision, TradeRevisionStatus::KeptAsPlaced);
+
+        corrupt_order_workflow_revision(connection, order_id, "future_revision");
+
+        let list_error = repository
+            .load_buyer_orders(&context)
+            .expect_err("invalid revision should fail buyer list projection");
+        let detail_error = repository
+            .load_buyer_order_detail(&context, order_id)
+            .expect_err("invalid revision should fail buyer detail projection");
+
+        assert_decode_enum(list_error, "orders.workflow_revision", "future_revision");
+        assert_decode_enum(detail_error, "orders.workflow_revision", "future_revision");
+    }
+
+    #[test]
     fn buyer_cart_rejects_cross_farm_lines() {
         let store = AppSqliteStore::open(DatabaseTarget::InMemory).expect("store should open");
         let farm_id = FarmId::new();
@@ -3613,6 +3669,43 @@ mod tests {
                 ],
             )
             .expect("order insert should succeed");
+    }
+
+    fn set_order_workflow_revision(
+        connection: &Connection,
+        order_id: OrderId,
+        workflow_revision: &str,
+    ) {
+        connection
+            .execute(
+                "update orders set workflow_revision = ?1 where id = ?2",
+                params![workflow_revision, order_id.to_string()],
+            )
+            .expect("order workflow revision update should succeed");
+    }
+
+    fn corrupt_order_workflow_revision(
+        connection: &Connection,
+        order_id: OrderId,
+        workflow_revision: &str,
+    ) {
+        connection
+            .execute_batch("pragma ignore_check_constraints = on")
+            .expect("check constraints should disable");
+        set_order_workflow_revision(connection, order_id, workflow_revision);
+        connection
+            .execute_batch("pragma ignore_check_constraints = off")
+            .expect("check constraints should re-enable");
+    }
+
+    fn assert_decode_enum(error: AppSqliteError, expected_field: &str, expected_value: &str) {
+        match error {
+            AppSqliteError::DecodeEnum { field, value } => {
+                assert_eq!(field, expected_field);
+                assert_eq!(value, expected_value);
+            }
+            other => panic!("expected DecodeEnum error, got {other:?}"),
+        }
     }
 
     fn row_count(connection: &Connection, table_name: &str) -> i64 {

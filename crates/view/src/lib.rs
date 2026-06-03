@@ -1169,6 +1169,25 @@ pub enum TradeRevisionStatus {
     KeptAsPlaced,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ParseTradeRevisionStatusError {
+    value: String,
+}
+
+impl ParseTradeRevisionStatusError {
+    pub fn value(&self) -> &str {
+        self.value.as_str()
+    }
+}
+
+impl fmt::Display for ParseTradeRevisionStatusError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(formatter, "invalid trade revision status `{}`", self.value)
+    }
+}
+
+impl Error for ParseTradeRevisionStatusError {}
+
 impl TradeRevisionStatus {
     pub const fn storage_key(self) -> &'static str {
         match self {
@@ -1197,12 +1216,15 @@ impl TradeRevisionStatus {
         }
     }
 
-    pub fn from_storage_key(value: &str) -> Self {
-        match value.trim() {
-            "change_proposed" => Self::ChangeProposed,
-            "updated" => Self::Updated,
-            "kept_as_placed" => Self::KeptAsPlaced,
-            _ => Self::None,
+    pub fn try_from_storage_key(value: &str) -> Result<Self, ParseTradeRevisionStatusError> {
+        match value {
+            "none" => Ok(Self::None),
+            "change_proposed" => Ok(Self::ChangeProposed),
+            "updated" => Ok(Self::Updated),
+            "kept_as_placed" => Ok(Self::KeptAsPlaced),
+            _ => Err(ParseTradeRevisionStatusError {
+                value: value.to_owned(),
+            }),
         }
     }
 }
@@ -2800,6 +2822,32 @@ mod tests {
         assert_eq!(
             TradeRevisionStatus::from_reducer_status(TradeReducerRevisionStatus::Declined),
             TradeRevisionStatus::KeptAsPlaced
+        );
+        assert_eq!(
+            TradeRevisionStatus::try_from_storage_key("none"),
+            Ok(TradeRevisionStatus::None)
+        );
+        assert_eq!(
+            TradeRevisionStatus::try_from_storage_key("change_proposed"),
+            Ok(TradeRevisionStatus::ChangeProposed)
+        );
+        assert_eq!(
+            TradeRevisionStatus::try_from_storage_key("updated"),
+            Ok(TradeRevisionStatus::Updated)
+        );
+        assert_eq!(
+            TradeRevisionStatus::try_from_storage_key("kept_as_placed"),
+            Ok(TradeRevisionStatus::KeptAsPlaced)
+        );
+        assert_eq!(
+            TradeRevisionStatus::try_from_storage_key("proposed")
+                .expect_err("reducer key should not parse as app revision key")
+                .value(),
+            "proposed"
+        );
+        assert!(
+            TradeRevisionStatus::try_from_storage_key(" none ").is_err(),
+            "storage keys must parse exactly"
         );
 
         let order_id = OrderId::new();

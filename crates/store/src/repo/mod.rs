@@ -9,6 +9,10 @@ pub(crate) mod products;
 pub(crate) mod reminders;
 pub(crate) mod today;
 
+use radroots_studio_app_view::TradeRevisionStatus;
+
+use crate::AppSqliteError;
+
 pub use activation::AppActivationRepository;
 pub use activity::{
     APP_ACTIVITY_CONTEXT_LIMIT, APP_ACTIVITY_RETENTION_LIMIT, AppActivityRepository,
@@ -25,3 +29,11 @@ pub use reminders::AppRemindersRepository;
 pub use today::{
     AppTodayAgendaRepository, TODAY_AGENDA_LIST_LIMIT, TODAY_AGENDA_LOW_STOCK_THRESHOLD,
 };
+
+pub(crate) fn parse_trade_revision_status(
+    field: &'static str,
+    value: String,
+) -> Result<TradeRevisionStatus, AppSqliteError> {
+    TradeRevisionStatus::try_from_storage_key(value.as_str())
+        .map_err(|_| AppSqliteError::DecodeEnum { field, value })
+}
