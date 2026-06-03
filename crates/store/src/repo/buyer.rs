@@ -8,11 +8,12 @@ use radroots_studio_app_view::{
     BuyerProductDetailProjection, FarmId, FarmOrderMethod, FulfillmentWindowId, OrderDetailItemRow,
     OrderId, OrderStatus, ProductAvailabilityState, ProductAvailabilitySummary, ProductId,
     ProductPricePresentation, ProductStatus, ProductStockState, ProductStockSummary,
-    RepeatDemandEligibility, RepeatDemandHandoffProjection,
+    RepeatDemandEligibility, RepeatDemandHandoffProjection, TradePaymentDisplayStatus,
 };
 use rusqlite::{Connection, OptionalExtension, params};
 use serde_json::Value;
 
+use super::order_detail::{order_detail_economics, order_detail_item_row};
 use crate::AppSqliteError;
 
 const BUYER_LOW_STOCK_THRESHOLD: u32 = 3;
@@ -869,8 +870,10 @@ impl<'a> AppBuyerRepository<'a> {
                     fulfillment_starts_at,
                     fulfillment_ends_at,
                 )| {
-                    let order_id = parse_typed_id("orders.id", order_id)?;
-                    let farm_id = parse_typed_id("orders.farm_id", farm_id)?;
+                    let order_id: OrderId = parse_typed_id("orders.id", order_id)?;
+                    let farm_id: FarmId = parse_typed_id("orders.farm_id", farm_id)?;
+                    let items = self.load_order_detail_items(order_id.to_string())?;
+                    let economics = order_detail_economics(&items)?;
                     Ok(BuyerOrderDetailProjection {
                         order_id,
                         farm_id,
@@ -885,7 +888,9 @@ impl<'a> AppBuyerRepository<'a> {
                             "orders.status",
                             status,
                         )?),
-                        items: self.load_order_detail_items(order_id.to_string())?,
+                        items,
+                        economics,
+                        payment: TradePaymentDisplayStatus::NotRecorded,
                         order_note: empty_string_to_none(order_note),
                         repeat_demand: self.build_repeat_demand_handoff(
                             order_id,
@@ -1659,7 +1664,13 @@ impl<'a> AppBuyerRepository<'a> {
         let mut statement = self
             .connection
             .prepare(
-                "select title, quantity_display
+                "select
+                    title,
+                    quantity_display,
+                    quantity_value,
+                    quantity_unit_label,
+                    unit_price_minor_units,
+                    price_currency
                  from order_lines
                  where order_id = ?1
                  order by sort_index asc, id asc",
@@ -1670,21 +1681,44 @@ impl<'a> AppBuyerRepository<'a> {
             })?;
         let rows = statement
             .query_map(params![order_id], |row| {
-                Ok(OrderDetailItemRow {
-                    title: row.get(0)?,
-                    quantity_display: row.get(1)?,
-                })
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, i64>(2)?,
+                    row.get::<_, String>(3)?,
+                    row.get::<_, Option<u32>>(4)?,
+                    row.get::<_, Option<String>>(5)?,
+                ))
             })
             .map_err(|source| AppSqliteError::Query {
                 operation: "query buyer order detail items",
                 source,
             })?;
+        let mut items = Vec::new();
 
-        rows.collect::<Result<Vec<_>, _>>()
-            .map_err(|source| AppSqliteError::Query {
+        for row in rows {
+            let (
+                title,
+                quantity_display,
+                quantity_value,
+                quantity_unit_label,
+                unit_price_minor_units,
+                price_currency,
+            ) = row.map_err(|source| AppSqliteError::Query {
                 operation: "read buyer order detail items",
                 source,
-            })
+            })?;
+            items.push(order_detail_item_row(
+                title,
+                quantity_display,
+                quantity_value,
+                quantity_unit_label,
+                unit_price_minor_units,
+                price_currency,
+            )?);
+        }
+
+        Ok(items)
     }
 
     fn load_buyer_order_local_event_lines(
@@ -2738,7 +2772,7 @@ mod tests {
 
     use radroots_studio_app_view::{
         BuyerCheckoutDisabledReason, BuyerContext, FarmId, FarmOrderMethod, FulfillmentWindowId,
-        OrderId, PickupLocationId, ProductId,
+        OrderId, PickupLocationId, ProductId, TradePaymentDisplayStatus,
     };
     use rusqlite::{Connection, params};
     use serde_json::json;
@@ -3119,6 +3153,28 @@ mod tests {
         assert_eq!(row_repeat_demand.available_item_count, 1);
         assert_eq!(row_repeat_demand.unavailable_item_count, 1);
         assert_eq!(detail_repeat_demand, row_repeat_demand);
+        assert_eq!(buyer_order_detail.items.len(), 2);
+        assert!(
+            buyer_order_detail
+                .items
+                .iter()
+                .any(|item| item.line_total_minor_units == Some(1300))
+        );
+        assert!(
+            buyer_order_detail
+                .items
+                .iter()
+                .any(|item| item.line_total_minor_units == Some(450))
+        );
+        assert_eq!(buyer_order_detail.economics.total_minor_units, Some(1750));
+        assert_eq!(
+            buyer_order_detail.economics.currency_code.as_deref(),
+            Some("USD")
+        );
+        assert_eq!(
+            buyer_order_detail.payment,
+            TradePaymentDisplayStatus::NotRecorded
+        );
     }
 
     #[test]

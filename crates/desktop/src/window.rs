@@ -65,7 +65,7 @@ use radroots_studio_app_view::{
     RecoveryKind, RecoveryState, ReminderDeadlineProjection, ReminderDeliveryState, ReminderId,
     ReminderLogEntryProjection, ReminderLogProjection, ReminderSurface, ReminderUrgency,
     RepeatDemandEligibility, RepeatDemandHandoffProjection, ShellSection, TodayAgendaProjection,
-    TodaySetupTaskKind,
+    TodaySetupTaskKind, TradeEconomicsProjection, TradePaymentDisplayStatus,
 };
 use radroots_nostr::prelude::RadrootsNostrClient;
 use std::{
@@ -4152,6 +4152,14 @@ impl HomeView {
                     LabelValueRow::new(
                         app_shared_text(AppTextKey::OrdersDetailPickupLabel),
                         order_optional_text(detail.pickup_location_label.as_deref()),
+                    ),
+                    LabelValueRow::new(
+                        app_shared_text(AppTextKey::OrdersDetailTotalLabel),
+                        trade_economics_total_text(&detail.economics),
+                    ),
+                    LabelValueRow::new(
+                        app_shared_text(AppTextKey::OrdersDetailPaymentLabel),
+                        app_shared_text(trade_payment_display_status_key(detail.payment)),
                     ),
                 ]))
                 .child(app_form_section(
@@ -8581,6 +8589,22 @@ fn buyer_money_text(amount_minor_units: u32, currency_code: &str) -> String {
     }
 }
 
+fn trade_economics_total_text(economics: &TradeEconomicsProjection) -> String {
+    economics
+        .total_minor_units
+        .zip(economics.currency_code.as_deref())
+        .map(|(amount, currency_code)| buyer_money_text(amount, currency_code))
+        .unwrap_or_else(|| app_shared_text(AppTextKey::ValueNone).to_string())
+}
+
+fn trade_payment_display_status_key(status: TradePaymentDisplayStatus) -> AppTextKey {
+    match status {
+        TradePaymentDisplayStatus::NotRecorded => AppTextKey::TradeWorkflowPaymentNotRecorded,
+        TradePaymentDisplayStatus::Recorded => AppTextKey::TradeWorkflowPaymentRecorded,
+        TradePaymentDisplayStatus::NeedsReview => AppTextKey::TradeWorkflowPaymentNeedsReview,
+    }
+}
+
 fn buyer_orders_list_card(
     rows: &[BuyerOrdersListRow],
     selected_order_id: Option<OrderId>,
@@ -8714,6 +8738,14 @@ fn buyer_order_detail_card(
                 LabelValueRow::new(
                     app_shared_text(AppTextKey::PersonalOrdersDetailFulfillmentLabel),
                     detail.fulfillment_summary.clone(),
+                ),
+                LabelValueRow::new(
+                    app_shared_text(AppTextKey::PersonalOrdersDetailTotalLabel),
+                    trade_economics_total_text(&detail.economics),
+                ),
+                LabelValueRow::new(
+                    app_shared_text(AppTextKey::PersonalOrdersDetailPaymentLabel),
+                    app_shared_text(trade_payment_display_status_key(detail.payment)),
                 ),
                 LabelValueRow::new(
                     app_shared_text(AppTextKey::PersonalOrdersDetailNoteLabel),
@@ -12688,6 +12720,12 @@ fn home_list_card(
 }
 
 fn order_detail_item_row(item: &OrderDetailItemRow) -> AnyElement {
+    let unit_price = item.unit_price.as_ref().map(buyer_listing_price_text);
+    let line_total = item.unit_price.as_ref().and_then(|unit_price| {
+        item.line_total_minor_units
+            .map(|amount| buyer_money_text(amount, unit_price.currency_code.as_str()))
+    });
+
     div()
         .w_full()
         .min_w_0()
@@ -12699,17 +12737,47 @@ fn order_detail_item_row(item: &OrderDetailItemRow) -> AnyElement {
             div()
                 .flex_1()
                 .min_w_0()
-                .text_size(px(APP_UI_THEME.foundation.typography.body_text_px))
-                .font_weight(gpui::FontWeight::MEDIUM)
-                .line_height(relative(1.2))
-                .text_color(rgb(APP_UI_THEME.foundation.text.primary))
-                .child(item.title.clone()),
+                .flex()
+                .flex_col()
+                .gap(px(2.0))
+                .child(
+                    div()
+                        .text_size(px(APP_UI_THEME.foundation.typography.body_text_px))
+                        .font_weight(gpui::FontWeight::MEDIUM)
+                        .line_height(relative(1.2))
+                        .text_color(rgb(APP_UI_THEME.foundation.text.primary))
+                        .child(item.title.clone()),
+                )
+                .when_some(unit_price, |this, unit_price| {
+                    this.child(
+                        div()
+                            .text_size(px(APP_UI_THEME.foundation.typography.utility_title_text_px))
+                            .text_color(rgb(APP_UI_THEME.foundation.text.secondary))
+                            .child(unit_price),
+                    )
+                }),
         )
         .child(
             div()
-                .text_size(px(APP_UI_THEME.foundation.typography.utility_title_text_px))
-                .text_color(rgb(APP_UI_THEME.foundation.text.secondary))
-                .child(item.quantity_display.clone()),
+                .flex()
+                .flex_col()
+                .items_end()
+                .gap(px(2.0))
+                .child(
+                    div()
+                        .text_size(px(APP_UI_THEME.foundation.typography.utility_title_text_px))
+                        .text_color(rgb(APP_UI_THEME.foundation.text.secondary))
+                        .child(item.quantity_display.clone()),
+                )
+                .when_some(line_total, |this, line_total| {
+                    this.child(
+                        div()
+                            .text_size(px(APP_UI_THEME.foundation.typography.body_text_px))
+                            .font_weight(gpui::FontWeight::MEDIUM)
+                            .text_color(rgb(APP_UI_THEME.foundation.text.primary))
+                            .child(line_total),
+                    )
+                }),
         )
         .into_any_element()
 }
@@ -13075,6 +13143,7 @@ mod tests {
         ReminderDeadlineProjection, ReminderDeliveryState, ReminderId, ReminderKind,
         ReminderSurface, ReminderUrgency, RepeatDemandEligibility, RepeatDemandHandoffProjection,
         ShellSection, TodayAgendaProjection, TodaySetupTask, TodaySetupTaskKind,
+        TradeEconomicsProjection, TradePaymentDisplayStatus,
     };
     use radroots_identity::RadrootsIdentity;
     use std::{
@@ -13550,6 +13619,8 @@ mod tests {
             fulfillment_summary: String::new(),
             status: BuyerOrderStatus::Placed,
             items: Vec::new(),
+            economics: TradeEconomicsProjection::default(),
+            payment: TradePaymentDisplayStatus::NotRecorded,
             order_note: None,
             repeat_demand: Some(RepeatDemandHandoffProjection {
                 order_id,
@@ -13675,6 +13746,8 @@ mod tests {
             fulfillment_window_label: None,
             pickup_location_label: None,
             items: Vec::new(),
+            economics: TradeEconomicsProjection::default(),
+            payment: TradePaymentDisplayStatus::NotRecorded,
             primary_action: Some(OrderPrimaryAction::MarkPacked),
             recoveries: Vec::new(),
         });

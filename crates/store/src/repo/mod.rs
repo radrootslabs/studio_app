@@ -3,6 +3,7 @@ pub(crate) mod activity;
 pub(crate) mod buyer;
 pub(crate) mod farm_rules;
 pub(crate) mod farm_setup;
+pub(crate) mod order_detail;
 pub(crate) mod orders;
 pub(crate) mod products;
 pub(crate) mod reminders;

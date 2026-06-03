@@ -1542,6 +1542,8 @@ impl OrdersListProjection {
 pub struct OrderDetailItemRow {
     pub title: String,
     pub quantity_display: String,
+    pub unit_price: Option<ProductPricePresentation>,
+    pub line_total_minor_units: Option<u32>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -1555,6 +1557,8 @@ pub struct OrderDetailProjection {
     pub fulfillment_window_label: Option<String>,
     pub pickup_location_label: Option<String>,
     pub items: Vec<OrderDetailItemRow>,
+    pub economics: TradeEconomicsProjection,
+    pub payment: TradePaymentDisplayStatus,
     pub primary_action: Option<OrderPrimaryAction>,
     pub recoveries: Vec<OrderRecoveryProjection>,
 }
@@ -1590,6 +1594,8 @@ pub struct BuyerOrderDetailProjection {
     pub fulfillment_summary: String,
     pub status: BuyerOrderStatus,
     pub items: Vec<OrderDetailItemRow>,
+    pub economics: TradeEconomicsProjection,
+    pub payment: TradePaymentDisplayStatus,
     pub order_note: Option<String>,
     pub repeat_demand: Option<RepeatDemandHandoffProjection>,
 }
@@ -2033,10 +2039,10 @@ mod tests {
         SelectedAccountProjection, SelectedSurfaceProjection, SettingsPreference, SettingsSection,
         ShellSection, StartupSignerEntryProjection, StartupSignerSource, StartupSignerSourceKind,
         TodayAgendaProjection, TodaySetupTask, TodaySetupTaskKind, TodaySummary,
-        TradeAgreementStatus, TradeFulfillmentStatus, TradeInventoryStatus,
-        TradePaymentDisplayStatus, TradeProvenanceProjection, TradeReducerAgreementStatus,
-        TradeReducerFulfillmentStatus, TradeReducerRevisionStatus, TradeRevisionStatus,
-        TradeWorkflowProjection, TradeWorkflowSource,
+        TradeAgreementStatus, TradeEconomicsProjection, TradeFulfillmentStatus,
+        TradeInventoryStatus, TradePaymentDisplayStatus, TradeProvenanceProjection,
+        TradeReducerAgreementStatus, TradeReducerFulfillmentStatus, TradeReducerRevisionStatus,
+        TradeRevisionStatus, TradeWorkflowProjection, TradeWorkflowSource,
     };
     use std::{collections::BTreeSet, str::FromStr};
     use uuid::Uuid;
@@ -3126,7 +3132,20 @@ mod tests {
             items: vec![OrderDetailItemRow {
                 title: "Salad mix".to_owned(),
                 quantity_display: "2 bags".to_owned(),
+                unit_price: Some(ProductPricePresentation {
+                    amount_minor_units: 650,
+                    currency_code: "USD".to_owned(),
+                    unit_label: "bag".to_owned(),
+                }),
+                line_total_minor_units: Some(1300),
             }],
+            economics: TradeEconomicsProjection {
+                subtotal_minor_units: Some(1300),
+                total_minor_units: Some(1300),
+                currency_code: Some("USD".to_owned()),
+                ..TradeEconomicsProjection::default()
+            },
+            payment: TradePaymentDisplayStatus::NotRecorded,
             primary_action: Some(OrderPrimaryAction::MarkPacked),
             recoveries: Vec::new(),
         };
@@ -3255,7 +3274,20 @@ mod tests {
             items: vec![OrderDetailItemRow {
                 title: "Spring salad mix".to_owned(),
                 quantity_display: "2 bags".to_owned(),
+                unit_price: Some(ProductPricePresentation {
+                    amount_minor_units: 650,
+                    currency_code: "USD".to_owned(),
+                    unit_label: "bag".to_owned(),
+                }),
+                line_total_minor_units: Some(1300),
             }],
+            economics: TradeEconomicsProjection {
+                subtotal_minor_units: Some(1300),
+                total_minor_units: Some(1300),
+                currency_code: Some("USD".to_owned()),
+                ..TradeEconomicsProjection::default()
+            },
+            payment: TradePaymentDisplayStatus::NotRecorded,
             order_note: Some("Leave by the cooler".to_owned()),
             repeat_demand: None,
         };

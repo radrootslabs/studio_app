@@ -6669,10 +6669,9 @@ fn buyer_order_request_local_work_payload(
             "order_updated_at": order.updated_at,
             "created_at_ms": timestamp,
         },
-        "no_payment": {
-            "payment_required": false,
-            "settlement_deferred": true,
-            "payment_state": "not_applicable",
+        "payment_display": {
+            "state": "not_recorded",
+            "allows_payment_action": false,
         },
         "document": {
             "version": 1,
@@ -13537,8 +13536,8 @@ mod tests {
             .as_ref()
             .expect("order local work payload");
         assert_eq!(payload["support_status"]["state"], "supported");
-        assert_eq!(payload["no_payment"]["payment_required"], false);
-        assert_eq!(payload["no_payment"]["settlement_deferred"], true);
+        assert_eq!(payload["payment_display"]["state"], "not_recorded");
+        assert_eq!(payload["payment_display"]["allows_payment_action"], false);
         assert_eq!(payload["currentness"]["current"], true);
         assert_eq!(payload["document"]["kind"], "order_draft_v1");
         assert_eq!(

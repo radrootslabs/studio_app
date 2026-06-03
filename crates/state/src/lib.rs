@@ -2270,10 +2270,11 @@ mod tests {
         PackDayPrintLabelStock, PackDayPrintStatus, PackDayProductTotalRow, PackDayProjection,
         PackDayRosterRow, PackDayScreenQueryState, PersonalEntryState, PersonalSection,
         PickupLocationId, PickupLocationRecord, ProductEditorDraft, ProductId,
-        ProductPublishBlocker, ProductsFilter, ProductsListProjection, ProductsSort,
-        ReminderDeliveryState, ReminderFeedProjection, ReminderKind, ReminderLogEntryProjection,
-        ReminderLogProjection, SelectedAccountProjection, SelectedSurfaceProjection,
-        SettingsSection, ShellSection, TodayAgendaProjection, TodaySetupTask, TodaySetupTaskKind,
+        ProductPricePresentation, ProductPublishBlocker, ProductsFilter, ProductsListProjection,
+        ProductsSort, ReminderDeliveryState, ReminderFeedProjection, ReminderKind,
+        ReminderLogEntryProjection, ReminderLogProjection, SelectedAccountProjection,
+        SelectedSurfaceProjection, SettingsSection, ShellSection, TodayAgendaProjection,
+        TodaySetupTask, TodaySetupTaskKind, TradeEconomicsProjection, TradePaymentDisplayStatus,
     };
 
     struct FailingRepository;
@@ -2530,7 +2531,20 @@ mod tests {
             items: vec![OrderDetailItemRow {
                 title: "Salad mix".to_owned(),
                 quantity_display: "2 bags".to_owned(),
+                unit_price: Some(ProductPricePresentation {
+                    amount_minor_units: 650,
+                    currency_code: "USD".to_owned(),
+                    unit_label: "bag".to_owned(),
+                }),
+                line_total_minor_units: Some(1300),
             }],
+            economics: TradeEconomicsProjection {
+                subtotal_minor_units: Some(1300),
+                total_minor_units: Some(1300),
+                currency_code: Some("USD".to_owned()),
+                ..TradeEconomicsProjection::default()
+            },
+            payment: TradePaymentDisplayStatus::NotRecorded,
             primary_action: Some(OrderPrimaryAction::Review),
             recoveries: Vec::new(),
         };
