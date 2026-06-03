@@ -2331,18 +2331,6 @@ impl DesktopAppRuntimeState {
                 reason: "seller order decision requires a selected seller public key",
             },
         )?;
-        let Some(order_export) =
-            sqlite_store.load_seller_order_decision_export(farm_id, order_id)?
-        else {
-            return Err(AppSqliteError::InvalidProjection {
-                reason: "seller order decision requires a visible seller order",
-            });
-        };
-        if order_export.status != OrderStatus::NeedsAction {
-            return Err(AppSqliteError::InvalidProjection {
-                reason: "seller order decision requires an undecided order",
-            });
-        }
         let request = self.resolve_seller_order_request_evidence(order_id)?;
         if request.payload.seller_pubkey.trim() != seller_pubkey.as_str() {
             return Err(AppSqliteError::InvalidProjection {
@@ -2357,6 +2345,18 @@ impl DesktopAppRuntimeState {
         if listing_address.seller_pubkey != seller_pubkey {
             return Err(AppSqliteError::InvalidProjection {
                 reason: "seller order decision listing address is outside seller authority",
+            });
+        }
+        let Some(order_export) =
+            sqlite_store.load_seller_order_decision_export(farm_id, order_id)?
+        else {
+            return Err(AppSqliteError::InvalidProjection {
+                reason: "seller order decision requires a visible seller order",
+            });
+        };
+        if order_export.status != OrderStatus::NeedsAction {
+            return Err(AppSqliteError::InvalidProjection {
+                reason: "seller order decision requires an undecided order",
             });
         }
 
@@ -8400,6 +8400,7 @@ mod tests {
         SdkDirectRelayAppSyncTransport, TokioRuntimeBuilder, default_sync_transport,
         direct_relay_event_source_runtime, farm_sync_payload, is_hex_64,
         order_decision_publish_payload_to_sdk_decision, pending_sync_upsert,
+        signed_event_from_local_record,
     };
     use crate::pack_day_host_handoff::PackDayHostHandoffError;
     use crate::pack_day_print::{
@@ -13315,6 +13316,24 @@ mod tests {
                 && record.event_kind == Some(3423)
                 && record.event_pubkey.as_deref() == Some(seller_pubkey.as_str())
         }));
+        let decision_event = shared_seller_order_decision_event(&paths, seller_pubkey.as_str());
+        let envelope = radroots_sdk::trade::parse_order_decision(&decision_event)
+            .expect("app seller order accept should parse as canonical order decision");
+        assert_eq!(envelope.payload.order_id, "seller-order-decision-1");
+        assert!(matches!(
+            envelope.payload.decision,
+            RadrootsTradeOrderDecision::Accepted { .. }
+        ));
+        assert!(event_has_tag(
+            &decision_event,
+            "e_root",
+            "event-app:signed_event:order-request:seller-order-decision-1"
+        ));
+        assert!(event_has_tag(
+            &decision_event,
+            "e_prev",
+            "event-app:signed_event:order-request:seller-order-decision-1"
+        ));
 
         cleanup_bootstrapped_runtime_paths(&paths);
     }
@@ -13339,6 +13358,23 @@ mod tests {
                 && record.event_kind == Some(3423)
                 && record.event_pubkey.as_deref() == Some(seller_pubkey.as_str())
         }));
+        let decision_event = shared_seller_order_decision_event(&paths, seller_pubkey.as_str());
+        let envelope = radroots_sdk::trade::parse_order_decision(&decision_event)
+            .expect("app seller order decline should parse as canonical order decision");
+        let RadrootsTradeOrderDecision::Declined { reason } = envelope.payload.decision else {
+            panic!("expected declined decision");
+        };
+        assert_eq!(reason, "not available");
+        assert!(event_has_tag(
+            &decision_event,
+            "e_root",
+            "event-app:signed_event:order-request:seller-order-decision-1"
+        ));
+        assert!(event_has_tag(
+            &decision_event,
+            "e_prev",
+            "event-app:signed_event:order-request:seller-order-decision-1"
+        ));
 
         cleanup_bootstrapped_runtime_paths(&paths);
     }
@@ -17726,6 +17762,30 @@ mod tests {
         store
             .list_records_after_seq(0, 100)
             .expect("shared local records should list")
+    }
+
+    fn shared_seller_order_decision_event(
+        paths: &AppDesktopRuntimePaths,
+        seller_pubkey: &str,
+    ) -> radroots_sdk::RadrootsNostrEvent {
+        let record = shared_local_event_records(paths)
+            .into_iter()
+            .find(|record| {
+                record.family == LocalRecordFamily::SignedEvent
+                    && record.event_kind == Some(3423)
+                    && record.event_pubkey.as_deref() == Some(seller_pubkey)
+            })
+            .expect("shared seller order decision record should exist");
+        signed_event_from_local_record(&record)
+            .expect("shared seller order decision record should decode")
+            .expect("shared seller order decision record should contain signed event")
+    }
+
+    fn event_has_tag(event: &radroots_sdk::RadrootsNostrEvent, key: &str, value: &str) -> bool {
+        event.tags.iter().any(|tag| {
+            tag.first().map(String::as_str) == Some(key)
+                && tag.get(1).map(String::as_str) == Some(value)
+        })
     }
 
     fn persisted_order_status(runtime: &DesktopAppRuntime, order_id: OrderId) -> String {
