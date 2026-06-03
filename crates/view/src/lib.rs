@@ -2821,6 +2821,17 @@ mod tests {
     }
 
     #[test]
+    fn trade_payment_display_statuses_do_not_enable_payment_actions() {
+        for status in [
+            TradePaymentDisplayStatus::NotRecorded,
+            TradePaymentDisplayStatus::Recorded,
+            TradePaymentDisplayStatus::NeedsReview,
+        ] {
+            assert!(!status.allows_payment_action());
+        }
+    }
+
+    #[test]
     fn trade_workflow_projection_uses_localization_key_ids_for_visible_status_labels() {
         assert_eq!(
             TradeReducerAgreementStatus::Requested.storage_key(),

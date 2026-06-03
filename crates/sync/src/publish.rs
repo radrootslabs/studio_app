@@ -763,7 +763,7 @@ mod tests {
         AppOrderFulfillmentPublishStatus, AppOrderReceiptPublishPayload,
         AppOrderRequestItemPayload, AppOrderRequestPublishPayload,
         AppOrderRevisionDecisionPublishPayload, AppOrderRevisionProposalPublishPayload,
-        AppPublishContext, AppPublishPayload, AppPublishValidationFailure,
+        AppPublishContext, AppPublishPayload, AppPublishValidationFailure, AppPublishWorkKind,
     };
     use crate::{
         PendingSyncOperation, PendingSyncOperationState, SyncAggregateRef, SyncOperationKind,
@@ -810,6 +810,31 @@ mod tests {
             operation.publish_payload().expect("payload should parse"),
             payload
         );
+    }
+
+    #[test]
+    fn publish_work_kinds_keep_payment_and_settlement_events_reserved() {
+        let work_kinds = [
+            AppPublishWorkKind::FarmProfile,
+            AppPublishWorkKind::Listing,
+            AppPublishWorkKind::OrderRequest,
+            AppPublishWorkKind::OrderDecision,
+            AppPublishWorkKind::OrderRevisionProposal,
+            AppPublishWorkKind::OrderRevisionDecision,
+            AppPublishWorkKind::OrderCancellation,
+            AppPublishWorkKind::OrderFulfillment,
+            AppPublishWorkKind::OrderReceipt,
+        ];
+
+        assert_eq!(work_kinds.len(), 9);
+        for work_kind in work_kinds {
+            let storage_key = work_kind.storage_key();
+            let sdk_operation = work_kind.sdk_operation();
+            assert!(!storage_key.contains("payment"));
+            assert!(!storage_key.contains("settlement"));
+            assert!(!sdk_operation.contains("payment"));
+            assert!(!sdk_operation.contains("settlement"));
+        }
     }
 
     #[test]

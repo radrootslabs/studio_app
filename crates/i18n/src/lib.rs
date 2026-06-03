@@ -378,6 +378,47 @@ mod tests {
     }
 
     #[test]
+    fn english_payment_action_copy_remains_unspoken_for_reserved_workflow() {
+        let action_keys = [
+            AppTextKey::PersonalCartContinueCheckoutAction,
+            AppTextKey::PersonalCheckoutBackAction,
+            AppTextKey::PersonalCheckoutPlaceOrderAction,
+            AppTextKey::OrdersRecoveryActionOpenFollowUp,
+            AppTextKey::OrdersRecoveryActionStartReview,
+            AppTextKey::OrdersRecoveryActionMarkOpen,
+            AppTextKey::OrdersRecoveryActionResolve,
+        ];
+        let forbidden_action_terms = [
+            "checkout",
+            "pay",
+            "refund",
+            "settlement",
+            "wallet",
+            "invoice",
+            "bank",
+            "card",
+            "processor",
+        ];
+
+        for key in action_keys {
+            let copy = app_text(key).to_lowercase();
+            for term in forbidden_action_terms {
+                assert!(!copy.contains(term));
+            }
+        }
+
+        for copy in [
+            app_text(AppTextKey::PersonalCheckoutLocalOnlyBody),
+            app_text(AppTextKey::PersonalOrderCoordinationFailedNotice),
+        ] {
+            let normalized_copy = copy.to_lowercase();
+            assert!(!normalized_copy.contains("payments are deferred"));
+            assert!(!normalized_copy.contains("payment deferred"));
+            assert!(!normalized_copy.contains("checkout unavailable"));
+        }
+    }
+
+    #[test]
     fn english_trade_workflow_copy_matches_the_projection_contract() {
         assert_eq!(
             app_text(AppTextKey::TradeWorkflowAxisAgreement),

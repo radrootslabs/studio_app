@@ -747,6 +747,17 @@ const REMOVED_WINDOW_HELPER_FAMILIES: &[&str] = &[
     "fn home_farm_setup_blocker(",
 ];
 
+const FORBIDDEN_PAYMENT_ACTION_COPY_PATTERNS: &[&str] = &[
+    "payments are deferred",
+    "payment is deferred",
+    "payment deferred",
+    "checkout unavailable",
+    "pay now",
+    "refund outside the app",
+    "payment handling outside the app",
+    "handle any refund outside the app",
+];
+
 #[test]
 fn desktop_menu_source_uses_localized_copy_paths() {
     assert_eq!(
@@ -814,6 +825,20 @@ fn desktop_window_source_does_not_use_about_placeholder_copy() {
         !source.contains("SettingsAboutPlaceholder"),
         "window.rs still references retired about placeholder copy"
     );
+}
+
+#[test]
+fn desktop_sources_do_not_expose_reserved_payment_action_copy() {
+    for (path, source) in launcher_source_files() {
+        let normalized_source = source.to_lowercase();
+        for pattern in FORBIDDEN_PAYMENT_ACTION_COPY_PATTERNS {
+            assert!(
+                !normalized_source.contains(pattern),
+                "{} contains reserved payment action copy `{pattern}`",
+                path.display()
+            );
+        }
+    }
 }
 
 fn extract_string_literals(source: &str) -> BTreeSet<&str> {

@@ -8753,9 +8753,13 @@ fn order_recovery_summary(kind: RecoveryKind, state: RecoveryState) -> &'static 
         (RecoveryKind::MissedPickup, RecoveryState::Resolved) => {
             "Missed pickup follow-up is resolved"
         }
-        (RecoveryKind::RefundFollowUp, RecoveryState::Open) => "Refund follow-up is open",
-        (RecoveryKind::RefundFollowUp, RecoveryState::InReview) => "Refund follow-up is in review",
-        (RecoveryKind::RefundFollowUp, RecoveryState::Resolved) => "Refund follow-up is resolved",
+        (RecoveryKind::RefundFollowUp, RecoveryState::Open) => "Payment status follow-up is open",
+        (RecoveryKind::RefundFollowUp, RecoveryState::InReview) => {
+            "Payment status follow-up is in review"
+        }
+        (RecoveryKind::RefundFollowUp, RecoveryState::Resolved) => {
+            "Payment status follow-up is resolved"
+        }
     }
 }
 
@@ -8771,13 +8775,13 @@ fn order_recovery_note(kind: RecoveryKind, state: RecoveryState) -> &'static str
             "The seller and buyer have agreed on the next step."
         }
         (RecoveryKind::RefundFollowUp, RecoveryState::Open) => {
-            "Review the situation and handle any refund outside the app."
+            "Review the order record and agree on the next step."
         }
         (RecoveryKind::RefundFollowUp, RecoveryState::InReview) => {
-            "Confirm the outcome and keep payment handling outside the app."
+            "Confirm the outcome with the order parties."
         }
         (RecoveryKind::RefundFollowUp, RecoveryState::Resolved) => {
-            "The refund follow-up was handled outside the app."
+            "The payment status follow-up is resolved."
         }
     }
 }
