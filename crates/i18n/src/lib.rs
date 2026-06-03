@@ -311,7 +311,11 @@ mod tests {
         );
         assert_eq!(
             app_text(AppTextKey::OrdersRecoveryRefundFollowUpTitle),
-            "Refund follow-up"
+            "Payment status"
+        );
+        assert_eq!(
+            app_text(AppTextKey::OrdersRecoveryRefundFollowUpBody),
+            "Track the recorded payment state for this order."
         );
         assert_eq!(
             app_text(AppTextKey::OrdersRecoveryActionResolve),
@@ -352,16 +356,16 @@ mod tests {
     fn english_marketplace_checkout_copy_matches_the_local_order_contract() {
         assert_eq!(
             app_text(AppTextKey::PersonalCartContinueCheckoutAction),
-            "Continue to checkout"
+            "Review order"
         );
-        assert_eq!(app_text(AppTextKey::PersonalCheckoutTitle), "Checkout");
+        assert_eq!(app_text(AppTextKey::PersonalCheckoutTitle), "Order review");
         assert_eq!(
             app_text(AppTextKey::PersonalCheckoutPlaceOrderAction),
             "Place order"
         );
         assert_eq!(
             app_text(AppTextKey::PersonalCheckoutLocalOnlyBody),
-            "This places a local order on this device. It does not charge a card."
+            "Review the details before placing the order."
         );
         assert_eq!(
             app_text(AppTextKey::PersonalOrderPlaceFailedNotice),
@@ -370,6 +374,51 @@ mod tests {
         assert_eq!(
             app_text(AppTextKey::PersonalOrderCoordinationFailedNotice),
             "Order saved locally. It still needs to be shared with your order tools; open Orders and try again."
+        );
+    }
+
+    #[test]
+    fn english_trade_workflow_copy_matches_the_projection_contract() {
+        assert_eq!(
+            app_text(AppTextKey::TradeWorkflowAgreementOrdered),
+            "Ordered"
+        );
+        assert_eq!(
+            app_text(AppTextKey::TradeWorkflowAgreementConfirmed),
+            "Confirmed"
+        );
+        assert_eq!(
+            app_text(AppTextKey::TradeWorkflowAgreementNeedsReview),
+            "Needs review"
+        );
+        assert_eq!(
+            app_text(AppTextKey::TradeWorkflowRevisionChangeProposed),
+            "Change proposed"
+        );
+        assert_eq!(
+            app_text(AppTextKey::TradeWorkflowRevisionKeptAsPlaced),
+            "Kept as placed"
+        );
+        assert_eq!(
+            app_text(AppTextKey::TradeWorkflowFulfillmentReadyForPickup),
+            "Ready for pickup"
+        );
+        assert_eq!(
+            app_text(AppTextKey::TradeWorkflowInventoryReserved),
+            "Reserved"
+        );
+        assert_eq!(
+            app_text(AppTextKey::TradeWorkflowPaymentNotRecorded),
+            "Not recorded"
+        );
+        assert_eq!(
+            app_text(AppTextKey::TradeWorkflowPaymentRecorded),
+            "Recorded"
+        );
+        assert_eq!(app_text(AppTextKey::TradeWorkflowProvenanceCli), "CLI");
+        assert_eq!(
+            app_text(AppTextKey::TradeWorkflowProvenanceLocalEvents),
+            "Local events"
         );
     }
 

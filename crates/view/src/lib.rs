@@ -1058,6 +1058,398 @@ pub struct BuyerCheckoutProjection {
     pub place_order_disabled_reason: Option<BuyerCheckoutDisabledReason>,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TradeReducerAgreementStatus {
+    Requested,
+    Accepted,
+    Declined,
+    Cancelled,
+    Completed,
+    Disputed,
+    Invalid,
+}
+
+impl TradeReducerAgreementStatus {
+    pub const fn storage_key(self) -> &'static str {
+        match self {
+            Self::Requested => "requested",
+            Self::Accepted => "accepted",
+            Self::Declined => "declined",
+            Self::Cancelled => "cancelled",
+            Self::Completed => "completed",
+            Self::Disputed => "disputed",
+            Self::Invalid => "invalid",
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TradeAgreementStatus {
+    #[default]
+    Ordered,
+    Confirmed,
+    Declined,
+    Cancelled,
+    Completed,
+    NeedsReview,
+}
+
+impl TradeAgreementStatus {
+    pub const fn storage_key(self) -> &'static str {
+        match self {
+            Self::Ordered => "ordered",
+            Self::Confirmed => "confirmed",
+            Self::Declined => "declined",
+            Self::Cancelled => "cancelled",
+            Self::Completed => "completed",
+            Self::NeedsReview => "needs_review",
+        }
+    }
+
+    pub const fn label_key_id(self) -> &'static str {
+        match self {
+            Self::Ordered => "messages.trade.workflow.agreement.ordered",
+            Self::Confirmed => "messages.trade.workflow.agreement.confirmed",
+            Self::Declined => "messages.trade.workflow.agreement.declined",
+            Self::Cancelled => "messages.trade.workflow.agreement.cancelled",
+            Self::Completed => "messages.trade.workflow.agreement.completed",
+            Self::NeedsReview => "messages.trade.workflow.agreement.needs_review",
+        }
+    }
+
+    pub const fn from_reducer_status(status: TradeReducerAgreementStatus) -> Self {
+        match status {
+            TradeReducerAgreementStatus::Requested => Self::Ordered,
+            TradeReducerAgreementStatus::Accepted => Self::Confirmed,
+            TradeReducerAgreementStatus::Declined => Self::Declined,
+            TradeReducerAgreementStatus::Cancelled => Self::Cancelled,
+            TradeReducerAgreementStatus::Completed => Self::Completed,
+            TradeReducerAgreementStatus::Disputed | TradeReducerAgreementStatus::Invalid => {
+                Self::NeedsReview
+            }
+        }
+    }
+}
+
+impl From<TradeReducerAgreementStatus> for TradeAgreementStatus {
+    fn from(status: TradeReducerAgreementStatus) -> Self {
+        Self::from_reducer_status(status)
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TradeReducerRevisionStatus {
+    None,
+    Proposed,
+    Accepted,
+    Declined,
+}
+
+impl TradeReducerRevisionStatus {
+    pub const fn storage_key(self) -> &'static str {
+        match self {
+            Self::None => "none",
+            Self::Proposed => "proposed",
+            Self::Accepted => "accepted",
+            Self::Declined => "declined",
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TradeRevisionStatus {
+    #[default]
+    None,
+    ChangeProposed,
+    Updated,
+    KeptAsPlaced,
+}
+
+impl TradeRevisionStatus {
+    pub const fn storage_key(self) -> &'static str {
+        match self {
+            Self::None => "none",
+            Self::ChangeProposed => "change_proposed",
+            Self::Updated => "updated",
+            Self::KeptAsPlaced => "kept_as_placed",
+        }
+    }
+
+    pub const fn label_key_id(self) -> &'static str {
+        match self {
+            Self::None => "messages.trade.workflow.revision.none",
+            Self::ChangeProposed => "messages.trade.workflow.revision.change_proposed",
+            Self::Updated => "messages.trade.workflow.revision.updated",
+            Self::KeptAsPlaced => "messages.trade.workflow.revision.kept_as_placed",
+        }
+    }
+
+    pub const fn from_reducer_status(status: TradeReducerRevisionStatus) -> Self {
+        match status {
+            TradeReducerRevisionStatus::None => Self::None,
+            TradeReducerRevisionStatus::Proposed => Self::ChangeProposed,
+            TradeReducerRevisionStatus::Accepted => Self::Updated,
+            TradeReducerRevisionStatus::Declined => Self::KeptAsPlaced,
+        }
+    }
+}
+
+impl From<TradeReducerRevisionStatus> for TradeRevisionStatus {
+    fn from(status: TradeReducerRevisionStatus) -> Self {
+        Self::from_reducer_status(status)
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TradeReducerFulfillmentStatus {
+    AcceptedNotFulfilled,
+    Preparing,
+    ReadyForPickup,
+    OutForDelivery,
+    Delivered,
+    SellerCancelled,
+}
+
+impl TradeReducerFulfillmentStatus {
+    pub const fn storage_key(self) -> &'static str {
+        match self {
+            Self::AcceptedNotFulfilled => "accepted_not_fulfilled",
+            Self::Preparing => "preparing",
+            Self::ReadyForPickup => "ready_for_pickup",
+            Self::OutForDelivery => "out_for_delivery",
+            Self::Delivered => "delivered",
+            Self::SellerCancelled => "seller_cancelled",
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TradeFulfillmentStatus {
+    #[default]
+    Confirmed,
+    Preparing,
+    ReadyForPickup,
+    OutForDelivery,
+    Delivered,
+    Cancelled,
+}
+
+impl TradeFulfillmentStatus {
+    pub const fn storage_key(self) -> &'static str {
+        match self {
+            Self::Confirmed => "confirmed",
+            Self::Preparing => "preparing",
+            Self::ReadyForPickup => "ready_for_pickup",
+            Self::OutForDelivery => "out_for_delivery",
+            Self::Delivered => "delivered",
+            Self::Cancelled => "cancelled",
+        }
+    }
+
+    pub const fn label_key_id(self) -> &'static str {
+        match self {
+            Self::Confirmed => "messages.trade.workflow.fulfillment.confirmed",
+            Self::Preparing => "messages.trade.workflow.fulfillment.preparing",
+            Self::ReadyForPickup => "messages.trade.workflow.fulfillment.ready_for_pickup",
+            Self::OutForDelivery => "messages.trade.workflow.fulfillment.out_for_delivery",
+            Self::Delivered => "messages.trade.workflow.fulfillment.delivered",
+            Self::Cancelled => "messages.trade.workflow.fulfillment.cancelled",
+        }
+    }
+
+    pub const fn from_reducer_status(status: TradeReducerFulfillmentStatus) -> Self {
+        match status {
+            TradeReducerFulfillmentStatus::AcceptedNotFulfilled => Self::Confirmed,
+            TradeReducerFulfillmentStatus::Preparing => Self::Preparing,
+            TradeReducerFulfillmentStatus::ReadyForPickup => Self::ReadyForPickup,
+            TradeReducerFulfillmentStatus::OutForDelivery => Self::OutForDelivery,
+            TradeReducerFulfillmentStatus::Delivered => Self::Delivered,
+            TradeReducerFulfillmentStatus::SellerCancelled => Self::Cancelled,
+        }
+    }
+}
+
+impl From<TradeReducerFulfillmentStatus> for TradeFulfillmentStatus {
+    fn from(status: TradeReducerFulfillmentStatus) -> Self {
+        Self::from_reducer_status(status)
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TradeInventoryStatus {
+    Available,
+    Reserved,
+    SoldOut,
+    #[default]
+    NeedsReview,
+}
+
+impl TradeInventoryStatus {
+    pub const fn storage_key(self) -> &'static str {
+        match self {
+            Self::Available => "available",
+            Self::Reserved => "reserved",
+            Self::SoldOut => "sold_out",
+            Self::NeedsReview => "needs_review",
+        }
+    }
+
+    pub const fn label_key_id(self) -> &'static str {
+        match self {
+            Self::Available => "messages.trade.workflow.inventory.available",
+            Self::Reserved => "messages.trade.workflow.inventory.reserved",
+            Self::SoldOut => "messages.trade.workflow.inventory.sold_out",
+            Self::NeedsReview => "messages.trade.workflow.inventory.needs_review",
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TradePaymentDisplayStatus {
+    #[default]
+    NotRecorded,
+    Recorded,
+    NeedsReview,
+}
+
+impl TradePaymentDisplayStatus {
+    pub const fn storage_key(self) -> &'static str {
+        match self {
+            Self::NotRecorded => "not_recorded",
+            Self::Recorded => "recorded",
+            Self::NeedsReview => "needs_review",
+        }
+    }
+
+    pub const fn label_key_id(self) -> &'static str {
+        match self {
+            Self::NotRecorded => "messages.trade.workflow.payment.not_recorded",
+            Self::Recorded => "messages.trade.workflow.payment.recorded",
+            Self::NeedsReview => "messages.trade.workflow.payment.needs_review",
+        }
+    }
+
+    pub const fn allows_payment_action(self) -> bool {
+        false
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Ord, PartialOrd, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TradeWorkflowSource {
+    App,
+    Cli,
+    Relay,
+    LocalEvents,
+    #[default]
+    Unknown,
+}
+
+impl TradeWorkflowSource {
+    pub const fn storage_key(self) -> &'static str {
+        match self {
+            Self::App => "app",
+            Self::Cli => "cli",
+            Self::Relay => "relay",
+            Self::LocalEvents => "local_events",
+            Self::Unknown => "unknown",
+        }
+    }
+
+    pub const fn label_key_id(self) -> &'static str {
+        match self {
+            Self::App => "messages.trade.workflow.provenance.app",
+            Self::Cli => "messages.trade.workflow.provenance.cli",
+            Self::Relay => "messages.trade.workflow.provenance.relay",
+            Self::LocalEvents => "messages.trade.workflow.provenance.local_events",
+            Self::Unknown => "messages.trade.workflow.provenance.unknown",
+        }
+    }
+}
+
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+pub struct TradeEconomicsProjection {
+    pub subtotal_minor_units: Option<u32>,
+    pub discount_total_minor_units: Option<u32>,
+    pub adjustment_total_minor_units: Option<u32>,
+    pub total_minor_units: Option<u32>,
+    pub currency_code: Option<String>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct TradeProvenanceProjection {
+    pub primary_source: TradeWorkflowSource,
+    pub sources: BTreeSet<TradeWorkflowSource>,
+    pub last_event_id: Option<String>,
+}
+
+impl TradeProvenanceProjection {
+    pub fn new(
+        primary_source: TradeWorkflowSource,
+        sources: impl IntoIterator<Item = TradeWorkflowSource>,
+    ) -> Self {
+        let mut sources = sources.into_iter().collect::<BTreeSet<_>>();
+        sources.insert(primary_source);
+        Self {
+            primary_source,
+            sources,
+            last_event_id: None,
+        }
+    }
+
+    pub fn from_primary_source(primary_source: TradeWorkflowSource) -> Self {
+        Self::new(primary_source, [primary_source])
+    }
+}
+
+impl Default for TradeProvenanceProjection {
+    fn default() -> Self {
+        Self::from_primary_source(TradeWorkflowSource::Unknown)
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct TradeWorkflowProjection {
+    pub order_id: OrderId,
+    pub agreement: TradeAgreementStatus,
+    pub revision: TradeRevisionStatus,
+    pub fulfillment: Option<TradeFulfillmentStatus>,
+    pub economics: TradeEconomicsProjection,
+    pub inventory: TradeInventoryStatus,
+    pub payment: TradePaymentDisplayStatus,
+    pub provenance: TradeProvenanceProjection,
+}
+
+impl TradeWorkflowProjection {
+    pub fn new(order_id: OrderId, agreement: TradeAgreementStatus) -> Self {
+        Self {
+            order_id,
+            agreement,
+            revision: TradeRevisionStatus::None,
+            fulfillment: None,
+            economics: TradeEconomicsProjection::default(),
+            inventory: TradeInventoryStatus::NeedsReview,
+            payment: TradePaymentDisplayStatus::NotRecorded,
+            provenance: TradeProvenanceProjection::default(),
+        }
+    }
+
+    pub fn from_reducer_status(order_id: OrderId, agreement: TradeReducerAgreementStatus) -> Self {
+        Self::new(
+            order_id,
+            TradeAgreementStatus::from_reducer_status(agreement),
+        )
+    }
+}
+
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum OrdersFilter {
@@ -1641,6 +2033,10 @@ mod tests {
         SelectedAccountProjection, SelectedSurfaceProjection, SettingsPreference, SettingsSection,
         ShellSection, StartupSignerEntryProjection, StartupSignerSource, StartupSignerSourceKind,
         TodayAgendaProjection, TodaySetupTask, TodaySetupTaskKind, TodaySummary,
+        TradeAgreementStatus, TradeFulfillmentStatus, TradeInventoryStatus,
+        TradePaymentDisplayStatus, TradeProvenanceProjection, TradeReducerAgreementStatus,
+        TradeReducerFulfillmentStatus, TradeReducerRevisionStatus, TradeRevisionStatus,
+        TradeWorkflowProjection, TradeWorkflowSource,
     };
     use std::{collections::BTreeSet, str::FromStr};
     use uuid::Uuid;
@@ -2246,6 +2642,130 @@ mod tests {
         assert_eq!(
             OrderPrimaryAction::MarkCompleted.storage_key(),
             "mark_completed"
+        );
+    }
+
+    #[test]
+    fn trade_workflow_projection_maps_reducer_status_to_product_axes() {
+        assert_eq!(
+            TradeAgreementStatus::from_reducer_status(TradeReducerAgreementStatus::Requested),
+            TradeAgreementStatus::Ordered
+        );
+        assert_eq!(
+            TradeAgreementStatus::from_reducer_status(TradeReducerAgreementStatus::Accepted),
+            TradeAgreementStatus::Confirmed
+        );
+        assert_eq!(
+            TradeAgreementStatus::from_reducer_status(TradeReducerAgreementStatus::Disputed),
+            TradeAgreementStatus::NeedsReview
+        );
+        assert_eq!(
+            TradeAgreementStatus::from_reducer_status(TradeReducerAgreementStatus::Invalid),
+            TradeAgreementStatus::NeedsReview
+        );
+        assert_eq!(
+            TradeFulfillmentStatus::from_reducer_status(
+                TradeReducerFulfillmentStatus::AcceptedNotFulfilled
+            ),
+            TradeFulfillmentStatus::Confirmed
+        );
+        assert_eq!(
+            TradeFulfillmentStatus::from_reducer_status(
+                TradeReducerFulfillmentStatus::SellerCancelled
+            ),
+            TradeFulfillmentStatus::Cancelled
+        );
+        assert_eq!(
+            TradeRevisionStatus::from_reducer_status(TradeReducerRevisionStatus::Proposed),
+            TradeRevisionStatus::ChangeProposed
+        );
+        assert_eq!(
+            TradeRevisionStatus::from_reducer_status(TradeReducerRevisionStatus::Accepted),
+            TradeRevisionStatus::Updated
+        );
+        assert_eq!(
+            TradeRevisionStatus::from_reducer_status(TradeReducerRevisionStatus::Declined),
+            TradeRevisionStatus::KeptAsPlaced
+        );
+
+        let order_id = OrderId::new();
+        let projection = TradeWorkflowProjection::from_reducer_status(
+            order_id,
+            TradeReducerAgreementStatus::Requested,
+        );
+        assert_eq!(projection.order_id, order_id);
+        assert_eq!(projection.agreement, TradeAgreementStatus::Ordered);
+        assert_eq!(projection.revision, TradeRevisionStatus::None);
+        assert_eq!(projection.fulfillment, None);
+        assert_eq!(projection.inventory, TradeInventoryStatus::NeedsReview);
+        assert_eq!(projection.payment, TradePaymentDisplayStatus::NotRecorded);
+        assert!(!projection.payment.allows_payment_action());
+        assert_eq!(
+            projection.provenance,
+            TradeProvenanceProjection::from_primary_source(TradeWorkflowSource::Unknown)
+        );
+    }
+
+    #[test]
+    fn trade_workflow_projection_uses_localization_key_ids_for_visible_status_labels() {
+        assert_eq!(
+            TradeReducerAgreementStatus::Requested.storage_key(),
+            "requested"
+        );
+        assert_eq!(
+            TradeReducerFulfillmentStatus::AcceptedNotFulfilled.storage_key(),
+            "accepted_not_fulfilled"
+        );
+        assert_eq!(
+            TradeReducerRevisionStatus::Proposed.storage_key(),
+            "proposed"
+        );
+        assert_eq!(TradeAgreementStatus::Ordered.storage_key(), "ordered");
+        assert_eq!(
+            TradeFulfillmentStatus::ReadyForPickup.storage_key(),
+            "ready_for_pickup"
+        );
+        assert_eq!(
+            TradeRevisionStatus::KeptAsPlaced.storage_key(),
+            "kept_as_placed"
+        );
+        assert_eq!(TradeInventoryStatus::Reserved.storage_key(), "reserved");
+        assert_eq!(
+            TradePaymentDisplayStatus::NotRecorded.storage_key(),
+            "not_recorded"
+        );
+        assert_eq!(
+            TradeWorkflowSource::LocalEvents.storage_key(),
+            "local_events"
+        );
+
+        assert_eq!(
+            TradeAgreementStatus::Ordered.label_key_id(),
+            "messages.trade.workflow.agreement.ordered"
+        );
+        assert_eq!(
+            TradeAgreementStatus::NeedsReview.label_key_id(),
+            "messages.trade.workflow.agreement.needs_review"
+        );
+        assert_eq!(
+            TradeRevisionStatus::ChangeProposed.label_key_id(),
+            "messages.trade.workflow.revision.change_proposed"
+        );
+        assert_eq!(
+            TradeFulfillmentStatus::ReadyForPickup.label_key_id(),
+            "messages.trade.workflow.fulfillment.ready_for_pickup"
+        );
+        assert_eq!(
+            TradeInventoryStatus::SoldOut.label_key_id(),
+            "messages.trade.workflow.inventory.sold_out"
+        );
+        assert_eq!(
+            TradePaymentDisplayStatus::NotRecorded.label_key_id(),
+            "messages.trade.workflow.payment.not_recorded"
+        );
+        assert_eq!(
+            TradeWorkflowSource::Cli.label_key_id(),
+            "messages.trade.workflow.provenance.cli"
         );
     }
 
