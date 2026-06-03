@@ -3,7 +3,8 @@ use radroots_studio_app_view::{
 };
 use radroots_sdk::SdkTransportMode;
 use radroots_sdk::trade::{
-    RadrootsTradeOrderEconomics, RadrootsTradeOrderItem, RadrootsTradeOrderRevisionDecision,
+    RadrootsActiveTradeFulfillmentState, RadrootsTradeOrderEconomics, RadrootsTradeOrderItem,
+    RadrootsTradeOrderRevisionDecision,
 };
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -213,16 +214,6 @@ pub struct AppOrderRevisionDecisionPublishPayload {
     pub decision: RadrootsTradeOrderRevisionDecision,
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum AppOrderFulfillmentPublishStatus {
-    Preparing,
-    ReadyForPickup,
-    OutForDelivery,
-    Delivered,
-    SellerCancelled,
-}
-
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct AppOrderFulfillmentPublishPayload {
     pub context: AppPublishContext,
@@ -234,7 +225,7 @@ pub struct AppOrderFulfillmentPublishPayload {
     pub listing_addr: String,
     pub buyer_pubkey: String,
     pub seller_pubkey: String,
-    pub status: AppOrderFulfillmentPublishStatus,
+    pub status: RadrootsActiveTradeFulfillmentState,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -542,16 +533,21 @@ impl AppPublishPayload {
                     failures.push(AppPublishValidationFailure::MissingOrderCancellationReason);
                 }
             }
-            Self::OrderFulfillment(payload) => validate_lifecycle_order_fields(
-                &payload.context,
-                payload.trade_order_id.as_str(),
-                payload.request_event_id.as_str(),
-                payload.prev_event_id.as_str(),
-                payload.listing_addr.as_str(),
-                payload.buyer_pubkey.as_str(),
-                payload.seller_pubkey.as_str(),
-                &mut failures,
-            ),
+            Self::OrderFulfillment(payload) => {
+                validate_lifecycle_order_fields(
+                    &payload.context,
+                    payload.trade_order_id.as_str(),
+                    payload.request_event_id.as_str(),
+                    payload.prev_event_id.as_str(),
+                    payload.listing_addr.as_str(),
+                    payload.buyer_pubkey.as_str(),
+                    payload.seller_pubkey.as_str(),
+                    &mut failures,
+                );
+                if !payload.status.is_publishable_update() {
+                    failures.push(AppPublishValidationFailure::InvalidOrderFulfillmentStatus);
+                }
+            }
             Self::OrderReceipt(payload) => {
                 validate_lifecycle_order_fields(
                     &payload.context,
@@ -664,6 +660,7 @@ pub enum AppPublishValidationFailure {
     MissingOrderRevisionReason,
     MissingOrderRevisionDecisionReason,
     MissingOrderCancellationReason,
+    InvalidOrderFulfillmentStatus,
     MissingOrderReceiptIssue,
     UnexpectedOrderReceiptIssue,
 }
@@ -705,6 +702,7 @@ impl AppPublishValidationFailure {
             Self::MissingOrderRevisionReason => "missing_order_revision_reason",
             Self::MissingOrderRevisionDecisionReason => "missing_order_revision_decision_reason",
             Self::MissingOrderCancellationReason => "missing_order_cancellation_reason",
+            Self::InvalidOrderFulfillmentStatus => "invalid_order_fulfillment_status",
             Self::MissingOrderReceiptIssue => "missing_order_receipt_issue",
             Self::UnexpectedOrderReceiptIssue => "unexpected_order_receipt_issue",
         }
@@ -760,8 +758,7 @@ mod tests {
     use super::{
         AppFarmProfilePublishPayload, AppListingPublishPayload, AppOrderCancellationPublishPayload,
         AppOrderDecisionPayload, AppOrderDecisionPublishPayload, AppOrderFulfillmentPublishPayload,
-        AppOrderFulfillmentPublishStatus, AppOrderReceiptPublishPayload,
-        AppOrderRequestItemPayload, AppOrderRequestPublishPayload,
+        AppOrderReceiptPublishPayload, AppOrderRequestItemPayload, AppOrderRequestPublishPayload,
         AppOrderRevisionDecisionPublishPayload, AppOrderRevisionProposalPublishPayload,
         AppPublishContext, AppPublishPayload, AppPublishValidationFailure, AppPublishWorkKind,
     };
@@ -770,7 +767,8 @@ mod tests {
     };
     use radroots_studio_app_view::{FarmId, FarmReadiness, OrderId, ProductId, ProductStatus};
     use radroots_sdk::trade::{
-        RadrootsTradeOrderEconomics, RadrootsTradeOrderItem, RadrootsTradeOrderRevisionDecision,
+        RadrootsActiveTradeFulfillmentState, RadrootsTradeOrderEconomics, RadrootsTradeOrderItem,
+        RadrootsTradeOrderRevisionDecision,
     };
     use serde_json::json;
 
@@ -1001,7 +999,7 @@ mod tests {
             listing_addr: "30402:seller:listing".to_owned(),
             buyer_pubkey: "buyer".to_owned(),
             seller_pubkey: "seller".to_owned(),
-            status: AppOrderFulfillmentPublishStatus::ReadyForPickup,
+            status: RadrootsActiveTradeFulfillmentState::ReadyForPickup,
         });
         let receipt = AppPublishPayload::OrderReceipt(AppOrderReceiptPublishPayload {
             context: AppPublishContext::new("acct_local", "buyer_order_receipt"),
@@ -1059,6 +1057,28 @@ mod tests {
         );
         assert_eq!(receipt_reason_codes, vec!["unexpected_order_receipt_issue"]);
 
+        let invalid_fulfillment_reason_codes: Vec<&str> =
+            AppPublishPayload::OrderFulfillment(AppOrderFulfillmentPublishPayload {
+                context: AppPublishContext::new("acct_local", "seller_order_fulfillment"),
+                app_order_id: order_id,
+                farm_id,
+                trade_order_id: "order-1".to_owned(),
+                request_event_id: "request-event-1".to_owned(),
+                prev_event_id: "decision-event-1".to_owned(),
+                listing_addr: "30402:seller:listing".to_owned(),
+                buyer_pubkey: "buyer".to_owned(),
+                seller_pubkey: "seller".to_owned(),
+                status: RadrootsActiveTradeFulfillmentState::AcceptedNotFulfilled,
+            })
+            .validation_failures()
+            .into_iter()
+            .map(AppPublishValidationFailure::storage_key)
+            .collect();
+        assert_eq!(
+            invalid_fulfillment_reason_codes,
+            vec!["invalid_order_fulfillment_status"]
+        );
+
         let operation = PendingSyncOperation::from_publish_payload(
             AppPublishPayload::OrderFulfillment(AppOrderFulfillmentPublishPayload {
                 context: AppPublishContext::new("acct_local", "seller_order_fulfillment"),
@@ -1070,7 +1090,7 @@ mod tests {
                 listing_addr: "30402:seller:listing".to_owned(),
                 buyer_pubkey: "buyer".to_owned(),
                 seller_pubkey: "seller".to_owned(),
-                status: AppOrderFulfillmentPublishStatus::Delivered,
+                status: RadrootsActiveTradeFulfillmentState::Delivered,
             }),
             "2026-04-20T18:00:00Z",
         )
@@ -1091,7 +1111,7 @@ mod tests {
                 listing_addr: "30402:seller:listing".to_owned(),
                 buyer_pubkey: "buyer".to_owned(),
                 seller_pubkey: "seller".to_owned(),
-                status: AppOrderFulfillmentPublishStatus::Delivered,
+                status: RadrootsActiveTradeFulfillmentState::Delivered,
             })
         );
     }

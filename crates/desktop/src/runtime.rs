@@ -34,12 +34,11 @@ use radroots_studio_app_state::{
 use radroots_studio_app_sync::{
     AppFarmProfilePublishPayload, AppListingPublishPayload, AppOrderCancellationPublishPayload,
     AppOrderDecisionInventoryCommitment, AppOrderDecisionPayload, AppOrderDecisionPublishPayload,
-    AppOrderFulfillmentPublishPayload, AppOrderFulfillmentPublishStatus,
-    AppOrderReceiptPublishPayload, AppOrderRequestItemPayload, AppOrderRequestPublishPayload,
-    AppOrderRevisionDecisionPublishPayload, AppOrderRevisionProposalPublishPayload,
-    AppPublishContext, AppPublishPayload, AppPublishedOperationReceipt,
-    AppRelayIngestScopeFreshness, AppSyncProjection, AppSyncRequest, AppSyncResult,
-    AppSyncRunStatus, AppSyncTransport, AppSyncTransportError, PendingSyncOperation,
+    AppOrderFulfillmentPublishPayload, AppOrderReceiptPublishPayload, AppOrderRequestItemPayload,
+    AppOrderRequestPublishPayload, AppOrderRevisionDecisionPublishPayload,
+    AppOrderRevisionProposalPublishPayload, AppPublishContext, AppPublishPayload,
+    AppPublishedOperationReceipt, AppRelayIngestScopeFreshness, AppSyncProjection, AppSyncRequest,
+    AppSyncResult, AppSyncRunStatus, AppSyncTransport, AppSyncTransportError, PendingSyncOperation,
     SyncAggregateRef, SyncCheckpointStatus, SyncConflictSeverity, SyncOperationKind, SyncTrigger,
 };
 use radroots_studio_app_view::{
@@ -770,13 +769,15 @@ impl DesktopAppRuntime {
     ) -> Result<bool, AppSqliteError> {
         self.lock_state_mut().publish_seller_order_fulfillment(
             order_id,
-            AppOrderFulfillmentPublishStatus::ReadyForPickup,
+            RadrootsActiveTradeFulfillmentState::ReadyForPickup,
         )
     }
 
     pub fn publish_order_delivered(&self, order_id: OrderId) -> Result<bool, AppSqliteError> {
-        self.lock_state_mut()
-            .publish_seller_order_fulfillment(order_id, AppOrderFulfillmentPublishStatus::Delivered)
+        self.lock_state_mut().publish_seller_order_fulfillment(
+            order_id,
+            RadrootsActiveTradeFulfillmentState::Delivered,
+        )
     }
 
     pub fn publish_order_revision_proposal(
@@ -2535,7 +2536,7 @@ impl DesktopAppRuntimeState {
     fn prepare_seller_order_fulfillment(
         &mut self,
         order_id: OrderId,
-        status: AppOrderFulfillmentPublishStatus,
+        status: RadrootsActiveTradeFulfillmentState,
     ) -> Result<AppOrderFulfillmentPublishPayload, AppSqliteError> {
         let _ = self.import_shared_local_events()?;
         let relay_urls = normalized_app_sync_relay_urls(&self.nostr_relay_urls).map_err(|_| {
@@ -2621,9 +2622,14 @@ impl DesktopAppRuntimeState {
             });
         };
         let prev_event_id = match status {
-            AppOrderFulfillmentPublishStatus::ReadyForPickup
-            | AppOrderFulfillmentPublishStatus::Preparing
-            | AppOrderFulfillmentPublishStatus::OutForDelivery => {
+            RadrootsActiveTradeFulfillmentState::AcceptedNotFulfilled => {
+                return Err(AppSqliteError::InvalidProjection {
+                    reason: "seller order fulfillment status must be publishable",
+                });
+            }
+            RadrootsActiveTradeFulfillmentState::ReadyForPickup
+            | RadrootsActiveTradeFulfillmentState::Preparing
+            | RadrootsActiveTradeFulfillmentState::OutForDelivery => {
                 if order_detail.status != OrderStatus::Scheduled {
                     return Err(AppSqliteError::InvalidProjection {
                         reason: "seller order fulfillment requires a scheduled order",
@@ -2635,7 +2641,7 @@ impl DesktopAppRuntimeState {
                     .map(|fulfillment| fulfillment.event_id.clone())
                     .unwrap_or_else(|| decision.event_id.clone())
             }
-            AppOrderFulfillmentPublishStatus::Delivered => {
+            RadrootsActiveTradeFulfillmentState::Delivered => {
                 if order_detail.status != OrderStatus::Packed {
                     return Err(AppSqliteError::InvalidProjection {
                         reason: "seller order delivery requires a ready order",
@@ -2649,7 +2655,7 @@ impl DesktopAppRuntimeState {
                         reason: "seller order delivery requires fulfillment evidence",
                     })?
             }
-            AppOrderFulfillmentPublishStatus::SellerCancelled => lifecycle
+            RadrootsActiveTradeFulfillmentState::SellerCancelled => lifecycle
                 .latest_fulfillment
                 .as_ref()
                 .map(|fulfillment| fulfillment.event_id.clone())
@@ -2678,7 +2684,7 @@ impl DesktopAppRuntimeState {
     fn publish_seller_order_fulfillment(
         &mut self,
         order_id: OrderId,
-        status: AppOrderFulfillmentPublishStatus,
+        status: RadrootsActiveTradeFulfillmentState,
     ) -> Result<bool, AppSqliteError> {
         let payload = self.prepare_seller_order_fulfillment(order_id, status)?;
         let operation = PendingSyncOperation::from_publish_payload(
@@ -9468,23 +9474,7 @@ fn order_fulfillment_publish_payload_to_sdk_fulfillment(
         listing_addr: payload.listing_addr.clone(),
         buyer_pubkey: payload.buyer_pubkey.clone(),
         seller_pubkey: payload.seller_pubkey.clone(),
-        status: match payload.status {
-            AppOrderFulfillmentPublishStatus::Preparing => {
-                RadrootsActiveTradeFulfillmentState::Preparing
-            }
-            AppOrderFulfillmentPublishStatus::ReadyForPickup => {
-                RadrootsActiveTradeFulfillmentState::ReadyForPickup
-            }
-            AppOrderFulfillmentPublishStatus::OutForDelivery => {
-                RadrootsActiveTradeFulfillmentState::OutForDelivery
-            }
-            AppOrderFulfillmentPublishStatus::Delivered => {
-                RadrootsActiveTradeFulfillmentState::Delivered
-            }
-            AppOrderFulfillmentPublishStatus::SellerCancelled => {
-                RadrootsActiveTradeFulfillmentState::SellerCancelled
-            }
-        },
+        status: payload.status,
     }
 }
 
@@ -9613,8 +9603,7 @@ mod tests {
         AppFarmProfilePublishPayload, AppListingPublishPayload, AppOrderCancellationPublishPayload,
         AppOrderDecisionInventoryCommitment, AppOrderDecisionPayload,
         AppOrderDecisionPublishPayload, AppOrderFulfillmentPublishPayload,
-        AppOrderFulfillmentPublishStatus, AppOrderReceiptPublishPayload,
-        AppOrderRequestItemPayload, AppOrderRequestPublishPayload,
+        AppOrderReceiptPublishPayload, AppOrderRequestItemPayload, AppOrderRequestPublishPayload,
         AppOrderRevisionDecisionPublishPayload, AppOrderRevisionProposalPublishPayload,
         AppPublishContext, AppPublishPayload, AppPublishedOperationReceipt,
         AppRelayIngestScopeFreshness, AppRelayIngestScopeStatus, AppSyncRequest, AppSyncResult,
@@ -10326,7 +10315,7 @@ mod tests {
             listing_addr: common.4.clone(),
             buyer_pubkey: common.5.clone(),
             seller_pubkey: common.6.clone(),
-            status: AppOrderFulfillmentPublishStatus::ReadyForPickup,
+            status: RadrootsActiveTradeFulfillmentState::ReadyForPickup,
         });
         let receipt = AppPublishPayload::OrderReceipt(AppOrderReceiptPublishPayload {
             context: AppPublishContext::new(buyer_account_id.to_string(), "buyer_order_receipt"),
