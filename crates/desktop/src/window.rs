@@ -65,7 +65,9 @@ use radroots_studio_app_view::{
     RecoveryKind, RecoveryState, ReminderDeadlineProjection, ReminderDeliveryState, ReminderId,
     ReminderLogEntryProjection, ReminderLogProjection, ReminderSurface, ReminderUrgency,
     RepeatDemandEligibility, RepeatDemandHandoffProjection, ShellSection, TodayAgendaProjection,
-    TodaySetupTaskKind, TradeEconomicsProjection, TradePaymentDisplayStatus,
+    TodaySetupTaskKind, TradeAgreementStatus, TradeEconomicsProjection, TradeFulfillmentStatus,
+    TradeInventoryStatus, TradePaymentDisplayStatus, TradeRevisionStatus, TradeWorkflowProjection,
+    TradeWorkflowSource,
 };
 use radroots_nostr::prelude::RadrootsNostrClient;
 use std::{
@@ -4136,14 +4138,11 @@ impl HomeView {
             app_stack_v(APP_UI_THEME.shells.home_stack_gap_px)
                 .child(app_heading_section(detail.order_number.clone()))
                 .child(home_body_text(detail.customer_display_name.clone()))
+                .child(trade_workflow_detail_badge_strip(&detail.workflow))
                 .child(label_value_list([
                     LabelValueRow::new(
                         app_shared_text(AppTextKey::OrdersDetailCustomerLabel),
                         detail.customer_display_name.clone(),
-                    ),
-                    LabelValueRow::new(
-                        app_shared_text(AppTextKey::OrdersDetailStatusLabel),
-                        app_shared_text(orders_status_key(detail.status)),
                     ),
                     LabelValueRow::new(
                         app_shared_text(AppTextKey::OrdersDetailWindowLabel),
@@ -4155,11 +4154,7 @@ impl HomeView {
                     ),
                     LabelValueRow::new(
                         app_shared_text(AppTextKey::OrdersDetailTotalLabel),
-                        trade_economics_total_text(&detail.economics),
-                    ),
-                    LabelValueRow::new(
-                        app_shared_text(AppTextKey::OrdersDetailPaymentLabel),
-                        app_shared_text(trade_payment_display_status_key(detail.payment)),
+                        trade_economics_total_text(&detail.workflow.economics),
                     ),
                 ]))
                 .child(app_form_section(
@@ -8597,11 +8592,156 @@ fn trade_economics_total_text(economics: &TradeEconomicsProjection) -> String {
         .unwrap_or_else(|| app_shared_text(AppTextKey::ValueNone).to_string())
 }
 
+fn trade_workflow_detail_badge_strip(workflow: &TradeWorkflowProjection) -> AnyElement {
+    let mut badges = vec![
+        trade_workflow_labeled_key_badge(
+            AppTextKey::TradeWorkflowAxisAgreement,
+            trade_agreement_status_key(workflow.agreement),
+        ),
+        trade_workflow_labeled_key_badge(
+            AppTextKey::TradeWorkflowAxisRevision,
+            trade_revision_status_key(workflow.revision),
+        ),
+    ];
+
+    if let Some(fulfillment) = workflow.fulfillment {
+        badges.push(trade_workflow_labeled_key_badge(
+            AppTextKey::TradeWorkflowAxisFulfillment,
+            trade_fulfillment_status_key(fulfillment),
+        ));
+    }
+
+    badges.push(trade_workflow_labeled_key_badge(
+        AppTextKey::TradeWorkflowAxisInventory,
+        trade_inventory_status_key(workflow.inventory),
+    ));
+    badges.push(trade_workflow_labeled_key_badge(
+        AppTextKey::TradeWorkflowAxisPayment,
+        trade_payment_display_status_key(workflow.payment),
+    ));
+    if workflow.provenance.primary_source != TradeWorkflowSource::Unknown {
+        badges.push(trade_workflow_labeled_key_badge(
+            AppTextKey::TradeWorkflowAxisSource,
+            trade_workflow_source_key(workflow.provenance.primary_source),
+        ));
+    }
+
+    app_cluster(APP_UI_THEME.foundation.spacing.small_px)
+        .w_full()
+        .children(badges)
+        .into_any_element()
+}
+
+fn trade_workflow_list_badge_strip(workflow: &TradeWorkflowProjection) -> AnyElement {
+    let mut badges = vec![trade_workflow_value_badge(trade_agreement_status_key(
+        workflow.agreement,
+    ))];
+
+    if workflow.revision != TradeRevisionStatus::None {
+        badges.push(trade_workflow_value_badge(trade_revision_status_key(
+            workflow.revision,
+        )));
+    }
+
+    if let Some(fulfillment) = workflow.fulfillment {
+        badges.push(trade_workflow_value_badge(trade_fulfillment_status_key(
+            fulfillment,
+        )));
+    }
+
+    badges.push(trade_workflow_labeled_key_badge(
+        AppTextKey::TradeWorkflowAxisPayment,
+        trade_payment_display_status_key(workflow.payment),
+    ));
+
+    app_cluster(APP_UI_THEME.foundation.spacing.tight_px)
+        .w_full()
+        .children(badges)
+        .into_any_element()
+}
+
+fn trade_workflow_status_stack(workflow: &TradeWorkflowProjection) -> AnyElement {
+    app_stack_v(2.0)
+        .min_w_0()
+        .child(trade_workflow_value_badge(trade_agreement_status_key(
+            workflow.agreement,
+        )))
+        .when_some(workflow.fulfillment, |this, fulfillment| {
+            this.child(trade_workflow_value_badge(trade_fulfillment_status_key(
+                fulfillment,
+            )))
+        })
+        .into_any_element()
+}
+
+fn trade_workflow_labeled_key_badge(label_key: AppTextKey, value_key: AppTextKey) -> AnyElement {
+    settings_badge_text(format!("{}: {}", app_text(label_key), app_text(value_key)))
+        .into_any_element()
+}
+
+fn trade_workflow_value_badge(value_key: AppTextKey) -> AnyElement {
+    settings_badge_text(app_shared_text(value_key)).into_any_element()
+}
+
+fn trade_agreement_status_key(status: TradeAgreementStatus) -> AppTextKey {
+    match status {
+        TradeAgreementStatus::Ordered => AppTextKey::TradeWorkflowAgreementOrdered,
+        TradeAgreementStatus::Confirmed => AppTextKey::TradeWorkflowAgreementConfirmed,
+        TradeAgreementStatus::Declined => AppTextKey::TradeWorkflowAgreementDeclined,
+        TradeAgreementStatus::Cancelled => AppTextKey::TradeWorkflowAgreementCancelled,
+        TradeAgreementStatus::Completed => AppTextKey::TradeWorkflowAgreementCompleted,
+        TradeAgreementStatus::NeedsReview => AppTextKey::TradeWorkflowAgreementNeedsReview,
+    }
+}
+
+fn trade_revision_status_key(status: TradeRevisionStatus) -> AppTextKey {
+    match status {
+        TradeRevisionStatus::None => AppTextKey::TradeWorkflowRevisionNone,
+        TradeRevisionStatus::ChangeProposed => AppTextKey::TradeWorkflowRevisionChangeProposed,
+        TradeRevisionStatus::Updated => AppTextKey::TradeWorkflowRevisionUpdated,
+        TradeRevisionStatus::KeptAsPlaced => AppTextKey::TradeWorkflowRevisionKeptAsPlaced,
+    }
+}
+
+fn trade_fulfillment_status_key(status: TradeFulfillmentStatus) -> AppTextKey {
+    match status {
+        TradeFulfillmentStatus::Confirmed => AppTextKey::TradeWorkflowFulfillmentConfirmed,
+        TradeFulfillmentStatus::Preparing => AppTextKey::TradeWorkflowFulfillmentPreparing,
+        TradeFulfillmentStatus::ReadyForPickup => {
+            AppTextKey::TradeWorkflowFulfillmentReadyForPickup
+        }
+        TradeFulfillmentStatus::OutForDelivery => {
+            AppTextKey::TradeWorkflowFulfillmentOutForDelivery
+        }
+        TradeFulfillmentStatus::Delivered => AppTextKey::TradeWorkflowFulfillmentDelivered,
+        TradeFulfillmentStatus::Cancelled => AppTextKey::TradeWorkflowFulfillmentCancelled,
+    }
+}
+
+fn trade_inventory_status_key(status: TradeInventoryStatus) -> AppTextKey {
+    match status {
+        TradeInventoryStatus::Available => AppTextKey::TradeWorkflowInventoryAvailable,
+        TradeInventoryStatus::Reserved => AppTextKey::TradeWorkflowInventoryReserved,
+        TradeInventoryStatus::SoldOut => AppTextKey::TradeWorkflowInventorySoldOut,
+        TradeInventoryStatus::NeedsReview => AppTextKey::TradeWorkflowInventoryNeedsReview,
+    }
+}
+
 fn trade_payment_display_status_key(status: TradePaymentDisplayStatus) -> AppTextKey {
     match status {
         TradePaymentDisplayStatus::NotRecorded => AppTextKey::TradeWorkflowPaymentNotRecorded,
         TradePaymentDisplayStatus::Recorded => AppTextKey::TradeWorkflowPaymentRecorded,
         TradePaymentDisplayStatus::NeedsReview => AppTextKey::TradeWorkflowPaymentNeedsReview,
+    }
+}
+
+fn trade_workflow_source_key(source: TradeWorkflowSource) -> AppTextKey {
+    match source {
+        TradeWorkflowSource::App => AppTextKey::TradeWorkflowProvenanceApp,
+        TradeWorkflowSource::Cli => AppTextKey::TradeWorkflowProvenanceCli,
+        TradeWorkflowSource::Relay => AppTextKey::TradeWorkflowProvenanceRelay,
+        TradeWorkflowSource::LocalEvents => AppTextKey::TradeWorkflowProvenanceLocalEvents,
+        TradeWorkflowSource::Unknown => AppTextKey::TradeWorkflowProvenanceUnknown,
     }
 }
 
@@ -8703,10 +8843,13 @@ fn buyer_orders_list_entry(
                                         .utility_title_text_px))
                                     .font_weight(gpui::FontWeight::MEDIUM)
                                     .text_color(rgb(APP_UI_THEME.foundation.text.primary))
-                                    .child(app_shared_text(buyer_orders_status_key(row.status))),
+                                    .child(app_shared_text(trade_agreement_status_key(
+                                        row.workflow.agreement,
+                                    ))),
                             ),
                     ),
             )
+            .child(trade_workflow_list_badge_strip(&row.workflow))
             .child(buyer_listing_chip(row.fulfillment_summary.clone())),
     )
     .into_any_element()
@@ -8726,14 +8869,11 @@ fn buyer_order_detail_card(
             .w_full()
             .child(app_heading_section(detail.order_number.clone()))
             .child(settings_badge_text(detail.farm_display_name.clone()))
+            .child(trade_workflow_detail_badge_strip(&detail.workflow))
             .child(label_value_list([
                 LabelValueRow::new(
                     app_shared_text(AppTextKey::PersonalOrdersDetailFarmLabel),
                     detail.farm_display_name.clone(),
-                ),
-                LabelValueRow::new(
-                    app_shared_text(AppTextKey::PersonalOrdersDetailStatusLabel),
-                    app_shared_text(buyer_orders_status_key(detail.status)),
                 ),
                 LabelValueRow::new(
                     app_shared_text(AppTextKey::PersonalOrdersDetailFulfillmentLabel),
@@ -8741,11 +8881,7 @@ fn buyer_order_detail_card(
                 ),
                 LabelValueRow::new(
                     app_shared_text(AppTextKey::PersonalOrdersDetailTotalLabel),
-                    trade_economics_total_text(&detail.economics),
-                ),
-                LabelValueRow::new(
-                    app_shared_text(AppTextKey::PersonalOrdersDetailPaymentLabel),
-                    app_shared_text(trade_payment_display_status_key(detail.payment)),
+                    trade_economics_total_text(&detail.workflow.economics),
                 ),
                 LabelValueRow::new(
                     app_shared_text(AppTextKey::PersonalOrdersDetailNoteLabel),
@@ -8883,17 +9019,6 @@ fn buyer_order_detail_empty_card() -> impl IntoElement {
         app_shared_text(AppTextKey::PersonalOrdersDetailTitle),
         home_body_text(app_shared_text(AppTextKey::PersonalOrdersDetailEmptyBody)),
     )
-}
-
-fn buyer_orders_status_key(status: BuyerOrderStatus) -> AppTextKey {
-    match status {
-        BuyerOrderStatus::Placed => AppTextKey::PersonalOrdersStatusPlaced,
-        BuyerOrderStatus::Scheduled => AppTextKey::PersonalOrdersStatusScheduled,
-        BuyerOrderStatus::Ready => AppTextKey::PersonalOrdersStatusReady,
-        BuyerOrderStatus::Completed => AppTextKey::PersonalOrdersStatusCompleted,
-        BuyerOrderStatus::Declined => AppTextKey::PersonalOrdersStatusDeclined,
-        BuyerOrderStatus::Refunded => AppTextKey::PersonalOrdersStatusRefunded,
-    }
 }
 
 fn buyer_orders_status_color(status: BuyerOrderStatus) -> u32 {
@@ -10055,7 +10180,7 @@ fn orders_table_header() -> impl IntoElement {
         ))
         .child(products_table_header_column(
             AppTextKey::OrdersColumnStatus,
-            Some(128.0),
+            Some(160.0),
             false,
         ))
         .child(products_table_header_column(
@@ -10088,17 +10213,12 @@ fn orders_table_row(
         .child(order)
         .child(
             div()
-                .w(px(128.0))
+                .w(px(160.0))
                 .flex()
-                .items_center()
+                .items_start()
                 .gap(px(6.0))
                 .child(status_indicator(orders_status_color(row.status)))
-                .child(
-                    div()
-                        .text_size(px(APP_UI_THEME.foundation.typography.utility_title_text_px))
-                        .text_color(rgb(APP_UI_THEME.foundation.text.primary))
-                        .child(app_shared_text(orders_status_key(row.status))),
-                ),
+                .child(trade_workflow_status_stack(&row.workflow)),
         )
         .child(
             div()
@@ -10168,17 +10288,6 @@ fn orders_empty_state_card(filter: OrdersFilter) -> impl IntoElement {
     };
 
     home_empty_state_card(title_key, body_key)
-}
-
-fn orders_status_key(status: OrderStatus) -> AppTextKey {
-    match status {
-        OrderStatus::NeedsAction => AppTextKey::OrdersStatusNeedsAction,
-        OrderStatus::Scheduled => AppTextKey::OrdersStatusScheduled,
-        OrderStatus::Packed => AppTextKey::OrdersStatusPacked,
-        OrderStatus::Completed => AppTextKey::OrdersStatusCompleted,
-        OrderStatus::Declined => AppTextKey::OrdersStatusDeclined,
-        OrderStatus::Refunded => AppTextKey::OrdersStatusRefunded,
-    }
 }
 
 fn orders_status_color(status: OrderStatus) -> u32 {
@@ -13091,8 +13200,8 @@ mod tests {
         about_conflict_detail_rows, about_conflict_review_body_key, about_manual_refresh_enabled,
         about_runtime_rows, about_status_rows, app_text,
         buyer_order_coordination_notice_forces_redraw, buyer_orders_retry_action_visible,
-        buyer_orders_status_key, farm_setup_onboarding_card_spec, farmer_home_farm_state,
-        farmer_pack_day_available, home_auto_focus_target, home_content_scroll_id, home_saved_farm,
+        farm_setup_onboarding_card_spec, farmer_home_farm_state, farmer_pack_day_available,
+        home_auto_focus_target, home_content_scroll_id, home_saved_farm,
         home_sidebar_navigation_sections, home_stage, home_window_launch_size_px,
         home_window_minimum_size_px, pack_day_batch_print_action_presentation,
         pack_day_batch_print_status_presentation, pack_day_export_action_enabled,
@@ -13143,7 +13252,7 @@ mod tests {
         ReminderDeadlineProjection, ReminderDeliveryState, ReminderId, ReminderKind,
         ReminderSurface, ReminderUrgency, RepeatDemandEligibility, RepeatDemandHandoffProjection,
         ShellSection, TodayAgendaProjection, TodaySetupTask, TodaySetupTaskKind,
-        TradeEconomicsProjection, TradePaymentDisplayStatus,
+        TradeEconomicsProjection, TradePaymentDisplayStatus, TradeWorkflowProjection,
     };
     use radroots_identity::RadrootsIdentity;
     use std::{
@@ -13609,6 +13718,10 @@ mod tests {
             farm_display_name: String::new(),
             fulfillment_summary: String::new(),
             status: BuyerOrderStatus::Placed,
+            workflow: TradeWorkflowProjection::from_buyer_order_status(
+                order_id,
+                BuyerOrderStatus::Placed,
+            ),
             repeat_demand: None,
         }];
         buyer_orders.personal_projection.orders.detail = Some(BuyerOrderDetailProjection {
@@ -13621,6 +13734,10 @@ mod tests {
             items: Vec::new(),
             economics: TradeEconomicsProjection::default(),
             payment: TradePaymentDisplayStatus::NotRecorded,
+            workflow: TradeWorkflowProjection::from_buyer_order_status(
+                order_id,
+                BuyerOrderStatus::Placed,
+            ),
             order_note: None,
             repeat_demand: Some(RepeatDemandHandoffProjection {
                 order_id,
@@ -13725,20 +13842,26 @@ mod tests {
             ActiveSurface::Farmer,
             ShellSection::Farmer(FarmerSection::Orders),
         );
+        let farmer_order_id = OrderId::new();
+        let farmer_order_farm_id = FarmId::new();
         orders.orders_projection.list.rows = vec![OrdersListRow {
-            order_id: OrderId::new(),
-            farm_id: FarmId::new(),
+            order_id: farmer_order_id,
+            farm_id: farmer_order_farm_id,
             fulfillment_window_id: None,
             order_number: String::new(),
             customer_display_name: String::new(),
             fulfillment_window_label: None,
             pickup_location_label: None,
             status: OrderStatus::Scheduled,
+            workflow: TradeWorkflowProjection::from_order_status(
+                farmer_order_id,
+                OrderStatus::Scheduled,
+            ),
             primary_action: Some(OrderPrimaryAction::MarkPacked),
         }];
         orders.orders_projection.detail = Some(OrderDetailProjection {
-            order_id: OrderId::new(),
-            farm_id: FarmId::new(),
+            order_id: farmer_order_id,
+            farm_id: farmer_order_farm_id,
             order_number: String::new(),
             customer_display_name: String::new(),
             status: OrderStatus::Scheduled,
@@ -13748,6 +13871,10 @@ mod tests {
             items: Vec::new(),
             economics: TradeEconomicsProjection::default(),
             payment: TradePaymentDisplayStatus::NotRecorded,
+            workflow: TradeWorkflowProjection::from_order_status(
+                farmer_order_id,
+                OrderStatus::Scheduled,
+            ),
             primary_action: Some(OrderPrimaryAction::MarkPacked),
             recoveries: Vec::new(),
         });
@@ -13790,18 +13917,6 @@ mod tests {
             Some(SettingsAutoFocusTarget::Navigation(
                 SettingsPanelViewKey::About
             ))
-        );
-    }
-
-    #[test]
-    fn buyer_orders_status_keys_use_buyer_facing_copy() {
-        assert_eq!(
-            buyer_orders_status_key(BuyerOrderStatus::Placed),
-            AppTextKey::PersonalOrdersStatusPlaced
-        );
-        assert_eq!(
-            buyer_orders_status_key(BuyerOrderStatus::Ready),
-            AppTextKey::PersonalOrdersStatusReady
         );
     }
 

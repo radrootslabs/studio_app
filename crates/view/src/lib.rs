@@ -1448,6 +1448,96 @@ impl TradeWorkflowProjection {
             TradeAgreementStatus::from_reducer_status(agreement),
         )
     }
+
+    pub fn from_order_status(order_id: OrderId, status: OrderStatus) -> Self {
+        let mut projection = match status {
+            OrderStatus::NeedsAction => Self::new(order_id, TradeAgreementStatus::Ordered),
+            OrderStatus::Scheduled => Self::new(order_id, TradeAgreementStatus::Confirmed),
+            OrderStatus::Packed => Self::new(order_id, TradeAgreementStatus::Confirmed),
+            OrderStatus::Completed => Self::new(order_id, TradeAgreementStatus::Completed),
+            OrderStatus::Declined => Self::new(order_id, TradeAgreementStatus::Declined),
+            OrderStatus::Refunded => Self::new(order_id, TradeAgreementStatus::NeedsReview),
+        };
+
+        match status {
+            OrderStatus::NeedsAction => {}
+            OrderStatus::Scheduled => {
+                projection.fulfillment = Some(TradeFulfillmentStatus::Confirmed);
+                projection.inventory = TradeInventoryStatus::Reserved;
+            }
+            OrderStatus::Packed => {
+                projection.fulfillment = Some(TradeFulfillmentStatus::ReadyForPickup);
+                projection.inventory = TradeInventoryStatus::Reserved;
+            }
+            OrderStatus::Completed => {
+                projection.fulfillment = Some(TradeFulfillmentStatus::Delivered);
+                projection.inventory = TradeInventoryStatus::Reserved;
+            }
+            OrderStatus::Declined => {
+                projection.fulfillment = Some(TradeFulfillmentStatus::Cancelled);
+                projection.inventory = TradeInventoryStatus::Available;
+            }
+            OrderStatus::Refunded => {
+                projection.payment = TradePaymentDisplayStatus::NeedsReview;
+            }
+        }
+
+        projection
+    }
+
+    pub fn from_buyer_order_status(order_id: OrderId, status: BuyerOrderStatus) -> Self {
+        let mut projection = match status {
+            BuyerOrderStatus::Placed => Self::new(order_id, TradeAgreementStatus::Ordered),
+            BuyerOrderStatus::Scheduled => Self::new(order_id, TradeAgreementStatus::Confirmed),
+            BuyerOrderStatus::Ready => Self::new(order_id, TradeAgreementStatus::Confirmed),
+            BuyerOrderStatus::Completed => Self::new(order_id, TradeAgreementStatus::Completed),
+            BuyerOrderStatus::Declined => Self::new(order_id, TradeAgreementStatus::Declined),
+            BuyerOrderStatus::Refunded => Self::new(order_id, TradeAgreementStatus::NeedsReview),
+        };
+
+        match status {
+            BuyerOrderStatus::Placed => {}
+            BuyerOrderStatus::Scheduled => {
+                projection.fulfillment = Some(TradeFulfillmentStatus::Confirmed);
+                projection.inventory = TradeInventoryStatus::Reserved;
+            }
+            BuyerOrderStatus::Ready => {
+                projection.fulfillment = Some(TradeFulfillmentStatus::ReadyForPickup);
+                projection.inventory = TradeInventoryStatus::Reserved;
+            }
+            BuyerOrderStatus::Completed => {
+                projection.fulfillment = Some(TradeFulfillmentStatus::Delivered);
+                projection.inventory = TradeInventoryStatus::Reserved;
+            }
+            BuyerOrderStatus::Declined => {
+                projection.fulfillment = Some(TradeFulfillmentStatus::Cancelled);
+                projection.inventory = TradeInventoryStatus::Available;
+            }
+            BuyerOrderStatus::Refunded => {
+                projection.payment = TradePaymentDisplayStatus::NeedsReview;
+            }
+        }
+
+        projection
+    }
+
+    pub fn with_economics(mut self, economics: TradeEconomicsProjection) -> Self {
+        self.economics = economics;
+        self
+    }
+
+    pub fn with_payment(mut self, payment: TradePaymentDisplayStatus) -> Self {
+        self.payment = payment;
+        self
+    }
+
+    pub fn with_economics_and_payment(
+        self,
+        economics: TradeEconomicsProjection,
+        payment: TradePaymentDisplayStatus,
+    ) -> Self {
+        self.with_economics(economics).with_payment(payment)
+    }
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
@@ -1523,6 +1613,7 @@ pub struct OrdersListRow {
     pub fulfillment_window_label: Option<String>,
     pub pickup_location_label: Option<String>,
     pub status: OrderStatus,
+    pub workflow: TradeWorkflowProjection,
     pub primary_action: Option<OrderPrimaryAction>,
 }
 
@@ -1559,6 +1650,7 @@ pub struct OrderDetailProjection {
     pub items: Vec<OrderDetailItemRow>,
     pub economics: TradeEconomicsProjection,
     pub payment: TradePaymentDisplayStatus,
+    pub workflow: TradeWorkflowProjection,
     pub primary_action: Option<OrderPrimaryAction>,
     pub recoveries: Vec<OrderRecoveryProjection>,
 }
@@ -1571,6 +1663,7 @@ pub struct BuyerOrdersListRow {
     pub farm_display_name: String,
     pub fulfillment_summary: String,
     pub status: BuyerOrderStatus,
+    pub workflow: TradeWorkflowProjection,
     pub repeat_demand: Option<RepeatDemandHandoffProjection>,
 }
 
@@ -1596,6 +1689,7 @@ pub struct BuyerOrderDetailProjection {
     pub items: Vec<OrderDetailItemRow>,
     pub economics: TradeEconomicsProjection,
     pub payment: TradePaymentDisplayStatus,
+    pub workflow: TradeWorkflowProjection,
     pub order_note: Option<String>,
     pub repeat_demand: Option<RepeatDemandHandoffProjection>,
 }
@@ -3101,6 +3195,13 @@ mod tests {
         let fulfillment_window_id = super::FulfillmentWindowId::new();
         let farm_id = FarmId::new();
         let order_id = super::OrderId::new();
+        let order_economics = TradeEconomicsProjection {
+            subtotal_minor_units: Some(1300),
+            total_minor_units: Some(1300),
+            currency_code: Some("USD".to_owned()),
+            ..TradeEconomicsProjection::default()
+        };
+        let order_payment = TradePaymentDisplayStatus::NotRecorded;
         let orders_list = OrdersListProjection {
             summary: OrdersListSummary {
                 total_orders: 3,
@@ -3117,6 +3218,10 @@ mod tests {
                 fulfillment_window_label: Some("Wednesday pickup".to_owned()),
                 pickup_location_label: Some("North barn".to_owned()),
                 status: OrderStatus::Scheduled,
+                workflow: TradeWorkflowProjection::from_order_status(
+                    order_id,
+                    OrderStatus::Scheduled,
+                ),
                 primary_action: Some(OrderPrimaryAction::MarkPacked),
             }],
         };
@@ -3139,13 +3244,10 @@ mod tests {
                 }),
                 line_total_minor_units: Some(1300),
             }],
-            economics: TradeEconomicsProjection {
-                subtotal_minor_units: Some(1300),
-                total_minor_units: Some(1300),
-                currency_code: Some("USD".to_owned()),
-                ..TradeEconomicsProjection::default()
-            },
-            payment: TradePaymentDisplayStatus::NotRecorded,
+            economics: order_economics.clone(),
+            payment: order_payment,
+            workflow: TradeWorkflowProjection::from_order_status(order_id, OrderStatus::Scheduled)
+                .with_economics_and_payment(order_economics, order_payment),
             primary_action: Some(OrderPrimaryAction::MarkPacked),
             recoveries: Vec::new(),
         };
@@ -3178,7 +3280,15 @@ mod tests {
             orders_list.rows[0].primary_action,
             Some(OrderPrimaryAction::MarkPacked)
         );
+        assert_eq!(
+            orders_list.rows[0].workflow.agreement,
+            TradeAgreementStatus::Confirmed
+        );
         assert_eq!(order_detail.items[0].quantity_display, "2 bags");
+        assert_eq!(
+            order_detail.workflow.fulfillment,
+            Some(TradeFulfillmentStatus::Confirmed)
+        );
         assert!(!pack_day.is_empty());
         assert_eq!(pack_day.pickup_roster[0].order_number, "R-1001");
     }
@@ -3188,6 +3298,13 @@ mod tests {
         let farm_id = FarmId::new();
         let product_id = super::ProductId::new();
         let order_id = super::OrderId::new();
+        let buyer_order_economics = TradeEconomicsProjection {
+            subtotal_minor_units: Some(1300),
+            total_minor_units: Some(1300),
+            currency_code: Some("USD".to_owned()),
+            ..TradeEconomicsProjection::default()
+        };
+        let buyer_order_payment = TradePaymentDisplayStatus::NotRecorded;
         let listing = BuyerListingRow {
             product_id,
             farm_id,
@@ -3261,6 +3378,10 @@ mod tests {
                 farm_display_name: "Cedar Grove Farm".to_owned(),
                 fulfillment_summary: "Thursday pickup".to_owned(),
                 status: BuyerOrderStatus::Scheduled,
+                workflow: TradeWorkflowProjection::from_buyer_order_status(
+                    order_id,
+                    BuyerOrderStatus::Scheduled,
+                ),
                 repeat_demand: None,
             }],
         };
@@ -3281,13 +3402,13 @@ mod tests {
                 }),
                 line_total_minor_units: Some(1300),
             }],
-            economics: TradeEconomicsProjection {
-                subtotal_minor_units: Some(1300),
-                total_minor_units: Some(1300),
-                currency_code: Some("USD".to_owned()),
-                ..TradeEconomicsProjection::default()
-            },
-            payment: TradePaymentDisplayStatus::NotRecorded,
+            economics: buyer_order_economics.clone(),
+            payment: buyer_order_payment,
+            workflow: TradeWorkflowProjection::from_buyer_order_status(
+                order_id,
+                BuyerOrderStatus::Scheduled,
+            )
+            .with_economics_and_payment(buyer_order_economics, buyer_order_payment),
             order_note: Some("Leave by the cooler".to_owned()),
             repeat_demand: None,
         };
@@ -3298,6 +3419,10 @@ mod tests {
         assert!(!orders.is_empty());
         assert_eq!(listing.fulfillment_methods.len(), 1);
         assert_eq!(order_detail.status, BuyerOrderStatus::Scheduled);
+        assert_eq!(
+            order_detail.workflow.agreement,
+            TradeAgreementStatus::Confirmed
+        );
     }
 
     #[test]
@@ -3313,8 +3438,9 @@ mod tests {
             }],
             ..TodayAgendaProjection::default()
         };
+        let orders_row_id = super::OrderId::new();
         let orders_row = OrdersListRow {
-            order_id: super::OrderId::new(),
+            order_id: orders_row_id,
             farm_id: FarmId::new(),
             fulfillment_window_id: None,
             order_number: "R-2002".to_owned(),
@@ -3322,6 +3448,10 @@ mod tests {
             fulfillment_window_label: None,
             pickup_location_label: None,
             status: OrderStatus::Completed,
+            workflow: TradeWorkflowProjection::from_order_status(
+                orders_row_id,
+                OrderStatus::Completed,
+            ),
             primary_action: None,
         };
 

@@ -2275,6 +2275,7 @@ mod tests {
         ReminderLogEntryProjection, ReminderLogProjection, SelectedAccountProjection,
         SelectedSurfaceProjection, SettingsSection, ShellSection, TodayAgendaProjection,
         TodaySetupTask, TodaySetupTaskKind, TradeEconomicsProjection, TradePaymentDisplayStatus,
+        TradeWorkflowProjection,
     };
 
     struct FailingRepository;
@@ -2500,6 +2501,13 @@ mod tests {
         let farm_id = FarmId::new();
         let fulfillment_window_id = FulfillmentWindowId::new();
         let order_id = OrderId::new();
+        let order_economics = TradeEconomicsProjection {
+            subtotal_minor_units: Some(1300),
+            total_minor_units: Some(1300),
+            currency_code: Some("USD".to_owned()),
+            ..TradeEconomicsProjection::default()
+        };
+        let order_payment = TradePaymentDisplayStatus::NotRecorded;
         let orders_list = OrdersListProjection {
             summary: OrdersListSummary {
                 total_orders: 2,
@@ -2516,6 +2524,10 @@ mod tests {
                 fulfillment_window_label: Some("Friday pickup".to_owned()),
                 pickup_location_label: Some("North barn".to_owned()),
                 status: OrderStatus::NeedsAction,
+                workflow: TradeWorkflowProjection::from_order_status(
+                    order_id,
+                    OrderStatus::NeedsAction,
+                ),
                 primary_action: Some(OrderPrimaryAction::Review),
             }],
         };
@@ -2538,13 +2550,13 @@ mod tests {
                 }),
                 line_total_minor_units: Some(1300),
             }],
-            economics: TradeEconomicsProjection {
-                subtotal_minor_units: Some(1300),
-                total_minor_units: Some(1300),
-                currency_code: Some("USD".to_owned()),
-                ..TradeEconomicsProjection::default()
-            },
-            payment: TradePaymentDisplayStatus::NotRecorded,
+            economics: order_economics.clone(),
+            payment: order_payment,
+            workflow: TradeWorkflowProjection::from_order_status(
+                order_id,
+                OrderStatus::NeedsAction,
+            )
+            .with_economics_and_payment(order_economics, order_payment),
             primary_action: Some(OrderPrimaryAction::Review),
             recoveries: Vec::new(),
         };

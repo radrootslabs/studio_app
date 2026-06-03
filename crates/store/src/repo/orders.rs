@@ -7,7 +7,7 @@ use radroots_studio_app_view::{
     PackDayOutputCustomerOrder, PackDayOutputOrderState, PackDayOutputPackListEntry,
     PackDayOutputProductTotal, PackDayOutputQuantity, PackDayOutputSource, PackDayOutputWindow,
     PackDayPackListRow, PackDayProductTotalRow, PackDayProjection, PackDayRosterRow,
-    PackDayScreenQueryState, ProductId, TradePaymentDisplayStatus,
+    PackDayScreenQueryState, ProductId, TradePaymentDisplayStatus, TradeWorkflowProjection,
 };
 use rusqlite::{Connection, OptionalExtension, params};
 
@@ -113,12 +113,17 @@ impl<'a> AppOrdersRepository<'a> {
                     fulfillment_window_label,
                     pickup_location_label,
                 )| {
+                    let order_id: OrderId = parse_typed_id("orders.id", order_id)?;
+                    let farm_id: FarmId = parse_typed_id("orders.farm_id", farm_id)?;
                     let status = parse_order_status("orders.status", status)?;
-                    let items = self.load_order_detail_items(order_id.clone())?;
+                    let items = self.load_order_detail_items(order_id.to_string())?;
                     let economics = order_detail_economics(&items)?;
+                    let payment = TradePaymentDisplayStatus::NotRecorded;
+                    let workflow = TradeWorkflowProjection::from_order_status(order_id, status)
+                        .with_economics_and_payment(economics.clone(), payment);
                     Ok(OrderDetailProjection {
-                        order_id: parse_typed_id("orders.id", order_id)?,
-                        farm_id: parse_typed_id("orders.farm_id", farm_id)?,
+                        order_id,
+                        farm_id,
                         order_number,
                         customer_display_name,
                         status,
@@ -130,7 +135,8 @@ impl<'a> AppOrdersRepository<'a> {
                         pickup_location_label: empty_string_to_none(pickup_location_label),
                         items,
                         economics,
-                        payment: TradePaymentDisplayStatus::NotRecorded,
+                        payment,
+                        workflow,
                         primary_action: primary_action_for_status(status),
                         recoveries: Vec::new(),
                     })
@@ -1126,6 +1132,8 @@ impl OrderRecord {
     }
 
     fn into_list_row(self) -> OrdersListRow {
+        let workflow = TradeWorkflowProjection::from_order_status(self.order_id, self.status);
+
         OrdersListRow {
             order_id: self.order_id,
             farm_id: self.farm_id,
@@ -1135,6 +1143,7 @@ impl OrderRecord {
             fulfillment_window_label: self.fulfillment_window_label,
             pickup_location_label: self.pickup_location_label,
             status: self.status,
+            workflow,
             primary_action: primary_action_for_status(self.status),
         }
     }

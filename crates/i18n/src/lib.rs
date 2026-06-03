@@ -380,6 +380,16 @@ mod tests {
     #[test]
     fn english_trade_workflow_copy_matches_the_projection_contract() {
         assert_eq!(
+            app_text(AppTextKey::TradeWorkflowAxisAgreement),
+            "Agreement"
+        );
+        assert_eq!(
+            app_text(AppTextKey::TradeWorkflowAxisFulfillment),
+            "Fulfillment"
+        );
+        assert_eq!(app_text(AppTextKey::TradeWorkflowAxisPayment), "Payment");
+        assert_eq!(app_text(AppTextKey::TradeWorkflowAxisSource), "Source");
+        assert_eq!(
             app_text(AppTextKey::TradeWorkflowAgreementOrdered),
             "Ordered"
         );

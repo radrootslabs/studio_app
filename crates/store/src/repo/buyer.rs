@@ -9,6 +9,7 @@ use radroots_studio_app_view::{
     OrderId, OrderStatus, ProductAvailabilityState, ProductAvailabilitySummary, ProductId,
     ProductPricePresentation, ProductStatus, ProductStockState, ProductStockSummary,
     RepeatDemandEligibility, RepeatDemandHandoffProjection, TradePaymentDisplayStatus,
+    TradeWorkflowProjection,
 };
 use rusqlite::{Connection, OptionalExtension, params};
 use serde_json::Value;
@@ -786,14 +787,17 @@ impl<'a> AppBuyerRepository<'a> {
                 operation: "read buyer orders list",
                 source,
             })?;
+            let order_id = parse_typed_id("orders.id", order_id)?;
+            let farm_id = parse_typed_id("orders.farm_id", farm_id)?;
+            let buyer_status = BuyerOrderStatus::from(parse_order_status("orders.status", status)?);
 
             orders.push(BuyerOrdersListRow {
-                order_id: parse_typed_id("orders.id", order_id.clone())?,
-                farm_id: parse_typed_id("orders.farm_id", farm_id.clone())?,
+                order_id,
+                farm_id,
                 order_number,
                 repeat_demand: self.build_repeat_demand_handoff(
-                    parse_typed_id("orders.id", order_id)?,
-                    parse_typed_id("orders.farm_id", farm_id)?,
+                    order_id,
+                    farm_id,
                     farm_display_name.as_str(),
                     &visible_listings,
                 )?,
@@ -803,7 +807,8 @@ impl<'a> AppBuyerRepository<'a> {
                     fulfillment_starts_at,
                     fulfillment_ends_at,
                 ),
-                status: BuyerOrderStatus::from(parse_order_status("orders.status", status)?),
+                status: buyer_status,
+                workflow: TradeWorkflowProjection::from_buyer_order_status(order_id, buyer_status),
             });
         }
 
@@ -872,8 +877,14 @@ impl<'a> AppBuyerRepository<'a> {
                 )| {
                     let order_id: OrderId = parse_typed_id("orders.id", order_id)?;
                     let farm_id: FarmId = parse_typed_id("orders.farm_id", farm_id)?;
+                    let status =
+                        BuyerOrderStatus::from(parse_order_status("orders.status", status)?);
                     let items = self.load_order_detail_items(order_id.to_string())?;
                     let economics = order_detail_economics(&items)?;
+                    let payment = TradePaymentDisplayStatus::NotRecorded;
+                    let workflow =
+                        TradeWorkflowProjection::from_buyer_order_status(order_id, status)
+                            .with_economics_and_payment(economics.clone(), payment);
                     Ok(BuyerOrderDetailProjection {
                         order_id,
                         farm_id,
@@ -884,13 +895,11 @@ impl<'a> AppBuyerRepository<'a> {
                             fulfillment_starts_at,
                             fulfillment_ends_at,
                         ),
-                        status: BuyerOrderStatus::from(parse_order_status(
-                            "orders.status",
-                            status,
-                        )?),
+                        status,
                         items,
                         economics,
-                        payment: TradePaymentDisplayStatus::NotRecorded,
+                        payment,
+                        workflow,
                         order_note: empty_string_to_none(order_note),
                         repeat_demand: self.build_repeat_demand_handoff(
                             order_id,
