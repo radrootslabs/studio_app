@@ -76,6 +76,47 @@ mod tests {
         AppTextKey, app_text, default_locale, resolve_locale_from_host, supported_locales,
     };
 
+    const RESERVED_PAYMENT_ACTION_TERMS: &[&str] = &[
+        "checkout",
+        "pay",
+        "refund",
+        "settlement",
+        "wallet",
+        "invoice",
+        "bank",
+        "card",
+        "processor",
+        "provider",
+        "payment-provider",
+        "payment provider",
+    ];
+
+    const FORBIDDEN_PAYMENT_DEFERRAL_COPY_PATTERNS: &[&str] = &[
+        "payments are deferred",
+        "payment is deferred",
+        "payment deferred",
+        "payments deferred",
+        "deferred payment",
+        "deferred payments",
+        "checkout unavailable",
+        "figure it out",
+        "payment handling outside the app",
+        "refund outside the app",
+        "handle any refund outside the app",
+        "settle outside the app",
+    ];
+
+    const FORBIDDEN_TRADE_WORKFLOW_LEAKAGE_PATTERNS: &[&str] = &[
+        "state machine",
+        "reducer",
+        "event kind",
+        "nostr",
+        "protocol",
+        "checkout",
+        "payment provider",
+        "payment-provider",
+    ];
+
     #[test]
     fn generated_catalog_matches_typed_key_registry() {
         let catalog_keys = super::DEFAULT_CATALOG_KEY_IDS
@@ -382,45 +423,79 @@ mod tests {
 
     #[test]
     fn english_payment_action_copy_remains_unspoken_for_reserved_workflow() {
-        let action_keys = [
-            AppTextKey::PersonalCartReviewOrderAction,
-            AppTextKey::PersonalOrderReviewBackAction,
-            AppTextKey::PersonalOrderReviewPlaceOrderAction,
-            AppTextKey::OrdersRecoveryActionOpenFollowUp,
-            AppTextKey::OrdersRecoveryActionStartReview,
-            AppTextKey::OrdersRecoveryActionMarkOpen,
-            AppTextKey::OrdersRecoveryActionResolve,
-        ];
-        let forbidden_action_terms = [
-            "checkout",
-            "pay",
-            "refund",
-            "settlement",
-            "wallet",
-            "invoice",
-            "bank",
-            "card",
-            "processor",
-            "provider",
-            "payment-provider",
-            "payment provider",
-        ];
+        let action_keys = AppTextKey::ALL
+            .iter()
+            .copied()
+            .filter(|key| is_visible_action_text_key(*key))
+            .collect::<Vec<_>>();
+
+        assert!(action_keys.contains(&AppTextKey::PersonalCartReviewOrderAction));
+        assert!(action_keys.contains(&AppTextKey::PersonalOrderReviewPlaceOrderAction));
+        assert!(action_keys.contains(&AppTextKey::OrdersRecoveryActionResolve));
 
         for key in action_keys {
             let copy = app_text(key).to_lowercase();
-            for term in forbidden_action_terms {
-                assert!(!copy.contains(term));
+            for term in RESERVED_PAYMENT_ACTION_TERMS {
+                assert!(
+                    !contains_reserved_payment_action_term(&copy, term),
+                    "{} contains reserved payment action term `{term}`",
+                    key.id()
+                );
             }
         }
+    }
 
-        for copy in [
-            app_text(AppTextKey::PersonalOrderReviewLocalOnlyBody),
-            app_text(AppTextKey::PersonalOrderCoordinationFailedNotice),
-        ] {
+    #[test]
+    fn english_visible_copy_does_not_explain_payment_deferral() {
+        for key in AppTextKey::ALL {
+            let normalized_copy = app_text(*key).to_lowercase();
+            for pattern in FORBIDDEN_PAYMENT_DEFERRAL_COPY_PATTERNS {
+                assert!(
+                    !normalized_copy.contains(pattern),
+                    "{} contains forbidden payment-deferral copy `{pattern}`",
+                    key.id()
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn english_buyer_visible_copy_does_not_use_checkout_wording() {
+        for key in AppTextKey::ALL
+            .iter()
+            .copied()
+            .filter(|key| is_buyer_visible_text_key(*key))
+        {
+            let normalized_copy = app_text(key).to_lowercase();
+            assert!(
+                !contains_reserved_payment_action_term(&normalized_copy, "checkout"),
+                "{} contains buyer-visible checkout wording",
+                key.id()
+            );
+        }
+    }
+
+    #[test]
+    fn english_trade_workflow_copy_stays_compact_and_product_facing() {
+        for key in AppTextKey::ALL
+            .iter()
+            .copied()
+            .filter(|key| is_trade_workflow_text_key(*key))
+        {
+            let copy = app_text(key);
             let normalized_copy = copy.to_lowercase();
-            assert!(!normalized_copy.contains("payments are deferred"));
-            assert!(!normalized_copy.contains("payment deferred"));
-            assert!(!normalized_copy.contains("checkout unavailable"));
+            assert!(
+                copy.split_whitespace().count() <= 4,
+                "{} is too long for a compact workflow badge",
+                key.id()
+            );
+            for pattern in FORBIDDEN_TRADE_WORKFLOW_LEAKAGE_PATTERNS {
+                assert!(
+                    !normalized_copy.contains(pattern),
+                    "{} contains workflow implementation copy `{pattern}`",
+                    key.id()
+                );
+            }
         }
     }
 
@@ -1134,5 +1209,50 @@ mod tests {
         assert_eq!(resolve_locale_from_host("en:fr"), "en");
         assert_eq!(resolve_locale_from_host(""), "en");
         assert_eq!(resolve_locale_from_host("C.UTF-8"), "en");
+    }
+
+    fn is_visible_action_text_key(key: AppTextKey) -> bool {
+        let id = key.id();
+        id.contains(".action") || id.contains("_action")
+    }
+
+    fn is_buyer_visible_text_key(key: AppTextKey) -> bool {
+        key.id().starts_with("messages.personal.")
+    }
+
+    fn is_trade_workflow_text_key(key: AppTextKey) -> bool {
+        key.id().starts_with("messages.trade.workflow.")
+    }
+
+    fn contains_reserved_payment_action_term(value: &str, term: &str) -> bool {
+        if term.contains(' ') || term.contains('-') {
+            return value.contains(term);
+        }
+
+        value.match_indices(term).any(|(start, _)| {
+            let end = start + term.len();
+            is_reserved_payment_term_boundary_before(value, start)
+                && is_reserved_payment_term_boundary_after(value, end)
+        })
+    }
+
+    fn is_reserved_payment_term_boundary_before(value: &str, index: usize) -> bool {
+        if index == 0 {
+            return true;
+        }
+
+        is_reserved_payment_term_boundary_byte(value.as_bytes()[index - 1])
+    }
+
+    fn is_reserved_payment_term_boundary_after(value: &str, index: usize) -> bool {
+        if index == value.len() {
+            return true;
+        }
+
+        is_reserved_payment_term_boundary_byte(value.as_bytes()[index])
+    }
+
+    fn is_reserved_payment_term_boundary_byte(byte: u8) -> bool {
+        !byte.is_ascii_alphanumeric() && byte != b'_' && byte != b'-'
     }
 }

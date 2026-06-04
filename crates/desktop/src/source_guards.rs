@@ -407,6 +407,7 @@ const REQUIRED_WINDOW_COPY_KEYS: &[&str] = &[
     "AppTextKey::PersonalOrdersDetailEmptyBody",
     "AppTextKey::PersonalOrdersDetailFarmLabel",
     "AppTextKey::PersonalOrdersDetailFulfillmentLabel",
+    "AppTextKey::PersonalOrdersDetailTotalLabel",
     "AppTextKey::PersonalOrdersDetailNoteLabel",
     "AppTextKey::PersonalOrdersDetailItemsTitle",
     "AppTextKey::PersonalOrdersActionCancel",
@@ -476,12 +477,41 @@ const REQUIRED_WINDOW_COPY_KEYS: &[&str] = &[
     "AppTextKey::OrdersDetailCustomerLabel",
     "AppTextKey::OrdersDetailWindowLabel",
     "AppTextKey::OrdersDetailPickupLabel",
+    "AppTextKey::OrdersDetailTotalLabel",
     "AppTextKey::TradeWorkflowAxisAgreement",
     "AppTextKey::TradeWorkflowAxisRevision",
     "AppTextKey::TradeWorkflowAxisFulfillment",
     "AppTextKey::TradeWorkflowAxisInventory",
     "AppTextKey::TradeWorkflowAxisPayment",
     "AppTextKey::TradeWorkflowAxisSource",
+    "AppTextKey::TradeWorkflowAgreementOrdered",
+    "AppTextKey::TradeWorkflowAgreementConfirmed",
+    "AppTextKey::TradeWorkflowAgreementDeclined",
+    "AppTextKey::TradeWorkflowAgreementCancelled",
+    "AppTextKey::TradeWorkflowAgreementCompleted",
+    "AppTextKey::TradeWorkflowAgreementNeedsReview",
+    "AppTextKey::TradeWorkflowRevisionNone",
+    "AppTextKey::TradeWorkflowRevisionChangeProposed",
+    "AppTextKey::TradeWorkflowRevisionUpdated",
+    "AppTextKey::TradeWorkflowRevisionKeptAsPlaced",
+    "AppTextKey::TradeWorkflowFulfillmentConfirmed",
+    "AppTextKey::TradeWorkflowFulfillmentPreparing",
+    "AppTextKey::TradeWorkflowFulfillmentReadyForPickup",
+    "AppTextKey::TradeWorkflowFulfillmentOutForDelivery",
+    "AppTextKey::TradeWorkflowFulfillmentDelivered",
+    "AppTextKey::TradeWorkflowFulfillmentCancelled",
+    "AppTextKey::TradeWorkflowInventoryAvailable",
+    "AppTextKey::TradeWorkflowInventoryReserved",
+    "AppTextKey::TradeWorkflowInventorySoldOut",
+    "AppTextKey::TradeWorkflowInventoryNeedsReview",
+    "AppTextKey::TradeWorkflowPaymentNotRecorded",
+    "AppTextKey::TradeWorkflowPaymentRecorded",
+    "AppTextKey::TradeWorkflowPaymentNeedsReview",
+    "AppTextKey::TradeWorkflowProvenanceApp",
+    "AppTextKey::TradeWorkflowProvenanceCli",
+    "AppTextKey::TradeWorkflowProvenanceRelay",
+    "AppTextKey::TradeWorkflowProvenanceLocalEvents",
+    "AppTextKey::TradeWorkflowProvenanceUnknown",
     "AppTextKey::OrdersRecoverySectionTitle",
     "AppTextKey::OrdersRecoveryMissedPickupTitle",
     "AppTextKey::OrdersRecoveryMissedPickupBody",
@@ -747,15 +777,67 @@ const REMOVED_WINDOW_HELPER_FAMILIES: &[&str] = &[
     "fn home_farm_setup_blocker(",
 ];
 
-const FORBIDDEN_PAYMENT_ACTION_COPY_PATTERNS: &[&str] = &[
+const FORBIDDEN_HARDCODED_WORKFLOW_UI_LITERALS: &[&str] = &[
+    "Agreement",
+    "Change",
+    "Fulfillment",
+    "Stock",
+    "Payment",
+    "Source",
+    "Ordered",
+    "Confirmed",
+    "Declined",
+    "Cancelled",
+    "Completed",
+    "Needs review",
+    "No change",
+    "Change proposed",
+    "Updated",
+    "Kept as placed",
+    "Preparing",
+    "Ready for pickup",
+    "Out for delivery",
+    "Delivered",
+    "Available",
+    "Reserved",
+    "Sold out",
+    "Not recorded",
+    "Recorded",
+    "App",
+    "CLI",
+    "Relay",
+    "Local events",
+    "Unknown",
+];
+
+const FORBIDDEN_PAYMENT_DEFERRAL_COPY_PATTERNS: &[&str] = &[
     "payments are deferred",
     "payment is deferred",
     "payment deferred",
+    "payments deferred",
+    "deferred payment",
+    "deferred payments",
     "checkout unavailable",
-    "pay now",
-    "refund outside the app",
+    "figure it out",
     "payment handling outside the app",
+    "refund outside the app",
     "handle any refund outside the app",
+    "settle outside the app",
+];
+
+const FORBIDDEN_PAYMENT_ACTION_COPY_TERMS: &[&str] = &[
+    "checkout",
+    "pay",
+    "refund",
+    "settlement",
+    "wallet",
+    "invoice",
+    "bank",
+    "card",
+    "processor",
+    "provider",
+    "payment-provider",
+    "payment provider",
 ];
 
 #[test]
@@ -828,15 +910,41 @@ fn desktop_window_source_does_not_use_about_placeholder_copy() {
 }
 
 #[test]
+fn desktop_sources_do_not_hardcode_workflow_ui_copy() {
+    for (path, source) in launcher_source_files() {
+        let literals = extract_string_literals(&source);
+        for literal in literals {
+            for forbidden_literal in FORBIDDEN_HARDCODED_WORKFLOW_UI_LITERALS {
+                assert_ne!(
+                    literal,
+                    *forbidden_literal,
+                    "{} hardcodes workflow UI copy `{forbidden_literal}`",
+                    path.display()
+                );
+            }
+        }
+    }
+}
+
+#[test]
 fn desktop_sources_do_not_expose_reserved_payment_action_copy() {
     for (path, source) in launcher_source_files() {
-        let normalized_source = source.to_lowercase();
-        for pattern in FORBIDDEN_PAYMENT_ACTION_COPY_PATTERNS {
-            assert!(
-                !normalized_source.contains(pattern),
-                "{} contains reserved payment action copy `{pattern}`",
-                path.display()
-            );
+        for literal in extract_string_literals(&source) {
+            let normalized_literal = literal.to_lowercase();
+            for pattern in FORBIDDEN_PAYMENT_DEFERRAL_COPY_PATTERNS {
+                assert!(
+                    !normalized_literal.contains(pattern),
+                    "{} contains forbidden payment-deferral copy `{pattern}`",
+                    path.display()
+                );
+            }
+            for term in FORBIDDEN_PAYMENT_ACTION_COPY_TERMS {
+                assert!(
+                    !contains_reserved_payment_action_term(&normalized_literal, term),
+                    "{} contains reserved payment action copy `{term}` in `{literal}`",
+                    path.display()
+                );
+            }
         }
     }
 }
@@ -861,6 +969,38 @@ fn extract_string_literals(source: &str) -> BTreeSet<&str> {
     }
 
     literals
+}
+
+fn contains_reserved_payment_action_term(value: &str, term: &str) -> bool {
+    if term.contains(' ') || term.contains('-') {
+        return value.contains(term);
+    }
+
+    value.match_indices(term).any(|(start, _)| {
+        let end = start + term.len();
+        is_reserved_payment_term_boundary_before(value, start)
+            && is_reserved_payment_term_boundary_after(value, end)
+    })
+}
+
+fn is_reserved_payment_term_boundary_before(value: &str, index: usize) -> bool {
+    if index == 0 {
+        return true;
+    }
+
+    is_reserved_payment_term_boundary_byte(value.as_bytes()[index - 1])
+}
+
+fn is_reserved_payment_term_boundary_after(value: &str, index: usize) -> bool {
+    if index == value.len() {
+        return true;
+    }
+
+    is_reserved_payment_term_boundary_byte(value.as_bytes()[index])
+}
+
+fn is_reserved_payment_term_boundary_byte(byte: u8) -> bool {
+    !byte.is_ascii_alphanumeric() && byte != b'_' && byte != b'-'
 }
 
 fn launcher_source_files() -> Vec<(PathBuf, String)> {
