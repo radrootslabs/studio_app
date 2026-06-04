@@ -13,7 +13,7 @@ use radroots_studio_app_sync::{
 };
 use radroots_studio_app_view::{
     ActiveSurface, AppIdentityProjection, AppStartupGate, BuyerCartProjection,
-    BuyerCheckoutProjection, BuyerListingsProjection, BuyerOrderDetailProjection,
+    BuyerListingsProjection, BuyerOrderDetailProjection, BuyerOrderReviewProjection,
     BuyerOrdersProjection, BuyerProductDetailProjection, FarmOrderMethod, FarmReadiness,
     FarmReadinessBlocker, FarmRulesProjection, FarmSetupBlocker, FarmSetupProjection,
     FarmSetupReadiness, FarmTimingConflict, FulfillmentWindowId, LoggedOutStartupPhase,
@@ -125,7 +125,7 @@ pub struct BuyerSearchScreenProjection {
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct BuyerCartScreenProjection {
     pub cart: BuyerCartProjection,
-    pub checkout: BuyerCheckoutProjection,
+    pub order_review: BuyerOrderReviewProjection,
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]

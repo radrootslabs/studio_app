@@ -1017,7 +1017,7 @@ impl BuyerCartProjection {
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
-pub struct BuyerCheckoutDraft {
+pub struct BuyerOrderReviewDraft {
     pub name: String,
     pub email: String,
     pub phone: String,
@@ -1025,7 +1025,7 @@ pub struct BuyerCheckoutDraft {
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
-pub struct BuyerCheckoutSummaryProjection {
+pub struct BuyerOrderReviewSummaryProjection {
     pub farm_display_name: Option<String>,
     pub fulfillment_summary: Option<String>,
     pub line_count: u32,
@@ -1035,7 +1035,7 @@ pub struct BuyerCheckoutSummaryProjection {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub enum BuyerCheckoutDisabledReason {
+pub enum BuyerOrderReviewDisabledReason {
     EmptyCart,
     MissingFulfillment,
     MissingName,
@@ -1043,7 +1043,7 @@ pub enum BuyerCheckoutDisabledReason {
     AccountRequired,
 }
 
-impl BuyerCheckoutDisabledReason {
+impl BuyerOrderReviewDisabledReason {
     pub const fn storage_key(self) -> &'static str {
         match self {
             Self::EmptyCart => "empty_cart",
@@ -1056,11 +1056,11 @@ impl BuyerCheckoutDisabledReason {
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
-pub struct BuyerCheckoutProjection {
-    pub draft: BuyerCheckoutDraft,
-    pub summary: BuyerCheckoutSummaryProjection,
+pub struct BuyerOrderReviewProjection {
+    pub draft: BuyerOrderReviewDraft,
+    pub summary: BuyerOrderReviewSummaryProjection,
     pub can_place_order: bool,
-    pub place_order_disabled_reason: Option<BuyerCheckoutDisabledReason>,
+    pub place_order_disabled_reason: Option<BuyerOrderReviewDisabledReason>,
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
@@ -2189,19 +2189,20 @@ mod tests {
         AccountCustody, AccountSummary, AccountSurfaceActivationProjection, ActiveSurface,
         ActivityEventId, AppActivityContext, AppActivityEvent, AppActivityKind,
         AppIdentityProjection, AppStartupGate, BlackoutPeriodId, BuyerCartLineProjection,
-        BuyerCartProjection, BuyerCheckoutDisabledReason, BuyerCheckoutDraft,
-        BuyerCheckoutProjection, BuyerCheckoutSummaryProjection, BuyerContext, BuyerListingRow,
-        BuyerListingsProjection, BuyerOrderDetailProjection, BuyerOrderStatus, BuyerOrdersListRow,
-        BuyerOrdersProjection, FarmId, FarmOrderMethod, FarmReadinessBlocker, FarmRulesProjection,
-        FarmRulesReadiness, FarmSetupBlocker, FarmSetupDraft, FarmSetupProjection,
-        FarmSetupReadiness, FarmSetupSection, FarmTimingConflict, FarmTimingConflictKind,
-        FarmerActivationProjection, FarmerSection, FulfillmentWindowId, IdentityBlockedReason,
-        IdentityReadiness, LoggedOutStartupPhase, LoggedOutStartupProjection, OrderDetailItemRow,
-        OrderDetailProjection, OrderId, OrderListRow, OrderPrimaryAction, OrderRecoveryProjection,
-        OrderStatus, OrdersFilter, OrdersListProjection, OrdersListRow, OrdersListSummary,
-        OrdersScreenQueryState, PackDayBatchPrintArtifact, PackDayBatchPrintFailureKind,
-        PackDayBatchPrintStatus, PackDayExportArtifact, PackDayExportArtifactKind,
-        PackDayExportBundle, PackDayExportInstanceId, PackDayExportStatus, PackDayHostHandoffKind,
+        BuyerCartProjection, BuyerContext, BuyerListingRow, BuyerListingsProjection,
+        BuyerOrderDetailProjection, BuyerOrderReviewDisabledReason, BuyerOrderReviewDraft,
+        BuyerOrderReviewProjection, BuyerOrderReviewSummaryProjection, BuyerOrderStatus,
+        BuyerOrdersListRow, BuyerOrdersProjection, FarmId, FarmOrderMethod, FarmReadinessBlocker,
+        FarmRulesProjection, FarmRulesReadiness, FarmSetupBlocker, FarmSetupDraft,
+        FarmSetupProjection, FarmSetupReadiness, FarmSetupSection, FarmTimingConflict,
+        FarmTimingConflictKind, FarmerActivationProjection, FarmerSection, FulfillmentWindowId,
+        IdentityBlockedReason, IdentityReadiness, LoggedOutStartupPhase,
+        LoggedOutStartupProjection, OrderDetailItemRow, OrderDetailProjection, OrderId,
+        OrderListRow, OrderPrimaryAction, OrderRecoveryProjection, OrderStatus, OrdersFilter,
+        OrdersListProjection, OrdersListRow, OrdersListSummary, OrdersScreenQueryState,
+        PackDayBatchPrintArtifact, PackDayBatchPrintFailureKind, PackDayBatchPrintStatus,
+        PackDayExportArtifact, PackDayExportArtifactKind, PackDayExportBundle,
+        PackDayExportInstanceId, PackDayExportStatus, PackDayHostHandoffKind,
         PackDayHostHandoffStatus, PackDayOutputCustomerOrder, PackDayOutputOrderState,
         PackDayOutputPackListEntry, PackDayOutputProductTotal, PackDayOutputQuantity,
         PackDayOutputSource, PackDayOutputWindow, PackDayPackListRow, PackDayPrintFailureKind,
@@ -2677,25 +2678,25 @@ mod tests {
     }
 
     #[test]
-    fn buyer_checkout_disabled_reason_storage_keys_are_stable() {
+    fn buyer_order_review_disabled_reason_storage_keys_are_stable() {
         assert_eq!(
-            BuyerCheckoutDisabledReason::EmptyCart.storage_key(),
+            BuyerOrderReviewDisabledReason::EmptyCart.storage_key(),
             "empty_cart"
         );
         assert_eq!(
-            BuyerCheckoutDisabledReason::MissingFulfillment.storage_key(),
+            BuyerOrderReviewDisabledReason::MissingFulfillment.storage_key(),
             "missing_fulfillment"
         );
         assert_eq!(
-            BuyerCheckoutDisabledReason::MissingName.storage_key(),
+            BuyerOrderReviewDisabledReason::MissingName.storage_key(),
             "missing_name"
         );
         assert_eq!(
-            BuyerCheckoutDisabledReason::MissingEmail.storage_key(),
+            BuyerOrderReviewDisabledReason::MissingEmail.storage_key(),
             "missing_email"
         );
         assert_eq!(
-            BuyerCheckoutDisabledReason::AccountRequired.storage_key(),
+            BuyerOrderReviewDisabledReason::AccountRequired.storage_key(),
             "account_required"
         );
     }
@@ -3615,14 +3616,14 @@ mod tests {
             currency_code: Some("USD".to_owned()),
             replace_confirmation: None,
         };
-        let checkout = BuyerCheckoutProjection {
-            draft: BuyerCheckoutDraft {
+        let order_review = BuyerOrderReviewProjection {
+            draft: BuyerOrderReviewDraft {
                 name: "Casey Buyer".to_owned(),
                 email: "casey@example.com".to_owned(),
                 phone: String::new(),
                 order_note: "Leave by the cooler".to_owned(),
             },
-            summary: BuyerCheckoutSummaryProjection {
+            summary: BuyerOrderReviewSummaryProjection {
                 farm_display_name: Some("Cedar Grove Farm".to_owned()),
                 fulfillment_summary: Some("Thursday pickup".to_owned()),
                 line_count: 1,
@@ -3677,7 +3678,7 @@ mod tests {
 
         assert!(!listings.is_empty());
         assert!(!cart.is_empty());
-        assert!(checkout.can_place_order);
+        assert!(order_review.can_place_order);
         assert!(!orders.is_empty());
         assert_eq!(listing.fulfillment_methods.len(), 1);
         assert_eq!(order_detail.status, BuyerOrderStatus::Scheduled);

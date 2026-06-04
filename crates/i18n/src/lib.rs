@@ -353,18 +353,21 @@ mod tests {
     }
 
     #[test]
-    fn english_marketplace_checkout_copy_matches_the_local_order_contract() {
+    fn english_marketplace_order_review_copy_matches_the_local_order_contract() {
         assert_eq!(
-            app_text(AppTextKey::PersonalCartContinueCheckoutAction),
+            app_text(AppTextKey::PersonalCartReviewOrderAction),
             "Review order"
         );
-        assert_eq!(app_text(AppTextKey::PersonalCheckoutTitle), "Order review");
         assert_eq!(
-            app_text(AppTextKey::PersonalCheckoutPlaceOrderAction),
+            app_text(AppTextKey::PersonalOrderReviewTitle),
+            "Order review"
+        );
+        assert_eq!(
+            app_text(AppTextKey::PersonalOrderReviewPlaceOrderAction),
             "Place order"
         );
         assert_eq!(
-            app_text(AppTextKey::PersonalCheckoutLocalOnlyBody),
+            app_text(AppTextKey::PersonalOrderReviewLocalOnlyBody),
             "Review the details before placing the order."
         );
         assert_eq!(
@@ -380,9 +383,9 @@ mod tests {
     #[test]
     fn english_payment_action_copy_remains_unspoken_for_reserved_workflow() {
         let action_keys = [
-            AppTextKey::PersonalCartContinueCheckoutAction,
-            AppTextKey::PersonalCheckoutBackAction,
-            AppTextKey::PersonalCheckoutPlaceOrderAction,
+            AppTextKey::PersonalCartReviewOrderAction,
+            AppTextKey::PersonalOrderReviewBackAction,
+            AppTextKey::PersonalOrderReviewPlaceOrderAction,
             AppTextKey::OrdersRecoveryActionOpenFollowUp,
             AppTextKey::OrdersRecoveryActionStartReview,
             AppTextKey::OrdersRecoveryActionMarkOpen,
@@ -398,6 +401,9 @@ mod tests {
             "bank",
             "card",
             "processor",
+            "provider",
+            "payment-provider",
+            "payment provider",
         ];
 
         for key in action_keys {
@@ -408,7 +414,7 @@ mod tests {
         }
 
         for copy in [
-            app_text(AppTextKey::PersonalCheckoutLocalOnlyBody),
+            app_text(AppTextKey::PersonalOrderReviewLocalOnlyBody),
             app_text(AppTextKey::PersonalOrderCoordinationFailedNotice),
         ] {
             let normalized_copy = copy.to_lowercase();

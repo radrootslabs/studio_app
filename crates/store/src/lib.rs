@@ -14,8 +14,8 @@ use radroots_studio_app_sync::{
 };
 use radroots_studio_app_view::{
     AccountSurfaceActivationProjection, AppActivityContext, AppActivityEvent, AppActivityKind,
-    BuyerCartProjection, BuyerCheckoutDraft, BuyerCheckoutProjection, BuyerContext,
-    BuyerListingsProjection, BuyerOrderDetailProjection, BuyerOrdersProjection,
+    BuyerCartProjection, BuyerContext, BuyerListingsProjection, BuyerOrderDetailProjection,
+    BuyerOrderReviewDraft, BuyerOrderReviewProjection, BuyerOrdersProjection,
     BuyerProductDetailProjection, FarmId, FarmOrderMethod, FarmRulesProjection,
     FarmSetupProjection, FarmSummary, FulfillmentWindowId, OrderDetailProjection, OrderId,
     OrderRecoveryProjection, OrdersListProjection, OrdersScreenQueryState, PackDayOutputSource,
@@ -421,20 +421,20 @@ impl AppSqliteStore {
         self.buyer_repository().clear_buyer_cart(context)
     }
 
-    pub fn load_buyer_checkout(
+    pub fn load_buyer_order_review(
         &self,
         context: &BuyerContext,
-    ) -> Result<BuyerCheckoutProjection, AppSqliteError> {
-        self.buyer_repository().load_buyer_checkout(context)
+    ) -> Result<BuyerOrderReviewProjection, AppSqliteError> {
+        self.buyer_repository().load_buyer_order_review(context)
     }
 
-    pub fn save_buyer_checkout_draft(
+    pub fn save_buyer_order_review_draft(
         &self,
         context: &BuyerContext,
-        draft: &BuyerCheckoutDraft,
+        draft: &BuyerOrderReviewDraft,
     ) -> Result<(), AppSqliteError> {
         self.buyer_repository()
-            .save_buyer_checkout_draft(context, draft)
+            .save_buyer_order_review_draft(context, draft)
     }
 
     pub fn place_buyer_order(&self, context: &BuyerContext) -> Result<OrderId, AppSqliteError> {

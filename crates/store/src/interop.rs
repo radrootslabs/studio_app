@@ -11,7 +11,7 @@ use radroots_events::{
     kinds::{
         KIND_TRADE_CANCEL, KIND_TRADE_FULFILLMENT_UPDATE, KIND_TRADE_ORDER_REQUEST,
         KIND_TRADE_ORDER_RESPONSE, KIND_TRADE_ORDER_REVISION, KIND_TRADE_ORDER_REVISION_RESPONSE,
-        KIND_TRADE_RECEIPT,
+        KIND_TRADE_PAYMENT_RECORDED, KIND_TRADE_RECEIPT, KIND_TRADE_SETTLEMENT_DECISION,
     },
     trade::{
         RadrootsTradeOrderEconomics, RadrootsTradeOrderItem, RadrootsTradeOrderRequested,
@@ -23,7 +23,8 @@ use radroots_events_codec::trade::{
     active_trade_fulfillment_update_from_event, active_trade_order_cancel_from_event,
     active_trade_order_decision_from_event, active_trade_order_request_from_event,
     active_trade_order_revision_decision_from_event,
-    active_trade_order_revision_proposal_from_event,
+    active_trade_order_revision_proposal_from_event, active_trade_payment_recorded_from_event,
+    active_trade_settlement_decision_from_event,
 };
 use radroots_local_events::{
     LocalEventRecord, LocalEventsStore, LocalRecordFamily, LocalRecordStatus, PublishOutboxStatus,
@@ -32,9 +33,10 @@ use radroots_local_events::{
 use radroots_sql_core::{SqlExecutor, SqliteExecutor};
 use radroots_trade::order::{
     RadrootsActiveOrderCancellationRecord, RadrootsActiveOrderDecisionRecord,
-    RadrootsActiveOrderFulfillmentRecord, RadrootsActiveOrderProjection,
-    RadrootsActiveOrderReceiptRecord, RadrootsActiveOrderRequestRecord,
-    RadrootsActiveOrderRevisionDecisionRecord, RadrootsActiveOrderRevisionProposalRecord,
+    RadrootsActiveOrderFulfillmentRecord, RadrootsActiveOrderPaymentRecord,
+    RadrootsActiveOrderProjection, RadrootsActiveOrderReceiptRecord,
+    RadrootsActiveOrderRequestRecord, RadrootsActiveOrderRevisionDecisionRecord,
+    RadrootsActiveOrderRevisionProposalRecord, RadrootsActiveOrderSettlementRecord,
     reduce_active_order_events,
 };
 use rusqlite::{Connection, OptionalExtension, params};
@@ -56,7 +58,9 @@ const KIND_ORDER_REVISION_DECISION: i64 = KIND_TRADE_ORDER_REVISION_RESPONSE as 
 const KIND_ORDER_CANCEL: i64 = KIND_TRADE_CANCEL as i64;
 const KIND_ORDER_FULFILLMENT: i64 = KIND_TRADE_FULFILLMENT_UPDATE as i64;
 const KIND_ORDER_RECEIPT: i64 = KIND_TRADE_RECEIPT as i64;
-const ACTIVE_ORDER_EVENT_KINDS: [i64; 7] = [
+const KIND_ORDER_PAYMENT: i64 = KIND_TRADE_PAYMENT_RECORDED as i64;
+const KIND_ORDER_SETTLEMENT: i64 = KIND_TRADE_SETTLEMENT_DECISION as i64;
+const ACTIVE_ORDER_EVENT_KINDS: [i64; 9] = [
     KIND_ORDER_REQUEST,
     KIND_ORDER_DECISION,
     KIND_ORDER_REVISION,
@@ -64,6 +68,8 @@ const ACTIVE_ORDER_EVENT_KINDS: [i64; 7] = [
     KIND_ORDER_CANCEL,
     KIND_ORDER_FULFILLMENT,
     KIND_ORDER_RECEIPT,
+    KIND_ORDER_PAYMENT,
+    KIND_ORDER_SETTLEMENT,
 ];
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
@@ -1091,8 +1097,8 @@ impl<'a> AppLocalInteropRepository<'a> {
             buckets.fulfillments,
             buckets.cancellations,
             buckets.receipts,
-            [],
-            [],
+            buckets.payments,
+            buckets.settlements,
         );
         let request_payload = projection.request_event_id.as_deref().and_then(|event_id| {
             requests
@@ -1196,12 +1202,26 @@ impl<'a> AppLocalInteropRepository<'a> {
                 "UPDATE orders
                  SET status = ?2,
                      workflow_revision = ?3,
+                     workflow_agreement = ?4,
+                     workflow_fulfillment = ?5,
+                     workflow_inventory = ?6,
+                     workflow_payment = ?7,
+                     workflow_provenance_source = ?8,
+                     workflow_provenance_last_event_id = ?9,
                      updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now')
                  WHERE id = ?1",
                 params![
                     workflow.order_id.to_string(),
                     status.storage_key(),
-                    workflow.revision.storage_key()
+                    workflow.revision.storage_key(),
+                    workflow.agreement.storage_key(),
+                    workflow
+                        .fulfillment
+                        .map(|fulfillment| fulfillment.storage_key()),
+                    workflow.inventory.storage_key(),
+                    workflow.payment.storage_key(),
+                    workflow.provenance.primary_source.storage_key(),
+                    workflow.provenance.last_event_id.as_deref()
                 ],
             )
             .map_err(|source| AppSqliteError::Query {
@@ -2456,6 +2476,8 @@ enum ActiveOrderEvidence {
     Fulfillment(RadrootsActiveOrderFulfillmentRecord),
     Cancellation(RadrootsActiveOrderCancellationRecord),
     Receipt(RadrootsActiveOrderReceiptRecord),
+    Payment(RadrootsActiveOrderPaymentRecord),
+    Settlement(RadrootsActiveOrderSettlementRecord),
 }
 
 impl ActiveOrderEvidence {
@@ -2468,6 +2490,8 @@ impl ActiveOrderEvidence {
             Self::Fulfillment(record) => record.event_id.as_str(),
             Self::Cancellation(record) => record.event_id.as_str(),
             Self::Receipt(record) => record.event_id.as_str(),
+            Self::Payment(record) => record.event_id.as_str(),
+            Self::Settlement(record) => record.event_id.as_str(),
         }
     }
 
@@ -2480,6 +2504,8 @@ impl ActiveOrderEvidence {
             Self::Fulfillment(record) => record.payload.order_id.as_str(),
             Self::Cancellation(record) => record.payload.order_id.as_str(),
             Self::Receipt(record) => record.payload.order_id.as_str(),
+            Self::Payment(record) => record.payload.order_id.as_str(),
+            Self::Settlement(record) => record.payload.order_id.as_str(),
         }
     }
 
@@ -2491,7 +2517,9 @@ impl ActiveOrderEvidence {
             | Self::RevisionDecision(_)
             | Self::Fulfillment(_)
             | Self::Cancellation(_)
-            | Self::Receipt(_) => None,
+            | Self::Receipt(_)
+            | Self::Payment(_)
+            | Self::Settlement(_) => None,
         }
     }
 
@@ -2525,6 +2553,14 @@ impl ActiveOrderEvidence {
                 record.payload.order_id.as_str(),
                 record.payload.buyer_pubkey.as_str(),
             ),
+            Self::Payment(record) => (
+                record.payload.order_id.as_str(),
+                record.payload.buyer_pubkey.as_str(),
+            ),
+            Self::Settlement(record) => (
+                record.payload.order_id.as_str(),
+                record.payload.buyer_pubkey.as_str(),
+            ),
         }
     }
 }
@@ -2538,6 +2574,8 @@ struct ActiveOrderEvidenceBuckets {
     fulfillments: Vec<RadrootsActiveOrderFulfillmentRecord>,
     cancellations: Vec<RadrootsActiveOrderCancellationRecord>,
     receipts: Vec<RadrootsActiveOrderReceiptRecord>,
+    payments: Vec<RadrootsActiveOrderPaymentRecord>,
+    settlements: Vec<RadrootsActiveOrderSettlementRecord>,
 }
 
 impl ActiveOrderEvidenceBuckets {
@@ -2556,6 +2594,8 @@ impl ActiveOrderEvidenceBuckets {
                 ActiveOrderEvidence::Fulfillment(record) => buckets.fulfillments.push(record),
                 ActiveOrderEvidence::Cancellation(record) => buckets.cancellations.push(record),
                 ActiveOrderEvidence::Receipt(record) => buckets.receipts.push(record),
+                ActiveOrderEvidence::Payment(record) => buckets.payments.push(record),
+                ActiveOrderEvidence::Settlement(record) => buckets.settlements.push(record),
             }
         }
         buckets
@@ -2803,6 +2843,36 @@ fn active_order_evidence_from_event(event: &RadrootsNostrEvent) -> Option<Active
                 active_trade_event_context_from_tags(envelope.message_type, &event.tags).ok()?;
             Some(ActiveOrderEvidence::Receipt(
                 RadrootsActiveOrderReceiptRecord {
+                    event_id: event.id.clone(),
+                    author_pubkey: event.author.clone(),
+                    counterparty_pubkey: context.counterparty_pubkey,
+                    root_event_id: context.root_event_id?,
+                    prev_event_id: context.prev_event_id?,
+                    payload: envelope.payload,
+                },
+            ))
+        }
+        KIND_ORDER_PAYMENT => {
+            let envelope = active_trade_payment_recorded_from_event(event).ok()?;
+            let context =
+                active_trade_event_context_from_tags(envelope.message_type, &event.tags).ok()?;
+            Some(ActiveOrderEvidence::Payment(
+                RadrootsActiveOrderPaymentRecord {
+                    event_id: event.id.clone(),
+                    author_pubkey: event.author.clone(),
+                    counterparty_pubkey: context.counterparty_pubkey,
+                    root_event_id: context.root_event_id?,
+                    prev_event_id: context.prev_event_id?,
+                    payload: envelope.payload,
+                },
+            ))
+        }
+        KIND_ORDER_SETTLEMENT => {
+            let envelope = active_trade_settlement_decision_from_event(event).ok()?;
+            let context =
+                active_trade_event_context_from_tags(envelope.message_type, &event.tags).ok()?;
+            Some(ActiveOrderEvidence::Settlement(
+                RadrootsActiveOrderSettlementRecord {
                     event_id: event.id.clone(),
                     author_pubkey: event.author.clone(),
                     counterparty_pubkey: context.counterparty_pubkey,
@@ -3562,7 +3632,8 @@ mod tests {
 
     use radroots_studio_app_view::{
         BuyerContext, BuyerOrderStatus, FarmId, FarmOrderMethod, OrderStatus, OrdersFilter,
-        OrdersScreenQueryState, ProductAvailabilityState, ProductId, TradeRevisionStatus,
+        OrdersScreenQueryState, ProductAvailabilityState, ProductId, TradePaymentDisplayStatus,
+        TradeRevisionStatus, TradeWorkflowSource,
     };
     use radroots_core::{
         RadrootsCoreCurrency, RadrootsCoreDecimal, RadrootsCoreMoney, RadrootsCoreUnit,
@@ -3577,7 +3648,7 @@ mod tests {
             RadrootsTradeOrderEconomicLine, RadrootsTradeOrderEconomics, RadrootsTradeOrderItem,
             RadrootsTradeOrderRequested, RadrootsTradeOrderRevisionDecision,
             RadrootsTradeOrderRevisionDecisionEvent, RadrootsTradeOrderRevisionProposed,
-            RadrootsTradePricingBasis,
+            RadrootsTradePaymentMethod, RadrootsTradePaymentRecorded, RadrootsTradePricingBasis,
         },
     };
     use radroots_events_codec::{
@@ -3587,6 +3658,7 @@ mod tests {
             active_trade_order_request_event_build,
             active_trade_order_revision_decision_event_build,
             active_trade_order_revision_proposal_event_build,
+            active_trade_payment_recorded_event_build,
         },
         wire::WireEventParts,
     };
@@ -3595,6 +3667,7 @@ mod tests {
         LocalRecordStatus, PublishOutboxStatus, RelayDeliveryEvidence, SourceRuntime,
     };
     use radroots_sql_core::SqliteExecutor;
+    use radroots_trade::order::radroots_trade_order_economics_digest;
     use rusqlite::params;
     use serde_json::json;
     use uuid::Uuid;
@@ -4242,6 +4315,32 @@ mod tests {
         }
     }
 
+    fn payment_recorded_payload(
+        request: &RadrootsTradeOrderRequested,
+        root_event_id: &str,
+        previous_event_id: &str,
+        agreement_event_id: &str,
+    ) -> RadrootsTradePaymentRecorded {
+        RadrootsTradePaymentRecorded {
+            order_id: request.order_id.clone(),
+            listing_addr: request.listing_addr.clone(),
+            buyer_pubkey: request.buyer_pubkey.clone(),
+            seller_pubkey: request.seller_pubkey.clone(),
+            root_event_id: root_event_id.to_owned(),
+            previous_event_id: previous_event_id.to_owned(),
+            agreement_event_id: agreement_event_id.to_owned(),
+            quote_id: request.economics.quote_id.clone(),
+            quote_version: request.economics.quote_version,
+            economics_digest: radroots_trade_order_economics_digest(&request.economics)
+                .expect("order economics digest should encode"),
+            amount: request.economics.total.amount,
+            currency: request.economics.total.currency,
+            method: RadrootsTradePaymentMethod::ManualTransfer,
+            reference: Some("manual reference".to_owned()),
+            paid_at: Some(1_777_665_800),
+        }
+    }
+
     fn event_from_parts(event_id: &str, author: &str, parts: WireEventParts) -> RadrootsNostrEvent {
         RadrootsNostrEvent {
             id: event_id.to_owned(),
@@ -4671,8 +4770,68 @@ mod tests {
         assert_eq!(decision_report.imported_records, 1);
         assert_eq!(buyer_orders.rows.len(), 1);
         assert_eq!(buyer_orders.rows[0].status, BuyerOrderStatus::Scheduled);
+        assert_eq!(
+            buyer_orders.rows[0].workflow.payment,
+            TradePaymentDisplayStatus::NotRecorded
+        );
         assert_eq!(buyer_detail.status, BuyerOrderStatus::Scheduled);
         assert_eq!(seller_orders.rows[0].status, OrderStatus::Scheduled);
+
+        let payment_payload = payment_recorded_payload(
+            &request_payload,
+            request_event.id.as_str(),
+            decision_event.id.as_str(),
+            decision_event.id.as_str(),
+        );
+        let payment_parts = active_trade_payment_recorded_event_build(
+            request_event.id.as_str(),
+            decision_event.id.as_str(),
+            &payment_payload,
+        )
+        .expect("build payment recorded event");
+        let payment_event =
+            event_from_parts("buyer-order-payment-event", buyer_pubkey, payment_parts);
+        events
+            .append_record(&signed_order_event_record(
+                "app:signed_event:order-payment:buyer",
+                &payment_event,
+                listing_addr.as_str(),
+                SourceRuntime::App,
+                Some("acct_buyer"),
+            ))
+            .expect("append payment recorded event");
+
+        let payment_report = app_store
+            .import_shared_local_events_from_store(&events)
+            .expect("import payment recorded event");
+        let buyer_orders = app_store
+            .load_buyer_orders(&buyer_context)
+            .expect("load buyer orders after payment");
+        let buyer_detail = app_store
+            .load_buyer_order_detail(&buyer_context, order_id)
+            .expect("load buyer order detail after payment")
+            .expect("buyer order detail after payment");
+
+        assert_eq!(payment_report.imported_records, 1);
+        assert_eq!(buyer_orders.rows[0].status, BuyerOrderStatus::Scheduled);
+        assert_eq!(
+            buyer_orders.rows[0].workflow.payment,
+            TradePaymentDisplayStatus::Recorded
+        );
+        assert_eq!(
+            buyer_orders.rows[0].workflow.provenance.primary_source,
+            TradeWorkflowSource::LocalEvents
+        );
+        assert_eq!(
+            buyer_orders.rows[0]
+                .workflow
+                .provenance
+                .last_event_id
+                .as_deref(),
+            Some(decision_event.id.as_str())
+        );
+        assert_eq!(buyer_detail.payment, TradePaymentDisplayStatus::Recorded);
+        assert_eq!(buyer_detail.workflow, buyer_orders.rows[0].workflow);
     }
 
     #[test]
@@ -6367,16 +6526,16 @@ mod tests {
             )
             .expect("buyer cart should save");
         app_store
-            .save_buyer_checkout_draft(
+            .save_buyer_order_review_draft(
                 &buyer_context,
-                &radroots_studio_app_view::BuyerCheckoutDraft {
+                &radroots_studio_app_view::BuyerOrderReviewDraft {
                     name: "Casey Buyer".to_owned(),
                     email: "casey@example.test".to_owned(),
                     phone: String::new(),
                     order_note: String::new(),
                 },
             )
-            .expect("checkout draft should save");
+            .expect("order review draft should save");
         let order_id = app_store
             .place_buyer_order(&buyer_context)
             .expect("buyer order should place");

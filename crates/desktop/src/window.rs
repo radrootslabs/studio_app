@@ -48,8 +48,8 @@ use radroots_studio_app_ui::{
 pub use radroots_studio_app_view::SettingsSection as SettingsPanelViewKey;
 use radroots_studio_app_view::{
     AppStartupGate, BlackoutPeriodId, BlackoutPeriodRecord, BuyerCartProjection,
-    BuyerCartReplaceConfirmationProjection, BuyerCheckoutDraft, BuyerCheckoutSummaryProjection,
-    BuyerListingRow, BuyerOrderDetailProjection, BuyerOrderStatus, BuyerOrdersListRow,
+    BuyerCartReplaceConfirmationProjection, BuyerListingRow, BuyerOrderDetailProjection,
+    BuyerOrderReviewDraft, BuyerOrderReviewSummaryProjection, BuyerOrderStatus, BuyerOrdersListRow,
     BuyerProductDetailProjection, FarmId, FarmOperatingRulesRecord, FarmOrderMethod,
     FarmProfileRecord, FarmReadinessBlocker, FarmRulesProjection, FarmRulesReadiness,
     FarmSetupBlocker, FarmSetupDraft, FarmSummary, FarmTimingConflictKind, FarmerSection,
@@ -220,7 +220,7 @@ pub struct HomeView {
     startup_signer_recovery_attempted: bool,
     farm_setup_form: Option<FarmSetupFormState>,
     personal_search: Option<PersonalSearchState>,
-    buyer_checkout_form: Option<BuyerCheckoutFormState>,
+    buyer_order_review_form: Option<BuyerOrderReviewFormState>,
     products_search: Option<ProductsSearchState>,
     products_stock_editor: Option<ProductsStockEditorState>,
     product_editor_form: Option<ProductEditorFormState>,
@@ -263,7 +263,7 @@ struct HomeAutoFocusState {
     startup_signer_input_is_editable: bool,
     has_farm_setup_form: bool,
     has_personal_search_input: bool,
-    has_buyer_checkout_form: bool,
+    has_buyer_order_review_form: bool,
     has_products_search_input: bool,
     has_products_stock_editor: bool,
     has_product_editor_form: bool,
@@ -278,8 +278,8 @@ enum HomeAutoFocusTarget {
     BuyerSearchInput,
     BuyerListingOpenFirst,
     BuyerDetailBack,
-    BuyerCartOpenCheckout,
-    BuyerCheckoutNameInput,
+    BuyerCartOpenOrderReview,
+    BuyerOrderReviewNameInput,
     BuyerOrderOpenFirst,
     BuyerOrderConfirmReplace,
     BuyerOrderRepeatDemand,
@@ -336,7 +336,7 @@ impl HomeView {
             startup_signer_recovery_attempted: false,
             farm_setup_form: None,
             personal_search: None,
-            buyer_checkout_form: None,
+            buyer_order_review_form: None,
             products_search: None,
             products_stock_editor: None,
             product_editor_form: None,
@@ -353,7 +353,7 @@ impl HomeView {
             ),
             has_farm_setup_form: self.farm_setup_form.is_some(),
             has_personal_search_input: self.personal_search.is_some(),
-            has_buyer_checkout_form: self.buyer_checkout_form.is_some(),
+            has_buyer_order_review_form: self.buyer_order_review_form.is_some(),
             has_products_search_input: self.products_search.is_some(),
             has_products_stock_editor: self.products_stock_editor.is_some(),
             has_product_editor_form: self.product_editor_form.is_some(),
@@ -404,11 +404,11 @@ impl HomeView {
                 HomeAutoFocusTarget::BuyerDetailBack => {
                     focus_button(window, "buyer-detail-back", cx);
                 }
-                HomeAutoFocusTarget::BuyerCartOpenCheckout => {
-                    focus_button(window, "buyer-cart-open-checkout", cx);
+                HomeAutoFocusTarget::BuyerCartOpenOrderReview => {
+                    focus_button(window, "buyer-cart-open-order-review", cx);
                 }
-                HomeAutoFocusTarget::BuyerCheckoutNameInput => {
-                    if let Some(form) = self.buyer_checkout_form.as_ref() {
+                HomeAutoFocusTarget::BuyerOrderReviewNameInput => {
+                    if let Some(form) = self.buyer_order_review_form.as_ref() {
                         form.name_input
                             .update(cx, |input, cx| input.focus(window, cx));
                     }
@@ -1029,7 +1029,7 @@ impl HomeView {
         }
     }
 
-    fn sync_buyer_checkout_form(
+    fn sync_buyer_order_review_form(
         &mut self,
         runtime_summary: &DesktopAppRuntimeSummary,
         window: &mut Window,
@@ -1044,25 +1044,29 @@ impl HomeView {
                 .lines
                 .is_empty()
         {
-            self.buyer_checkout_form = None;
+            self.buyer_order_review_form = None;
             return;
         }
 
         let workspace_id = personal_workspace_id(runtime_summary);
-        let draft = &runtime_summary.personal_projection.cart.checkout.draft;
+        let draft = &runtime_summary.personal_projection.cart.order_review.draft;
         let should_reset = self
-            .buyer_checkout_form
+            .buyer_order_review_form
             .as_ref()
             .map(|form| form.workspace_id != workspace_id)
             .unwrap_or(false);
 
         if should_reset {
-            self.buyer_checkout_form =
-                Some(BuyerCheckoutFormState::new(workspace_id, draft, window, cx));
+            self.buyer_order_review_form = Some(BuyerOrderReviewFormState::new(
+                workspace_id,
+                draft,
+                window,
+                cx,
+            ));
             return;
         }
 
-        if let Some(form) = self.buyer_checkout_form.as_mut() {
+        if let Some(form) = self.buyer_order_review_form.as_mut() {
             form.sync(draft, window, cx);
         }
     }
@@ -1323,7 +1327,7 @@ impl HomeView {
         }
     }
 
-    fn handle_buyer_checkout_input_event(
+    fn handle_buyer_order_review_input_event(
         &mut self,
         state: &Entity<InputState>,
         event: &InputEvent,
@@ -1334,7 +1338,7 @@ impl HomeView {
             return;
         }
 
-        let Some(form) = self.buyer_checkout_form.as_ref() else {
+        let Some(form) = self.buyer_order_review_form.as_ref() else {
             return;
         };
         let matches_input = form.name_input == *state
@@ -1347,16 +1351,16 @@ impl HomeView {
 
         match self
             .runtime
-            .save_personal_checkout_draft(form.current_draft(cx))
+            .save_personal_order_review_draft(form.current_draft(cx))
         {
             Ok(true) => cx.notify(),
             Ok(false) => {}
             Err(runtime_error) => {
                 error!(
                     target: "buyer",
-                    event = "buyer.checkout_save_failed",
+                    event = "buyer.order_review_save_failed",
                     error = %runtime_error,
-                    "failed to save buyer checkout draft"
+                    "failed to save buyer order review draft"
                 );
             }
         }
@@ -1499,8 +1503,8 @@ impl HomeView {
         }
     }
 
-    fn open_personal_checkout(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if self.buyer_checkout_form.is_some() {
+    fn open_personal_order_review(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.buyer_order_review_form.is_some() {
             return;
         }
 
@@ -1517,17 +1521,17 @@ impl HomeView {
             return;
         }
 
-        self.buyer_checkout_form = Some(BuyerCheckoutFormState::new(
+        self.buyer_order_review_form = Some(BuyerOrderReviewFormState::new(
             personal_workspace_id(&runtime_summary),
-            &runtime_summary.personal_projection.cart.checkout.draft,
+            &runtime_summary.personal_projection.cart.order_review.draft,
             window,
             cx,
         ));
         cx.notify();
     }
 
-    fn close_personal_checkout(&mut self, cx: &mut Context<Self>) {
-        if self.buyer_checkout_form.take().is_some() {
+    fn close_personal_order_review(&mut self, cx: &mut Context<Self>) {
+        if self.buyer_order_review_form.take().is_some() {
             cx.notify();
         }
     }
@@ -1557,7 +1561,7 @@ impl HomeView {
     fn place_personal_order_update(&mut self) -> bool {
         match self.runtime.place_personal_order() {
             Ok(true) => {
-                self.buyer_checkout_form = None;
+                self.buyer_order_review_form = None;
                 let _ = self.clear_buyer_workspace_notice();
                 true
             }
@@ -1565,11 +1569,11 @@ impl HomeView {
             Err(runtime_error) => {
                 let notice = buyer_order_place_failure_notice(&runtime_error);
                 if notice == BuyerWorkspaceNotice::OrderCoordinationFailed {
-                    self.buyer_checkout_form = None;
+                    self.buyer_order_review_form = None;
                 }
                 error!(
                     target: "buyer",
-                    event = "buyer.checkout_place_failed",
+                    event = "buyer.order_review_place_failed",
                     error = %runtime_error,
                     "failed to place buyer order"
                 );
@@ -3190,7 +3194,7 @@ impl HomeView {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let cart = &runtime.personal_projection.cart.cart;
-        let checkout = &runtime.personal_projection.cart.checkout;
+        let order_review = &runtime.personal_projection.cart.order_review;
 
         app_stack_v(APP_UI_THEME.shells.home_stack_gap_px)
             .w_full()
@@ -3210,15 +3214,15 @@ impl HomeView {
                     .w_full()
                     .child(buyer_cart_card(
                         cart,
-                        &checkout.summary,
-                        self.buyer_checkout_form.is_some(),
+                        &order_review.summary,
+                        self.buyer_order_review_form.is_some(),
                         cx,
                     ))
-                    .when_some(self.buyer_checkout_form.as_ref(), |this, form| {
-                        this.child(buyer_checkout_card(
+                    .when_some(self.buyer_order_review_form.as_ref(), |this, form| {
+                        this.child(buyer_order_review_card(
                             form,
-                            checkout,
-                            cx.listener(|this, _, _, cx| this.close_personal_checkout(cx)),
+                            order_review,
+                            cx.listener(|this, _, _, cx| this.close_personal_order_review(cx)),
                             cx.listener(|this, _, _, cx| this.place_personal_order(cx)),
                             cx,
                         ))
@@ -4573,7 +4577,7 @@ impl Render for HomeView {
         self.sync_startup_signer_entry(&runtime_summary, window, cx);
         self.sync_farm_setup_form(&runtime_summary, window, cx);
         self.sync_personal_search(&runtime_summary, window, cx);
-        self.sync_buyer_checkout_form(&runtime_summary, window, cx);
+        self.sync_buyer_order_review_form(&runtime_summary, window, cx);
         self.sync_products_search(&runtime_summary, window, cx);
         self.sync_products_stock_editor(&runtime_summary);
         self.sync_product_editor_form(&runtime_summary, window, cx);
@@ -4698,7 +4702,7 @@ impl PersonalSearchState {
     }
 }
 
-struct BuyerCheckoutFormState {
+struct BuyerOrderReviewFormState {
     workspace_id: String,
     name_input: Entity<InputState>,
     email_input: Entity<InputState>,
@@ -4710,10 +4714,10 @@ struct BuyerCheckoutFormState {
     _order_note_subscription: Subscription,
 }
 
-impl BuyerCheckoutFormState {
+impl BuyerOrderReviewFormState {
     fn new(
         workspace_id: String,
-        draft: &BuyerCheckoutDraft,
+        draft: &BuyerOrderReviewDraft,
         window: &mut Window,
         cx: &mut Context<HomeView>,
     ) -> Self {
@@ -4727,22 +4731,22 @@ impl BuyerCheckoutFormState {
         let name_subscription = cx.subscribe_in(
             &name_input,
             window,
-            HomeView::handle_buyer_checkout_input_event,
+            HomeView::handle_buyer_order_review_input_event,
         );
         let email_subscription = cx.subscribe_in(
             &email_input,
             window,
-            HomeView::handle_buyer_checkout_input_event,
+            HomeView::handle_buyer_order_review_input_event,
         );
         let phone_subscription = cx.subscribe_in(
             &phone_input,
             window,
-            HomeView::handle_buyer_checkout_input_event,
+            HomeView::handle_buyer_order_review_input_event,
         );
         let order_note_subscription = cx.subscribe_in(
             &order_note_input,
             window,
-            HomeView::handle_buyer_checkout_input_event,
+            HomeView::handle_buyer_order_review_input_event,
         );
 
         Self {
@@ -4760,14 +4764,14 @@ impl BuyerCheckoutFormState {
 
     fn sync(
         &mut self,
-        draft: &BuyerCheckoutDraft,
+        draft: &BuyerOrderReviewDraft,
         window: &mut Window,
         cx: &mut Context<HomeView>,
     ) {
-        sync_checkout_input(&self.name_input, draft.name.as_str(), window, cx);
-        sync_checkout_input(&self.email_input, draft.email.as_str(), window, cx);
-        sync_checkout_input(&self.phone_input, draft.phone.as_str(), window, cx);
-        sync_checkout_input(
+        sync_order_review_input(&self.name_input, draft.name.as_str(), window, cx);
+        sync_order_review_input(&self.email_input, draft.email.as_str(), window, cx);
+        sync_order_review_input(&self.phone_input, draft.phone.as_str(), window, cx);
+        sync_order_review_input(
             &self.order_note_input,
             draft.order_note.as_str(),
             window,
@@ -4775,8 +4779,8 @@ impl BuyerCheckoutFormState {
         );
     }
 
-    fn current_draft(&self, cx: &App) -> BuyerCheckoutDraft {
-        BuyerCheckoutDraft {
+    fn current_draft(&self, cx: &App) -> BuyerOrderReviewDraft {
+        BuyerOrderReviewDraft {
             name: self.name_input.read(cx).value().to_string(),
             email: self.email_input.read(cx).value().to_string(),
             phone: self.phone_input.read(cx).value().to_string(),
@@ -4785,7 +4789,7 @@ impl BuyerCheckoutFormState {
     }
 }
 
-fn sync_checkout_input(
+fn sync_order_review_input(
     input: &Entity<InputState>,
     value: &str,
     window: &mut Window,
@@ -7607,10 +7611,10 @@ fn buyer_auto_focus_target(
             }
         }
         PersonalSection::Cart => {
-            if state.has_buyer_checkout_form {
-                Some(HomeAutoFocusTarget::BuyerCheckoutNameInput)
+            if state.has_buyer_order_review_form {
+                Some(HomeAutoFocusTarget::BuyerOrderReviewNameInput)
             } else if !runtime.personal_projection.cart.cart.lines.is_empty() {
-                Some(HomeAutoFocusTarget::BuyerCartOpenCheckout)
+                Some(HomeAutoFocusTarget::BuyerCartOpenOrderReview)
             } else {
                 None
             }
@@ -8410,8 +8414,8 @@ fn buyer_product_detail_card(
 
 fn buyer_cart_card(
     cart: &BuyerCartProjection,
-    summary: &BuyerCheckoutSummaryProjection,
-    checkout_open: bool,
+    summary: &BuyerOrderReviewSummaryProjection,
+    order_review_open: bool,
     cx: &mut Context<HomeView>,
 ) -> impl IntoElement {
     app_surface_card(
@@ -8433,11 +8437,11 @@ fn buyer_cart_card(
                     )))
                     .child(label_value_list(buyer_order_summary_rows(summary))),
             ))
-            .when(!checkout_open, |this| {
+            .when(!order_review_open, |this| {
                 this.child(action_button_primary(
-                    "buyer-cart-open-checkout",
-                    app_shared_text(AppTextKey::PersonalCartContinueCheckoutAction),
-                    cx.listener(|this, _, window, cx| this.open_personal_checkout(window, cx)),
+                    "buyer-cart-open-order-review",
+                    app_shared_text(AppTextKey::PersonalCartReviewOrderAction),
+                    cx.listener(|this, _, window, cx| this.open_personal_order_review(window, cx)),
                     cx,
                 ))
             }),
@@ -8498,9 +8502,9 @@ fn buyer_cart_line_card(
     )
 }
 
-fn buyer_checkout_card(
-    form: &BuyerCheckoutFormState,
-    checkout: &radroots_studio_app_view::BuyerCheckoutProjection,
+fn buyer_order_review_card(
+    form: &BuyerOrderReviewFormState,
+    order_review: &radroots_studio_app_view::BuyerOrderReviewProjection,
     on_close: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
     on_place_order: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
     cx: &App,
@@ -8516,17 +8520,17 @@ fn buyer_checkout_card(
                     .justify_between()
                     .gap(px(APP_UI_THEME.shells.home_stack_gap_px))
                     .child(app_text_value(app_shared_text(
-                        AppTextKey::PersonalCheckoutTitle,
+                        AppTextKey::PersonalOrderReviewTitle,
                     )))
                     .child(text_button(
-                        "buyer-checkout-back",
-                        app_shared_text(AppTextKey::PersonalCheckoutBackAction),
+                        "buyer-order-review-back",
+                        app_shared_text(AppTextKey::PersonalOrderReviewBackAction),
                         on_close,
                         cx,
                     )),
             )
             .child(home_body_text(app_shared_text(
-                AppTextKey::PersonalCheckoutLocalOnlyBody,
+                AppTextKey::PersonalOrderReviewLocalOnlyBody,
             )))
             .child(app_surface_panel(
                 app_stack_v(APP_UI_THEME.foundation.spacing.small_px)
@@ -8536,7 +8540,7 @@ fn buyer_checkout_card(
                         AppTextKey::PersonalOrderSummaryTitle,
                     )))
                     .child(label_value_list(buyer_order_summary_rows(
-                        &checkout.summary,
+                        &order_review.summary,
                     ))),
             ))
             .child(app_surface_panel(
@@ -8547,7 +8551,7 @@ fn buyer_checkout_card(
                         AppTextKey::PersonalFulfillmentTitle,
                     )))
                     .child(home_body_text(
-                        checkout
+                        order_review
                             .summary
                             .fulfillment_summary
                             .clone()
@@ -8555,7 +8559,7 @@ fn buyer_checkout_card(
                     )),
             ))
             .child(app_form_section(
-                app_shared_text(AppTextKey::PersonalCheckoutContactTitle),
+                app_shared_text(AppTextKey::PersonalOrderReviewContactTitle),
                 div()
                     .w_full()
                     .flex()
@@ -8563,7 +8567,7 @@ fn buyer_checkout_card(
                     .gap(px(APP_UI_THEME.shells.home_stack_gap_px))
                     .child(app_form_input_text(
                         AppFormFieldSpec::new(
-                            app_shared_text(AppTextKey::PersonalCheckoutFieldName),
+                            app_shared_text(AppTextKey::PersonalOrderReviewFieldName),
                             Option::<SharedString>::None,
                         ),
                         &form.name_input,
@@ -8571,7 +8575,7 @@ fn buyer_checkout_card(
                     ))
                     .child(app_form_input_text(
                         AppFormFieldSpec::new(
-                            app_shared_text(AppTextKey::PersonalCheckoutFieldEmail),
+                            app_shared_text(AppTextKey::PersonalOrderReviewFieldEmail),
                             Option::<SharedString>::None,
                         ),
                         &form.email_input,
@@ -8579,7 +8583,7 @@ fn buyer_checkout_card(
                     ))
                     .child(app_form_input_text(
                         AppFormFieldSpec::new(
-                            app_shared_text(AppTextKey::PersonalCheckoutFieldPhone),
+                            app_shared_text(AppTextKey::PersonalOrderReviewFieldPhone),
                             Option::<SharedString>::None,
                         ),
                         &form.phone_input,
@@ -8587,25 +8591,25 @@ fn buyer_checkout_card(
                     ))
                     .child(app_form_input_text(
                         AppFormFieldSpec::new(
-                            app_shared_text(AppTextKey::PersonalCheckoutFieldOrderNote),
+                            app_shared_text(AppTextKey::PersonalOrderReviewFieldOrderNote),
                             Option::<SharedString>::None,
                         ),
                         &form.order_note_input,
                         false,
                     )),
             ))
-            .child(if checkout.can_place_order {
+            .child(if order_review.can_place_order {
                 action_button_primary(
-                    "buyer-checkout-place-order",
-                    app_shared_text(AppTextKey::PersonalCheckoutPlaceOrderAction),
+                    "buyer-order-review-place-order",
+                    app_shared_text(AppTextKey::PersonalOrderReviewPlaceOrderAction),
                     on_place_order,
                     cx,
                 )
                 .into_any_element()
             } else {
                 action_button_primary_disabled(
-                    "buyer-checkout-place-order",
-                    app_shared_text(AppTextKey::PersonalCheckoutPlaceOrderAction),
+                    "buyer-order-review-place-order",
+                    app_shared_text(AppTextKey::PersonalOrderReviewPlaceOrderAction),
                     cx,
                 )
                 .into_any_element()
@@ -8613,7 +8617,7 @@ fn buyer_checkout_card(
     )
 }
 
-fn buyer_order_summary_rows(summary: &BuyerCheckoutSummaryProjection) -> Vec<LabelValueRow> {
+fn buyer_order_summary_rows(summary: &BuyerOrderReviewSummaryProjection) -> Vec<LabelValueRow> {
     vec![
         LabelValueRow::new(
             app_shared_text(AppTextKey::PersonalSummaryFarmLabel),
@@ -8891,7 +8895,10 @@ fn buyer_orders_list_entry(
                             .flex_1()
                             .min_w_0()
                             .child(app_text_label(row.order_number.clone()))
-                            .child(settings_badge_text(row.farm_display_name.clone())),
+                            .child(settings_badge_text(row.farm_display_name.clone()))
+                            .child(settings_badge_text(trade_economics_total_text(
+                                &row.workflow.economics,
+                            ))),
                     )
                     .child(
                         div()
@@ -13812,20 +13819,20 @@ mod tests {
             Some(HomeAutoFocusTarget::BuyerSearchInput)
         );
 
-        let mut buyer_cart_checkout = buyer_search.clone();
-        buyer_cart_checkout.shell_projection = AppShellProjection::new(
+        let mut buyer_cart_order_review = buyer_search.clone();
+        buyer_cart_order_review.shell_projection = AppShellProjection::new(
             ActiveSurface::Personal,
             ShellSection::Personal(PersonalSection::Cart),
         );
         assert_eq!(
             home_auto_focus_target(
-                &buyer_cart_checkout,
+                &buyer_cart_order_review,
                 HomeAutoFocusState {
-                    has_buyer_checkout_form: true,
+                    has_buyer_order_review_form: true,
                     ..HomeAutoFocusState::default()
                 },
             ),
-            Some(HomeAutoFocusTarget::BuyerCheckoutNameInput)
+            Some(HomeAutoFocusTarget::BuyerOrderReviewNameInput)
         );
 
         let order_id = OrderId::new();

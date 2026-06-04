@@ -44,7 +44,7 @@ use radroots_studio_app_sync::{
 use radroots_studio_app_view::{
     ActiveSurface, AppActivityContext, AppActivityKind, AppIdentityProjection, AppStartupGate,
     BuyerCartLineProjection, BuyerCartProjection, BuyerCartReplaceConfirmationProjection,
-    BuyerCheckoutDraft, BuyerContext, BuyerOrderDetailProjection, BuyerOrderStatus,
+    BuyerContext, BuyerOrderDetailProjection, BuyerOrderReviewDraft, BuyerOrderStatus,
     BuyerProductDetailProjection, FarmId, FarmOrderMethod, FarmProfileRecord, FarmReadiness,
     FarmRulesProjection, FarmSetupDraft, FarmSetupProjection, FarmSummary, FarmerSection,
     FulfillmentWindowId, LoggedOutStartupProjection, OrderDetailProjection, OrderId,
@@ -636,11 +636,12 @@ impl DesktopAppRuntime {
         self.lock_state_mut().remove_personal_cart_line(product_id)
     }
 
-    pub fn save_personal_checkout_draft(
+    pub fn save_personal_order_review_draft(
         &self,
-        draft: BuyerCheckoutDraft,
+        draft: BuyerOrderReviewDraft,
     ) -> Result<bool, AppSqliteError> {
-        self.lock_state_mut().save_personal_checkout_draft(draft)
+        self.lock_state_mut()
+            .save_personal_order_review_draft(draft)
     }
 
     pub fn place_personal_order(&self) -> Result<bool, AppSqliteError> {
@@ -1751,15 +1752,15 @@ impl DesktopAppRuntimeState {
         let next_cart = next_buyer_cart_for_detail(current_cart, &detail, replace_existing)?;
         sqlite_store.replace_buyer_cart(&buyer_context, &next_cart)?;
         let refreshed_cart = sqlite_store.load_buyer_cart(&buyer_context)?;
-        let refreshed_checkout = sqlite_store.load_buyer_checkout(&buyer_context)?;
+        let refreshed_order_review = sqlite_store.load_buyer_order_review(&buyer_context)?;
         let cart_changed = self.mutate_personal_projection(|projection| {
             let mut changed = false;
             if projection.cart.cart != refreshed_cart {
                 projection.cart.cart = refreshed_cart.clone();
                 changed = true;
             }
-            if projection.cart.checkout != refreshed_checkout {
-                projection.cart.checkout = refreshed_checkout.clone();
+            if projection.cart.order_review != refreshed_order_review {
+                projection.cart.order_review = refreshed_order_review.clone();
                 changed = true;
             }
             changed
@@ -1797,28 +1798,28 @@ impl DesktopAppRuntimeState {
         }
 
         let refreshed_cart = sqlite_store.load_buyer_cart(&buyer_context)?;
-        let refreshed_checkout = sqlite_store.load_buyer_checkout(&buyer_context)?;
+        let refreshed_order_review = sqlite_store.load_buyer_order_review(&buyer_context)?;
 
-        Ok(self.refresh_personal_cart_and_checkout(refreshed_cart, refreshed_checkout))
+        Ok(self.refresh_personal_cart_and_order_review(refreshed_cart, refreshed_order_review))
     }
 
-    fn save_personal_checkout_draft(
+    fn save_personal_order_review_draft(
         &mut self,
-        draft: BuyerCheckoutDraft,
+        draft: BuyerOrderReviewDraft,
     ) -> Result<bool, AppSqliteError> {
         let Some(sqlite_store) = self.sqlite_store.as_ref() else {
             return Ok(false);
         };
         let buyer_context = self.state_store.identity_projection().buyer_context();
-        sqlite_store.save_buyer_checkout_draft(&buyer_context, &draft)?;
-        let refreshed_checkout = sqlite_store.load_buyer_checkout(&buyer_context)?;
+        sqlite_store.save_buyer_order_review_draft(&buyer_context, &draft)?;
+        let refreshed_order_review = sqlite_store.load_buyer_order_review(&buyer_context)?;
 
         Ok(self.mutate_personal_projection(|projection| {
-            if projection.cart.checkout == refreshed_checkout {
+            if projection.cart.order_review == refreshed_order_review {
                 return false;
             }
 
-            projection.cart.checkout = refreshed_checkout;
+            projection.cart.order_review = refreshed_order_review;
             true
         }))
     }
@@ -1827,16 +1828,16 @@ impl DesktopAppRuntimeState {
         let buyer_context = self.state_store.identity_projection().buyer_context();
         if matches!(buyer_context, BuyerContext::Guest) {
             return Err(AppSqliteError::InvalidProjection {
-                reason: "buyer checkout requires a selected account",
+                reason: "buyer order review requires a selected account",
             });
         }
-        let (refreshed_cart, refreshed_checkout, refreshed_orders, order_detail, order_export) = {
+        let (refreshed_cart, refreshed_order_review, refreshed_orders, order_detail, order_export) = {
             let Some(sqlite_store) = self.sqlite_store.as_ref() else {
                 return Ok(false);
             };
             let order_id = sqlite_store.place_buyer_order(&buyer_context)?;
             let refreshed_cart = sqlite_store.load_buyer_cart(&buyer_context)?;
-            let refreshed_checkout = sqlite_store.load_buyer_checkout(&buyer_context)?;
+            let refreshed_order_review = sqlite_store.load_buyer_order_review(&buyer_context)?;
             let refreshed_orders = sqlite_store.load_buyer_orders(&buyer_context)?;
             if !refreshed_orders
                 .rows
@@ -1863,7 +1864,7 @@ impl DesktopAppRuntimeState {
             };
             (
                 refreshed_cart,
-                refreshed_checkout,
+                refreshed_order_review,
                 refreshed_orders,
                 order_detail,
                 order_export,
@@ -1875,8 +1876,8 @@ impl DesktopAppRuntimeState {
                 projection.cart.cart = refreshed_cart.clone();
                 changed = true;
             }
-            if projection.cart.checkout != refreshed_checkout {
-                projection.cart.checkout = refreshed_checkout.clone();
+            if projection.cart.order_review != refreshed_order_review {
+                projection.cart.order_review = refreshed_order_review.clone();
                 changed = true;
             }
             if projection.orders.list != refreshed_orders {
@@ -2022,7 +2023,7 @@ impl DesktopAppRuntimeState {
             .map(|detail| detail.order_id);
         let (
             refreshed_cart,
-            refreshed_checkout,
+            refreshed_order_review,
             refreshed_orders,
             refreshed_order_detail,
             has_recoverable_coordination,
@@ -2031,7 +2032,7 @@ impl DesktopAppRuntimeState {
                 return Ok(false);
             };
             let refreshed_cart = sqlite_store.load_buyer_cart(buyer_context)?;
-            let refreshed_checkout = sqlite_store.load_buyer_checkout(buyer_context)?;
+            let refreshed_order_review = sqlite_store.load_buyer_order_review(buyer_context)?;
             let refreshed_orders = sqlite_store.load_buyer_orders(buyer_context)?;
             let has_recoverable_coordination = !sqlite_store
                 .load_recoverable_buyer_order_coordination_records(buyer_context)?
@@ -2057,7 +2058,7 @@ impl DesktopAppRuntimeState {
             };
             (
                 refreshed_cart,
-                refreshed_checkout,
+                refreshed_order_review,
                 refreshed_orders,
                 refreshed_order_detail,
                 has_recoverable_coordination,
@@ -2070,8 +2071,8 @@ impl DesktopAppRuntimeState {
                 projection.cart.cart = refreshed_cart.clone();
                 changed = true;
             }
-            if projection.cart.checkout != refreshed_checkout {
-                projection.cart.checkout = refreshed_checkout.clone();
+            if projection.cart.order_review != refreshed_order_review {
+                projection.cart.order_review = refreshed_order_review.clone();
                 changed = true;
             }
             if projection.orders.list != refreshed_orders {
@@ -2124,7 +2125,8 @@ impl DesktopAppRuntimeState {
         )? {
             BuyerRepeatDemandApplyOutcome::Applied => {
                 let refreshed_cart = sqlite_store.load_buyer_cart(&buyer_context)?;
-                let refreshed_checkout = sqlite_store.load_buyer_checkout(&buyer_context)?;
+                let refreshed_order_review =
+                    sqlite_store.load_buyer_order_review(&buyer_context)?;
                 let refreshed_orders = sqlite_store.load_buyer_orders(&buyer_context)?;
                 let refreshed_detail =
                     sqlite_store.load_buyer_order_detail(&buyer_context, order_id)?;
@@ -2134,8 +2136,8 @@ impl DesktopAppRuntimeState {
                         projection.cart.cart = refreshed_cart.clone();
                         changed = true;
                     }
-                    if projection.cart.checkout != refreshed_checkout {
-                        projection.cart.checkout = refreshed_checkout.clone();
+                    if projection.cart.order_review != refreshed_order_review {
+                        projection.cart.order_review = refreshed_order_review.clone();
                         changed = true;
                     }
                     if projection.orders.list != refreshed_orders {
@@ -5136,10 +5138,10 @@ impl DesktopAppRuntimeState {
         sqlite_store.load_buyer_listings(&query.search_query, &query.fulfillment_methods)
     }
 
-    fn refresh_personal_cart_and_checkout(
+    fn refresh_personal_cart_and_order_review(
         &mut self,
         refreshed_cart: BuyerCartProjection,
-        refreshed_checkout: radroots_studio_app_view::BuyerCheckoutProjection,
+        refreshed_order_review: radroots_studio_app_view::BuyerOrderReviewProjection,
     ) -> bool {
         self.mutate_personal_projection(|projection| {
             let mut changed = false;
@@ -5147,8 +5149,8 @@ impl DesktopAppRuntimeState {
                 projection.cart.cart = refreshed_cart.clone();
                 changed = true;
             }
-            if projection.cart.checkout != refreshed_checkout {
-                projection.cart.checkout = refreshed_checkout.clone();
+            if projection.cart.order_review != refreshed_order_review {
+                projection.cart.order_review = refreshed_order_review.clone();
                 changed = true;
             }
 
@@ -7985,7 +7987,7 @@ fn load_selected_account_context_with_options(
         None => None,
     };
     let buyer_cart = sqlite_store.load_buyer_cart(&buyer_context)?;
-    let buyer_checkout = sqlite_store.load_buyer_checkout(&buyer_context)?;
+    let buyer_order_review = sqlite_store.load_buyer_order_review(&buyer_context)?;
     let buyer_orders = sqlite_store.load_buyer_orders(&buyer_context)?;
     let has_recoverable_coordination = !sqlite_store
         .load_recoverable_buyer_order_coordination_records(&buyer_context)?
@@ -8006,7 +8008,7 @@ fn load_selected_account_context_with_options(
         },
         cart: BuyerCartScreenProjection {
             cart: buyer_cart,
-            checkout: buyer_checkout,
+            order_review: buyer_order_review,
         },
         orders: BuyerOrdersScreenProjection {
             list: buyer_orders,
@@ -9615,20 +9617,21 @@ mod tests {
     use radroots_studio_app_view::{
         AccountCustody, AccountSummary, AccountSurfaceActivationProjection, ActiveSurface,
         AppActivityKind, AppIdentityProjection, AppStartupGate, BlackoutPeriodId,
-        BlackoutPeriodRecord, BuyerCheckoutDisabledReason, BuyerCheckoutDraft, BuyerOrderStatus,
-        FarmId, FarmOperatingRulesRecord, FarmOrderMethod, FarmProfileRecord, FarmReadiness,
-        FarmReadinessBlocker, FarmRulesProjection, FarmSetupDraft, FarmSetupProjection,
-        FarmSummary, FarmerActivationProjection, FarmerSection, FulfillmentWindowId,
-        FulfillmentWindowRecord, LoggedOutStartupProjection, OrderId, OrderStatus, OrdersFilter,
-        PackDayBatchPrintArtifact, PackDayBatchPrintFailureKind, PackDayBatchPrintStatus,
-        PackDayExportInstanceId, PackDayExportStatus, PackDayHostHandoffKind,
-        PackDayHostHandoffStatus, PackDayPackListRow, PackDayPrintFailureKind, PackDayPrintKind,
-        PackDayPrintStatus, PackDayProductTotalRow, PackDayProjection, PackDayRosterRow,
-        PersonalSection, PickupLocationId, PickupLocationRecord, ProductEditorDraft, ProductId,
-        ProductPublishBlocker, ProductStatus, ProductsFilter, ProductsSort, RecoveryKind,
-        RecoveryRecordId, ReminderDeliveryState, ReminderFeedProjection, ReminderKind,
-        SelectedAccountProjection, SelectedSurfaceProjection, SettingsPreference, SettingsSection,
-        ShellSection, TodayAgendaProjection, TodaySetupTask, TodaySetupTaskKind, TodaySummary,
+        BlackoutPeriodRecord, BuyerOrderReviewDisabledReason, BuyerOrderReviewDraft,
+        BuyerOrderStatus, FarmId, FarmOperatingRulesRecord, FarmOrderMethod, FarmProfileRecord,
+        FarmReadiness, FarmReadinessBlocker, FarmRulesProjection, FarmSetupDraft,
+        FarmSetupProjection, FarmSummary, FarmerActivationProjection, FarmerSection,
+        FulfillmentWindowId, FulfillmentWindowRecord, LoggedOutStartupProjection, OrderId,
+        OrderStatus, OrdersFilter, PackDayBatchPrintArtifact, PackDayBatchPrintFailureKind,
+        PackDayBatchPrintStatus, PackDayExportInstanceId, PackDayExportStatus,
+        PackDayHostHandoffKind, PackDayHostHandoffStatus, PackDayPackListRow,
+        PackDayPrintFailureKind, PackDayPrintKind, PackDayPrintStatus, PackDayProductTotalRow,
+        PackDayProjection, PackDayRosterRow, PersonalSection, PickupLocationId,
+        PickupLocationRecord, ProductEditorDraft, ProductId, ProductPublishBlocker, ProductStatus,
+        ProductsFilter, ProductsSort, RecoveryKind, RecoveryRecordId, ReminderDeliveryState,
+        ReminderFeedProjection, ReminderKind, SelectedAccountProjection, SelectedSurfaceProjection,
+        SettingsPreference, SettingsSection, ShellSection, TodayAgendaProjection, TodaySetupTask,
+        TodaySetupTaskKind, TodaySummary,
     };
     use radroots_core::{
         RadrootsCoreCurrency, RadrootsCoreDecimal, RadrootsCoreMoney, RadrootsCoreUnit,
@@ -14275,7 +14278,7 @@ mod tests {
     }
 
     #[test]
-    fn runtime_removing_buyer_cart_line_clears_cart_and_checkout_readiness() {
+    fn runtime_removing_buyer_cart_line_clears_cart_and_order_review_readiness() {
         let runtime = memory_runtime();
         let (account_id, farm_id) = provision_ready_farmer_account(&runtime);
         assert!(
@@ -14331,9 +14334,20 @@ mod tests {
         let summary = runtime.summary();
         assert!(summary.personal_projection.cart.cart.lines.is_empty());
         assert!(summary.personal_projection.cart.cart.farm_id.is_none());
-        assert!(!summary.personal_projection.cart.checkout.can_place_order);
+        assert!(
+            !summary
+                .personal_projection
+                .cart
+                .order_review
+                .can_place_order
+        );
         assert_eq!(
-            summary.personal_projection.cart.checkout.summary.line_count,
+            summary
+                .personal_projection
+                .cart
+                .order_review
+                .summary
+                .line_count,
             0
         );
     }
@@ -14387,17 +14401,17 @@ mod tests {
         );
         assert!(
             runtime
-                .save_personal_checkout_draft(BuyerCheckoutDraft {
+                .save_personal_order_review_draft(BuyerOrderReviewDraft {
                     name: "Casey Buyer".to_owned(),
                     email: "casey@example.com".to_owned(),
                     phone: "555-0101".to_owned(),
                     order_note: "Leave by the cooler".to_owned(),
                 })
-                .expect("buyer checkout draft should save")
+                .expect("buyer order review draft should save")
         );
-        let checkout = runtime.summary().personal_projection.cart.checkout;
-        assert!(checkout.can_place_order);
-        assert_eq!(checkout.place_order_disabled_reason, None);
+        let order_review = runtime.summary().personal_projection.cart.order_review;
+        assert!(order_review.can_place_order);
+        assert_eq!(order_review.place_order_disabled_reason, None);
         assert!(
             runtime
                 .place_personal_order()
@@ -14410,14 +14424,20 @@ mod tests {
             ShellSection::Personal(PersonalSection::Orders)
         );
         assert!(summary.personal_projection.cart.cart.lines.is_empty());
-        assert!(!summary.personal_projection.cart.checkout.can_place_order);
+        assert!(
+            !summary
+                .personal_projection
+                .cart
+                .order_review
+                .can_place_order
+        );
         assert_eq!(
             summary
                 .personal_projection
                 .cart
-                .checkout
+                .order_review
                 .place_order_disabled_reason,
-            Some(BuyerCheckoutDisabledReason::EmptyCart)
+            Some(BuyerOrderReviewDisabledReason::EmptyCart)
         );
         assert_eq!(summary.personal_projection.orders.list.rows.len(), 1);
         assert_eq!(
@@ -14454,7 +14474,7 @@ mod tests {
     }
 
     #[test]
-    fn runtime_guest_checkout_requires_account_before_order_write() {
+    fn runtime_guest_order_review_requires_account_before_order_write() {
         let runtime = memory_runtime();
         let farm_id = FarmId::new();
         runtime
@@ -14513,13 +14533,13 @@ mod tests {
         );
         assert!(
             runtime
-                .save_personal_checkout_draft(BuyerCheckoutDraft {
+                .save_personal_order_review_draft(BuyerOrderReviewDraft {
                     name: "Casey Buyer".to_owned(),
                     email: "casey@example.com".to_owned(),
                     phone: "555-0101".to_owned(),
                     order_note: "Leave by the cooler".to_owned(),
                 })
-                .expect("buyer checkout draft should save")
+                .expect("buyer order review draft should save")
         );
 
         let ready_summary = runtime.summary();
@@ -14527,22 +14547,22 @@ mod tests {
             !ready_summary
                 .personal_projection
                 .cart
-                .checkout
+                .order_review
                 .can_place_order
         );
         assert_eq!(
             ready_summary
                 .personal_projection
                 .cart
-                .checkout
+                .order_review
                 .place_order_disabled_reason,
-            Some(BuyerCheckoutDisabledReason::AccountRequired)
+            Some(BuyerOrderReviewDisabledReason::AccountRequired)
         );
         assert_eq!(
             ready_summary
                 .personal_projection
                 .cart
-                .checkout
+                .order_review
                 .summary
                 .line_count,
             1
@@ -14550,7 +14570,7 @@ mod tests {
 
         let error = runtime
             .place_personal_order()
-            .expect_err("guest checkout should require an account");
+            .expect_err("guest order review should require an account");
         assert!(matches!(error, AppSqliteError::InvalidProjection { .. }));
 
         let summary = runtime.summary();
@@ -14982,13 +15002,13 @@ mod tests {
             .expect("listing projection should mutate after cart snapshot");
         assert!(
             runtime
-                .save_personal_checkout_draft(BuyerCheckoutDraft {
+                .save_personal_order_review_draft(BuyerOrderReviewDraft {
                     name: "Casey Buyer".to_owned(),
                     email: "casey@example.com".to_owned(),
                     phone: "555-0101".to_owned(),
                     order_note: "Leave by the cooler".to_owned(),
                 })
-                .expect("buyer checkout draft should save")
+                .expect("buyer order review draft should save")
         );
         assert!(
             runtime
@@ -15433,13 +15453,13 @@ mod tests {
         );
         assert!(
             runtime
-                .save_personal_checkout_draft(BuyerCheckoutDraft {
+                .save_personal_order_review_draft(BuyerOrderReviewDraft {
                     name: "Casey Buyer".to_owned(),
                     email: "casey@example.com".to_owned(),
                     phone: String::new(),
                     order_note: String::new(),
                 })
-                .expect("buyer checkout draft should save")
+                .expect("buyer order review draft should save")
         );
         assert!(
             runtime
@@ -15545,13 +15565,13 @@ mod tests {
         );
         assert!(
             runtime
-                .save_personal_checkout_draft(BuyerCheckoutDraft {
+                .save_personal_order_review_draft(BuyerOrderReviewDraft {
                     name: "Casey Buyer".to_owned(),
                     email: "casey@example.com".to_owned(),
                     phone: String::new(),
                     order_note: String::new(),
                 })
-                .expect("buyer checkout draft should save")
+                .expect("buyer order review draft should save")
         );
         assert!(
             runtime
@@ -19515,13 +19535,13 @@ mod tests {
         );
         assert!(
             runtime
-                .save_personal_checkout_draft(BuyerCheckoutDraft {
+                .save_personal_order_review_draft(BuyerOrderReviewDraft {
                     name: "Casey Buyer".to_owned(),
                     email: "casey@example.com".to_owned(),
                     phone: String::new(),
                     order_note: String::new(),
                 })
-                .expect("buyer checkout draft should save")
+                .expect("buyer order review draft should save")
         );
         block_shared_local_events_database(&paths);
 
@@ -19542,7 +19562,13 @@ mod tests {
                 .has_recoverable_coordination
         );
         assert!(summary.personal_projection.cart.cart.lines.is_empty());
-        assert!(!summary.personal_projection.cart.checkout.can_place_order);
+        assert!(
+            !summary
+                .personal_projection
+                .cart
+                .order_review
+                .can_place_order
+        );
         assert_eq!(summary.personal_projection.orders.list.rows.len(), 1);
         let visible_order_id = summary.personal_projection.orders.list.rows[0].order_id;
         let order_detail = summary

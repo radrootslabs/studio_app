@@ -2,14 +2,16 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use radroots_studio_app_view::{
     BuyerCartLineProjection, BuyerCartProjection, BuyerCartReplaceConfirmationProjection,
-    BuyerCheckoutDisabledReason, BuyerCheckoutDraft, BuyerCheckoutProjection,
-    BuyerCheckoutSummaryProjection, BuyerContext, BuyerListingRow, BuyerListingsProjection,
-    BuyerOrderDetailProjection, BuyerOrderStatus, BuyerOrdersListRow, BuyerOrdersProjection,
+    BuyerContext, BuyerListingRow, BuyerListingsProjection, BuyerOrderDetailProjection,
+    BuyerOrderReviewDisabledReason, BuyerOrderReviewDraft, BuyerOrderReviewProjection,
+    BuyerOrderReviewSummaryProjection, BuyerOrderStatus, BuyerOrdersListRow, BuyerOrdersProjection,
     BuyerProductDetailProjection, FarmId, FarmOrderMethod, FulfillmentWindowId, OrderDetailItemRow,
     OrderId, OrderStatus, ProductAvailabilityState, ProductAvailabilitySummary, ProductId,
     ProductPricePresentation, ProductStatus, ProductStockState, ProductStockSummary,
-    RepeatDemandEligibility, RepeatDemandHandoffProjection, TradePaymentDisplayStatus,
-    TradeWorkflowProjection,
+    RepeatDemandEligibility, RepeatDemandHandoffProjection, TradeAgreementStatus,
+    TradeEconomicsProjection, TradeFulfillmentStatus, TradeInventoryStatus,
+    TradePaymentDisplayStatus, TradeProvenanceProjection, TradeRevisionStatus,
+    TradeWorkflowProjection, TradeWorkflowSource,
 };
 use rusqlite::{Connection, OptionalExtension, params};
 use serde_json::Value;
@@ -270,24 +272,28 @@ impl<'a> AppBuyerRepository<'a> {
         Ok(())
     }
 
-    pub fn load_buyer_checkout(
+    pub fn load_buyer_order_review(
         &self,
         context: &BuyerContext,
-    ) -> Result<BuyerCheckoutProjection, AppSqliteError> {
+    ) -> Result<BuyerOrderReviewProjection, AppSqliteError> {
         let context_key = context.storage_key();
         let header = self.load_cart_header(&context_key)?;
         let cart =
             self.build_cart_projection(header.clone(), self.load_cart_line_records(&context_key)?)?;
         let draft = header
-            .map(BuyerCartHeader::into_checkout_draft)
+            .map(BuyerCartHeader::into_order_review_draft)
             .unwrap_or_default();
         let fulfillment_summary = shared_fulfillment_summary(&cart.lines);
-        let place_order_disabled_reason =
-            buyer_checkout_disabled_reason(context, &cart, fulfillment_summary.as_ref(), &draft);
+        let place_order_disabled_reason = buyer_order_review_disabled_reason(
+            context,
+            &cart,
+            fulfillment_summary.as_ref(),
+            &draft,
+        );
 
-        Ok(BuyerCheckoutProjection {
+        Ok(BuyerOrderReviewProjection {
             draft: draft.clone(),
-            summary: BuyerCheckoutSummaryProjection {
+            summary: BuyerOrderReviewSummaryProjection {
                 farm_display_name: cart.farm_display_name.clone(),
                 fulfillment_summary: fulfillment_summary.clone(),
                 line_count: cart.lines.len() as u32,
@@ -299,10 +305,10 @@ impl<'a> AppBuyerRepository<'a> {
         })
     }
 
-    pub fn save_buyer_checkout_draft(
+    pub fn save_buyer_order_review_draft(
         &self,
         context: &BuyerContext,
-        draft: &BuyerCheckoutDraft,
+        draft: &BuyerOrderReviewDraft,
     ) -> Result<(), AppSqliteError> {
         let context_key = context.storage_key();
 
@@ -317,7 +323,7 @@ impl<'a> AppBuyerRepository<'a> {
                 params![context_key.as_str()],
             )
             .map_err(|source| AppSqliteError::Query {
-                operation: "ensure buyer checkout header",
+                operation: "ensure buyer order review header",
                 source,
             })?;
         self.connection
@@ -339,7 +345,7 @@ impl<'a> AppBuyerRepository<'a> {
                 ],
             )
             .map_err(|source| AppSqliteError::Query {
-                operation: "save buyer checkout draft",
+                operation: "save buyer order review draft",
                 source,
             })?;
 
@@ -355,11 +361,11 @@ impl<'a> AppBuyerRepository<'a> {
                 })?;
         let line_records = self.load_cart_line_records(&context_key)?;
         let cart = self.build_cart_projection(Some(header.clone()), line_records.clone())?;
-        let checkout = self.load_buyer_checkout(context)?;
+        let order_review = self.load_buyer_order_review(context)?;
 
-        if let Some(disabled_reason) = checkout.place_order_disabled_reason {
+        if let Some(disabled_reason) = order_review.place_order_disabled_reason {
             return Err(AppSqliteError::InvalidProjection {
-                reason: buyer_checkout_disabled_error(disabled_reason),
+                reason: buyer_order_review_disabled_error(disabled_reason),
             });
         }
 
@@ -373,7 +379,7 @@ impl<'a> AppBuyerRepository<'a> {
         self.connection
             .execute_batch("begin immediate transaction")
             .map_err(|source| AppSqliteError::Query {
-                operation: "begin buyer checkout write",
+                operation: "begin buyer order review write",
                 source,
             })?;
 
@@ -410,11 +416,11 @@ impl<'a> AppBuyerRepository<'a> {
                         farm_id.to_string(),
                         fulfillment_window_id.map(|id| id.to_string()),
                         order_number,
-                        checkout.draft.name.trim(),
+                        order_review.draft.name.trim(),
                         context_key.as_str(),
-                        checkout.draft.email.trim(),
-                        checkout.draft.phone.trim(),
-                        checkout.draft.order_note.trim(),
+                        order_review.draft.email.trim(),
+                        order_review.draft.phone.trim(),
+                        order_review.draft.order_note.trim(),
                     ],
                 )
                 .map_err(|source| AppSqliteError::Query {
@@ -473,7 +479,7 @@ impl<'a> AppBuyerRepository<'a> {
                     params![context_key.as_str()],
                 )
                 .map_err(|source| AppSqliteError::Query {
-                    operation: "clear buyer cart lines after checkout",
+                    operation: "clear buyer cart lines after order review",
                     source,
                 })?;
             self.connection
@@ -487,7 +493,7 @@ impl<'a> AppBuyerRepository<'a> {
                     params![context_key.as_str()],
                 )
                 .map_err(|source| AppSqliteError::Query {
-                    operation: "reset buyer cart header after checkout",
+                    operation: "reset buyer cart header after order review",
                     source,
                 })?;
             self.insert_pending_buyer_order_coordination(context_key.as_str(), order_id)?;
@@ -499,7 +505,7 @@ impl<'a> AppBuyerRepository<'a> {
             Ok(order_id) => {
                 self.connection.execute_batch("commit").map_err(|source| {
                     AppSqliteError::Query {
-                        operation: "commit buyer checkout write",
+                        operation: "commit buyer order review write",
                         source,
                     }
                 })?;
@@ -744,6 +750,12 @@ impl<'a> AppBuyerRepository<'a> {
                     o.order_number,
                     o.status,
                     o.workflow_revision,
+                    o.workflow_agreement,
+                    o.workflow_fulfillment,
+                    o.workflow_inventory,
+                    o.workflow_payment,
+                    o.workflow_provenance_source,
+                    o.workflow_provenance_last_event_id,
                     f.display_name,
                     fw.label,
                     fw.starts_at,
@@ -768,8 +780,14 @@ impl<'a> AppBuyerRepository<'a> {
                     row.get::<_, String>(4)?,
                     row.get::<_, String>(5)?,
                     row.get::<_, Option<String>>(6)?,
-                    row.get::<_, Option<String>>(7)?,
-                    row.get::<_, Option<String>>(8)?,
+                    row.get::<_, String>(7)?,
+                    row.get::<_, String>(8)?,
+                    row.get::<_, String>(9)?,
+                    row.get::<_, Option<String>>(10)?,
+                    row.get::<_, String>(11)?,
+                    row.get::<_, Option<String>>(12)?,
+                    row.get::<_, Option<String>>(13)?,
+                    row.get::<_, Option<String>>(14)?,
                 ))
             })
             .map_err(|source| AppSqliteError::Query {
@@ -785,6 +803,12 @@ impl<'a> AppBuyerRepository<'a> {
                 order_number,
                 status,
                 workflow_revision,
+                workflow_agreement,
+                workflow_fulfillment,
+                workflow_inventory,
+                workflow_payment,
+                workflow_provenance_source,
+                workflow_provenance_last_event_id,
                 farm_display_name,
                 fulfillment_label,
                 fulfillment_starts_at,
@@ -793,11 +817,24 @@ impl<'a> AppBuyerRepository<'a> {
                 operation: "read buyer orders list",
                 source,
             })?;
-            let order_id = parse_typed_id("orders.id", order_id)?;
-            let farm_id = parse_typed_id("orders.farm_id", farm_id)?;
+            let order_id: OrderId = parse_typed_id("orders.id", order_id)?;
+            let farm_id: FarmId = parse_typed_id("orders.farm_id", farm_id)?;
             let buyer_status = BuyerOrderStatus::from(parse_order_status("orders.status", status)?);
             let revision =
                 parse_trade_revision_status("orders.workflow_revision", workflow_revision)?;
+            let items = self.load_order_detail_items(order_id.to_string())?;
+            let economics = order_detail_economics(&items)?;
+            let workflow = trade_workflow_projection_from_storage(
+                order_id,
+                revision,
+                economics,
+                workflow_agreement,
+                workflow_fulfillment,
+                workflow_inventory,
+                workflow_payment,
+                workflow_provenance_source,
+                workflow_provenance_last_event_id,
+            )?;
 
             orders.push(BuyerOrdersListRow {
                 order_id,
@@ -816,8 +853,7 @@ impl<'a> AppBuyerRepository<'a> {
                     fulfillment_ends_at,
                 ),
                 status: buyer_status,
-                workflow: TradeWorkflowProjection::from_buyer_order_status(order_id, buyer_status)
-                    .with_revision(revision),
+                workflow,
             });
         }
 
@@ -842,6 +878,12 @@ impl<'a> AppBuyerRepository<'a> {
                     o.status,
                     o.buyer_order_note,
                     o.workflow_revision,
+                    o.workflow_agreement,
+                    o.workflow_fulfillment,
+                    o.workflow_inventory,
+                    o.workflow_payment,
+                    o.workflow_provenance_source,
+                    o.workflow_provenance_last_event_id,
                     f.display_name,
                     fw.label,
                     fw.starts_at,
@@ -862,8 +904,14 @@ impl<'a> AppBuyerRepository<'a> {
                         row.get::<_, String>(5)?,
                         row.get::<_, String>(6)?,
                         row.get::<_, Option<String>>(7)?,
-                        row.get::<_, Option<String>>(8)?,
-                        row.get::<_, Option<String>>(9)?,
+                        row.get::<_, String>(8)?,
+                        row.get::<_, String>(9)?,
+                        row.get::<_, String>(10)?,
+                        row.get::<_, Option<String>>(11)?,
+                        row.get::<_, String>(12)?,
+                        row.get::<_, Option<String>>(13)?,
+                        row.get::<_, Option<String>>(14)?,
+                        row.get::<_, Option<String>>(15)?,
                     ))
                 },
             )
@@ -882,6 +930,12 @@ impl<'a> AppBuyerRepository<'a> {
                     status,
                     order_note,
                     workflow_revision,
+                    workflow_agreement,
+                    workflow_fulfillment,
+                    workflow_inventory,
+                    workflow_payment,
+                    workflow_provenance_source,
+                    workflow_provenance_last_event_id,
                     farm_display_name,
                     fulfillment_label,
                     fulfillment_starts_at,
@@ -895,11 +949,18 @@ impl<'a> AppBuyerRepository<'a> {
                         parse_trade_revision_status("orders.workflow_revision", workflow_revision)?;
                     let items = self.load_order_detail_items(order_id.to_string())?;
                     let economics = order_detail_economics(&items)?;
-                    let payment = TradePaymentDisplayStatus::NotRecorded;
-                    let workflow =
-                        TradeWorkflowProjection::from_buyer_order_status(order_id, status)
-                            .with_revision(revision)
-                            .with_economics_and_payment(economics.clone(), payment);
+                    let workflow = trade_workflow_projection_from_storage(
+                        order_id,
+                        revision,
+                        economics.clone(),
+                        workflow_agreement,
+                        workflow_fulfillment,
+                        workflow_inventory,
+                        workflow_payment,
+                        workflow_provenance_source,
+                        workflow_provenance_last_event_id,
+                    )?;
+                    let payment = workflow.payment;
                     Ok(BuyerOrderDetailProjection {
                         order_id,
                         farm_id,
@@ -2064,8 +2125,8 @@ struct BuyerCartHeader {
 }
 
 impl BuyerCartHeader {
-    fn into_checkout_draft(self) -> BuyerCheckoutDraft {
-        BuyerCheckoutDraft {
+    fn into_order_review_draft(self) -> BuyerOrderReviewDraft {
+        BuyerOrderReviewDraft {
             name: self.buyer_name,
             email: self.buyer_email,
             phone: self.buyer_phone,
@@ -2474,6 +2535,104 @@ fn refresh_buyer_cart_summary(cart: &mut BuyerCartProjection) -> Result<(), AppS
     Ok(())
 }
 
+fn trade_workflow_projection_from_storage(
+    order_id: OrderId,
+    revision: TradeRevisionStatus,
+    economics: TradeEconomicsProjection,
+    agreement: String,
+    fulfillment: Option<String>,
+    inventory: String,
+    payment: String,
+    provenance_source: String,
+    provenance_last_event_id: Option<String>,
+) -> Result<TradeWorkflowProjection, AppSqliteError> {
+    Ok(TradeWorkflowProjection {
+        order_id,
+        agreement: parse_trade_agreement_status("orders.workflow_agreement", agreement)?,
+        revision,
+        fulfillment: fulfillment
+            .map(|value| parse_trade_fulfillment_status("orders.workflow_fulfillment", value))
+            .transpose()?,
+        economics,
+        inventory: parse_trade_inventory_status("orders.workflow_inventory", inventory)?,
+        payment: parse_trade_payment_display_status("orders.workflow_payment", payment)?,
+        provenance: TradeProvenanceProjection::from_primary_source(parse_trade_workflow_source(
+            "orders.workflow_provenance_source",
+            provenance_source,
+        )?)
+        .with_last_event_id(provenance_last_event_id),
+    })
+}
+
+fn parse_trade_agreement_status(
+    field: &'static str,
+    value: String,
+) -> Result<TradeAgreementStatus, AppSqliteError> {
+    match value.as_str() {
+        "ordered" => Ok(TradeAgreementStatus::Ordered),
+        "confirmed" => Ok(TradeAgreementStatus::Confirmed),
+        "declined" => Ok(TradeAgreementStatus::Declined),
+        "cancelled" => Ok(TradeAgreementStatus::Cancelled),
+        "completed" => Ok(TradeAgreementStatus::Completed),
+        "needs_review" => Ok(TradeAgreementStatus::NeedsReview),
+        _ => Err(AppSqliteError::DecodeEnum { field, value }),
+    }
+}
+
+fn parse_trade_fulfillment_status(
+    field: &'static str,
+    value: String,
+) -> Result<TradeFulfillmentStatus, AppSqliteError> {
+    match value.as_str() {
+        "confirmed" => Ok(TradeFulfillmentStatus::Confirmed),
+        "preparing" => Ok(TradeFulfillmentStatus::Preparing),
+        "ready_for_pickup" => Ok(TradeFulfillmentStatus::ReadyForPickup),
+        "out_for_delivery" => Ok(TradeFulfillmentStatus::OutForDelivery),
+        "delivered" => Ok(TradeFulfillmentStatus::Delivered),
+        "cancelled" => Ok(TradeFulfillmentStatus::Cancelled),
+        _ => Err(AppSqliteError::DecodeEnum { field, value }),
+    }
+}
+
+fn parse_trade_inventory_status(
+    field: &'static str,
+    value: String,
+) -> Result<TradeInventoryStatus, AppSqliteError> {
+    match value.as_str() {
+        "available" => Ok(TradeInventoryStatus::Available),
+        "reserved" => Ok(TradeInventoryStatus::Reserved),
+        "sold_out" => Ok(TradeInventoryStatus::SoldOut),
+        "needs_review" => Ok(TradeInventoryStatus::NeedsReview),
+        _ => Err(AppSqliteError::DecodeEnum { field, value }),
+    }
+}
+
+fn parse_trade_payment_display_status(
+    field: &'static str,
+    value: String,
+) -> Result<TradePaymentDisplayStatus, AppSqliteError> {
+    match value.as_str() {
+        "not_recorded" => Ok(TradePaymentDisplayStatus::NotRecorded),
+        "recorded" => Ok(TradePaymentDisplayStatus::Recorded),
+        "needs_review" => Ok(TradePaymentDisplayStatus::NeedsReview),
+        _ => Err(AppSqliteError::DecodeEnum { field, value }),
+    }
+}
+
+fn parse_trade_workflow_source(
+    field: &'static str,
+    value: String,
+) -> Result<TradeWorkflowSource, AppSqliteError> {
+    match value.as_str() {
+        "app" => Ok(TradeWorkflowSource::App),
+        "cli" => Ok(TradeWorkflowSource::Cli),
+        "relay" => Ok(TradeWorkflowSource::Relay),
+        "local_events" => Ok(TradeWorkflowSource::LocalEvents),
+        "unknown" => Ok(TradeWorkflowSource::Unknown),
+        _ => Err(AppSqliteError::DecodeEnum { field, value }),
+    }
+}
+
 fn shared_fulfillment_summary(lines: &[BuyerCartLineProjection]) -> Option<String> {
     let first = lines.first()?.fulfillment_summary.clone();
 
@@ -2483,40 +2642,40 @@ fn shared_fulfillment_summary(lines: &[BuyerCartLineProjection]) -> Option<Strin
         .then_some(first)
 }
 
-fn buyer_checkout_disabled_reason(
+fn buyer_order_review_disabled_reason(
     context: &BuyerContext,
     cart: &BuyerCartProjection,
     fulfillment_summary: Option<&String>,
-    draft: &BuyerCheckoutDraft,
-) -> Option<BuyerCheckoutDisabledReason> {
+    draft: &BuyerOrderReviewDraft,
+) -> Option<BuyerOrderReviewDisabledReason> {
     if cart.lines.is_empty() {
-        return Some(BuyerCheckoutDisabledReason::EmptyCart);
+        return Some(BuyerOrderReviewDisabledReason::EmptyCart);
     }
     if fulfillment_summary.is_none() {
-        return Some(BuyerCheckoutDisabledReason::MissingFulfillment);
+        return Some(BuyerOrderReviewDisabledReason::MissingFulfillment);
     }
     if draft.name.trim().is_empty() {
-        return Some(BuyerCheckoutDisabledReason::MissingName);
+        return Some(BuyerOrderReviewDisabledReason::MissingName);
     }
     if draft.email.trim().is_empty() {
-        return Some(BuyerCheckoutDisabledReason::MissingEmail);
+        return Some(BuyerOrderReviewDisabledReason::MissingEmail);
     }
     if matches!(context, BuyerContext::Guest) {
-        return Some(BuyerCheckoutDisabledReason::AccountRequired);
+        return Some(BuyerOrderReviewDisabledReason::AccountRequired);
     }
     None
 }
 
-fn buyer_checkout_disabled_error(reason: BuyerCheckoutDisabledReason) -> &'static str {
+fn buyer_order_review_disabled_error(reason: BuyerOrderReviewDisabledReason) -> &'static str {
     match reason {
-        BuyerCheckoutDisabledReason::EmptyCart => "buyer checkout cart is empty",
-        BuyerCheckoutDisabledReason::MissingFulfillment => {
-            "buyer checkout fulfillment is unavailable"
+        BuyerOrderReviewDisabledReason::EmptyCart => "buyer order review cart is empty",
+        BuyerOrderReviewDisabledReason::MissingFulfillment => {
+            "buyer order review fulfillment is unavailable"
         }
-        BuyerCheckoutDisabledReason::MissingName => "buyer checkout buyer name is missing",
-        BuyerCheckoutDisabledReason::MissingEmail => "buyer checkout buyer email is missing",
-        BuyerCheckoutDisabledReason::AccountRequired => {
-            "buyer checkout requires a selected account"
+        BuyerOrderReviewDisabledReason::MissingName => "buyer order review buyer name is missing",
+        BuyerOrderReviewDisabledReason::MissingEmail => "buyer order review buyer email is missing",
+        BuyerOrderReviewDisabledReason::AccountRequired => {
+            "buyer order review requires a selected account"
         }
     }
 }
@@ -2538,7 +2697,7 @@ fn shared_fulfillment_window_id(
         Ok(first_window_id)
     } else {
         Err(AppSqliteError::InvalidProjection {
-            reason: "buyer cart must share one fulfillment window at checkout",
+            reason: "buyer cart must share one fulfillment window at order review",
         })
     }
 }
@@ -2795,8 +2954,9 @@ mod tests {
     use std::collections::BTreeSet;
 
     use radroots_studio_app_view::{
-        BuyerCheckoutDisabledReason, BuyerContext, FarmId, FarmOrderMethod, FulfillmentWindowId,
-        OrderId, PickupLocationId, ProductId, TradePaymentDisplayStatus, TradeRevisionStatus,
+        BuyerContext, BuyerOrderReviewDisabledReason, FarmId, FarmOrderMethod, FulfillmentWindowId,
+        OrderId, PickupLocationId, ProductId, TradeAgreementStatus, TradeFulfillmentStatus,
+        TradeInventoryStatus, TradePaymentDisplayStatus, TradeRevisionStatus, TradeWorkflowSource,
     };
     use rusqlite::{Connection, params};
     use serde_json::json;
@@ -2942,7 +3102,7 @@ mod tests {
     }
 
     #[test]
-    fn buyer_checkout_requires_account_before_order_write() {
+    fn buyer_order_review_requires_account_before_order_write() {
         let store = AppSqliteStore::open(DatabaseTarget::InMemory).expect("store should open");
         let connection = store.connection();
         let repository = AppBuyerRepository::new(connection);
@@ -3002,36 +3162,36 @@ mod tests {
             )
             .expect("buyer cart should save");
         repository
-            .save_buyer_checkout_draft(
+            .save_buyer_order_review_draft(
                 &context,
-                &radroots_studio_app_view::BuyerCheckoutDraft {
+                &radroots_studio_app_view::BuyerOrderReviewDraft {
                     name: "Casey Buyer".to_owned(),
                     email: "casey@example.com".to_owned(),
                     phone: "555-0101".to_owned(),
                     order_note: "Leave by the cooler".to_owned(),
                 },
             )
-            .expect("buyer checkout draft should save");
+            .expect("buyer order review draft should save");
 
-        let checkout = repository
-            .load_buyer_checkout(&context)
-            .expect("buyer checkout should load");
+        let order_review = repository
+            .load_buyer_order_review(&context)
+            .expect("buyer order review should load");
         let error = repository
             .place_buyer_order(&context)
-            .expect_err("guest checkout should require an account");
-        let cart_after_checkout = repository
+            .expect_err("guest order review should require an account");
+        let cart_after_order_review = repository
             .load_buyer_cart(&context)
-            .expect("buyer cart should remain after blocked checkout");
+            .expect("buyer cart should remain after blocked order review");
 
         assert!(matches!(error, AppSqliteError::InvalidProjection { .. }));
-        assert!(!checkout.can_place_order);
+        assert!(!order_review.can_place_order);
         assert_eq!(
-            checkout.place_order_disabled_reason,
-            Some(BuyerCheckoutDisabledReason::AccountRequired)
+            order_review.place_order_disabled_reason,
+            Some(BuyerOrderReviewDisabledReason::AccountRequired)
         );
-        assert_eq!(checkout.summary.line_count, 1);
-        assert_eq!(cart_after_checkout.lines.len(), 1);
-        assert_eq!(cart_after_checkout.farm_id, Some(farm_id));
+        assert_eq!(order_review.summary.line_count, 1);
+        assert_eq!(cart_after_order_review.lines.len(), 1);
+        assert_eq!(cart_after_order_review.farm_id, Some(farm_id));
         assert_eq!(row_count(connection, "orders"), 0);
         assert_eq!(row_count(connection, "order_lines"), 0);
         assert_eq!(row_count(connection, "buyer_order_coordination_records"), 0);
@@ -3132,19 +3292,19 @@ mod tests {
             )
             .expect("buyer cart should save");
         repository
-            .save_buyer_checkout_draft(
+            .save_buyer_order_review_draft(
                 &context,
-                &radroots_studio_app_view::BuyerCheckoutDraft {
+                &radroots_studio_app_view::BuyerOrderReviewDraft {
                     name: "Casey Buyer".to_owned(),
                     email: "casey@example.com".to_owned(),
                     phone: String::new(),
                     order_note: String::new(),
                 },
             )
-            .expect("buyer checkout draft should save");
+            .expect("buyer order review draft should save");
         let order_id = repository
             .place_buyer_order(&context)
-            .expect("buyer checkout should place order");
+            .expect("buyer order review should place order");
 
         connection
             .execute(
@@ -3262,19 +3422,19 @@ mod tests {
             )
             .expect("buyer cart should save");
         repository
-            .save_buyer_checkout_draft(
+            .save_buyer_order_review_draft(
                 &context,
-                &radroots_studio_app_view::BuyerCheckoutDraft {
+                &radroots_studio_app_view::BuyerOrderReviewDraft {
                     name: "Casey Buyer".to_owned(),
                     email: "casey@example.com".to_owned(),
                     phone: String::new(),
                     order_note: String::new(),
                 },
             )
-            .expect("buyer checkout draft should save");
+            .expect("buyer order review draft should save");
         let order_id = repository
             .place_buyer_order(&context)
-            .expect("buyer checkout should place order");
+            .expect("buyer order review should place order");
 
         connection
             .execute(
@@ -3416,6 +3576,84 @@ mod tests {
 
         assert_decode_enum(list_error, "orders.workflow_revision", "future_revision");
         assert_decode_enum(detail_error, "orders.workflow_revision", "future_revision");
+    }
+
+    #[test]
+    fn buyer_order_projections_read_workflow_display_snapshot() {
+        let store = AppSqliteStore::open(DatabaseTarget::InMemory).expect("store should open");
+        let connection = store.connection();
+        let repository = AppBuyerRepository::new(connection);
+        let context = BuyerContext::account("acct_buyer");
+        let farm_id = insert_farm(connection, "Willow Farm", "ready");
+        let order_id = OrderId::new();
+        let product_id = ProductId::new();
+
+        insert_order(
+            connection,
+            order_id,
+            farm_id,
+            "R-100",
+            "needs_action",
+            Some("account:acct_buyer"),
+            "buyer@example.com",
+            "",
+            "",
+        );
+        insert_order_line(
+            connection,
+            order_id,
+            product_id,
+            "Salad mix",
+            2,
+            "bag",
+            Some(650),
+            "USD",
+        );
+        set_order_workflow_revision(
+            connection,
+            order_id,
+            TradeRevisionStatus::KeptAsPlaced.storage_key(),
+        );
+        set_order_workflow_display_projection(
+            connection,
+            order_id,
+            "confirmed",
+            Some("ready_for_pickup"),
+            "reserved",
+            "recorded",
+            "local_events",
+            Some("payment-event-1"),
+        );
+
+        let list = repository
+            .load_buyer_orders(&context)
+            .expect("buyer order list should load");
+        let detail = repository
+            .load_buyer_order_detail(&context, order_id)
+            .expect("buyer order detail should load")
+            .expect("buyer order detail should exist");
+        let row = &list.rows[0];
+
+        assert_eq!(list.rows.len(), 1);
+        assert_eq!(row.workflow.agreement, TradeAgreementStatus::Confirmed);
+        assert_eq!(
+            row.workflow.fulfillment,
+            Some(TradeFulfillmentStatus::ReadyForPickup)
+        );
+        assert_eq!(row.workflow.inventory, TradeInventoryStatus::Reserved);
+        assert_eq!(row.workflow.payment, TradePaymentDisplayStatus::Recorded);
+        assert_eq!(
+            row.workflow.provenance.primary_source,
+            TradeWorkflowSource::LocalEvents
+        );
+        assert_eq!(
+            row.workflow.provenance.last_event_id.as_deref(),
+            Some("payment-event-1")
+        );
+        assert_eq!(row.workflow.economics.total_minor_units, Some(1300));
+        assert_eq!(row.workflow.economics.currency_code.as_deref(), Some("USD"));
+        assert_eq!(detail.workflow, row.workflow);
+        assert_eq!(detail.payment, TradePaymentDisplayStatus::Recorded);
     }
 
     #[test]
@@ -3682,6 +3920,76 @@ mod tests {
                 params![workflow_revision, order_id.to_string()],
             )
             .expect("order workflow revision update should succeed");
+    }
+
+    fn set_order_workflow_display_projection(
+        connection: &Connection,
+        order_id: OrderId,
+        agreement: &str,
+        fulfillment: Option<&str>,
+        inventory: &str,
+        payment: &str,
+        provenance_source: &str,
+        provenance_last_event_id: Option<&str>,
+    ) {
+        connection
+            .execute(
+                "update orders
+                 set workflow_agreement = ?1,
+                     workflow_fulfillment = ?2,
+                     workflow_inventory = ?3,
+                     workflow_payment = ?4,
+                     workflow_provenance_source = ?5,
+                     workflow_provenance_last_event_id = ?6
+                 where id = ?7",
+                params![
+                    agreement,
+                    fulfillment,
+                    inventory,
+                    payment,
+                    provenance_source,
+                    provenance_last_event_id,
+                    order_id.to_string(),
+                ],
+            )
+            .expect("order workflow display projection update should succeed");
+    }
+
+    fn insert_order_line(
+        connection: &Connection,
+        order_id: OrderId,
+        product_id: ProductId,
+        title: &str,
+        quantity: i64,
+        unit_label: &str,
+        unit_price_minor_units: Option<u32>,
+        price_currency: &str,
+    ) {
+        connection
+            .execute(
+                "insert into order_lines (
+                    id,
+                    order_id,
+                    title,
+                    quantity_value,
+                    quantity_unit_label,
+                    quantity_display,
+                    unit_price_minor_units,
+                    price_currency,
+                    sort_index
+                 ) values (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 0)",
+                params![
+                    format!("{order_id}:{product_id}"),
+                    order_id.to_string(),
+                    title,
+                    quantity,
+                    unit_label,
+                    format!("{quantity} {unit_label}"),
+                    unit_price_minor_units,
+                    price_currency,
+                ],
+            )
+            .expect("order line insert should succeed");
     }
 
     fn corrupt_order_workflow_revision(
