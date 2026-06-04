@@ -10,7 +10,7 @@ use radroots_studio_app_view::{
     ProductPricePresentation, ProductStatus, ProductStockState, ProductStockSummary,
     RepeatDemandEligibility, RepeatDemandHandoffProjection,
 };
-use rusqlite::{Connection, OptionalExtension, params};
+use rusqlite::{Connection, OptionalExtension, params, params_from_iter};
 use serde_json::Value;
 
 use super::{
@@ -736,40 +736,53 @@ impl<'a> AppBuyerRepository<'a> {
         &self,
         context: &BuyerContext,
     ) -> Result<BuyerOrdersProjection, AppSqliteError> {
+        let context_key = context.storage_key();
+        self.load_buyer_orders_for_context_keys(std::slice::from_ref(&context_key))
+    }
+
+    pub fn load_buyer_orders_for_context_keys(
+        &self,
+        context_keys: &[String],
+    ) -> Result<BuyerOrdersProjection, AppSqliteError> {
         let now_utc = self.current_utc_timestamp()?;
         let visible_listings = self.visible_listing_index(&now_utc)?;
-        let context_key = context.storage_key();
-        let mut statement = self
-            .connection
-            .prepare(
-                "select
-                    o.id,
-                    o.farm_id,
-                    o.order_number,
-                    o.status,
-                    o.workflow_revision,
-                    o.workflow_agreement,
-                    o.workflow_fulfillment,
-                    o.workflow_inventory,
-                    o.workflow_payment,
-                    o.workflow_provenance_source,
-                    o.workflow_provenance_last_event_id,
-                    f.display_name,
-                    fw.label,
-                    fw.starts_at,
-                    fw.ends_at
-                 from orders o
-                 inner join farms f on f.id = o.farm_id
-                 left join fulfillment_windows fw on fw.id = o.fulfillment_window_id
-                 where o.buyer_context_key = ?1
-                 order by o.updated_at desc, o.id desc",
-            )
-            .map_err(|source| AppSqliteError::Query {
-                operation: "prepare buyer orders list",
-                source,
-            })?;
+        let context_keys = normalized_buyer_context_keys(context_keys);
+        if context_keys.is_empty() {
+            return Ok(BuyerOrdersProjection::default());
+        }
+        let placeholders = sql_placeholders(context_keys.len());
+        let query = format!(
+            "select
+                o.id,
+                o.farm_id,
+                o.order_number,
+                o.status,
+                o.workflow_revision,
+                o.workflow_agreement,
+                o.workflow_fulfillment,
+                o.workflow_inventory,
+                o.workflow_payment,
+                o.workflow_provenance_source,
+                o.workflow_provenance_last_event_id,
+                f.display_name,
+                fw.label,
+                fw.starts_at,
+                fw.ends_at
+             from orders o
+             inner join farms f on f.id = o.farm_id
+             left join fulfillment_windows fw on fw.id = o.fulfillment_window_id
+             where o.buyer_context_key in ({placeholders})
+             order by o.updated_at desc, o.id desc"
+        );
+        let mut statement =
+            self.connection
+                .prepare(query.as_str())
+                .map_err(|source| AppSqliteError::Query {
+                    operation: "prepare buyer orders list",
+                    source,
+                })?;
         let rows = statement
-            .query_map(params![context_key.as_str()], |row| {
+            .query_map(params_from_iter(context_keys.iter()), |row| {
                 Ok((
                     row.get::<_, String>(0)?,
                     row.get::<_, String>(1)?,
@@ -863,56 +876,70 @@ impl<'a> AppBuyerRepository<'a> {
         context: &BuyerContext,
         order_id: OrderId,
     ) -> Result<Option<BuyerOrderDetailProjection>, AppSqliteError> {
+        let context_key = context.storage_key();
+        self.load_buyer_order_detail_for_context_keys(std::slice::from_ref(&context_key), order_id)
+    }
+
+    pub fn load_buyer_order_detail_for_context_keys(
+        &self,
+        context_keys: &[String],
+        order_id: OrderId,
+    ) -> Result<Option<BuyerOrderDetailProjection>, AppSqliteError> {
         let now_utc = self.current_utc_timestamp()?;
         let visible_listings = self.visible_listing_index(&now_utc)?;
-        let context_key = context.storage_key();
+        let context_keys = normalized_buyer_context_keys(context_keys);
+        if context_keys.is_empty() {
+            return Ok(None);
+        }
+        let placeholders = sql_placeholders(context_keys.len());
+        let query = format!(
+            "select
+                o.id,
+                o.farm_id,
+                o.order_number,
+                o.status,
+                o.buyer_order_note,
+                o.workflow_revision,
+                o.workflow_agreement,
+                o.workflow_fulfillment,
+                o.workflow_inventory,
+                o.workflow_payment,
+                o.workflow_provenance_source,
+                o.workflow_provenance_last_event_id,
+                f.display_name,
+                fw.label,
+                fw.starts_at,
+                fw.ends_at
+             from orders o
+             inner join farms f on f.id = o.farm_id
+             left join fulfillment_windows fw on fw.id = o.fulfillment_window_id
+             where o.buyer_context_key in ({placeholders}) and o.id = ?
+             limit 1"
+        );
+        let mut params = context_keys.clone();
+        params.push(order_id.to_string());
         let record = self
             .connection
-            .query_row(
-                "select
-                    o.id,
-                    o.farm_id,
-                    o.order_number,
-                    o.status,
-                    o.buyer_order_note,
-                    o.workflow_revision,
-                    o.workflow_agreement,
-                    o.workflow_fulfillment,
-                    o.workflow_inventory,
-                    o.workflow_payment,
-                    o.workflow_provenance_source,
-                    o.workflow_provenance_last_event_id,
-                    f.display_name,
-                    fw.label,
-                    fw.starts_at,
-                    fw.ends_at
-                 from orders o
-                 inner join farms f on f.id = o.farm_id
-                 left join fulfillment_windows fw on fw.id = o.fulfillment_window_id
-                 where o.buyer_context_key = ?1 and o.id = ?2
-                 limit 1",
-                params![context_key.as_str(), order_id.to_string()],
-                |row| {
-                    Ok((
-                        row.get::<_, String>(0)?,
-                        row.get::<_, String>(1)?,
-                        row.get::<_, String>(2)?,
-                        row.get::<_, String>(3)?,
-                        row.get::<_, String>(4)?,
-                        row.get::<_, String>(5)?,
-                        row.get::<_, String>(6)?,
-                        row.get::<_, Option<String>>(7)?,
-                        row.get::<_, String>(8)?,
-                        row.get::<_, String>(9)?,
-                        row.get::<_, String>(10)?,
-                        row.get::<_, Option<String>>(11)?,
-                        row.get::<_, String>(12)?,
-                        row.get::<_, Option<String>>(13)?,
-                        row.get::<_, Option<String>>(14)?,
-                        row.get::<_, Option<String>>(15)?,
-                    ))
-                },
-            )
+            .query_row(query.as_str(), params_from_iter(params.iter()), |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, String>(3)?,
+                    row.get::<_, String>(4)?,
+                    row.get::<_, String>(5)?,
+                    row.get::<_, String>(6)?,
+                    row.get::<_, Option<String>>(7)?,
+                    row.get::<_, String>(8)?,
+                    row.get::<_, String>(9)?,
+                    row.get::<_, String>(10)?,
+                    row.get::<_, Option<String>>(11)?,
+                    row.get::<_, String>(12)?,
+                    row.get::<_, Option<String>>(13)?,
+                    row.get::<_, Option<String>>(14)?,
+                    row.get::<_, Option<String>>(15)?,
+                ))
+            })
             .optional()
             .map_err(|source| AppSqliteError::Query {
                 operation: "load buyer order detail",
@@ -2483,6 +2510,23 @@ fn next_buyer_cart_for_repeat_demand(
     Ok(current_cart)
 }
 
+fn normalized_buyer_context_keys(context_keys: &[String]) -> Vec<String> {
+    let mut unique = BTreeSet::new();
+    context_keys
+        .iter()
+        .map(|key| key.trim())
+        .filter(|key| !key.is_empty())
+        .filter(|key| unique.insert((*key).to_owned()))
+        .map(str::to_owned)
+        .collect()
+}
+
+fn sql_placeholders(count: usize) -> String {
+    std::iter::repeat_n("?", count)
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
 fn parse_repeat_demand_product_id(line_id: &str) -> Result<ProductId, AppSqliteError> {
     let Some((_, product_id)) = line_id.rsplit_once(':') else {
         return Err(AppSqliteError::InvalidProjection {
@@ -2855,9 +2899,10 @@ mod tests {
     use std::collections::BTreeSet;
 
     use radroots_studio_app_view::{
-        BuyerContext, BuyerOrderReviewDisabledReason, FarmId, FarmOrderMethod, FulfillmentWindowId,
-        OrderId, PickupLocationId, ProductId, TradeAgreementStatus, TradeFulfillmentStatus,
-        TradeInventoryStatus, TradePaymentDisplayStatus, TradeRevisionStatus, TradeWorkflowSource,
+        BuyerContext, BuyerOrderReviewDisabledReason, BuyerOrderStatus, FarmId, FarmOrderMethod,
+        FulfillmentWindowId, OrderId, PickupLocationId, ProductId, TradeAgreementStatus,
+        TradeFulfillmentStatus, TradeInventoryStatus, TradePaymentDisplayStatus,
+        TradeRevisionStatus, TradeWorkflowSource,
     };
     use rusqlite::{Connection, params};
     use serde_json::json;
@@ -3000,6 +3045,77 @@ mod tests {
         );
         assert_eq!(detail.selected_quantity, 1);
         assert_eq!(detail.detail_text.as_deref(), Some("Spring blend"));
+    }
+
+    #[test]
+    fn buyer_orders_can_read_account_and_linked_nostr_contexts() {
+        let store = AppSqliteStore::open(DatabaseTarget::InMemory).expect("store should open");
+        let connection = store.connection();
+        let repository = AppBuyerRepository::new(connection);
+        let farm_id = insert_farm(connection, "Willow Farm", "ready");
+        let account_order_id = OrderId::new();
+        let relay_order_id = OrderId::new();
+        insert_order(
+            connection,
+            account_order_id,
+            farm_id,
+            "1001",
+            "scheduled",
+            Some("account:acct_buyer"),
+            "casey@example.com",
+            "555-0100",
+            "",
+        );
+        insert_order(
+            connection,
+            relay_order_id,
+            farm_id,
+            "1002",
+            "packed",
+            Some("nostr:buyer-pubkey"),
+            "",
+            "",
+            "",
+        );
+
+        let context_keys = vec![
+            "account:acct_buyer".to_owned(),
+            "nostr:buyer-pubkey".to_owned(),
+            "nostr:buyer-pubkey".to_owned(),
+            " ".to_owned(),
+        ];
+        let linked_orders = repository
+            .load_buyer_orders_for_context_keys(&context_keys)
+            .expect("linked buyer orders should load");
+        let linked_detail = repository
+            .load_buyer_order_detail_for_context_keys(&context_keys, relay_order_id)
+            .expect("linked buyer order detail should load")
+            .expect("linked buyer order detail should exist");
+        let account_only_orders = repository
+            .load_buyer_orders(&BuyerContext::account("acct_buyer"))
+            .expect("account buyer orders should load");
+        let account_only_detail = repository
+            .load_buyer_order_detail(&BuyerContext::account("acct_buyer"), relay_order_id)
+            .expect("account buyer order detail should load");
+
+        assert_eq!(linked_orders.rows.len(), 2);
+        assert!(
+            linked_orders
+                .rows
+                .iter()
+                .any(|row| row.order_id == account_order_id)
+        );
+        assert!(
+            linked_orders
+                .rows
+                .iter()
+                .any(|row| row.order_id == relay_order_id)
+        );
+        assert_eq!(linked_detail.order_id, relay_order_id);
+        assert_eq!(linked_detail.status, BuyerOrderStatus::Ready);
+        assert_eq!(account_only_orders.rows.len(), 1);
+        assert_eq!(account_only_orders.rows[0].order_id, account_order_id);
+        assert!(account_only_detail.is_none());
     }
 
     #[test]

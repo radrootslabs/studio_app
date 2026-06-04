@@ -74,7 +74,7 @@ use radroots_local_events::{
 };
 use radroots_nostr::prelude::{
     RadrootsNostrClient, RadrootsNostrEvent, RadrootsNostrFilter, RadrootsNostrOutput,
-    RadrootsNostrTimestamp, radroots_nostr_kind,
+    RadrootsNostrTimestamp, radroots_nostr_kind, radroots_nostr_parse_pubkey,
 };
 use radroots_nostr_accounts::prelude::RadrootsNostrAccountsManager;
 use radroots_sdk::farm::{RadrootsFarm, RadrootsFarmRef};
@@ -2021,6 +2021,8 @@ impl DesktopAppRuntimeState {
             .detail
             .as_ref()
             .map(|detail| detail.order_id);
+        let buyer_order_context_keys =
+            buyer_order_context_keys(self.state_store.identity_projection());
         let (
             refreshed_cart,
             refreshed_order_review,
@@ -2033,7 +2035,8 @@ impl DesktopAppRuntimeState {
             };
             let refreshed_cart = sqlite_store.load_buyer_cart(buyer_context)?;
             let refreshed_order_review = sqlite_store.load_buyer_order_review(buyer_context)?;
-            let refreshed_orders = sqlite_store.load_buyer_orders(buyer_context)?;
+            let refreshed_orders =
+                sqlite_store.load_buyer_orders_for_context_keys(&buyer_order_context_keys)?;
             let has_recoverable_coordination = !sqlite_store
                 .load_recoverable_buyer_order_coordination_records(buyer_context)?
                 .is_empty();
@@ -2053,7 +2056,10 @@ impl DesktopAppRuntimeState {
                     })
                 });
             let refreshed_order_detail = match detail_order_id {
-                Some(order_id) => sqlite_store.load_buyer_order_detail(buyer_context, order_id)?,
+                Some(order_id) => sqlite_store.load_buyer_order_detail_for_context_keys(
+                    &buyer_order_context_keys,
+                    order_id,
+                )?,
                 None => None,
             };
             (
@@ -2096,8 +2102,10 @@ impl DesktopAppRuntimeState {
         let Some(sqlite_store) = self.sqlite_store.as_ref() else {
             return Ok(false);
         };
-        let buyer_context = self.state_store.identity_projection().buyer_context();
-        let Some(order_detail) = sqlite_store.load_buyer_order_detail(&buyer_context, order_id)?
+        let buyer_order_context_keys =
+            buyer_order_context_keys(self.state_store.identity_projection());
+        let Some(order_detail) = sqlite_store
+            .load_buyer_order_detail_for_context_keys(&buyer_order_context_keys, order_id)?
         else {
             return Ok(false);
         };
@@ -7964,6 +7972,33 @@ fn load_selected_account_context(
     )
 }
 
+fn buyer_order_context_keys(identity_projection: &AppIdentityProjection) -> Vec<String> {
+    let mut context_keys = vec![identity_projection.buyer_context().storage_key()];
+    if let Some(selected_account) = identity_projection.selected_account.as_ref()
+        && let Some(public_key_hex) = selected_account_public_key_hex(selected_account)
+    {
+        let nostr_context_key = format!("nostr:{public_key_hex}");
+        if !context_keys.contains(&nostr_context_key) {
+            context_keys.push(nostr_context_key);
+        }
+    }
+    context_keys
+}
+
+fn selected_account_public_key_hex(
+    selected_account: &radroots_studio_app_view::SelectedAccountProjection,
+) -> Option<String> {
+    let npub = selected_account.account.npub.trim();
+    radroots_nostr_parse_pubkey(npub)
+        .ok()
+        .map(|public_key| public_key.to_hex())
+        .filter(|public_key| is_hex_64(public_key))
+        .or_else(|| {
+            let account_id = selected_account.account.account_id.trim();
+            is_hex_64(account_id).then(|| account_id.to_owned())
+        })
+}
+
 fn load_selected_account_context_with_options(
     sqlite_store: &AppSqliteStore,
     identity_projection: &AppIdentityProjection,
@@ -7971,6 +8006,7 @@ fn load_selected_account_context_with_options(
     allow_auto_present: bool,
 ) -> Result<DesktopSelectedAccountContext, AppSqliteError> {
     let buyer_context = identity_projection.buyer_context();
+    let buyer_order_context_keys = buyer_order_context_keys(identity_projection);
     let browse_fulfillment_methods = BTreeSet::new();
     let browse_listings = sqlite_store.load_buyer_listings("", &browse_fulfillment_methods)?;
     let search_query = continuity_state.buyer.search_query.clone();
@@ -7988,12 +8024,14 @@ fn load_selected_account_context_with_options(
     };
     let buyer_cart = sqlite_store.load_buyer_cart(&buyer_context)?;
     let buyer_order_review = sqlite_store.load_buyer_order_review(&buyer_context)?;
-    let buyer_orders = sqlite_store.load_buyer_orders(&buyer_context)?;
+    let buyer_orders =
+        sqlite_store.load_buyer_orders_for_context_keys(&buyer_order_context_keys)?;
     let has_recoverable_coordination = !sqlite_store
         .load_recoverable_buyer_order_coordination_records(&buyer_context)?
         .is_empty();
     let buyer_order_detail = match continuity_state.buyer.orders_detail_order_id {
-        Some(order_id) => sqlite_store.load_buyer_order_detail(&buyer_context, order_id)?,
+        Some(order_id) => sqlite_store
+            .load_buyer_order_detail_for_context_keys(&buyer_order_context_keys, order_id)?,
         None => None,
     };
     let personal_projection = PersonalWorkspaceProjection {

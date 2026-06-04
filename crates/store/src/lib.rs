@@ -448,6 +448,14 @@ impl AppSqliteStore {
         self.buyer_repository().load_buyer_orders(context)
     }
 
+    pub fn load_buyer_orders_for_context_keys(
+        &self,
+        context_keys: &[String],
+    ) -> Result<BuyerOrdersProjection, AppSqliteError> {
+        self.buyer_repository()
+            .load_buyer_orders_for_context_keys(context_keys)
+    }
+
     pub fn load_buyer_order_detail(
         &self,
         context: &BuyerContext,
@@ -455,6 +463,15 @@ impl AppSqliteStore {
     ) -> Result<Option<BuyerOrderDetailProjection>, AppSqliteError> {
         self.buyer_repository()
             .load_buyer_order_detail(context, order_id)
+    }
+
+    pub fn load_buyer_order_detail_for_context_keys(
+        &self,
+        context_keys: &[String],
+        order_id: OrderId,
+    ) -> Result<Option<BuyerOrderDetailProjection>, AppSqliteError> {
+        self.buyer_repository()
+            .load_buyer_order_detail_for_context_keys(context_keys, order_id)
     }
 
     pub fn load_buyer_order_local_event_export(
