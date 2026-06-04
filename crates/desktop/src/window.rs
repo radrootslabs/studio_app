@@ -13368,6 +13368,8 @@ mod tests {
         startup_issue_summary_text, startup_notice_text, startup_signer_preview_summary,
         startup_signer_preview_summary_for_connect_state, startup_signer_source_input_is_editable,
         startup_signer_status_spec, startup_signer_transport_failure_requires_notice,
+        trade_agreement_status_key, trade_fulfillment_status_key, trade_inventory_status_key,
+        trade_payment_display_status_key, trade_revision_status_key, trade_workflow_source_key,
     };
     use crate::runtime::{
         DesktopAppRuntimeMetadataSummary, DesktopAppRuntimeSummary, DesktopAppSyncConflictSummary,
@@ -13404,7 +13406,9 @@ mod tests {
         ReminderDeadlineProjection, ReminderDeliveryState, ReminderId, ReminderKind,
         ReminderSurface, ReminderUrgency, RepeatDemandEligibility, RepeatDemandHandoffProjection,
         ShellSection, TodayAgendaProjection, TodaySetupTask, TodaySetupTaskKind,
-        TradeEconomicsProjection, TradePaymentDisplayStatus, TradeWorkflowProjection,
+        TradeAgreementStatus, TradeEconomicsProjection, TradeFulfillmentStatus,
+        TradeInventoryStatus, TradePaymentDisplayStatus, TradeRevisionStatus,
+        TradeWorkflowProjection, TradeWorkflowSource,
     };
     use radroots_identity::RadrootsIdentity;
     use std::{
@@ -13700,6 +13704,157 @@ mod tests {
                 },
             ]
         );
+    }
+
+    #[test]
+    fn trade_workflow_badge_keys_cover_refactored_status_axes() {
+        for (status, key) in [
+            (
+                TradeAgreementStatus::Ordered,
+                AppTextKey::TradeWorkflowAgreementOrdered,
+            ),
+            (
+                TradeAgreementStatus::Confirmed,
+                AppTextKey::TradeWorkflowAgreementConfirmed,
+            ),
+            (
+                TradeAgreementStatus::Declined,
+                AppTextKey::TradeWorkflowAgreementDeclined,
+            ),
+            (
+                TradeAgreementStatus::Cancelled,
+                AppTextKey::TradeWorkflowAgreementCancelled,
+            ),
+            (
+                TradeAgreementStatus::Completed,
+                AppTextKey::TradeWorkflowAgreementCompleted,
+            ),
+            (
+                TradeAgreementStatus::NeedsReview,
+                AppTextKey::TradeWorkflowAgreementNeedsReview,
+            ),
+        ] {
+            assert_eq!(trade_agreement_status_key(status), key);
+            assert!(!app_text(key).is_empty());
+        }
+
+        for (status, key) in [
+            (
+                TradeRevisionStatus::None,
+                AppTextKey::TradeWorkflowRevisionNone,
+            ),
+            (
+                TradeRevisionStatus::ChangeProposed,
+                AppTextKey::TradeWorkflowRevisionChangeProposed,
+            ),
+            (
+                TradeRevisionStatus::Updated,
+                AppTextKey::TradeWorkflowRevisionUpdated,
+            ),
+            (
+                TradeRevisionStatus::KeptAsPlaced,
+                AppTextKey::TradeWorkflowRevisionKeptAsPlaced,
+            ),
+        ] {
+            assert_eq!(trade_revision_status_key(status), key);
+            assert!(!app_text(key).is_empty());
+        }
+
+        for (status, key) in [
+            (
+                TradeFulfillmentStatus::Confirmed,
+                AppTextKey::TradeWorkflowFulfillmentConfirmed,
+            ),
+            (
+                TradeFulfillmentStatus::Preparing,
+                AppTextKey::TradeWorkflowFulfillmentPreparing,
+            ),
+            (
+                TradeFulfillmentStatus::ReadyForPickup,
+                AppTextKey::TradeWorkflowFulfillmentReadyForPickup,
+            ),
+            (
+                TradeFulfillmentStatus::OutForDelivery,
+                AppTextKey::TradeWorkflowFulfillmentOutForDelivery,
+            ),
+            (
+                TradeFulfillmentStatus::Delivered,
+                AppTextKey::TradeWorkflowFulfillmentDelivered,
+            ),
+            (
+                TradeFulfillmentStatus::Cancelled,
+                AppTextKey::TradeWorkflowFulfillmentCancelled,
+            ),
+        ] {
+            assert_eq!(trade_fulfillment_status_key(status), key);
+            assert!(!app_text(key).is_empty());
+        }
+
+        for (status, key) in [
+            (
+                TradeInventoryStatus::Available,
+                AppTextKey::TradeWorkflowInventoryAvailable,
+            ),
+            (
+                TradeInventoryStatus::Reserved,
+                AppTextKey::TradeWorkflowInventoryReserved,
+            ),
+            (
+                TradeInventoryStatus::SoldOut,
+                AppTextKey::TradeWorkflowInventorySoldOut,
+            ),
+            (
+                TradeInventoryStatus::NeedsReview,
+                AppTextKey::TradeWorkflowInventoryNeedsReview,
+            ),
+        ] {
+            assert_eq!(trade_inventory_status_key(status), key);
+            assert!(!app_text(key).is_empty());
+        }
+
+        for (status, key) in [
+            (
+                TradePaymentDisplayStatus::NotRecorded,
+                AppTextKey::TradeWorkflowPaymentNotRecorded,
+            ),
+            (
+                TradePaymentDisplayStatus::Recorded,
+                AppTextKey::TradeWorkflowPaymentRecorded,
+            ),
+            (
+                TradePaymentDisplayStatus::NeedsReview,
+                AppTextKey::TradeWorkflowPaymentNeedsReview,
+            ),
+        ] {
+            assert_eq!(trade_payment_display_status_key(status), key);
+            assert!(!app_text(key).is_empty());
+        }
+
+        for (source, key) in [
+            (
+                TradeWorkflowSource::App,
+                AppTextKey::TradeWorkflowProvenanceApp,
+            ),
+            (
+                TradeWorkflowSource::Cli,
+                AppTextKey::TradeWorkflowProvenanceCli,
+            ),
+            (
+                TradeWorkflowSource::Relay,
+                AppTextKey::TradeWorkflowProvenanceRelay,
+            ),
+            (
+                TradeWorkflowSource::LocalEvents,
+                AppTextKey::TradeWorkflowProvenanceLocalEvents,
+            ),
+            (
+                TradeWorkflowSource::Unknown,
+                AppTextKey::TradeWorkflowProvenanceUnknown,
+            ),
+        ] {
+            assert_eq!(trade_workflow_source_key(source), key);
+            assert!(!app_text(key).is_empty());
+        }
     }
 
     #[test]

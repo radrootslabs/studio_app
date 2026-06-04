@@ -3558,6 +3558,71 @@ mod tests {
     }
 
     #[test]
+    fn buyer_order_projections_fail_closed_for_invalid_workflow_snapshot_keys() {
+        let store = AppSqliteStore::open(DatabaseTarget::InMemory).expect("store should open");
+        let connection = store.connection();
+        let repository = AppBuyerRepository::new(connection);
+        let context = BuyerContext::account("acct_buyer");
+        let farm_id = insert_farm(connection, "Willow Farm", "ready");
+        let order_id = OrderId::new();
+
+        insert_order(
+            connection,
+            order_id,
+            farm_id,
+            "R-100",
+            "scheduled",
+            Some("account:acct_buyer"),
+            "buyer@example.com",
+            "",
+            "",
+        );
+        set_order_workflow_display_projection(
+            connection,
+            order_id,
+            "confirmed",
+            Some("ready_for_pickup"),
+            "reserved",
+            "recorded",
+            "local_events",
+            Some("buyer-workflow-event"),
+        );
+
+        for (column, expected_field) in [
+            ("workflow_agreement", "orders.workflow_agreement"),
+            ("workflow_fulfillment", "orders.workflow_fulfillment"),
+            ("workflow_inventory", "orders.workflow_inventory"),
+            ("workflow_payment", "orders.workflow_payment"),
+            (
+                "workflow_provenance_source",
+                "orders.workflow_provenance_source",
+            ),
+        ] {
+            set_order_workflow_display_projection(
+                connection,
+                order_id,
+                "confirmed",
+                Some("ready_for_pickup"),
+                "reserved",
+                "recorded",
+                "local_events",
+                Some("buyer-workflow-event"),
+            );
+            corrupt_order_workflow_display_projection(connection, order_id, column, "future_state");
+
+            let list_error = repository
+                .load_buyer_orders(&context)
+                .expect_err("invalid workflow snapshot should fail buyer list projection");
+            let detail_error = repository
+                .load_buyer_order_detail(&context, order_id)
+                .expect_err("invalid workflow snapshot should fail buyer detail projection");
+
+            assert_decode_enum(list_error, expected_field, "future_state");
+            assert_decode_enum(detail_error, expected_field, "future_state");
+        }
+    }
+
+    #[test]
     fn buyer_cart_rejects_cross_farm_lines() {
         let store = AppSqliteStore::open(DatabaseTarget::InMemory).expect("store should open");
         let farm_id = FarmId::new();
@@ -3902,6 +3967,33 @@ mod tests {
             .execute_batch("pragma ignore_check_constraints = on")
             .expect("check constraints should disable");
         set_order_workflow_revision(connection, order_id, workflow_revision);
+        connection
+            .execute_batch("pragma ignore_check_constraints = off")
+            .expect("check constraints should re-enable");
+    }
+
+    fn corrupt_order_workflow_display_projection(
+        connection: &Connection,
+        order_id: OrderId,
+        column: &str,
+        value: &str,
+    ) {
+        connection
+            .execute_batch("pragma ignore_check_constraints = on")
+            .expect("check constraints should disable");
+        let statement = match column {
+            "workflow_agreement" => "update orders set workflow_agreement = ?1 where id = ?2",
+            "workflow_fulfillment" => "update orders set workflow_fulfillment = ?1 where id = ?2",
+            "workflow_inventory" => "update orders set workflow_inventory = ?1 where id = ?2",
+            "workflow_payment" => "update orders set workflow_payment = ?1 where id = ?2",
+            "workflow_provenance_source" => {
+                "update orders set workflow_provenance_source = ?1 where id = ?2"
+            }
+            _ => panic!("unsupported workflow display projection column {column}"),
+        };
+        connection
+            .execute(statement, params![value, order_id.to_string()])
+            .expect("order workflow display projection corruption should succeed");
         connection
             .execute_batch("pragma ignore_check_constraints = off")
             .expect("check constraints should re-enable");
