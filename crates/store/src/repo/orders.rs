@@ -7,14 +7,14 @@ use radroots_studio_app_view::{
     PackDayOutputCustomerOrder, PackDayOutputOrderState, PackDayOutputPackListEntry,
     PackDayOutputProductTotal, PackDayOutputQuantity, PackDayOutputSource, PackDayOutputWindow,
     PackDayPackListRow, PackDayProductTotalRow, PackDayProjection, PackDayRosterRow,
-    PackDayScreenQueryState, ProductId, TradePaymentDisplayStatus, TradeRevisionStatus,
-    TradeWorkflowProjection,
+    PackDayScreenQueryState, ProductId, TradeWorkflowProjection,
 };
 use rusqlite::{Connection, OptionalExtension, params};
 
 use super::{
     order_detail::{order_detail_economics, order_detail_item_row},
     parse_trade_revision_status,
+    workflow::{StoredTradeWorkflowSnapshot, trade_workflow_projection_from_storage},
 };
 use crate::AppSqliteError;
 
@@ -79,6 +79,12 @@ impl<'a> AppOrdersRepository<'a> {
                     o.status,
                     o.fulfillment_window_id,
                     o.workflow_revision,
+                    o.workflow_agreement,
+                    o.workflow_fulfillment,
+                    o.workflow_inventory,
+                    o.workflow_payment,
+                    o.workflow_provenance_source,
+                    o.workflow_provenance_last_event_id,
                     fw.label,
                     pl.label
                  from orders o
@@ -96,8 +102,14 @@ impl<'a> AppOrdersRepository<'a> {
                         row.get::<_, String>(4)?,
                         row.get::<_, Option<String>>(5)?,
                         row.get::<_, String>(6)?,
-                        row.get::<_, Option<String>>(7)?,
+                        row.get::<_, String>(7)?,
                         row.get::<_, Option<String>>(8)?,
+                        row.get::<_, String>(9)?,
+                        row.get::<_, String>(10)?,
+                        row.get::<_, String>(11)?,
+                        row.get::<_, Option<String>>(12)?,
+                        row.get::<_, Option<String>>(13)?,
+                        row.get::<_, Option<String>>(14)?,
                     ))
                 },
             )
@@ -117,6 +129,12 @@ impl<'a> AppOrdersRepository<'a> {
                     status,
                     fulfillment_window_id,
                     workflow_revision,
+                    workflow_agreement,
+                    workflow_fulfillment,
+                    workflow_inventory,
+                    workflow_payment,
+                    workflow_provenance_source,
+                    workflow_provenance_last_event_id,
                     fulfillment_window_label,
                     pickup_location_label,
                 )| {
@@ -127,10 +145,19 @@ impl<'a> AppOrdersRepository<'a> {
                         parse_trade_revision_status("orders.workflow_revision", workflow_revision)?;
                     let items = self.load_order_detail_items(order_id.to_string())?;
                     let economics = order_detail_economics(&items)?;
-                    let payment = TradePaymentDisplayStatus::NotRecorded;
-                    let workflow = TradeWorkflowProjection::from_order_status(order_id, status)
-                        .with_revision(revision)
-                        .with_economics_and_payment(economics.clone(), payment);
+                    let workflow =
+                        trade_workflow_projection_from_storage(StoredTradeWorkflowSnapshot {
+                            order_id,
+                            revision,
+                            economics: economics.clone(),
+                            agreement: workflow_agreement,
+                            fulfillment: workflow_fulfillment,
+                            inventory: workflow_inventory,
+                            payment: workflow_payment,
+                            provenance_source: workflow_provenance_source,
+                            provenance_last_event_id: workflow_provenance_last_event_id,
+                        })?;
+                    let payment = workflow.payment;
                     Ok(OrderDetailProjection {
                         order_id,
                         farm_id,
@@ -296,6 +323,12 @@ impl<'a> AppOrdersRepository<'a> {
                     o.customer_display_name,
                     o.status,
                     o.workflow_revision,
+                    o.workflow_agreement,
+                    o.workflow_fulfillment,
+                    o.workflow_inventory,
+                    o.workflow_payment,
+                    o.workflow_provenance_source,
+                    o.workflow_provenance_last_event_id,
                     fw.label,
                     pl.label
                  from orders o
@@ -324,8 +357,14 @@ impl<'a> AppOrdersRepository<'a> {
                         row.get::<_, String>(4)?,
                         row.get::<_, String>(5)?,
                         row.get::<_, String>(6)?,
-                        row.get::<_, Option<String>>(7)?,
+                        row.get::<_, String>(7)?,
                         row.get::<_, Option<String>>(8)?,
+                        row.get::<_, String>(9)?,
+                        row.get::<_, String>(10)?,
+                        row.get::<_, String>(11)?,
+                        row.get::<_, Option<String>>(12)?,
+                        row.get::<_, Option<String>>(13)?,
+                        row.get::<_, Option<String>>(14)?,
                     ))
                 },
             )
@@ -344,16 +383,40 @@ impl<'a> AppOrdersRepository<'a> {
                 customer_display_name,
                 status,
                 workflow_revision,
+                workflow_agreement,
+                workflow_fulfillment,
+                workflow_inventory,
+                workflow_payment,
+                workflow_provenance_source,
+                workflow_provenance_last_event_id,
                 fulfillment_window_label,
                 pickup_location_label,
             ) = row.map_err(|source| AppSqliteError::Query {
                 operation: "read orders list",
                 source,
             })?;
+            let order_id: OrderId = parse_typed_id("orders.id", order_id)?;
+            let farm_id: FarmId = parse_typed_id("orders.farm_id", farm_id)?;
+            let status = parse_order_status("orders.status", status)?;
+            let revision =
+                parse_trade_revision_status("orders.workflow_revision", workflow_revision)?;
+            let items = self.load_order_detail_items(order_id.to_string())?;
+            let economics = order_detail_economics(&items)?;
+            let workflow = trade_workflow_projection_from_storage(StoredTradeWorkflowSnapshot {
+                order_id,
+                revision,
+                economics,
+                agreement: workflow_agreement,
+                fulfillment: workflow_fulfillment,
+                inventory: workflow_inventory,
+                payment: workflow_payment,
+                provenance_source: workflow_provenance_source,
+                provenance_last_event_id: workflow_provenance_last_event_id,
+            })?;
 
             records.push(OrderRecord {
-                order_id: parse_typed_id("orders.id", order_id)?,
-                farm_id: parse_typed_id("orders.farm_id", farm_id)?,
+                order_id,
+                farm_id,
                 fulfillment_window_id: parse_optional_typed_id(
                     "orders.fulfillment_window_id",
                     fulfillment_window_id,
@@ -362,11 +425,8 @@ impl<'a> AppOrdersRepository<'a> {
                 customer_display_name,
                 fulfillment_window_label: empty_string_to_none(fulfillment_window_label),
                 pickup_location_label: empty_string_to_none(pickup_location_label),
-                status: parse_order_status("orders.status", status)?,
-                revision: parse_trade_revision_status(
-                    "orders.workflow_revision",
-                    workflow_revision,
-                )?,
+                status,
+                workflow,
             });
         }
 
@@ -1134,7 +1194,7 @@ struct OrderRecord {
     fulfillment_window_label: Option<String>,
     pickup_location_label: Option<String>,
     status: OrderStatus,
-    revision: TradeRevisionStatus,
+    workflow: TradeWorkflowProjection,
 }
 
 impl OrderRecord {
@@ -1150,9 +1210,6 @@ impl OrderRecord {
     }
 
     fn into_list_row(self) -> OrdersListRow {
-        let workflow = TradeWorkflowProjection::from_order_status(self.order_id, self.status)
-            .with_revision(self.revision);
-
         OrdersListRow {
             order_id: self.order_id,
             farm_id: self.farm_id,
@@ -1162,7 +1219,7 @@ impl OrderRecord {
             fulfillment_window_label: self.fulfillment_window_label,
             pickup_location_label: self.pickup_location_label,
             status: self.status,
-            workflow,
+            workflow: self.workflow,
             primary_action: primary_action_for_status(self.status),
         }
     }
@@ -1280,7 +1337,8 @@ mod tests {
     use radroots_studio_app_view::{
         FarmId, FulfillmentWindowId, OrderId, OrderPrimaryAction, OrderStatus, OrdersFilter,
         OrdersScreenQueryState, PackDayOutputOrderState, PackDayProductTotalRow,
-        PackDayScreenQueryState, PickupLocationId, TradePaymentDisplayStatus, TradeRevisionStatus,
+        PackDayScreenQueryState, PickupLocationId, TradeAgreementStatus, TradeFulfillmentStatus,
+        TradeInventoryStatus, TradePaymentDisplayStatus, TradeRevisionStatus, TradeWorkflowSource,
     };
     use rusqlite::{Connection, params};
 
@@ -1566,6 +1624,168 @@ mod tests {
 
         assert_decode_enum(list_error, "orders.workflow_revision", "future_revision");
         assert_decode_enum(detail_error, "orders.workflow_revision", "future_revision");
+    }
+
+    #[test]
+    fn seller_order_projections_read_workflow_display_snapshot() {
+        let store = AppSqliteStore::open(DatabaseTarget::InMemory).expect("store should open");
+        let connection = store.connection();
+        let farm_id = FarmId::new();
+        let order_id = OrderId::new();
+
+        insert_farm(
+            connection,
+            farm_id,
+            "Willow farm",
+            "ready",
+            "2026-04-17T08:00:00Z",
+        );
+        insert_order(
+            connection,
+            order_id,
+            farm_id,
+            None,
+            "R-100",
+            "Casey",
+            "scheduled",
+            "2026-04-17T10:00:00Z",
+        );
+        insert_order_line(
+            connection,
+            "line-1",
+            order_id,
+            "Salad mix",
+            2,
+            "bags",
+            "2 bags",
+            0,
+        );
+        set_order_workflow_revision(
+            connection,
+            order_id,
+            TradeRevisionStatus::Updated.storage_key(),
+        );
+        set_order_workflow_display_projection(
+            connection,
+            order_id,
+            "confirmed",
+            Some("ready_for_pickup"),
+            "reserved",
+            "recorded",
+            "local_events",
+            Some("seller-workflow-event"),
+        );
+
+        let list = store
+            .load_orders_list(
+                farm_id,
+                &OrdersScreenQueryState {
+                    filter: OrdersFilter::All,
+                    fulfillment_window_id: None,
+                },
+            )
+            .expect("seller list should load");
+        let detail = store
+            .load_order_detail(farm_id, order_id)
+            .expect("seller detail should load")
+            .expect("seller detail should exist");
+        let workflow = &list.rows[0].workflow;
+
+        assert_eq!(workflow.agreement, TradeAgreementStatus::Confirmed);
+        assert_eq!(workflow.revision, TradeRevisionStatus::Updated);
+        assert_eq!(
+            workflow.fulfillment,
+            Some(TradeFulfillmentStatus::ReadyForPickup)
+        );
+        assert_eq!(workflow.inventory, TradeInventoryStatus::Reserved);
+        assert_eq!(workflow.payment, TradePaymentDisplayStatus::Recorded);
+        assert_eq!(
+            workflow.provenance.primary_source,
+            TradeWorkflowSource::LocalEvents
+        );
+        assert_eq!(
+            workflow.provenance.last_event_id.as_deref(),
+            Some("seller-workflow-event")
+        );
+        assert_eq!(workflow.economics.total_minor_units, Some(1300));
+        assert_eq!(workflow.economics.currency_code.as_deref(), Some("USD"));
+        assert_eq!(detail.payment, TradePaymentDisplayStatus::Recorded);
+        assert_eq!(detail.workflow, *workflow);
+    }
+
+    #[test]
+    fn seller_order_projections_fail_closed_for_invalid_workflow_snapshot_keys() {
+        let store = AppSqliteStore::open(DatabaseTarget::InMemory).expect("store should open");
+        let connection = store.connection();
+        let farm_id = FarmId::new();
+        let order_id = OrderId::new();
+
+        insert_farm(
+            connection,
+            farm_id,
+            "Willow farm",
+            "ready",
+            "2026-04-17T08:00:00Z",
+        );
+        insert_order(
+            connection,
+            order_id,
+            farm_id,
+            None,
+            "R-100",
+            "Casey",
+            "scheduled",
+            "2026-04-17T10:00:00Z",
+        );
+        set_order_workflow_display_projection(
+            connection,
+            order_id,
+            "confirmed",
+            Some("ready_for_pickup"),
+            "reserved",
+            "recorded",
+            "local_events",
+            Some("seller-workflow-event"),
+        );
+
+        for (column, expected_field) in [
+            ("workflow_agreement", "orders.workflow_agreement"),
+            ("workflow_fulfillment", "orders.workflow_fulfillment"),
+            ("workflow_inventory", "orders.workflow_inventory"),
+            ("workflow_payment", "orders.workflow_payment"),
+            (
+                "workflow_provenance_source",
+                "orders.workflow_provenance_source",
+            ),
+        ] {
+            set_order_workflow_display_projection(
+                connection,
+                order_id,
+                "confirmed",
+                Some("ready_for_pickup"),
+                "reserved",
+                "recorded",
+                "local_events",
+                Some("seller-workflow-event"),
+            );
+            corrupt_order_workflow_display_projection(connection, order_id, column, "future_state");
+
+            let list_error = store
+                .load_orders_list(
+                    farm_id,
+                    &OrdersScreenQueryState {
+                        filter: OrdersFilter::All,
+                        fulfillment_window_id: None,
+                    },
+                )
+                .expect_err("invalid workflow snapshot should fail seller list projection");
+            let detail_error = store
+                .load_order_detail(farm_id, order_id)
+                .expect_err("invalid workflow snapshot should fail seller detail projection");
+
+            assert_decode_enum(list_error, expected_field, "future_state");
+            assert_decode_enum(detail_error, expected_field, "future_state");
+        }
     }
 
     #[test]
@@ -2121,6 +2341,66 @@ mod tests {
             .execute_batch("pragma ignore_check_constraints = on")
             .expect("check constraints should disable");
         set_order_workflow_revision(connection, order_id, workflow_revision);
+        connection
+            .execute_batch("pragma ignore_check_constraints = off")
+            .expect("check constraints should re-enable");
+    }
+
+    fn set_order_workflow_display_projection(
+        connection: &Connection,
+        order_id: OrderId,
+        agreement: &str,
+        fulfillment: Option<&str>,
+        inventory: &str,
+        payment: &str,
+        provenance_source: &str,
+        provenance_last_event_id: Option<&str>,
+    ) {
+        connection
+            .execute(
+                "update orders
+                 set workflow_agreement = ?1,
+                     workflow_fulfillment = ?2,
+                     workflow_inventory = ?3,
+                     workflow_payment = ?4,
+                     workflow_provenance_source = ?5,
+                     workflow_provenance_last_event_id = ?6
+                 where id = ?7",
+                params![
+                    agreement,
+                    fulfillment,
+                    inventory,
+                    payment,
+                    provenance_source,
+                    provenance_last_event_id,
+                    order_id.to_string(),
+                ],
+            )
+            .expect("order workflow display projection update should succeed");
+    }
+
+    fn corrupt_order_workflow_display_projection(
+        connection: &Connection,
+        order_id: OrderId,
+        column: &str,
+        value: &str,
+    ) {
+        connection
+            .execute_batch("pragma ignore_check_constraints = on")
+            .expect("check constraints should disable");
+        let statement = match column {
+            "workflow_agreement" => "update orders set workflow_agreement = ?1 where id = ?2",
+            "workflow_fulfillment" => "update orders set workflow_fulfillment = ?1 where id = ?2",
+            "workflow_inventory" => "update orders set workflow_inventory = ?1 where id = ?2",
+            "workflow_payment" => "update orders set workflow_payment = ?1 where id = ?2",
+            "workflow_provenance_source" => {
+                "update orders set workflow_provenance_source = ?1 where id = ?2"
+            }
+            _ => panic!("unsupported workflow display projection column {column}"),
+        };
+        connection
+            .execute(statement, params![value, order_id.to_string()])
+            .expect("order workflow display projection corruption should succeed");
         connection
             .execute_batch("pragma ignore_check_constraints = off")
             .expect("check constraints should re-enable");

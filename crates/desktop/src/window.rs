@@ -10311,22 +10311,32 @@ fn orders_table_header() -> impl IntoElement {
         ))
         .child(products_table_header_column(
             AppTextKey::OrdersColumnStatus,
-            Some(160.0),
+            Some(144.0),
+            false,
+        ))
+        .child(products_table_header_column(
+            AppTextKey::OrdersDetailTotalLabel,
+            Some(112.0),
+            false,
+        ))
+        .child(products_table_header_column(
+            AppTextKey::TradeWorkflowAxisPayment,
+            Some(128.0),
             false,
         ))
         .child(products_table_header_column(
             AppTextKey::OrdersColumnWindow,
-            Some(196.0),
+            Some(160.0),
             false,
         ))
         .child(products_table_header_column(
             AppTextKey::OrdersColumnPickup,
-            Some(196.0),
+            Some(160.0),
             false,
         ))
         .child(products_table_header_column(
             AppTextKey::OrdersColumnAction,
-            Some(132.0),
+            Some(120.0),
             false,
         ))
 }
@@ -10344,7 +10354,7 @@ fn orders_table_row(
         .child(order)
         .child(
             div()
-                .w(px(160.0))
+                .w(px(144.0))
                 .flex()
                 .items_start()
                 .gap(px(6.0))
@@ -10353,7 +10363,18 @@ fn orders_table_row(
         )
         .child(
             div()
-                .w(px(196.0))
+                .w(px(112.0))
+                .text_size(px(APP_UI_THEME.foundation.typography.utility_title_text_px))
+                .line_height(relative(1.2))
+                .text_color(rgb(APP_UI_THEME.foundation.text.primary))
+                .child(trade_economics_total_text(&row.workflow.economics)),
+        )
+        .child(div().w(px(128.0)).child(trade_workflow_value_badge(
+            trade_payment_display_status_key(row.workflow.payment),
+        )))
+        .child(
+            div()
+                .w(px(160.0))
                 .text_size(px(APP_UI_THEME.foundation.typography.utility_title_text_px))
                 .line_height(relative(1.2))
                 .text_color(rgb(APP_UI_THEME.foundation.text.primary))
@@ -10361,13 +10382,13 @@ fn orders_table_row(
         )
         .child(
             div()
-                .w(px(196.0))
+                .w(px(160.0))
                 .text_size(px(APP_UI_THEME.foundation.typography.utility_title_text_px))
                 .line_height(relative(1.2))
                 .text_color(rgb(APP_UI_THEME.foundation.text.primary))
                 .child(order_optional_text(row.pickup_location_label.as_deref())),
         )
-        .child(div().w(px(132.0)).flex().justify_end().child(action))
+        .child(div().w(px(120.0)).flex().justify_end().child(action))
 }
 
 fn orders_table_action(

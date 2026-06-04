@@ -8,6 +8,7 @@ pub(crate) mod orders;
 pub(crate) mod products;
 pub(crate) mod reminders;
 pub(crate) mod today;
+pub(crate) mod workflow;
 
 use radroots_studio_app_view::TradeRevisionStatus;
 

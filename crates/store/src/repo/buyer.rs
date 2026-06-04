@@ -8,10 +8,7 @@ use radroots_studio_app_view::{
     BuyerProductDetailProjection, FarmId, FarmOrderMethod, FulfillmentWindowId, OrderDetailItemRow,
     OrderId, OrderStatus, ProductAvailabilityState, ProductAvailabilitySummary, ProductId,
     ProductPricePresentation, ProductStatus, ProductStockState, ProductStockSummary,
-    RepeatDemandEligibility, RepeatDemandHandoffProjection, TradeAgreementStatus,
-    TradeEconomicsProjection, TradeFulfillmentStatus, TradeInventoryStatus,
-    TradePaymentDisplayStatus, TradeProvenanceProjection, TradeRevisionStatus,
-    TradeWorkflowProjection, TradeWorkflowSource,
+    RepeatDemandEligibility, RepeatDemandHandoffProjection,
 };
 use rusqlite::{Connection, OptionalExtension, params};
 use serde_json::Value;
@@ -19,6 +16,7 @@ use serde_json::Value;
 use super::{
     order_detail::{order_detail_economics, order_detail_item_row},
     parse_trade_revision_status,
+    workflow::{StoredTradeWorkflowSnapshot, trade_workflow_projection_from_storage},
 };
 use crate::AppSqliteError;
 
@@ -824,17 +822,17 @@ impl<'a> AppBuyerRepository<'a> {
                 parse_trade_revision_status("orders.workflow_revision", workflow_revision)?;
             let items = self.load_order_detail_items(order_id.to_string())?;
             let economics = order_detail_economics(&items)?;
-            let workflow = trade_workflow_projection_from_storage(
+            let workflow = trade_workflow_projection_from_storage(StoredTradeWorkflowSnapshot {
                 order_id,
                 revision,
                 economics,
-                workflow_agreement,
-                workflow_fulfillment,
-                workflow_inventory,
-                workflow_payment,
-                workflow_provenance_source,
-                workflow_provenance_last_event_id,
-            )?;
+                agreement: workflow_agreement,
+                fulfillment: workflow_fulfillment,
+                inventory: workflow_inventory,
+                payment: workflow_payment,
+                provenance_source: workflow_provenance_source,
+                provenance_last_event_id: workflow_provenance_last_event_id,
+            })?;
 
             orders.push(BuyerOrdersListRow {
                 order_id,
@@ -949,17 +947,18 @@ impl<'a> AppBuyerRepository<'a> {
                         parse_trade_revision_status("orders.workflow_revision", workflow_revision)?;
                     let items = self.load_order_detail_items(order_id.to_string())?;
                     let economics = order_detail_economics(&items)?;
-                    let workflow = trade_workflow_projection_from_storage(
-                        order_id,
-                        revision,
-                        economics.clone(),
-                        workflow_agreement,
-                        workflow_fulfillment,
-                        workflow_inventory,
-                        workflow_payment,
-                        workflow_provenance_source,
-                        workflow_provenance_last_event_id,
-                    )?;
+                    let workflow =
+                        trade_workflow_projection_from_storage(StoredTradeWorkflowSnapshot {
+                            order_id,
+                            revision,
+                            economics: economics.clone(),
+                            agreement: workflow_agreement,
+                            fulfillment: workflow_fulfillment,
+                            inventory: workflow_inventory,
+                            payment: workflow_payment,
+                            provenance_source: workflow_provenance_source,
+                            provenance_last_event_id: workflow_provenance_last_event_id,
+                        })?;
                     let payment = workflow.payment;
                     Ok(BuyerOrderDetailProjection {
                         order_id,
@@ -2533,104 +2532,6 @@ fn refresh_buyer_cart_summary(cart: &mut BuyerCartProjection) -> Result<(), AppS
     cart.currency_code = Some(currency_code.unwrap_or_default());
 
     Ok(())
-}
-
-fn trade_workflow_projection_from_storage(
-    order_id: OrderId,
-    revision: TradeRevisionStatus,
-    economics: TradeEconomicsProjection,
-    agreement: String,
-    fulfillment: Option<String>,
-    inventory: String,
-    payment: String,
-    provenance_source: String,
-    provenance_last_event_id: Option<String>,
-) -> Result<TradeWorkflowProjection, AppSqliteError> {
-    Ok(TradeWorkflowProjection {
-        order_id,
-        agreement: parse_trade_agreement_status("orders.workflow_agreement", agreement)?,
-        revision,
-        fulfillment: fulfillment
-            .map(|value| parse_trade_fulfillment_status("orders.workflow_fulfillment", value))
-            .transpose()?,
-        economics,
-        inventory: parse_trade_inventory_status("orders.workflow_inventory", inventory)?,
-        payment: parse_trade_payment_display_status("orders.workflow_payment", payment)?,
-        provenance: TradeProvenanceProjection::from_primary_source(parse_trade_workflow_source(
-            "orders.workflow_provenance_source",
-            provenance_source,
-        )?)
-        .with_last_event_id(provenance_last_event_id),
-    })
-}
-
-fn parse_trade_agreement_status(
-    field: &'static str,
-    value: String,
-) -> Result<TradeAgreementStatus, AppSqliteError> {
-    match value.as_str() {
-        "ordered" => Ok(TradeAgreementStatus::Ordered),
-        "confirmed" => Ok(TradeAgreementStatus::Confirmed),
-        "declined" => Ok(TradeAgreementStatus::Declined),
-        "cancelled" => Ok(TradeAgreementStatus::Cancelled),
-        "completed" => Ok(TradeAgreementStatus::Completed),
-        "needs_review" => Ok(TradeAgreementStatus::NeedsReview),
-        _ => Err(AppSqliteError::DecodeEnum { field, value }),
-    }
-}
-
-fn parse_trade_fulfillment_status(
-    field: &'static str,
-    value: String,
-) -> Result<TradeFulfillmentStatus, AppSqliteError> {
-    match value.as_str() {
-        "confirmed" => Ok(TradeFulfillmentStatus::Confirmed),
-        "preparing" => Ok(TradeFulfillmentStatus::Preparing),
-        "ready_for_pickup" => Ok(TradeFulfillmentStatus::ReadyForPickup),
-        "out_for_delivery" => Ok(TradeFulfillmentStatus::OutForDelivery),
-        "delivered" => Ok(TradeFulfillmentStatus::Delivered),
-        "cancelled" => Ok(TradeFulfillmentStatus::Cancelled),
-        _ => Err(AppSqliteError::DecodeEnum { field, value }),
-    }
-}
-
-fn parse_trade_inventory_status(
-    field: &'static str,
-    value: String,
-) -> Result<TradeInventoryStatus, AppSqliteError> {
-    match value.as_str() {
-        "available" => Ok(TradeInventoryStatus::Available),
-        "reserved" => Ok(TradeInventoryStatus::Reserved),
-        "sold_out" => Ok(TradeInventoryStatus::SoldOut),
-        "needs_review" => Ok(TradeInventoryStatus::NeedsReview),
-        _ => Err(AppSqliteError::DecodeEnum { field, value }),
-    }
-}
-
-fn parse_trade_payment_display_status(
-    field: &'static str,
-    value: String,
-) -> Result<TradePaymentDisplayStatus, AppSqliteError> {
-    match value.as_str() {
-        "not_recorded" => Ok(TradePaymentDisplayStatus::NotRecorded),
-        "recorded" => Ok(TradePaymentDisplayStatus::Recorded),
-        "needs_review" => Ok(TradePaymentDisplayStatus::NeedsReview),
-        _ => Err(AppSqliteError::DecodeEnum { field, value }),
-    }
-}
-
-fn parse_trade_workflow_source(
-    field: &'static str,
-    value: String,
-) -> Result<TradeWorkflowSource, AppSqliteError> {
-    match value.as_str() {
-        "app" => Ok(TradeWorkflowSource::App),
-        "cli" => Ok(TradeWorkflowSource::Cli),
-        "relay" => Ok(TradeWorkflowSource::Relay),
-        "local_events" => Ok(TradeWorkflowSource::LocalEvents),
-        "unknown" => Ok(TradeWorkflowSource::Unknown),
-        _ => Err(AppSqliteError::DecodeEnum { field, value }),
-    }
 }
 
 fn shared_fulfillment_summary(lines: &[BuyerCartLineProjection]) -> Option<String> {
