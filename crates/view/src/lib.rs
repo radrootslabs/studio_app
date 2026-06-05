@@ -1648,16 +1648,16 @@ pub struct OrdersScreenQueryState {
 #[serde(rename_all = "snake_case")]
 pub enum OrderPrimaryAction {
     Review,
-    MarkPacked,
-    MarkCompleted,
+    PublishReadyForPickup,
+    PublishDelivered,
 }
 
 impl OrderPrimaryAction {
     pub const fn storage_key(self) -> &'static str {
         match self {
             Self::Review => "review",
-            Self::MarkPacked => "mark_packed",
-            Self::MarkCompleted => "mark_completed",
+            Self::PublishReadyForPickup => "publish_ready_for_pickup",
+            Self::PublishDelivered => "publish_delivered",
         }
     }
 }
@@ -2825,10 +2825,13 @@ mod tests {
         assert_eq!(OrdersFilter::Refunded.storage_key(), "refunded");
 
         assert_eq!(OrderPrimaryAction::Review.storage_key(), "review");
-        assert_eq!(OrderPrimaryAction::MarkPacked.storage_key(), "mark_packed");
         assert_eq!(
-            OrderPrimaryAction::MarkCompleted.storage_key(),
-            "mark_completed"
+            OrderPrimaryAction::PublishReadyForPickup.storage_key(),
+            "publish_ready_for_pickup"
+        );
+        assert_eq!(
+            OrderPrimaryAction::PublishDelivered.storage_key(),
+            "publish_delivered"
         );
     }
 
@@ -3485,7 +3488,7 @@ mod tests {
                     order_id,
                     OrderStatus::Scheduled,
                 ),
-                primary_action: Some(OrderPrimaryAction::MarkPacked),
+                primary_action: Some(OrderPrimaryAction::PublishReadyForPickup),
             }],
         };
         let order_detail = OrderDetailProjection {
@@ -3511,7 +3514,7 @@ mod tests {
             payment: order_payment,
             workflow: TradeWorkflowProjection::from_order_status(order_id, OrderStatus::Scheduled)
                 .with_economics_and_payment(order_economics, order_payment),
-            primary_action: Some(OrderPrimaryAction::MarkPacked),
+            primary_action: Some(OrderPrimaryAction::PublishReadyForPickup),
             recoveries: Vec::new(),
         };
         let pack_day = PackDayProjection {
@@ -3541,7 +3544,7 @@ mod tests {
         assert!(!orders_list.is_empty());
         assert_eq!(
             orders_list.rows[0].primary_action,
-            Some(OrderPrimaryAction::MarkPacked)
+            Some(OrderPrimaryAction::PublishReadyForPickup)
         );
         assert_eq!(
             orders_list.rows[0].workflow.agreement,

@@ -339,9 +339,13 @@ mod tests {
             "Needs action"
         );
         assert_eq!(app_text(AppTextKey::OrdersStatusDeclined), "Declined");
-        assert_eq!(app_text(AppTextKey::OrdersActionMarkPacked), "Mark packed");
+        assert_eq!(app_text(AppTextKey::OrdersStatusInHandoff), "In handoff");
         assert_eq!(
-            app_text(AppTextKey::OrdersActionMarkCompleted),
+            app_text(AppTextKey::OrdersActionReadyForPickup),
+            "Ready for pickup"
+        );
+        assert_eq!(
+            app_text(AppTextKey::OrdersActionMarkDelivered),
             "Mark delivered"
         );
         assert_eq!(app_text(AppTextKey::OrdersDetailTitle), "Order detail");

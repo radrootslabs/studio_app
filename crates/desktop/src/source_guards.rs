@@ -99,8 +99,8 @@ const ALLOWED_WINDOW_LITERALS: &[&str] = &[
     "failed to cancel buyer order",
     "failed to keep buyer order",
     "failed to mark buyer order received",
-    "failed to mark order delivered",
-    "failed to mark order ready",
+    "failed to publish delivered order",
+    "failed to publish order ready for pickup",
     "failed to open existing product editor",
     "failed to open new product editor",
     "failed to acknowledge reminder",
@@ -194,8 +194,8 @@ const ALLOWED_WINDOW_LITERALS: &[&str] = &[
     "pack-day-reveal-bundle",
     "pack_day.export_failed",
     "pack_day.route_failed",
-    "orders-detail-mark-completed",
-    "orders-detail-mark-packed",
+    "orders-detail-publish-delivered",
+    "orders-detail-publish-ready-for-pickup",
     "orders-filter-all",
     "orders-filter-completed",
     "orders-filter-needs-action",
@@ -206,14 +206,14 @@ const ALLOWED_WINDOW_LITERALS: &[&str] = &[
     "orders-recovery-review",
     "orders-recovery-reopen",
     "orders-recovery-resolve",
-    "orders-row-action-mark-completed",
-    "orders-row-action-mark-packed",
+    "orders-row-action-publish-delivered",
+    "orders-row-action-publish-ready-for-pickup",
     "orders-row-action-review",
     "orders-row-open",
     "orders.detail_open_failed",
     "orders.filter_update_failed",
-    "orders.mark_delivered_failed",
-    "orders.ready_for_pickup_failed",
+    "orders.delivered_publish_failed",
+    "orders.ready_for_pickup_publish_failed",
     "orders.recovery_reopen_failed",
     "orders.recovery_resolve_failed",
     "orders.recovery_review_failed",
@@ -455,7 +455,7 @@ const REQUIRED_WINDOW_COPY_KEYS: &[&str] = &[
     "AppTextKey::OrdersFilterAll",
     "AppTextKey::OrdersStatusNeedsAction",
     "AppTextKey::OrdersStatusScheduled",
-    "AppTextKey::OrdersStatusPacked",
+    "AppTextKey::OrdersStatusInHandoff",
     "AppTextKey::OrdersStatusCompleted",
     "AppTextKey::OrdersStatusRefunded",
     "AppTextKey::OrdersTableTitle",
@@ -465,8 +465,8 @@ const REQUIRED_WINDOW_COPY_KEYS: &[&str] = &[
     "AppTextKey::OrdersColumnPickup",
     "AppTextKey::OrdersColumnAction",
     "AppTextKey::OrdersActionReview",
-    "AppTextKey::OrdersActionMarkPacked",
-    "AppTextKey::OrdersActionMarkCompleted",
+    "AppTextKey::OrdersActionReadyForPickup",
+    "AppTextKey::OrdersActionMarkDelivered",
     "AppTextKey::OrdersEmptyTitle",
     "AppTextKey::OrdersEmptyBody",
     "AppTextKey::OrdersEmptyNeedsActionTitle",
@@ -810,6 +810,19 @@ const FORBIDDEN_HARDCODED_WORKFLOW_UI_LITERALS: &[&str] = &[
     "Unknown",
 ];
 
+const FORBIDDEN_STALE_SELLER_LIFECYCLE_WINDOW_PATTERNS: &[&str] = &[
+    concat!("orders-detail-", "mark-packed"),
+    concat!("orders-detail-", "mark-completed"),
+    concat!("orders-row-action-", "mark-packed"),
+    concat!("orders-row-action-", "mark-completed"),
+    concat!("orders.", "mark_delivered_failed"),
+    concat!("OrderPrimaryAction::", "MarkPacked"),
+    concat!("OrderPrimaryAction::", "MarkCompleted"),
+    concat!("AppTextKey::", "OrdersStatus", "Packed"),
+    concat!("AppTextKey::", "OrdersAction", "MarkPacked"),
+    concat!("AppTextKey::", "OrdersAction", "MarkCompleted"),
+];
+
 const FORBIDDEN_PAYMENT_DEFERRAL_COPY_PATTERNS: &[&str] = &[
     "payments are deferred",
     "payment is deferred",
@@ -895,6 +908,18 @@ fn desktop_window_source_does_not_reintroduce_removed_ui_helper_families() {
         assert!(
             !source.contains(helper_name),
             "window.rs reintroduced removed launcher-local helper family `{helper_name}`"
+        );
+    }
+}
+
+#[test]
+fn desktop_window_source_uses_publish_lifecycle_action_identifiers() {
+    let source = include_str!("window.rs");
+
+    for pattern in FORBIDDEN_STALE_SELLER_LIFECYCLE_WINDOW_PATTERNS {
+        assert!(
+            !source.contains(pattern),
+            "window.rs still contains stale seller lifecycle action pattern `{pattern}`"
         );
     }
 }

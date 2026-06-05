@@ -7,7 +7,7 @@ use radroots_studio_app_view::{
     PackDayOutputCustomerOrder, PackDayOutputOrderState, PackDayOutputPackListEntry,
     PackDayOutputProductTotal, PackDayOutputQuantity, PackDayOutputSource, PackDayOutputWindow,
     PackDayPackListRow, PackDayProductTotalRow, PackDayProjection, PackDayRosterRow,
-    PackDayScreenQueryState, ProductId, TradeWorkflowProjection,
+    PackDayScreenQueryState, ProductId, TradeFulfillmentStatus, TradeWorkflowProjection,
 };
 use rusqlite::{Connection, OptionalExtension, params};
 
@@ -173,8 +173,8 @@ impl<'a> AppOrdersRepository<'a> {
                         items,
                         economics,
                         payment,
+                        primary_action: primary_action_for_order(status, &workflow),
                         workflow,
-                        primary_action: primary_action_for_status(status),
                         recoveries: Vec::new(),
                     })
                 },
@@ -1161,8 +1161,8 @@ impl OrderRecord {
             fulfillment_window_label: self.fulfillment_window_label,
             pickup_location_label: self.pickup_location_label,
             status: self.status,
+            primary_action: primary_action_for_order(self.status, &self.workflow),
             workflow: self.workflow,
-            primary_action: primary_action_for_status(self.status),
         }
     }
 }
@@ -1185,11 +1185,21 @@ fn summarize_orders(records: &[OrderRecord]) -> OrdersListSummary {
     summary
 }
 
-fn primary_action_for_status(status: OrderStatus) -> Option<OrderPrimaryAction> {
+fn primary_action_for_order(
+    status: OrderStatus,
+    workflow: &TradeWorkflowProjection,
+) -> Option<OrderPrimaryAction> {
     match status {
         OrderStatus::NeedsAction => Some(OrderPrimaryAction::Review),
-        OrderStatus::Scheduled => Some(OrderPrimaryAction::MarkPacked),
-        OrderStatus::Packed => Some(OrderPrimaryAction::MarkCompleted),
+        OrderStatus::Scheduled | OrderStatus::Packed => match workflow.fulfillment {
+            None | Some(TradeFulfillmentStatus::Confirmed | TradeFulfillmentStatus::Preparing) => {
+                Some(OrderPrimaryAction::PublishReadyForPickup)
+            }
+            Some(
+                TradeFulfillmentStatus::ReadyForPickup | TradeFulfillmentStatus::OutForDelivery,
+            ) => Some(OrderPrimaryAction::PublishDelivered),
+            Some(TradeFulfillmentStatus::Delivered | TradeFulfillmentStatus::Cancelled) => None,
+        },
         OrderStatus::Completed | OrderStatus::Declined | OrderStatus::Refunded => None,
     }
 }
@@ -1499,7 +1509,10 @@ mod tests {
         assert_eq!(detail.economics.total_minor_units, Some(1950));
         assert_eq!(detail.economics.currency_code.as_deref(), Some("USD"));
         assert_eq!(detail.payment, TradePaymentDisplayStatus::NotRecorded);
-        assert_eq!(detail.primary_action, Some(OrderPrimaryAction::MarkPacked));
+        assert_eq!(
+            detail.primary_action,
+            Some(OrderPrimaryAction::PublishReadyForPickup)
+        );
     }
 
     #[test]
@@ -1653,6 +1666,72 @@ mod tests {
         assert_eq!(workflow.economics.currency_code.as_deref(), Some("USD"));
         assert_eq!(detail.payment, TradePaymentDisplayStatus::Recorded);
         assert_eq!(detail.workflow, *workflow);
+        assert_eq!(
+            list.rows[0].primary_action,
+            Some(OrderPrimaryAction::PublishDelivered)
+        );
+        assert_eq!(
+            detail.primary_action,
+            Some(OrderPrimaryAction::PublishDelivered)
+        );
+    }
+
+    #[test]
+    fn seller_delivered_workflow_exposes_no_duplicate_primary_action() {
+        let store = AppSqliteStore::open(DatabaseTarget::InMemory).expect("store should open");
+        let connection = store.connection();
+        let farm_id = FarmId::new();
+        let order_id = OrderId::new();
+
+        insert_farm(
+            connection,
+            farm_id,
+            "Willow farm",
+            "ready",
+            "2026-04-17T08:00:00Z",
+        );
+        insert_order(
+            connection,
+            order_id,
+            farm_id,
+            None,
+            "R-101",
+            "Casey",
+            "packed",
+            "2026-04-17T10:00:00Z",
+        );
+        set_order_workflow_display_projection(
+            connection,
+            order_id,
+            "confirmed",
+            Some("delivered"),
+            "reserved",
+            "not_recorded",
+            "local_events",
+            Some("seller-delivered-event"),
+        );
+
+        let list = store
+            .load_orders_list(
+                farm_id,
+                &OrdersScreenQueryState {
+                    filter: OrdersFilter::Packed,
+                    fulfillment_window_id: None,
+                },
+            )
+            .expect("seller list should load");
+        let detail = store
+            .load_order_detail(farm_id, order_id)
+            .expect("seller detail should load")
+            .expect("seller detail should exist");
+
+        assert_eq!(list.rows[0].status, OrderStatus::Packed);
+        assert_eq!(
+            list.rows[0].workflow.fulfillment,
+            Some(TradeFulfillmentStatus::Delivered)
+        );
+        assert_eq!(list.rows[0].primary_action, None);
+        assert_eq!(detail.primary_action, None);
     }
 
     #[test]

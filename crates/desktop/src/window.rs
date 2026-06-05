@@ -298,8 +298,8 @@ enum HomeAutoFocusTarget {
     ProductsStockInput,
     ProductEditorTitleInput,
     OrdersRowOpenFirst,
-    OrdersDetailMarkPacked,
-    OrdersDetailMarkCompleted,
+    OrdersDetailPublishReadyForPickup,
+    OrdersDetailPublishDelivered,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -477,11 +477,11 @@ impl HomeView {
                 HomeAutoFocusTarget::OrdersRowOpenFirst => {
                     focus_button(window, ("orders-row-open", 0_usize), cx);
                 }
-                HomeAutoFocusTarget::OrdersDetailMarkPacked => {
-                    focus_button(window, "orders-detail-mark-packed", cx);
+                HomeAutoFocusTarget::OrdersDetailPublishReadyForPickup => {
+                    focus_button(window, "orders-detail-publish-ready-for-pickup", cx);
                 }
-                HomeAutoFocusTarget::OrdersDetailMarkCompleted => {
-                    focus_button(window, "orders-detail-mark-completed", cx);
+                HomeAutoFocusTarget::OrdersDetailPublishDelivered => {
+                    focus_button(window, "orders-detail-publish-delivered", cx);
                 }
             }
         }
@@ -2106,10 +2106,10 @@ impl HomeView {
             Err(runtime_error) => {
                 error!(
                     target: "orders",
-                    event = "orders.ready_for_pickup_failed",
+                    event = "orders.ready_for_pickup_publish_failed",
                     error = %runtime_error,
                     order_id = %order_id,
-                    "failed to mark order ready"
+                    "failed to publish order ready for pickup"
                 );
             }
         }
@@ -2122,10 +2122,10 @@ impl HomeView {
             Err(runtime_error) => {
                 error!(
                     target: "orders",
-                    event = "orders.mark_delivered_failed",
+                    event = "orders.delivered_publish_failed",
                     error = %runtime_error,
                     order_id = %order_id,
-                    "failed to mark order delivered"
+                    "failed to publish delivered order"
                 );
             }
         }
@@ -3490,7 +3490,7 @@ impl HomeView {
                         summary.scheduled_orders,
                     ))
                     .child(home_summary_metric(
-                        AppTextKey::OrdersStatusPacked,
+                        AppTextKey::OrdersStatusInHandoff,
                         summary.packed_orders,
                     )),
             )
@@ -3526,7 +3526,7 @@ impl HomeView {
                     ))
                     .child(choice_button(
                         "orders-filter-packed",
-                        app_shared_text(AppTextKey::OrdersStatusPacked),
+                        app_shared_text(AppTextKey::OrdersStatusInHandoff),
                         projection.query.filter == OrdersFilter::Packed,
                         cx.listener(|this, _, _, cx| {
                             this.select_orders_filter(OrdersFilter::Packed, cx)
@@ -4174,10 +4174,10 @@ impl HomeView {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let primary_action = match detail.primary_action {
-            Some(OrderPrimaryAction::MarkPacked) => Some(
+            Some(OrderPrimaryAction::PublishReadyForPickup) => Some(
                 action_button_primary(
-                    "orders-detail-mark-packed",
-                    app_shared_text(AppTextKey::OrdersActionMarkPacked),
+                    "orders-detail-publish-ready-for-pickup",
+                    app_shared_text(AppTextKey::OrdersActionReadyForPickup),
                     cx.listener({
                         let order_id = detail.order_id;
                         move |this, _, _, cx| this.publish_order_ready_for_pickup(order_id, cx)
@@ -4186,10 +4186,10 @@ impl HomeView {
                 )
                 .into_any_element(),
             ),
-            Some(OrderPrimaryAction::MarkCompleted) => Some(
+            Some(OrderPrimaryAction::PublishDelivered) => Some(
                 action_button_primary(
-                    "orders-detail-mark-completed",
-                    app_shared_text(AppTextKey::OrdersActionMarkCompleted),
+                    "orders-detail-publish-delivered",
+                    app_shared_text(AppTextKey::OrdersActionMarkDelivered),
                     cx.listener({
                         let order_id = detail.order_id;
                         move |this, _, _, cx| this.publish_order_delivered(order_id, cx)
@@ -7679,11 +7679,11 @@ fn farmer_auto_focus_target(
         FarmerSection::Orders if farmer_products_available(runtime) => {
             if let Some(detail) = runtime.orders_projection.detail.as_ref() {
                 match detail.primary_action {
-                    Some(OrderPrimaryAction::MarkPacked) => {
-                        Some(HomeAutoFocusTarget::OrdersDetailMarkPacked)
+                    Some(OrderPrimaryAction::PublishReadyForPickup) => {
+                        Some(HomeAutoFocusTarget::OrdersDetailPublishReadyForPickup)
                     }
-                    Some(OrderPrimaryAction::MarkCompleted) => {
-                        Some(HomeAutoFocusTarget::OrdersDetailMarkCompleted)
+                    Some(OrderPrimaryAction::PublishDelivered) => {
+                        Some(HomeAutoFocusTarget::OrdersDetailPublishDelivered)
                     }
                     Some(OrderPrimaryAction::Review) | None
                         if !runtime.orders_projection.list.rows.is_empty() =>
@@ -10395,8 +10395,8 @@ fn orders_table_action(
     index: usize,
     row: &OrdersListRow,
     on_review: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
-    on_mark_packed: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
-    on_mark_completed: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+    on_publish_ready_for_pickup: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+    on_publish_delivered: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
     cx: &App,
 ) -> AnyElement {
     match row.primary_action {
@@ -10407,17 +10407,17 @@ fn orders_table_action(
             cx,
         )
         .into_any_element(),
-        Some(OrderPrimaryAction::MarkPacked) => action_button_compact(
-            ("orders-row-action-mark-packed", index),
-            app_shared_text(AppTextKey::OrdersActionMarkPacked),
-            on_mark_packed,
+        Some(OrderPrimaryAction::PublishReadyForPickup) => action_button_compact(
+            ("orders-row-action-publish-ready-for-pickup", index),
+            app_shared_text(AppTextKey::OrdersActionReadyForPickup),
+            on_publish_ready_for_pickup,
             cx,
         )
         .into_any_element(),
-        Some(OrderPrimaryAction::MarkCompleted) => action_button_compact(
-            ("orders-row-action-mark-completed", index),
-            app_shared_text(AppTextKey::OrdersActionMarkCompleted),
-            on_mark_completed,
+        Some(OrderPrimaryAction::PublishDelivered) => action_button_compact(
+            ("orders-row-action-publish-delivered", index),
+            app_shared_text(AppTextKey::OrdersActionMarkDelivered),
+            on_publish_delivered,
             cx,
         )
         .into_any_element(),
@@ -14164,7 +14164,7 @@ mod tests {
                 farmer_order_id,
                 OrderStatus::Scheduled,
             ),
-            primary_action: Some(OrderPrimaryAction::MarkPacked),
+            primary_action: Some(OrderPrimaryAction::PublishReadyForPickup),
         }];
         orders.orders_projection.detail = Some(OrderDetailProjection {
             order_id: farmer_order_id,
@@ -14182,12 +14182,12 @@ mod tests {
                 farmer_order_id,
                 OrderStatus::Scheduled,
             ),
-            primary_action: Some(OrderPrimaryAction::MarkPacked),
+            primary_action: Some(OrderPrimaryAction::PublishReadyForPickup),
             recoveries: Vec::new(),
         });
         assert_eq!(
             home_auto_focus_target(&orders, HomeAutoFocusState::default()),
-            Some(HomeAutoFocusTarget::OrdersDetailMarkPacked)
+            Some(HomeAutoFocusTarget::OrdersDetailPublishReadyForPickup)
         );
     }
 
