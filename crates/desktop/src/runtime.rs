@@ -18,8 +18,9 @@ use radroots_studio_app_remote_signer::{
 use radroots_studio_app_sqlite::{
     APP_ACTIVITY_CONTEXT_LIMIT, AppLocalInteropImportReport, AppSqliteError, AppSqliteStore,
     BuyerOrderLocalEventExport, BuyerOrderLocalEventLine, BuyerRepeatDemandApplyOutcome,
-    DatabaseTarget, SellerOrderDecisionExport, StoredPendingSyncOperation, StoredRelayIngestCursor,
-    StoredSyncConflict, derive_farm_rules_readiness, projected_order_id_from_trade_request,
+    DatabaseTarget, SelectedBuyerOrderScope, SellerOrderDecisionExport, StoredPendingSyncOperation,
+    StoredRelayIngestCursor, StoredSyncConflict, derive_farm_rules_readiness,
+    projected_order_id_from_trade_request,
 };
 use radroots_studio_app_state::{
     APP_STATE_FILE_NAME, AppShellProjection, AppStateCommand, AppStatePersistenceRepository,
@@ -2021,8 +2022,7 @@ impl DesktopAppRuntimeState {
             .detail
             .as_ref()
             .map(|detail| detail.order_id);
-        let buyer_order_context_keys =
-            buyer_order_context_keys(self.state_store.identity_projection());
+        let buyer_order_scope = selected_buyer_order_scope(self.state_store.identity_projection());
         let (
             refreshed_cart,
             refreshed_order_review,
@@ -2035,8 +2035,7 @@ impl DesktopAppRuntimeState {
             };
             let refreshed_cart = sqlite_store.load_buyer_cart(buyer_context)?;
             let refreshed_order_review = sqlite_store.load_buyer_order_review(buyer_context)?;
-            let refreshed_orders =
-                sqlite_store.load_buyer_orders_for_context_keys(&buyer_order_context_keys)?;
+            let refreshed_orders = sqlite_store.load_buyer_orders_for_scope(&buyer_order_scope)?;
             let has_recoverable_coordination = !sqlite_store
                 .load_recoverable_buyer_order_coordination_records(buyer_context)?
                 .is_empty();
@@ -2056,10 +2055,9 @@ impl DesktopAppRuntimeState {
                     })
                 });
             let refreshed_order_detail = match detail_order_id {
-                Some(order_id) => sqlite_store.load_buyer_order_detail_for_context_keys(
-                    &buyer_order_context_keys,
-                    order_id,
-                )?,
+                Some(order_id) => {
+                    sqlite_store.load_buyer_order_detail_for_scope(&buyer_order_scope, order_id)?
+                }
                 None => None,
             };
             (
@@ -2102,10 +2100,9 @@ impl DesktopAppRuntimeState {
         let Some(sqlite_store) = self.sqlite_store.as_ref() else {
             return Ok(false);
         };
-        let buyer_order_context_keys =
-            buyer_order_context_keys(self.state_store.identity_projection());
-        let Some(order_detail) = sqlite_store
-            .load_buyer_order_detail_for_context_keys(&buyer_order_context_keys, order_id)?
+        let buyer_order_scope = selected_buyer_order_scope(self.state_store.identity_projection());
+        let Some(order_detail) =
+            sqlite_store.load_buyer_order_detail_for_scope(&buyer_order_scope, order_id)?
         else {
             return Ok(false);
         };
@@ -2125,8 +2122,10 @@ impl DesktopAppRuntimeState {
             return Ok(false);
         };
         let buyer_context = self.state_store.identity_projection().buyer_context();
+        let buyer_order_scope = selected_buyer_order_scope(self.state_store.identity_projection());
 
-        match sqlite_store.apply_buyer_repeat_demand_to_cart(
+        match sqlite_store.apply_buyer_repeat_demand_from_scope_to_cart(
+            &buyer_order_scope,
             &buyer_context,
             order_id,
             replace_existing,
@@ -2135,9 +2134,10 @@ impl DesktopAppRuntimeState {
                 let refreshed_cart = sqlite_store.load_buyer_cart(&buyer_context)?;
                 let refreshed_order_review =
                     sqlite_store.load_buyer_order_review(&buyer_context)?;
-                let refreshed_orders = sqlite_store.load_buyer_orders(&buyer_context)?;
+                let refreshed_orders =
+                    sqlite_store.load_buyer_orders_for_scope(&buyer_order_scope)?;
                 let refreshed_detail =
-                    sqlite_store.load_buyer_order_detail(&buyer_context, order_id)?;
+                    sqlite_store.load_buyer_order_detail_for_scope(&buyer_order_scope, order_id)?;
                 let personal_changed = self.mutate_personal_projection(|projection| {
                     let mut changed = false;
                     if projection.cart.cart != refreshed_cart {
@@ -2893,7 +2893,10 @@ impl DesktopAppRuntimeState {
                 reason: "buyer order revision requires local state",
             });
         };
-        let Some(detail) = sqlite_store.load_buyer_order_detail(&buyer_context, order_id)? else {
+        let buyer_order_scope = selected_buyer_order_scope(self.state_store.identity_projection());
+        let Some(detail) =
+            sqlite_store.load_buyer_order_detail_for_scope(&buyer_order_scope, order_id)?
+        else {
             return Err(AppSqliteError::InvalidProjection {
                 reason: "buyer order revision requires a visible buyer order",
             });
@@ -3033,7 +3036,10 @@ impl DesktopAppRuntimeState {
                 reason: "buyer order cancellation requires local state",
             });
         };
-        let Some(detail) = sqlite_store.load_buyer_order_detail(&buyer_context, order_id)? else {
+        let buyer_order_scope = selected_buyer_order_scope(self.state_store.identity_projection());
+        let Some(detail) =
+            sqlite_store.load_buyer_order_detail_for_scope(&buyer_order_scope, order_id)?
+        else {
             return Err(AppSqliteError::InvalidProjection {
                 reason: "buyer order cancellation requires a visible buyer order",
             });
@@ -3152,7 +3158,10 @@ impl DesktopAppRuntimeState {
                 reason: "buyer order receipt requires local state",
             });
         };
-        let Some(detail) = sqlite_store.load_buyer_order_detail(&buyer_context, order_id)? else {
+        let buyer_order_scope = selected_buyer_order_scope(self.state_store.identity_projection());
+        let Some(detail) =
+            sqlite_store.load_buyer_order_detail_for_scope(&buyer_order_scope, order_id)?
+        else {
             return Err(AppSqliteError::InvalidProjection {
                 reason: "buyer order receipt requires a visible buyer order",
             });
@@ -7972,17 +7981,21 @@ fn load_selected_account_context(
     )
 }
 
-fn buyer_order_context_keys(identity_projection: &AppIdentityProjection) -> Vec<String> {
-    let mut context_keys = vec![identity_projection.buyer_context().storage_key()];
-    if let Some(selected_account) = identity_projection.selected_account.as_ref()
-        && let Some(public_key_hex) = selected_account_public_key_hex(selected_account)
-    {
-        let nostr_context_key = format!("nostr:{public_key_hex}");
-        if !context_keys.contains(&nostr_context_key) {
-            context_keys.push(nostr_context_key);
-        }
+fn selected_buyer_order_scope(
+    identity_projection: &AppIdentityProjection,
+) -> SelectedBuyerOrderScope {
+    let buyer_context = identity_projection.buyer_context();
+    match &buyer_context {
+        BuyerContext::Account(account_id) => SelectedBuyerOrderScope::for_selected_account(
+            account_id,
+            identity_projection
+                .selected_account
+                .as_ref()
+                .and_then(selected_account_public_key_hex)
+                .as_deref(),
+        ),
+        BuyerContext::Guest => SelectedBuyerOrderScope::from_buyer_context(&buyer_context),
     }
-    context_keys
 }
 
 fn selected_account_public_key_hex(
@@ -8006,7 +8019,7 @@ fn load_selected_account_context_with_options(
     allow_auto_present: bool,
 ) -> Result<DesktopSelectedAccountContext, AppSqliteError> {
     let buyer_context = identity_projection.buyer_context();
-    let buyer_order_context_keys = buyer_order_context_keys(identity_projection);
+    let buyer_order_scope = selected_buyer_order_scope(identity_projection);
     let browse_fulfillment_methods = BTreeSet::new();
     let browse_listings = sqlite_store.load_buyer_listings("", &browse_fulfillment_methods)?;
     let search_query = continuity_state.buyer.search_query.clone();
@@ -8024,14 +8037,14 @@ fn load_selected_account_context_with_options(
     };
     let buyer_cart = sqlite_store.load_buyer_cart(&buyer_context)?;
     let buyer_order_review = sqlite_store.load_buyer_order_review(&buyer_context)?;
-    let buyer_orders =
-        sqlite_store.load_buyer_orders_for_context_keys(&buyer_order_context_keys)?;
+    let buyer_orders = sqlite_store.load_buyer_orders_for_scope(&buyer_order_scope)?;
     let has_recoverable_coordination = !sqlite_store
         .load_recoverable_buyer_order_coordination_records(&buyer_context)?
         .is_empty();
     let buyer_order_detail = match continuity_state.buyer.orders_detail_order_id {
-        Some(order_id) => sqlite_store
-            .load_buyer_order_detail_for_context_keys(&buyer_order_context_keys, order_id)?,
+        Some(order_id) => {
+            sqlite_store.load_buyer_order_detail_for_scope(&buyer_order_scope, order_id)?
+        }
         None => None,
     };
     let personal_projection = PersonalWorkspaceProjection {
@@ -9688,9 +9701,11 @@ mod tests {
     };
     use radroots_sdk::RadrootsNostrEventPtr;
     use radroots_sdk::trade::{
-        RadrootsActiveTradeFulfillmentState, RadrootsTradeOrderDecision,
-        RadrootsTradeOrderEconomicItem, RadrootsTradeOrderEconomics, RadrootsTradeOrderItem,
-        RadrootsTradeOrderRequested, RadrootsTradeOrderRevisionDecision, RadrootsTradePricingBasis,
+        RadrootsActiveTradeFulfillmentState, RadrootsTradeFulfillmentUpdated,
+        RadrootsTradeInventoryCommitment, RadrootsTradeOrderDecision,
+        RadrootsTradeOrderDecisionEvent, RadrootsTradeOrderEconomicItem,
+        RadrootsTradeOrderEconomics, RadrootsTradeOrderItem, RadrootsTradeOrderRequested,
+        RadrootsTradeOrderRevisionDecision, RadrootsTradePricingBasis,
     };
     use radroots_sql_core::{SqlExecutor, SqliteExecutor};
     use serde_json::json;
@@ -15536,6 +15551,170 @@ mod tests {
     }
 
     #[test]
+    fn runtime_opens_linked_buyer_order_detail_from_selected_account_nostr_scope() {
+        let fixture = linked_buyer_lifecycle_runtime("linked_buyer_order_open", false);
+        let report = fixture
+            .runtime
+            .refresh_shared_local_events()
+            .expect("linked buyer local events should import");
+        assert!(report.imported_records > 0);
+
+        assert!(
+            fixture
+                .runtime
+                .open_personal_order_detail(fixture.order_id)
+                .expect("linked buyer order detail should open")
+        );
+
+        let summary = fixture.runtime.summary();
+        let row = summary
+            .personal_projection
+            .orders
+            .list
+            .rows
+            .iter()
+            .find(|row| row.order_id == fixture.order_id)
+            .expect("linked buyer order row should exist");
+        let detail = summary
+            .personal_projection
+            .orders
+            .detail
+            .as_ref()
+            .expect("linked buyer order detail should exist");
+        assert_eq!(row.status, BuyerOrderStatus::Scheduled);
+        assert_eq!(detail.order_id, fixture.order_id);
+        assert_eq!(detail.status, BuyerOrderStatus::Scheduled);
+        assert_eq!(
+            detail.workflow.provenance.last_event_id.as_deref(),
+            Some(fixture.decision_event_id.as_str())
+        );
+
+        cleanup_bootstrapped_runtime_paths(&fixture.paths);
+    }
+
+    #[test]
+    fn runtime_publishes_linked_buyer_cancellation_from_selected_account_nostr_scope() {
+        let relay = ThreadedAckRelay::spawn();
+        let fixture = linked_buyer_lifecycle_runtime("linked_buyer_order_cancel", false);
+        install_direct_relay_sync_transport(&fixture.runtime, &relay);
+        fixture
+            .runtime
+            .refresh_shared_local_events()
+            .expect("linked buyer local events should import");
+        assert!(
+            fixture
+                .runtime
+                .open_personal_order_detail(fixture.order_id)
+                .expect("linked buyer order detail should open")
+        );
+
+        assert!(
+            fixture
+                .runtime
+                .publish_buyer_order_cancel(fixture.order_id)
+                .expect("linked buyer cancellation should publish")
+        );
+
+        assert_eq!(
+            persisted_order_status(&fixture.runtime, fixture.order_id),
+            "declined"
+        );
+        assert_eq!(relay.event_count(), 1);
+        let cancellation_events =
+            shared_order_events_by_kind(&fixture.paths, 3432, fixture.buyer_pubkey.as_str());
+        assert_eq!(cancellation_events.len(), 1);
+        let cancellation_event = cancellation_events
+            .first()
+            .expect("linked buyer cancellation event");
+        let cancellation = radroots_sdk::trade::parse_order_cancellation(cancellation_event)
+            .expect("linked buyer cancellation should parse");
+        assert_eq!(cancellation.payload.order_id, fixture.trade_order_id);
+        assert_eq!(cancellation.payload.buyer_pubkey, fixture.buyer_pubkey);
+        assert_eq!(cancellation.payload.seller_pubkey, fixture.seller_pubkey);
+        assert!(event_has_tag(
+            cancellation_event,
+            "e_root",
+            fixture.request_event_id.as_str()
+        ));
+        assert!(event_has_tag(
+            cancellation_event,
+            "e_prev",
+            fixture.decision_event_id.as_str()
+        ));
+
+        cleanup_bootstrapped_runtime_paths(&fixture.paths);
+    }
+
+    #[test]
+    fn runtime_publishes_linked_buyer_receipt_from_selected_account_nostr_scope() {
+        let relay = ThreadedAckRelay::spawn();
+        let fixture = linked_buyer_lifecycle_runtime("linked_buyer_order_receipt", true);
+        let fulfillment_event_id = fixture
+            .fulfillment_event_id
+            .as_deref()
+            .expect("ready fixture should include fulfillment event")
+            .to_owned();
+        install_direct_relay_sync_transport(&fixture.runtime, &relay);
+        fixture
+            .runtime
+            .refresh_shared_local_events()
+            .expect("linked buyer local events should import");
+        assert!(
+            fixture
+                .runtime
+                .open_personal_order_detail(fixture.order_id)
+                .expect("linked ready buyer order detail should open")
+        );
+        assert_eq!(
+            fixture
+                .runtime
+                .summary()
+                .personal_projection
+                .orders
+                .detail
+                .as_ref()
+                .expect("linked ready buyer detail")
+                .status,
+            BuyerOrderStatus::Ready
+        );
+
+        assert!(
+            fixture
+                .runtime
+                .publish_buyer_order_receipt(fixture.order_id)
+                .expect("linked buyer receipt should publish")
+        );
+
+        assert_eq!(
+            persisted_order_status(&fixture.runtime, fixture.order_id),
+            "completed"
+        );
+        assert_eq!(relay.event_count(), 1);
+        let receipt_events =
+            shared_order_events_by_kind(&fixture.paths, 3434, fixture.buyer_pubkey.as_str());
+        assert_eq!(receipt_events.len(), 1);
+        let receipt_event = receipt_events.first().expect("linked buyer receipt event");
+        let receipt = radroots_sdk::trade::parse_buyer_receipt(receipt_event)
+            .expect("linked buyer receipt should parse");
+        assert_eq!(receipt.payload.order_id, fixture.trade_order_id);
+        assert_eq!(receipt.payload.buyer_pubkey, fixture.buyer_pubkey);
+        assert_eq!(receipt.payload.seller_pubkey, fixture.seller_pubkey);
+        assert!(receipt.payload.received);
+        assert!(event_has_tag(
+            receipt_event,
+            "e_root",
+            fixture.request_event_id.as_str()
+        ));
+        assert!(event_has_tag(
+            receipt_event,
+            "e_prev",
+            fulfillment_event_id.as_str()
+        ));
+
+        cleanup_bootstrapped_runtime_paths(&fixture.paths);
+    }
+
+    #[test]
     fn runtime_repeat_personal_order_readds_only_currently_eligible_items() {
         let runtime = memory_runtime();
         let (account_id, farm_id) = provision_ready_farmer_account(&runtime);
@@ -18808,6 +18987,115 @@ mod tests {
             .expect("append signed buyer listing");
     }
 
+    struct LinkedBuyerLifecycleFixture {
+        runtime: DesktopAppRuntime,
+        paths: AppDesktopRuntimePaths,
+        order_id: OrderId,
+        trade_order_id: String,
+        request_event_id: String,
+        decision_event_id: String,
+        fulfillment_event_id: Option<String>,
+        buyer_pubkey: String,
+        seller_pubkey: String,
+    }
+
+    fn linked_buyer_lifecycle_runtime(
+        label: &str,
+        include_ready_fulfillment: bool,
+    ) -> LinkedBuyerLifecycleFixture {
+        let (runtime, paths) = bootstrapped_runtime(label);
+        assert!(
+            runtime
+                .generate_local_account(Some("Buyer".to_owned()))
+                .expect("buyer account should generate")
+        );
+        assert!(
+            runtime
+                .select_active_surface(ActiveSurface::Personal)
+                .expect("buyer surface should select")
+        );
+        let buyer_account_id = runtime
+            .summary()
+            .settings_account_projection
+            .selected_account
+            .as_ref()
+            .expect("selected buyer account")
+            .account
+            .account_id
+            .clone();
+        let buyer_pubkey = runtime
+            .lock_state()
+            .accounts_manager
+            .as_ref()
+            .expect("accounts manager")
+            .resolve_account_selector(buyer_account_id.as_str())
+            .expect("selected buyer account should resolve")
+            .public_identity
+            .public_key_hex;
+        let seller_pubkey =
+            "2222222222222222222222222222222222222222222222222222222222222222".to_owned();
+        let farm_key = super::d_tag_from_uuid(FarmId::new().as_uuid());
+        let listing_key = super::d_tag_from_uuid(ProductId::new().as_uuid());
+        let listing_addr = format!("30402:{seller_pubkey}:{listing_key}");
+        let listing_event_id = format!("event-app:signed_event:listing:{label}");
+        let trade_order_id = format!("{label}-trade-order");
+        let order_id =
+            projected_order_id_from_trade_request(trade_order_id.as_str(), buyer_pubkey.as_str());
+        append_app_signed_listing_record(
+            &paths,
+            "linked-seller-account",
+            seller_pubkey.as_str(),
+            farm_key.as_str(),
+            listing_key.as_str(),
+            listing_event_id.as_str(),
+            6,
+        );
+        append_signed_order_request_record(
+            &paths,
+            trade_order_id.as_str(),
+            listing_addr.as_str(),
+            listing_event_id.as_str(),
+            buyer_pubkey.as_str(),
+            seller_pubkey.as_str(),
+            2,
+        );
+        let request_event_id = format!("event-app:signed_event:order-request:{trade_order_id}");
+        let decision_event_id = append_signed_order_decision_record(
+            &paths,
+            trade_order_id.as_str(),
+            request_event_id.as_str(),
+            listing_addr.as_str(),
+            buyer_pubkey.as_str(),
+            seller_pubkey.as_str(),
+            2,
+        );
+        let fulfillment_event_id = if include_ready_fulfillment {
+            Some(append_signed_order_fulfillment_record(
+                &paths,
+                trade_order_id.as_str(),
+                request_event_id.as_str(),
+                decision_event_id.as_str(),
+                listing_addr.as_str(),
+                buyer_pubkey.as_str(),
+                seller_pubkey.as_str(),
+            ))
+        } else {
+            None
+        };
+
+        LinkedBuyerLifecycleFixture {
+            runtime,
+            paths,
+            order_id,
+            trade_order_id,
+            request_event_id,
+            decision_event_id,
+            fulfillment_event_id,
+            buyer_pubkey,
+            seller_pubkey,
+        }
+    }
+
     fn seller_order_decision_runtime(
         label: &str,
         stock_count: u32,
@@ -19150,6 +19438,150 @@ mod tests {
                 relay_delivery_json: Some(relay_delivery_json),
             })
             .expect("append signed order request");
+    }
+
+    fn append_signed_order_decision_record(
+        paths: &AppDesktopRuntimePaths,
+        trade_order_id: &str,
+        request_event_id: &str,
+        listing_addr: &str,
+        buyer_pubkey: &str,
+        seller_pubkey: &str,
+        order_quantity: u32,
+    ) -> String {
+        let payload = RadrootsTradeOrderDecisionEvent {
+            order_id: trade_order_id.to_owned(),
+            listing_addr: listing_addr.to_owned(),
+            buyer_pubkey: buyer_pubkey.to_owned(),
+            seller_pubkey: seller_pubkey.to_owned(),
+            decision: RadrootsTradeOrderDecision::Accepted {
+                inventory_commitments: vec![RadrootsTradeInventoryCommitment {
+                    bin_id: "seller-order-primary-bin".to_owned(),
+                    bin_count: order_quantity,
+                }],
+            },
+        };
+        let parts = radroots_sdk::trade::build_order_decision_draft(
+            request_event_id,
+            request_event_id,
+            &payload,
+        )
+        .expect("order decision draft should build")
+        .into_wire_parts();
+        let record_id = format!("app:signed_event:order-decision:{trade_order_id}");
+        let event_id = format!("event-{record_id}");
+        append_trade_signed_event_record(
+            paths,
+            record_id.as_str(),
+            event_id.as_str(),
+            i64::from(parts.kind),
+            seller_pubkey,
+            listing_addr,
+            json!(parts.tags),
+            parts.content,
+        );
+        event_id
+    }
+
+    fn append_signed_order_fulfillment_record(
+        paths: &AppDesktopRuntimePaths,
+        trade_order_id: &str,
+        request_event_id: &str,
+        decision_event_id: &str,
+        listing_addr: &str,
+        buyer_pubkey: &str,
+        seller_pubkey: &str,
+    ) -> String {
+        let payload = RadrootsTradeFulfillmentUpdated {
+            order_id: trade_order_id.to_owned(),
+            listing_addr: listing_addr.to_owned(),
+            buyer_pubkey: buyer_pubkey.to_owned(),
+            seller_pubkey: seller_pubkey.to_owned(),
+            status: RadrootsActiveTradeFulfillmentState::ReadyForPickup,
+        };
+        let parts = radroots_sdk::trade::build_fulfillment_update_draft(
+            request_event_id,
+            decision_event_id,
+            &payload,
+        )
+        .expect("fulfillment update draft should build")
+        .into_wire_parts();
+        let record_id = format!("app:signed_event:fulfillment:{trade_order_id}");
+        let event_id = format!("event-{record_id}");
+        append_trade_signed_event_record(
+            paths,
+            record_id.as_str(),
+            event_id.as_str(),
+            i64::from(parts.kind),
+            seller_pubkey,
+            listing_addr,
+            json!(parts.tags),
+            parts.content,
+        );
+        event_id
+    }
+
+    fn append_trade_signed_event_record(
+        paths: &AppDesktopRuntimePaths,
+        record_id: &str,
+        event_id: &str,
+        event_kind: i64,
+        event_pubkey: &str,
+        listing_addr: &str,
+        event_tags_json: serde_json::Value,
+        event_content: String,
+    ) {
+        let database_path = paths
+            .shared_local_events_database_path()
+            .expect("shared local events path");
+        if let Some(parent) = database_path.parent() {
+            fs::create_dir_all(parent).expect("shared local events directory should create");
+        }
+        let executor =
+            SqliteExecutor::open(database_path.as_path()).expect("open shared local events db");
+        let store = LocalEventsStore::new(executor);
+        store.migrate_up().expect("migrate shared local events");
+        let relay_delivery_json = RelayDeliveryEvidence::acknowledged(
+            ["wss://relay.example"],
+            ["wss://relay.example"],
+            ["wss://relay.example"],
+            Vec::new(),
+        )
+        .expect("acknowledged relay delivery evidence")
+        .to_json_value()
+        .expect("acknowledged relay delivery json");
+        store
+            .append_record(&LocalEventRecordInput {
+                record_id: record_id.to_owned(),
+                family: LocalRecordFamily::SignedEvent,
+                status: LocalRecordStatus::Published,
+                source_runtime: SourceRuntime::Test,
+                created_at_ms: 1_774_000_020_000,
+                inserted_at_ms: 1_774_000_020_001,
+                owner_account_id: None,
+                owner_pubkey: Some(event_pubkey.to_owned()),
+                farm_id: None,
+                listing_addr: Some(listing_addr.to_owned()),
+                local_work_json: None,
+                event_id: Some(event_id.to_owned()),
+                event_kind: Some(event_kind),
+                event_pubkey: Some(event_pubkey.to_owned()),
+                event_created_at: Some(1_774_000_020),
+                event_tags_json: Some(event_tags_json.clone()),
+                event_content: Some(event_content.clone()),
+                event_sig: Some("signature".to_owned()),
+                raw_event_json: Some(json!({
+                    "id": event_id,
+                    "kind": event_kind,
+                    "pubkey": event_pubkey,
+                    "tags": event_tags_json,
+                    "content": event_content
+                })),
+                outbox_status: PublishOutboxStatus::Acknowledged,
+                relay_set_fingerprint: Some("relay-set".to_owned()),
+                relay_delivery_json: Some(relay_delivery_json),
+            })
+            .expect("append signed trade event");
     }
 
     fn mark_shared_seller_order_request_evidence_pending(paths: &AppDesktopRuntimePaths) {

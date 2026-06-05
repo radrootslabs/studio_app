@@ -29,6 +29,46 @@ pub enum BuyerRepeatDemandApplyOutcome {
     Unavailable,
 }
 
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct SelectedBuyerOrderScope {
+    context_keys: Vec<String>,
+}
+
+impl SelectedBuyerOrderScope {
+    pub fn from_buyer_context(context: &BuyerContext) -> Self {
+        Self::from_context_keys([context.storage_key()])
+    }
+
+    pub fn for_selected_account(
+        account_id: impl AsRef<str>,
+        selected_account_pubkey: Option<&str>,
+    ) -> Self {
+        let mut context_keys = vec![format!("account:{}", account_id.as_ref().trim())];
+        if let Some(pubkey) = selected_account_pubkey
+            .map(str::trim)
+            .filter(|pubkey| !pubkey.is_empty())
+        {
+            context_keys.push(format!("nostr:{pubkey}"));
+        }
+        Self::from_context_keys(context_keys)
+    }
+
+    fn from_context_keys(context_keys: impl IntoIterator<Item = String>) -> Self {
+        let mut unique = BTreeSet::new();
+        let context_keys = context_keys
+            .into_iter()
+            .map(|key| key.trim().to_owned())
+            .filter(|key| !key.is_empty())
+            .filter(|key| unique.insert(key.clone()))
+            .collect();
+        Self { context_keys }
+    }
+
+    fn context_keys(&self) -> &[String] {
+        self.context_keys.as_slice()
+    }
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct BuyerOrderLocalEventExport {
     pub order_id: OrderId,
@@ -736,17 +776,16 @@ impl<'a> AppBuyerRepository<'a> {
         &self,
         context: &BuyerContext,
     ) -> Result<BuyerOrdersProjection, AppSqliteError> {
-        let context_key = context.storage_key();
-        self.load_buyer_orders_for_context_keys(std::slice::from_ref(&context_key))
+        self.load_buyer_orders_for_scope(&SelectedBuyerOrderScope::from_buyer_context(context))
     }
 
-    pub fn load_buyer_orders_for_context_keys(
+    pub fn load_buyer_orders_for_scope(
         &self,
-        context_keys: &[String],
+        scope: &SelectedBuyerOrderScope,
     ) -> Result<BuyerOrdersProjection, AppSqliteError> {
         let now_utc = self.current_utc_timestamp()?;
         let visible_listings = self.visible_listing_index(&now_utc)?;
-        let context_keys = normalized_buyer_context_keys(context_keys);
+        let context_keys = scope.context_keys();
         if context_keys.is_empty() {
             return Ok(BuyerOrdersProjection::default());
         }
@@ -876,18 +915,20 @@ impl<'a> AppBuyerRepository<'a> {
         context: &BuyerContext,
         order_id: OrderId,
     ) -> Result<Option<BuyerOrderDetailProjection>, AppSqliteError> {
-        let context_key = context.storage_key();
-        self.load_buyer_order_detail_for_context_keys(std::slice::from_ref(&context_key), order_id)
+        self.load_buyer_order_detail_for_scope(
+            &SelectedBuyerOrderScope::from_buyer_context(context),
+            order_id,
+        )
     }
 
-    pub fn load_buyer_order_detail_for_context_keys(
+    pub fn load_buyer_order_detail_for_scope(
         &self,
-        context_keys: &[String],
+        scope: &SelectedBuyerOrderScope,
         order_id: OrderId,
     ) -> Result<Option<BuyerOrderDetailProjection>, AppSqliteError> {
         let now_utc = self.current_utc_timestamp()?;
         let visible_listings = self.visible_listing_index(&now_utc)?;
-        let context_keys = normalized_buyer_context_keys(context_keys);
+        let context_keys = scope.context_keys();
         if context_keys.is_empty() {
             return Ok(None);
         }
@@ -916,7 +957,7 @@ impl<'a> AppBuyerRepository<'a> {
              where o.buyer_context_key in ({placeholders}) and o.id = ?
              limit 1"
         );
-        let mut params = context_keys.clone();
+        let mut params = context_keys.to_vec();
         params.push(order_id.to_string());
         let record = self
             .connection
@@ -1124,8 +1165,23 @@ impl<'a> AppBuyerRepository<'a> {
         order_id: OrderId,
         replace_existing: bool,
     ) -> Result<BuyerRepeatDemandApplyOutcome, AppSqliteError> {
+        self.apply_buyer_repeat_demand_from_scope_to_cart(
+            &SelectedBuyerOrderScope::from_buyer_context(context),
+            context,
+            order_id,
+            replace_existing,
+        )
+    }
+
+    pub fn apply_buyer_repeat_demand_from_scope_to_cart(
+        &self,
+        source_scope: &SelectedBuyerOrderScope,
+        cart_context: &BuyerContext,
+        order_id: OrderId,
+        replace_existing: bool,
+    ) -> Result<BuyerRepeatDemandApplyOutcome, AppSqliteError> {
         let Some((farm_id, farm_display_name)) =
-            self.load_buyer_order_repeat_demand_header(context, order_id)?
+            self.load_buyer_order_repeat_demand_header_for_scope(source_scope, order_id)?
         else {
             return Ok(BuyerRepeatDemandApplyOutcome::Unavailable);
         };
@@ -1144,7 +1200,7 @@ impl<'a> AppBuyerRepository<'a> {
             return Ok(BuyerRepeatDemandApplyOutcome::Unavailable);
         }
 
-        let current_cart = self.load_buyer_cart(context)?;
+        let current_cart = self.load_buyer_cart(cart_context)?;
         if !replace_existing
             && !current_cart.is_empty()
             && current_cart.farm_id != Some(candidate.farm_id)
@@ -1177,7 +1233,7 @@ impl<'a> AppBuyerRepository<'a> {
             &candidate.available_lines,
             replace_existing,
         )?;
-        self.replace_buyer_cart(context, &next_cart)?;
+        self.replace_buyer_cart(cart_context, &next_cart)?;
 
         Ok(BuyerRepeatDemandApplyOutcome::Applied)
     }
@@ -1993,23 +2049,29 @@ impl<'a> AppBuyerRepository<'a> {
         Ok(order_lines)
     }
 
-    fn load_buyer_order_repeat_demand_header(
+    fn load_buyer_order_repeat_demand_header_for_scope(
         &self,
-        context: &BuyerContext,
+        scope: &SelectedBuyerOrderScope,
         order_id: OrderId,
     ) -> Result<Option<(FarmId, String)>, AppSqliteError> {
-        let context_key = context.storage_key();
-
+        let context_keys = scope.context_keys();
+        if context_keys.is_empty() {
+            return Ok(None);
+        }
+        let placeholders = sql_placeholders(context_keys.len());
+        let query = format!(
+            "select o.farm_id, f.display_name
+             from orders o
+             inner join farms f on f.id = o.farm_id
+             where o.buyer_context_key in ({placeholders}) and o.id = ?
+             limit 1"
+        );
+        let mut params = context_keys.to_vec();
+        params.push(order_id.to_string());
         self.connection
-            .query_row(
-                "select o.farm_id, f.display_name
-                 from orders o
-                 inner join farms f on f.id = o.farm_id
-                 where o.buyer_context_key = ?1 and o.id = ?2
-                 limit 1",
-                params![context_key.as_str(), order_id.to_string()],
-                |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
-            )
+            .query_row(query.as_str(), params_from_iter(params.iter()), |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+            })
             .optional()
             .map_err(|source| AppSqliteError::Query {
                 operation: "load buyer repeat demand header",
@@ -2510,17 +2572,6 @@ fn next_buyer_cart_for_repeat_demand(
     Ok(current_cart)
 }
 
-fn normalized_buyer_context_keys(context_keys: &[String]) -> Vec<String> {
-    let mut unique = BTreeSet::new();
-    context_keys
-        .iter()
-        .map(|key| key.trim())
-        .filter(|key| !key.is_empty())
-        .filter(|key| unique.insert((*key).to_owned()))
-        .map(str::to_owned)
-        .collect()
-}
-
 fn sql_placeholders(count: usize) -> String {
     std::iter::repeat_n("?", count)
         .collect::<Vec<_>>()
@@ -2907,7 +2958,10 @@ mod tests {
     use rusqlite::{Connection, params};
     use serde_json::json;
 
-    use crate::{AppSqliteError, AppSqliteStore, BuyerRepeatDemandApplyOutcome, DatabaseTarget};
+    use crate::{
+        AppSqliteError, AppSqliteStore, BuyerRepeatDemandApplyOutcome, DatabaseTarget,
+        SelectedBuyerOrderScope,
+    };
 
     use super::AppBuyerRepository;
 
@@ -3078,17 +3132,13 @@ mod tests {
             "",
         );
 
-        let context_keys = vec![
-            "account:acct_buyer".to_owned(),
-            "nostr:buyer-pubkey".to_owned(),
-            "nostr:buyer-pubkey".to_owned(),
-            " ".to_owned(),
-        ];
+        let scope =
+            SelectedBuyerOrderScope::for_selected_account("acct_buyer", Some("buyer-pubkey"));
         let linked_orders = repository
-            .load_buyer_orders_for_context_keys(&context_keys)
+            .load_buyer_orders_for_scope(&scope)
             .expect("linked buyer orders should load");
         let linked_detail = repository
-            .load_buyer_order_detail_for_context_keys(&context_keys, relay_order_id)
+            .load_buyer_order_detail_for_scope(&scope, relay_order_id)
             .expect("linked buyer order detail should load")
             .expect("linked buyer order detail should exist");
         let account_only_orders = repository
@@ -3376,6 +3426,120 @@ mod tests {
             buyer_order_detail.payment,
             TradePaymentDisplayStatus::NotRecorded
         );
+    }
+
+    #[test]
+    fn buyer_repeat_demand_from_linked_order_writes_selected_account_cart() {
+        let store = AppSqliteStore::open(DatabaseTarget::InMemory).expect("store should open");
+        let connection = store.connection();
+        let repository = AppBuyerRepository::new(connection);
+        let context = BuyerContext::account("acct_buyer");
+        let farm_id = insert_farm(connection, "Willow Farm", "ready");
+        let pickup_location_id = insert_pickup_location(connection, farm_id, "Barn pickup");
+        let future_window_id = insert_window(
+            connection,
+            farm_id,
+            Some(pickup_location_id),
+            "Friday pickup",
+            "2099-04-18T16:00:00Z",
+            "2099-04-18T18:00:00Z",
+        );
+
+        insert_farm_setup_binding(connection, "acct_farmer", farm_id, true, false, false);
+        let product_id = insert_product(
+            connection,
+            farm_id,
+            SeedProduct {
+                title: "Salad mix",
+                subtitle: "Spring blend",
+                status: "published",
+                unit_label: "bag",
+                price_minor_units: Some(650),
+                price_currency: "USD",
+                stock_count: Some(8),
+                availability_window_id: Some(future_window_id),
+            },
+        );
+        let listing = repository
+            .load_buyer_product_detail(product_id)
+            .expect("buyer detail should load")
+            .expect("listing should exist")
+            .listing;
+
+        repository
+            .replace_buyer_cart(
+                &context,
+                &radroots_studio_app_view::BuyerCartProjection {
+                    farm_id: Some(farm_id),
+                    farm_display_name: Some("Willow Farm".to_owned()),
+                    lines: vec![radroots_studio_app_view::BuyerCartLineProjection {
+                        product_id: listing.product_id,
+                        farm_id: listing.farm_id,
+                        farm_display_name: listing.farm_display_name.clone(),
+                        title: listing.title.clone(),
+                        quantity: 2,
+                        unit_price: listing.price.clone(),
+                        line_total_minor_units: 1300,
+                        fulfillment_summary: "Friday pickup".to_owned(),
+                    }],
+                    subtotal_minor_units: Some(1300),
+                    currency_code: Some("USD".to_owned()),
+                    replace_confirmation: None,
+                },
+            )
+            .expect("buyer cart should save");
+        repository
+            .save_buyer_order_review_draft(
+                &context,
+                &radroots_studio_app_view::BuyerOrderReviewDraft {
+                    name: "Casey Buyer".to_owned(),
+                    email: "casey@example.com".to_owned(),
+                    phone: String::new(),
+                    order_note: String::new(),
+                },
+            )
+            .expect("buyer order review draft should save");
+        let order_id = repository
+            .place_buyer_order(&context)
+            .expect("buyer order review should place order");
+
+        connection
+            .execute(
+                "update orders set buyer_context_key = ?1 where id = ?2",
+                params!["nostr:buyer-pubkey", order_id.to_string()],
+            )
+            .expect("linked order context should mutate");
+
+        let scope =
+            SelectedBuyerOrderScope::for_selected_account("acct_buyer", Some("buyer-pubkey"));
+        let linked_detail = repository
+            .load_buyer_order_detail_for_scope(&scope, order_id)
+            .expect("linked detail should load")
+            .expect("linked order should be visible");
+        let account_only_detail = repository
+            .load_buyer_order_detail(&context, order_id)
+            .expect("account-only detail should load");
+        let outcome = repository
+            .apply_buyer_repeat_demand_from_scope_to_cart(&scope, &context, order_id, false)
+            .expect("linked repeat demand should apply");
+        let account_cart = repository
+            .load_buyer_cart(&context)
+            .expect("selected account cart should load");
+        let nostr_cart_line_count: u32 = connection
+            .query_row(
+                "select count(*) from buyer_cart_lines where buyer_context_key = ?1",
+                params!["nostr:buyer-pubkey"],
+                |row| row.get(0),
+            )
+            .expect("nostr cart line count should load");
+
+        assert!(linked_detail.repeat_demand.is_some());
+        assert!(account_only_detail.is_none());
+        assert_eq!(outcome, BuyerRepeatDemandApplyOutcome::Applied);
+        assert_eq!(account_cart.lines.len(), 1);
+        assert_eq!(account_cart.lines[0].product_id, product_id);
+        assert_eq!(account_cart.lines[0].quantity, 2);
+        assert_eq!(nostr_cart_line_count, 0);
     }
 
     #[test]

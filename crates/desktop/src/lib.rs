@@ -11,6 +11,7 @@ mod runtime;
 mod source_guards;
 mod window;
 
+pub use accounts::DesktopLocalIdentityImportRequest;
 pub use app::AppLaunchError;
 pub use runtime::DesktopAppRuntime;
 

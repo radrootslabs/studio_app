@@ -21,6 +21,7 @@ pub use activity::{
 pub use buyer::{
     AppBuyerRepository, BuyerOrderCoordinationRecord, BuyerOrderCoordinationState,
     BuyerOrderLocalEventExport, BuyerOrderLocalEventLine, BuyerRepeatDemandApplyOutcome,
+    SelectedBuyerOrderScope,
 };
 pub use farm_rules::{AppFarmRulesRepository, derive_farm_rules_readiness};
 pub use farm_setup::AppFarmSetupRepository;

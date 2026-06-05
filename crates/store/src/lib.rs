@@ -37,9 +37,9 @@ pub use repo::{
     AppActivityRepository, AppBuyerRepository, AppFarmRulesRepository, AppFarmSetupRepository,
     AppOrdersRepository, AppProductsRepository, AppRemindersRepository, AppTodayAgendaRepository,
     BuyerOrderCoordinationRecord, BuyerOrderCoordinationState, BuyerOrderLocalEventExport,
-    BuyerOrderLocalEventLine, BuyerRepeatDemandApplyOutcome, SellerOrderDecisionExport,
-    SellerOrderDecisionLineExport, TODAY_AGENDA_LIST_LIMIT, TODAY_AGENDA_LOW_STOCK_THRESHOLD,
-    derive_farm_rules_readiness,
+    BuyerOrderLocalEventLine, BuyerRepeatDemandApplyOutcome, SelectedBuyerOrderScope,
+    SellerOrderDecisionExport, SellerOrderDecisionLineExport, TODAY_AGENDA_LIST_LIMIT,
+    TODAY_AGENDA_LOW_STOCK_THRESHOLD, derive_farm_rules_readiness,
 };
 pub use sync::{
     AppSyncRepository, StoredPendingSyncOperation, StoredRelayIngestCursor, StoredSyncConflict,
@@ -448,12 +448,11 @@ impl AppSqliteStore {
         self.buyer_repository().load_buyer_orders(context)
     }
 
-    pub fn load_buyer_orders_for_context_keys(
+    pub fn load_buyer_orders_for_scope(
         &self,
-        context_keys: &[String],
+        scope: &SelectedBuyerOrderScope,
     ) -> Result<BuyerOrdersProjection, AppSqliteError> {
-        self.buyer_repository()
-            .load_buyer_orders_for_context_keys(context_keys)
+        self.buyer_repository().load_buyer_orders_for_scope(scope)
     }
 
     pub fn load_buyer_order_detail(
@@ -465,13 +464,13 @@ impl AppSqliteStore {
             .load_buyer_order_detail(context, order_id)
     }
 
-    pub fn load_buyer_order_detail_for_context_keys(
+    pub fn load_buyer_order_detail_for_scope(
         &self,
-        context_keys: &[String],
+        scope: &SelectedBuyerOrderScope,
         order_id: OrderId,
     ) -> Result<Option<BuyerOrderDetailProjection>, AppSqliteError> {
         self.buyer_repository()
-            .load_buyer_order_detail_for_context_keys(context_keys, order_id)
+            .load_buyer_order_detail_for_scope(scope, order_id)
     }
 
     pub fn load_buyer_order_local_event_export(
@@ -550,6 +549,22 @@ impl AppSqliteStore {
             order_id,
             replace_existing,
         )
+    }
+
+    pub fn apply_buyer_repeat_demand_from_scope_to_cart(
+        &self,
+        source_scope: &SelectedBuyerOrderScope,
+        cart_context: &BuyerContext,
+        order_id: OrderId,
+        replace_existing: bool,
+    ) -> Result<BuyerRepeatDemandApplyOutcome, AppSqliteError> {
+        self.buyer_repository()
+            .apply_buyer_repeat_demand_from_scope_to_cart(
+                source_scope,
+                cart_context,
+                order_id,
+                replace_existing,
+            )
     }
 
     pub fn enqueue_pending_sync_operation(
