@@ -810,7 +810,7 @@ const FORBIDDEN_HARDCODED_WORKFLOW_UI_LITERALS: &[&str] = &[
     "Unknown",
 ];
 
-const FORBIDDEN_STALE_SELLER_LIFECYCLE_WINDOW_PATTERNS: &[&str] = &[
+const FORBIDDEN_STALE_SELLER_LIFECYCLE_PATTERNS: &[&str] = &[
     concat!("orders-detail-", "mark-packed"),
     concat!("orders-detail-", "mark-completed"),
     concat!("orders-row-action-", "mark-packed"),
@@ -818,9 +818,14 @@ const FORBIDDEN_STALE_SELLER_LIFECYCLE_WINDOW_PATTERNS: &[&str] = &[
     concat!("orders.", "mark_delivered_failed"),
     concat!("OrderPrimaryAction::", "MarkPacked"),
     concat!("OrderPrimaryAction::", "MarkCompleted"),
+    concat!("mark", "_packed"),
+    concat!("mark", "_completed"),
     concat!("AppTextKey::", "OrdersStatus", "Packed"),
     concat!("AppTextKey::", "OrdersAction", "MarkPacked"),
     concat!("AppTextKey::", "OrdersAction", "MarkCompleted"),
+    concat!("orders.status.", "packed"),
+    concat!("orders.action.", "mark_packed"),
+    concat!("orders.action.", "mark_completed"),
 ];
 
 const FORBIDDEN_PAYMENT_DEFERRAL_COPY_PATTERNS: &[&str] = &[
@@ -913,14 +918,15 @@ fn desktop_window_source_does_not_reintroduce_removed_ui_helper_families() {
 }
 
 #[test]
-fn desktop_window_source_uses_publish_lifecycle_action_identifiers() {
-    let source = include_str!("window.rs");
-
-    for pattern in FORBIDDEN_STALE_SELLER_LIFECYCLE_WINDOW_PATTERNS {
-        assert!(
-            !source.contains(pattern),
-            "window.rs still contains stale seller lifecycle action pattern `{pattern}`"
-        );
+fn app_sources_use_publish_lifecycle_action_identifiers() {
+    for (path, source) in seller_lifecycle_action_owner_sources() {
+        for pattern in FORBIDDEN_STALE_SELLER_LIFECYCLE_PATTERNS {
+            assert!(
+                !source.contains(pattern),
+                "{} still contains stale seller lifecycle action pattern `{pattern}`",
+                path.display()
+            );
+        }
     }
 }
 
@@ -1045,6 +1051,34 @@ fn launcher_source_files() -> Vec<(PathBuf, String)> {
             (path, source)
         })
         .collect()
+}
+
+fn seller_lifecycle_action_owner_sources() -> Vec<(PathBuf, String)> {
+    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let app_root = manifest_dir
+        .parent()
+        .and_then(|path| path.parent())
+        .expect("desktop crate should live under app crates directory");
+    [
+        manifest_dir.join("src/window.rs"),
+        manifest_dir.join("src/runtime.rs"),
+        app_root.join("crates/view/src/lib.rs"),
+        app_root.join("crates/store/src/repo/orders.rs"),
+        app_root.join("crates/i18n/src/keys.rs"),
+        app_root.join("crates/i18n/src/lib.rs"),
+        app_root.join("i18n/locales/en/messages.json"),
+    ]
+    .into_iter()
+    .map(|path| {
+        let source = fs::read_to_string(&path).unwrap_or_else(|error| {
+            panic!(
+                "failed to read seller lifecycle source {}: {error}",
+                path.display()
+            )
+        });
+        (path, source)
+    })
+    .collect()
 }
 
 fn collect_rust_source_files(root: &Path, paths: &mut Vec<PathBuf>) {
