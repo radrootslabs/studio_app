@@ -718,14 +718,6 @@ impl DesktopAppRuntime {
         self.lock_state_mut().open_order_detail(order_id)
     }
 
-    pub fn mark_order_packed(&self, order_id: OrderId) -> Result<bool, AppSqliteError> {
-        self.lock_state_mut().mark_order_packed(order_id)
-    }
-
-    pub fn mark_order_completed(&self, order_id: OrderId) -> Result<bool, AppSqliteError> {
-        self.lock_state_mut().mark_order_completed(order_id)
-    }
-
     pub fn prepare_order_accept(
         &self,
         order_id: OrderId,
@@ -2333,66 +2325,6 @@ impl DesktopAppRuntimeState {
         let editor_changed = self.close_product_editor();
 
         Ok(detail_changed || section_changed || editor_changed)
-    }
-
-    fn mark_order_packed(&mut self, order_id: OrderId) -> Result<bool, AppSqliteError> {
-        let Some(sqlite_store) = self.sqlite_store.as_ref() else {
-            return Ok(false);
-        };
-        let Some(farm_id) = self.selected_farm_id() else {
-            return Ok(false);
-        };
-
-        let updated = sqlite_store.mark_order_packed(farm_id, order_id)?;
-        if !updated {
-            return Ok(false);
-        }
-
-        let continuity_state =
-            self.continuity_state_with_order_detail(self.selected_order_detail_id());
-        let selected_account_context = load_selected_account_context(
-            sqlite_store,
-            self.state_store.identity_projection(),
-            &continuity_state,
-        )?;
-        let context_changed = self.apply_selected_account_context(&selected_account_context);
-        let pending_changed =
-            self.enqueue_selected_account_sync_operations(vec![pending_sync_upsert(
-                SyncAggregateRef::Order(order_id),
-                order_sync_payload(order_id, farm_id, "mark_order_packed", Some("packed")),
-            )])?;
-
-        Ok(updated || context_changed || pending_changed)
-    }
-
-    fn mark_order_completed(&mut self, order_id: OrderId) -> Result<bool, AppSqliteError> {
-        let Some(sqlite_store) = self.sqlite_store.as_ref() else {
-            return Ok(false);
-        };
-        let Some(farm_id) = self.selected_farm_id() else {
-            return Ok(false);
-        };
-
-        let updated = sqlite_store.mark_order_completed(farm_id, order_id)?;
-        if !updated {
-            return Ok(false);
-        }
-
-        let continuity_state =
-            self.continuity_state_with_order_detail(self.selected_order_detail_id());
-        let selected_account_context = load_selected_account_context(
-            sqlite_store,
-            self.state_store.identity_projection(),
-            &continuity_state,
-        )?;
-        let context_changed = self.apply_selected_account_context(&selected_account_context);
-        let pending_changed =
-            self.enqueue_selected_account_sync_operations(vec![pending_sync_upsert(
-                SyncAggregateRef::Order(order_id),
-                order_sync_payload(order_id, farm_id, "mark_order_completed", Some("completed")),
-            )])?;
-
-        Ok(updated || context_changed || pending_changed)
     }
 
     fn prepare_seller_order_decision(
@@ -9583,22 +9515,6 @@ fn farm_sync_payload(
             FarmReadiness::Incomplete => "incomplete",
             FarmReadiness::Ready => "ready",
         }),
-        "source": source,
-    })
-    .to_string()
-}
-
-fn order_sync_payload(
-    order_id: OrderId,
-    farm_id: FarmId,
-    source: &str,
-    status: Option<&str>,
-) -> String {
-    json!({
-        "aggregate_kind": "order",
-        "order_id": order_id.to_string(),
-        "farm_id": farm_id.to_string(),
-        "status": status,
         "source": source,
     })
     .to_string()
@@ -17191,25 +17107,21 @@ mod tests {
         let runtime = memory_runtime();
         let (_, farm_id) = provision_ready_farmer_account(&runtime);
         let (_, order_id) = seed_order_workspace(&runtime, farm_id);
-        let sql = format!(
-            "update orders
-             set status = 'scheduled', updated_at = '2026-04-17T12:00:00Z'
-             where id = '{order_id}' and farm_id = '{farm_id}'"
-        );
-        runtime
-            .lock_state()
-            .sqlite_store
-            .as_ref()
-            .expect("sqlite store")
-            .connection()
-            .execute_batch(&sql)
-            .expect("order should update to scheduled");
 
         assert!(runtime.open_orders().expect("orders should open"));
         assert!(
             runtime
-                .mark_order_packed(order_id)
-                .expect("mark packed should succeed")
+                .lock_state_mut()
+                .enqueue_selected_account_sync_operations(vec![pending_sync_upsert(
+                    SyncAggregateRef::Order(order_id),
+                    json!({
+                        "aggregate_kind": "order",
+                        "order_id": order_id.to_string(),
+                        "source": "test_pending_order_sync",
+                    })
+                    .to_string(),
+                )])
+                .expect("pending order sync should enqueue")
         );
         let summary = runtime.summary();
 
@@ -17574,15 +17486,51 @@ mod tests {
     }
 
     #[test]
-    fn runtime_order_actions_refresh_repository_backed_orders_projection() {
+    fn runtime_order_filters_refresh_repository_backed_orders_projection() {
         let runtime = memory_runtime();
         let (_, farm_id) = provision_ready_farmer_account(&runtime);
-        let (_, order_id) = seed_order_workspace(&runtime, farm_id);
+        let (fulfillment_window_id, scheduled_order_id) = seed_order_workspace(&runtime, farm_id);
+        let packed_order_id = OrderId::new();
+        let completed_order_id = OrderId::new();
 
         let sql = format!(
             "update orders
              set status = 'scheduled', updated_at = '2026-04-17T12:00:00Z'
-             where id = '{order_id}' and farm_id = '{farm_id}'"
+             where id = '{scheduled_order_id}' and farm_id = '{farm_id}';
+             insert into orders (
+                id,
+                farm_id,
+                fulfillment_window_id,
+                order_number,
+                customer_display_name,
+                status,
+                updated_at
+             ) values (
+                '{packed_order_id}',
+                '{farm_id}',
+                '{fulfillment_window_id}',
+                'R-101',
+                'Taylor',
+                'packed',
+                '2026-04-17T12:30:00Z'
+             );
+             insert into orders (
+                id,
+                farm_id,
+                fulfillment_window_id,
+                order_number,
+                customer_display_name,
+                status,
+                updated_at
+             ) values (
+                '{completed_order_id}',
+                '{farm_id}',
+                '{fulfillment_window_id}',
+                'R-102',
+                'Morgan',
+                'completed',
+                '2026-04-17T13:00:00Z'
+             )"
         );
         runtime
             .lock_state()
@@ -17606,35 +17554,33 @@ mod tests {
 
         assert!(
             runtime
-                .open_order_detail(order_id)
+                .open_order_detail(scheduled_order_id)
                 .expect("order detail should open")
         );
-        assert!(
-            runtime
-                .mark_order_packed(order_id)
-                .expect("order should mark packed")
-        );
-        let packed_summary = runtime.summary();
+        let scheduled_detail_summary = runtime.summary();
         assert_eq!(
-            packed_summary
+            scheduled_detail_summary
                 .orders_projection
                 .detail
                 .as_ref()
-                .expect("packed detail")
+                .expect("scheduled detail")
                 .status,
-            OrderStatus::Packed
+            OrderStatus::Scheduled
         );
-        assert_eq!(packed_summary.orders_projection.list.rows.len(), 0);
         assert_eq!(
-            packed_summary
+            scheduled_detail_summary
                 .orders_projection
                 .list
                 .summary
                 .scheduled_orders,
-            0
+            1
         );
         assert_eq!(
-            packed_summary.orders_projection.list.summary.packed_orders,
+            scheduled_detail_summary
+                .orders_projection
+                .list
+                .summary
+                .packed_orders,
             1
         );
 
@@ -17651,23 +17597,18 @@ mod tests {
 
         assert!(
             runtime
-                .open_order_detail(order_id)
+                .open_order_detail(packed_order_id)
                 .expect("packed detail should open")
         );
-        assert!(
-            runtime
-                .mark_order_completed(order_id)
-                .expect("order should mark completed")
-        );
-        let completed_summary = runtime.summary();
+        let packed_detail_summary = runtime.summary();
         assert_eq!(
-            completed_summary
+            packed_detail_summary
                 .orders_projection
                 .detail
                 .as_ref()
-                .expect("completed detail")
+                .expect("packed detail")
                 .status,
-            OrderStatus::Completed
+            OrderStatus::Packed
         );
 
         assert!(
@@ -17678,6 +17619,22 @@ mod tests {
         assert_eq!(runtime.summary().orders_projection.list.rows.len(), 1);
         assert_eq!(
             runtime.summary().orders_projection.list.rows[0].status,
+            OrderStatus::Completed
+        );
+
+        assert!(
+            runtime
+                .open_order_detail(completed_order_id)
+                .expect("completed detail should open")
+        );
+        assert_eq!(
+            runtime
+                .summary()
+                .orders_projection
+                .detail
+                .as_ref()
+                .expect("completed detail")
+                .status,
             OrderStatus::Completed
         );
     }

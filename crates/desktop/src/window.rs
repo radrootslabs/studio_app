@@ -2099,7 +2099,7 @@ impl HomeView {
         }
     }
 
-    fn mark_order_packed(&mut self, order_id: OrderId, cx: &mut Context<Self>) {
+    fn publish_order_ready_for_pickup(&mut self, order_id: OrderId, cx: &mut Context<Self>) {
         match self.runtime.publish_order_ready_for_pickup(order_id) {
             Ok(true) => cx.notify(),
             Ok(false) => {}
@@ -2115,7 +2115,7 @@ impl HomeView {
         }
     }
 
-    fn mark_order_completed(&mut self, order_id: OrderId, cx: &mut Context<Self>) {
+    fn publish_order_delivered(&mut self, order_id: OrderId, cx: &mut Context<Self>) {
         match self.runtime.publish_order_delivered(order_id) {
             Ok(true) => cx.notify(),
             Ok(false) => {}
@@ -4180,7 +4180,7 @@ impl HomeView {
                     app_shared_text(AppTextKey::OrdersActionMarkPacked),
                     cx.listener({
                         let order_id = detail.order_id;
-                        move |this, _, _, cx| this.mark_order_packed(order_id, cx)
+                        move |this, _, _, cx| this.publish_order_ready_for_pickup(order_id, cx)
                     }),
                     cx,
                 )
@@ -4192,7 +4192,7 @@ impl HomeView {
                     app_shared_text(AppTextKey::OrdersActionMarkCompleted),
                     cx.listener({
                         let order_id = detail.order_id;
-                        move |this, _, _, cx| this.mark_order_completed(order_id, cx)
+                        move |this, _, _, cx| this.publish_order_delivered(order_id, cx)
                     }),
                     cx,
                 )
@@ -4555,11 +4555,11 @@ impl HomeView {
             }),
             cx.listener({
                 let order_id = row.order_id;
-                move |this, _, _, cx| this.mark_order_packed(order_id, cx)
+                move |this, _, _, cx| this.publish_order_ready_for_pickup(order_id, cx)
             }),
             cx.listener({
                 let order_id = row.order_id;
-                move |this, _, _, cx| this.mark_order_completed(order_id, cx)
+                move |this, _, _, cx| this.publish_order_delivered(order_id, cx)
             }),
             cx,
         );

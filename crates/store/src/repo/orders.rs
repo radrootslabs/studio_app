@@ -279,34 +279,6 @@ impl<'a> AppOrdersRepository<'a> {
         }))
     }
 
-    pub fn mark_order_packed(
-        &self,
-        farm_id: FarmId,
-        order_id: OrderId,
-    ) -> Result<bool, AppSqliteError> {
-        self.transition_order_status(
-            farm_id,
-            order_id,
-            OrderStatus::Scheduled,
-            OrderStatus::Packed,
-            "mark order packed",
-        )
-    }
-
-    pub fn mark_order_completed(
-        &self,
-        farm_id: FarmId,
-        order_id: OrderId,
-    ) -> Result<bool, AppSqliteError> {
-        self.transition_order_status(
-            farm_id,
-            order_id,
-            OrderStatus::Packed,
-            OrderStatus::Completed,
-            "mark order completed",
-        )
-    }
-
     fn load_order_records(
         &self,
         farm_id: FarmId,
@@ -1151,36 +1123,6 @@ impl<'a> AppOrdersRepository<'a> {
         }
 
         Ok(roster)
-    }
-
-    fn transition_order_status(
-        &self,
-        farm_id: FarmId,
-        order_id: OrderId,
-        current_status: OrderStatus,
-        next_status: OrderStatus,
-        operation: &'static str,
-    ) -> Result<bool, AppSqliteError> {
-        let updated_rows = self
-            .connection
-            .execute(
-                "update orders
-                 set
-                    status = ?3,
-                    updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now')
-                 where farm_id = ?1
-                   and id = ?2
-                   and status = ?4",
-                params![
-                    farm_id.to_string(),
-                    order_id.to_string(),
-                    next_status.storage_key(),
-                    current_status.storage_key(),
-                ],
-            )
-            .map_err(|source| AppSqliteError::Query { operation, source })?;
-
-        Ok(updated_rows > 0)
     }
 }
 
@@ -2067,67 +2009,6 @@ mod tests {
     }
 
     #[test]
-    fn order_status_transitions_are_guarded() {
-        let store = AppSqliteStore::open(DatabaseTarget::InMemory).expect("store should open");
-        let connection = store.connection();
-        let farm_id = FarmId::new();
-        let scheduled_order_id = OrderId::new();
-        let packed_order_id = OrderId::new();
-
-        insert_farm(
-            connection,
-            farm_id,
-            "Willow farm",
-            "ready",
-            "2026-04-17T08:00:00Z",
-        );
-        insert_order(
-            connection,
-            scheduled_order_id,
-            farm_id,
-            None,
-            "R-100",
-            "Casey",
-            "scheduled",
-            "2026-04-17T10:00:00Z",
-        );
-        insert_order(
-            connection,
-            packed_order_id,
-            farm_id,
-            None,
-            "R-101",
-            "Taylor",
-            "packed",
-            "2026-04-17T11:00:00Z",
-        );
-
-        assert!(
-            store
-                .mark_order_packed(farm_id, scheduled_order_id)
-                .expect("scheduled order should mark packed")
-        );
-        assert!(
-            !store
-                .mark_order_packed(farm_id, packed_order_id)
-                .expect("packed order should not mark packed twice")
-        );
-        assert!(
-            store
-                .mark_order_completed(farm_id, packed_order_id)
-                .expect("packed order should mark completed")
-        );
-        assert_eq!(
-            read_order_status(connection, scheduled_order_id),
-            OrderStatus::Packed
-        );
-        assert_eq!(
-            read_order_status(connection, packed_order_id),
-            OrderStatus::Completed
-        );
-    }
-
-    #[test]
     fn orders_list_stays_aligned_with_today_needs_action_order_boundary() {
         let store = AppSqliteStore::open(DatabaseTarget::InMemory).expect("store should open");
         let connection = store.connection();
@@ -2450,17 +2331,5 @@ mod tests {
                 ],
             )
             .expect("order line insert should succeed");
-    }
-
-    fn read_order_status(connection: &Connection, order_id: OrderId) -> OrderStatus {
-        let status = connection
-            .query_row(
-                "select status from orders where id = ?1 limit 1",
-                params![order_id.to_string()],
-                |row| row.get::<_, String>(0),
-            )
-            .expect("order status should load");
-
-        super::parse_order_status("orders.status", status).expect("order status should decode")
     }
 }

@@ -258,24 +258,6 @@ impl AppSqliteStore {
             .load_pack_day_output_source(farm_id, fulfillment_window_id)
     }
 
-    pub fn mark_order_packed(
-        &self,
-        farm_id: FarmId,
-        order_id: OrderId,
-    ) -> Result<bool, AppSqliteError> {
-        self.orders_repository()
-            .mark_order_packed(farm_id, order_id)
-    }
-
-    pub fn mark_order_completed(
-        &self,
-        farm_id: FarmId,
-        order_id: OrderId,
-    ) -> Result<bool, AppSqliteError> {
-        self.orders_repository()
-            .mark_order_completed(farm_id, order_id)
-    }
-
     pub fn load_reminder_schedule(
         &self,
         account_id: &str,
