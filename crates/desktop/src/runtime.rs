@@ -217,8 +217,11 @@ struct ResolvedAppOrderFulfillmentEvidence {
     status: RadrootsActiveTradeFulfillmentState,
 }
 
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 struct ResolvedAppOrderLifecycleEvidence {
+    status: RadrootsActiveOrderStatus,
+    agreement_event_id: Option<String>,
+    last_event_id: Option<String>,
     decision: Option<ResolvedAppOrderDecisionEvidence>,
     revision_proposals: Vec<ResolvedAppOrderRevisionProposalEvidence>,
     revision_decisions: Vec<ResolvedAppOrderRevisionDecisionEvidence>,
@@ -2593,7 +2596,10 @@ impl DesktopAppRuntimeState {
                 });
             }
             RadrootsActiveTradeFulfillmentState::ReadyForPickup => match latest_fulfillment {
-                None => decision.event_id.clone(),
+                None => active_order_current_parent_event_id(
+                    &lifecycle,
+                    "seller order fulfillment requires current lifecycle parent evidence",
+                )?,
                 Some(fulfillment)
                     if matches!(
                         fulfillment.status,
@@ -2625,9 +2631,12 @@ impl DesktopAppRuntimeState {
                     });
                 }
             },
-            RadrootsActiveTradeFulfillmentState::SellerCancelled => latest_fulfillment
-                .map(|fulfillment| fulfillment.event_id.clone())
-                .unwrap_or_else(|| decision.event_id.clone()),
+            RadrootsActiveTradeFulfillmentState::SellerCancelled => {
+                active_order_current_parent_event_id(
+                    &lifecycle,
+                    "seller order fulfillment requires current lifecycle parent evidence",
+                )?
+            }
         };
         let payload = AppOrderFulfillmentPublishPayload {
             context: AppPublishContext::new(account_id, "seller_order_fulfillment"),
@@ -3025,19 +3034,18 @@ impl DesktopAppRuntimeState {
                 reason: "buyer order cancellation requires an unfulfilled order",
             });
         }
-        let prev_event_id = match detail.status {
-            BuyerOrderStatus::Placed => request.request_event_id.clone(),
-            BuyerOrderStatus::Scheduled => lifecycle
-                .decision
-                .as_ref()
-                .map(|decision| decision.event_id.clone())
-                .ok_or(AppSqliteError::InvalidProjection {
-                    reason: "buyer order cancellation requires order decision evidence",
-                })?,
-            BuyerOrderStatus::Ready
-            | BuyerOrderStatus::Completed
-            | BuyerOrderStatus::Declined
-            | BuyerOrderStatus::Refunded => {
+        let prev_event_id = match lifecycle.status {
+            RadrootsActiveOrderStatus::Requested => request.request_event_id.clone(),
+            RadrootsActiveOrderStatus::Accepted => active_order_current_parent_event_id(
+                &lifecycle,
+                "buyer order cancellation requires order decision evidence",
+            )?,
+            RadrootsActiveOrderStatus::Missing
+            | RadrootsActiveOrderStatus::Declined
+            | RadrootsActiveOrderStatus::Cancelled
+            | RadrootsActiveOrderStatus::Completed
+            | RadrootsActiveOrderStatus::Disputed
+            | RadrootsActiveOrderStatus::Invalid => {
                 return Err(AppSqliteError::InvalidProjection {
                     reason: "buyer order cancellation requires an open order",
                 });
@@ -5574,6 +5582,9 @@ impl DesktopAppRuntimeState {
             .transpose()?;
 
         Ok(ResolvedAppOrderLifecycleEvidence {
+            status: projection.status,
+            agreement_event_id: projection.agreement_event_id,
+            last_event_id: projection.last_event_id,
             decision,
             revision_proposals: buckets
                 .revision_proposals
@@ -9356,36 +9367,23 @@ fn active_order_event_record_context(
     Ok((context.counterparty_pubkey, root_event_id, prev_event_id))
 }
 
+fn active_order_current_parent_event_id(
+    lifecycle: &ResolvedAppOrderLifecycleEvidence,
+    reason: &'static str,
+) -> Result<String, AppSqliteError> {
+    lifecycle
+        .last_event_id
+        .clone()
+        .ok_or(AppSqliteError::InvalidProjection { reason })
+}
+
 fn active_order_revision_parent_event_id(
     lifecycle: &ResolvedAppOrderLifecycleEvidence,
 ) -> Option<String> {
-    let decision = lifecycle.decision.as_ref()?;
-    let mut parent_event_id = decision.event_id.clone();
-    loop {
-        let proposals = lifecycle
-            .revision_proposals
-            .iter()
-            .filter(|proposal| proposal.payload.prev_event_id == parent_event_id)
-            .collect::<Vec<_>>();
-        let proposal = match proposals.as_slice() {
-            [] => return Some(parent_event_id),
-            [proposal] => *proposal,
-            _ => return None,
-        };
-        let decisions = lifecycle
-            .revision_decisions
-            .iter()
-            .filter(|decision| {
-                decision.payload.prev_event_id == proposal.event_id
-                    && decision.payload.revision_id == proposal.payload.revision_id
-            })
-            .collect::<Vec<_>>();
-        let decision = match decisions.as_slice() {
-            [] => return None,
-            [decision] => *decision,
-            _ => return None,
-        };
-        parent_event_id.clone_from(&decision.event_id);
+    if active_order_pending_revision_proposal(lifecycle).is_some() {
+        None
+    } else {
+        lifecycle.last_event_id.clone()
     }
 }
 
@@ -9730,7 +9728,8 @@ mod tests {
         RadrootsTradeOrderCancelled, RadrootsTradeOrderDecision, RadrootsTradeOrderDecisionEvent,
         RadrootsTradeOrderEconomicItem, RadrootsTradeOrderEconomics, RadrootsTradeOrderItem,
         RadrootsTradeOrderRequested, RadrootsTradeOrderRevisionDecision,
-        RadrootsTradeOrderRevisionProposed, RadrootsTradePricingBasis,
+        RadrootsTradeOrderRevisionDecisionEvent, RadrootsTradeOrderRevisionProposed,
+        RadrootsTradePricingBasis,
     };
     use radroots_sql_core::{SqlExecutor, SqliteExecutor};
     use serde_json::json;
@@ -15023,6 +15022,84 @@ mod tests {
     }
 
     #[test]
+    fn runtime_publishes_seller_order_fulfillment_ready_from_revision_parent() {
+        for (label, revision_decision) in [
+            ("accepted", RadrootsTradeOrderRevisionDecision::Accepted),
+            (
+                "declined",
+                RadrootsTradeOrderRevisionDecision::Declined {
+                    reason: "keep original order".to_owned(),
+                },
+            ),
+        ] {
+            let relay = ThreadedAckRelay::spawn();
+            let runtime_label = format!("seller_order_fulfillment_revision_parent_{label}");
+            let (runtime, paths, order_id, product_id, seller_pubkey, buyer_pubkey) =
+                seller_order_decision_runtime(runtime_label.as_str(), 6, 2);
+            install_direct_relay_sync_transport(&runtime, &relay);
+            let listing_key = super::d_tag_from_uuid(product_id.as_uuid());
+            let listing_addr = format!("30402:{seller_pubkey}:{listing_key}");
+            let request_event_id = "event-app:signed_event:order-request:seller-order-decision-1";
+            let decision_event_id = append_signed_order_decision_record(
+                &paths,
+                "seller-order-decision-1",
+                request_event_id,
+                listing_addr.as_str(),
+                buyer_pubkey.as_str(),
+                seller_pubkey.as_str(),
+                2,
+            );
+            let proposal_key = format!("seller-order-ready-revision-{label}-proposal");
+            let proposal_event_id = append_signed_order_revision_proposal_record_with_prev(
+                &paths,
+                "seller-order-decision-1",
+                proposal_key.as_str(),
+                request_event_id,
+                decision_event_id.as_str(),
+                listing_addr.as_str(),
+                buyer_pubkey.as_str(),
+                seller_pubkey.as_str(),
+            );
+            let revision_id = format!("revision-{proposal_key}");
+            let revision_decision_event_id = append_signed_order_revision_decision_record_with_prev(
+                &paths,
+                "seller-order-decision-1",
+                format!("seller-order-ready-revision-{label}-decision").as_str(),
+                request_event_id,
+                proposal_event_id.as_str(),
+                revision_id.as_str(),
+                listing_addr.as_str(),
+                buyer_pubkey.as_str(),
+                seller_pubkey.as_str(),
+                revision_decision,
+            );
+            runtime
+                .refresh_shared_local_events()
+                .expect("seller revision fixture should import");
+            set_persisted_order_status(&runtime, order_id, "scheduled");
+
+            assert!(
+                runtime
+                    .publish_order_ready_for_pickup(order_id)
+                    .expect("seller ready fulfillment should publish from revision parent")
+            );
+
+            assert_eq!(relay.event_count(), 1);
+            let fulfillment_events =
+                shared_order_events_by_kind(&paths, 3433, seller_pubkey.as_str());
+            assert_eq!(fulfillment_events.len(), 1);
+            let ready_event = fulfillment_events.first().expect("ready event");
+            assert!(event_has_tag(
+                ready_event,
+                "e_prev",
+                revision_decision_event_id.as_str()
+            ));
+
+            cleanup_bootstrapped_runtime_paths(&paths);
+        }
+    }
+
+    #[test]
     fn runtime_publishes_seller_order_fulfillment_delivered_when_coarse_status_lags() {
         let relay = ThreadedAckRelay::spawn();
         let (runtime, paths, order_id, product_id, seller_pubkey, buyer_pubkey) =
@@ -15956,6 +16033,81 @@ mod tests {
         ));
 
         cleanup_bootstrapped_runtime_paths(&fixture.paths);
+    }
+
+    #[test]
+    fn runtime_publishes_linked_buyer_cancellation_from_revision_parent() {
+        for (label, revision_decision) in [
+            ("accepted", RadrootsTradeOrderRevisionDecision::Accepted),
+            (
+                "declined",
+                RadrootsTradeOrderRevisionDecision::Declined {
+                    reason: "keep original order".to_owned(),
+                },
+            ),
+        ] {
+            let relay = ThreadedAckRelay::spawn();
+            let fixture_label = format!("linked_buyer_order_cancel_revision_{label}");
+            let fixture = linked_buyer_lifecycle_runtime(fixture_label.as_str(), false);
+            let proposal_key = format!("linked-buyer-order-cancel-revision-{label}-proposal");
+            let proposal_event_id = append_signed_order_revision_proposal_record_with_prev(
+                &fixture.paths,
+                fixture.trade_order_id.as_str(),
+                proposal_key.as_str(),
+                fixture.request_event_id.as_str(),
+                fixture.decision_event_id.as_str(),
+                fixture.listing_addr.as_str(),
+                fixture.buyer_pubkey.as_str(),
+                fixture.seller_pubkey.as_str(),
+            );
+            let revision_id = format!("revision-{proposal_key}");
+            let revision_decision_event_id = append_signed_order_revision_decision_record_with_prev(
+                &fixture.paths,
+                fixture.trade_order_id.as_str(),
+                format!("linked-buyer-order-cancel-revision-{label}-decision").as_str(),
+                fixture.request_event_id.as_str(),
+                proposal_event_id.as_str(),
+                revision_id.as_str(),
+                fixture.listing_addr.as_str(),
+                fixture.buyer_pubkey.as_str(),
+                fixture.seller_pubkey.as_str(),
+                revision_decision,
+            );
+            install_direct_relay_sync_transport(&fixture.runtime, &relay);
+            fixture
+                .runtime
+                .refresh_shared_local_events()
+                .expect("linked buyer revision events should import");
+            assert!(
+                fixture
+                    .runtime
+                    .open_personal_order_detail(fixture.order_id)
+                    .expect("linked buyer order detail should open")
+            );
+            set_persisted_order_status(&fixture.runtime, fixture.order_id, "scheduled");
+
+            assert!(
+                fixture
+                    .runtime
+                    .publish_buyer_order_cancel(fixture.order_id)
+                    .expect("linked buyer cancellation should publish from revision parent")
+            );
+
+            assert_eq!(relay.event_count(), 1);
+            let cancellation_events =
+                shared_order_events_by_kind(&fixture.paths, 3432, fixture.buyer_pubkey.as_str());
+            assert_eq!(cancellation_events.len(), 1);
+            let cancellation_event = cancellation_events
+                .first()
+                .expect("linked buyer cancellation event");
+            assert!(event_has_tag(
+                cancellation_event,
+                "e_prev",
+                revision_decision_event_id.as_str()
+            ));
+
+            cleanup_bootstrapped_runtime_paths(&fixture.paths);
+        }
     }
 
     #[test]
@@ -20198,6 +20350,50 @@ mod tests {
             event_id.as_str(),
             i64::from(parts.kind),
             seller_pubkey,
+            listing_addr,
+            json!(parts.tags),
+            parts.content,
+        );
+        event_id
+    }
+
+    fn append_signed_order_revision_decision_record_with_prev(
+        paths: &AppDesktopRuntimePaths,
+        trade_order_id: &str,
+        event_key: &str,
+        request_event_id: &str,
+        proposal_event_id: &str,
+        revision_id: &str,
+        listing_addr: &str,
+        buyer_pubkey: &str,
+        seller_pubkey: &str,
+        decision: RadrootsTradeOrderRevisionDecision,
+    ) -> String {
+        let payload = RadrootsTradeOrderRevisionDecisionEvent {
+            revision_id: revision_id.to_owned(),
+            order_id: trade_order_id.to_owned(),
+            listing_addr: listing_addr.to_owned(),
+            buyer_pubkey: buyer_pubkey.to_owned(),
+            seller_pubkey: seller_pubkey.to_owned(),
+            root_event_id: request_event_id.to_owned(),
+            prev_event_id: proposal_event_id.to_owned(),
+            decision,
+        };
+        let parts = radroots_sdk::trade::build_order_revision_decision_draft(
+            request_event_id,
+            proposal_event_id,
+            &payload,
+        )
+        .expect("order revision decision draft should build")
+        .into_wire_parts();
+        let record_id = format!("app:signed_event:revision-decision:{event_key}");
+        let event_id = format!("event-{record_id}");
+        append_trade_signed_event_record(
+            paths,
+            record_id.as_str(),
+            event_id.as_str(),
+            i64::from(parts.kind),
+            buyer_pubkey,
             listing_addr,
             json!(parts.tags),
             parts.content,
