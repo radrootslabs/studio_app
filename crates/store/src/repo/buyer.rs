@@ -43,11 +43,12 @@ impl SelectedBuyerOrderScope {
         account_id: impl AsRef<str>,
         selected_account_pubkey: Option<&str>,
     ) -> Self {
-        let mut context_keys = vec![format!("account:{}", account_id.as_ref().trim())];
-        if let Some(pubkey) = selected_account_pubkey
-            .map(str::trim)
-            .filter(|pubkey| !pubkey.is_empty())
-        {
+        let mut context_keys = Vec::new();
+        let account_id = account_id.as_ref().trim();
+        if !account_id.is_empty() {
+            context_keys.push(format!("account:{account_id}"));
+        }
+        if let Some(pubkey) = selected_account_pubkey.and_then(normalized_nostr_pubkey) {
             context_keys.push(format!("nostr:{pubkey}"));
         }
         Self::from_context_keys(context_keys)
@@ -66,6 +67,15 @@ impl SelectedBuyerOrderScope {
 
     fn context_keys(&self) -> &[String] {
         self.context_keys.as_slice()
+    }
+}
+
+fn normalized_nostr_pubkey(pubkey: &str) -> Option<String> {
+    let pubkey = pubkey.trim().to_ascii_lowercase();
+    if pubkey.len() == 64 && pubkey.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+        Some(pubkey)
+    } else {
+        None
     }
 }
 
@@ -2965,6 +2975,41 @@ mod tests {
 
     use super::AppBuyerRepository;
 
+    const LINKED_BUYER_PUBKEY: &str =
+        "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+
+    #[test]
+    fn selected_buyer_order_scope_uses_only_valid_context_keys() {
+        let upper_pubkey = LINKED_BUYER_PUBKEY.to_ascii_uppercase();
+        let valid_scope = SelectedBuyerOrderScope::for_selected_account(
+            " acct_buyer ",
+            Some(upper_pubkey.as_str()),
+        );
+        let expected_valid = vec![
+            "account:acct_buyer".to_owned(),
+            format!("nostr:{LINKED_BUYER_PUBKEY}"),
+        ];
+
+        let malformed_scope =
+            SelectedBuyerOrderScope::for_selected_account("acct_buyer", Some("buyer-pubkey"));
+        let expected_account_only = vec!["account:acct_buyer".to_owned()];
+
+        let blank_scope = SelectedBuyerOrderScope::for_selected_account(" ", Some(" "));
+        let duplicate_scope = SelectedBuyerOrderScope::from_context_keys([
+            format!("nostr:{LINKED_BUYER_PUBKEY}"),
+            format!("nostr:{LINKED_BUYER_PUBKEY}"),
+        ]);
+        let expected_deduped = vec![format!("nostr:{LINKED_BUYER_PUBKEY}")];
+
+        assert_eq!(valid_scope.context_keys(), expected_valid.as_slice());
+        assert_eq!(
+            malformed_scope.context_keys(),
+            expected_account_only.as_slice()
+        );
+        assert!(blank_scope.context_keys().is_empty());
+        assert_eq!(duplicate_scope.context_keys(), expected_deduped.as_slice());
+    }
+
     #[test]
     fn listing_relays_from_json_uses_only_acknowledged_or_observed_relays() {
         assert_eq!(
@@ -3109,6 +3154,7 @@ mod tests {
         let farm_id = insert_farm(connection, "Willow Farm", "ready");
         let account_order_id = OrderId::new();
         let relay_order_id = OrderId::new();
+        let linked_context_key = format!("nostr:{LINKED_BUYER_PUBKEY}");
         insert_order(
             connection,
             account_order_id,
@@ -3126,14 +3172,14 @@ mod tests {
             farm_id,
             "1002",
             "packed",
-            Some("nostr:buyer-pubkey"),
+            Some(linked_context_key.as_str()),
             "",
             "",
             "",
         );
 
         let scope =
-            SelectedBuyerOrderScope::for_selected_account("acct_buyer", Some("buyer-pubkey"));
+            SelectedBuyerOrderScope::for_selected_account("acct_buyer", Some(LINKED_BUYER_PUBKEY));
         let linked_orders = repository
             .load_buyer_orders_for_scope(&scope)
             .expect("linked buyer orders should load");
@@ -3506,12 +3552,12 @@ mod tests {
         connection
             .execute(
                 "update orders set buyer_context_key = ?1 where id = ?2",
-                params!["nostr:buyer-pubkey", order_id.to_string()],
+                params![format!("nostr:{LINKED_BUYER_PUBKEY}"), order_id.to_string()],
             )
             .expect("linked order context should mutate");
 
         let scope =
-            SelectedBuyerOrderScope::for_selected_account("acct_buyer", Some("buyer-pubkey"));
+            SelectedBuyerOrderScope::for_selected_account("acct_buyer", Some(LINKED_BUYER_PUBKEY));
         let linked_detail = repository
             .load_buyer_order_detail_for_scope(&scope, order_id)
             .expect("linked detail should load")
@@ -3528,7 +3574,7 @@ mod tests {
         let nostr_cart_line_count: u32 = connection
             .query_row(
                 "select count(*) from buyer_cart_lines where buyer_context_key = ?1",
-                params!["nostr:buyer-pubkey"],
+                params![format!("nostr:{LINKED_BUYER_PUBKEY}")],
                 |row| row.get(0),
             )
             .expect("nostr cart line count should load");
