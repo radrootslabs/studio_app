@@ -48,8 +48,8 @@ use radroots_studio_app_view::{
     BuyerContext, BuyerOrderDetailProjection, BuyerOrderReviewDraft, BuyerOrderStatus,
     BuyerProductDetailProjection, FarmId, FarmOrderMethod, FarmProfileRecord, FarmReadiness,
     FarmRulesProjection, FarmSetupDraft, FarmSetupProjection, FarmSummary, FarmerSection,
-    FulfillmentWindowId, LoggedOutStartupProjection, OrderDetailProjection, OrderId,
-    OrderRecoveryProjection, OrderStatus, OrdersFilter, OrdersListProjection,
+    FulfillmentWindowId, LoggedOutStartupProjection, OrderDetailProjection, OrderFulfillmentAction,
+    OrderId, OrderRecoveryProjection, OrderStatus, OrdersFilter, OrdersListProjection,
     OrdersScreenQueryState, PackDayBatchPrintStatus, PackDayExportBundle, PackDayExportInstanceId,
     PackDayExportStatus, PackDayHostHandoffKind, PackDayHostHandoffStatus, PackDayPrintKind,
     PackDayPrintStatus, PackDayProjection, PackDayScreenQueryState, PersonalSection,
@@ -805,21 +805,13 @@ impl DesktopAppRuntime {
         )
     }
 
-    pub fn publish_order_ready_for_pickup(
+    pub fn publish_order_fulfillment_update(
         &self,
         order_id: OrderId,
+        action: OrderFulfillmentAction,
     ) -> Result<bool, AppSqliteError> {
-        self.lock_state_mut().publish_seller_order_fulfillment(
-            order_id,
-            RadrootsActiveTradeFulfillmentState::ReadyForPickup,
-        )
-    }
-
-    pub fn publish_order_delivered(&self, order_id: OrderId) -> Result<bool, AppSqliteError> {
-        self.lock_state_mut().publish_seller_order_fulfillment(
-            order_id,
-            RadrootsActiveTradeFulfillmentState::Delivered,
-        )
+        self.lock_state_mut()
+            .publish_seller_order_fulfillment(order_id, action.fulfillment_status())
     }
 
     pub fn publish_order_revision_proposal(
@@ -2611,57 +2603,17 @@ impl DesktopAppRuntimeState {
                 reason: "seller order fulfillment requires a visible seller order",
             });
         };
-        let latest_fulfillment = lifecycle.latest_fulfillment.as_ref();
-        let prev_event_id = match status {
-            RadrootsActiveTradeFulfillmentState::AcceptedNotFulfilled
-            | RadrootsActiveTradeFulfillmentState::Preparing
-            | RadrootsActiveTradeFulfillmentState::OutForDelivery => {
-                return Err(AppSqliteError::InvalidProjection {
-                    reason: "seller order fulfillment status must be publishable",
-                });
-            }
-            RadrootsActiveTradeFulfillmentState::ReadyForPickup => match latest_fulfillment {
-                None => active_order_current_parent_event_id(
-                    &lifecycle,
-                    "seller order fulfillment requires current lifecycle parent evidence",
-                )?,
-                Some(fulfillment)
-                    if matches!(
-                        fulfillment.status,
-                        RadrootsActiveTradeFulfillmentState::AcceptedNotFulfilled
-                            | RadrootsActiveTradeFulfillmentState::Preparing
-                    ) =>
-                {
-                    fulfillment.event_id.clone()
-                }
-                Some(_) => {
-                    return Err(AppSqliteError::InvalidProjection {
-                        reason: "seller order ready for pickup requires accepted or preparing fulfillment evidence",
-                    });
-                }
-            },
-            RadrootsActiveTradeFulfillmentState::Delivered => match latest_fulfillment {
-                Some(fulfillment)
-                    if matches!(
-                        fulfillment.status,
-                        RadrootsActiveTradeFulfillmentState::ReadyForPickup
-                            | RadrootsActiveTradeFulfillmentState::OutForDelivery
-                    ) =>
-                {
-                    fulfillment.event_id.clone()
-                }
-                Some(_) | None => {
-                    return Err(AppSqliteError::InvalidProjection {
-                        reason: "seller order delivery requires ready fulfillment evidence",
-                    });
-                }
-            },
-            RadrootsActiveTradeFulfillmentState::SellerCancelled => {
-                active_order_current_parent_event_id(
-                    &lifecycle,
-                    "seller order fulfillment requires current lifecycle parent evidence",
-                )?
-            }
+        if !status.is_publishable_update() {
+            return Err(AppSqliteError::InvalidProjection {
+                reason: "seller order fulfillment status must be publishable",
+            });
+        }
+        let prev_event_id = match lifecycle.latest_fulfillment.as_ref() {
+            Some(fulfillment) => fulfillment.event_id.clone(),
+            None => active_order_current_parent_event_id(
+                &lifecycle,
+                "seller order fulfillment requires current lifecycle parent evidence",
+            )?,
         };
         let payload = AppOrderFulfillmentPublishPayload {
             context: AppPublishContext::new(account_id, "seller_order_fulfillment"),
@@ -9786,10 +9738,10 @@ mod tests {
         BuyerOrderStatus, FarmId, FarmOperatingRulesRecord, FarmOrderMethod, FarmProfileRecord,
         FarmReadiness, FarmReadinessBlocker, FarmRulesProjection, FarmSetupDraft,
         FarmSetupProjection, FarmSummary, FarmerActivationProjection, FarmerSection,
-        FulfillmentWindowId, FulfillmentWindowRecord, LoggedOutStartupProjection, OrderId,
-        OrderStatus, OrdersFilter, PackDayBatchPrintArtifact, PackDayBatchPrintFailureKind,
-        PackDayBatchPrintStatus, PackDayExportInstanceId, PackDayExportStatus,
-        PackDayHostHandoffKind, PackDayHostHandoffStatus, PackDayPackListRow,
+        FulfillmentWindowId, FulfillmentWindowRecord, LoggedOutStartupProjection,
+        OrderFulfillmentAction, OrderId, OrderStatus, OrdersFilter, PackDayBatchPrintArtifact,
+        PackDayBatchPrintFailureKind, PackDayBatchPrintStatus, PackDayExportInstanceId,
+        PackDayExportStatus, PackDayHostHandoffKind, PackDayHostHandoffStatus, PackDayPackListRow,
         PackDayPrintFailureKind, PackDayPrintKind, PackDayPrintStatus, PackDayProductTotalRow,
         PackDayProjection, PackDayRosterRow, PersonalSection, PickupLocationId,
         PickupLocationRecord, ProductEditorDraft, ProductId, ProductPublishBlocker, ProductStatus,
@@ -15069,61 +15021,80 @@ mod tests {
     }
 
     #[test]
-    fn runtime_publishes_seller_fulfillment_updates_and_projects_signed_evidence() {
-        let relay = ThreadedAckRelay::spawn();
-        let (runtime, paths, order_id, product_id, seller_pubkey, buyer_pubkey) =
-            seller_order_decision_runtime("seller_order_fulfillment_publish", 6, 2);
-        install_direct_relay_sync_transport(&runtime, &relay);
-        publish_prior_relay_seller_order_accept(
-            &runtime,
-            &relay,
-            order_id,
-            product_id,
-            seller_pubkey.as_str(),
-            buyer_pubkey.as_str(),
-        );
+    fn runtime_publishes_all_seller_fulfillment_states_and_projects_signed_evidence() {
+        for (label, action, expected_status, expected_order_status) in [
+            (
+                "preparing",
+                OrderFulfillmentAction::Preparing,
+                RadrootsActiveTradeFulfillmentState::Preparing,
+                "scheduled",
+            ),
+            (
+                "ready_for_pickup",
+                OrderFulfillmentAction::ReadyForPickup,
+                RadrootsActiveTradeFulfillmentState::ReadyForPickup,
+                "packed",
+            ),
+            (
+                "out_for_delivery",
+                OrderFulfillmentAction::OutForDelivery,
+                RadrootsActiveTradeFulfillmentState::OutForDelivery,
+                "packed",
+            ),
+            (
+                "delivered",
+                OrderFulfillmentAction::Delivered,
+                RadrootsActiveTradeFulfillmentState::Delivered,
+                "packed",
+            ),
+            (
+                "seller_cancelled",
+                OrderFulfillmentAction::SellerCancelled,
+                RadrootsActiveTradeFulfillmentState::SellerCancelled,
+                "declined",
+            ),
+        ] {
+            let relay = ThreadedAckRelay::spawn();
+            let runtime_label = format!("seller_order_fulfillment_publish_{label}");
+            let (runtime, paths, order_id, product_id, seller_pubkey, buyer_pubkey) =
+                seller_order_decision_runtime(runtime_label.as_str(), 6, 2);
+            install_direct_relay_sync_transport(&runtime, &relay);
+            publish_prior_relay_seller_order_accept(
+                &runtime,
+                &relay,
+                order_id,
+                product_id,
+                seller_pubkey.as_str(),
+                buyer_pubkey.as_str(),
+            );
 
-        assert!(
-            runtime
-                .publish_order_ready_for_pickup(order_id)
-                .expect("seller order ready update should publish")
-        );
+            assert!(
+                runtime
+                    .publish_order_fulfillment_update(order_id, action)
+                    .expect("seller fulfillment update should publish")
+            );
 
-        assert_eq!(persisted_order_status(&runtime, order_id), "packed");
-        assert_eq!(relay.event_count(), 2);
-        let fulfillment_events = shared_order_events_by_kind(&paths, 3433, seller_pubkey.as_str());
-        assert_eq!(fulfillment_events.len(), 1);
-        let ready_event = fulfillment_events.first().expect("ready event");
-        let ready_envelope = radroots_sdk::trade::parse_fulfillment_update(ready_event)
-            .expect("ready fulfillment should parse");
-        assert_eq!(
-            ready_envelope.payload.status,
-            RadrootsActiveTradeFulfillmentState::ReadyForPickup
-        );
-        assert!(event_has_tag(
-            ready_event,
-            "e_root",
-            "event-app:signed_event:order-request:seller-order-decision-1"
-        ));
+            assert_eq!(
+                persisted_order_status(&runtime, order_id),
+                expected_order_status
+            );
+            assert_eq!(relay.event_count(), 2);
+            let fulfillment_events =
+                shared_order_events_by_kind(&paths, 3433, seller_pubkey.as_str());
+            assert_eq!(fulfillment_events.len(), 1);
+            let fulfillment_event = fulfillment_events.first().expect("fulfillment event");
+            let envelope = radroots_sdk::trade::parse_fulfillment_update(fulfillment_event)
+                .expect("fulfillment should parse");
+            assert_eq!(envelope.payload.status, expected_status);
+            assert!(event_has_tag(
+                fulfillment_event,
+                "e_root",
+                "event-app:signed_event:order-request:seller-order-decision-1"
+            ));
+            assert!(event_has_nonempty_value_tag(fulfillment_event, "e_prev"));
 
-        assert!(
-            runtime
-                .publish_order_delivered(order_id)
-                .expect("seller order delivered update should publish")
-        );
-
-        assert_eq!(relay.event_count(), 3);
-        let fulfillment_events = shared_order_events_by_kind(&paths, 3433, seller_pubkey.as_str());
-        assert_eq!(fulfillment_events.len(), 2);
-        assert!(fulfillment_events.iter().any(|event| {
-            radroots_sdk::trade::parse_fulfillment_update(event)
-                .map(|envelope| {
-                    envelope.payload.status == RadrootsActiveTradeFulfillmentState::Delivered
-                })
-                .unwrap_or(false)
-        }));
-
-        cleanup_bootstrapped_runtime_paths(&paths);
+            cleanup_bootstrapped_runtime_paths(&paths);
+        }
     }
 
     #[test]
@@ -15185,7 +15156,10 @@ mod tests {
 
             assert!(
                 runtime
-                    .publish_order_ready_for_pickup(order_id)
+                    .publish_order_fulfillment_update(
+                        order_id,
+                        OrderFulfillmentAction::ReadyForPickup,
+                    )
                     .expect("seller ready fulfillment should publish from revision parent")
             );
 
@@ -15240,7 +15214,7 @@ mod tests {
 
         assert!(
             runtime
-                .publish_order_delivered(order_id)
+                .publish_order_fulfillment_update(order_id, OrderFulfillmentAction::Delivered)
                 .expect("seller delivered fulfillment should publish from workflow evidence")
         );
 
@@ -15268,7 +15242,7 @@ mod tests {
     }
 
     #[test]
-    fn runtime_rejects_seller_order_fulfillment_delivered_without_ready_evidence() {
+    fn runtime_publishes_seller_order_fulfillment_delivered_without_ready_evidence() {
         for (label, latest_fulfillment) in [
             ("seller_order_fulfillment_delivery_missing_ready", None),
             (
@@ -15308,17 +15282,37 @@ mod tests {
                 .refresh_shared_local_events()
                 .expect("seller fulfillment fixture should import");
 
-            let error = runtime
-                .publish_order_delivered(order_id)
-                .expect_err("seller delivered fulfillment should require ready evidence");
+            assert!(
+                runtime
+                    .publish_order_fulfillment_update(order_id, OrderFulfillmentAction::Delivered)
+                    .expect("seller delivered fulfillment should publish")
+            );
 
-            assert!(matches!(
-                error,
-                AppSqliteError::InvalidProjection {
-                    reason: "seller order delivery requires ready fulfillment evidence"
-                }
+            assert_eq!(persisted_order_status(&runtime, order_id), "packed");
+            assert_eq!(relay.event_count(), 1);
+            let fulfillment_events =
+                shared_order_events_by_kind(&paths, 3433, seller_pubkey.as_str());
+            let delivered_event = fulfillment_events
+                .iter()
+                .find(|event| {
+                    radroots_sdk::trade::parse_fulfillment_update(event)
+                        .map(|envelope| {
+                            envelope.payload.status
+                                == RadrootsActiveTradeFulfillmentState::Delivered
+                        })
+                        .unwrap_or(false)
+                })
+                .expect("delivered fulfillment event should exist");
+            assert!(event_has_tag(
+                delivered_event,
+                "e_prev",
+                latest_fulfillment
+                    .map(|_| {
+                        "event-app:signed_event:fulfillment:seller-order-decision-1".to_owned()
+                    })
+                    .unwrap_or_else(|| decision_event_id.clone())
+                    .as_str()
             ));
-            assert_eq!(relay.event_count(), 0);
             cleanup_bootstrapped_runtime_paths(&paths);
         }
     }
@@ -15383,7 +15377,7 @@ mod tests {
             }
 
             let error = runtime
-                .publish_order_delivered(order_id)
+                .publish_order_fulfillment_update(order_id, OrderFulfillmentAction::Delivered)
                 .expect_err("seller delivered fulfillment should reject reducer-invalid evidence");
 
             assert_order_lifecycle_evidence_invalid(error);
@@ -15440,7 +15434,7 @@ mod tests {
             }
 
             let error = runtime
-                .publish_order_ready_for_pickup(order_id)
+                .publish_order_fulfillment_update(order_id, OrderFulfillmentAction::ReadyForPickup)
                 .expect_err("seller ready fulfillment should reject invalid terminal evidence");
 
             assert_order_lifecycle_evidence_invalid(error);
@@ -21624,6 +21618,13 @@ mod tests {
         event.tags.iter().any(|tag| {
             tag.first().map(String::as_str) == Some(key)
                 && tag.get(1).map(String::as_str) == Some(value)
+        })
+    }
+
+    fn event_has_nonempty_value_tag(event: &radroots_sdk::RadrootsNostrEvent, key: &str) -> bool {
+        event.tags.iter().any(|tag| {
+            tag.first().map(String::as_str) == Some(key)
+                && tag.get(1).map(|value| !value.is_empty()).unwrap_or(false)
         })
     }
 

@@ -1686,18 +1686,87 @@ pub struct OrdersScreenQueryState {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
+pub enum OrderFulfillmentAction {
+    Preparing,
+    ReadyForPickup,
+    OutForDelivery,
+    Delivered,
+    SellerCancelled,
+}
+
+impl OrderFulfillmentAction {
+    pub const ALL: &'static [Self] = &[
+        Self::Preparing,
+        Self::ReadyForPickup,
+        Self::OutForDelivery,
+        Self::Delivered,
+        Self::SellerCancelled,
+    ];
+
+    pub const fn storage_key(self) -> &'static str {
+        match self {
+            Self::Preparing => "publish_preparing",
+            Self::ReadyForPickup => "publish_ready_for_pickup",
+            Self::OutForDelivery => "publish_out_for_delivery",
+            Self::Delivered => "publish_delivered",
+            Self::SellerCancelled => "publish_seller_cancelled",
+        }
+    }
+
+    pub const fn fulfillment_status(self) -> RadrootsActiveTradeFulfillmentState {
+        match self {
+            Self::Preparing => RadrootsActiveTradeFulfillmentState::Preparing,
+            Self::ReadyForPickup => RadrootsActiveTradeFulfillmentState::ReadyForPickup,
+            Self::OutForDelivery => RadrootsActiveTradeFulfillmentState::OutForDelivery,
+            Self::Delivered => RadrootsActiveTradeFulfillmentState::Delivered,
+            Self::SellerCancelled => RadrootsActiveTradeFulfillmentState::SellerCancelled,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum OrderPrimaryAction {
     Review,
+    PublishPreparing,
     PublishReadyForPickup,
+    PublishOutForDelivery,
     PublishDelivered,
+    PublishSellerCancelled,
 }
 
 impl OrderPrimaryAction {
     pub const fn storage_key(self) -> &'static str {
         match self {
             Self::Review => "review",
+            Self::PublishPreparing => "publish_preparing",
             Self::PublishReadyForPickup => "publish_ready_for_pickup",
+            Self::PublishOutForDelivery => "publish_out_for_delivery",
             Self::PublishDelivered => "publish_delivered",
+            Self::PublishSellerCancelled => "publish_seller_cancelled",
+        }
+    }
+
+    pub const fn fulfillment_action(self) -> Option<OrderFulfillmentAction> {
+        match self {
+            Self::Review => None,
+            Self::PublishPreparing => Some(OrderFulfillmentAction::Preparing),
+            Self::PublishReadyForPickup => Some(OrderFulfillmentAction::ReadyForPickup),
+            Self::PublishOutForDelivery => Some(OrderFulfillmentAction::OutForDelivery),
+            Self::PublishDelivered => Some(OrderFulfillmentAction::Delivered),
+            Self::PublishSellerCancelled => Some(OrderFulfillmentAction::SellerCancelled),
+        }
+    }
+}
+
+impl From<OrderFulfillmentAction> for OrderPrimaryAction {
+    fn from(action: OrderFulfillmentAction) -> Self {
+        match action {
+            OrderFulfillmentAction::Preparing => Self::PublishPreparing,
+            OrderFulfillmentAction::ReadyForPickup => Self::PublishReadyForPickup,
+            OrderFulfillmentAction::OutForDelivery => Self::PublishOutForDelivery,
+            OrderFulfillmentAction::Delivered => Self::PublishDelivered,
+            OrderFulfillmentAction::SellerCancelled => Self::PublishSellerCancelled,
         }
     }
 }
@@ -1728,6 +1797,7 @@ pub struct OrdersListRow {
     pub status: OrderStatus,
     pub workflow: TradeWorkflowProjection,
     pub primary_action: Option<OrderPrimaryAction>,
+    pub fulfillment_actions: Vec<OrderFulfillmentAction>,
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
@@ -1765,6 +1835,7 @@ pub struct OrderDetailProjection {
     pub payment: TradePaymentDisplayStatus,
     pub workflow: TradeWorkflowProjection,
     pub primary_action: Option<OrderPrimaryAction>,
+    pub fulfillment_actions: Vec<OrderFulfillmentAction>,
     pub recoveries: Vec<OrderRecoveryProjection>,
 }
 
@@ -2237,12 +2308,12 @@ mod tests {
         FarmSetupProjection, FarmSetupReadiness, FarmSetupSection, FarmTimingConflict,
         FarmTimingConflictKind, FarmerActivationProjection, FarmerSection, FulfillmentWindowId,
         IdentityBlockedReason, IdentityReadiness, LoggedOutStartupPhase,
-        LoggedOutStartupProjection, OrderDetailItemRow, OrderDetailProjection, OrderId,
-        OrderListRow, OrderPrimaryAction, OrderRecoveryProjection, OrderStatus, OrdersFilter,
-        OrdersListProjection, OrdersListRow, OrdersListSummary, OrdersScreenQueryState,
-        PackDayBatchPrintArtifact, PackDayBatchPrintFailureKind, PackDayBatchPrintStatus,
-        PackDayExportArtifact, PackDayExportArtifactKind, PackDayExportBundle,
-        PackDayExportInstanceId, PackDayExportStatus, PackDayHostHandoffKind,
+        LoggedOutStartupProjection, OrderDetailItemRow, OrderDetailProjection,
+        OrderFulfillmentAction, OrderId, OrderListRow, OrderPrimaryAction, OrderRecoveryProjection,
+        OrderStatus, OrdersFilter, OrdersListProjection, OrdersListRow, OrdersListSummary,
+        OrdersScreenQueryState, PackDayBatchPrintArtifact, PackDayBatchPrintFailureKind,
+        PackDayBatchPrintStatus, PackDayExportArtifact, PackDayExportArtifactKind,
+        PackDayExportBundle, PackDayExportInstanceId, PackDayExportStatus, PackDayHostHandoffKind,
         PackDayHostHandoffStatus, PackDayOutputCustomerOrder, PackDayOutputOrderState,
         PackDayOutputPackListEntry, PackDayOutputProductTotal, PackDayOutputQuantity,
         PackDayOutputSource, PackDayOutputWindow, PackDayPackListRow, PackDayPrintFailureKind,
@@ -2866,8 +2937,36 @@ mod tests {
 
         assert_eq!(OrderPrimaryAction::Review.storage_key(), "review");
         assert_eq!(
+            OrderFulfillmentAction::Preparing.storage_key(),
+            "publish_preparing"
+        );
+        assert_eq!(
+            OrderFulfillmentAction::ReadyForPickup.storage_key(),
+            "publish_ready_for_pickup"
+        );
+        assert_eq!(
+            OrderFulfillmentAction::OutForDelivery.storage_key(),
+            "publish_out_for_delivery"
+        );
+        assert_eq!(
+            OrderFulfillmentAction::Delivered.storage_key(),
+            "publish_delivered"
+        );
+        assert_eq!(
+            OrderFulfillmentAction::SellerCancelled.storage_key(),
+            "publish_seller_cancelled"
+        );
+        assert_eq!(
+            OrderFulfillmentAction::Preparing.fulfillment_status(),
+            RadrootsActiveTradeFulfillmentState::Preparing
+        );
+        assert_eq!(
             OrderPrimaryAction::PublishReadyForPickup.storage_key(),
             "publish_ready_for_pickup"
+        );
+        assert_eq!(
+            OrderPrimaryAction::PublishOutForDelivery.storage_key(),
+            "publish_out_for_delivery"
         );
         assert_eq!(
             OrderPrimaryAction::PublishDelivered.storage_key(),
@@ -3602,7 +3701,8 @@ mod tests {
                     order_id,
                     OrderStatus::Scheduled,
                 ),
-                primary_action: Some(OrderPrimaryAction::PublishReadyForPickup),
+                primary_action: Some(OrderPrimaryAction::PublishPreparing),
+                fulfillment_actions: OrderFulfillmentAction::ALL.to_vec(),
             }],
         };
         let order_detail = OrderDetailProjection {
@@ -3628,7 +3728,8 @@ mod tests {
             payment: order_payment,
             workflow: TradeWorkflowProjection::from_order_status(order_id, OrderStatus::Scheduled)
                 .with_economics_and_payment(order_economics, order_payment),
-            primary_action: Some(OrderPrimaryAction::PublishReadyForPickup),
+            primary_action: Some(OrderPrimaryAction::PublishPreparing),
+            fulfillment_actions: OrderFulfillmentAction::ALL.to_vec(),
             recoveries: Vec::new(),
         };
         let pack_day = PackDayProjection {
@@ -3658,7 +3759,11 @@ mod tests {
         assert!(!orders_list.is_empty());
         assert_eq!(
             orders_list.rows[0].primary_action,
-            Some(OrderPrimaryAction::PublishReadyForPickup)
+            Some(OrderPrimaryAction::PublishPreparing)
+        );
+        assert_eq!(
+            orders_list.rows[0].fulfillment_actions,
+            OrderFulfillmentAction::ALL.to_vec()
         );
         assert_eq!(
             orders_list.rows[0].workflow.agreement,
@@ -3833,6 +3938,7 @@ mod tests {
                 OrderStatus::Completed,
             ),
             primary_action: None,
+            fulfillment_actions: Vec::new(),
         };
 
         assert_eq!(today.orders_needing_action.len(), 1);

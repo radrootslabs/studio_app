@@ -3633,9 +3633,10 @@ mod tests {
     use std::collections::BTreeSet;
 
     use radroots_studio_app_view::{
-        BuyerContext, BuyerOrderStatus, FarmId, FarmOrderMethod, OrderStatus, OrdersFilter,
-        OrdersScreenQueryState, ProductAvailabilityState, ProductId, TradePaymentDisplayStatus,
-        TradeRevisionStatus, TradeWorkflowSource,
+        BuyerContext, BuyerOrderStatus, FarmId, FarmOrderMethod, OrderFulfillmentAction,
+        OrderPrimaryAction, OrderStatus, OrdersFilter, OrdersScreenQueryState,
+        ProductAvailabilityState, ProductId, TradeFulfillmentStatus, TradeInventoryStatus,
+        TradePaymentDisplayStatus, TradeRevisionStatus, TradeWorkflowSource,
     };
     use radroots_core::{
         RadrootsCoreCurrency, RadrootsCoreDecimal, RadrootsCoreMoney, RadrootsCoreUnit,
@@ -5184,6 +5185,14 @@ mod tests {
             )
             .expect("load lifecycle seller orders after decision");
         assert_eq!(seller_orders.rows[0].status, OrderStatus::Scheduled);
+        assert_eq!(
+            seller_orders.rows[0].primary_action,
+            Some(OrderPrimaryAction::PublishPreparing)
+        );
+        assert_eq!(
+            seller_orders.rows[0].fulfillment_actions,
+            OrderFulfillmentAction::ALL.to_vec()
+        );
 
         let fulfillment_payload = fulfillment_update_payload(
             order_id_raw,
@@ -5229,6 +5238,22 @@ mod tests {
             .expect("load lifecycle seller orders after fulfillment");
         assert_eq!(buyer_orders.rows[0].status, BuyerOrderStatus::Ready);
         assert_eq!(seller_orders.rows[0].status, OrderStatus::Packed);
+        assert_eq!(
+            seller_orders.rows[0].workflow.fulfillment,
+            Some(TradeFulfillmentStatus::ReadyForPickup)
+        );
+        assert_eq!(
+            seller_orders.rows[0].workflow.inventory,
+            TradeInventoryStatus::Reserved
+        );
+        assert_eq!(
+            seller_orders.rows[0].primary_action,
+            Some(OrderPrimaryAction::PublishDelivered)
+        );
+        assert_eq!(
+            seller_orders.rows[0].fulfillment_actions,
+            OrderFulfillmentAction::ALL.to_vec()
+        );
 
         let receipt_payload = buyer_receipt_payload(
             order_id_raw,
@@ -5275,6 +5300,8 @@ mod tests {
             .expect("load lifecycle seller orders after receipt");
         assert_eq!(buyer_detail.status, BuyerOrderStatus::Completed);
         assert_eq!(seller_orders.rows[0].status, OrderStatus::Completed);
+        assert_eq!(seller_orders.rows[0].primary_action, None);
+        assert_eq!(seller_orders.rows[0].fulfillment_actions, Vec::new());
     }
 
     #[test]
@@ -5530,6 +5557,8 @@ mod tests {
         assert_eq!(buyer_detail.status, BuyerOrderStatus::Declined);
         assert_eq!(buyer_detail.workflow.revision, TradeRevisionStatus::Updated);
         assert_eq!(seller_orders.rows[0].status, OrderStatus::Declined);
+        assert_eq!(seller_orders.rows[0].primary_action, None);
+        assert_eq!(seller_orders.rows[0].fulfillment_actions, Vec::new());
     }
 
     #[test]

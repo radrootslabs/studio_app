@@ -2529,6 +2529,7 @@ mod tests {
                     OrderStatus::NeedsAction,
                 ),
                 primary_action: Some(OrderPrimaryAction::Review),
+                fulfillment_actions: Vec::new(),
             }],
         };
         let order_detail = OrderDetailProjection {
@@ -2558,6 +2559,7 @@ mod tests {
             )
             .with_economics_and_payment(order_economics, order_payment),
             primary_action: Some(OrderPrimaryAction::Review),
+            fulfillment_actions: Vec::new(),
             recoveries: Vec::new(),
         };
         let orders_reminders = ReminderFeedProjection {

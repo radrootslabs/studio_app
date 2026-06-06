@@ -54,8 +54,8 @@ use radroots_studio_app_view::{
     FarmProfileRecord, FarmReadinessBlocker, FarmRulesProjection, FarmRulesReadiness,
     FarmSetupBlocker, FarmSetupDraft, FarmSummary, FarmTimingConflictKind, FarmerSection,
     FulfillmentWindowId, FulfillmentWindowRecord, FulfillmentWindowSummary, LoggedOutStartupPhase,
-    OrderDetailItemRow, OrderDetailProjection, OrderId, OrderListRow, OrderPrimaryAction,
-    OrderRecoveryProjection, OrderStatus, OrdersFilter, OrdersListRow,
+    OrderDetailItemRow, OrderDetailProjection, OrderFulfillmentAction, OrderId, OrderListRow,
+    OrderPrimaryAction, OrderRecoveryProjection, OrderStatus, OrdersFilter, OrdersListRow,
     PackDayBatchPrintFailureKind, PackDayBatchPrintStatus, PackDayExportBundle,
     PackDayExportStatus, PackDayHostHandoffKind, PackDayHostHandoffStatus, PackDayPackListRow,
     PackDayPrintFailureKind, PackDayPrintKind, PackDayPrintStatus, PackDayProductTotalRow,
@@ -298,8 +298,7 @@ enum HomeAutoFocusTarget {
     ProductsStockInput,
     ProductEditorTitleInput,
     OrdersRowOpenFirst,
-    OrdersDetailPublishReadyForPickup,
-    OrdersDetailPublishDelivered,
+    OrdersDetailPublishFulfillmentFirst,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -477,11 +476,8 @@ impl HomeView {
                 HomeAutoFocusTarget::OrdersRowOpenFirst => {
                     focus_button(window, ("orders-row-open", 0_usize), cx);
                 }
-                HomeAutoFocusTarget::OrdersDetailPublishReadyForPickup => {
-                    focus_button(window, "orders-detail-publish-ready-for-pickup", cx);
-                }
-                HomeAutoFocusTarget::OrdersDetailPublishDelivered => {
-                    focus_button(window, "orders-detail-publish-delivered", cx);
+                HomeAutoFocusTarget::OrdersDetailPublishFulfillmentFirst => {
+                    focus_button(window, "orders-detail-publish-preparing", cx);
                 }
             }
         }
@@ -2099,33 +2095,26 @@ impl HomeView {
         }
     }
 
-    fn publish_order_ready_for_pickup(&mut self, order_id: OrderId, cx: &mut Context<Self>) {
-        match self.runtime.publish_order_ready_for_pickup(order_id) {
+    fn publish_order_fulfillment_update(
+        &mut self,
+        order_id: OrderId,
+        action: OrderFulfillmentAction,
+        cx: &mut Context<Self>,
+    ) {
+        match self
+            .runtime
+            .publish_order_fulfillment_update(order_id, action)
+        {
             Ok(true) => cx.notify(),
             Ok(false) => {}
             Err(runtime_error) => {
                 error!(
                     target: "orders",
-                    event = "orders.ready_for_pickup_publish_failed",
+                    event = "orders.fulfillment_publish_failed",
                     error = %runtime_error,
                     order_id = %order_id,
-                    "failed to publish order ready for pickup"
-                );
-            }
-        }
-    }
-
-    fn publish_order_delivered(&mut self, order_id: OrderId, cx: &mut Context<Self>) {
-        match self.runtime.publish_order_delivered(order_id) {
-            Ok(true) => cx.notify(),
-            Ok(false) => {}
-            Err(runtime_error) => {
-                error!(
-                    target: "orders",
-                    event = "orders.delivered_publish_failed",
-                    error = %runtime_error,
-                    order_id = %order_id,
-                    "failed to publish delivered order"
+                    fulfillment_state = action.storage_key(),
+                    "failed to publish order fulfillment update"
                 );
             }
         }
@@ -4173,33 +4162,32 @@ impl HomeView {
         detail: &OrderDetailProjection,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let primary_action = match detail.primary_action {
-            Some(OrderPrimaryAction::PublishReadyForPickup) => Some(
-                action_button_primary(
-                    "orders-detail-publish-ready-for-pickup",
-                    app_shared_text(AppTextKey::OrdersActionReadyForPickup),
-                    cx.listener({
-                        let order_id = detail.order_id;
-                        move |this, _, _, cx| this.publish_order_ready_for_pickup(order_id, cx)
-                    }),
-                    cx,
-                )
-                .into_any_element(),
-            ),
-            Some(OrderPrimaryAction::PublishDelivered) => Some(
-                action_button_primary(
-                    "orders-detail-publish-delivered",
-                    app_shared_text(AppTextKey::OrdersActionMarkDelivered),
-                    cx.listener({
-                        let order_id = detail.order_id;
-                        move |this, _, _, cx| this.publish_order_delivered(order_id, cx)
-                    }),
-                    cx,
-                )
-                .into_any_element(),
-            ),
-            Some(OrderPrimaryAction::Review) | None => None,
-        };
+        let fulfillment_actions = (!detail.fulfillment_actions.is_empty()).then(|| {
+            app_form_section(
+                app_shared_text(AppTextKey::TradeWorkflowAxisFulfillment),
+                app_cluster(APP_UI_THEME.foundation.spacing.tight_px).children(
+                    detail
+                        .fulfillment_actions
+                        .iter()
+                        .copied()
+                        .map(|action| {
+                            action_button_compact(
+                                order_detail_fulfillment_action_id(action),
+                                app_shared_text(order_fulfillment_action_label_key(action)),
+                                cx.listener({
+                                    let order_id = detail.order_id;
+                                    move |this, _, _, cx| {
+                                        this.publish_order_fulfillment_update(order_id, action, cx)
+                                    }
+                                }),
+                                cx,
+                            )
+                            .into_any_element()
+                        })
+                        .collect::<Vec<_>>(),
+                ),
+            )
+        });
 
         home_card(
             app_shared_text(AppTextKey::OrdersDetailTitle),
@@ -4244,8 +4232,8 @@ impl HomeView {
                         }),
                 ))
                 .child(self.render_order_recovery_section(detail, cx))
-                .when_some(primary_action, |this, primary_action| {
-                    this.child(div().child(primary_action))
+                .when_some(fulfillment_actions, |this, fulfillment_actions| {
+                    this.child(fulfillment_actions)
                 }),
         )
         .into_any_element()
@@ -4555,11 +4543,14 @@ impl HomeView {
             }),
             cx.listener({
                 let order_id = row.order_id;
-                move |this, _, _, cx| this.publish_order_ready_for_pickup(order_id, cx)
-            }),
-            cx.listener({
-                let order_id = row.order_id;
-                move |this, _, _, cx| this.publish_order_delivered(order_id, cx)
+                let action = row
+                    .primary_action
+                    .and_then(OrderPrimaryAction::fulfillment_action);
+                move |this, _, _, cx| {
+                    if let Some(action) = action {
+                        this.publish_order_fulfillment_update(order_id, action, cx);
+                    }
+                }
             }),
             cx,
         );
@@ -7678,19 +7669,12 @@ fn farmer_auto_focus_target(
         }
         FarmerSection::Orders if farmer_products_available(runtime) => {
             if let Some(detail) = runtime.orders_projection.detail.as_ref() {
-                match detail.primary_action {
-                    Some(OrderPrimaryAction::PublishReadyForPickup) => {
-                        Some(HomeAutoFocusTarget::OrdersDetailPublishReadyForPickup)
-                    }
-                    Some(OrderPrimaryAction::PublishDelivered) => {
-                        Some(HomeAutoFocusTarget::OrdersDetailPublishDelivered)
-                    }
-                    Some(OrderPrimaryAction::Review) | None
-                        if !runtime.orders_projection.list.rows.is_empty() =>
-                    {
-                        Some(HomeAutoFocusTarget::OrdersRowOpenFirst)
-                    }
-                    Some(OrderPrimaryAction::Review) | None => None,
+                if !detail.fulfillment_actions.is_empty() {
+                    Some(HomeAutoFocusTarget::OrdersDetailPublishFulfillmentFirst)
+                } else if !runtime.orders_projection.list.rows.is_empty() {
+                    Some(HomeAutoFocusTarget::OrdersRowOpenFirst)
+                } else {
+                    None
                 }
             } else if !runtime.orders_projection.list.rows.is_empty() {
                 Some(HomeAutoFocusTarget::OrdersRowOpenFirst)
@@ -10397,8 +10381,7 @@ fn orders_table_action(
     index: usize,
     row: &OrdersListRow,
     on_review: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
-    on_publish_ready_for_pickup: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
-    on_publish_delivered: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+    on_publish_fulfillment: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
     cx: &App,
 ) -> AnyElement {
     match row.primary_action {
@@ -10409,17 +10392,16 @@ fn orders_table_action(
             cx,
         )
         .into_any_element(),
-        Some(OrderPrimaryAction::PublishReadyForPickup) => action_button_compact(
-            ("orders-row-action-publish-ready-for-pickup", index),
-            app_shared_text(AppTextKey::OrdersActionReadyForPickup),
-            on_publish_ready_for_pickup,
-            cx,
-        )
-        .into_any_element(),
-        Some(OrderPrimaryAction::PublishDelivered) => action_button_compact(
-            ("orders-row-action-publish-delivered", index),
-            app_shared_text(AppTextKey::OrdersActionMarkDelivered),
-            on_publish_delivered,
+        Some(
+            OrderPrimaryAction::PublishPreparing
+            | OrderPrimaryAction::PublishReadyForPickup
+            | OrderPrimaryAction::PublishOutForDelivery
+            | OrderPrimaryAction::PublishDelivered
+            | OrderPrimaryAction::PublishSellerCancelled,
+        ) => action_button_compact(
+            ("orders-row-action-publish-fulfillment", index),
+            app_shared_text(AppTextKey::OrdersActionUpdateFulfillment),
+            on_publish_fulfillment,
             cx,
         )
         .into_any_element(),
@@ -10428,6 +10410,26 @@ fn orders_table_action(
             .text_color(rgb(APP_UI_THEME.foundation.text.secondary))
             .child(app_shared_text(AppTextKey::ValueNone))
             .into_any_element(),
+    }
+}
+
+fn order_detail_fulfillment_action_id(action: OrderFulfillmentAction) -> &'static str {
+    match action {
+        OrderFulfillmentAction::Preparing => "orders-detail-publish-preparing",
+        OrderFulfillmentAction::ReadyForPickup => "orders-detail-publish-ready-for-pickup",
+        OrderFulfillmentAction::OutForDelivery => "orders-detail-publish-out-for-delivery",
+        OrderFulfillmentAction::Delivered => "orders-detail-publish-delivered",
+        OrderFulfillmentAction::SellerCancelled => "orders-detail-publish-seller-cancelled",
+    }
+}
+
+fn order_fulfillment_action_label_key(action: OrderFulfillmentAction) -> AppTextKey {
+    match action {
+        OrderFulfillmentAction::Preparing => AppTextKey::OrdersActionPreparing,
+        OrderFulfillmentAction::ReadyForPickup => AppTextKey::OrdersActionReadyForPickup,
+        OrderFulfillmentAction::OutForDelivery => AppTextKey::OrdersActionOutForDelivery,
+        OrderFulfillmentAction::Delivered => AppTextKey::OrdersActionMarkDelivered,
+        OrderFulfillmentAction::SellerCancelled => AppTextKey::OrdersActionCancelFulfillment,
     }
 }
 
@@ -13400,15 +13402,15 @@ mod tests {
         BuyerOrdersListRow, FarmId, FarmOrderMethod, FarmReadiness, FarmSetupDraft,
         FarmSetupProjection, FarmSummary, FarmerSection, FulfillmentWindowId,
         FulfillmentWindowSummary, LoggedOutStartupPhase, LoggedOutStartupProjection,
-        OrderDetailProjection, OrderId, OrderPrimaryAction, OrderStatus, OrdersListRow,
-        PackDayBatchPrintArtifact, PackDayBatchPrintFailureKind, PackDayExportArtifact,
-        PackDayExportArtifactKind, PackDayExportBundle, PackDayHostHandoffKind,
-        PackDayHostHandoffStatus, PackDayPrintFailureKind, PackDayPrintKind, PackDayPrintStatus,
-        PackDayProductTotalRow, PackDayProjection, PersonalSection, ProductId,
-        ReminderDeadlineProjection, ReminderDeliveryState, ReminderId, ReminderKind,
-        ReminderSurface, ReminderUrgency, RepeatDemandEligibility, RepeatDemandHandoffProjection,
-        ShellSection, TodayAgendaProjection, TodaySetupTask, TodaySetupTaskKind,
-        TradeAgreementStatus, TradeEconomicsProjection, TradeFulfillmentStatus,
+        OrderDetailProjection, OrderFulfillmentAction, OrderId, OrderPrimaryAction, OrderStatus,
+        OrdersListRow, PackDayBatchPrintArtifact, PackDayBatchPrintFailureKind,
+        PackDayExportArtifact, PackDayExportArtifactKind, PackDayExportBundle,
+        PackDayHostHandoffKind, PackDayHostHandoffStatus, PackDayPrintFailureKind,
+        PackDayPrintKind, PackDayPrintStatus, PackDayProductTotalRow, PackDayProjection,
+        PersonalSection, ProductId, ReminderDeadlineProjection, ReminderDeliveryState, ReminderId,
+        ReminderKind, ReminderSurface, ReminderUrgency, RepeatDemandEligibility,
+        RepeatDemandHandoffProjection, ShellSection, TodayAgendaProjection, TodaySetupTask,
+        TodaySetupTaskKind, TradeAgreementStatus, TradeEconomicsProjection, TradeFulfillmentStatus,
         TradeInventoryStatus, TradePaymentDisplayStatus, TradeRevisionStatus,
         TradeWorkflowProjection, TradeWorkflowSource,
     };
@@ -14203,7 +14205,8 @@ mod tests {
                 farmer_order_id,
                 OrderStatus::Scheduled,
             ),
-            primary_action: Some(OrderPrimaryAction::PublishReadyForPickup),
+            primary_action: Some(OrderPrimaryAction::PublishPreparing),
+            fulfillment_actions: OrderFulfillmentAction::ALL.to_vec(),
         }];
         orders.orders_projection.detail = Some(OrderDetailProjection {
             order_id: farmer_order_id,
@@ -14221,12 +14224,13 @@ mod tests {
                 farmer_order_id,
                 OrderStatus::Scheduled,
             ),
-            primary_action: Some(OrderPrimaryAction::PublishReadyForPickup),
+            primary_action: Some(OrderPrimaryAction::PublishPreparing),
+            fulfillment_actions: OrderFulfillmentAction::ALL.to_vec(),
             recoveries: Vec::new(),
         });
         assert_eq!(
             home_auto_focus_target(&orders, HomeAutoFocusState::default()),
-            Some(HomeAutoFocusTarget::OrdersDetailPublishReadyForPickup)
+            Some(HomeAutoFocusTarget::OrdersDetailPublishFulfillmentFirst)
         );
     }
 

@@ -2,8 +2,8 @@ use std::collections::BTreeMap;
 
 use radroots_studio_app_view::{
     FarmId, FulfillmentWindowId, FulfillmentWindowSummary, OrderDetailItemRow,
-    OrderDetailProjection, OrderId, OrderPrimaryAction, OrderStatus, OrdersFilter,
-    OrdersListProjection, OrdersListRow, OrdersListSummary, OrdersScreenQueryState,
+    OrderDetailProjection, OrderFulfillmentAction, OrderId, OrderPrimaryAction, OrderStatus,
+    OrdersFilter, OrdersListProjection, OrdersListRow, OrdersListSummary, OrdersScreenQueryState,
     PackDayOutputCustomerOrder, PackDayOutputOrderState, PackDayOutputPackListEntry,
     PackDayOutputProductTotal, PackDayOutputQuantity, PackDayOutputSource, PackDayOutputWindow,
     PackDayPackListRow, PackDayProductTotalRow, PackDayProjection, PackDayRosterRow,
@@ -174,6 +174,7 @@ impl<'a> AppOrdersRepository<'a> {
                         economics,
                         payment,
                         primary_action: primary_action_for_order(status, &workflow),
+                        fulfillment_actions: fulfillment_actions_for_order(status, &workflow),
                         workflow,
                         recoveries: Vec::new(),
                     })
@@ -1162,6 +1163,7 @@ impl OrderRecord {
             pickup_location_label: self.pickup_location_label,
             status: self.status,
             primary_action: primary_action_for_order(self.status, &self.workflow),
+            fulfillment_actions: fulfillment_actions_for_order(self.status, &self.workflow),
             workflow: self.workflow,
         }
     }
@@ -1193,7 +1195,7 @@ fn primary_action_for_order(
         OrderStatus::NeedsAction => Some(OrderPrimaryAction::Review),
         OrderStatus::Scheduled | OrderStatus::Packed => match workflow.fulfillment {
             None | Some(TradeFulfillmentStatus::Confirmed | TradeFulfillmentStatus::Preparing) => {
-                Some(OrderPrimaryAction::PublishReadyForPickup)
+                Some(OrderPrimaryAction::PublishPreparing)
             }
             Some(
                 TradeFulfillmentStatus::ReadyForPickup | TradeFulfillmentStatus::OutForDelivery,
@@ -1201,6 +1203,25 @@ fn primary_action_for_order(
             Some(TradeFulfillmentStatus::Delivered | TradeFulfillmentStatus::Cancelled) => None,
         },
         OrderStatus::Completed | OrderStatus::Declined | OrderStatus::Refunded => None,
+    }
+}
+
+fn fulfillment_actions_for_order(
+    status: OrderStatus,
+    workflow: &TradeWorkflowProjection,
+) -> Vec<OrderFulfillmentAction> {
+    match (status, workflow.fulfillment) {
+        (
+            OrderStatus::Scheduled | OrderStatus::Packed,
+            None
+            | Some(
+                TradeFulfillmentStatus::Confirmed
+                | TradeFulfillmentStatus::Preparing
+                | TradeFulfillmentStatus::ReadyForPickup
+                | TradeFulfillmentStatus::OutForDelivery,
+            ),
+        ) => OrderFulfillmentAction::ALL.to_vec(),
+        _ => Vec::new(),
     }
 }
 
@@ -1287,10 +1308,11 @@ fn empty_string_to_none(value: Option<String>) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use radroots_studio_app_view::{
-        FarmId, FulfillmentWindowId, OrderId, OrderPrimaryAction, OrderStatus, OrdersFilter,
-        OrdersScreenQueryState, PackDayOutputOrderState, PackDayProductTotalRow,
-        PackDayScreenQueryState, PickupLocationId, TradeAgreementStatus, TradeFulfillmentStatus,
-        TradeInventoryStatus, TradePaymentDisplayStatus, TradeRevisionStatus, TradeWorkflowSource,
+        FarmId, FulfillmentWindowId, OrderFulfillmentAction, OrderId, OrderPrimaryAction,
+        OrderStatus, OrdersFilter, OrdersScreenQueryState, PackDayOutputOrderState,
+        PackDayProductTotalRow, PackDayScreenQueryState, PickupLocationId, TradeAgreementStatus,
+        TradeFulfillmentStatus, TradeInventoryStatus, TradePaymentDisplayStatus,
+        TradeRevisionStatus, TradeWorkflowSource,
     };
     use rusqlite::{Connection, params};
 
@@ -1511,7 +1533,11 @@ mod tests {
         assert_eq!(detail.payment, TradePaymentDisplayStatus::NotRecorded);
         assert_eq!(
             detail.primary_action,
-            Some(OrderPrimaryAction::PublishReadyForPickup)
+            Some(OrderPrimaryAction::PublishPreparing)
+        );
+        assert_eq!(
+            detail.fulfillment_actions,
+            OrderFulfillmentAction::ALL.to_vec()
         );
     }
 
@@ -1671,8 +1697,16 @@ mod tests {
             Some(OrderPrimaryAction::PublishDelivered)
         );
         assert_eq!(
+            list.rows[0].fulfillment_actions,
+            OrderFulfillmentAction::ALL.to_vec()
+        );
+        assert_eq!(
             detail.primary_action,
             Some(OrderPrimaryAction::PublishDelivered)
+        );
+        assert_eq!(
+            detail.fulfillment_actions,
+            OrderFulfillmentAction::ALL.to_vec()
         );
     }
 
@@ -1731,7 +1765,9 @@ mod tests {
             Some(TradeFulfillmentStatus::Delivered)
         );
         assert_eq!(list.rows[0].primary_action, None);
+        assert_eq!(list.rows[0].fulfillment_actions, Vec::new());
         assert_eq!(detail.primary_action, None);
+        assert_eq!(detail.fulfillment_actions, Vec::new());
     }
 
     #[test]

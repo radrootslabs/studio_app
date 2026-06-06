@@ -344,9 +344,22 @@ mod tests {
             app_text(AppTextKey::OrdersActionReadyForPickup),
             "Ready for pickup"
         );
+        assert_eq!(app_text(AppTextKey::OrdersActionPreparing), "Preparing");
+        assert_eq!(
+            app_text(AppTextKey::OrdersActionOutForDelivery),
+            "Out for delivery"
+        );
         assert_eq!(
             app_text(AppTextKey::OrdersActionMarkDelivered),
             "Mark delivered"
+        );
+        assert_eq!(
+            app_text(AppTextKey::OrdersActionCancelFulfillment),
+            "Cancel fulfillment"
+        );
+        assert_eq!(
+            app_text(AppTextKey::OrdersActionUpdateFulfillment),
+            "Update"
         );
         assert_eq!(app_text(AppTextKey::OrdersDetailTitle), "Order detail");
         assert_eq!(app_text(AppTextKey::OrdersRecoverySectionTitle), "Recovery");
