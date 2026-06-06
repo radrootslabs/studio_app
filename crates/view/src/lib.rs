@@ -8,6 +8,10 @@ use radroots_trade::order::{
     RadrootsActiveOrderPaymentProjection, RadrootsActiveOrderPaymentState,
     RadrootsActiveOrderProjection, RadrootsActiveOrderSettlementState, RadrootsActiveOrderStatus,
 };
+use radroots_trade::validation_receipt::{
+    RadrootsValidationReceiptProofSystem, RadrootsValidationReceiptResult,
+    RadrootsValidationReceiptType,
+};
 use serde::{Deserialize, Serialize};
 use std::{collections::BTreeSet, error::Error, fmt, str::FromStr};
 use url::Url;
@@ -1489,6 +1493,134 @@ impl TradeReceiptProjection {
     }
 }
 
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TradeValidationReceiptResult {
+    #[default]
+    Valid,
+    NeedsReview,
+}
+
+impl TradeValidationReceiptResult {
+    pub const fn storage_key(self) -> &'static str {
+        match self {
+            Self::Valid => "valid",
+            Self::NeedsReview => "needs_review",
+        }
+    }
+
+    pub const fn label_key_id(self) -> &'static str {
+        match self {
+            Self::Valid => "messages.trade.validation.result.valid",
+            Self::NeedsReview => "messages.trade.validation.result.needs_review",
+        }
+    }
+
+    pub const fn from_validation_receipt_result(result: RadrootsValidationReceiptResult) -> Self {
+        match result {
+            RadrootsValidationReceiptResult::Valid => Self::Valid,
+            RadrootsValidationReceiptResult::Invalid => Self::NeedsReview,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TradeValidationReceiptType {
+    ListingValidation,
+    #[default]
+    TradeTransition,
+    InventoryState,
+    StateCheckpoint,
+}
+
+impl TradeValidationReceiptType {
+    pub const fn storage_key(self) -> &'static str {
+        match self {
+            Self::ListingValidation => "listing_validation",
+            Self::TradeTransition => "trade_transition",
+            Self::InventoryState => "inventory_state",
+            Self::StateCheckpoint => "state_checkpoint",
+        }
+    }
+
+    pub const fn label_key_id(self) -> &'static str {
+        match self {
+            Self::ListingValidation => "messages.trade.validation.type.listing_validation",
+            Self::TradeTransition => "messages.trade.validation.type.trade_transition",
+            Self::InventoryState => "messages.trade.validation.type.inventory_state",
+            Self::StateCheckpoint => "messages.trade.validation.type.state_checkpoint",
+        }
+    }
+
+    pub const fn from_validation_receipt_type(receipt_type: RadrootsValidationReceiptType) -> Self {
+        match receipt_type {
+            RadrootsValidationReceiptType::ListingValidation => Self::ListingValidation,
+            RadrootsValidationReceiptType::TradeTransition => Self::TradeTransition,
+            RadrootsValidationReceiptType::InventoryState => Self::InventoryState,
+            RadrootsValidationReceiptType::StateCheckpoint => Self::StateCheckpoint,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TradeValidationReceiptProofSystem {
+    #[default]
+    None,
+    Sp1Core,
+    Sp1Compressed,
+    Sp1Groth16,
+    Sp1Plonk,
+}
+
+impl TradeValidationReceiptProofSystem {
+    pub const fn storage_key(self) -> &'static str {
+        match self {
+            Self::None => "none",
+            Self::Sp1Core => "sp1_core",
+            Self::Sp1Compressed => "sp1_compressed",
+            Self::Sp1Groth16 => "sp1_groth16",
+            Self::Sp1Plonk => "sp1_plonk",
+        }
+    }
+
+    pub const fn label_key_id(self) -> &'static str {
+        match self {
+            Self::None => "messages.trade.validation.proof.none",
+            Self::Sp1Core => "messages.trade.validation.proof.sp1_core",
+            Self::Sp1Compressed => "messages.trade.validation.proof.sp1_compressed",
+            Self::Sp1Groth16 => "messages.trade.validation.proof.sp1_groth16",
+            Self::Sp1Plonk => "messages.trade.validation.proof.sp1_plonk",
+        }
+    }
+
+    pub const fn from_validation_receipt_proof_system(
+        proof_system: RadrootsValidationReceiptProofSystem,
+    ) -> Self {
+        match proof_system {
+            RadrootsValidationReceiptProofSystem::None => Self::None,
+            RadrootsValidationReceiptProofSystem::Sp1Core => Self::Sp1Core,
+            RadrootsValidationReceiptProofSystem::Sp1Compressed => Self::Sp1Compressed,
+            RadrootsValidationReceiptProofSystem::Sp1Groth16 => Self::Sp1Groth16,
+            RadrootsValidationReceiptProofSystem::Sp1Plonk => Self::Sp1Plonk,
+        }
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct TradeValidationReceiptProjection {
+    pub event_id: String,
+    pub result: TradeValidationReceiptResult,
+    pub receipt_type: TradeValidationReceiptType,
+    pub proof_system: TradeValidationReceiptProofSystem,
+    pub event_set_root: String,
+    pub reducer_output_root: String,
+    pub public_values_hash: String,
+    pub target_event_id: String,
+    pub recorded_at: u64,
+}
+
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct TradeWorkflowProjection {
     pub order_id: OrderId,
@@ -1861,6 +1993,7 @@ pub struct OrderDetailProjection {
     pub economics: TradeEconomicsProjection,
     pub payment: TradePaymentDisplayStatus,
     pub workflow: TradeWorkflowProjection,
+    pub validation_receipts: Vec<TradeValidationReceiptProjection>,
     pub primary_action: Option<OrderPrimaryAction>,
     pub fulfillment_actions: Vec<OrderFulfillmentAction>,
     pub recoveries: Vec<OrderRecoveryProjection>,
@@ -1901,6 +2034,7 @@ pub struct BuyerOrderDetailProjection {
     pub economics: TradeEconomicsProjection,
     pub payment: TradePaymentDisplayStatus,
     pub workflow: TradeWorkflowProjection,
+    pub validation_receipts: Vec<TradeValidationReceiptProjection>,
     pub order_note: Option<String>,
     pub repeat_demand: Option<RepeatDemandHandoffProjection>,
 }
@@ -2322,6 +2456,10 @@ mod tests {
         RadrootsActiveOrderProjection, RadrootsActiveOrderSettlementState,
         RadrootsActiveOrderStatus,
     };
+    use radroots_trade::validation_receipt::{
+        RadrootsValidationReceiptProofSystem, RadrootsValidationReceiptResult,
+        RadrootsValidationReceiptType,
+    };
 
     use super::{
         AccountCustody, AccountSummary, AccountSurfaceActivationProjection, ActiveSurface,
@@ -2360,7 +2498,8 @@ mod tests {
         TodayAgendaProjection, TodaySetupTask, TodaySetupTaskKind, TodaySummary,
         TradeAgreementStatus, TradeEconomicsProjection, TradeFulfillmentStatus,
         TradeInventoryStatus, TradePaymentDisplayStatus, TradeProvenanceProjection,
-        TradeRevisionStatus, TradeWorkflowProjection, TradeWorkflowSource,
+        TradeRevisionStatus, TradeValidationReceiptProofSystem, TradeValidationReceiptResult,
+        TradeValidationReceiptType, TradeWorkflowProjection, TradeWorkflowSource,
         order_status_from_active_order_projection,
     };
     use std::{collections::BTreeSet, str::FromStr};
@@ -3309,6 +3448,59 @@ mod tests {
     }
 
     #[test]
+    fn validation_receipt_projection_maps_shared_receipt_metadata_passively() {
+        assert_eq!(
+            TradeValidationReceiptResult::from_validation_receipt_result(
+                RadrootsValidationReceiptResult::Valid
+            ),
+            TradeValidationReceiptResult::Valid
+        );
+        assert_eq!(
+            TradeValidationReceiptResult::from_validation_receipt_result(
+                RadrootsValidationReceiptResult::Invalid
+            ),
+            TradeValidationReceiptResult::NeedsReview
+        );
+        assert_eq!(
+            TradeValidationReceiptType::from_validation_receipt_type(
+                RadrootsValidationReceiptType::TradeTransition
+            ),
+            TradeValidationReceiptType::TradeTransition
+        );
+        assert_eq!(
+            TradeValidationReceiptProofSystem::from_validation_receipt_proof_system(
+                RadrootsValidationReceiptProofSystem::Sp1Compressed
+            ),
+            TradeValidationReceiptProofSystem::Sp1Compressed
+        );
+        assert_eq!(TradeValidationReceiptResult::Valid.storage_key(), "valid");
+        assert_eq!(
+            TradeValidationReceiptResult::NeedsReview.storage_key(),
+            "needs_review"
+        );
+        assert_eq!(
+            TradeValidationReceiptType::TradeTransition.storage_key(),
+            "trade_transition"
+        );
+        assert_eq!(
+            TradeValidationReceiptProofSystem::Sp1Compressed.storage_key(),
+            "sp1_compressed"
+        );
+        assert_eq!(
+            TradeValidationReceiptResult::NeedsReview.label_key_id(),
+            "messages.trade.validation.result.needs_review"
+        );
+        assert_eq!(
+            TradeValidationReceiptType::InventoryState.label_key_id(),
+            "messages.trade.validation.type.inventory_state"
+        );
+        assert_eq!(
+            TradeValidationReceiptProofSystem::Sp1Compressed.label_key_id(),
+            "messages.trade.validation.proof.sp1_compressed"
+        );
+    }
+
+    #[test]
     fn trade_workflow_projection_uses_localization_key_ids_for_visible_status_labels() {
         assert_eq!(
             TradeAgreementStatus::from_active_order_status(&RadrootsActiveOrderStatus::Requested)
@@ -3765,6 +3957,7 @@ mod tests {
             payment: order_payment,
             workflow: TradeWorkflowProjection::from_order_status(order_id, OrderStatus::Scheduled)
                 .with_economics_and_payment(order_economics, order_payment),
+            validation_receipts: Vec::new(),
             primary_action: Some(OrderPrimaryAction::PublishPreparing),
             fulfillment_actions: OrderFulfillmentAction::ALL.to_vec(),
             recoveries: Vec::new(),
@@ -3931,6 +4124,7 @@ mod tests {
                 BuyerOrderStatus::Scheduled,
             )
             .with_economics_and_payment(buyer_order_economics, buyer_order_payment),
+            validation_receipts: Vec::new(),
             order_note: Some("Leave by the cooler".to_owned()),
             repeat_demand: None,
         };

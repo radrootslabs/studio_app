@@ -2558,6 +2558,7 @@ mod tests {
                 OrderStatus::NeedsAction,
             )
             .with_economics_and_payment(order_economics, order_payment),
+            validation_receipts: Vec::new(),
             primary_action: Some(OrderPrimaryAction::Review),
             fulfillment_actions: Vec::new(),
             recoveries: Vec::new(),

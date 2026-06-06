@@ -14,7 +14,7 @@ use rusqlite::{Connection, OptionalExtension, params, params_from_iter};
 use serde_json::Value;
 
 use super::{
-    order_detail::{order_detail_economics, order_detail_item_row},
+    order_detail::{order_detail_economics, order_detail_item_row, order_validation_receipts},
     parse_trade_revision_status,
     workflow::{StoredTradeWorkflowSnapshot, trade_workflow_projection_from_storage},
 };
@@ -1070,6 +1070,7 @@ impl<'a> AppBuyerRepository<'a> {
                             provenance_last_event_id: workflow_provenance_last_event_id,
                         })?;
                     let payment = workflow.payment;
+                    let validation_receipts = order_validation_receipts(self.connection, order_id)?;
                     Ok(BuyerOrderDetailProjection {
                         order_id,
                         farm_id,
@@ -1085,6 +1086,7 @@ impl<'a> AppBuyerRepository<'a> {
                         economics,
                         payment,
                         workflow,
+                        validation_receipts,
                         order_note: empty_string_to_none(order_note),
                         repeat_demand: self.build_repeat_demand_handoff(
                             order_id,

@@ -67,7 +67,9 @@ use radroots_studio_app_view::{
     RepeatDemandEligibility, RepeatDemandHandoffProjection, ShellSection, TodayAgendaProjection,
     TodaySetupTaskKind, TradeAgreementStatus, TradeEconomicsProjection, TradeFulfillmentStatus,
     TradeInventoryStatus, TradePaymentDisplayStatus, TradeReceiptProjection, TradeRevisionStatus,
-    TradeWorkflowProjection, TradeWorkflowSource,
+    TradeValidationReceiptProjection, TradeValidationReceiptProofSystem,
+    TradeValidationReceiptResult, TradeValidationReceiptType, TradeWorkflowProjection,
+    TradeWorkflowSource,
 };
 use radroots_nostr::prelude::RadrootsNostrClient;
 use std::{
@@ -4336,6 +4338,11 @@ impl HomeView {
                         trade_economics_total_text(&detail.workflow.economics),
                     ),
                 ]))
+                .when(!detail.validation_receipts.is_empty(), |this| {
+                    this.child(validation_receipts_summary_section(
+                        &detail.validation_receipts,
+                    ))
+                })
                 .child(app_form_section(
                     app_shared_text(AppTextKey::OrdersDetailItemsTitle),
                     div()
@@ -9128,6 +9135,11 @@ fn buyer_order_detail_card(
             .when_some(detail.workflow.receipt.as_ref(), |this, receipt| {
                 this.child(buyer_receipt_summary_section(receipt))
             })
+            .when(!detail.validation_receipts.is_empty(), |this| {
+                this.child(validation_receipts_summary_section(
+                    &detail.validation_receipts,
+                ))
+            })
             .child(app_form_section(
                 app_shared_text(AppTextKey::PersonalOrdersDetailItemsTitle),
                 div()
@@ -9324,6 +9336,71 @@ fn buyer_receipt_summary_section(receipt: &TradeReceiptProjection) -> AnyElement
     .into_any_element()
 }
 
+fn validation_receipts_summary_section(
+    receipts: &[TradeValidationReceiptProjection],
+) -> AnyElement {
+    app_form_section(
+        app_shared_text(AppTextKey::TradeValidationReceiptSectionLabel),
+        app_stack_v(APP_UI_THEME.foundation.spacing.small_px)
+            .w_full()
+            .children(
+                receipts
+                    .iter()
+                    .map(validation_receipt_summary_panel)
+                    .collect::<Vec<_>>(),
+            ),
+    )
+    .into_any_element()
+}
+
+fn validation_receipt_summary_panel(receipt: &TradeValidationReceiptProjection) -> AnyElement {
+    app_surface_panel(
+        app_stack_v(APP_UI_THEME.foundation.spacing.small_px)
+            .w_full()
+            .p(px(APP_UI_THEME.shells.home_card_padding_px))
+            .child(
+                app_cluster(APP_UI_THEME.foundation.spacing.small_px)
+                    .w_full()
+                    .child(trade_workflow_value_badge(validation_receipt_result_key(
+                        receipt.result,
+                    )))
+                    .child(trade_workflow_value_badge(validation_receipt_type_key(
+                        receipt.receipt_type,
+                    )))
+                    .child(trade_workflow_value_badge(
+                        validation_receipt_proof_system_key(receipt.proof_system),
+                    )),
+            )
+            .child(label_value_list([
+                LabelValueRow::new(
+                    app_shared_text(AppTextKey::TradeValidationReceiptEventLabel),
+                    short_evidence_text(receipt.event_id.as_str()),
+                ),
+                LabelValueRow::new(
+                    app_shared_text(AppTextKey::TradeValidationReceiptTargetLabel),
+                    short_evidence_text(receipt.target_event_id.as_str()),
+                ),
+                LabelValueRow::new(
+                    app_shared_text(AppTextKey::TradeValidationReceiptEventSetRootLabel),
+                    short_evidence_text(receipt.event_set_root.as_str()),
+                ),
+                LabelValueRow::new(
+                    app_shared_text(AppTextKey::TradeValidationReceiptReducerOutputRootLabel),
+                    short_evidence_text(receipt.reducer_output_root.as_str()),
+                ),
+                LabelValueRow::new(
+                    app_shared_text(AppTextKey::TradeValidationReceiptPublicValuesHashLabel),
+                    short_evidence_text(receipt.public_values_hash.as_str()),
+                ),
+                LabelValueRow::new(
+                    app_shared_text(AppTextKey::TradeValidationReceiptRecordedAtLabel),
+                    receipt.recorded_at.to_string(),
+                ),
+            ])),
+    )
+    .into_any_element()
+}
+
 fn buyer_receipt_issue_form_section(
     form: &BuyerReceiptIssueFormState,
     cx: &mut Context<HomeView>,
@@ -9387,6 +9464,60 @@ fn buyer_receipt_status_key(receipt: &TradeReceiptProjection) -> AppTextKey {
         AppTextKey::TradeWorkflowReceiptReceived
     } else {
         AppTextKey::TradeWorkflowReceiptNeedsReview
+    }
+}
+
+fn validation_receipt_result_key(result: TradeValidationReceiptResult) -> AppTextKey {
+    match result {
+        TradeValidationReceiptResult::Valid => AppTextKey::TradeValidationReceiptResultValid,
+        TradeValidationReceiptResult::NeedsReview => {
+            AppTextKey::TradeValidationReceiptResultNeedsReview
+        }
+    }
+}
+
+fn validation_receipt_type_key(receipt_type: TradeValidationReceiptType) -> AppTextKey {
+    match receipt_type {
+        TradeValidationReceiptType::ListingValidation => {
+            AppTextKey::TradeValidationReceiptTypeListingValidation
+        }
+        TradeValidationReceiptType::TradeTransition => {
+            AppTextKey::TradeValidationReceiptTypeTradeTransition
+        }
+        TradeValidationReceiptType::InventoryState => {
+            AppTextKey::TradeValidationReceiptTypeInventoryState
+        }
+        TradeValidationReceiptType::StateCheckpoint => {
+            AppTextKey::TradeValidationReceiptTypeStateCheckpoint
+        }
+    }
+}
+
+fn validation_receipt_proof_system_key(
+    proof_system: TradeValidationReceiptProofSystem,
+) -> AppTextKey {
+    match proof_system {
+        TradeValidationReceiptProofSystem::None => AppTextKey::TradeValidationReceiptProofNone,
+        TradeValidationReceiptProofSystem::Sp1Core => {
+            AppTextKey::TradeValidationReceiptProofSp1Core
+        }
+        TradeValidationReceiptProofSystem::Sp1Compressed => {
+            AppTextKey::TradeValidationReceiptProofSp1Compressed
+        }
+        TradeValidationReceiptProofSystem::Sp1Groth16 => {
+            AppTextKey::TradeValidationReceiptProofSp1Groth16
+        }
+        TradeValidationReceiptProofSystem::Sp1Plonk => {
+            AppTextKey::TradeValidationReceiptProofSp1Plonk
+        }
+    }
+}
+
+fn short_evidence_text(value: &str) -> String {
+    if value.len() <= 16 {
+        value.to_owned()
+    } else {
+        format!("{}...", &value[..16])
     }
 }
 
@@ -14400,6 +14531,7 @@ mod tests {
                 order_id,
                 BuyerOrderStatus::Placed,
             ),
+            validation_receipts: Vec::new(),
             order_note: None,
             repeat_demand: Some(RepeatDemandHandoffProjection {
                 order_id,
@@ -14548,6 +14680,7 @@ mod tests {
                 farmer_order_id,
                 OrderStatus::Scheduled,
             ),
+            validation_receipts: Vec::new(),
             primary_action: Some(OrderPrimaryAction::PublishPreparing),
             fulfillment_actions: OrderFulfillmentAction::ALL.to_vec(),
             recoveries: Vec::new(),

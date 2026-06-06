@@ -3,8 +3,9 @@ use std::{fs, path::Path};
 use radroots_studio_app_view::{
     FarmId, FarmOrderMethod, FarmReadiness, FarmSetupDraft, FarmSetupProjection, FarmSummary,
     FulfillmentWindowId, OrderId, PickupLocationId, ProductId, ProductStatus,
-    TradeProvenanceProjection, TradeRevisionStatus, TradeWorkflowProjection, TradeWorkflowSource,
-    order_status_from_active_order_projection,
+    TradeProvenanceProjection, TradeRevisionStatus, TradeValidationReceiptProofSystem,
+    TradeValidationReceiptResult, TradeValidationReceiptType, TradeWorkflowProjection,
+    TradeWorkflowSource, order_status_from_active_order_projection,
 };
 use radroots_events::{
     RadrootsNostrEvent,
@@ -13,7 +14,7 @@ use radroots_events::{
         KIND_LISTING_DRAFT as RADROOTS_KIND_LISTING_DRAFT, KIND_TRADE_CANCEL,
         KIND_TRADE_FULFILLMENT_UPDATE, KIND_TRADE_ORDER_REQUEST, KIND_TRADE_ORDER_RESPONSE,
         KIND_TRADE_ORDER_REVISION, KIND_TRADE_ORDER_REVISION_RESPONSE, KIND_TRADE_PAYMENT_RECORDED,
-        KIND_TRADE_RECEIPT, KIND_TRADE_SETTLEMENT_DECISION,
+        KIND_TRADE_RECEIPT, KIND_TRADE_SETTLEMENT_DECISION, KIND_TRADE_VALIDATION_RECEIPT,
     },
     trade::{
         RadrootsTradeOrderEconomics, RadrootsTradeOrderItem, RadrootsTradeOrderRequested,
@@ -41,6 +42,9 @@ use radroots_trade::order::{
     RadrootsActiveOrderRevisionProposalRecord, RadrootsActiveOrderSettlementRecord,
     reduce_active_order_events,
 };
+use radroots_trade::validation_receipt::{
+    RadrootsTradeValidationReceipt, RadrootsValidationReceiptTags, validation_receipt_from_event,
+};
 use rusqlite::{Connection, OptionalExtension, params};
 use serde_json::Value;
 use uuid::Uuid;
@@ -62,6 +66,7 @@ const KIND_ORDER_FULFILLMENT: i64 = KIND_TRADE_FULFILLMENT_UPDATE as i64;
 const KIND_ORDER_RECEIPT: i64 = KIND_TRADE_RECEIPT as i64;
 const KIND_ORDER_PAYMENT: i64 = KIND_TRADE_PAYMENT_RECORDED as i64;
 const KIND_ORDER_SETTLEMENT: i64 = KIND_TRADE_SETTLEMENT_DECISION as i64;
+const KIND_VALIDATION_RECEIPT: i64 = KIND_TRADE_VALIDATION_RECEIPT as i64;
 const ACTIVE_ORDER_EVENT_KINDS: [i64; 9] = [
     KIND_ORDER_REQUEST,
     KIND_ORDER_DECISION,
@@ -310,6 +315,69 @@ impl<'a> AppLocalInteropRepository<'a> {
             }
         }
         Ok(events)
+    }
+
+    fn load_signed_event_by_event_id(
+        &self,
+        event_id: &str,
+    ) -> Result<Option<RadrootsNostrEvent>, AppSqliteError> {
+        let mut statement = self
+            .connection
+            .prepare(
+                "SELECT
+                    event_id,
+                    event_kind,
+                    local_status,
+                    outbox_status,
+                    relay_delivery_json,
+                    event_pubkey,
+                    event_created_at,
+                    event_tags_json,
+                    event_content,
+                    event_sig
+                 FROM local_interop_imports
+                 WHERE record_family = 'signed_event'
+                    AND event_id = ?1
+                 ORDER BY local_seq DESC, record_id DESC",
+            )
+            .map_err(|source| AppSqliteError::Query {
+                operation: "prepare local interop signed event id evidence query",
+                source,
+            })?;
+        let rows = statement
+            .query_map(params![event_id], |row| {
+                Ok(StoredLocalInteropSignedEventEvidence {
+                    event_id: row.get(0)?,
+                    event_kind: row.get(1)?,
+                    local_status: row.get(2)?,
+                    outbox_status: row.get(3)?,
+                    relay_delivery_json: row.get(4)?,
+                    event_pubkey: row.get(5)?,
+                    event_created_at: row.get(6)?,
+                    event_tags_json: row.get(7)?,
+                    event_content: row.get(8)?,
+                    event_sig: row.get(9)?,
+                })
+            })
+            .map_err(|source| AppSqliteError::Query {
+                operation: "query local interop signed event id evidence",
+                source,
+            })?;
+
+        for row in rows {
+            let evidence = row.map_err(|source| AppSqliteError::Query {
+                operation: "read local interop signed event id evidence row",
+                source,
+            })?;
+            if !signed_event_local_interop_evidence_is_usable(&evidence) {
+                continue;
+            }
+            if let Some(event) = signed_event_from_local_interop_evidence(&evidence)? {
+                return Ok(Some(event));
+            }
+        }
+
+        Ok(None)
     }
 
     fn last_imported_change_seq(&self) -> Result<i64, AppSqliteError> {
@@ -698,6 +766,7 @@ impl<'a> AppLocalInteropRepository<'a> {
         match record.event_kind {
             Some(KIND_FARM) => self.import_signed_farm(record),
             Some(KIND_LISTING | KIND_LISTING_DRAFT) => self.import_signed_listing(record),
+            Some(KIND_VALIDATION_RECEIPT) => self.import_signed_validation_receipt(record),
             Some(kind) if active_order_event_kind(kind) => self.import_signed_active_order(record),
             _ => Ok(Some(ProjectionRecord {
                 kind: "signed_event",
@@ -1066,13 +1135,38 @@ impl<'a> AppLocalInteropRepository<'a> {
         Ok(Some(signed_event_projection(record)))
     }
 
+    fn import_signed_validation_receipt(
+        &self,
+        record: &LocalEventRecord,
+    ) -> Result<Option<ProjectionRecord>, AppSqliteError> {
+        if !signed_event_record_is_usable(record) {
+            return Ok(Some(signed_event_projection(record)));
+        }
+        let Some(event) = signed_event_from_record(record)? else {
+            return Ok(Some(signed_event_projection(record)));
+        };
+        let Ok(verified) = validation_receipt_from_event(&event) else {
+            return Ok(Some(signed_event_projection(record)));
+        };
+        self.upsert_validation_receipt_projection(&event, &verified.receipt, &verified.tags)?;
+        Ok(Some(ProjectionRecord {
+            kind: "validation_receipt",
+            projected_id: Some(event.id),
+        }))
+    }
+
     fn project_active_order(
         &self,
         record: &LocalEventRecord,
         current_evidence: ActiveOrderEvidence,
     ) -> Result<(), AppSqliteError> {
-        if let Some(payload) = current_evidence.request_payload() {
-            self.upsert_order_request(record, payload)?;
+        if let ActiveOrderEvidence::Request(request) = &current_evidence {
+            let order_id = self.upsert_order_request(record, &request.payload)?;
+            self.attach_validation_receipts_for_request(
+                request.event_id.as_str(),
+                request.payload.order_id.as_str(),
+                order_id,
+            )?;
         }
         let mut evidence = self.load_active_order_evidence(current_evidence.order_id())?;
         evidence.push(current_evidence);
@@ -1259,6 +1353,122 @@ impl<'a> AppLocalInteropRepository<'a> {
         {
             self.replace_active_order_agreement_lines(workflow.order_id, agreement_source)?;
         }
+        Ok(())
+    }
+
+    fn upsert_validation_receipt_projection(
+        &self,
+        event: &RadrootsNostrEvent,
+        receipt: &RadrootsTradeValidationReceipt,
+        tags: &RadrootsValidationReceiptTags,
+    ) -> Result<(), AppSqliteError> {
+        let order_id = match self.validation_receipt_order_attachment(tags)? {
+            ValidationReceiptOrderAttachment::Pending => None,
+            ValidationReceiptOrderAttachment::Attached(order_id) => Some(order_id),
+            ValidationReceiptOrderAttachment::Rejected => return Ok(()),
+        };
+        let result = TradeValidationReceiptResult::from_validation_receipt_result(receipt.result);
+        let receipt_type =
+            TradeValidationReceiptType::from_validation_receipt_type(receipt.receipt_type);
+        let proof_system = TradeValidationReceiptProofSystem::from_validation_receipt_proof_system(
+            receipt.proof.system,
+        );
+
+        self.connection
+            .execute(
+                "INSERT INTO order_validation_receipts (
+                    event_id,
+                    order_id,
+                    raw_order_id,
+                    root_event_id,
+                    listing_event_id,
+                    target_event_id,
+                    receipt_type,
+                    result,
+                    proof_system,
+                    event_set_root,
+                    reducer_output_root,
+                    public_values_hash,
+                    event_created_at
+                 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)
+                 ON CONFLICT(event_id) DO UPDATE SET
+                    order_id = excluded.order_id,
+                    raw_order_id = excluded.raw_order_id,
+                    root_event_id = excluded.root_event_id,
+                    listing_event_id = excluded.listing_event_id,
+                    target_event_id = excluded.target_event_id,
+                    receipt_type = excluded.receipt_type,
+                    result = excluded.result,
+                    proof_system = excluded.proof_system,
+                    event_set_root = excluded.event_set_root,
+                    reducer_output_root = excluded.reducer_output_root,
+                    public_values_hash = excluded.public_values_hash,
+                    event_created_at = excluded.event_created_at",
+                params![
+                    event.id.as_str(),
+                    order_id.map(|order_id| order_id.to_string()),
+                    tags.order_id.as_str(),
+                    tags.root_event_id.as_str(),
+                    tags.listing_event_id.as_str(),
+                    tags.target_event_id.as_str(),
+                    receipt_type.storage_key(),
+                    result.storage_key(),
+                    proof_system.storage_key(),
+                    tags.event_set_root.as_str(),
+                    tags.reducer_output_root.as_str(),
+                    tags.public_values_hash.as_str(),
+                    i64::from(event.created_at),
+                ],
+            )
+            .map_err(|source| AppSqliteError::Query {
+                operation: "upsert local interop validation receipt projection",
+                source,
+            })?;
+        Ok(())
+    }
+
+    fn validation_receipt_order_attachment(
+        &self,
+        tags: &RadrootsValidationReceiptTags,
+    ) -> Result<ValidationReceiptOrderAttachment, AppSqliteError> {
+        let Some(root_event) = self.load_signed_event_by_event_id(tags.root_event_id.as_str())?
+        else {
+            return Ok(ValidationReceiptOrderAttachment::Pending);
+        };
+        let Ok(envelope) = active_trade_order_request_from_event(&root_event) else {
+            return Ok(ValidationReceiptOrderAttachment::Rejected);
+        };
+        if envelope.payload.order_id != tags.order_id {
+            return Ok(ValidationReceiptOrderAttachment::Rejected);
+        }
+
+        Ok(ValidationReceiptOrderAttachment::Attached(
+            projected_order_id(
+                envelope.payload.order_id.as_str(),
+                envelope.payload.buyer_pubkey.as_str(),
+            ),
+        ))
+    }
+
+    fn attach_validation_receipts_for_request(
+        &self,
+        root_event_id: &str,
+        raw_order_id: &str,
+        order_id: OrderId,
+    ) -> Result<(), AppSqliteError> {
+        self.connection
+            .execute(
+                "UPDATE order_validation_receipts
+                 SET order_id = ?3
+                 WHERE root_event_id = ?1
+                    AND raw_order_id = ?2
+                    AND order_id IS NULL",
+                params![root_event_id, raw_order_id, order_id.to_string()],
+            )
+            .map_err(|source| AppSqliteError::Query {
+                operation: "attach local interop validation receipts to request",
+                source,
+            })?;
         Ok(())
     }
 
@@ -2328,6 +2538,13 @@ enum DuplicateSignedEventAction {
     Skip,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum ValidationReceiptOrderAttachment {
+    Pending,
+    Attached(OrderId),
+    Rejected,
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 struct ProjectionRecord {
     kind: &'static str,
@@ -2532,20 +2749,6 @@ impl ActiveOrderEvidence {
             Self::Receipt(record) => record.payload.order_id.as_str(),
             Self::Payment(record) => record.payload.order_id.as_str(),
             Self::Settlement(record) => record.payload.order_id.as_str(),
-        }
-    }
-
-    fn request_payload(&self) -> Option<&RadrootsTradeOrderRequested> {
-        match self {
-            Self::Request(record) => Some(&record.payload),
-            Self::Decision(_)
-            | Self::RevisionProposal(_)
-            | Self::RevisionDecision(_)
-            | Self::Fulfillment(_)
-            | Self::Cancellation(_)
-            | Self::Receipt(_)
-            | Self::Payment(_)
-            | Self::Settlement(_) => None,
         }
     }
 
@@ -3660,13 +3863,15 @@ mod tests {
         BuyerContext, BuyerOrderStatus, FarmId, FarmOrderMethod, OrderFulfillmentAction, OrderId,
         OrderPrimaryAction, OrderStatus, OrdersFilter, OrdersScreenQueryState,
         ProductAvailabilityState, ProductId, TradeFulfillmentStatus, TradeInventoryStatus,
-        TradePaymentDisplayStatus, TradeRevisionStatus, TradeWorkflowSource,
+        TradePaymentDisplayStatus, TradeRevisionStatus, TradeValidationReceiptProofSystem,
+        TradeValidationReceiptResult, TradeValidationReceiptType, TradeWorkflowSource,
     };
     use radroots_core::{
         RadrootsCoreCurrency, RadrootsCoreDecimal, RadrootsCoreMoney, RadrootsCoreUnit,
     };
     use radroots_events::{
         RadrootsNostrEvent, RadrootsNostrEventPtr,
+        kinds::KIND_TRADE_RECEIPT,
         trade::{
             RadrootsActiveTradeFulfillmentState, RadrootsTradeBuyerReceipt,
             RadrootsTradeFulfillmentUpdated, RadrootsTradeInventoryCommitment,
@@ -3696,14 +3901,23 @@ mod tests {
         LocalRecordStatus, PublishOutboxStatus, RelayDeliveryEvidence, SourceRuntime,
     };
     use radroots_sql_core::SqliteExecutor;
-    use radroots_trade::order::radroots_trade_order_economics_digest;
+    use radroots_trade::{
+        order::radroots_trade_order_economics_digest,
+        validation_receipt::{
+            RadrootsTradeValidationReceipt, RadrootsValidationReceiptProof,
+            RadrootsValidationReceiptProofSystem, RadrootsValidationReceiptResult,
+            RadrootsValidationReceiptStatement, RadrootsValidationReceiptType,
+            VALIDATION_RECEIPT_DOMAIN, VALIDATION_RECEIPT_VERSION, validation_receipt_event_build,
+        },
+    };
     use rusqlite::params;
     use serde_json::json;
     use uuid::Uuid;
 
     use super::{
-        KIND_FARM, KIND_LISTING, KIND_ORDER_REQUEST, deterministic_farm_id,
-        deterministic_product_id, projected_farm_id, projected_order_id, projected_product_id,
+        KIND_FARM, KIND_LISTING, KIND_ORDER_REQUEST, KIND_VALIDATION_RECEIPT,
+        deterministic_farm_id, deterministic_product_id, projected_farm_id, projected_order_id,
+        projected_product_id,
     };
     use crate::{AppSqliteStore, BuyerRepeatDemandApplyOutcome, DatabaseTarget};
 
@@ -4358,6 +4572,21 @@ mod tests {
         fulfillment_event_id: String,
     }
 
+    struct ValidationReceiptOrderFixture {
+        app_store: AppSqliteStore,
+        events: LocalEventsStore<SqliteExecutor>,
+        buyer_context: BuyerContext,
+        seller_farm_id: FarmId,
+        order_id: OrderId,
+        order_id_raw: String,
+        listing_addr: String,
+        buyer_pubkey: String,
+        seller_pubkey: String,
+        listing_event_id: String,
+        request_event_id: String,
+        decision_event_id: String,
+    }
+
     fn active_order_ready_fixture(label: &str) -> ActiveOrderReadyFixture {
         let app_store =
             AppSqliteStore::open(DatabaseTarget::InMemory).expect("open app sqlite store");
@@ -4497,6 +4726,117 @@ mod tests {
         }
     }
 
+    fn validation_receipt_order_fixture(label: &str) -> ValidationReceiptOrderFixture {
+        let app_store =
+            AppSqliteStore::open(DatabaseTarget::InMemory).expect("open app sqlite store");
+        let events = local_events_store();
+        let farm_key = "DDDDDDDDDDDDDDDDDDDDDD";
+        let listing_key = "AAAAAAAAAAAAAAAAAAAAAw";
+        let seller_pubkey = format!("{label}-seller");
+        let buyer_pubkey = format!("{label}-buyer");
+        let order_id_raw = format!("{label}-order");
+        let listing_addr = format!("30402:{seller_pubkey}:{listing_key}");
+        let listing_event_id = hex_event_id(21);
+        let request_event_id = hex_event_id(22);
+        let decision_event_id = hex_event_id(23);
+        events
+            .append_record(&signed_market_listing_record(
+                format!("{label}-listing-record").as_str(),
+                seller_pubkey.as_str(),
+                farm_key,
+                listing_key,
+                "Validation Eggs",
+                "9",
+                "active",
+                "pickup",
+                "North barn pickup",
+                4_102_444_800,
+                4_102_531_200,
+                LocalRecordStatus::Published,
+                PublishOutboxStatus::Acknowledged,
+            ))
+            .expect("append signed listing");
+        app_store
+            .import_shared_local_events_from_store(&events)
+            .expect("import signed listing");
+
+        let request_payload = order_request_payload(
+            order_id_raw.as_str(),
+            listing_addr.as_str(),
+            buyer_pubkey.as_str(),
+            seller_pubkey.as_str(),
+        );
+        let request_parts = active_trade_order_request_event_build(
+            &listing_event_ptr(&listing_event_id),
+            &request_payload,
+        )
+        .expect("build validation order request");
+        let request_event = event_from_parts_at(
+            request_event_id.as_str(),
+            buyer_pubkey.as_str(),
+            request_parts,
+            1_777_665_601,
+        );
+        events
+            .append_record(&signed_order_event_record(
+                format!("app:signed_event:{label}:request").as_str(),
+                &request_event,
+                listing_addr.as_str(),
+                SourceRuntime::App,
+                Some("acct_validation"),
+            ))
+            .expect("append validation order request");
+        app_store
+            .import_shared_local_events_from_store(&events)
+            .expect("import validation order request");
+
+        let decision_payload = accepted_order_decision_payload(
+            order_id_raw.as_str(),
+            listing_addr.as_str(),
+            buyer_pubkey.as_str(),
+            seller_pubkey.as_str(),
+        );
+        let decision_parts = active_trade_order_decision_event_build(
+            request_event_id.as_str(),
+            request_event_id.as_str(),
+            &decision_payload,
+        )
+        .expect("build validation order decision");
+        let decision_event = event_from_parts_at(
+            decision_event_id.as_str(),
+            seller_pubkey.as_str(),
+            decision_parts,
+            1_777_665_602,
+        );
+        events
+            .append_record(&signed_order_event_record(
+                format!("cli:signed_event:{label}:decision").as_str(),
+                &decision_event,
+                listing_addr.as_str(),
+                SourceRuntime::Cli,
+                None,
+            ))
+            .expect("append validation order decision");
+        app_store
+            .import_shared_local_events_from_store(&events)
+            .expect("import validation order decision");
+
+        ValidationReceiptOrderFixture {
+            app_store,
+            events,
+            buyer_context: BuyerContext::account("acct_validation"),
+            seller_farm_id: deterministic_farm_id(Some(seller_pubkey.as_str()), farm_key),
+            order_id: projected_order_id(order_id_raw.as_str(), buyer_pubkey.as_str()),
+            order_id_raw,
+            listing_addr,
+            buyer_pubkey,
+            seller_pubkey,
+            listing_event_id,
+            request_event_id,
+            decision_event_id,
+        }
+    }
+
     fn payment_recorded_payload(
         request: &RadrootsTradeOrderRequested,
         root_event_id: &str,
@@ -4563,6 +4903,83 @@ mod tests {
             content: parts.content,
             sig: format!("sig-{event_id}"),
         }
+    }
+
+    fn event_from_parts_at(
+        event_id: &str,
+        author: &str,
+        parts: WireEventParts,
+        created_at: u32,
+    ) -> RadrootsNostrEvent {
+        let mut event = event_from_parts(event_id, author, parts);
+        event.created_at = created_at;
+        event
+    }
+
+    fn hex_event_id(seed: u8) -> String {
+        format!("{seed:064x}")
+    }
+
+    fn hash32(seed: u8) -> String {
+        format!("0x{seed:064x}")
+    }
+
+    fn validation_error_bitmap(result: RadrootsValidationReceiptResult) -> String {
+        match result {
+            RadrootsValidationReceiptResult::Valid => format!("0x{:032x}", 0),
+            RadrootsValidationReceiptResult::Invalid => format!("0x{:032x}", 1),
+        }
+    }
+
+    fn validation_receipt_payload(
+        listing_event_id: &str,
+        root_event_id: &str,
+        target_event_id: &str,
+        result: RadrootsValidationReceiptResult,
+    ) -> RadrootsTradeValidationReceipt {
+        RadrootsTradeValidationReceipt {
+            changed_records_root: hash32(41),
+            domain: VALIDATION_RECEIPT_DOMAIN.to_owned(),
+            error_bitmap: validation_error_bitmap(result),
+            event_set_root: hash32(42),
+            new_state_root: hash32(43),
+            previous_state_root: hash32(44),
+            proof: RadrootsValidationReceiptProof {
+                inline_proof_base64: None,
+                mode: None,
+                program_hash: None,
+                proof_reference: None,
+                system: RadrootsValidationReceiptProofSystem::None,
+                verifying_key_hash: None,
+            },
+            public_values_hash: hash32(45),
+            receipt_type: RadrootsValidationReceiptType::TradeTransition,
+            result,
+            statement: RadrootsValidationReceiptStatement {
+                listing_event_id: listing_event_id.to_owned(),
+                root_event_id: root_event_id.to_owned(),
+                target_event_id: target_event_id.to_owned(),
+                statement_type: RadrootsValidationReceiptType::TradeTransition,
+            },
+            version: VALIDATION_RECEIPT_VERSION,
+        }
+    }
+
+    fn validation_receipt_event(
+        event_id: &str,
+        author: &str,
+        order_id: &str,
+        listing_event_id: &str,
+        root_event_id: &str,
+        target_event_id: &str,
+        result: RadrootsValidationReceiptResult,
+        created_at: u32,
+    ) -> RadrootsNostrEvent {
+        let receipt =
+            validation_receipt_payload(listing_event_id, root_event_id, target_event_id, result);
+        let parts =
+            validation_receipt_event_build(order_id, &receipt).expect("validation receipt parts");
+        event_from_parts_at(event_id, author, parts, created_at)
     }
 
     fn signed_order_event_record(
@@ -5573,6 +5990,377 @@ mod tests {
         assert_eq!(seller_receipt.received_at, receipt_payload.received_at);
         assert_eq!(seller_orders.rows[0].primary_action, None);
         assert_eq!(seller_orders.rows[0].fulfillment_actions, Vec::new());
+    }
+
+    #[test]
+    fn validation_receipts_project_passively_on_buyer_and_seller_order_details() {
+        let fixture = validation_receipt_order_fixture("validation-receipt-passive");
+        let valid_event = validation_receipt_event(
+            hex_event_id(31).as_str(),
+            fixture.seller_pubkey.as_str(),
+            fixture.order_id_raw.as_str(),
+            fixture.listing_event_id.as_str(),
+            fixture.request_event_id.as_str(),
+            fixture.decision_event_id.as_str(),
+            RadrootsValidationReceiptResult::Valid,
+            1_777_665_603,
+        );
+        let invalid_event = validation_receipt_event(
+            hex_event_id(32).as_str(),
+            fixture.seller_pubkey.as_str(),
+            fixture.order_id_raw.as_str(),
+            fixture.listing_event_id.as_str(),
+            fixture.request_event_id.as_str(),
+            fixture.decision_event_id.as_str(),
+            RadrootsValidationReceiptResult::Invalid,
+            1_777_665_604,
+        );
+        let duplicate_valid_event = valid_event.clone();
+        fixture
+            .events
+            .append_record(&signed_order_event_record(
+                "cli:signed_event:validation-receipt:valid",
+                &valid_event,
+                fixture.listing_addr.as_str(),
+                SourceRuntime::Cli,
+                None,
+            ))
+            .expect("append valid validation receipt");
+        fixture
+            .events
+            .append_record(&signed_order_event_record(
+                "cli:signed_event:validation-receipt:invalid",
+                &invalid_event,
+                fixture.listing_addr.as_str(),
+                SourceRuntime::Cli,
+                None,
+            ))
+            .expect("append invalid validation receipt");
+        fixture
+            .events
+            .append_record(&signed_order_event_record(
+                "cli:signed_event:validation-receipt:valid-duplicate",
+                &duplicate_valid_event,
+                fixture.listing_addr.as_str(),
+                SourceRuntime::Cli,
+                None,
+            ))
+            .expect("append duplicate validation receipt");
+        fixture
+            .app_store
+            .import_shared_local_events_from_store(&fixture.events)
+            .expect("import validation receipts");
+
+        let buyer_detail = fixture
+            .app_store
+            .load_buyer_order_detail(&fixture.buyer_context, fixture.order_id)
+            .expect("load buyer validation receipt detail")
+            .expect("buyer validation receipt detail");
+        let seller_detail = fixture
+            .app_store
+            .load_order_detail(fixture.seller_farm_id, fixture.order_id)
+            .expect("load seller validation receipt detail")
+            .expect("seller validation receipt detail");
+        let imports = fixture
+            .app_store
+            .load_local_interop_records()
+            .expect("load validation receipt imports");
+
+        assert_eq!(buyer_detail.status, BuyerOrderStatus::Scheduled);
+        assert_eq!(seller_detail.status, OrderStatus::Scheduled);
+        assert!(buyer_detail.workflow.receipt.is_none());
+        assert!(seller_detail.workflow.receipt.is_none());
+        assert_eq!(
+            buyer_detail.workflow.payment,
+            TradePaymentDisplayStatus::NotRecorded
+        );
+        assert_eq!(
+            seller_detail.workflow.payment,
+            TradePaymentDisplayStatus::NotRecorded
+        );
+        assert_eq!(
+            seller_detail.primary_action,
+            Some(OrderPrimaryAction::PublishPreparing)
+        );
+        assert_eq!(
+            seller_detail.fulfillment_actions,
+            OrderFulfillmentAction::ALL.to_vec()
+        );
+        assert_eq!(buyer_detail.validation_receipts.len(), 2);
+        assert_eq!(
+            buyer_detail.validation_receipts,
+            seller_detail.validation_receipts
+        );
+        assert_eq!(
+            buyer_detail.validation_receipts[0].event_id,
+            invalid_event.id
+        );
+        assert_eq!(
+            buyer_detail.validation_receipts[0].result,
+            TradeValidationReceiptResult::NeedsReview
+        );
+        assert_eq!(
+            buyer_detail.validation_receipts[0].receipt_type,
+            TradeValidationReceiptType::TradeTransition
+        );
+        assert_eq!(
+            buyer_detail.validation_receipts[0].proof_system,
+            TradeValidationReceiptProofSystem::None
+        );
+        assert_eq!(
+            buyer_detail.validation_receipts[0].target_event_id,
+            fixture.decision_event_id
+        );
+        assert_eq!(
+            buyer_detail.validation_receipts[0].event_set_root,
+            hash32(42)
+        );
+        assert_eq!(
+            buyer_detail.validation_receipts[0].reducer_output_root,
+            hash32(43)
+        );
+        assert_eq!(
+            buyer_detail.validation_receipts[0].public_values_hash,
+            hash32(45)
+        );
+        assert_eq!(
+            buyer_detail.validation_receipts[0].recorded_at,
+            1_777_665_604
+        );
+        assert_eq!(buyer_detail.validation_receipts[1].event_id, valid_event.id);
+        assert_eq!(
+            buyer_detail.validation_receipts[1].result,
+            TradeValidationReceiptResult::Valid
+        );
+        assert!(
+            imports
+                .iter()
+                .any(|record| record.projected_kind == "validation_receipt"
+                    && record.event_kind == Some(KIND_VALIDATION_RECEIPT)
+                    && record.event_id.as_deref() == Some(invalid_event.id.as_str()))
+        );
+    }
+
+    #[test]
+    fn validation_receipt_import_before_order_request_attaches_when_request_arrives() {
+        let app_store =
+            AppSqliteStore::open(DatabaseTarget::InMemory).expect("open app sqlite store");
+        let events = local_events_store();
+        let farm_key = "DDDDDDDDDDDDDDDDDDDDDD";
+        let listing_key = "AAAAAAAAAAAAAAAAAAAAAw";
+        let seller_pubkey = "validation-out-of-order-seller";
+        let buyer_pubkey = "validation-out-of-order-buyer";
+        let order_id_raw = "validation-out-of-order";
+        let listing_addr = format!("30402:{seller_pubkey}:{listing_key}");
+        let listing_event_id = hex_event_id(51);
+        let request_event_id = hex_event_id(52);
+        let target_event_id = hex_event_id(53);
+        events
+            .append_record(&signed_market_listing_record(
+                "validation-out-of-order-listing",
+                seller_pubkey,
+                farm_key,
+                listing_key,
+                "Validation Eggs",
+                "9",
+                "active",
+                "pickup",
+                "North barn pickup",
+                4_102_444_800,
+                4_102_531_200,
+                LocalRecordStatus::Published,
+                PublishOutboxStatus::Acknowledged,
+            ))
+            .expect("append out-of-order listing");
+        app_store
+            .import_shared_local_events_from_store(&events)
+            .expect("import out-of-order listing");
+
+        let receipt_event = validation_receipt_event(
+            hex_event_id(54).as_str(),
+            seller_pubkey,
+            order_id_raw,
+            listing_event_id.as_str(),
+            request_event_id.as_str(),
+            target_event_id.as_str(),
+            RadrootsValidationReceiptResult::Valid,
+            1_777_665_603,
+        );
+        events
+            .append_record(&signed_order_event_record(
+                "cli:signed_event:validation-receipt:before-request",
+                &receipt_event,
+                listing_addr.as_str(),
+                SourceRuntime::Cli,
+                None,
+            ))
+            .expect("append receipt before request");
+        app_store
+            .import_shared_local_events_from_store(&events)
+            .expect("import receipt before request");
+
+        let pending_count: i64 = app_store
+            .connection()
+            .query_row(
+                "SELECT count(*) FROM order_validation_receipts WHERE order_id IS NULL",
+                [],
+                |row| row.get(0),
+            )
+            .expect("count pending validation receipts");
+        assert_eq!(pending_count, 1);
+
+        let request_payload = order_request_payload(
+            order_id_raw,
+            listing_addr.as_str(),
+            buyer_pubkey,
+            seller_pubkey,
+        );
+        let request_parts = active_trade_order_request_event_build(
+            &listing_event_ptr(listing_event_id.as_str()),
+            &request_payload,
+        )
+        .expect("build request after validation receipt");
+        let request_event = event_from_parts_at(
+            request_event_id.as_str(),
+            buyer_pubkey,
+            request_parts,
+            1_777_665_604,
+        );
+        events
+            .append_record(&signed_order_event_record(
+                "app:signed_event:validation-receipt:request-after",
+                &request_event,
+                listing_addr.as_str(),
+                SourceRuntime::App,
+                Some("acct_validation_out_of_order"),
+            ))
+            .expect("append request after receipt");
+        app_store
+            .import_shared_local_events_from_store(&events)
+            .expect("import request after receipt");
+
+        let order_id = projected_order_id(order_id_raw, buyer_pubkey);
+        let buyer_context = BuyerContext::account("acct_validation_out_of_order");
+        let buyer_detail = app_store
+            .load_buyer_order_detail(&buyer_context, order_id)
+            .expect("load attached buyer validation receipt detail")
+            .expect("attached buyer validation receipt detail");
+        let seller_detail = app_store
+            .load_order_detail(
+                deterministic_farm_id(Some(seller_pubkey), farm_key),
+                order_id,
+            )
+            .expect("load attached seller validation receipt detail")
+            .expect("attached seller validation receipt detail");
+
+        assert_eq!(buyer_detail.validation_receipts.len(), 1);
+        assert_eq!(
+            buyer_detail.validation_receipts,
+            seller_detail.validation_receipts
+        );
+        assert_eq!(
+            buyer_detail.validation_receipts[0].event_id,
+            receipt_event.id
+        );
+        assert_eq!(buyer_detail.status, BuyerOrderStatus::Placed);
+        assert_eq!(seller_detail.status, OrderStatus::NeedsAction);
+        assert!(buyer_detail.workflow.receipt.is_none());
+        assert!(seller_detail.workflow.receipt.is_none());
+    }
+
+    #[test]
+    fn validation_receipt_invalid_candidates_do_not_surface_as_order_evidence() {
+        let fixture = validation_receipt_order_fixture("validation-receipt-invalid-candidates");
+        let mut mismatched_tag_event = validation_receipt_event(
+            hex_event_id(61).as_str(),
+            fixture.seller_pubkey.as_str(),
+            fixture.order_id_raw.as_str(),
+            fixture.listing_event_id.as_str(),
+            fixture.request_event_id.as_str(),
+            fixture.decision_event_id.as_str(),
+            RadrootsValidationReceiptResult::Valid,
+            1_777_665_603,
+        );
+        if let Some(tag) = mismatched_tag_event
+            .tags
+            .iter_mut()
+            .find(|tag| tag.first().map(String::as_str) == Some("event_set_root"))
+        {
+            tag[1] = hash32(99);
+        }
+        let wrong_order_event = validation_receipt_event(
+            hex_event_id(62).as_str(),
+            fixture.seller_pubkey.as_str(),
+            "wrong-order-id",
+            fixture.listing_event_id.as_str(),
+            fixture.request_event_id.as_str(),
+            fixture.decision_event_id.as_str(),
+            RadrootsValidationReceiptResult::Valid,
+            1_777_665_604,
+        );
+        let mut buyer_kind_candidate = validation_receipt_event(
+            hex_event_id(63).as_str(),
+            fixture.buyer_pubkey.as_str(),
+            fixture.order_id_raw.as_str(),
+            fixture.listing_event_id.as_str(),
+            fixture.request_event_id.as_str(),
+            fixture.decision_event_id.as_str(),
+            RadrootsValidationReceiptResult::Valid,
+            1_777_665_605,
+        );
+        buyer_kind_candidate.kind = KIND_TRADE_RECEIPT;
+
+        for (record_id, event) in [
+            (
+                "cli:signed_event:validation-receipt:mismatched-tag",
+                &mismatched_tag_event,
+            ),
+            (
+                "cli:signed_event:validation-receipt:wrong-order",
+                &wrong_order_event,
+            ),
+            (
+                "cli:signed_event:validation-receipt:buyer-kind",
+                &buyer_kind_candidate,
+            ),
+        ] {
+            fixture
+                .events
+                .append_record(&signed_order_event_record(
+                    record_id,
+                    event,
+                    fixture.listing_addr.as_str(),
+                    SourceRuntime::Cli,
+                    None,
+                ))
+                .expect("append invalid validation receipt candidate");
+        }
+        fixture
+            .app_store
+            .import_shared_local_events_from_store(&fixture.events)
+            .expect("import invalid validation receipt candidates");
+
+        let buyer_detail = fixture
+            .app_store
+            .load_buyer_order_detail(&fixture.buyer_context, fixture.order_id)
+            .expect("load buyer detail after invalid validation receipt candidates")
+            .expect("buyer detail after invalid validation receipt candidates");
+        let seller_detail = fixture
+            .app_store
+            .load_order_detail(fixture.seller_farm_id, fixture.order_id)
+            .expect("load seller detail after invalid validation receipt candidates")
+            .expect("seller detail after invalid validation receipt candidates");
+
+        assert!(buyer_detail.validation_receipts.is_empty());
+        assert!(seller_detail.validation_receipts.is_empty());
+        assert_eq!(buyer_detail.status, BuyerOrderStatus::Scheduled);
+        assert_eq!(seller_detail.status, OrderStatus::Scheduled);
+        assert!(buyer_detail.workflow.receipt.is_none());
+        assert!(seller_detail.workflow.receipt.is_none());
+        assert_eq!(
+            seller_detail.primary_action,
+            Some(OrderPrimaryAction::PublishPreparing)
+        );
     }
 
     #[test]

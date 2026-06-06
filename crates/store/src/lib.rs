@@ -851,6 +851,7 @@ mod tests {
         assert!(table_exists(connection, "reminder_log_entries"));
         assert!(table_exists(connection, "order_recovery_records"));
         assert!(table_exists(connection, "buyer_order_coordination_records"));
+        assert!(table_exists(connection, "order_validation_receipts"));
         assert!(column_exists(connection, "farms", "timezone"));
         assert!(column_exists(connection, "farms", "currency_code"));
         assert!(column_exists(connection, "local_outbox", "account_id"));
@@ -988,9 +989,68 @@ mod tests {
         ));
         assert!(column_exists(
             connection,
+            "order_validation_receipts",
+            "event_id"
+        ));
+        assert!(column_exists(
+            connection,
+            "order_validation_receipts",
+            "order_id"
+        ));
+        assert!(column_exists(
+            connection,
+            "order_validation_receipts",
+            "raw_order_id"
+        ));
+        assert!(column_exists(
+            connection,
+            "order_validation_receipts",
+            "root_event_id"
+        ));
+        assert!(column_exists(
+            connection,
+            "order_validation_receipts",
+            "target_event_id"
+        ));
+        assert!(column_exists(
+            connection,
+            "order_validation_receipts",
+            "result"
+        ));
+        assert!(column_exists(
+            connection,
+            "order_validation_receipts",
+            "proof_system"
+        ));
+        assert!(column_exists(
+            connection,
             "order_recovery_records",
             "recovery_state"
         ));
+        connection
+            .execute(
+                "INSERT INTO local_interop_imports (
+                    record_id,
+                    local_seq,
+                    record_family,
+                    local_status,
+                    source_runtime,
+                    projected_kind,
+                    outbox_status,
+                    imported_at
+                 ) VALUES (
+                    'schema_validation_receipt_projection_kind',
+                    0,
+                    'signed_event',
+                    'published',
+                    'cli',
+                    'validation_receipt',
+                    'acknowledged',
+                    '2026-01-01T00:00:00Z'
+                 )",
+                [],
+            )
+            .expect("local interop imports should accept validation receipt projections");
         assert_eq!(row_count(connection, "sync_checkpoints"), 0);
 
         drop(store);

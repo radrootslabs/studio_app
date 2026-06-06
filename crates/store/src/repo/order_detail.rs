@@ -1,4 +1,9 @@
-use radroots_studio_app_view::{OrderDetailItemRow, ProductPricePresentation, TradeEconomicsProjection};
+use radroots_studio_app_view::{
+    OrderDetailItemRow, OrderId, ProductPricePresentation, TradeEconomicsProjection,
+    TradeValidationReceiptProjection, TradeValidationReceiptProofSystem,
+    TradeValidationReceiptResult, TradeValidationReceiptType,
+};
+use rusqlite::{Connection, params};
 
 use crate::AppSqliteError;
 
@@ -80,11 +85,135 @@ pub(super) fn order_detail_economics(
     )
 }
 
+pub(super) fn order_validation_receipts(
+    connection: &Connection,
+    order_id: OrderId,
+) -> Result<Vec<TradeValidationReceiptProjection>, AppSqliteError> {
+    let mut statement = connection
+        .prepare(
+            "SELECT
+                event_id,
+                result,
+                receipt_type,
+                proof_system,
+                event_set_root,
+                reducer_output_root,
+                public_values_hash,
+                target_event_id,
+                event_created_at
+             FROM order_validation_receipts
+             WHERE order_id = ?1
+             ORDER BY event_created_at DESC, event_id DESC",
+        )
+        .map_err(|source| AppSqliteError::Query {
+            operation: "prepare order validation receipts",
+            source,
+        })?;
+    let rows = statement
+        .query_map(params![order_id.to_string()], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+                row.get::<_, String>(3)?,
+                row.get::<_, String>(4)?,
+                row.get::<_, String>(5)?,
+                row.get::<_, String>(6)?,
+                row.get::<_, String>(7)?,
+                row.get::<_, i64>(8)?,
+            ))
+        })
+        .map_err(|source| AppSqliteError::Query {
+            operation: "query order validation receipts",
+            source,
+        })?;
+    let mut receipts = Vec::new();
+
+    for row in rows {
+        let (
+            event_id,
+            result,
+            receipt_type,
+            proof_system,
+            event_set_root,
+            reducer_output_root,
+            public_values_hash,
+            target_event_id,
+            event_created_at,
+        ) = row.map_err(|source| AppSqliteError::Query {
+            operation: "read order validation receipt",
+            source,
+        })?;
+
+        receipts.push(TradeValidationReceiptProjection {
+            event_id,
+            result: parse_validation_receipt_result(result)?,
+            receipt_type: parse_validation_receipt_type(receipt_type)?,
+            proof_system: parse_validation_receipt_proof_system(proof_system)?,
+            event_set_root,
+            reducer_output_root,
+            public_values_hash,
+            target_event_id,
+            recorded_at: u64::try_from(event_created_at).map_err(|_| {
+                AppSqliteError::InvalidProjection {
+                    reason: "order_validation_receipts.event_created_at must be non-negative",
+                }
+            })?,
+        });
+    }
+
+    Ok(receipts)
+}
+
 fn normalize_currency_code(value: &str) -> String {
     let trimmed = value.trim();
     if trimmed.is_empty() {
         "USD".to_owned()
     } else {
         trimmed.to_ascii_uppercase()
+    }
+}
+
+fn parse_validation_receipt_result(
+    value: String,
+) -> Result<TradeValidationReceiptResult, AppSqliteError> {
+    match value.as_str() {
+        "valid" => Ok(TradeValidationReceiptResult::Valid),
+        "needs_review" => Ok(TradeValidationReceiptResult::NeedsReview),
+        _ => Err(AppSqliteError::DecodeEnum {
+            field: "order_validation_receipts.result",
+            value,
+        }),
+    }
+}
+
+fn parse_validation_receipt_type(
+    value: String,
+) -> Result<TradeValidationReceiptType, AppSqliteError> {
+    match value.as_str() {
+        "listing_validation" => Ok(TradeValidationReceiptType::ListingValidation),
+        "trade_transition" => Ok(TradeValidationReceiptType::TradeTransition),
+        "inventory_state" => Ok(TradeValidationReceiptType::InventoryState),
+        "state_checkpoint" => Ok(TradeValidationReceiptType::StateCheckpoint),
+        _ => Err(AppSqliteError::DecodeEnum {
+            field: "order_validation_receipts.receipt_type",
+            value,
+        }),
+    }
+}
+
+fn parse_validation_receipt_proof_system(
+    value: String,
+) -> Result<TradeValidationReceiptProofSystem, AppSqliteError> {
+    match value.as_str() {
+        "none" => Ok(TradeValidationReceiptProofSystem::None),
+        "sp1_core" => Ok(TradeValidationReceiptProofSystem::Sp1Core),
+        "sp1_compressed" => Ok(TradeValidationReceiptProofSystem::Sp1Compressed),
+        "sp1_groth16" => Ok(TradeValidationReceiptProofSystem::Sp1Groth16),
+        "sp1_plonk" => Ok(TradeValidationReceiptProofSystem::Sp1Plonk),
+        _ => Err(AppSqliteError::DecodeEnum {
+            field: "order_validation_receipts.proof_system",
+            value,
+        }),
     }
 }

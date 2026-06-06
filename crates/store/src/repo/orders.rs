@@ -12,7 +12,7 @@ use radroots_studio_app_view::{
 use rusqlite::{Connection, OptionalExtension, params};
 
 use super::{
-    order_detail::{order_detail_economics, order_detail_item_row},
+    order_detail::{order_detail_economics, order_detail_item_row, order_validation_receipts},
     parse_trade_revision_status,
     workflow::{StoredTradeWorkflowSnapshot, trade_workflow_projection_from_storage},
 };
@@ -174,6 +174,7 @@ impl<'a> AppOrdersRepository<'a> {
                             provenance_last_event_id: workflow_provenance_last_event_id,
                         })?;
                     let payment = workflow.payment;
+                    let validation_receipts = order_validation_receipts(self.connection, order_id)?;
                     Ok(OrderDetailProjection {
                         order_id,
                         farm_id,
@@ -189,6 +190,7 @@ impl<'a> AppOrdersRepository<'a> {
                         items,
                         economics,
                         payment,
+                        validation_receipts,
                         primary_action: primary_action_for_order(status, &workflow),
                         fulfillment_actions: fulfillment_actions_for_order(status, &workflow),
                         workflow,

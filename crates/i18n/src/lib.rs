@@ -600,6 +600,70 @@ mod tests {
     }
 
     #[test]
+    fn validation_receipt_copy_covers_passive_evidence() {
+        for (key, expected) in [
+            (AppTextKey::TradeValidationReceiptSectionLabel, "Validation"),
+            (AppTextKey::TradeValidationReceiptEventLabel, "Receipt"),
+            (AppTextKey::TradeValidationReceiptTargetLabel, "Target"),
+            (
+                AppTextKey::TradeValidationReceiptEventSetRootLabel,
+                "Event set",
+            ),
+            (
+                AppTextKey::TradeValidationReceiptReducerOutputRootLabel,
+                "Output root",
+            ),
+            (
+                AppTextKey::TradeValidationReceiptPublicValuesHashLabel,
+                "Values hash",
+            ),
+            (
+                AppTextKey::TradeValidationReceiptRecordedAtLabel,
+                "Recorded",
+            ),
+            (AppTextKey::TradeValidationReceiptResultValid, "Valid"),
+            (
+                AppTextKey::TradeValidationReceiptResultNeedsReview,
+                "Needs review",
+            ),
+            (
+                AppTextKey::TradeValidationReceiptTypeListingValidation,
+                "Listing",
+            ),
+            (
+                AppTextKey::TradeValidationReceiptTypeTradeTransition,
+                "Trade",
+            ),
+            (
+                AppTextKey::TradeValidationReceiptTypeInventoryState,
+                "Stock",
+            ),
+            (
+                AppTextKey::TradeValidationReceiptTypeStateCheckpoint,
+                "State",
+            ),
+            (AppTextKey::TradeValidationReceiptProofNone, "None"),
+            (AppTextKey::TradeValidationReceiptProofSp1Core, "SP1 core"),
+            (
+                AppTextKey::TradeValidationReceiptProofSp1Compressed,
+                "SP1 compressed",
+            ),
+            (
+                AppTextKey::TradeValidationReceiptProofSp1Groth16,
+                "SP1 Groth16",
+            ),
+            (AppTextKey::TradeValidationReceiptProofSp1Plonk, "SP1 Plonk"),
+        ] {
+            assert_eq!(app_text(key), expected);
+            assert!(
+                app_text(key).split_whitespace().count() <= 3,
+                "{} is too long for compact validation receipt evidence",
+                key.id()
+            );
+        }
+    }
+
+    #[test]
     fn english_marketplace_orders_copy_matches_the_buyer_history_contract() {
         assert_eq!(
             app_text(AppTextKey::PersonalOrdersSurfaceBody),
