@@ -90,7 +90,9 @@ fn parse_trade_payment_display_status(
 ) -> Result<TradePaymentDisplayStatus, AppSqliteError> {
     match value.as_str() {
         "not_recorded" => Ok(TradePaymentDisplayStatus::NotRecorded),
+        "pending" => Ok(TradePaymentDisplayStatus::Pending),
         "recorded" => Ok(TradePaymentDisplayStatus::Recorded),
+        "settled" => Ok(TradePaymentDisplayStatus::Settled),
         "needs_review" => Ok(TradePaymentDisplayStatus::NeedsReview),
         _ => Err(AppSqliteError::DecodeEnum { field, value }),
     }
@@ -107,5 +109,44 @@ fn parse_trade_workflow_source(
         "local_events" => Ok(TradeWorkflowSource::LocalEvents),
         "unknown" => Ok(TradeWorkflowSource::Unknown),
         _ => Err(AppSqliteError::DecodeEnum { field, value }),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::parse_trade_payment_display_status;
+    use crate::AppSqliteError;
+    use radroots_studio_app_view::TradePaymentDisplayStatus;
+
+    #[test]
+    fn workflow_payment_display_parser_accepts_all_payment_states() {
+        for (stored, expected) in [
+            ("not_recorded", TradePaymentDisplayStatus::NotRecorded),
+            ("pending", TradePaymentDisplayStatus::Pending),
+            ("recorded", TradePaymentDisplayStatus::Recorded),
+            ("settled", TradePaymentDisplayStatus::Settled),
+            ("needs_review", TradePaymentDisplayStatus::NeedsReview),
+        ] {
+            assert_eq!(
+                parse_trade_payment_display_status("orders.workflow_payment", stored.to_owned())
+                    .expect("workflow payment should parse"),
+                expected
+            );
+        }
+    }
+
+    #[test]
+    fn workflow_payment_display_parser_rejects_unknown_payment_state() {
+        let error =
+            parse_trade_payment_display_status("orders.workflow_payment", "unknown".to_owned())
+                .expect_err("unknown workflow payment should reject");
+
+        match error {
+            AppSqliteError::DecodeEnum { field, value } => {
+                assert_eq!(field, "orders.workflow_payment");
+                assert_eq!(value, "unknown");
+            }
+            other => panic!("expected DecodeEnum error, got {other:?}"),
+        }
     }
 }

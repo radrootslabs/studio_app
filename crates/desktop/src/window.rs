@@ -8798,7 +8798,9 @@ fn trade_inventory_status_key(status: TradeInventoryStatus) -> AppTextKey {
 fn trade_payment_display_status_key(status: TradePaymentDisplayStatus) -> AppTextKey {
     match status {
         TradePaymentDisplayStatus::NotRecorded => AppTextKey::TradeWorkflowPaymentNotRecorded,
+        TradePaymentDisplayStatus::Pending => AppTextKey::TradeWorkflowPaymentPending,
         TradePaymentDisplayStatus::Recorded => AppTextKey::TradeWorkflowPaymentRecorded,
+        TradePaymentDisplayStatus::Settled => AppTextKey::TradeWorkflowPaymentSettled,
         TradePaymentDisplayStatus::NeedsReview => AppTextKey::TradeWorkflowPaymentNeedsReview,
     }
 }
@@ -13818,8 +13820,16 @@ mod tests {
                 AppTextKey::TradeWorkflowPaymentNotRecorded,
             ),
             (
+                TradePaymentDisplayStatus::Pending,
+                AppTextKey::TradeWorkflowPaymentPending,
+            ),
+            (
                 TradePaymentDisplayStatus::Recorded,
                 AppTextKey::TradeWorkflowPaymentRecorded,
+            ),
+            (
+                TradePaymentDisplayStatus::Settled,
+                AppTextKey::TradeWorkflowPaymentSettled,
             ),
             (
                 TradePaymentDisplayStatus::NeedsReview,
@@ -13853,6 +13863,35 @@ mod tests {
             ),
         ] {
             assert_eq!(trade_workflow_source_key(source), key);
+            assert!(!app_text(key).is_empty());
+        }
+    }
+
+    #[test]
+    fn trade_payment_display_status_keys_cover_passive_states() {
+        for (status, key) in [
+            (
+                TradePaymentDisplayStatus::NotRecorded,
+                AppTextKey::TradeWorkflowPaymentNotRecorded,
+            ),
+            (
+                TradePaymentDisplayStatus::Pending,
+                AppTextKey::TradeWorkflowPaymentPending,
+            ),
+            (
+                TradePaymentDisplayStatus::Recorded,
+                AppTextKey::TradeWorkflowPaymentRecorded,
+            ),
+            (
+                TradePaymentDisplayStatus::Settled,
+                AppTextKey::TradeWorkflowPaymentSettled,
+            ),
+            (
+                TradePaymentDisplayStatus::NeedsReview,
+                AppTextKey::TradeWorkflowPaymentNeedsReview,
+            ),
+        ] {
+            assert_eq!(trade_payment_display_status_key(status), key);
             assert!(!app_text(key).is_empty());
         }
     }

@@ -3651,6 +3651,7 @@ mod tests {
             RadrootsTradeOrderRequested, RadrootsTradeOrderRevisionDecision,
             RadrootsTradeOrderRevisionDecisionEvent, RadrootsTradeOrderRevisionProposed,
             RadrootsTradePaymentMethod, RadrootsTradePaymentRecorded, RadrootsTradePricingBasis,
+            RadrootsTradeSettlementDecision, RadrootsTradeSettlementDecisionEvent,
         },
     };
     use radroots_events_codec::{
@@ -3661,6 +3662,7 @@ mod tests {
             active_trade_order_revision_decision_event_build,
             active_trade_order_revision_proposal_event_build,
             active_trade_payment_recorded_event_build,
+            active_trade_settlement_decision_event_build,
         },
         wire::WireEventParts,
     };
@@ -4343,6 +4345,36 @@ mod tests {
         }
     }
 
+    fn settlement_decision_payload(
+        request: &RadrootsTradeOrderRequested,
+        root_event_id: &str,
+        previous_event_id: &str,
+        agreement_event_id: &str,
+        payment_event_id: &str,
+        decision: RadrootsTradeSettlementDecision,
+    ) -> RadrootsTradeSettlementDecisionEvent {
+        let reason = (decision == RadrootsTradeSettlementDecision::Rejected)
+            .then(|| "reference mismatch".to_owned());
+        RadrootsTradeSettlementDecisionEvent {
+            order_id: request.order_id.clone(),
+            listing_addr: request.listing_addr.clone(),
+            buyer_pubkey: request.buyer_pubkey.clone(),
+            seller_pubkey: request.seller_pubkey.clone(),
+            root_event_id: root_event_id.to_owned(),
+            previous_event_id: previous_event_id.to_owned(),
+            agreement_event_id: agreement_event_id.to_owned(),
+            payment_event_id: payment_event_id.to_owned(),
+            quote_id: request.economics.quote_id.clone(),
+            quote_version: request.economics.quote_version,
+            economics_digest: radroots_trade_order_economics_digest(&request.economics)
+                .expect("order economics digest should encode"),
+            amount: request.economics.total.amount,
+            currency: request.economics.total.currency,
+            decision,
+            reason,
+        }
+    }
+
     fn event_from_parts(event_id: &str, author: &str, parts: WireEventParts) -> RadrootsNostrEvent {
         RadrootsNostrEvent {
             id: event_id.to_owned(),
@@ -4716,6 +4748,7 @@ mod tests {
             .expect("import app order request");
         let buyer_context = BuyerContext::account("acct_buyer");
         let order_id = projected_order_id(order_id_raw, buyer_pubkey);
+        let farm_id = deterministic_farm_id(Some(seller_pubkey), farm_key);
         let buyer_orders = app_store
             .load_buyer_orders(&buyer_context)
             .expect("load buyer orders after request");
@@ -4761,7 +4794,7 @@ mod tests {
             .expect("buyer order detail");
         let seller_orders = app_store
             .load_orders_list(
-                deterministic_farm_id(Some(seller_pubkey), farm_key),
+                farm_id,
                 &OrdersScreenQueryState {
                     filter: OrdersFilter::All,
                     fulfillment_window_id: None,
@@ -4813,12 +4846,25 @@ mod tests {
             .load_buyer_order_detail(&buyer_context, order_id)
             .expect("load buyer order detail after payment")
             .expect("buyer order detail after payment");
+        let seller_orders = app_store
+            .load_orders_list(
+                farm_id,
+                &OrdersScreenQueryState {
+                    filter: OrdersFilter::All,
+                    fulfillment_window_id: None,
+                },
+            )
+            .expect("load seller orders after payment");
+        let seller_detail = app_store
+            .load_order_detail(farm_id, order_id)
+            .expect("load seller order detail after payment")
+            .expect("seller order detail after payment");
 
         assert_eq!(payment_report.imported_records, 1);
         assert_eq!(buyer_orders.rows[0].status, BuyerOrderStatus::Scheduled);
         assert_eq!(
             buyer_orders.rows[0].workflow.payment,
-            TradePaymentDisplayStatus::Recorded
+            TradePaymentDisplayStatus::Pending
         );
         assert_eq!(
             buyer_orders.rows[0].workflow.provenance.primary_source,
@@ -4832,8 +4878,78 @@ mod tests {
                 .as_deref(),
             Some(decision_event.id.as_str())
         );
-        assert_eq!(buyer_detail.payment, TradePaymentDisplayStatus::Recorded);
+        assert_eq!(buyer_detail.payment, TradePaymentDisplayStatus::Pending);
         assert_eq!(buyer_detail.workflow, buyer_orders.rows[0].workflow);
+        assert_eq!(
+            seller_orders.rows[0].workflow.payment,
+            TradePaymentDisplayStatus::Pending
+        );
+        assert_eq!(seller_detail.payment, TradePaymentDisplayStatus::Pending);
+
+        let settlement_payload = settlement_decision_payload(
+            &request_payload,
+            request_event.id.as_str(),
+            payment_event.id.as_str(),
+            decision_event.id.as_str(),
+            payment_event.id.as_str(),
+            RadrootsTradeSettlementDecision::Accepted,
+        );
+        let settlement_parts = active_trade_settlement_decision_event_build(
+            request_event.id.as_str(),
+            payment_event.id.as_str(),
+            &settlement_payload,
+        )
+        .expect("build settlement decision event");
+        let settlement_event = event_from_parts(
+            "buyer-order-settlement-event",
+            seller_pubkey,
+            settlement_parts,
+        );
+        events
+            .append_record(&signed_order_event_record(
+                "cli:signed_event:order-settlement:buyer",
+                &settlement_event,
+                listing_addr.as_str(),
+                SourceRuntime::Cli,
+                None,
+            ))
+            .expect("append settlement decision event");
+
+        let settlement_report = app_store
+            .import_shared_local_events_from_store(&events)
+            .expect("import settlement decision event");
+        let buyer_orders = app_store
+            .load_buyer_orders(&buyer_context)
+            .expect("load buyer orders after settlement");
+        let buyer_detail = app_store
+            .load_buyer_order_detail(&buyer_context, order_id)
+            .expect("load buyer order detail after settlement")
+            .expect("buyer order detail after settlement");
+        let seller_orders = app_store
+            .load_orders_list(
+                farm_id,
+                &OrdersScreenQueryState {
+                    filter: OrdersFilter::All,
+                    fulfillment_window_id: None,
+                },
+            )
+            .expect("load seller orders after settlement");
+        let seller_detail = app_store
+            .load_order_detail(farm_id, order_id)
+            .expect("load seller order detail after settlement")
+            .expect("seller order detail after settlement");
+
+        assert_eq!(settlement_report.imported_records, 1);
+        assert_eq!(
+            buyer_orders.rows[0].workflow.payment,
+            TradePaymentDisplayStatus::Settled
+        );
+        assert_eq!(buyer_detail.payment, TradePaymentDisplayStatus::Settled);
+        assert_eq!(
+            seller_orders.rows[0].workflow.payment,
+            TradePaymentDisplayStatus::Settled
+        );
+        assert_eq!(seller_detail.payment, TradePaymentDisplayStatus::Settled);
     }
 
     #[test]

@@ -5,7 +5,8 @@ pub use radroots_studio_app_types::*;
 use radroots_core::RadrootsCoreMoney;
 use radroots_events::trade::{RadrootsActiveTradeFulfillmentState, RadrootsTradeOrderEconomics};
 use radroots_trade::order::{
-    RadrootsActiveOrderPaymentState, RadrootsActiveOrderProjection, RadrootsActiveOrderStatus,
+    RadrootsActiveOrderPaymentProjection, RadrootsActiveOrderPaymentState,
+    RadrootsActiveOrderProjection, RadrootsActiveOrderSettlementState, RadrootsActiveOrderStatus,
 };
 use serde::{Deserialize, Serialize};
 use std::{collections::BTreeSet, error::Error, fmt, str::FromStr};
@@ -1291,7 +1292,9 @@ impl TradeInventoryStatus {
 pub enum TradePaymentDisplayStatus {
     #[default]
     NotRecorded,
+    Pending,
     Recorded,
+    Settled,
     NeedsReview,
 }
 
@@ -1299,7 +1302,9 @@ impl TradePaymentDisplayStatus {
     pub const fn storage_key(self) -> &'static str {
         match self {
             Self::NotRecorded => "not_recorded",
+            Self::Pending => "pending",
             Self::Recorded => "recorded",
+            Self::Settled => "settled",
             Self::NeedsReview => "needs_review",
         }
     }
@@ -1307,7 +1312,9 @@ impl TradePaymentDisplayStatus {
     pub const fn label_key_id(self) -> &'static str {
         match self {
             Self::NotRecorded => "messages.trade.workflow.payment.not_recorded",
+            Self::Pending => "messages.trade.workflow.payment.pending",
             Self::Recorded => "messages.trade.workflow.payment.recorded",
+            Self::Settled => "messages.trade.workflow.payment.settled",
             Self::NeedsReview => "messages.trade.workflow.payment.needs_review",
         }
     }
@@ -1319,10 +1326,43 @@ impl TradePaymentDisplayStatus {
     pub fn from_active_payment_state(status: &RadrootsActiveOrderPaymentState) -> Self {
         match status {
             RadrootsActiveOrderPaymentState::NotRecorded => Self::NotRecorded,
-            RadrootsActiveOrderPaymentState::Recorded
-            | RadrootsActiveOrderPaymentState::Settled => Self::Recorded,
+            RadrootsActiveOrderPaymentState::Recorded => Self::Recorded,
+            RadrootsActiveOrderPaymentState::Settled => Self::Settled,
             RadrootsActiveOrderPaymentState::Rejected
             | RadrootsActiveOrderPaymentState::Invalid => Self::NeedsReview,
+        }
+    }
+
+    pub fn from_active_payment_projection(payment: &RadrootsActiveOrderPaymentProjection) -> Self {
+        match (&payment.state, &payment.settlement_state) {
+            (
+                RadrootsActiveOrderPaymentState::NotRecorded,
+                RadrootsActiveOrderSettlementState::NotRequired,
+            ) => Self::NotRecorded,
+            (RadrootsActiveOrderPaymentState::NotRecorded, _) => Self::NeedsReview,
+            (
+                RadrootsActiveOrderPaymentState::Recorded,
+                RadrootsActiveOrderSettlementState::Pending,
+            ) => Self::Pending,
+            (
+                RadrootsActiveOrderPaymentState::Recorded,
+                RadrootsActiveOrderSettlementState::NotRequired,
+            ) => Self::Recorded,
+            (
+                RadrootsActiveOrderPaymentState::Recorded,
+                RadrootsActiveOrderSettlementState::Accepted,
+            ) => Self::Settled,
+            (
+                RadrootsActiveOrderPaymentState::Recorded,
+                RadrootsActiveOrderSettlementState::Rejected
+                | RadrootsActiveOrderSettlementState::Invalid,
+            ) => Self::NeedsReview,
+            (RadrootsActiveOrderPaymentState::Settled, _) => Self::Settled,
+            (
+                RadrootsActiveOrderPaymentState::Rejected
+                | RadrootsActiveOrderPaymentState::Invalid,
+                _,
+            ) => Self::NeedsReview,
         }
     }
 }
@@ -1476,7 +1516,7 @@ impl TradeWorkflowProjection {
             .unwrap_or_default();
         workflow.inventory = TradeInventoryStatus::from_active_order_projection(projection);
         workflow.payment =
-            TradePaymentDisplayStatus::from_active_payment_state(&projection.payment.state);
+            TradePaymentDisplayStatus::from_active_payment_projection(&projection.payment);
         workflow.provenance = provenance.with_last_event_id(projection.last_event_id.clone());
         workflow
     }
@@ -2950,7 +2990,7 @@ mod tests {
             TradePaymentDisplayStatus::from_active_payment_state(
                 &RadrootsActiveOrderPaymentState::Settled
             ),
-            TradePaymentDisplayStatus::Recorded
+            TradePaymentDisplayStatus::Settled
         );
         assert_eq!(
             TradePaymentDisplayStatus::from_active_payment_state(
@@ -3059,17 +3099,81 @@ mod tests {
             invalid_payment_projection.payment,
             TradePaymentDisplayStatus::NeedsReview
         );
+
+        let mut pending_payment_order = test_active_order_projection(
+            RadrootsActiveOrderStatus::Accepted,
+            None,
+            RadrootsActiveOrderPaymentState::Recorded,
+        );
+        pending_payment_order.payment.settlement_state =
+            RadrootsActiveOrderSettlementState::Pending;
+        let pending_payment_projection = TradeWorkflowProjection::from_active_order_projection(
+            order_id,
+            &pending_payment_order,
+            TradeRevisionStatus::None,
+            TradeProvenanceProjection::from_primary_source(TradeWorkflowSource::LocalEvents),
+        );
+        assert_eq!(
+            pending_payment_projection.payment,
+            TradePaymentDisplayStatus::Pending
+        );
+
+        let settled_payment_order = test_active_order_projection(
+            RadrootsActiveOrderStatus::Completed,
+            None,
+            RadrootsActiveOrderPaymentState::Settled,
+        );
+        let settled_payment_projection = TradeWorkflowProjection::from_active_order_projection(
+            order_id,
+            &settled_payment_order,
+            TradeRevisionStatus::None,
+            TradeProvenanceProjection::from_primary_source(TradeWorkflowSource::LocalEvents),
+        );
+        assert_eq!(
+            settled_payment_projection.payment,
+            TradePaymentDisplayStatus::Settled
+        );
     }
 
     #[test]
     fn trade_payment_display_statuses_do_not_enable_payment_actions() {
         for status in [
             TradePaymentDisplayStatus::NotRecorded,
+            TradePaymentDisplayStatus::Pending,
             TradePaymentDisplayStatus::Recorded,
+            TradePaymentDisplayStatus::Settled,
             TradePaymentDisplayStatus::NeedsReview,
         ] {
             assert!(!status.allows_payment_action());
         }
+    }
+
+    #[test]
+    fn trade_payment_display_projection_maps_reducer_payment_states() {
+        let mut pending = RadrootsActiveOrderPaymentProjection::not_recorded();
+        pending.state = RadrootsActiveOrderPaymentState::Recorded;
+        pending.payment_event_id = Some("payment-event-1".to_owned());
+        pending.settlement_state = RadrootsActiveOrderSettlementState::Pending;
+        assert_eq!(
+            TradePaymentDisplayStatus::from_active_payment_projection(&pending),
+            TradePaymentDisplayStatus::Pending
+        );
+
+        let mut settled = RadrootsActiveOrderPaymentProjection::not_recorded();
+        settled.state = RadrootsActiveOrderPaymentState::Settled;
+        settled.payment_event_id = Some("payment-event-1".to_owned());
+        settled.settlement_state = RadrootsActiveOrderSettlementState::Accepted;
+        assert_eq!(
+            TradePaymentDisplayStatus::from_active_payment_projection(&settled),
+            TradePaymentDisplayStatus::Settled
+        );
+
+        let mut inconsistent = RadrootsActiveOrderPaymentProjection::not_recorded();
+        inconsistent.settlement_state = RadrootsActiveOrderSettlementState::Accepted;
+        assert_eq!(
+            TradePaymentDisplayStatus::from_active_payment_projection(&inconsistent),
+            TradePaymentDisplayStatus::NeedsReview
+        );
     }
 
     #[test]
@@ -3100,6 +3204,8 @@ mod tests {
             TradePaymentDisplayStatus::NotRecorded.storage_key(),
             "not_recorded"
         );
+        assert_eq!(TradePaymentDisplayStatus::Pending.storage_key(), "pending");
+        assert_eq!(TradePaymentDisplayStatus::Settled.storage_key(), "settled");
         assert_eq!(
             TradeWorkflowSource::LocalEvents.storage_key(),
             "local_events"
@@ -3128,6 +3234,14 @@ mod tests {
         assert_eq!(
             TradePaymentDisplayStatus::NotRecorded.label_key_id(),
             "messages.trade.workflow.payment.not_recorded"
+        );
+        assert_eq!(
+            TradePaymentDisplayStatus::Pending.label_key_id(),
+            "messages.trade.workflow.payment.pending"
+        );
+        assert_eq!(
+            TradePaymentDisplayStatus::Settled.label_key_id(),
+            "messages.trade.workflow.payment.settled"
         );
         assert_eq!(
             TradeWorkflowSource::Cli.label_key_id(),

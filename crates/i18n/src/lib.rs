@@ -547,15 +547,30 @@ mod tests {
             app_text(AppTextKey::TradeWorkflowPaymentNotRecorded),
             "Not recorded"
         );
+        assert_eq!(app_text(AppTextKey::TradeWorkflowPaymentPending), "Pending");
         assert_eq!(
             app_text(AppTextKey::TradeWorkflowPaymentRecorded),
             "Recorded"
         );
+        assert_eq!(app_text(AppTextKey::TradeWorkflowPaymentSettled), "Settled");
         assert_eq!(app_text(AppTextKey::TradeWorkflowProvenanceCli), "CLI");
         assert_eq!(
             app_text(AppTextKey::TradeWorkflowProvenanceLocalEvents),
             "Local events"
         );
+    }
+
+    #[test]
+    fn payment_workflow_copy_covers_passive_statuses() {
+        for (key, expected) in [
+            (AppTextKey::TradeWorkflowPaymentNotRecorded, "Not recorded"),
+            (AppTextKey::TradeWorkflowPaymentPending, "Pending"),
+            (AppTextKey::TradeWorkflowPaymentRecorded, "Recorded"),
+            (AppTextKey::TradeWorkflowPaymentSettled, "Settled"),
+            (AppTextKey::TradeWorkflowPaymentNeedsReview, "Needs review"),
+        ] {
+            assert_eq!(app_text(key), expected);
+        }
     }
 
     #[test]

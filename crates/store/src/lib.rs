@@ -1027,6 +1027,53 @@ mod tests {
     }
 
     #[test]
+    fn workflow_payment_display_schema_accepts_pending_and_settled_states() {
+        let store = AppSqliteStore::open(DatabaseTarget::InMemory).expect("store should open");
+        let connection = store.connection();
+        connection
+            .execute(
+                "INSERT INTO farms (id, display_name, readiness, created_at, updated_at)
+                 VALUES (?1, 'Schema Farm', 'ready', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
+                params!["farm_schema"],
+            )
+            .expect("farm should insert");
+
+        for (order_id, workflow_payment) in [
+            ("order_payment_pending", "pending"),
+            ("order_payment_settled", "settled"),
+        ] {
+            connection
+                .execute(
+                    "INSERT INTO orders (
+                        id,
+                        farm_id,
+                        order_number,
+                        customer_display_name,
+                        status,
+                        updated_at,
+                        workflow_payment
+                     ) VALUES (?1, 'farm_schema', ?2, 'Buyer', 'scheduled', '2026-01-01T00:00:00Z', ?3)",
+                    params![order_id, order_id, workflow_payment],
+                )
+                .expect("expanded workflow payment state should insert");
+        }
+
+        let invalid_result = connection.execute(
+            "INSERT INTO orders (
+                id,
+                farm_id,
+                order_number,
+                customer_display_name,
+                status,
+                updated_at,
+                workflow_payment
+             ) VALUES ('order_payment_invalid', 'farm_schema', 'invalid', 'Buyer', 'scheduled', '2026-01-01T00:00:00Z', 'collect')",
+            [],
+        );
+        assert!(invalid_result.is_err());
+    }
+
+    #[test]
     fn legacy_sync_scaffolding_migrates_to_account_scoped_contract() {
         let path = temp_database_path("legacy-sync-contract");
         fs::create_dir_all(path.parent().expect("temp database should have a parent"))
