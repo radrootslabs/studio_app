@@ -858,6 +858,30 @@ const FORBIDDEN_PAYMENT_ACTION_COPY_TERMS: &[&str] = &[
     "payment provider",
 ];
 
+const FORBIDDEN_PRODUCTION_EVENT_KIND_LITERALS: &[(&str, &str)] = &[
+    ("30340", "KIND_FARM"),
+    ("30402", "KIND_LISTING"),
+    ("30403", "KIND_LISTING_DRAFT"),
+    ("3422", "KIND_TRADE_ORDER_REQUEST"),
+    ("3423", "KIND_TRADE_ORDER_DECISION"),
+    ("3424", "KIND_TRADE_ORDER_REVISION"),
+    ("3425", "KIND_TRADE_ORDER_REVISION_RESPONSE"),
+    ("3426", "KIND_TRADE_QUESTION"),
+    ("3427", "KIND_TRADE_ANSWER"),
+    ("3428", "KIND_TRADE_DISCOUNT_REQUEST"),
+    ("3429", "KIND_TRADE_DISCOUNT_OFFER"),
+    ("3430", "KIND_TRADE_DISCOUNT_ACCEPT"),
+    ("3431", "KIND_TRADE_FORBIDDEN_3431"),
+    ("3432", "KIND_TRADE_CANCEL"),
+    ("3433", "KIND_TRADE_FULFILLMENT_UPDATE"),
+    ("3434", "KIND_TRADE_RECEIPT"),
+    ("3435", "KIND_TRADE_PAYMENT_RECORDED"),
+    ("3436", "KIND_TRADE_SETTLEMENT_DECISION"),
+    ("3440", "KIND_TRADE_VALIDATION_RECEIPT"),
+];
+
+const TEST_MODULE_SENTINEL: &str = "\n#[cfg(test)]\nmod tests {";
+
 #[test]
 fn desktop_menu_source_uses_localized_copy_paths() {
     assert_eq!(
@@ -980,6 +1004,32 @@ fn desktop_sources_do_not_expose_reserved_payment_action_copy() {
     }
 }
 
+#[test]
+fn app_production_trade_event_kinds_use_shared_constants() {
+    assert_production_source_omits_event_kind_literals(
+        "crates/desktop/src/runtime.rs",
+        include_str!("runtime.rs"),
+    );
+
+    let store_interop_path = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .and_then(|path| path.parent())
+        .expect("desktop crate should live under app crates directory")
+        .join("crates/store/src/interop.rs");
+    let store_interop_source =
+        fs::read_to_string(store_interop_path.as_path()).unwrap_or_else(|error| {
+            panic!(
+                "failed to read app store interop source {}: {error}",
+                store_interop_path.display()
+            )
+        });
+
+    assert_production_source_omits_event_kind_literals(
+        "crates/store/src/interop.rs",
+        store_interop_source.as_str(),
+    );
+}
+
 fn extract_string_literals(source: &str) -> BTreeSet<&str> {
     let mut literals = BTreeSet::new();
     let bytes = source.as_bytes();
@@ -1000,6 +1050,35 @@ fn extract_string_literals(source: &str) -> BTreeSet<&str> {
     }
 
     literals
+}
+
+fn assert_production_source_omits_event_kind_literals(path: &str, source: &str) {
+    let production_source = production_source_without_tests(source);
+    for (literal, constant_name) in FORBIDDEN_PRODUCTION_EVENT_KIND_LITERALS {
+        assert!(
+            !contains_numeric_token(production_source, literal),
+            "{path} uses raw event kind {literal}; use shared {constant_name} instead"
+        );
+    }
+}
+
+fn production_source_without_tests(source: &str) -> &str {
+    source
+        .split_once(TEST_MODULE_SENTINEL)
+        .map_or(source, |(production_source, _)| production_source)
+}
+
+fn contains_numeric_token(source: &str, literal: &str) -> bool {
+    source.match_indices(literal).any(|(start, _)| {
+        let end = start + literal.len();
+        let before_ok = start == 0 || !is_rust_identifier_byte(source.as_bytes()[start - 1]);
+        let after_ok = end == source.len() || !source.as_bytes()[end].is_ascii_digit();
+        before_ok && after_ok
+    })
+}
+
+fn is_rust_identifier_byte(byte: u8) -> bool {
+    byte.is_ascii_alphanumeric() || byte == b'_'
 }
 
 fn contains_reserved_payment_action_term(value: &str, term: &str) -> bool {

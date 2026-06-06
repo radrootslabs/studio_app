@@ -5070,6 +5070,7 @@ dependencies = [
  "radroots_studio_app_ui",
  "radroots_studio_app_view",
  "radroots_core",
+ "radroots_events",
  "radroots_events_codec",
  "radroots_identity",
  "radroots_local_events",

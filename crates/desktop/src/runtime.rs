@@ -64,6 +64,12 @@ use radroots_core::{
     RadrootsCoreCurrency, RadrootsCoreDecimal, RadrootsCoreMoney, RadrootsCoreQuantity,
     RadrootsCoreQuantityPrice, RadrootsCoreUnit,
 };
+use radroots_events::kinds::{
+    KIND_FARM, KIND_LISTING, KIND_LISTING_DRAFT, KIND_PROFILE, KIND_TRADE_CANCEL,
+    KIND_TRADE_FULFILLMENT_UPDATE, KIND_TRADE_ORDER_DECISION, KIND_TRADE_ORDER_REQUEST,
+    KIND_TRADE_ORDER_REVISION, KIND_TRADE_ORDER_REVISION_RESPONSE, KIND_TRADE_PAYMENT_RECORDED,
+    KIND_TRADE_RECEIPT, KIND_TRADE_SETTLEMENT_DECISION,
+};
 use radroots_events_codec::trade::{
     active_trade_event_context_from_tags, active_trade_payment_recorded_from_event,
     active_trade_settlement_decision_from_event,
@@ -145,7 +151,19 @@ const APP_DIRECT_RELAY_INGEST_SCOPE_KEY: &str = "direct_relay_ingest";
 const APP_DIRECT_RELAY_INGEST_STALE_AFTER_SECONDS: i64 = 900;
 const APP_SELLER_ORDER_DECISION_EVIDENCE_PAGE_SIZE: u32 = 250;
 const APP_DIRECT_RELAY_INGEST_KINDS: &[u16] = &[
-    0, 30340, 30402, 30403, 3422, 3423, 3424, 3425, 3432, 3433, 3434, 3435, 3436,
+    KIND_PROFILE as u16,
+    KIND_FARM as u16,
+    KIND_LISTING as u16,
+    KIND_LISTING_DRAFT as u16,
+    KIND_TRADE_ORDER_REQUEST as u16,
+    KIND_TRADE_ORDER_DECISION as u16,
+    KIND_TRADE_ORDER_REVISION as u16,
+    KIND_TRADE_ORDER_REVISION_RESPONSE as u16,
+    KIND_TRADE_CANCEL as u16,
+    KIND_TRADE_FULFILLMENT_UPDATE as u16,
+    KIND_TRADE_RECEIPT as u16,
+    KIND_TRADE_PAYMENT_RECORDED as u16,
+    KIND_TRADE_SETTLEMENT_DECISION as u16,
 ];
 
 #[derive(Debug, Default)]
@@ -5428,7 +5446,7 @@ impl DesktopAppRuntimeState {
                 continue;
             }
             match event.kind {
-                3423 => {
+                KIND_TRADE_ORDER_DECISION => {
                     let envelope =
                         radroots_sdk::trade::parse_order_decision(&event).map_err(|_| {
                             AppSqliteError::InvalidProjection {
@@ -5445,7 +5463,7 @@ impl DesktopAppRuntimeState {
                         payload: envelope.payload,
                     });
                 }
-                3424 => {
+                KIND_TRADE_ORDER_REVISION => {
                     let Ok(envelope) = radroots_sdk::trade::parse_order_revision_proposal(&event)
                     else {
                         return Err(AppSqliteError::InvalidProjection {
@@ -5464,7 +5482,7 @@ impl DesktopAppRuntimeState {
                             payload: envelope.payload,
                         });
                 }
-                3425 => {
+                KIND_TRADE_ORDER_REVISION_RESPONSE => {
                     let Ok(envelope) = radroots_sdk::trade::parse_order_revision_decision(&event)
                     else {
                         return Err(AppSqliteError::InvalidProjection {
@@ -5483,7 +5501,7 @@ impl DesktopAppRuntimeState {
                             payload: envelope.payload,
                         });
                 }
-                3432 => {
+                KIND_TRADE_CANCEL => {
                     let Ok(envelope) = radroots_sdk::trade::parse_order_cancellation(&event) else {
                         return Err(AppSqliteError::InvalidProjection {
                             reason: "order lifecycle evidence is invalid",
@@ -5501,7 +5519,7 @@ impl DesktopAppRuntimeState {
                             payload: envelope.payload,
                         });
                 }
-                3433 => {
+                KIND_TRADE_FULFILLMENT_UPDATE => {
                     let Ok(envelope) = radroots_sdk::trade::parse_fulfillment_update(&event) else {
                         return Err(AppSqliteError::InvalidProjection {
                             reason: "order lifecycle evidence is invalid",
@@ -5519,7 +5537,7 @@ impl DesktopAppRuntimeState {
                             payload: envelope.payload,
                         });
                 }
-                3434 => {
+                KIND_TRADE_RECEIPT => {
                     let Ok(envelope) = radroots_sdk::trade::parse_buyer_receipt(&event) else {
                         return Err(AppSqliteError::InvalidProjection {
                             reason: "order lifecycle evidence is invalid",
@@ -5535,7 +5553,7 @@ impl DesktopAppRuntimeState {
                         payload: envelope.payload,
                     });
                 }
-                3435 => {
+                KIND_TRADE_PAYMENT_RECORDED => {
                     let envelope =
                         active_trade_payment_recorded_from_event(&event).map_err(|_| {
                             AppSqliteError::InvalidProjection {
@@ -5552,7 +5570,7 @@ impl DesktopAppRuntimeState {
                         payload: envelope.payload,
                     });
                 }
-                3436 => {
+                KIND_TRADE_SETTLEMENT_DECISION => {
                     let envelope =
                         active_trade_settlement_decision_from_event(&event).map_err(|_| {
                             AppSqliteError::InvalidProjection {
@@ -5667,7 +5685,16 @@ impl DesktopAppRuntimeState {
     ) -> Result<Vec<radroots_sdk::RadrootsNostrEvent>, AppSqliteError> {
         let mut events = Vec::new();
         let mut seen_event_ids = BTreeSet::new();
-        let kinds = [3423_u32, 3424, 3425, 3432, 3433, 3434, 3435, 3436];
+        let kinds = [
+            KIND_TRADE_ORDER_DECISION,
+            KIND_TRADE_ORDER_REVISION,
+            KIND_TRADE_ORDER_REVISION_RESPONSE,
+            KIND_TRADE_CANCEL,
+            KIND_TRADE_FULFILLMENT_UPDATE,
+            KIND_TRADE_RECEIPT,
+            KIND_TRADE_PAYMENT_RECORDED,
+            KIND_TRADE_SETTLEMENT_DECISION,
+        ];
 
         if let Some(sqlite_store) = self.sqlite_store.as_ref() {
             for kind in kinds {
@@ -5876,7 +5903,7 @@ impl DesktopAppRuntimeState {
         let owner_pubkey = self.local_events_owner_pubkey(account);
         let listing_addr = owner_pubkey
             .as_ref()
-            .map(|pubkey| format!("30402:{pubkey}:{listing_d_tag}"));
+            .map(|pubkey| format!("{KIND_LISTING}:{pubkey}:{listing_d_tag}"));
         let exportability = local_work_exportability(owner_pubkey.as_deref());
         let farm_setup = self.state_store.farm_setup_projection();
         let farm_rules = self.state_store.farm_rules_projection();
@@ -6951,8 +6978,8 @@ fn direct_relay_event_records(
 
 fn direct_relay_event_farm_id(kind: u16, tags: &[Vec<String>]) -> Option<String> {
     match kind {
-        30340 => relay_event_tag_value(tags, "d", 1),
-        30402 | 30403 => {
+        kind if kind == KIND_FARM as u16 => relay_event_tag_value(tags, "d", 1),
+        kind if kind == KIND_LISTING as u16 || kind == KIND_LISTING_DRAFT as u16 => {
             relay_event_tag_value(tags, "a", 1).and_then(|address| relay_address_d_tag(&address))
         }
         _ => None,
@@ -6965,7 +6992,9 @@ fn direct_relay_event_listing_addr(
     listing_d_tag: Option<&str>,
 ) -> Option<String> {
     match kind {
-        30402 | 30403 => listing_d_tag.map(|d_tag| format!("{kind}:{event_pubkey}:{d_tag}")),
+        kind if kind == KIND_LISTING as u16 || kind == KIND_LISTING_DRAFT as u16 => {
+            listing_d_tag.map(|d_tag| format!("{kind}:{event_pubkey}:{d_tag}"))
+        }
         _ => None,
     }
 }
@@ -7639,15 +7668,15 @@ fn d_tag_from_uuid(uuid: Uuid) -> String {
 
 fn signed_event_farm_id(receipt: &AppPublishedOperationReceipt) -> Option<String> {
     match receipt.event_kind {
-        30340 => signed_event_tag_value(&receipt.event_tags_json, "d", 1),
-        30402 => signed_event_tag_value(&receipt.event_tags_json, "a", 1)
+        KIND_FARM => signed_event_tag_value(&receipt.event_tags_json, "d", 1),
+        KIND_LISTING => signed_event_tag_value(&receipt.event_tags_json, "a", 1)
             .and_then(|address| signed_event_address_d_tag(address.as_str())),
         _ => None,
     }
 }
 
 fn signed_event_listing_addr(receipt: &AppPublishedOperationReceipt) -> Option<String> {
-    if receipt.event_kind != 30402 {
+    if receipt.event_kind != KIND_LISTING {
         return None;
     }
     let pubkey = receipt.event_pubkey.trim();
@@ -7655,7 +7684,7 @@ fn signed_event_listing_addr(receipt: &AppPublishedOperationReceipt) -> Option<S
         return None;
     }
     signed_event_tag_value(&receipt.event_tags_json, "d", 1)
-        .map(|d_tag| format!("30402:{pubkey}:{d_tag}"))
+        .map(|d_tag| format!("{KIND_LISTING}:{pubkey}:{d_tag}"))
 }
 
 fn signed_event_tag_value(
