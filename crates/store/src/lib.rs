@@ -1058,6 +1058,35 @@ mod tests {
                 .expect("expanded workflow payment state should insert");
         }
 
+        connection
+            .execute(
+                "INSERT INTO orders (
+                    id,
+                    farm_id,
+                    order_number,
+                    customer_display_name,
+                    status,
+                    updated_at,
+                    workflow_receipt_event_id,
+                    workflow_receipt_received,
+                    workflow_receipt_issue,
+                    workflow_receipt_received_at
+                 ) VALUES (
+                    'order_issue_receipt',
+                    'farm_schema',
+                    'issue receipt',
+                    'Buyer',
+                    'needs_review',
+                    '2026-01-01T00:00:00Z',
+                    'receipt-event-1',
+                    0,
+                    'items need review',
+                    1777665700
+                 )",
+                [],
+            )
+            .expect("receipt projection should insert");
+
         let invalid_result = connection.execute(
             "INSERT INTO orders (
                 id,
@@ -1071,6 +1100,32 @@ mod tests {
             [],
         );
         assert!(invalid_result.is_err());
+
+        let invalid_receipt_result = connection.execute(
+            "INSERT INTO orders (
+                id,
+                farm_id,
+                order_number,
+                customer_display_name,
+                status,
+                updated_at,
+                workflow_receipt_event_id,
+                workflow_receipt_received,
+                workflow_receipt_received_at
+             ) VALUES (
+                'order_receipt_invalid',
+                'farm_schema',
+                'invalid receipt',
+                'Buyer',
+                'needs_review',
+                '2026-01-01T00:00:00Z',
+                'receipt-event-invalid',
+                2,
+                1777665700
+             )",
+            [],
+        );
+        assert!(invalid_receipt_result.is_err());
     }
 
     #[test]
@@ -1233,6 +1288,12 @@ mod tests {
                 [],
             )
             .expect("declined status should satisfy migrated check");
+        connection
+            .execute(
+                "UPDATE orders SET status = 'needs_review' WHERE id = 'order_legacy'",
+                [],
+            )
+            .expect("needs review status should satisfy migrated check");
 
         let status: String = connection
             .query_row(
@@ -1241,7 +1302,7 @@ mod tests {
                 |row| row.get(0),
             )
             .expect("status should load");
-        assert_eq!(status, "declined");
+        assert_eq!(status, "needs_review");
 
         drop(store);
         remove_database_artifacts(&path);

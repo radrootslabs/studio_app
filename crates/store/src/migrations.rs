@@ -100,6 +100,10 @@ const MIGRATIONS: &[Migration] = &[
         version: 24,
         sql: include_str!("../migrations/0024_order_workflow_payment_display_states.sql"),
     },
+    Migration {
+        version: 25,
+        sql: include_str!("../migrations/0025_order_receipt_display_projection.sql"),
+    },
 ];
 
 pub fn latest_schema_version() -> u32 {

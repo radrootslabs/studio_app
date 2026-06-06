@@ -258,6 +258,34 @@ pub struct AppOrderReceiptPublishPayload {
     pub received_at: u64,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum AppOrderReceiptOutcome {
+    Received,
+    Issue { issue: String },
+}
+
+impl AppOrderReceiptOutcome {
+    pub fn issue(issue: impl Into<String>) -> Option<Self> {
+        let issue = issue.into().trim().to_owned();
+        if issue.is_empty() {
+            None
+        } else {
+            Some(Self::Issue { issue })
+        }
+    }
+
+    pub const fn received(&self) -> bool {
+        matches!(self, Self::Received)
+    }
+
+    pub fn issue_text(self) -> Option<String> {
+        match self {
+            Self::Received => None,
+            Self::Issue { issue } => Some(issue),
+        }
+    }
+}
+
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "publish_kind", content = "payload", rename_all = "snake_case")]
 pub enum AppPublishPayload {
@@ -758,9 +786,10 @@ mod tests {
     use super::{
         AppFarmProfilePublishPayload, AppListingPublishPayload, AppOrderCancellationPublishPayload,
         AppOrderDecisionPayload, AppOrderDecisionPublishPayload, AppOrderFulfillmentPublishPayload,
-        AppOrderReceiptPublishPayload, AppOrderRequestItemPayload, AppOrderRequestPublishPayload,
-        AppOrderRevisionDecisionPublishPayload, AppOrderRevisionProposalPublishPayload,
-        AppPublishContext, AppPublishPayload, AppPublishValidationFailure, AppPublishWorkKind,
+        AppOrderReceiptOutcome, AppOrderReceiptPublishPayload, AppOrderRequestItemPayload,
+        AppOrderRequestPublishPayload, AppOrderRevisionDecisionPublishPayload,
+        AppOrderRevisionProposalPublishPayload, AppPublishContext, AppPublishPayload,
+        AppPublishValidationFailure, AppPublishWorkKind,
     };
     use crate::{
         PendingSyncOperation, PendingSyncOperationState, SyncAggregateRef, SyncOperationKind,
@@ -808,6 +837,17 @@ mod tests {
             operation.publish_payload().expect("payload should parse"),
             payload
         );
+    }
+
+    #[test]
+    fn order_receipt_outcome_requires_non_empty_issue_text() {
+        assert_eq!(AppOrderReceiptOutcome::issue("   "), None);
+        assert!(AppOrderReceiptOutcome::Received.received());
+
+        let issue = AppOrderReceiptOutcome::issue("  items need review  ")
+            .expect("issue text should normalize");
+        assert!(!issue.received());
+        assert_eq!(issue.issue_text().as_deref(), Some("items need review"));
     }
 
     #[test]

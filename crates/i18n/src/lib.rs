@@ -341,6 +341,10 @@ mod tests {
         assert_eq!(app_text(AppTextKey::OrdersStatusDeclined), "Declined");
         assert_eq!(app_text(AppTextKey::OrdersStatusInHandoff), "In handoff");
         assert_eq!(
+            app_text(AppTextKey::OrdersStatusNeedsReview),
+            "Needs review"
+        );
+        assert_eq!(
             app_text(AppTextKey::OrdersActionReadyForPickup),
             "Ready for pickup"
         );
@@ -527,6 +531,7 @@ mod tests {
             "Fulfillment"
         );
         assert_eq!(app_text(AppTextKey::TradeWorkflowAxisPayment), "Payment");
+        assert_eq!(app_text(AppTextKey::TradeWorkflowAxisReceipt), "Receipt");
         assert_eq!(app_text(AppTextKey::TradeWorkflowAxisSource), "Source");
         assert_eq!(
             app_text(AppTextKey::TradeWorkflowAgreementOrdered),
@@ -566,6 +571,14 @@ mod tests {
             "Recorded"
         );
         assert_eq!(app_text(AppTextKey::TradeWorkflowPaymentSettled), "Settled");
+        assert_eq!(
+            app_text(AppTextKey::TradeWorkflowReceiptReceived),
+            "Received"
+        );
+        assert_eq!(
+            app_text(AppTextKey::TradeWorkflowReceiptNeedsReview),
+            "Needs review"
+        );
         assert_eq!(app_text(AppTextKey::TradeWorkflowProvenanceCli), "CLI");
         assert_eq!(
             app_text(AppTextKey::TradeWorkflowProvenanceLocalEvents),
@@ -619,6 +632,10 @@ mod tests {
             "Refunded"
         );
         assert_eq!(
+            app_text(AppTextKey::PersonalOrdersStatusNeedsReview),
+            "Needs review"
+        );
+        assert_eq!(
             app_text(AppTextKey::PersonalOrdersDetailTitle),
             "Order detail"
         );
@@ -635,6 +652,10 @@ mod tests {
             "Order note"
         );
         assert_eq!(
+            app_text(AppTextKey::PersonalOrdersDetailReceiptLabel),
+            "Receipt"
+        );
+        assert_eq!(
             app_text(AppTextKey::PersonalOrdersActionCancel),
             "Cancel order"
         );
@@ -649,6 +670,18 @@ mod tests {
         assert_eq!(
             app_text(AppTextKey::PersonalOrdersActionMarkReceived),
             "Mark received"
+        );
+        assert_eq!(
+            app_text(AppTextKey::PersonalOrdersActionReportIssue),
+            "Report issue"
+        );
+        assert_eq!(
+            app_text(AppTextKey::PersonalOrdersActionSendReceiptIssue),
+            "Send update"
+        );
+        assert_eq!(
+            app_text(AppTextKey::PersonalOrdersReceiptIssuePlaceholder),
+            "What needs review"
         );
         assert_eq!(
             app_text(AppTextKey::PersonalOrdersRepeatDemandTitle),

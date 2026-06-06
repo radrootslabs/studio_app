@@ -1206,10 +1206,14 @@ impl<'a> AppLocalInteropRepository<'a> {
                      workflow_revision = ?3,
                      workflow_agreement = ?4,
                      workflow_fulfillment = ?5,
-                     workflow_inventory = ?6,
-                     workflow_payment = ?7,
-                     workflow_provenance_source = ?8,
-                     workflow_provenance_last_event_id = ?9,
+                     workflow_receipt_event_id = ?6,
+                     workflow_receipt_received = ?7,
+                     workflow_receipt_issue = ?8,
+                     workflow_receipt_received_at = ?9,
+                     workflow_inventory = ?10,
+                     workflow_payment = ?11,
+                     workflow_provenance_source = ?12,
+                     workflow_provenance_last_event_id = ?13,
                      updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now')
                  WHERE id = ?1",
                 params![
@@ -1220,6 +1224,26 @@ impl<'a> AppLocalInteropRepository<'a> {
                     workflow
                         .fulfillment
                         .map(|fulfillment| fulfillment.storage_key()),
+                    workflow
+                        .receipt
+                        .as_ref()
+                        .map(|receipt| receipt.event_id.as_str()),
+                    workflow
+                        .receipt
+                        .as_ref()
+                        .map(|receipt| if receipt.received { 1_i64 } else { 0_i64 }),
+                    workflow
+                        .receipt
+                        .as_ref()
+                        .and_then(|receipt| receipt.issue.as_deref()),
+                    workflow
+                        .receipt
+                        .as_ref()
+                        .map(|receipt| i64::try_from(receipt.received_at))
+                        .transpose()
+                        .map_err(|_| AppSqliteError::InvalidProjection {
+                            reason: "receipt timestamp must fit sqlite integer",
+                        })?,
                     workflow.inventory.storage_key(),
                     workflow.payment.storage_key(),
                     workflow.provenance.primary_source.storage_key(),
@@ -3633,7 +3657,7 @@ mod tests {
     use std::collections::BTreeSet;
 
     use radroots_studio_app_view::{
-        BuyerContext, BuyerOrderStatus, FarmId, FarmOrderMethod, OrderFulfillmentAction,
+        BuyerContext, BuyerOrderStatus, FarmId, FarmOrderMethod, OrderFulfillmentAction, OrderId,
         OrderPrimaryAction, OrderStatus, OrdersFilter, OrdersScreenQueryState,
         ProductAvailabilityState, ProductId, TradeFulfillmentStatus, TradeInventoryStatus,
         TradePaymentDisplayStatus, TradeRevisionStatus, TradeWorkflowSource,
@@ -4317,6 +4341,159 @@ mod tests {
             received,
             issue: (!received).then(|| "items need review".to_owned()),
             received_at: 1_777_665_700,
+        }
+    }
+
+    struct ActiveOrderReadyFixture {
+        app_store: AppSqliteStore,
+        events: LocalEventsStore<SqliteExecutor>,
+        buyer_context: BuyerContext,
+        seller_farm_id: FarmId,
+        order_id: OrderId,
+        order_id_raw: String,
+        listing_addr: String,
+        buyer_pubkey: String,
+        seller_pubkey: String,
+        request_event_id: String,
+        fulfillment_event_id: String,
+    }
+
+    fn active_order_ready_fixture(label: &str) -> ActiveOrderReadyFixture {
+        let app_store =
+            AppSqliteStore::open(DatabaseTarget::InMemory).expect("open app sqlite store");
+        let events = local_events_store();
+        let farm_key = "DDDDDDDDDDDDDDDDDDDDDD";
+        let listing_key = "AAAAAAAAAAAAAAAAAAAAAw";
+        let seller_pubkey = format!("{label}-seller");
+        let buyer_pubkey = format!("{label}-buyer");
+        let order_id_raw = format!("{label}-order");
+        let listing_addr = format!("30402:{seller_pubkey}:{listing_key}");
+        events
+            .append_record(&signed_market_listing_record(
+                format!("{label}-listing-record").as_str(),
+                seller_pubkey.as_str(),
+                farm_key,
+                listing_key,
+                "Lifecycle Eggs",
+                "9",
+                "active",
+                "pickup",
+                "North barn pickup",
+                4_102_444_800,
+                4_102_531_200,
+                LocalRecordStatus::Published,
+                PublishOutboxStatus::Acknowledged,
+            ))
+            .expect("append signed listing");
+        app_store
+            .import_shared_local_events_from_store(&events)
+            .expect("import signed listing");
+
+        let request_payload = order_request_payload(
+            order_id_raw.as_str(),
+            listing_addr.as_str(),
+            buyer_pubkey.as_str(),
+            seller_pubkey.as_str(),
+        );
+        let request_parts = active_trade_order_request_event_build(
+            &listing_event_ptr(format!("{label}-listing-event").as_str()),
+            &request_payload,
+        )
+        .expect("build lifecycle order request");
+        let request_event = event_from_parts(
+            format!("{label}-request-event").as_str(),
+            buyer_pubkey.as_str(),
+            request_parts,
+        );
+        events
+            .append_record(&signed_order_event_record(
+                format!("app:signed_event:{label}:request").as_str(),
+                &request_event,
+                listing_addr.as_str(),
+                SourceRuntime::App,
+                Some("acct_lifecycle"),
+            ))
+            .expect("append lifecycle order request");
+        app_store
+            .import_shared_local_events_from_store(&events)
+            .expect("import lifecycle order request");
+
+        let order_id = projected_order_id(order_id_raw.as_str(), buyer_pubkey.as_str());
+        let buyer_context = BuyerContext::account("acct_lifecycle");
+        let seller_farm_id = deterministic_farm_id(Some(seller_pubkey.as_str()), farm_key);
+        let decision_payload = accepted_order_decision_payload(
+            order_id_raw.as_str(),
+            listing_addr.as_str(),
+            buyer_pubkey.as_str(),
+            seller_pubkey.as_str(),
+        );
+        let decision_parts = active_trade_order_decision_event_build(
+            request_event.id.as_str(),
+            request_event.id.as_str(),
+            &decision_payload,
+        )
+        .expect("build lifecycle order decision");
+        let decision_event = event_from_parts(
+            format!("{label}-decision-event").as_str(),
+            seller_pubkey.as_str(),
+            decision_parts,
+        );
+        events
+            .append_record(&signed_order_event_record(
+                format!("cli:signed_event:{label}:decision").as_str(),
+                &decision_event,
+                listing_addr.as_str(),
+                SourceRuntime::Cli,
+                None,
+            ))
+            .expect("append lifecycle order decision");
+        app_store
+            .import_shared_local_events_from_store(&events)
+            .expect("import lifecycle order decision");
+
+        let fulfillment_payload = fulfillment_update_payload(
+            order_id_raw.as_str(),
+            listing_addr.as_str(),
+            buyer_pubkey.as_str(),
+            seller_pubkey.as_str(),
+            RadrootsActiveTradeFulfillmentState::ReadyForPickup,
+        );
+        let fulfillment_parts = active_trade_fulfillment_update_event_build(
+            request_event.id.as_str(),
+            decision_event.id.as_str(),
+            &fulfillment_payload,
+        )
+        .expect("build lifecycle fulfillment update");
+        let fulfillment_event = event_from_parts(
+            format!("{label}-fulfillment-event").as_str(),
+            seller_pubkey.as_str(),
+            fulfillment_parts,
+        );
+        events
+            .append_record(&signed_order_event_record(
+                format!("cli:signed_event:{label}:fulfillment").as_str(),
+                &fulfillment_event,
+                listing_addr.as_str(),
+                SourceRuntime::Cli,
+                None,
+            ))
+            .expect("append lifecycle fulfillment");
+        app_store
+            .import_shared_local_events_from_store(&events)
+            .expect("import lifecycle fulfillment");
+
+        ActiveOrderReadyFixture {
+            app_store,
+            events,
+            buyer_context,
+            seller_farm_id,
+            order_id,
+            order_id_raw,
+            listing_addr,
+            buyer_pubkey,
+            seller_pubkey,
+            request_event_id: request_event.id,
+            fulfillment_event_id: fulfillment_event.id,
         }
     }
 
@@ -5299,7 +5476,101 @@ mod tests {
             )
             .expect("load lifecycle seller orders after receipt");
         assert_eq!(buyer_detail.status, BuyerOrderStatus::Completed);
+        let buyer_receipt = buyer_detail
+            .workflow
+            .receipt
+            .as_ref()
+            .expect("buyer receipt projection");
+        assert_eq!(buyer_receipt.event_id, receipt_event.id);
+        assert!(buyer_receipt.received);
+        assert!(buyer_receipt.issue.is_none());
+        assert_eq!(buyer_receipt.received_at, receipt_payload.received_at);
         assert_eq!(seller_orders.rows[0].status, OrderStatus::Completed);
+        let seller_receipt = seller_orders.rows[0]
+            .workflow
+            .receipt
+            .as_ref()
+            .expect("seller receipt projection");
+        assert_eq!(seller_receipt.event_id, receipt_event.id);
+        assert!(seller_receipt.received);
+        assert!(seller_receipt.issue.is_none());
+        assert_eq!(seller_receipt.received_at, receipt_payload.received_at);
+        assert_eq!(seller_orders.rows[0].primary_action, None);
+        assert_eq!(seller_orders.rows[0].fulfillment_actions, Vec::new());
+    }
+
+    #[test]
+    fn active_order_issue_receipt_projects_through_cli_reducer_state() {
+        let fixture = active_order_ready_fixture("active-lifecycle-issue-receipt");
+        let receipt_payload = buyer_receipt_payload(
+            fixture.order_id_raw.as_str(),
+            fixture.listing_addr.as_str(),
+            fixture.buyer_pubkey.as_str(),
+            fixture.seller_pubkey.as_str(),
+            false,
+        );
+        let receipt_parts = active_trade_buyer_receipt_event_build(
+            fixture.request_event_id.as_str(),
+            fixture.fulfillment_event_id.as_str(),
+            &receipt_payload,
+        )
+        .expect("build lifecycle buyer issue receipt");
+        let receipt_event = event_from_parts(
+            "active-lifecycle-issue-receipt-event",
+            fixture.buyer_pubkey.as_str(),
+            receipt_parts,
+        );
+        fixture
+            .events
+            .append_record(&signed_order_event_record(
+                "app:signed_event:active-lifecycle:issue-receipt",
+                &receipt_event,
+                fixture.listing_addr.as_str(),
+                SourceRuntime::App,
+                Some("acct_lifecycle"),
+            ))
+            .expect("append lifecycle buyer issue receipt");
+        fixture
+            .app_store
+            .import_shared_local_events_from_store(&fixture.events)
+            .expect("import lifecycle buyer issue receipt");
+
+        let buyer_detail = fixture
+            .app_store
+            .load_buyer_order_detail(&fixture.buyer_context, fixture.order_id)
+            .expect("load lifecycle buyer issue detail")
+            .expect("lifecycle buyer issue detail");
+        let seller_orders = fixture
+            .app_store
+            .load_orders_list(
+                fixture.seller_farm_id,
+                &OrdersScreenQueryState {
+                    filter: OrdersFilter::All,
+                    fulfillment_window_id: None,
+                },
+            )
+            .expect("load lifecycle seller orders after issue receipt");
+
+        assert_eq!(buyer_detail.status, BuyerOrderStatus::NeedsReview);
+        let buyer_receipt = buyer_detail
+            .workflow
+            .receipt
+            .as_ref()
+            .expect("buyer issue receipt projection");
+        assert_eq!(buyer_receipt.event_id, receipt_event.id);
+        assert!(!buyer_receipt.received);
+        assert_eq!(buyer_receipt.issue.as_deref(), Some("items need review"));
+        assert_eq!(buyer_receipt.received_at, receipt_payload.received_at);
+        assert_eq!(seller_orders.rows[0].status, OrderStatus::NeedsReview);
+        let seller_receipt = seller_orders.rows[0]
+            .workflow
+            .receipt
+            .as_ref()
+            .expect("seller issue receipt projection");
+        assert_eq!(seller_receipt.event_id, receipt_event.id);
+        assert!(!seller_receipt.received);
+        assert_eq!(seller_receipt.issue.as_deref(), Some("items need review"));
+        assert_eq!(seller_receipt.received_at, receipt_payload.received_at);
         assert_eq!(seller_orders.rows[0].primary_action, None);
         assert_eq!(seller_orders.rows[0].fulfillment_actions, Vec::new());
     }

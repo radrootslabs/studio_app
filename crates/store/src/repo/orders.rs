@@ -81,6 +81,10 @@ impl<'a> AppOrdersRepository<'a> {
                     o.workflow_revision,
                     o.workflow_agreement,
                     o.workflow_fulfillment,
+                    o.workflow_receipt_event_id,
+                    o.workflow_receipt_received,
+                    o.workflow_receipt_issue,
+                    o.workflow_receipt_received_at,
                     o.workflow_inventory,
                     o.workflow_payment,
                     o.workflow_provenance_source,
@@ -104,12 +108,16 @@ impl<'a> AppOrdersRepository<'a> {
                         row.get::<_, String>(6)?,
                         row.get::<_, String>(7)?,
                         row.get::<_, Option<String>>(8)?,
-                        row.get::<_, String>(9)?,
-                        row.get::<_, String>(10)?,
-                        row.get::<_, String>(11)?,
-                        row.get::<_, Option<String>>(12)?,
-                        row.get::<_, Option<String>>(13)?,
-                        row.get::<_, Option<String>>(14)?,
+                        row.get::<_, Option<String>>(9)?,
+                        row.get::<_, Option<i64>>(10)?,
+                        row.get::<_, Option<String>>(11)?,
+                        row.get::<_, Option<i64>>(12)?,
+                        row.get::<_, String>(13)?,
+                        row.get::<_, String>(14)?,
+                        row.get::<_, String>(15)?,
+                        row.get::<_, Option<String>>(16)?,
+                        row.get::<_, Option<String>>(17)?,
+                        row.get::<_, Option<String>>(18)?,
                     ))
                 },
             )
@@ -131,6 +139,10 @@ impl<'a> AppOrdersRepository<'a> {
                     workflow_revision,
                     workflow_agreement,
                     workflow_fulfillment,
+                    workflow_receipt_event_id,
+                    workflow_receipt_received,
+                    workflow_receipt_issue,
+                    workflow_receipt_received_at,
                     workflow_inventory,
                     workflow_payment,
                     workflow_provenance_source,
@@ -152,6 +164,10 @@ impl<'a> AppOrdersRepository<'a> {
                             economics: economics.clone(),
                             agreement: workflow_agreement,
                             fulfillment: workflow_fulfillment,
+                            receipt_event_id: workflow_receipt_event_id,
+                            receipt_received: workflow_receipt_received,
+                            receipt_issue: workflow_receipt_issue,
+                            receipt_received_at: workflow_receipt_received_at,
                             inventory: workflow_inventory,
                             payment: workflow_payment,
                             provenance_source: workflow_provenance_source,
@@ -298,6 +314,10 @@ impl<'a> AppOrdersRepository<'a> {
                     o.workflow_revision,
                     o.workflow_agreement,
                     o.workflow_fulfillment,
+                    o.workflow_receipt_event_id,
+                    o.workflow_receipt_received,
+                    o.workflow_receipt_issue,
+                    o.workflow_receipt_received_at,
                     o.workflow_inventory,
                     o.workflow_payment,
                     o.workflow_provenance_source,
@@ -332,12 +352,16 @@ impl<'a> AppOrdersRepository<'a> {
                         row.get::<_, String>(6)?,
                         row.get::<_, String>(7)?,
                         row.get::<_, Option<String>>(8)?,
-                        row.get::<_, String>(9)?,
-                        row.get::<_, String>(10)?,
-                        row.get::<_, String>(11)?,
-                        row.get::<_, Option<String>>(12)?,
-                        row.get::<_, Option<String>>(13)?,
-                        row.get::<_, Option<String>>(14)?,
+                        row.get::<_, Option<String>>(9)?,
+                        row.get::<_, Option<i64>>(10)?,
+                        row.get::<_, Option<String>>(11)?,
+                        row.get::<_, Option<i64>>(12)?,
+                        row.get::<_, String>(13)?,
+                        row.get::<_, String>(14)?,
+                        row.get::<_, String>(15)?,
+                        row.get::<_, Option<String>>(16)?,
+                        row.get::<_, Option<String>>(17)?,
+                        row.get::<_, Option<String>>(18)?,
                     ))
                 },
             )
@@ -358,6 +382,10 @@ impl<'a> AppOrdersRepository<'a> {
                 workflow_revision,
                 workflow_agreement,
                 workflow_fulfillment,
+                workflow_receipt_event_id,
+                workflow_receipt_received,
+                workflow_receipt_issue,
+                workflow_receipt_received_at,
                 workflow_inventory,
                 workflow_payment,
                 workflow_provenance_source,
@@ -381,6 +409,10 @@ impl<'a> AppOrdersRepository<'a> {
                 economics,
                 agreement: workflow_agreement,
                 fulfillment: workflow_fulfillment,
+                receipt_event_id: workflow_receipt_event_id,
+                receipt_received: workflow_receipt_received,
+                receipt_issue: workflow_receipt_issue,
+                receipt_received_at: workflow_receipt_received_at,
                 inventory: workflow_inventory,
                 payment: workflow_payment,
                 provenance_source: workflow_provenance_source,
@@ -1144,7 +1176,12 @@ impl OrderRecord {
     fn matches_filter(&self, filter: OrdersFilter) -> bool {
         match filter {
             OrdersFilter::All => true,
-            OrdersFilter::NeedsAction => self.status == OrderStatus::NeedsAction,
+            OrdersFilter::NeedsAction => {
+                matches!(
+                    self.status,
+                    OrderStatus::NeedsAction | OrderStatus::NeedsReview
+                )
+            }
             OrdersFilter::Scheduled => self.status == OrderStatus::Scheduled,
             OrdersFilter::Packed => self.status == OrderStatus::Packed,
             OrdersFilter::Completed => self.status == OrderStatus::Completed,
@@ -1177,7 +1214,7 @@ fn summarize_orders(records: &[OrderRecord]) -> OrdersListSummary {
 
     for record in records {
         match record.status {
-            OrderStatus::NeedsAction => summary.needs_action_orders += 1,
+            OrderStatus::NeedsAction | OrderStatus::NeedsReview => summary.needs_action_orders += 1,
             OrderStatus::Scheduled => summary.scheduled_orders += 1,
             OrderStatus::Packed => summary.packed_orders += 1,
             OrderStatus::Completed | OrderStatus::Declined | OrderStatus::Refunded => {}
@@ -1202,7 +1239,10 @@ fn primary_action_for_order(
             ) => Some(OrderPrimaryAction::PublishDelivered),
             Some(TradeFulfillmentStatus::Delivered | TradeFulfillmentStatus::Cancelled) => None,
         },
-        OrderStatus::Completed | OrderStatus::Declined | OrderStatus::Refunded => None,
+        OrderStatus::Completed
+        | OrderStatus::Declined
+        | OrderStatus::Refunded
+        | OrderStatus::NeedsReview => None,
     }
 }
 
@@ -1280,6 +1320,7 @@ fn parse_order_status(field: &'static str, value: String) -> Result<OrderStatus,
         "completed" => Ok(OrderStatus::Completed),
         "declined" => Ok(OrderStatus::Declined),
         "refunded" => Ok(OrderStatus::Refunded),
+        "needs_review" => Ok(OrderStatus::NeedsReview),
         _ => Err(AppSqliteError::DecodeEnum { field, value }),
     }
 }

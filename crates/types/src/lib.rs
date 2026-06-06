@@ -342,6 +342,7 @@ pub enum OrderStatus {
     Completed,
     Declined,
     Refunded,
+    NeedsReview,
 }
 
 impl OrderStatus {
@@ -353,6 +354,7 @@ impl OrderStatus {
             Self::Completed => "completed",
             Self::Declined => "declined",
             Self::Refunded => "refunded",
+            Self::NeedsReview => "needs_review",
         }
     }
 }
@@ -366,6 +368,7 @@ pub enum BuyerOrderStatus {
     Completed,
     Declined,
     Refunded,
+    NeedsReview,
 }
 
 impl BuyerOrderStatus {
@@ -377,6 +380,7 @@ impl BuyerOrderStatus {
             Self::Completed => "completed",
             Self::Declined => "declined",
             Self::Refunded => "refunded",
+            Self::NeedsReview => "needs_review",
         }
     }
 }
@@ -390,6 +394,7 @@ impl From<OrderStatus> for BuyerOrderStatus {
             OrderStatus::Completed => Self::Completed,
             OrderStatus::Declined => Self::Declined,
             OrderStatus::Refunded => Self::Refunded,
+            OrderStatus::NeedsReview => Self::NeedsReview,
         }
     }
 }
@@ -690,7 +695,10 @@ impl PackDayOutputOrderState {
             OrderStatus::NeedsAction => Some(Self::NeedsAction),
             OrderStatus::Scheduled => Some(Self::Scheduled),
             OrderStatus::Packed => Some(Self::Packed),
-            OrderStatus::Completed | OrderStatus::Declined | OrderStatus::Refunded => None,
+            OrderStatus::Completed
+            | OrderStatus::Declined
+            | OrderStatus::Refunded
+            | OrderStatus::NeedsReview => None,
         }
     }
 }

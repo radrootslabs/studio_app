@@ -35,11 +35,12 @@ use radroots_studio_app_state::{
 use radroots_studio_app_sync::{
     AppFarmProfilePublishPayload, AppListingPublishPayload, AppOrderCancellationPublishPayload,
     AppOrderDecisionInventoryCommitment, AppOrderDecisionPayload, AppOrderDecisionPublishPayload,
-    AppOrderFulfillmentPublishPayload, AppOrderReceiptPublishPayload, AppOrderRequestItemPayload,
-    AppOrderRequestPublishPayload, AppOrderRevisionDecisionPublishPayload,
-    AppOrderRevisionProposalPublishPayload, AppPublishContext, AppPublishPayload,
-    AppPublishedOperationReceipt, AppRelayIngestScopeFreshness, AppSyncProjection, AppSyncRequest,
-    AppSyncResult, AppSyncRunStatus, AppSyncTransport, AppSyncTransportError, PendingSyncOperation,
+    AppOrderFulfillmentPublishPayload, AppOrderReceiptOutcome, AppOrderReceiptPublishPayload,
+    AppOrderRequestItemPayload, AppOrderRequestPublishPayload,
+    AppOrderRevisionDecisionPublishPayload, AppOrderRevisionProposalPublishPayload,
+    AppPublishContext, AppPublishPayload, AppPublishedOperationReceipt,
+    AppRelayIngestScopeFreshness, AppSyncProjection, AppSyncRequest, AppSyncResult,
+    AppSyncRunStatus, AppSyncTransport, AppSyncTransportError, PendingSyncOperation,
     SyncAggregateRef, SyncCheckpointStatus, SyncConflictSeverity, SyncOperationKind, SyncTrigger,
 };
 use radroots_studio_app_view::{
@@ -846,8 +847,13 @@ impl DesktopAppRuntime {
             .publish_buyer_order_revision_decline(order_id)
     }
 
-    pub fn publish_buyer_order_receipt(&self, order_id: OrderId) -> Result<bool, AppSqliteError> {
-        self.lock_state_mut().publish_buyer_order_receipt(order_id)
+    pub fn publish_buyer_order_receipt(
+        &self,
+        order_id: OrderId,
+        outcome: AppOrderReceiptOutcome,
+    ) -> Result<bool, AppSqliteError> {
+        self.lock_state_mut()
+            .publish_buyer_order_receipt(order_id, outcome)
     }
 
     pub fn start_order_recovery(
@@ -3077,6 +3083,7 @@ impl DesktopAppRuntimeState {
     fn prepare_buyer_order_receipt(
         &mut self,
         order_id: OrderId,
+        outcome: AppOrderReceiptOutcome,
     ) -> Result<AppOrderReceiptPublishPayload, AppSqliteError> {
         let _ = self.import_shared_local_events()?;
         let relay_urls = normalized_app_sync_relay_urls(&self.nostr_relay_urls).map_err(|_| {
@@ -3119,11 +3126,6 @@ impl DesktopAppRuntimeState {
                 reason: "buyer order receipt requires a visible buyer order",
             });
         };
-        if detail.status != BuyerOrderStatus::Ready {
-            return Err(AppSqliteError::InvalidProjection {
-                reason: "buyer order receipt requires a ready order",
-            });
-        }
         let request = self.resolve_seller_order_request_evidence(order_id)?;
         if request.payload.buyer_pubkey.trim() != buyer_pubkey.as_str() {
             return Err(AppSqliteError::InvalidProjection {
@@ -3157,6 +3159,7 @@ impl DesktopAppRuntimeState {
                 reason: "buyer order receipt timestamp must be non-negative",
             }
         })?;
+        let received = outcome.received();
         let payload = AppOrderReceiptPublishPayload {
             context: AppPublishContext::new(account_id.clone(), "buyer_order_receipt"),
             app_order_id: order_id,
@@ -3167,8 +3170,8 @@ impl DesktopAppRuntimeState {
             listing_addr: request.payload.listing_addr,
             buyer_pubkey: request.payload.buyer_pubkey,
             seller_pubkey: request.payload.seller_pubkey,
-            received: true,
-            issue: None,
+            received,
+            issue: outcome.issue_text(),
             received_at,
         };
         AppPublishPayload::OrderReceipt(payload.clone())
@@ -3179,8 +3182,12 @@ impl DesktopAppRuntimeState {
         Ok(payload)
     }
 
-    fn publish_buyer_order_receipt(&mut self, order_id: OrderId) -> Result<bool, AppSqliteError> {
-        let payload = self.prepare_buyer_order_receipt(order_id)?;
+    fn publish_buyer_order_receipt(
+        &mut self,
+        order_id: OrderId,
+        outcome: AppOrderReceiptOutcome,
+    ) -> Result<bool, AppSqliteError> {
+        let payload = self.prepare_buyer_order_receipt(order_id, outcome)?;
         let operation = PendingSyncOperation::from_publish_payload(
             AppPublishPayload::OrderReceipt(payload),
             current_utc_timestamp(),
@@ -9721,7 +9728,7 @@ mod tests {
     use radroots_studio_app_sync::{
         AppFarmProfilePublishPayload, AppListingPublishPayload, AppOrderCancellationPublishPayload,
         AppOrderDecisionInventoryCommitment, AppOrderDecisionPayload,
-        AppOrderDecisionPublishPayload, AppOrderFulfillmentPublishPayload,
+        AppOrderDecisionPublishPayload, AppOrderFulfillmentPublishPayload, AppOrderReceiptOutcome,
         AppOrderReceiptPublishPayload, AppOrderRequestItemPayload, AppOrderRequestPublishPayload,
         AppOrderRevisionDecisionPublishPayload, AppOrderRevisionProposalPublishPayload,
         AppPublishContext, AppPublishPayload, AppPublishedOperationReceipt,
@@ -16732,7 +16739,7 @@ mod tests {
         assert!(
             fixture
                 .runtime
-                .publish_buyer_order_receipt(fixture.order_id)
+                .publish_buyer_order_receipt(fixture.order_id, AppOrderReceiptOutcome::Received)
                 .expect("linked buyer receipt should publish")
         );
 
@@ -16761,6 +16768,126 @@ mod tests {
             "e_prev",
             fulfillment_event_id.as_str()
         ));
+
+        cleanup_bootstrapped_runtime_paths(&fixture.paths);
+    }
+
+    #[test]
+    fn runtime_publishes_linked_buyer_receipt_after_direct_delivered_fulfillment() {
+        let relay = ThreadedAckRelay::spawn();
+        let fixture = linked_buyer_lifecycle_runtime("linked_buyer_order_receipt_delivered", false);
+        let fulfillment_event_id = append_signed_order_fulfillment_record_with_status(
+            &fixture.paths,
+            fixture.trade_order_id.as_str(),
+            fixture.request_event_id.as_str(),
+            fixture.decision_event_id.as_str(),
+            fixture.listing_addr.as_str(),
+            fixture.buyer_pubkey.as_str(),
+            fixture.seller_pubkey.as_str(),
+            RadrootsActiveTradeFulfillmentState::Delivered,
+        );
+        install_direct_relay_sync_transport(&fixture.runtime, &relay);
+        fixture
+            .runtime
+            .refresh_shared_local_events()
+            .expect("linked buyer delivered local events should import");
+        assert!(
+            fixture
+                .runtime
+                .open_personal_order_detail(fixture.order_id)
+                .expect("linked delivered buyer order detail should open")
+        );
+
+        assert!(
+            fixture
+                .runtime
+                .publish_buyer_order_receipt(fixture.order_id, AppOrderReceiptOutcome::Received)
+                .expect("linked delivered buyer receipt should publish")
+        );
+
+        assert_eq!(
+            persisted_order_status(&fixture.runtime, fixture.order_id),
+            "completed"
+        );
+        assert_eq!(relay.event_count(), 1);
+        let receipt_events =
+            shared_order_events_by_kind(&fixture.paths, 3434, fixture.buyer_pubkey.as_str());
+        assert_eq!(receipt_events.len(), 1);
+        let receipt_event = receipt_events.first().expect("linked buyer receipt event");
+        let receipt = radroots_sdk::trade::parse_buyer_receipt(receipt_event)
+            .expect("linked buyer delivered receipt should parse");
+        assert!(receipt.payload.received);
+        assert!(event_has_tag(
+            receipt_event,
+            "e_prev",
+            fulfillment_event_id.as_str()
+        ));
+
+        cleanup_bootstrapped_runtime_paths(&fixture.paths);
+    }
+
+    #[test]
+    fn runtime_publishes_linked_buyer_issue_receipt_from_selected_account_nostr_scope() {
+        let relay = ThreadedAckRelay::spawn();
+        let fixture = linked_buyer_lifecycle_runtime("linked_buyer_order_issue_receipt", true);
+        install_direct_relay_sync_transport(&fixture.runtime, &relay);
+        fixture
+            .runtime
+            .refresh_shared_local_events()
+            .expect("linked buyer local events should import");
+        assert!(
+            fixture
+                .runtime
+                .open_personal_order_detail(fixture.order_id)
+                .expect("linked ready buyer order detail should open")
+        );
+
+        assert!(
+            fixture
+                .runtime
+                .publish_buyer_order_receipt(
+                    fixture.order_id,
+                    AppOrderReceiptOutcome::issue("items need review")
+                        .expect("issue receipt text should be accepted"),
+                )
+                .expect("linked buyer issue receipt should publish")
+        );
+
+        assert_eq!(
+            persisted_order_status(&fixture.runtime, fixture.order_id),
+            "needs_review"
+        );
+        assert_eq!(relay.event_count(), 1);
+        let receipt_events =
+            shared_order_events_by_kind(&fixture.paths, 3434, fixture.buyer_pubkey.as_str());
+        assert_eq!(receipt_events.len(), 1);
+        let receipt_event = receipt_events
+            .first()
+            .expect("linked buyer issue receipt event");
+        let receipt = radroots_sdk::trade::parse_buyer_receipt(receipt_event)
+            .expect("linked buyer issue receipt should parse");
+        assert!(!receipt.payload.received);
+        assert_eq!(receipt.payload.issue.as_deref(), Some("items need review"));
+        let buyer_detail = fixture
+            .runtime
+            .summary()
+            .personal_projection
+            .orders
+            .detail
+            .as_ref()
+            .expect("linked buyer issue receipt detail")
+            .clone();
+        assert_eq!(buyer_detail.status, BuyerOrderStatus::NeedsReview);
+        let projected_receipt = buyer_detail
+            .workflow
+            .receipt
+            .as_ref()
+            .expect("receipt projection should be present");
+        assert!(!projected_receipt.received);
+        assert_eq!(
+            projected_receipt.issue.as_deref(),
+            Some("items need review")
+        );
 
         cleanup_bootstrapped_runtime_paths(&fixture.paths);
     }
@@ -16850,7 +16977,7 @@ mod tests {
 
         let error = fixture
             .runtime
-            .publish_buyer_order_receipt(fixture.order_id)
+            .publish_buyer_order_receipt(fixture.order_id, AppOrderReceiptOutcome::Received)
             .expect_err("linked buyer receipt should reject reducer-invalid fulfillment evidence");
 
         assert!(
@@ -21126,7 +21253,7 @@ mod tests {
             buyer_pubkey: buyer_pubkey.to_owned(),
             seller_pubkey: seller_pubkey.to_owned(),
             received,
-            issue: None,
+            issue: (!received).then(|| "items need review".to_owned()),
             received_at: 1_774_000_030,
         };
         let parts = radroots_sdk::trade::build_buyer_receipt_draft(

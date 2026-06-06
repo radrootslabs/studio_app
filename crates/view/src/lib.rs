@@ -1469,11 +1469,33 @@ impl Default for TradeProvenanceProjection {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct TradeReceiptProjection {
+    pub event_id: String,
+    pub received: bool,
+    pub issue: Option<String>,
+    pub received_at: u64,
+}
+
+impl TradeReceiptProjection {
+    pub fn from_active_order_projection(
+        projection: &RadrootsActiveOrderProjection,
+    ) -> Option<Self> {
+        Some(Self {
+            event_id: projection.receipt_event_id.clone()?,
+            received: projection.receipt_received?,
+            issue: projection.receipt_issue.clone(),
+            received_at: projection.receipt_received_at?,
+        })
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct TradeWorkflowProjection {
     pub order_id: OrderId,
     pub agreement: TradeAgreementStatus,
     pub revision: TradeRevisionStatus,
     pub fulfillment: Option<TradeFulfillmentStatus>,
+    pub receipt: Option<TradeReceiptProjection>,
     pub economics: TradeEconomicsProjection,
     pub inventory: TradeInventoryStatus,
     pub payment: TradePaymentDisplayStatus,
@@ -1487,6 +1509,7 @@ impl TradeWorkflowProjection {
             agreement,
             revision: TradeRevisionStatus::None,
             fulfillment: None,
+            receipt: None,
             economics: TradeEconomicsProjection::default(),
             inventory: TradeInventoryStatus::NeedsReview,
             payment: TradePaymentDisplayStatus::NotRecorded,
@@ -1509,6 +1532,7 @@ impl TradeWorkflowProjection {
             .fulfillment_status
             .as_ref()
             .map(TradeFulfillmentStatus::from_active_fulfillment_status);
+        workflow.receipt = TradeReceiptProjection::from_active_order_projection(projection);
         workflow.economics = projection
             .economics
             .as_ref()
@@ -1528,7 +1552,9 @@ impl TradeWorkflowProjection {
             OrderStatus::Packed => Self::new(order_id, TradeAgreementStatus::Confirmed),
             OrderStatus::Completed => Self::new(order_id, TradeAgreementStatus::Completed),
             OrderStatus::Declined => Self::new(order_id, TradeAgreementStatus::Declined),
-            OrderStatus::Refunded => Self::new(order_id, TradeAgreementStatus::NeedsReview),
+            OrderStatus::Refunded | OrderStatus::NeedsReview => {
+                Self::new(order_id, TradeAgreementStatus::NeedsReview)
+            }
         };
 
         match status {
@@ -1549,7 +1575,7 @@ impl TradeWorkflowProjection {
                 projection.fulfillment = Some(TradeFulfillmentStatus::Cancelled);
                 projection.inventory = TradeInventoryStatus::Available;
             }
-            OrderStatus::Refunded => {
+            OrderStatus::Refunded | OrderStatus::NeedsReview => {
                 projection.payment = TradePaymentDisplayStatus::NeedsReview;
             }
         }
@@ -1564,7 +1590,9 @@ impl TradeWorkflowProjection {
             BuyerOrderStatus::Ready => Self::new(order_id, TradeAgreementStatus::Confirmed),
             BuyerOrderStatus::Completed => Self::new(order_id, TradeAgreementStatus::Completed),
             BuyerOrderStatus::Declined => Self::new(order_id, TradeAgreementStatus::Declined),
-            BuyerOrderStatus::Refunded => Self::new(order_id, TradeAgreementStatus::NeedsReview),
+            BuyerOrderStatus::Refunded | BuyerOrderStatus::NeedsReview => {
+                Self::new(order_id, TradeAgreementStatus::NeedsReview)
+            }
         };
 
         match status {
@@ -1585,7 +1613,7 @@ impl TradeWorkflowProjection {
                 projection.fulfillment = Some(TradeFulfillmentStatus::Cancelled);
                 projection.inventory = TradeInventoryStatus::Available;
             }
-            BuyerOrderStatus::Refunded => {
+            BuyerOrderStatus::Refunded | BuyerOrderStatus::NeedsReview => {
                 projection.payment = TradePaymentDisplayStatus::NeedsReview;
             }
         }
@@ -1647,9 +1675,8 @@ pub fn order_status_from_active_order_projection(
             Some(OrderStatus::Declined)
         }
         (RadrootsActiveOrderStatus::Completed, _) => Some(OrderStatus::Completed),
-        (RadrootsActiveOrderStatus::Disputed | RadrootsActiveOrderStatus::Invalid, _) => {
-            Some(OrderStatus::NeedsAction)
-        }
+        (RadrootsActiveOrderStatus::Disputed, _) => Some(OrderStatus::NeedsReview),
+        (RadrootsActiveOrderStatus::Invalid, _) => Some(OrderStatus::NeedsAction),
     }
 }
 
@@ -2908,12 +2935,14 @@ mod tests {
         assert_eq!(OrderStatus::Completed.storage_key(), "completed");
         assert_eq!(OrderStatus::Declined.storage_key(), "declined");
         assert_eq!(OrderStatus::Refunded.storage_key(), "refunded");
+        assert_eq!(OrderStatus::NeedsReview.storage_key(), "needs_review");
         assert_eq!(BuyerOrderStatus::Placed.storage_key(), "placed");
         assert_eq!(BuyerOrderStatus::Scheduled.storage_key(), "scheduled");
         assert_eq!(BuyerOrderStatus::Ready.storage_key(), "ready");
         assert_eq!(BuyerOrderStatus::Completed.storage_key(), "completed");
         assert_eq!(BuyerOrderStatus::Declined.storage_key(), "declined");
         assert_eq!(BuyerOrderStatus::Refunded.storage_key(), "refunded");
+        assert_eq!(BuyerOrderStatus::NeedsReview.storage_key(), "needs_review");
         assert_eq!(
             BuyerOrderStatus::from(OrderStatus::NeedsAction),
             BuyerOrderStatus::Placed
@@ -2925,6 +2954,10 @@ mod tests {
         assert_eq!(
             BuyerOrderStatus::from(OrderStatus::Declined),
             BuyerOrderStatus::Declined
+        );
+        assert_eq!(
+            BuyerOrderStatus::from(OrderStatus::NeedsReview),
+            BuyerOrderStatus::NeedsReview
         );
 
         assert_eq!(OrdersFilter::default(), OrdersFilter::NeedsAction);
@@ -3585,6 +3618,10 @@ mod tests {
         );
         assert_eq!(
             PackDayOutputOrderState::from_order_status(OrderStatus::Refunded),
+            None
+        );
+        assert_eq!(
+            PackDayOutputOrderState::from_order_status(OrderStatus::NeedsReview),
             None
         );
         assert_eq!(

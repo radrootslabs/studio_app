@@ -1,7 +1,7 @@
 use radroots_studio_app_view::{
     OrderId, TradeAgreementStatus, TradeEconomicsProjection, TradeFulfillmentStatus,
     TradeInventoryStatus, TradePaymentDisplayStatus, TradeProvenanceProjection,
-    TradeRevisionStatus, TradeWorkflowProjection, TradeWorkflowSource,
+    TradeReceiptProjection, TradeRevisionStatus, TradeWorkflowProjection, TradeWorkflowSource,
 };
 
 use crate::AppSqliteError;
@@ -13,6 +13,10 @@ pub(super) struct StoredTradeWorkflowSnapshot {
     pub economics: TradeEconomicsProjection,
     pub agreement: String,
     pub fulfillment: Option<String>,
+    pub receipt_event_id: Option<String>,
+    pub receipt_received: Option<i64>,
+    pub receipt_issue: Option<String>,
+    pub receipt_received_at: Option<i64>,
     pub inventory: String,
     pub payment: String,
     pub provenance_source: String,
@@ -30,6 +34,12 @@ pub(super) fn trade_workflow_projection_from_storage(
             .fulfillment
             .map(|value| parse_trade_fulfillment_status("orders.workflow_fulfillment", value))
             .transpose()?,
+        receipt: trade_receipt_projection_from_storage(
+            snapshot.receipt_event_id,
+            snapshot.receipt_received,
+            snapshot.receipt_issue,
+            snapshot.receipt_received_at,
+        )?,
         economics: snapshot.economics,
         inventory: parse_trade_inventory_status("orders.workflow_inventory", snapshot.inventory)?,
         payment: parse_trade_payment_display_status("orders.workflow_payment", snapshot.payment)?,
@@ -39,6 +49,40 @@ pub(super) fn trade_workflow_projection_from_storage(
         )?)
         .with_last_event_id(snapshot.provenance_last_event_id),
     })
+}
+
+fn trade_receipt_projection_from_storage(
+    event_id: Option<String>,
+    received: Option<i64>,
+    issue: Option<String>,
+    received_at: Option<i64>,
+) -> Result<Option<TradeReceiptProjection>, AppSqliteError> {
+    match (event_id, received, received_at) {
+        (None, None, None) => Ok(None),
+        (Some(event_id), Some(received), Some(received_at)) => Ok(Some(TradeReceiptProjection {
+            event_id,
+            received: parse_workflow_receipt_received(received)?,
+            issue,
+            received_at: u64::try_from(received_at).map_err(|_| {
+                AppSqliteError::InvalidProjection {
+                    reason: "orders.workflow_receipt_received_at must be non-negative",
+                }
+            })?,
+        })),
+        _ => Err(AppSqliteError::InvalidProjection {
+            reason: "orders.workflow_receipt projection is incomplete",
+        }),
+    }
+}
+
+fn parse_workflow_receipt_received(value: i64) -> Result<bool, AppSqliteError> {
+    match value {
+        0 => Ok(false),
+        1 => Ok(true),
+        _ => Err(AppSqliteError::InvalidProjection {
+            reason: "orders.workflow_receipt_received must be 0 or 1",
+        }),
+    }
 }
 
 fn parse_trade_agreement_status(
