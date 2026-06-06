@@ -16526,6 +16526,79 @@ mod tests {
     }
 
     #[test]
+    fn runtime_rejects_linked_buyer_cancellation_after_relay_settlement_evidence() {
+        let relay = ThreadedAckRelay::spawn();
+        let seller_identity = RadrootsIdentity::generate();
+        let seller_pubkey = seller_identity.public_key_hex();
+        let fixture = linked_buyer_lifecycle_runtime_with_seller_pubkey(
+            "linked_buyer_order_cancel_relay_k3436",
+            false,
+            seller_pubkey.as_str(),
+        );
+        configure_runtime_relay_ingest(&fixture.runtime, &relay);
+        fixture
+            .runtime
+            .refresh_shared_local_events()
+            .expect("linked buyer local events should import");
+        assert!(
+            fixture
+                .runtime
+                .open_personal_order_detail(fixture.order_id)
+                .expect("linked buyer order detail should open")
+        );
+        let buyer_identity = selected_account_signing_identity(&fixture.runtime);
+        let payment_event = signed_payment_recorded_relay_event(
+            &buyer_identity,
+            fixture.trade_order_id.as_str(),
+            fixture.request_event_id.as_str(),
+            fixture.decision_event_id.as_str(),
+            fixture.listing_addr.as_str(),
+            fixture.buyer_pubkey.as_str(),
+            fixture.seller_pubkey.as_str(),
+            2,
+        );
+        let payment_event_id = payment_event.id.to_hex();
+        let k3436_event = signed_settlement_decision_relay_event(
+            &seller_identity,
+            fixture.trade_order_id.as_str(),
+            fixture.request_event_id.as_str(),
+            fixture.decision_event_id.as_str(),
+            payment_event_id.as_str(),
+            fixture.listing_addr.as_str(),
+            fixture.buyer_pubkey.as_str(),
+            fixture.seller_pubkey.as_str(),
+            2,
+            RadrootsTradeSettlementDecision::Accepted,
+        );
+        let k3436_event_id = k3436_event.id.to_hex();
+        relay.push_event(&payment_event);
+        relay.push_event(&k3436_event);
+
+        let error = fixture
+            .runtime
+            .publish_buyer_order_cancel(fixture.order_id)
+            .expect_err("linked buyer cancellation should reject relay k3436 evidence");
+
+        assert!(matches!(
+            error,
+            AppSqliteError::InvalidProjection {
+                reason: "buyer order cancellation requires no recorded or settled payment"
+            }
+        ));
+        let k3436_events = fixture
+            .runtime
+            .lock_state()
+            .sqlite_store
+            .as_ref()
+            .expect("sqlite store")
+            .load_local_interop_signed_events_by_kind(3436)
+            .expect("relay k3436 evidence should load from local interop");
+        assert!(k3436_events.iter().any(|event| event.id == k3436_event_id));
+        assert_eq!(relay.event_count(), 2);
+        cleanup_bootstrapped_runtime_paths(&fixture.paths);
+    }
+
+    #[test]
     fn runtime_publishes_linked_buyer_cancellation_from_revision_parent() {
         for (label, revision_decision) in [
             ("accepted", RadrootsTradeOrderRevisionDecision::Accepted),
@@ -20157,6 +20230,18 @@ mod tests {
         label: &str,
         include_ready_fulfillment: bool,
     ) -> LinkedBuyerLifecycleFixture {
+        linked_buyer_lifecycle_runtime_with_seller_pubkey(
+            label,
+            include_ready_fulfillment,
+            "2222222222222222222222222222222222222222222222222222222222222222",
+        )
+    }
+
+    fn linked_buyer_lifecycle_runtime_with_seller_pubkey(
+        label: &str,
+        include_ready_fulfillment: bool,
+        seller_pubkey: &str,
+    ) -> LinkedBuyerLifecycleFixture {
         let (runtime, paths) = bootstrapped_runtime(label);
         assert!(
             runtime
@@ -20186,8 +20271,6 @@ mod tests {
             .expect("selected buyer account should resolve")
             .public_identity
             .public_key_hex;
-        let seller_pubkey =
-            "2222222222222222222222222222222222222222222222222222222222222222".to_owned();
         let farm_key = super::d_tag_from_uuid(FarmId::new().as_uuid());
         let listing_key = super::d_tag_from_uuid(ProductId::new().as_uuid());
         let listing_addr = format!("30402:{seller_pubkey}:{listing_key}");
@@ -20198,7 +20281,7 @@ mod tests {
         append_app_signed_listing_record(
             &paths,
             "linked-seller-account",
-            seller_pubkey.as_str(),
+            seller_pubkey,
             farm_key.as_str(),
             listing_key.as_str(),
             listing_event_id.as_str(),
@@ -20210,7 +20293,7 @@ mod tests {
             listing_addr.as_str(),
             listing_event_id.as_str(),
             buyer_pubkey.as_str(),
-            seller_pubkey.as_str(),
+            seller_pubkey,
             2,
         );
         let request_event_id = format!("event-app:signed_event:order-request:{trade_order_id}");
@@ -20220,7 +20303,7 @@ mod tests {
             request_event_id.as_str(),
             listing_addr.as_str(),
             buyer_pubkey.as_str(),
-            seller_pubkey.as_str(),
+            seller_pubkey,
             2,
         );
         let fulfillment_event_id = if include_ready_fulfillment {
@@ -20231,7 +20314,7 @@ mod tests {
                 decision_event_id.as_str(),
                 listing_addr.as_str(),
                 buyer_pubkey.as_str(),
-                seller_pubkey.as_str(),
+                seller_pubkey,
             ))
         } else {
             None
@@ -20247,7 +20330,7 @@ mod tests {
             fulfillment_event_id,
             listing_addr,
             buyer_pubkey,
-            seller_pubkey,
+            seller_pubkey: seller_pubkey.to_owned(),
         }
     }
 
@@ -20811,6 +20894,51 @@ mod tests {
             .expect("relay payment builder")
             .sign_with_keys(buyer.keys())
             .expect("relay payment should sign")
+    }
+
+    fn signed_settlement_decision_relay_event(
+        seller: &RadrootsIdentity,
+        trade_order_id: &str,
+        request_event_id: &str,
+        agreement_event_id: &str,
+        payment_event_id: &str,
+        listing_addr: &str,
+        buyer_pubkey: &str,
+        seller_pubkey: &str,
+        order_quantity: u32,
+        decision: RadrootsTradeSettlementDecision,
+    ) -> radroots_nostr::prelude::RadrootsNostrEvent {
+        let economics = signed_order_request_economics(trade_order_id, order_quantity);
+        let payload = RadrootsTradeSettlementDecisionEvent {
+            order_id: trade_order_id.to_owned(),
+            listing_addr: listing_addr.to_owned(),
+            seller_pubkey: seller_pubkey.to_owned(),
+            buyer_pubkey: buyer_pubkey.to_owned(),
+            root_event_id: request_event_id.to_owned(),
+            previous_event_id: payment_event_id.to_owned(),
+            agreement_event_id: agreement_event_id.to_owned(),
+            payment_event_id: payment_event_id.to_owned(),
+            quote_id: economics.quote_id.clone(),
+            quote_version: economics.quote_version,
+            economics_digest: radroots_trade_order_economics_digest(&economics)
+                .expect("relay k3436 economics digest"),
+            amount: economics.total.amount,
+            currency: economics.total.currency,
+            decision,
+            reason: (decision == RadrootsTradeSettlementDecision::Rejected)
+                .then(|| "reference mismatch".to_owned()),
+        };
+        let parts = active_trade_settlement_decision_event_build(
+            request_event_id,
+            payment_event_id,
+            &payload,
+        )
+        .expect("relay k3436 draft should build");
+
+        radroots_nostr_build_event(parts.kind, parts.content, parts.tags)
+            .expect("relay k3436 builder")
+            .sign_with_keys(seller.keys())
+            .expect("relay k3436 should sign")
     }
 
     fn selected_account_signing_identity(runtime: &DesktopAppRuntime) -> RadrootsIdentity {
