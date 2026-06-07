@@ -890,6 +890,96 @@ pub fn app_button_list_row(
         )
 }
 
+pub fn app_button_account_selector_row(
+    id: impl Into<ElementId>,
+    title: impl Into<SharedString>,
+    subtitle: impl Into<SharedString>,
+    is_selected: bool,
+    on_click: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+    cx: &App,
+) -> impl IntoElement {
+    let tokens = APP_UI_THEME.components.app_account_selector_row;
+    let background = if is_selected {
+        tokens.active_background
+    } else {
+        tokens.inactive_background
+    };
+
+    Button::new(id)
+        .custom(
+            ButtonCustomVariant::new(cx)
+                .color(rgb(background).into())
+                .foreground(rgb(APP_UI_THEME.foundation.text.primary).into())
+                .border(transparent_black())
+                .hover(rgb(background).into())
+                .active(rgb(background).into()),
+        )
+        .rounded(ButtonRounded::Size(px(APP_UI_THEME
+            .shells
+            .settings_account_sidebar_button_corner_radius_px)))
+        .w_full()
+        .min_w_0()
+        .on_click(on_click)
+        .child(
+            div()
+                .w_full()
+                .flex()
+                .items_center()
+                .gap(px(APP_UI_THEME
+                    .shells
+                    .settings_account_sidebar_button_gap_px))
+                .px(px(APP_UI_THEME
+                    .shells
+                    .settings_account_sidebar_button_padding_px))
+                .py(px(APP_UI_THEME
+                    .shells
+                    .settings_account_sidebar_button_padding_px))
+                .child(
+                    div()
+                        .size(px(APP_UI_THEME
+                            .shells
+                            .settings_account_sidebar_avatar_size_px))
+                        .rounded_full()
+                        .bg(rgb(APP_UI_THEME.foundation.surfaces.divider))
+                        .flex_shrink_0(),
+                )
+                .child(
+                    div()
+                        .min_w_0()
+                        .flex()
+                        .flex_col()
+                        .items_start()
+                        .gap(px(APP_UI_THEME
+                            .shells
+                            .settings_account_identity_text_gap_px))
+                        .child(
+                            div()
+                                .max_w_full()
+                                .overflow_hidden()
+                                .text_ellipsis()
+                                .whitespace_nowrap()
+                                .text_size(px(APP_UI_THEME
+                                    .foundation
+                                    .typography
+                                    .settings_account_identity_text_px))
+                                .font_weight(gpui::FontWeight::MEDIUM)
+                                .text_color(rgb(APP_UI_THEME.foundation.text.primary))
+                                .child(title.into()),
+                        )
+                        .child(
+                            div()
+                                .max_w_full()
+                                .overflow_hidden()
+                                .text_ellipsis()
+                                .whitespace_nowrap()
+                                .text_size(px(APP_UI_THEME.foundation.typography.body_text_px))
+                                .text_color(rgb(APP_UI_THEME.foundation.text.secondary))
+                                .child(subtitle.into()),
+                        ),
+                ),
+        )
+}
+
 pub fn app_button_card(
     id: impl Into<ElementId>,
     is_selected: bool,

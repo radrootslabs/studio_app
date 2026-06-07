@@ -72,6 +72,13 @@ pub struct AppComponentTokens {
     pub app_input_text: AppInputTextTokens,
     pub app_checkbox_field: AppCheckboxFieldTokens,
     pub app_status_indicator: AppStatusIndicatorTokens,
+    pub app_account_selector_row: AppAccountSelectorRowTokens,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct AppAccountSelectorRowTokens {
+    pub inactive_background: u32,
+    pub active_background: u32,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -202,6 +209,7 @@ const APP_SURFACE_CHROME_BACKGROUND: u32 = 0xF5F5F7;
 const APP_SURFACE_PANEL_BACKGROUND: u32 = 0xFFFFFF;
 const APP_SURFACE_CARD_BACKGROUND: u32 = 0xF2F2F7;
 const APP_SURFACE_DIVIDER: u32 = 0xD2D2D7;
+const APP_SURFACE_ACCOUNT_SELECTOR_ACTIVE_BACKGROUND: u32 = 0xE5E5EA;
 const APP_TEXT_PRIMARY: u32 = 0x1D1D1F;
 const APP_TEXT_SECONDARY: u32 = 0x6E6E73;
 const APP_TEXT_ACCENT: u32 = 0x0A84FF;
@@ -328,6 +336,10 @@ pub const APP_UI_THEME: AppUiTheme = AppUiTheme {
             offline: APP_STATUS_OFFLINE,
             attention: APP_STATUS_ATTENTION,
         },
+        app_account_selector_row: AppAccountSelectorRowTokens {
+            inactive_background: APP_SURFACE_CARD_BACKGROUND,
+            active_background: APP_SURFACE_ACCOUNT_SELECTOR_ACTIVE_BACKGROUND,
+        },
     },
     shells: AppShellTokens {
         home_min_width_px: 1284.0,
@@ -437,6 +449,7 @@ mod tests {
         let text_input = APP_UI_THEME.components.app_input_text;
         let checkbox = APP_UI_THEME.components.app_checkbox_field;
         let status = APP_UI_THEME.components.app_status_indicator;
+        let account_selector = APP_UI_THEME.components.app_account_selector_row;
 
         assert_eq!(segmented.height_px, 44.0);
         assert_eq!(segmented.corner_radius_px, 8.0);
@@ -450,6 +463,8 @@ mod tests {
         assert_eq!(checkbox.size_px, 16.0);
         assert_eq!(checkbox.corner_radius_px, 5.0);
         assert_eq!(status.size_px, 12.0);
+        assert_eq!(account_selector.inactive_background, 0xF2F2F7);
+        assert_eq!(account_selector.active_background, 0xE5E5EA);
     }
 
     #[test]

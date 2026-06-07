@@ -26,7 +26,8 @@ use radroots_studio_app_sync::{
 use radroots_studio_app_ui::{
     APP_UI_THEME, AppCheckboxFieldSpec, AppFormFieldSpec,
     AppSegmentButtonIconSpec as IconSegmentButtonSpec, LabelValueRow,
-    SettingsPreferencesGeneralRowState, app_button_card, app_button_choice as choice_button,
+    SettingsPreferencesGeneralRowState, app_button_account_selector_row as account_selector_row,
+    app_button_card, app_button_choice as choice_button,
     app_button_compact as action_button_compact, app_button_list_row as list_row_button,
     app_button_primary as action_button_primary,
     app_button_primary_disabled as action_button_primary_disabled,
@@ -6369,6 +6370,25 @@ impl SettingsWindowView {
         self.runtime.selected_settings_section()
     }
 
+    fn select_account(&mut self, account_id: String, cx: &mut Context<Self>) {
+        match self.runtime.select_local_account(account_id.as_str()) {
+            Ok(changed) => {
+                if changed {
+                    cx.refresh_windows();
+                }
+                cx.notify();
+            }
+            Err(runtime_error) => {
+                error!(
+                    target: "settings",
+                    event = "settings.account.select_failed",
+                    error = %runtime_error,
+                    "failed to select account from settings panel"
+                );
+            }
+        }
+    }
+
     fn handle_farm_rules_input_event(
         &mut self,
         _: &Entity<InputState>,
@@ -6710,12 +6730,16 @@ impl SettingsWindowView {
             .iter()
             .enumerate()
             .map(|(index, account)| {
-                list_row_button(
+                let account_id = account.account_id.clone();
+                let is_selected = selected_account_id
+                    .is_some_and(|selected_account_id| selected_account_id == account.account_id);
+
+                account_selector_row(
                     ("settings-account-row", index),
                     account_display_name(account),
-                    Some(SharedString::from(abbreviated_npub(account.npub.as_str()))),
-                    false,
-                    cx.listener(|_, _, _, _| {}),
+                    SharedString::from(abbreviated_npub(account.npub.as_str())),
+                    is_selected,
+                    cx.listener(move |this, _, _, cx| this.select_account(account_id.clone(), cx)),
                     cx,
                 )
                 .into_any_element()
