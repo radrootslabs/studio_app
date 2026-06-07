@@ -217,6 +217,7 @@ impl AccountTab {
 }
 
 type AccountProfileSelectState = SelectState<SearchableVec<SharedString>>;
+type AccountFarmProfileSelectState = SelectState<SearchableVec<SharedString>>;
 
 #[derive(Clone)]
 struct AccountProfileFormState {
@@ -290,6 +291,106 @@ fn account_profile_select_state(
     window: &mut Window,
     cx: &mut Context<HomeView>,
 ) -> Entity<AccountProfileSelectState> {
+    let values = value_keys
+        .iter()
+        .copied()
+        .map(app_shared_text)
+        .collect::<Vec<_>>();
+    cx.new(|cx| {
+        SelectState::new(
+            SearchableVec::new(values),
+            Some(IndexPath::default().row(0)),
+            window,
+            cx,
+        )
+    })
+}
+
+#[derive(Clone)]
+struct AccountFarmProfileFormState {
+    farm_name_input: Entity<InputState>,
+    public_farm_name_input: Entity<InputState>,
+    short_description_input: Entity<InputState>,
+    contact_email_input: Entity<InputState>,
+    public_phone_input: Entity<InputState>,
+    website_input: Entity<InputState>,
+    established_year_input: Entity<InputState>,
+    about_farm_input: Entity<InputState>,
+    farm_type_select: Entity<AccountFarmProfileSelectState>,
+}
+
+impl AccountFarmProfileFormState {
+    fn new(window: &mut Window, cx: &mut Context<HomeView>) -> Self {
+        Self {
+            farm_name_input: account_profile_input_state(
+                AppTextKey::AccountFarmDetailsFarmNameValue,
+                window,
+                cx,
+            ),
+            public_farm_name_input: account_profile_input_state(
+                AppTextKey::AccountFarmDetailsPublicFarmNameValue,
+                window,
+                cx,
+            ),
+            short_description_input: account_profile_input_state(
+                AppTextKey::AccountFarmDetailsShortDescriptionValue,
+                window,
+                cx,
+            ),
+            contact_email_input: account_profile_input_state(
+                AppTextKey::AccountFarmDetailsContactEmailValue,
+                window,
+                cx,
+            ),
+            public_phone_input: account_profile_input_state(
+                AppTextKey::AccountFarmDetailsPublicPhoneValue,
+                window,
+                cx,
+            ),
+            website_input: account_profile_input_state(
+                AppTextKey::AccountFarmDetailsWebsiteValue,
+                window,
+                cx,
+            ),
+            established_year_input: account_profile_input_state(
+                AppTextKey::AccountFarmDetailsEstablishedYearValue,
+                window,
+                cx,
+            ),
+            about_farm_input: account_profile_input_state(
+                AppTextKey::AccountFarmDetailsAboutFarmValue,
+                window,
+                cx,
+            ),
+            farm_type_select: account_farm_profile_select_state(
+                &[
+                    AppTextKey::AccountFarmDetailsFarmTypeVegetableFarm,
+                    AppTextKey::AccountFarmDetailsFarmTypeFruitOrchard,
+                    AppTextKey::AccountFarmDetailsFarmTypeBerryFarm,
+                    AppTextKey::AccountFarmDetailsFarmTypeHerbFarm,
+                    AppTextKey::AccountFarmDetailsFarmTypeFlowerFarm,
+                    AppTextKey::AccountFarmDetailsFarmTypeMushroomFarm,
+                    AppTextKey::AccountFarmDetailsFarmTypeGrainFieldCropFarm,
+                    AppTextKey::AccountFarmDetailsFarmTypeDairyFarm,
+                    AppTextKey::AccountFarmDetailsFarmTypeEggPoultryFarm,
+                    AppTextKey::AccountFarmDetailsFarmTypeLivestockFarm,
+                    AppTextKey::AccountFarmDetailsFarmTypeHoneyApiary,
+                    AppTextKey::AccountFarmDetailsFarmTypeNurseryPlantFarm,
+                    AppTextKey::AccountFarmDetailsFarmTypeMixedFarm,
+                    AppTextKey::AccountFarmDetailsFarmTypeOther,
+                ],
+                window,
+                cx,
+            ),
+        }
+    }
+}
+
+fn account_farm_profile_select_state(
+    value_keys: &[AppTextKey],
+    window: &mut Window,
+    cx: &mut Context<HomeView>,
+) -> Entity<AccountFarmProfileSelectState> {
     let values = value_keys
         .iter()
         .copied()
@@ -433,6 +534,7 @@ pub struct HomeView {
     focused_view: Option<HomeFocusedView>,
     selected_account_tab: AccountTab,
     account_profile_form: Option<AccountProfileFormState>,
+    account_farm_profile_form: Option<AccountFarmProfileFormState>,
     relay_client: Option<RadrootsNostrClient>,
     buyer_workspace_notice: Option<String>,
 }
@@ -554,6 +656,7 @@ impl HomeView {
             focused_view: None,
             selected_account_tab: AccountTab::default(),
             account_profile_form: None,
+            account_farm_profile_form: None,
             relay_client: None,
             buyer_workspace_notice: None,
         }
@@ -5111,7 +5214,11 @@ impl HomeView {
                 let form = self.account_profile_form(window, cx).clone();
                 account_profile_panel(&form, cx).into_any_element()
             }
-            AccountTab::FarmDetails | AccountTab::Preferences | AccountTab::Security => {
+            AccountTab::FarmDetails => {
+                let form = self.account_farm_profile_form(window, cx).clone();
+                account_farm_profile_panel(&form, cx).into_any_element()
+            }
+            AccountTab::Preferences | AccountTab::Security => {
                 account_placeholder_panel(selected_tab.panel_text_key()).into_any_element()
             }
         };
@@ -5147,6 +5254,21 @@ impl HomeView {
         }
 
         let Some(form) = self.account_profile_form.as_ref() else {
+            unreachable!();
+        };
+        form
+    }
+
+    fn account_farm_profile_form(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> &AccountFarmProfileFormState {
+        if self.account_farm_profile_form.is_none() {
+            self.account_farm_profile_form = Some(AccountFarmProfileFormState::new(window, cx));
+        }
+
+        let Some(form) = self.account_farm_profile_form.as_ref() else {
             unreachable!();
         };
         form
@@ -9113,6 +9235,456 @@ fn account_profile_labeled_control(
                 .child(app_shared_text(label_key)),
         )
         .child(control)
+}
+
+fn account_farm_profile_panel(
+    form: &AccountFarmProfileFormState,
+    cx: &mut Context<HomeView>,
+) -> impl IntoElement {
+    app_stack_v(APP_UI_THEME.shells.home_stack_gap_px)
+        .w_full()
+        .child(
+            div()
+                .w_full()
+                .flex()
+                .items_start()
+                .gap(px(APP_UI_THEME.shells.home_stack_gap_px))
+                .child(
+                    div()
+                        .flex_1()
+                        .min_w_0()
+                        .child(account_farm_profile_main_card(form)),
+                )
+                .child(
+                    app_stack_v(APP_UI_THEME.shells.home_stack_gap_px)
+                        .w(px(336.0))
+                        .min_w(px(300.0))
+                        .child(account_farm_profile_completeness_card())
+                        .child(account_farm_profile_summary_card(cx)),
+                ),
+        )
+        .child(account_farm_profile_action_row(cx))
+}
+
+fn account_farm_profile_main_card(form: &AccountFarmProfileFormState) -> impl IntoElement {
+    account_farm_profile_card(
+        app_stack_v(APP_UI_THEME.shells.home_stack_gap_px)
+            .w_full()
+            .child(account_farm_profile_title_block(
+                AppTextKey::AccountFarmDetailsFarmProfileTitle,
+                AppTextKey::AccountFarmDetailsFarmProfileIntro,
+            ))
+            .child(account_farm_profile_field_row(
+                account_profile_input_field(
+                    AppTextKey::AccountFarmDetailsFarmNameLabel,
+                    &form.farm_name_input,
+                ),
+                account_profile_input_field(
+                    AppTextKey::AccountFarmDetailsPublicFarmNameLabel,
+                    &form.public_farm_name_input,
+                ),
+            ))
+            .child(account_farm_profile_field_row(
+                account_profile_input_field(
+                    AppTextKey::AccountFarmDetailsShortDescriptionLabel,
+                    &form.short_description_input,
+                ),
+                account_farm_profile_select_field(
+                    AppTextKey::AccountFarmDetailsFarmTypeLabel,
+                    &form.farm_type_select,
+                ),
+            ))
+            .child(account_farm_profile_field_row(
+                account_profile_input_field(
+                    AppTextKey::AccountFarmDetailsContactEmailLabel,
+                    &form.contact_email_input,
+                ),
+                account_profile_input_field(
+                    AppTextKey::AccountFarmDetailsPublicPhoneLabel,
+                    &form.public_phone_input,
+                ),
+            ))
+            .child(account_farm_profile_field_row(
+                account_profile_input_field(
+                    AppTextKey::AccountFarmDetailsWebsiteLabel,
+                    &form.website_input,
+                ),
+                account_profile_input_field(
+                    AppTextKey::AccountFarmDetailsEstablishedYearLabel,
+                    &form.established_year_input,
+                ),
+            ))
+            .child(account_farm_profile_text_area_field(
+                AppTextKey::AccountFarmDetailsAboutFarmLabel,
+                &form.about_farm_input,
+            ))
+            .child(
+                div()
+                    .w_full()
+                    .text_size(px(APP_UI_THEME.foundation.typography.utility_title_text_px))
+                    .text_color(rgb(APP_UI_THEME.foundation.text.secondary))
+                    .child(app_shared_text(
+                        AppTextKey::AccountFarmDetailsRequiredFieldNote,
+                    )),
+            ),
+    )
+}
+
+fn account_farm_profile_card(content: impl IntoElement) -> impl IntoElement {
+    div()
+        .w_full()
+        .border_1()
+        .border_color(rgb(APP_UI_THEME.foundation.surfaces.divider))
+        .rounded(px(APP_UI_THEME.foundation.radii.large_px))
+        .bg(transparent_black())
+        .child(
+            div()
+                .w_full()
+                .p(px(APP_UI_THEME.shells.home_card_padding_px))
+                .child(content),
+        )
+}
+
+fn account_farm_profile_title_block(
+    title_key: AppTextKey,
+    body_key: AppTextKey,
+) -> impl IntoElement {
+    app_stack_v(8.0)
+        .w_full()
+        .child(
+            div()
+                .w_full()
+                .text_size(px(APP_UI_THEME.foundation.typography.body_text_px * 1.1))
+                .font_weight(gpui::FontWeight::BOLD)
+                .text_color(rgb(APP_UI_THEME.foundation.text.primary))
+                .child(app_shared_text(title_key)),
+        )
+        .child(
+            div()
+                .w_full()
+                .line_height(relative(1.35))
+                .text_size(px(APP_UI_THEME.foundation.typography.body_text_px))
+                .text_color(rgb(APP_UI_THEME.foundation.text.secondary))
+                .child(app_shared_text(body_key)),
+        )
+}
+
+fn account_farm_profile_field_row(
+    first: impl IntoElement,
+    second: impl IntoElement,
+) -> impl IntoElement {
+    div()
+        .w_full()
+        .flex()
+        .items_start()
+        .gap(px(APP_UI_THEME.shells.home_stack_gap_px))
+        .child(div().flex_1().min_w_0().child(first))
+        .child(div().flex_1().min_w_0().child(second))
+}
+
+fn account_farm_profile_select_field(
+    label_key: AppTextKey,
+    select: &Entity<AccountFarmProfileSelectState>,
+) -> impl IntoElement {
+    account_profile_labeled_control(
+        label_key,
+        Select::new(select).with_size(Size::Medium).w_full(),
+    )
+}
+
+fn account_farm_profile_text_area_field(
+    label_key: AppTextKey,
+    input: &Entity<InputState>,
+) -> impl IntoElement {
+    account_profile_labeled_control(label_key, app_text_input(input, false).w_full().h(px(76.0)))
+}
+
+fn account_farm_profile_completeness_card() -> impl IntoElement {
+    account_farm_profile_card(
+        app_stack_v(APP_UI_THEME.shells.home_stack_gap_px)
+            .w_full()
+            .child(
+                div()
+                    .w_full()
+                    .text_size(px(APP_UI_THEME.foundation.typography.body_text_px * 1.1))
+                    .font_weight(gpui::FontWeight::BOLD)
+                    .text_color(rgb(APP_UI_THEME.foundation.text.primary))
+                    .child(app_shared_text(
+                        AppTextKey::AccountFarmDetailsCompletenessTitle,
+                    )),
+            )
+            .child(
+                div()
+                    .w_full()
+                    .flex()
+                    .items_center()
+                    .gap(px(APP_UI_THEME.shells.home_stack_gap_px))
+                    .child(account_farm_profile_progress_badge())
+                    .child(
+                        app_stack_v(6.0)
+                            .flex_1()
+                            .min_w_0()
+                            .child(
+                                div()
+                                    .text_size(px(APP_UI_THEME.foundation.typography.body_text_px))
+                                    .font_weight(gpui::FontWeight::BOLD)
+                                    .text_color(rgb(APP_UI_THEME.foundation.text.primary))
+                                    .child(app_shared_text(
+                                        AppTextKey::AccountFarmDetailsCompletenessCallout,
+                                    )),
+                            )
+                            .child(
+                                div()
+                                    .line_height(relative(1.3))
+                                    .text_size(px(APP_UI_THEME.foundation.typography.body_text_px))
+                                    .text_color(rgb(APP_UI_THEME.foundation.text.secondary))
+                                    .child(app_shared_text(
+                                        AppTextKey::AccountFarmDetailsCompletenessBody,
+                                    )),
+                            ),
+                    ),
+            )
+            .child(account_farm_profile_step_list()),
+    )
+}
+
+fn account_farm_profile_progress_badge() -> impl IntoElement {
+    div()
+        .size(px(72.0))
+        .rounded(px(36.0))
+        .border_1()
+        .border_color(rgb(APP_UI_THEME
+            .components
+            .app_button
+            .primary_colors
+            .background))
+        .bg(transparent_black())
+        .flex()
+        .items_center()
+        .justify_center()
+        .text_size(px(APP_UI_THEME.foundation.typography.body_text_px * 1.25))
+        .font_weight(gpui::FontWeight::BOLD)
+        .text_color(rgb(APP_UI_THEME.foundation.text.primary))
+        .child(app_shared_text(
+            AppTextKey::AccountFarmDetailsCompletenessPercent,
+        ))
+}
+
+fn account_farm_profile_step_list() -> impl IntoElement {
+    app_stack_v(8.0)
+        .w_full()
+        .child(account_farm_profile_step_row(
+            1,
+            AppTextKey::AccountFarmDetailsStepFarmProfile,
+            AppTextKey::AccountFarmDetailsStatusInProgress,
+            true,
+        ))
+        .child(account_farm_profile_step_row(
+            2,
+            AppTextKey::AccountFarmDetailsStepLocation,
+            AppTextKey::AccountFarmDetailsStatusNotStarted,
+            false,
+        ))
+        .child(account_farm_profile_step_row(
+            3,
+            AppTextKey::AccountFarmDetailsStepOperatingDetails,
+            AppTextKey::AccountFarmDetailsStatusNotStarted,
+            false,
+        ))
+        .child(account_farm_profile_step_row(
+            4,
+            AppTextKey::AccountFarmDetailsStepPickupFulfillment,
+            AppTextKey::AccountFarmDetailsStatusNotStarted,
+            false,
+        ))
+        .child(account_farm_profile_step_row(
+            5,
+            AppTextKey::AccountFarmDetailsStepReviewPublish,
+            AppTextKey::AccountFarmDetailsStatusNotStarted,
+            false,
+        ))
+}
+
+fn account_farm_profile_step_row(
+    number: usize,
+    label_key: AppTextKey,
+    status_key: AppTextKey,
+    active: bool,
+) -> impl IntoElement {
+    let marker_bg = if active {
+        APP_UI_THEME.components.app_button.primary_colors.background
+    } else {
+        APP_UI_THEME.foundation.surfaces.divider
+    };
+    let marker_fg = if active {
+        APP_UI_THEME.components.app_button.primary_colors.foreground
+    } else {
+        APP_UI_THEME.foundation.text.secondary
+    };
+    let row_bg = if active {
+        APP_UI_THEME.foundation.surfaces.card_background
+    } else {
+        APP_UI_THEME.foundation.surfaces.window_background
+    };
+
+    div()
+        .w_full()
+        .rounded(px(APP_UI_THEME.foundation.radii.medium_px))
+        .bg(rgb(row_bg))
+        .px(px(8.0))
+        .py(px(6.0))
+        .flex()
+        .items_center()
+        .gap(px(8.0))
+        .child(
+            div()
+                .size(px(18.0))
+                .rounded(px(9.0))
+                .bg(rgb(marker_bg))
+                .flex()
+                .items_center()
+                .justify_center()
+                .text_size(px(APP_UI_THEME.foundation.typography.utility_title_text_px))
+                .font_weight(gpui::FontWeight::BOLD)
+                .text_color(rgb(marker_fg))
+                .child(number.to_string()),
+        )
+        .child(
+            div()
+                .flex_1()
+                .min_w_0()
+                .text_size(px(APP_UI_THEME.foundation.typography.body_text_px))
+                .font_weight(gpui::FontWeight::MEDIUM)
+                .text_color(rgb(APP_UI_THEME.foundation.text.primary))
+                .child(app_shared_text(label_key)),
+        )
+        .child(
+            div()
+                .text_size(px(APP_UI_THEME.foundation.typography.utility_title_text_px))
+                .text_color(rgb(APP_UI_THEME.foundation.text.secondary))
+                .child(app_shared_text(status_key)),
+        )
+}
+
+fn account_farm_profile_summary_card(cx: &mut Context<HomeView>) -> impl IntoElement {
+    account_farm_profile_card(
+        app_stack_v(APP_UI_THEME.shells.home_stack_gap_px)
+            .w_full()
+            .child(
+                div()
+                    .w_full()
+                    .text_size(px(APP_UI_THEME.foundation.typography.body_text_px * 1.1))
+                    .font_weight(gpui::FontWeight::BOLD)
+                    .text_color(rgb(APP_UI_THEME.foundation.text.primary))
+                    .child(app_shared_text(AppTextKey::AccountFarmDetailsSummaryTitle)),
+            )
+            .child(
+                div()
+                    .w_full()
+                    .flex()
+                    .items_center()
+                    .gap(px(APP_UI_THEME.shells.home_stack_gap_px))
+                    .child(
+                        div()
+                            .size(px(56.0))
+                            .rounded(px(28.0))
+                            .bg(rgb(0xA7F3B8))
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .child(
+                                Icon::new(IconName::Building2)
+                                    .with_size(gpui_component::Size::Size(px(28.0)))
+                                    .text_color(rgb(APP_UI_THEME.foundation.text.primary)),
+                            ),
+                    )
+                    .child(
+                        app_stack_v(4.0)
+                            .flex_1()
+                            .min_w_0()
+                            .child(
+                                div()
+                                    .text_size(px(APP_UI_THEME.foundation.typography.body_text_px))
+                                    .font_weight(gpui::FontWeight::BOLD)
+                                    .text_color(rgb(APP_UI_THEME.foundation.text.primary))
+                                    .child(app_shared_text(
+                                        AppTextKey::AccountFarmDetailsFarmNameValue,
+                                    )),
+                            )
+                            .child(
+                                div()
+                                    .text_size(px(APP_UI_THEME.foundation.typography.body_text_px))
+                                    .text_color(rgb(APP_UI_THEME.foundation.text.secondary))
+                                    .child(app_shared_text(
+                                        AppTextKey::AccountFarmDetailsFarmLocationValue,
+                                    )),
+                            ),
+                    ),
+            )
+            .child(account_farm_profile_summary_row(
+                AppTextKey::AccountFarmDetailsFarmTypeSummaryLabel,
+                AppTextKey::AccountFarmDetailsFarmTypeVegetableFarm,
+            ))
+            .child(account_farm_profile_summary_row(
+                AppTextKey::AccountFarmDetailsEstablishedSummaryLabel,
+                AppTextKey::AccountFarmDetailsEstablishedYearValue,
+            ))
+            .child(action_button_full_width(
+                "account-farm-view-profile",
+                app_shared_text(AppTextKey::AccountFarmDetailsViewFarmProfileAction),
+                |_, _, _| {},
+                cx,
+            )),
+    )
+}
+
+fn account_farm_profile_summary_row(
+    label_key: AppTextKey,
+    value_key: AppTextKey,
+) -> impl IntoElement {
+    div()
+        .w_full()
+        .flex()
+        .items_center()
+        .justify_between()
+        .gap(px(APP_UI_THEME.shells.home_stack_gap_px))
+        .child(
+            div()
+                .text_size(px(APP_UI_THEME.foundation.typography.body_text_px))
+                .text_color(rgb(APP_UI_THEME.foundation.text.secondary))
+                .child(app_shared_text(label_key)),
+        )
+        .child(
+            div()
+                .text_size(px(APP_UI_THEME.foundation.typography.body_text_px))
+                .text_color(rgb(APP_UI_THEME.foundation.text.primary))
+                .child(app_shared_text(value_key)),
+        )
+}
+
+fn account_farm_profile_action_row(cx: &mut Context<HomeView>) -> impl IntoElement {
+    div()
+        .w_full()
+        .flex()
+        .items_center()
+        .gap(px(APP_UI_THEME.shells.home_stack_gap_px))
+        .child(div().w(px(280.0)).child(action_button_full_width(
+            "account-farm-save-draft",
+            app_shared_text(AppTextKey::AccountFarmDetailsSaveDraftAction),
+            |_, _, _| {},
+            cx,
+        )))
+        .child(
+            div()
+                .flex_1()
+                .min_w_0()
+                .child(action_button_primary_full_width(
+                    "account-farm-continue-location",
+                    app_shared_text(AppTextKey::AccountFarmDetailsContinueLocationAction),
+                    |_, _, _| {},
+                    cx,
+                )),
+        )
 }
 
 fn buyer_listings_feed(

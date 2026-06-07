@@ -178,6 +178,22 @@ mod tests {
             "Remove"
         );
         assert_eq!(
+            app_text(AppTextKey::AccountFarmDetailsFarmProfileTitle),
+            "Farm profile"
+        );
+        assert_eq!(
+            app_text(AppTextKey::AccountFarmDetailsFarmTypeVegetableFarm),
+            "Vegetable farm"
+        );
+        assert_eq!(
+            app_text(AppTextKey::AccountFarmDetailsSaveDraftAction),
+            "Save draft"
+        );
+        assert_eq!(
+            app_text(AppTextKey::AccountFarmDetailsContinueLocationAction),
+            "Continue to location"
+        );
+        assert_eq!(
             app_text(AppTextKey::HomeTodayEmptySetupBody),
             "Add a local account to start using Radroots on this device."
         );
