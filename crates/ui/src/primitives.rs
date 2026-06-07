@@ -722,6 +722,25 @@ pub fn app_button_secondary(
     )
 }
 
+pub fn app_button_secondary_full_width(
+    id: impl Into<ElementId>,
+    label: impl Into<SharedString>,
+    on_click: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+    cx: &App,
+) -> impl IntoElement {
+    app_button_label(
+        app_button_base(id, AppButtonVariant::Secondary, on_click, cx),
+        label.into(),
+        APP_UI_THEME
+            .components
+            .app_button
+            .sizing
+            .horizontal_padding_px,
+        AppButtonVariant::Secondary,
+    )
+    .w_full()
+}
+
 pub fn app_button_secondary_disabled(
     id: impl Into<ElementId>,
     label: impl Into<SharedString>,
@@ -755,6 +774,25 @@ pub fn app_button_primary(
             .horizontal_padding_px,
         AppButtonVariant::Primary,
     )
+}
+
+pub fn app_button_primary_full_width(
+    id: impl Into<ElementId>,
+    label: impl Into<SharedString>,
+    on_click: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+    cx: &App,
+) -> impl IntoElement {
+    app_button_label(
+        app_button_base(id, AppButtonVariant::Primary, on_click, cx),
+        label.into(),
+        APP_UI_THEME
+            .components
+            .app_button
+            .sizing
+            .horizontal_padding_px,
+        AppButtonVariant::Primary,
+    )
+    .w_full()
 }
 
 pub fn app_button_primary_disabled(
@@ -828,7 +866,7 @@ fn app_button_label(
     label: SharedString,
     horizontal_padding_px: f32,
     variant: AppButtonVariant,
-) -> impl IntoElement {
+) -> Button {
     let sizing = APP_UI_THEME.components.app_button.sizing;
     let colors = app_button_colors(variant);
     button.child(

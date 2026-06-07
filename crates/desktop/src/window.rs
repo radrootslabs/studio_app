@@ -5,7 +5,11 @@ use gpui::{
     div, img, prelude::FluentBuilder, px, relative, rgb, size, transparent_black,
 };
 use gpui_component::{
-    Icon, IconName, Root, Sizable, input::InputEvent, input::InputState, menu::PopupMenuItem,
+    Icon, IconName, IndexPath, Root, Sizable, Size,
+    input::InputEvent,
+    input::InputState,
+    menu::PopupMenuItem,
+    select::{SearchableVec, Select, SelectState},
 };
 use radroots_studio_app_i18n::{AppTextKey, app_text};
 use radroots_studio_app_remote_signer::{
@@ -33,7 +37,9 @@ use radroots_studio_app_ui::{
     app_button_compact as action_button_compact, app_button_list_row as list_row_button,
     app_button_primary as action_button_primary,
     app_button_primary_disabled as action_button_primary_disabled,
+    app_button_primary_full_width as action_button_primary_full_width,
     app_button_secondary as action_button, app_button_secondary_disabled as action_button_disabled,
+    app_button_secondary_full_width as action_button_full_width,
     app_button_square_dropdown_secondary as action_dropdown_button, app_button_text as text_button,
     app_checkbox_field, app_cluster, app_detail_row, app_divider as section_divider,
     app_focused_detail_view, app_focused_task_view, app_form_field, app_form_input_text,
@@ -210,6 +216,95 @@ impl AccountTab {
     }
 }
 
+type AccountProfileSelectState = SelectState<SearchableVec<SharedString>>;
+
+#[derive(Clone)]
+struct AccountProfileFormState {
+    full_name_input: Entity<InputState>,
+    email_input: Entity<InputState>,
+    phone_input: Entity<InputState>,
+    role_select: Entity<AccountProfileSelectState>,
+    time_zone_select: Entity<AccountProfileSelectState>,
+    language_select: Entity<AccountProfileSelectState>,
+}
+
+impl AccountProfileFormState {
+    fn new(window: &mut Window, cx: &mut Context<HomeView>) -> Self {
+        Self {
+            full_name_input: account_profile_input_state(
+                AppTextKey::AccountProfileFullNameValue,
+                window,
+                cx,
+            ),
+            email_input: account_profile_input_state(
+                AppTextKey::AccountProfileEmailValue,
+                window,
+                cx,
+            ),
+            phone_input: account_profile_input_state(
+                AppTextKey::AccountProfilePhoneValue,
+                window,
+                cx,
+            ),
+            role_select: account_profile_select_state(
+                &[
+                    AppTextKey::AccountProfileRoleValue,
+                    AppTextKey::AccountProfileRoleFarmManagerValue,
+                    AppTextKey::AccountProfileRoleTeamMemberValue,
+                ],
+                window,
+                cx,
+            ),
+            time_zone_select: account_profile_select_state(
+                &[
+                    AppTextKey::AccountProfileTimeZoneValue,
+                    AppTextKey::AccountProfileTimeZoneMountainValue,
+                    AppTextKey::AccountProfileTimeZoneEasternValue,
+                ],
+                window,
+                cx,
+            ),
+            language_select: account_profile_select_state(
+                &[
+                    AppTextKey::AccountProfileLanguageValue,
+                    AppTextKey::AccountProfileLanguageFrenchValue,
+                    AppTextKey::AccountProfileLanguageSpanishValue,
+                ],
+                window,
+                cx,
+            ),
+        }
+    }
+}
+
+fn account_profile_input_state(
+    value_key: AppTextKey,
+    window: &mut Window,
+    cx: &mut Context<HomeView>,
+) -> Entity<InputState> {
+    cx.new(|cx| InputState::new(window, cx).default_value(app_text(value_key)))
+}
+
+fn account_profile_select_state(
+    value_keys: &[AppTextKey],
+    window: &mut Window,
+    cx: &mut Context<HomeView>,
+) -> Entity<AccountProfileSelectState> {
+    let values = value_keys
+        .iter()
+        .copied()
+        .map(app_shared_text)
+        .collect::<Vec<_>>();
+    cx.new(|cx| {
+        SelectState::new(
+            SearchableVec::new(values),
+            Some(IndexPath::default().row(0)),
+            window,
+            cx,
+        )
+    })
+}
+
 fn buyer_order_detail_focus_after_open(
     runtime_changed: bool,
     runtime: &DesktopAppRuntimeSummary,
@@ -337,6 +432,7 @@ pub struct HomeView {
     product_editor_form: Option<ProductEditorFormState>,
     focused_view: Option<HomeFocusedView>,
     selected_account_tab: AccountTab,
+    account_profile_form: Option<AccountProfileFormState>,
     relay_client: Option<RadrootsNostrClient>,
     buyer_workspace_notice: Option<String>,
 }
@@ -457,6 +553,7 @@ impl HomeView {
             product_editor_form: None,
             focused_view: None,
             selected_account_tab: AccountTab::default(),
+            account_profile_form: None,
             relay_client: None,
             buyer_workspace_notice: None,
         }
@@ -4930,7 +5027,9 @@ impl Render for HomeView {
                     cx,
                 )
                 .into_any_element(),
-            HomeStage::AccountWorkspace => self.render_account_workspace(&runtime_summary, cx),
+            HomeStage::AccountWorkspace => {
+                self.render_account_workspace(&runtime_summary, window, cx)
+            }
             HomeStage::BuyerWorkspace => self.render_buyer_workspace(&runtime_summary, cx),
             HomeStage::FarmerWorkspace => self.render_farmer_workspace(&runtime_summary, cx),
         }
@@ -4941,6 +5040,7 @@ impl HomeView {
     fn render_account_workspace(
         &mut self,
         runtime: &DesktopAppRuntimeSummary,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let sidebar = if runtime.shell_projection.active_surface == ActiveSurface::Farmer {
@@ -4990,18 +5090,31 @@ impl HomeView {
                     "account-scroll",
                     0.0,
                     None,
-                    self.render_account_content(cx),
+                    self.render_account_content(window, cx),
                 ))
                 .into_any_element(),
         )
         .into_any_element()
     }
 
-    fn render_account_content(&mut self, cx: &mut Context<Self>) -> AnyElement {
+    fn render_account_content(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         let selected_tab = self.selected_account_tab;
         let tabs = AccountTab::ORDERED
             .into_iter()
             .map(|tab| AppUnderlineTabSpec::new(app_shared_text(tab.text_key())));
+        let panel = match selected_tab {
+            AccountTab::Profile => {
+                let form = self.account_profile_form(window, cx).clone();
+                account_profile_panel(&form, cx).into_any_element()
+            }
+            AccountTab::FarmDetails | AccountTab::Preferences | AccountTab::Security => {
+                account_placeholder_panel(selected_tab.panel_text_key()).into_any_element()
+            }
+        };
 
         app_stack_v(APP_UI_THEME.shells.home_stack_gap_px)
             .w_full()
@@ -5019,9 +5132,24 @@ impl HomeView {
                             this.select_account_tab(AccountTab::from_index(*index), cx)
                         }),
                     ))
-                    .child(account_panel(selected_tab, cx)),
+                    .child(panel),
             )
             .into_any_element()
+    }
+
+    fn account_profile_form(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> &AccountProfileFormState {
+        if self.account_profile_form.is_none() {
+            self.account_profile_form = Some(AccountProfileFormState::new(window, cx));
+        }
+
+        let Some(form) = self.account_profile_form.as_ref() else {
+            unreachable!();
+        };
+        form
     }
 }
 
@@ -8653,8 +8781,10 @@ fn shared_shell_header(
     cx: &App,
 ) -> impl IntoElement {
     let can_enter_farmer_workspace = runtime.personal_projection.entry.can_enter_farmer_workspace;
-    let is_marketplace_active =
-        runtime.shell_projection.active_surface != radroots_studio_app_view::ActiveSurface::Farmer;
+    let active_mode = shell_header_active_mode(runtime);
+    let is_account_active = active_mode == ShellHeaderActiveMode::Account;
+    let is_farm_active = active_mode == ShellHeaderActiveMode::Farm;
+    let is_marketplace_active = active_mode == ShellHeaderActiveMode::Marketplace;
     let farm_name = home_saved_farm(runtime).map(|farm| farm.display_name.clone());
     let account_label = shell_account_label(runtime);
 
@@ -8695,7 +8825,7 @@ fn shared_shell_header(
                             shared_shell_mode_button(
                                 "shell-mode-farm",
                                 AppTextKey::HomeHeaderFarmMode,
-                                !is_marketplace_active,
+                                is_farm_active,
                                 on_select_farm,
                                 cx,
                             )
@@ -8705,11 +8835,32 @@ fn shared_shell_header(
                     .child(shell_account_entry(
                         runtime,
                         account_label,
+                        is_account_active,
                         on_open_account,
                         cx,
                     )),
             ),
     )
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum ShellHeaderActiveMode {
+    Marketplace,
+    Farm,
+    Account,
+}
+
+fn shell_header_active_mode(runtime: &DesktopAppRuntimeSummary) -> ShellHeaderActiveMode {
+    if matches!(
+        runtime.shell_projection.selected_section,
+        ShellSection::Account
+    ) {
+        ShellHeaderActiveMode::Account
+    } else if runtime.shell_projection.active_surface == ActiveSurface::Farmer {
+        ShellHeaderActiveMode::Farm
+    } else {
+        ShellHeaderActiveMode::Marketplace
+    }
 }
 
 fn shared_shell_mode_button(
@@ -8725,20 +8876,28 @@ fn shared_shell_mode_button(
 fn shell_account_entry(
     runtime: &DesktopAppRuntimeSummary,
     account_label: String,
+    is_active: bool,
     on_open_account: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
     cx: &App,
 ) -> AnyElement {
     if runtime.personal_projection.entry.state == PersonalEntryState::Guest {
-        action_button_compact(
+        choice_button(
             "shell-account-entry",
             app_shared_text(AppTextKey::HomeHeaderAccountSetupAction),
+            is_active,
             on_open_account,
             cx,
         )
         .into_any_element()
     } else {
-        action_button_compact("shell-account-entry", account_label, on_open_account, cx)
-            .into_any_element()
+        choice_button(
+            "shell-account-entry",
+            account_label,
+            is_active,
+            on_open_account,
+            cx,
+        )
+        .into_any_element()
     }
 }
 
@@ -8784,15 +8943,6 @@ fn buyer_workspace_title_block(title_key: AppTextKey, body_key: AppTextKey) -> i
         )
 }
 
-fn account_panel(tab: AccountTab, cx: &mut Context<HomeView>) -> AnyElement {
-    match tab {
-        AccountTab::Profile => account_profile_panel(cx).into_any_element(),
-        AccountTab::FarmDetails | AccountTab::Preferences | AccountTab::Security => {
-            account_placeholder_panel(tab.panel_text_key()).into_any_element()
-        }
-    }
-}
-
 fn account_placeholder_panel(text_key: AppTextKey) -> impl IntoElement {
     div()
         .w_full()
@@ -8805,7 +8955,10 @@ fn account_placeholder_panel(text_key: AppTextKey) -> impl IntoElement {
         .child(app_shared_text(text_key))
 }
 
-fn account_profile_panel(cx: &mut Context<HomeView>) -> impl IntoElement {
+fn account_profile_panel(
+    form: &AccountProfileFormState,
+    cx: &mut Context<HomeView>,
+) -> impl IntoElement {
     app_stack_v(APP_UI_THEME.shells.home_stack_gap_px)
         .w_full()
         .child(
@@ -8818,10 +8971,13 @@ fn account_profile_panel(cx: &mut Context<HomeView>) -> impl IntoElement {
                     AppTextKey::AccountProfilePersonalDetailsTitle,
                 )),
         )
-        .child(account_profile_details_card(cx))
+        .child(account_profile_details_card(form, cx))
 }
 
-fn account_profile_details_card(cx: &mut Context<HomeView>) -> impl IntoElement {
+fn account_profile_details_card(
+    form: &AccountProfileFormState,
+    cx: &mut Context<HomeView>,
+) -> impl IntoElement {
     div()
         .w_full()
         .border_1()
@@ -8837,85 +8993,79 @@ fn account_profile_details_card(cx: &mut Context<HomeView>) -> impl IntoElement 
                 .gap(px(APP_UI_THEME.shells.home_card_padding_px))
                 .child(account_profile_photo_actions(cx))
                 .child(
-                    app_stack_v(APP_UI_THEME.shells.home_stack_gap_px)
-                        .flex_1()
-                        .min_w_0()
-                        .child(account_profile_field_row(
-                            account_profile_field(
-                                AppTextKey::AccountProfileFullNameLabel,
-                                AppTextKey::AccountProfileFullNameValue,
-                                false,
-                            ),
-                            account_profile_field(
-                                AppTextKey::AccountProfileEmailLabel,
-                                AppTextKey::AccountProfileEmailValue,
-                                false,
-                            ),
+                    account_profile_field_column()
+                        .child(account_profile_input_field(
+                            AppTextKey::AccountProfileFullNameLabel,
+                            &form.full_name_input,
                         ))
-                        .child(account_profile_field_row(
-                            account_profile_field(
-                                AppTextKey::AccountProfilePhoneLabel,
-                                AppTextKey::AccountProfilePhoneValue,
-                                false,
-                            ),
-                            account_profile_field(
-                                AppTextKey::AccountProfileRoleLabel,
-                                AppTextKey::AccountProfileRoleValue,
-                                true,
-                            ),
+                        .child(account_profile_input_field(
+                            AppTextKey::AccountProfilePhoneLabel,
+                            &form.phone_input,
                         ))
-                        .child(account_profile_field_row(
-                            account_profile_field(
-                                AppTextKey::AccountProfileTimeZoneLabel,
-                                AppTextKey::AccountProfileTimeZoneValue,
-                                true,
-                            ),
-                            account_profile_field(
-                                AppTextKey::AccountProfileLanguageLabel,
-                                AppTextKey::AccountProfileLanguageValue,
-                                true,
-                            ),
+                        .child(account_profile_select_field(
+                            AppTextKey::AccountProfileTimeZoneLabel,
+                            &form.time_zone_select,
+                        )),
+                )
+                .child(
+                    account_profile_field_column()
+                        .child(account_profile_input_field(
+                            AppTextKey::AccountProfileEmailLabel,
+                            &form.email_input,
+                        ))
+                        .child(account_profile_select_field(
+                            AppTextKey::AccountProfileRoleLabel,
+                            &form.role_select,
+                        ))
+                        .child(account_profile_select_field(
+                            AppTextKey::AccountProfileLanguageLabel,
+                            &form.language_select,
                         )),
                 ),
         )
 }
 
 fn account_profile_photo_actions(cx: &mut Context<HomeView>) -> impl IntoElement {
-    app_stack_v(8.0)
-        .w(px(190.0))
-        .min_w(px(190.0))
+    app_stack_v(10.0)
+        .flex_none()
+        .flex_basis(relative(0.4))
+        .min_w(px(176.0))
         .child(
             div()
+                .w_full()
                 .text_size(px(APP_UI_THEME.foundation.typography.utility_title_text_px))
                 .font_weight(gpui::FontWeight::SEMIBOLD)
                 .text_color(rgb(APP_UI_THEME.foundation.text.secondary))
                 .child(app_shared_text(AppTextKey::AccountProfilePictureLabel)),
         )
         .child(
-            div()
-                .size(px(72.0))
-                .rounded(px(36.0))
-                .border_1()
-                .border_color(rgb(APP_UI_THEME.foundation.surfaces.divider))
-                .bg(rgb(APP_UI_THEME.foundation.surfaces.card_background))
-                .flex()
-                .items_center()
-                .justify_center()
-                .child(
-                    Icon::new(IconName::CircleUser)
-                        .with_size(gpui_component::Size::Size(px(34.0)))
-                        .text_color(rgb(APP_UI_THEME.foundation.text.secondary)),
-                ),
+            div().w_full().flex().justify_center().child(
+                div()
+                    .size(px(72.0))
+                    .rounded(px(36.0))
+                    .border_1()
+                    .border_color(rgb(APP_UI_THEME.foundation.surfaces.divider))
+                    .bg(rgb(APP_UI_THEME.foundation.surfaces.card_background))
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .child(
+                        Icon::new(IconName::CircleUser)
+                            .with_size(gpui_component::Size::Size(px(34.0)))
+                            .text_color(rgb(APP_UI_THEME.foundation.text.secondary)),
+                    ),
+            ),
         )
         .child(
-            app_stack_h(8.0)
-                .child(action_button(
+            app_stack_v(8.0)
+                .w_full()
+                .child(action_button_primary_full_width(
                     "account-profile-change-photo",
                     app_shared_text(AppTextKey::AccountProfileChangePhotoAction),
                     |_, _, _| {},
                     cx,
                 ))
-                .child(text_button(
+                .child(action_button_full_width(
                     "account-profile-remove-photo",
                     app_shared_text(AppTextKey::AccountProfileRemovePhotoAction),
                     |_, _, _| {},
@@ -8924,23 +9074,33 @@ fn account_profile_photo_actions(cx: &mut Context<HomeView>) -> impl IntoElement
         )
 }
 
-fn account_profile_field_row(
-    first: impl IntoElement,
-    second: impl IntoElement,
-) -> impl IntoElement {
-    div()
+fn account_profile_field_column() -> gpui::Div {
+    app_stack_v(APP_UI_THEME.shells.home_stack_gap_px)
         .w_full()
-        .flex()
-        .items_start()
-        .gap(px(APP_UI_THEME.shells.home_stack_gap_px))
-        .child(div().flex_1().min_w_0().child(first))
-        .child(div().flex_1().min_w_0().child(second))
+        .flex_1()
+        .min_w_0()
 }
 
-fn account_profile_field(
+fn account_profile_input_field(
     label_key: AppTextKey,
-    value_key: AppTextKey,
-    selectable: bool,
+    input: &Entity<InputState>,
+) -> impl IntoElement {
+    account_profile_labeled_control(label_key, app_text_input(input, false).w_full())
+}
+
+fn account_profile_select_field(
+    label_key: AppTextKey,
+    select: &Entity<AccountProfileSelectState>,
+) -> impl IntoElement {
+    account_profile_labeled_control(
+        label_key,
+        Select::new(select).with_size(Size::Medium).w_full(),
+    )
+}
+
+fn account_profile_labeled_control(
+    label_key: AppTextKey,
+    control: impl IntoElement,
 ) -> impl IntoElement {
     app_stack_v(6.0)
         .w_full()
@@ -8952,37 +9112,7 @@ fn account_profile_field(
                 .text_color(rgb(APP_UI_THEME.foundation.text.secondary))
                 .child(app_shared_text(label_key)),
         )
-        .child(
-            div()
-                .w_full()
-                .min_w_0()
-                .h(px(38.0))
-                .border_1()
-                .border_color(rgb(APP_UI_THEME.foundation.surfaces.divider))
-                .rounded(px(APP_UI_THEME.foundation.radii.medium_px))
-                .bg(transparent_black())
-                .px(px(12.0))
-                .flex()
-                .items_center()
-                .justify_between()
-                .gap(px(8.0))
-                .child(
-                    div()
-                        .flex_1()
-                        .min_w_0()
-                        .overflow_hidden()
-                        .text_size(px(APP_UI_THEME.foundation.typography.body_text_px))
-                        .text_color(rgb(APP_UI_THEME.foundation.text.primary))
-                        .child(app_shared_text(value_key)),
-                )
-                .when(selectable, |this| {
-                    this.child(
-                        Icon::new(IconName::ChevronDown)
-                            .with_size(gpui_component::Size::Size(px(16.0)))
-                            .text_color(rgb(APP_UI_THEME.foundation.text.secondary)),
-                    )
-                }),
-        )
+        .child(control)
 }
 
 fn buyer_listings_feed(
@@ -14502,14 +14632,14 @@ mod tests {
         PackDayHostHandoffStatusPresentation, PackDayPrintActionPresentation,
         PackDayPrintStatusPresentation, ReminderActionTarget, SETTINGS_FARM_PANEL_SECTIONS,
         SETTINGS_NAVIGATION_ORDER, SETTINGS_OPERATIONS_PANEL_SECTIONS, SettingsAutoFocusTarget,
-        SettingsInventorySectionSpec, SettingsPanelViewKey, StartupHomeSurface,
-        StartupSignerConnectState, abbreviated_npub, about_conflict_action_specs,
-        about_conflict_aggregate_text, about_conflict_detail_rows, about_conflict_review_body_key,
-        about_manual_refresh_enabled, about_runtime_rows, about_status_rows, account_display_name,
-        app_text, buyer_order_coordination_notice_forces_redraw,
-        buyer_order_detail_focus_after_open, buyer_orders_retry_action_visible,
-        buyer_receipt_issue_focus_after_submit, buyer_receipt_status_key,
-        farm_setup_onboarding_card_spec, farmer_home_farm_state,
+        SettingsInventorySectionSpec, SettingsPanelViewKey, ShellHeaderActiveMode,
+        StartupHomeSurface, StartupSignerConnectState, abbreviated_npub,
+        about_conflict_action_specs, about_conflict_aggregate_text, about_conflict_detail_rows,
+        about_conflict_review_body_key, about_manual_refresh_enabled, about_runtime_rows,
+        about_status_rows, account_display_name, app_text,
+        buyer_order_coordination_notice_forces_redraw, buyer_order_detail_focus_after_open,
+        buyer_orders_retry_action_visible, buyer_receipt_issue_focus_after_submit,
+        buyer_receipt_status_key, farm_setup_onboarding_card_spec, farmer_home_farm_state,
         farmer_order_detail_focus_after_open, farmer_pack_day_available, home_auto_focus_target,
         home_content_scroll_id, home_saved_farm, home_sidebar_navigation_sections, home_stage,
         home_window_launch_size_px, home_window_minimum_size_px,
@@ -14522,8 +14652,8 @@ mod tests {
         parse_product_editor_price_input, presented_farmer_reminder, product_display_title,
         reminder_action_target, reminder_deadline_text, reminder_delivery_state_key,
         reminder_urgency_color, reminder_urgency_key, settings_auto_focus_target,
-        settings_preferences_general_row_state, startup_home_surface, startup_issue_summary_text,
-        startup_notice_text, startup_signer_preview_summary,
+        settings_preferences_general_row_state, shell_header_active_mode, startup_home_surface,
+        startup_issue_summary_text, startup_notice_text, startup_signer_preview_summary,
         startup_signer_preview_summary_for_connect_state, startup_signer_source_input_is_editable,
         startup_signer_status_spec, startup_signer_transport_failure_requires_notice,
         trade_agreement_status_key, trade_fulfillment_status_key, trade_inventory_status_key,
@@ -15276,6 +15406,46 @@ mod tests {
         );
 
         assert_eq!(home_stage(&guest_marketplace), HomeStage::BuyerWorkspace);
+    }
+
+    #[test]
+    fn shell_header_active_mode_tracks_account_as_a_peer_selector() {
+        let mut runtime = summary(
+            HomeRoute::Personal,
+            TodayAgendaProjection::default(),
+            FarmSetupProjection::default(),
+        );
+        runtime.shell_projection = AppShellProjection::new(
+            ActiveSurface::Personal,
+            ShellSection::Personal(PersonalSection::Browse),
+        );
+        assert_eq!(
+            shell_header_active_mode(&runtime),
+            ShellHeaderActiveMode::Marketplace
+        );
+
+        runtime.shell_projection = AppShellProjection::new(
+            ActiveSurface::Farmer,
+            ShellSection::Farmer(FarmerSection::Today),
+        );
+        assert_eq!(
+            shell_header_active_mode(&runtime),
+            ShellHeaderActiveMode::Farm
+        );
+
+        runtime.shell_projection =
+            AppShellProjection::new(ActiveSurface::Personal, ShellSection::Account);
+        assert_eq!(
+            shell_header_active_mode(&runtime),
+            ShellHeaderActiveMode::Account
+        );
+
+        runtime.shell_projection =
+            AppShellProjection::new(ActiveSurface::Farmer, ShellSection::Account);
+        assert_eq!(
+            shell_header_active_mode(&runtime),
+            ShellHeaderActiveMode::Account
+        );
     }
 
     #[test]
