@@ -6760,13 +6760,9 @@ impl SettingsWindowView {
                     .child(
                         app_stack_v(APP_UI_THEME.foundation.spacing.tight_px)
                             .w_full()
-                            .bg(rgb(APP_UI_THEME.foundation.surfaces.chrome_background))
                             .rounded(px(APP_UI_THEME
                                 .shells
                                 .settings_account_sidebar_button_corner_radius_px))
-                            .p(px(APP_UI_THEME
-                                .shells
-                                .settings_account_sidebar_button_padding_px))
                             .children(account_rows)
                             .when(projection.roster.is_empty(), |this| {
                                 this.child(

@@ -365,7 +365,7 @@ pub const APP_UI_THEME: AppUiTheme = AppUiTheme {
         settings_content_padding_px: APP_SPACING_XLARGE_PX,
         settings_account_sidebar_width_px: 200.0,
         settings_account_sidebar_padding_px: APP_SPACING_SMALL_PX,
-        settings_account_sidebar_button_height_px: 42.0,
+        settings_account_sidebar_button_height_px: 52.0,
         settings_account_sidebar_button_padding_px: APP_SPACING_MICRO_PX,
         settings_account_sidebar_button_corner_radius_px: APP_RADIUS_MEDIUM_PX,
         settings_account_sidebar_button_gap_px: APP_SPACING_SMALL_PX,
@@ -438,7 +438,7 @@ mod tests {
             APP_UI_THEME
                 .shells
                 .settings_account_sidebar_button_height_px,
-            42.0
+            52.0
         );
     }
 
