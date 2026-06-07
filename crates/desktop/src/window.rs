@@ -547,6 +547,8 @@ pub struct HomeView {
     selected_account_tab: AccountTab,
     account_profile_form: Option<AccountProfileFormState>,
     account_farm_profile_form: Option<AccountFarmProfileFormState>,
+    account_farm_profile_textarea_wrap_ready: bool,
+    account_farm_profile_textarea_wrap_requested: bool,
     relay_client: Option<RadrootsNostrClient>,
     buyer_workspace_notice: Option<String>,
 }
@@ -669,6 +671,8 @@ impl HomeView {
             selected_account_tab: AccountTab::default(),
             account_profile_form: None,
             account_farm_profile_form: None,
+            account_farm_profile_textarea_wrap_ready: false,
+            account_farm_profile_textarea_wrap_requested: false,
             relay_client: None,
             buyer_workspace_notice: None,
         }
@@ -5227,8 +5231,10 @@ impl HomeView {
                 account_profile_panel(&form, cx).into_any_element()
             }
             AccountTab::FarmDetails => {
+                self.prepare_account_farm_profile_textarea_wrap(window, cx);
                 let form = self.account_farm_profile_form(window, cx).clone();
-                account_farm_profile_panel(&form, cx).into_any_element()
+                account_farm_profile_panel(&form, self.account_farm_profile_textarea_wrap_ready, cx)
+                    .into_any_element()
             }
             AccountTab::Preferences | AccountTab::Security => {
                 account_placeholder_panel(selected_tab.panel_text_key()).into_any_element()
@@ -5284,6 +5290,28 @@ impl HomeView {
             unreachable!();
         };
         form
+    }
+
+    fn prepare_account_farm_profile_textarea_wrap(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self.account_farm_profile_textarea_wrap_ready
+            || self.account_farm_profile_textarea_wrap_requested
+        {
+            return;
+        }
+
+        self.account_farm_profile_textarea_wrap_requested = true;
+        cx.spawn_in(window, async move |this, cx| {
+            Timer::after(Duration::from_millis(16)).await;
+            let _ = this.update(cx, |this, cx| {
+                this.account_farm_profile_textarea_wrap_ready = true;
+                cx.notify();
+            });
+        })
+        .detach();
     }
 }
 
@@ -9259,13 +9287,42 @@ fn account_form_text_input(input: &Entity<InputState>) -> impl IntoElement {
         .w_full()
 }
 
-fn account_form_text_area_input(input: &Entity<InputState>) -> impl IntoElement {
-    app_text_input(input, false)
-        .with_size(Size::Small)
-        .text_size(px(APP_UI_THEME.foundation.typography.settings_row_text_px))
-        .font_weight(gpui::FontWeight::NORMAL)
-        .rounded(px(ACCOUNT_FORM_CONTROL_RADIUS_PX))
+fn account_form_text_area_input_with_wrapped_preview(
+    input: &Entity<InputState>,
+    is_wrap_ready: bool,
+    cx: &mut Context<HomeView>,
+) -> impl IntoElement {
+    let preview = input.read(cx).value();
+
+    div()
+        .relative()
         .w_full()
+        .child(
+            app_text_input(input, false)
+                .with_size(Size::Small)
+                .text_size(px(APP_UI_THEME.foundation.typography.settings_row_text_px))
+                .font_weight(gpui::FontWeight::NORMAL)
+                .rounded(px(ACCOUNT_FORM_CONTROL_RADIUS_PX))
+                .w_full()
+                .opacity(if is_wrap_ready { 1.0 } else { 0.0 }),
+        )
+        .when(!is_wrap_ready, |this| {
+            this.child(
+                div()
+                    .absolute()
+                    .top_0()
+                    .left_0()
+                    .right_0()
+                    .px(px(8.0))
+                    .py(px(2.0))
+                    .line_height(relative(1.25))
+                    .whitespace_normal()
+                    .text_size(px(APP_UI_THEME.foundation.typography.settings_row_text_px))
+                    .font_weight(gpui::FontWeight::NORMAL)
+                    .text_color(rgb(APP_UI_THEME.foundation.text.primary))
+                    .child(preview),
+            )
+        })
 }
 
 fn account_profile_select_input(select: &Entity<AccountProfileSelectState>) -> impl IntoElement {
@@ -9292,6 +9349,7 @@ fn account_farm_profile_select_input(
 
 fn account_farm_profile_panel(
     form: &AccountFarmProfileFormState,
+    is_textarea_wrap_ready: bool,
     cx: &mut Context<HomeView>,
 ) -> impl IntoElement {
     app_stack_v(APP_UI_THEME.shells.home_stack_gap_px)
@@ -9306,7 +9364,11 @@ fn account_farm_profile_panel(
                     div()
                         .flex_1()
                         .min_w_0()
-                        .child(account_farm_profile_main_card(form)),
+                        .child(account_farm_profile_main_card(
+                            form,
+                            is_textarea_wrap_ready,
+                            cx,
+                        )),
                 )
                 .child(
                     app_stack_v(APP_UI_THEME.shells.home_stack_gap_px)
@@ -9319,7 +9381,11 @@ fn account_farm_profile_panel(
         .child(account_farm_profile_action_row(cx))
 }
 
-fn account_farm_profile_main_card(form: &AccountFarmProfileFormState) -> impl IntoElement {
+fn account_farm_profile_main_card(
+    form: &AccountFarmProfileFormState,
+    is_textarea_wrap_ready: bool,
+    cx: &mut Context<HomeView>,
+) -> impl IntoElement {
     account_farm_profile_card(
         app_stack_v(APP_UI_THEME.shells.home_stack_gap_px)
             .w_full()
@@ -9370,6 +9436,8 @@ fn account_farm_profile_main_card(form: &AccountFarmProfileFormState) -> impl In
             .child(account_farm_profile_text_area_field(
                 AppTextKey::AccountFarmDetailsAboutFarmLabel,
                 &form.about_farm_input,
+                is_textarea_wrap_ready,
+                cx,
             ))
             .child(
                 div()
@@ -9445,8 +9513,13 @@ fn account_farm_profile_select_field(
 fn account_farm_profile_text_area_field(
     label_key: AppTextKey,
     input: &Entity<InputState>,
+    is_wrap_ready: bool,
+    cx: &mut Context<HomeView>,
 ) -> impl IntoElement {
-    account_profile_labeled_control(label_key, account_form_text_area_input(input))
+    account_profile_labeled_control(
+        label_key,
+        account_form_text_area_input_with_wrapped_preview(input, is_wrap_ready, cx),
+    )
 }
 
 fn account_farm_profile_completeness_card() -> impl IntoElement {
