@@ -943,11 +943,23 @@ pub fn app_button_choice(
     on_click: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
     cx: &App,
 ) -> AnyElement {
-    if is_active {
-        app_button_primary(id, label, on_click, cx).into_any_element()
+    let variant = if is_active {
+        AppButtonVariant::Primary
     } else {
-        app_button_compact(id, label, on_click, cx).into_any_element()
-    }
+        AppButtonVariant::Secondary
+    };
+
+    app_button_label(
+        app_button_base(id, variant, on_click, cx),
+        label.into(),
+        APP_UI_THEME
+            .components
+            .app_button
+            .sizing
+            .compact_horizontal_padding_px,
+        variant,
+    )
+    .into_any_element()
 }
 
 pub fn app_button_list_row(
