@@ -5563,6 +5563,7 @@ impl HomeView {
                 .child(
                     div()
                         .flex_1()
+                        .w_full()
                         .overflow_hidden()
                         .child(self.render_account_content(window, cx)),
                 )
