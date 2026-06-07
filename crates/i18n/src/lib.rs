@@ -214,6 +214,26 @@ mod tests {
             app_text(AppTextKey::AccountFarmDetailsFarmTypeVegetableFarm),
             "Vegetable farm"
         );
+        assert_eq!(
+            app_text(AppTextKey::AccountFarmDetailsLocationTitle),
+            "Location & service area"
+        );
+        assert_eq!(
+            app_text(AppTextKey::AccountFarmDetailsMapNotImplemented),
+            "not implemented"
+        );
+        assert_eq!(
+            app_text(AppTextKey::AccountFarmDetailsOperatingTitle),
+            "Operating details"
+        );
+        assert_eq!(
+            app_text(AppTextKey::AccountFarmDetailsPickupFulfillmentTitle),
+            "Pickup & fulfilment"
+        );
+        assert_eq!(
+            app_text(AppTextKey::AccountFarmDetailsOrderCutoffNoonValue),
+            "12:00 PM (Noon)"
+        );
         assert_eq!(app_text(AppTextKey::AccountSettingsTitle), "Settings");
         assert_eq!(
             app_text(AppTextKey::AccountSettingsNostrRelaysTitle),

@@ -338,6 +338,21 @@ struct AccountFarmProfileFormState {
     established_year_input: Entity<InputState>,
     about_farm_input: Entity<InputState>,
     farm_type_select: Entity<AccountFarmProfileSelectState>,
+    street_address_input: Entity<InputState>,
+    city_input: Entity<InputState>,
+    postal_code_input: Entity<InputState>,
+    province_select: Entity<AccountFarmProfileSelectState>,
+    country_select: Entity<AccountFarmProfileSelectState>,
+    service_area_select: Entity<AccountFarmProfileSelectState>,
+    growing_practices_select: Entity<AccountFarmProfileSelectState>,
+    season_start_input: Entity<InputState>,
+    season_end_input: Entity<InputState>,
+    about_products_input: Entity<InputState>,
+    customer_note_input: Entity<InputState>,
+    primary_pickup_location_select: Entity<AccountFarmProfileSelectState>,
+    pickup_instructions_input: Entity<InputState>,
+    order_cutoff_select: Entity<AccountFarmProfileSelectState>,
+    delivery_radius_input: Entity<InputState>,
 }
 
 impl AccountFarmProfileFormState {
@@ -403,6 +418,90 @@ impl AccountFarmProfileFormState {
                 window,
                 cx,
             ),
+            street_address_input: account_profile_input_state(
+                AppTextKey::AccountFarmDetailsStreetAddressValue,
+                window,
+                cx,
+            ),
+            city_input: account_profile_input_state(
+                AppTextKey::AccountFarmDetailsCityValue,
+                window,
+                cx,
+            ),
+            postal_code_input: account_profile_input_state(
+                AppTextKey::AccountFarmDetailsPostalCodeValue,
+                window,
+                cx,
+            ),
+            province_select: account_farm_profile_select_state(
+                &[
+                    AppTextKey::AccountFarmDetailsProvinceBritishColumbia,
+                    AppTextKey::AccountFarmDetailsProvinceAlberta,
+                ],
+                window,
+                cx,
+            ),
+            country_select: account_farm_profile_select_state(
+                &[
+                    AppTextKey::AccountFarmDetailsCountryCanada,
+                    AppTextKey::AccountFarmDetailsCountryUnitedStates,
+                ],
+                window,
+                cx,
+            ),
+            service_area_select: account_farm_profile_select_state(
+                &[AppTextKey::AccountFarmDetailsServiceAreaValue],
+                window,
+                cx,
+            ),
+            growing_practices_select: account_farm_profile_select_state(
+                &[
+                    AppTextKey::AccountFarmDetailsGrowingPracticeRegenerative,
+                    AppTextKey::AccountFarmDetailsGrowingPracticeOrganic,
+                ],
+                window,
+                cx,
+            ),
+            season_start_input: account_profile_input_state(
+                AppTextKey::AccountFarmDetailsSeasonStartValue,
+                window,
+                cx,
+            ),
+            season_end_input: account_profile_input_state(
+                AppTextKey::AccountFarmDetailsSeasonEndValue,
+                window,
+                cx,
+            ),
+            about_products_input: account_profile_autogrow_input_state(
+                AppTextKey::AccountFarmDetailsAboutProductsValue,
+                window,
+                cx,
+            ),
+            customer_note_input: account_profile_autogrow_input_state(
+                AppTextKey::AccountFarmDetailsCustomerNoteValue,
+                window,
+                cx,
+            ),
+            primary_pickup_location_select: account_farm_profile_select_state(
+                &[AppTextKey::AccountFarmDetailsPrimaryPickupLocationTitleValue],
+                window,
+                cx,
+            ),
+            pickup_instructions_input: account_profile_autogrow_input_state(
+                AppTextKey::AccountFarmDetailsPickupInstructionsValue,
+                window,
+                cx,
+            ),
+            order_cutoff_select: account_farm_profile_select_state(
+                &[AppTextKey::AccountFarmDetailsOrderCutoffNoonValue],
+                window,
+                cx,
+            ),
+            delivery_radius_input: account_profile_input_state(
+                AppTextKey::AccountFarmDetailsDeliveryRadiusValue,
+                window,
+                cx,
+            ),
         }
     }
 
@@ -440,6 +539,57 @@ impl AccountFarmProfileFormState {
             AppTextKey::AccountFarmDetailsAboutFarmValue,
             cx,
         ) || account_select_is_dirty(&self.farm_type_select, cx)
+            || account_input_is_dirty(
+                &self.street_address_input,
+                AppTextKey::AccountFarmDetailsStreetAddressValue,
+                cx,
+            )
+            || account_input_is_dirty(
+                &self.city_input,
+                AppTextKey::AccountFarmDetailsCityValue,
+                cx,
+            )
+            || account_input_is_dirty(
+                &self.postal_code_input,
+                AppTextKey::AccountFarmDetailsPostalCodeValue,
+                cx,
+            )
+            || account_select_is_dirty(&self.province_select, cx)
+            || account_select_is_dirty(&self.country_select, cx)
+            || account_select_is_dirty(&self.service_area_select, cx)
+            || account_select_is_dirty(&self.growing_practices_select, cx)
+            || account_input_is_dirty(
+                &self.season_start_input,
+                AppTextKey::AccountFarmDetailsSeasonStartValue,
+                cx,
+            )
+            || account_input_is_dirty(
+                &self.season_end_input,
+                AppTextKey::AccountFarmDetailsSeasonEndValue,
+                cx,
+            )
+            || account_input_is_dirty(
+                &self.about_products_input,
+                AppTextKey::AccountFarmDetailsAboutProductsValue,
+                cx,
+            )
+            || account_input_is_dirty(
+                &self.customer_note_input,
+                AppTextKey::AccountFarmDetailsCustomerNoteValue,
+                cx,
+            )
+            || account_select_is_dirty(&self.primary_pickup_location_select, cx)
+            || account_input_is_dirty(
+                &self.pickup_instructions_input,
+                AppTextKey::AccountFarmDetailsPickupInstructionsValue,
+                cx,
+            )
+            || account_select_is_dirty(&self.order_cutoff_select, cx)
+            || account_input_is_dirty(
+                &self.delivery_radius_input,
+                AppTextKey::AccountFarmDetailsDeliveryRadiusValue,
+                cx,
+            )
     }
 }
 
@@ -9598,37 +9748,45 @@ fn account_farm_profile_panel(
                 cx,
             )),
         ))
-        .child(
-            div()
+        .child(account_farm_profile_section_row(
+            account_farm_profile_main_card(form, is_textarea_wrap_ready, cx),
+            app_stack_v(APP_UI_THEME.shells.home_stack_gap_px)
                 .w_full()
-                .flex()
-                .items_start()
-                .gap(px(APP_UI_THEME.shells.home_stack_gap_px))
-                .child(
-                    div()
-                        .flex_1()
-                        .min_w_0()
-                        .child(account_farm_profile_main_card(
-                            form,
-                            is_textarea_wrap_ready,
-                            cx,
-                        )),
-                )
-                .child(
-                    app_stack_v(APP_UI_THEME.shells.home_stack_gap_px)
-                        .w(px(336.0))
-                        .min_w(px(300.0))
-                        .child(account_farm_profile_completeness_card())
-                        .child(account_farm_profile_summary_card(cx)),
-                ),
-        )
+                .child(account_farm_profile_completeness_card())
+                .child(account_farm_profile_summary_card(cx)),
+        ))
+        .child(account_farm_profile_section_row(
+            account_farm_location_card(form),
+            account_farm_location_preview_card(),
+        ))
+        .child(account_farm_profile_section_row(
+            account_farm_operating_card(form, is_textarea_wrap_ready, cx),
+            account_farm_profile_preview_card(cx),
+        ))
+        .child(account_farm_profile_section_row(
+            account_farm_fulfillment_card(form, is_textarea_wrap_ready, cx),
+            account_farm_customer_experience_card(),
+        ))
+}
+
+fn account_farm_profile_section_row(
+    main: impl IntoElement,
+    rail: impl IntoElement,
+) -> impl IntoElement {
+    div()
+        .w_full()
+        .flex()
+        .items_start()
+        .gap(px(APP_UI_THEME.shells.home_stack_gap_px))
+        .child(div().flex_1().min_w_0().child(main))
+        .child(div().w(px(336.0)).min_w(px(300.0)).child(rail))
 }
 
 fn account_farm_profile_main_card(
     form: &AccountFarmProfileFormState,
     is_textarea_wrap_ready: bool,
     cx: &mut Context<HomeView>,
-) -> impl IntoElement {
+) -> impl IntoElement + use<> {
     account_farm_profile_card(
         app_stack_v(APP_UI_THEME.shells.home_stack_gap_px)
             .w_full()
@@ -9694,6 +9852,462 @@ fn account_farm_profile_main_card(
     )
 }
 
+fn account_farm_location_card(form: &AccountFarmProfileFormState) -> impl IntoElement {
+    account_farm_profile_card(
+        app_stack_v(APP_UI_THEME.shells.home_stack_gap_px)
+            .w_full()
+            .child(account_farm_profile_title_block(
+                AppTextKey::AccountFarmDetailsLocationTitle,
+                AppTextKey::AccountFarmDetailsLocationIntro,
+            ))
+            .child(account_farm_map_placeholder())
+            .child(account_farm_profile_field_row(
+                account_profile_input_field(
+                    AppTextKey::AccountFarmDetailsStreetAddressLabel,
+                    &form.street_address_input,
+                ),
+                account_profile_input_field(
+                    AppTextKey::AccountFarmDetailsCityLabel,
+                    &form.city_input,
+                ),
+            ))
+            .child(account_farm_profile_field_row(
+                account_farm_profile_select_field(
+                    AppTextKey::AccountFarmDetailsProvinceLabel,
+                    &form.province_select,
+                ),
+                account_profile_input_field(
+                    AppTextKey::AccountFarmDetailsPostalCodeLabel,
+                    &form.postal_code_input,
+                ),
+            ))
+            .child(account_farm_profile_field_row(
+                account_farm_profile_select_field(
+                    AppTextKey::AccountFarmDetailsCountryLabel,
+                    &form.country_select,
+                ),
+                account_farm_profile_select_field(
+                    AppTextKey::AccountFarmDetailsServiceAreaLabel,
+                    &form.service_area_select,
+                ),
+            ))
+            .child(account_farm_profile_helper_text(
+                AppTextKey::AccountFarmDetailsServiceAreaHelper,
+            ))
+            .child(account_farm_toggle_preview_row(
+                AppTextKey::AccountFarmDetailsExactAddressPublicLabel,
+                AppTextKey::AccountFarmDetailsExactAddressPublicHelper,
+            )),
+    )
+}
+
+fn account_farm_map_placeholder() -> impl IntoElement {
+    div()
+        .w_full()
+        .h(px(220.0))
+        .rounded(px(APP_UI_THEME.foundation.radii.large_px))
+        .border_1()
+        .border_color(rgb(APP_UI_THEME.foundation.surfaces.divider))
+        .bg(rgb(APP_UI_THEME.foundation.surfaces.card_background))
+        .flex()
+        .items_center()
+        .justify_center()
+        .child(
+            div()
+                .text_size(px(APP_UI_THEME.foundation.typography.body_text_px))
+                .font_weight(gpui::FontWeight::MEDIUM)
+                .text_color(rgb(APP_UI_THEME.foundation.text.secondary))
+                .child(app_shared_text(
+                    AppTextKey::AccountFarmDetailsMapNotImplemented,
+                )),
+        )
+}
+
+fn account_farm_location_preview_card() -> impl IntoElement {
+    account_farm_profile_card(
+        app_stack_v(APP_UI_THEME.shells.home_stack_gap_px)
+            .w_full()
+            .child(account_farm_preview_title(
+                AppTextKey::AccountFarmDetailsLocationPreviewTitle,
+            ))
+            .child(account_farm_icon_value_row(
+                IconName::Map,
+                AppTextKey::AccountFarmDetailsFarmLocationValue,
+                AppTextKey::AccountFarmDetailsServiceAreaValue,
+            ))
+            .child(account_farm_service_area_preview())
+            .child(account_farm_profile_helper_text(
+                AppTextKey::AccountFarmDetailsLocationPreviewHelper,
+            )),
+    )
+}
+
+fn account_farm_service_area_preview() -> impl IntoElement {
+    div()
+        .w_full()
+        .h(px(132.0))
+        .rounded(px(APP_UI_THEME.foundation.radii.medium_px))
+        .bg(rgb(APP_UI_THEME.foundation.surfaces.card_background))
+        .border_1()
+        .border_color(rgb(APP_UI_THEME.foundation.surfaces.divider))
+        .flex()
+        .items_center()
+        .justify_center()
+        .child(
+            div()
+                .text_size(px(APP_UI_THEME.foundation.typography.body_text_px))
+                .font_weight(gpui::FontWeight::MEDIUM)
+                .text_color(rgb(APP_UI_THEME.foundation.text.secondary))
+                .child(app_shared_text(
+                    AppTextKey::AccountFarmDetailsMapNotImplemented,
+                )),
+        )
+}
+
+fn account_farm_operating_card(
+    form: &AccountFarmProfileFormState,
+    is_textarea_wrap_ready: bool,
+    cx: &mut Context<HomeView>,
+) -> impl IntoElement + use<> {
+    account_farm_profile_card(
+        app_stack_v(APP_UI_THEME.shells.home_stack_gap_px)
+            .w_full()
+            .child(account_farm_profile_title_block(
+                AppTextKey::AccountFarmDetailsOperatingTitle,
+                AppTextKey::AccountFarmDetailsOperatingIntro,
+            ))
+            .child(account_farm_profile_field_row(
+                account_farm_profile_select_field(
+                    AppTextKey::AccountFarmDetailsGrowingPracticesLabel,
+                    &form.growing_practices_select,
+                ),
+                account_farm_static_chip_group(
+                    AppTextKey::AccountFarmDetailsProductionMethodsLabel,
+                    &[
+                        AppTextKey::AccountFarmDetailsProductionMethodOrganicPractices,
+                        AppTextKey::AccountFarmDetailsProductionMethodNoSpray,
+                        AppTextKey::AccountFarmDetailsGrowingPracticeRegenerative,
+                    ],
+                    3,
+                ),
+            ))
+            .child(account_farm_profile_field_row(
+                account_farm_date_range_fields(
+                    AppTextKey::AccountFarmDetailsSeasonDatesLabel,
+                    &form.season_start_input,
+                    &form.season_end_input,
+                ),
+                account_farm_day_chip_group(),
+            ))
+            .child(account_farm_profile_text_area_field(
+                AppTextKey::AccountFarmDetailsAboutProductsLabel,
+                &form.about_products_input,
+                is_textarea_wrap_ready,
+                cx,
+            ))
+            .child(account_farm_static_chip_group_with_helper(
+                AppTextKey::AccountFarmDetailsCertificationsTitle,
+                AppTextKey::AccountFarmDetailsCertificationsHelper,
+                &[
+                    AppTextKey::AccountFarmDetailsCertificationCertifiedOrganic,
+                    AppTextKey::AccountFarmDetailsCertificationNaturallyGrown,
+                    AppTextKey::AccountFarmDetailsCertificationSmallFamilyFarm,
+                    AppTextKey::AccountFarmDetailsCertificationDeliveryAvailable,
+                ],
+                3,
+            ))
+            .child(account_farm_profile_text_area_field_with_helper(
+                AppTextKey::AccountFarmDetailsCustomerNoteTitle,
+                AppTextKey::AccountFarmDetailsCustomerNoteHelper,
+                &form.customer_note_input,
+                is_textarea_wrap_ready,
+                cx,
+            )),
+    )
+}
+
+fn account_farm_profile_preview_card(cx: &mut Context<HomeView>) -> impl IntoElement + use<> {
+    account_farm_profile_card(
+        app_stack_v(APP_UI_THEME.shells.home_stack_gap_px)
+            .w_full()
+            .child(account_farm_preview_title(
+                AppTextKey::AccountFarmDetailsProfilePreviewTitle,
+            ))
+            .child(account_farm_icon_value_row(
+                IconName::Building2,
+                AppTextKey::AccountFarmDetailsFarmNameValue,
+                AppTextKey::AccountFarmDetailsFarmLocationValue,
+            ))
+            .child(account_farm_profile_summary_row(
+                AppTextKey::AccountFarmDetailsGrowingPracticesSummaryLabel,
+                AppTextKey::AccountFarmDetailsGrowingPracticeRegenerative,
+            ))
+            .child(account_farm_profile_summary_row(
+                AppTextKey::AccountFarmDetailsSeasonSummaryLabel,
+                AppTextKey::AccountFarmDetailsSeasonStartValue,
+            ))
+            .child(account_farm_profile_summary_row(
+                AppTextKey::AccountFarmDetailsOrderDaysSummaryLabel,
+                AppTextKey::AccountFarmDetailsOrderDaysSummaryValue,
+            ))
+            .child(account_farm_profile_summary_row(
+                AppTextKey::AccountFarmDetailsFarmTypeSummaryLabel,
+                AppTextKey::AccountFarmDetailsFarmTypeVegetableFarm,
+            ))
+            .child(action_button_full_width(
+                "account-farm-profile-preview",
+                app_shared_text(AppTextKey::AccountFarmDetailsViewFarmProfileAction),
+                |_, _, _| {},
+                cx,
+            )),
+    )
+}
+
+fn account_farm_fulfillment_card(
+    form: &AccountFarmProfileFormState,
+    is_textarea_wrap_ready: bool,
+    cx: &mut Context<HomeView>,
+) -> impl IntoElement + use<> {
+    account_farm_profile_card(
+        app_stack_v(APP_UI_THEME.shells.home_stack_gap_px)
+            .w_full()
+            .child(account_farm_profile_title_block(
+                AppTextKey::AccountFarmDetailsPickupFulfillmentTitle,
+                AppTextKey::AccountFarmDetailsPickupFulfillmentIntro,
+            ))
+            .child(account_farm_static_chip_group(
+                AppTextKey::AccountFarmDetailsFulfillmentModeLabel,
+                &[
+                    AppTextKey::AccountFarmDetailsFulfillmentPickupOnly,
+                    AppTextKey::AccountFarmDetailsFulfillmentDelivery,
+                    AppTextKey::AccountFarmDetailsFulfillmentBoth,
+                ],
+                2,
+            ))
+            .child(account_farm_profile_labeled_control_with_helper(
+                AppTextKey::AccountFarmDetailsPrimaryPickupLocationLabel,
+                account_farm_profile_select_input(&form.primary_pickup_location_select),
+                Some(AppTextKey::AccountFarmDetailsPrimaryPickupLocationAddressValue),
+            ))
+            .child(account_farm_profile_text_area_field_with_helper(
+                AppTextKey::AccountFarmDetailsPickupInstructionsLabel,
+                AppTextKey::AccountFarmDetailsPickupInstructionsHelper,
+                &form.pickup_instructions_input,
+                is_textarea_wrap_ready,
+                cx,
+            ))
+            .child(account_farm_pickup_schedule_row(form, cx))
+            .child(account_farm_delivery_radius_row(
+                &form.delivery_radius_input,
+            )),
+    )
+}
+
+fn account_farm_pickup_schedule_row(
+    form: &AccountFarmProfileFormState,
+    cx: &mut Context<HomeView>,
+) -> impl IntoElement {
+    div()
+        .w_full()
+        .flex()
+        .items_start()
+        .gap(px(APP_UI_THEME.shells.home_stack_gap_px))
+        .child(
+            app_stack_v(8.0)
+                .flex_1()
+                .min_w_0()
+                .child(account_farm_field_label(
+                    AppTextKey::AccountFarmDetailsPickupWindowsLabel,
+                ))
+                .child(account_farm_pickup_windows_table())
+                .child(div().w(px(180.0)).child(action_button_compact(
+                    "account-farm-add-pickup-window",
+                    app_shared_text(AppTextKey::AccountFarmDetailsAddPickupWindowAction),
+                    |_, _, _| {},
+                    cx,
+                ))),
+        )
+        .child(
+            div()
+                .w(px(176.0))
+                .child(account_farm_profile_labeled_control_with_helper(
+                    AppTextKey::AccountFarmDetailsOrderCutoffLabel,
+                    account_farm_profile_select_input(&form.order_cutoff_select),
+                    Some(AppTextKey::AccountFarmDetailsOrderCutoffHelper),
+                )),
+        )
+}
+
+fn account_farm_pickup_windows_table() -> impl IntoElement {
+    app_stack_v(0.0)
+        .w_full()
+        .border_1()
+        .border_color(rgb(APP_UI_THEME.foundation.surfaces.divider))
+        .rounded(px(APP_UI_THEME.foundation.radii.medium_px))
+        .overflow_hidden()
+        .child(account_farm_pickup_window_table_row(
+            AppTextKey::AccountFarmDetailsPickupWindowDayHeader,
+            AppTextKey::AccountFarmDetailsPickupWindowStartHeader,
+            AppTextKey::AccountFarmDetailsPickupWindowEndHeader,
+            false,
+        ))
+        .child(account_farm_pickup_window_table_row(
+            AppTextKey::AccountFarmDetailsPickupWindowWednesday,
+            AppTextKey::AccountFarmDetailsPickupWindowWednesdayStart,
+            AppTextKey::AccountFarmDetailsPickupWindowWednesdayEnd,
+            true,
+        ))
+        .child(account_farm_pickup_window_table_row(
+            AppTextKey::AccountFarmDetailsPickupWindowSaturday,
+            AppTextKey::AccountFarmDetailsPickupWindowSaturdayStart,
+            AppTextKey::AccountFarmDetailsPickupWindowSaturdayEnd,
+            true,
+        ))
+}
+
+fn account_farm_pickup_window_table_row(
+    day_key: AppTextKey,
+    start_key: AppTextKey,
+    end_key: AppTextKey,
+    action: bool,
+) -> impl IntoElement {
+    let bg = if action {
+        APP_UI_THEME.foundation.surfaces.window_background
+    } else {
+        APP_UI_THEME.foundation.surfaces.card_background
+    };
+
+    div()
+        .w_full()
+        .bg(rgb(bg))
+        .px(px(10.0))
+        .py(px(7.0))
+        .flex()
+        .items_center()
+        .gap(px(10.0))
+        .child(account_farm_table_cell(day_key, 1.0))
+        .child(account_farm_table_cell(start_key, 1.0))
+        .child(account_farm_table_cell(end_key, 1.0))
+        .when(action, |this| {
+            this.child(
+                div()
+                    .flex_none()
+                    .text_color(rgb(APP_UI_THEME.foundation.text.secondary))
+                    .child(Icon::new(IconName::Ellipsis).with_size(gpui_component::Size::Small)),
+            )
+        })
+}
+
+fn account_farm_table_cell(label_key: AppTextKey, basis: f32) -> impl IntoElement {
+    div()
+        .flex_basis(relative(basis))
+        .min_w_0()
+        .text_size(px(APP_UI_THEME.foundation.typography.settings_row_text_px))
+        .text_color(rgb(APP_UI_THEME.foundation.text.primary))
+        .child(app_shared_text(label_key))
+}
+
+fn account_farm_delivery_radius_row(input: &Entity<InputState>) -> impl IntoElement {
+    app_stack_v(8.0)
+        .w_full()
+        .pt(px(APP_UI_THEME.shells.home_stack_gap_px))
+        .child(account_farm_profile_title_block(
+            AppTextKey::AccountFarmDetailsDeliveryRadiusTitle,
+            AppTextKey::AccountFarmDetailsDeliveryRadiusHelper,
+        ))
+        .child(
+            div()
+                .w_full()
+                .flex()
+                .items_center()
+                .gap(px(APP_UI_THEME.shells.home_stack_gap_px))
+                .child(account_farm_slider_preview())
+                .child(div().w(px(74.0)).child(account_form_text_input(input)))
+                .child(
+                    div()
+                        .text_size(px(APP_UI_THEME.foundation.typography.settings_row_text_px))
+                        .text_color(rgb(APP_UI_THEME.foundation.text.secondary))
+                        .child(app_shared_text(
+                            AppTextKey::AccountFarmDetailsDeliveryRadiusUnit,
+                        )),
+                ),
+        )
+        .child(account_farm_profile_helper_text(
+            AppTextKey::AccountFarmDetailsDeliveryRadiusNote,
+        ))
+}
+
+fn account_farm_slider_preview() -> impl IntoElement {
+    div()
+        .flex_1()
+        .min_w_0()
+        .h(px(4.0))
+        .rounded(px(2.0))
+        .bg(rgb(APP_UI_THEME.foundation.surfaces.divider))
+        .child(div().w(relative(0.38)).h(px(4.0)).rounded(px(2.0)).bg(rgb(
+            APP_UI_THEME.components.app_button.primary_colors.background,
+        )))
+}
+
+fn account_farm_customer_experience_card() -> impl IntoElement {
+    account_farm_profile_card(
+        app_stack_v(APP_UI_THEME.shells.home_stack_gap_px)
+            .w_full()
+            .child(account_farm_preview_title(
+                AppTextKey::AccountFarmDetailsCustomerExperienceTitle,
+            ))
+            .child(account_farm_profile_helper_text(
+                AppTextKey::AccountFarmDetailsCustomerExperienceIntro,
+            ))
+            .child(account_farm_customer_experience_panel(
+                AppTextKey::AccountFarmDetailsCustomerExperiencePickupTitle,
+                AppTextKey::AccountFarmDetailsPrimaryPickupLocationTitleValue,
+                AppTextKey::AccountFarmDetailsPrimaryPickupLocationAddressValue,
+            ))
+            .child(account_farm_customer_experience_panel(
+                AppTextKey::AccountFarmDetailsCustomerExperienceDeliveryTitle,
+                AppTextKey::AccountFarmDetailsCustomerExperienceDeliveryBody,
+                AppTextKey::AccountFarmDetailsServiceAreaValue,
+            )),
+    )
+}
+
+fn account_farm_customer_experience_panel(
+    title_key: AppTextKey,
+    primary_key: AppTextKey,
+    secondary_key: AppTextKey,
+) -> impl IntoElement {
+    div()
+        .w_full()
+        .rounded(px(APP_UI_THEME.foundation.radii.medium_px))
+        .bg(rgb(APP_UI_THEME.foundation.surfaces.card_background))
+        .p(px(10.0))
+        .child(
+            app_stack_v(4.0)
+                .w_full()
+                .child(
+                    div()
+                        .text_size(px(APP_UI_THEME.foundation.typography.settings_row_text_px))
+                        .font_weight(gpui::FontWeight::BOLD)
+                        .text_color(rgb(APP_UI_THEME.foundation.text.primary))
+                        .child(app_shared_text(title_key)),
+                )
+                .child(
+                    div()
+                        .text_size(px(APP_UI_THEME.foundation.typography.settings_row_text_px))
+                        .text_color(rgb(APP_UI_THEME.foundation.text.primary))
+                        .child(app_shared_text(primary_key)),
+                )
+                .child(
+                    div()
+                        .text_size(px(APP_UI_THEME.foundation.typography.settings_row_text_px))
+                        .line_height(relative(1.25))
+                        .text_color(rgb(APP_UI_THEME.foundation.text.secondary))
+                        .child(app_shared_text(secondary_key)),
+                ),
+        )
+}
+
 fn account_farm_profile_card(content: impl IntoElement) -> impl IntoElement {
     div()
         .w_full()
@@ -9746,6 +10360,38 @@ fn account_farm_profile_field_row(
         .child(div().flex_1().min_w_0().child(second))
 }
 
+fn account_farm_field_label(label_key: AppTextKey) -> impl IntoElement {
+    div()
+        .w_full()
+        .text_size(px(APP_UI_THEME.foundation.typography.utility_title_text_px))
+        .font_weight(gpui::FontWeight::SEMIBOLD)
+        .text_color(rgb(APP_UI_THEME.foundation.text.secondary))
+        .child(app_shared_text(label_key))
+}
+
+fn account_farm_profile_helper_text(text_key: AppTextKey) -> impl IntoElement {
+    div()
+        .w_full()
+        .line_height(relative(1.3))
+        .text_size(px(APP_UI_THEME.foundation.typography.settings_row_text_px))
+        .text_color(rgb(APP_UI_THEME.foundation.text.secondary))
+        .child(app_shared_text(text_key))
+}
+
+fn account_farm_profile_labeled_control_with_helper(
+    label_key: AppTextKey,
+    control: impl IntoElement,
+    helper_key: Option<AppTextKey>,
+) -> impl IntoElement {
+    app_stack_v(6.0)
+        .w_full()
+        .child(account_farm_field_label(label_key))
+        .child(control)
+        .when_some(helper_key, |this, helper_key| {
+            this.child(account_farm_profile_helper_text(helper_key))
+        })
+}
+
 fn account_farm_profile_select_field(
     label_key: AppTextKey,
     select: &Entity<AccountFarmProfileSelectState>,
@@ -9763,6 +10409,234 @@ fn account_farm_profile_text_area_field(
         label_key,
         account_form_text_area_input_with_wrapped_preview(input, is_wrap_ready, cx),
     )
+}
+
+fn account_farm_profile_text_area_field_with_helper(
+    label_key: AppTextKey,
+    helper_key: AppTextKey,
+    input: &Entity<InputState>,
+    is_wrap_ready: bool,
+    cx: &mut Context<HomeView>,
+) -> impl IntoElement {
+    account_farm_profile_labeled_control_with_helper(
+        label_key,
+        account_form_text_area_input_with_wrapped_preview(input, is_wrap_ready, cx),
+        Some(helper_key),
+    )
+}
+
+fn account_farm_toggle_preview_row(
+    label_key: AppTextKey,
+    helper_key: AppTextKey,
+) -> impl IntoElement {
+    div()
+        .w_full()
+        .flex()
+        .items_start()
+        .gap(px(10.0))
+        .child(
+            div()
+                .flex_none()
+                .w(px(34.0))
+                .h(px(20.0))
+                .rounded(px(10.0))
+                .bg(rgb(APP_UI_THEME.foundation.surfaces.divider))
+                .p(px(2.0))
+                .child(
+                    div()
+                        .size(px(16.0))
+                        .rounded(px(8.0))
+                        .bg(rgb(APP_UI_THEME.foundation.surfaces.window_background)),
+                ),
+        )
+        .child(
+            app_stack_v(3.0)
+                .flex_1()
+                .min_w_0()
+                .child(
+                    div()
+                        .text_size(px(APP_UI_THEME.foundation.typography.settings_row_text_px))
+                        .font_weight(gpui::FontWeight::MEDIUM)
+                        .text_color(rgb(APP_UI_THEME.foundation.text.primary))
+                        .child(app_shared_text(label_key)),
+                )
+                .child(account_farm_profile_helper_text(helper_key)),
+        )
+}
+
+fn account_farm_preview_title(title_key: AppTextKey) -> impl IntoElement {
+    div()
+        .w_full()
+        .text_size(px(APP_UI_THEME.foundation.typography.body_text_px * 1.1))
+        .font_weight(gpui::FontWeight::BOLD)
+        .text_color(rgb(APP_UI_THEME.foundation.text.primary))
+        .child(app_shared_text(title_key))
+}
+
+fn account_farm_icon_value_row(
+    icon_name: IconName,
+    title_key: AppTextKey,
+    subtitle_key: AppTextKey,
+) -> impl IntoElement {
+    div()
+        .w_full()
+        .flex()
+        .items_center()
+        .gap(px(APP_UI_THEME.shells.home_stack_gap_px))
+        .child(
+            div()
+                .size(px(46.0))
+                .rounded(px(23.0))
+                .bg(rgb(0xA7F3B8))
+                .flex()
+                .items_center()
+                .justify_center()
+                .child(
+                    Icon::new(icon_name)
+                        .with_size(gpui_component::Size::Size(px(24.0)))
+                        .text_color(rgb(APP_UI_THEME.foundation.text.primary)),
+                ),
+        )
+        .child(
+            app_stack_v(3.0)
+                .flex_1()
+                .min_w_0()
+                .child(
+                    div()
+                        .text_size(px(APP_UI_THEME.foundation.typography.body_text_px))
+                        .font_weight(gpui::FontWeight::BOLD)
+                        .text_color(rgb(APP_UI_THEME.foundation.text.primary))
+                        .child(app_shared_text(title_key)),
+                )
+                .child(
+                    div()
+                        .text_size(px(APP_UI_THEME.foundation.typography.settings_row_text_px))
+                        .text_color(rgb(APP_UI_THEME.foundation.text.secondary))
+                        .child(app_shared_text(subtitle_key)),
+                ),
+        )
+}
+
+fn account_farm_static_chip_group(
+    label_key: AppTextKey,
+    chips: &[AppTextKey],
+    selected_count: usize,
+) -> impl IntoElement {
+    account_farm_profile_labeled_control_with_helper(
+        label_key,
+        account_farm_chip_wrap(chips, selected_count),
+        None,
+    )
+}
+
+fn account_farm_static_chip_group_with_helper(
+    label_key: AppTextKey,
+    helper_key: AppTextKey,
+    chips: &[AppTextKey],
+    selected_count: usize,
+) -> impl IntoElement {
+    account_farm_profile_labeled_control_with_helper(
+        label_key,
+        account_farm_chip_wrap(chips, selected_count),
+        Some(helper_key),
+    )
+}
+
+fn account_farm_chip_wrap(chips: &[AppTextKey], selected_count: usize) -> impl IntoElement {
+    div().w_full().flex().flex_wrap().gap(px(8.0)).children(
+        chips
+            .iter()
+            .enumerate()
+            .map(|(index, key)| account_farm_chip(*key, index < selected_count).into_any_element()),
+    )
+}
+
+fn account_farm_chip(label_key: AppTextKey, selected: bool) -> impl IntoElement {
+    let border = if selected {
+        APP_UI_THEME.components.app_button.primary_colors.background
+    } else {
+        APP_UI_THEME.foundation.surfaces.divider
+    };
+    let text = if selected {
+        APP_UI_THEME.components.app_button.primary_colors.background
+    } else {
+        APP_UI_THEME.foundation.text.primary
+    };
+
+    div()
+        .rounded(px(APP_UI_THEME.foundation.radii.medium_px))
+        .border_1()
+        .border_color(rgb(border))
+        .bg(rgb(APP_UI_THEME.foundation.surfaces.window_background))
+        .px(px(10.0))
+        .py(px(6.0))
+        .flex()
+        .items_center()
+        .gap(px(6.0))
+        .when(selected, |this| {
+            this.child(
+                Icon::new(IconName::Check)
+                    .with_size(gpui_component::Size::Small)
+                    .text_color(rgb(text)),
+            )
+        })
+        .child(
+            div()
+                .text_size(px(APP_UI_THEME.foundation.typography.settings_row_text_px))
+                .font_weight(gpui::FontWeight::MEDIUM)
+                .text_color(rgb(text))
+                .child(app_shared_text(label_key)),
+        )
+}
+
+fn account_farm_day_chip_group() -> impl IntoElement {
+    account_farm_static_chip_group(
+        AppTextKey::AccountFarmDetailsOrderDaysLabel,
+        &[
+            AppTextKey::AccountFarmDetailsDayMon,
+            AppTextKey::AccountFarmDetailsDayTue,
+            AppTextKey::AccountFarmDetailsDayWed,
+            AppTextKey::AccountFarmDetailsDayThu,
+            AppTextKey::AccountFarmDetailsDayFri,
+            AppTextKey::AccountFarmDetailsDaySat,
+            AppTextKey::AccountFarmDetailsDaySun,
+        ],
+        5,
+    )
+}
+
+fn account_farm_date_range_fields(
+    label_key: AppTextKey,
+    start_input: &Entity<InputState>,
+    end_input: &Entity<InputState>,
+) -> impl IntoElement {
+    app_stack_v(6.0)
+        .w_full()
+        .child(account_farm_field_label(label_key))
+        .child(
+            div()
+                .w_full()
+                .flex()
+                .items_center()
+                .gap(px(8.0))
+                .child(
+                    div()
+                        .flex_1()
+                        .min_w_0()
+                        .child(account_form_text_input(start_input)),
+                )
+                .child(
+                    Icon::new(IconName::ArrowRight)
+                        .with_size(gpui_component::Size::Small)
+                        .text_color(rgb(APP_UI_THEME.foundation.text.secondary)),
+                )
+                .child(
+                    div()
+                        .flex_1()
+                        .min_w_0()
+                        .child(account_form_text_input(end_input)),
+                ),
+        )
 }
 
 fn account_farm_profile_completeness_card() -> impl IntoElement {
