@@ -310,20 +310,31 @@ pub fn app_underline_tabs(
         .underline()
         .with_size(Size::Medium)
         .w_full()
-        .selected_index(selected_index)
         .children(tabs.into_iter().enumerate().map(|(index, tab)| {
-            let foreground = if index == selected_index {
+            let is_selected = index == selected_index;
+            let foreground = if is_selected {
                 active_foreground
             } else {
                 inactive_foreground
             };
-
             Tab::new().child(
                 div()
+                    .h_full()
+                    .flex()
+                    .flex_col()
+                    .justify_between()
                     .text_size(px(tab_text_px))
                     .font_weight(gpui::FontWeight::MEDIUM)
                     .text_color(rgb(foreground))
-                    .child(tab.label),
+                    .child(tab.label)
+                    .child(
+                        div()
+                            .w_full()
+                            .h(px(2.0))
+                            .rounded(px(1.0))
+                            .when(is_selected, |this| this.bg(rgb(active_foreground)))
+                            .when(!is_selected, |this| this.bg(transparent_black())),
+                    ),
             )
         }))
         .on_click(on_click)
