@@ -317,25 +317,27 @@ pub fn app_underline_tabs(
             } else {
                 inactive_foreground
             };
-            Tab::new().child(
-                div()
-                    .h_full()
-                    .flex()
-                    .flex_col()
-                    .justify_between()
-                    .text_size(px(tab_text_px))
-                    .font_weight(gpui::FontWeight::MEDIUM)
-                    .text_color(rgb(foreground))
-                    .child(tab.label)
-                    .child(
-                        div()
-                            .w_full()
-                            .h(px(2.0))
-                            .rounded(px(1.0))
-                            .when(is_selected, |this| this.bg(rgb(active_foreground)))
-                            .when(!is_selected, |this| this.bg(transparent_black())),
-                    ),
-            )
+
+            let tab_label = div()
+                .text_size(px(tab_text_px))
+                .font_weight(gpui::FontWeight::MEDIUM)
+                .text_color(rgb(foreground))
+                .child(tab.label);
+            let tab = Tab::new().relative().child(tab_label);
+            if is_selected {
+                tab.suffix(
+                    div()
+                        .absolute()
+                        .left_0()
+                        .right_0()
+                        .bottom_0()
+                        .h(px(2.0))
+                        .rounded(px(1.0))
+                        .bg(rgb(active_foreground)),
+                )
+            } else {
+                tab
+            }
         }))
         .on_click(on_click)
 }
