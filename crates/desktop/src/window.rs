@@ -30,12 +30,12 @@ use radroots_studio_app_sync::{
     SyncConflictKind, SyncConflictResolutionStatus, SyncConflictSeverity,
 };
 use radroots_studio_app_ui::{
-    APP_UI_THEME, AppCheckboxFieldSpec, AppFormFieldSpec,
+    APP_UI_THEME, AppCheckboxFieldSpec, AppFormFieldSpec, AppIconButtonSpec,
     AppSegmentButtonIconSpec as IconSegmentButtonSpec, AppUnderlineTabSpec, LabelValueRow,
     SettingsPreferencesGeneralRowState, app_button_account_selector_row as account_selector_row,
     app_button_card, app_button_choice as choice_button,
-    app_button_compact as action_button_compact, app_button_list_row as list_row_button,
-    app_button_primary as action_button_primary,
+    app_button_compact as action_button_compact, app_button_icon as action_icon_button,
+    app_button_list_row as list_row_button, app_button_primary as action_button_primary,
     app_button_primary_disabled as action_button_primary_disabled,
     app_button_primary_full_width as action_button_primary_full_width,
     app_button_secondary as action_button, app_button_secondary_disabled as action_button_disabled,
@@ -177,7 +177,7 @@ enum AccountTab {
     Profile,
     FarmDetails,
     Preferences,
-    Security,
+    Settings,
 }
 
 impl AccountTab {
@@ -185,7 +185,7 @@ impl AccountTab {
         Self::Profile,
         Self::FarmDetails,
         Self::Preferences,
-        Self::Security,
+        Self::Settings,
     ];
 
     const fn text_key(self) -> AppTextKey {
@@ -193,14 +193,15 @@ impl AccountTab {
             Self::Profile => AppTextKey::AccountTabProfile,
             Self::FarmDetails => AppTextKey::AccountTabFarmDetails,
             Self::Preferences => AppTextKey::AccountTabPreferences,
-            Self::Security => AppTextKey::AccountTabSecurity,
+            Self::Settings => AppTextKey::AccountTabSettings,
         }
     }
 
     const fn panel_text_key(self) -> AppTextKey {
         match self {
             Self::Profile | Self::FarmDetails => self.text_key(),
-            Self::Preferences | Self::Security => AppTextKey::AccountNotImplemented,
+            Self::Preferences => AppTextKey::AccountNotImplemented,
+            Self::Settings => AppTextKey::AccountSettingsTitle,
         }
     }
 
@@ -398,6 +399,26 @@ impl AccountFarmProfileFormState {
     }
 }
 
+#[derive(Clone)]
+struct AccountSettingsFormState {
+    add_relay_input: Entity<InputState>,
+    blossom_server_input: Entity<InputState>,
+}
+
+impl AccountSettingsFormState {
+    fn new(window: &mut Window, cx: &mut Context<HomeView>) -> Self {
+        Self {
+            add_relay_input: cx.new(|cx| {
+                InputState::new(window, cx)
+                    .placeholder(app_text(AppTextKey::AccountSettingsAddRelayPlaceholder))
+            }),
+            blossom_server_input: cx.new(|cx| {
+                InputState::new(window, cx).default_value(ACCOUNT_SETTINGS_DEFAULT_BLOSSOM_SERVER)
+            }),
+        }
+    }
+}
+
 fn account_farm_profile_select_state(
     value_keys: &[AppTextKey],
     window: &mut Window,
@@ -547,6 +568,7 @@ pub struct HomeView {
     selected_account_tab: AccountTab,
     account_profile_form: Option<AccountProfileFormState>,
     account_farm_profile_form: Option<AccountFarmProfileFormState>,
+    account_settings_form: Option<AccountSettingsFormState>,
     account_farm_profile_textarea_wrap_ready: bool,
     account_farm_profile_textarea_wrap_requested: bool,
     relay_client: Option<RadrootsNostrClient>,
@@ -671,6 +693,7 @@ impl HomeView {
             selected_account_tab: AccountTab::default(),
             account_profile_form: None,
             account_farm_profile_form: None,
+            account_settings_form: None,
             account_farm_profile_textarea_wrap_ready: false,
             account_farm_profile_textarea_wrap_requested: false,
             relay_client: None,
@@ -5236,8 +5259,12 @@ impl HomeView {
                 account_farm_profile_panel(&form, self.account_farm_profile_textarea_wrap_ready, cx)
                     .into_any_element()
             }
-            AccountTab::Preferences | AccountTab::Security => {
+            AccountTab::Preferences => {
                 account_placeholder_panel(selected_tab.panel_text_key()).into_any_element()
+            }
+            AccountTab::Settings => {
+                let form = self.account_settings_form(window, cx).clone();
+                account_settings_panel(&form, cx).into_any_element()
             }
         };
 
@@ -5287,6 +5314,21 @@ impl HomeView {
         }
 
         let Some(form) = self.account_farm_profile_form.as_ref() else {
+            unreachable!();
+        };
+        form
+    }
+
+    fn account_settings_form(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> &AccountSettingsFormState {
+        if self.account_settings_form.is_none() {
+            self.account_settings_form = Some(AccountSettingsFormState::new(window, cx));
+        }
+
+        let Some(form) = self.account_settings_form.as_ref() else {
             unreachable!();
         };
         form
@@ -9278,6 +9320,9 @@ fn account_profile_labeled_control(
 
 const ACCOUNT_FORM_CONTROL_HEIGHT_PX: f32 = 28.0;
 const ACCOUNT_FORM_CONTROL_RADIUS_PX: f32 = 8.0;
+const ACCOUNT_SETTINGS_DEFAULT_BLOSSOM_SERVER: &str = "http://localhost:8082";
+const ACCOUNT_SETTINGS_RELAY_LOCALHOST_8080: &str = "ws://localhost:8080";
+const ACCOUNT_SETTINGS_RELAY_LOCALHOST_8081: &str = "ws://localhost:8081";
 
 fn account_form_text_input(input: &Entity<InputState>) -> impl IntoElement {
     gpui::Styled::h(
@@ -9813,6 +9858,301 @@ fn account_farm_profile_action_row(cx: &mut Context<HomeView>) -> impl IntoEleme
                     |_, _, _| {},
                     cx,
                 )),
+        )
+}
+
+fn account_settings_panel(
+    form: &AccountSettingsFormState,
+    cx: &mut Context<HomeView>,
+) -> impl IntoElement {
+    app_stack_v(APP_UI_THEME.shells.home_stack_gap_px)
+        .w_full()
+        .child(account_section_heading(AppTextKey::AccountSettingsTitle))
+        .child(
+            div()
+                .w_full()
+                .flex()
+                .items_start()
+                .gap(px(APP_UI_THEME.shells.home_stack_gap_px))
+                .child(
+                    div()
+                        .flex_1()
+                        .min_w_0()
+                        .child(account_settings_nostr_relays_card(form, cx)),
+                )
+                .child(
+                    div()
+                        .flex_basis(relative(0.4))
+                        .min_w(px(320.0))
+                        .child(account_settings_blossom_server_card(form, cx)),
+                ),
+        )
+        .child(action_button_primary_full_width(
+            "account-settings-save",
+            app_shared_text(AppTextKey::AccountSettingsSaveChangesAction),
+            |_, _, _| {},
+            cx,
+        ))
+}
+
+fn account_settings_nostr_relays_card(
+    form: &AccountSettingsFormState,
+    cx: &mut Context<HomeView>,
+) -> impl IntoElement {
+    account_settings_card(
+        app_stack_v(APP_UI_THEME.shells.home_stack_gap_px)
+            .w_full()
+            .child(account_farm_profile_title_block(
+                AppTextKey::AccountSettingsNostrRelaysTitle,
+                AppTextKey::AccountSettingsNostrRelaysHelper,
+            ))
+            .child(account_settings_relay_list(cx))
+            .child(account_settings_add_relay_controls(form, cx))
+            .child(div().w(px(160.0)).child(action_button_full_width(
+                "account-settings-reset-relays",
+                app_shared_text(AppTextKey::AccountSettingsResetRelaysAction),
+                |_, _, _| {},
+                cx,
+            )))
+            .child(account_settings_helper_note(
+                AppTextKey::AccountSettingsDefaultRelaysNote,
+            )),
+    )
+}
+
+fn account_settings_relay_list(cx: &mut Context<HomeView>) -> impl IntoElement {
+    app_stack_v(0.0)
+        .w_full()
+        .border_1()
+        .border_color(rgb(APP_UI_THEME.foundation.surfaces.divider))
+        .rounded(px(APP_UI_THEME.foundation.radii.medium_px))
+        .overflow_hidden()
+        .child(account_settings_relay_row(
+            "account-settings-relay-localhost-8080",
+            "account-settings-remove-relay-localhost-8080",
+            ACCOUNT_SETTINGS_RELAY_LOCALHOST_8080,
+            AppTextKey::AccountSettingsRelayAccessReadWrite,
+            true,
+            cx,
+        ))
+        .child(account_settings_relay_row(
+            "account-settings-relay-localhost-8081",
+            "account-settings-remove-relay-localhost-8081",
+            ACCOUNT_SETTINGS_RELAY_LOCALHOST_8081,
+            AppTextKey::AccountSettingsRelayAccessReadOnly,
+            true,
+            cx,
+        ))
+}
+
+fn account_settings_relay_row(
+    checkbox_id: &'static str,
+    remove_id: &'static str,
+    relay_url: &'static str,
+    access_key: AppTextKey,
+    enabled: bool,
+    cx: &mut Context<HomeView>,
+) -> impl IntoElement {
+    div()
+        .w_full()
+        .min_h(px(52.0))
+        .px(px(APP_UI_THEME.foundation.spacing.medium_px))
+        .py(px(APP_UI_THEME.foundation.spacing.small_px))
+        .flex()
+        .items_center()
+        .gap(px(APP_UI_THEME.shells.home_stack_gap_px))
+        .child(div().flex_1().min_w_0().child(app_checkbox_field(
+            AppCheckboxFieldSpec::new(checkbox_id, relay_url, Option::<SharedString>::None),
+            enabled,
+            cx,
+            |_, _, _| {},
+        )))
+        .child(
+            div()
+                .w(px(104.0))
+                .text_size(px(APP_UI_THEME.foundation.typography.settings_row_text_px))
+                .text_color(rgb(APP_UI_THEME.foundation.text.secondary))
+                .child(app_shared_text(access_key)),
+        )
+        .child(action_icon_button(
+            AppIconButtonSpec::new(
+                remove_id,
+                app_shared_text(AppTextKey::AccountSettingsRemoveRelayAction),
+                IconName::Delete,
+            ),
+            |_, _, _| {},
+            cx,
+        ))
+}
+
+fn account_settings_add_relay_controls(
+    form: &AccountSettingsFormState,
+    cx: &mut Context<HomeView>,
+) -> impl IntoElement {
+    app_stack_v(APP_UI_THEME.foundation.spacing.tight_px)
+        .w_full()
+        .child(
+            div()
+                .w_full()
+                .text_size(px(APP_UI_THEME.foundation.typography.utility_title_text_px))
+                .font_weight(gpui::FontWeight::SEMIBOLD)
+                .text_color(rgb(APP_UI_THEME.foundation.text.secondary))
+                .child(app_shared_text(AppTextKey::AccountSettingsAddRelayLabel)),
+        )
+        .child(
+            div()
+                .w_full()
+                .flex()
+                .items_center()
+                .gap(px(APP_UI_THEME.shells.home_stack_gap_px))
+                .child(
+                    div()
+                        .flex_1()
+                        .min_w_0()
+                        .child(account_form_text_input(&form.add_relay_input)),
+                )
+                .child(action_button(
+                    "account-settings-add-relay",
+                    app_shared_text(AppTextKey::AccountSettingsAddRelayAction),
+                    |_, _, _| {},
+                    cx,
+                )),
+        )
+}
+
+fn account_settings_blossom_server_card(
+    form: &AccountSettingsFormState,
+    cx: &mut Context<HomeView>,
+) -> impl IntoElement {
+    account_settings_card(
+        app_stack_v(APP_UI_THEME.shells.home_stack_gap_px)
+            .w_full()
+            .child(account_farm_profile_title_block(
+                AppTextKey::AccountSettingsBlossomServerTitle,
+                AppTextKey::AccountSettingsBlossomServerHelper,
+            ))
+            .child(account_profile_labeled_control(
+                AppTextKey::AccountSettingsBlossomServerUrlLabel,
+                account_form_text_input(&form.blossom_server_input),
+            ))
+            .child(app_checkbox_field(
+                AppCheckboxFieldSpec::new(
+                    "account-settings-blossom-product-photos",
+                    app_shared_text(AppTextKey::AccountSettingsBlossomProductPhotosLabel),
+                    Option::<SharedString>::None,
+                ),
+                true,
+                cx,
+                |_, _, _| {},
+            ))
+            .child(app_checkbox_field(
+                AppCheckboxFieldSpec::new(
+                    "account-settings-blossom-profile-farm-media",
+                    app_shared_text(AppTextKey::AccountSettingsBlossomProfileFarmMediaLabel),
+                    Option::<SharedString>::None,
+                ),
+                true,
+                cx,
+                |_, _, _| {},
+            ))
+            .child(div().w(px(172.0)).child(action_button_full_width(
+                "account-settings-reset-blossom",
+                app_shared_text(AppTextKey::AccountSettingsResetBlossomServerAction),
+                |_, _, _| {},
+                cx,
+            )))
+            .child(account_settings_blossom_health_card()),
+    )
+}
+
+fn account_settings_blossom_health_card() -> impl IntoElement {
+    div()
+        .w_full()
+        .border_1()
+        .border_color(rgb(APP_UI_THEME.foundation.surfaces.divider))
+        .rounded(px(APP_UI_THEME.foundation.radii.medium_px))
+        .p(px(APP_UI_THEME.foundation.spacing.large_px))
+        .flex()
+        .items_center()
+        .justify_between()
+        .gap(px(APP_UI_THEME.shells.home_stack_gap_px))
+        .child(
+            div()
+                .flex()
+                .items_center()
+                .gap(px(APP_UI_THEME.foundation.spacing.medium_px))
+                .child(status_indicator(
+                    APP_UI_THEME.components.app_status_indicator.online,
+                ))
+                .child(
+                    app_stack_v(APP_UI_THEME.foundation.spacing.micro_px)
+                        .min_w_0()
+                        .child(
+                            div()
+                                .text_size(px(APP_UI_THEME
+                                    .foundation
+                                    .typography
+                                    .settings_row_text_px))
+                                .font_weight(gpui::FontWeight::MEDIUM)
+                                .text_color(rgb(APP_UI_THEME.foundation.text.primary))
+                                .child(app_shared_text(
+                                    AppTextKey::AccountSettingsBlossomConnectionHealthy,
+                                )),
+                        )
+                        .child(
+                            div()
+                                .text_size(px(APP_UI_THEME
+                                    .foundation
+                                    .typography
+                                    .settings_row_text_px))
+                                .text_color(rgb(APP_UI_THEME.foundation.text.secondary))
+                                .child(app_shared_text(
+                                    AppTextKey::AccountSettingsBlossomUploadsAvailable,
+                                )),
+                        ),
+                ),
+        )
+        .child(
+            Icon::new(IconName::CircleCheck)
+                .with_size(gpui_component::Size::Size(px(18.0)))
+                .text_color(rgb(APP_UI_THEME.components.app_status_indicator.online)),
+        )
+}
+
+fn account_settings_card(content: impl IntoElement) -> impl IntoElement {
+    div()
+        .w_full()
+        .border_1()
+        .border_color(rgb(APP_UI_THEME.foundation.surfaces.divider))
+        .rounded(px(APP_UI_THEME.foundation.radii.large_px))
+        .bg(transparent_black())
+        .child(
+            div()
+                .w_full()
+                .p(px(APP_UI_THEME.shells.home_card_padding_px))
+                .child(content),
+        )
+}
+
+fn account_settings_helper_note(text_key: AppTextKey) -> impl IntoElement {
+    div()
+        .w_full()
+        .flex()
+        .items_center()
+        .gap(px(APP_UI_THEME.foundation.spacing.small_px))
+        .child(
+            Icon::new(IconName::Info)
+                .with_size(gpui_component::Size::Size(px(14.0)))
+                .text_color(rgb(APP_UI_THEME.foundation.text.secondary)),
+        )
+        .child(
+            div()
+                .flex_1()
+                .min_w_0()
+                .text_size(px(APP_UI_THEME.foundation.typography.utility_title_text_px))
+                .line_height(relative(1.25))
+                .text_color(rgb(APP_UI_THEME.foundation.text.secondary))
+                .child(app_shared_text(text_key)),
         )
 }
 

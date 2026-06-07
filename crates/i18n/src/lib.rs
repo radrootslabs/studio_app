@@ -160,7 +160,7 @@ mod tests {
         assert_eq!(app_text(AppTextKey::AccountTabProfile), "Profile");
         assert_eq!(app_text(AppTextKey::AccountTabFarmDetails), "Farm details");
         assert_eq!(app_text(AppTextKey::AccountTabPreferences), "Preferences");
-        assert_eq!(app_text(AppTextKey::AccountTabSecurity), "Security");
+        assert_eq!(app_text(AppTextKey::AccountTabSettings), "Settings");
         assert_eq!(
             app_text(AppTextKey::AccountNotImplemented),
             "Not implemented"
@@ -208,6 +208,19 @@ mod tests {
         assert_eq!(
             app_text(AppTextKey::AccountFarmDetailsFarmTypeVegetableFarm),
             "Vegetable farm"
+        );
+        assert_eq!(app_text(AppTextKey::AccountSettingsTitle), "Settings");
+        assert_eq!(
+            app_text(AppTextKey::AccountSettingsNostrRelaysTitle),
+            "Nostr relays"
+        );
+        assert_eq!(
+            app_text(AppTextKey::AccountSettingsBlossomServerTitle),
+            "Blossom server"
+        );
+        assert_eq!(
+            app_text(AppTextKey::AccountSettingsSaveChangesAction),
+            "Save changes"
         );
         assert_eq!(
             app_text(AppTextKey::AccountFarmDetailsSaveDraftAction),
