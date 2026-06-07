@@ -9,7 +9,7 @@ use crate::{
 actions!(radroots_studio_app, [OpenAboutWindow, QuitApp]);
 
 const fn about_menu_settings_view() -> SettingsPanelViewKey {
-    SettingsPanelViewKey::About
+    SettingsPanelViewKey::Account
 }
 
 pub fn install_native_app_menu(runtime: DesktopAppRuntime, cx: &mut App) {
@@ -42,7 +42,7 @@ mod tests {
     use crate::window::SettingsPanelViewKey;
 
     #[test]
-    fn about_menu_targets_the_about_settings_panel() {
-        assert_eq!(about_menu_settings_view(), SettingsPanelViewKey::About);
+    fn about_menu_targets_the_account_settings_panel() {
+        assert_eq!(about_menu_settings_view(), SettingsPanelViewKey::Account);
     }
 }

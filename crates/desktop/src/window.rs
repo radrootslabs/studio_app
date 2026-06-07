@@ -1,8 +1,8 @@
 use gpui::{
     Animation, AnimationExt, AnyElement, App, AppContext, Bounds, ClickEvent, Context, ElementId,
     Entity, InteractiveElement, IntoElement, ParentElement, Render, SharedString, Styled,
-    Subscription, Timer, Window, WindowBackgroundAppearance, WindowBounds, WindowOptions, div,
-    prelude::FluentBuilder, px, relative, rgb, size,
+    Subscription, Timer, Window, WindowBounds, WindowOptions, div, prelude::FluentBuilder, px,
+    relative, rgb, size,
 };
 use gpui_component::{
     IconName, Root,
@@ -48,9 +48,10 @@ use radroots_studio_app_ui::{
 };
 pub use radroots_studio_app_view::SettingsSection as SettingsPanelViewKey;
 use radroots_studio_app_view::{
-    AppStartupGate, BlackoutPeriodId, BlackoutPeriodRecord, BuyerCartProjection,
-    BuyerCartReplaceConfirmationProjection, BuyerListingRow, BuyerOrderDetailProjection,
-    BuyerOrderReviewDraft, BuyerOrderReviewSummaryProjection, BuyerOrderStatus, BuyerOrdersListRow,
+    AccountCustody, AccountSummary, ActiveSurface, AppStartupGate, BlackoutPeriodId,
+    BlackoutPeriodRecord, BuyerCartProjection, BuyerCartReplaceConfirmationProjection,
+    BuyerListingRow, BuyerOrderDetailProjection, BuyerOrderReviewDraft,
+    BuyerOrderReviewSummaryProjection, BuyerOrderStatus, BuyerOrdersListRow,
     BuyerProductDetailProjection, FarmId, FarmOperatingRulesRecord, FarmOrderMethod,
     FarmProfileRecord, FarmReadinessBlocker, FarmRulesProjection, FarmRulesReadiness,
     FarmSetupBlocker, FarmSetupDraft, FarmSummary, FarmTimingConflictKind, FarmerSection,
@@ -65,9 +66,10 @@ use radroots_studio_app_view::{
     ProductPublishBlocker, ProductStatus, ProductsFilter, ProductsListRow, ProductsSort,
     RecoveryKind, RecoveryState, ReminderDeadlineProjection, ReminderDeliveryState, ReminderId,
     ReminderLogEntryProjection, ReminderLogProjection, ReminderSurface, ReminderUrgency,
-    RepeatDemandEligibility, RepeatDemandHandoffProjection, ShellSection, TodayAgendaProjection,
-    TodaySetupTaskKind, TradeAgreementStatus, TradeEconomicsProjection, TradeFulfillmentStatus,
-    TradeInventoryStatus, TradePaymentDisplayStatus, TradeReceiptProjection, TradeRevisionStatus,
+    RepeatDemandEligibility, RepeatDemandHandoffProjection, SettingsAccountProjection,
+    ShellSection, TodayAgendaProjection, TodaySetupTaskKind, TradeAgreementStatus,
+    TradeEconomicsProjection, TradeFulfillmentStatus, TradeInventoryStatus,
+    TradePaymentDisplayStatus, TradeReceiptProjection, TradeRevisionStatus,
     TradeValidationReceiptProjection, TradeValidationReceiptResult, TradeValidationReceiptType,
     TradeWorkflowProjection, TradeWorkflowSource,
 };
@@ -241,7 +243,6 @@ pub fn settings_window_options(cx: &mut App) -> WindowOptions {
             px(APP_UI_THEME.shells.settings_height_px),
         )),
         titlebar: Some(settings_titlebar_options()),
-        window_background: WindowBackgroundAppearance::Transparent,
         ..Default::default()
     }
 }
@@ -6695,11 +6696,33 @@ impl SettingsWindowView {
     }
 
     fn account_panel(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let runtime = self.runtime.summary();
+        let projection = &runtime.settings_account_projection;
         let detail_text_px = APP_UI_THEME
             .foundation
             .typography
             .settings_account_detail_text_px;
-        let account_status_color = APP_UI_THEME.components.app_status_indicator.offline;
+        let detail_account = settings_account_detail_account(projection);
+        let selected_account_id = projection
+            .selected_account
+            .as_ref()
+            .map(|account| account.account.account_id.as_str());
+        let account_rows = projection
+            .roster
+            .iter()
+            .enumerate()
+            .map(|(index, account)| {
+                list_row_button(
+                    ("settings-account-row", index),
+                    account_display_name(account),
+                    Some(SharedString::from(abbreviated_npub(account.npub.as_str()))),
+                    Some(account.account_id.as_str()) == selected_account_id,
+                    cx.listener(|_, _, _, _| {}),
+                    cx,
+                )
+                .into_any_element()
+            })
+            .collect::<Vec<_>>();
 
         div()
             .size_full()
@@ -6713,7 +6736,7 @@ impl SettingsWindowView {
                     .flex_col()
                     .justify_between()
                     .child(
-                        div()
+                        app_stack_v(APP_UI_THEME.foundation.spacing.tight_px)
                             .w_full()
                             .bg(rgb(APP_UI_THEME.foundation.surfaces.chrome_background))
                             .rounded(px(APP_UI_THEME
@@ -6722,36 +6745,43 @@ impl SettingsWindowView {
                             .p(px(APP_UI_THEME
                                 .shells
                                 .settings_account_sidebar_button_padding_px))
-                            .child(
-                                div()
-                                    .flex()
-                                    .flex_col()
-                                    .gap(px(2.0))
-                                    .child(
-                                        div()
-                                            .text_size(px(APP_UI_THEME
-                                                .foundation
-                                                .typography
-                                                .settings_account_identity_text_px))
-                                            .font_weight(gpui::FontWeight::MEDIUM)
-                                            .text_color(rgb(APP_UI_THEME.foundation.text.primary))
-                                            .child(app_shared_text(
-                                                AppTextKey::SettingsAccountNoSelectionTitle,
-                                            )),
-                                    )
-                                    .child(
-                                        div()
-                                            .text_size(px(APP_UI_THEME
-                                                .foundation
-                                                .typography
-                                                .settings_account_identity_text_px))
-                                            .text_color(rgb(APP_UI_THEME.foundation.text.secondary))
-                                            .line_height(relative(1.2))
-                                            .child(app_shared_text(
-                                                AppTextKey::SettingsAccountNoSelectionBody,
-                                            )),
-                                    ),
-                            ),
+                            .children(account_rows)
+                            .when(projection.roster.is_empty(), |this| {
+                                this.child(
+                                    div()
+                                        .flex()
+                                        .flex_col()
+                                        .gap(px(2.0))
+                                        .child(
+                                            div()
+                                                .text_size(px(APP_UI_THEME
+                                                    .foundation
+                                                    .typography
+                                                    .settings_account_identity_text_px))
+                                                .font_weight(gpui::FontWeight::MEDIUM)
+                                                .text_color(rgb(
+                                                    APP_UI_THEME.foundation.text.primary,
+                                                ))
+                                                .child(app_shared_text(
+                                                    AppTextKey::SettingsAccountNoSelectionTitle,
+                                                )),
+                                        )
+                                        .child(
+                                            div()
+                                                .text_size(px(APP_UI_THEME
+                                                    .foundation
+                                                    .typography
+                                                    .settings_account_identity_text_px))
+                                                .text_color(rgb(
+                                                    APP_UI_THEME.foundation.text.secondary,
+                                                ))
+                                                .line_height(relative(1.2))
+                                                .child(app_shared_text(
+                                                    AppTextKey::SettingsAccountNoSelectionBody,
+                                                )),
+                                        ),
+                                )
+                            }),
                     )
                     .child(
                         div()
@@ -6774,14 +6804,16 @@ impl SettingsWindowView {
                                     .gap(px(APP_UI_THEME
                                         .shells
                                         .settings_account_sidebar_footer_button_gap_px))
-                                    .child(action_button_disabled(
+                                    .child(action_button_primary(
                                         "account-add",
                                         app_shared_text(AppTextKey::SettingsAccountAddAction),
+                                        cx.listener(|_, _, _, _| {}),
                                         cx,
                                     ))
-                                    .child(action_button_disabled(
+                                    .child(action_button_primary(
                                         "account-more",
                                         app_shared_text(AppTextKey::SettingsAccountMoreActions),
+                                        cx.listener(|_, _, _, _| {}),
                                         cx,
                                     )),
                             ),
@@ -6838,9 +6870,16 @@ impl SettingsWindowView {
                                             .text_size(px(detail_text_px))
                                             .font_weight(gpui::FontWeight::MEDIUM)
                                             .text_color(rgb(APP_UI_THEME.foundation.text.primary))
-                                            .child(app_shared_text(
-                                                AppTextKey::SettingsAccountNoSelectionTitle,
-                                            )),
+                                            .child(
+                                                detail_account
+                                                    .map(account_display_name)
+                                                    .unwrap_or_else(|| {
+                                                        app_shared_text(
+                                                            AppTextKey::SettingsAccountNoSelectionTitle,
+                                                        )
+                                                        .to_string()
+                                                    }),
+                                            ),
                                     ),
                             )
                             .child(
@@ -6856,7 +6895,14 @@ impl SettingsWindowView {
                                         div()
                                             .text_size(px(detail_text_px))
                                             .text_color(rgb(APP_UI_THEME.foundation.text.primary))
-                                            .child(app_shared_text(AppTextKey::ValueNone)),
+                                            .child(
+                                                detail_account
+                                                    .map(account_display_name)
+                                                    .unwrap_or_else(|| {
+                                                        app_shared_text(AppTextKey::ValueNone)
+                                                            .to_string()
+                                                    }),
+                                            ),
                                     ))
                                     .child(app_detail_row(
                                         app_shared_label_text(
@@ -6868,7 +6914,10 @@ impl SettingsWindowView {
                                             .gap(px(APP_UI_THEME
                                                 .shells
                                                 .settings_account_status_gap_px))
-                                            .child(status_indicator(account_status_color))
+                                            .child(status_indicator(settings_account_status_color(
+                                                detail_account,
+                                                selected_account_id,
+                                            )))
                                             .child(
                                                 div()
                                                     .text_size(px(detail_text_px))
@@ -6877,7 +6926,10 @@ impl SettingsWindowView {
                                                         .text
                                                         .primary))
                                                     .child(app_shared_text(
-                                                        AppTextKey::SettingsAccountStatusLoggedOut,
+                                                        settings_account_status_key(
+                                                            detail_account,
+                                                            selected_account_id,
+                                                        ),
                                                     )),
                                             ),
                                     ))
@@ -6888,7 +6940,13 @@ impl SettingsWindowView {
                                         div()
                                             .text_size(px(detail_text_px))
                                             .text_color(rgb(APP_UI_THEME.foundation.text.primary))
-                                            .child(app_shared_text(AppTextKey::ValueNone)),
+                                            .child(app_shared_text(
+                                                detail_account
+                                                    .map(|account| {
+                                                        account_custody_key(account.custody)
+                                                    })
+                                                    .unwrap_or(AppTextKey::ValueNone),
+                                            )),
                                     ))
                                     .child(app_detail_row(
                                         app_shared_label_text(
@@ -6897,7 +6955,10 @@ impl SettingsWindowView {
                                         div()
                                             .text_size(px(detail_text_px))
                                             .text_color(rgb(APP_UI_THEME.foundation.text.primary))
-                                            .child(app_shared_text(AppTextKey::ValueNone)),
+                                            .child(app_shared_text(settings_account_surface_key(
+                                                projection,
+                                                detail_account,
+                                            ))),
                                     ))
                                     .child(app_detail_row(
                                         app_shared_label_text(
@@ -6907,12 +6968,17 @@ impl SettingsWindowView {
                                             .text_size(px(detail_text_px))
                                             .text_color(rgb(APP_UI_THEME.foundation.text.primary))
                                             .child(app_shared_text(
-                                                AppTextKey::SettingsAccountActivationInactive,
+                                                settings_account_activation_key(
+                                                    projection,
+                                                    detail_account,
+                                                ),
                                             )),
                                     ))
-                                    .child(home_body_text(app_shared_text(
-                                        AppTextKey::SettingsAccountNoSelectionBody,
-                                    )))
+                                    .when(detail_account.is_none(), |this| {
+                                        this.child(home_body_text(app_shared_text(
+                                            AppTextKey::SettingsAccountNoSelectionBody,
+                                        )))
+                                    })
                                     .child(
                                         div()
                                             .w_full()
@@ -6922,18 +6988,20 @@ impl SettingsWindowView {
                                             .gap(px(APP_UI_THEME
                                                 .shells
                                                 .settings_account_action_row_gap_px))
-                                            .child(div().child(action_button_disabled(
+                                            .child(div().child(action_button_primary(
                                                 "account-log-out",
                                                 app_shared_text(
                                                     AppTextKey::SettingsAccountLogOutAction,
                                                 ),
+                                                cx.listener(|_, _, _, _| {}),
                                                 cx,
                                             )))
-                                            .child(div().child(action_button_disabled(
+                                            .child(div().child(action_button_primary(
                                                 "account-open-workspace",
                                                 app_shared_text(
                                                     AppTextKey::SettingsAccountOpenWorkspaceAction,
                                                 ),
+                                                cx.listener(|_, _, _, _| {}),
                                                 cx,
                                             ))),
                                     ),
@@ -7506,6 +7574,122 @@ impl SettingsWindowView {
         }
 
         focus_state.update(cx, |last_target, _| *last_target = desired_target);
+    }
+}
+
+fn settings_account_detail_account(
+    projection: &SettingsAccountProjection,
+) -> Option<&AccountSummary> {
+    projection
+        .selected_account
+        .as_ref()
+        .map(|selected_account| &selected_account.account)
+        .or_else(|| projection.roster.first())
+}
+
+fn account_display_name(account: &AccountSummary) -> String {
+    account
+        .label
+        .as_deref()
+        .map(str::trim)
+        .filter(|label| !label.is_empty())
+        .map(ToOwned::to_owned)
+        .unwrap_or_else(|| abbreviated_npub(account.npub.as_str()))
+}
+
+fn abbreviated_npub(npub: &str) -> String {
+    let trimmed = npub.trim();
+    if trimmed.chars().count() <= 20 {
+        return trimmed.to_owned();
+    }
+
+    let prefix = trimmed.chars().take(10).collect::<String>();
+    let suffix = trimmed
+        .chars()
+        .rev()
+        .take(6)
+        .collect::<Vec<_>>()
+        .into_iter()
+        .rev()
+        .collect::<String>();
+    format!("{prefix}...{suffix}")
+}
+
+fn settings_account_status_color(
+    account: Option<&AccountSummary>,
+    selected_account_id: Option<&str>,
+) -> u32 {
+    if settings_account_is_selected(account, selected_account_id) {
+        APP_UI_THEME.components.app_status_indicator.online
+    } else {
+        APP_UI_THEME.components.app_status_indicator.offline
+    }
+}
+
+fn settings_account_status_key(
+    account: Option<&AccountSummary>,
+    selected_account_id: Option<&str>,
+) -> AppTextKey {
+    if settings_account_is_selected(account, selected_account_id) {
+        AppTextKey::SettingsAccountStatusLoggedIn
+    } else {
+        AppTextKey::SettingsAccountStatusLoggedOut
+    }
+}
+
+fn settings_account_is_selected(
+    account: Option<&AccountSummary>,
+    selected_account_id: Option<&str>,
+) -> bool {
+    account
+        .zip(selected_account_id)
+        .is_some_and(|(account, selected_account_id)| account.account_id == selected_account_id)
+}
+
+fn account_custody_key(custody: AccountCustody) -> AppTextKey {
+    match custody {
+        AccountCustody::LocalManaged => AppTextKey::SettingsAccountCustodyLocalManaged,
+        AccountCustody::BrowserSigner => AppTextKey::SettingsAccountCustodyBrowserSigner,
+        AccountCustody::RemoteSigner => AppTextKey::SettingsAccountCustodyRemoteSigner,
+    }
+}
+
+fn settings_account_surface_key(
+    projection: &SettingsAccountProjection,
+    account: Option<&AccountSummary>,
+) -> AppTextKey {
+    projection
+        .selected_account
+        .as_ref()
+        .filter(|selected_account| {
+            account.is_some_and(|account| account.account_id == selected_account.account.account_id)
+        })
+        .map(|selected_account| active_surface_settings_key(selected_account.active_surface()))
+        .unwrap_or(AppTextKey::ValueNone)
+}
+
+fn active_surface_settings_key(surface: ActiveSurface) -> AppTextKey {
+    match surface {
+        ActiveSurface::Personal => AppTextKey::SettingsAccountSurfacePersonal,
+        ActiveSurface::Farmer => AppTextKey::SettingsAccountSurfaceFarmer,
+    }
+}
+
+fn settings_account_activation_key(
+    projection: &SettingsAccountProjection,
+    account: Option<&AccountSummary>,
+) -> AppTextKey {
+    if projection
+        .selected_account
+        .as_ref()
+        .filter(|selected_account| {
+            account.is_some_and(|account| account.account_id == selected_account.account.account_id)
+        })
+        .is_some_and(|selected_account| selected_account.farmer_activation.is_active())
+    {
+        AppTextKey::SettingsAccountActivationActive
+    } else {
+        AppTextKey::SettingsAccountActivationInactive
     }
 }
 
@@ -13818,12 +14002,13 @@ mod tests {
         PackDayPrintStatusPresentation, ReminderActionTarget, SETTINGS_FARM_PANEL_SECTIONS,
         SETTINGS_NAVIGATION_ORDER, SETTINGS_OPERATIONS_PANEL_SECTIONS, SettingsAutoFocusTarget,
         SettingsInventorySectionSpec, SettingsPanelViewKey, StartupHomeSurface,
-        StartupSignerConnectState, about_conflict_action_specs, about_conflict_aggregate_text,
-        about_conflict_detail_rows, about_conflict_review_body_key, about_manual_refresh_enabled,
-        about_runtime_rows, about_status_rows, app_text,
-        buyer_order_coordination_notice_forces_redraw, buyer_order_detail_focus_after_open,
-        buyer_orders_retry_action_visible, buyer_receipt_issue_focus_after_submit,
-        buyer_receipt_status_key, farm_setup_onboarding_card_spec, farmer_home_farm_state,
+        StartupSignerConnectState, abbreviated_npub, about_conflict_action_specs,
+        about_conflict_aggregate_text, about_conflict_detail_rows, about_conflict_review_body_key,
+        about_manual_refresh_enabled, about_runtime_rows, about_status_rows, account_display_name,
+        app_text, buyer_order_coordination_notice_forces_redraw,
+        buyer_order_detail_focus_after_open, buyer_orders_retry_action_visible,
+        buyer_receipt_issue_focus_after_submit, buyer_receipt_status_key,
+        farm_setup_onboarding_card_spec, farmer_home_farm_state,
         farmer_order_detail_focus_after_open, farmer_pack_day_available, home_auto_focus_target,
         home_content_scroll_id, home_saved_farm, home_sidebar_navigation_sections, home_stage,
         home_window_launch_size_px, home_window_minimum_size_px,
@@ -13866,9 +14051,9 @@ mod tests {
     };
     use radroots_studio_app_view::SettingsAccountProjection;
     use radroots_studio_app_view::{
-        ActiveSurface, AppStartupGate, BuyerOrderDetailProjection, BuyerOrderStatus,
-        BuyerOrdersListRow, FarmId, FarmOrderMethod, FarmReadiness, FarmSetupDraft,
-        FarmSetupProjection, FarmSummary, FarmerSection, FulfillmentWindowId,
+        AccountCustody, AccountSummary, ActiveSurface, AppStartupGate, BuyerOrderDetailProjection,
+        BuyerOrderStatus, BuyerOrdersListRow, FarmId, FarmOrderMethod, FarmReadiness,
+        FarmSetupDraft, FarmSetupProjection, FarmSummary, FarmerSection, FulfillmentWindowId,
         FulfillmentWindowSummary, LoggedOutStartupPhase, LoggedOutStartupProjection,
         OrderDetailProjection, OrderFulfillmentAction, OrderId, OrderPrimaryAction, OrderStatus,
         OrdersListRow, PackDayBatchPrintArtifact, PackDayBatchPrintFailureKind,
@@ -14210,6 +14395,31 @@ mod tests {
                 SettingsPanelViewKey::Settings,
                 SettingsPanelViewKey::About,
             ]
+        );
+    }
+
+    #[test]
+    fn settings_account_display_uses_label_before_npub_fallback() {
+        let labeled = AccountSummary {
+            account_id: "account_1".to_owned(),
+            npub: "npub1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq".to_owned(),
+            label: Some("  Farm Profile  ".to_owned()),
+            custody: AccountCustody::LocalManaged,
+        };
+        let unlabeled = AccountSummary {
+            label: None,
+            ..labeled.clone()
+        };
+
+        assert_eq!(account_display_name(&labeled), "Farm Profile");
+        assert_eq!(account_display_name(&unlabeled), "npub1qqqqq...qqqqqq");
+    }
+
+    #[test]
+    fn settings_account_npub_fallback_stays_compact() {
+        assert_eq!(
+            abbreviated_npub("npub1sxczrq2dp4jtehcm8mtemj975u5ytf2d7mc6dpuuq3rzkjzr76ls5lkheq"),
+            "npub1sxczr...5lkheq"
         );
     }
 
