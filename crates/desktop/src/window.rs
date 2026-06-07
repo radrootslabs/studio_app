@@ -192,6 +192,13 @@ fn farmer_order_detail_focus_after_open(
     }
 }
 
+fn buyer_receipt_issue_focus_after_submit(
+    runtime_changed: bool,
+    order_id: OrderId,
+) -> Option<HomeFocusedView> {
+    runtime_changed.then_some(HomeFocusedView::BuyerOrderDetail(order_id))
+}
+
 pub fn home_window_options(cx: &mut App) -> WindowOptions {
     let (launch_width_px, launch_height_px) = home_window_launch_size_px();
     let (minimum_width_px, minimum_height_px) = home_window_minimum_size_px();
@@ -2417,11 +2424,15 @@ impl HomeView {
         };
 
         match self.runtime.publish_buyer_order_receipt(order_id, issue) {
-            Ok(true) => {
-                self.buyer_receipt_issue_form = None;
-                cx.notify();
+            Ok(runtime_changed) => {
+                if let Some(focused_view) =
+                    buyer_receipt_issue_focus_after_submit(runtime_changed, order_id)
+                {
+                    self.buyer_receipt_issue_form = None;
+                    self.focused_view = Some(focused_view);
+                    cx.notify();
+                }
             }
-            Ok(false) => {}
             Err(runtime_error) => {
                 error!(
                     target: "personal_orders",
@@ -13795,8 +13806,8 @@ mod tests {
         about_conflict_detail_rows, about_conflict_review_body_key, about_manual_refresh_enabled,
         about_runtime_rows, about_status_rows, app_text,
         buyer_order_coordination_notice_forces_redraw, buyer_order_detail_focus_after_open,
-        buyer_orders_retry_action_visible, buyer_receipt_status_key,
-        farm_setup_onboarding_card_spec, farmer_home_farm_state,
+        buyer_orders_retry_action_visible, buyer_receipt_issue_focus_after_submit,
+        buyer_receipt_status_key, farm_setup_onboarding_card_spec, farmer_home_farm_state,
         farmer_order_detail_focus_after_open, farmer_pack_day_available, home_auto_focus_target,
         home_content_scroll_id, home_saved_farm, home_sidebar_navigation_sections, home_stage,
         home_window_launch_size_px, home_window_minimum_size_px,
@@ -14067,6 +14078,20 @@ mod tests {
         );
         assert_eq!(
             farmer_order_detail_focus_after_open(false, &runtime, OrderId::new()),
+            None
+        );
+    }
+
+    #[test]
+    fn buyer_receipt_issue_submit_returns_to_order_detail() {
+        let order_id = OrderId::new();
+
+        assert_eq!(
+            buyer_receipt_issue_focus_after_submit(true, order_id),
+            Some(HomeFocusedView::BuyerOrderDetail(order_id))
+        );
+        assert_eq!(
+            buyer_receipt_issue_focus_after_submit(false, order_id),
             None
         );
     }
