@@ -286,6 +286,18 @@ fn account_profile_input_state(
     cx.new(|cx| InputState::new(window, cx).default_value(app_text(value_key)))
 }
 
+fn account_profile_autogrow_input_state(
+    value_key: AppTextKey,
+    window: &mut Window,
+    cx: &mut Context<HomeView>,
+) -> Entity<InputState> {
+    cx.new(|cx| {
+        InputState::new(window, cx)
+            .auto_grow(3, 6)
+            .default_value(app_text(value_key))
+    })
+}
+
 fn account_profile_select_state(
     value_keys: &[AppTextKey],
     window: &mut Window,
@@ -357,7 +369,7 @@ impl AccountFarmProfileFormState {
                 window,
                 cx,
             ),
-            about_farm_input: account_profile_input_state(
+            about_farm_input: account_profile_autogrow_input_state(
                 AppTextKey::AccountFarmDetailsAboutFarmValue,
                 window,
                 cx,
@@ -9150,8 +9162,8 @@ fn account_profile_details_card(
 fn account_profile_photo_actions(cx: &mut Context<HomeView>) -> impl IntoElement {
     app_stack_v(10.0)
         .flex_none()
-        .flex_basis(relative(0.4))
-        .min_w(px(176.0))
+        .flex_basis(relative(0.24))
+        .min_w(px(136.0))
         .child(
             div()
                 .w_full()
@@ -9207,17 +9219,14 @@ fn account_profile_input_field(
     label_key: AppTextKey,
     input: &Entity<InputState>,
 ) -> impl IntoElement {
-    account_profile_labeled_control(label_key, app_text_input(input, false).w_full())
+    account_profile_labeled_control(label_key, account_form_text_input(input))
 }
 
 fn account_profile_select_field(
     label_key: AppTextKey,
     select: &Entity<AccountProfileSelectState>,
 ) -> impl IntoElement {
-    account_profile_labeled_control(
-        label_key,
-        Select::new(select).with_size(Size::Medium).w_full(),
-    )
+    account_profile_labeled_control(label_key, account_profile_select_input(select))
 }
 
 fn account_profile_labeled_control(
@@ -9235,6 +9244,32 @@ fn account_profile_labeled_control(
                 .child(app_shared_text(label_key)),
         )
         .child(control)
+}
+
+fn account_form_text_input(input: &Entity<InputState>) -> impl IntoElement {
+    app_text_input(input, false)
+        .with_size(Size::Small)
+        .text_size(px(APP_UI_THEME.foundation.typography.settings_row_text_px))
+        .font_weight(gpui::FontWeight::NORMAL)
+        .w_full()
+}
+
+fn account_profile_select_input(select: &Entity<AccountProfileSelectState>) -> impl IntoElement {
+    Select::new(select)
+        .with_size(Size::Small)
+        .text_size(px(APP_UI_THEME.foundation.typography.settings_row_text_px))
+        .font_weight(gpui::FontWeight::NORMAL)
+        .w_full()
+}
+
+fn account_farm_profile_select_input(
+    select: &Entity<AccountFarmProfileSelectState>,
+) -> impl IntoElement {
+    Select::new(select)
+        .with_size(Size::Small)
+        .text_size(px(APP_UI_THEME.foundation.typography.settings_row_text_px))
+        .font_weight(gpui::FontWeight::NORMAL)
+        .w_full()
 }
 
 fn account_farm_profile_panel(
@@ -9386,17 +9421,14 @@ fn account_farm_profile_select_field(
     label_key: AppTextKey,
     select: &Entity<AccountFarmProfileSelectState>,
 ) -> impl IntoElement {
-    account_profile_labeled_control(
-        label_key,
-        Select::new(select).with_size(Size::Medium).w_full(),
-    )
+    account_profile_labeled_control(label_key, account_farm_profile_select_input(select))
 }
 
 fn account_farm_profile_text_area_field(
     label_key: AppTextKey,
     input: &Entity<InputState>,
 ) -> impl IntoElement {
-    account_profile_labeled_control(label_key, app_text_input(input, false).w_full().h(px(76.0)))
+    account_profile_labeled_control(label_key, account_form_text_input(input))
 }
 
 fn account_farm_profile_completeness_card() -> impl IntoElement {
