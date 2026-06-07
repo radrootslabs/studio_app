@@ -8,6 +8,7 @@ use gpui_component::{
     button::{Button, ButtonCustomVariant, ButtonRounded, ButtonVariants, DropdownButton},
     input::{Input, InputState},
     menu::PopupMenu,
+    tab::{Tab, TabBar},
 };
 use std::rc::Rc;
 
@@ -81,6 +82,18 @@ impl AppFormFieldSpec {
         Self {
             label: label.into(),
             note: note.map(Into::into),
+        }
+    }
+}
+
+pub struct AppUnderlineTabSpec {
+    pub label: SharedString,
+}
+
+impl AppUnderlineTabSpec {
+    pub fn new(label: impl Into<SharedString>) -> Self {
+        Self {
+            label: label.into(),
         }
     }
 }
@@ -281,6 +294,21 @@ pub fn app_divider() -> impl IntoElement {
         .w_full()
         .h(px(APP_UI_THEME.foundation.borders.divider_thickness_px))
         .bg(rgb(APP_UI_THEME.foundation.surfaces.divider))
+}
+
+pub fn app_underline_tabs(
+    id: &'static str,
+    tabs: impl IntoIterator<Item = AppUnderlineTabSpec>,
+    selected_index: usize,
+    on_click: impl Fn(&usize, &mut Window, &mut App) + 'static,
+) -> impl IntoElement {
+    TabBar::new(id)
+        .underline()
+        .with_size(Size::Medium)
+        .w_full()
+        .selected_index(selected_index)
+        .children(tabs.into_iter().map(|tab| Tab::new().label(tab.label)))
+        .on_click(on_click)
 }
 
 pub fn app_heading_view(content: impl Into<SharedString>) -> impl IntoElement {

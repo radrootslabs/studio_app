@@ -725,14 +725,17 @@ impl AppShellProjection {
         self.active_surface = active_surface;
         match active_surface {
             ActiveSurface::Personal => {
-                if matches!(self.selected_section, ShellSection::Farmer(_)) {
+                if matches!(
+                    self.selected_section,
+                    ShellSection::Account | ShellSection::Farmer(_)
+                ) {
                     self.selected_section = ShellSection::default_for_surface(active_surface);
                 }
             }
             ActiveSurface::Farmer => {
                 if matches!(
                     self.selected_section,
-                    ShellSection::Home | ShellSection::Personal(_)
+                    ShellSection::Home | ShellSection::Account | ShellSection::Personal(_)
                 ) {
                     self.selected_section = ShellSection::default_for_surface(active_surface);
                 }

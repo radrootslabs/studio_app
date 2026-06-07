@@ -156,6 +156,15 @@ mod tests {
 
     #[test]
     fn english_auth_copy_matches_the_local_account_workflow_contract() {
+        assert_eq!(app_text(AppTextKey::AccountTitle), "Account");
+        assert_eq!(app_text(AppTextKey::AccountTabProfile), "Profile");
+        assert_eq!(app_text(AppTextKey::AccountTabFarmDetails), "Farm details");
+        assert_eq!(app_text(AppTextKey::AccountTabPreferences), "Preferences");
+        assert_eq!(app_text(AppTextKey::AccountTabSecurity), "Security");
+        assert_eq!(
+            app_text(AppTextKey::AccountNotImplemented),
+            "Not implemented"
+        );
         assert_eq!(
             app_text(AppTextKey::HomeTodayEmptySetupBody),
             "Add a local account to start using Radroots on this device."

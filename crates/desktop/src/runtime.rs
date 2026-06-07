@@ -634,6 +634,16 @@ impl DesktopAppRuntime {
         section_changed || editor_changed
     }
 
+    pub fn select_account(&self) -> bool {
+        let mut state = self.lock_state_mut();
+        let section_changed = state
+            .state_store
+            .apply_in_memory(AppStateCommand::SelectSection(ShellSection::Account));
+        let editor_changed = state.close_product_editor();
+
+        section_changed || editor_changed
+    }
+
     pub fn select_personal_section(
         &self,
         section: PersonalSection,
@@ -6328,7 +6338,10 @@ impl DesktopAppRuntimeState {
                 !self.has_saved_farm() || !self.has_pack_day_context()
             }
             ShellSection::Farmer(FarmerSection::Farm) => true,
-            ShellSection::Home | ShellSection::Personal(_) | ShellSection::Settings(_) => false,
+            ShellSection::Home
+            | ShellSection::Account
+            | ShellSection::Personal(_)
+            | ShellSection::Settings(_) => false,
         };
 
         should_reset_to_today

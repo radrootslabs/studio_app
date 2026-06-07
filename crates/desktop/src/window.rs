@@ -25,7 +25,7 @@ use radroots_studio_app_sync::{
 };
 use radroots_studio_app_ui::{
     APP_UI_THEME, AppCheckboxFieldSpec, AppFormFieldSpec,
-    AppSegmentButtonIconSpec as IconSegmentButtonSpec, LabelValueRow,
+    AppSegmentButtonIconSpec as IconSegmentButtonSpec, AppUnderlineTabSpec, LabelValueRow,
     SettingsPreferencesGeneralRowState, app_button_account_selector_row as account_selector_row,
     app_button_card, app_button_choice as choice_button,
     app_button_compact as action_button_compact, app_button_list_row as list_row_button,
@@ -42,8 +42,8 @@ use radroots_studio_app_ui::{
     app_surface_card_section as home_card, app_surface_panel, app_surface_sidebar,
     app_surface_window as app_window_shell, app_text_badge as settings_badge_text,
     app_text_body_subtle as home_body_text, app_text_label,
-    app_text_label as home_farm_setup_field_label, app_text_value, label_value_list,
-    runtime_metadata_rows, settings_preferences_general_rows, utility_title_row,
+    app_text_label as home_farm_setup_field_label, app_text_value, app_underline_tabs,
+    label_value_list, runtime_metadata_rows, settings_preferences_general_rows, utility_title_row,
 };
 pub use radroots_studio_app_view::SettingsSection as SettingsPanelViewKey;
 use radroots_studio_app_view::{
@@ -121,6 +121,7 @@ pub enum PrimaryWindowTarget {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum HomeStage {
     Setup,
+    AccountWorkspace,
     BuyerWorkspace,
     FarmerWorkspace,
 }
@@ -133,6 +134,11 @@ pub fn primary_window_target(_: &DesktopAppRuntimeSummary) -> PrimaryWindowTarge
 pub fn home_stage(summary: &DesktopAppRuntimeSummary) -> HomeStage {
     if summary.startup_issue.is_some() || summary.startup_gate == AppStartupGate::Blocked {
         HomeStage::Setup
+    } else if matches!(
+        summary.shell_projection.selected_section,
+        ShellSection::Account
+    ) {
+        HomeStage::AccountWorkspace
     } else if summary.startup_gate == AppStartupGate::Farmer {
         HomeStage::FarmerWorkspace
     } else if matches!(
@@ -155,6 +161,51 @@ enum HomeFocusedView {
     BuyerOrderReview,
     BuyerOrderDetail(OrderId),
     BuyerReceiptIssue(OrderId),
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+enum AccountTab {
+    #[default]
+    Profile,
+    FarmDetails,
+    Preferences,
+    Security,
+}
+
+impl AccountTab {
+    const ORDERED: [Self; 4] = [
+        Self::Profile,
+        Self::FarmDetails,
+        Self::Preferences,
+        Self::Security,
+    ];
+
+    const fn text_key(self) -> AppTextKey {
+        match self {
+            Self::Profile => AppTextKey::AccountTabProfile,
+            Self::FarmDetails => AppTextKey::AccountTabFarmDetails,
+            Self::Preferences => AppTextKey::AccountTabPreferences,
+            Self::Security => AppTextKey::AccountTabSecurity,
+        }
+    }
+
+    const fn panel_text_key(self) -> AppTextKey {
+        match self {
+            Self::Profile | Self::FarmDetails => self.text_key(),
+            Self::Preferences | Self::Security => AppTextKey::AccountNotImplemented,
+        }
+    }
+
+    fn selected_index(self) -> usize {
+        Self::ORDERED
+            .iter()
+            .position(|tab| *tab == self)
+            .unwrap_or(0)
+    }
+
+    fn from_index(index: usize) -> Self {
+        Self::ORDERED.get(index).copied().unwrap_or_default()
+    }
 }
 
 fn buyer_order_detail_focus_after_open(
@@ -283,6 +334,7 @@ pub struct HomeView {
     products_stock_editor: Option<ProductsStockEditorState>,
     product_editor_form: Option<ProductEditorFormState>,
     focused_view: Option<HomeFocusedView>,
+    selected_account_tab: AccountTab,
     relay_client: Option<RadrootsNostrClient>,
     buyer_workspace_notice: Option<String>,
 }
@@ -402,6 +454,7 @@ impl HomeView {
             products_stock_editor: None,
             product_editor_form: None,
             focused_view: None,
+            selected_account_tab: AccountTab::default(),
             relay_client: None,
             buyer_workspace_notice: None,
         }
@@ -1349,9 +1402,17 @@ impl HomeView {
     }
 
     fn open_account_entry(&mut self, cx: &mut Context<Self>) {
-        if self.runtime.select_home() {
+        if self.runtime.select_account() {
             self.products_stock_editor = None;
             self.product_editor_form = None;
+            self.clear_focused_view();
+            cx.notify();
+        }
+    }
+
+    fn select_account_tab(&mut self, tab: AccountTab, cx: &mut Context<Self>) {
+        if self.selected_account_tab != tab {
+            self.selected_account_tab = tab;
             cx.notify();
         }
     }
@@ -4867,9 +4928,98 @@ impl Render for HomeView {
                     cx,
                 )
                 .into_any_element(),
+            HomeStage::AccountWorkspace => self.render_account_workspace(&runtime_summary, cx),
             HomeStage::BuyerWorkspace => self.render_buyer_workspace(&runtime_summary, cx),
             HomeStage::FarmerWorkspace => self.render_farmer_workspace(&runtime_summary, cx),
         }
+    }
+}
+
+impl HomeView {
+    fn render_account_workspace(
+        &mut self,
+        runtime: &DesktopAppRuntimeSummary,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let sidebar = if runtime.shell_projection.active_surface == ActiveSurface::Farmer {
+            home_sidebar(
+                runtime,
+                cx.listener(|this, _, _, cx| this.select_farmer_section(FarmerSection::Today, cx)),
+                cx.listener(|this, _, _, cx| {
+                    this.select_farmer_section(FarmerSection::Products, cx)
+                }),
+                cx.listener(|this, _, _, cx| this.open_orders(cx)),
+                cx.listener(|this, _, _, cx| this.open_pack_day(None, cx)),
+                cx,
+            )
+            .into_any_element()
+        } else {
+            buyer_sidebar(
+                runtime,
+                cx.listener(|this, _, _, cx| {
+                    this.select_personal_section(PersonalSection::Browse, cx)
+                }),
+                cx.listener(|this, _, _, cx| {
+                    this.select_personal_section(PersonalSection::Search, cx)
+                }),
+                cx.listener(|this, _, _, cx| {
+                    this.select_personal_section(PersonalSection::Cart, cx)
+                }),
+                cx.listener(|this, _, _, cx| {
+                    this.select_personal_section(PersonalSection::Orders, cx)
+                }),
+                cx,
+            )
+            .into_any_element()
+        };
+
+        app_split_shell(
+            sidebar,
+            app_stack_v(APP_UI_THEME.shells.home_stack_gap_px)
+                .size_full()
+                .child(shared_shell_header(
+                    runtime,
+                    cx.listener(|this, _, _, cx| this.switch_to_marketplace(cx)),
+                    cx.listener(|this, _, _, cx| this.switch_to_farmer_workspace(cx)),
+                    cx.listener(|this, _, _, cx| this.open_account_entry(cx)),
+                    cx,
+                ))
+                .child(app_scroll_panel(
+                    "account-scroll",
+                    0.0,
+                    None,
+                    self.render_account_content(cx),
+                ))
+                .into_any_element(),
+        )
+        .into_any_element()
+    }
+
+    fn render_account_content(&mut self, cx: &mut Context<Self>) -> AnyElement {
+        let selected_tab = self.selected_account_tab;
+        let tabs = AccountTab::ORDERED
+            .into_iter()
+            .map(|tab| AppUnderlineTabSpec::new(app_shared_text(tab.text_key())));
+
+        app_stack_v(APP_UI_THEME.shells.home_stack_gap_px)
+            .w_full()
+            .max_w(px(APP_UI_THEME.shells.home_card_max_width_px))
+            .mx_auto()
+            .child(app_text_value(app_shared_text(AppTextKey::AccountTitle)))
+            .child(app_surface_card(
+                app_stack_v(APP_UI_THEME.shells.home_stack_gap_px)
+                    .w_full()
+                    .child(app_underline_tabs(
+                        "account-tabs",
+                        tabs,
+                        selected_tab.selected_index(),
+                        cx.listener(|this, index: &usize, _, cx| {
+                            this.select_account_tab(AccountTab::from_index(*index), cx)
+                        }),
+                    ))
+                    .child(account_placeholder_panel(selected_tab.panel_text_key())),
+            ))
+            .into_any_element()
     }
 }
 
@@ -8120,6 +8270,7 @@ fn home_auto_focus_target(
 ) -> Option<HomeAutoFocusTarget> {
     match home_stage(runtime) {
         HomeStage::Setup => startup_auto_focus_target(runtime, state),
+        HomeStage::AccountWorkspace => None,
         HomeStage::BuyerWorkspace => buyer_auto_focus_target(runtime, state),
         HomeStage::FarmerWorkspace => farmer_auto_focus_target(runtime, state),
     }
@@ -8629,6 +8780,18 @@ fn buyer_workspace_title_block(title_key: AppTextKey, body_key: AppTextKey) -> i
                 .text_color(rgb(APP_UI_THEME.foundation.text.secondary))
                 .child(app_shared_text(body_key)),
         )
+}
+
+fn account_placeholder_panel(text_key: AppTextKey) -> impl IntoElement {
+    div()
+        .w_full()
+        .min_h(px(320.0))
+        .flex()
+        .items_center()
+        .justify_center()
+        .text_size(px(APP_UI_THEME.foundation.typography.body_text_px))
+        .text_color(rgb(APP_UI_THEME.foundation.text.secondary))
+        .child(app_shared_text(text_key))
 }
 
 fn buyer_listings_feed(
@@ -10682,18 +10845,20 @@ fn home_sidebar_navigation_sections(
 fn selected_farmer_section(runtime: &DesktopAppRuntimeSummary) -> FarmerSection {
     match runtime.shell_projection.selected_section {
         ShellSection::Farmer(section) => section,
-        ShellSection::Home | ShellSection::Personal(_) | ShellSection::Settings(_) => {
-            FarmerSection::Today
-        }
+        ShellSection::Home
+        | ShellSection::Account
+        | ShellSection::Personal(_)
+        | ShellSection::Settings(_) => FarmerSection::Today,
     }
 }
 
 fn selected_personal_section(runtime: &DesktopAppRuntimeSummary) -> PersonalSection {
     match runtime.shell_projection.selected_section {
         ShellSection::Personal(section) => section,
-        ShellSection::Home | ShellSection::Farmer(_) | ShellSection::Settings(_) => {
-            PersonalSection::Browse
-        }
+        ShellSection::Home
+        | ShellSection::Account
+        | ShellSection::Farmer(_)
+        | ShellSection::Settings(_) => PersonalSection::Browse,
     }
 }
 

@@ -82,6 +82,7 @@ impl PersonalSection {
 pub enum ShellSection {
     #[default]
     Home,
+    Account,
     Personal(PersonalSection),
     Farmer(FarmerSection),
     Settings(SettingsSection),
@@ -90,7 +91,7 @@ pub enum ShellSection {
 impl ShellSection {
     pub const fn surface(self) -> Option<ActiveSurface> {
         match self {
-            Self::Home | Self::Settings(_) => None,
+            Self::Home | Self::Account | Self::Settings(_) => None,
             Self::Personal(_) => Some(ActiveSurface::Personal),
             Self::Farmer(_) => Some(ActiveSurface::Farmer),
         }
@@ -106,6 +107,7 @@ impl ShellSection {
     pub const fn storage_key(self) -> &'static str {
         match self {
             Self::Home => "home",
+            Self::Account => "account",
             Self::Personal(section) => section.storage_key(),
             Self::Farmer(section) => section.storage_key(),
             Self::Settings(section) => section.storage_key(),
@@ -130,6 +132,7 @@ impl FromStr for ShellSection {
     fn from_str(value: &str) -> Result<Self, Self::Err> {
         match value {
             "home" => Ok(Self::Home),
+            "account" => Ok(Self::Account),
             "personal.browse" => Ok(Self::Personal(PersonalSection::Browse)),
             "personal.search" => Ok(Self::Personal(PersonalSection::Search)),
             "personal.cart" => Ok(Self::Personal(PersonalSection::Cart)),
@@ -2513,6 +2516,7 @@ mod tests {
             ShellSection::Personal(PersonalSection::Search),
             ShellSection::Personal(PersonalSection::Cart),
             ShellSection::Personal(PersonalSection::Orders),
+            ShellSection::Account,
             ShellSection::Farmer(FarmerSection::Today),
             ShellSection::Farmer(FarmerSection::Products),
             ShellSection::Farmer(FarmerSection::Orders),
@@ -2540,6 +2544,7 @@ mod tests {
     #[test]
     fn shell_section_surface_is_explicit_for_surface_routes_only() {
         assert_eq!(ShellSection::Home.surface(), None);
+        assert_eq!(ShellSection::Account.surface(), None);
         assert_eq!(
             ShellSection::Personal(PersonalSection::Browse).surface(),
             Some(ActiveSurface::Personal)
