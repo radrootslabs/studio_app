@@ -5509,12 +5509,12 @@ impl HomeView {
                     cx.listener(|this, _, _, cx| this.open_account_entry(cx)),
                     cx,
                 ))
-                .child(app_scroll_panel(
-                    "account-scroll",
-                    0.0,
-                    None,
-                    self.render_account_content(window, cx),
-                ))
+                .child(
+                    div()
+                        .flex_1()
+                        .overflow_hidden()
+                        .child(self.render_account_content(window, cx)),
+                )
                 .into_any_element(),
         )
         .into_any_element()
@@ -5529,45 +5529,72 @@ impl HomeView {
         let tabs = AccountTab::ORDERED
             .into_iter()
             .map(|tab| AppUnderlineTabSpec::new(app_shared_text(tab.text_key())));
-        let panel = match selected_tab {
-            AccountTab::Profile => {
-                let form = self.account_profile_form(window, cx).clone();
-                account_profile_panel(&form, cx).into_any_element()
-            }
-            AccountTab::FarmDetails => {
-                self.prepare_account_farm_profile_textarea_wrap(window, cx);
-                let form = self.account_farm_profile_form(window, cx).clone();
-                account_farm_profile_panel(&form, self.account_farm_profile_textarea_wrap_ready, cx)
-                    .into_any_element()
-            }
-            AccountTab::Preferences => {
-                account_placeholder_panel(selected_tab.panel_text_key()).into_any_element()
-            }
-            AccountTab::Settings => {
-                let form = self.account_settings_form(window, cx).clone();
-                account_settings_panel(&form, cx).into_any_element()
-            }
-        };
+        let (heading_key, heading_actions, panel): (AppTextKey, Option<AnyElement>, AnyElement) =
+            match selected_tab {
+                AccountTab::Profile => {
+                    let form = self.account_profile_form(window, cx).clone();
+                    (
+                        AppTextKey::AccountProfilePersonalDetailsTitle,
+                        None,
+                        account_profile_panel(&form, cx).into_any_element(),
+                    )
+                }
+                AccountTab::FarmDetails => {
+                    self.prepare_account_farm_profile_textarea_wrap(window, cx);
+                    let form = self.account_farm_profile_form(window, cx).clone();
+                    (
+                        AppTextKey::AccountFarmDetailsTitle,
+                        Some(
+                            account_form_heading_actions(
+                                "account-farm-save-draft",
+                                "account-farm-save",
+                                form.is_dirty(cx),
+                                cx,
+                            )
+                            .into_any_element(),
+                        ),
+                        account_farm_profile_panel(
+                            &form,
+                            self.account_farm_profile_textarea_wrap_ready,
+                            cx,
+                        )
+                        .into_any_element(),
+                    )
+                }
+                AccountTab::Preferences => (
+                    AppTextKey::AccountTabPreferences,
+                    None,
+                    account_placeholder_panel(selected_tab.panel_text_key()).into_any_element(),
+                ),
+                AccountTab::Settings => {
+                    let form = self.account_settings_form(window, cx).clone();
+                    (
+                        AppTextKey::AccountSettingsTitle,
+                        Some(
+                            account_form_heading_actions(
+                                "account-settings-save-draft",
+                                "account-settings-save",
+                                form.is_dirty(cx),
+                                cx,
+                            )
+                            .into_any_element(),
+                        ),
+                        account_settings_panel(&form, cx).into_any_element(),
+                    )
+                }
+            };
 
-        app_stack_v(APP_UI_THEME.shells.home_stack_gap_px)
-            .w_full()
-            .max_w(px(APP_UI_THEME.shells.home_card_max_width_px))
-            .mx_auto()
-            .child(app_text_value(app_shared_text(AppTextKey::AccountTitle)))
-            .child(
-                app_stack_v(APP_UI_THEME.shells.home_stack_gap_px)
-                    .w_full()
-                    .child(app_underline_tabs(
-                        "account-tabs",
-                        tabs,
-                        selected_tab.selected_index(),
-                        cx.listener(|this, index: &usize, _, cx| {
-                            this.select_account_tab(AccountTab::from_index(*index), cx)
-                        }),
-                    ))
-                    .child(panel),
-            )
-            .into_any_element()
+        account_tab_frame(
+            tabs,
+            selected_tab.selected_index(),
+            cx.listener(|this, index: &usize, _, cx| {
+                this.select_account_tab(AccountTab::from_index(*index), cx)
+            }),
+            heading_key,
+            heading_actions,
+            panel,
+        )
+        .into_any_element()
     }
 
     fn account_profile_form(
@@ -5584,7 +5611,6 @@ impl HomeView {
         };
         form
     }
-
     fn account_farm_profile_form(
         &mut self,
         window: &mut Window,
@@ -9428,6 +9454,46 @@ fn buyer_workspace_title_block(title_key: AppTextKey, body_key: AppTextKey) -> i
         )
 }
 
+fn account_tab_frame(
+    tabs: impl IntoIterator<Item = AppUnderlineTabSpec>,
+    selected_index: usize,
+    on_select_tab: impl Fn(&usize, &mut Window, &mut App) + 'static,
+    heading_key: AppTextKey,
+    heading_actions: Option<AnyElement>,
+    panel: AnyElement,
+) -> AnyElement {
+    let content_max_width_px = APP_UI_THEME.shells.home_card_max_width_px;
+
+    div()
+        .size_full()
+        .overflow_hidden()
+        .flex()
+        .flex_col()
+        .gap(px(APP_UI_THEME.shells.home_stack_gap_px))
+        .child(
+            app_stack_v(APP_UI_THEME.shells.home_stack_gap_px)
+                .w_full()
+                .max_w(px(content_max_width_px))
+                .mx_auto()
+                .flex_none()
+                .child(app_text_value(app_shared_text(AppTextKey::AccountTitle)))
+                .child(app_underline_tabs(
+                    "account-tabs",
+                    tabs,
+                    selected_index,
+                    on_select_tab,
+                ))
+                .child(account_section_heading_row(heading_key, heading_actions)),
+        )
+        .child(div().flex_1().overflow_hidden().child(app_scroll_panel(
+            "account-scroll",
+            0.0,
+            Some(content_max_width_px),
+            panel,
+        )))
+        .into_any_element()
+}
+
 fn account_placeholder_panel(text_key: AppTextKey) -> impl IntoElement {
     div()
         .w_full()
@@ -9446,14 +9512,7 @@ fn account_profile_panel(
 ) -> impl IntoElement {
     app_stack_v(APP_UI_THEME.shells.home_stack_gap_px)
         .w_full()
-        .child(account_section_heading(
-            AppTextKey::AccountProfilePersonalDetailsTitle,
-        ))
         .child(account_profile_details_card(form, cx))
-}
-
-fn account_section_heading(label_key: AppTextKey) -> impl IntoElement {
-    account_section_heading_row(label_key, None::<gpui::AnyElement>)
 }
 
 fn account_section_heading_row(
@@ -9739,15 +9798,6 @@ fn account_farm_profile_panel(
 ) -> impl IntoElement {
     app_stack_v(APP_UI_THEME.shells.home_stack_gap_px)
         .w_full()
-        .child(account_section_heading_row(
-            AppTextKey::AccountFarmDetailsTitle,
-            Some(account_form_heading_actions(
-                "account-farm-save-draft",
-                "account-farm-save",
-                form.is_dirty(cx),
-                cx,
-            )),
-        ))
         .child(account_farm_profile_section_row(
             account_farm_profile_main_card(form, is_textarea_wrap_ready, cx),
             account_farm_profile_summary_card(cx),
@@ -10738,15 +10788,6 @@ fn account_settings_panel(
 ) -> impl IntoElement {
     app_stack_v(APP_UI_THEME.shells.home_stack_gap_px)
         .w_full()
-        .child(account_section_heading_row(
-            AppTextKey::AccountSettingsTitle,
-            Some(account_form_heading_actions(
-                "account-settings-save-draft",
-                "account-settings-save",
-                form.is_dirty(cx),
-                cx,
-            )),
-        ))
         .child(
             div()
                 .w_full()
