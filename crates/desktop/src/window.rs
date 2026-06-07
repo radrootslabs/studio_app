@@ -7238,7 +7238,7 @@ impl SettingsWindowView {
             return app_scroll_panel(
                 "settings-panel-scroll",
                 APP_UI_THEME.shells.settings_content_padding_px,
-                Some(560.0),
+                Some(APP_UI_THEME.shells.settings_panel_content_max_width_px),
                 app_stack_v(APP_UI_THEME.shells.home_stack_gap_px)
                     .w_full()
                     .child(home_body_text(app_shared_text(
@@ -7259,7 +7259,7 @@ impl SettingsWindowView {
             return app_scroll_panel(
                 "settings-panel-scroll",
                 APP_UI_THEME.shells.settings_content_padding_px,
-                Some(560.0),
+                Some(APP_UI_THEME.shells.settings_panel_content_max_width_px),
                 app_stack_v(APP_UI_THEME.shells.home_stack_gap_px)
                     .w_full()
                     .child(home_body_text(app_shared_text(
@@ -7372,7 +7372,7 @@ impl SettingsWindowView {
         app_scroll_panel(
             "settings-panel-scroll",
             APP_UI_THEME.shells.settings_content_padding_px,
-            Some(560.0),
+            Some(APP_UI_THEME.shells.settings_panel_content_max_width_px),
             app_stack_v(APP_UI_THEME.shells.home_stack_gap_px)
                 .w_full()
                 .child(home_body_text(app_shared_text(

@@ -657,7 +657,9 @@ const REQUIRED_WINDOW_COPY_KEYS: &[&str] = &[
     "AppTextKey::ProductsEditorFieldUnit",
     "AppTextKey::ProductsEditorFieldPrice",
     "AppTextKey::ProductsEditorFieldStock",
+    "AppTextKey::ProductsEditorFieldAvailability",
     "AppTextKey::ProductsEditorFieldStatus",
+    "AppTextKey::ProductsEditorAvailabilityEmpty",
     "AppTextKey::ProductsEditorCloseAction",
     "AppTextKey::ProductsEditorSaveAction",
     "AppTextKey::ProductsEditorSaveFailed",
@@ -942,6 +944,20 @@ fn desktop_window_source_keeps_shell_reset_copy_keyed() {
             "desktop window is missing localized copy key {copy_key}"
         );
     }
+}
+
+#[test]
+fn desktop_window_source_uses_settings_width_theme_token() {
+    let source = include_str!("window.rs");
+
+    assert!(
+        !source.contains("Some(560.0)"),
+        "settings panel width caps must use APP_UI_THEME.shells.settings_panel_content_max_width_px"
+    );
+    assert!(
+        source.contains("settings_panel_content_max_width_px"),
+        "settings panel width token is not used by window.rs"
+    );
 }
 
 #[test]
