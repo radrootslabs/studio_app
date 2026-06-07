@@ -5006,7 +5006,7 @@ impl HomeView {
             .max_w(px(APP_UI_THEME.shells.home_card_max_width_px))
             .mx_auto()
             .child(app_text_value(app_shared_text(AppTextKey::AccountTitle)))
-            .child(app_surface_card(
+            .child(
                 app_stack_v(APP_UI_THEME.shells.home_stack_gap_px)
                     .w_full()
                     .child(app_underline_tabs(
@@ -5018,7 +5018,7 @@ impl HomeView {
                         }),
                     ))
                     .child(account_placeholder_panel(selected_tab.panel_text_key())),
-            ))
+            )
             .into_any_element()
     }
 }

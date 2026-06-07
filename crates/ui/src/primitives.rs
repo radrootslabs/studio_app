@@ -302,12 +302,30 @@ pub fn app_underline_tabs(
     selected_index: usize,
     on_click: impl Fn(&usize, &mut Window, &mut App) + 'static,
 ) -> impl IntoElement {
+    let tab_text_px = APP_UI_THEME.foundation.typography.body_text_px + 1.0;
+    let active_foreground = APP_UI_THEME.components.app_button.primary_colors.background;
+    let inactive_foreground = APP_UI_THEME.foundation.text.secondary;
+
     TabBar::new(id)
         .underline()
         .with_size(Size::Medium)
         .w_full()
         .selected_index(selected_index)
-        .children(tabs.into_iter().map(|tab| Tab::new().label(tab.label)))
+        .children(tabs.into_iter().enumerate().map(|(index, tab)| {
+            let foreground = if index == selected_index {
+                active_foreground
+            } else {
+                inactive_foreground
+            };
+
+            Tab::new().child(
+                div()
+                    .text_size(px(tab_text_px))
+                    .font_weight(gpui::FontWeight::MEDIUM)
+                    .text_color(rgb(foreground))
+                    .child(tab.label),
+            )
+        }))
         .on_click(on_click)
 }
 
