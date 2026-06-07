@@ -30,7 +30,7 @@ use radroots_studio_app_sync::{
     SyncConflictKind, SyncConflictResolutionStatus, SyncConflictSeverity,
 };
 use radroots_studio_app_ui::{
-    APP_UI_THEME, AppCheckboxFieldSpec, AppFormFieldSpec,
+    APP_UI_THEME, AppCheckboxFieldSpec, AppFormFieldSpec, AppPillTabSpec,
     AppSegmentButtonIconSpec as IconSegmentButtonSpec, AppUnderlineTabSpec, LabelValueRow,
     SettingsPreferencesGeneralRowState, app_button_account_selector_row as account_selector_row,
     app_button_card, app_button_choice as choice_button,
@@ -46,7 +46,7 @@ use radroots_studio_app_ui::{
     app_checkbox_button as action_checkbox_button, app_checkbox_field, app_cluster, app_detail_row,
     app_divider as section_divider, app_focused_detail_view, app_focused_task_view, app_form_field,
     app_form_input_text, app_form_section, app_heading_section, app_heading_view,
-    app_input_text as app_text_input, app_scroll_panel,
+    app_input_text as app_text_input, app_pill_tabs, app_scroll_panel,
     app_segment_button_icon as icon_segment_button, app_shared_label_text, app_shared_text,
     app_split_shell, app_stack_h, app_stack_v, app_status_indicator as status_indicator,
     app_surface_card, app_surface_card_section as home_card, app_surface_panel,
@@ -204,6 +204,44 @@ impl AccountTab {
             Self::Profile | Self::FarmDetails => self.text_key(),
             Self::Preferences => AppTextKey::AccountNotImplemented,
             Self::Settings => AppTextKey::AccountSettingsTitle,
+        }
+    }
+
+    fn selected_index(self) -> usize {
+        Self::ORDERED
+            .iter()
+            .position(|tab| *tab == self)
+            .unwrap_or(0)
+    }
+
+    fn from_index(index: usize) -> Self {
+        Self::ORDERED.get(index).copied().unwrap_or_default()
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+enum AccountFarmDetailsTab {
+    #[default]
+    Profile,
+    Location,
+    Operations,
+    Fulfilment,
+}
+
+impl AccountFarmDetailsTab {
+    const ORDERED: [Self; 4] = [
+        Self::Profile,
+        Self::Location,
+        Self::Operations,
+        Self::Fulfilment,
+    ];
+
+    const fn text_key(self) -> AppTextKey {
+        match self {
+            Self::Profile => AppTextKey::AccountFarmDetailsTabProfile,
+            Self::Location => AppTextKey::AccountFarmDetailsTabLocation,
+            Self::Operations => AppTextKey::AccountFarmDetailsTabOperations,
+            Self::Fulfilment => AppTextKey::AccountFarmDetailsTabFulfilment,
         }
     }
 
@@ -847,6 +885,7 @@ pub struct HomeView {
     product_editor_form: Option<ProductEditorFormState>,
     focused_view: Option<HomeFocusedView>,
     selected_account_tab: AccountTab,
+    selected_account_farm_details_tab: AccountFarmDetailsTab,
     account_profile_form: Option<AccountProfileFormState>,
     account_farm_profile_form: Option<AccountFarmProfileFormState>,
     account_settings_form: Option<AccountSettingsFormState>,
@@ -972,6 +1011,7 @@ impl HomeView {
             product_editor_form: None,
             focused_view: None,
             selected_account_tab: AccountTab::default(),
+            selected_account_farm_details_tab: AccountFarmDetailsTab::default(),
             account_profile_form: None,
             account_farm_profile_form: None,
             account_settings_form: None,
@@ -1935,6 +1975,17 @@ impl HomeView {
     fn select_account_tab(&mut self, tab: AccountTab, cx: &mut Context<Self>) {
         if self.selected_account_tab != tab {
             self.selected_account_tab = tab;
+            cx.notify();
+        }
+    }
+
+    fn select_account_farm_details_tab(
+        &mut self,
+        tab: AccountFarmDetailsTab,
+        cx: &mut Context<Self>,
+    ) {
+        if self.selected_account_farm_details_tab != tab {
+            self.selected_account_farm_details_tab = tab;
             cx.notify();
         }
     }
@@ -5542,6 +5593,7 @@ impl HomeView {
                 AccountTab::FarmDetails => {
                     self.prepare_account_farm_profile_textarea_wrap(window, cx);
                     let form = self.account_farm_profile_form(window, cx).clone();
+                    let selected_farm_details_tab = self.selected_account_farm_details_tab;
                     (
                         AppTextKey::AccountFarmDetailsTitle,
                         Some(
@@ -5555,7 +5607,14 @@ impl HomeView {
                         ),
                         account_farm_profile_panel(
                             &form,
+                            selected_farm_details_tab,
                             self.account_farm_profile_textarea_wrap_ready,
+                            cx.listener(|this, index: &usize, _, cx| {
+                                this.select_account_farm_details_tab(
+                                    AccountFarmDetailsTab::from_index(*index),
+                                    cx,
+                                )
+                            }),
                             cx,
                         )
                         .into_any_element(),
@@ -9793,27 +9852,66 @@ fn account_farm_profile_select_input(
 
 fn account_farm_profile_panel(
     form: &AccountFarmProfileFormState,
+    selected_tab: AccountFarmDetailsTab,
     is_textarea_wrap_ready: bool,
+    on_select_tab: impl Fn(&usize, &mut Window, &mut App) + 'static,
     cx: &mut Context<HomeView>,
 ) -> impl IntoElement {
+    let tabs = AccountFarmDetailsTab::ORDERED
+        .into_iter()
+        .map(|tab| AppPillTabSpec::new(app_shared_text(tab.text_key())));
+
     app_stack_v(APP_UI_THEME.shells.home_stack_gap_px)
         .w_full()
-        .child(account_farm_profile_section_row(
+        .min_h(relative(1.0))
+        .child(app_pill_tabs(
+            "account-farm-details-tabs",
+            tabs,
+            selected_tab.selected_index(),
+            on_select_tab,
+        ))
+        .child(
+            div()
+                .w_full()
+                .flex_1()
+                .min_h(relative(1.0))
+                .child(account_farm_details_tab_panel(
+                    form,
+                    selected_tab,
+                    is_textarea_wrap_ready,
+                    cx,
+                )),
+        )
+}
+
+fn account_farm_details_tab_panel(
+    form: &AccountFarmProfileFormState,
+    selected_tab: AccountFarmDetailsTab,
+    is_textarea_wrap_ready: bool,
+    cx: &mut Context<HomeView>,
+) -> AnyElement {
+    match selected_tab {
+        AccountFarmDetailsTab::Profile => account_farm_profile_section_row(
             account_farm_profile_main_card(form, is_textarea_wrap_ready, cx),
             account_farm_profile_summary_card(cx),
-        ))
-        .child(account_farm_profile_section_row(
+        )
+        .into_any_element(),
+        AccountFarmDetailsTab::Location => account_farm_profile_section_row(
             account_farm_location_card(form),
             account_farm_location_preview_card(),
-        ))
-        .child(account_farm_profile_section_row(
+        )
+        .into_any_element(),
+        AccountFarmDetailsTab::Operations => account_farm_profile_section_row(
             account_farm_operating_card(form, is_textarea_wrap_ready, cx),
             account_farm_profile_preview_card(cx),
-        ))
-        .child(account_farm_profile_section_row(
+        )
+        .into_any_element(),
+        AccountFarmDetailsTab::Fulfilment => account_farm_profile_section_row(
             account_farm_fulfillment_card(form, is_textarea_wrap_ready, cx),
             account_farm_customer_experience_card(),
-        ))
+        )
+        .into_any_element(),
+    }
 }
 
 fn account_farm_profile_section_row(
@@ -9822,11 +9920,18 @@ fn account_farm_profile_section_row(
 ) -> impl IntoElement {
     div()
         .w_full()
+        .min_h(relative(1.0))
         .flex()
         .items_start()
         .gap(px(APP_UI_THEME.shells.home_stack_gap_px))
-        .child(div().flex_1().min_w_0().child(main))
-        .child(div().w(px(336.0)).min_w(px(300.0)).child(rail))
+        .child(div().flex_1().min_w_0().min_h(relative(1.0)).child(main))
+        .child(
+            div()
+                .w(px(336.0))
+                .min_w(px(300.0))
+                .min_h(relative(1.0))
+                .child(rail),
+        )
 }
 
 fn account_farm_profile_main_card(
@@ -10358,6 +10463,7 @@ fn account_farm_customer_experience_panel(
 fn account_farm_profile_card(content: impl IntoElement) -> impl IntoElement {
     div()
         .w_full()
+        .min_h(relative(1.0))
         .border_1()
         .border_color(rgb(APP_UI_THEME.foundation.surfaces.divider))
         .rounded(px(APP_UI_THEME.foundation.radii.large_px))
@@ -10365,6 +10471,7 @@ fn account_farm_profile_card(content: impl IntoElement) -> impl IntoElement {
         .child(
             div()
                 .w_full()
+                .min_h(relative(1.0))
                 .p(px(APP_UI_THEME.shells.home_card_padding_px))
                 .child(content),
         )

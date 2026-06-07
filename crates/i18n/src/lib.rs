@@ -199,6 +199,22 @@ mod tests {
             "Farm details"
         );
         assert_eq!(
+            app_text(AppTextKey::AccountFarmDetailsTabProfile),
+            "Profile"
+        );
+        assert_eq!(
+            app_text(AppTextKey::AccountFarmDetailsTabLocation),
+            "Location"
+        );
+        assert_eq!(
+            app_text(AppTextKey::AccountFarmDetailsTabOperations),
+            "Operations"
+        );
+        assert_eq!(
+            app_text(AppTextKey::AccountFarmDetailsTabFulfilment),
+            "Fulfilment"
+        );
+        assert_eq!(
             app_text(AppTextKey::AccountFarmDetailsFarmProfileTitle),
             "Farm profile"
         );

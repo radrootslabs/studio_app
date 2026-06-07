@@ -98,6 +98,18 @@ impl AppUnderlineTabSpec {
     }
 }
 
+pub struct AppPillTabSpec {
+    pub label: SharedString,
+}
+
+impl AppPillTabSpec {
+    pub fn new(label: impl Into<SharedString>) -> Self {
+        Self {
+            label: label.into(),
+        }
+    }
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct LabelValueRow {
     pub label: SharedString,
@@ -267,11 +279,16 @@ pub fn app_scroll_panel(
     let content: AnyElement = match content_max_width_px {
         Some(content_max_width_px) => div()
             .w_full()
+            .min_h(relative(1.0))
             .max_w(px(content_max_width_px))
             .mx_auto()
             .child(content)
             .into_any_element(),
-        None => div().w_full().child(content).into_any_element(),
+        None => div()
+            .w_full()
+            .min_h(relative(1.0))
+            .child(content)
+            .into_any_element(),
     };
 
     div()
@@ -281,6 +298,7 @@ pub fn app_scroll_panel(
         .child(
             div()
                 .w_full()
+                .min_h(relative(1.0))
                 .when(content_padding_px > 0.0, |this| {
                     this.p(px(content_padding_px))
                 })
@@ -357,6 +375,25 @@ pub fn app_underline_tabs(
                 .rounded(px(1.0))
                 .bg(rgb(active_foreground)),
         )
+}
+
+pub fn app_pill_tabs(
+    id: &'static str,
+    tabs: impl IntoIterator<Item = AppPillTabSpec>,
+    selected_index: usize,
+    on_click: impl Fn(&usize, &mut Window, &mut App) + 'static,
+) -> impl IntoElement {
+    TabBar::new(id)
+        .pill()
+        .with_size(Size::Small)
+        .w_full()
+        .selected_index(selected_index)
+        .children(
+            tabs.into_iter()
+                .map(|tab| Tab::new().label(tab.label))
+                .collect::<Vec<_>>(),
+        )
+        .on_click(on_click)
 }
 
 fn app_underline_tab_width_px(label: &SharedString, tab_text_px: f32) -> f32 {
