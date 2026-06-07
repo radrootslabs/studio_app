@@ -279,16 +279,11 @@ pub fn app_scroll_panel(
     let content: AnyElement = match content_max_width_px {
         Some(content_max_width_px) => div()
             .w_full()
-            .min_h(relative(1.0))
             .max_w(px(content_max_width_px))
             .mx_auto()
             .child(content)
             .into_any_element(),
-        None => div()
-            .w_full()
-            .min_h(relative(1.0))
-            .child(content)
-            .into_any_element(),
+        None => div().w_full().child(content).into_any_element(),
     };
 
     div()
@@ -298,7 +293,6 @@ pub fn app_scroll_panel(
         .child(
             div()
                 .w_full()
-                .min_h(relative(1.0))
                 .when(content_padding_px > 0.0, |this| {
                     this.p(px(content_padding_px))
                 })

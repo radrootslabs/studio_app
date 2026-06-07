@@ -9542,8 +9542,6 @@ fn account_tab_frame(
     fixed_subheader: Option<AnyElement>,
     panel: AnyElement,
 ) -> AnyElement {
-    let content_max_width_px = APP_UI_THEME.shells.home_card_max_width_px;
-
     div()
         .size_full()
         .overflow_hidden()
@@ -9553,8 +9551,6 @@ fn account_tab_frame(
         .child(
             app_stack_v(APP_UI_THEME.shells.home_stack_gap_px)
                 .w_full()
-                .max_w(px(content_max_width_px))
-                .mx_auto()
                 .flex_none()
                 .child(app_text_value(app_shared_text(AppTextKey::AccountTitle)))
                 .child(app_underline_tabs(
@@ -9566,19 +9562,12 @@ fn account_tab_frame(
                 .child(account_section_heading_row(heading_key, heading_actions)),
         )
         .when_some(fixed_subheader, |this, fixed_subheader| {
-            this.child(
-                div()
-                    .w_full()
-                    .max_w(px(content_max_width_px))
-                    .mx_auto()
-                    .flex_none()
-                    .child(fixed_subheader),
-            )
+            this.child(div().w_full().flex_none().child(fixed_subheader))
         })
         .child(div().flex_1().overflow_hidden().child(app_scroll_panel(
             "account-scroll",
             0.0,
-            Some(content_max_width_px),
+            None,
             panel,
         )))
         .into_any_element()
@@ -9807,6 +9796,7 @@ const ACCOUNT_FORM_CONTROL_HEIGHT_PX: f32 = 28.0;
 const ACCOUNT_FORM_CONTROL_RADIUS_PX: f32 = 8.0;
 const ACCOUNT_FARM_DETAILS_TAB_CARD_MIN_HEIGHT_PX: f32 = 520.0;
 const ACCOUNT_FARM_DETAILS_FIELD_MIN_WIDTH_PX: f32 = 220.0;
+const ACCOUNT_FARM_DETAILS_FULL_FIELD_MIN_WIDTH_PX: f32 = 464.0;
 const ACCOUNT_SETTINGS_DEFAULT_BLOSSOM_SERVER: &str = "http://localhost:8082";
 const ACCOUNT_SETTINGS_RELAY_LOCALHOST_8080: &str = "ws://localhost:8080";
 const ACCOUNT_SETTINGS_RELAY_LOCALHOST_8081: &str = "ws://localhost:8081";
@@ -9846,6 +9836,7 @@ fn account_form_text_area_input_with_wrapped_preview(
     div()
         .relative()
         .w_full()
+        .min_w(px(ACCOUNT_FARM_DETAILS_FULL_FIELD_MIN_WIDTH_PX))
         .child(
             app_text_input(input, false)
                 .with_size(Size::Small)
