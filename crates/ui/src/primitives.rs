@@ -305,41 +305,62 @@ pub fn app_underline_tabs(
     let tab_text_px = APP_UI_THEME.foundation.typography.body_text_px + 1.0;
     let active_foreground = APP_UI_THEME.components.app_button.primary_colors.background;
     let inactive_foreground = APP_UI_THEME.foundation.text.secondary;
+    let tab_gap_px = 16.0;
+    let tabs = tabs.into_iter().collect::<Vec<_>>();
+    let tab_widths = tabs
+        .iter()
+        .map(|tab| app_underline_tab_width_px(&tab.label, tab_text_px))
+        .collect::<Vec<_>>();
+    let selected_width_px = tab_widths.get(selected_index).copied().unwrap_or(0.0);
+    let selected_offset_px = tab_widths.iter().take(selected_index).copied().sum::<f32>()
+        + tab_gap_px * selected_index as f32;
 
-    TabBar::new(id)
-        .underline()
-        .with_size(Size::Medium)
+    div()
+        .relative()
         .w_full()
-        .children(tabs.into_iter().enumerate().map(|(index, tab)| {
-            let is_selected = index == selected_index;
-            let foreground = if is_selected {
-                active_foreground
-            } else {
-                inactive_foreground
-            };
+        .child(
+            TabBar::new(id)
+                .underline()
+                .with_size(Size::Medium)
+                .w_full()
+                .children(
+                    tabs.into_iter()
+                        .enumerate()
+                        .map(|(index, tab)| {
+                            let is_selected = index == selected_index;
+                            let foreground = if is_selected {
+                                active_foreground
+                            } else {
+                                inactive_foreground
+                            };
 
-            let tab_label = div()
-                .text_size(px(tab_text_px))
-                .font_weight(gpui::FontWeight::MEDIUM)
-                .text_color(rgb(foreground))
-                .child(tab.label);
-            let tab = Tab::new().relative().child(tab_label);
-            if is_selected {
-                tab.suffix(
-                    div()
-                        .absolute()
-                        .left_0()
-                        .right_0()
-                        .bottom_0()
-                        .h(px(2.0))
-                        .rounded(px(1.0))
-                        .bg(rgb(active_foreground)),
+                            Tab::new().child(
+                                div()
+                                    .w(px(tab_widths.get(index).copied().unwrap_or(36.0)))
+                                    .text_size(px(tab_text_px))
+                                    .font_weight(gpui::FontWeight::MEDIUM)
+                                    .text_color(rgb(foreground))
+                                    .child(tab.label),
+                            )
+                        })
+                        .collect::<Vec<_>>(),
                 )
-            } else {
-                tab
-            }
-        }))
-        .on_click(on_click)
+                .on_click(on_click),
+        )
+        .child(
+            div()
+                .absolute()
+                .left(px(selected_offset_px))
+                .bottom_0()
+                .w(px(selected_width_px))
+                .h(px(2.0))
+                .rounded(px(1.0))
+                .bg(rgb(active_foreground)),
+        )
+}
+
+fn app_underline_tab_width_px(label: &SharedString, tab_text_px: f32) -> f32 {
+    (label.as_ref().chars().count() as f32 * tab_text_px * 0.56).max(36.0)
 }
 
 pub fn app_heading_view(content: impl Into<SharedString>) -> impl IntoElement {

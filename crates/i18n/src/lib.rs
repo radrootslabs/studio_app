@@ -166,6 +166,18 @@ mod tests {
             "Not implemented"
         );
         assert_eq!(
+            app_text(AppTextKey::AccountProfilePersonalDetailsTitle),
+            "Personal details"
+        );
+        assert_eq!(
+            app_text(AppTextKey::AccountProfileChangePhotoAction),
+            "Change photo"
+        );
+        assert_eq!(
+            app_text(AppTextKey::AccountProfileRemovePhotoAction),
+            "Remove"
+        );
+        assert_eq!(
             app_text(AppTextKey::HomeTodayEmptySetupBody),
             "Add a local account to start using Radroots on this device."
         );

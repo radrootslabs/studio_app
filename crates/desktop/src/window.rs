@@ -2,9 +2,11 @@ use gpui::{
     Animation, AnimationExt, AnyElement, App, AppContext, Bounds, ClickEvent, Context, ElementId,
     Entity, Image, ImageFormat, InteractiveElement, IntoElement, ObjectFit, ParentElement, Render,
     SharedString, Styled, StyledImage, Subscription, Timer, Window, WindowBounds, WindowOptions,
-    div, img, prelude::FluentBuilder, px, relative, rgb, size,
+    div, img, prelude::FluentBuilder, px, relative, rgb, size, transparent_black,
 };
-use gpui_component::{IconName, Root, input::InputEvent, input::InputState, menu::PopupMenuItem};
+use gpui_component::{
+    Icon, IconName, Root, Sizable, input::InputEvent, input::InputState, menu::PopupMenuItem,
+};
 use radroots_studio_app_i18n::{AppTextKey, app_text};
 use radroots_studio_app_remote_signer::{
     RadrootsAppRemoteSignerApprovedSession, RadrootsAppRemoteSignerPendingPollOutcome,
@@ -5017,7 +5019,7 @@ impl HomeView {
                             this.select_account_tab(AccountTab::from_index(*index), cx)
                         }),
                     ))
-                    .child(account_placeholder_panel(selected_tab.panel_text_key())),
+                    .child(account_panel(selected_tab, cx)),
             )
             .into_any_element()
     }
@@ -8782,6 +8784,15 @@ fn buyer_workspace_title_block(title_key: AppTextKey, body_key: AppTextKey) -> i
         )
 }
 
+fn account_panel(tab: AccountTab, cx: &mut Context<HomeView>) -> AnyElement {
+    match tab {
+        AccountTab::Profile => account_profile_panel(cx).into_any_element(),
+        AccountTab::FarmDetails | AccountTab::Preferences | AccountTab::Security => {
+            account_placeholder_panel(tab.panel_text_key()).into_any_element()
+        }
+    }
+}
+
 fn account_placeholder_panel(text_key: AppTextKey) -> impl IntoElement {
     div()
         .w_full()
@@ -8792,6 +8803,186 @@ fn account_placeholder_panel(text_key: AppTextKey) -> impl IntoElement {
         .text_size(px(APP_UI_THEME.foundation.typography.body_text_px))
         .text_color(rgb(APP_UI_THEME.foundation.text.secondary))
         .child(app_shared_text(text_key))
+}
+
+fn account_profile_panel(cx: &mut Context<HomeView>) -> impl IntoElement {
+    app_stack_v(APP_UI_THEME.shells.home_stack_gap_px)
+        .w_full()
+        .child(
+            div()
+                .w_full()
+                .text_size(px(APP_UI_THEME.foundation.typography.body_text_px * 1.5))
+                .font_weight(gpui::FontWeight::BOLD)
+                .text_color(rgb(APP_UI_THEME.foundation.text.primary))
+                .child(app_shared_text(
+                    AppTextKey::AccountProfilePersonalDetailsTitle,
+                )),
+        )
+        .child(account_profile_details_card(cx))
+}
+
+fn account_profile_details_card(cx: &mut Context<HomeView>) -> impl IntoElement {
+    div()
+        .w_full()
+        .border_1()
+        .border_color(rgb(APP_UI_THEME.foundation.surfaces.divider))
+        .rounded(px(APP_UI_THEME.foundation.radii.large_px))
+        .bg(transparent_black())
+        .child(
+            div()
+                .w_full()
+                .p(px(APP_UI_THEME.shells.home_card_padding_px))
+                .flex()
+                .items_start()
+                .gap(px(APP_UI_THEME.shells.home_card_padding_px))
+                .child(account_profile_photo_actions(cx))
+                .child(
+                    app_stack_v(APP_UI_THEME.shells.home_stack_gap_px)
+                        .flex_1()
+                        .min_w_0()
+                        .child(account_profile_field_row(
+                            account_profile_field(
+                                AppTextKey::AccountProfileFullNameLabel,
+                                AppTextKey::AccountProfileFullNameValue,
+                                false,
+                            ),
+                            account_profile_field(
+                                AppTextKey::AccountProfileEmailLabel,
+                                AppTextKey::AccountProfileEmailValue,
+                                false,
+                            ),
+                        ))
+                        .child(account_profile_field_row(
+                            account_profile_field(
+                                AppTextKey::AccountProfilePhoneLabel,
+                                AppTextKey::AccountProfilePhoneValue,
+                                false,
+                            ),
+                            account_profile_field(
+                                AppTextKey::AccountProfileRoleLabel,
+                                AppTextKey::AccountProfileRoleValue,
+                                true,
+                            ),
+                        ))
+                        .child(account_profile_field_row(
+                            account_profile_field(
+                                AppTextKey::AccountProfileTimeZoneLabel,
+                                AppTextKey::AccountProfileTimeZoneValue,
+                                true,
+                            ),
+                            account_profile_field(
+                                AppTextKey::AccountProfileLanguageLabel,
+                                AppTextKey::AccountProfileLanguageValue,
+                                true,
+                            ),
+                        )),
+                ),
+        )
+}
+
+fn account_profile_photo_actions(cx: &mut Context<HomeView>) -> impl IntoElement {
+    app_stack_v(8.0)
+        .w(px(190.0))
+        .min_w(px(190.0))
+        .child(
+            div()
+                .text_size(px(APP_UI_THEME.foundation.typography.utility_title_text_px))
+                .font_weight(gpui::FontWeight::SEMIBOLD)
+                .text_color(rgb(APP_UI_THEME.foundation.text.secondary))
+                .child(app_shared_text(AppTextKey::AccountProfilePictureLabel)),
+        )
+        .child(
+            div()
+                .size(px(72.0))
+                .rounded(px(36.0))
+                .border_1()
+                .border_color(rgb(APP_UI_THEME.foundation.surfaces.divider))
+                .bg(rgb(APP_UI_THEME.foundation.surfaces.card_background))
+                .flex()
+                .items_center()
+                .justify_center()
+                .child(
+                    Icon::new(IconName::CircleUser)
+                        .with_size(gpui_component::Size::Size(px(34.0)))
+                        .text_color(rgb(APP_UI_THEME.foundation.text.secondary)),
+                ),
+        )
+        .child(
+            app_stack_h(8.0)
+                .child(action_button(
+                    "account-profile-change-photo",
+                    app_shared_text(AppTextKey::AccountProfileChangePhotoAction),
+                    |_, _, _| {},
+                    cx,
+                ))
+                .child(text_button(
+                    "account-profile-remove-photo",
+                    app_shared_text(AppTextKey::AccountProfileRemovePhotoAction),
+                    |_, _, _| {},
+                    cx,
+                )),
+        )
+}
+
+fn account_profile_field_row(
+    first: impl IntoElement,
+    second: impl IntoElement,
+) -> impl IntoElement {
+    div()
+        .w_full()
+        .flex()
+        .items_start()
+        .gap(px(APP_UI_THEME.shells.home_stack_gap_px))
+        .child(div().flex_1().min_w_0().child(first))
+        .child(div().flex_1().min_w_0().child(second))
+}
+
+fn account_profile_field(
+    label_key: AppTextKey,
+    value_key: AppTextKey,
+    selectable: bool,
+) -> impl IntoElement {
+    app_stack_v(6.0)
+        .w_full()
+        .child(
+            div()
+                .w_full()
+                .text_size(px(APP_UI_THEME.foundation.typography.utility_title_text_px))
+                .font_weight(gpui::FontWeight::SEMIBOLD)
+                .text_color(rgb(APP_UI_THEME.foundation.text.secondary))
+                .child(app_shared_text(label_key)),
+        )
+        .child(
+            div()
+                .w_full()
+                .min_w_0()
+                .h(px(38.0))
+                .border_1()
+                .border_color(rgb(APP_UI_THEME.foundation.surfaces.divider))
+                .rounded(px(APP_UI_THEME.foundation.radii.medium_px))
+                .bg(transparent_black())
+                .px(px(12.0))
+                .flex()
+                .items_center()
+                .justify_between()
+                .gap(px(8.0))
+                .child(
+                    div()
+                        .flex_1()
+                        .min_w_0()
+                        .overflow_hidden()
+                        .text_size(px(APP_UI_THEME.foundation.typography.body_text_px))
+                        .text_color(rgb(APP_UI_THEME.foundation.text.primary))
+                        .child(app_shared_text(value_key)),
+                )
+                .when(selectable, |this| {
+                    this.child(
+                        Icon::new(IconName::ChevronDown)
+                            .with_size(gpui_component::Size::Size(px(16.0)))
+                            .text_color(rgb(APP_UI_THEME.foundation.text.secondary)),
+                    )
+                }),
+        )
 }
 
 fn buyer_listings_feed(
