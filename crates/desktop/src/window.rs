@@ -155,6 +155,43 @@ enum HomeFocusedView {
     BuyerReceiptIssue(OrderId),
 }
 
+fn buyer_order_detail_focus_after_open(
+    runtime_changed: bool,
+    runtime: &DesktopAppRuntimeSummary,
+    order_id: OrderId,
+) -> Option<HomeFocusedView> {
+    if runtime_changed
+        || runtime
+            .personal_projection
+            .orders
+            .detail
+            .as_ref()
+            .is_some_and(|detail| detail.order_id == order_id)
+    {
+        Some(HomeFocusedView::BuyerOrderDetail(order_id))
+    } else {
+        None
+    }
+}
+
+fn farmer_order_detail_focus_after_open(
+    runtime_changed: bool,
+    runtime: &DesktopAppRuntimeSummary,
+    order_id: OrderId,
+) -> Option<HomeFocusedView> {
+    if runtime_changed
+        || runtime
+            .orders_projection
+            .detail
+            .as_ref()
+            .is_some_and(|detail| detail.order_id == order_id)
+    {
+        Some(HomeFocusedView::FarmerOrderDetail(order_id))
+    } else {
+        None
+    }
+}
+
 pub fn home_window_options(cx: &mut App) -> WindowOptions {
     let (launch_width_px, launch_height_px) = home_window_launch_size_px();
     let (minimum_width_px, minimum_height_px) = home_window_minimum_size_px();
@@ -1709,7 +1746,14 @@ impl HomeView {
 
     fn open_personal_order_detail(&mut self, order_id: OrderId, cx: &mut Context<Self>) {
         match self.runtime.open_personal_order_detail(order_id) {
-            Ok(true) => {
+            Ok(runtime_changed) => {
+                let Some(focused_view) = buyer_order_detail_focus_after_open(
+                    runtime_changed,
+                    &self.runtime.summary(),
+                    order_id,
+                ) else {
+                    return;
+                };
                 if self
                     .buyer_receipt_issue_form
                     .as_ref()
@@ -1717,10 +1761,9 @@ impl HomeView {
                 {
                     self.buyer_receipt_issue_form = None;
                 }
-                self.focused_view = Some(HomeFocusedView::BuyerOrderDetail(order_id));
+                self.focused_view = Some(focused_view);
                 cx.notify();
             }
-            Ok(false) => {}
             Err(runtime_error) => {
                 error!(
                     target: "buyer",
@@ -2117,13 +2160,19 @@ impl HomeView {
 
     fn open_order_detail(&mut self, order_id: OrderId, cx: &mut Context<Self>) {
         match self.runtime.open_order_detail(order_id) {
-            Ok(true) => {
+            Ok(runtime_changed) => {
+                let Some(focused_view) = farmer_order_detail_focus_after_open(
+                    runtime_changed,
+                    &self.runtime.summary(),
+                    order_id,
+                ) else {
+                    return;
+                };
                 self.products_stock_editor = None;
                 self.product_editor_form = None;
-                self.focused_view = Some(HomeFocusedView::FarmerOrderDetail(order_id));
+                self.focused_view = Some(focused_view);
                 cx.notify();
             }
-            Ok(false) => {}
             Err(runtime_error) => {
                 error!(
                     target: "orders",
@@ -13735,7 +13784,7 @@ fn home_farm_order_method_label_key(method: FarmOrderMethod) -> AppTextKey {
 mod tests {
     use super::{
         APP_UI_THEME, AppTextKey, BuyerWorkspaceNotice, FarmerHomeFarmState, HomeAutoFocusState,
-        HomeAutoFocusTarget, HomeStage, HomeView, LabelValueRow,
+        HomeAutoFocusTarget, HomeFocusedView, HomeStage, HomeView, LabelValueRow,
         PackDayBatchPrintActionPresentation, PackDayBatchPrintStatusPresentation,
         PackDayExportStatusPresentation, PackDayHostHandoffActionPresentation,
         PackDayHostHandoffStatusPresentation, PackDayPrintActionPresentation,
@@ -13745,25 +13794,27 @@ mod tests {
         StartupSignerConnectState, about_conflict_action_specs, about_conflict_aggregate_text,
         about_conflict_detail_rows, about_conflict_review_body_key, about_manual_refresh_enabled,
         about_runtime_rows, about_status_rows, app_text,
-        buyer_order_coordination_notice_forces_redraw, buyer_orders_retry_action_visible,
-        buyer_receipt_status_key, farm_setup_onboarding_card_spec, farmer_home_farm_state,
-        farmer_pack_day_available, home_auto_focus_target, home_content_scroll_id, home_saved_farm,
-        home_sidebar_navigation_sections, home_stage, home_window_launch_size_px,
-        home_window_minimum_size_px, pack_day_batch_print_action_presentation,
-        pack_day_batch_print_status_presentation, pack_day_export_action_enabled,
-        pack_day_export_action_label_key, pack_day_export_artifact_names,
-        pack_day_export_detail_rows, pack_day_export_status_presentation,
-        pack_day_host_handoff_action_presentations, pack_day_host_handoff_status_presentation,
-        pack_day_print_action_presentations, pack_day_print_status_presentation,
-        parse_optional_product_editor_stock_input, parse_product_editor_price_input,
-        presented_farmer_reminder, product_display_title, reminder_action_target,
-        reminder_deadline_text, reminder_delivery_state_key, reminder_urgency_color,
-        reminder_urgency_key, settings_auto_focus_target, startup_home_surface,
-        startup_issue_summary_text, startup_notice_text, startup_signer_preview_summary,
-        startup_signer_preview_summary_for_connect_state, startup_signer_source_input_is_editable,
-        startup_signer_status_spec, startup_signer_transport_failure_requires_notice,
-        trade_agreement_status_key, trade_fulfillment_status_key, trade_inventory_status_key,
-        trade_payment_display_status_key, trade_revision_status_key, trade_workflow_source_key,
+        buyer_order_coordination_notice_forces_redraw, buyer_order_detail_focus_after_open,
+        buyer_orders_retry_action_visible, buyer_receipt_status_key,
+        farm_setup_onboarding_card_spec, farmer_home_farm_state,
+        farmer_order_detail_focus_after_open, farmer_pack_day_available, home_auto_focus_target,
+        home_content_scroll_id, home_saved_farm, home_sidebar_navigation_sections, home_stage,
+        home_window_launch_size_px, home_window_minimum_size_px,
+        pack_day_batch_print_action_presentation, pack_day_batch_print_status_presentation,
+        pack_day_export_action_enabled, pack_day_export_action_label_key,
+        pack_day_export_artifact_names, pack_day_export_detail_rows,
+        pack_day_export_status_presentation, pack_day_host_handoff_action_presentations,
+        pack_day_host_handoff_status_presentation, pack_day_print_action_presentations,
+        pack_day_print_status_presentation, parse_optional_product_editor_stock_input,
+        parse_product_editor_price_input, presented_farmer_reminder, product_display_title,
+        reminder_action_target, reminder_deadline_text, reminder_delivery_state_key,
+        reminder_urgency_color, reminder_urgency_key, settings_auto_focus_target,
+        startup_home_surface, startup_issue_summary_text, startup_notice_text,
+        startup_signer_preview_summary, startup_signer_preview_summary_for_connect_state,
+        startup_signer_source_input_is_editable, startup_signer_status_spec,
+        startup_signer_transport_failure_requires_notice, trade_agreement_status_key,
+        trade_fulfillment_status_key, trade_inventory_status_key, trade_payment_display_status_key,
+        trade_revision_status_key, trade_workflow_source_key,
     };
     use crate::runtime::{
         DesktopAppRuntimeMetadataSummary, DesktopAppRuntimeSummary, DesktopAppSyncConflictSummary,
@@ -13930,6 +13981,94 @@ mod tests {
 
         orders.has_recoverable_coordination = true;
         assert!(buyer_orders_retry_action_visible(&orders));
+    }
+
+    #[test]
+    fn buyer_order_detail_focus_reopens_same_selected_detail() {
+        let order_id = OrderId::new();
+        let farm_id = FarmId::new();
+        let mut runtime = summary(
+            HomeRoute::Personal,
+            TodayAgendaProjection::default(),
+            FarmSetupProjection::default(),
+        );
+
+        assert_eq!(
+            buyer_order_detail_focus_after_open(false, &runtime, order_id),
+            None
+        );
+
+        runtime.personal_projection.orders.detail = Some(BuyerOrderDetailProjection {
+            order_id,
+            farm_id,
+            order_number: String::new(),
+            farm_display_name: String::new(),
+            fulfillment_summary: String::new(),
+            status: BuyerOrderStatus::Placed,
+            items: Vec::new(),
+            economics: TradeEconomicsProjection::default(),
+            payment: TradePaymentDisplayStatus::NotRecorded,
+            workflow: TradeWorkflowProjection::from_buyer_order_status(
+                order_id,
+                BuyerOrderStatus::Placed,
+            ),
+            validation_receipts: Vec::new(),
+            order_note: None,
+            repeat_demand: None,
+        });
+
+        assert_eq!(
+            buyer_order_detail_focus_after_open(false, &runtime, order_id),
+            Some(HomeFocusedView::BuyerOrderDetail(order_id))
+        );
+        assert_eq!(
+            buyer_order_detail_focus_after_open(false, &runtime, OrderId::new()),
+            None
+        );
+    }
+
+    #[test]
+    fn farmer_order_detail_focus_reopens_same_selected_detail() {
+        let order_id = OrderId::new();
+        let farm_id = FarmId::new();
+        let mut runtime = summary(
+            HomeRoute::Today,
+            TodayAgendaProjection::default(),
+            FarmSetupProjection::default(),
+        );
+
+        assert_eq!(
+            farmer_order_detail_focus_after_open(false, &runtime, order_id),
+            None
+        );
+
+        runtime.orders_projection.detail = Some(OrderDetailProjection {
+            order_id,
+            farm_id,
+            order_number: String::new(),
+            customer_display_name: String::new(),
+            status: OrderStatus::Scheduled,
+            fulfillment_window_id: None,
+            fulfillment_window_label: None,
+            pickup_location_label: None,
+            items: Vec::new(),
+            economics: TradeEconomicsProjection::default(),
+            payment: TradePaymentDisplayStatus::NotRecorded,
+            workflow: TradeWorkflowProjection::from_order_status(order_id, OrderStatus::Scheduled),
+            validation_receipts: Vec::new(),
+            primary_action: Some(OrderPrimaryAction::PublishPreparing),
+            fulfillment_actions: OrderFulfillmentAction::ALL.to_vec(),
+            recoveries: Vec::new(),
+        });
+
+        assert_eq!(
+            farmer_order_detail_focus_after_open(false, &runtime, order_id),
+            Some(HomeFocusedView::FarmerOrderDetail(order_id))
+        );
+        assert_eq!(
+            farmer_order_detail_focus_after_open(false, &runtime, OrderId::new()),
+            None
+        );
     }
 
     #[test]
