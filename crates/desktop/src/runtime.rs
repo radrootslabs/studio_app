@@ -1580,7 +1580,12 @@ impl DesktopAppRuntimeState {
             select_active_surface(accounts_manager, sqlite_store, active_surface)?
         };
 
-        self.replace_identity_projection(projection)
+        let identity_changed = self.replace_identity_projection(projection)?;
+        let shell_changed = self
+            .state_store
+            .apply_in_memory(AppStateCommand::select_active_surface(active_surface));
+
+        Ok(identity_changed || shell_changed)
     }
 
     fn remove_selected_local_key(&mut self) -> Result<bool, DesktopAppRuntimeCommandError> {
@@ -19479,6 +19484,11 @@ mod tests {
                 .expect("account should select")
         );
         assert_eq!(runtime.summary().startup_gate, AppStartupGate::Farmer);
+        assert!(runtime.select_account());
+        assert_eq!(
+            runtime.summary().shell_projection.selected_section,
+            ShellSection::Account
+        );
 
         assert!(
             runtime
@@ -19487,6 +19497,14 @@ mod tests {
         );
         let personal_summary = runtime.summary();
         assert_eq!(personal_summary.startup_gate, AppStartupGate::Personal);
+        assert_eq!(
+            personal_summary.shell_projection.active_surface,
+            ActiveSurface::Personal
+        );
+        assert_eq!(
+            personal_summary.shell_projection.selected_section,
+            ShellSection::Personal(PersonalSection::Browse)
+        );
         assert_eq!(
             personal_summary
                 .settings_account_projection
@@ -19508,6 +19526,11 @@ mod tests {
             ActiveSurface::Personal
         );
 
+        assert!(runtime.select_account());
+        assert_eq!(
+            runtime.summary().shell_projection.selected_section,
+            ShellSection::Account
+        );
         assert!(
             runtime
                 .select_active_surface(ActiveSurface::Farmer)
@@ -19515,6 +19538,14 @@ mod tests {
         );
         let farmer_summary = runtime.summary();
         assert_eq!(farmer_summary.startup_gate, AppStartupGate::Farmer);
+        assert_eq!(
+            farmer_summary.shell_projection.active_surface,
+            ActiveSurface::Farmer
+        );
+        assert_eq!(
+            farmer_summary.shell_projection.selected_section,
+            ShellSection::Farmer(FarmerSection::Today)
+        );
         assert_eq!(
             farmer_summary
                 .settings_account_projection
