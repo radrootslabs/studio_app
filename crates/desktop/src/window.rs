@@ -5,7 +5,8 @@ use gpui::{
     relative, rgb, size,
 };
 use gpui_component::{
-    IconName, Root,
+    IconName, Root, Sizable, Size,
+    button::{Button, ButtonCustomVariant, ButtonRounded, ButtonVariants, DropdownButton},
     input::{InputEvent, InputState},
 };
 use radroots_studio_app_i18n::{AppTextKey, app_text};
@@ -6804,18 +6805,13 @@ impl SettingsWindowView {
                                     .gap(px(APP_UI_THEME
                                         .shells
                                         .settings_account_sidebar_footer_button_gap_px))
-                                    .child(action_button_primary(
+                                    .child(action_button(
                                         "account-add",
                                         app_shared_text(AppTextKey::SettingsAccountAddAction),
                                         cx.listener(|_, _, _, _| {}),
                                         cx,
                                     ))
-                                    .child(action_button_primary(
-                                        "account-more",
-                                        app_shared_text(AppTextKey::SettingsAccountMoreActions),
-                                        cx.listener(|_, _, _, _| {}),
-                                        cx,
-                                    )),
+                                    .child(settings_account_more_actions_button(cx)),
                             ),
                     ),
             )
@@ -7575,6 +7571,36 @@ impl SettingsWindowView {
 
         focus_state.update(cx, |last_target, _| *last_target = desired_target);
     }
+}
+
+fn settings_account_more_actions_button(cx: &App) -> impl IntoElement {
+    let sizing = APP_UI_THEME.components.app_button.sizing;
+    let colors = APP_UI_THEME.components.app_button.secondary_colors;
+    let hover_background = if colors.hover_changes_background {
+        colors.hover_background
+    } else {
+        colors.background
+    };
+    let neutral_variant = ButtonCustomVariant::new(cx)
+        .color(rgb(colors.background).into())
+        .foreground(rgb(colors.foreground).into())
+        .border(gpui::transparent_black())
+        .hover(rgb(hover_background).into())
+        .active(rgb(colors.active_background).into());
+
+    DropdownButton::new("account-more")
+        .button(
+            Button::new("account-more-anchor")
+                .tab_stop(false)
+                .w(px(0.0))
+                .overflow_hidden()
+                .custom(neutral_variant)
+                .with_size(Size::Size(px(sizing.square_width_px))),
+        )
+        .dropdown_menu(|menu, _, _| menu)
+        .custom(neutral_variant)
+        .rounded(ButtonRounded::Size(px(sizing.corner_radius_px)))
+        .with_size(Size::Size(px(sizing.square_width_px)))
 }
 
 fn settings_account_detail_account(
