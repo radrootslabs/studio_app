@@ -9791,6 +9791,7 @@ fn account_profile_labeled_control(
 ) -> impl IntoElement {
     app_stack_v(6.0)
         .w_full()
+        .min_w_0()
         .child(
             div()
                 .w_full()
@@ -9804,6 +9805,8 @@ fn account_profile_labeled_control(
 
 const ACCOUNT_FORM_CONTROL_HEIGHT_PX: f32 = 28.0;
 const ACCOUNT_FORM_CONTROL_RADIUS_PX: f32 = 8.0;
+const ACCOUNT_FARM_DETAILS_TAB_CARD_MIN_HEIGHT_PX: f32 = 520.0;
+const ACCOUNT_FARM_DETAILS_FIELD_MIN_WIDTH_PX: f32 = 220.0;
 const ACCOUNT_SETTINGS_DEFAULT_BLOSSOM_SERVER: &str = "http://localhost:8082";
 const ACCOUNT_SETTINGS_RELAY_LOCALHOST_8080: &str = "ws://localhost:8080";
 const ACCOUNT_SETTINGS_RELAY_LOCALHOST_8081: &str = "ws://localhost:8081";
@@ -9887,15 +9890,12 @@ fn account_farm_profile_panel(
     is_textarea_wrap_ready: bool,
     cx: &mut Context<HomeView>,
 ) -> impl IntoElement {
-    div()
-        .w_full()
-        .min_h(relative(1.0))
-        .child(account_farm_details_tab_panel(
-            form,
-            selected_tab,
-            is_textarea_wrap_ready,
-            cx,
-        ))
+    div().w_full().child(account_farm_details_tab_panel(
+        form,
+        selected_tab,
+        is_textarea_wrap_ready,
+        cx,
+    ))
 }
 
 fn account_farm_details_tab_panel(
@@ -9934,18 +9934,12 @@ fn account_farm_profile_section_row(
 ) -> impl IntoElement {
     div()
         .w_full()
-        .min_h(relative(1.0))
+        .min_h(px(ACCOUNT_FARM_DETAILS_TAB_CARD_MIN_HEIGHT_PX))
         .flex()
         .items_start()
         .gap(px(APP_UI_THEME.shells.home_stack_gap_px))
-        .child(div().flex_1().min_w_0().min_h(relative(1.0)).child(main))
-        .child(
-            div()
-                .w(px(336.0))
-                .min_w(px(300.0))
-                .min_h(relative(1.0))
-                .child(rail),
-        )
+        .child(div().flex_1().min_w_0().child(main))
+        .child(div().w(px(336.0)).min_w(px(300.0)).child(rail))
 }
 
 fn account_farm_profile_main_card(
@@ -10477,7 +10471,7 @@ fn account_farm_customer_experience_panel(
 fn account_farm_profile_card(content: impl IntoElement) -> impl IntoElement {
     div()
         .w_full()
-        .min_h(relative(1.0))
+        .min_h(px(ACCOUNT_FARM_DETAILS_TAB_CARD_MIN_HEIGHT_PX))
         .border_1()
         .border_color(rgb(APP_UI_THEME.foundation.surfaces.divider))
         .rounded(px(APP_UI_THEME.foundation.radii.large_px))
@@ -10485,7 +10479,6 @@ fn account_farm_profile_card(content: impl IntoElement) -> impl IntoElement {
         .child(
             div()
                 .w_full()
-                .min_h(relative(1.0))
                 .p(px(APP_UI_THEME.shells.home_card_padding_px))
                 .child(content),
         )
@@ -10524,8 +10517,18 @@ fn account_farm_profile_field_row(
         .flex()
         .items_start()
         .gap(px(APP_UI_THEME.shells.home_stack_gap_px))
-        .child(div().flex_1().min_w_0().child(first))
-        .child(div().flex_1().min_w_0().child(second))
+        .child(
+            div()
+                .flex_1()
+                .min_w(px(ACCOUNT_FARM_DETAILS_FIELD_MIN_WIDTH_PX))
+                .child(first),
+        )
+        .child(
+            div()
+                .flex_1()
+                .min_w(px(ACCOUNT_FARM_DETAILS_FIELD_MIN_WIDTH_PX))
+                .child(second),
+        )
 }
 
 fn account_farm_field_label(label_key: AppTextKey) -> impl IntoElement {
