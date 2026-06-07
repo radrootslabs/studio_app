@@ -9991,16 +9991,7 @@ fn account_farm_profile_main_card(
                 &form.about_farm_input,
                 is_textarea_wrap_ready,
                 cx,
-            ))
-            .child(
-                div()
-                    .w_full()
-                    .text_size(px(APP_UI_THEME.foundation.typography.utility_title_text_px))
-                    .text_color(rgb(APP_UI_THEME.foundation.text.secondary))
-                    .child(app_shared_text(
-                        AppTextKey::AccountFarmDetailsRequiredFieldNote,
-                    )),
-            ),
+            )),
     )
 }
 
@@ -10476,6 +10467,21 @@ fn account_farm_profile_card(content: impl IntoElement) -> impl IntoElement {
         )
 }
 
+fn account_farm_profile_rail_card(content: impl IntoElement) -> impl IntoElement {
+    div()
+        .w_full()
+        .border_1()
+        .border_color(rgb(APP_UI_THEME.foundation.surfaces.divider))
+        .rounded(px(APP_UI_THEME.foundation.radii.large_px))
+        .bg(transparent_black())
+        .child(
+            div()
+                .w_full()
+                .p(px(APP_UI_THEME.shells.home_card_padding_px))
+                .child(content),
+        )
+}
+
 fn account_farm_profile_title_block(
     title_key: AppTextKey,
     body_key: AppTextKey,
@@ -10803,7 +10809,7 @@ fn account_farm_date_range_fields(
 }
 
 fn account_farm_profile_summary_card(cx: &mut Context<HomeView>) -> impl IntoElement {
-    account_farm_profile_card(
+    account_farm_profile_rail_card(
         app_stack_v(APP_UI_THEME.shells.home_stack_gap_px)
             .w_full()
             .child(

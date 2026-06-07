@@ -431,7 +431,6 @@ const REQUIRED_WINDOW_COPY_KEYS: &[&str] = &[
     "AppTextKey::AccountFarmDetailsEstablishedYearValue",
     "AppTextKey::AccountFarmDetailsAboutFarmValue",
     "AppTextKey::AccountFarmDetailsFarmLocationValue",
-    "AppTextKey::AccountFarmDetailsRequiredFieldNote",
     "AppTextKey::AccountFarmDetailsSummaryTitle",
     "AppTextKey::AccountFarmDetailsFarmTypeSummaryLabel",
     "AppTextKey::AccountFarmDetailsEstablishedSummaryLabel",
