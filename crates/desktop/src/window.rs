@@ -4,11 +4,7 @@ use gpui::{
     Subscription, Timer, Window, WindowBounds, WindowOptions, div, prelude::FluentBuilder, px,
     relative, rgb, size,
 };
-use gpui_component::{
-    IconName, Root, Sizable, Size,
-    button::{Button, ButtonCustomVariant, ButtonRounded, ButtonVariants, DropdownButton},
-    input::{InputEvent, InputState},
-};
+use gpui_component::{IconName, Root, input::InputEvent, input::InputState, menu::PopupMenuItem};
 use radroots_studio_app_i18n::{AppTextKey, app_text};
 use radroots_studio_app_remote_signer::{
     RadrootsAppRemoteSignerApprovedSession, RadrootsAppRemoteSignerPendingPollOutcome,
@@ -35,15 +31,16 @@ use radroots_studio_app_ui::{
     app_button_primary as action_button_primary,
     app_button_primary_disabled as action_button_primary_disabled,
     app_button_secondary as action_button, app_button_secondary_disabled as action_button_disabled,
-    app_button_text as text_button, app_checkbox_field, app_cluster, app_detail_row,
-    app_divider as section_divider, app_focused_detail_view, app_focused_task_view, app_form_field,
-    app_form_input_text, app_form_section, app_heading_section, app_heading_view,
-    app_input_text as app_text_input, app_scroll_panel,
-    app_segment_button_icon as icon_segment_button, app_shared_label_text, app_shared_text,
-    app_split_shell, app_stack_h, app_stack_v, app_status_indicator as status_indicator,
-    app_surface_card, app_surface_card_section as home_card, app_surface_panel,
-    app_surface_sidebar, app_surface_window as app_window_shell,
-    app_text_badge as settings_badge_text, app_text_body_subtle as home_body_text, app_text_label,
+    app_button_square_dropdown_secondary as action_dropdown_button, app_button_text as text_button,
+    app_checkbox_field, app_cluster, app_detail_row, app_divider as section_divider,
+    app_focused_detail_view, app_focused_task_view, app_form_field, app_form_input_text,
+    app_form_section, app_heading_section, app_heading_view, app_input_text as app_text_input,
+    app_scroll_panel, app_segment_button_icon as icon_segment_button, app_shared_label_text,
+    app_shared_text, app_split_shell, app_stack_h, app_stack_v,
+    app_status_indicator as status_indicator, app_surface_card,
+    app_surface_card_section as home_card, app_surface_panel, app_surface_sidebar,
+    app_surface_window as app_window_shell, app_text_badge as settings_badge_text,
+    app_text_body_subtle as home_body_text, app_text_label,
     app_text_label as home_farm_setup_field_label, app_text_value, label_value_list,
     runtime_metadata_rows, settings_preferences_general_rows, utility_title_row,
 };
@@ -7574,33 +7571,26 @@ impl SettingsWindowView {
 }
 
 fn settings_account_more_actions_button(cx: &App) -> impl IntoElement {
-    let sizing = APP_UI_THEME.components.app_button.sizing;
-    let colors = APP_UI_THEME.components.app_button.secondary_colors;
-    let hover_background = if colors.hover_changes_background {
-        colors.hover_background
-    } else {
-        colors.background
-    };
-    let neutral_variant = ButtonCustomVariant::new(cx)
-        .color(rgb(colors.background).into())
-        .foreground(rgb(colors.foreground).into())
-        .border(gpui::transparent_black())
-        .hover(rgb(hover_background).into())
-        .active(rgb(colors.active_background).into());
-
-    DropdownButton::new("account-more")
-        .button(
-            Button::new("account-more-anchor")
-                .tab_stop(false)
-                .w(px(0.0))
-                .overflow_hidden()
-                .custom(neutral_variant)
-                .with_size(Size::Size(px(sizing.square_width_px))),
-        )
-        .dropdown_menu(|menu, _, _| menu)
-        .custom(neutral_variant)
-        .rounded(ButtonRounded::Size(px(sizing.corner_radius_px)))
-        .with_size(Size::Size(px(sizing.square_width_px)))
+    action_dropdown_button(
+        "account-more",
+        |menu, _, _| {
+            menu.item(
+                PopupMenuItem::new(app_text(AppTextKey::SettingsAccountImportFileAction))
+                    .on_click(|_, _, _| {}),
+            )
+            .item(
+                PopupMenuItem::new(app_text(AppTextKey::SettingsAccountImportDatabaseAction))
+                    .on_click(|_, _, _| {}),
+            )
+            .item(
+                PopupMenuItem::new(app_text(
+                    AppTextKey::SettingsAccountConnectRemoteBunkerAction,
+                ))
+                .on_click(|_, _, _| {}),
+            )
+        },
+        cx,
+    )
 }
 
 fn settings_account_detail_account(

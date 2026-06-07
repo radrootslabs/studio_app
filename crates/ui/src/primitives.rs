@@ -1,12 +1,13 @@
 use gpui::{
-    AnyElement, App, ClickEvent, Div, ElementId, Entity, InteractiveElement, IntoElement,
+    AnyElement, App, ClickEvent, Context, Div, ElementId, Entity, InteractiveElement, IntoElement,
     ParentElement, SharedString, StatefulInteractiveElement, Styled, Window, div,
     prelude::FluentBuilder, px, relative, rgb, transparent_black,
 };
 use gpui_component::{
     Icon, IconName, Sizable, Size,
-    button::{Button, ButtonCustomVariant, ButtonRounded, ButtonVariants},
+    button::{Button, ButtonCustomVariant, ButtonRounded, ButtonVariants, DropdownButton},
     input::{Input, InputState},
+    menu::PopupMenu,
 };
 use std::rc::Rc;
 
@@ -709,6 +710,47 @@ pub fn app_button_compact(
             .compact_horizontal_padding_px,
         AppButtonVariant::Secondary,
     )
+}
+
+pub fn app_button_square_dropdown_secondary(
+    id: &'static str,
+    menu: impl Fn(PopupMenu, &mut Window, &mut Context<PopupMenu>) -> PopupMenu + 'static,
+    cx: &App,
+) -> impl IntoElement {
+    let sizing = APP_UI_THEME.components.app_button.sizing;
+    let colors = APP_UI_THEME.components.app_button.secondary_colors;
+    let hover_background = if colors.hover_changes_background {
+        colors.hover_background
+    } else {
+        colors.background
+    };
+    let neutral_variant = ButtonCustomVariant::new(cx)
+        .color(rgb(colors.background).into())
+        .foreground(rgb(colors.foreground).into())
+        .border(transparent_black())
+        .hover(rgb(hover_background).into())
+        .active(rgb(colors.active_background).into());
+
+    div()
+        .w(px(sizing.square_width_px))
+        .h(px(sizing.height_px))
+        .rounded(px(sizing.corner_radius_px))
+        .overflow_hidden()
+        .child(
+            DropdownButton::new(id)
+                .button(
+                    Button::new((id, 0usize))
+                        .tab_stop(false)
+                        .w(px(0.0))
+                        .overflow_hidden()
+                        .custom(neutral_variant)
+                        .with_size(Size::Size(px(sizing.square_width_px))),
+                )
+                .dropdown_menu(menu)
+                .custom(neutral_variant)
+                .rounded(ButtonRounded::Size(px(sizing.corner_radius_px)))
+                .with_size(Size::Size(px(sizing.square_width_px))),
+        )
 }
 
 fn app_button_label(

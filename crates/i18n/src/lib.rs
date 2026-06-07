@@ -172,6 +172,18 @@ mod tests {
             app_text(AppTextKey::SettingsAccountOpenWorkspaceAction),
             "Admin Console"
         );
+        assert_eq!(
+            app_text(AppTextKey::SettingsAccountImportFileAction),
+            "Import from file"
+        );
+        assert_eq!(
+            app_text(AppTextKey::SettingsAccountImportDatabaseAction),
+            "Import from database"
+        );
+        assert_eq!(
+            app_text(AppTextKey::SettingsAccountConnectRemoteBunkerAction),
+            "Connect remote bunker"
+        );
     }
 
     #[test]
