@@ -1,10 +1,11 @@
-use gpui::Application;
+use gpui::{Application, rgb};
 use gpui_component::{Theme, ThemeMode};
 use radroots_studio_app_core::{
     APP_PROJECTION_SOURCE, AppBuildIdentity, AppRuntimeConfig, AppRuntimeConfigError,
     AppRuntimeSnapshot, bootstrap_logging, install_panic_hook, launch_startup_event,
 };
 use radroots_studio_app_i18n::select_locale_from_host;
+use radroots_studio_app_ui::APP_UI_THEME;
 use thiserror::Error;
 use tracing::{error, info};
 
@@ -45,6 +46,7 @@ pub fn launch() -> Result<(), AppLaunchError> {
     app.run(move |cx| {
         gpui_component::init(cx);
         Theme::change(ThemeMode::Light, None, cx);
+        Theme::global_mut(cx).ring = rgb(APP_UI_THEME.components.app_input_text.border).into();
         select_locale_from_host(&snapshot.host.host_locale);
         install_native_app_menu(runtime.clone(), cx);
 

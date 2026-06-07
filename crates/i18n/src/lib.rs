@@ -178,8 +178,28 @@ mod tests {
             "Remove"
         );
         assert_eq!(
+            app_text(AppTextKey::AccountProfileFullNameValue),
+            "Tyson Lupul"
+        );
+        assert_eq!(
+            app_text(AppTextKey::AccountProfileEmailValue),
+            "tyson@tysonsfarm.com"
+        );
+        assert_eq!(
+            app_text(AppTextKey::AccountProfilePhoneValue),
+            "+1 250 202 3030"
+        );
+        assert_eq!(
             app_text(AppTextKey::AccountFarmDetailsFarmProfileTitle),
             "Farm profile"
+        );
+        assert_eq!(
+            app_text(AppTextKey::AccountFarmDetailsContactEmailValue),
+            "tyson@tysonsfarm.com"
+        );
+        assert_eq!(
+            app_text(AppTextKey::AccountFarmDetailsPublicPhoneValue),
+            "+1 250 202 3030"
         );
         assert_eq!(
             app_text(AppTextKey::AccountFarmDetailsFarmTypeVegetableFarm),
