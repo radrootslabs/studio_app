@@ -9,7 +9,7 @@ use gpui_component::{
     input::InputEvent,
     input::InputState,
     menu::PopupMenuItem,
-    select::{SearchableVec, Select, SelectState},
+    select::{SearchableVec, Select, SelectDelegate, SelectState},
 };
 use radroots_studio_app_i18n::{AppTextKey, app_text};
 use radroots_studio_app_remote_signer::{
@@ -9274,11 +9274,26 @@ fn account_profile_labeled_control(
         .child(control)
 }
 
-const ACCOUNT_FORM_CONTROL_HEIGHT_PX: f32 = 32.0;
+const ACCOUNT_FORM_CONTROL_HEIGHT_PX: f32 = 36.0;
 const ACCOUNT_FORM_CONTROL_RADIUS_PX: f32 = 8.0;
 
 fn account_form_text_input(input: &Entity<InputState>) -> impl IntoElement {
-    app_text_input(input, false)
+    gpui::Styled::h(
+        app_text_input(input, false)
+            .with_size(Size::Small)
+            .text_size(px(APP_UI_THEME.foundation.typography.settings_row_text_px))
+            .font_weight(gpui::FontWeight::NORMAL)
+            .rounded(px(ACCOUNT_FORM_CONTROL_RADIUS_PX))
+            .w_full(),
+        px(ACCOUNT_FORM_CONTROL_HEIGHT_PX),
+    )
+}
+
+fn account_form_select_input<D>(select: &Entity<SelectState<D>>) -> impl IntoElement
+where
+    D: SelectDelegate + 'static,
+{
+    Select::new(select)
         .with_size(Size::Small)
         .h(px(ACCOUNT_FORM_CONTROL_HEIGHT_PX))
         .text_size(px(APP_UI_THEME.foundation.typography.settings_row_text_px))
@@ -9326,25 +9341,13 @@ fn account_form_text_area_input_with_wrapped_preview(
 }
 
 fn account_profile_select_input(select: &Entity<AccountProfileSelectState>) -> impl IntoElement {
-    Select::new(select)
-        .with_size(Size::Small)
-        .h(px(ACCOUNT_FORM_CONTROL_HEIGHT_PX))
-        .text_size(px(APP_UI_THEME.foundation.typography.settings_row_text_px))
-        .font_weight(gpui::FontWeight::NORMAL)
-        .rounded(px(ACCOUNT_FORM_CONTROL_RADIUS_PX))
-        .w_full()
+    account_form_select_input(select)
 }
 
 fn account_farm_profile_select_input(
     select: &Entity<AccountFarmProfileSelectState>,
 ) -> impl IntoElement {
-    Select::new(select)
-        .with_size(Size::Small)
-        .h(px(ACCOUNT_FORM_CONTROL_HEIGHT_PX))
-        .text_size(px(APP_UI_THEME.foundation.typography.settings_row_text_px))
-        .font_weight(gpui::FontWeight::NORMAL)
-        .rounded(px(ACCOUNT_FORM_CONTROL_RADIUS_PX))
-        .w_full()
+    account_form_select_input(select)
 }
 
 fn account_farm_profile_panel(
