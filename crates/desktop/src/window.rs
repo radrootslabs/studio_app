@@ -6716,7 +6716,7 @@ impl SettingsWindowView {
                     ("settings-account-row", index),
                     account_display_name(account),
                     Some(SharedString::from(abbreviated_npub(account.npub.as_str()))),
-                    Some(account.account_id.as_str()) == selected_account_id,
+                    false,
                     cx.listener(|_, _, _, _| {}),
                     cx,
                 )
@@ -6933,6 +6933,32 @@ impl SettingsWindowView {
                                                     )),
                                             ),
                                     ))
+                                    .child(
+                                        div()
+                                            .w_full()
+                                            .flex()
+                                            .min_w_0()
+                                            .items_center()
+                                            .gap(px(APP_UI_THEME
+                                                .shells
+                                                .settings_account_action_row_gap_px))
+                                            .child(div().child(action_button(
+                                                "account-log-out",
+                                                app_shared_text(
+                                                    AppTextKey::SettingsAccountLogOutAction,
+                                                ),
+                                                cx.listener(|_, _, _, _| {}),
+                                                cx,
+                                            )))
+                                            .child(div().child(action_button(
+                                                "account-open-workspace",
+                                                app_shared_text(
+                                                    AppTextKey::SettingsAccountOpenWorkspaceAction,
+                                                ),
+                                                cx.listener(|_, _, _, _| {}),
+                                                cx,
+                                            ))),
+                                    )
                                     .child(app_detail_row(
                                         app_shared_label_text(
                                             AppTextKey::SettingsAccountCustodyLabel,
@@ -6978,33 +7004,7 @@ impl SettingsWindowView {
                                         this.child(home_body_text(app_shared_text(
                                             AppTextKey::SettingsAccountNoSelectionBody,
                                         )))
-                                    })
-                                    .child(
-                                        div()
-                                            .w_full()
-                                            .flex()
-                                            .min_w_0()
-                                            .items_center()
-                                            .gap(px(APP_UI_THEME
-                                                .shells
-                                                .settings_account_action_row_gap_px))
-                                            .child(div().child(action_button_primary(
-                                                "account-log-out",
-                                                app_shared_text(
-                                                    AppTextKey::SettingsAccountLogOutAction,
-                                                ),
-                                                cx.listener(|_, _, _, _| {}),
-                                                cx,
-                                            )))
-                                            .child(div().child(action_button_primary(
-                                                "account-open-workspace",
-                                                app_shared_text(
-                                                    AppTextKey::SettingsAccountOpenWorkspaceAction,
-                                                ),
-                                                cx.listener(|_, _, _, _| {}),
-                                                cx,
-                                            ))),
-                                    ),
+                                    }),
                             ),
                     ),
             )

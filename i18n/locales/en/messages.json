@@ -467,7 +467,7 @@
   "settings.account.action.add_account": "Add Account...",
   "settings.account.action.log_out": "Log Out",
   "settings.account.action.more_actions": "More Actions",
-  "settings.account.action.open_workspace": "Open Workspace...",
+  "settings.account.action.open_workspace": "Admin Console",
   "settings.view.account": "account",
   "settings.view.settings": "settings",
   "settings.view.about": "about",

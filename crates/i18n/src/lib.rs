@@ -170,7 +170,7 @@ mod tests {
         );
         assert_eq!(
             app_text(AppTextKey::SettingsAccountOpenWorkspaceAction),
-            "Open Workspace..."
+            "Admin Console"
         );
     }
 
@@ -204,7 +204,7 @@ mod tests {
         assert_eq!(app_text(AppTextKey::SettingsAccountLogOutAction), "Log Out");
         assert_eq!(
             app_text(AppTextKey::SettingsAccountOpenWorkspaceAction),
-            "Open Workspace..."
+            "Admin Console"
         );
     }
 
