@@ -256,6 +256,39 @@ mod tests {
     #[test]
     fn english_about_copy_matches_the_runtime_status_contract() {
         assert_eq!(
+            app_text(AppTextKey::SettingsAboutCompanyName),
+            "Radroots, Inc."
+        );
+        assert_eq!(app_text(AppTextKey::SettingsAboutVersionLabel), "Version");
+        assert_eq!(
+            app_text(AppTextKey::SettingsAboutVariantLabel),
+            "Standalone local app"
+        );
+        assert_eq!(
+            app_text(AppTextKey::SettingsAboutAcknowledgementsAction),
+            "Acknowledgements"
+        );
+        assert_eq!(
+            app_text(AppTextKey::SettingsAboutPrivacyPolicyAction),
+            "Privacy Policy"
+        );
+        assert_eq!(
+            app_text(AppTextKey::SettingsAboutTermsAction),
+            "Terms of Service"
+        );
+        assert_eq!(
+            app_text(AppTextKey::SettingsAboutReportIssueAction),
+            "Report an Issue..."
+        );
+        assert_eq!(
+            app_text(AppTextKey::SettingsAboutCopyrightNotice),
+            "© 2026 Radroots, Inc. All rights reserved."
+        );
+        assert_eq!(
+            app_text(AppTextKey::SettingsAboutTrademarkNotice),
+            "Radroots is a trademark of Radroots, Inc."
+        );
+        assert_eq!(
             app_text(AppTextKey::SettingsAboutStatusSectionLabel),
             "Status"
         );

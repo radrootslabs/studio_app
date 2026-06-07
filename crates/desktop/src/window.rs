@@ -1,8 +1,8 @@
 use gpui::{
     Animation, AnimationExt, AnyElement, App, AppContext, Bounds, ClickEvent, Context, ElementId,
-    Entity, InteractiveElement, IntoElement, ParentElement, Render, SharedString, Styled,
-    Subscription, Timer, Window, WindowBounds, WindowOptions, div, prelude::FluentBuilder, px,
-    relative, rgb, size,
+    Entity, Image, ImageFormat, InteractiveElement, IntoElement, ObjectFit, ParentElement, Render,
+    SharedString, Styled, StyledImage, Subscription, Timer, Window, WindowBounds, WindowOptions,
+    div, img, prelude::FluentBuilder, px, relative, rgb, size,
 };
 use gpui_component::{IconName, Root, input::InputEvent, input::InputState, menu::PopupMenuItem};
 use radroots_studio_app_i18n::{AppTextKey, app_text};
@@ -7486,6 +7486,7 @@ impl SettingsWindowView {
             app_stack_v(APP_UI_THEME.shells.settings_account_main_stack_gap_px)
                 .size_full()
                 .py_12()
+                .child(settings_about_product_section(cx))
                 .child(app_surface_card(
                     app_stack_v(APP_UI_THEME.shells.home_stack_gap_px)
                         .w_full()
@@ -7611,6 +7612,114 @@ fn settings_account_more_actions_button(cx: &App) -> impl IntoElement {
         },
         cx,
     )
+}
+
+fn settings_about_product_section(cx: &mut Context<SettingsWindowView>) -> impl IntoElement {
+    let app_icon = Arc::new(Image::from_bytes(
+        ImageFormat::Png,
+        include_bytes!("../../../platforms/macos/App/Resources/AppIconSource.png").to_vec(),
+    ));
+    let version = format!(
+        "{} {}",
+        app_text(AppTextKey::SettingsAboutVersionLabel),
+        env!("CARGO_PKG_VERSION")
+    );
+
+    div()
+        .w_full()
+        .flex()
+        .flex_col()
+        .items_center()
+        .gap(px(APP_UI_THEME.shells.home_stack_gap_px))
+        .child(
+            div()
+                .w_full()
+                .flex()
+                .items_start()
+                .justify_center()
+                .gap(px(APP_UI_THEME.shells.settings_account_main_padding_px))
+                .child(
+                    img(app_icon)
+                        .w(px(128.0))
+                        .h(px(128.0))
+                        .object_fit(ObjectFit::Contain)
+                        .flex_shrink_0(),
+                )
+                .child(
+                    app_stack_v(APP_UI_THEME.foundation.spacing.small_px)
+                        .min_w_0()
+                        .child(
+                            div()
+                                .text_size(
+                                    px(APP_UI_THEME.foundation.typography.body_text_px * 1.7),
+                                )
+                                .font_weight(gpui::FontWeight::SEMIBOLD)
+                                .text_color(rgb(APP_UI_THEME.foundation.text.primary))
+                                .child(app_shared_text(AppTextKey::AppName)),
+                        )
+                        .child(
+                            div()
+                                .text_size(px(APP_UI_THEME.foundation.typography.body_text_px))
+                                .font_weight(gpui::FontWeight::MEDIUM)
+                                .text_color(rgb(APP_UI_THEME.foundation.text.secondary))
+                                .child(version),
+                        )
+                        .child(
+                            div()
+                                .text_size(px(APP_UI_THEME.foundation.typography.body_text_px))
+                                .font_weight(gpui::FontWeight::MEDIUM)
+                                .text_color(rgb(APP_UI_THEME.foundation.text.secondary))
+                                .child(app_shared_text(AppTextKey::SettingsAboutVariantLabel)),
+                        )
+                        .child(
+                            div()
+                                .text_size(px(APP_UI_THEME.foundation.typography.body_text_px))
+                                .font_weight(gpui::FontWeight::MEDIUM)
+                                .text_color(rgb(APP_UI_THEME.foundation.text.secondary))
+                                .child(app_shared_text(AppTextKey::SettingsAboutCompanyName)),
+                        )
+                        .child(text_button(
+                            "settings-about-acknowledgements",
+                            app_shared_text(AppTextKey::SettingsAboutAcknowledgementsAction),
+                            cx.listener(|_, _, _, _| {}),
+                            cx,
+                        ))
+                        .child(text_button(
+                            "settings-about-privacy-policy",
+                            app_shared_text(AppTextKey::SettingsAboutPrivacyPolicyAction),
+                            cx.listener(|_, _, _, _| {}),
+                            cx,
+                        ))
+                        .child(text_button(
+                            "settings-about-terms",
+                            app_shared_text(AppTextKey::SettingsAboutTermsAction),
+                            cx.listener(|_, _, _, _| {}),
+                            cx,
+                        ))
+                        .child(action_button(
+                            "settings-about-report-issue",
+                            app_shared_text(AppTextKey::SettingsAboutReportIssueAction),
+                            cx.listener(|_, _, _, _| {}),
+                            cx,
+                        )),
+                ),
+        )
+        .child(
+            app_stack_v(APP_UI_THEME.foundation.spacing.small_px)
+                .items_center()
+                .child(
+                    div()
+                        .text_size(px(APP_UI_THEME.foundation.typography.body_text_px))
+                        .text_color(rgb(APP_UI_THEME.foundation.text.secondary))
+                        .child(app_shared_text(AppTextKey::SettingsAboutCopyrightNotice)),
+                )
+                .child(
+                    div()
+                        .text_size(px(APP_UI_THEME.foundation.typography.body_text_px))
+                        .text_color(rgb(APP_UI_THEME.foundation.text.secondary))
+                        .child(app_shared_text(AppTextKey::SettingsAboutTrademarkNotice)),
+                ),
+        )
 }
 
 fn settings_account_detail_account(
