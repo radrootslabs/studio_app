@@ -9246,7 +9246,18 @@ fn account_profile_labeled_control(
         .child(control)
 }
 
+const ACCOUNT_FORM_CONTROL_HEIGHT_PX: f32 = 28.0;
+
 fn account_form_text_input(input: &Entity<InputState>) -> impl IntoElement {
+    app_text_input(input, false)
+        .with_size(Size::Small)
+        .h(px(ACCOUNT_FORM_CONTROL_HEIGHT_PX))
+        .text_size(px(APP_UI_THEME.foundation.typography.settings_row_text_px))
+        .font_weight(gpui::FontWeight::NORMAL)
+        .w_full()
+}
+
+fn account_form_text_area_input(input: &Entity<InputState>) -> impl IntoElement {
     app_text_input(input, false)
         .with_size(Size::Small)
         .text_size(px(APP_UI_THEME.foundation.typography.settings_row_text_px))
@@ -9257,8 +9268,10 @@ fn account_form_text_input(input: &Entity<InputState>) -> impl IntoElement {
 fn account_profile_select_input(select: &Entity<AccountProfileSelectState>) -> impl IntoElement {
     Select::new(select)
         .with_size(Size::Small)
+        .h(px(ACCOUNT_FORM_CONTROL_HEIGHT_PX))
         .text_size(px(APP_UI_THEME.foundation.typography.settings_row_text_px))
         .font_weight(gpui::FontWeight::NORMAL)
+        .rounded(px(APP_UI_THEME.components.app_input_text.corner_radius_px))
         .w_full()
 }
 
@@ -9267,8 +9280,10 @@ fn account_farm_profile_select_input(
 ) -> impl IntoElement {
     Select::new(select)
         .with_size(Size::Small)
+        .h(px(ACCOUNT_FORM_CONTROL_HEIGHT_PX))
         .text_size(px(APP_UI_THEME.foundation.typography.settings_row_text_px))
         .font_weight(gpui::FontWeight::NORMAL)
+        .rounded(px(APP_UI_THEME.components.app_input_text.corner_radius_px))
         .w_full()
 }
 
@@ -9428,7 +9443,7 @@ fn account_farm_profile_text_area_field(
     label_key: AppTextKey,
     input: &Entity<InputState>,
 ) -> impl IntoElement {
-    account_profile_labeled_control(label_key, account_form_text_input(input))
+    account_profile_labeled_control(label_key, account_form_text_area_input(input))
 }
 
 fn account_farm_profile_completeness_card() -> impl IntoElement {
