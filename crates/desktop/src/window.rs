@@ -9123,17 +9123,19 @@ fn account_profile_panel(
 ) -> impl IntoElement {
     app_stack_v(APP_UI_THEME.shells.home_stack_gap_px)
         .w_full()
-        .child(
-            div()
-                .w_full()
-                .text_size(px(APP_UI_THEME.foundation.typography.body_text_px * 1.5))
-                .font_weight(gpui::FontWeight::BOLD)
-                .text_color(rgb(APP_UI_THEME.foundation.text.primary))
-                .child(app_shared_text(
-                    AppTextKey::AccountProfilePersonalDetailsTitle,
-                )),
-        )
+        .child(account_section_heading(
+            AppTextKey::AccountProfilePersonalDetailsTitle,
+        ))
         .child(account_profile_details_card(form, cx))
+}
+
+fn account_section_heading(label_key: AppTextKey) -> impl IntoElement {
+    div()
+        .w_full()
+        .text_size(px(APP_UI_THEME.foundation.typography.body_text_px * 1.5))
+        .font_weight(gpui::FontWeight::BOLD)
+        .text_color(rgb(APP_UI_THEME.foundation.text.primary))
+        .child(app_shared_text(label_key))
 }
 
 fn account_profile_details_card(
@@ -9357,6 +9359,7 @@ fn account_farm_profile_panel(
 ) -> impl IntoElement {
     app_stack_v(APP_UI_THEME.shells.home_stack_gap_px)
         .w_full()
+        .child(account_section_heading(AppTextKey::AccountFarmDetailsTitle))
         .child(
             div()
                 .w_full()

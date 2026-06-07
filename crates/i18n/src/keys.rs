@@ -55,6 +55,7 @@ define_app_text_keys! {
     AccountProfileLanguageValue => "account.profile.language.value",
     AccountProfileLanguageFrenchValue => "account.profile.language.french.value",
     AccountProfileLanguageSpanishValue => "account.profile.language.spanish.value",
+    AccountFarmDetailsTitle => "account.farm_details.title",
     AccountFarmDetailsFarmProfileTitle => "account.farm_details.farm_profile.title",
     AccountFarmDetailsFarmProfileIntro => "account.farm_details.farm_profile.intro",
     AccountFarmDetailsFarmNameLabel => "account.farm_details.farm_name.label",

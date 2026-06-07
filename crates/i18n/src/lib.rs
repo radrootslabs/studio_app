@@ -190,6 +190,10 @@ mod tests {
             "+1 250 202 3030"
         );
         assert_eq!(
+            app_text(AppTextKey::AccountFarmDetailsTitle),
+            "Farm details"
+        );
+        assert_eq!(
             app_text(AppTextKey::AccountFarmDetailsFarmProfileTitle),
             "Farm profile"
         );

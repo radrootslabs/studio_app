@@ -387,6 +387,7 @@ const REQUIRED_WINDOW_COPY_KEYS: &[&str] = &[
     "AppTextKey::AccountProfileLanguageValue",
     "AppTextKey::AccountProfileLanguageFrenchValue",
     "AppTextKey::AccountProfileLanguageSpanishValue",
+    "AppTextKey::AccountFarmDetailsTitle",
     "AppTextKey::AccountFarmDetailsFarmProfileTitle",
     "AppTextKey::AccountFarmDetailsFarmProfileIntro",
     "AppTextKey::AccountFarmDetailsFarmNameLabel",

@@ -34,6 +34,7 @@
   "account.profile.language.value": "English",
   "account.profile.language.french.value": "French",
   "account.profile.language.spanish.value": "Spanish",
+  "account.farm_details.title": "Farm details",
   "account.farm_details.farm_profile.title": "Farm profile",
   "account.farm_details.farm_profile.intro": "Tell us about your farm. This information helps build your public profile and connect you with customers.",
   "account.farm_details.farm_name.label": "Farm name *",
