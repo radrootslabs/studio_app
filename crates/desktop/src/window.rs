@@ -9463,6 +9463,11 @@ fn account_tab_frame(
     panel: AnyElement,
 ) -> AnyElement {
     let content_max_width_px = APP_UI_THEME.shells.home_card_max_width_px;
+    let panel = div()
+        .w_full()
+        .pb(px(ACCOUNT_TAB_SCROLL_BOTTOM_PADDING_PX))
+        .child(panel)
+        .into_any_element();
 
     div()
         .size_full()
@@ -9493,6 +9498,8 @@ fn account_tab_frame(
         )))
         .into_any_element()
 }
+
+const ACCOUNT_TAB_SCROLL_BOTTOM_PADDING_PX: f32 = 4.0;
 
 fn account_placeholder_panel(text_key: AppTextKey) -> impl IntoElement {
     div()
