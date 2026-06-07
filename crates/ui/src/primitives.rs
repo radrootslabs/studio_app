@@ -785,6 +785,41 @@ pub fn app_button_primary(
     )
 }
 
+pub fn app_button_primary_compact(
+    id: impl Into<ElementId>,
+    label: impl Into<SharedString>,
+    on_click: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+    cx: &App,
+) -> impl IntoElement {
+    app_button_label(
+        app_button_base(id, AppButtonVariant::Primary, on_click, cx),
+        label.into(),
+        APP_UI_THEME
+            .components
+            .app_button
+            .sizing
+            .compact_horizontal_padding_px,
+        AppButtonVariant::Primary,
+    )
+}
+
+pub fn app_button_primary_compact_disabled(
+    id: impl Into<ElementId>,
+    label: impl Into<SharedString>,
+    cx: &App,
+) -> impl IntoElement {
+    app_button_label(
+        app_button_base_disabled(id, AppButtonVariant::Primary, cx),
+        label.into(),
+        APP_UI_THEME
+            .components
+            .app_button
+            .sizing
+            .compact_horizontal_padding_px,
+        AppButtonVariant::Primary,
+    )
+}
+
 pub fn app_button_primary_full_width(
     id: impl Into<ElementId>,
     label: impl Into<SharedString>,

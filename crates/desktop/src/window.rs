@@ -9,7 +9,7 @@ use gpui_component::{
     input::InputEvent,
     input::InputState,
     menu::PopupMenuItem,
-    select::{SearchableVec, Select, SelectDelegate, SelectState},
+    select::{SearchableVec, Select, SelectDelegate, SelectEvent, SelectState},
 };
 use radroots_studio_app_i18n::{AppTextKey, app_text};
 use radroots_studio_app_remote_signer::{
@@ -36,6 +36,8 @@ use radroots_studio_app_ui::{
     app_button_card, app_button_choice as choice_button,
     app_button_compact as action_button_compact, app_button_ellipsis_menu as action_ellipsis_menu,
     app_button_list_row as list_row_button, app_button_primary as action_button_primary,
+    app_button_primary_compact as action_button_primary_compact,
+    app_button_primary_compact_disabled as action_button_primary_compact_disabled,
     app_button_primary_disabled as action_button_primary_disabled,
     app_button_primary_full_width as action_button_primary_full_width,
     app_button_secondary as action_button, app_button_secondary_disabled as action_button_disabled,
@@ -284,7 +286,9 @@ fn account_profile_input_state(
     window: &mut Window,
     cx: &mut Context<HomeView>,
 ) -> Entity<InputState> {
-    cx.new(|cx| InputState::new(window, cx).default_value(app_text(value_key)))
+    let input = cx.new(|cx| InputState::new(window, cx).default_value(app_text(value_key)));
+    account_subscribe_input_change(&input, window, cx);
+    input
 }
 
 fn account_profile_autogrow_input_state(
@@ -292,11 +296,13 @@ fn account_profile_autogrow_input_state(
     window: &mut Window,
     cx: &mut Context<HomeView>,
 ) -> Entity<InputState> {
-    cx.new(|cx| {
+    let input = cx.new(|cx| {
         InputState::new(window, cx)
             .auto_grow(3, 6)
             .default_value(app_text(value_key))
-    })
+    });
+    account_subscribe_input_change(&input, window, cx);
+    input
 }
 
 fn account_profile_select_state(
@@ -309,14 +315,16 @@ fn account_profile_select_state(
         .copied()
         .map(app_shared_text)
         .collect::<Vec<_>>();
-    cx.new(|cx| {
+    let select = cx.new(|cx| {
         SelectState::new(
             SearchableVec::new(values),
             Some(IndexPath::default().row(0)),
             window,
             cx,
         )
-    })
+    });
+    account_subscribe_profile_select_change(&select, window, cx);
+    select
 }
 
 #[derive(Clone)]
@@ -397,6 +405,42 @@ impl AccountFarmProfileFormState {
             ),
         }
     }
+
+    fn is_dirty(&self, cx: &App) -> bool {
+        account_input_is_dirty(
+            &self.farm_name_input,
+            AppTextKey::AccountFarmDetailsFarmNameValue,
+            cx,
+        ) || account_input_is_dirty(
+            &self.public_farm_name_input,
+            AppTextKey::AccountFarmDetailsPublicFarmNameValue,
+            cx,
+        ) || account_input_is_dirty(
+            &self.short_description_input,
+            AppTextKey::AccountFarmDetailsShortDescriptionValue,
+            cx,
+        ) || account_input_is_dirty(
+            &self.contact_email_input,
+            AppTextKey::AccountFarmDetailsContactEmailValue,
+            cx,
+        ) || account_input_is_dirty(
+            &self.public_phone_input,
+            AppTextKey::AccountFarmDetailsPublicPhoneValue,
+            cx,
+        ) || account_input_is_dirty(
+            &self.website_input,
+            AppTextKey::AccountFarmDetailsWebsiteValue,
+            cx,
+        ) || account_input_is_dirty(
+            &self.established_year_input,
+            AppTextKey::AccountFarmDetailsEstablishedYearValue,
+            cx,
+        ) || account_input_is_dirty(
+            &self.about_farm_input,
+            AppTextKey::AccountFarmDetailsAboutFarmValue,
+            cx,
+        ) || account_select_is_dirty(&self.farm_type_select, cx)
+    }
 }
 
 #[derive(Clone)]
@@ -407,15 +451,26 @@ struct AccountSettingsFormState {
 
 impl AccountSettingsFormState {
     fn new(window: &mut Window, cx: &mut Context<HomeView>) -> Self {
+        let add_relay_input = cx.new(|cx| {
+            InputState::new(window, cx)
+                .placeholder(app_text(AppTextKey::AccountSettingsAddRelayPlaceholder))
+        });
+        let blossom_server_input = cx.new(|cx| {
+            InputState::new(window, cx).default_value(ACCOUNT_SETTINGS_DEFAULT_BLOSSOM_SERVER)
+        });
+        account_subscribe_input_change(&add_relay_input, window, cx);
+        account_subscribe_input_change(&blossom_server_input, window, cx);
+
         Self {
-            add_relay_input: cx.new(|cx| {
-                InputState::new(window, cx)
-                    .placeholder(app_text(AppTextKey::AccountSettingsAddRelayPlaceholder))
-            }),
-            blossom_server_input: cx.new(|cx| {
-                InputState::new(window, cx).default_value(ACCOUNT_SETTINGS_DEFAULT_BLOSSOM_SERVER)
-            }),
+            add_relay_input,
+            blossom_server_input,
         }
+    }
+
+    fn is_dirty(&self, cx: &App) -> bool {
+        !self.add_relay_input.read(cx).value().trim().is_empty()
+            || self.blossom_server_input.read(cx).value().as_ref()
+                != ACCOUNT_SETTINGS_DEFAULT_BLOSSOM_SERVER
     }
 }
 
@@ -429,14 +484,90 @@ fn account_farm_profile_select_state(
         .copied()
         .map(app_shared_text)
         .collect::<Vec<_>>();
-    cx.new(|cx| {
+    let select = cx.new(|cx| {
         SelectState::new(
             SearchableVec::new(values),
             Some(IndexPath::default().row(0)),
             window,
             cx,
         )
-    })
+    });
+    account_subscribe_farm_select_change(&select, window, cx);
+    select
+}
+
+fn account_input_is_dirty(
+    input: &Entity<InputState>,
+    initial_value_key: AppTextKey,
+    cx: &App,
+) -> bool {
+    input.read(cx).value().as_ref() != app_text(initial_value_key)
+}
+
+fn account_select_is_dirty(select: &Entity<AccountProfileSelectState>, cx: &App) -> bool {
+    select
+        .read(cx)
+        .selected_index(cx)
+        .is_some_and(|index| index.row != 0)
+}
+
+fn account_subscribe_input_change(
+    input: &Entity<InputState>,
+    window: &mut Window,
+    cx: &mut Context<HomeView>,
+) {
+    cx.subscribe_in(
+        input,
+        window,
+        |_: &mut HomeView, _: &Entity<InputState>, event: &InputEvent, _, cx| {
+            if matches!(event, InputEvent::Change) {
+                cx.notify();
+            }
+        },
+    )
+    .detach();
+}
+
+fn account_subscribe_profile_select_change(
+    select: &Entity<AccountProfileSelectState>,
+    window: &mut Window,
+    cx: &mut Context<HomeView>,
+) {
+    cx.subscribe_in(
+        select,
+        window,
+        |_: &mut HomeView,
+         _: &Entity<AccountProfileSelectState>,
+         event: &SelectEvent<SearchableVec<SharedString>>,
+         _,
+         cx| {
+            if matches!(event, SelectEvent::Confirm(_)) {
+                cx.notify();
+            }
+        },
+    )
+    .detach();
+}
+
+fn account_subscribe_farm_select_change(
+    select: &Entity<AccountFarmProfileSelectState>,
+    window: &mut Window,
+    cx: &mut Context<HomeView>,
+) {
+    cx.subscribe_in(
+        select,
+        window,
+        |_: &mut HomeView,
+         _: &Entity<AccountFarmProfileSelectState>,
+         event: &SelectEvent<SearchableVec<SharedString>>,
+         _,
+         cx| {
+            if matches!(event, SelectEvent::Confirm(_)) {
+                cx.notify();
+            }
+        },
+    )
+    .detach();
 }
 
 fn buyer_order_detail_focus_after_open(
@@ -9172,12 +9303,66 @@ fn account_profile_panel(
 }
 
 fn account_section_heading(label_key: AppTextKey) -> impl IntoElement {
+    account_section_heading_row(label_key, None::<gpui::AnyElement>)
+}
+
+fn account_section_heading_row(
+    label_key: AppTextKey,
+    actions: Option<impl IntoElement>,
+) -> impl IntoElement {
     div()
         .w_full()
-        .text_size(px(APP_UI_THEME.foundation.typography.body_text_px * 1.5))
-        .font_weight(gpui::FontWeight::BOLD)
-        .text_color(rgb(APP_UI_THEME.foundation.text.primary))
-        .child(app_shared_text(label_key))
+        .flex()
+        .items_center()
+        .justify_between()
+        .gap(px(APP_UI_THEME.shells.home_stack_gap_px))
+        .child(
+            div()
+                .min_w_0()
+                .text_size(px(APP_UI_THEME.foundation.typography.body_text_px * 1.5))
+                .font_weight(gpui::FontWeight::BOLD)
+                .text_color(rgb(APP_UI_THEME.foundation.text.primary))
+                .child(app_shared_text(label_key)),
+        )
+        .when_some(actions, |this, actions| {
+            this.child(div().flex_none().child(actions))
+        })
+}
+
+fn account_form_heading_actions(
+    draft_id: &'static str,
+    save_id: &'static str,
+    save_is_active: bool,
+    cx: &mut Context<HomeView>,
+) -> impl IntoElement {
+    let save_button = if save_is_active {
+        action_button_primary_compact(
+            save_id,
+            app_shared_text(AppTextKey::AccountFormSaveAction),
+            |_, _, _| {},
+            cx,
+        )
+        .into_any_element()
+    } else {
+        action_button_primary_compact_disabled(
+            save_id,
+            app_shared_text(AppTextKey::AccountFormSaveAction),
+            cx,
+        )
+        .into_any_element()
+    };
+
+    div()
+        .flex()
+        .items_center()
+        .gap(px(APP_UI_THEME.foundation.spacing.small_px))
+        .child(action_button_compact(
+            draft_id,
+            app_shared_text(AppTextKey::AccountFormSaveDraftAction),
+            |_, _, _| {},
+            cx,
+        ))
+        .child(save_button)
 }
 
 fn account_profile_details_card(
@@ -9404,7 +9589,15 @@ fn account_farm_profile_panel(
 ) -> impl IntoElement {
     app_stack_v(APP_UI_THEME.shells.home_stack_gap_px)
         .w_full()
-        .child(account_section_heading(AppTextKey::AccountFarmDetailsTitle))
+        .child(account_section_heading_row(
+            AppTextKey::AccountFarmDetailsTitle,
+            Some(account_form_heading_actions(
+                "account-farm-save-draft",
+                "account-farm-save",
+                form.is_dirty(cx),
+                cx,
+            )),
+        ))
         .child(
             div()
                 .w_full()
@@ -9429,7 +9622,6 @@ fn account_farm_profile_panel(
                         .child(account_farm_profile_summary_card(cx)),
                 ),
         )
-        .child(account_farm_profile_action_row(cx))
 }
 
 fn account_farm_profile_main_card(
@@ -9836,38 +10028,21 @@ fn account_farm_profile_summary_row(
         )
 }
 
-fn account_farm_profile_action_row(cx: &mut Context<HomeView>) -> impl IntoElement {
-    div()
-        .w_full()
-        .flex()
-        .items_center()
-        .gap(px(APP_UI_THEME.shells.home_stack_gap_px))
-        .child(div().w(px(280.0)).child(action_button_full_width(
-            "account-farm-save-draft",
-            app_shared_text(AppTextKey::AccountFarmDetailsSaveDraftAction),
-            |_, _, _| {},
-            cx,
-        )))
-        .child(
-            div()
-                .flex_1()
-                .min_w_0()
-                .child(action_button_primary_full_width(
-                    "account-farm-continue-location",
-                    app_shared_text(AppTextKey::AccountFarmDetailsContinueLocationAction),
-                    |_, _, _| {},
-                    cx,
-                )),
-        )
-}
-
 fn account_settings_panel(
     form: &AccountSettingsFormState,
     cx: &mut Context<HomeView>,
 ) -> impl IntoElement {
     app_stack_v(APP_UI_THEME.shells.home_stack_gap_px)
         .w_full()
-        .child(account_section_heading(AppTextKey::AccountSettingsTitle))
+        .child(account_section_heading_row(
+            AppTextKey::AccountSettingsTitle,
+            Some(account_form_heading_actions(
+                "account-settings-save-draft",
+                "account-settings-save",
+                form.is_dirty(cx),
+                cx,
+            )),
+        ))
         .child(
             div()
                 .w_full()
@@ -9887,12 +10062,6 @@ fn account_settings_panel(
                         .child(account_settings_blossom_server_card(form, cx)),
                 ),
         )
-        .child(action_button_primary_full_width(
-            "account-settings-save",
-            app_shared_text(AppTextKey::AccountSettingsSaveChangesAction),
-            |_, _, _| {},
-            cx,
-        ))
 }
 
 fn account_settings_nostr_relays_card(

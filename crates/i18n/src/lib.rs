@@ -165,6 +165,11 @@ mod tests {
             app_text(AppTextKey::AccountNotImplemented),
             "Not implemented"
         );
+        assert_eq!(app_text(AppTextKey::AccountFormSaveAction), "Save");
+        assert_eq!(
+            app_text(AppTextKey::AccountFormSaveDraftAction),
+            "Save draft"
+        );
         assert_eq!(
             app_text(AppTextKey::AccountProfilePersonalDetailsTitle),
             "Personal details"
@@ -217,18 +222,6 @@ mod tests {
         assert_eq!(
             app_text(AppTextKey::AccountSettingsBlossomServerTitle),
             "Blossom server"
-        );
-        assert_eq!(
-            app_text(AppTextKey::AccountSettingsSaveChangesAction),
-            "Save changes"
-        );
-        assert_eq!(
-            app_text(AppTextKey::AccountFarmDetailsSaveDraftAction),
-            "Save draft"
-        );
-        assert_eq!(
-            app_text(AppTextKey::AccountFarmDetailsContinueLocationAction),
-            "Continue to location"
         );
         assert_eq!(
             app_text(AppTextKey::HomeTodayEmptySetupBody),
