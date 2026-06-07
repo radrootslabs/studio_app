@@ -17,8 +17,8 @@ pub use primitives::{
     app_text_label, app_text_value, label_value_list, utility_title_row,
 };
 pub use text::{
-    app_shared_label_text, app_shared_text, runtime_metadata_rows,
-    settings_preferences_general_rows,
+    SettingsPreferencesGeneralRowState, app_shared_label_text, app_shared_text,
+    runtime_metadata_rows, settings_preferences_general_rows,
 };
 pub use theme::{
     APP_UI_THEME, AppBorderTokens, AppButtonColors, AppButtonSizing, AppButtonTokens,

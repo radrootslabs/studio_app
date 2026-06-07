@@ -28,9 +28,10 @@ use radroots_studio_app_sync::{
 };
 use radroots_studio_app_ui::{
     APP_UI_THEME, AppCheckboxFieldSpec, AppFormFieldSpec,
-    AppSegmentButtonIconSpec as IconSegmentButtonSpec, LabelValueRow, app_button_card,
-    app_button_choice as choice_button, app_button_compact as action_button_compact,
-    app_button_list_row as list_row_button, app_button_primary as action_button_primary,
+    AppSegmentButtonIconSpec as IconSegmentButtonSpec, LabelValueRow,
+    SettingsPreferencesGeneralRowState, app_button_card, app_button_choice as choice_button,
+    app_button_compact as action_button_compact, app_button_list_row as list_row_button,
+    app_button_primary as action_button_primary,
     app_button_primary_disabled as action_button_primary_disabled,
     app_button_secondary as action_button, app_button_secondary_disabled as action_button_disabled,
     app_button_text as text_button, app_checkbox_field, app_cluster, app_detail_row,
@@ -6335,6 +6336,18 @@ enum SettingsAutoFocusTarget {
     AboutRefresh,
 }
 
+fn settings_preferences_general_row_state(
+    runtime: &DesktopAppRuntimeSummary,
+) -> SettingsPreferencesGeneralRowState {
+    let general = &runtime.shell_projection.settings.general;
+    SettingsPreferencesGeneralRowState {
+        allow_relay_connections: general.allow_relay_connections,
+        use_media_servers: general.use_media_servers,
+        use_nip05: general.use_nip05,
+        launch_at_login: general.launch_at_login,
+    }
+}
+
 impl SettingsWindowView {
     pub fn new(runtime: DesktopAppRuntime, initial_view: SettingsPanelViewKey) -> Self {
         let _ = initial_view;
@@ -6931,6 +6944,7 @@ impl SettingsWindowView {
 
     fn settings_panel(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         self.sync_farm_panel_state(window, cx);
+        let runtime = self.runtime.summary();
 
         let mut cards = Vec::new();
 
@@ -7188,7 +7202,9 @@ impl SettingsWindowView {
                 app_shared_text(AppTextKey::SettingsGeneralSectionLabel),
                 app_stack_v(APP_UI_THEME.foundation.spacing.small_px)
                     .w_full()
-                    .child(label_value_list(settings_preferences_general_rows())),
+                    .child(label_value_list(settings_preferences_general_rows(
+                        settings_preferences_general_row_state(&runtime),
+                    ))),
             )
             .into_any_element(),
         );
@@ -13820,12 +13836,12 @@ mod tests {
         parse_product_editor_price_input, presented_farmer_reminder, product_display_title,
         reminder_action_target, reminder_deadline_text, reminder_delivery_state_key,
         reminder_urgency_color, reminder_urgency_key, settings_auto_focus_target,
-        startup_home_surface, startup_issue_summary_text, startup_notice_text,
-        startup_signer_preview_summary, startup_signer_preview_summary_for_connect_state,
-        startup_signer_source_input_is_editable, startup_signer_status_spec,
-        startup_signer_transport_failure_requires_notice, trade_agreement_status_key,
-        trade_fulfillment_status_key, trade_inventory_status_key, trade_payment_display_status_key,
-        trade_revision_status_key, trade_workflow_source_key,
+        settings_preferences_general_row_state, startup_home_surface, startup_issue_summary_text,
+        startup_notice_text, startup_signer_preview_summary,
+        startup_signer_preview_summary_for_connect_state, startup_signer_source_input_is_editable,
+        startup_signer_status_spec, startup_signer_transport_failure_requires_notice,
+        trade_agreement_status_key, trade_fulfillment_status_key, trade_inventory_status_key,
+        trade_payment_display_status_key, trade_revision_status_key, trade_workflow_source_key,
     };
     use crate::runtime::{
         DesktopAppRuntimeMetadataSummary, DesktopAppRuntimeSummary, DesktopAppSyncConflictSummary,
@@ -14860,6 +14876,30 @@ mod tests {
                 SettingsPanelViewKey::About
             ))
         );
+    }
+
+    #[test]
+    fn settings_general_rows_read_runtime_projection_values() {
+        let mut runtime = summary(
+            HomeRoute::Today,
+            TodayAgendaProjection::default(),
+            FarmSetupProjection::default(),
+        );
+        runtime
+            .shell_projection
+            .settings
+            .general
+            .allow_relay_connections = false;
+        runtime.shell_projection.settings.general.use_media_servers = true;
+        runtime.shell_projection.settings.general.use_nip05 = false;
+        runtime.shell_projection.settings.general.launch_at_login = true;
+
+        let state = settings_preferences_general_row_state(&runtime);
+
+        assert!(!state.allow_relay_connections);
+        assert!(state.use_media_servers);
+        assert!(!state.use_nip05);
+        assert!(state.launch_at_login);
     }
 
     #[test]
