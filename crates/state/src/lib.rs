@@ -718,16 +718,12 @@ impl AppShellProjection {
     }
 
     fn select_active_surface(&mut self, active_surface: ActiveSurface) {
-        if self.active_surface == active_surface {
-            return;
-        }
-
         self.active_surface = active_surface;
         match active_surface {
             ActiveSurface::Personal => {
                 if matches!(
                     self.selected_section,
-                    ShellSection::Account | ShellSection::Farmer(_)
+                    ShellSection::Home | ShellSection::Account | ShellSection::Farmer(_)
                 ) {
                     self.selected_section = ShellSection::default_for_surface(active_surface);
                 }
@@ -3937,6 +3933,64 @@ mod tests {
             ShellSection::Personal(PersonalSection::Browse)
         );
         assert_eq!(store.startup_gate(), AppStartupGate::Personal);
+    }
+
+    #[test]
+    fn select_active_surface_moves_account_route_to_personal_default() {
+        let repository = InMemoryAppStateRepository::new(AppShellProjection::new(
+            ActiveSurface::Personal,
+            ShellSection::Account,
+        ));
+        let mut store = AppStateStore::load(repository).expect("in-memory repository should load");
+        assert_eq!(
+            store.apply(AppStateCommand::replace_identity_projection(
+                ready_identity(ActiveSurface::Personal,)
+            )),
+            Ok(true)
+        );
+
+        let changed = store.apply(AppStateCommand::select_active_surface(
+            ActiveSurface::Personal,
+        ));
+
+        assert_eq!(changed, Ok(true));
+        assert_eq!(
+            store.projection().shell.active_surface,
+            ActiveSurface::Personal
+        );
+        assert_eq!(
+            store.projection().shell.selected_section,
+            ShellSection::Personal(PersonalSection::Browse)
+        );
+    }
+
+    #[test]
+    fn select_active_surface_moves_account_route_to_farmer_default() {
+        let repository = InMemoryAppStateRepository::new(AppShellProjection::new(
+            ActiveSurface::Farmer,
+            ShellSection::Account,
+        ));
+        let mut store = AppStateStore::load(repository).expect("in-memory repository should load");
+        assert_eq!(
+            store.apply(AppStateCommand::replace_identity_projection(
+                ready_identity(ActiveSurface::Farmer,)
+            )),
+            Ok(true)
+        );
+
+        let changed = store.apply(AppStateCommand::select_active_surface(
+            ActiveSurface::Farmer,
+        ));
+
+        assert_eq!(changed, Ok(true));
+        assert_eq!(
+            store.projection().shell.active_surface,
+            ActiveSurface::Farmer
+        );
+        assert_eq!(
+            store.projection().shell.selected_section,
+            ShellSection::Farmer(FarmerSection::Today)
+        );
     }
 
     #[test]
