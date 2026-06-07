@@ -9274,7 +9274,7 @@ fn account_profile_labeled_control(
         .child(control)
 }
 
-const ACCOUNT_FORM_CONTROL_HEIGHT_PX: f32 = 36.0;
+const ACCOUNT_FORM_CONTROL_HEIGHT_PX: f32 = 34.0;
 const ACCOUNT_FORM_CONTROL_RADIUS_PX: f32 = 8.0;
 
 fn account_form_text_input(input: &Entity<InputState>) -> impl IntoElement {
