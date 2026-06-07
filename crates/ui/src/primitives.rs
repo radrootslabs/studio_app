@@ -382,18 +382,68 @@ pub fn app_pill_tabs(
     tabs: impl IntoIterator<Item = AppPillTabSpec>,
     selected_index: usize,
     on_click: impl Fn(&usize, &mut Window, &mut App) + 'static,
+    cx: &App,
 ) -> impl IntoElement {
-    TabBar::new(id)
-        .pill()
-        .with_size(Size::Small)
+    let on_click: Rc<dyn Fn(&usize, &mut Window, &mut App)> = Rc::new(on_click);
+    let tabs = tabs.into_iter().collect::<Vec<_>>();
+    let height_px = APP_UI_THEME.components.app_button.sizing.height_px;
+    let radius_px = height_px / 2.0;
+    let primary = APP_UI_THEME.components.app_button.primary_colors;
+    let inactive_foreground = APP_UI_THEME.foundation.text.secondary;
+    let inactive_hover_background = APP_UI_THEME.foundation.surfaces.card_background;
+
+    div()
+        .id(id)
+        .flex()
+        .items_center()
         .w_full()
-        .selected_index(selected_index)
-        .children(
-            tabs.into_iter()
-                .map(|tab| Tab::new().label(tab.label))
-                .collect::<Vec<_>>(),
-        )
-        .on_click(on_click)
+        .gap(px(APP_UI_THEME.foundation.spacing.micro_px))
+        .children(tabs.into_iter().enumerate().map(|(index, tab)| {
+            let is_selected = index == selected_index;
+            let foreground = if is_selected {
+                primary.foreground
+            } else {
+                inactive_foreground
+            };
+            let variant = if is_selected {
+                ButtonCustomVariant::new(cx)
+                    .color(rgb(primary.background).into())
+                    .foreground(rgb(primary.foreground).into())
+                    .border(transparent_black())
+                    .hover(rgb(primary.hover_background).into())
+                    .active(rgb(primary.active_background).into())
+            } else {
+                ButtonCustomVariant::new(cx)
+                    .color(transparent_black().into())
+                    .foreground(rgb(inactive_foreground).into())
+                    .border(transparent_black())
+                    .hover(rgb(inactive_hover_background).into())
+                    .active(rgb(inactive_hover_background).into())
+            };
+            let on_click = Rc::clone(&on_click);
+
+            Button::new((id, index))
+                .custom(variant)
+                .h(px(height_px))
+                .rounded(ButtonRounded::Size(px(radius_px)))
+                .on_click(move |_, window, cx| on_click(&index, window, cx))
+                .child(
+                    div()
+                        .h_full()
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .px(px(APP_UI_THEME
+                            .components
+                            .app_button
+                            .sizing
+                            .horizontal_padding_px))
+                        .text_size(px(APP_UI_THEME.components.app_button.sizing.label_size_px))
+                        .font_weight(gpui::FontWeight::MEDIUM)
+                        .text_color(rgb(foreground))
+                        .child(tab.label),
+                )
+        }))
 }
 
 fn app_underline_tab_width_px(label: &SharedString, tab_text_px: f32) -> f32 {

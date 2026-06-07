@@ -5624,6 +5624,7 @@ impl HomeView {
                                     cx,
                                 )
                             }),
+                            cx,
                         )
                         .into_any_element(),
                     ),
