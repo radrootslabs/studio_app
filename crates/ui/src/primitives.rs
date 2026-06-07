@@ -1,13 +1,13 @@
 use gpui::{
-    AnyElement, App, ClickEvent, Context, Div, ElementId, Entity, InteractiveElement, IntoElement,
-    ParentElement, SharedString, StatefulInteractiveElement, Styled, Window, div,
+    AnyElement, App, ClickEvent, Context, Corner, Div, ElementId, Entity, InteractiveElement,
+    IntoElement, ParentElement, SharedString, StatefulInteractiveElement, Styled, Window, div,
     prelude::FluentBuilder, px, relative, rgb, transparent_black,
 };
 use gpui_component::{
     Icon, IconName, Sizable, Size,
     button::{Button, ButtonCustomVariant, ButtonRounded, ButtonVariants, DropdownButton},
     input::{Input, InputState},
-    menu::PopupMenu,
+    menu::{DropdownMenu, PopupMenu},
     tab::{Tab, TabBar},
 };
 use std::rc::Rc;
@@ -556,6 +556,15 @@ fn app_checkbox(
     button.tab_stop(false)
 }
 
+pub fn app_checkbox_button(
+    id: &'static str,
+    checked: bool,
+    cx: &App,
+    on_change: impl Fn(bool, &mut Window, &mut App) + 'static,
+) -> impl IntoElement {
+    app_checkbox(id, checked, cx, on_change)
+}
+
 pub fn app_checkbox_field(
     spec: AppCheckboxFieldSpec,
     checked: bool,
@@ -859,6 +868,29 @@ pub fn app_button_square_dropdown_secondary(
                 .rounded(ButtonRounded::Size(px(sizing.corner_radius_px)))
                 .with_size(Size::Size(px(sizing.square_width_px))),
         )
+}
+
+pub fn app_button_ellipsis_menu(
+    id: &'static str,
+    menu: impl Fn(PopupMenu, &mut Window, &mut Context<PopupMenu>) -> PopupMenu + 'static,
+    _cx: &App,
+) -> impl IntoElement {
+    let sizing = APP_UI_THEME.components.app_button.sizing;
+
+    Button::new(id)
+        .ghost()
+        .rounded(ButtonRounded::Size(px(APP_UI_THEME
+            .foundation
+            .radii
+            .medium_px)))
+        .with_size(Size::Size(px(sizing.square_width_px)))
+        .tab_stop(false)
+        .child(
+            Icon::new(IconName::Ellipsis)
+                .with_size(Size::Size(px(sizing.icon_size_px)))
+                .text_color(rgb(APP_UI_THEME.foundation.text.secondary)),
+        )
+        .dropdown_menu_with_anchor(Corner::BottomRight, menu)
 }
 
 fn app_button_label(

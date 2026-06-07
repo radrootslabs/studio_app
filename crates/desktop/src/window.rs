@@ -30,26 +30,26 @@ use radroots_studio_app_sync::{
     SyncConflictKind, SyncConflictResolutionStatus, SyncConflictSeverity,
 };
 use radroots_studio_app_ui::{
-    APP_UI_THEME, AppCheckboxFieldSpec, AppFormFieldSpec, AppIconButtonSpec,
+    APP_UI_THEME, AppCheckboxFieldSpec, AppFormFieldSpec,
     AppSegmentButtonIconSpec as IconSegmentButtonSpec, AppUnderlineTabSpec, LabelValueRow,
     SettingsPreferencesGeneralRowState, app_button_account_selector_row as account_selector_row,
     app_button_card, app_button_choice as choice_button,
-    app_button_compact as action_button_compact, app_button_icon as action_icon_button,
+    app_button_compact as action_button_compact, app_button_ellipsis_menu as action_ellipsis_menu,
     app_button_list_row as list_row_button, app_button_primary as action_button_primary,
     app_button_primary_disabled as action_button_primary_disabled,
     app_button_primary_full_width as action_button_primary_full_width,
     app_button_secondary as action_button, app_button_secondary_disabled as action_button_disabled,
     app_button_secondary_full_width as action_button_full_width,
     app_button_square_dropdown_secondary as action_dropdown_button, app_button_text as text_button,
-    app_checkbox_field, app_cluster, app_detail_row, app_divider as section_divider,
-    app_focused_detail_view, app_focused_task_view, app_form_field, app_form_input_text,
-    app_form_section, app_heading_section, app_heading_view, app_input_text as app_text_input,
-    app_scroll_panel, app_segment_button_icon as icon_segment_button, app_shared_label_text,
-    app_shared_text, app_split_shell, app_stack_h, app_stack_v,
-    app_status_indicator as status_indicator, app_surface_card,
-    app_surface_card_section as home_card, app_surface_panel, app_surface_sidebar,
-    app_surface_window as app_window_shell, app_text_badge as settings_badge_text,
-    app_text_body_subtle as home_body_text, app_text_label,
+    app_checkbox_button as action_checkbox_button, app_checkbox_field, app_cluster, app_detail_row,
+    app_divider as section_divider, app_focused_detail_view, app_focused_task_view, app_form_field,
+    app_form_input_text, app_form_section, app_heading_section, app_heading_view,
+    app_input_text as app_text_input, app_scroll_panel,
+    app_segment_button_icon as icon_segment_button, app_shared_label_text, app_shared_text,
+    app_split_shell, app_stack_h, app_stack_v, app_status_indicator as status_indicator,
+    app_surface_card, app_surface_card_section as home_card, app_surface_panel,
+    app_surface_sidebar, app_surface_window as app_window_shell,
+    app_text_badge as settings_badge_text, app_text_body_subtle as home_body_text, app_text_label,
     app_text_label as home_farm_setup_field_label, app_text_value, app_underline_tabs,
     label_value_list, runtime_metadata_rows, settings_preferences_general_rows, utility_title_row,
 };
@@ -9929,7 +9929,7 @@ fn account_settings_relay_list(cx: &mut Context<HomeView>) -> impl IntoElement {
         .overflow_hidden()
         .child(account_settings_relay_row(
             "account-settings-relay-localhost-8080",
-            "account-settings-remove-relay-localhost-8080",
+            "account-settings-relay-menu-localhost-8080",
             ACCOUNT_SETTINGS_RELAY_LOCALHOST_8080,
             AppTextKey::AccountSettingsRelayAccessReadWrite,
             true,
@@ -9937,7 +9937,7 @@ fn account_settings_relay_list(cx: &mut Context<HomeView>) -> impl IntoElement {
         ))
         .child(account_settings_relay_row(
             "account-settings-relay-localhost-8081",
-            "account-settings-remove-relay-localhost-8081",
+            "account-settings-relay-menu-localhost-8081",
             ACCOUNT_SETTINGS_RELAY_LOCALHOST_8081,
             AppTextKey::AccountSettingsRelayAccessReadOnly,
             true,
@@ -9947,7 +9947,7 @@ fn account_settings_relay_list(cx: &mut Context<HomeView>) -> impl IntoElement {
 
 fn account_settings_relay_row(
     checkbox_id: &'static str,
-    remove_id: &'static str,
+    menu_id: &'static str,
     relay_url: &'static str,
     access_key: AppTextKey,
     enabled: bool,
@@ -9961,12 +9961,23 @@ fn account_settings_relay_row(
         .flex()
         .items_center()
         .gap(px(APP_UI_THEME.shells.home_stack_gap_px))
-        .child(div().flex_1().min_w_0().child(app_checkbox_field(
-            AppCheckboxFieldSpec::new(checkbox_id, relay_url, Option::<SharedString>::None),
-            enabled,
-            cx,
-            |_, _, _| {},
-        )))
+        .child(
+            div()
+                .flex_1()
+                .min_w_0()
+                .flex()
+                .items_center()
+                .gap(px(APP_UI_THEME.foundation.spacing.medium_px))
+                .child(account_settings_checkbox(checkbox_id, enabled, cx))
+                .child(
+                    div()
+                        .flex_1()
+                        .min_w_0()
+                        .text_size(px(APP_UI_THEME.foundation.typography.settings_row_text_px))
+                        .text_color(rgb(APP_UI_THEME.foundation.text.primary))
+                        .child(relay_url),
+                ),
+        )
         .child(
             div()
                 .w(px(104.0))
@@ -9974,15 +9985,68 @@ fn account_settings_relay_row(
                 .text_color(rgb(APP_UI_THEME.foundation.text.secondary))
                 .child(app_shared_text(access_key)),
         )
-        .child(action_icon_button(
-            AppIconButtonSpec::new(
-                remove_id,
-                app_shared_text(AppTextKey::AccountSettingsRemoveRelayAction),
-                IconName::Delete,
-            ),
-            |_, _, _| {},
-            cx,
-        ))
+        .child(account_settings_relay_menu_button(menu_id, cx))
+}
+
+fn account_settings_checkbox(
+    id: &'static str,
+    checked: bool,
+    cx: &mut Context<HomeView>,
+) -> impl IntoElement {
+    action_checkbox_button(id, checked, cx, |_, _, _| {})
+}
+
+fn account_settings_relay_menu_button(
+    id: &'static str,
+    cx: &mut Context<HomeView>,
+) -> impl IntoElement {
+    action_ellipsis_menu(
+        id,
+        |menu, _, _| {
+            menu.item(PopupMenuItem::new(app_text(
+                AppTextKey::AccountSettingsRelayMenuAbout,
+            )))
+            .item(PopupMenuItem::new(app_text(
+                AppTextKey::AccountSettingsRelayMenuView,
+            )))
+            .item(
+                PopupMenuItem::new(app_text(AppTextKey::AccountSettingsRemoveRelayAction))
+                    .on_click(|_, _, _| {}),
+            )
+            .item(PopupMenuItem::new(app_text(
+                AppTextKey::AccountSettingsRelayMenuCheckConnection,
+            )))
+            .separator()
+            .item(account_settings_copy_menu_item())
+        },
+        cx,
+    )
+}
+
+fn account_settings_copy_menu_item() -> PopupMenuItem {
+    PopupMenuItem::element(|_, _| {
+        div()
+            .w(px(180.0))
+            .flex()
+            .items_center()
+            .justify_between()
+            .gap(px(APP_UI_THEME.foundation.spacing.large_px))
+            .child(
+                div()
+                    .text_size(px(APP_UI_THEME.foundation.typography.settings_row_text_px))
+                    .text_color(rgb(APP_UI_THEME.foundation.text.primary))
+                    .child(app_shared_text(AppTextKey::AccountSettingsRelayMenuCopy)),
+            )
+            .child(
+                div()
+                    .text_size(px(APP_UI_THEME.foundation.typography.utility_title_text_px))
+                    .text_color(rgb(APP_UI_THEME.foundation.text.secondary))
+                    .child(app_shared_text(
+                        AppTextKey::AccountSettingsRelayMenuCopyShortcut,
+                    )),
+            )
+    })
+    .on_click(|_, _, _| {})
 }
 
 fn account_settings_add_relay_controls(
