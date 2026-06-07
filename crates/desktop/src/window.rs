@@ -9246,7 +9246,8 @@ fn account_profile_labeled_control(
         .child(control)
 }
 
-const ACCOUNT_FORM_CONTROL_HEIGHT_PX: f32 = 28.0;
+const ACCOUNT_FORM_CONTROL_HEIGHT_PX: f32 = 32.0;
+const ACCOUNT_FORM_CONTROL_RADIUS_PX: f32 = 8.0;
 
 fn account_form_text_input(input: &Entity<InputState>) -> impl IntoElement {
     app_text_input(input, false)
@@ -9254,6 +9255,7 @@ fn account_form_text_input(input: &Entity<InputState>) -> impl IntoElement {
         .h(px(ACCOUNT_FORM_CONTROL_HEIGHT_PX))
         .text_size(px(APP_UI_THEME.foundation.typography.settings_row_text_px))
         .font_weight(gpui::FontWeight::NORMAL)
+        .rounded(px(ACCOUNT_FORM_CONTROL_RADIUS_PX))
         .w_full()
 }
 
@@ -9262,6 +9264,7 @@ fn account_form_text_area_input(input: &Entity<InputState>) -> impl IntoElement 
         .with_size(Size::Small)
         .text_size(px(APP_UI_THEME.foundation.typography.settings_row_text_px))
         .font_weight(gpui::FontWeight::NORMAL)
+        .rounded(px(ACCOUNT_FORM_CONTROL_RADIUS_PX))
         .w_full()
 }
 
@@ -9271,7 +9274,7 @@ fn account_profile_select_input(select: &Entity<AccountProfileSelectState>) -> i
         .h(px(ACCOUNT_FORM_CONTROL_HEIGHT_PX))
         .text_size(px(APP_UI_THEME.foundation.typography.settings_row_text_px))
         .font_weight(gpui::FontWeight::NORMAL)
-        .rounded(px(APP_UI_THEME.components.app_input_text.corner_radius_px))
+        .rounded(px(ACCOUNT_FORM_CONTROL_RADIUS_PX))
         .w_full()
 }
 
@@ -9283,7 +9286,7 @@ fn account_farm_profile_select_input(
         .h(px(ACCOUNT_FORM_CONTROL_HEIGHT_PX))
         .text_size(px(APP_UI_THEME.foundation.typography.settings_row_text_px))
         .font_weight(gpui::FontWeight::NORMAL)
-        .rounded(px(APP_UI_THEME.components.app_input_text.corner_radius_px))
+        .rounded(px(ACCOUNT_FORM_CONTROL_RADIUS_PX))
         .w_full()
 }
 
