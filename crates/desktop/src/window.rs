@@ -27,23 +27,23 @@ use radroots_studio_app_sync::{
     SyncConflictKind, SyncConflictResolutionStatus, SyncConflictSeverity,
 };
 use radroots_studio_app_ui::{
-    APP_UI_THEME, AppCheckboxFieldSpec, AppFormFieldSpec, AppIconButtonSpec,
+    APP_UI_THEME, AppCheckboxFieldSpec, AppFormFieldSpec,
     AppSegmentButtonIconSpec as IconSegmentButtonSpec, LabelValueRow, app_button_card,
     app_button_choice as choice_button, app_button_compact as action_button_compact,
-    app_button_icon as action_icon_button, app_button_list_row as list_row_button,
-    app_button_primary as action_button_primary,
+    app_button_list_row as list_row_button, app_button_primary as action_button_primary,
     app_button_primary_disabled as action_button_primary_disabled,
     app_button_secondary as action_button, app_button_secondary_disabled as action_button_disabled,
     app_button_text as text_button, app_checkbox_field, app_cluster, app_detail_row,
-    app_divider as section_divider, app_form_field, app_form_input_text, app_form_section,
-    app_heading_section, app_heading_view, app_input_text as app_text_input, app_scroll_panel,
+    app_divider as section_divider, app_focused_detail_view, app_focused_task_view, app_form_field,
+    app_form_input_text, app_form_section, app_heading_section, app_heading_view,
+    app_input_text as app_text_input, app_scroll_panel,
     app_segment_button_icon as icon_segment_button, app_shared_label_text, app_shared_text,
     app_split_shell, app_stack_h, app_stack_v, app_status_indicator as status_indicator,
     app_surface_card, app_surface_card_section as home_card, app_surface_panel,
     app_surface_sidebar, app_surface_window as app_window_shell,
     app_text_badge as settings_badge_text, app_text_body_subtle as home_body_text, app_text_label,
     app_text_label as home_farm_setup_field_label, app_text_value, label_value_list,
-    runtime_metadata_rows, utility_title_row,
+    runtime_metadata_rows, settings_preferences_general_rows, utility_title_row,
 };
 pub use radroots_studio_app_view::SettingsSection as SettingsPanelViewKey;
 use radroots_studio_app_view::{
@@ -67,9 +67,8 @@ use radroots_studio_app_view::{
     RepeatDemandEligibility, RepeatDemandHandoffProjection, ShellSection, TodayAgendaProjection,
     TodaySetupTaskKind, TradeAgreementStatus, TradeEconomicsProjection, TradeFulfillmentStatus,
     TradeInventoryStatus, TradePaymentDisplayStatus, TradeReceiptProjection, TradeRevisionStatus,
-    TradeValidationReceiptProjection, TradeValidationReceiptProofSystem,
-    TradeValidationReceiptResult, TradeValidationReceiptType, TradeWorkflowProjection,
-    TradeWorkflowSource,
+    TradeValidationReceiptProjection, TradeValidationReceiptResult, TradeValidationReceiptType,
+    TradeWorkflowProjection, TradeWorkflowSource,
 };
 use radroots_nostr::prelude::RadrootsNostrClient;
 use std::{
@@ -143,6 +142,17 @@ pub fn home_stage(summary: &DesktopAppRuntimeSummary) -> HomeStage {
     } else {
         HomeStage::Setup
     }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum HomeFocusedView {
+    FarmSetup,
+    ProductEditor,
+    FarmerOrderDetail(OrderId),
+    BuyerProductDetail(PersonalSection),
+    BuyerOrderReview,
+    BuyerOrderDetail(OrderId),
+    BuyerReceiptIssue(OrderId),
 }
 
 pub fn home_window_options(cx: &mut App) -> WindowOptions {
@@ -227,6 +237,7 @@ pub struct HomeView {
     products_search: Option<ProductsSearchState>,
     products_stock_editor: Option<ProductsStockEditorState>,
     product_editor_form: Option<ProductEditorFormState>,
+    focused_view: Option<HomeFocusedView>,
     relay_client: Option<RadrootsNostrClient>,
     buyer_workspace_notice: Option<String>,
 }
@@ -345,6 +356,7 @@ impl HomeView {
             products_search: None,
             products_stock_editor: None,
             product_editor_form: None,
+            focused_view: None,
             relay_client: None,
             buyer_workspace_notice: None,
         }
@@ -363,6 +375,19 @@ impl HomeView {
             has_products_search_input: self.products_search.is_some(),
             has_products_stock_editor: self.products_stock_editor.is_some(),
             has_product_editor_form: self.product_editor_form.is_some(),
+        }
+    }
+
+    fn clear_focused_view(&mut self) -> bool {
+        self.focused_view.take().is_some()
+    }
+
+    fn clear_focused_view_matching(&mut self, view: HomeFocusedView) -> bool {
+        if self.focused_view == Some(view) {
+            self.focused_view = None;
+            true
+        } else {
+            false
         }
     }
 
@@ -892,6 +917,7 @@ impl HomeView {
                 window,
                 cx,
             ));
+            self.focused_view = Some(HomeFocusedView::FarmSetup);
             cx.notify();
             return;
         }
@@ -906,6 +932,7 @@ impl HomeView {
             window,
             cx,
         ));
+        self.focused_view = Some(HomeFocusedView::FarmSetup);
         if stage_changed || self.farm_setup_form.is_some() {
             cx.notify();
         }
@@ -924,6 +951,7 @@ impl HomeView {
             .map(|account| account.account.account_id.clone())
         else {
             self.farm_setup_form = None;
+            self.clear_focused_view_matching(HomeFocusedView::FarmSetup);
             return;
         };
 
@@ -942,6 +970,10 @@ impl HomeView {
 
         if should_reset {
             self.farm_setup_form = Some(FarmSetupFormState::new(account_id, draft, window, cx));
+        }
+
+        if runtime_summary.home_route == HomeRoute::FarmSetupForm {
+            self.focused_view = Some(HomeFocusedView::FarmSetup);
         }
     }
 
@@ -1144,6 +1176,7 @@ impl HomeView {
             .map(|account| account.account.account_id.clone())
         else {
             self.product_editor_form = None;
+            self.clear_focused_view_matching(HomeFocusedView::ProductEditor);
             return;
         };
 
@@ -1151,6 +1184,7 @@ impl HomeView {
             || !runtime_summary.farm_setup_projection.has_saved_farm()
         {
             self.product_editor_form = None;
+            self.clear_focused_view_matching(HomeFocusedView::ProductEditor);
             return;
         }
 
@@ -1158,10 +1192,12 @@ impl HomeView {
             &runtime_summary.products_projection.editor
         else {
             self.product_editor_form = None;
+            self.clear_focused_view_matching(HomeFocusedView::ProductEditor);
             return;
         };
         let Some(product_id) = session.selected_product_id else {
             self.product_editor_form = None;
+            self.clear_focused_view_matching(HomeFocusedView::ProductEditor);
             return;
         };
         let should_reset = self
@@ -1184,6 +1220,7 @@ impl HomeView {
     fn select_farmer_section(&mut self, section: FarmerSection, cx: &mut Context<Self>) {
         if self.runtime.select_farmer_section(section) {
             self.products_stock_editor = None;
+            self.clear_focused_view();
             if section != FarmerSection::Products {
                 self.product_editor_form = None;
             }
@@ -1202,6 +1239,7 @@ impl HomeView {
             Ok(true) => {
                 self.products_stock_editor = None;
                 self.product_editor_form = None;
+                self.clear_focused_view();
                 self.clear_buyer_workspace_notice();
                 true
             }
@@ -1227,6 +1265,7 @@ impl HomeView {
             Ok(true) => {
                 self.products_stock_editor = None;
                 self.product_editor_form = None;
+                self.clear_focused_view();
                 cx.notify();
             }
             Ok(false) => {}
@@ -1249,6 +1288,7 @@ impl HomeView {
             Ok(true) => {
                 self.products_stock_editor = None;
                 self.product_editor_form = None;
+                self.clear_focused_view();
                 cx.notify();
             }
             Ok(false) => {}
@@ -1472,6 +1512,7 @@ impl HomeView {
         {
             Ok(true) => {
                 self.clear_buyer_workspace_notice();
+                self.focused_view = Some(HomeFocusedView::BuyerProductDetail(section));
                 true
             }
             Ok(false) => self.clear_buyer_workspace_notice(),
@@ -1499,7 +1540,10 @@ impl HomeView {
     }
 
     fn close_personal_product_detail(&mut self, section: PersonalSection, cx: &mut Context<Self>) {
-        if self.runtime.close_personal_product_detail(section) {
+        let runtime_changed = self.runtime.close_personal_product_detail(section);
+        let focus_changed =
+            self.clear_focused_view_matching(HomeFocusedView::BuyerProductDetail(section));
+        if runtime_changed || focus_changed {
             cx.notify();
         }
     }
@@ -1577,11 +1621,14 @@ impl HomeView {
             window,
             cx,
         ));
+        self.focused_view = Some(HomeFocusedView::BuyerOrderReview);
         cx.notify();
     }
 
     fn close_personal_order_review(&mut self, cx: &mut Context<Self>) {
-        if self.buyer_order_review_form.take().is_some() {
+        let cleared = self.buyer_order_review_form.take().is_some();
+        let focus_changed = self.clear_focused_view_matching(HomeFocusedView::BuyerOrderReview);
+        if cleared || focus_changed {
             cx.notify();
         }
     }
@@ -1670,6 +1717,7 @@ impl HomeView {
                 {
                     self.buyer_receipt_issue_form = None;
                 }
+                self.focused_view = Some(HomeFocusedView::BuyerOrderDetail(order_id));
                 cx.notify();
             }
             Ok(false) => {}
@@ -1682,6 +1730,12 @@ impl HomeView {
                     "failed to open buyer order detail"
                 );
             }
+        }
+    }
+
+    fn close_personal_order_detail(&mut self, order_id: OrderId, cx: &mut Context<Self>) {
+        if self.clear_focused_view_matching(HomeFocusedView::BuyerOrderDetail(order_id)) {
+            cx.notify();
         }
     }
 
@@ -1771,6 +1825,7 @@ impl HomeView {
             Ok(true) => {
                 self.products_stock_editor = None;
                 self.product_editor_form = None;
+                self.clear_focused_view();
                 cx.notify();
             }
             Ok(false) => {}
@@ -1797,6 +1852,7 @@ impl HomeView {
             Ok(true) => {
                 self.products_stock_editor = None;
                 self.product_editor_form = None;
+                self.clear_focused_view();
                 cx.notify();
             }
             Ok(false) => {}
@@ -1821,6 +1877,7 @@ impl HomeView {
             Ok(true) => {
                 self.products_stock_editor = None;
                 self.product_editor_form = None;
+                self.clear_focused_view();
                 cx.notify();
             }
             Ok(false) => {}
@@ -2027,6 +2084,7 @@ impl HomeView {
             Ok(true) => {
                 self.products_stock_editor = None;
                 self.product_editor_form = None;
+                self.clear_focused_view();
                 cx.notify();
             }
             Ok(false) => self.open_orders_fulfillment_window(fulfillment_window_id, cx),
@@ -2062,6 +2120,7 @@ impl HomeView {
             Ok(true) => {
                 self.products_stock_editor = None;
                 self.product_editor_form = None;
+                self.focused_view = Some(HomeFocusedView::FarmerOrderDetail(order_id));
                 cx.notify();
             }
             Ok(false) => {}
@@ -2074,6 +2133,12 @@ impl HomeView {
                     "failed to open order detail"
                 );
             }
+        }
+    }
+
+    fn close_order_detail(&mut self, order_id: OrderId, cx: &mut Context<Self>) {
+        if self.clear_focused_view_matching(HomeFocusedView::FarmerOrderDetail(order_id)) {
+            cx.notify();
         }
     }
 
@@ -2103,6 +2168,7 @@ impl HomeView {
             Ok(true) | Ok(false) => {
                 self.products_stock_editor = None;
                 self.product_editor_form = None;
+                self.focused_view = Some(HomeFocusedView::FarmerOrderDetail(order_id));
                 self.dismiss_presented_reminder(reminder_id, cx);
             }
             Err(runtime_error) => {
@@ -2238,11 +2304,27 @@ impl HomeView {
         cx: &mut Context<Self>,
     ) {
         self.buyer_receipt_issue_form = Some(BuyerReceiptIssueFormState::new(order_id, window, cx));
+        self.focused_view = Some(HomeFocusedView::BuyerReceiptIssue(order_id));
         cx.notify();
     }
 
     fn close_buyer_receipt_issue_form(&mut self, cx: &mut Context<Self>) {
-        if self.buyer_receipt_issue_form.take().is_some() {
+        let order_id = self
+            .buyer_receipt_issue_form
+            .as_ref()
+            .map(|form| form.order_id);
+        let cleared = self.buyer_receipt_issue_form.take().is_some();
+        let focus_changed = order_id
+            .map(|order_id| {
+                self.clear_focused_view_matching(HomeFocusedView::BuyerReceiptIssue(order_id))
+            })
+            .unwrap_or(false);
+        if focus_changed {
+            if let Some(order_id) = order_id {
+                self.focused_view = Some(HomeFocusedView::BuyerOrderDetail(order_id));
+            }
+        }
+        if cleared || focus_changed {
             cx.notify();
         }
     }
@@ -2503,6 +2585,7 @@ impl HomeView {
         match self.runtime.open_new_product_editor() {
             Ok(true) => {
                 self.products_stock_editor = None;
+                self.focused_view = Some(HomeFocusedView::ProductEditor);
                 cx.notify();
             }
             Ok(false) => {}
@@ -2521,6 +2604,7 @@ impl HomeView {
         match self.runtime.open_existing_product_editor(product_id) {
             Ok(true) => {
                 self.products_stock_editor = None;
+                self.focused_view = Some(HomeFocusedView::ProductEditor);
                 cx.notify();
             }
             Ok(false) => {}
@@ -2539,8 +2623,9 @@ impl HomeView {
     fn close_product_editor(&mut self, cx: &mut Context<Self>) {
         let changed = self.runtime.close_product_editor();
         let cleared = self.product_editor_form.take().is_some();
+        let focus_changed = self.clear_focused_view_matching(HomeFocusedView::ProductEditor);
 
-        if changed || cleared {
+        if changed || cleared || focus_changed {
             cx.notify();
         }
     }
@@ -2561,6 +2646,7 @@ impl HomeView {
         };
         let matches_input = form.title_input == *state
             || form.subtitle_input == *state
+            || form.category_input == *state
             || form.unit_input == *state
             || form.price_input == *state
             || form.stock_input == *state;
@@ -2573,6 +2659,24 @@ impl HomeView {
             form.save_failed = false;
         }
 
+        cx.notify();
+    }
+
+    fn select_product_editor_availability_window(
+        &mut self,
+        availability_window_id: FulfillmentWindowId,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(form) = self.product_editor_form.as_mut() else {
+            return;
+        };
+
+        if form.selected_availability_window_id == Some(availability_window_id) {
+            return;
+        }
+
+        form.selected_availability_window_id = Some(availability_window_id);
+        form.save_failed = false;
         cx.notify();
     }
 
@@ -2735,25 +2839,7 @@ impl HomeView {
             );
         }
 
-        if let Some(farm_setup_form) = self.farm_setup_form.as_ref() {
-            sections.push(
-                home_farm_setup_form_card(
-                    farm_setup_form,
-                    cx.listener(|this, checked: &bool, _, cx| {
-                        this.toggle_farm_order_method(FarmOrderMethod::Pickup, *checked, cx)
-                    }),
-                    cx.listener(|this, checked: &bool, _, cx| {
-                        this.toggle_farm_order_method(FarmOrderMethod::Delivery, *checked, cx)
-                    }),
-                    cx.listener(|this, checked: &bool, _, cx| {
-                        this.toggle_farm_order_method(FarmOrderMethod::Shipping, *checked, cx)
-                    }),
-                    cx.listener(|this, _, _, cx| this.finish_farm_setup(cx)),
-                    cx,
-                )
-                .into_any_element(),
-            );
-        } else if let Some(spec) = setup_onboarding {
+        if let Some(spec) = setup_onboarding {
             sections.push(
                 home_farm_setup_onboarding_card(
                     spec,
@@ -2972,20 +3058,22 @@ impl HomeView {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let selected_personal_section = selected_personal_section(runtime);
-        let main_content = match selected_personal_section {
-            PersonalSection::Browse => self
-                .render_buyer_browse_content(runtime, cx)
-                .into_any_element(),
-            PersonalSection::Search => self
-                .render_buyer_search_content(runtime, cx)
-                .into_any_element(),
-            PersonalSection::Cart => self
-                .render_buyer_cart_content(runtime, cx)
-                .into_any_element(),
-            PersonalSection::Orders => self
-                .render_buyer_orders_content(runtime, cx)
-                .into_any_element(),
-        };
+        let main_content = self
+            .render_buyer_focused_view(runtime, cx)
+            .unwrap_or_else(|| match selected_personal_section {
+                PersonalSection::Browse => self
+                    .render_buyer_browse_content(runtime, cx)
+                    .into_any_element(),
+                PersonalSection::Search => self
+                    .render_buyer_search_content(runtime, cx)
+                    .into_any_element(),
+                PersonalSection::Cart => self
+                    .render_buyer_cart_content(runtime, cx)
+                    .into_any_element(),
+                PersonalSection::Orders => self
+                    .render_buyer_orders_content(runtime, cx)
+                    .into_any_element(),
+            });
 
         app_split_shell(
             buyer_sidebar(
@@ -3031,6 +3119,107 @@ impl HomeView {
         .into_any_element()
     }
 
+    fn render_buyer_focused_view(
+        &mut self,
+        runtime: &DesktopAppRuntimeSummary,
+        cx: &mut Context<Self>,
+    ) -> Option<AnyElement> {
+        match self.focused_view? {
+            HomeFocusedView::BuyerProductDetail(section) => {
+                let detail = match section {
+                    PersonalSection::Browse => runtime.personal_projection.browse.detail.as_ref(),
+                    PersonalSection::Search => runtime.personal_projection.search.detail.as_ref(),
+                    PersonalSection::Cart | PersonalSection::Orders => None,
+                }?;
+                Some(
+                    buyer_product_detail_card(
+                        detail,
+                        runtime
+                            .personal_projection
+                            .cart
+                            .cart
+                            .replace_confirmation
+                            .as_ref(),
+                        cx.listener(move |this, _, _, cx| {
+                            this.close_personal_product_detail(section, cx)
+                        }),
+                        cx.listener(move |this, _, _, cx| {
+                            this.decrease_personal_product_quantity(section, cx)
+                        }),
+                        cx.listener(move |this, _, _, cx| {
+                            this.increase_personal_product_quantity(section, cx)
+                        }),
+                        cx.listener(move |this, _, _, cx| {
+                            this.add_personal_product_to_cart(section, false, cx)
+                        }),
+                        cx.listener(move |this, _, _, cx| {
+                            this.add_personal_product_to_cart(section, true, cx)
+                        }),
+                        cx.listener(|this, _, _, cx| {
+                            this.clear_personal_cart_replace_confirmation(cx)
+                        }),
+                        cx,
+                    )
+                    .into_any_element(),
+                )
+            }
+            HomeFocusedView::BuyerOrderReview => {
+                let form = self.buyer_order_review_form.as_ref()?;
+                Some(
+                    buyer_order_review_card(
+                        form,
+                        &runtime.personal_projection.cart.order_review,
+                        cx.listener(|this, _, _, cx| this.close_personal_order_review(cx)),
+                        cx.listener(|this, _, _, cx| this.place_personal_order(cx)),
+                        cx,
+                    )
+                    .into_any_element(),
+                )
+            }
+            HomeFocusedView::BuyerOrderDetail(order_id) => {
+                let detail = runtime
+                    .personal_projection
+                    .orders
+                    .detail
+                    .as_ref()
+                    .filter(|detail| detail.order_id == order_id)?;
+                Some(
+                    buyer_order_detail_card(
+                        detail,
+                        None,
+                        runtime
+                            .personal_projection
+                            .cart
+                            .cart
+                            .replace_confirmation
+                            .as_ref(),
+                        cx.listener(move |this, _, _, cx| {
+                            this.close_personal_order_detail(order_id, cx)
+                        }),
+                        cx,
+                    )
+                    .into_any_element(),
+                )
+            }
+            HomeFocusedView::BuyerReceiptIssue(order_id) => {
+                let detail = runtime
+                    .personal_projection
+                    .orders
+                    .detail
+                    .as_ref()
+                    .filter(|detail| detail.order_id == order_id)?;
+                let issue_form = self
+                    .buyer_receipt_issue_form
+                    .as_ref()
+                    .filter(|form| form.order_id == order_id)?;
+                Some(buyer_receipt_issue_focused_view(detail, issue_form, cx))
+            }
+            HomeFocusedView::FarmSetup
+            | HomeFocusedView::ProductEditor
+            | HomeFocusedView::FarmerOrderDetail(_) => None,
+        }
+    }
+
     fn render_buyer_browse_content(
         &mut self,
         runtime: &DesktopAppRuntimeSummary,
@@ -3061,53 +3250,6 @@ impl HomeView {
             } else {
                 app_stack_v(APP_UI_THEME.shells.home_stack_gap_px)
                     .w_full()
-                    .when_some(
-                        runtime.personal_projection.browse.detail.as_ref(),
-                        |this, detail| {
-                            this.child(buyer_product_detail_card(
-                                detail,
-                                runtime
-                                    .personal_projection
-                                    .cart
-                                    .cart
-                                    .replace_confirmation
-                                    .as_ref(),
-                                cx.listener(|this, _, _, cx| {
-                                    this.close_personal_product_detail(PersonalSection::Browse, cx)
-                                }),
-                                cx.listener(|this, _, _, cx| {
-                                    this.decrease_personal_product_quantity(
-                                        PersonalSection::Browse,
-                                        cx,
-                                    )
-                                }),
-                                cx.listener(|this, _, _, cx| {
-                                    this.increase_personal_product_quantity(
-                                        PersonalSection::Browse,
-                                        cx,
-                                    )
-                                }),
-                                cx.listener(|this, _, _, cx| {
-                                    this.add_personal_product_to_cart(
-                                        PersonalSection::Browse,
-                                        false,
-                                        cx,
-                                    )
-                                }),
-                                cx.listener(|this, _, _, cx| {
-                                    this.add_personal_product_to_cart(
-                                        PersonalSection::Browse,
-                                        true,
-                                        cx,
-                                    )
-                                }),
-                                cx.listener(|this, _, _, cx| {
-                                    this.clear_personal_cart_replace_confirmation(cx)
-                                }),
-                                cx,
-                            ))
-                        },
-                    )
                     .child(buyer_listings_feed(
                         PersonalSection::Browse,
                         listings,
@@ -3238,53 +3380,6 @@ impl HomeView {
             } else {
                 app_stack_v(APP_UI_THEME.shells.home_stack_gap_px)
                     .w_full()
-                    .when_some(
-                        runtime.personal_projection.search.detail.as_ref(),
-                        |this, detail| {
-                            this.child(buyer_product_detail_card(
-                                detail,
-                                runtime
-                                    .personal_projection
-                                    .cart
-                                    .cart
-                                    .replace_confirmation
-                                    .as_ref(),
-                                cx.listener(|this, _, _, cx| {
-                                    this.close_personal_product_detail(PersonalSection::Search, cx)
-                                }),
-                                cx.listener(|this, _, _, cx| {
-                                    this.decrease_personal_product_quantity(
-                                        PersonalSection::Search,
-                                        cx,
-                                    )
-                                }),
-                                cx.listener(|this, _, _, cx| {
-                                    this.increase_personal_product_quantity(
-                                        PersonalSection::Search,
-                                        cx,
-                                    )
-                                }),
-                                cx.listener(|this, _, _, cx| {
-                                    this.add_personal_product_to_cart(
-                                        PersonalSection::Search,
-                                        false,
-                                        cx,
-                                    )
-                                }),
-                                cx.listener(|this, _, _, cx| {
-                                    this.add_personal_product_to_cart(
-                                        PersonalSection::Search,
-                                        true,
-                                        cx,
-                                    )
-                                }),
-                                cx.listener(|this, _, _, cx| {
-                                    this.clear_personal_cart_replace_confirmation(cx)
-                                }),
-                                cx,
-                            ))
-                        },
-                    )
                     .child(buyer_listings_feed(
                         PersonalSection::Search,
                         listings,
@@ -3326,15 +3421,6 @@ impl HomeView {
                         self.buyer_order_review_form.is_some(),
                         cx,
                     ))
-                    .when_some(self.buyer_order_review_form.as_ref(), |this, form| {
-                        this.child(buyer_order_review_card(
-                            form,
-                            order_review,
-                            cx.listener(|this, _, _, cx| this.close_personal_order_review(cx)),
-                            cx.listener(|this, _, _, cx| this.place_personal_order(cx)),
-                            cx,
-                        ))
-                    })
                     .into_any_element()
             })
             .into_any_element()
@@ -3373,30 +3459,6 @@ impl HomeView {
                         selected_order_id,
                         cx,
                     ))
-                    .child(
-                        orders
-                            .detail
-                            .as_ref()
-                            .map(|detail| {
-                                let issue_form =
-                                    self.buyer_receipt_issue_form.as_ref().filter(|form| {
-                                        form.order_id == detail.order_id
-                                            && buyer_receipt_actions_available(detail)
-                                    });
-                                buyer_order_detail_card(
-                                    detail,
-                                    issue_form,
-                                    runtime
-                                        .personal_projection
-                                        .cart
-                                        .cart
-                                        .replace_confirmation
-                                        .as_ref(),
-                                    cx,
-                                )
-                            })
-                            .unwrap_or_else(|| buyer_order_detail_empty_card().into_any_element()),
-                    )
                     .into_any_element()
             })
             .into_any_element()
@@ -3408,22 +3470,24 @@ impl HomeView {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let selected_farmer_section = selected_farmer_section(runtime);
-        let main_content = match selected_farmer_section {
-            FarmerSection::Products if farmer_products_available(runtime) => {
-                self.render_products_content(runtime, cx)
-            }
-            FarmerSection::Orders if farmer_products_available(runtime) => {
-                self.render_orders_content(runtime, cx)
-            }
-            FarmerSection::PackDay if farmer_pack_day_available(runtime) => {
-                self.render_pack_day_content(runtime, cx)
-            }
-            FarmerSection::Today
-            | FarmerSection::Products
-            | FarmerSection::Orders
-            | FarmerSection::PackDay
-            | FarmerSection::Farm => self.render_today_content(runtime, cx),
-        };
+        let main_content = self
+            .render_farmer_focused_view(runtime, cx)
+            .unwrap_or_else(|| match selected_farmer_section {
+                FarmerSection::Products if farmer_products_available(runtime) => {
+                    self.render_products_content(runtime, cx)
+                }
+                FarmerSection::Orders if farmer_products_available(runtime) => {
+                    self.render_orders_content(runtime, cx)
+                }
+                FarmerSection::PackDay if farmer_pack_day_available(runtime) => {
+                    self.render_pack_day_content(runtime, cx)
+                }
+                FarmerSection::Today
+                | FarmerSection::Products
+                | FarmerSection::Orders
+                | FarmerSection::PackDay
+                | FarmerSection::Farm => self.render_today_content(runtime, cx),
+            });
 
         app_split_shell(
             home_sidebar(
@@ -3472,6 +3536,55 @@ impl HomeView {
                 .into_any_element(),
         )
         .into_any_element()
+    }
+
+    fn render_farmer_focused_view(
+        &mut self,
+        runtime: &DesktopAppRuntimeSummary,
+        cx: &mut Context<Self>,
+    ) -> Option<AnyElement> {
+        match self.focused_view? {
+            HomeFocusedView::FarmSetup => {
+                let form = self.farm_setup_form.as_ref()?;
+                Some(
+                    home_farm_setup_form_card(
+                        form,
+                        cx.listener(|this, checked: &bool, _, cx| {
+                            this.toggle_farm_order_method(FarmOrderMethod::Pickup, *checked, cx)
+                        }),
+                        cx.listener(|this, checked: &bool, _, cx| {
+                            this.toggle_farm_order_method(FarmOrderMethod::Delivery, *checked, cx)
+                        }),
+                        cx.listener(|this, checked: &bool, _, cx| {
+                            this.toggle_farm_order_method(FarmOrderMethod::Shipping, *checked, cx)
+                        }),
+                        cx.listener(|this, _, _, cx| this.finish_farm_setup(cx)),
+                        cx,
+                    )
+                    .into_any_element(),
+                )
+            }
+            HomeFocusedView::ProductEditor => {
+                let form = self.product_editor_form.as_ref()?;
+                Some(products_editor_surface(form, runtime, cx).into_any_element())
+            }
+            HomeFocusedView::FarmerOrderDetail(order_id) => {
+                let detail = runtime
+                    .orders_projection
+                    .detail
+                    .as_ref()
+                    .filter(|detail| detail.order_id == order_id)?;
+                Some(self.render_order_detail_card(
+                    detail,
+                    cx.listener(move |this, _, _, cx| this.close_order_detail(order_id, cx)),
+                    cx,
+                ))
+            }
+            HomeFocusedView::BuyerProductDetail(_)
+            | HomeFocusedView::BuyerOrderReview
+            | HomeFocusedView::BuyerOrderDetail(_)
+            | HomeFocusedView::BuyerReceiptIssue(_) => None,
+        }
     }
 
     fn render_products_content(
@@ -3544,27 +3657,6 @@ impl HomeView {
                 cx.listener(|this, _, _, cx| this.select_products_sort(ProductsSort::Price, cx)),
                 cx,
             ))
-            .when_some(self.product_editor_form.as_ref(), |this, form| {
-                this.child(products_editor_surface(
-                    form,
-                    runtime,
-                    cx.listener(|this, _, _, cx| {
-                        this.select_product_editor_status(ProductStatus::Draft, cx)
-                    }),
-                    cx.listener(|this, _, _, cx| {
-                        this.select_product_editor_status(ProductStatus::Published, cx)
-                    }),
-                    cx.listener(|this, _, _, cx| {
-                        this.select_product_editor_status(ProductStatus::Paused, cx)
-                    }),
-                    cx.listener(|this, _, _, cx| {
-                        this.select_product_editor_status(ProductStatus::Archived, cx)
-                    }),
-                    cx.listener(|this, _, _, cx| this.close_product_editor(cx)),
-                    cx.listener(|this, _, _, cx| this.save_product_editor(cx)),
-                    cx,
-                ))
-            })
             .child(if projection.list.is_empty() {
                 products_empty_state_card(projection.query.filter).into_any_element()
             } else {
@@ -3684,21 +3776,6 @@ impl HomeView {
                     cx,
                 )
             })
-            .when_some(projection.detail.as_ref(), |this, detail| {
-                this.child(self.render_order_detail_card(detail, cx))
-            })
-            .when(
-                projection.detail.is_none() && !projection.list.is_empty(),
-                |this| {
-                    this.child(
-                        home_card(
-                            app_shared_text(AppTextKey::OrdersDetailTitle),
-                            home_body_text(app_shared_text(AppTextKey::OrdersDetailEmptyBody)),
-                        )
-                        .into_any_element(),
-                    )
-                },
-            )
             .into_any_element()
     }
 
@@ -4285,6 +4362,7 @@ impl HomeView {
     fn render_order_detail_card(
         &mut self,
         detail: &OrderDetailProjection,
+        on_close: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let fulfillment_actions = (!detail.fulfillment_actions.is_empty()).then(|| {
@@ -4314,9 +4392,10 @@ impl HomeView {
             )
         });
 
-        home_card(
+        app_focused_detail_view(
             app_shared_text(AppTextKey::OrdersDetailTitle),
             app_stack_v(APP_UI_THEME.shells.home_stack_gap_px)
+                .w_full()
                 .child(app_heading_section(detail.order_number.clone()))
                 .child(home_body_text(detail.customer_display_name.clone()))
                 .child(trade_workflow_detail_badge_strip(&detail.workflow))
@@ -4365,8 +4444,13 @@ impl HomeView {
                 .when_some(fulfillment_actions, |this, fulfillment_actions| {
                     this.child(fulfillment_actions)
                 }),
+            text_button(
+                "orders-detail-back",
+                app_shared_text(AppTextKey::PersonalDetailBackAction),
+                on_close,
+                cx,
+            ),
         )
-        .into_any_element()
     }
 
     fn render_order_recovery_section(
@@ -5091,6 +5175,7 @@ struct ProductEditorFormState {
     product_id: ProductId,
     initial_draft: ProductEditorDraft,
     status: ProductStatus,
+    selected_availability_window_id: Option<FulfillmentWindowId>,
     title_input: Entity<InputState>,
     subtitle_input: Entity<InputState>,
     category_input: Entity<InputState>,
@@ -5114,6 +5199,7 @@ impl ProductEditorFormState {
         window: &mut Window,
         cx: &mut Context<HomeView>,
     ) -> Self {
+        let selected_availability_window_id = draft.availability_window_id;
         let title_input =
             cx.new(|cx| InputState::new(window, cx).default_value(draft.title.clone()));
         let subtitle_input =
@@ -5169,6 +5255,7 @@ impl ProductEditorFormState {
             account_id,
             product_id,
             status: draft.status,
+            selected_availability_window_id,
             initial_draft: draft,
             title_input,
             subtitle_input,
@@ -5199,7 +5286,7 @@ impl ProductEditorFormState {
             stock_quantity: parse_optional_product_editor_stock_input(
                 self.stock_input.read(cx).value().as_ref(),
             )?,
-            availability_window_id: self.initial_draft.availability_window_id,
+            availability_window_id: self.selected_availability_window_id,
             status: self.status,
         })
     }
@@ -6185,7 +6272,6 @@ enum SettingsAutoFocusTarget {
     Navigation(SettingsPanelViewKey),
     AccountAdd,
     FarmNameInput,
-    SettingsAllowRelayConnections,
     AboutRefresh,
 }
 
@@ -6615,19 +6701,14 @@ impl SettingsWindowView {
                                     .gap(px(APP_UI_THEME
                                         .shells
                                         .settings_account_sidebar_footer_button_gap_px))
-                                    .child(action_button(
+                                    .child(action_button_disabled(
                                         "account-add",
                                         app_shared_text(AppTextKey::SettingsAccountAddAction),
-                                        |_, _, _| {},
                                         cx,
                                     ))
-                                    .child(action_icon_button(
-                                        AppIconButtonSpec::new(
-                                            "account-more",
-                                            app_shared_text(AppTextKey::SettingsAccountMoreActions),
-                                            IconName::ChevronDown,
-                                        ),
-                                        |_, _, _| {},
+                                    .child(action_button_disabled(
+                                        "account-more",
+                                        app_shared_text(AppTextKey::SettingsAccountMoreActions),
                                         cx,
                                     )),
                             ),
@@ -6768,20 +6849,18 @@ impl SettingsWindowView {
                                             .gap(px(APP_UI_THEME
                                                 .shells
                                                 .settings_account_action_row_gap_px))
-                                            .child(div().child(action_button(
+                                            .child(div().child(action_button_disabled(
                                                 "account-log-out",
                                                 app_shared_text(
                                                     AppTextKey::SettingsAccountLogOutAction,
                                                 ),
-                                                |_, _, _| {},
                                                 cx,
                                             )))
-                                            .child(div().child(action_button(
+                                            .child(div().child(action_button_disabled(
                                                 "account-open-workspace",
                                                 app_shared_text(
                                                     AppTextKey::SettingsAccountOpenWorkspaceAction,
                                                 ),
-                                                |_, _, _| {},
                                                 cx,
                                             ))),
                                     ),
@@ -6792,13 +6871,6 @@ impl SettingsWindowView {
 
     fn settings_panel(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         self.sync_farm_panel_state(window, cx);
-
-        let runtime_summary = self.runtime.summary();
-        let general_settings = runtime_summary.shell_projection.settings.general;
-        let general_allow_relay_connections = general_settings.allow_relay_connections;
-        let general_use_media_servers = general_settings.use_media_servers;
-        let general_use_nip05 = general_settings.use_nip05;
-        let general_launch_at_login = general_settings.launch_at_login;
 
         let mut cards = Vec::new();
 
@@ -7054,84 +7126,9 @@ impl SettingsWindowView {
         cards.push(
             home_card(
                 app_shared_text(AppTextKey::SettingsGeneralSectionLabel),
-                app_stack_v(16.0)
+                app_stack_v(APP_UI_THEME.foundation.spacing.small_px)
                     .w_full()
-                    .child(
-                        div()
-                            .w_full()
-                            .flex()
-                            .items_start()
-                            .gap(px(APP_UI_THEME.shells.settings_account_detail_value_gap_px))
-                            .child(app_checkbox_field(
-                                AppCheckboxFieldSpec::new(
-                                    "settings-allow-relay-connections",
-                                    app_shared_text(
-                                        AppTextKey::SettingsGeneralAllowRelayConnections,
-                                    ),
-                                    Option::<SharedString>::None,
-                                ),
-                                general_allow_relay_connections,
-                                cx,
-                                |_, _, _| {},
-                            )),
-                    )
-                    .child(
-                        div()
-                            .w_full()
-                            .flex()
-                            .items_start()
-                            .gap(px(APP_UI_THEME.shells.settings_account_detail_value_gap_px))
-                            .child(app_checkbox_field(
-                                AppCheckboxFieldSpec::new(
-                                    "settings-use-media-servers",
-                                    app_shared_text(AppTextKey::SettingsGeneralUseMediaServers),
-                                    Option::<SharedString>::None,
-                                ),
-                                general_use_media_servers,
-                                cx,
-                                |_, _, _| {},
-                            ))
-                            .child(div().flex_none().child(action_button_compact(
-                                "settings-manage-media-servers",
-                                app_shared_text(AppTextKey::SettingsGeneralManageAction),
-                                |_, _, _| {},
-                                cx,
-                            ))),
-                    )
-                    .child(
-                        div()
-                            .w_full()
-                            .flex()
-                            .items_start()
-                            .gap(px(APP_UI_THEME.shells.settings_account_detail_value_gap_px))
-                            .child(app_checkbox_field(
-                                AppCheckboxFieldSpec::new(
-                                    "settings-use-nip05",
-                                    app_shared_text(AppTextKey::SettingsGeneralUseNip05),
-                                    Some(app_shared_text(AppTextKey::SettingsGeneralUseNip05Note)),
-                                ),
-                                general_use_nip05,
-                                cx,
-                                |_, _, _| {},
-                            )),
-                    )
-                    .child(
-                        div()
-                            .w_full()
-                            .flex()
-                            .items_start()
-                            .gap(px(APP_UI_THEME.shells.settings_account_detail_value_gap_px))
-                            .child(app_checkbox_field(
-                                AppCheckboxFieldSpec::new(
-                                    "settings-launch-at-login",
-                                    app_shared_text(AppTextKey::SettingsGeneralLaunchAtLogin),
-                                    Option::<SharedString>::None,
-                                ),
-                                general_launch_at_login,
-                                cx,
-                                |_, _, _| {},
-                            )),
-                    ),
+                    .child(label_value_list(settings_preferences_general_rows())),
             )
             .into_any_element(),
         );
@@ -7139,7 +7136,7 @@ impl SettingsWindowView {
         app_scroll_panel(
             "settings-panel-scroll",
             APP_UI_THEME.shells.settings_content_padding_px,
-            Some(560.0),
+            Some(APP_UI_THEME.shells.settings_panel_content_max_width_px),
             app_stack_v(APP_UI_THEME.shells.home_stack_gap_px)
                 .w_full()
                 .child(home_body_text(app_shared_text(
@@ -7425,9 +7422,6 @@ impl SettingsWindowView {
                         form.farm_name_input
                             .update(cx, |input, cx| input.focus(window, cx));
                     }
-                }
-                SettingsAutoFocusTarget::SettingsAllowRelayConnections => {
-                    focus_button(window, "settings-allow-relay-connections", cx);
                 }
                 SettingsAutoFocusTarget::AboutRefresh => {
                     focus_button(window, "settings-about-refresh-sync", cx);
@@ -7915,9 +7909,9 @@ fn settings_auto_focus_target(
             .or(Some(SettingsAutoFocusTarget::Navigation(
                 SettingsPanelViewKey::Farm,
             ))),
-        SettingsPanelViewKey::Settings => {
-            Some(SettingsAutoFocusTarget::SettingsAllowRelayConnections)
-        }
+        SettingsPanelViewKey::Settings => Some(SettingsAutoFocusTarget::Navigation(
+            SettingsPanelViewKey::Settings,
+        )),
         SettingsPanelViewKey::About => {
             if about_manual_refresh_enabled(&runtime.sync_status) {
                 Some(SettingsAutoFocusTarget::AboutRefresh)
@@ -8167,17 +8161,7 @@ fn shared_shell_mode_button(
     on_click: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
     cx: &App,
 ) -> AnyElement {
-    if is_active {
-        div()
-            .id(id)
-            .text_size(px(APP_UI_THEME.foundation.typography.body_text_px))
-            .font_weight(gpui::FontWeight::SEMIBOLD)
-            .text_color(rgb(APP_UI_THEME.foundation.text.primary))
-            .child(app_shared_text(key))
-            .into_any_element()
-    } else {
-        action_button_compact(id, app_shared_text(key), on_click, cx).into_any_element()
-    }
+    choice_button(id, app_shared_text(key), is_active, on_click, cx).into_any_element()
 }
 
 fn shell_account_entry(
@@ -8195,12 +8179,7 @@ fn shell_account_entry(
         )
         .into_any_element()
     } else {
-        div()
-            .id("shell-account-label")
-            .text_size(px(APP_UI_THEME.foundation.typography.body_text_px))
-            .font_weight(gpui::FontWeight::MEDIUM)
-            .text_color(rgb(APP_UI_THEME.foundation.text.secondary))
-            .child(account_label)
+        action_button_compact("shell-account-entry", account_label, on_open_account, cx)
             .into_any_element()
     }
 }
@@ -8217,7 +8196,7 @@ fn shell_account_label(runtime: &DesktopAppRuntimeSummary) -> String {
                 .as_ref()
                 .map(|label| label.trim().to_owned())
                 .filter(|label| !label.is_empty())
-                .or_else(|| Some(account.account.npub.clone()))
+                .or_else(|| Some(app_shared_text(AppTextKey::HomeHeaderAccountLabel).to_string()))
         })
         .unwrap_or_else(|| app_shared_text(AppTextKey::HomeHeaderGuestLabel).to_string())
 }
@@ -8436,34 +8415,13 @@ fn buyer_product_detail_card(
     on_keep_current_cart: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
     cx: &App,
 ) -> impl IntoElement {
-    app_surface_card(
+    app_focused_detail_view(
+        product_display_title(detail.listing.title.as_str()),
         app_stack_v(APP_UI_THEME.shells.home_stack_gap_px)
             .w_full()
-            .child(
-                div()
-                    .w_full()
-                    .flex()
-                    .items_start()
-                    .justify_between()
-                    .gap(px(APP_UI_THEME.shells.home_stack_gap_px))
-                    .child(
-                        app_stack_v(4.0)
-                            .flex_1()
-                            .min_w_0()
-                            .child(app_text_value(product_display_title(
-                                detail.listing.title.as_str(),
-                            )))
-                            .child(settings_badge_text(
-                                detail.listing.farm_display_name.clone(),
-                            )),
-                    )
-                    .child(text_button(
-                        "buyer-detail-back",
-                        app_shared_text(AppTextKey::PersonalDetailBackAction),
-                        on_close,
-                        cx,
-                    )),
-            )
+            .child(settings_badge_text(
+                detail.listing.farm_display_name.clone(),
+            ))
             .when_some(
                 detail
                     .detail_text
@@ -8563,6 +8521,12 @@ fn buyer_product_detail_card(
                 on_add_to_cart,
                 cx,
             )),
+        text_button(
+            "buyer-detail-back",
+            app_shared_text(AppTextKey::PersonalDetailBackAction),
+            on_close,
+            cx,
+        ),
     )
 }
 
@@ -9102,12 +9066,13 @@ fn buyer_order_detail_card(
     detail: &BuyerOrderDetailProjection,
     issue_form: Option<&BuyerReceiptIssueFormState>,
     replace_confirmation: Option<&BuyerCartReplaceConfirmationProjection>,
+    on_close: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
     cx: &mut Context<HomeView>,
 ) -> AnyElement {
     let repeat_confirmation = replace_confirmation
         .filter(|confirmation| confirmation.incoming_farm_display_name == detail.farm_display_name);
 
-    home_card(
+    app_focused_detail_view(
         app_shared_text(AppTextKey::PersonalOrdersDetailTitle),
         app_stack_v(APP_UI_THEME.shells.home_stack_gap_px)
             .w_full()
@@ -9317,8 +9282,13 @@ fn buyer_order_detail_card(
                         ),
                 ))
             }),
+        text_button(
+            "buyer-order-detail-back",
+            app_shared_text(AppTextKey::PersonalDetailBackAction),
+            on_close,
+            cx,
+        ),
     )
-    .into_any_element()
 }
 
 fn buyer_receipt_summary_section(receipt: &TradeReceiptProjection) -> AnyElement {
@@ -9366,37 +9336,13 @@ fn validation_receipt_summary_panel(receipt: &TradeValidationReceiptProjection) 
                     )))
                     .child(trade_workflow_value_badge(validation_receipt_type_key(
                         receipt.receipt_type,
-                    )))
-                    .child(trade_workflow_value_badge(
-                        validation_receipt_proof_system_key(receipt.proof_system),
-                    )),
+                    ))),
             )
-            .child(label_value_list([
-                LabelValueRow::new(
-                    app_shared_text(AppTextKey::TradeValidationReceiptEventLabel),
-                    short_evidence_text(receipt.event_id.as_str()),
-                ),
-                LabelValueRow::new(
-                    app_shared_text(AppTextKey::TradeValidationReceiptTargetLabel),
-                    short_evidence_text(receipt.target_event_id.as_str()),
-                ),
-                LabelValueRow::new(
-                    app_shared_text(AppTextKey::TradeValidationReceiptEventSetRootLabel),
-                    short_evidence_text(receipt.event_set_root.as_str()),
-                ),
-                LabelValueRow::new(
-                    app_shared_text(AppTextKey::TradeValidationReceiptReducerOutputRootLabel),
-                    short_evidence_text(receipt.reducer_output_root.as_str()),
-                ),
-                LabelValueRow::new(
-                    app_shared_text(AppTextKey::TradeValidationReceiptPublicValuesHashLabel),
-                    short_evidence_text(receipt.public_values_hash.as_str()),
-                ),
-                LabelValueRow::new(
-                    app_shared_text(AppTextKey::TradeValidationReceiptRecordedAtLabel),
-                    receipt.recorded_at.to_string(),
-                ),
-            ])),
+            .child(home_body_text(format!(
+                "{} {}",
+                app_shared_text(AppTextKey::TradeValidationReceiptRecordedAtLabel),
+                receipt.recorded_at
+            ))),
     )
     .into_any_element()
 }
@@ -9450,6 +9396,54 @@ fn buyer_receipt_issue_form_section(
     .into_any_element()
 }
 
+fn buyer_receipt_issue_focused_view(
+    detail: &BuyerOrderDetailProjection,
+    form: &BuyerReceiptIssueFormState,
+    cx: &mut Context<HomeView>,
+) -> AnyElement {
+    let order_id = form.order_id;
+    let submit_action = if form.can_submit(cx) {
+        action_button_primary(
+            "buyer-order-send-issue",
+            app_shared_text(AppTextKey::PersonalOrdersActionSendReceiptIssue),
+            cx.listener(move |this, _, _, cx| this.submit_buyer_order_issue_receipt(order_id, cx)),
+            cx,
+        )
+        .into_any_element()
+    } else {
+        action_button_primary_disabled(
+            "buyer-order-send-issue",
+            app_shared_text(AppTextKey::PersonalOrdersActionSendReceiptIssue),
+            cx,
+        )
+        .into_any_element()
+    };
+
+    app_focused_task_view(
+        app_shared_text(AppTextKey::PersonalOrdersActionReportIssue),
+        app_stack_v(APP_UI_THEME.shells.home_stack_gap_px)
+            .w_full()
+            .child(app_heading_section(detail.order_number.clone()))
+            .child(settings_badge_text(detail.farm_display_name.clone()))
+            .child(home_body_text(detail.fulfillment_summary.clone()))
+            .child(app_form_input_text(
+                AppFormFieldSpec::new(
+                    app_shared_text(AppTextKey::PersonalOrdersReceiptIssueLabel),
+                    Option::<SharedString>::None,
+                ),
+                &form.issue_input,
+                false,
+            ))
+            .child(submit_action),
+        text_button(
+            "buyer-order-close-issue",
+            app_shared_text(AppTextKey::PersonalDetailBackAction),
+            cx.listener(|this, _, _, cx| this.close_buyer_receipt_issue_form(cx)),
+            cx,
+        ),
+    )
+}
+
 fn buyer_receipt_actions_available(detail: &BuyerOrderDetailProjection) -> bool {
     detail.workflow.receipt.is_none()
         && detail.workflow.agreement == TradeAgreementStatus::Confirmed
@@ -9493,34 +9487,6 @@ fn validation_receipt_type_key(receipt_type: TradeValidationReceiptType) -> AppT
     }
 }
 
-fn validation_receipt_proof_system_key(
-    proof_system: TradeValidationReceiptProofSystem,
-) -> AppTextKey {
-    match proof_system {
-        TradeValidationReceiptProofSystem::None => AppTextKey::TradeValidationReceiptProofNone,
-        TradeValidationReceiptProofSystem::Sp1Core => {
-            AppTextKey::TradeValidationReceiptProofSp1Core
-        }
-        TradeValidationReceiptProofSystem::Sp1Compressed => {
-            AppTextKey::TradeValidationReceiptProofSp1Compressed
-        }
-        TradeValidationReceiptProofSystem::Sp1Groth16 => {
-            AppTextKey::TradeValidationReceiptProofSp1Groth16
-        }
-        TradeValidationReceiptProofSystem::Sp1Plonk => {
-            AppTextKey::TradeValidationReceiptProofSp1Plonk
-        }
-    }
-}
-
-fn short_evidence_text(value: &str) -> String {
-    if value.len() <= 16 {
-        value.to_owned()
-    } else {
-        format!("{}...", &value[..16])
-    }
-}
-
 fn buyer_repeat_demand_action_label(repeat_demand: &RepeatDemandHandoffProjection) -> SharedString {
     match repeat_demand.eligibility {
         RepeatDemandEligibility::Eligible => {
@@ -9548,13 +9514,6 @@ fn buyer_repeat_demand_note(repeat_demand: &RepeatDemandHandoffProjection) -> Op
             AppTextKey::PersonalOrdersRepeatDemandNoteUnavailable,
         )),
     }
-}
-
-fn buyer_order_detail_empty_card() -> impl IntoElement {
-    home_card(
-        app_shared_text(AppTextKey::PersonalOrdersDetailTitle),
-        home_body_text(app_shared_text(AppTextKey::PersonalOrdersDetailEmptyBody)),
-    )
 }
 
 fn buyer_orders_status_color(status: BuyerOrderStatus) -> u32 {
@@ -10295,21 +10254,11 @@ fn buyer_sidebar_nav_button(
     on_click: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
     cx: &App,
 ) -> AnyElement {
-    if is_active {
-        div()
-            .id(id)
-            .text_size(px(APP_UI_THEME.foundation.typography.body_text_px * 2.0))
-            .font_weight(gpui::FontWeight::BOLD)
-            .text_color(rgb(APP_UI_THEME.foundation.text.primary))
-            .child(app_shared_text(key))
-            .into_any_element()
-    } else {
-        action_button(id, app_shared_text(key), on_click, cx).into_any_element()
-    }
+    choice_button(id, app_shared_text(key), is_active, on_click, cx).into_any_element()
 }
 
 fn home_sidebar_navigation_sections(
-    selected_section: FarmerSection,
+    _selected_section: FarmerSection,
     workspace_available: bool,
     pack_day_available: bool,
 ) -> Vec<FarmerSection> {
@@ -10320,14 +10269,6 @@ fn home_sidebar_navigation_sections(
     }
     if pack_day_available {
         sections.push(FarmerSection::PackDay);
-    }
-
-    if let Some(selected_index) = sections
-        .iter()
-        .position(|section| *section == selected_section)
-    {
-        let selected = sections.remove(selected_index);
-        sections.insert(0, selected);
     }
 
     sections
@@ -10402,17 +10343,7 @@ fn home_sidebar_nav_button(
         return div().id(id).into_any_element();
     }
 
-    if is_active {
-        div()
-            .id(id)
-            .text_size(px(APP_UI_THEME.foundation.typography.body_text_px * 2.0))
-            .font_weight(gpui::FontWeight::BOLD)
-            .text_color(rgb(APP_UI_THEME.foundation.text.primary))
-            .child(app_shared_text(key))
-            .into_any_element()
-    } else {
-        action_button(id, app_shared_text(key), on_click, cx).into_any_element()
-    }
+    choice_button(id, app_shared_text(key), is_active, on_click, cx).into_any_element()
 }
 
 fn products_title_row(
@@ -12311,138 +12242,133 @@ fn products_stock_editor_validation_key(
 fn products_editor_surface(
     form: &ProductEditorFormState,
     runtime: &DesktopAppRuntimeSummary,
-    on_select_draft: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
-    on_select_live: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
-    on_select_paused: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
-    on_select_archived: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
-    on_close: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
-    on_save: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
-    cx: &App,
-) -> impl IntoElement {
+    cx: &mut Context<HomeView>,
+) -> AnyElement {
     let validation_keys = products_editor_validation_keys(form, cx);
     let save_ready = form.has_changes(cx) && validation_keys.is_empty();
 
-    div().w_full().flex().justify_center().child(
-        div().w_full().max_w(px(520.0)).child(home_card(
-            app_shared_text(AppTextKey::ProductsEditorTitle),
-            div()
-                .w_full()
-                .flex()
-                .flex_col()
-                .gap(px(APP_UI_THEME.shells.home_stack_gap_px))
-                .child(home_body_text(app_shared_text(
-                    AppTextKey::ProductsEditorBody,
-                )))
-                .child(app_form_input_text(
-                    AppFormFieldSpec::new(
-                        app_shared_text(AppTextKey::ProductsEditorFieldTitle),
-                        Option::<SharedString>::None,
-                    ),
-                    &form.title_input,
-                    false,
-                ))
-                .child(app_form_input_text(
-                    AppFormFieldSpec::new(
-                        app_shared_text(AppTextKey::ProductsEditorFieldSubtitle),
-                        Option::<SharedString>::None,
-                    ),
-                    &form.subtitle_input,
-                    false,
-                ))
-                .child(app_form_input_text(
-                    AppFormFieldSpec::new(
-                        app_shared_text(AppTextKey::ProductsEditorFieldCategory),
-                        Option::<SharedString>::None,
-                    ),
-                    &form.category_input,
-                    false,
-                ))
-                .child(app_form_input_text(
-                    AppFormFieldSpec::new(
-                        app_shared_text(AppTextKey::ProductsEditorFieldUnit),
-                        Option::<SharedString>::None,
-                    ),
-                    &form.unit_input,
-                    false,
-                ))
-                .child(app_form_input_text(
-                    AppFormFieldSpec::new(
-                        app_shared_text(AppTextKey::ProductsEditorFieldPrice),
-                        products_editor_invalid_price_key(form, cx).map(app_shared_text),
-                    ),
-                    &form.price_input,
-                    false,
-                ))
-                .child(app_form_input_text(
-                    AppFormFieldSpec::new(
-                        app_shared_text(AppTextKey::ProductsEditorFieldStock),
-                        products_editor_invalid_stock_key(form, cx).map(app_shared_text),
-                    ),
-                    &form.stock_input,
-                    false,
-                ))
-                .child(products_editor_status_section(
-                    form.status,
-                    on_select_draft,
-                    on_select_live,
-                    on_select_paused,
-                    on_select_archived,
-                    cx,
-                ))
-                .child(products_editor_publish_readiness_section(form, runtime, cx))
-                .when(form.save_failed, |this| {
-                    this.child(home_body_text(app_shared_text(
-                        AppTextKey::ProductsEditorSaveFailed,
-                    )))
-                })
-                .child(
-                    div()
-                        .w_full()
-                        .flex()
-                        .items_center()
-                        .justify_between()
-                        .gap(px(APP_UI_THEME.shells.home_stack_gap_px))
-                        .child(
-                            div()
-                                .text_size(px(APP_UI_THEME
-                                    .foundation
-                                    .typography
-                                    .utility_title_text_px))
-                                .text_color(rgb(APP_UI_THEME.foundation.text.secondary))
-                                .child(product_display_title(
-                                    form.title_input.read(cx).value().as_ref(),
-                                )),
-                        )
-                        .child(
-                            div()
-                                .flex()
-                                .items_center()
-                                .gap(px(8.0))
-                                .child(action_button_compact(
-                                    "products-editor-close",
-                                    app_shared_text(AppTextKey::ProductsEditorCloseAction),
-                                    on_close,
-                                    cx,
-                                ))
-                                .child(if save_ready {
-                                    action_button_primary(
-                                        "products-editor-save",
-                                        app_shared_text(AppTextKey::ProductsEditorSaveAction),
-                                        on_save,
-                                        cx,
-                                    )
-                                    .into_any_element()
-                                } else {
-                                    action_button_primary_disabled(
-                                        "products-editor-save",
-                                        app_shared_text(AppTextKey::ProductsEditorSaveAction),
-                                        cx,
-                                    )
-                                    .into_any_element()
-                                }),
-                        ),
+    let save_action = if save_ready {
+        action_button_primary(
+            "products-editor-save",
+            app_shared_text(AppTextKey::ProductsEditorSaveAction),
+            cx.listener(|this, _, _, cx| this.save_product_editor(cx)),
+            cx,
+        )
+        .into_any_element()
+    } else {
+        action_button_primary_disabled(
+            "products-editor-save",
+            app_shared_text(AppTextKey::ProductsEditorSaveAction),
+            cx,
+        )
+        .into_any_element()
+    };
+
+    app_focused_task_view(
+        app_shared_text(AppTextKey::ProductsEditorTitle),
+        app_stack_v(APP_UI_THEME.shells.home_stack_gap_px)
+            .w_full()
+            .child(home_body_text(app_shared_text(
+                AppTextKey::ProductsEditorBody,
+            )))
+            .child(app_form_input_text(
+                AppFormFieldSpec::new(
+                    app_shared_text(AppTextKey::ProductsEditorFieldTitle),
+                    Option::<SharedString>::None,
                 ),
-        )),
+                &form.title_input,
+                false,
+            ))
+            .child(app_form_input_text(
+                AppFormFieldSpec::new(
+                    app_shared_text(AppTextKey::ProductsEditorFieldSubtitle),
+                    Option::<SharedString>::None,
+                ),
+                &form.subtitle_input,
+                false,
+            ))
+            .child(app_form_input_text(
+                AppFormFieldSpec::new(
+                    app_shared_text(AppTextKey::ProductsEditorFieldCategory),
+                    Option::<SharedString>::None,
+                ),
+                &form.category_input,
+                false,
+            ))
+            .child(app_form_input_text(
+                AppFormFieldSpec::new(
+                    app_shared_text(AppTextKey::ProductsEditorFieldUnit),
+                    Option::<SharedString>::None,
+                ),
+                &form.unit_input,
+                false,
+            ))
+            .child(app_form_input_text(
+                AppFormFieldSpec::new(
+                    app_shared_text(AppTextKey::ProductsEditorFieldPrice),
+                    products_editor_invalid_price_key(form, cx).map(app_shared_text),
+                ),
+                &form.price_input,
+                false,
+            ))
+            .child(app_form_input_text(
+                AppFormFieldSpec::new(
+                    app_shared_text(AppTextKey::ProductsEditorFieldStock),
+                    products_editor_invalid_stock_key(form, cx).map(app_shared_text),
+                ),
+                &form.stock_input,
+                false,
+            ))
+            .child(products_editor_availability_section(
+                form,
+                &runtime.farm_rules_projection.fulfillment_windows,
+                cx,
+            ))
+            .child(products_editor_status_section(
+                form.status,
+                cx.listener(|this, _, _, cx| {
+                    this.select_product_editor_status(ProductStatus::Draft, cx)
+                }),
+                cx.listener(|this, _, _, cx| {
+                    this.select_product_editor_status(ProductStatus::Published, cx)
+                }),
+                cx.listener(|this, _, _, cx| {
+                    this.select_product_editor_status(ProductStatus::Paused, cx)
+                }),
+                cx.listener(|this, _, _, cx| {
+                    this.select_product_editor_status(ProductStatus::Archived, cx)
+                }),
+                cx,
+            ))
+            .child(products_editor_publish_readiness_section(form, runtime, cx))
+            .when(form.save_failed, |this| {
+                this.child(home_body_text(app_shared_text(
+                    AppTextKey::ProductsEditorSaveFailed,
+                )))
+            })
+            .child(
+                div()
+                    .w_full()
+                    .flex()
+                    .items_center()
+                    .justify_between()
+                    .gap(px(APP_UI_THEME.shells.home_stack_gap_px))
+                    .child(
+                        div()
+                            .text_size(px(APP_UI_THEME.foundation.typography.utility_title_text_px))
+                            .text_color(rgb(APP_UI_THEME.foundation.text.secondary))
+                            .child(product_display_title(
+                                form.title_input.read(cx).value().as_ref(),
+                            )),
+                    )
+                    .child(save_action),
+            ),
+        text_button(
+            "products-editor-close",
+            app_shared_text(AppTextKey::ProductsEditorCloseAction),
+            cx.listener(|this, _, _, cx| this.close_product_editor(cx)),
+            cx,
+        ),
     )
 }
 
@@ -12498,6 +12424,49 @@ fn products_editor_status_section(
                     cx,
                 )),
         )
+}
+
+fn products_editor_availability_section(
+    form: &ProductEditorFormState,
+    fulfillment_windows: &[FulfillmentWindowRecord],
+    cx: &mut Context<HomeView>,
+) -> impl IntoElement {
+    let choices = fulfillment_windows
+        .iter()
+        .enumerate()
+        .map(|(index, fulfillment_window)| {
+            let fulfillment_window_id = fulfillment_window.fulfillment_window_id;
+            choice_button(
+                ("products-editor-availability", index),
+                SharedString::from(fulfillment_window.label.clone()),
+                form.selected_availability_window_id == Some(fulfillment_window_id),
+                cx.listener(move |this, _, _, cx| {
+                    this.select_product_editor_availability_window(fulfillment_window_id, cx)
+                }),
+                cx,
+            )
+            .into_any_element()
+        })
+        .collect::<Vec<_>>();
+
+    div()
+        .w_full()
+        .flex()
+        .flex_col()
+        .items_start()
+        .gap(px(APP_UI_THEME.foundation.spacing.small_px))
+        .child(home_farm_setup_field_label(app_shared_text(
+            AppTextKey::ProductsEditorFieldAvailability,
+        )))
+        .child(if choices.is_empty() {
+            home_body_text(app_shared_text(AppTextKey::ProductsEditorAvailabilityEmpty))
+                .into_any_element()
+        } else {
+            app_cluster(APP_UI_THEME.foundation.spacing.tight_px)
+                .w_full()
+                .children(choices)
+                .into_any_element()
+        })
 }
 
 fn products_editor_publish_readiness_section(
@@ -14710,7 +14679,9 @@ mod tests {
         );
         assert_eq!(
             settings_auto_focus_target(SettingsPanelViewKey::Settings, None, &runtime),
-            Some(SettingsAutoFocusTarget::SettingsAllowRelayConnections)
+            Some(SettingsAutoFocusTarget::Navigation(
+                SettingsPanelViewKey::Settings
+            ))
         );
 
         let mut about_enabled = runtime.clone();
@@ -15498,7 +15469,7 @@ mod tests {
     }
 
     #[test]
-    fn sidebar_navigation_keeps_the_active_destination_first() {
+    fn sidebar_navigation_keeps_destinations_stable() {
         assert_eq!(
             home_sidebar_navigation_sections(FarmerSection::Today, true, false),
             vec![
@@ -15510,26 +15481,26 @@ mod tests {
         assert_eq!(
             home_sidebar_navigation_sections(FarmerSection::Products, true, false),
             vec![
-                FarmerSection::Products,
                 FarmerSection::Today,
+                FarmerSection::Products,
                 FarmerSection::Orders,
             ]
         );
         assert_eq!(
             home_sidebar_navigation_sections(FarmerSection::Orders, true, false),
             vec![
-                FarmerSection::Orders,
                 FarmerSection::Today,
                 FarmerSection::Products,
+                FarmerSection::Orders,
             ]
         );
         assert_eq!(
             home_sidebar_navigation_sections(FarmerSection::PackDay, true, true),
             vec![
-                FarmerSection::PackDay,
                 FarmerSection::Today,
                 FarmerSection::Products,
                 FarmerSection::Orders,
+                FarmerSection::PackDay,
             ]
         );
     }

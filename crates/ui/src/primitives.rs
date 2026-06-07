@@ -143,6 +143,60 @@ pub fn app_surface_card_section(
     app_surface_card(app_form_section(title, body))
 }
 
+pub fn app_focused_task_view(
+    title: impl Into<SharedString>,
+    body: impl IntoElement,
+    actions: impl IntoElement,
+) -> AnyElement {
+    app_focused_view(
+        APP_UI_THEME.shells.focused_task_max_width_px,
+        title,
+        body,
+        actions,
+    )
+}
+
+pub fn app_focused_detail_view(
+    title: impl Into<SharedString>,
+    body: impl IntoElement,
+    actions: impl IntoElement,
+) -> AnyElement {
+    app_focused_view(
+        APP_UI_THEME.shells.focused_detail_max_width_px,
+        title,
+        body,
+        actions,
+    )
+}
+
+fn app_focused_view(
+    max_width_px: f32,
+    title: impl Into<SharedString>,
+    body: impl IntoElement,
+    actions: impl IntoElement,
+) -> AnyElement {
+    div()
+        .w_full()
+        .max_w(px(max_width_px))
+        .mx_auto()
+        .child(app_surface_card(
+            app_stack_v(APP_UI_THEME.shells.home_stack_gap_px)
+                .w_full()
+                .child(
+                    div()
+                        .w_full()
+                        .flex()
+                        .items_start()
+                        .justify_between()
+                        .gap(px(APP_UI_THEME.shells.home_stack_gap_px))
+                        .child(app_text_value(title))
+                        .child(actions),
+                )
+                .child(body),
+        ))
+        .into_any_element()
+}
+
 pub fn app_stack_v(gap_px: f32) -> Div {
     div().flex().flex_col().gap(px(gap_px))
 }
@@ -440,7 +494,7 @@ pub fn app_checkbox_field(
         .w_full()
         .flex()
         .flex_col()
-        .gap(px(4.0))
+        .gap(px(APP_UI_THEME.foundation.spacing.micro_px))
         .child(
             Button::new((checkbox_id, 0usize))
                 .custom(

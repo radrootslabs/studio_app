@@ -161,6 +161,9 @@ pub struct AppShellTokens {
     pub home_window_padding_px: f32,
     pub home_sidebar_width_px: f32,
     pub home_card_max_width_px: f32,
+    pub focused_task_max_width_px: f32,
+    pub focused_detail_max_width_px: f32,
+    pub settings_panel_content_max_width_px: f32,
     pub home_card_padding_px: f32,
     pub home_stack_gap_px: f32,
     pub startup_stack_gap_px: f32,
@@ -334,6 +337,9 @@ pub const APP_UI_THEME: AppUiTheme = AppUiTheme {
         home_window_padding_px: APP_SPACING_XLARGE_PX,
         home_sidebar_width_px: 240.0,
         home_card_max_width_px: 1080.0,
+        focused_task_max_width_px: 720.0,
+        focused_detail_max_width_px: 840.0,
+        settings_panel_content_max_width_px: 560.0,
         home_card_padding_px: APP_SPACING_XLARGE_PX,
         home_stack_gap_px: APP_SPACING_MEDIUM_PX,
         startup_stack_gap_px: APP_SPACING_TIGHT_PX,
@@ -401,6 +407,8 @@ mod tests {
         assert_eq!(APP_UI_THEME.shells.home_min_height_px, 795.0);
         assert_eq!(APP_UI_THEME.shells.home_sidebar_width_px, 240.0);
         assert_eq!(APP_UI_THEME.shells.home_window_padding_px, 24.0);
+        assert_eq!(APP_UI_THEME.shells.focused_task_max_width_px, 720.0);
+        assert_eq!(APP_UI_THEME.shells.focused_detail_max_width_px, 840.0);
     }
 
     #[test]
@@ -409,6 +417,10 @@ mod tests {
         assert_eq!(APP_UI_THEME.shells.settings_height_px, 540.0);
         assert_eq!(APP_UI_THEME.shells.settings_chrome_height_px, 88.0);
         assert_eq!(APP_UI_THEME.shells.settings_content_padding_px, 24.0);
+        assert_eq!(
+            APP_UI_THEME.shells.settings_panel_content_max_width_px,
+            560.0
+        );
         assert_eq!(APP_UI_THEME.shells.settings_account_sidebar_width_px, 200.0);
         assert_eq!(
             APP_UI_THEME

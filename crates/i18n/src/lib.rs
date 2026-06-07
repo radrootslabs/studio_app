@@ -607,15 +607,15 @@ mod tests {
             (AppTextKey::TradeValidationReceiptTargetLabel, "Target"),
             (
                 AppTextKey::TradeValidationReceiptEventSetRootLabel,
-                "Event set",
+                "Evidence set",
             ),
             (
                 AppTextKey::TradeValidationReceiptReducerOutputRootLabel,
-                "Output root",
+                "Review output",
             ),
             (
                 AppTextKey::TradeValidationReceiptPublicValuesHashLabel,
-                "Values hash",
+                "Verification values",
             ),
             (
                 AppTextKey::TradeValidationReceiptRecordedAtLabel,
@@ -643,16 +643,19 @@ mod tests {
                 "State",
             ),
             (AppTextKey::TradeValidationReceiptProofNone, "None"),
-            (AppTextKey::TradeValidationReceiptProofSp1Core, "SP1 core"),
+            (AppTextKey::TradeValidationReceiptProofSp1Core, "Core proof"),
             (
                 AppTextKey::TradeValidationReceiptProofSp1Compressed,
-                "SP1 compressed",
+                "Compressed proof",
             ),
             (
                 AppTextKey::TradeValidationReceiptProofSp1Groth16,
-                "SP1 Groth16",
+                "Groth16 proof",
             ),
-            (AppTextKey::TradeValidationReceiptProofSp1Plonk, "SP1 Plonk"),
+            (
+                AppTextKey::TradeValidationReceiptProofSp1Plonk,
+                "Plonk proof",
+            ),
         ] {
             assert_eq!(app_text(key), expected);
             assert!(
