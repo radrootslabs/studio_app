@@ -1012,6 +1012,77 @@ pub fn app_button_ellipsis_menu(
         .dropdown_menu_with_anchor(Corner::BottomRight, menu)
 }
 
+pub fn app_button_sidebar_account_menu(
+    id: &'static str,
+    label: impl Into<SharedString>,
+    menu: impl Fn(PopupMenu, &mut Window, &mut Context<PopupMenu>) -> PopupMenu + 'static,
+    cx: &App,
+) -> impl IntoElement {
+    let label = label.into();
+    let sizing = APP_UI_THEME.components.app_button.sizing;
+    let row = APP_UI_THEME.components.app_account_selector_row;
+
+    Button::new(id)
+        .custom(
+            ButtonCustomVariant::new(cx)
+                .color(rgb(row.inactive_background).into())
+                .foreground(rgb(APP_UI_THEME.foundation.text.secondary).into())
+                .border(transparent_black())
+                .hover(rgb(row.active_background).into())
+                .active(rgb(row.active_background).into()),
+        )
+        .w_full()
+        .h(px(APP_UI_THEME
+            .shells
+            .settings_account_sidebar_button_height_px))
+        .rounded(ButtonRounded::Size(px(APP_UI_THEME
+            .shells
+            .settings_account_sidebar_button_corner_radius_px)))
+        .tab_stop(false)
+        .child(
+            div()
+                .size_full()
+                .px(px(APP_UI_THEME
+                    .shells
+                    .settings_account_sidebar_footer_button_gap_px))
+                .flex()
+                .items_center()
+                .justify_between()
+                .gap(px(APP_UI_THEME
+                    .shells
+                    .settings_account_sidebar_button_gap_px))
+                .child(
+                    div()
+                        .flex()
+                        .items_center()
+                        .min_w_0()
+                        .gap(px(APP_UI_THEME
+                            .shells
+                            .settings_account_sidebar_button_gap_px))
+                        .child(
+                            Icon::new(IconName::CircleUser)
+                                .with_size(Size::Size(px(sizing.icon_size_px)))
+                                .text_color(rgb(APP_UI_THEME.foundation.text.secondary)),
+                        )
+                        .child(
+                            div()
+                                .min_w_0()
+                                .truncate()
+                                .text_size(px(APP_UI_THEME.foundation.typography.body_text_px))
+                                .font_weight(gpui::FontWeight::MEDIUM)
+                                .text_color(rgb(APP_UI_THEME.foundation.text.secondary))
+                                .child(label),
+                        ),
+                )
+                .child(
+                    Icon::new(IconName::ChevronsUpDown)
+                        .with_size(Size::Size(px(sizing.icon_size_px)))
+                        .text_color(rgb(APP_UI_THEME.foundation.text.secondary)),
+                ),
+        )
+        .dropdown_menu_with_anchor(Corner::TopLeft, menu)
+}
+
 fn app_button_label(
     button: Button,
     label: SharedString,

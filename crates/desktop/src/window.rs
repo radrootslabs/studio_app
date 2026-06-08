@@ -41,7 +41,7 @@ use radroots_studio_app_ui::{
     app_button_primary_disabled as action_button_primary_disabled,
     app_button_primary_full_width as action_button_primary_full_width,
     app_button_secondary as action_button, app_button_secondary_disabled as action_button_disabled,
-    app_button_secondary_full_width as action_button_full_width,
+    app_button_secondary_full_width as action_button_full_width, app_button_sidebar_account_menu,
     app_button_square_dropdown_secondary as action_dropdown_button, app_button_text as text_button,
     app_checkbox_button as action_checkbox_button, app_checkbox_field, app_cluster, app_detail_row,
     app_divider as section_divider, app_focused_detail_view, app_focused_task_view, app_form_field,
@@ -1968,6 +1968,22 @@ impl HomeView {
             self.products_stock_editor = None;
             self.product_editor_form = None;
             self.clear_focused_view();
+            cx.notify();
+        }
+    }
+
+    fn open_account_tab(&mut self, tab: AccountTab, cx: &mut Context<Self>) {
+        let route_changed = self.runtime.select_account();
+        if route_changed {
+            self.products_stock_editor = None;
+            self.product_editor_form = None;
+            self.clear_focused_view();
+        }
+
+        let tab_changed = self.selected_account_tab != tab;
+        self.selected_account_tab = tab;
+
+        if route_changed || tab_changed {
             cx.notify();
         }
     }
@@ -4193,6 +4209,10 @@ impl HomeView {
                 }),
                 cx.listener(|this, _, _, cx| this.open_orders(cx)),
                 cx.listener(|this, _, _, cx| this.open_pack_day(None, cx)),
+                cx.listener(|this, _, _, cx| this.open_account_tab(AccountTab::Profile, cx)),
+                cx.listener(|this, _, _, cx| this.open_account_tab(AccountTab::FarmDetails, cx)),
+                cx.listener(|this, _, _, cx| this.open_account_tab(AccountTab::Preferences, cx)),
+                cx.listener(|this, _, _, cx| this.open_account_tab(AccountTab::Settings, cx)),
                 cx,
             )
             .into_any_element(),
@@ -5526,6 +5546,10 @@ impl HomeView {
                 }),
                 cx.listener(|this, _, _, cx| this.open_orders(cx)),
                 cx.listener(|this, _, _, cx| this.open_pack_day(None, cx)),
+                cx.listener(|this, _, _, cx| this.open_account_tab(AccountTab::Profile, cx)),
+                cx.listener(|this, _, _, cx| this.open_account_tab(AccountTab::FarmDetails, cx)),
+                cx.listener(|this, _, _, cx| this.open_account_tab(AccountTab::Preferences, cx)),
+                cx.listener(|this, _, _, cx| this.open_account_tab(AccountTab::Settings, cx)),
                 cx,
             )
             .into_any_element()
@@ -13127,6 +13151,10 @@ fn home_sidebar(
     on_select_products: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
     on_select_orders: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
     on_select_pack_day: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+    on_select_account_profile: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+    on_select_account_farm_details: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+    on_select_account_preferences: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+    on_select_account_settings: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
     cx: &App,
 ) -> impl IntoElement {
     let selected_section = selected_farmer_section(runtime);
@@ -13138,6 +13166,10 @@ fn home_sidebar(
     let on_select_products = Arc::new(on_select_products);
     let on_select_orders = Arc::new(on_select_orders);
     let on_select_pack_day = Arc::new(on_select_pack_day);
+    let on_select_account_profile = Arc::new(on_select_account_profile);
+    let on_select_account_farm_details = Arc::new(on_select_account_farm_details);
+    let on_select_account_preferences = Arc::new(on_select_account_preferences);
+    let on_select_account_settings = Arc::new(on_select_account_settings);
     let mut navigation_elements = Vec::with_capacity(navigation_sections.len());
     for section in navigation_sections {
         let element = match section {
@@ -13211,11 +13243,60 @@ fn home_sidebar(
                     .gap(px(APP_UI_THEME.shells.home_stack_gap_px))
                     .children(navigation_elements),
             )
-            .child(
-                div().child(div().when_some(home_saved_farm(runtime), |this, farm| {
-                    this.child(home_body_text(farm.display_name.clone()))
-                })),
-            ),
+            .when_some(home_saved_farm(runtime), |this, farm| {
+                this.child(home_sidebar_account_menu(
+                    farm.display_name.clone(),
+                    Arc::clone(&on_select_account_profile),
+                    Arc::clone(&on_select_account_farm_details),
+                    Arc::clone(&on_select_account_preferences),
+                    Arc::clone(&on_select_account_settings),
+                    cx,
+                ))
+            }),
+    )
+}
+
+fn home_sidebar_account_menu<ProfileAction, FarmDetailsAction, PreferencesAction, SettingsAction>(
+    label: impl Into<SharedString>,
+    on_select_profile: Arc<ProfileAction>,
+    on_select_farm_details: Arc<FarmDetailsAction>,
+    on_select_preferences: Arc<PreferencesAction>,
+    on_select_settings: Arc<SettingsAction>,
+    cx: &App,
+) -> impl IntoElement
+where
+    ProfileAction: Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+    FarmDetailsAction: Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+    PreferencesAction: Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+    SettingsAction: Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+{
+    app_button_sidebar_account_menu(
+        "home-sidebar-account-menu",
+        label,
+        move |menu, _, _| {
+            let on_select_profile = Arc::clone(&on_select_profile);
+            let on_select_farm_details = Arc::clone(&on_select_farm_details);
+            let on_select_preferences = Arc::clone(&on_select_preferences);
+            let on_select_settings = Arc::clone(&on_select_settings);
+
+            menu.item(
+                PopupMenuItem::new(app_text(AccountTab::Profile.text_key()))
+                    .on_click(move |event, window, app| on_select_profile(event, window, app)),
+            )
+            .item(
+                PopupMenuItem::new(app_text(AccountTab::FarmDetails.text_key()))
+                    .on_click(move |event, window, app| on_select_farm_details(event, window, app)),
+            )
+            .item(
+                PopupMenuItem::new(app_text(AccountTab::Preferences.text_key()))
+                    .on_click(move |event, window, app| on_select_preferences(event, window, app)),
+            )
+            .item(
+                PopupMenuItem::new(app_text(AccountTab::Settings.text_key()))
+                    .on_click(move |event, window, app| on_select_settings(event, window, app)),
+            )
+        },
+        cx,
     )
 }
 

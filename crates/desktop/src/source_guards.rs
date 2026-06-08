@@ -171,6 +171,7 @@ const ALLOWED_WINDOW_LITERALS: &[&str] = &[
     "home-farm-setup-shipping",
     "home-farm-setup-start",
     "home-generate-key",
+    "home-sidebar-account-menu",
     "home-nav-orders",
     "home-nav-pack-day",
     "home-nav-products",
