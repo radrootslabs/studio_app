@@ -5662,6 +5662,7 @@ impl HomeView {
                 )
             }
         };
+        let panel_uses_inner_scroll = selected_tab == AccountTab::FarmDetails;
 
         account_tab_frame(
             tabs,
@@ -5673,6 +5674,7 @@ impl HomeView {
             heading_actions,
             fixed_subheader,
             panel,
+            panel_uses_inner_scroll,
         )
         .into_any_element()
     }
@@ -9542,6 +9544,7 @@ fn account_tab_frame(
     heading_actions: Option<AnyElement>,
     fixed_subheader: Option<AnyElement>,
     panel: AnyElement,
+    panel_uses_inner_scroll: bool,
 ) -> AnyElement {
     div()
         .size_full()
@@ -9565,12 +9568,21 @@ fn account_tab_frame(
         .when_some(fixed_subheader, |this, fixed_subheader| {
             this.child(div().w_full().flex_none().child(fixed_subheader))
         })
-        .child(div().flex_1().overflow_hidden().child(app_scroll_panel(
-            "account-scroll",
-            0.0,
-            None,
-            panel,
-        )))
+        .child(if panel_uses_inner_scroll {
+            div()
+                .flex_1()
+                .w_full()
+                .overflow_hidden()
+                .child(panel)
+                .into_any_element()
+        } else {
+            div()
+                .flex_1()
+                .w_full()
+                .overflow_hidden()
+                .child(app_scroll_panel("account-scroll", 0.0, None, panel))
+                .into_any_element()
+        })
         .into_any_element()
 }
 
@@ -9795,7 +9807,6 @@ fn account_profile_labeled_control(
 
 const ACCOUNT_FORM_CONTROL_HEIGHT_PX: f32 = 28.0;
 const ACCOUNT_FORM_CONTROL_RADIUS_PX: f32 = 8.0;
-const ACCOUNT_FARM_DETAILS_TAB_CARD_MIN_HEIGHT_PX: f32 = 520.0;
 const ACCOUNT_FARM_DETAILS_FIELD_MIN_WIDTH_PX: f32 = 220.0;
 const ACCOUNT_FARM_DETAILS_FULL_FIELD_MIN_WIDTH_PX: f32 = 464.0;
 const ACCOUNT_SETTINGS_DEFAULT_BLOSSOM_SERVER: &str = "http://localhost:8082";
@@ -9882,12 +9893,15 @@ fn account_farm_profile_panel(
     is_textarea_wrap_ready: bool,
     cx: &mut Context<HomeView>,
 ) -> impl IntoElement {
-    div().w_full().child(account_farm_details_tab_panel(
-        form,
-        selected_tab,
-        is_textarea_wrap_ready,
-        cx,
-    ))
+    div()
+        .size_full()
+        .overflow_hidden()
+        .child(account_farm_details_tab_panel(
+            form,
+            selected_tab,
+            is_textarea_wrap_ready,
+            cx,
+        ))
 }
 
 fn account_farm_details_tab_panel(
@@ -9925,13 +9939,13 @@ fn account_farm_profile_section_row(
     rail: impl IntoElement,
 ) -> impl IntoElement {
     div()
-        .w_full()
-        .min_h(px(ACCOUNT_FARM_DETAILS_TAB_CARD_MIN_HEIGHT_PX))
+        .size_full()
+        .overflow_hidden()
         .flex()
         .items_start()
         .gap(px(APP_UI_THEME.shells.home_stack_gap_px))
-        .child(div().flex_1().min_w_0().child(main))
-        .child(div().w(px(336.0)).min_w(px(300.0)).child(rail))
+        .child(div().flex_1().h_full().min_w_0().child(main))
+        .child(div().w(px(336.0)).min_w(px(300.0)).flex_none().child(rail))
 }
 
 fn account_farm_profile_main_card(
@@ -10067,7 +10081,7 @@ fn account_farm_map_placeholder() -> impl IntoElement {
 }
 
 fn account_farm_location_preview_card() -> impl IntoElement {
-    account_farm_profile_card(
+    account_farm_profile_rail_card(
         app_stack_v(APP_UI_THEME.shells.home_stack_gap_px)
             .w_full()
             .child(account_farm_preview_title(
@@ -10170,7 +10184,7 @@ fn account_farm_operating_card(
 }
 
 fn account_farm_profile_preview_card(cx: &mut Context<HomeView>) -> impl IntoElement + use<> {
-    account_farm_profile_card(
+    account_farm_profile_rail_card(
         app_stack_v(APP_UI_THEME.shells.home_stack_gap_px)
             .w_full()
             .child(account_farm_preview_title(
@@ -10393,7 +10407,7 @@ fn account_farm_slider_preview() -> impl IntoElement {
 }
 
 fn account_farm_customer_experience_card() -> impl IntoElement {
-    account_farm_profile_card(
+    account_farm_profile_rail_card(
         app_stack_v(APP_UI_THEME.shells.home_stack_gap_px)
             .w_full()
             .child(account_farm_preview_title(
@@ -10453,18 +10467,18 @@ fn account_farm_customer_experience_panel(
 
 fn account_farm_profile_card(content: impl IntoElement) -> impl IntoElement {
     div()
-        .w_full()
-        .min_h(px(ACCOUNT_FARM_DETAILS_TAB_CARD_MIN_HEIGHT_PX))
+        .size_full()
+        .overflow_hidden()
         .border_1()
         .border_color(rgb(APP_UI_THEME.foundation.surfaces.divider))
         .rounded(px(APP_UI_THEME.foundation.radii.large_px))
         .bg(transparent_black())
-        .child(
-            div()
-                .w_full()
-                .p(px(APP_UI_THEME.shells.home_card_padding_px))
-                .child(content),
-        )
+        .child(app_scroll_panel(
+            "account-farm-card-scroll",
+            APP_UI_THEME.shells.home_card_padding_px,
+            None,
+            content,
+        ))
 }
 
 fn account_farm_profile_rail_card(content: impl IntoElement) -> impl IntoElement {

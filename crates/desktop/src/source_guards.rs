@@ -54,6 +54,7 @@ const ALLOWED_WINDOW_LITERALS: &[&str] = &[
     "account-settings-reset-relays",
     "account-settings-save",
     "account-settings-save-draft",
+    "account-farm-card-scroll",
     "account-farm-details-tabs",
     "account-farm-save",
     "account-farm-save-draft",
