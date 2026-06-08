@@ -382,6 +382,13 @@ pub fn app_pill_tabs(
     let tabs = tabs.into_iter().collect::<Vec<_>>();
     let height_px = APP_UI_THEME.components.app_button.sizing.height_px;
     let radius_px = height_px / 2.0;
+    let horizontal_padding_px = APP_UI_THEME
+        .components
+        .app_button
+        .sizing
+        .compact_horizontal_padding_px;
+    let label_size_px = APP_UI_THEME.components.app_button.sizing.label_size_px;
+    let gap_px = APP_UI_THEME.foundation.spacing.micro_px;
     let primary = APP_UI_THEME.components.app_button.primary_colors;
     let inactive_foreground = APP_UI_THEME.foundation.text.secondary;
     let inactive_hover_background = APP_UI_THEME.foundation.surfaces.card_background;
@@ -391,7 +398,7 @@ pub fn app_pill_tabs(
         .flex()
         .items_center()
         .w_full()
-        .gap(px(APP_UI_THEME.foundation.spacing.micro_px))
+        .gap(px(gap_px))
         .children(tabs.into_iter().enumerate().map(|(index, tab)| {
             let is_selected = index == selected_index;
             let foreground = if is_selected {
@@ -427,12 +434,8 @@ pub fn app_pill_tabs(
                         .flex()
                         .items_center()
                         .justify_center()
-                        .px(px(APP_UI_THEME
-                            .components
-                            .app_button
-                            .sizing
-                            .horizontal_padding_px))
-                        .text_size(px(APP_UI_THEME.components.app_button.sizing.label_size_px))
+                        .px(px(horizontal_padding_px))
+                        .text_size(px(label_size_px))
                         .font_weight(gpui::FontWeight::MEDIUM)
                         .text_color(rgb(foreground))
                         .child(tab.label),
