@@ -1021,6 +1021,11 @@ pub fn app_button_sidebar_account_menu(
     let label = label.into();
     let sizing = APP_UI_THEME.components.app_button.sizing;
     let row = APP_UI_THEME.components.app_account_selector_row;
+    let horizontal_padding_px = APP_UI_THEME
+        .shells
+        .settings_account_sidebar_footer_button_gap_px;
+    let icon_label_gap_px = APP_UI_THEME.foundation.spacing.micro_px;
+    let icon_size = Size::Size(px(sizing.icon_size_px));
 
     Button::new(id)
         .custom(
@@ -1032,19 +1037,16 @@ pub fn app_button_sidebar_account_menu(
                 .active(rgb(row.active_background).into()),
         )
         .w_full()
-        .h(px(APP_UI_THEME
-            .shells
-            .settings_account_sidebar_button_height_px))
+        .h(px(sizing.height_px))
         .rounded(ButtonRounded::Size(px(APP_UI_THEME
             .shells
             .settings_account_sidebar_button_corner_radius_px)))
         .tab_stop(false)
         .child(
             div()
-                .size_full()
-                .px(px(APP_UI_THEME
-                    .shells
-                    .settings_account_sidebar_footer_button_gap_px))
+                .w_full()
+                .h_full()
+                .px(px(horizontal_padding_px))
                 .flex()
                 .items_center()
                 .justify_between()
@@ -1053,15 +1055,14 @@ pub fn app_button_sidebar_account_menu(
                     .settings_account_sidebar_button_gap_px))
                 .child(
                     div()
+                        .flex_1()
                         .flex()
                         .items_center()
                         .min_w_0()
-                        .gap(px(APP_UI_THEME
-                            .shells
-                            .settings_account_sidebar_button_gap_px))
+                        .gap(px(icon_label_gap_px))
                         .child(
                             Icon::new(IconName::CircleUser)
-                                .with_size(Size::Size(px(sizing.icon_size_px)))
+                                .with_size(icon_size)
                                 .text_color(rgb(APP_UI_THEME.foundation.text.secondary)),
                         )
                         .child(
@@ -1076,7 +1077,7 @@ pub fn app_button_sidebar_account_menu(
                 )
                 .child(
                     Icon::new(IconName::ChevronsUpDown)
-                        .with_size(Size::Size(px(sizing.icon_size_px)))
+                        .with_size(icon_size)
                         .text_color(rgb(APP_UI_THEME.foundation.text.secondary)),
                 ),
         )
