@@ -1026,6 +1026,8 @@ pub fn app_button_sidebar_account_menu(
         .settings_account_sidebar_footer_button_gap_px;
     let icon_label_gap_px = APP_UI_THEME.foundation.spacing.micro_px;
     let icon_size = Size::Size(px(sizing.icon_size_px));
+    let width_px = APP_UI_THEME.shells.home_sidebar_width_px
+        - (APP_UI_THEME.shells.home_window_padding_px * 2.0);
 
     Button::new(id)
         .custom(
@@ -1036,15 +1038,16 @@ pub fn app_button_sidebar_account_menu(
                 .hover(rgb(row.active_background).into())
                 .active(rgb(row.active_background).into()),
         )
-        .w_full()
+        .w(px(width_px))
         .h(px(sizing.height_px))
+        .p(px(0.0))
         .rounded(ButtonRounded::Size(px(APP_UI_THEME
             .shells
             .settings_account_sidebar_button_corner_radius_px)))
         .tab_stop(false)
         .child(
             div()
-                .w_full()
+                .w(px(width_px))
                 .h_full()
                 .px(px(horizontal_padding_px))
                 .flex()
@@ -1061,24 +1064,31 @@ pub fn app_button_sidebar_account_menu(
                         .min_w_0()
                         .gap(px(icon_label_gap_px))
                         .child(
-                            Icon::new(IconName::CircleUser)
-                                .with_size(icon_size)
-                                .text_color(rgb(APP_UI_THEME.foundation.text.secondary)),
+                            div().flex_none().child(
+                                Icon::new(IconName::CircleUser)
+                                    .with_size(icon_size)
+                                    .text_color(rgb(APP_UI_THEME.foundation.text.secondary)),
+                            ),
                         )
                         .child(
                             div()
                                 .min_w_0()
                                 .truncate()
-                                .text_size(px(APP_UI_THEME.foundation.typography.body_text_px))
+                                .text_size(px(APP_UI_THEME
+                                    .foundation
+                                    .typography
+                                    .settings_row_text_px))
                                 .font_weight(gpui::FontWeight::MEDIUM)
                                 .text_color(rgb(APP_UI_THEME.foundation.text.secondary))
                                 .child(label),
                         ),
                 )
                 .child(
-                    Icon::new(IconName::ChevronsUpDown)
-                        .with_size(icon_size)
-                        .text_color(rgb(APP_UI_THEME.foundation.text.secondary)),
+                    div().flex_none().child(
+                        Icon::new(IconName::ChevronsUpDown)
+                            .with_size(icon_size)
+                            .text_color(rgb(APP_UI_THEME.foundation.text.secondary)),
+                    ),
                 ),
         )
         .dropdown_menu_with_anchor(Corner::TopLeft, menu)
