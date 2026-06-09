@@ -681,6 +681,7 @@ pub fn app_checkbox_field(
                 )
                 .rounded(ButtonRounded::Size(px(0.0)))
                 .w_full()
+                .p(px(0.0))
                 .on_click({
                     let on_change = Rc::clone(&on_change);
                     move |_, window, cx| on_change(!checked, window, cx)

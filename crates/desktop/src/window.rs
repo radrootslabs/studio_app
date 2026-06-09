@@ -11209,11 +11209,17 @@ fn account_settings_blossom_server_card(
                 |_, _, _| {},
                 cx,
             )))
-            .child(account_settings_blossom_health_card()),
+            .child(account_settings_blossom_health_card(form, cx)),
     )
 }
 
-fn account_settings_blossom_health_card() -> impl IntoElement {
+fn account_settings_blossom_health_card(
+    form: &AccountSettingsFormState,
+    cx: &mut Context<HomeView>,
+) -> impl IntoElement {
+    let status =
+        account_settings_blossom_status(form.blossom_server_input.read(cx).value().as_ref());
+
     div()
         .w_full()
         .border_1()
@@ -11229,9 +11235,7 @@ fn account_settings_blossom_health_card() -> impl IntoElement {
                 .flex()
                 .items_center()
                 .gap(px(APP_UI_THEME.foundation.spacing.medium_px))
-                .child(status_indicator(
-                    APP_UI_THEME.components.app_status_indicator.online,
-                ))
+                .child(status_indicator(status.indicator_color))
                 .child(
                     app_stack_v(APP_UI_THEME.foundation.spacing.micro_px)
                         .min_w_0()
@@ -11243,9 +11247,7 @@ fn account_settings_blossom_health_card() -> impl IntoElement {
                                     .settings_row_text_px))
                                 .font_weight(gpui::FontWeight::MEDIUM)
                                 .text_color(rgb(APP_UI_THEME.foundation.text.primary))
-                                .child(app_shared_text(
-                                    AppTextKey::AccountSettingsBlossomConnectionHealthy,
-                                )),
+                                .child(app_shared_text(status.title_key)),
                         )
                         .child(
                             div()
@@ -11254,17 +11256,53 @@ fn account_settings_blossom_health_card() -> impl IntoElement {
                                     .typography
                                     .settings_row_text_px))
                                 .text_color(rgb(APP_UI_THEME.foundation.text.secondary))
-                                .child(app_shared_text(
-                                    AppTextKey::AccountSettingsBlossomUploadsAvailable,
-                                )),
+                                .child(app_shared_text(status.body_key)),
                         ),
                 ),
         )
         .child(
-            Icon::new(IconName::CircleCheck)
+            Icon::new(status.icon_name)
                 .with_size(gpui_component::Size::Size(px(18.0)))
-                .text_color(rgb(APP_UI_THEME.components.app_status_indicator.online)),
+                .text_color(rgb(status.indicator_color)),
         )
+}
+
+#[derive(Clone)]
+struct AccountSettingsBlossomStatusPresentation {
+    indicator_color: u32,
+    icon_name: IconName,
+    title_key: AppTextKey,
+    body_key: AppTextKey,
+}
+
+fn account_settings_blossom_status(server_url: &str) -> AccountSettingsBlossomStatusPresentation {
+    let trimmed = server_url.trim();
+    let status = APP_UI_THEME.components.app_status_indicator;
+
+    if trimmed.is_empty() || !(trimmed.starts_with("http://") || trimmed.starts_with("https://")) {
+        return AccountSettingsBlossomStatusPresentation {
+            indicator_color: status.attention,
+            icon_name: IconName::CircleX,
+            title_key: AppTextKey::AccountSettingsBlossomConnectionInvalid,
+            body_key: AppTextKey::AccountSettingsBlossomUploadsUnavailable,
+        };
+    }
+
+    if trimmed.contains("localhost") || trimmed.contains("127.0.0.1") || trimmed.contains("[::1]") {
+        return AccountSettingsBlossomStatusPresentation {
+            indicator_color: status.offline,
+            icon_name: IconName::TriangleAlert,
+            title_key: AppTextKey::AccountSettingsBlossomConnectionLocal,
+            body_key: AppTextKey::AccountSettingsBlossomUploadsPending,
+        };
+    }
+
+    AccountSettingsBlossomStatusPresentation {
+        indicator_color: status.online,
+        icon_name: IconName::CircleCheck,
+        title_key: AppTextKey::AccountSettingsBlossomConnectionHealthy,
+        body_key: AppTextKey::AccountSettingsBlossomUploadsAvailable,
+    }
 }
 
 fn account_settings_card(content: impl IntoElement) -> impl IntoElement {
