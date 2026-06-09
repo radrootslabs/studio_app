@@ -43,15 +43,15 @@ use radroots_studio_app_ui::{
     app_button_secondary as action_button, app_button_secondary_disabled as action_button_disabled,
     app_button_secondary_full_width as action_button_full_width, app_button_sidebar_account_menu,
     app_button_square_dropdown_secondary as action_dropdown_button, app_button_text as text_button,
-    app_checkbox_button as action_checkbox_button, app_checkbox_field, app_cluster, app_detail_row,
-    app_divider as section_divider, app_focused_detail_view, app_focused_task_view, app_form_field,
-    app_form_input_text, app_form_section, app_heading_section, app_heading_view,
-    app_input_text as app_text_input, app_pill_tabs, app_scroll_panel,
-    app_segment_button_icon as icon_segment_button, app_shared_label_text, app_shared_text,
-    app_split_shell, app_stack_h, app_stack_v, app_status_indicator as status_indicator,
-    app_surface_card, app_surface_card_section as home_card, app_surface_panel,
-    app_surface_sidebar, app_surface_window as app_window_shell,
-    app_text_badge as settings_badge_text, app_text_body_subtle as home_body_text, app_text_label,
+    app_checkbox_field, app_cluster, app_detail_row, app_divider as section_divider,
+    app_focused_detail_view, app_focused_task_view, app_form_field, app_form_input_text,
+    app_form_section, app_heading_section, app_heading_view, app_input_text as app_text_input,
+    app_pill_tabs, app_scroll_panel, app_segment_button_icon as icon_segment_button,
+    app_shared_label_text, app_shared_text, app_split_shell, app_stack_h, app_stack_v,
+    app_status_indicator as status_indicator, app_surface_card,
+    app_surface_card_section as home_card, app_surface_panel, app_surface_sidebar,
+    app_surface_window as app_window_shell, app_text_badge as settings_badge_text,
+    app_text_body_subtle as home_body_text, app_text_label,
     app_text_label as home_farm_setup_field_label, app_text_value, app_underline_tabs,
     label_value_list, runtime_metadata_rows, settings_preferences_general_rows, utility_title_row,
 };
@@ -11006,7 +11006,7 @@ fn account_settings_relay_list(cx: &mut Context<HomeView>) -> impl IntoElement {
             "account-settings-relay-menu-localhost-8080",
             ACCOUNT_SETTINGS_RELAY_LOCALHOST_8080,
             AppTextKey::AccountSettingsRelayAccessReadWrite,
-            true,
+            APP_UI_THEME.components.app_status_indicator.online,
             cx,
         ))
         .child(account_settings_relay_row(
@@ -11014,20 +11014,21 @@ fn account_settings_relay_list(cx: &mut Context<HomeView>) -> impl IntoElement {
             "account-settings-relay-menu-localhost-8081",
             ACCOUNT_SETTINGS_RELAY_LOCALHOST_8081,
             AppTextKey::AccountSettingsRelayAccessReadOnly,
-            true,
+            APP_UI_THEME.components.app_status_indicator.offline,
             cx,
         ))
 }
 
 fn account_settings_relay_row(
-    checkbox_id: &'static str,
+    row_id: &'static str,
     menu_id: &'static str,
     relay_url: &'static str,
     access_key: AppTextKey,
-    enabled: bool,
+    status_color: u32,
     cx: &mut Context<HomeView>,
 ) -> impl IntoElement {
     div()
+        .id(row_id)
         .w_full()
         .min_h(px(52.0))
         .px(px(APP_UI_THEME.foundation.spacing.medium_px))
@@ -11042,7 +11043,7 @@ fn account_settings_relay_row(
                 .flex()
                 .items_center()
                 .gap(px(APP_UI_THEME.foundation.spacing.medium_px))
-                .child(account_settings_checkbox(checkbox_id, enabled, cx))
+                .child(account_settings_relay_status_indicator(status_color))
                 .child(
                     div()
                         .flex_1()
@@ -11062,12 +11063,8 @@ fn account_settings_relay_row(
         .child(account_settings_relay_menu_button(menu_id, cx))
 }
 
-fn account_settings_checkbox(
-    id: &'static str,
-    checked: bool,
-    cx: &mut Context<HomeView>,
-) -> impl IntoElement {
-    action_checkbox_button(id, checked, cx, |_, _, _| {})
+fn account_settings_relay_status_indicator(status_color: u32) -> impl IntoElement {
+    div().flex_none().child(status_indicator(status_color))
 }
 
 fn account_settings_relay_menu_button(
@@ -11084,14 +11081,14 @@ fn account_settings_relay_menu_button(
                 AppTextKey::AccountSettingsRelayMenuView,
             )))
             .item(
-                PopupMenuItem::new(app_text(AppTextKey::AccountSettingsRemoveRelayAction))
-                    .on_click(|_, _, _| {}),
+                PopupMenuItem::new(app_text(
+                    AppTextKey::AccountSettingsRelayMenuCheckConnection,
+                ))
+                .on_click(|_, _, _| {}),
             )
-            .item(PopupMenuItem::new(app_text(
-                AppTextKey::AccountSettingsRelayMenuCheckConnection,
-            )))
             .separator()
             .item(account_settings_copy_menu_item())
+            .item(account_settings_remove_menu_item())
         },
         cx,
     )
@@ -11119,6 +11116,19 @@ fn account_settings_copy_menu_item() -> PopupMenuItem {
                         AppTextKey::AccountSettingsRelayMenuCopyShortcut,
                     )),
             )
+    })
+    .on_click(|_, _, _| {})
+}
+
+fn account_settings_remove_menu_item() -> PopupMenuItem {
+    PopupMenuItem::element(|_, _| {
+        div()
+            .w(px(180.0))
+            .text_size(px(APP_UI_THEME.foundation.typography.settings_row_text_px))
+            .text_color(rgb(APP_UI_THEME.components.app_status_indicator.attention))
+            .child(app_shared_text(
+                AppTextKey::AccountSettingsRemoveRelayAction,
+            ))
     })
     .on_click(|_, _, _| {})
 }
