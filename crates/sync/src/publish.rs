@@ -1174,7 +1174,7 @@ mod tests {
                 buyer_pubkey: "buyer".to_owned(),
                 seller_pubkey: "seller".to_owned(),
                 items: vec![RadrootsOrderItem {
-                    bin_id: "bin-1".to_owned(),
+                    bin_id: "bin-1".parse().expect("valid bin id"),
                     bin_count: 2,
                 }],
                 economics: economics.clone(),

@@ -2436,6 +2436,10 @@ mod tests {
     use radroots_core::{
         RadrootsCoreCurrency, RadrootsCoreDecimal, RadrootsCoreMoney, RadrootsCoreUnit,
     };
+    use radroots_events::ids::{
+        RadrootsEventId, RadrootsInventoryBinId, RadrootsListingAddress, RadrootsOrderId,
+        RadrootsOrderQuoteId, RadrootsPublicKey,
+    };
     use radroots_events::order::{
         RadrootsOrderEconomicItem, RadrootsOrderEconomics, RadrootsOrderFulfillmentState,
         RadrootsOrderPricingBasis,
@@ -3144,14 +3148,38 @@ mod tests {
         RadrootsCoreMoney::new(test_decimal(raw), RadrootsCoreCurrency::USD)
     }
 
+    fn test_order_id(raw: &str) -> RadrootsOrderId {
+        raw.parse().expect("test order id should parse")
+    }
+
+    fn test_quote_id(raw: &str) -> RadrootsOrderQuoteId {
+        raw.parse().expect("test quote id should parse")
+    }
+
+    fn test_bin_id(raw: &str) -> RadrootsInventoryBinId {
+        raw.parse().expect("test bin id should parse")
+    }
+
+    fn test_event_id(raw: &str) -> RadrootsEventId {
+        raw.parse().expect("test event id should parse")
+    }
+
+    fn test_pubkey(raw: &str) -> RadrootsPublicKey {
+        raw.parse().expect("test pubkey should parse")
+    }
+
+    fn test_listing_addr(raw: &str) -> RadrootsListingAddress {
+        raw.parse().expect("test listing address should parse")
+    }
+
     fn test_trade_economics() -> RadrootsOrderEconomics {
         RadrootsOrderEconomics {
-            quote_id: "quote-active-order".to_owned(),
+            quote_id: test_quote_id("quote-1"),
             quote_version: 2,
             pricing_basis: RadrootsOrderPricingBasis::ListingEvent,
             currency: RadrootsCoreCurrency::USD,
             items: vec![RadrootsOrderEconomicItem {
-                bin_id: "bin-1".to_owned(),
+                bin_id: test_bin_id("bin-1"),
                 bin_count: 2,
                 quantity_amount: test_decimal("1"),
                 quantity_unit: RadrootsCoreUnit::Each,
@@ -3171,7 +3199,9 @@ mod tests {
     fn test_payment_projection(state: RadrootsOrderPaymentState) -> RadrootsOrderPaymentProjection {
         let mut projection = RadrootsOrderPaymentProjection::not_recorded();
         projection.payment_event_id = (!matches!(&state, RadrootsOrderPaymentState::NotRecorded))
-            .then(|| "payment-event-1".to_owned());
+            .then(|| {
+                test_event_id("4444444444444444444444444444444444444444444444444444444444444444")
+            });
         projection.settlement_state = match &state {
             RadrootsOrderPaymentState::Settled => RadrootsOrderSettlementState::Accepted,
             RadrootsOrderPaymentState::Invalid => RadrootsOrderSettlementState::Invalid,
@@ -3187,13 +3217,17 @@ mod tests {
         payment_state: RadrootsOrderPaymentState,
     ) -> RadrootsOrderProjection {
         RadrootsOrderProjection {
-            order_id: "active-order-1".to_owned(),
+            order_id: test_order_id("ord_AAAAAAAAAAAAAAAAAAAAAg"),
             status,
-            request_event_id: Some("request-event-1".to_owned()),
-            decision_event_id: Some("decision-event-1".to_owned()),
-            fulfillment_event_id: fulfillment_status
-                .as_ref()
-                .map(|_| "fulfillment-event-1".to_owned()),
+            request_event_id: Some(test_event_id(
+                "1111111111111111111111111111111111111111111111111111111111111111",
+            )),
+            decision_event_id: Some(test_event_id(
+                "2222222222222222222222222222222222222222222222222222222222222222",
+            )),
+            fulfillment_event_id: fulfillment_status.as_ref().map(|_| {
+                test_event_id("3333333333333333333333333333333333333333333333333333333333333333")
+            }),
             fulfillment_status,
             cancellation_event_id: None,
             receipt_event_id: None,
@@ -3203,11 +3237,21 @@ mod tests {
             lifecycle_terminal: false,
             payment: test_payment_projection(payment_state),
             economics: Some(test_trade_economics()),
-            agreement_event_id: Some("decision-event-1".to_owned()),
-            listing_addr: Some("30402:seller:listing".to_owned()),
-            buyer_pubkey: Some("buyer".to_owned()),
-            seller_pubkey: Some("seller".to_owned()),
-            last_event_id: Some("fulfillment-event-1".to_owned()),
+            agreement_event_id: Some(test_event_id(
+                "2222222222222222222222222222222222222222222222222222222222222222",
+            )),
+            listing_addr: Some(test_listing_addr(
+                "30402:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb:AAAAAAAAAAAAAAAAAAAAAg",
+            )),
+            buyer_pubkey: Some(test_pubkey(
+                "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            )),
+            seller_pubkey: Some(test_pubkey(
+                "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            )),
+            last_event_id: Some(test_event_id(
+                "3333333333333333333333333333333333333333333333333333333333333333",
+            )),
             issues: Vec::new(),
         }
     }
@@ -3308,7 +3352,9 @@ mod tests {
         assert_eq!(
             projection.provenance,
             TradeProvenanceProjection::from_primary_source(TradeWorkflowSource::LocalEvents)
-                .with_last_event_id(Some("fulfillment-event-1".to_owned()))
+                .with_last_event_id(Some(
+                    "3333333333333333333333333333333333333333333333333333333333333333".to_owned()
+                ))
         );
         assert_eq!(
             order_status_from_active_order_projection(&active_order),
@@ -3407,7 +3453,9 @@ mod tests {
     fn trade_payment_display_projection_maps_reducer_payment_states() {
         let mut pending = RadrootsOrderPaymentProjection::not_recorded();
         pending.state = RadrootsOrderPaymentState::Recorded;
-        pending.payment_event_id = Some("payment-event-1".to_owned());
+        pending.payment_event_id = Some(test_event_id(
+            "4444444444444444444444444444444444444444444444444444444444444444",
+        ));
         pending.settlement_state = RadrootsOrderSettlementState::Pending;
         assert_eq!(
             TradePaymentDisplayStatus::from_active_payment_projection(&pending),
@@ -3416,7 +3464,9 @@ mod tests {
 
         let mut settled = RadrootsOrderPaymentProjection::not_recorded();
         settled.state = RadrootsOrderPaymentState::Settled;
-        settled.payment_event_id = Some("payment-event-1".to_owned());
+        settled.payment_event_id = Some(test_event_id(
+            "4444444444444444444444444444444444444444444444444444444444444444",
+        ));
         settled.settlement_state = RadrootsOrderSettlementState::Accepted;
         assert_eq!(
             TradePaymentDisplayStatus::from_active_payment_projection(&settled),
