@@ -9,6 +9,7 @@ use radroots_studio_app_view::{
 };
 use radroots_events::{
     RadrootsNostrEvent,
+    ids::{RadrootsEventId, RadrootsOrderId, RadrootsPublicKey},
     kinds::{
         KIND_FARM as RADROOTS_KIND_FARM, KIND_LISTING as RADROOTS_KIND_LISTING,
         KIND_LISTING_DRAFT as RADROOTS_KIND_LISTING_DRAFT,
@@ -1187,8 +1188,15 @@ impl<'a> AppLocalInteropRepository<'a> {
         let requests = buckets.requests.clone();
         let revision_proposals = buckets.revision_proposals.clone();
         let revision_decisions = buckets.revision_decisions.clone();
+        let reducer_order_id =
+            raw_order_id
+                .parse::<RadrootsOrderId>()
+                .map_err(|_| AppSqliteError::DecodeId {
+                    field: "order_id",
+                    value: raw_order_id.clone(),
+                })?;
         let projection = reduce_order_events(
-            raw_order_id.as_str(),
+            &reducer_order_id,
             buckets.requests,
             buckets.decisions,
             buckets.revision_proposals,
@@ -2982,13 +2990,21 @@ fn active_order_event_kind(kind: i64) -> bool {
     ACTIVE_ORDER_EVENT_KINDS.contains(&kind)
 }
 
+fn active_event_id(event: &RadrootsNostrEvent) -> Option<RadrootsEventId> {
+    event.id.parse().ok()
+}
+
+fn active_author_pubkey(event: &RadrootsNostrEvent) -> Option<RadrootsPublicKey> {
+    event.author.parse().ok()
+}
+
 fn active_order_evidence_from_event(event: &RadrootsNostrEvent) -> Option<ActiveOrderEvidence> {
     match i64::from(event.kind) {
         KIND_ORDER_REQUEST => {
             let envelope = order_request_from_event(event).ok()?;
             Some(ActiveOrderEvidence::Request(RadrootsOrderRequestRecord {
-                event_id: event.id.clone(),
-                author_pubkey: event.author.clone(),
+                event_id: active_event_id(event)?,
+                author_pubkey: active_author_pubkey(event)?,
                 payload: envelope.payload,
             }))
         }
@@ -2996,8 +3012,8 @@ fn active_order_evidence_from_event(event: &RadrootsNostrEvent) -> Option<Active
             let envelope = order_decision_from_event(event).ok()?;
             let context = order_event_context_from_tags(envelope.message_type, &event.tags).ok()?;
             Some(ActiveOrderEvidence::Decision(RadrootsOrderDecisionRecord {
-                event_id: event.id.clone(),
-                author_pubkey: event.author.clone(),
+                event_id: active_event_id(event)?,
+                author_pubkey: active_author_pubkey(event)?,
                 counterparty_pubkey: context.counterparty_pubkey,
                 root_event_id: context.root_event_id?,
                 prev_event_id: context.prev_event_id?,
@@ -3009,8 +3025,8 @@ fn active_order_evidence_from_event(event: &RadrootsNostrEvent) -> Option<Active
             let context = order_event_context_from_tags(envelope.message_type, &event.tags).ok()?;
             Some(ActiveOrderEvidence::RevisionProposal(
                 RadrootsOrderRevisionProposalRecord {
-                    event_id: event.id.clone(),
-                    author_pubkey: event.author.clone(),
+                    event_id: active_event_id(event)?,
+                    author_pubkey: active_author_pubkey(event)?,
                     counterparty_pubkey: context.counterparty_pubkey,
                     root_event_id: context.root_event_id?,
                     prev_event_id: context.prev_event_id?,
@@ -3023,8 +3039,8 @@ fn active_order_evidence_from_event(event: &RadrootsNostrEvent) -> Option<Active
             let context = order_event_context_from_tags(envelope.message_type, &event.tags).ok()?;
             Some(ActiveOrderEvidence::RevisionDecision(
                 RadrootsOrderRevisionDecisionRecord {
-                    event_id: event.id.clone(),
-                    author_pubkey: event.author.clone(),
+                    event_id: active_event_id(event)?,
+                    author_pubkey: active_author_pubkey(event)?,
                     counterparty_pubkey: context.counterparty_pubkey,
                     root_event_id: context.root_event_id?,
                     prev_event_id: context.prev_event_id?,
@@ -3037,8 +3053,8 @@ fn active_order_evidence_from_event(event: &RadrootsNostrEvent) -> Option<Active
             let context = order_event_context_from_tags(envelope.message_type, &event.tags).ok()?;
             Some(ActiveOrderEvidence::Cancellation(
                 RadrootsOrderCancellationRecord {
-                    event_id: event.id.clone(),
-                    author_pubkey: event.author.clone(),
+                    event_id: active_event_id(event)?,
+                    author_pubkey: active_author_pubkey(event)?,
                     counterparty_pubkey: context.counterparty_pubkey,
                     root_event_id: context.root_event_id?,
                     prev_event_id: context.prev_event_id?,
@@ -3051,8 +3067,8 @@ fn active_order_evidence_from_event(event: &RadrootsNostrEvent) -> Option<Active
             let context = order_event_context_from_tags(envelope.message_type, &event.tags).ok()?;
             Some(ActiveOrderEvidence::Fulfillment(
                 RadrootsOrderFulfillmentRecord {
-                    event_id: event.id.clone(),
-                    author_pubkey: event.author.clone(),
+                    event_id: active_event_id(event)?,
+                    author_pubkey: active_author_pubkey(event)?,
                     counterparty_pubkey: context.counterparty_pubkey,
                     root_event_id: context.root_event_id?,
                     prev_event_id: context.prev_event_id?,
@@ -3064,8 +3080,8 @@ fn active_order_evidence_from_event(event: &RadrootsNostrEvent) -> Option<Active
             let envelope = order_receipt_from_event(event).ok()?;
             let context = order_event_context_from_tags(envelope.message_type, &event.tags).ok()?;
             Some(ActiveOrderEvidence::Receipt(RadrootsOrderReceiptRecord {
-                event_id: event.id.clone(),
-                author_pubkey: event.author.clone(),
+                event_id: active_event_id(event)?,
+                author_pubkey: active_author_pubkey(event)?,
                 counterparty_pubkey: context.counterparty_pubkey,
                 root_event_id: context.root_event_id?,
                 prev_event_id: context.prev_event_id?,
@@ -3077,8 +3093,8 @@ fn active_order_evidence_from_event(event: &RadrootsNostrEvent) -> Option<Active
             let context = order_event_context_from_tags(envelope.message_type, &event.tags).ok()?;
             Some(ActiveOrderEvidence::Payment(
                 RadrootsOrderPaymentEventRecord {
-                    event_id: event.id.clone(),
-                    author_pubkey: event.author.clone(),
+                    event_id: active_event_id(event)?,
+                    author_pubkey: active_author_pubkey(event)?,
                     counterparty_pubkey: context.counterparty_pubkey,
                     root_event_id: context.root_event_id?,
                     prev_event_id: context.prev_event_id?,
@@ -3091,8 +3107,8 @@ fn active_order_evidence_from_event(event: &RadrootsNostrEvent) -> Option<Active
             let context = order_event_context_from_tags(envelope.message_type, &event.tags).ok()?;
             Some(ActiveOrderEvidence::Settlement(
                 RadrootsOrderSettlementRecord {
-                    event_id: event.id.clone(),
-                    author_pubkey: event.author.clone(),
+                    event_id: active_event_id(event)?,
+                    author_pubkey: active_author_pubkey(event)?,
                     counterparty_pubkey: context.counterparty_pubkey,
                     root_event_id: context.root_event_id?,
                     prev_event_id: context.prev_event_id?,
@@ -3359,14 +3375,14 @@ fn active_order_agreement_source(
     {
         return ActiveOrderAgreementSource {
             listing_addr: revision_proposal.payload.listing_addr.to_string(),
-            seller_pubkey: revision_proposal.payload.seller_pubkey.clone(),
+            seller_pubkey: revision_proposal.payload.seller_pubkey.to_string(),
             items: revision_proposal.payload.items.clone(),
             economics: revision_proposal.payload.economics.clone(),
         };
     }
     ActiveOrderAgreementSource {
         listing_addr: request.listing_addr.to_string(),
-        seller_pubkey: request.seller_pubkey.clone(),
+        seller_pubkey: request.seller_pubkey.to_string(),
         items: request.items.clone(),
         economics: request.economics.clone(),
     }

@@ -1474,7 +1474,7 @@ pub struct TradeReceiptProjection {
 impl TradeReceiptProjection {
     pub fn from_active_order_projection(projection: &RadrootsOrderProjection) -> Option<Self> {
         Some(Self {
-            event_id: projection.receipt_event_id.clone()?,
+            event_id: projection.receipt_event_id.as_ref()?.to_string(),
             received: projection.receipt_received?,
             issue: projection.receipt_issue.clone(),
             received_at: projection.receipt_received_at?,
@@ -1662,7 +1662,8 @@ impl TradeWorkflowProjection {
         workflow.inventory = TradeInventoryStatus::from_active_order_projection(projection);
         workflow.payment =
             TradePaymentDisplayStatus::from_active_payment_projection(&projection.payment);
-        workflow.provenance = provenance.with_last_event_id(projection.last_event_id.clone());
+        workflow.provenance = provenance
+            .with_last_event_id(projection.last_event_id.as_ref().map(ToString::to_string));
         workflow
     }
 
