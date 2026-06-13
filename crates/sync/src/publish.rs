@@ -2,9 +2,9 @@ use radroots_studio_app_view::{
     FarmId, FarmReadiness, FulfillmentWindowId, OrderId, ProductId, ProductStatus,
 };
 use radroots_sdk::SdkTransportMode;
-use radroots_sdk::trade::{
-    RadrootsActiveTradeFulfillmentState, RadrootsTradeOrderEconomics, RadrootsTradeOrderItem,
-    RadrootsTradeOrderRevisionDecision,
+use radroots_sdk::order::{
+    RadrootsOrderEconomics, RadrootsOrderFulfillmentState, RadrootsOrderItem,
+    RadrootsOrderRevisionOutcome,
 };
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -194,8 +194,8 @@ pub struct AppOrderRevisionProposalPublishPayload {
     pub listing_addr: String,
     pub buyer_pubkey: String,
     pub seller_pubkey: String,
-    pub items: Vec<RadrootsTradeOrderItem>,
-    pub economics: RadrootsTradeOrderEconomics,
+    pub items: Vec<RadrootsOrderItem>,
+    pub economics: RadrootsOrderEconomics,
     pub reason: String,
 }
 
@@ -211,7 +211,7 @@ pub struct AppOrderRevisionDecisionPublishPayload {
     pub listing_addr: String,
     pub buyer_pubkey: String,
     pub seller_pubkey: String,
-    pub decision: RadrootsTradeOrderRevisionDecision,
+    pub decision: RadrootsOrderRevisionOutcome,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -225,7 +225,7 @@ pub struct AppOrderFulfillmentPublishPayload {
     pub listing_addr: String,
     pub buyer_pubkey: String,
     pub seller_pubkey: String,
-    pub status: RadrootsActiveTradeFulfillmentState,
+    pub status: RadrootsOrderFulfillmentState,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -795,9 +795,9 @@ mod tests {
         PendingSyncOperation, PendingSyncOperationState, SyncAggregateRef, SyncOperationKind,
     };
     use radroots_studio_app_view::{FarmId, FarmReadiness, OrderId, ProductId, ProductStatus};
-    use radroots_sdk::trade::{
-        RadrootsActiveTradeFulfillmentState, RadrootsTradeOrderEconomics, RadrootsTradeOrderItem,
-        RadrootsTradeOrderRevisionDecision,
+    use radroots_sdk::order::{
+        RadrootsOrderEconomics, RadrootsOrderFulfillmentState, RadrootsOrderItem,
+        RadrootsOrderRevisionOutcome,
     };
     use serde_json::json;
 
@@ -1039,7 +1039,7 @@ mod tests {
             listing_addr: "30402:seller:listing".to_owned(),
             buyer_pubkey: "buyer".to_owned(),
             seller_pubkey: "seller".to_owned(),
-            status: RadrootsActiveTradeFulfillmentState::ReadyForPickup,
+            status: RadrootsOrderFulfillmentState::ReadyForPickup,
         });
         let receipt = AppPublishPayload::OrderReceipt(AppOrderReceiptPublishPayload {
             context: AppPublishContext::new("acct_local", "buyer_order_receipt"),
@@ -1108,7 +1108,7 @@ mod tests {
                 listing_addr: "30402:seller:listing".to_owned(),
                 buyer_pubkey: "buyer".to_owned(),
                 seller_pubkey: "seller".to_owned(),
-                status: RadrootsActiveTradeFulfillmentState::AcceptedNotFulfilled,
+                status: RadrootsOrderFulfillmentState::AcceptedNotFulfilled,
             })
             .validation_failures()
             .into_iter()
@@ -1130,7 +1130,7 @@ mod tests {
                 listing_addr: "30402:seller:listing".to_owned(),
                 buyer_pubkey: "buyer".to_owned(),
                 seller_pubkey: "seller".to_owned(),
-                status: RadrootsActiveTradeFulfillmentState::Delivered,
+                status: RadrootsOrderFulfillmentState::Delivered,
             }),
             "2026-04-20T18:00:00Z",
         )
@@ -1151,7 +1151,7 @@ mod tests {
                 listing_addr: "30402:seller:listing".to_owned(),
                 buyer_pubkey: "buyer".to_owned(),
                 seller_pubkey: "seller".to_owned(),
-                status: RadrootsActiveTradeFulfillmentState::Delivered,
+                status: RadrootsOrderFulfillmentState::Delivered,
             })
         );
     }
@@ -1173,7 +1173,7 @@ mod tests {
                 listing_addr: "30402:seller:listing".to_owned(),
                 buyer_pubkey: "buyer".to_owned(),
                 seller_pubkey: "seller".to_owned(),
-                items: vec![RadrootsTradeOrderItem {
+                items: vec![RadrootsOrderItem {
                     bin_id: "bin-1".to_owned(),
                     bin_count: 2,
                 }],
@@ -1208,7 +1208,7 @@ mod tests {
                 listing_addr: String::new(),
                 buyer_pubkey: String::new(),
                 seller_pubkey: String::new(),
-                decision: RadrootsTradeOrderRevisionDecision::Declined {
+                decision: RadrootsOrderRevisionOutcome::Declined {
                     reason: " ".to_owned(),
                 },
             });
@@ -1285,7 +1285,7 @@ mod tests {
         assert!(pending_operation.publish_payload().is_err());
     }
 
-    fn revision_economics() -> RadrootsTradeOrderEconomics {
+    fn revision_economics() -> RadrootsOrderEconomics {
         serde_json::from_value(json!({
             "quote_id": "quote-revision-1",
             "quote_version": 2,

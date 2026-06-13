@@ -3,10 +3,10 @@
 pub use radroots_studio_app_types::*;
 
 use radroots_core::RadrootsCoreMoney;
-use radroots_events::trade::{RadrootsActiveTradeFulfillmentState, RadrootsTradeOrderEconomics};
+use radroots_events::order::{RadrootsOrderEconomics, RadrootsOrderFulfillmentState};
 use radroots_trade::order::{
-    RadrootsActiveOrderPaymentProjection, RadrootsActiveOrderPaymentState,
-    RadrootsActiveOrderProjection, RadrootsActiveOrderSettlementState, RadrootsActiveOrderStatus,
+    RadrootsOrderPaymentProjection, RadrootsOrderPaymentState, RadrootsOrderProjection,
+    RadrootsOrderSettlementState, RadrootsOrderStatus,
 };
 use radroots_trade::validation_receipt::{
     RadrootsValidationReceiptProofSystem, RadrootsValidationReceiptResult,
@@ -1106,23 +1106,21 @@ impl TradeAgreementStatus {
         }
     }
 
-    pub const fn from_active_order_status(status: &RadrootsActiveOrderStatus) -> Self {
+    pub const fn from_active_order_status(status: &RadrootsOrderStatus) -> Self {
         match status {
-            RadrootsActiveOrderStatus::Missing => Self::NeedsReview,
-            RadrootsActiveOrderStatus::Requested => Self::Ordered,
-            RadrootsActiveOrderStatus::Accepted => Self::Confirmed,
-            RadrootsActiveOrderStatus::Declined => Self::Declined,
-            RadrootsActiveOrderStatus::Cancelled => Self::Cancelled,
-            RadrootsActiveOrderStatus::Completed => Self::Completed,
-            RadrootsActiveOrderStatus::Disputed | RadrootsActiveOrderStatus::Invalid => {
-                Self::NeedsReview
-            }
+            RadrootsOrderStatus::Missing => Self::NeedsReview,
+            RadrootsOrderStatus::Requested => Self::Ordered,
+            RadrootsOrderStatus::Accepted => Self::Confirmed,
+            RadrootsOrderStatus::Declined => Self::Declined,
+            RadrootsOrderStatus::Cancelled => Self::Cancelled,
+            RadrootsOrderStatus::Completed => Self::Completed,
+            RadrootsOrderStatus::Disputed | RadrootsOrderStatus::Invalid => Self::NeedsReview,
         }
     }
 }
 
-impl From<&RadrootsActiveOrderStatus> for TradeAgreementStatus {
-    fn from(status: &RadrootsActiveOrderStatus) -> Self {
+impl From<&RadrootsOrderStatus> for TradeAgreementStatus {
+    fn from(status: &RadrootsOrderStatus) -> Self {
         Self::from_active_order_status(status)
     }
 }
@@ -1223,22 +1221,20 @@ impl TradeFulfillmentStatus {
         }
     }
 
-    pub const fn from_active_fulfillment_status(
-        status: &RadrootsActiveTradeFulfillmentState,
-    ) -> Self {
+    pub const fn from_active_fulfillment_status(status: &RadrootsOrderFulfillmentState) -> Self {
         match status {
-            RadrootsActiveTradeFulfillmentState::AcceptedNotFulfilled => Self::Confirmed,
-            RadrootsActiveTradeFulfillmentState::Preparing => Self::Preparing,
-            RadrootsActiveTradeFulfillmentState::ReadyForPickup => Self::ReadyForPickup,
-            RadrootsActiveTradeFulfillmentState::OutForDelivery => Self::OutForDelivery,
-            RadrootsActiveTradeFulfillmentState::Delivered => Self::Delivered,
-            RadrootsActiveTradeFulfillmentState::SellerCancelled => Self::Cancelled,
+            RadrootsOrderFulfillmentState::AcceptedNotFulfilled => Self::Confirmed,
+            RadrootsOrderFulfillmentState::Preparing => Self::Preparing,
+            RadrootsOrderFulfillmentState::ReadyForPickup => Self::ReadyForPickup,
+            RadrootsOrderFulfillmentState::OutForDelivery => Self::OutForDelivery,
+            RadrootsOrderFulfillmentState::Delivered => Self::Delivered,
+            RadrootsOrderFulfillmentState::SellerCancelled => Self::Cancelled,
         }
     }
 }
 
-impl From<&RadrootsActiveTradeFulfillmentState> for TradeFulfillmentStatus {
-    fn from(status: &RadrootsActiveTradeFulfillmentState) -> Self {
+impl From<&RadrootsOrderFulfillmentState> for TradeFulfillmentStatus {
+    fn from(status: &RadrootsOrderFulfillmentState) -> Self {
         Self::from_active_fulfillment_status(status)
     }
 }
@@ -1272,22 +1268,20 @@ impl TradeInventoryStatus {
         }
     }
 
-    pub fn from_active_order_projection(projection: &RadrootsActiveOrderProjection) -> Self {
+    pub fn from_active_order_projection(projection: &RadrootsOrderProjection) -> Self {
         match (&projection.status, projection.fulfillment_status.as_ref()) {
-            (RadrootsActiveOrderStatus::Requested, _) => Self::NeedsReview,
+            (RadrootsOrderStatus::Requested, _) => Self::NeedsReview,
             (
-                RadrootsActiveOrderStatus::Accepted,
-                Some(RadrootsActiveTradeFulfillmentState::SellerCancelled),
+                RadrootsOrderStatus::Accepted,
+                Some(RadrootsOrderFulfillmentState::SellerCancelled),
             ) => Self::Available,
-            (RadrootsActiveOrderStatus::Accepted, _) => Self::Reserved,
-            (RadrootsActiveOrderStatus::Declined | RadrootsActiveOrderStatus::Cancelled, _) => {
-                Self::Available
-            }
-            (RadrootsActiveOrderStatus::Completed, _) => Self::Reserved,
+            (RadrootsOrderStatus::Accepted, _) => Self::Reserved,
+            (RadrootsOrderStatus::Declined | RadrootsOrderStatus::Cancelled, _) => Self::Available,
+            (RadrootsOrderStatus::Completed, _) => Self::Reserved,
             (
-                RadrootsActiveOrderStatus::Missing
-                | RadrootsActiveOrderStatus::Disputed
-                | RadrootsActiveOrderStatus::Invalid,
+                RadrootsOrderStatus::Missing
+                | RadrootsOrderStatus::Disputed
+                | RadrootsOrderStatus::Invalid,
                 _,
             ) => Self::NeedsReview,
         }
@@ -1330,46 +1324,40 @@ impl TradePaymentDisplayStatus {
         false
     }
 
-    pub fn from_active_payment_state(status: &RadrootsActiveOrderPaymentState) -> Self {
+    pub fn from_active_payment_state(status: &RadrootsOrderPaymentState) -> Self {
         match status {
-            RadrootsActiveOrderPaymentState::NotRecorded => Self::NotRecorded,
-            RadrootsActiveOrderPaymentState::Recorded => Self::Recorded,
-            RadrootsActiveOrderPaymentState::Settled => Self::Settled,
-            RadrootsActiveOrderPaymentState::Rejected
-            | RadrootsActiveOrderPaymentState::Invalid => Self::NeedsReview,
+            RadrootsOrderPaymentState::NotRecorded => Self::NotRecorded,
+            RadrootsOrderPaymentState::Recorded => Self::Recorded,
+            RadrootsOrderPaymentState::Settled => Self::Settled,
+            RadrootsOrderPaymentState::Rejected | RadrootsOrderPaymentState::Invalid => {
+                Self::NeedsReview
+            }
         }
     }
 
-    pub fn from_active_payment_projection(payment: &RadrootsActiveOrderPaymentProjection) -> Self {
+    pub fn from_active_payment_projection(payment: &RadrootsOrderPaymentProjection) -> Self {
         match (&payment.state, &payment.settlement_state) {
+            (RadrootsOrderPaymentState::NotRecorded, RadrootsOrderSettlementState::NotRequired) => {
+                Self::NotRecorded
+            }
+            (RadrootsOrderPaymentState::NotRecorded, _) => Self::NeedsReview,
+            (RadrootsOrderPaymentState::Recorded, RadrootsOrderSettlementState::Pending) => {
+                Self::Pending
+            }
+            (RadrootsOrderPaymentState::Recorded, RadrootsOrderSettlementState::NotRequired) => {
+                Self::Recorded
+            }
+            (RadrootsOrderPaymentState::Recorded, RadrootsOrderSettlementState::Accepted) => {
+                Self::Settled
+            }
             (
-                RadrootsActiveOrderPaymentState::NotRecorded,
-                RadrootsActiveOrderSettlementState::NotRequired,
-            ) => Self::NotRecorded,
-            (RadrootsActiveOrderPaymentState::NotRecorded, _) => Self::NeedsReview,
-            (
-                RadrootsActiveOrderPaymentState::Recorded,
-                RadrootsActiveOrderSettlementState::Pending,
-            ) => Self::Pending,
-            (
-                RadrootsActiveOrderPaymentState::Recorded,
-                RadrootsActiveOrderSettlementState::NotRequired,
-            ) => Self::Recorded,
-            (
-                RadrootsActiveOrderPaymentState::Recorded,
-                RadrootsActiveOrderSettlementState::Accepted,
-            ) => Self::Settled,
-            (
-                RadrootsActiveOrderPaymentState::Recorded,
-                RadrootsActiveOrderSettlementState::Rejected
-                | RadrootsActiveOrderSettlementState::Invalid,
+                RadrootsOrderPaymentState::Recorded,
+                RadrootsOrderSettlementState::Rejected | RadrootsOrderSettlementState::Invalid,
             ) => Self::NeedsReview,
-            (RadrootsActiveOrderPaymentState::Settled, _) => Self::Settled,
-            (
-                RadrootsActiveOrderPaymentState::Rejected
-                | RadrootsActiveOrderPaymentState::Invalid,
-                _,
-            ) => Self::NeedsReview,
+            (RadrootsOrderPaymentState::Settled, _) => Self::Settled,
+            (RadrootsOrderPaymentState::Rejected | RadrootsOrderPaymentState::Invalid, _) => {
+                Self::NeedsReview
+            }
         }
     }
 }
@@ -1417,7 +1405,7 @@ pub struct TradeEconomicsProjection {
 }
 
 impl TradeEconomicsProjection {
-    pub fn from_trade_order_economics(economics: &RadrootsTradeOrderEconomics) -> Self {
+    pub fn from_trade_order_economics(economics: &RadrootsOrderEconomics) -> Self {
         Self {
             subtotal_minor_units: money_minor_units(&economics.subtotal),
             discount_total_minor_units: money_minor_units(&economics.discount_total),
@@ -1428,8 +1416,8 @@ impl TradeEconomicsProjection {
     }
 }
 
-impl From<&RadrootsTradeOrderEconomics> for TradeEconomicsProjection {
-    fn from(economics: &RadrootsTradeOrderEconomics) -> Self {
+impl From<&RadrootsOrderEconomics> for TradeEconomicsProjection {
+    fn from(economics: &RadrootsOrderEconomics) -> Self {
         Self::from_trade_order_economics(economics)
     }
 }
@@ -1484,9 +1472,7 @@ pub struct TradeReceiptProjection {
 }
 
 impl TradeReceiptProjection {
-    pub fn from_active_order_projection(
-        projection: &RadrootsActiveOrderProjection,
-    ) -> Option<Self> {
+    pub fn from_active_order_projection(projection: &RadrootsOrderProjection) -> Option<Self> {
         Some(Self {
             event_id: projection.receipt_event_id.clone()?,
             received: projection.receipt_received?,
@@ -1654,7 +1640,7 @@ impl TradeWorkflowProjection {
 
     pub fn from_active_order_projection(
         order_id: OrderId,
-        projection: &RadrootsActiveOrderProjection,
+        projection: &RadrootsOrderProjection,
         revision: TradeRevisionStatus,
         provenance: TradeProvenanceProjection,
     ) -> Self {
@@ -1781,37 +1767,36 @@ impl TradeWorkflowProjection {
 }
 
 pub fn order_status_from_active_order_projection(
-    projection: &RadrootsActiveOrderProjection,
+    projection: &RadrootsOrderProjection,
 ) -> Option<OrderStatus> {
     match (&projection.status, projection.fulfillment_status.as_ref()) {
-        (RadrootsActiveOrderStatus::Missing, _) => None,
-        (RadrootsActiveOrderStatus::Requested, _) => Some(OrderStatus::NeedsAction),
+        (RadrootsOrderStatus::Missing, _) => None,
+        (RadrootsOrderStatus::Requested, _) => Some(OrderStatus::NeedsAction),
         (
-            RadrootsActiveOrderStatus::Accepted,
+            RadrootsOrderStatus::Accepted,
             Some(
-                RadrootsActiveTradeFulfillmentState::ReadyForPickup
-                | RadrootsActiveTradeFulfillmentState::OutForDelivery
-                | RadrootsActiveTradeFulfillmentState::Delivered,
+                RadrootsOrderFulfillmentState::ReadyForPickup
+                | RadrootsOrderFulfillmentState::OutForDelivery
+                | RadrootsOrderFulfillmentState::Delivered,
             ),
         ) => Some(OrderStatus::Packed),
+        (RadrootsOrderStatus::Accepted, Some(RadrootsOrderFulfillmentState::SellerCancelled)) => {
+            Some(OrderStatus::Declined)
+        }
         (
-            RadrootsActiveOrderStatus::Accepted,
-            Some(RadrootsActiveTradeFulfillmentState::SellerCancelled),
-        ) => Some(OrderStatus::Declined),
-        (
-            RadrootsActiveOrderStatus::Accepted,
+            RadrootsOrderStatus::Accepted,
             Some(
-                RadrootsActiveTradeFulfillmentState::Preparing
-                | RadrootsActiveTradeFulfillmentState::AcceptedNotFulfilled,
+                RadrootsOrderFulfillmentState::Preparing
+                | RadrootsOrderFulfillmentState::AcceptedNotFulfilled,
             )
             | None,
         ) => Some(OrderStatus::Scheduled),
-        (RadrootsActiveOrderStatus::Declined | RadrootsActiveOrderStatus::Cancelled, _) => {
+        (RadrootsOrderStatus::Declined | RadrootsOrderStatus::Cancelled, _) => {
             Some(OrderStatus::Declined)
         }
-        (RadrootsActiveOrderStatus::Completed, _) => Some(OrderStatus::Completed),
-        (RadrootsActiveOrderStatus::Disputed, _) => Some(OrderStatus::NeedsReview),
-        (RadrootsActiveOrderStatus::Invalid, _) => Some(OrderStatus::NeedsAction),
+        (RadrootsOrderStatus::Completed, _) => Some(OrderStatus::Completed),
+        (RadrootsOrderStatus::Disputed, _) => Some(OrderStatus::NeedsReview),
+        (RadrootsOrderStatus::Invalid, _) => Some(OrderStatus::NeedsAction),
     }
 }
 
@@ -1875,13 +1860,13 @@ impl OrderFulfillmentAction {
         }
     }
 
-    pub const fn fulfillment_status(self) -> RadrootsActiveTradeFulfillmentState {
+    pub const fn fulfillment_status(self) -> RadrootsOrderFulfillmentState {
         match self {
-            Self::Preparing => RadrootsActiveTradeFulfillmentState::Preparing,
-            Self::ReadyForPickup => RadrootsActiveTradeFulfillmentState::ReadyForPickup,
-            Self::OutForDelivery => RadrootsActiveTradeFulfillmentState::OutForDelivery,
-            Self::Delivered => RadrootsActiveTradeFulfillmentState::Delivered,
-            Self::SellerCancelled => RadrootsActiveTradeFulfillmentState::SellerCancelled,
+            Self::Preparing => RadrootsOrderFulfillmentState::Preparing,
+            Self::ReadyForPickup => RadrootsOrderFulfillmentState::ReadyForPickup,
+            Self::OutForDelivery => RadrootsOrderFulfillmentState::OutForDelivery,
+            Self::Delivered => RadrootsOrderFulfillmentState::Delivered,
+            Self::SellerCancelled => RadrootsOrderFulfillmentState::SellerCancelled,
         }
     }
 }
@@ -2450,14 +2435,13 @@ mod tests {
     use radroots_core::{
         RadrootsCoreCurrency, RadrootsCoreDecimal, RadrootsCoreMoney, RadrootsCoreUnit,
     };
-    use radroots_events::trade::{
-        RadrootsActiveTradeFulfillmentState, RadrootsTradeOrderEconomicItem,
-        RadrootsTradeOrderEconomics, RadrootsTradePricingBasis,
+    use radroots_events::order::{
+        RadrootsOrderEconomicItem, RadrootsOrderEconomics, RadrootsOrderFulfillmentState,
+        RadrootsOrderPricingBasis,
     };
     use radroots_trade::order::{
-        RadrootsActiveOrderPaymentProjection, RadrootsActiveOrderPaymentState,
-        RadrootsActiveOrderProjection, RadrootsActiveOrderSettlementState,
-        RadrootsActiveOrderStatus,
+        RadrootsOrderPaymentProjection, RadrootsOrderPaymentState, RadrootsOrderProjection,
+        RadrootsOrderSettlementState, RadrootsOrderStatus,
     };
     use radroots_trade::validation_receipt::{
         RadrootsValidationReceiptProofSystem, RadrootsValidationReceiptResult,
@@ -3135,7 +3119,7 @@ mod tests {
         );
         assert_eq!(
             OrderFulfillmentAction::Preparing.fulfillment_status(),
-            RadrootsActiveTradeFulfillmentState::Preparing
+            RadrootsOrderFulfillmentState::Preparing
         );
         assert_eq!(
             OrderPrimaryAction::PublishReadyForPickup.storage_key(),
@@ -3159,13 +3143,13 @@ mod tests {
         RadrootsCoreMoney::new(test_decimal(raw), RadrootsCoreCurrency::USD)
     }
 
-    fn test_trade_economics() -> RadrootsTradeOrderEconomics {
-        RadrootsTradeOrderEconomics {
+    fn test_trade_economics() -> RadrootsOrderEconomics {
+        RadrootsOrderEconomics {
             quote_id: "quote-active-order".to_owned(),
             quote_version: 2,
-            pricing_basis: RadrootsTradePricingBasis::ListingEvent,
+            pricing_basis: RadrootsOrderPricingBasis::ListingEvent,
             currency: RadrootsCoreCurrency::USD,
-            items: vec![RadrootsTradeOrderEconomicItem {
+            items: vec![RadrootsOrderEconomicItem {
                 bin_id: "bin-1".to_owned(),
                 bin_count: 2,
                 quantity_amount: test_decimal("1"),
@@ -3183,30 +3167,25 @@ mod tests {
         }
     }
 
-    fn test_payment_projection(
-        state: RadrootsActiveOrderPaymentState,
-    ) -> RadrootsActiveOrderPaymentProjection {
-        let mut projection = RadrootsActiveOrderPaymentProjection::not_recorded();
-        projection.payment_event_id =
-            (!matches!(&state, RadrootsActiveOrderPaymentState::NotRecorded))
-                .then(|| "payment-event-1".to_owned());
+    fn test_payment_projection(state: RadrootsOrderPaymentState) -> RadrootsOrderPaymentProjection {
+        let mut projection = RadrootsOrderPaymentProjection::not_recorded();
+        projection.payment_event_id = (!matches!(&state, RadrootsOrderPaymentState::NotRecorded))
+            .then(|| "payment-event-1".to_owned());
         projection.settlement_state = match &state {
-            RadrootsActiveOrderPaymentState::Settled => {
-                RadrootsActiveOrderSettlementState::Accepted
-            }
-            RadrootsActiveOrderPaymentState::Invalid => RadrootsActiveOrderSettlementState::Invalid,
-            _ => RadrootsActiveOrderSettlementState::NotRequired,
+            RadrootsOrderPaymentState::Settled => RadrootsOrderSettlementState::Accepted,
+            RadrootsOrderPaymentState::Invalid => RadrootsOrderSettlementState::Invalid,
+            _ => RadrootsOrderSettlementState::NotRequired,
         };
         projection.state = state;
         projection
     }
 
     fn test_active_order_projection(
-        status: RadrootsActiveOrderStatus,
-        fulfillment_status: Option<RadrootsActiveTradeFulfillmentState>,
-        payment_state: RadrootsActiveOrderPaymentState,
-    ) -> RadrootsActiveOrderProjection {
-        RadrootsActiveOrderProjection {
+        status: RadrootsOrderStatus,
+        fulfillment_status: Option<RadrootsOrderFulfillmentState>,
+        payment_state: RadrootsOrderPaymentState,
+    ) -> RadrootsOrderProjection {
+        RadrootsOrderProjection {
             order_id: "active-order-1".to_owned(),
             status,
             request_event_id: Some("request-event-1".to_owned()),
@@ -3235,42 +3214,42 @@ mod tests {
     #[test]
     fn trade_workflow_projection_maps_shared_active_order_projection_to_product_axes() {
         assert_eq!(
-            TradeAgreementStatus::from_active_order_status(&RadrootsActiveOrderStatus::Requested),
+            TradeAgreementStatus::from_active_order_status(&RadrootsOrderStatus::Requested),
             TradeAgreementStatus::Ordered
         );
         assert_eq!(
-            TradeAgreementStatus::from_active_order_status(&RadrootsActiveOrderStatus::Accepted),
+            TradeAgreementStatus::from_active_order_status(&RadrootsOrderStatus::Accepted),
             TradeAgreementStatus::Confirmed
         );
         assert_eq!(
-            TradeAgreementStatus::from_active_order_status(&RadrootsActiveOrderStatus::Disputed),
+            TradeAgreementStatus::from_active_order_status(&RadrootsOrderStatus::Disputed),
             TradeAgreementStatus::NeedsReview
         );
         assert_eq!(
-            TradeAgreementStatus::from_active_order_status(&RadrootsActiveOrderStatus::Invalid),
+            TradeAgreementStatus::from_active_order_status(&RadrootsOrderStatus::Invalid),
             TradeAgreementStatus::NeedsReview
         );
         assert_eq!(
             TradeFulfillmentStatus::from_active_fulfillment_status(
-                &RadrootsActiveTradeFulfillmentState::AcceptedNotFulfilled
+                &RadrootsOrderFulfillmentState::AcceptedNotFulfilled
             ),
             TradeFulfillmentStatus::Confirmed
         );
         assert_eq!(
             TradeFulfillmentStatus::from_active_fulfillment_status(
-                &RadrootsActiveTradeFulfillmentState::SellerCancelled
+                &RadrootsOrderFulfillmentState::SellerCancelled
             ),
             TradeFulfillmentStatus::Cancelled
         );
         assert_eq!(
             TradePaymentDisplayStatus::from_active_payment_state(
-                &RadrootsActiveOrderPaymentState::Settled
+                &RadrootsOrderPaymentState::Settled
             ),
             TradePaymentDisplayStatus::Settled
         );
         assert_eq!(
             TradePaymentDisplayStatus::from_active_payment_state(
-                &RadrootsActiveOrderPaymentState::Rejected
+                &RadrootsOrderPaymentState::Rejected
             ),
             TradePaymentDisplayStatus::NeedsReview
         );
@@ -3303,9 +3282,9 @@ mod tests {
 
         let order_id = OrderId::new();
         let active_order = test_active_order_projection(
-            RadrootsActiveOrderStatus::Accepted,
-            Some(RadrootsActiveTradeFulfillmentState::ReadyForPickup),
-            RadrootsActiveOrderPaymentState::Recorded,
+            RadrootsOrderStatus::Accepted,
+            Some(RadrootsOrderFulfillmentState::ReadyForPickup),
+            RadrootsOrderPaymentState::Recorded,
         );
         let projection = TradeWorkflowProjection::from_active_order_projection(
             order_id,
@@ -3336,9 +3315,9 @@ mod tests {
         );
 
         let requested_order = test_active_order_projection(
-            RadrootsActiveOrderStatus::Requested,
+            RadrootsOrderStatus::Requested,
             None,
-            RadrootsActiveOrderPaymentState::NotRecorded,
+            RadrootsOrderPaymentState::NotRecorded,
         );
         let requested_projection = TradeWorkflowProjection::from_active_order_projection(
             order_id,
@@ -3361,9 +3340,9 @@ mod tests {
         );
 
         let invalid_payment_order = test_active_order_projection(
-            RadrootsActiveOrderStatus::Accepted,
+            RadrootsOrderStatus::Accepted,
             None,
-            RadrootsActiveOrderPaymentState::Invalid,
+            RadrootsOrderPaymentState::Invalid,
         );
         let invalid_payment_projection = TradeWorkflowProjection::from_active_order_projection(
             order_id,
@@ -3377,12 +3356,11 @@ mod tests {
         );
 
         let mut pending_payment_order = test_active_order_projection(
-            RadrootsActiveOrderStatus::Accepted,
+            RadrootsOrderStatus::Accepted,
             None,
-            RadrootsActiveOrderPaymentState::Recorded,
+            RadrootsOrderPaymentState::Recorded,
         );
-        pending_payment_order.payment.settlement_state =
-            RadrootsActiveOrderSettlementState::Pending;
+        pending_payment_order.payment.settlement_state = RadrootsOrderSettlementState::Pending;
         let pending_payment_projection = TradeWorkflowProjection::from_active_order_projection(
             order_id,
             &pending_payment_order,
@@ -3395,9 +3373,9 @@ mod tests {
         );
 
         let settled_payment_order = test_active_order_projection(
-            RadrootsActiveOrderStatus::Completed,
+            RadrootsOrderStatus::Completed,
             None,
-            RadrootsActiveOrderPaymentState::Settled,
+            RadrootsOrderPaymentState::Settled,
         );
         let settled_payment_projection = TradeWorkflowProjection::from_active_order_projection(
             order_id,
@@ -3426,26 +3404,26 @@ mod tests {
 
     #[test]
     fn trade_payment_display_projection_maps_reducer_payment_states() {
-        let mut pending = RadrootsActiveOrderPaymentProjection::not_recorded();
-        pending.state = RadrootsActiveOrderPaymentState::Recorded;
+        let mut pending = RadrootsOrderPaymentProjection::not_recorded();
+        pending.state = RadrootsOrderPaymentState::Recorded;
         pending.payment_event_id = Some("payment-event-1".to_owned());
-        pending.settlement_state = RadrootsActiveOrderSettlementState::Pending;
+        pending.settlement_state = RadrootsOrderSettlementState::Pending;
         assert_eq!(
             TradePaymentDisplayStatus::from_active_payment_projection(&pending),
             TradePaymentDisplayStatus::Pending
         );
 
-        let mut settled = RadrootsActiveOrderPaymentProjection::not_recorded();
-        settled.state = RadrootsActiveOrderPaymentState::Settled;
+        let mut settled = RadrootsOrderPaymentProjection::not_recorded();
+        settled.state = RadrootsOrderPaymentState::Settled;
         settled.payment_event_id = Some("payment-event-1".to_owned());
-        settled.settlement_state = RadrootsActiveOrderSettlementState::Accepted;
+        settled.settlement_state = RadrootsOrderSettlementState::Accepted;
         assert_eq!(
             TradePaymentDisplayStatus::from_active_payment_projection(&settled),
             TradePaymentDisplayStatus::Settled
         );
 
-        let mut inconsistent = RadrootsActiveOrderPaymentProjection::not_recorded();
-        inconsistent.settlement_state = RadrootsActiveOrderSettlementState::Accepted;
+        let mut inconsistent = RadrootsOrderPaymentProjection::not_recorded();
+        inconsistent.settlement_state = RadrootsOrderSettlementState::Accepted;
         assert_eq!(
             TradePaymentDisplayStatus::from_active_payment_projection(&inconsistent),
             TradePaymentDisplayStatus::NeedsReview
@@ -3508,14 +3486,14 @@ mod tests {
     #[test]
     fn trade_workflow_projection_uses_localization_key_ids_for_visible_status_labels() {
         assert_eq!(
-            TradeAgreementStatus::from_active_order_status(&RadrootsActiveOrderStatus::Requested)
+            TradeAgreementStatus::from_active_order_status(&RadrootsOrderStatus::Requested)
                 .storage_key(),
             "ordered"
         );
         assert_eq!(TradeAgreementStatus::Ordered.storage_key(), "ordered");
         assert_eq!(
             TradeFulfillmentStatus::from_active_fulfillment_status(
-                &RadrootsActiveTradeFulfillmentState::AcceptedNotFulfilled
+                &RadrootsOrderFulfillmentState::AcceptedNotFulfilled
             )
             .storage_key(),
             "confirmed"
