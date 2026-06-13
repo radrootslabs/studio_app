@@ -65,11 +65,17 @@ use radroots_core::{
     RadrootsCoreCurrency, RadrootsCoreDecimal, RadrootsCoreMoney, RadrootsCoreQuantity,
     RadrootsCoreQuantityPrice, RadrootsCoreUnit,
 };
-use radroots_events::kinds::{
-    KIND_FARM, KIND_LISTING, KIND_LISTING_DRAFT, KIND_ORDER_CANCELLATION, KIND_ORDER_DECISION,
-    KIND_ORDER_FULFILLMENT_UPDATE, KIND_ORDER_PAYMENT_RECORD, KIND_ORDER_RECEIPT,
-    KIND_ORDER_REQUEST, KIND_ORDER_REVISION_DECISION, KIND_ORDER_REVISION_PROPOSAL,
-    KIND_ORDER_SETTLEMENT_DECISION, KIND_PROFILE,
+use radroots_events::{
+    ids::{
+        RadrootsDTag, RadrootsInventoryBinId, RadrootsListingAddress, RadrootsOrderId,
+        RadrootsOrderRevisionId,
+    },
+    kinds::{
+        KIND_FARM, KIND_LISTING, KIND_LISTING_DRAFT, KIND_ORDER_CANCELLATION, KIND_ORDER_DECISION,
+        KIND_ORDER_FULFILLMENT_UPDATE, KIND_ORDER_PAYMENT_RECORD, KIND_ORDER_RECEIPT,
+        KIND_ORDER_REQUEST, KIND_ORDER_REVISION_DECISION, KIND_ORDER_REVISION_PROPOSAL,
+        KIND_ORDER_SETTLEMENT_DECISION, KIND_PROFILE,
+    },
 };
 use radroots_events_codec::order::{
     order_event_context_from_tags, order_payment_record_from_event,
@@ -2479,10 +2485,10 @@ impl DesktopAppRuntimeState {
             context: AppPublishContext::new(account_id, "seller_order_decision"),
             app_order_id: order_id,
             farm_id,
-            trade_order_id: request.payload.order_id.clone(),
+            trade_order_id: request.payload.order_id.to_string(),
             request_event_id: request.request_event_id,
             listing_event_id: request.listing_event_id,
-            listing_addr: request.payload.listing_addr,
+            listing_addr: request.payload.listing_addr.to_string(),
             buyer_pubkey: request.payload.buyer_pubkey,
             seller_pubkey: request.payload.seller_pubkey,
             decision,
@@ -2639,10 +2645,10 @@ impl DesktopAppRuntimeState {
             context: AppPublishContext::new(account_id, "seller_order_fulfillment"),
             app_order_id: order_id,
             farm_id,
-            trade_order_id: request.payload.order_id,
+            trade_order_id: request.payload.order_id.to_string(),
             request_event_id: request.request_event_id,
             prev_event_id,
-            listing_addr: request.payload.listing_addr,
+            listing_addr: request.payload.listing_addr.to_string(),
             buyer_pubkey: request.payload.buyer_pubkey,
             seller_pubkey: request.payload.seller_pubkey,
             status,
@@ -2785,11 +2791,11 @@ impl DesktopAppRuntimeState {
             context: AppPublishContext::new(account_id, "seller_order_revision_proposal"),
             app_order_id: order_id,
             farm_id,
-            trade_order_id: request.payload.order_id,
+            trade_order_id: request.payload.order_id.to_string(),
             request_event_id: request.request_event_id,
             prev_event_id,
             revision_id: format!("app-revision-{}", d_tag_from_uuid(Uuid::now_v7())),
-            listing_addr: request.payload.listing_addr,
+            listing_addr: request.payload.listing_addr.to_string(),
             buyer_pubkey: request.payload.buyer_pubkey,
             seller_pubkey: request.payload.seller_pubkey,
             items,
@@ -2912,11 +2918,11 @@ impl DesktopAppRuntimeState {
             context: AppPublishContext::new(account_id.clone(), "buyer_order_revision_decision"),
             app_order_id: order_id,
             farm_id: detail.farm_id,
-            trade_order_id: request.payload.order_id,
+            trade_order_id: request.payload.order_id.to_string(),
             request_event_id: request.request_event_id,
             prev_event_id: proposal.event_id.clone(),
-            revision_id: proposal.payload.revision_id.clone(),
-            listing_addr: request.payload.listing_addr,
+            revision_id: proposal.payload.revision_id.to_string(),
+            listing_addr: request.payload.listing_addr.to_string(),
             buyer_pubkey: request.payload.buyer_pubkey,
             seller_pubkey: request.payload.seller_pubkey,
             decision,
@@ -3059,10 +3065,10 @@ impl DesktopAppRuntimeState {
             context: AppPublishContext::new(account_id.clone(), "buyer_order_cancellation"),
             app_order_id: order_id,
             farm_id: detail.farm_id,
-            trade_order_id: request.payload.order_id,
+            trade_order_id: request.payload.order_id.to_string(),
             request_event_id: request.request_event_id,
             prev_event_id,
-            listing_addr: request.payload.listing_addr,
+            listing_addr: request.payload.listing_addr.to_string(),
             buyer_pubkey: request.payload.buyer_pubkey,
             seller_pubkey: request.payload.seller_pubkey,
             reason: "buyer cancelled order".to_owned(),
@@ -3175,10 +3181,10 @@ impl DesktopAppRuntimeState {
             context: AppPublishContext::new(account_id.clone(), "buyer_order_receipt"),
             app_order_id: order_id,
             farm_id: detail.farm_id,
-            trade_order_id: request.payload.order_id,
+            trade_order_id: request.payload.order_id.to_string(),
             request_event_id: request.request_event_id,
             prev_event_id: fulfillment.event_id.clone(),
-            listing_addr: request.payload.listing_addr,
+            listing_addr: request.payload.listing_addr.to_string(),
             buyer_pubkey: request.payload.buyer_pubkey,
             seller_pubkey: request.payload.seller_pubkey,
             received,
@@ -7184,7 +7190,7 @@ async fn publish_app_payload(
                 .map_err(|error| AppSyncTransportError::failed(error.to_string()))
         }
         AppPublishPayload::OrderDecision(payload) => {
-            let decision = order_decision_publish_payload_to_sdk_decision(payload);
+            let decision = order_decision_publish_payload_to_sdk_decision(payload)?;
             client
                 .order()
                 .publish_order_decision_with_identity(
@@ -7197,7 +7203,7 @@ async fn publish_app_payload(
                 .map_err(|error| AppSyncTransportError::failed(error.to_string()))
         }
         AppPublishPayload::OrderRevisionProposal(payload) => {
-            let proposal = order_revision_proposal_publish_payload_to_sdk_revision(payload);
+            let proposal = order_revision_proposal_publish_payload_to_sdk_revision(payload)?;
             client
                 .order()
                 .publish_order_revision_proposal_with_identity(
@@ -7211,7 +7217,7 @@ async fn publish_app_payload(
         }
         AppPublishPayload::OrderRevisionDecision(payload) => {
             let decision =
-                order_revision_decision_publish_payload_to_sdk_revision_decision(payload);
+                order_revision_decision_publish_payload_to_sdk_revision_decision(payload)?;
             client
                 .order()
                 .publish_order_revision_decision_with_identity(
@@ -7224,7 +7230,7 @@ async fn publish_app_payload(
                 .map_err(|error| AppSyncTransportError::failed(error.to_string()))
         }
         AppPublishPayload::OrderCancellation(payload) => {
-            let cancellation = order_cancellation_publish_payload_to_sdk_cancellation(payload);
+            let cancellation = order_cancellation_publish_payload_to_sdk_cancellation(payload)?;
             client
                 .order()
                 .publish_order_cancellation_with_identity(
@@ -7237,7 +7243,7 @@ async fn publish_app_payload(
                 .map_err(|error| AppSyncTransportError::failed(error.to_string()))
         }
         AppPublishPayload::OrderFulfillment(payload) => {
-            let fulfillment = order_fulfillment_publish_payload_to_sdk_fulfillment(payload);
+            let fulfillment = order_fulfillment_publish_payload_to_sdk_fulfillment(payload)?;
             client
                 .order()
                 .publish_fulfillment_update_with_identity(
@@ -7250,7 +7256,7 @@ async fn publish_app_payload(
                 .map_err(|error| AppSyncTransportError::failed(error.to_string()))
         }
         AppPublishPayload::OrderReceipt(payload) => {
-            let receipt = order_receipt_publish_payload_to_sdk_receipt(payload);
+            let receipt = order_receipt_publish_payload_to_sdk_receipt(payload)?;
             client
                 .order()
                 .publish_buyer_receipt_with_identity(
@@ -7291,7 +7297,10 @@ fn listing_publish_payload_to_sdk_listing(
         .filter(|value| !value.trim().is_empty())
         .map(str::to_owned)
         .unwrap_or_else(|| d_tag_from_uuid(payload.product_id.as_uuid()));
-    let bin_id = listing_primary_bin_id(d_tag.as_str());
+    let d_tag = RadrootsDTag::parse(d_tag.as_str())
+        .map_err(|error| AppSyncTransportError::failed(error.to_string()))?;
+    let bin_id = RadrootsInventoryBinId::parse(listing_primary_bin_id(d_tag.as_str()))
+        .map_err(|error| AppSyncTransportError::failed(error.to_string()))?;
 
     Ok(RadrootsListing {
         d_tag,
@@ -9553,12 +9562,31 @@ fn seller_order_inventory_commitments(
         .collect()
 }
 
+fn publish_order_id(value: &str) -> Result<RadrootsOrderId, AppSyncTransportError> {
+    RadrootsOrderId::parse(value).map_err(|error| AppSyncTransportError::failed(error.to_string()))
+}
+
+fn publish_revision_id(value: &str) -> Result<RadrootsOrderRevisionId, AppSyncTransportError> {
+    RadrootsOrderRevisionId::parse(value)
+        .map_err(|error| AppSyncTransportError::failed(error.to_string()))
+}
+
+fn publish_listing_addr(value: &str) -> Result<RadrootsListingAddress, AppSyncTransportError> {
+    RadrootsListingAddress::parse(value)
+        .map_err(|error| AppSyncTransportError::failed(error.to_string()))
+}
+
+fn publish_bin_id(value: &str) -> Result<RadrootsInventoryBinId, AppSyncTransportError> {
+    RadrootsInventoryBinId::parse(value)
+        .map_err(|error| AppSyncTransportError::failed(error.to_string()))
+}
+
 fn order_decision_publish_payload_to_sdk_decision(
     payload: &AppOrderDecisionPublishPayload,
-) -> RadrootsOrderDecision {
-    RadrootsOrderDecision {
-        order_id: payload.trade_order_id.clone(),
-        listing_addr: payload.listing_addr.clone(),
+) -> Result<RadrootsOrderDecision, AppSyncTransportError> {
+    Ok(RadrootsOrderDecision {
+        order_id: publish_order_id(payload.trade_order_id.as_str())?,
+        listing_addr: publish_listing_addr(payload.listing_addr.as_str())?,
         buyer_pubkey: payload.buyer_pubkey.clone(),
         seller_pubkey: payload.seller_pubkey.clone(),
         decision: match &payload.decision {
@@ -9567,11 +9595,13 @@ fn order_decision_publish_payload_to_sdk_decision(
             } => RadrootsOrderDecisionOutcome::Accepted {
                 inventory_commitments: inventory_commitments
                     .iter()
-                    .map(|commitment| RadrootsOrderInventoryCommitment {
-                        bin_id: commitment.bin_id.clone(),
-                        bin_count: commitment.bin_count,
+                    .map(|commitment| {
+                        Ok(RadrootsOrderInventoryCommitment {
+                            bin_id: publish_bin_id(commitment.bin_id.as_str())?,
+                            bin_count: commitment.bin_count,
+                        })
                     })
-                    .collect(),
+                    .collect::<Result<Vec<_>, AppSyncTransportError>>()?,
             },
             AppOrderDecisionPayload::Declined { reason } => {
                 RadrootsOrderDecisionOutcome::Declined {
@@ -9579,16 +9609,16 @@ fn order_decision_publish_payload_to_sdk_decision(
                 }
             }
         },
-    }
+    })
 }
 
 fn order_revision_proposal_publish_payload_to_sdk_revision(
     payload: &AppOrderRevisionProposalPublishPayload,
-) -> RadrootsOrderRevisionProposal {
-    RadrootsOrderRevisionProposal {
-        revision_id: payload.revision_id.clone(),
-        order_id: payload.trade_order_id.clone(),
-        listing_addr: payload.listing_addr.clone(),
+) -> Result<RadrootsOrderRevisionProposal, AppSyncTransportError> {
+    Ok(RadrootsOrderRevisionProposal {
+        revision_id: publish_revision_id(payload.revision_id.as_str())?,
+        order_id: publish_order_id(payload.trade_order_id.as_str())?,
+        listing_addr: publish_listing_addr(payload.listing_addr.as_str())?,
         buyer_pubkey: payload.buyer_pubkey.clone(),
         seller_pubkey: payload.seller_pubkey.clone(),
         root_event_id: payload.request_event_id.clone(),
@@ -9596,60 +9626,60 @@ fn order_revision_proposal_publish_payload_to_sdk_revision(
         items: payload.items.clone(),
         economics: payload.economics.clone(),
         reason: payload.reason.clone(),
-    }
+    })
 }
 
 fn order_revision_decision_publish_payload_to_sdk_revision_decision(
     payload: &AppOrderRevisionDecisionPublishPayload,
-) -> RadrootsOrderRevisionDecision {
-    RadrootsOrderRevisionDecision {
-        revision_id: payload.revision_id.clone(),
-        order_id: payload.trade_order_id.clone(),
-        listing_addr: payload.listing_addr.clone(),
+) -> Result<RadrootsOrderRevisionDecision, AppSyncTransportError> {
+    Ok(RadrootsOrderRevisionDecision {
+        revision_id: publish_revision_id(payload.revision_id.as_str())?,
+        order_id: publish_order_id(payload.trade_order_id.as_str())?,
+        listing_addr: publish_listing_addr(payload.listing_addr.as_str())?,
         buyer_pubkey: payload.buyer_pubkey.clone(),
         seller_pubkey: payload.seller_pubkey.clone(),
         root_event_id: payload.request_event_id.clone(),
         prev_event_id: payload.prev_event_id.clone(),
         decision: payload.decision.clone(),
-    }
+    })
 }
 
 fn order_fulfillment_publish_payload_to_sdk_fulfillment(
     payload: &AppOrderFulfillmentPublishPayload,
-) -> RadrootsOrderFulfillmentUpdate {
-    RadrootsOrderFulfillmentUpdate {
-        order_id: payload.trade_order_id.clone(),
-        listing_addr: payload.listing_addr.clone(),
+) -> Result<RadrootsOrderFulfillmentUpdate, AppSyncTransportError> {
+    Ok(RadrootsOrderFulfillmentUpdate {
+        order_id: publish_order_id(payload.trade_order_id.as_str())?,
+        listing_addr: publish_listing_addr(payload.listing_addr.as_str())?,
         buyer_pubkey: payload.buyer_pubkey.clone(),
         seller_pubkey: payload.seller_pubkey.clone(),
         status: payload.status,
-    }
+    })
 }
 
 fn order_cancellation_publish_payload_to_sdk_cancellation(
     payload: &AppOrderCancellationPublishPayload,
-) -> RadrootsOrderCancellation {
-    RadrootsOrderCancellation {
-        order_id: payload.trade_order_id.clone(),
-        listing_addr: payload.listing_addr.clone(),
+) -> Result<RadrootsOrderCancellation, AppSyncTransportError> {
+    Ok(RadrootsOrderCancellation {
+        order_id: publish_order_id(payload.trade_order_id.as_str())?,
+        listing_addr: publish_listing_addr(payload.listing_addr.as_str())?,
         buyer_pubkey: payload.buyer_pubkey.clone(),
         seller_pubkey: payload.seller_pubkey.clone(),
         reason: payload.reason.clone(),
-    }
+    })
 }
 
 fn order_receipt_publish_payload_to_sdk_receipt(
     payload: &AppOrderReceiptPublishPayload,
-) -> RadrootsOrderReceipt {
-    RadrootsOrderReceipt {
-        order_id: payload.trade_order_id.clone(),
-        listing_addr: payload.listing_addr.clone(),
+) -> Result<RadrootsOrderReceipt, AppSyncTransportError> {
+    Ok(RadrootsOrderReceipt {
+        order_id: publish_order_id(payload.trade_order_id.as_str())?,
+        listing_addr: publish_listing_addr(payload.listing_addr.as_str())?,
         buyer_pubkey: payload.buyer_pubkey.clone(),
         seller_pubkey: payload.seller_pubkey.clone(),
         received: payload.received,
         issue: payload.issue.clone(),
         received_at: payload.received_at,
-    }
+    })
 }
 
 fn pending_sync_upsert(aggregate: SyncAggregateRef, payload_json: String) -> PendingSyncOperation {

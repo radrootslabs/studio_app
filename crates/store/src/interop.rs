@@ -1527,7 +1527,7 @@ impl<'a> AppLocalInteropRepository<'a> {
                 .unwrap_or_else(|| payload.economics.currency.to_string());
             let title = existing_listing
                 .map(|listing| listing.title.clone())
-                .unwrap_or_else(|| item.bin_id.clone());
+                .unwrap_or_else(|| item.bin_id.to_string());
             self.connection
                 .execute(
                     "INSERT INTO order_lines (
@@ -1622,7 +1622,7 @@ impl<'a> AppLocalInteropRepository<'a> {
                         .is_none_or(|listing_bin_id| listing_bin_id == item.bin_id)
                 })
                 .map(|listing| listing.title.clone())
-                .unwrap_or_else(|| item.bin_id.clone());
+                .unwrap_or_else(|| item.bin_id.to_string());
             self.connection
                 .execute(
                     "INSERT INTO order_lines (
@@ -3358,14 +3358,14 @@ fn active_order_agreement_source(
         })
     {
         return ActiveOrderAgreementSource {
-            listing_addr: revision_proposal.payload.listing_addr.clone(),
+            listing_addr: revision_proposal.payload.listing_addr.to_string(),
             seller_pubkey: revision_proposal.payload.seller_pubkey.clone(),
             items: revision_proposal.payload.items.clone(),
             economics: revision_proposal.payload.economics.clone(),
         };
     }
     ActiveOrderAgreementSource {
-        listing_addr: request.listing_addr.clone(),
+        listing_addr: request.listing_addr.to_string(),
         seller_pubkey: request.seller_pubkey.clone(),
         items: request.items.clone(),
         economics: request.economics.clone(),
@@ -3858,6 +3858,10 @@ mod tests {
     };
     use radroots_events::{
         RadrootsNostrEvent, RadrootsNostrEventPtr,
+        ids::{
+            RadrootsEconomicsDigest, RadrootsInventoryBinId, RadrootsListingAddress,
+            RadrootsOrderId, RadrootsOrderQuoteId, RadrootsOrderRevisionId,
+        },
         kinds::KIND_ORDER_RECEIPT,
         order::{
             RadrootsOrderCancellation, RadrootsOrderDecision, RadrootsOrderDecisionOutcome,
@@ -4356,6 +4360,37 @@ mod tests {
         RadrootsCoreMoney::new(decimal(raw), RadrootsCoreCurrency::USD)
     }
 
+    fn test_pubkey(seed: &str) -> String {
+        let left = Uuid::new_v5(&Uuid::NAMESPACE_URL, seed.as_bytes());
+        let right_seed = format!("{seed}:right");
+        let right = Uuid::new_v5(&Uuid::NAMESPACE_URL, right_seed.as_bytes());
+        format!("{}{}", left.simple(), right.simple())
+    }
+
+    fn typed_order_id(raw: &str) -> RadrootsOrderId {
+        raw.parse().expect("valid order id")
+    }
+
+    fn typed_revision_id(raw: &str) -> RadrootsOrderRevisionId {
+        raw.parse().expect("valid revision id")
+    }
+
+    fn typed_quote_id(raw: &str) -> RadrootsOrderQuoteId {
+        raw.parse().expect("valid quote id")
+    }
+
+    fn typed_bin_id(raw: &str) -> RadrootsInventoryBinId {
+        raw.parse().expect("valid bin id")
+    }
+
+    fn typed_listing_addr(raw: &str) -> RadrootsListingAddress {
+        raw.parse().expect("valid listing address")
+    }
+
+    fn typed_economics_digest(raw: &str) -> RadrootsEconomicsDigest {
+        raw.parse().expect("valid economics digest")
+    }
+
     fn listing_event_ptr(event_id: &str) -> RadrootsNostrEventPtr {
         RadrootsNostrEventPtr {
             id: event_id.to_owned(),
@@ -4370,21 +4405,21 @@ mod tests {
         seller_pubkey: &str,
     ) -> RadrootsOrderRequest {
         RadrootsOrderRequest {
-            order_id: order_id.to_owned(),
-            listing_addr: listing_addr.to_owned(),
+            order_id: typed_order_id(order_id),
+            listing_addr: typed_listing_addr(listing_addr),
             buyer_pubkey: buyer_pubkey.to_owned(),
             seller_pubkey: seller_pubkey.to_owned(),
             items: vec![RadrootsOrderItem {
-                bin_id: "bin-1".to_owned(),
+                bin_id: typed_bin_id("bin-1"),
                 bin_count: 2,
             }],
             economics: RadrootsOrderEconomics {
-                quote_id: format!("quote-{order_id}"),
+                quote_id: typed_quote_id(format!("quote-{order_id}").as_str()),
                 quote_version: 1,
                 pricing_basis: RadrootsOrderPricingBasis::ListingEvent,
                 currency: RadrootsCoreCurrency::USD,
                 items: vec![RadrootsOrderEconomicItem {
-                    bin_id: "bin-1".to_owned(),
+                    bin_id: typed_bin_id("bin-1"),
                     bin_count: 2,
                     quantity_amount: decimal("1"),
                     quantity_unit: RadrootsCoreUnit::Each,
@@ -4409,13 +4444,13 @@ mod tests {
         seller_pubkey: &str,
     ) -> RadrootsOrderDecision {
         RadrootsOrderDecision {
-            order_id: order_id.to_owned(),
-            listing_addr: listing_addr.to_owned(),
+            order_id: typed_order_id(order_id),
+            listing_addr: typed_listing_addr(listing_addr),
             buyer_pubkey: buyer_pubkey.to_owned(),
             seller_pubkey: seller_pubkey.to_owned(),
             decision: RadrootsOrderDecisionOutcome::Accepted {
                 inventory_commitments: vec![RadrootsOrderInventoryCommitment {
-                    bin_id: "bin-1".to_owned(),
+                    bin_id: typed_bin_id("bin-1"),
                     bin_count: 2,
                 }],
             },
@@ -4429,8 +4464,8 @@ mod tests {
         seller_pubkey: &str,
     ) -> RadrootsOrderDecision {
         RadrootsOrderDecision {
-            order_id: order_id.to_owned(),
-            listing_addr: listing_addr.to_owned(),
+            order_id: typed_order_id(order_id),
+            listing_addr: typed_listing_addr(listing_addr),
             buyer_pubkey: buyer_pubkey.to_owned(),
             seller_pubkey: seller_pubkey.to_owned(),
             decision: RadrootsOrderDecisionOutcome::Declined {
@@ -4451,16 +4486,17 @@ mod tests {
         let mut request =
             order_request_payload(order_id, listing_addr, buyer_pubkey, seller_pubkey);
         request.items[0].bin_count = 3;
-        request.economics.quote_id = format!("quote-{order_id}-{revision_id}");
+        request.economics.quote_id =
+            typed_quote_id(format!("quote-{order_id}-{revision_id}").as_str());
         request.economics.quote_version = 2;
         request.economics.items[0].bin_count = 3;
         request.economics.items[0].line_subtotal = usd("24");
         request.economics.subtotal = usd("24");
         request.economics.total = usd("24");
         RadrootsOrderRevisionProposal {
-            revision_id: revision_id.to_owned(),
-            order_id: order_id.to_owned(),
-            listing_addr: listing_addr.to_owned(),
+            revision_id: typed_revision_id(revision_id),
+            order_id: typed_order_id(order_id),
+            listing_addr: typed_listing_addr(listing_addr),
             buyer_pubkey: buyer_pubkey.to_owned(),
             seller_pubkey: seller_pubkey.to_owned(),
             root_event_id: root_event_id.to_owned(),
@@ -4482,9 +4518,9 @@ mod tests {
         decision: RadrootsOrderRevisionOutcome,
     ) -> RadrootsOrderRevisionDecision {
         RadrootsOrderRevisionDecision {
-            revision_id: revision_id.to_owned(),
-            order_id: order_id.to_owned(),
-            listing_addr: listing_addr.to_owned(),
+            revision_id: typed_revision_id(revision_id),
+            order_id: typed_order_id(order_id),
+            listing_addr: typed_listing_addr(listing_addr),
             buyer_pubkey: buyer_pubkey.to_owned(),
             seller_pubkey: seller_pubkey.to_owned(),
             root_event_id: root_event_id.to_owned(),
@@ -4501,8 +4537,8 @@ mod tests {
         status: RadrootsOrderFulfillmentState,
     ) -> RadrootsOrderFulfillmentUpdate {
         RadrootsOrderFulfillmentUpdate {
-            order_id: order_id.to_owned(),
-            listing_addr: listing_addr.to_owned(),
+            order_id: typed_order_id(order_id),
+            listing_addr: typed_listing_addr(listing_addr),
             buyer_pubkey: buyer_pubkey.to_owned(),
             seller_pubkey: seller_pubkey.to_owned(),
             status,
@@ -4516,8 +4552,8 @@ mod tests {
         seller_pubkey: &str,
     ) -> RadrootsOrderCancellation {
         RadrootsOrderCancellation {
-            order_id: order_id.to_owned(),
-            listing_addr: listing_addr.to_owned(),
+            order_id: typed_order_id(order_id),
+            listing_addr: typed_listing_addr(listing_addr),
             buyer_pubkey: buyer_pubkey.to_owned(),
             seller_pubkey: seller_pubkey.to_owned(),
             reason: "buyer changed pickup plan".to_owned(),
@@ -4532,8 +4568,8 @@ mod tests {
         received: bool,
     ) -> RadrootsOrderReceipt {
         RadrootsOrderReceipt {
-            order_id: order_id.to_owned(),
-            listing_addr: listing_addr.to_owned(),
+            order_id: typed_order_id(order_id),
+            listing_addr: typed_listing_addr(listing_addr),
             buyer_pubkey: buyer_pubkey.to_owned(),
             seller_pubkey: seller_pubkey.to_owned(),
             received,
@@ -4577,7 +4613,7 @@ mod tests {
         let events = local_events_store();
         let farm_key = "DDDDDDDDDDDDDDDDDDDDDD";
         let listing_key = "AAAAAAAAAAAAAAAAAAAAAw";
-        let seller_pubkey = format!("{label}-seller");
+        let seller_pubkey = test_pubkey(format!("{label}-seller").as_str());
         let buyer_pubkey = format!("{label}-buyer");
         let order_id_raw = format!("{label}-order");
         let listing_addr = format!("30402:{seller_pubkey}:{listing_key}");
@@ -4716,7 +4752,7 @@ mod tests {
         let events = local_events_store();
         let farm_key = "DDDDDDDDDDDDDDDDDDDDDD";
         let listing_key = "AAAAAAAAAAAAAAAAAAAAAw";
-        let seller_pubkey = format!("{label}-seller");
+        let seller_pubkey = test_pubkey(format!("{label}-seller").as_str());
         let buyer_pubkey = format!("{label}-buyer");
         let order_id_raw = format!("{label}-order");
         let listing_addr = format!("30402:{seller_pubkey}:{listing_key}");
@@ -4835,8 +4871,11 @@ mod tests {
             agreement_event_id: agreement_event_id.to_owned(),
             quote_id: request.economics.quote_id.clone(),
             quote_version: request.economics.quote_version,
-            economics_digest: radroots_order_economics_digest(&request.economics)
-                .expect("order economics digest should encode"),
+            economics_digest: typed_economics_digest(
+                radroots_order_economics_digest(&request.economics)
+                    .expect("order economics digest should encode")
+                    .as_str(),
+            ),
             amount: request.economics.total.amount,
             currency: request.economics.total.currency,
             method: RadrootsOrderPaymentMethod::ManualTransfer,
@@ -4866,8 +4905,11 @@ mod tests {
             payment_event_id: payment_event_id.to_owned(),
             quote_id: request.economics.quote_id.clone(),
             quote_version: request.economics.quote_version,
-            economics_digest: radroots_order_economics_digest(&request.economics)
-                .expect("order economics digest should encode"),
+            economics_digest: typed_economics_digest(
+                radroots_order_economics_digest(&request.economics)
+                    .expect("order economics digest should encode")
+                    .as_str(),
+            ),
             amount: request.economics.total.amount,
             currency: request.economics.total.currency,
             decision,
@@ -5021,7 +5063,8 @@ mod tests {
         let events = local_events_store();
         let farm_key = "AAAAAAAAAAAAAAAAAAAAAA";
         let listing_key = "AAAAAAAAAAAAAAAAAAAAAg";
-        let seller_pubkey = "seller-pubkey";
+        let seller_pubkey = test_pubkey("seller-pubkey");
+        let seller_pubkey = seller_pubkey.as_str();
         let buyer_pubkey = "buyer-pubkey";
         let order_id_raw = "relay-order-1";
         let listing_addr = format!("30402:{seller_pubkey}:{listing_key}");
@@ -5124,13 +5167,18 @@ mod tests {
         let app_store =
             AppSqliteStore::open(DatabaseTarget::InMemory).expect("open app sqlite store");
         let events = local_events_store();
-        let listing_addr = "30402:seller-pubkey:AAAAAAAAAAAAAAAAAAAAAg";
         let buyer_pubkey = "buyer-pubkey";
-        let seller_pubkey = "seller-pubkey";
+        let seller_pubkey = test_pubkey("seller-pubkey");
+        let seller_pubkey = seller_pubkey.as_str();
+        let listing_addr = format!("30402:{seller_pubkey}:AAAAAAAAAAAAAAAAAAAAAg");
         let relay_url = "ws://127.0.0.1:1234";
         let build_event = |event_id: &str, order_id_raw: &str| {
-            let payload =
-                order_request_payload(order_id_raw, listing_addr, buyer_pubkey, seller_pubkey);
+            let payload = order_request_payload(
+                order_id_raw,
+                listing_addr.as_str(),
+                buyer_pubkey,
+                seller_pubkey,
+            );
             let parts = order_request_event_build(&listing_event_ptr("listing-event-1"), &payload)
                 .expect("build order request event");
             event_from_parts(event_id, buyer_pubkey, parts)
@@ -5140,7 +5188,7 @@ mod tests {
             .append_record(&signed_order_event_record(
                 "cli:signed_event:order-request:evidence-ack",
                 &acknowledged_event,
-                listing_addr,
+                listing_addr.as_str(),
                 SourceRuntime::Cli,
                 None,
             ))
@@ -5150,7 +5198,7 @@ mod tests {
         let mut observed_record = signed_order_event_record(
             "cli:signed_event:order-request:evidence-observed",
             &observed_event,
-            listing_addr,
+            listing_addr.as_str(),
             SourceRuntime::Cli,
             None,
         );
@@ -5169,7 +5217,7 @@ mod tests {
         let mut pending_record = signed_order_event_record(
             "cli:signed_event:order-request:evidence-pending",
             &pending_event,
-            listing_addr,
+            listing_addr.as_str(),
             SourceRuntime::Cli,
             None,
         );
@@ -5189,7 +5237,7 @@ mod tests {
         let mut failed_record = signed_order_event_record(
             "cli:signed_event:order-request:evidence-failed",
             &failed_event,
-            listing_addr,
+            listing_addr.as_str(),
             SourceRuntime::Cli,
             None,
         );
@@ -5209,7 +5257,7 @@ mod tests {
         let mut local_only_record = signed_order_event_record(
             "cli:signed_event:order-request:evidence-local-only",
             &local_only_event,
-            listing_addr,
+            listing_addr.as_str(),
             SourceRuntime::Cli,
             None,
         );
@@ -5227,7 +5275,7 @@ mod tests {
         let mut malformed_delivery_record = signed_order_event_record(
             "cli:signed_event:order-request:evidence-malformed-delivery",
             &malformed_delivery_event,
-            listing_addr,
+            listing_addr.as_str(),
             SourceRuntime::Cli,
             None,
         );
@@ -5243,7 +5291,7 @@ mod tests {
         let mut malformed_record = signed_order_event_record(
             "cli:signed_event:order-request:evidence-malformed-event",
             &malformed_event,
-            listing_addr,
+            listing_addr.as_str(),
             SourceRuntime::Cli,
             None,
         );
@@ -5269,7 +5317,8 @@ mod tests {
         let events = local_events_store();
         let farm_key = "CCCCCCCCCCCCCCCCCCCCCC";
         let listing_key = "AAAAAAAAAAAAAAAAAAAAAg";
-        let seller_pubkey = "seller-pubkey";
+        let seller_pubkey = test_pubkey("seller-pubkey");
+        let seller_pubkey = seller_pubkey.as_str();
         let buyer_pubkey = "app-buyer-pubkey";
         let order_id_raw = "app-relay-order-1";
         let listing_addr = format!("30402:{seller_pubkey}:{listing_key}");
@@ -5532,7 +5581,8 @@ mod tests {
         let events = local_events_store();
         let farm_key = "CCCCCCCCCCCCCCCCCCCCCC";
         let listing_key = "AAAAAAAAAAAAAAAAAAAAAg";
-        let seller_pubkey = "seller-pubkey";
+        let seller_pubkey = test_pubkey("seller-pubkey");
+        let seller_pubkey = seller_pubkey.as_str();
         let buyer_pubkey = "app-buyer-pubkey";
         let order_id_raw = "app-relay-order-declined-1";
         let listing_addr = format!("30402:{seller_pubkey}:{listing_key}");
@@ -5661,7 +5711,8 @@ mod tests {
         let events = local_events_store();
         let farm_key = "DDDDDDDDDDDDDDDDDDDDDD";
         let listing_key = "AAAAAAAAAAAAAAAAAAAAAw";
-        let seller_pubkey = "seller-pubkey";
+        let seller_pubkey = test_pubkey("seller-pubkey");
+        let seller_pubkey = seller_pubkey.as_str();
         let buyer_pubkey = "app-buyer-pubkey";
         let order_id_raw = "active-lifecycle-order-1";
         let listing_addr = format!("30402:{seller_pubkey}:{listing_key}");
@@ -6126,7 +6177,8 @@ mod tests {
         let events = local_events_store();
         let farm_key = "DDDDDDDDDDDDDDDDDDDDDD";
         let listing_key = "AAAAAAAAAAAAAAAAAAAAAw";
-        let seller_pubkey = "validation-out-of-order-seller";
+        let seller_pubkey = test_pubkey("validation-out-of-order-seller");
+        let seller_pubkey = seller_pubkey.as_str();
         let buyer_pubkey = "validation-out-of-order-buyer";
         let order_id_raw = "validation-out-of-order";
         let listing_addr = format!("30402:{seller_pubkey}:{listing_key}");
@@ -6348,7 +6400,8 @@ mod tests {
         let events = local_events_store();
         let farm_key = "EEEEEEEEEEEEEEEEEEEEEE";
         let listing_key = "AAAAAAAAAAAAAAAAAAAAAw";
-        let seller_pubkey = "seller-pubkey";
+        let seller_pubkey = test_pubkey("seller-pubkey");
+        let seller_pubkey = seller_pubkey.as_str();
         let buyer_pubkey = "app-buyer-pubkey";
         let order_id_raw = "active-revision-order-1";
         let listing_addr = format!("30402:{seller_pubkey}:{listing_key}");
@@ -6606,7 +6659,8 @@ mod tests {
             let events = local_events_store();
             let farm_key = "FFFFFFFFFFFFFFFFFFFFFF";
             let listing_key = "AAAAAAAAAAAAAAAAAAAAAw";
-            let seller_pubkey = "seller-pubkey";
+            let seller_pubkey = test_pubkey("seller-pubkey");
+            let seller_pubkey = seller_pubkey.as_str();
             let buyer_pubkey = "app-buyer-pubkey";
             let order_id_raw = if accepted_first {
                 "active-conflict-order-accepted-first"
@@ -8511,12 +8565,14 @@ mod tests {
         let app_store =
             AppSqliteStore::open(DatabaseTarget::InMemory).expect("open app sqlite store");
         let events = local_events_store();
-        let listing_addr = "30402:seller-pubkey:app-order-listing";
+        let seller_pubkey = test_pubkey("seller-pubkey");
+        let seller_pubkey = seller_pubkey.as_str();
+        let listing_addr = format!("30402:{seller_pubkey}:app-order-listing");
         let payload = order_request_payload(
             "app-order-receipt-replaces-relay",
-            listing_addr,
+            listing_addr.as_str(),
             "buyer-pubkey",
-            "seller-pubkey",
+            seller_pubkey,
         );
         let parts = order_request_event_build(&listing_event_ptr("listing-event"), &payload)
             .expect("build order request event");
@@ -8524,7 +8580,7 @@ mod tests {
         let mut relay_record = signed_order_event_record(
             "app:relay_event:order-request:duplicate",
             &event,
-            listing_addr,
+            listing_addr.as_str(),
             SourceRuntime::Cli,
             None,
         );
@@ -8540,7 +8596,7 @@ mod tests {
             .append_record(&signed_order_event_record(
                 "app:signed_event:order-request:duplicate",
                 &event,
-                listing_addr,
+                listing_addr.as_str(),
                 SourceRuntime::App,
                 Some("acct_buyer"),
             ))
@@ -8573,7 +8629,7 @@ mod tests {
             stored.outbox_status,
             PublishOutboxStatus::Acknowledged.as_str()
         );
-        assert_eq!(stored.listing_addr.as_deref(), Some(listing_addr));
+        assert_eq!(stored.listing_addr.as_deref(), Some(listing_addr.as_str()));
     }
 
     #[test]
@@ -8581,12 +8637,14 @@ mod tests {
         let app_store =
             AppSqliteStore::open(DatabaseTarget::InMemory).expect("open app sqlite store");
         let events = local_events_store();
-        let listing_addr = "30402:seller-pubkey:app-decision-listing";
+        let seller_pubkey = test_pubkey("seller-pubkey");
+        let seller_pubkey = seller_pubkey.as_str();
+        let listing_addr = format!("30402:{seller_pubkey}:app-decision-listing");
         let request_payload = order_request_payload(
             "app-decision-receipt",
-            listing_addr,
+            listing_addr.as_str(),
             "buyer-pubkey",
-            "seller-pubkey",
+            seller_pubkey,
         );
         let request_parts =
             order_request_event_build(&listing_event_ptr("listing-event"), &request_payload)
@@ -8595,9 +8653,9 @@ mod tests {
             event_from_parts("app-decision-request-event", "buyer-pubkey", request_parts);
         let decision_payload = accepted_order_decision_payload(
             "app-decision-receipt",
-            listing_addr,
+            listing_addr.as_str(),
             "buyer-pubkey",
-            "seller-pubkey",
+            seller_pubkey,
         );
         let decision_parts = order_decision_event_build(
             request_event.id.as_str(),
@@ -8611,7 +8669,7 @@ mod tests {
             .append_record(&signed_order_event_record(
                 "app:signed_event:order-decision:duplicate",
                 &decision_event,
-                listing_addr,
+                listing_addr.as_str(),
                 SourceRuntime::App,
                 Some("acct_seller"),
             ))
@@ -8619,7 +8677,7 @@ mod tests {
         let mut relay_record = signed_order_event_record(
             "app:relay_event:order-decision:duplicate",
             &decision_event,
-            listing_addr,
+            listing_addr.as_str(),
             SourceRuntime::Cli,
             None,
         );
@@ -8662,7 +8720,7 @@ mod tests {
             stored.outbox_status,
             PublishOutboxStatus::Acknowledged.as_str()
         );
-        assert_eq!(stored.listing_addr.as_deref(), Some(listing_addr));
+        assert_eq!(stored.listing_addr.as_deref(), Some(listing_addr.as_str()));
     }
 
     #[test]
