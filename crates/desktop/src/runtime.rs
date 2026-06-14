@@ -113,10 +113,11 @@ use radroots_sdk::{
     SdkPublishReceipt, SdkTransportMode, SdkTransportReceipt, SignerConfig,
 };
 use radroots_sql_core::SqliteExecutor;
+use radroots_trade::listing::parse_public_listing_address;
 use radroots_trade::order::{
     RadrootsOrderCancellationRecord, RadrootsOrderDecisionRecord, RadrootsOrderFulfillmentRecord,
     RadrootsOrderPaymentEventRecord, RadrootsOrderPaymentState, RadrootsOrderReceiptRecord,
-    RadrootsOrderRequestRecord, RadrootsOrderRevisionDecisionRecord,
+    RadrootsOrderReductionInputs, RadrootsOrderRequestRecord, RadrootsOrderRevisionDecisionRecord,
     RadrootsOrderRevisionProposalRecord, RadrootsOrderSettlementRecord, RadrootsOrderStatus,
     reduce_order_events,
 };
@@ -2442,12 +2443,11 @@ impl DesktopAppRuntimeState {
                 reason: "seller order decision seller account does not match order seller",
             });
         }
-        let listing_address =
-            radroots_sdk::order::parse_listing_address(request.payload.listing_addr.as_str())
-                .map_err(|_| AppSqliteError::InvalidProjection {
-                    reason: "seller order decision listing address is invalid",
-                })?;
-        if listing_address.seller_pubkey != seller_pubkey {
+        let listing_address = parse_public_listing_address(request.payload.listing_addr.as_str())
+            .map_err(|_| AppSqliteError::InvalidProjection {
+            reason: "seller order decision listing address is invalid",
+        })?;
+        if listing_address.seller_pubkey.as_str() != seller_pubkey.as_str() {
             return Err(AppSqliteError::InvalidProjection {
                 reason: "seller order decision listing address is outside seller authority",
             });
@@ -2729,12 +2729,11 @@ impl DesktopAppRuntimeState {
                 reason: "seller order revision seller account does not match order seller",
             });
         }
-        let listing_address =
-            radroots_sdk::order::parse_listing_address(request.payload.listing_addr.as_str())
-                .map_err(|_| AppSqliteError::InvalidProjection {
-                    reason: "seller order revision listing address is invalid",
-                })?;
-        if listing_address.seller_pubkey != seller_pubkey {
+        let listing_address = parse_public_listing_address(request.payload.listing_addr.as_str())
+            .map_err(|_| AppSqliteError::InvalidProjection {
+            reason: "seller order revision listing address is invalid",
+        })?;
+        if listing_address.seller_pubkey.as_str() != seller_pubkey.as_str() {
             return Err(AppSqliteError::InvalidProjection {
                 reason: "seller order revision listing address is outside seller authority",
             });
@@ -5570,15 +5569,17 @@ impl DesktopAppRuntimeState {
 
         let projection = reduce_order_events(
             &request.payload.order_id,
-            buckets.requests.clone(),
-            buckets.decisions.clone(),
-            buckets.revision_proposals.clone(),
-            buckets.revision_decisions.clone(),
-            buckets.fulfillments.clone(),
-            buckets.cancellations.clone(),
-            buckets.receipts.clone(),
-            buckets.payments.clone(),
-            buckets.settlements.clone(),
+            RadrootsOrderReductionInputs {
+                requests: buckets.requests.clone(),
+                decisions: buckets.decisions.clone(),
+                revision_proposals: buckets.revision_proposals.clone(),
+                revision_decisions: buckets.revision_decisions.clone(),
+                fulfillments: buckets.fulfillments.clone(),
+                cancellations: buckets.cancellations.clone(),
+                receipts: buckets.receipts.clone(),
+                payments: buckets.payments.clone(),
+                settlements: buckets.settlements.clone(),
+            },
         );
         if !projection.issues.is_empty() || projection.status == RadrootsOrderStatus::Invalid {
             return Err(AppSqliteError::InvalidProjection {

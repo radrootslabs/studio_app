@@ -43,7 +43,7 @@ use radroots_sql_core::{SqlExecutor, SqliteExecutor};
 use radroots_trade::order::{
     RadrootsOrderCancellationRecord, RadrootsOrderDecisionRecord, RadrootsOrderFulfillmentRecord,
     RadrootsOrderPaymentEventRecord, RadrootsOrderProjection, RadrootsOrderReceiptRecord,
-    RadrootsOrderRequestRecord, RadrootsOrderRevisionDecisionRecord,
+    RadrootsOrderReductionInputs, RadrootsOrderRequestRecord, RadrootsOrderRevisionDecisionRecord,
     RadrootsOrderRevisionProposalRecord, RadrootsOrderSettlementRecord, reduce_order_events,
 };
 use radroots_trade::validation_receipt::{
@@ -1197,15 +1197,17 @@ impl<'a> AppLocalInteropRepository<'a> {
                 })?;
         let projection = reduce_order_events(
             &reducer_order_id,
-            buckets.requests,
-            buckets.decisions,
-            buckets.revision_proposals,
-            buckets.revision_decisions,
-            buckets.fulfillments,
-            buckets.cancellations,
-            buckets.receipts,
-            buckets.payments,
-            buckets.settlements,
+            RadrootsOrderReductionInputs {
+                requests: buckets.requests,
+                decisions: buckets.decisions,
+                revision_proposals: buckets.revision_proposals,
+                revision_decisions: buckets.revision_decisions,
+                fulfillments: buckets.fulfillments,
+                cancellations: buckets.cancellations,
+                receipts: buckets.receipts,
+                payments: buckets.payments,
+                settlements: buckets.settlements,
+            },
         );
         let request_payload = projection.request_event_id.as_deref().and_then(|event_id| {
             requests
