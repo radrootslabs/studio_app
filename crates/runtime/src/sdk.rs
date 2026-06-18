@@ -11,6 +11,7 @@ use std::{
 
 use radroots_sdk::{
     IntegrityReceipt, IntegrityRequest, RadrootsSdk, RadrootsSdkError, RadrootsSdkStoragePaths,
+    RestoreReceipt, RestoreRequest, SdkBackupVerification,
     SdkRelayUrlPolicy as SdkRuntimeRelayUrlPolicy, StorageStatusReceipt, StorageStatusRequest,
     SyncStatusReceipt, SyncStatusRequest,
 };
@@ -75,6 +76,7 @@ pub struct AppSdkRuntimeStatus {
     pub relay_url_policy: AppSdkRelayUrlPolicy,
     pub storage_paths: Option<AppSdkStoragePaths>,
     pub last_issue: Option<AppSdkRuntimeIssue>,
+    pub projection_lifecycle: AppSdkProjectionLifecycleStatus,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -173,6 +175,49 @@ pub struct AppSdkSyncRelayTargetDiagnostics {
     pub configured_relays: Vec<String>,
 }
 
+#[derive(Clone, Debug, PartialEq)]
+pub struct AppSdkRestorePreflightRequest {
+    pub source: PathBuf,
+    pub overwrite_existing_sdk_storage: bool,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct AppSdkRestorePreflightReceipt {
+    pub source: PathBuf,
+    pub destination: PathBuf,
+    pub state: String,
+    pub destination_paths: Option<AppSdkStoragePaths>,
+    pub restored_paths: Option<AppSdkStoragePaths>,
+    pub event_store_path: PathBuf,
+    pub outbox_path: PathBuf,
+    pub manifest_path: PathBuf,
+    pub verification: AppSdkBackupVerificationDiagnostics,
+    pub source_storage: AppSdkStorageDiagnostics,
+    pub projection_lifecycle: AppSdkProjectionLifecycleStatus,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct AppSdkBackupVerificationDiagnostics {
+    pub event_store_ok: bool,
+    pub outbox_ok: bool,
+    pub event_store_events: i64,
+    pub outbox_events: i64,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct AppSdkProjectionLifecycleStatus {
+    pub state: AppSdkProjectionLifecycleState,
+    pub reason: Option<String>,
+    pub restore_source: Option<PathBuf>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum AppSdkProjectionLifecycleState {
+    Current,
+    Stale,
+    Rebuilding,
+}
+
 #[derive(Debug, Error)]
 pub enum AppSdkRuntimeError {
     #[error("app sdk command queue capacity must be greater than zero")]
@@ -212,6 +257,16 @@ enum AppSdkWorkerCommand {
     IntegrityStatus(mpsc::Sender<Result<AppSdkIntegrityDiagnostics, AppSdkRuntimeIssue>>),
     SyncStatus(mpsc::Sender<Result<AppSdkSyncDiagnostics, AppSdkRuntimeIssue>>),
     Diagnostics(mpsc::Sender<Result<AppSdkDiagnostics, AppSdkRuntimeIssue>>),
+    RestorePreflight(
+        AppSdkRestorePreflightRequest,
+        mpsc::Sender<Result<AppSdkRestorePreflightReceipt, AppSdkRuntimeIssue>>,
+    ),
+    BeginProjectionRebuild(
+        mpsc::Sender<Result<AppSdkProjectionLifecycleStatus, AppSdkRuntimeIssue>>,
+    ),
+    CompleteProjectionRebuild(
+        mpsc::Sender<Result<AppSdkProjectionLifecycleStatus, AppSdkRuntimeIssue>>,
+    ),
 }
 
 impl fmt::Debug for AppSdkWorkerCommand {
@@ -222,6 +277,9 @@ impl fmt::Debug for AppSdkWorkerCommand {
             Self::IntegrityStatus(_) => formatter.write_str("IntegrityStatus"),
             Self::SyncStatus(_) => formatter.write_str("SyncStatus"),
             Self::Diagnostics(_) => formatter.write_str("Diagnostics"),
+            Self::RestorePreflight(_, _) => formatter.write_str("RestorePreflight"),
+            Self::BeginProjectionRebuild(_) => formatter.write_str("BeginProjectionRebuild"),
+            Self::CompleteProjectionRebuild(_) => formatter.write_str("CompleteProjectionRebuild"),
         }
     }
 }
@@ -243,6 +301,46 @@ impl AppSdkConfig {
     pub fn with_command_queue_capacity(mut self, capacity: usize) -> Self {
         self.command_queue_capacity = capacity;
         self
+    }
+}
+
+impl AppSdkRestorePreflightRequest {
+    pub fn new(source: impl Into<PathBuf>) -> Self {
+        Self {
+            source: source.into(),
+            overwrite_existing_sdk_storage: false,
+        }
+    }
+
+    pub fn with_overwrite_existing_sdk_storage(mut self, overwrite: bool) -> Self {
+        self.overwrite_existing_sdk_storage = overwrite;
+        self
+    }
+}
+
+impl AppSdkProjectionLifecycleStatus {
+    pub fn current() -> Self {
+        Self {
+            state: AppSdkProjectionLifecycleState::Current,
+            reason: None,
+            restore_source: None,
+        }
+    }
+
+    fn stale(reason: impl Into<String>, restore_source: Option<PathBuf>) -> Self {
+        Self {
+            state: AppSdkProjectionLifecycleState::Stale,
+            reason: Some(reason.into()),
+            restore_source,
+        }
+    }
+
+    fn rebuilding(reason: impl Into<String>, restore_source: Option<PathBuf>) -> Self {
+        Self {
+            state: AppSdkProjectionLifecycleState::Rebuilding,
+            reason: Some(reason.into()),
+            restore_source,
+        }
     }
 }
 
@@ -289,6 +387,27 @@ impl AppSdkRuntime {
 
     pub fn diagnostics(&self) -> Result<AppSdkDiagnostics, AppSdkRuntimeError> {
         self.run_command(AppSdkWorkerCommand::Diagnostics)
+    }
+
+    pub fn restore_preflight(
+        &self,
+        request: AppSdkRestorePreflightRequest,
+    ) -> Result<AppSdkRestorePreflightReceipt, AppSdkRuntimeError> {
+        self.run_command(|response_sender| {
+            AppSdkWorkerCommand::RestorePreflight(request, response_sender)
+        })
+    }
+
+    pub fn begin_projection_rebuild(
+        &self,
+    ) -> Result<AppSdkProjectionLifecycleStatus, AppSdkRuntimeError> {
+        self.run_command(AppSdkWorkerCommand::BeginProjectionRebuild)
+    }
+
+    pub fn complete_projection_rebuild(
+        &self,
+    ) -> Result<AppSdkProjectionLifecycleStatus, AppSdkRuntimeError> {
+        self.run_command(AppSdkWorkerCommand::CompleteProjectionRebuild)
     }
 
     pub fn wait_for_startup(&self, timeout: Duration) -> AppSdkRuntimeStatus {
@@ -428,6 +547,23 @@ impl AppSdkRuntimeIssue {
             }),
         }
     }
+
+    fn lifecycle_blocked(state: AppSdkLifecycleState) -> Self {
+        Self {
+            code: "sdk_lifecycle_busy".to_owned(),
+            class: "runtime".to_owned(),
+            retryable: true,
+            message: format!("app sdk runtime is {:?}", state),
+            recovery_actions: vec!["wait_for_sdk_lifecycle".to_owned()],
+            detail_json: json!({
+                "code": "sdk_lifecycle_busy",
+                "class": "runtime",
+                "retryable": true,
+                "state": format!("{state:?}"),
+                "recovery_actions": ["wait_for_sdk_lifecycle"]
+            }),
+        }
+    }
 }
 
 impl fmt::Display for AppSdkRuntimeIssue {
@@ -450,6 +586,7 @@ impl AppSdkRuntimeStatus {
             relay_url_policy: config.relay_url_policy,
             storage_paths,
             last_issue,
+            projection_lifecycle: AppSdkProjectionLifecycleStatus::current(),
         }
     }
 }
@@ -539,6 +676,45 @@ impl From<SyncStatusReceipt> for AppSdkSyncDiagnostics {
     }
 }
 
+impl From<SdkBackupVerification> for AppSdkBackupVerificationDiagnostics {
+    fn from(verification: SdkBackupVerification) -> Self {
+        Self {
+            event_store_ok: verification.event_store_ok,
+            outbox_ok: verification.outbox_ok,
+            event_store_events: verification.event_store_events,
+            outbox_events: verification.outbox_events,
+        }
+    }
+}
+
+impl AppSdkRestorePreflightReceipt {
+    fn from_restore_receipt(
+        receipt: RestoreReceipt,
+        destination: PathBuf,
+        projection_lifecycle: AppSdkProjectionLifecycleStatus,
+    ) -> Self {
+        Self {
+            source: receipt.source,
+            destination: receipt.destination.unwrap_or(destination),
+            state: serialized_label(&receipt.state),
+            destination_paths: receipt
+                .destination_paths
+                .as_ref()
+                .map(AppSdkStoragePaths::from),
+            restored_paths: receipt
+                .restored_paths
+                .as_ref()
+                .map(AppSdkStoragePaths::from),
+            event_store_path: receipt.event_store_path,
+            outbox_path: receipt.outbox_path,
+            manifest_path: receipt.manifest_path,
+            verification: receipt.verification.into(),
+            source_storage: receipt.manifest.source_status.into(),
+            projection_lifecycle,
+        }
+    }
+}
+
 pub fn app_sdk_storage_root_from_data_root(data_root: &Path) -> PathBuf {
     data_root.join(APP_SDK_STORAGE_DIR_NAME)
 }
@@ -619,44 +795,81 @@ fn run_app_sdk_worker(
                 return;
             }
             AppSdkWorkerCommand::StorageStatus(response_sender) => {
-                let result = match sdk.as_ref() {
-                    Some(sdk) => runtime
-                        .block_on(sdk.storage_status(StorageStatusRequest::new()))
-                        .map(AppSdkStorageDiagnostics::from)
-                        .map_err(|error| AppSdkRuntimeIssue::from_sdk_error(&error)),
-                    None => Err(runtime_unavailable_issue(&shared)),
+                let result = if let Some(issue) = lifecycle_busy_issue(&shared) {
+                    Err(issue)
+                } else {
+                    match sdk.as_ref() {
+                        Some(sdk) => runtime
+                            .block_on(sdk.storage_status(StorageStatusRequest::new()))
+                            .map(AppSdkStorageDiagnostics::from)
+                            .map_err(|error| AppSdkRuntimeIssue::from_sdk_error(&error)),
+                        None => Err(runtime_unavailable_issue(&shared)),
+                    }
                 };
                 send_worker_result(&shared, response_sender, result);
             }
             AppSdkWorkerCommand::IntegrityStatus(response_sender) => {
-                let result = match sdk.as_ref() {
-                    Some(sdk) => runtime
-                        .block_on(sdk.integrity(IntegrityRequest::new()))
-                        .map(AppSdkIntegrityDiagnostics::from)
-                        .map_err(|error| AppSdkRuntimeIssue::from_sdk_error(&error)),
-                    None => Err(runtime_unavailable_issue(&shared)),
+                let result = if let Some(issue) = lifecycle_busy_issue(&shared) {
+                    Err(issue)
+                } else {
+                    match sdk.as_ref() {
+                        Some(sdk) => runtime
+                            .block_on(sdk.integrity(IntegrityRequest::new()))
+                            .map(AppSdkIntegrityDiagnostics::from)
+                            .map_err(|error| AppSdkRuntimeIssue::from_sdk_error(&error)),
+                        None => Err(runtime_unavailable_issue(&shared)),
+                    }
                 };
                 send_worker_result(&shared, response_sender, result);
             }
             AppSdkWorkerCommand::SyncStatus(response_sender) => {
-                let result = match sdk.as_ref() {
-                    Some(sdk) => runtime
-                        .block_on(sdk.sync().status(SyncStatusRequest::new()))
-                        .map(AppSdkSyncDiagnostics::from)
-                        .map_err(|error| AppSdkRuntimeIssue::from_sdk_error(&error)),
-                    None => Err(runtime_unavailable_issue(&shared)),
+                let result = if let Some(issue) = lifecycle_busy_issue(&shared) {
+                    Err(issue)
+                } else {
+                    match sdk.as_ref() {
+                        Some(sdk) => runtime
+                            .block_on(sdk.sync().status(SyncStatusRequest::new()))
+                            .map(AppSdkSyncDiagnostics::from)
+                            .map_err(|error| AppSdkRuntimeIssue::from_sdk_error(&error)),
+                        None => Err(runtime_unavailable_issue(&shared)),
+                    }
                 };
                 send_worker_result(&shared, response_sender, result);
             }
             AppSdkWorkerCommand::Diagnostics(response_sender) => {
-                let result = match sdk.as_ref() {
-                    Some(sdk) => {
-                        let mut runtime_status = lock_status(&shared).clone();
-                        runtime_status.last_issue = None;
-                        runtime
-                            .block_on(collect_sdk_diagnostics(sdk, runtime_status))
-                            .map_err(|error| AppSdkRuntimeIssue::from_sdk_error(&error))
+                let result = if let Some(issue) = lifecycle_busy_issue(&shared) {
+                    Err(issue)
+                } else {
+                    match sdk.as_ref() {
+                        Some(sdk) => {
+                            let mut runtime_status = lock_status(&shared).clone();
+                            runtime_status.last_issue = None;
+                            runtime
+                                .block_on(collect_sdk_diagnostics(sdk, runtime_status))
+                                .map_err(|error| AppSdkRuntimeIssue::from_sdk_error(&error))
+                        }
+                        None => Err(runtime_unavailable_issue(&shared)),
                     }
+                };
+                send_worker_result(&shared, response_sender, result);
+            }
+            AppSdkWorkerCommand::RestorePreflight(request, response_sender) => {
+                let result = match sdk.as_ref() {
+                    Some(_) => run_restore_preflight(&runtime, &shared, &config, request),
+                    None => Err(runtime_unavailable_issue(&shared)),
+                };
+                send_worker_result(&shared, response_sender, result);
+            }
+            AppSdkWorkerCommand::BeginProjectionRebuild(response_sender) => {
+                let result = match sdk.as_ref() {
+                    Some(_) => Ok(begin_projection_rebuild(&shared)),
+                    None => Err(runtime_unavailable_issue(&shared)),
+                };
+                send_worker_result(&shared, response_sender, result);
+            }
+            AppSdkWorkerCommand::CompleteProjectionRebuild(response_sender) => {
+                let result = match sdk.as_ref() {
+                    Some(_) => complete_projection_rebuild(&shared),
                     None => Err(runtime_unavailable_issue(&shared)),
                 };
                 send_worker_result(&shared, response_sender, result);
@@ -718,6 +931,27 @@ fn run_degraded_worker(
                     Err(runtime_unavailable_issue(&shared)),
                 );
             }
+            AppSdkWorkerCommand::RestorePreflight(_, response_sender) => {
+                send_worker_result(
+                    &shared,
+                    response_sender,
+                    Err(runtime_unavailable_issue(&shared)),
+                );
+            }
+            AppSdkWorkerCommand::BeginProjectionRebuild(response_sender) => {
+                send_worker_result(
+                    &shared,
+                    response_sender,
+                    Err(runtime_unavailable_issue(&shared)),
+                );
+            }
+            AppSdkWorkerCommand::CompleteProjectionRebuild(response_sender) => {
+                send_worker_result(
+                    &shared,
+                    response_sender,
+                    Err(runtime_unavailable_issue(&shared)),
+                );
+            }
         }
     }
 
@@ -736,6 +970,44 @@ async fn build_sdk_runtime(config: &AppSdkConfig) -> Result<RadrootsSdk, Radroot
         builder = builder.relay_url(relay_url.clone());
     }
     builder.build().await
+}
+
+fn run_restore_preflight(
+    runtime: &tokio::runtime::Runtime,
+    shared: &AppSdkRuntimeShared,
+    config: &AppSdkConfig,
+    request: AppSdkRestorePreflightRequest,
+) -> Result<AppSdkRestorePreflightReceipt, AppSdkRuntimeIssue> {
+    if let Some(issue) = lifecycle_busy_issue(shared) {
+        return Err(issue);
+    }
+    transition_status_state(shared, AppSdkLifecycleState::Pausing);
+    transition_status_state(shared, AppSdkLifecycleState::Paused);
+    transition_status_state(shared, AppSdkLifecycleState::Restoring);
+
+    let restore_request = RestoreRequest::new(request.source.clone())
+        .with_destination(config.storage_root.clone())
+        .with_overwrite(request.overwrite_existing_sdk_storage)
+        .dry_run();
+    let result = runtime
+        .block_on(RadrootsSdk::restore(restore_request))
+        .map_err(|error| AppSdkRuntimeIssue::from_sdk_error(&error))
+        .map(|receipt| {
+            let projection_lifecycle = mark_projections_stale(
+                shared,
+                "sdk_restore_preflight",
+                Some(request.source.clone()),
+            );
+            AppSdkRestorePreflightReceipt::from_restore_receipt(
+                receipt,
+                config.storage_root.clone(),
+                projection_lifecycle,
+            )
+        });
+    if result.is_err() {
+        transition_status_state(shared, AppSdkLifecycleState::Ready);
+    }
+    result
 }
 
 async fn collect_sdk_diagnostics(
@@ -768,6 +1040,22 @@ fn send_worker_result<T>(
     let _ = response_sender.send(result);
 }
 
+fn lifecycle_busy_issue(shared: &AppSdkRuntimeShared) -> Option<AppSdkRuntimeIssue> {
+    let state = lock_status(shared).state;
+    if matches!(
+        state,
+        AppSdkLifecycleState::Pausing
+            | AppSdkLifecycleState::Paused
+            | AppSdkLifecycleState::Restoring
+            | AppSdkLifecycleState::RebuildingProjections
+            | AppSdkLifecycleState::ShuttingDown
+    ) {
+        Some(AppSdkRuntimeIssue::lifecycle_blocked(state))
+    } else {
+        None
+    }
+}
+
 fn runtime_unavailable_issue(shared: &AppSdkRuntimeShared) -> AppSdkRuntimeIssue {
     let status = lock_status(shared).clone();
     if let Some(issue) = status.last_issue {
@@ -793,6 +1081,47 @@ fn set_last_issue(shared: &AppSdkRuntimeShared, issue: Option<AppSdkRuntimeIssue
 fn transition_status_state(shared: &AppSdkRuntimeShared, state: AppSdkLifecycleState) {
     lock_status(shared).state = state;
     shared.status_changed.notify_all();
+}
+
+fn mark_projections_stale(
+    shared: &AppSdkRuntimeShared,
+    reason: impl Into<String>,
+    restore_source: Option<PathBuf>,
+) -> AppSdkProjectionLifecycleStatus {
+    let mut status = lock_status(shared);
+    status.projection_lifecycle = AppSdkProjectionLifecycleStatus::stale(reason, restore_source);
+    status.state = AppSdkLifecycleState::Ready;
+    let projection_lifecycle = status.projection_lifecycle.clone();
+    shared.status_changed.notify_all();
+    projection_lifecycle
+}
+
+fn begin_projection_rebuild(shared: &AppSdkRuntimeShared) -> AppSdkProjectionLifecycleStatus {
+    let restore_source = lock_status(shared)
+        .projection_lifecycle
+        .restore_source
+        .clone();
+    let mut status = lock_status(shared);
+    status.state = AppSdkLifecycleState::RebuildingProjections;
+    status.projection_lifecycle =
+        AppSdkProjectionLifecycleStatus::rebuilding("sdk_projection_rebuild", restore_source);
+    let projection_lifecycle = status.projection_lifecycle.clone();
+    shared.status_changed.notify_all();
+    projection_lifecycle
+}
+
+fn complete_projection_rebuild(
+    shared: &AppSdkRuntimeShared,
+) -> Result<AppSdkProjectionLifecycleStatus, AppSdkRuntimeIssue> {
+    let mut status = lock_status(shared);
+    if !matches!(status.state, AppSdkLifecycleState::RebuildingProjections) {
+        return Err(AppSdkRuntimeIssue::lifecycle_blocked(status.state));
+    }
+    status.state = AppSdkLifecycleState::Ready;
+    status.projection_lifecycle = AppSdkProjectionLifecycleStatus::current();
+    let projection_lifecycle = status.projection_lifecycle.clone();
+    shared.status_changed.notify_all();
+    Ok(projection_lifecycle)
 }
 
 fn lock_status(shared: &AppSdkRuntimeShared) -> MutexGuard<'_, AppSdkRuntimeStatus> {
@@ -823,13 +1152,16 @@ mod tests {
         time::{Duration, SystemTime, UNIX_EPOCH},
     };
 
+    use radroots_sdk::{BackupRequest, RadrootsSdk, SdkRelayUrlPolicy as SdkRuntimeRelayUrlPolicy};
+
     use crate::{
         APP_RUNTIME_NAMESPACE, AppDesktopRuntimePaths, AppRuntimeHostEnvironment,
         AppRuntimePlatform,
     };
 
     use super::{
-        APP_SDK_STORAGE_DIR_NAME, AppSdkConfig, AppSdkLifecycleState, AppSdkRelayUrlPolicy,
+        APP_SDK_STORAGE_DIR_NAME, AppSdkConfig, AppSdkLifecycleState,
+        AppSdkProjectionLifecycleState, AppSdkRelayUrlPolicy, AppSdkRestorePreflightRequest,
         AppSdkRuntime, AppSdkRuntimeError, app_sdk_storage_root_from_data_root,
     };
 
@@ -959,6 +1291,128 @@ mod tests {
             }
             unexpected => panic!("unexpected degraded diagnostics error: {unexpected:?}"),
         }
+        runtime.shutdown().expect("sdk runtime should shut down");
+        let _ = fs::remove_dir_all(storage_root);
+    }
+
+    #[test]
+    fn sdk_restore_preflight_marks_projections_stale_without_writing_destination() {
+        let backup_source_root = temp_storage_root("restore_backup_source");
+        let backup_archive = backup_source_root
+            .parent()
+            .expect("backup source should have parent")
+            .join("backup_archive");
+        let tokio = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("tokio runtime");
+        let sdk = tokio
+            .block_on(
+                RadrootsSdk::builder()
+                    .directory_storage(backup_source_root.clone())
+                    .relay_url_policy(SdkRuntimeRelayUrlPolicy::Localhost)
+                    .relay_url("ws://127.0.0.1:8080")
+                    .build(),
+            )
+            .expect("source sdk should build");
+        tokio
+            .block_on(sdk.backup(BackupRequest::new(backup_archive.clone())))
+            .expect("backup should complete");
+
+        let app_storage_root = temp_storage_root("restore_preflight_destination");
+        let app_data_root = app_storage_root
+            .parent()
+            .expect("app storage root should have parent")
+            .to_path_buf();
+        let config = AppSdkConfig::from_app_data_root(
+            app_data_root.as_path(),
+            vec!["ws://127.0.0.1:8080".to_owned()],
+        );
+        let runtime = AppSdkRuntime::start(config).expect("sdk runtime should start");
+        assert_eq!(
+            runtime.wait_for_startup(Duration::from_secs(5)).state,
+            AppSdkLifecycleState::Ready
+        );
+        let sentinel = app_storage_root.join("restore-preflight-sentinel");
+        fs::write(&sentinel, "existing destination").expect("sentinel should write");
+
+        let receipt = runtime
+            .restore_preflight(
+                AppSdkRestorePreflightRequest::new(backup_archive.clone())
+                    .with_overwrite_existing_sdk_storage(true),
+            )
+            .expect("restore preflight should succeed");
+
+        assert_eq!(receipt.state, "dry_run");
+        assert_eq!(receipt.destination, app_storage_root);
+        assert_eq!(receipt.restored_paths, None);
+        assert!(sentinel.exists());
+        assert_eq!(
+            receipt.projection_lifecycle.state,
+            AppSdkProjectionLifecycleState::Stale
+        );
+        assert_eq!(
+            receipt.projection_lifecycle.reason.as_deref(),
+            Some("sdk_restore_preflight")
+        );
+        assert_eq!(
+            runtime.status().projection_lifecycle.state,
+            AppSdkProjectionLifecycleState::Stale
+        );
+        assert_eq!(runtime.status().state, AppSdkLifecycleState::Ready);
+        runtime.shutdown().expect("sdk runtime should shut down");
+        let _ = fs::remove_dir_all(
+            backup_source_root
+                .parent()
+                .expect("backup source should have parent"),
+        );
+        let _ = fs::remove_dir_all(app_data_root);
+    }
+
+    #[test]
+    fn sdk_projection_rebuild_state_rejects_conflicting_commands() {
+        let storage_root = temp_storage_root("projection_rebuild");
+        let config = AppSdkConfig::from_app_data_root(
+            storage_root
+                .parent()
+                .expect("storage root should have parent"),
+            vec!["ws://127.0.0.1:8080".to_owned()],
+        );
+        let runtime = AppSdkRuntime::start(config).expect("sdk runtime should start");
+        assert_eq!(
+            runtime.wait_for_startup(Duration::from_secs(5)).state,
+            AppSdkLifecycleState::Ready
+        );
+
+        let rebuilding = runtime
+            .begin_projection_rebuild()
+            .expect("projection rebuild should start");
+
+        assert_eq!(rebuilding.state, AppSdkProjectionLifecycleState::Rebuilding);
+        assert_eq!(
+            runtime.status().state,
+            AppSdkLifecycleState::RebuildingProjections
+        );
+        let error = runtime
+            .sync_status()
+            .expect_err("sync status should wait for rebuild completion");
+        match error {
+            AppSdkRuntimeError::CommandFailed(issue) => {
+                assert_eq!(issue.code, "sdk_lifecycle_busy");
+                assert_eq!(issue.detail_json["state"], "RebuildingProjections");
+            }
+            unexpected => panic!("unexpected lifecycle error: {unexpected:?}"),
+        }
+
+        let complete = runtime
+            .complete_projection_rebuild()
+            .expect("projection rebuild should complete");
+
+        assert_eq!(complete.state, AppSdkProjectionLifecycleState::Current);
+        assert_eq!(runtime.status().state, AppSdkLifecycleState::Ready);
+        runtime
+            .sync_status()
+            .expect("sync status should work after rebuild");
         runtime.shutdown().expect("sdk runtime should shut down");
         let _ = fs::remove_dir_all(storage_root);
     }
