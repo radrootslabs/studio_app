@@ -8,8 +8,8 @@ use std::time::{Duration as StdDuration, SystemTime, UNIX_EPOCH};
 use chrono::{DateTime, Duration, Utc};
 use radroots_studio_app_core::{
     AppBuildIdentity, AppDesktopRuntimePaths, AppRuntimeCapture, AppRuntimeMode,
-    AppRuntimePathsError, AppRuntimeSnapshot, AppSdkConfig, AppSdkRuntime, AppSdkRuntimeError,
-    AppSdkRuntimeStatus, AppSharedAccountsPaths, PackDayExportWriteError,
+    AppRuntimePathsError, AppRuntimeSnapshot, AppSdkConfig, AppSdkDiagnostics, AppSdkRuntime,
+    AppSdkRuntimeError, AppSdkRuntimeStatus, AppSharedAccountsPaths, PackDayExportWriteError,
     prepare_pack_day_export_bundle_at_data_root,
     shared_local_events_database_path_from_shared_accounts, write_prepared_pack_day_export_bundle,
 };
@@ -597,6 +597,17 @@ impl DesktopAppRuntime {
         };
         runtime.shutdown()?;
         Ok(true)
+    }
+
+    pub fn sdk_diagnostics(&self) -> Result<Option<AppSdkDiagnostics>, AppSdkRuntimeError> {
+        let sdk_runtime = self
+            .sdk_runtime
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let Some(runtime) = sdk_runtime.as_ref() else {
+            return Ok(None);
+        };
+        runtime.diagnostics().map(Some)
     }
 
     pub fn selected_settings_section(&self) -> SettingsSection {
@@ -13446,6 +13457,13 @@ mod tests {
                 .event_store_path,
             paths.app.data.join("sdk").join("event_store.sqlite")
         );
+        let diagnostics = runtime
+            .sdk_diagnostics()
+            .expect("sdk diagnostics should load")
+            .expect("sdk diagnostics should be present");
+        assert_eq!(diagnostics.runtime.state, AppSdkLifecycleState::Ready);
+        assert_eq!(diagnostics.storage.storage_kind, "directory");
+        assert_eq!(diagnostics.sync.relay_targets.configured_count, 1);
         assert!(
             runtime
                 .shutdown_sdk_runtime()

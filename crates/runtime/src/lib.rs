@@ -37,8 +37,11 @@ pub use runtime::{
 };
 pub use sdk::{
     APP_SDK_DEFAULT_COMMAND_QUEUE_CAPACITY, APP_SDK_STORAGE_DIR_NAME, AppSdkConfig,
-    AppSdkLifecycleState, AppSdkRelayUrlPolicy, AppSdkRuntime, AppSdkRuntimeError,
-    AppSdkRuntimeIssue, AppSdkRuntimeStatus, AppSdkStoragePaths,
+    AppSdkDiagnostics, AppSdkEventStoreDiagnostics, AppSdkIntegrityDiagnostics,
+    AppSdkLifecycleState, AppSdkOutboxDiagnostics, AppSdkRelayUrlPolicy, AppSdkRuntime,
+    AppSdkRuntimeError, AppSdkRuntimeIssue, AppSdkRuntimeStatus, AppSdkSqliteStoreDiagnostics,
+    AppSdkStorageDiagnostics, AppSdkStoragePaths, AppSdkSyncDiagnostics,
+    AppSdkSyncEventStoreDiagnostics, AppSdkSyncOutboxDiagnostics, AppSdkSyncRelayTargetDiagnostics,
     app_sdk_storage_root_from_data_root,
 };
 pub use startup::{AppStartupEvent, AppStartupEventMetadata, launch_startup_event};

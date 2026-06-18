@@ -10,9 +10,11 @@ use std::{
 };
 
 use radroots_sdk::{
-    RadrootsSdk, RadrootsSdkError, RadrootsSdkStoragePaths,
-    SdkRelayUrlPolicy as SdkRuntimeRelayUrlPolicy,
+    IntegrityReceipt, IntegrityRequest, RadrootsSdk, RadrootsSdkError, RadrootsSdkStoragePaths,
+    SdkRelayUrlPolicy as SdkRuntimeRelayUrlPolicy, StorageStatusReceipt, StorageStatusRequest,
+    SyncStatusReceipt, SyncStatusRequest,
 };
+use serde::Serialize;
 use serde_json::{Value, json};
 use thiserror::Error;
 use tokio::runtime::Builder as TokioRuntimeBuilder;
@@ -75,6 +77,102 @@ pub struct AppSdkRuntimeStatus {
     pub last_issue: Option<AppSdkRuntimeIssue>,
 }
 
+#[derive(Clone, Debug, PartialEq)]
+pub struct AppSdkDiagnostics {
+    pub runtime: AppSdkRuntimeStatus,
+    pub storage: AppSdkStorageDiagnostics,
+    pub integrity: AppSdkIntegrityDiagnostics,
+    pub sync: AppSdkSyncDiagnostics,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct AppSdkStorageDiagnostics {
+    pub storage_kind: String,
+    pub paths: Option<AppSdkStoragePaths>,
+    pub event_store: AppSdkEventStoreDiagnostics,
+    pub outbox: AppSdkOutboxDiagnostics,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct AppSdkSqliteStoreDiagnostics {
+    pub schema_version: i64,
+    pub journal_mode: String,
+    pub foreign_keys_enabled: bool,
+    pub busy_timeout_ms: i64,
+    pub integrity_ok: bool,
+    pub integrity_result: String,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct AppSdkEventStoreDiagnostics {
+    pub store: AppSdkSqliteStoreDiagnostics,
+    pub total_events: i64,
+    pub projection_eligible_events: i64,
+    pub relay_observations: i64,
+    pub last_event_seq: Option<i64>,
+    pub last_event_updated_at_ms: Option<i64>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct AppSdkOutboxDiagnostics {
+    pub store: AppSdkSqliteStoreDiagnostics,
+    pub total_events: i64,
+    pub pending_events: i64,
+    pub retryable_events: i64,
+    pub terminal_events: i64,
+    pub failed_terminal_events: i64,
+    pub ready_signed_events: i64,
+    pub publishing_events: i64,
+    pub last_attempt_at_ms: Option<i64>,
+    pub last_error: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct AppSdkIntegrityDiagnostics {
+    pub checked_paths: Vec<PathBuf>,
+    pub event_store_ok: bool,
+    pub outbox_ok: bool,
+    pub event_store_result: String,
+    pub outbox_result: String,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct AppSdkSyncDiagnostics {
+    pub source: String,
+    pub observed_at_ms: i64,
+    pub event_store: AppSdkSyncEventStoreDiagnostics,
+    pub outbox: AppSdkSyncOutboxDiagnostics,
+    pub relay_targets: AppSdkSyncRelayTargetDiagnostics,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct AppSdkSyncEventStoreDiagnostics {
+    pub total_events: i64,
+    pub projection_eligible_events: i64,
+    pub relay_observations: i64,
+    pub last_event_seq: Option<i64>,
+    pub last_event_updated_at_ms: Option<i64>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct AppSdkSyncOutboxDiagnostics {
+    pub total_events: i64,
+    pub pending_events: i64,
+    pub retryable_events: i64,
+    pub terminal_events: i64,
+    pub failed_terminal_events: i64,
+    pub ready_signed_events: i64,
+    pub publishing_events: i64,
+    pub last_attempt_at_ms: Option<i64>,
+    pub last_error: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct AppSdkSyncRelayTargetDiagnostics {
+    pub configured_count: usize,
+    pub configured_relays: Vec<String>,
+}
+
 #[derive(Debug, Error)]
 pub enum AppSdkRuntimeError {
     #[error("app sdk command queue capacity must be greater than zero")]
@@ -85,6 +183,10 @@ pub enum AppSdkRuntimeError {
     CommandQueueFull,
     #[error("app sdk command queue is closed")]
     CommandQueueClosed,
+    #[error("app sdk command response channel is closed")]
+    CommandResponseClosed,
+    #[error("app sdk command failed: {0}")]
+    CommandFailed(AppSdkRuntimeIssue),
     #[error("app sdk shutdown acknowledgement failed")]
     ShutdownAck,
     #[error("app sdk worker failed to join")]
@@ -106,12 +208,20 @@ struct AppSdkRuntimeShared {
 
 enum AppSdkWorkerCommand {
     Shutdown(mpsc::Sender<()>),
+    StorageStatus(mpsc::Sender<Result<AppSdkStorageDiagnostics, AppSdkRuntimeIssue>>),
+    IntegrityStatus(mpsc::Sender<Result<AppSdkIntegrityDiagnostics, AppSdkRuntimeIssue>>),
+    SyncStatus(mpsc::Sender<Result<AppSdkSyncDiagnostics, AppSdkRuntimeIssue>>),
+    Diagnostics(mpsc::Sender<Result<AppSdkDiagnostics, AppSdkRuntimeIssue>>),
 }
 
 impl fmt::Debug for AppSdkWorkerCommand {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Shutdown(_) => formatter.write_str("Shutdown"),
+            Self::StorageStatus(_) => formatter.write_str("StorageStatus"),
+            Self::IntegrityStatus(_) => formatter.write_str("IntegrityStatus"),
+            Self::SyncStatus(_) => formatter.write_str("SyncStatus"),
+            Self::Diagnostics(_) => formatter.write_str("Diagnostics"),
         }
     }
 }
@@ -163,6 +273,22 @@ impl AppSdkRuntime {
 
     pub fn status(&self) -> AppSdkRuntimeStatus {
         lock_status(&self.shared).clone()
+    }
+
+    pub fn storage_status(&self) -> Result<AppSdkStorageDiagnostics, AppSdkRuntimeError> {
+        self.run_command(AppSdkWorkerCommand::StorageStatus)
+    }
+
+    pub fn integrity_status(&self) -> Result<AppSdkIntegrityDiagnostics, AppSdkRuntimeError> {
+        self.run_command(AppSdkWorkerCommand::IntegrityStatus)
+    }
+
+    pub fn sync_status(&self) -> Result<AppSdkSyncDiagnostics, AppSdkRuntimeError> {
+        self.run_command(AppSdkWorkerCommand::SyncStatus)
+    }
+
+    pub fn diagnostics(&self) -> Result<AppSdkDiagnostics, AppSdkRuntimeError> {
+        self.run_command(AppSdkWorkerCommand::Diagnostics)
     }
 
     pub fn wait_for_startup(&self, timeout: Duration) -> AppSdkRuntimeStatus {
@@ -223,6 +349,24 @@ impl AppSdkRuntime {
             return Ok(());
         };
         worker.join().map_err(|_| AppSdkRuntimeError::WorkerJoin)
+    }
+
+    fn run_command<T>(
+        &self,
+        command: impl FnOnce(mpsc::Sender<Result<T, AppSdkRuntimeIssue>>) -> AppSdkWorkerCommand,
+    ) -> Result<T, AppSdkRuntimeError> {
+        let (response_sender, response_receiver) = mpsc::channel();
+        match self.command_sender.try_send(command(response_sender)) {
+            Ok(()) => {}
+            Err(TrySendError::Full(_)) => return Err(AppSdkRuntimeError::CommandQueueFull),
+            Err(TrySendError::Disconnected(_)) => {
+                return Err(AppSdkRuntimeError::CommandQueueClosed);
+            }
+        }
+        response_receiver
+            .recv()
+            .map_err(|_| AppSdkRuntimeError::CommandResponseClosed)?
+            .map_err(AppSdkRuntimeError::CommandFailed)
     }
 }
 
@@ -286,6 +430,12 @@ impl AppSdkRuntimeIssue {
     }
 }
 
+impl fmt::Display for AppSdkRuntimeIssue {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(formatter, "{}: {}", self.code, self.message)
+    }
+}
+
 impl AppSdkRuntimeStatus {
     fn from_config(
         config: &AppSdkConfig,
@@ -300,6 +450,91 @@ impl AppSdkRuntimeStatus {
             relay_url_policy: config.relay_url_policy,
             storage_paths,
             last_issue,
+        }
+    }
+}
+
+impl From<StorageStatusReceipt> for AppSdkStorageDiagnostics {
+    fn from(receipt: StorageStatusReceipt) -> Self {
+        Self {
+            storage_kind: serialized_label(&receipt.storage),
+            paths: receipt.paths.as_ref().map(AppSdkStoragePaths::from),
+            event_store: AppSdkEventStoreDiagnostics {
+                store: receipt.event_store.store.into(),
+                total_events: receipt.event_store.total_events,
+                projection_eligible_events: receipt.event_store.projection_eligible_events,
+                relay_observations: receipt.event_store.relay_observations,
+                last_event_seq: receipt.event_store.last_event_seq,
+                last_event_updated_at_ms: receipt.event_store.last_event_updated_at_ms,
+            },
+            outbox: AppSdkOutboxDiagnostics {
+                store: receipt.outbox.store.into(),
+                total_events: receipt.outbox.total_events,
+                pending_events: receipt.outbox.pending_events,
+                retryable_events: receipt.outbox.retryable_events,
+                terminal_events: receipt.outbox.terminal_events,
+                failed_terminal_events: receipt.outbox.failed_terminal_events,
+                ready_signed_events: receipt.outbox.ready_signed_events,
+                publishing_events: receipt.outbox.publishing_events,
+                last_attempt_at_ms: receipt.outbox.last_attempt_at_ms,
+                last_error: receipt.outbox.last_error,
+            },
+        }
+    }
+}
+
+impl From<radroots_sdk::SdkSqliteStoreStatus> for AppSdkSqliteStoreDiagnostics {
+    fn from(status: radroots_sdk::SdkSqliteStoreStatus) -> Self {
+        Self {
+            schema_version: status.schema_version,
+            journal_mode: status.journal_mode,
+            foreign_keys_enabled: status.foreign_keys_enabled,
+            busy_timeout_ms: status.busy_timeout_ms,
+            integrity_ok: status.integrity_ok,
+            integrity_result: status.integrity_result,
+        }
+    }
+}
+
+impl From<IntegrityReceipt> for AppSdkIntegrityDiagnostics {
+    fn from(receipt: IntegrityReceipt) -> Self {
+        Self {
+            checked_paths: receipt.checked_paths,
+            event_store_ok: receipt.event_store_ok,
+            outbox_ok: receipt.outbox_ok,
+            event_store_result: receipt.event_store_result,
+            outbox_result: receipt.outbox_result,
+        }
+    }
+}
+
+impl From<SyncStatusReceipt> for AppSdkSyncDiagnostics {
+    fn from(receipt: SyncStatusReceipt) -> Self {
+        Self {
+            source: serialized_label(&receipt.source),
+            observed_at_ms: receipt.observed_at_ms,
+            event_store: AppSdkSyncEventStoreDiagnostics {
+                total_events: receipt.event_store.total_events,
+                projection_eligible_events: receipt.event_store.projection_eligible_events,
+                relay_observations: receipt.event_store.relay_observations,
+                last_event_seq: receipt.event_store.last_event_seq,
+                last_event_updated_at_ms: receipt.event_store.last_event_updated_at_ms,
+            },
+            outbox: AppSdkSyncOutboxDiagnostics {
+                total_events: receipt.outbox.total_events,
+                pending_events: receipt.outbox.pending_events,
+                retryable_events: receipt.outbox.retryable_events,
+                terminal_events: receipt.outbox.terminal_events,
+                failed_terminal_events: receipt.outbox.failed_terminal_events,
+                ready_signed_events: receipt.outbox.ready_signed_events,
+                publishing_events: receipt.outbox.publishing_events,
+                last_attempt_at_ms: receipt.outbox.last_attempt_at_ms,
+                last_error: receipt.outbox.last_error,
+            },
+            relay_targets: AppSdkSyncRelayTargetDiagnostics {
+                configured_count: receipt.relay_targets.configured_count,
+                configured_relays: receipt.relay_targets.configured_relays,
+            },
         }
     }
 }
@@ -383,6 +618,49 @@ fn run_app_sdk_worker(
                 let _ = ack_sender.send(());
                 return;
             }
+            AppSdkWorkerCommand::StorageStatus(response_sender) => {
+                let result = match sdk.as_ref() {
+                    Some(sdk) => runtime
+                        .block_on(sdk.storage_status(StorageStatusRequest::new()))
+                        .map(AppSdkStorageDiagnostics::from)
+                        .map_err(|error| AppSdkRuntimeIssue::from_sdk_error(&error)),
+                    None => Err(runtime_unavailable_issue(&shared)),
+                };
+                send_worker_result(&shared, response_sender, result);
+            }
+            AppSdkWorkerCommand::IntegrityStatus(response_sender) => {
+                let result = match sdk.as_ref() {
+                    Some(sdk) => runtime
+                        .block_on(sdk.integrity(IntegrityRequest::new()))
+                        .map(AppSdkIntegrityDiagnostics::from)
+                        .map_err(|error| AppSdkRuntimeIssue::from_sdk_error(&error)),
+                    None => Err(runtime_unavailable_issue(&shared)),
+                };
+                send_worker_result(&shared, response_sender, result);
+            }
+            AppSdkWorkerCommand::SyncStatus(response_sender) => {
+                let result = match sdk.as_ref() {
+                    Some(sdk) => runtime
+                        .block_on(sdk.sync().status(SyncStatusRequest::new()))
+                        .map(AppSdkSyncDiagnostics::from)
+                        .map_err(|error| AppSdkRuntimeIssue::from_sdk_error(&error)),
+                    None => Err(runtime_unavailable_issue(&shared)),
+                };
+                send_worker_result(&shared, response_sender, result);
+            }
+            AppSdkWorkerCommand::Diagnostics(response_sender) => {
+                let result = match sdk.as_ref() {
+                    Some(sdk) => {
+                        let mut runtime_status = lock_status(&shared).clone();
+                        runtime_status.last_issue = None;
+                        runtime
+                            .block_on(collect_sdk_diagnostics(sdk, runtime_status))
+                            .map_err(|error| AppSdkRuntimeIssue::from_sdk_error(&error))
+                    }
+                    None => Err(runtime_unavailable_issue(&shared)),
+                };
+                send_worker_result(&shared, response_sender, result);
+            }
         }
     }
 
@@ -412,6 +690,34 @@ fn run_degraded_worker(
                 let _ = ack_sender.send(());
                 return;
             }
+            AppSdkWorkerCommand::StorageStatus(response_sender) => {
+                send_worker_result(
+                    &shared,
+                    response_sender,
+                    Err(runtime_unavailable_issue(&shared)),
+                );
+            }
+            AppSdkWorkerCommand::IntegrityStatus(response_sender) => {
+                send_worker_result(
+                    &shared,
+                    response_sender,
+                    Err(runtime_unavailable_issue(&shared)),
+                );
+            }
+            AppSdkWorkerCommand::SyncStatus(response_sender) => {
+                send_worker_result(
+                    &shared,
+                    response_sender,
+                    Err(runtime_unavailable_issue(&shared)),
+                );
+            }
+            AppSdkWorkerCommand::Diagnostics(response_sender) => {
+                send_worker_result(
+                    &shared,
+                    response_sender,
+                    Err(runtime_unavailable_issue(&shared)),
+                );
+            }
         }
     }
 
@@ -432,8 +738,55 @@ async fn build_sdk_runtime(config: &AppSdkConfig) -> Result<RadrootsSdk, Radroot
     builder.build().await
 }
 
+async fn collect_sdk_diagnostics(
+    sdk: &RadrootsSdk,
+    runtime: AppSdkRuntimeStatus,
+) -> Result<AppSdkDiagnostics, RadrootsSdkError> {
+    let storage = sdk.storage_status(StorageStatusRequest::new()).await?;
+    let integrity = sdk.integrity(IntegrityRequest::new()).await?;
+    let sync = sdk.sync().status(SyncStatusRequest::new()).await?;
+    Ok(AppSdkDiagnostics {
+        runtime,
+        storage: storage.into(),
+        integrity: integrity.into(),
+        sync: sync.into(),
+    })
+}
+
+fn send_worker_result<T>(
+    shared: &AppSdkRuntimeShared,
+    response_sender: mpsc::Sender<Result<T, AppSdkRuntimeIssue>>,
+    result: Result<T, AppSdkRuntimeIssue>,
+) {
+    set_last_issue(
+        shared,
+        match &result {
+            Ok(_) => None,
+            Err(issue) => Some(issue.clone()),
+        },
+    );
+    let _ = response_sender.send(result);
+}
+
+fn runtime_unavailable_issue(shared: &AppSdkRuntimeShared) -> AppSdkRuntimeIssue {
+    let status = lock_status(shared).clone();
+    if let Some(issue) = status.last_issue {
+        issue
+    } else {
+        AppSdkRuntimeIssue::runtime_error(
+            "sdk_runtime_not_ready",
+            format!("app sdk runtime is {:?}", status.state),
+        )
+    }
+}
+
 fn replace_status(shared: &AppSdkRuntimeShared, status: AppSdkRuntimeStatus) {
     *lock_status(shared) = status;
+    shared.status_changed.notify_all();
+}
+
+fn set_last_issue(shared: &AppSdkRuntimeShared, issue: Option<AppSdkRuntimeIssue>) {
+    lock_status(shared).last_issue = issue;
     shared.status_changed.notify_all();
 }
 
@@ -456,6 +809,13 @@ fn sdk_error_class_label(error: &RadrootsSdkError) -> String {
         .unwrap_or_else(|| format!("{:?}", error.class()))
 }
 
+fn serialized_label(value: &(impl Serialize + fmt::Debug)) -> String {
+    serde_json::to_value(value)
+        .ok()
+        .and_then(|value| value.as_str().map(str::to_owned))
+        .unwrap_or_else(|| format!("{value:?}"))
+}
+
 #[cfg(test)]
 mod tests {
     use std::{
@@ -470,7 +830,7 @@ mod tests {
 
     use super::{
         APP_SDK_STORAGE_DIR_NAME, AppSdkConfig, AppSdkLifecycleState, AppSdkRelayUrlPolicy,
-        AppSdkRuntime, app_sdk_storage_root_from_data_root,
+        AppSdkRuntime, AppSdkRuntimeError, app_sdk_storage_root_from_data_root,
     };
 
     #[test]
@@ -539,6 +899,24 @@ mod tests {
             storage_paths.outbox_path,
             storage_root.join("outbox.sqlite")
         );
+        let storage = runtime
+            .storage_status()
+            .expect("storage diagnostics should load");
+        assert_eq!(storage.storage_kind, "directory");
+        assert!(storage.event_store.store.integrity_ok);
+        assert!(storage.outbox.store.integrity_ok);
+        let integrity = runtime
+            .integrity_status()
+            .expect("integrity diagnostics should load");
+        assert!(integrity.event_store_ok);
+        assert!(integrity.outbox_ok);
+        let sync = runtime.sync_status().expect("sync diagnostics should load");
+        assert_eq!(sync.source, "sdk_canonical_stores");
+        assert_eq!(sync.relay_targets.configured_count, 1);
+        let diagnostics = runtime.diagnostics().expect("diagnostics should load");
+        assert_eq!(diagnostics.runtime.state, AppSdkLifecycleState::Ready);
+        assert_eq!(diagnostics.storage.storage_kind, "directory");
+        assert_eq!(diagnostics.sync.relay_targets.configured_count, 1);
         runtime.shutdown().expect("sdk runtime should shut down");
         assert_eq!(runtime.status().state, AppSdkLifecycleState::Stopped);
         let _ = fs::remove_dir_all(storage_root);
@@ -570,6 +948,17 @@ mod tests {
                 .contains(&"configure_relay_targets".to_owned())
         );
         assert_eq!(issue.detail_json["code"], "invalid_relay_url");
+        let error = runtime
+            .diagnostics()
+            .expect_err("degraded diagnostics should fail");
+        match error {
+            AppSdkRuntimeError::CommandFailed(issue) => {
+                assert_eq!(issue.code, "invalid_relay_url");
+                assert_eq!(issue.class, "configuration");
+                assert_eq!(issue.detail_json["code"], "invalid_relay_url");
+            }
+            unexpected => panic!("unexpected degraded diagnostics error: {unexpected:?}"),
+        }
         runtime.shutdown().expect("sdk runtime should shut down");
         let _ = fs::remove_dir_all(storage_root);
     }
