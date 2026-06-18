@@ -98,6 +98,7 @@ pub enum AppSdkMigrationAuditClassification {
     ManualReviewRequired,
     PaymentDeferred,
     SettlementDeferred,
+    ValidationReceiptDeferred,
     Unsupported,
     Unknown,
 }
@@ -111,6 +112,7 @@ impl AppSdkMigrationAuditClassification {
             Self::ManualReviewRequired => "manual_review_required",
             Self::PaymentDeferred => "payment_deferred",
             Self::SettlementDeferred => "settlement_deferred",
+            Self::ValidationReceiptDeferred => "validation_receipt_deferred",
             Self::Unsupported => "unsupported",
             Self::Unknown => "unknown",
         }
@@ -563,6 +565,9 @@ fn classify_shared_signed_event(
         Some(kind) if kind == KIND_ORDER_SETTLEMENT_DECISION as i64 => {
             AppSdkMigrationAuditClassification::SettlementDeferred
         }
+        Some(kind) if kind == KIND_TRADE_VALIDATION_RECEIPT as i64 => {
+            AppSdkMigrationAuditClassification::ValidationReceiptDeferred
+        }
         Some(kind) if supported_signed_event_kind(kind) => {
             if signed_event_is_already_represented(record.status, record.outbox_status) {
                 AppSdkMigrationAuditClassification::AlreadyRepresentedCandidate
@@ -665,7 +670,6 @@ fn supported_signed_event_kind(kind: i64) -> bool {
             || value == KIND_ORDER_CANCELLATION as i64
             || value == KIND_ORDER_FULFILLMENT_UPDATE as i64
             || value == KIND_ORDER_RECEIPT as i64
-            || value == KIND_TRADE_VALIDATION_RECEIPT as i64
     )
 }
 
@@ -731,6 +735,7 @@ mod tests {
     use radroots_studio_app_view::{FarmId, FarmReadiness};
     use radroots_events::kinds::{
         KIND_LISTING, KIND_ORDER_PAYMENT_RECORD, KIND_ORDER_SETTLEMENT_DECISION,
+        KIND_TRADE_VALIDATION_RECEIPT,
     };
     use radroots_local_events::{
         LocalEventRecord, LocalEventRecordInput, LocalEventsStore, LocalRecordFamily,
@@ -959,6 +964,13 @@ mod tests {
                 KIND_ORDER_SETTLEMENT_DECISION as i64,
             ))
             .expect("append settlement");
+        shared_events
+            .append_record(&signed_event_record(
+                "validation-receipt",
+                "validation-receipt-event",
+                KIND_TRADE_VALIDATION_RECEIPT as i64,
+            ))
+            .expect("append validation receipt");
         let before_records = shared_events
             .list_records_changed_after(0, 10)
             .expect("list records before audit")
@@ -978,8 +990,8 @@ mod tests {
                 .len(),
             before_records
         );
-        assert_eq!(report.shared_local_events.batch_count, 4);
-        assert_eq!(report.shared_local_events.scanned_records, 4);
+        assert_eq!(report.shared_local_events.batch_count, 5);
+        assert_eq!(report.shared_local_events.scanned_records, 5);
         assert_eq!(
             count_named(
                 &report.shared_local_events.classification_counts,
@@ -1000,6 +1012,20 @@ mod tests {
                 AppSdkMigrationAuditClassification::SettlementDeferred.storage_key()
             ),
             1
+        );
+        assert_eq!(
+            count_named(
+                &report.shared_local_events.classification_counts,
+                AppSdkMigrationAuditClassification::ValidationReceiptDeferred.storage_key()
+            ),
+            1
+        );
+        assert_eq!(
+            count_named(
+                &report.shared_local_events.classification_counts,
+                AppSdkMigrationAuditClassification::PublishableCandidate.storage_key()
+            ),
+            0
         );
         assert!(
             report
