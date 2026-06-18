@@ -2,6 +2,7 @@
 
 mod error;
 mod interop;
+mod migration_audit;
 mod migrations;
 mod repo;
 mod sync;
@@ -30,6 +31,12 @@ pub use error::AppSqliteError;
 pub use interop::{
     AppLocalInteropImportReport, AppLocalInteropRepository, StoredLocalInteropRecord,
     projected_order_id_from_trade_request,
+};
+pub use migration_audit::{
+    APP_SDK_MIGRATION_AUDIT_DEFAULT_BATCH_SIZE, APP_SDK_MIGRATION_AUDIT_MAX_BATCH_SIZE,
+    AppSdkMigrationAuditClassification, AppSdkMigrationAuditCount,
+    AppSdkMigrationAuditDuplicateCandidate, AppSdkMigrationAuditIssue, AppSdkMigrationAuditReport,
+    AppSdkMigrationAuditRequest, AppSdkMigrationAuditSource, AppSdkMigrationAuditSourceReport,
 };
 pub use migrations::latest_schema_version;
 pub use repo::{
