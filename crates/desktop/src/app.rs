@@ -269,6 +269,7 @@ mod tests {
             logged_out_startup: LoggedOutStartupProjection::default(),
             sync_status: crate::runtime::DesktopAppSyncStatusSummary::default(),
             startup_issue: startup_issue.map(str::to_owned),
+            sdk_status: None,
         }
     }
 

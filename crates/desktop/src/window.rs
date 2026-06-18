@@ -11,6 +11,9 @@ use gpui_component::{
     menu::PopupMenuItem,
     select::{SearchableVec, Select, SelectDelegate, SelectEvent, SelectState},
 };
+use radroots_studio_app_core::{
+    AppSdkLifecycleState, AppSdkProjectionLifecycleState, AppSdkRelayUrlPolicy,
+};
 use radroots_studio_app_i18n::{AppTextKey, app_text};
 use radroots_studio_app_remote_signer::{
     RadrootsAppRemoteSignerApprovedSession, RadrootsAppRemoteSignerPendingPollOutcome,
@@ -99,8 +102,10 @@ use crate::pack_day_print::{
     PackDayPrintError, execute_pack_day_batch_print_plan, execute_pack_day_print_plan,
 };
 use crate::runtime::{
-    DesktopAppRuntime, DesktopAppRuntimeSummary, DesktopAppSyncConflictSummary,
-    DesktopAppSyncStatusSummary,
+    DesktopAppRuntime, DesktopAppRuntimeSummary, DesktopAppSdkDiagnosticsState,
+    DesktopAppSdkDiagnosticsSummary, DesktopAppSdkIssueSummary,
+    DesktopAppSdkReadyDiagnosticsSummary, DesktopAppSdkStatusSummary,
+    DesktopAppSyncConflictSummary, DesktopAppSyncStatusSummary,
 };
 
 const HOME_WINDOW_MIN_WIDTH_PX: f32 = 1080.0;
@@ -8362,7 +8367,8 @@ impl SettingsWindowView {
 
     fn about_panel(&mut self, cx: &mut Context<Self>) -> impl IntoElement {
         let runtime = self.runtime.summary();
-        let status_rows = about_status_rows(&runtime);
+        let sdk_diagnostics = self.runtime.sdk_diagnostics_summary();
+        let status_rows = about_status_rows(&runtime, sdk_diagnostics.as_ref());
         let runtime_rows = about_runtime_rows(&runtime);
         let manual_refresh_enabled = about_manual_refresh_enabled(&runtime.sync_status);
         let conflict_cards = runtime
@@ -8735,7 +8741,10 @@ fn settings_account_activation_key(
     }
 }
 
-fn about_status_rows(runtime: &DesktopAppRuntimeSummary) -> Vec<LabelValueRow> {
+fn about_status_rows(
+    runtime: &DesktopAppRuntimeSummary,
+    sdk_diagnostics: Option<&DesktopAppSdkDiagnosticsSummary>,
+) -> Vec<LabelValueRow> {
     let mut rows = vec![
         LabelValueRow::new(
             app_shared_text(AppTextKey::MetadataSelectedAccount),
@@ -8791,7 +8800,125 @@ fn about_status_rows(runtime: &DesktopAppRuntimeSummary) -> Vec<LabelValueRow> {
             .unwrap_or_else(|| app_text(AppTextKey::ValueNone)),
     ));
 
+    append_sdk_status_rows(&mut rows, runtime.sdk_status.as_ref(), sdk_diagnostics);
+
     rows
+}
+
+fn append_sdk_status_rows(
+    rows: &mut Vec<LabelValueRow>,
+    sdk_status: Option<&DesktopAppSdkStatusSummary>,
+    sdk_diagnostics: Option<&DesktopAppSdkDiagnosticsSummary>,
+) {
+    let status = sdk_diagnostics
+        .map(|diagnostics| &diagnostics.status)
+        .or(sdk_status);
+    let Some(status) = status else {
+        rows.push(LabelValueRow::new(
+            app_shared_text(AppTextKey::MetadataSdkLifecycleState),
+            app_text(AppTextKey::ValueDisabled),
+        ));
+        rows.push(LabelValueRow::new(
+            app_shared_text(AppTextKey::MetadataSdkDiagnosticState),
+            app_text(AppTextKey::ValueSdkUnavailable),
+        ));
+        return;
+    };
+
+    rows.push(LabelValueRow::new(
+        app_shared_text(AppTextKey::MetadataSdkLifecycleState),
+        sdk_lifecycle_state_text(status.lifecycle_state),
+    ));
+    rows.push(LabelValueRow::new(
+        app_shared_text(AppTextKey::MetadataSdkProjectionLifecycleState),
+        sdk_projection_lifecycle_state_text(status.projection_lifecycle_state),
+    ));
+    rows.push(LabelValueRow::new(
+        app_shared_text(AppTextKey::MetadataSdkRelayTargetCount),
+        status.relay_target_count.to_string(),
+    ));
+
+    match sdk_diagnostics.map(|diagnostics| &diagnostics.state) {
+        Some(DesktopAppSdkDiagnosticsState::Ready(ready)) => {
+            append_ready_sdk_rows(rows, ready);
+            append_sdk_issue_rows(rows, status.last_issue.as_ref());
+        }
+        Some(DesktopAppSdkDiagnosticsState::Blocked(issue)) => {
+            rows.push(LabelValueRow::new(
+                app_shared_text(AppTextKey::MetadataSdkDiagnosticState),
+                app_text(AppTextKey::ValueSdkDiagnosticsBlocked),
+            ));
+            append_sdk_issue_rows(rows, Some(issue));
+        }
+        None => {
+            rows.push(LabelValueRow::new(
+                app_shared_text(AppTextKey::MetadataSdkDiagnosticState),
+                app_text(AppTextKey::ValueNone),
+            ));
+            append_sdk_issue_rows(rows, status.last_issue.as_ref());
+        }
+    }
+}
+
+fn append_ready_sdk_rows(
+    rows: &mut Vec<LabelValueRow>,
+    ready: &DesktopAppSdkReadyDiagnosticsSummary,
+) {
+    rows.push(LabelValueRow::new(
+        app_shared_text(AppTextKey::MetadataSdkDiagnosticState),
+        app_text(AppTextKey::ValueSdkDiagnosticsReady),
+    ));
+    rows.push(LabelValueRow::new(
+        app_shared_text(AppTextKey::MetadataSdkStorageKind),
+        sdk_storage_kind_text(ready.storage_kind.as_str()),
+    ));
+    rows.push(LabelValueRow::new(
+        app_shared_text(AppTextKey::MetadataSdkEventCount),
+        ready.event_store_total_events.to_string(),
+    ));
+    rows.push(LabelValueRow::new(
+        app_shared_text(AppTextKey::MetadataSdkOutboxCount),
+        ready.outbox_total_events.to_string(),
+    ));
+    rows.push(LabelValueRow::new(
+        app_shared_text(AppTextKey::MetadataSdkOutboxPendingCount),
+        ready.outbox_pending_events.to_string(),
+    ));
+    rows.push(LabelValueRow::new(
+        app_shared_text(AppTextKey::MetadataSdkOutboxFailedCount),
+        ready.outbox_failed_terminal_events.to_string(),
+    ));
+    rows.push(LabelValueRow::new(
+        app_shared_text(AppTextKey::MetadataSdkIntegrityStatus),
+        sdk_integrity_status_text(ready.integrity_ok()),
+    ));
+    rows.push(LabelValueRow::new(
+        app_shared_text(AppTextKey::MetadataSdkSyncStatus),
+        app_text(AppTextKey::ValueSdkDiagnosticsReady),
+    ));
+}
+
+fn append_sdk_issue_rows(rows: &mut Vec<LabelValueRow>, issue: Option<&DesktopAppSdkIssueSummary>) {
+    rows.push(LabelValueRow::new(
+        app_shared_text(AppTextKey::MetadataSdkLastIssueCode),
+        issue
+            .map(|issue| issue.code.clone())
+            .unwrap_or_else(|| app_text(AppTextKey::ValueNone)),
+    ));
+    if let Some(issue) = issue {
+        rows.push(LabelValueRow::new(
+            app_shared_text(AppTextKey::MetadataSdkLastIssueClass),
+            issue.class.clone(),
+        ));
+        rows.push(LabelValueRow::new(
+            app_shared_text(AppTextKey::MetadataSdkIssueRetryable),
+            yes_no_text(issue.retryable),
+        ));
+        rows.push(LabelValueRow::new(
+            app_shared_text(AppTextKey::MetadataSdkRecoveryAction),
+            sdk_recovery_actions_text(&issue.recovery_actions),
+        ));
+    }
 }
 
 fn about_conflict_review_body_key(sync_status: &DesktopAppSyncStatusSummary) -> AppTextKey {
@@ -8962,6 +9089,24 @@ fn about_runtime_rows(runtime: &DesktopAppRuntimeSummary) -> Vec<LabelValueRow> 
             .storage_key()
             .to_owned(),
     ));
+    if let Some(sdk_status) = runtime.sdk_status.as_ref() {
+        rows.push(LabelValueRow::new(
+            app_shared_text(AppTextKey::MetadataSdkStorageRoot),
+            sdk_status.storage_root.display().to_string(),
+        ));
+        rows.push(LabelValueRow::new(
+            app_shared_text(AppTextKey::MetadataSdkEventStorePath),
+            path_or_none(sdk_status.event_store_path.as_ref()),
+        ));
+        rows.push(LabelValueRow::new(
+            app_shared_text(AppTextKey::MetadataSdkOutboxPath),
+            path_or_none(sdk_status.outbox_path.as_ref()),
+        ));
+        rows.push(LabelValueRow::new(
+            app_shared_text(AppTextKey::MetadataSdkRelayUrlPolicy),
+            sdk_relay_url_policy_text(sdk_status.relay_url_policy),
+        ));
+    }
     rows
 }
 
@@ -9001,6 +9146,83 @@ fn about_sync_checkpoint_state_text(sync_status: &DesktopAppSyncStatusSummary) -
 fn path_or_none(path: Option<&PathBuf>) -> String {
     path.map(|value| value.display().to_string())
         .unwrap_or_else(|| app_text(AppTextKey::ValueNone))
+}
+
+fn sdk_lifecycle_state_text(state: AppSdkLifecycleState) -> String {
+    app_text(match state {
+        AppSdkLifecycleState::Starting => AppTextKey::ValueSdkLifecycleStarting,
+        AppSdkLifecycleState::Ready => AppTextKey::ValueSdkLifecycleReady,
+        AppSdkLifecycleState::Degraded => AppTextKey::ValueSdkLifecycleDegraded,
+        AppSdkLifecycleState::Pausing => AppTextKey::ValueSdkLifecyclePausing,
+        AppSdkLifecycleState::Paused => AppTextKey::ValueSdkLifecyclePaused,
+        AppSdkLifecycleState::Restoring => AppTextKey::ValueSdkLifecycleRestoring,
+        AppSdkLifecycleState::RebuildingProjections => {
+            AppTextKey::ValueSdkLifecycleRebuildingProjections
+        }
+        AppSdkLifecycleState::ShuttingDown => AppTextKey::ValueSdkLifecycleShuttingDown,
+        AppSdkLifecycleState::Stopped => AppTextKey::ValueSdkLifecycleStopped,
+    })
+}
+
+fn sdk_projection_lifecycle_state_text(state: AppSdkProjectionLifecycleState) -> String {
+    app_text(match state {
+        AppSdkProjectionLifecycleState::Current => AppTextKey::ValueSdkProjectionCurrent,
+        AppSdkProjectionLifecycleState::Stale => AppTextKey::ValueSdkProjectionStale,
+        AppSdkProjectionLifecycleState::Rebuilding => AppTextKey::ValueSdkProjectionRebuilding,
+    })
+}
+
+fn sdk_relay_url_policy_text(policy: AppSdkRelayUrlPolicy) -> String {
+    app_text(match policy {
+        AppSdkRelayUrlPolicy::Public => AppTextKey::ValueSdkRelayPolicyPublic,
+        AppSdkRelayUrlPolicy::Localhost => AppTextKey::ValueSdkRelayPolicyLocalhost,
+    })
+}
+
+fn sdk_storage_kind_text(kind: &str) -> String {
+    match kind {
+        "directory" => app_text(AppTextKey::ValueSdkStorageKindDirectory),
+        _ => app_text(AppTextKey::ValueSdkStorageKindUnknown),
+    }
+}
+
+fn sdk_integrity_status_text(ok: bool) -> String {
+    if ok {
+        app_text(AppTextKey::ValueSdkIntegrityOk)
+    } else {
+        app_text(AppTextKey::ValueSdkIntegrityFailed)
+    }
+}
+
+fn yes_no_text(value: bool) -> String {
+    if value {
+        app_text(AppTextKey::ValueYes)
+    } else {
+        app_text(AppTextKey::ValueNo)
+    }
+}
+
+fn sdk_recovery_actions_text(actions: &[String]) -> String {
+    if actions.is_empty() {
+        return app_text(AppTextKey::ValueNone);
+    }
+
+    actions
+        .iter()
+        .map(|action| app_text(sdk_recovery_action_key(action)))
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+fn sdk_recovery_action_key(action: &str) -> AppTextKey {
+    match action {
+        "configure_relay_targets" => AppTextKey::ValueSdkRecoveryConfigureRelayTargets,
+        "retry_startup" => AppTextKey::ValueSdkRecoveryRetryStartup,
+        "wait_for_sdk_lifecycle" => AppTextKey::ValueSdkRecoveryWaitForLifecycle,
+        "retry_status_refresh" => AppTextKey::ValueSdkRecoveryRetryStatusRefresh,
+        "review_runtime_configuration" => AppTextKey::ValueSdkRecoveryReviewRuntimeConfiguration,
+        _ => AppTextKey::ValueSdkRecoveryReviewStatus,
+    }
 }
 
 fn focus_button<V>(window: &mut Window, id: impl Into<ElementId>, cx: &mut Context<V>) {
@@ -16944,11 +17166,14 @@ mod tests {
         trade_payment_display_status_key, trade_revision_status_key, trade_workflow_source_key,
     };
     use crate::runtime::{
-        DesktopAppRuntimeMetadataSummary, DesktopAppRuntimeSummary, DesktopAppSyncConflictSummary,
-        DesktopAppSyncStatusSummary,
+        DesktopAppRuntimeMetadataSummary, DesktopAppRuntimeSummary, DesktopAppSdkDiagnosticsState,
+        DesktopAppSdkDiagnosticsSummary, DesktopAppSdkIssueSummary,
+        DesktopAppSdkReadyDiagnosticsSummary, DesktopAppSdkStatusSummary,
+        DesktopAppSyncConflictSummary, DesktopAppSyncStatusSummary,
     };
     use radroots_studio_app_core::{
         AppDesktopRuntimePaths, AppRuntimeHostEnvironment, AppRuntimePlatform,
+        AppSdkLifecycleState, AppSdkProjectionLifecycleState, AppSdkRelayUrlPolicy,
     };
     use radroots_studio_app_remote_signer::{
         RadrootsAppRemoteSignerApprovedSession, RadrootsAppRemoteSignerPendingSession,
@@ -19252,11 +19477,14 @@ mod tests {
 
     #[test]
     fn about_status_rows_disable_sync_without_a_selected_account() {
-        let rows = about_status_rows(&summary(
-            HomeRoute::SetupRequired,
-            TodayAgendaProjection::default(),
-            FarmSetupProjection::default(),
-        ));
+        let rows = about_status_rows(
+            &summary(
+                HomeRoute::SetupRequired,
+                TodayAgendaProjection::default(),
+                FarmSetupProjection::default(),
+            ),
+            None,
+        );
 
         assert!(rows.iter().any(|row| {
             row.label == app_text(AppTextKey::MetadataSelectedAccount)
@@ -19376,6 +19604,103 @@ mod tests {
     }
 
     #[test]
+    fn about_status_rows_surface_ready_sdk_diagnostics() {
+        let sdk_status = fixture_sdk_status(AppSdkLifecycleState::Ready);
+        let sdk_diagnostics = DesktopAppSdkDiagnosticsSummary {
+            status: sdk_status.clone(),
+            state: DesktopAppSdkDiagnosticsState::Ready(DesktopAppSdkReadyDiagnosticsSummary {
+                storage_kind: "directory".to_owned(),
+                event_store_total_events: 7,
+                outbox_total_events: 3,
+                outbox_pending_events: 2,
+                outbox_failed_terminal_events: 0,
+                integrity_event_store_ok: true,
+                integrity_outbox_ok: true,
+                sync_source: "sdk_canonical_stores".to_owned(),
+                sync_observed_at_ms: 42,
+                sync_relay_target_count: 2,
+            }),
+        };
+        let mut runtime = summary(
+            HomeRoute::Today,
+            TodayAgendaProjection::default(),
+            FarmSetupProjection::default(),
+        );
+        runtime.sdk_status = Some(sdk_status);
+
+        let rows = about_status_rows(&runtime, Some(&sdk_diagnostics));
+
+        assert!(rows.iter().any(|row| {
+            row.label == app_text(AppTextKey::MetadataSdkLifecycleState)
+                && row.value == app_text(AppTextKey::ValueSdkLifecycleReady)
+        }));
+        assert!(rows.iter().any(|row| {
+            row.label == app_text(AppTextKey::MetadataSdkDiagnosticState)
+                && row.value == app_text(AppTextKey::ValueSdkDiagnosticsReady)
+        }));
+        assert!(rows.iter().any(|row| {
+            row.label == app_text(AppTextKey::MetadataSdkStorageKind)
+                && row.value == app_text(AppTextKey::ValueSdkStorageKindDirectory)
+        }));
+        assert!(rows.iter().any(|row| {
+            row.label == app_text(AppTextKey::MetadataSdkOutboxPendingCount) && row.value == "2"
+        }));
+        assert!(rows.iter().any(|row| {
+            row.label == app_text(AppTextKey::MetadataSdkIntegrityStatus)
+                && row.value == app_text(AppTextKey::ValueSdkIntegrityOk)
+        }));
+        assert!(rows.iter().any(|row| {
+            row.label == app_text(AppTextKey::MetadataSdkLastIssueCode)
+                && row.value == app_text(AppTextKey::ValueNone)
+        }));
+    }
+
+    #[test]
+    fn about_status_rows_surface_blocked_sdk_issue_metadata() {
+        let issue = DesktopAppSdkIssueSummary {
+            code: "invalid_relay_url".to_owned(),
+            class: "configuration".to_owned(),
+            retryable: false,
+            recovery_actions: vec!["configure_relay_targets".to_owned()],
+        };
+        let mut sdk_status = fixture_sdk_status(AppSdkLifecycleState::Degraded);
+        sdk_status.last_issue = Some(issue.clone());
+        let sdk_diagnostics = DesktopAppSdkDiagnosticsSummary {
+            status: sdk_status.clone(),
+            state: DesktopAppSdkDiagnosticsState::Blocked(issue),
+        };
+        let mut runtime = summary(
+            HomeRoute::Today,
+            TodayAgendaProjection::default(),
+            FarmSetupProjection::default(),
+        );
+        runtime.sdk_status = Some(sdk_status);
+
+        let rows = about_status_rows(&runtime, Some(&sdk_diagnostics));
+
+        assert!(rows.iter().any(|row| {
+            row.label == app_text(AppTextKey::MetadataSdkLifecycleState)
+                && row.value == app_text(AppTextKey::ValueSdkLifecycleDegraded)
+        }));
+        assert!(rows.iter().any(|row| {
+            row.label == app_text(AppTextKey::MetadataSdkDiagnosticState)
+                && row.value == app_text(AppTextKey::ValueSdkDiagnosticsBlocked)
+        }));
+        assert!(rows.iter().any(|row| {
+            row.label == app_text(AppTextKey::MetadataSdkLastIssueCode)
+                && row.value == "invalid_relay_url"
+        }));
+        assert!(rows.iter().any(|row| {
+            row.label == app_text(AppTextKey::MetadataSdkIssueRetryable)
+                && row.value == app_text(AppTextKey::ValueNo)
+        }));
+        assert!(rows.iter().any(|row| {
+            row.label == app_text(AppTextKey::MetadataSdkRecoveryAction)
+                && row.value == app_text(AppTextKey::ValueSdkRecoveryConfigureRelayTargets)
+        }));
+    }
+
+    #[test]
     fn about_runtime_rows_append_paths_schema_and_shell_section() {
         let mut runtime = summary(
             HomeRoute::Today,
@@ -19394,6 +19719,7 @@ mod tests {
             database_schema_version: Some(7),
             ..DesktopAppRuntimeMetadataSummary::default()
         };
+        runtime.sdk_status = Some(fixture_sdk_status(AppSdkLifecycleState::Ready));
 
         let rows = about_runtime_rows(&runtime);
 
@@ -19408,6 +19734,14 @@ mod tests {
         assert!(rows.iter().any(|row| {
             row.label == app_text(AppTextKey::MetadataShellSection)
                 && row.value == ShellSection::Settings(SettingsPanelViewKey::About).storage_key()
+        }));
+        assert!(rows.iter().any(|row| {
+            row.label == app_text(AppTextKey::MetadataSdkStorageRoot)
+                && row.value == "/tmp/radroots/data/apps/app/sdk"
+        }));
+        assert!(rows.iter().any(|row| {
+            row.label == app_text(AppTextKey::MetadataSdkRelayUrlPolicy)
+                && row.value == app_text(AppTextKey::ValueSdkRelayPolicyLocalhost)
         }));
     }
 
@@ -19453,6 +19787,22 @@ mod tests {
             runtime_metadata: DesktopAppRuntimeMetadataSummary::default(),
             sync_status: crate::runtime::DesktopAppSyncStatusSummary::default(),
             startup_issue: None,
+            sdk_status: None,
+        }
+    }
+
+    fn fixture_sdk_status(lifecycle_state: AppSdkLifecycleState) -> DesktopAppSdkStatusSummary {
+        let storage_root = PathBuf::from("/tmp/radroots/data/apps/app/sdk");
+        DesktopAppSdkStatusSummary {
+            lifecycle_state,
+            projection_lifecycle_state: AppSdkProjectionLifecycleState::Current,
+            projection_lifecycle_reason: None,
+            storage_root: storage_root.clone(),
+            event_store_path: Some(storage_root.join("event_store.sqlite")),
+            outbox_path: Some(storage_root.join("outbox.sqlite")),
+            relay_target_count: 2,
+            relay_url_policy: AppSdkRelayUrlPolicy::Localhost,
+            last_issue: None,
         }
     }
 

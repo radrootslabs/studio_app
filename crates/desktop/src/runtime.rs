@@ -8,9 +8,10 @@ use std::time::{Duration as StdDuration, SystemTime, UNIX_EPOCH};
 use chrono::{DateTime, Duration, Utc};
 use radroots_studio_app_core::{
     AppBuildIdentity, AppDesktopRuntimePaths, AppRuntimeCapture, AppRuntimeMode,
-    AppRuntimePathsError, AppRuntimeSnapshot, AppSdkConfig, AppSdkDiagnostics, AppSdkRuntime,
-    AppSdkRuntimeError, AppSdkRuntimeStatus, AppSharedAccountsPaths, PackDayExportWriteError,
-    prepare_pack_day_export_bundle_at_data_root,
+    AppRuntimePathsError, AppRuntimeSnapshot, AppSdkConfig, AppSdkDiagnostics,
+    AppSdkLifecycleState, AppSdkProjectionLifecycleState, AppSdkRelayUrlPolicy, AppSdkRuntime,
+    AppSdkRuntimeError, AppSdkRuntimeIssue, AppSdkRuntimeStatus, AppSdkStoragePaths,
+    AppSharedAccountsPaths, PackDayExportWriteError, prepare_pack_day_export_bundle_at_data_root,
     shared_local_events_database_path_from_shared_accounts, write_prepared_pack_day_export_bundle,
 };
 use radroots_studio_app_remote_signer::{
@@ -533,6 +534,7 @@ impl DesktopAppRuntime {
     }
 
     pub fn summary(&self) -> DesktopAppRuntimeSummary {
+        let sdk_status = self.sdk_status_summary();
         let state = self.lock_state();
         let sync_status = DesktopAppSyncStatusSummary {
             account_id: state
@@ -564,6 +566,7 @@ impl DesktopAppRuntime {
             runtime_metadata: state.runtime_metadata.clone(),
             sync_status,
             startup_issue: state.startup_issue.clone(),
+            sdk_status,
         }
     }
 
@@ -577,6 +580,12 @@ impl DesktopAppRuntime {
             .unwrap_or_else(|poisoned| poisoned.into_inner())
             .as_ref()
             .map(AppSdkRuntime::status)
+    }
+
+    pub fn sdk_status_summary(&self) -> Option<DesktopAppSdkStatusSummary> {
+        self.sdk_status()
+            .as_ref()
+            .map(DesktopAppSdkStatusSummary::from_status)
     }
 
     pub fn wait_for_sdk_startup(&self, timeout: StdDuration) -> Option<AppSdkRuntimeStatus> {
@@ -608,6 +617,32 @@ impl DesktopAppRuntime {
             return Ok(None);
         };
         runtime.diagnostics().map(Some)
+    }
+
+    pub fn sdk_diagnostics_summary(&self) -> Option<DesktopAppSdkDiagnosticsSummary> {
+        let sdk_runtime = self
+            .sdk_runtime
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let runtime = sdk_runtime.as_ref()?;
+        let status = runtime.status();
+        match runtime.diagnostics() {
+            Ok(diagnostics) => Some(DesktopAppSdkDiagnosticsSummary {
+                status: DesktopAppSdkStatusSummary::from_status(&diagnostics.runtime),
+                state: DesktopAppSdkDiagnosticsState::Ready(
+                    DesktopAppSdkReadyDiagnosticsSummary::from_diagnostics(&diagnostics),
+                ),
+            }),
+            Err(error) => {
+                let issue = desktop_app_sdk_issue_from_runtime_error(&error);
+                let mut status = DesktopAppSdkStatusSummary::from_status(&status);
+                status.last_issue = Some(issue.clone());
+                Some(DesktopAppSdkDiagnosticsSummary {
+                    status,
+                    state: DesktopAppSdkDiagnosticsState::Blocked(issue),
+                })
+            }
+        }
     }
 
     pub fn selected_settings_section(&self) -> SettingsSection {
@@ -1284,6 +1319,52 @@ fn start_desktop_sdk_runtime(
     AppSdkRuntime::start(AppSdkConfig::from_desktop_paths(paths, nostr_relay_urls))
 }
 
+fn sdk_storage_path_pair(paths: Option<&AppSdkStoragePaths>) -> (Option<PathBuf>, Option<PathBuf>) {
+    paths
+        .map(|paths| {
+            (
+                Some(paths.event_store_path.clone()),
+                Some(paths.outbox_path.clone()),
+            )
+        })
+        .unwrap_or((None, None))
+}
+
+fn desktop_app_sdk_issue_from_runtime_error(
+    error: &AppSdkRuntimeError,
+) -> DesktopAppSdkIssueSummary {
+    match error {
+        AppSdkRuntimeError::CommandFailed(issue) => DesktopAppSdkIssueSummary::from_issue(issue),
+        AppSdkRuntimeError::CommandQueueCapacityZero => DesktopAppSdkIssueSummary::runtime(
+            "sdk_command_queue_capacity_zero",
+            false,
+            ["review_runtime_configuration"],
+        ),
+        AppSdkRuntimeError::WorkerSpawn(_) => {
+            DesktopAppSdkIssueSummary::runtime("sdk_worker_spawn_failed", true, ["retry_startup"])
+        }
+        AppSdkRuntimeError::CommandQueueFull => DesktopAppSdkIssueSummary::runtime(
+            "sdk_command_queue_full",
+            true,
+            ["retry_status_refresh"],
+        ),
+        AppSdkRuntimeError::CommandQueueClosed => {
+            DesktopAppSdkIssueSummary::runtime("sdk_command_queue_closed", true, ["retry_startup"])
+        }
+        AppSdkRuntimeError::CommandResponseClosed => DesktopAppSdkIssueSummary::runtime(
+            "sdk_command_response_closed",
+            true,
+            ["retry_status_refresh"],
+        ),
+        AppSdkRuntimeError::ShutdownAck => {
+            DesktopAppSdkIssueSummary::runtime("sdk_shutdown_ack_failed", true, ["retry_startup"])
+        }
+        AppSdkRuntimeError::WorkerJoin => {
+            DesktopAppSdkIssueSummary::runtime("sdk_worker_join_failed", true, ["retry_startup"])
+        }
+    }
+}
+
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct DesktopAppSyncStatusSummary {
     pub account_id: Option<String>,
@@ -1302,6 +1383,118 @@ impl DesktopAppSyncStatusSummary {
 pub struct DesktopAppSyncConflictSummary {
     pub conflict_id: String,
     pub conflict: radroots_studio_app_sync::SyncConflict,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct DesktopAppSdkStatusSummary {
+    pub lifecycle_state: AppSdkLifecycleState,
+    pub projection_lifecycle_state: AppSdkProjectionLifecycleState,
+    pub projection_lifecycle_reason: Option<String>,
+    pub storage_root: PathBuf,
+    pub event_store_path: Option<PathBuf>,
+    pub outbox_path: Option<PathBuf>,
+    pub relay_target_count: usize,
+    pub relay_url_policy: AppSdkRelayUrlPolicy,
+    pub last_issue: Option<DesktopAppSdkIssueSummary>,
+}
+
+impl DesktopAppSdkStatusSummary {
+    fn from_status(status: &AppSdkRuntimeStatus) -> Self {
+        let (event_store_path, outbox_path) = sdk_storage_path_pair(status.storage_paths.as_ref());
+        Self {
+            lifecycle_state: status.state,
+            projection_lifecycle_state: status.projection_lifecycle.state,
+            projection_lifecycle_reason: status.projection_lifecycle.reason.clone(),
+            storage_root: status.storage_root.clone(),
+            event_store_path,
+            outbox_path,
+            relay_target_count: status.relay_urls.len(),
+            relay_url_policy: status.relay_url_policy,
+            last_issue: status
+                .last_issue
+                .as_ref()
+                .map(DesktopAppSdkIssueSummary::from_issue),
+        }
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct DesktopAppSdkDiagnosticsSummary {
+    pub status: DesktopAppSdkStatusSummary,
+    pub state: DesktopAppSdkDiagnosticsState,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum DesktopAppSdkDiagnosticsState {
+    Ready(DesktopAppSdkReadyDiagnosticsSummary),
+    Blocked(DesktopAppSdkIssueSummary),
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct DesktopAppSdkReadyDiagnosticsSummary {
+    pub storage_kind: String,
+    pub event_store_total_events: i64,
+    pub outbox_total_events: i64,
+    pub outbox_pending_events: i64,
+    pub outbox_failed_terminal_events: i64,
+    pub integrity_event_store_ok: bool,
+    pub integrity_outbox_ok: bool,
+    pub sync_source: String,
+    pub sync_observed_at_ms: i64,
+    pub sync_relay_target_count: usize,
+}
+
+impl DesktopAppSdkReadyDiagnosticsSummary {
+    fn from_diagnostics(diagnostics: &AppSdkDiagnostics) -> Self {
+        Self {
+            storage_kind: diagnostics.storage.storage_kind.clone(),
+            event_store_total_events: diagnostics.storage.event_store.total_events,
+            outbox_total_events: diagnostics.storage.outbox.total_events,
+            outbox_pending_events: diagnostics.storage.outbox.pending_events,
+            outbox_failed_terminal_events: diagnostics.storage.outbox.failed_terminal_events,
+            integrity_event_store_ok: diagnostics.integrity.event_store_ok,
+            integrity_outbox_ok: diagnostics.integrity.outbox_ok,
+            sync_source: diagnostics.sync.source.clone(),
+            sync_observed_at_ms: diagnostics.sync.observed_at_ms,
+            sync_relay_target_count: diagnostics.sync.relay_targets.configured_count,
+        }
+    }
+
+    pub const fn integrity_ok(&self) -> bool {
+        self.integrity_event_store_ok && self.integrity_outbox_ok
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct DesktopAppSdkIssueSummary {
+    pub code: String,
+    pub class: String,
+    pub retryable: bool,
+    pub recovery_actions: Vec<String>,
+}
+
+impl DesktopAppSdkIssueSummary {
+    fn from_issue(issue: &AppSdkRuntimeIssue) -> Self {
+        Self {
+            code: issue.code.clone(),
+            class: issue.class.clone(),
+            retryable: issue.retryable,
+            recovery_actions: issue.recovery_actions.clone(),
+        }
+    }
+
+    fn runtime(
+        code: impl Into<String>,
+        retryable: bool,
+        recovery_actions: impl IntoIterator<Item = &'static str>,
+    ) -> Self {
+        Self {
+            code: code.into(),
+            class: "runtime".to_owned(),
+            retryable,
+            recovery_actions: recovery_actions.into_iter().map(str::to_owned).collect(),
+        }
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -1365,6 +1558,7 @@ pub struct DesktopAppRuntimeSummary {
     pub runtime_metadata: DesktopAppRuntimeMetadataSummary,
     pub sync_status: DesktopAppSyncStatusSummary,
     pub startup_issue: Option<String>,
+    pub sdk_status: Option<DesktopAppSdkStatusSummary>,
 }
 
 #[derive(Debug, Error)]
@@ -9886,8 +10080,8 @@ mod tests {
     use futures_util::{SinkExt, StreamExt};
     use radroots_studio_app_core::{
         AppDesktopRuntimePaths, AppRuntimeHostEnvironment, AppRuntimePlatform,
-        AppSdkLifecycleState, AppSharedAccountsPaths, SHARED_ACCOUNTS_STORE_FILE_NAME,
-        SHARED_IDENTITY_FILE_NAME,
+        AppSdkLifecycleState, AppSdkProjectionLifecycleState, AppSharedAccountsPaths,
+        SHARED_ACCOUNTS_STORE_FILE_NAME, SHARED_IDENTITY_FILE_NAME,
     };
     use radroots_studio_app_remote_signer::{
         RadrootsAppRemoteSignerPendingSession, RadrootsAppRemoteSignerSessionRecord,
@@ -9981,9 +10175,9 @@ mod tests {
     use super::{
         APP_DATABASE_FILE_NAME, DesktopAppRuntime, DesktopAppRuntimeActivityContextError,
         DesktopAppRuntimeCommandError, DesktopAppRuntimeMetadataSummary, DesktopAppRuntimeState,
-        DesktopAppSyncStatusSummary, DesktopRemoteSignerPaths, SYNC_TRANSPORT_UNAVAILABLE_MESSAGE,
-        SdkDirectRelayAppSyncTransport, TokioRuntimeBuilder, default_sync_transport,
-        direct_relay_event_source_runtime, farm_sync_payload, is_hex_64,
+        DesktopAppSdkDiagnosticsState, DesktopAppSyncStatusSummary, DesktopRemoteSignerPaths,
+        SYNC_TRANSPORT_UNAVAILABLE_MESSAGE, SdkDirectRelayAppSyncTransport, TokioRuntimeBuilder,
+        default_sync_transport, direct_relay_event_source_runtime, farm_sync_payload, is_hex_64,
         order_decision_publish_payload_to_sdk_decision, pending_sync_upsert,
         signed_event_from_local_record,
     };
@@ -13444,7 +13638,12 @@ mod tests {
 
     #[test]
     fn runtime_bootstrap_starts_sdk_runtime_under_app_data_root() {
-        let (runtime, paths) = bootstrapped_runtime("sdk_runtime");
+        let paths = temp_desktop_runtime_paths("sdk_runtime");
+        let runtime = DesktopAppRuntime::bootstrap_from_paths_with_snapshot(
+            paths.clone(),
+            vec!["ws://127.0.0.1:8080".to_owned()],
+            super::default_runtime_snapshot(),
+        );
         let status = runtime
             .wait_for_sdk_startup(StdDuration::from_secs(5))
             .expect("sdk runtime should be present");
@@ -13466,6 +13665,145 @@ mod tests {
         assert_eq!(diagnostics.runtime.state, AppSdkLifecycleState::Ready);
         assert_eq!(diagnostics.storage.storage_kind, "directory");
         assert_eq!(diagnostics.sync.relay_targets.configured_count, 1);
+        assert!(
+            runtime
+                .shutdown_sdk_runtime()
+                .expect("sdk runtime should shut down")
+        );
+
+        cleanup_bootstrapped_runtime_paths(&paths);
+    }
+
+    #[test]
+    fn runtime_summary_surfaces_lightweight_sdk_status() {
+        let paths = temp_desktop_runtime_paths("sdk_summary_status");
+        let runtime = DesktopAppRuntime::bootstrap_from_paths_with_snapshot(
+            paths.clone(),
+            vec!["ws://127.0.0.1:8080".to_owned()],
+            super::default_runtime_snapshot(),
+        );
+        runtime
+            .wait_for_sdk_startup(StdDuration::from_secs(5))
+            .expect("sdk runtime should be present");
+
+        let summary = runtime.summary();
+        let sdk_status = summary.sdk_status.expect("sdk status summary");
+
+        assert_eq!(sdk_status.lifecycle_state, AppSdkLifecycleState::Ready);
+        assert_eq!(
+            sdk_status.projection_lifecycle_state,
+            AppSdkProjectionLifecycleState::Current
+        );
+        assert_eq!(sdk_status.storage_root, paths.app.data.join("sdk"));
+        assert_eq!(
+            sdk_status.event_store_path.as_ref(),
+            Some(&paths.app.data.join("sdk").join("event_store.sqlite"))
+        );
+        assert_eq!(sdk_status.relay_target_count, 1);
+        assert!(
+            runtime
+                .shutdown_sdk_runtime()
+                .expect("sdk runtime should shut down")
+        );
+
+        cleanup_bootstrapped_runtime_paths(&paths);
+    }
+
+    #[test]
+    fn runtime_sdk_diagnostics_summary_preserves_degraded_issue_metadata() {
+        let paths = temp_desktop_runtime_paths("sdk_summary_degraded");
+        let runtime = DesktopAppRuntime::bootstrap_from_paths_with_snapshot(
+            paths.clone(),
+            vec!["ws://relay.example".to_owned()],
+            super::default_runtime_snapshot(),
+        );
+        let status = runtime
+            .wait_for_sdk_startup(StdDuration::from_secs(5))
+            .expect("sdk runtime should be present");
+        assert_eq!(status.state, AppSdkLifecycleState::Degraded);
+
+        let diagnostics = runtime
+            .sdk_diagnostics_summary()
+            .expect("sdk diagnostics summary");
+
+        assert_eq!(
+            diagnostics.status.lifecycle_state,
+            AppSdkLifecycleState::Degraded
+        );
+        match diagnostics.state {
+            DesktopAppSdkDiagnosticsState::Blocked(issue) => {
+                assert_eq!(issue.code, "invalid_relay_url");
+                assert_eq!(issue.class, "configuration");
+                assert!(!issue.retryable);
+                assert!(
+                    issue
+                        .recovery_actions
+                        .contains(&"configure_relay_targets".to_owned())
+                );
+            }
+            unexpected => panic!("unexpected diagnostics state: {unexpected:?}"),
+        }
+        assert!(
+            runtime
+                .shutdown_sdk_runtime()
+                .expect("sdk runtime should shut down")
+        );
+
+        cleanup_bootstrapped_runtime_paths(&paths);
+    }
+
+    #[test]
+    fn runtime_sdk_diagnostics_summary_keeps_lifecycle_busy_visible() {
+        let paths = temp_desktop_runtime_paths("sdk_summary_busy");
+        let runtime = DesktopAppRuntime::bootstrap_from_paths_with_snapshot(
+            paths.clone(),
+            vec!["ws://127.0.0.1:8080".to_owned()],
+            super::default_runtime_snapshot(),
+        );
+        runtime
+            .wait_for_sdk_startup(StdDuration::from_secs(5))
+            .expect("sdk runtime should be present");
+        {
+            let sdk_runtime = runtime.sdk_runtime.lock().expect("sdk runtime lock");
+            sdk_runtime
+                .as_ref()
+                .expect("sdk runtime")
+                .begin_projection_rebuild()
+                .expect("projection rebuild should begin");
+        }
+
+        let diagnostics = runtime
+            .sdk_diagnostics_summary()
+            .expect("sdk diagnostics summary");
+
+        assert_eq!(
+            diagnostics.status.lifecycle_state,
+            AppSdkLifecycleState::RebuildingProjections
+        );
+        assert_eq!(
+            diagnostics.status.projection_lifecycle_state,
+            AppSdkProjectionLifecycleState::Rebuilding
+        );
+        match diagnostics.state {
+            DesktopAppSdkDiagnosticsState::Blocked(issue) => {
+                assert_eq!(issue.code, "sdk_lifecycle_busy");
+                assert!(issue.retryable);
+                assert!(
+                    issue
+                        .recovery_actions
+                        .contains(&"wait_for_sdk_lifecycle".to_owned())
+                );
+            }
+            unexpected => panic!("unexpected diagnostics state: {unexpected:?}"),
+        }
+        {
+            let sdk_runtime = runtime.sdk_runtime.lock().expect("sdk runtime lock");
+            sdk_runtime
+                .as_ref()
+                .expect("sdk runtime")
+                .complete_projection_rebuild()
+                .expect("projection rebuild should complete");
+        }
         assert!(
             runtime
                 .shutdown_sdk_runtime()
