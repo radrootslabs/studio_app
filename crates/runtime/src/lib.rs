@@ -4,6 +4,7 @@ mod logging;
 mod pack_day_export;
 mod paths;
 mod runtime;
+mod sdk;
 mod startup;
 
 pub use logging::{
@@ -33,5 +34,11 @@ pub use runtime::{
     AppBuildIdentity, AppCoreRuntimeMetadata, AppHostRuntimeMetadata, AppRuntimeCapture,
     AppRuntimeConfig, AppRuntimeConfigError, AppRuntimeMode, AppRuntimeSnapshot,
     runtime_mode_label,
+};
+pub use sdk::{
+    APP_SDK_DEFAULT_COMMAND_QUEUE_CAPACITY, APP_SDK_STORAGE_DIR_NAME, AppSdkConfig,
+    AppSdkLifecycleState, AppSdkRelayUrlPolicy, AppSdkRuntime, AppSdkRuntimeError,
+    AppSdkRuntimeIssue, AppSdkRuntimeStatus, AppSdkStoragePaths,
+    app_sdk_storage_root_from_data_root,
 };
 pub use startup::{AppStartupEvent, AppStartupEventMetadata, launch_startup_event};

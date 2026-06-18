@@ -8,7 +8,8 @@ use std::time::{Duration as StdDuration, SystemTime, UNIX_EPOCH};
 use chrono::{DateTime, Duration, Utc};
 use radroots_studio_app_core::{
     AppBuildIdentity, AppDesktopRuntimePaths, AppRuntimeCapture, AppRuntimeMode,
-    AppRuntimePathsError, AppRuntimeSnapshot, AppSharedAccountsPaths, PackDayExportWriteError,
+    AppRuntimePathsError, AppRuntimeSnapshot, AppSdkConfig, AppSdkRuntime, AppSdkRuntimeError,
+    AppSdkRuntimeStatus, AppSharedAccountsPaths, PackDayExportWriteError,
     prepare_pack_day_export_bundle_at_data_root,
     shared_local_events_database_path_from_shared_accounts, write_prepared_pack_day_export_bundle,
 };
@@ -476,20 +477,22 @@ impl AppSyncTransport for SdkDirectRelayAppSyncTransport {
 #[derive(Clone, Debug)]
 pub struct DesktopAppRuntime {
     state: Arc<Mutex<DesktopAppRuntimeState>>,
+    sdk_runtime: Arc<Mutex<Option<AppSdkRuntime>>>,
 }
 
 impl DesktopAppRuntime {
     pub fn bootstrap(nostr_relay_urls: Vec<String>, runtime_snapshot: AppRuntimeSnapshot) -> Self {
-        let state =
-            match DesktopAppRuntimeState::try_bootstrap(nostr_relay_urls, runtime_snapshot.clone())
-            {
-                Ok(state) => state,
-                Err(error) => {
-                    DesktopAppRuntimeState::degraded_with_snapshot(error, runtime_snapshot)
-                }
-            };
+        let paths = match AppDesktopRuntimePaths::current_desktop() {
+            Ok(paths) => paths,
+            Err(error) => {
+                return Self::from_state(DesktopAppRuntimeState::degraded_with_snapshot(
+                    error.into(),
+                    runtime_snapshot,
+                ));
+            }
+        };
 
-        Self::from_state(state)
+        Self::bootstrap_from_paths_with_snapshot(paths, nostr_relay_urls, runtime_snapshot)
     }
 
     pub fn bootstrap_with_paths(
@@ -497,16 +500,36 @@ impl DesktopAppRuntime {
         nostr_relay_urls: Vec<String>,
     ) -> Self {
         let runtime_snapshot = default_runtime_snapshot();
+        Self::bootstrap_from_paths_with_snapshot(paths, nostr_relay_urls, runtime_snapshot)
+    }
+
+    fn bootstrap_from_paths_with_snapshot(
+        paths: AppDesktopRuntimePaths,
+        nostr_relay_urls: Vec<String>,
+        runtime_snapshot: AppRuntimeSnapshot,
+    ) -> Self {
         let state = match DesktopAppRuntimeState::bootstrap_from_paths(
-            paths,
-            nostr_relay_urls,
+            paths.clone(),
+            nostr_relay_urls.clone(),
             runtime_snapshot.clone(),
         ) {
             Ok(state) => state,
-            Err(error) => DesktopAppRuntimeState::degraded_with_snapshot(error, runtime_snapshot),
+            Err(error) => {
+                return Self::from_state(DesktopAppRuntimeState::degraded_with_snapshot(
+                    error,
+                    runtime_snapshot,
+                ));
+            }
         };
 
-        Self::from_state(state)
+        match start_desktop_sdk_runtime(&paths, nostr_relay_urls) {
+            Ok(sdk_runtime) => Self::from_state_with_sdk_runtime(state, sdk_runtime),
+            Err(error) => {
+                let mut state = state;
+                state.startup_issue = Some(error.to_string());
+                Self::from_state(state)
+            }
+        }
     }
 
     pub fn summary(&self) -> DesktopAppRuntimeSummary {
@@ -546,6 +569,34 @@ impl DesktopAppRuntime {
 
     pub fn nostr_relay_urls(&self) -> Vec<String> {
         self.lock_state().nostr_relay_urls.clone()
+    }
+
+    pub fn sdk_status(&self) -> Option<AppSdkRuntimeStatus> {
+        self.sdk_runtime
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .as_ref()
+            .map(AppSdkRuntime::status)
+    }
+
+    pub fn wait_for_sdk_startup(&self, timeout: StdDuration) -> Option<AppSdkRuntimeStatus> {
+        self.sdk_runtime
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .as_ref()
+            .map(|runtime| runtime.wait_for_startup(timeout))
+    }
+
+    pub fn shutdown_sdk_runtime(&self) -> Result<bool, AppSdkRuntimeError> {
+        let mut sdk_runtime = self
+            .sdk_runtime
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let Some(runtime) = sdk_runtime.take() else {
+            return Ok(false);
+        };
+        runtime.shutdown()?;
+        Ok(true)
     }
 
     pub fn selected_settings_section(&self) -> SettingsSection {
@@ -1157,6 +1208,17 @@ impl DesktopAppRuntime {
     fn from_state(state: DesktopAppRuntimeState) -> Self {
         Self {
             state: Arc::new(Mutex::new(state)),
+            sdk_runtime: Arc::new(Mutex::new(None)),
+        }
+    }
+
+    fn from_state_with_sdk_runtime(
+        state: DesktopAppRuntimeState,
+        sdk_runtime: AppSdkRuntime,
+    ) -> Self {
+        Self {
+            state: Arc::new(Mutex::new(state)),
+            sdk_runtime: Arc::new(Mutex::new(Some(sdk_runtime))),
         }
     }
 
@@ -1202,6 +1264,13 @@ fn default_runtime_snapshot() -> AppRuntimeSnapshot {
             run_id: "runtime-summary-test-run".to_owned(),
         },
     )
+}
+
+fn start_desktop_sdk_runtime(
+    paths: &AppDesktopRuntimePaths,
+    nostr_relay_urls: Vec<String>,
+) -> Result<AppSdkRuntime, AppSdkRuntimeError> {
+    AppSdkRuntime::start(AppSdkConfig::from_desktop_paths(paths, nostr_relay_urls))
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
@@ -1406,14 +1475,6 @@ impl fmt::Debug for DesktopAppRuntimeState {
 }
 
 impl DesktopAppRuntimeState {
-    fn try_bootstrap(
-        nostr_relay_urls: Vec<String>,
-        runtime_snapshot: AppRuntimeSnapshot,
-    ) -> Result<Self, DesktopAppRuntimeBootstrapError> {
-        let paths = AppDesktopRuntimePaths::current_desktop()?;
-        Self::bootstrap_from_paths(paths, nostr_relay_urls, runtime_snapshot)
-    }
-
     fn bootstrap_from_paths(
         paths: AppDesktopRuntimePaths,
         nostr_relay_urls: Vec<String>,
@@ -9807,14 +9868,15 @@ mod tests {
         sync::mpsc,
         sync::{Arc, Mutex},
         thread,
-        time::{SystemTime, UNIX_EPOCH},
+        time::{Duration as StdDuration, SystemTime, UNIX_EPOCH},
     };
 
     use chrono::{Duration, Utc};
     use futures_util::{SinkExt, StreamExt};
     use radroots_studio_app_core::{
         AppDesktopRuntimePaths, AppRuntimeHostEnvironment, AppRuntimePlatform,
-        AppSharedAccountsPaths, SHARED_ACCOUNTS_STORE_FILE_NAME, SHARED_IDENTITY_FILE_NAME,
+        AppSdkLifecycleState, AppSharedAccountsPaths, SHARED_ACCOUNTS_STORE_FILE_NAME,
+        SHARED_IDENTITY_FILE_NAME,
     };
     use radroots_studio_app_remote_signer::{
         RadrootsAppRemoteSignerPendingSession, RadrootsAppRemoteSignerSessionRecord,
@@ -13362,6 +13424,32 @@ mod tests {
         assert_eq!(
             summary.runtime_metadata.database_schema_version,
             Some(latest_schema_version())
+        );
+
+        cleanup_bootstrapped_runtime_paths(&paths);
+    }
+
+    #[test]
+    fn runtime_bootstrap_starts_sdk_runtime_under_app_data_root() {
+        let (runtime, paths) = bootstrapped_runtime("sdk_runtime");
+        let status = runtime
+            .wait_for_sdk_startup(StdDuration::from_secs(5))
+            .expect("sdk runtime should be present");
+
+        assert_eq!(status.state, AppSdkLifecycleState::Ready);
+        assert_eq!(status.storage_root, paths.app.data.join("sdk"));
+        assert_eq!(
+            status
+                .storage_paths
+                .as_ref()
+                .expect("sdk storage paths")
+                .event_store_path,
+            paths.app.data.join("sdk").join("event_store.sqlite")
+        );
+        assert!(
+            runtime
+                .shutdown_sdk_runtime()
+                .expect("sdk runtime should shut down")
         );
 
         cleanup_bootstrapped_runtime_paths(&paths);
