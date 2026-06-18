@@ -19,6 +19,7 @@ const ALLOWED_WINDOW_LITERALS: &[&str] = &[
     "127.0.0.1",
     "14",
     "14.5",
+    "2",
     "2 bags",
     "2222222222222222222222222222222222222222222222222222222222222222",
     "3333333333333333333333333333333333333333333333333333333333333333",
@@ -35,6 +36,7 @@ const ALLOWED_WINDOW_LITERALS: &[&str] = &[
     "USD",
     "[::1]",
     "/tmp/radroots/data/apps/app",
+    "/tmp/radroots/data/apps/app/sdk",
     "/tmp/radroots/logs/apps/app",
     "{}.{:02}",
     "abc",
@@ -111,11 +113,15 @@ const ALLOWED_WINDOW_LITERALS: &[&str] = &[
     "buyer.search_query_update_failed",
     "CARGO_PKG_VERSION",
     "clock",
+    "configuration",
+    "configure_relay_targets",
     "customer_labels.txt",
     "desktop runtime paths should resolve",
     "desktop runtime roots require HOME for macos",
+    "directory",
     "disk unavailable",
     "eggs",
+    "event_store.sqlite",
     "failed to add buyer product to cart",
     "failed to open buyer order detail",
     "failed to place buyer order",
@@ -267,6 +273,7 @@ const ALLOWED_WINDOW_LITERALS: &[&str] = &[
     "orders.recovery_review_failed",
     "orders.recovery_start_failed",
     "orders.route_failed",
+    "outbox.sqlite",
     "preview",
     "pack_sheet.txt",
     "pack_sheet.txt, pickup_roster.txt, customer_labels.txt",
@@ -316,11 +323,15 @@ const ALLOWED_WINDOW_LITERALS: &[&str] = &[
     "invalid discovery url: relative URL without a base",
     "invalid remote signer uri:",
     "invalid remote signer uri: invalid public key",
+    "invalid_relay_url",
     "a remote signer connection is already pending approval",
     "raw nostrconnect client uris are signer-side only",
     "remote signer",
     "remote signer connection failed: relay refused the request",
     "remote signer did not respond yet",
+    "retry_startup",
+    "retry_status_refresh",
+    "review_runtime_configuration",
     "runtime unavailable",
     "radroots_home_view_{label}_{suffix}",
     "sign_event:kind:1",
@@ -330,6 +341,7 @@ const ALLOWED_WINDOW_LITERALS: &[&str] = &[
     "shell-mode-marketplace",
     "shell.switch_farm_failed",
     "shell.switch_marketplace_failed",
+    "sdk_canonical_stores",
     "settings",
     "settings-add-blackout-period",
     "settings-add-fulfillment-window",
@@ -364,6 +376,7 @@ const ALLOWED_WINDOW_LITERALS: &[&str] = &[
     "switch_relays",
     "startup-title-radroots",
     "startup-title-starting",
+    "wait_for_sdk_lifecycle",
     "ws://localhost:8080",
     "ws://localhost:8081",
     "wss://relay.example",
@@ -1178,51 +1191,46 @@ struct LegacySdkBoundaryAllowlistEntry {
 
 const TEST_MODULE_SENTINEL: &str = "\n#[cfg(test)]\nmod tests {";
 
-const SDK_MIGRATED_SOURCE_PATHS: &[&str] = &[
-    "crates/runtime/src/sdk.rs",
-    "crates/store/src/migration_audit.rs",
-];
-
-const FORBIDDEN_SDK_MIGRATED_BOUNDARY_PATTERNS: &[SdkBoundaryForbiddenPattern] = &[
+const STRICT_SDK_BOUNDARY_FORBIDDEN_PATTERNS: &[SdkBoundaryForbiddenPattern] = &[
     SdkBoundaryForbiddenPattern {
         pattern: "SdkDirectRelayAppSyncTransport",
-        reason: "migrated paths must use AppSdkRuntime instead of the legacy direct relay sync transport",
+        reason: "app production sources must use AppSdkRuntime instead of the legacy direct relay sync transport",
     },
     SdkBoundaryForbiddenPattern {
         pattern: "RadrootsSdkClient",
-        reason: "migrated paths must use the long-lived RadrootsSdk runtime boundary",
+        reason: "app production sources must use the long-lived RadrootsSdk runtime boundary",
     },
     SdkBoundaryForbiddenPattern {
         pattern: "RadrootsSdkConfig",
-        reason: "migrated paths must use AppSdkConfig-derived runtime construction",
+        reason: "app production sources must use AppSdkConfig-derived runtime construction",
     },
     SdkBoundaryForbiddenPattern {
         pattern: "SdkTransportMode::RelayDirect",
-        reason: "migrated paths must not configure direct relay publish transport",
+        reason: "app production sources must not configure direct relay publish transport",
     },
     SdkBoundaryForbiddenPattern {
         pattern: "SignerConfig::LocalIdentity",
-        reason: "migrated paths must not configure local direct-publish signing",
+        reason: "app production sources must not configure local direct-publish signing",
     },
     SdkBoundaryForbiddenPattern {
         pattern: "PendingSyncOperation::from_publish_payload",
-        reason: "migrated paths must not enqueue legacy app publish payloads",
+        reason: "app production sources must not enqueue legacy app publish payloads",
     },
     SdkBoundaryForbiddenPattern {
         pattern: ".enqueue_pending_operation(",
-        reason: "migrated paths must not mutate the legacy app outbox",
+        reason: "app production sources must not mutate the legacy app outbox",
     },
     SdkBoundaryForbiddenPattern {
         pattern: "INSERT INTO local_outbox",
-        reason: "migrated paths must not write legacy local outbox rows",
+        reason: "app production sources must not write legacy local outbox rows",
     },
     SdkBoundaryForbiddenPattern {
         pattern: "UPDATE local_outbox",
-        reason: "migrated paths must not mutate legacy local outbox rows",
+        reason: "app production sources must not mutate legacy local outbox rows",
     },
     SdkBoundaryForbiddenPattern {
         pattern: "DELETE FROM local_outbox",
-        reason: "migrated paths must not delete legacy local outbox rows",
+        reason: "app production sources must not delete legacy local outbox rows",
     },
     SdkBoundaryForbiddenPattern {
         pattern: "RadrootsOutbox",
@@ -1238,86 +1246,64 @@ const FORBIDDEN_SDK_MIGRATED_BOUNDARY_PATTERNS: &[SdkBoundaryForbiddenPattern] =
     },
     SdkBoundaryForbiddenPattern {
         pattern: "connected_client_from_identity",
-        reason: "migrated paths must not connect relay clients directly for publish",
+        reason: "app production sources must not connect relay clients directly for publish",
     },
     SdkBoundaryForbiddenPattern {
         pattern: "publish_signed_event",
-        reason: "migrated paths must not publish signed events directly",
+        reason: "app production sources must not publish signed events directly",
     },
     SdkBoundaryForbiddenPattern {
         pattern: "radroots_nostr_build_event",
-        reason: "migrated paths must not build protocol events outside SDK-owned publish APIs",
+        reason: "app production sources must not build protocol events outside SDK-owned publish APIs",
     },
     SdkBoundaryForbiddenPattern {
         pattern: "RadrootsIdentity::from_secret_key_str",
-        reason: "migrated paths must not parse direct signing keys",
+        reason: "app production sources must not parse direct signing keys",
     },
     SdkBoundaryForbiddenPattern {
         pattern: "RawSecretKey",
-        reason: "migrated paths must not import raw signing-key material",
+        reason: "app production sources must not import raw signing-key material",
     },
     SdkBoundaryForbiddenPattern {
         pattern: "EncryptedSecretKey",
-        reason: "migrated paths must not import encrypted signing-key material",
+        reason: "app production sources must not import encrypted signing-key material",
     },
     SdkBoundaryForbiddenPattern {
         pattern: "publish_with_identity",
-        reason: "migrated paths must not call legacy direct SDK publish APIs",
+        reason: "app production sources must not call legacy direct SDK publish APIs",
     },
     SdkBoundaryForbiddenPattern {
         pattern: "publish_draft_with_identity",
-        reason: "migrated paths must not encode legacy direct SDK publish targets",
+        reason: "app production sources must not encode legacy direct SDK publish targets",
     },
     SdkBoundaryForbiddenPattern {
         pattern: "publish_order_request_with_identity",
-        reason: "migrated paths must not call legacy direct SDK order publish APIs",
+        reason: "app production sources must not call legacy direct SDK order publish APIs",
     },
     SdkBoundaryForbiddenPattern {
         pattern: "publish_order_decision_with_identity",
-        reason: "migrated paths must not call legacy direct SDK order publish APIs",
+        reason: "app production sources must not call legacy direct SDK order publish APIs",
     },
     SdkBoundaryForbiddenPattern {
         pattern: "publish_order_revision_proposal_with_identity",
-        reason: "migrated paths must not call legacy direct SDK order publish APIs",
+        reason: "app production sources must not call legacy direct SDK order publish APIs",
     },
     SdkBoundaryForbiddenPattern {
         pattern: "publish_order_revision_decision_with_identity",
-        reason: "migrated paths must not call legacy direct SDK order publish APIs",
+        reason: "app production sources must not call legacy direct SDK order publish APIs",
     },
     SdkBoundaryForbiddenPattern {
         pattern: "publish_order_cancellation_with_identity",
-        reason: "migrated paths must not call legacy direct SDK order publish APIs",
+        reason: "app production sources must not call legacy direct SDK order publish APIs",
     },
     SdkBoundaryForbiddenPattern {
         pattern: "publish_fulfillment_update_with_identity",
-        reason: "migrated paths must not call legacy direct SDK fulfillment publish APIs",
+        reason: "app production sources must not call legacy direct SDK fulfillment publish APIs",
     },
     SdkBoundaryForbiddenPattern {
         pattern: "publish_buyer_receipt_with_identity",
-        reason: "migrated paths must not call legacy direct SDK receipt publish APIs",
+        reason: "app production sources must not call legacy direct SDK receipt publish APIs",
     },
-];
-
-const LEGACY_SDK_BOUNDARY_PATTERNS: &[&str] = &[
-    "SdkDirectRelayAppSyncTransport",
-    "RadrootsSdkClient",
-    "RadrootsSdkConfig",
-    "SdkTransportMode::RelayDirect",
-    "SignerConfig::LocalIdentity",
-    "PendingSyncOperation::from_publish_payload",
-    ".enqueue_pending_operation(",
-    "INSERT INTO local_outbox",
-    "UPDATE local_outbox",
-    "DELETE FROM local_outbox",
-    "publish_with_identity",
-    "publish_draft_with_identity",
-    "publish_order_request_with_identity",
-    "publish_order_decision_with_identity",
-    "publish_order_revision_proposal_with_identity",
-    "publish_order_revision_decision_with_identity",
-    "publish_order_cancellation_with_identity",
-    "publish_fulfillment_update_with_identity",
-    "publish_buyer_receipt_with_identity",
 ];
 
 const LEGACY_SDK_BOUNDARY_ALLOWLIST: &[LegacySdkBoundaryAllowlistEntry] = &[
@@ -1418,6 +1404,34 @@ const LEGACY_SDK_BOUNDARY_ALLOWLIST: &[LegacySdkBoundaryAllowlistEntry] = &[
         owner: "rpv1-app-sdk-refactor.07",
         reason: "desktop runtime still calls legacy direct SDK receipt publish APIs",
         removal_condition: "remove when buyer receipt workflow enqueues through AppSdkRuntime",
+    },
+    LegacySdkBoundaryAllowlistEntry {
+        path: "crates/desktop/src/accounts.rs",
+        pattern: "RadrootsIdentity::from_secret_key_str",
+        owner: "rpv1-app-sdk-hardening.04",
+        reason: "desktop account import still accepts local raw secret-key material for account bootstrap",
+        removal_condition: "remove when local account import is mediated by protected signer adapters instead of raw key parsing",
+    },
+    LegacySdkBoundaryAllowlistEntry {
+        path: "crates/desktop/src/accounts.rs",
+        pattern: "RawSecretKey",
+        owner: "rpv1-app-sdk-hardening.04",
+        reason: "desktop account import still exposes a raw secret-key import mode for account bootstrap",
+        removal_condition: "remove when local account import is mediated by protected signer adapters instead of raw key import modes",
+    },
+    LegacySdkBoundaryAllowlistEntry {
+        path: "crates/desktop/src/accounts.rs",
+        pattern: "EncryptedSecretKey",
+        owner: "rpv1-app-sdk-hardening.04",
+        reason: "desktop account import still exposes an encrypted secret-key import mode for account bootstrap",
+        removal_condition: "remove when local account import is mediated by protected signer adapters instead of secret-key import modes",
+    },
+    LegacySdkBoundaryAllowlistEntry {
+        path: "crates/signer/src/protocol.rs",
+        pattern: "RadrootsIdentity::from_secret_key_str",
+        owner: "rpv1-app-sdk-hardening.04",
+        reason: "remote signer protocol connection still materializes client identity from local pending-session custody",
+        removal_condition: "remove when remote signer protocol sessions are mediated by SDK signer adapters and protected store APIs",
     },
     LegacySdkBoundaryAllowlistEntry {
         path: "crates/sync/src/publish.rs",
@@ -1675,23 +1689,38 @@ fn app_production_trade_event_kinds_use_shared_constants() {
 }
 
 #[test]
-fn app_migrated_sdk_paths_do_not_use_direct_publish_boundaries() {
-    let app_root = app_root();
-
-    for relative_path in SDK_MIGRATED_SOURCE_PATHS {
-        let path = app_root.join(relative_path);
-        let source = read_source_path(path.as_path());
+fn app_production_sdk_boundary_usage_is_allowlisted() {
+    for (relative_path, source) in app_rust_source_files() {
         let production_source = production_source_without_tests(&source);
+        let findings =
+            unallowlisted_sdk_boundary_patterns(relative_path.as_str(), production_source);
 
-        for forbidden in FORBIDDEN_SDK_MIGRATED_BOUNDARY_PATTERNS {
-            assert!(
-                !production_source.contains(forbidden.pattern),
-                "{relative_path} contains forbidden SDK boundary pattern `{}`: {}",
-                forbidden.pattern,
-                forbidden.reason
-            );
-        }
+        assert!(
+            findings.is_empty(),
+            "{} contains unallowlisted SDK boundary pattern `{}`: {}",
+            relative_path,
+            findings.first().map_or("", |finding| finding.pattern),
+            findings.first().map_or("", |finding| finding.reason)
+        );
     }
+}
+
+#[test]
+fn strict_sdk_boundary_scanner_rejects_unallowlisted_new_production_paths() {
+    let findings = unallowlisted_sdk_boundary_patterns(
+        "crates/desktop/src/new_workflow.rs",
+        "fn publish() { let _ = RadrootsSdkClient::from_config(config); }",
+    );
+
+    assert_eq!(findings.len(), 1);
+    assert_eq!(findings[0].pattern, "RadrootsSdkClient");
+    assert!(
+        unallowlisted_sdk_boundary_patterns(
+            "crates/desktop/src/runtime.rs",
+            "fn publish() { let _ = RadrootsSdkClient::from_config(config); }",
+        )
+        .is_empty()
+    );
 }
 
 #[test]
@@ -1737,23 +1766,6 @@ fn app_legacy_sdk_boundary_allowlist_entries_are_complete_and_current() {
     }
 }
 
-#[test]
-fn app_legacy_sdk_boundary_usage_is_allowlisted() {
-    for (relative_path, source) in app_rust_source_files() {
-        let production_source = production_source_without_tests(&source);
-
-        for pattern in LEGACY_SDK_BOUNDARY_PATTERNS {
-            if production_source.contains(pattern) {
-                assert!(
-                    legacy_sdk_boundary_allowlist_contains(relative_path.as_str(), pattern),
-                    "{} contains unallowlisted legacy SDK boundary pattern `{pattern}`",
-                    relative_path
-                );
-            }
-        }
-    }
-}
-
 fn extract_string_literals(source: &str) -> BTreeSet<&str> {
     let mut literals = BTreeSet::new();
     let bytes = source.as_bytes();
@@ -1790,6 +1802,17 @@ fn production_source_without_tests(source: &str) -> &str {
     source
         .split_once(TEST_MODULE_SENTINEL)
         .map_or(source, |(production_source, _)| production_source)
+}
+
+fn unallowlisted_sdk_boundary_patterns(
+    path: &str,
+    production_source: &str,
+) -> Vec<&'static SdkBoundaryForbiddenPattern> {
+    STRICT_SDK_BOUNDARY_FORBIDDEN_PATTERNS
+        .iter()
+        .filter(|forbidden| production_source.contains(forbidden.pattern))
+        .filter(|forbidden| !legacy_sdk_boundary_allowlist_contains(path, forbidden.pattern))
+        .collect()
 }
 
 fn legacy_sdk_boundary_allowlist_contains(path: &str, pattern: &str) -> bool {
