@@ -2,7 +2,7 @@ use radroots_studio_app_view::{
     FarmId, FarmReadiness, FulfillmentWindowId, OrderId, ProductId, ProductStatus,
 };
 use radroots_sdk::SdkTransportMode;
-use radroots_sdk::order::{
+use radroots_sdk::protocol::order::{
     RadrootsOrderEconomics, RadrootsOrderFulfillmentState, RadrootsOrderItem,
     RadrootsOrderRevisionOutcome,
 };
@@ -795,7 +795,7 @@ mod tests {
         PendingSyncOperation, PendingSyncOperationState, SyncAggregateRef, SyncOperationKind,
     };
     use radroots_studio_app_view::{FarmId, FarmReadiness, OrderId, ProductId, ProductStatus};
-    use radroots_sdk::order::{
+    use radroots_sdk::protocol::order::{
         RadrootsOrderEconomics, RadrootsOrderFulfillmentState, RadrootsOrderItem,
         RadrootsOrderRevisionOutcome,
     };
