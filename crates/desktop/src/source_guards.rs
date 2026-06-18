@@ -1163,7 +1163,354 @@ const FORBIDDEN_PRODUCTION_EVENT_KIND_LITERALS: &[(&str, &str)] = &[
     ("3440", "KIND_TRADE_VALIDATION_RECEIPT"),
 ];
 
+struct SdkBoundaryForbiddenPattern {
+    pattern: &'static str,
+    reason: &'static str,
+}
+
+struct LegacySdkBoundaryAllowlistEntry {
+    path: &'static str,
+    pattern: &'static str,
+    owner: &'static str,
+    reason: &'static str,
+    removal_condition: &'static str,
+}
+
 const TEST_MODULE_SENTINEL: &str = "\n#[cfg(test)]\nmod tests {";
+
+const SDK_MIGRATED_SOURCE_PATHS: &[&str] = &[
+    "crates/runtime/src/sdk.rs",
+    "crates/store/src/migration_audit.rs",
+];
+
+const FORBIDDEN_SDK_MIGRATED_BOUNDARY_PATTERNS: &[SdkBoundaryForbiddenPattern] = &[
+    SdkBoundaryForbiddenPattern {
+        pattern: "SdkDirectRelayAppSyncTransport",
+        reason: "migrated paths must use AppSdkRuntime instead of the legacy direct relay sync transport",
+    },
+    SdkBoundaryForbiddenPattern {
+        pattern: "RadrootsSdkClient",
+        reason: "migrated paths must use the long-lived RadrootsSdk runtime boundary",
+    },
+    SdkBoundaryForbiddenPattern {
+        pattern: "RadrootsSdkConfig",
+        reason: "migrated paths must use AppSdkConfig-derived runtime construction",
+    },
+    SdkBoundaryForbiddenPattern {
+        pattern: "SdkTransportMode::RelayDirect",
+        reason: "migrated paths must not configure direct relay publish transport",
+    },
+    SdkBoundaryForbiddenPattern {
+        pattern: "SignerConfig::LocalIdentity",
+        reason: "migrated paths must not configure local direct-publish signing",
+    },
+    SdkBoundaryForbiddenPattern {
+        pattern: "PendingSyncOperation::from_publish_payload",
+        reason: "migrated paths must not enqueue legacy app publish payloads",
+    },
+    SdkBoundaryForbiddenPattern {
+        pattern: ".enqueue_pending_operation(",
+        reason: "migrated paths must not mutate the legacy app outbox",
+    },
+    SdkBoundaryForbiddenPattern {
+        pattern: "INSERT INTO local_outbox",
+        reason: "migrated paths must not write legacy local outbox rows",
+    },
+    SdkBoundaryForbiddenPattern {
+        pattern: "UPDATE local_outbox",
+        reason: "migrated paths must not mutate legacy local outbox rows",
+    },
+    SdkBoundaryForbiddenPattern {
+        pattern: "DELETE FROM local_outbox",
+        reason: "migrated paths must not delete legacy local outbox rows",
+    },
+    SdkBoundaryForbiddenPattern {
+        pattern: "RadrootsOutbox",
+        reason: "canonical SDK outbox access belongs inside the SDK crate",
+    },
+    SdkBoundaryForbiddenPattern {
+        pattern: "enqueue_signed_operation",
+        reason: "canonical SDK outbox writes must go through SDK APIs",
+    },
+    SdkBoundaryForbiddenPattern {
+        pattern: "claim_ready_events",
+        reason: "canonical SDK outbox push claims must go through SDK APIs",
+    },
+    SdkBoundaryForbiddenPattern {
+        pattern: "connected_client_from_identity",
+        reason: "migrated paths must not connect relay clients directly for publish",
+    },
+    SdkBoundaryForbiddenPattern {
+        pattern: "publish_signed_event",
+        reason: "migrated paths must not publish signed events directly",
+    },
+    SdkBoundaryForbiddenPattern {
+        pattern: "radroots_nostr_build_event",
+        reason: "migrated paths must not build protocol events outside SDK-owned publish APIs",
+    },
+    SdkBoundaryForbiddenPattern {
+        pattern: "RadrootsIdentity::from_secret_key_str",
+        reason: "migrated paths must not parse direct signing keys",
+    },
+    SdkBoundaryForbiddenPattern {
+        pattern: "RawSecretKey",
+        reason: "migrated paths must not import raw signing-key material",
+    },
+    SdkBoundaryForbiddenPattern {
+        pattern: "EncryptedSecretKey",
+        reason: "migrated paths must not import encrypted signing-key material",
+    },
+    SdkBoundaryForbiddenPattern {
+        pattern: "publish_with_identity",
+        reason: "migrated paths must not call legacy direct SDK publish APIs",
+    },
+    SdkBoundaryForbiddenPattern {
+        pattern: "publish_draft_with_identity",
+        reason: "migrated paths must not encode legacy direct SDK publish targets",
+    },
+    SdkBoundaryForbiddenPattern {
+        pattern: "publish_order_request_with_identity",
+        reason: "migrated paths must not call legacy direct SDK order publish APIs",
+    },
+    SdkBoundaryForbiddenPattern {
+        pattern: "publish_order_decision_with_identity",
+        reason: "migrated paths must not call legacy direct SDK order publish APIs",
+    },
+    SdkBoundaryForbiddenPattern {
+        pattern: "publish_order_revision_proposal_with_identity",
+        reason: "migrated paths must not call legacy direct SDK order publish APIs",
+    },
+    SdkBoundaryForbiddenPattern {
+        pattern: "publish_order_revision_decision_with_identity",
+        reason: "migrated paths must not call legacy direct SDK order publish APIs",
+    },
+    SdkBoundaryForbiddenPattern {
+        pattern: "publish_order_cancellation_with_identity",
+        reason: "migrated paths must not call legacy direct SDK order publish APIs",
+    },
+    SdkBoundaryForbiddenPattern {
+        pattern: "publish_fulfillment_update_with_identity",
+        reason: "migrated paths must not call legacy direct SDK fulfillment publish APIs",
+    },
+    SdkBoundaryForbiddenPattern {
+        pattern: "publish_buyer_receipt_with_identity",
+        reason: "migrated paths must not call legacy direct SDK receipt publish APIs",
+    },
+];
+
+const LEGACY_SDK_BOUNDARY_PATTERNS: &[&str] = &[
+    "SdkDirectRelayAppSyncTransport",
+    "RadrootsSdkClient",
+    "RadrootsSdkConfig",
+    "SdkTransportMode::RelayDirect",
+    "SignerConfig::LocalIdentity",
+    "PendingSyncOperation::from_publish_payload",
+    ".enqueue_pending_operation(",
+    "INSERT INTO local_outbox",
+    "UPDATE local_outbox",
+    "DELETE FROM local_outbox",
+    "publish_with_identity",
+    "publish_draft_with_identity",
+    "publish_order_request_with_identity",
+    "publish_order_decision_with_identity",
+    "publish_order_revision_proposal_with_identity",
+    "publish_order_revision_decision_with_identity",
+    "publish_order_cancellation_with_identity",
+    "publish_fulfillment_update_with_identity",
+    "publish_buyer_receipt_with_identity",
+];
+
+const LEGACY_SDK_BOUNDARY_ALLOWLIST: &[LegacySdkBoundaryAllowlistEntry] = &[
+    LegacySdkBoundaryAllowlistEntry {
+        path: "crates/desktop/src/runtime.rs",
+        pattern: "SdkDirectRelayAppSyncTransport",
+        owner: "rpv1-app-sdk-refactor.07",
+        reason: "desktop runtime still owns deferred direct relay publish transport for unmigrated publish workflows",
+        removal_condition: "remove when farm, listing, order, fulfillment, and receipt publish workflows enqueue through AppSdkRuntime",
+    },
+    LegacySdkBoundaryAllowlistEntry {
+        path: "crates/desktop/src/runtime.rs",
+        pattern: "RadrootsSdkClient",
+        owner: "rpv1-app-sdk-refactor.07",
+        reason: "desktop runtime still constructs the legacy direct publish client for unmigrated publish workflows",
+        removal_condition: "remove when direct publish workflows no longer construct SDK clients outside AppSdkRuntime",
+    },
+    LegacySdkBoundaryAllowlistEntry {
+        path: "crates/desktop/src/runtime.rs",
+        pattern: "RadrootsSdkConfig",
+        owner: "rpv1-app-sdk-refactor.07",
+        reason: "desktop runtime still configures the legacy direct publish client for unmigrated publish workflows",
+        removal_condition: "remove when direct publish workflows no longer configure SDK clients outside AppSdkRuntime",
+    },
+    LegacySdkBoundaryAllowlistEntry {
+        path: "crates/desktop/src/runtime.rs",
+        pattern: "SdkTransportMode::RelayDirect",
+        owner: "rpv1-app-sdk-refactor.07",
+        reason: "desktop runtime still uses relay direct publish transport for deferred workflow migration",
+        removal_condition: "remove when all publish workflows route through SDK canonical outbox and sync APIs",
+    },
+    LegacySdkBoundaryAllowlistEntry {
+        path: "crates/desktop/src/runtime.rs",
+        pattern: "SignerConfig::LocalIdentity",
+        owner: "rpv1-app-sdk-refactor.07",
+        reason: "desktop runtime still configures direct local signing for deferred workflow migration",
+        removal_condition: "remove when publish signing is mediated by AppSdkRuntime and SDK signer adapters",
+    },
+    LegacySdkBoundaryAllowlistEntry {
+        path: "crates/desktop/src/runtime.rs",
+        pattern: "PendingSyncOperation::from_publish_payload",
+        owner: "rpv1-app-sdk-refactor.07",
+        reason: "desktop runtime still creates legacy local outbox publish work for unmigrated workflows",
+        removal_condition: "remove when app publish workflows write SDK canonical outbox requests instead of app local_outbox operations",
+    },
+    LegacySdkBoundaryAllowlistEntry {
+        path: "crates/desktop/src/runtime.rs",
+        pattern: "publish_with_identity",
+        owner: "rpv1-app-sdk-refactor.07",
+        reason: "desktop runtime still calls legacy direct SDK farm and listing publish APIs",
+        removal_condition: "remove when farm profile and listing publish workflows enqueue through AppSdkRuntime",
+    },
+    LegacySdkBoundaryAllowlistEntry {
+        path: "crates/desktop/src/runtime.rs",
+        pattern: "publish_order_request_with_identity",
+        owner: "rpv1-app-sdk-refactor.07",
+        reason: "desktop runtime still calls legacy direct SDK order request publish APIs",
+        removal_condition: "remove when buyer order request publish workflow enqueues through AppSdkRuntime",
+    },
+    LegacySdkBoundaryAllowlistEntry {
+        path: "crates/desktop/src/runtime.rs",
+        pattern: "publish_order_decision_with_identity",
+        owner: "rpv1-app-sdk-refactor.07",
+        reason: "desktop runtime still calls legacy direct SDK order decision publish APIs",
+        removal_condition: "remove when seller order decision publish workflow enqueues through AppSdkRuntime",
+    },
+    LegacySdkBoundaryAllowlistEntry {
+        path: "crates/desktop/src/runtime.rs",
+        pattern: "publish_order_revision_proposal_with_identity",
+        owner: "rpv1-app-sdk-refactor.07",
+        reason: "desktop runtime still calls legacy direct SDK order revision proposal publish APIs",
+        removal_condition: "remove when seller order revision proposal workflow enqueues through AppSdkRuntime",
+    },
+    LegacySdkBoundaryAllowlistEntry {
+        path: "crates/desktop/src/runtime.rs",
+        pattern: "publish_order_revision_decision_with_identity",
+        owner: "rpv1-app-sdk-refactor.07",
+        reason: "desktop runtime still calls legacy direct SDK order revision decision publish APIs",
+        removal_condition: "remove when buyer order revision decision workflow enqueues through AppSdkRuntime",
+    },
+    LegacySdkBoundaryAllowlistEntry {
+        path: "crates/desktop/src/runtime.rs",
+        pattern: "publish_order_cancellation_with_identity",
+        owner: "rpv1-app-sdk-refactor.07",
+        reason: "desktop runtime still calls legacy direct SDK order cancellation publish APIs",
+        removal_condition: "remove when buyer order cancellation workflow enqueues through AppSdkRuntime",
+    },
+    LegacySdkBoundaryAllowlistEntry {
+        path: "crates/desktop/src/runtime.rs",
+        pattern: "publish_fulfillment_update_with_identity",
+        owner: "rpv1-app-sdk-refactor.07",
+        reason: "desktop runtime still calls legacy direct SDK fulfillment publish APIs",
+        removal_condition: "remove when seller fulfillment workflow enqueues through AppSdkRuntime",
+    },
+    LegacySdkBoundaryAllowlistEntry {
+        path: "crates/desktop/src/runtime.rs",
+        pattern: "publish_buyer_receipt_with_identity",
+        owner: "rpv1-app-sdk-refactor.07",
+        reason: "desktop runtime still calls legacy direct SDK receipt publish APIs",
+        removal_condition: "remove when buyer receipt workflow enqueues through AppSdkRuntime",
+    },
+    LegacySdkBoundaryAllowlistEntry {
+        path: "crates/sync/src/publish.rs",
+        pattern: "SdkTransportMode::RelayDirect",
+        owner: "rpv1-app-sdk-refactor.07",
+        reason: "sync payload metadata still marks legacy app local outbox publish work as relay direct",
+        removal_condition: "remove when app sync publish payloads are replaced by SDK canonical outbox requests",
+    },
+    LegacySdkBoundaryAllowlistEntry {
+        path: "crates/sync/src/publish.rs",
+        pattern: "publish_draft_with_identity",
+        owner: "rpv1-app-sdk-refactor.07",
+        reason: "sync payload metadata still names legacy farm and listing SDK publish operations",
+        removal_condition: "remove when farm and listing publish payload metadata is replaced by SDK canonical outbox requests",
+    },
+    LegacySdkBoundaryAllowlistEntry {
+        path: "crates/sync/src/publish.rs",
+        pattern: "publish_order_request_with_identity",
+        owner: "rpv1-app-sdk-refactor.07",
+        reason: "sync payload metadata still names legacy order request SDK publish operations",
+        removal_condition: "remove when buyer order request publish payload metadata is replaced by SDK canonical outbox requests",
+    },
+    LegacySdkBoundaryAllowlistEntry {
+        path: "crates/sync/src/publish.rs",
+        pattern: "publish_order_decision_with_identity",
+        owner: "rpv1-app-sdk-refactor.07",
+        reason: "sync payload metadata still names legacy order decision SDK publish operations",
+        removal_condition: "remove when seller order decision publish payload metadata is replaced by SDK canonical outbox requests",
+    },
+    LegacySdkBoundaryAllowlistEntry {
+        path: "crates/sync/src/publish.rs",
+        pattern: "publish_order_revision_proposal_with_identity",
+        owner: "rpv1-app-sdk-refactor.07",
+        reason: "sync payload metadata still names legacy order revision proposal SDK publish operations",
+        removal_condition: "remove when order revision proposal payload metadata is replaced by SDK canonical outbox requests",
+    },
+    LegacySdkBoundaryAllowlistEntry {
+        path: "crates/sync/src/publish.rs",
+        pattern: "publish_order_revision_decision_with_identity",
+        owner: "rpv1-app-sdk-refactor.07",
+        reason: "sync payload metadata still names legacy order revision decision SDK publish operations",
+        removal_condition: "remove when order revision decision payload metadata is replaced by SDK canonical outbox requests",
+    },
+    LegacySdkBoundaryAllowlistEntry {
+        path: "crates/sync/src/publish.rs",
+        pattern: "publish_order_cancellation_with_identity",
+        owner: "rpv1-app-sdk-refactor.07",
+        reason: "sync payload metadata still names legacy order cancellation SDK publish operations",
+        removal_condition: "remove when order cancellation payload metadata is replaced by SDK canonical outbox requests",
+    },
+    LegacySdkBoundaryAllowlistEntry {
+        path: "crates/sync/src/publish.rs",
+        pattern: "publish_fulfillment_update_with_identity",
+        owner: "rpv1-app-sdk-refactor.07",
+        reason: "sync payload metadata still names legacy fulfillment SDK publish operations",
+        removal_condition: "remove when fulfillment payload metadata is replaced by SDK canonical outbox requests",
+    },
+    LegacySdkBoundaryAllowlistEntry {
+        path: "crates/sync/src/publish.rs",
+        pattern: "publish_buyer_receipt_with_identity",
+        owner: "rpv1-app-sdk-refactor.07",
+        reason: "sync payload metadata still names legacy receipt SDK publish operations",
+        removal_condition: "remove when receipt payload metadata is replaced by SDK canonical outbox requests",
+    },
+    LegacySdkBoundaryAllowlistEntry {
+        path: "crates/store/src/lib.rs",
+        pattern: ".enqueue_pending_operation(",
+        owner: "rpv1-app-sdk-refactor.07",
+        reason: "store facade still accepts legacy app local_outbox publish operations for deferred workflows",
+        removal_condition: "remove when app local_outbox enqueue is replaced by SDK canonical outbox enqueue APIs",
+    },
+    LegacySdkBoundaryAllowlistEntry {
+        path: "crates/store/src/sync.rs",
+        pattern: "INSERT INTO local_outbox",
+        owner: "rpv1-app-sdk-refactor.07",
+        reason: "store sync implementation still writes legacy app local_outbox rows for deferred workflows",
+        removal_condition: "remove when app local_outbox storage is retired after SDK canonical outbox migration",
+    },
+    LegacySdkBoundaryAllowlistEntry {
+        path: "crates/store/src/sync.rs",
+        pattern: "UPDATE local_outbox",
+        owner: "rpv1-app-sdk-refactor.07",
+        reason: "store sync implementation still updates legacy app local_outbox rows for deferred workflows",
+        removal_condition: "remove when app local_outbox storage is retired after SDK canonical outbox migration",
+    },
+    LegacySdkBoundaryAllowlistEntry {
+        path: "crates/store/src/sync.rs",
+        pattern: "DELETE FROM local_outbox",
+        owner: "rpv1-app-sdk-refactor.07",
+        reason: "store sync implementation still deletes legacy app local_outbox rows for deferred workflows",
+        removal_condition: "remove when app local_outbox storage is retired after SDK canonical outbox migration",
+    },
+];
 
 #[test]
 fn desktop_menu_source_uses_localized_copy_paths() {
@@ -1327,6 +1674,86 @@ fn app_production_trade_event_kinds_use_shared_constants() {
     );
 }
 
+#[test]
+fn app_migrated_sdk_paths_do_not_use_direct_publish_boundaries() {
+    let app_root = app_root();
+
+    for relative_path in SDK_MIGRATED_SOURCE_PATHS {
+        let path = app_root.join(relative_path);
+        let source = read_source_path(path.as_path());
+        let production_source = production_source_without_tests(&source);
+
+        for forbidden in FORBIDDEN_SDK_MIGRATED_BOUNDARY_PATTERNS {
+            assert!(
+                !production_source.contains(forbidden.pattern),
+                "{relative_path} contains forbidden SDK boundary pattern `{}`: {}",
+                forbidden.pattern,
+                forbidden.reason
+            );
+        }
+    }
+}
+
+#[test]
+fn app_legacy_sdk_boundary_allowlist_entries_are_complete_and_current() {
+    let app_root = app_root();
+    let mut entries = BTreeSet::new();
+
+    for entry in LEGACY_SDK_BOUNDARY_ALLOWLIST {
+        assert!(
+            entries.insert((entry.path, entry.pattern)),
+            "duplicate legacy SDK boundary allowlist entry {} `{}`",
+            entry.path,
+            entry.pattern
+        );
+        assert!(
+            !entry.owner.trim().is_empty(),
+            "{} `{}` is missing an owner",
+            entry.path,
+            entry.pattern
+        );
+        assert!(
+            !entry.reason.trim().is_empty(),
+            "{} `{}` is missing a reason",
+            entry.path,
+            entry.pattern
+        );
+        assert!(
+            !entry.removal_condition.trim().is_empty(),
+            "{} `{}` is missing a removal condition",
+            entry.path,
+            entry.pattern
+        );
+
+        let source_path = app_root.join(entry.path);
+        let source = read_source_path(source_path.as_path());
+        let production_source = production_source_without_tests(&source);
+        assert!(
+            production_source.contains(entry.pattern),
+            "{} allowlists legacy SDK boundary pattern `{}` that is no longer present",
+            entry.path,
+            entry.pattern
+        );
+    }
+}
+
+#[test]
+fn app_legacy_sdk_boundary_usage_is_allowlisted() {
+    for (relative_path, source) in app_rust_source_files() {
+        let production_source = production_source_without_tests(&source);
+
+        for pattern in LEGACY_SDK_BOUNDARY_PATTERNS {
+            if production_source.contains(pattern) {
+                assert!(
+                    legacy_sdk_boundary_allowlist_contains(relative_path.as_str(), pattern),
+                    "{} contains unallowlisted legacy SDK boundary pattern `{pattern}`",
+                    relative_path
+                );
+            }
+        }
+    }
+}
+
 fn extract_string_literals(source: &str) -> BTreeSet<&str> {
     let mut literals = BTreeSet::new();
     let bytes = source.as_bytes();
@@ -1363,6 +1790,50 @@ fn production_source_without_tests(source: &str) -> &str {
     source
         .split_once(TEST_MODULE_SENTINEL)
         .map_or(source, |(production_source, _)| production_source)
+}
+
+fn legacy_sdk_boundary_allowlist_contains(path: &str, pattern: &str) -> bool {
+    LEGACY_SDK_BOUNDARY_ALLOWLIST
+        .iter()
+        .any(|entry| entry.path == path && entry.pattern == pattern)
+}
+
+fn read_source_path(path: &Path) -> String {
+    fs::read_to_string(path)
+        .unwrap_or_else(|error| panic!("failed to read source {}: {error}", path.display()))
+}
+
+fn app_root() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .and_then(|path| path.parent())
+        .expect("desktop crate should live under app crates directory")
+        .to_path_buf()
+}
+
+fn app_rust_source_files() -> Vec<(String, String)> {
+    let app_root = app_root();
+    let mut paths = Vec::new();
+    collect_rust_source_files(app_root.join("crates").as_path(), &mut paths);
+    paths.sort();
+    paths
+        .into_iter()
+        .filter(|path| path.file_name().and_then(|name| name.to_str()) != Some("source_guards.rs"))
+        .map(|path| {
+            let relative_path = path
+                .strip_prefix(app_root.as_path())
+                .unwrap_or_else(|error| {
+                    panic!(
+                        "failed to derive app-relative source path {}: {error}",
+                        path.display()
+                    )
+                })
+                .to_string_lossy()
+                .replace('\\', "/");
+            let source = read_source_path(path.as_path());
+            (relative_path, source)
+        })
+        .collect()
 }
 
 fn contains_numeric_token(source: &str, literal: &str) -> bool {

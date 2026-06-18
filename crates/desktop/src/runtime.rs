@@ -9956,7 +9956,9 @@ mod tests {
         RadrootsNostrMemoryAccountStore, RadrootsNostrSecretVaultMemory, RadrootsSecretVault,
         account_secret_slot,
     };
-    use radroots_sdk::protocol::events::RadrootsNostrEventPtr;
+    use radroots_sdk::protocol::events::{
+        RadrootsNostrEvent as SdkRadrootsNostrEvent, RadrootsNostrEventPtr,
+    };
     use radroots_sdk::protocol::order::{
         RadrootsOrderCancellation, RadrootsOrderDecision, RadrootsOrderDecisionOutcome,
         RadrootsOrderEconomicItem, RadrootsOrderEconomics, RadrootsOrderFulfillmentState,
