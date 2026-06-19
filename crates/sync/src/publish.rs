@@ -851,7 +851,7 @@ mod tests {
     }
 
     #[test]
-    fn publish_work_kinds_keep_payment_and_settlement_events_reserved() {
+    fn publish_work_kinds_keep_payment_and_checkout_surfaces_reserved() {
         let work_kinds = [
             AppPublishWorkKind::FarmProfile,
             AppPublishWorkKind::Listing,
@@ -863,15 +863,27 @@ mod tests {
             AppPublishWorkKind::OrderFulfillment,
             AppPublishWorkKind::OrderReceipt,
         ];
+        let reserved_publish_tokens = [
+            "payment",
+            "settlement",
+            "checkout",
+            "refund",
+            "wallet",
+            "invoice",
+            "processor",
+            "provider",
+            "escrow",
+            "custody",
+        ];
 
         assert_eq!(work_kinds.len(), 9);
         for work_kind in work_kinds {
             let storage_key = work_kind.storage_key();
             let sdk_operation = work_kind.sdk_operation();
-            assert!(!storage_key.contains("payment"));
-            assert!(!storage_key.contains("settlement"));
-            assert!(!sdk_operation.contains("payment"));
-            assert!(!sdk_operation.contains("settlement"));
+            for reserved_token in reserved_publish_tokens {
+                assert!(!storage_key.contains(reserved_token));
+                assert!(!sdk_operation.contains(reserved_token));
+            }
         }
     }
 
