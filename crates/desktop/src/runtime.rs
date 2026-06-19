@@ -9,10 +9,11 @@ use chrono::{DateTime, Duration, Utc};
 use radroots_studio_app_core::{
     AppBuildIdentity, AppDesktopRuntimePaths, AppRuntimeCapture, AppRuntimeMode,
     AppRuntimePathsError, AppRuntimeSnapshot, AppSdkConfig, AppSdkDiagnostics,
-    AppSdkFarmPublishRequest, AppSdkLifecycleState, AppSdkOrderSubmitRequest,
-    AppSdkProjectionLifecycleState, AppSdkRelayUrlPolicy, AppSdkRuntime, AppSdkRuntimeError,
-    AppSdkRuntimeIssue, AppSdkRuntimeStatus, AppSdkStoragePaths, AppSdkWorkflowReceipt,
-    AppSharedAccountsPaths, PackDayExportWriteError, prepare_pack_day_export_bundle_at_data_root,
+    AppSdkFarmPublishRequest, AppSdkLifecycleState, AppSdkOrderDecisionRequest,
+    AppSdkOrderSubmitRequest, AppSdkProjectionLifecycleState, AppSdkRelayUrlPolicy, AppSdkRuntime,
+    AppSdkRuntimeError, AppSdkRuntimeIssue, AppSdkRuntimeStatus, AppSdkStoragePaths,
+    AppSdkWorkflowReceipt, AppSharedAccountsPaths, PackDayExportWriteError,
+    prepare_pack_day_export_bundle_at_data_root,
     shared_local_events_database_path_from_shared_accounts, write_prepared_pack_day_export_bundle,
 };
 use radroots_studio_app_remote_signer::{
@@ -116,9 +117,9 @@ use radroots_sdk::protocol::order::{
     RadrootsOrderRevisionProposal,
 };
 use radroots_sdk::{
-    FARM_PUBLISH_OPERATION_KIND, ORDER_SUBMIT_OPERATION_KIND, RadrootsSdkClient, RadrootsSdkConfig,
-    RelayConfig, SdkEnvironment, SdkPublishReceipt, SdkTransportMode, SdkTransportReceipt,
-    SignerConfig,
+    FARM_PUBLISH_OPERATION_KIND, ORDER_DECISION_OPERATION_KIND, ORDER_SUBMIT_OPERATION_KIND,
+    RadrootsSdkClient, RadrootsSdkConfig, RelayConfig, SdkEnvironment, SdkPublishReceipt,
+    SdkTransportMode, SdkTransportReceipt, SignerConfig,
 };
 use radroots_sql_core::SqliteExecutor;
 use radroots_trade::listing::parse_public_listing_address;
@@ -224,6 +225,7 @@ pub enum AppSellerOrderDecisionCommand {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 struct ResolvedAppSellerOrderRequest {
+    request_event: SdkRadrootsNostrEvent,
     request_event_id: String,
     request_author_pubkey: String,
     listing_event_id: Option<String>,
@@ -2816,15 +2818,14 @@ impl DesktopAppRuntimeState {
         command: AppSellerOrderDecisionCommand,
     ) -> Result<bool, AppSqliteError> {
         let payload = self.prepare_seller_order_decision(order_id, command)?;
-        let operation = PendingSyncOperation::from_publish_payload(
-            AppPublishPayload::OrderDecision(payload),
-            current_utc_timestamp(),
-        )
-        .map_err(|_| AppSqliteError::InvalidProjection {
-            reason: "seller order decision publish payload must serialize",
-        })?;
-        let _ = self.enqueue_selected_account_sync_operation_once(operation)?;
-        self.attempt_sync(SyncTrigger::ManualRefresh)
+        let source_record_id = order_decision_sdk_source_record_id(&payload);
+        self.enqueue_order_decision_payload_via_sdk(
+            &payload,
+            AppSdkMigrationReceiptSourceKind::LocalOutbox,
+            source_record_id.as_str(),
+        )?;
+        let _ = self.refresh_selected_account_sync()?;
+        Ok(true)
     }
 
     fn prepare_seller_order_fulfillment(
@@ -5332,6 +5333,57 @@ impl DesktopAppRuntimeState {
         }
     }
 
+    fn enqueue_order_decision_payload_via_sdk(
+        &self,
+        payload: &AppOrderDecisionPublishPayload,
+        source_kind: AppSdkMigrationReceiptSourceKind,
+        source_record_id: &str,
+    ) -> Result<(), AppSqliteError> {
+        let operation_kind = ORDER_DECISION_OPERATION_KIND;
+        let request_evidence = self.resolve_seller_order_request_evidence(payload.app_order_id)?;
+        let actor_pubkey = self
+            .local_signing_identity_for_publish_payload(&AppPublishPayload::OrderDecision(
+                payload.clone(),
+            ))
+            .and_then(|identity| {
+                let actor_pubkey = identity.public_key_hex();
+                let target_relays = normalized_app_sync_relay_urls(&self.nostr_relay_urls)?;
+                let request = AppSdkOrderDecisionRequest {
+                    actor_account_id: payload.context.account_id.clone(),
+                    actor_pubkey: actor_pubkey.clone(),
+                    signer_keys: identity.into_keys(),
+                    request_event: request_evidence.request_event,
+                    request_event_ptr: order_decision_sdk_request_event_ptr(
+                        payload,
+                        target_relays.as_slice(),
+                    )?,
+                    decision: order_decision_publish_payload_to_sdk_decision(payload)?,
+                    relay_url_policy: sdk_relay_url_policy_for_targets(target_relays.as_slice()),
+                    target_relays,
+                    idempotency_key: Some(sdk_idempotency_key(source_record_id)),
+                };
+                self.enqueue_app_sdk_order_decision(request)
+                    .map(|receipt| (actor_pubkey, receipt))
+                    .map_err(sync_transport_error_from_sdk_runtime_error)
+            });
+        match actor_pubkey {
+            Ok((actor_pubkey, receipt)) => self.record_app_sdk_migration_success(
+                source_kind,
+                source_record_id,
+                operation_kind,
+                actor_pubkey.as_str(),
+                &receipt,
+            ),
+            Err(error) => self.record_app_sdk_migration_failure(
+                source_kind,
+                source_record_id,
+                operation_kind,
+                None,
+                sync_transport_error_detail_json(&error),
+            ),
+        }
+    }
+
     fn local_signing_identity_for_publish_payload(
         &self,
         payload: &AppPublishPayload,
@@ -5354,6 +5406,13 @@ impl DesktopAppRuntimeState {
         request: AppSdkOrderSubmitRequest,
     ) -> Result<AppSdkWorkflowReceipt, AppSdkRuntimeError> {
         self.with_app_sdk_runtime(|runtime| runtime.enqueue_order_submit(request))
+    }
+
+    fn enqueue_app_sdk_order_decision(
+        &self,
+        request: AppSdkOrderDecisionRequest,
+    ) -> Result<AppSdkWorkflowReceipt, AppSdkRuntimeError> {
+        self.with_app_sdk_runtime(|runtime| runtime.enqueue_order_decision(request))
     }
 
     fn with_app_sdk_runtime<T>(
@@ -7624,6 +7683,10 @@ fn farm_publish_source_record(
         })
 }
 
+fn order_decision_sdk_source_record_id(payload: &AppOrderDecisionPublishPayload) -> String {
+    format!("app:order_decision:{}", payload.app_order_id)
+}
+
 fn sdk_relay_url_policy_for_targets(target_relays: &[String]) -> AppSdkRelayUrlPolicy {
     if target_relays
         .iter()
@@ -7788,20 +7851,9 @@ async fn publish_app_payload(
         AppPublishPayload::OrderRequest(_) => Err(AppSyncTransportError::failed(
             "order request publish uses AppSdkRuntime",
         )),
-        AppPublishPayload::OrderDecision(payload) => {
-            let decision = order_decision_publish_payload_to_sdk_decision(payload)?;
-            let request_event_id = publish_event_id(payload.request_event_id.as_str())?;
-            client
-                .order()
-                .publish_order_decision_with_identity(
-                    identity,
-                    &request_event_id,
-                    &request_event_id,
-                    &decision,
-                )
-                .await
-                .map_err(|error| AppSyncTransportError::failed(error.to_string()))
-        }
+        AppPublishPayload::OrderDecision(_) => Err(AppSyncTransportError::failed(
+            "order decision publish uses AppSdkRuntime",
+        )),
         AppPublishPayload::OrderRevisionProposal(payload) => {
             let proposal = order_revision_proposal_publish_payload_to_sdk_revision(payload)?;
             let request_event_id = publish_event_id(payload.request_event_id.as_str())?;
@@ -8109,6 +8161,22 @@ fn order_request_sdk_target_relays(
         return Ok(known_relays);
     }
     Ok(selected_relays)
+}
+
+fn order_decision_sdk_request_event_ptr(
+    payload: &AppOrderDecisionPublishPayload,
+    target_relays: &[String],
+) -> Result<RadrootsNostrEventPtr, AppSyncTransportError> {
+    let request_event_id = payload.request_event_id.trim();
+    if request_event_id.is_empty() {
+        return Err(AppSyncTransportError::failed(
+            "order decision publish requires request event id",
+        ));
+    }
+    Ok(RadrootsNostrEventPtr {
+        id: request_event_id.to_owned(),
+        relays: target_relays.first().cloned(),
+    })
 }
 
 #[cfg(test)]
@@ -10165,6 +10233,7 @@ fn insert_seller_order_request_evidence(
     matched_requests
         .entry(event.id.clone())
         .or_insert_with(|| ResolvedAppSellerOrderRequest {
+            request_event: event.clone(),
             request_event_id: event.id.clone(),
             request_author_pubkey: event.author.clone(),
             listing_event_id: listing_event_id_from_tags(&event.tags),
@@ -10485,13 +10554,15 @@ mod tests {
         LocalEventsStore, LocalRecordFamily, LocalRecordStatus, PublishOutboxStatus,
         RelayDeliveryEvidence, SourceRuntime,
     };
-    use radroots_nostr::prelude::radroots_nostr_build_event;
+    use radroots_nostr::prelude::{
+        RadrootsNostrKeys, RadrootsNostrSecretKey, RadrootsNostrTimestamp,
+        radroots_event_from_nostr, radroots_nostr_build_event,
+    };
     use radroots_nostr_accounts::prelude::{
         RadrootsNostrAccountsManager, RadrootsNostrFileAccountStore,
         RadrootsNostrMemoryAccountStore, RadrootsNostrSecretVaultMemory, RadrootsSecretVault,
         account_secret_slot,
     };
-    use radroots_sdk::ORDER_SUBMIT_OPERATION_KIND;
     use radroots_sdk::protocol::events::{
         RadrootsNostrEvent as SdkRadrootsNostrEvent, RadrootsNostrEventPtr,
     };
@@ -10504,6 +10575,7 @@ mod tests {
         RadrootsOrderRevisionOutcome, RadrootsOrderRevisionProposal,
         RadrootsOrderSettlementDecision, RadrootsOrderSettlementOutcome,
     };
+    use radroots_sdk::{ORDER_DECISION_OPERATION_KIND, ORDER_SUBMIT_OPERATION_KIND};
     use radroots_sql_core::{SqlExecutor, SqliteExecutor};
     use radroots_trade::order::radroots_order_economics_digest;
     use serde_json::json;
@@ -10513,6 +10585,11 @@ mod tests {
     use uuid::Uuid;
 
     use crate::accounts::DesktopLocalIdentityImportRequest;
+
+    const SDK_TEST_BUYER_SECRET_KEY_HEX: &str =
+        "10c5304d6c9ae3a1a16f7860f1cc8f5e3a76225a2663b3a989a0d775919b7df5";
+    const SDK_TEST_BUYER_PUBLIC_KEY_HEX: &str =
+        "585591529da0bab31b3b1b1f986611cf5f435dca84f978c89ee8a40cca7103df";
 
     use super::{
         APP_DATABASE_FILE_NAME, DesktopAppRuntime, DesktopAppRuntimeActivityContextError,
@@ -11064,7 +11141,7 @@ mod tests {
     }
 
     #[test]
-    fn runtime_direct_relay_transport_publishes_typed_order_decision_work() {
+    fn runtime_direct_relay_transport_rejects_typed_order_decision_work() {
         let relay = ThreadedAckRelay::spawn();
         let manager = RadrootsNostrAccountsManager::new_in_memory();
         let account_id = manager
@@ -11097,24 +11174,20 @@ mod tests {
         let mut transport =
             SdkDirectRelayAppSyncTransport::with_relay_urls(manager, vec![relay.url().to_owned()]);
 
-        let result = transport
+        let error = transport
             .sync(AppSyncRequest {
                 trigger: SyncTrigger::ManualRefresh,
                 checkpoint: SyncCheckpointStatus::never_synced(),
                 pending_operations: vec![operation],
                 known_conflicts: Vec::new(),
             })
-            .expect("direct relay order decision publish should succeed");
+            .expect_err("direct relay order decision publish should use AppSdkRuntime");
 
-        assert_eq!(result.run_status, AppSyncRunStatus::Succeeded);
-        assert_eq!(result.pushed_operation_count, 1);
-        assert_eq!(result.published_receipts.len(), 1);
-        assert_eq!(result.published_receipts[0].event_kind, 3423);
-        assert_eq!(
-            result.published_receipts[0].event_pubkey,
-            identity.public_key_hex()
+        assert_migrated_payload_uses_sdk_runtime(
+            error,
+            "order decision publish uses AppSdkRuntime",
         );
-        assert_eq!(relay.event_count(), 1);
+        assert_eq!(relay.event_count(), 0);
     }
 
     #[test]
@@ -15908,10 +15981,10 @@ mod tests {
     }
 
     #[test]
-    fn runtime_publishes_seller_order_accept_and_projects_signed_evidence() {
+    fn runtime_enqueues_seller_order_accept_via_sdk() {
         let relay = ThreadedAckRelay::spawn();
         let (runtime, paths, order_id, _product_id, seller_pubkey, _buyer_pubkey) =
-            seller_order_decision_runtime("seller_order_accept_publish", 6, 2);
+            seller_order_decision_sdk_runtime("seller_order_accept_publish", 6, 2);
         install_direct_relay_sync_transport(&runtime, &relay);
 
         assert!(
@@ -15920,41 +15993,27 @@ mod tests {
                 .expect("seller order accept should publish")
         );
 
-        assert_eq!(persisted_order_status(&runtime, order_id), "scheduled");
-        assert_eq!(relay.event_count(), 1);
-        assert!(shared_local_event_records(&paths).iter().any(|record| {
+        assert_eq!(persisted_order_status(&runtime, order_id), "needs_action");
+        assert_eq!(relay.event_count(), 0);
+        assert!(!shared_local_event_records(&paths).iter().any(|record| {
             record.family == LocalRecordFamily::SignedEvent
                 && record.event_kind == Some(3423)
                 && record.event_pubkey.as_deref() == Some(seller_pubkey.as_str())
         }));
-        let decision_event = shared_seller_order_decision_event(&paths, seller_pubkey.as_str());
-        let envelope = radroots_sdk::protocol::order::parse_order_decision(&decision_event)
-            .expect("app seller order accept should parse as canonical order decision");
-        assert_eq!(envelope.payload.order_id, "seller-order-decision-1");
-        assert!(matches!(
-            envelope.payload.decision,
-            RadrootsOrderDecisionOutcome::Accepted { .. }
-        ));
-        let request_event_id = signed_order_request_event_id("seller-order-decision-1");
-        assert!(event_has_tag(
-            &decision_event,
-            "e_root",
-            request_event_id.as_str()
-        ));
-        assert!(event_has_tag(
-            &decision_event,
-            "e_prev",
-            request_event_id.as_str()
-        ));
+        assert_order_decision_sdk_migration_receipt(
+            &runtime,
+            order_id,
+            AppSdkMigrationState::Enqueued,
+        );
 
         cleanup_bootstrapped_runtime_paths(&paths);
     }
 
     #[test]
-    fn runtime_publishes_seller_order_decline_and_projects_signed_evidence() {
+    fn runtime_enqueues_seller_order_decline_via_sdk() {
         let relay = ThreadedAckRelay::spawn();
         let (runtime, paths, order_id, _product_id, seller_pubkey, _buyer_pubkey) =
-            seller_order_decision_runtime("seller_order_decline_publish", 6, 2);
+            seller_order_decision_sdk_runtime("seller_order_decline_publish", 6, 2);
         install_direct_relay_sync_transport(&runtime, &relay);
 
         assert!(
@@ -15963,31 +16022,18 @@ mod tests {
                 .expect("seller order decline should publish")
         );
 
-        assert_eq!(persisted_order_status(&runtime, order_id), "declined");
-        assert_eq!(relay.event_count(), 1);
-        assert!(shared_local_event_records(&paths).iter().any(|record| {
+        assert_eq!(persisted_order_status(&runtime, order_id), "needs_action");
+        assert_eq!(relay.event_count(), 0);
+        assert!(!shared_local_event_records(&paths).iter().any(|record| {
             record.family == LocalRecordFamily::SignedEvent
                 && record.event_kind == Some(3423)
                 && record.event_pubkey.as_deref() == Some(seller_pubkey.as_str())
         }));
-        let decision_event = shared_seller_order_decision_event(&paths, seller_pubkey.as_str());
-        let envelope = radroots_sdk::protocol::order::parse_order_decision(&decision_event)
-            .expect("app seller order decline should parse as canonical order decision");
-        let RadrootsOrderDecisionOutcome::Declined { reason } = envelope.payload.decision else {
-            panic!("expected declined decision");
-        };
-        assert_eq!(reason, "not available");
-        let request_event_id = signed_order_request_event_id("seller-order-decision-1");
-        assert!(event_has_tag(
-            &decision_event,
-            "e_root",
-            request_event_id.as_str()
-        ));
-        assert!(event_has_tag(
-            &decision_event,
-            "e_prev",
-            request_event_id.as_str()
-        ));
+        assert_order_decision_sdk_migration_receipt(
+            &runtime,
+            order_id,
+            AppSdkMigrationState::Enqueued,
+        );
 
         cleanup_bootstrapped_runtime_paths(&paths);
     }
@@ -21526,6 +21572,67 @@ mod tests {
         )
     }
 
+    fn seller_order_decision_sdk_runtime(
+        label: &str,
+        stock_count: u32,
+        order_quantity: u32,
+    ) -> (
+        DesktopAppRuntime,
+        AppDesktopRuntimePaths,
+        OrderId,
+        ProductId,
+        String,
+        String,
+    ) {
+        let (runtime, paths) = bootstrapped_runtime(label);
+        let (account_id, farm_id) = provision_ready_farmer_account(&runtime);
+        runtime.lock_state_mut().nostr_relay_urls = vec!["wss://relay.example".to_owned()];
+        let seller_pubkey = runtime
+            .lock_state()
+            .accounts_manager
+            .as_ref()
+            .expect("accounts manager")
+            .resolve_account_selector(account_id.as_str())
+            .expect("selected seller account should resolve")
+            .public_identity
+            .public_key_hex;
+        let buyer_pubkey = SDK_TEST_BUYER_PUBLIC_KEY_HEX.to_owned();
+        let product_id = ProductId::new();
+        let trade_order_id = "seller-order-decision-1";
+        let order_id = projected_order_id_from_trade_request(trade_order_id, buyer_pubkey.as_str());
+        let farm_key = super::d_tag_from_uuid(farm_id.as_uuid());
+        let listing_key = super::d_tag_from_uuid(product_id.as_uuid());
+        let listing_addr = format!("30402:{seller_pubkey}:{listing_key}");
+        let listing_event_id = signed_listing_event_id("seller-order-decision");
+        append_app_signed_listing_record(
+            &paths,
+            account_id.as_str(),
+            seller_pubkey.as_str(),
+            farm_key.as_str(),
+            listing_key.as_str(),
+            listing_event_id.as_str(),
+            stock_count,
+        );
+        append_verified_signed_order_request_record(
+            &paths,
+            trade_order_id,
+            listing_addr.as_str(),
+            listing_event_id.as_str(),
+            buyer_pubkey.as_str(),
+            seller_pubkey.as_str(),
+            order_quantity,
+        );
+
+        (
+            runtime,
+            paths,
+            order_id,
+            product_id,
+            seller_pubkey,
+            buyer_pubkey,
+        )
+    }
+
     fn publish_prior_relay_seller_order_accept(
         runtime: &DesktopAppRuntime,
         relay: &ThreadedAckRelay,
@@ -21776,6 +21883,95 @@ mod tests {
                 relay_delivery_json: Some(relay_delivery_json),
             })
             .expect("append signed order request");
+    }
+
+    fn append_verified_signed_order_request_record(
+        paths: &AppDesktopRuntimePaths,
+        trade_order_id: &str,
+        listing_addr: &str,
+        listing_event_id: &str,
+        buyer_pubkey: &str,
+        seller_pubkey: &str,
+        order_quantity: u32,
+    ) {
+        assert_eq!(buyer_pubkey, SDK_TEST_BUYER_PUBLIC_KEY_HEX);
+        let database_path = paths
+            .shared_local_events_database_path()
+            .expect("shared local events path");
+        if let Some(parent) = database_path.parent() {
+            fs::create_dir_all(parent).expect("shared local events directory should create");
+        }
+        let executor =
+            SqliteExecutor::open(database_path.as_path()).expect("open shared local events db");
+        let store = LocalEventsStore::new(executor);
+        store.migrate_up().expect("migrate shared local events");
+        let order = RadrootsOrderRequest {
+            order_id: test_order_id(trade_order_id),
+            listing_addr: test_listing_addr(listing_addr),
+            buyer_pubkey: test_pubkey(buyer_pubkey),
+            seller_pubkey: test_pubkey(seller_pubkey),
+            items: vec![RadrootsOrderItem {
+                bin_id: test_bin_id("seller-order-primary-bin"),
+                bin_count: order_quantity,
+            }],
+            economics: signed_order_request_economics(trade_order_id, order_quantity),
+        };
+        let parts = radroots_sdk::protocol::order::build_order_request_draft(
+            &RadrootsNostrEventPtr {
+                id: test_event_id_seed(listing_event_id),
+                relays: Some("wss://relay.example".to_owned()),
+            },
+            &order,
+        )
+        .expect("order request draft should build")
+        .into_wire_parts();
+        let secret_key = RadrootsNostrSecretKey::from_hex(SDK_TEST_BUYER_SECRET_KEY_HEX)
+            .expect("SDK test buyer secret key should parse");
+        let keys = RadrootsNostrKeys::new(secret_key);
+        let signed_event = radroots_nostr_build_event(parts.kind, parts.content, parts.tags)
+            .expect("order request event should build")
+            .custom_created_at(RadrootsNostrTimestamp::from_secs(1_774_000_010))
+            .sign_with_keys(&keys)
+            .expect("order request event should sign");
+        let event = radroots_event_from_nostr(&signed_event);
+        let record_id = format!("app:signed_event:order-request:{trade_order_id}");
+        let relay_delivery_json = RelayDeliveryEvidence::acknowledged(
+            ["wss://relay.example"],
+            ["wss://relay.example"],
+            ["wss://relay.example"],
+            Vec::new(),
+        )
+        .expect("acknowledged relay delivery evidence")
+        .to_json_value()
+        .expect("acknowledged relay delivery json");
+        store
+            .append_record(&LocalEventRecordInput {
+                record_id,
+                family: LocalRecordFamily::SignedEvent,
+                status: LocalRecordStatus::Published,
+                source_runtime: SourceRuntime::Test,
+                created_at_ms: 1_774_000_010_000,
+                inserted_at_ms: 1_774_000_010_001,
+                owner_account_id: None,
+                owner_pubkey: Some(event.author.clone()),
+                farm_id: None,
+                listing_addr: Some(listing_addr.to_owned()),
+                local_work_json: None,
+                event_id: Some(event.id.clone()),
+                event_kind: Some(i64::from(event.kind)),
+                event_pubkey: Some(event.author.clone()),
+                event_created_at: Some(i64::from(event.created_at)),
+                event_tags_json: Some(json!(event.tags.clone())),
+                event_content: Some(event.content.clone()),
+                event_sig: Some(event.sig.clone()),
+                raw_event_json: Some(
+                    serde_json::to_value(&event).expect("SDK test event should serialize"),
+                ),
+                outbox_status: PublishOutboxStatus::Acknowledged,
+                relay_set_fingerprint: Some("relay-set".to_owned()),
+                relay_delivery_json: Some(relay_delivery_json),
+            })
+            .expect("append verified signed order request");
     }
 
     fn signed_order_request_economics(
@@ -22698,23 +22894,6 @@ mod tests {
             .expect("shared local records should list")
     }
 
-    fn shared_seller_order_decision_event(
-        paths: &AppDesktopRuntimePaths,
-        seller_pubkey: &str,
-    ) -> SdkRadrootsNostrEvent {
-        let record = shared_local_event_records(paths)
-            .into_iter()
-            .find(|record| {
-                record.family == LocalRecordFamily::SignedEvent
-                    && record.event_kind == Some(3423)
-                    && record.event_pubkey.as_deref() == Some(seller_pubkey)
-            })
-            .expect("shared seller order decision record should exist");
-        signed_event_from_local_record(&record)
-            .expect("shared seller order decision record should decode")
-            .expect("shared seller order decision record should contain signed event")
-    }
-
     fn shared_order_events_by_kind(
         paths: &AppDesktopRuntimePaths,
         kind: i64,
@@ -22827,6 +23006,38 @@ mod tests {
             .expect("SDK migration receipt should exist");
         assert_eq!(receipt.source_record_id, source_record_id);
         assert_eq!(receipt.sdk_operation_kind, ORDER_SUBMIT_OPERATION_KIND);
+        assert_eq!(
+            receipt.migration_state, expected_state,
+            "receipt detail: {}",
+            receipt.detail_json
+        );
+        if expected_state == AppSdkMigrationState::Enqueued {
+            assert!(receipt.expected_event_id.is_some());
+            assert!(receipt.actor_pubkey.as_deref().is_some_and(is_hex_64));
+            assert!(!receipt.sdk_outbox_event_ids.is_empty());
+        }
+    }
+
+    fn assert_order_decision_sdk_migration_receipt(
+        runtime: &DesktopAppRuntime,
+        order_id: OrderId,
+        expected_state: AppSdkMigrationState,
+    ) {
+        let source_record_id = format!("app:order_decision:{order_id}");
+        let receipt = runtime
+            .lock_state()
+            .sqlite_store
+            .as_ref()
+            .expect("sqlite store")
+            .sdk_migration_receipt_repository()
+            .load_receipt(
+                AppSdkMigrationReceiptSourceKind::LocalOutbox,
+                source_record_id.as_str(),
+            )
+            .expect("SDK migration receipt should load")
+            .expect("SDK migration receipt should exist");
+        assert_eq!(receipt.source_record_id, source_record_id);
+        assert_eq!(receipt.sdk_operation_kind, ORDER_DECISION_OPERATION_KIND);
         assert_eq!(
             receipt.migration_state, expected_state,
             "receipt detail: {}",

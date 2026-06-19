@@ -6,7 +6,9 @@ use radroots_sdk::protocol::order::{
     RadrootsOrderEconomics, RadrootsOrderFulfillmentState, RadrootsOrderItem,
     RadrootsOrderRevisionOutcome,
 };
-use radroots_sdk::{FARM_PUBLISH_OPERATION_KIND, ORDER_SUBMIT_OPERATION_KIND};
+use radroots_sdk::{
+    FARM_PUBLISH_OPERATION_KIND, ORDER_DECISION_OPERATION_KIND, ORDER_SUBMIT_OPERATION_KIND,
+};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
@@ -46,7 +48,7 @@ impl AppPublishWorkKind {
             Self::FarmProfile => FARM_PUBLISH_OPERATION_KIND,
             Self::Listing => "listing.publish_draft_with_identity",
             Self::OrderRequest => ORDER_SUBMIT_OPERATION_KIND,
-            Self::OrderDecision => "trade.publish_order_decision_with_identity",
+            Self::OrderDecision => ORDER_DECISION_OPERATION_KIND,
             Self::OrderRevisionProposal => "trade.publish_order_revision_proposal_with_identity",
             Self::OrderRevisionDecision => "trade.publish_order_revision_decision_with_identity",
             Self::OrderCancellation => "trade.publish_order_cancellation_with_identity",
@@ -318,9 +320,8 @@ impl AppPublishPayload {
 
     pub const fn legacy_sdk_transport_mode(&self) -> Option<SdkTransportMode> {
         match self {
-            Self::FarmProfile(_) | Self::OrderRequest(_) => None,
+            Self::FarmProfile(_) | Self::OrderRequest(_) | Self::OrderDecision(_) => None,
             Self::Listing(_)
-            | Self::OrderDecision(_)
             | Self::OrderRevisionProposal(_)
             | Self::OrderRevisionDecision(_)
             | Self::OrderCancellation(_)
@@ -800,6 +801,7 @@ mod tests {
         AppOrderRequestPublishPayload, AppOrderRevisionDecisionPublishPayload,
         AppOrderRevisionProposalPublishPayload, AppPublishContext, AppPublishPayload,
         AppPublishValidationFailure, AppPublishWorkKind, FARM_PUBLISH_OPERATION_KIND,
+        ORDER_DECISION_OPERATION_KIND,
     };
     use crate::{
         PendingSyncOperation, PendingSyncOperationState, SyncAggregateRef, SyncOperationKind,
@@ -996,7 +998,7 @@ mod tests {
         assert_eq!(payload.work_kind().storage_key(), "order_decision");
         assert_eq!(
             payload.work_kind().sdk_operation(),
-            "trade.publish_order_decision_with_identity"
+            ORDER_DECISION_OPERATION_KIND
         );
         let reason_codes: Vec<&str> = payload
             .validation_failures()

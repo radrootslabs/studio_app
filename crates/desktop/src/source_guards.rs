@@ -1358,13 +1358,6 @@ const LEGACY_SDK_BOUNDARY_ALLOWLIST: &[LegacySdkBoundaryAllowlistEntry] = &[
     },
     LegacySdkBoundaryAllowlistEntry {
         path: "crates/desktop/src/runtime.rs",
-        pattern: "publish_order_decision_with_identity",
-        owner: "rpv1-app-sdk-refactor.07",
-        reason: "desktop runtime still calls legacy direct SDK order decision publish APIs",
-        removal_condition: "remove when seller order decision publish workflow enqueues through AppSdkRuntime",
-    },
-    LegacySdkBoundaryAllowlistEntry {
-        path: "crates/desktop/src/runtime.rs",
         pattern: "publish_order_revision_proposal_with_identity",
         owner: "rpv1-app-sdk-refactor.07",
         reason: "desktop runtime still calls legacy direct SDK order revision proposal publish APIs",
@@ -1439,13 +1432,6 @@ const LEGACY_SDK_BOUNDARY_ALLOWLIST: &[LegacySdkBoundaryAllowlistEntry] = &[
         owner: "rpv1-app-sdk-refactor.07",
         reason: "sync payload metadata still names legacy listing SDK publish operations",
         removal_condition: "remove when listing publish payload metadata is replaced by SDK canonical outbox requests",
-    },
-    LegacySdkBoundaryAllowlistEntry {
-        path: "crates/sync/src/publish.rs",
-        pattern: "publish_order_decision_with_identity",
-        owner: "rpv1-app-sdk-refactor.07",
-        reason: "sync payload metadata still names legacy order decision SDK publish operations",
-        removal_condition: "remove when seller order decision publish payload metadata is replaced by SDK canonical outbox requests",
     },
     LegacySdkBoundaryAllowlistEntry {
         path: "crates/sync/src/publish.rs",
