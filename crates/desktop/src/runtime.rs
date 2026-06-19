@@ -10288,9 +10288,9 @@ fn active_order_current_parent_event_id(
 fn active_order_payment_blocks_lifecycle_write(
     lifecycle: &ResolvedAppOrderLifecycleEvidence,
 ) -> bool {
-    matches!(
+    !matches!(
         lifecycle.payment_state,
-        RadrootsOrderPaymentState::Recorded | RadrootsOrderPaymentState::Settled
+        RadrootsOrderPaymentState::NotRecorded
     )
 }
 
@@ -10668,6 +10668,7 @@ mod tests {
     use radroots_events_codec::order::{
         order_payment_record_event_build, order_settlement_decision_event_build,
     };
+    use radroots_events_codec::wire::WireEventParts;
     use radroots_identity::{RadrootsIdentity, RadrootsIdentityId};
     use radroots_local_events::{
         BUYER_ORDER_REQUEST_LOCAL_WORK_RECORD_KIND, LocalEventRecord, LocalEventRecordInput,
@@ -10696,7 +10697,10 @@ mod tests {
         RadrootsOrderSettlementDecision, RadrootsOrderSettlementOutcome,
     };
     use radroots_sdk::{
-        LISTING_PUBLISH_OPERATION_KIND, ORDER_DECISION_OPERATION_KIND, ORDER_SUBMIT_OPERATION_KIND,
+        LISTING_PUBLISH_OPERATION_KIND, ORDER_CANCELLATION_OPERATION_KIND,
+        ORDER_DECISION_OPERATION_KIND, ORDER_FULFILLMENT_UPDATE_OPERATION_KIND,
+        ORDER_RECEIPT_RECORD_OPERATION_KIND, ORDER_REVISION_DECISION_OPERATION_KIND,
+        ORDER_SUBMIT_OPERATION_KIND,
     };
     use radroots_sql_core::{SqlExecutor, SqliteExecutor};
     use radroots_trade::order::radroots_order_economics_digest;
@@ -10712,6 +10716,10 @@ mod tests {
         "10c5304d6c9ae3a1a16f7860f1cc8f5e3a76225a2663b3a989a0d775919b7df5";
     const SDK_TEST_BUYER_PUBLIC_KEY_HEX: &str =
         "585591529da0bab31b3b1b1f986611cf5f435dca84f978c89ee8a40cca7103df";
+    const SDK_TEST_SELLER_SECRET_KEY_HEX: &str =
+        "59392e9068f66431b12f70218fb61281cb6b433d7f27c55d61f1a63fe1a96ff8";
+    const SDK_TEST_SELLER_PUBLIC_KEY_HEX: &str =
+        "e0266e3cfb0d2886f91c73f5f868f3b98273713e5fcd97c081663f5518a4b3af";
 
     use super::{
         APP_DATABASE_FILE_NAME, APP_SYNC_PUBLISH_USES_SDK_RUNTIME_MESSAGE,
@@ -10720,8 +10728,8 @@ mod tests {
         DesktopAppSdkDiagnosticsState, DesktopAppSyncStatusSummary, DesktopRemoteSignerPaths,
         SYNC_TRANSPORT_UNAVAILABLE_MESSAGE, TokioRuntimeBuilder, default_sync_transport,
         direct_relay_event_source_runtime, farm_sync_payload, is_hex_64,
-        order_decision_publish_payload_to_sdk_decision, pending_sync_upsert,
-        signed_event_from_local_record,
+        order_decision_publish_payload_to_sdk_decision, order_fulfillment_status_storage_key,
+        pending_sync_upsert, signed_event_from_local_record,
     };
     use crate::pack_day_host_handoff::PackDayHostHandoffError;
     use crate::pack_day_print::{
@@ -11029,12 +11037,75 @@ mod tests {
         test_event_id_seed(record_id)
     }
 
-    fn signed_listing_event_id(label: &str) -> String {
-        signed_event_id(format!("app:signed_event:listing:{label}").as_str())
+    fn test_event_signature_seed(seed: &str) -> String {
+        let base = test_event_id_seed(seed);
+        format!("{base}{base}")
     }
 
-    fn signed_order_request_event_id(trade_order_id: &str) -> String {
-        signed_event_id(format!("app:signed_event:order-request:{trade_order_id}").as_str())
+    fn test_event_created_at(seed: &str, base: u32) -> u32 {
+        let offset = seed
+            .bytes()
+            .fold(0u32, |acc, byte| (acc + u32::from(byte)) % 900);
+        base + offset
+    }
+
+    fn signed_test_event(
+        secret_key_hex: &str,
+        created_at: u32,
+        parts: WireEventParts,
+    ) -> SdkRadrootsNostrEvent {
+        let secret_key = RadrootsNostrSecretKey::from_hex(secret_key_hex).expect("secret key");
+        let keys = RadrootsNostrKeys::new(secret_key);
+        let event = radroots_nostr_build_event(parts.kind, parts.content, parts.tags)
+            .expect("test event builder")
+            .custom_created_at(RadrootsNostrTimestamp::from_secs(u64::from(created_at)))
+            .sign_with_keys(&keys)
+            .expect("test event should sign");
+        radroots_event_from_nostr(&event)
+    }
+
+    fn signed_test_event_for_pubkey(
+        pubkey: &str,
+        created_at: u32,
+        parts: WireEventParts,
+    ) -> Option<SdkRadrootsNostrEvent> {
+        match pubkey {
+            SDK_TEST_BUYER_PUBLIC_KEY_HEX => Some(signed_test_event(
+                SDK_TEST_BUYER_SECRET_KEY_HEX,
+                created_at,
+                parts,
+            )),
+            SDK_TEST_SELLER_PUBLIC_KEY_HEX => Some(signed_test_event(
+                SDK_TEST_SELLER_SECRET_KEY_HEX,
+                created_at,
+                parts,
+            )),
+            _ => None,
+        }
+    }
+
+    fn test_event_from_parts(
+        record_id: &str,
+        event_id: String,
+        event_pubkey: &str,
+        created_at: u32,
+        parts: WireEventParts,
+    ) -> SdkRadrootsNostrEvent {
+        signed_test_event_for_pubkey(event_pubkey, created_at, parts.clone()).unwrap_or_else(|| {
+            SdkRadrootsNostrEvent {
+                id: event_id,
+                author: event_pubkey.to_owned(),
+                created_at,
+                kind: parts.kind,
+                tags: parts.tags,
+                content: parts.content,
+                sig: test_event_signature_seed(record_id),
+            }
+        })
+    }
+
+    fn signed_listing_event_id(label: &str) -> String {
+        signed_event_id(format!("app:signed_event:listing:{label}").as_str())
     }
 
     fn test_order_id(value: &str) -> RadrootsOrderId {
@@ -15800,7 +15871,7 @@ mod tests {
         assert_eq!(payload.trade_order_id, "seller-order-decision-1");
         assert_eq!(
             payload.request_event_id,
-            signed_order_request_event_id("seller-order-decision-1")
+            shared_order_request_event_id(&paths, "seller-order-decision-1")
         );
         assert_eq!(
             payload.listing_event_id,
@@ -15866,7 +15937,7 @@ mod tests {
         assert_eq!(payload.trade_order_id, "seller-order-decision-1");
         assert_eq!(
             payload.request_event_id,
-            signed_order_request_event_id("seller-order-decision-1")
+            shared_order_request_event_id(&paths, "seller-order-decision-1")
         );
 
         cleanup_bootstrapped_runtime_paths(&paths);
@@ -16044,36 +16115,31 @@ mod tests {
 
     #[test]
     fn runtime_publishes_all_seller_fulfillment_states_and_projects_signed_evidence() {
-        for (label, action, expected_status, expected_order_status) in [
+        for (label, action, expected_status) in [
             (
                 "preparing",
                 OrderFulfillmentAction::Preparing,
                 RadrootsOrderFulfillmentState::Preparing,
-                "scheduled",
             ),
             (
                 "ready_for_pickup",
                 OrderFulfillmentAction::ReadyForPickup,
                 RadrootsOrderFulfillmentState::ReadyForPickup,
-                "packed",
             ),
             (
                 "out_for_delivery",
                 OrderFulfillmentAction::OutForDelivery,
                 RadrootsOrderFulfillmentState::OutForDelivery,
-                "packed",
             ),
             (
                 "delivered",
                 OrderFulfillmentAction::Delivered,
                 RadrootsOrderFulfillmentState::Delivered,
-                "packed",
             ),
             (
                 "seller_cancelled",
                 OrderFulfillmentAction::SellerCancelled,
                 RadrootsOrderFulfillmentState::SellerCancelled,
-                "declined",
             ),
         ] {
             let relay = ThreadedAckRelay::spawn();
@@ -16096,26 +16162,17 @@ mod tests {
                     .expect("seller fulfillment update should publish")
             );
 
-            assert_eq!(
-                persisted_order_status(&runtime, order_id),
-                expected_order_status
-            );
-            assert_eq!(relay.event_count(), 2);
+            assert_eq!(persisted_order_status(&runtime, order_id), "scheduled");
+            assert_eq!(relay.event_count(), 1);
             let fulfillment_events =
                 shared_order_events_by_kind(&paths, 3433, seller_pubkey.as_str());
-            assert_eq!(fulfillment_events.len(), 1);
-            let fulfillment_event = fulfillment_events.first().expect("fulfillment event");
-            let envelope =
-                radroots_sdk::protocol::order::parse_fulfillment_update(fulfillment_event)
-                    .expect("fulfillment should parse");
-            assert_eq!(envelope.payload.status, expected_status);
-            let request_event_id = signed_order_request_event_id("seller-order-decision-1");
-            assert!(event_has_tag(
-                fulfillment_event,
-                "e_root",
-                request_event_id.as_str()
-            ));
-            assert!(event_has_nonempty_value_tag(fulfillment_event, "e_prev"));
+            assert!(fulfillment_events.is_empty());
+            assert_order_fulfillment_sdk_migration_receipt(
+                &runtime,
+                order_id,
+                expected_status,
+                AppSdkMigrationState::Enqueued,
+            );
 
             cleanup_bootstrapped_runtime_paths(&paths);
         }
@@ -16139,7 +16196,7 @@ mod tests {
             install_direct_relay_sync_transport(&runtime, &relay);
             let listing_key = super::d_tag_from_uuid(product_id.as_uuid());
             let listing_addr = format!("30402:{seller_pubkey}:{listing_key}");
-            let request_event_id = signed_order_request_event_id("seller-order-decision-1");
+            let request_event_id = shared_order_request_event_id(&paths, "seller-order-decision-1");
             let request_event_id = request_event_id.as_str();
             let decision_event_id = append_signed_order_decision_record(
                 &paths,
@@ -16162,18 +16219,19 @@ mod tests {
                 seller_pubkey.as_str(),
             );
             let revision_id = format!("revision-{proposal_key}");
-            let revision_decision_event_id = append_signed_order_revision_decision_record_with_prev(
-                &paths,
-                "seller-order-decision-1",
-                format!("seller-order-ready-revision-{label}-decision").as_str(),
-                request_event_id,
-                proposal_event_id.as_str(),
-                revision_id.as_str(),
-                listing_addr.as_str(),
-                buyer_pubkey.as_str(),
-                seller_pubkey.as_str(),
-                revision_decision,
-            );
+            let _revision_decision_event_id =
+                append_signed_order_revision_decision_record_with_prev(
+                    &paths,
+                    "seller-order-decision-1",
+                    format!("seller-order-ready-revision-{label}-decision").as_str(),
+                    request_event_id,
+                    proposal_event_id.as_str(),
+                    revision_id.as_str(),
+                    listing_addr.as_str(),
+                    buyer_pubkey.as_str(),
+                    seller_pubkey.as_str(),
+                    revision_decision,
+                );
             runtime
                 .refresh_shared_local_events()
                 .expect("seller revision fixture should import");
@@ -16188,16 +16246,16 @@ mod tests {
                     .expect("seller ready fulfillment should publish from revision parent")
             );
 
-            assert_eq!(relay.event_count(), 1);
+            assert_eq!(relay.event_count(), 0);
             let fulfillment_events =
                 shared_order_events_by_kind(&paths, 3433, seller_pubkey.as_str());
-            assert_eq!(fulfillment_events.len(), 1);
-            let ready_event = fulfillment_events.first().expect("ready event");
-            assert!(event_has_tag(
-                ready_event,
-                "e_prev",
-                revision_decision_event_id.as_str()
-            ));
+            assert!(fulfillment_events.is_empty());
+            assert_order_fulfillment_sdk_migration_receipt(
+                &runtime,
+                order_id,
+                RadrootsOrderFulfillmentState::ReadyForPickup,
+                AppSdkMigrationState::Enqueued,
+            );
 
             cleanup_bootstrapped_runtime_paths(&paths);
         }
@@ -16211,7 +16269,7 @@ mod tests {
         install_direct_relay_sync_transport(&runtime, &relay);
         let listing_key = super::d_tag_from_uuid(product_id.as_uuid());
         let listing_addr = format!("30402:{seller_pubkey}:{listing_key}");
-        let request_event_id = signed_order_request_event_id("seller-order-decision-1");
+        let request_event_id = shared_order_request_event_id(&paths, "seller-order-decision-1");
         let request_event_id = request_event_id.as_str();
         let decision_event_id = append_signed_order_decision_record(
             &paths,
@@ -16222,7 +16280,7 @@ mod tests {
             seller_pubkey.as_str(),
             2,
         );
-        let ready_event_id = append_signed_order_fulfillment_record_with_status(
+        let _ready_event_id = append_signed_order_fulfillment_record_with_status(
             &paths,
             "seller-order-decision-1",
             request_event_id,
@@ -16244,25 +16302,16 @@ mod tests {
                 .expect("seller delivered fulfillment should publish from workflow evidence")
         );
 
-        assert_eq!(persisted_order_status(&runtime, order_id), "packed");
-        assert_eq!(relay.event_count(), 1);
+        assert_eq!(persisted_order_status(&runtime, order_id), "scheduled");
+        assert_eq!(relay.event_count(), 0);
         let fulfillment_events = shared_order_events_by_kind(&paths, 3433, seller_pubkey.as_str());
-        assert_eq!(fulfillment_events.len(), 2);
-        let delivered_event = fulfillment_events
-            .iter()
-            .find(|event| {
-                radroots_sdk::protocol::order::parse_fulfillment_update(event)
-                    .map(|envelope| {
-                        envelope.payload.status == RadrootsOrderFulfillmentState::Delivered
-                    })
-                    .unwrap_or(false)
-            })
-            .expect("delivered fulfillment event should exist");
-        assert!(event_has_tag(
-            delivered_event,
-            "e_prev",
-            ready_event_id.as_str()
-        ));
+        assert_eq!(fulfillment_events.len(), 1);
+        assert_order_fulfillment_sdk_migration_receipt(
+            &runtime,
+            order_id,
+            RadrootsOrderFulfillmentState::Delivered,
+            AppSdkMigrationState::Enqueued,
+        );
 
         cleanup_bootstrapped_runtime_paths(&paths);
     }
@@ -16282,7 +16331,7 @@ mod tests {
             install_direct_relay_sync_transport(&runtime, &relay);
             let listing_key = super::d_tag_from_uuid(product_id.as_uuid());
             let listing_addr = format!("30402:{seller_pubkey}:{listing_key}");
-            let request_event_id = signed_order_request_event_id("seller-order-decision-1");
+            let request_event_id = shared_order_request_event_id(&paths, "seller-order-decision-1");
             let request_event_id = request_event_id.as_str();
             let decision_event_id = append_signed_order_decision_record(
                 &paths,
@@ -16315,30 +16364,20 @@ mod tests {
                     .expect("seller delivered fulfillment should publish")
             );
 
-            assert_eq!(persisted_order_status(&runtime, order_id), "packed");
-            assert_eq!(relay.event_count(), 1);
+            assert_eq!(persisted_order_status(&runtime, order_id), "scheduled");
+            assert_eq!(relay.event_count(), 0);
             let fulfillment_events =
                 shared_order_events_by_kind(&paths, 3433, seller_pubkey.as_str());
-            let delivered_event = fulfillment_events
-                .iter()
-                .find(|event| {
-                    radroots_sdk::protocol::order::parse_fulfillment_update(event)
-                        .map(|envelope| {
-                            envelope.payload.status == RadrootsOrderFulfillmentState::Delivered
-                        })
-                        .unwrap_or(false)
-                })
-                .expect("delivered fulfillment event should exist");
-            assert!(event_has_tag(
-                delivered_event,
-                "e_prev",
-                latest_fulfillment
-                    .map(|_| {
-                        signed_event_id("app:signed_event:fulfillment:seller-order-decision-1")
-                    })
-                    .unwrap_or_else(|| decision_event_id.clone())
-                    .as_str()
-            ));
+            assert_eq!(
+                fulfillment_events.len(),
+                usize::from(latest_fulfillment.is_some())
+            );
+            assert_order_fulfillment_sdk_migration_receipt(
+                &runtime,
+                order_id,
+                RadrootsOrderFulfillmentState::Delivered,
+                AppSdkMigrationState::Enqueued,
+            );
             cleanup_bootstrapped_runtime_paths(&paths);
         }
     }
@@ -16355,7 +16394,7 @@ mod tests {
             install_direct_relay_sync_transport(&runtime, &relay);
             let listing_key = super::d_tag_from_uuid(product_id.as_uuid());
             let listing_addr = format!("30402:{seller_pubkey}:{listing_key}");
-            let request_event_id = signed_order_request_event_id("seller-order-decision-1");
+            let request_event_id = shared_order_request_event_id(&paths, "seller-order-decision-1");
             let request_event_id = request_event_id.as_str();
             let decision_event_id = append_signed_order_decision_record(
                 &paths,
@@ -16425,7 +16464,7 @@ mod tests {
             install_direct_relay_sync_transport(&runtime, &relay);
             let listing_key = super::d_tag_from_uuid(product_id.as_uuid());
             let listing_addr = format!("30402:{seller_pubkey}:{listing_key}");
-            let request_event_id = signed_order_request_event_id("seller-order-decision-1");
+            let request_event_id = shared_order_request_event_id(&paths, "seller-order-decision-1");
             let request_event_id = request_event_id.as_str();
             append_signed_order_decision_record(
                 &paths,
@@ -16479,7 +16518,7 @@ mod tests {
         install_direct_relay_sync_transport(&runtime, &relay);
         let listing_key = super::d_tag_from_uuid(product_id.as_uuid());
         let listing_addr = format!("30402:{seller_pubkey}:{listing_key}");
-        let request_event_id = signed_order_request_event_id("seller-order-decision-1");
+        let request_event_id = shared_order_request_event_id(&paths, "seller-order-decision-1");
         let request_event_id = request_event_id.as_str();
         append_signed_order_decision_record(
             &paths,
@@ -16528,7 +16567,7 @@ mod tests {
             install_direct_relay_sync_transport(&runtime, &relay);
             let listing_key = super::d_tag_from_uuid(product_id.as_uuid());
             let listing_addr = format!("30402:{seller_pubkey}:{listing_key}");
-            let request_event_id = signed_order_request_event_id("seller-order-decision-1");
+            let request_event_id = shared_order_request_event_id(&paths, "seller-order-decision-1");
             let request_event_id = request_event_id.as_str();
             let decision_event_id = append_signed_order_decision_record(
                 &paths,
@@ -16591,14 +16630,14 @@ mod tests {
     }
 
     #[test]
-    fn runtime_publishes_seller_order_revision_after_rejected_settlement_evidence() {
+    fn runtime_rejects_seller_order_revision_after_rejected_settlement_evidence() {
         let relay = ThreadedAckRelay::spawn();
         let (runtime, paths, order_id, product_id, seller_pubkey, buyer_pubkey) =
             seller_order_decision_runtime("seller_order_revision_rejected_payment", 6, 2);
         install_direct_relay_sync_transport(&runtime, &relay);
         let listing_key = super::d_tag_from_uuid(product_id.as_uuid());
         let listing_addr = format!("30402:{seller_pubkey}:{listing_key}");
-        let request_event_id = signed_order_request_event_id("seller-order-decision-1");
+        let request_event_id = shared_order_request_event_id(&paths, "seller-order-decision-1");
         let request_event_id = request_event_id.as_str();
         let decision_event_id = append_signed_order_decision_record(
             &paths,
@@ -16638,25 +16677,24 @@ mod tests {
             .expect("seller rejected payment evidence should import");
         set_persisted_order_status(&runtime, order_id, "scheduled");
 
-        assert!(
-            runtime
-                .publish_order_revision_proposal(
-                    order_id,
-                    revision_test_order_items(),
-                    revision_test_order_economics(),
-                    "harvest count updated",
-                )
-                .expect("seller revision proposal should publish after rejected 3436")
-        );
+        let error = runtime
+            .publish_order_revision_proposal(
+                order_id,
+                revision_test_order_items(),
+                revision_test_order_economics(),
+                "harvest count updated",
+            )
+            .expect_err("seller revision proposal should reject rejected 3436 payment evidence");
 
-        assert_eq!(relay.event_count(), 1);
-        let revision_events = shared_order_events_by_kind(&paths, 3424, seller_pubkey.as_str());
-        assert_eq!(revision_events.len(), 1);
-        assert!(event_has_tag(
-            revision_events.first().expect("seller revision event"),
-            "e_prev",
-            decision_event_id.as_str()
+        assert!(matches!(
+            error,
+            AppSqliteError::InvalidProjection {
+                reason: "seller order revision requires no recorded or settled payment"
+            }
         ));
+        assert_eq!(relay.event_count(), 0);
+        let revision_events = shared_order_events_by_kind(&paths, 3424, seller_pubkey.as_str());
+        assert!(revision_events.is_empty());
         cleanup_bootstrapped_runtime_paths(&paths);
     }
 
@@ -16668,7 +16706,7 @@ mod tests {
         install_direct_relay_sync_transport(&runtime, &relay);
         let listing_key = super::d_tag_from_uuid(product_id.as_uuid());
         let listing_addr = format!("30402:{seller_pubkey}:{listing_key}");
-        let request_event_id = signed_order_request_event_id("seller-order-decision-1");
+        let request_event_id = shared_order_request_event_id(&paths, "seller-order-decision-1");
         let request_event_id = request_event_id.as_str();
         let decision_event_id = append_signed_order_decision_record(
             &paths,
@@ -17307,31 +17345,17 @@ mod tests {
 
         assert_eq!(
             persisted_order_status(&fixture.runtime, fixture.order_id),
-            "declined"
+            "scheduled"
         );
-        assert_eq!(relay.event_count(), 1);
+        assert_eq!(relay.event_count(), 0);
         let cancellation_events =
             shared_order_events_by_kind(&fixture.paths, 3432, fixture.buyer_pubkey.as_str());
-        assert_eq!(cancellation_events.len(), 1);
-        let cancellation_event = cancellation_events
-            .first()
-            .expect("linked buyer cancellation event");
-        let cancellation =
-            radroots_sdk::protocol::order::parse_order_cancellation(cancellation_event)
-                .expect("linked buyer cancellation should parse");
-        assert_eq!(cancellation.payload.order_id, fixture.trade_order_id);
-        assert_eq!(cancellation.payload.buyer_pubkey, fixture.buyer_pubkey);
-        assert_eq!(cancellation.payload.seller_pubkey, fixture.seller_pubkey);
-        assert!(event_has_tag(
-            cancellation_event,
-            "e_root",
-            fixture.request_event_id.as_str()
-        ));
-        assert!(event_has_tag(
-            cancellation_event,
-            "e_prev",
-            fixture.decision_event_id.as_str()
-        ));
+        assert!(cancellation_events.is_empty());
+        assert_order_cancellation_sdk_migration_receipt(
+            &fixture.runtime,
+            fixture.order_id,
+            AppSdkMigrationState::Enqueued,
+        );
 
         cleanup_bootstrapped_runtime_paths(&fixture.paths);
     }
@@ -17400,7 +17424,7 @@ mod tests {
     }
 
     #[test]
-    fn runtime_publishes_linked_buyer_cancellation_after_rejected_settlement_evidence() {
+    fn runtime_rejects_linked_buyer_cancellation_after_rejected_settlement_evidence() {
         let relay = ThreadedAckRelay::spawn();
         let fixture =
             linked_buyer_lifecycle_runtime("linked_buyer_order_cancel_rejected_payment", false);
@@ -17440,24 +17464,21 @@ mod tests {
                 .expect("linked buyer order detail should open")
         );
 
-        assert!(
-            fixture
-                .runtime
-                .publish_buyer_order_cancel(fixture.order_id)
-                .expect("linked buyer cancellation should publish after rejected 3436")
-        );
+        let error = fixture
+            .runtime
+            .publish_buyer_order_cancel(fixture.order_id)
+            .expect_err("linked buyer cancellation should reject rejected 3436 payment evidence");
 
-        assert_eq!(relay.event_count(), 1);
+        assert!(matches!(
+            error,
+            AppSqliteError::InvalidProjection {
+                reason: "buyer order cancellation requires no recorded or settled payment"
+            }
+        ));
+        assert_eq!(relay.event_count(), 0);
         let cancellation_events =
             shared_order_events_by_kind(&fixture.paths, 3432, fixture.buyer_pubkey.as_str());
-        assert_eq!(cancellation_events.len(), 1);
-        assert!(event_has_tag(
-            cancellation_events
-                .first()
-                .expect("linked buyer cancellation event"),
-            "e_prev",
-            fixture.decision_event_id.as_str()
-        ));
+        assert!(cancellation_events.is_empty());
         cleanup_bootstrapped_runtime_paths(&fixture.paths);
     }
 
@@ -17657,18 +17678,19 @@ mod tests {
                 fixture.seller_pubkey.as_str(),
             );
             let revision_id = format!("revision-{proposal_key}");
-            let revision_decision_event_id = append_signed_order_revision_decision_record_with_prev(
-                &fixture.paths,
-                fixture.trade_order_id.as_str(),
-                format!("linked-buyer-order-cancel-revision-{label}-decision").as_str(),
-                fixture.request_event_id.as_str(),
-                proposal_event_id.as_str(),
-                revision_id.as_str(),
-                fixture.listing_addr.as_str(),
-                fixture.buyer_pubkey.as_str(),
-                fixture.seller_pubkey.as_str(),
-                revision_decision,
-            );
+            let _revision_decision_event_id =
+                append_signed_order_revision_decision_record_with_prev(
+                    &fixture.paths,
+                    fixture.trade_order_id.as_str(),
+                    format!("linked-buyer-order-cancel-revision-{label}-decision").as_str(),
+                    fixture.request_event_id.as_str(),
+                    proposal_event_id.as_str(),
+                    revision_id.as_str(),
+                    fixture.listing_addr.as_str(),
+                    fixture.buyer_pubkey.as_str(),
+                    fixture.seller_pubkey.as_str(),
+                    revision_decision,
+                );
             install_direct_relay_sync_transport(&fixture.runtime, &relay);
             fixture
                 .runtime
@@ -17689,18 +17711,15 @@ mod tests {
                     .expect("linked buyer cancellation should publish from revision parent")
             );
 
-            assert_eq!(relay.event_count(), 1);
+            assert_eq!(relay.event_count(), 0);
             let cancellation_events =
                 shared_order_events_by_kind(&fixture.paths, 3432, fixture.buyer_pubkey.as_str());
-            assert_eq!(cancellation_events.len(), 1);
-            let cancellation_event = cancellation_events
-                .first()
-                .expect("linked buyer cancellation event");
-            assert!(event_has_tag(
-                cancellation_event,
-                "e_prev",
-                revision_decision_event_id.as_str()
-            ));
+            assert!(cancellation_events.is_empty());
+            assert_order_cancellation_sdk_migration_receipt(
+                &fixture.runtime,
+                fixture.order_id,
+                AppSdkMigrationState::Enqueued,
+            );
 
             cleanup_bootstrapped_runtime_paths(&fixture.paths);
         }
@@ -17710,7 +17729,7 @@ mod tests {
     fn runtime_publishes_linked_buyer_receipt_from_selected_account_nostr_scope() {
         let relay = ThreadedAckRelay::spawn();
         let fixture = linked_buyer_lifecycle_runtime("linked_buyer_order_receipt", true);
-        let fulfillment_event_id = fixture
+        let _fulfillment_event_id = fixture
             .fulfillment_event_id
             .as_deref()
             .expect("ready fixture should include fulfillment event")
@@ -17748,29 +17767,17 @@ mod tests {
 
         assert_eq!(
             persisted_order_status(&fixture.runtime, fixture.order_id),
-            "completed"
+            "packed"
         );
-        assert_eq!(relay.event_count(), 1);
+        assert_eq!(relay.event_count(), 0);
         let receipt_events =
             shared_order_events_by_kind(&fixture.paths, 3434, fixture.buyer_pubkey.as_str());
-        assert_eq!(receipt_events.len(), 1);
-        let receipt_event = receipt_events.first().expect("linked buyer receipt event");
-        let receipt = radroots_sdk::protocol::order::parse_buyer_receipt(receipt_event)
-            .expect("linked buyer receipt should parse");
-        assert_eq!(receipt.payload.order_id, fixture.trade_order_id);
-        assert_eq!(receipt.payload.buyer_pubkey, fixture.buyer_pubkey);
-        assert_eq!(receipt.payload.seller_pubkey, fixture.seller_pubkey);
-        assert!(receipt.payload.received);
-        assert!(event_has_tag(
-            receipt_event,
-            "e_root",
-            fixture.request_event_id.as_str()
-        ));
-        assert!(event_has_tag(
-            receipt_event,
-            "e_prev",
-            fulfillment_event_id.as_str()
-        ));
+        assert!(receipt_events.is_empty());
+        assert_order_receipt_sdk_migration_receipt(
+            &fixture.runtime,
+            fixture.order_id,
+            AppSdkMigrationState::Enqueued,
+        );
 
         cleanup_bootstrapped_runtime_paths(&fixture.paths);
     }
@@ -17779,7 +17786,7 @@ mod tests {
     fn runtime_publishes_linked_buyer_receipt_after_direct_delivered_fulfillment() {
         let relay = ThreadedAckRelay::spawn();
         let fixture = linked_buyer_lifecycle_runtime("linked_buyer_order_receipt_delivered", false);
-        let fulfillment_event_id = append_signed_order_fulfillment_record_with_status(
+        let _fulfillment_event_id = append_signed_order_fulfillment_record_with_status(
             &fixture.paths,
             fixture.trade_order_id.as_str(),
             fixture.request_event_id.as_str(),
@@ -17810,21 +17817,17 @@ mod tests {
 
         assert_eq!(
             persisted_order_status(&fixture.runtime, fixture.order_id),
-            "completed"
+            "packed"
         );
-        assert_eq!(relay.event_count(), 1);
+        assert_eq!(relay.event_count(), 0);
         let receipt_events =
             shared_order_events_by_kind(&fixture.paths, 3434, fixture.buyer_pubkey.as_str());
-        assert_eq!(receipt_events.len(), 1);
-        let receipt_event = receipt_events.first().expect("linked buyer receipt event");
-        let receipt = radroots_sdk::protocol::order::parse_buyer_receipt(receipt_event)
-            .expect("linked buyer delivered receipt should parse");
-        assert!(receipt.payload.received);
-        assert!(event_has_tag(
-            receipt_event,
-            "e_prev",
-            fulfillment_event_id.as_str()
-        ));
+        assert!(receipt_events.is_empty());
+        assert_order_receipt_sdk_migration_receipt(
+            &fixture.runtime,
+            fixture.order_id,
+            AppSdkMigrationState::Enqueued,
+        );
 
         cleanup_bootstrapped_runtime_paths(&fixture.paths);
     }
@@ -17858,19 +17861,12 @@ mod tests {
 
         assert_eq!(
             persisted_order_status(&fixture.runtime, fixture.order_id),
-            "needs_review"
+            "packed"
         );
-        assert_eq!(relay.event_count(), 1);
+        assert_eq!(relay.event_count(), 0);
         let receipt_events =
             shared_order_events_by_kind(&fixture.paths, 3434, fixture.buyer_pubkey.as_str());
-        assert_eq!(receipt_events.len(), 1);
-        let receipt_event = receipt_events
-            .first()
-            .expect("linked buyer issue receipt event");
-        let receipt = radroots_sdk::protocol::order::parse_buyer_receipt(receipt_event)
-            .expect("linked buyer issue receipt should parse");
-        assert!(!receipt.payload.received);
-        assert_eq!(receipt.payload.issue.as_deref(), Some("items need review"));
+        assert!(receipt_events.is_empty());
         let buyer_detail = fixture
             .runtime
             .summary()
@@ -17880,16 +17876,11 @@ mod tests {
             .as_ref()
             .expect("linked buyer issue receipt detail")
             .clone();
-        assert_eq!(buyer_detail.status, BuyerOrderStatus::NeedsReview);
-        let projected_receipt = buyer_detail
-            .workflow
-            .receipt
-            .as_ref()
-            .expect("receipt projection should be present");
-        assert!(!projected_receipt.received);
-        assert_eq!(
-            projected_receipt.issue.as_deref(),
-            Some("items need review")
+        assert_eq!(buyer_detail.status, BuyerOrderStatus::Ready);
+        assert_order_receipt_sdk_migration_receipt(
+            &fixture.runtime,
+            fixture.order_id,
+            AppSdkMigrationState::Enqueued,
         );
 
         cleanup_bootstrapped_runtime_paths(&fixture.paths);
@@ -17995,16 +17986,18 @@ mod tests {
     fn runtime_publishes_linked_buyer_revision_decision_from_reducer_valid_parent() {
         let relay = ThreadedAckRelay::spawn();
         let fixture = linked_buyer_lifecycle_runtime("linked_buyer_order_revision", false);
-        let proposal_event_id = append_signed_order_revision_proposal_record_with_prev(
+        let proposal_key = "linked-buyer-order-revision-proposal";
+        let _proposal_event_id = append_signed_order_revision_proposal_record_with_prev(
             &fixture.paths,
             fixture.trade_order_id.as_str(),
-            "linked-buyer-order-revision-proposal",
+            proposal_key,
             fixture.request_event_id.as_str(),
             fixture.decision_event_id.as_str(),
             fixture.listing_addr.as_str(),
             fixture.buyer_pubkey.as_str(),
             fixture.seller_pubkey.as_str(),
         );
+        let revision_id = format!("revision-{proposal_key}");
         install_direct_relay_sync_transport(&fixture.runtime, &relay);
         fixture
             .runtime
@@ -18024,30 +18017,16 @@ mod tests {
                 .expect("linked buyer revision decision should publish")
         );
 
-        assert_eq!(relay.event_count(), 1);
+        assert_eq!(relay.event_count(), 0);
         let revision_decision_events =
             shared_order_events_by_kind(&fixture.paths, 3425, fixture.buyer_pubkey.as_str());
-        assert_eq!(revision_decision_events.len(), 1);
-        let revision_decision_event = revision_decision_events
-            .first()
-            .expect("linked buyer revision decision event");
-        let revision_decision =
-            radroots_sdk::protocol::order::parse_order_revision_decision(revision_decision_event)
-                .expect("linked buyer revision decision should parse");
-        assert_eq!(
-            revision_decision.payload.decision,
-            RadrootsOrderRevisionOutcome::Accepted
+        assert!(revision_decision_events.is_empty());
+        assert_order_revision_decision_sdk_migration_receipt(
+            &fixture.runtime,
+            fixture.order_id,
+            revision_id.as_str(),
+            AppSdkMigrationState::Enqueued,
         );
-        assert!(event_has_tag(
-            revision_decision_event,
-            "e_root",
-            fixture.request_event_id.as_str()
-        ));
-        assert!(event_has_tag(
-            revision_decision_event,
-            "e_prev",
-            proposal_event_id.as_str()
-        ));
 
         cleanup_bootstrapped_runtime_paths(&fixture.paths);
     }
@@ -21413,7 +21392,7 @@ mod tests {
         linked_buyer_lifecycle_runtime_with_seller_pubkey(
             label,
             include_ready_fulfillment,
-            "2222222222222222222222222222222222222222222222222222222222222222",
+            SDK_TEST_SELLER_PUBLIC_KEY_HEX,
         )
     }
 
@@ -21425,8 +21404,10 @@ mod tests {
         let (runtime, paths) = bootstrapped_runtime(label);
         assert!(
             runtime
-                .generate_local_account(Some("Buyer".to_owned()))
-                .expect("buyer account should generate")
+                .import_local_account(DesktopLocalIdentityImportRequest::raw_secret_key(
+                    SDK_TEST_BUYER_SECRET_KEY_HEX,
+                ))
+                .expect("buyer account should import")
         );
         assert!(
             runtime
@@ -21467,7 +21448,7 @@ mod tests {
             listing_event_id.as_str(),
             6,
         );
-        append_signed_order_request_record(
+        let request_event_id = append_signed_order_request_record(
             &paths,
             trade_order_id.as_str(),
             listing_addr.as_str(),
@@ -21476,7 +21457,6 @@ mod tests {
             seller_pubkey,
             2,
         );
-        let request_event_id = signed_order_request_event_id(trade_order_id.as_str());
         let decision_event_id = append_signed_order_decision_record(
             &paths,
             trade_order_id.as_str(),
@@ -21527,7 +21507,8 @@ mod tests {
         String,
     ) {
         let (runtime, paths) = bootstrapped_runtime(label);
-        let (account_id, farm_id) = provision_ready_farmer_account(&runtime);
+        let (account_id, farm_id) =
+            provision_ready_farmer_account_from_secret(&runtime, SDK_TEST_SELLER_SECRET_KEY_HEX);
         runtime.lock_state_mut().nostr_relay_urls = vec!["wss://relay.example".to_owned()];
         let seller_pubkey = runtime
             .lock_state()
@@ -21538,8 +21519,7 @@ mod tests {
             .expect("selected seller account should resolve")
             .public_identity
             .public_key_hex;
-        let buyer_pubkey =
-            "1111111111111111111111111111111111111111111111111111111111111111".to_owned();
+        let buyer_pubkey = SDK_TEST_BUYER_PUBLIC_KEY_HEX.to_owned();
         let product_id = ProductId::new();
         let trade_order_id = "seller-order-decision-1";
         let order_id = projected_order_id_from_trade_request(trade_order_id, buyer_pubkey.as_str());
@@ -21589,7 +21569,8 @@ mod tests {
         String,
     ) {
         let (runtime, paths) = bootstrapped_runtime(label);
-        let (account_id, farm_id) = provision_ready_farmer_account(&runtime);
+        let (account_id, farm_id) =
+            provision_ready_farmer_account_from_secret(&runtime, SDK_TEST_SELLER_SECRET_KEY_HEX);
         runtime.lock_state_mut().nostr_relay_urls = vec!["wss://relay.example".to_owned()];
         let seller_pubkey = runtime
             .lock_state()
@@ -21664,12 +21645,18 @@ mod tests {
             )
         };
         let listing_key = super::d_tag_from_uuid(product_id.as_uuid());
+        let request_event_id = runtime
+            .lock_state()
+            .resolve_seller_order_request_evidence(order_id)
+            .expect("seller request evidence should resolve")
+            .request_event
+            .id;
         let payload = AppPublishPayload::OrderDecision(AppOrderDecisionPublishPayload {
             context: AppPublishContext::new(account_id.clone(), "seller_order_decision"),
             app_order_id: order_id,
             farm_id,
             trade_order_id: "seller-order-decision-1".to_owned(),
-            request_event_id: signed_order_request_event_id("seller-order-decision-1"),
+            request_event_id,
             listing_event_id: Some(signed_listing_event_id("seller-order-decision")),
             listing_addr: format!("30402:{seller_pubkey}:{listing_key}"),
             buyer_pubkey: buyer_pubkey.to_owned(),
@@ -21827,7 +21814,7 @@ mod tests {
         buyer_pubkey: &str,
         seller_pubkey: &str,
         order_quantity: u32,
-    ) {
+    ) -> String {
         let database_path = paths
             .shared_local_events_database_path()
             .expect("shared local events path");
@@ -21860,6 +21847,14 @@ mod tests {
         .into_wire_parts();
         let record_id = format!("app:signed_event:order-request:{trade_order_id}");
         let event_id = signed_event_id(record_id.as_str());
+        let event = test_event_from_parts(
+            record_id.as_str(),
+            event_id,
+            buyer_pubkey,
+            1_774_000_010,
+            parts,
+        );
+        let stored_event_id = event.id.clone();
         let relay_delivery_json = RelayDeliveryEvidence::acknowledged(
             ["wss://relay.example"],
             ["wss://relay.example"],
@@ -21878,28 +21873,31 @@ mod tests {
                 created_at_ms: 1_774_000_010_000,
                 inserted_at_ms: 1_774_000_010_001,
                 owner_account_id: None,
-                owner_pubkey: Some(buyer_pubkey.to_owned()),
+                owner_pubkey: Some(event.author.clone()),
                 farm_id: None,
                 listing_addr: Some(listing_addr.to_owned()),
                 local_work_json: None,
-                event_id: Some(event_id.clone()),
-                event_kind: Some(i64::from(parts.kind)),
-                event_pubkey: Some(buyer_pubkey.to_owned()),
-                event_created_at: Some(1_774_000_010),
-                event_tags_json: Some(json!(parts.tags)),
-                event_content: Some(parts.content.clone()),
-                event_sig: Some("signature".to_owned()),
+                event_id: Some(event.id.clone()),
+                event_kind: Some(i64::from(event.kind)),
+                event_pubkey: Some(event.author.clone()),
+                event_created_at: Some(i64::from(event.created_at)),
+                event_tags_json: Some(json!(event.tags.clone())),
+                event_content: Some(event.content.clone()),
+                event_sig: Some(event.sig.clone()),
                 raw_event_json: Some(json!({
-                    "id": event_id,
-                    "kind": parts.kind,
-                    "pubkey": buyer_pubkey,
-                    "content": parts.content
+                    "id": event.id.clone(),
+                    "kind": event.kind,
+                    "pubkey": event.author.clone(),
+                    "tags": event.tags.clone(),
+                    "content": event.content.clone(),
+                    "sig": event.sig.clone()
                 })),
                 outbox_status: PublishOutboxStatus::Acknowledged,
                 relay_set_fingerprint: Some("relay-set".to_owned()),
                 relay_delivery_json: Some(relay_delivery_json),
             })
             .expect("append signed order request");
+        stored_event_id
     }
 
     fn append_verified_signed_order_request_record(
@@ -22054,18 +22052,13 @@ mod tests {
         .expect("order decision draft should build")
         .into_wire_parts();
         let record_id = format!("app:signed_event:order-decision:{trade_order_id}");
-        let event_id = signed_event_id(record_id.as_str());
         append_trade_signed_event_record(
             paths,
             record_id.as_str(),
-            event_id.as_str(),
-            i64::from(parts.kind),
             seller_pubkey,
             listing_addr,
-            json!(parts.tags),
-            parts.content,
-        );
-        event_id
+            parts,
+        )
     }
 
     fn append_signed_payment_record(
@@ -22131,18 +22124,13 @@ mod tests {
         let parts = order_payment_record_event_build(&request_event_id, &prev_event_id, &payload)
             .expect("payment recorded draft should build");
         let record_id = format!("app:signed_event:payment:{event_key}");
-        let event_id = signed_event_id(record_id.as_str());
         append_trade_signed_event_record(
             paths,
             record_id.as_str(),
-            event_id.as_str(),
-            i64::from(parts.kind),
             buyer_pubkey,
             listing_addr,
-            json!(parts.tags),
-            parts.content,
-        );
-        event_id
+            parts,
+        )
     }
 
     fn append_signed_settlement_decision_record(
@@ -22186,18 +22174,13 @@ mod tests {
             order_settlement_decision_event_build(&request_event_id, &payment_event_id, &payload)
                 .expect("k3436 draft should build");
         let record_id = format!("app:signed_event:k3436:{event_key}");
-        let event_id = signed_event_id(record_id.as_str());
         append_trade_signed_event_record(
             paths,
             record_id.as_str(),
-            event_id.as_str(),
-            i64::from(parts.kind),
             seller_pubkey,
             listing_addr,
-            json!(parts.tags),
-            parts.content,
-        );
-        event_id
+            parts,
+        )
     }
 
     fn signed_payment_recorded_relay_event(
@@ -22383,18 +22366,13 @@ mod tests {
         .expect("fulfillment update draft should build")
         .into_wire_parts();
         let record_id = format!("app:signed_event:fulfillment:{event_key}");
-        let event_id = signed_event_id(record_id.as_str());
         append_trade_signed_event_record(
             paths,
             record_id.as_str(),
-            event_id.as_str(),
-            i64::from(parts.kind),
             seller_pubkey,
             listing_addr,
-            json!(parts.tags),
-            parts.content,
-        );
-        event_id
+            parts,
+        )
     }
 
     fn append_signed_order_cancellation_record_with_prev(
@@ -22424,18 +22402,13 @@ mod tests {
         .expect("order cancellation draft should build")
         .into_wire_parts();
         let record_id = format!("app:signed_event:cancellation:{event_key}");
-        let event_id = signed_event_id(record_id.as_str());
         append_trade_signed_event_record(
             paths,
             record_id.as_str(),
-            event_id.as_str(),
-            i64::from(parts.kind),
             buyer_pubkey,
             listing_addr,
-            json!(parts.tags),
-            parts.content,
-        );
-        event_id
+            parts,
+        )
     }
 
     fn append_signed_order_receipt_record_with_prev(
@@ -22468,18 +22441,13 @@ mod tests {
         .expect("buyer receipt draft should build")
         .into_wire_parts();
         let record_id = format!("app:signed_event:receipt:{event_key}");
-        let event_id = signed_event_id(record_id.as_str());
         append_trade_signed_event_record(
             paths,
             record_id.as_str(),
-            event_id.as_str(),
-            i64::from(parts.kind),
             buyer_pubkey,
             listing_addr,
-            json!(parts.tags),
-            parts.content,
-        );
-        event_id
+            parts,
+        )
     }
 
     fn append_signed_order_revision_proposal_record_with_prev(
@@ -22514,18 +22482,13 @@ mod tests {
         .expect("order revision proposal draft should build")
         .into_wire_parts();
         let record_id = format!("app:signed_event:revision-proposal:{event_key}");
-        let event_id = signed_event_id(record_id.as_str());
         append_trade_signed_event_record(
             paths,
             record_id.as_str(),
-            event_id.as_str(),
-            i64::from(parts.kind),
             seller_pubkey,
             listing_addr,
-            json!(parts.tags),
-            parts.content,
-        );
-        event_id
+            parts,
+        )
     }
 
     fn append_signed_order_revision_decision_record_with_prev(
@@ -22560,18 +22523,13 @@ mod tests {
         .expect("order revision decision draft should build")
         .into_wire_parts();
         let record_id = format!("app:signed_event:revision-decision:{event_key}");
-        let event_id = signed_event_id(record_id.as_str());
         append_trade_signed_event_record(
             paths,
             record_id.as_str(),
-            event_id.as_str(),
-            i64::from(parts.kind),
             buyer_pubkey,
             listing_addr,
-            json!(parts.tags),
-            parts.content,
-        );
-        event_id
+            parts,
+        )
     }
 
     fn revision_test_order_items() -> Vec<RadrootsOrderItem> {
@@ -22623,13 +22581,10 @@ mod tests {
     fn append_trade_signed_event_record(
         paths: &AppDesktopRuntimePaths,
         record_id: &str,
-        event_id: &str,
-        event_kind: i64,
         event_pubkey: &str,
         listing_addr: &str,
-        event_tags_json: serde_json::Value,
-        event_content: String,
-    ) {
+        parts: WireEventParts,
+    ) -> String {
         let database_path = paths
             .shared_local_events_database_path()
             .expect("shared local events path");
@@ -22640,6 +22595,15 @@ mod tests {
             SqliteExecutor::open(database_path.as_path()).expect("open shared local events db");
         let store = LocalEventsStore::new(executor);
         store.migrate_up().expect("migrate shared local events");
+        let created_at = test_event_created_at(record_id, 1_774_000_020);
+        let event = test_event_from_parts(
+            record_id,
+            signed_event_id(record_id),
+            event_pubkey,
+            created_at,
+            parts,
+        );
+        let stored_event_id = event.id.clone();
         let relay_delivery_json = RelayDeliveryEvidence::acknowledged(
             ["wss://relay.example"],
             ["wss://relay.example"],
@@ -22655,32 +22619,34 @@ mod tests {
                 family: LocalRecordFamily::SignedEvent,
                 status: LocalRecordStatus::Published,
                 source_runtime: SourceRuntime::Test,
-                created_at_ms: 1_774_000_020_000,
-                inserted_at_ms: 1_774_000_020_001,
+                created_at_ms: i64::from(created_at) * 1000,
+                inserted_at_ms: i64::from(created_at) * 1000 + 1,
                 owner_account_id: None,
-                owner_pubkey: Some(event_pubkey.to_owned()),
+                owner_pubkey: Some(event.author.clone()),
                 farm_id: None,
                 listing_addr: Some(listing_addr.to_owned()),
                 local_work_json: None,
-                event_id: Some(event_id.to_owned()),
-                event_kind: Some(event_kind),
-                event_pubkey: Some(event_pubkey.to_owned()),
-                event_created_at: Some(1_774_000_020),
-                event_tags_json: Some(event_tags_json.clone()),
-                event_content: Some(event_content.clone()),
-                event_sig: Some("signature".to_owned()),
+                event_id: Some(event.id.clone()),
+                event_kind: Some(i64::from(event.kind)),
+                event_pubkey: Some(event.author.clone()),
+                event_created_at: Some(i64::from(event.created_at)),
+                event_tags_json: Some(json!(event.tags.clone())),
+                event_content: Some(event.content.clone()),
+                event_sig: Some(event.sig.clone()),
                 raw_event_json: Some(json!({
-                    "id": event_id,
-                    "kind": event_kind,
-                    "pubkey": event_pubkey,
-                    "tags": event_tags_json,
-                    "content": event_content
+                    "id": event.id.clone(),
+                    "kind": event.kind,
+                    "pubkey": event.author.clone(),
+                    "tags": event.tags.clone(),
+                    "content": event.content.clone(),
+                    "sig": event.sig.clone()
                 })),
                 outbox_status: PublishOutboxStatus::Acknowledged,
                 relay_set_fingerprint: Some("relay-set".to_owned()),
                 relay_delivery_json: Some(relay_delivery_json),
             })
             .expect("append signed trade event");
+        stored_event_id
     }
 
     fn mark_shared_seller_order_request_evidence_pending(paths: &AppDesktopRuntimePaths) {
@@ -22898,6 +22864,18 @@ mod tests {
             .expect("shared local records should list")
     }
 
+    fn shared_order_request_event_id(
+        paths: &AppDesktopRuntimePaths,
+        trade_order_id: &str,
+    ) -> String {
+        let record_id = format!("app:signed_event:order-request:{trade_order_id}");
+        shared_local_event_records(paths)
+            .into_iter()
+            .find(|record| record.record_id == record_id)
+            .and_then(|record| record.event_id)
+            .expect("signed order request event id should exist")
+    }
+
     fn shared_order_events_by_kind(
         paths: &AppDesktopRuntimePaths,
         kind: i64,
@@ -22915,20 +22893,6 @@ mod tests {
                     .expect("shared signed event record should decode")
             })
             .collect()
-    }
-
-    fn event_has_tag(event: &SdkRadrootsNostrEvent, key: &str, value: &str) -> bool {
-        event.tags.iter().any(|tag| {
-            tag.first().map(String::as_str) == Some(key)
-                && tag.get(1).map(String::as_str) == Some(value)
-        })
-    }
-
-    fn event_has_nonempty_value_tag(event: &SdkRadrootsNostrEvent, key: &str) -> bool {
-        event.tags.iter().any(|tag| {
-            tag.first().map(String::as_str) == Some(key)
-                && tag.get(1).map(|value| !value.is_empty()).unwrap_or(false)
-        })
     }
 
     fn persisted_order_status(runtime: &DesktopAppRuntime, order_id: OrderId) -> String {
@@ -23042,6 +23006,96 @@ mod tests {
             .expect("SDK migration receipt should exist");
         assert_eq!(receipt.source_record_id, source_record_id);
         assert_eq!(receipt.sdk_operation_kind, ORDER_DECISION_OPERATION_KIND);
+        assert_eq!(
+            receipt.migration_state, expected_state,
+            "receipt detail: {}",
+            receipt.detail_json
+        );
+        if expected_state == AppSdkMigrationState::Enqueued {
+            assert!(receipt.expected_event_id.is_some());
+            assert!(receipt.actor_pubkey.as_deref().is_some_and(is_hex_64));
+            assert!(!receipt.sdk_outbox_event_ids.is_empty());
+        }
+    }
+
+    fn assert_order_revision_decision_sdk_migration_receipt(
+        runtime: &DesktopAppRuntime,
+        order_id: OrderId,
+        revision_id: &str,
+        expected_state: AppSdkMigrationState,
+    ) {
+        assert_order_sdk_migration_receipt(
+            runtime,
+            format!("app:order_revision_decision:{order_id}:{revision_id}").as_str(),
+            ORDER_REVISION_DECISION_OPERATION_KIND,
+            expected_state,
+        );
+    }
+
+    fn assert_order_cancellation_sdk_migration_receipt(
+        runtime: &DesktopAppRuntime,
+        order_id: OrderId,
+        expected_state: AppSdkMigrationState,
+    ) {
+        assert_order_sdk_migration_receipt(
+            runtime,
+            format!("app:order_cancellation:{order_id}").as_str(),
+            ORDER_CANCELLATION_OPERATION_KIND,
+            expected_state,
+        );
+    }
+
+    fn assert_order_fulfillment_sdk_migration_receipt(
+        runtime: &DesktopAppRuntime,
+        order_id: OrderId,
+        fulfillment: RadrootsOrderFulfillmentState,
+        expected_state: AppSdkMigrationState,
+    ) {
+        assert_order_sdk_migration_receipt(
+            runtime,
+            format!(
+                "app:order_fulfillment:{order_id}:{}",
+                order_fulfillment_status_storage_key(fulfillment)
+            )
+            .as_str(),
+            ORDER_FULFILLMENT_UPDATE_OPERATION_KIND,
+            expected_state,
+        );
+    }
+
+    fn assert_order_receipt_sdk_migration_receipt(
+        runtime: &DesktopAppRuntime,
+        order_id: OrderId,
+        expected_state: AppSdkMigrationState,
+    ) {
+        assert_order_sdk_migration_receipt(
+            runtime,
+            format!("app:order_receipt:{order_id}").as_str(),
+            ORDER_RECEIPT_RECORD_OPERATION_KIND,
+            expected_state,
+        );
+    }
+
+    fn assert_order_sdk_migration_receipt(
+        runtime: &DesktopAppRuntime,
+        source_record_id: &str,
+        operation_kind: &str,
+        expected_state: AppSdkMigrationState,
+    ) {
+        let receipt = runtime
+            .lock_state()
+            .sqlite_store
+            .as_ref()
+            .expect("sqlite store")
+            .sdk_migration_receipt_repository()
+            .load_receipt(
+                AppSdkMigrationReceiptSourceKind::LocalOutbox,
+                source_record_id,
+            )
+            .expect("SDK migration receipt should load")
+            .expect("SDK migration receipt should exist");
+        assert_eq!(receipt.source_record_id, source_record_id);
+        assert_eq!(receipt.sdk_operation_kind, operation_kind);
         assert_eq!(
             receipt.migration_state, expected_state,
             "receipt detail: {}",
@@ -23444,6 +23498,24 @@ mod tests {
                 .generate_local_account(Some("Farmer".to_owned()))
                 .expect("account should generate")
         );
+        provision_selected_farmer_account(runtime)
+    }
+
+    fn provision_ready_farmer_account_from_secret(
+        runtime: &DesktopAppRuntime,
+        secret_key_hex: &str,
+    ) -> (String, FarmId) {
+        assert!(
+            runtime
+                .import_local_account(DesktopLocalIdentityImportRequest::raw_secret_key(
+                    secret_key_hex,
+                ))
+                .expect("account should import")
+        );
+        provision_selected_farmer_account(runtime)
+    }
+
+    fn provision_selected_farmer_account(runtime: &DesktopAppRuntime) -> (String, FarmId) {
         let account_id = runtime
             .summary()
             .settings_account_projection
