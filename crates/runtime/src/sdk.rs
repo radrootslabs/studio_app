@@ -15,6 +15,7 @@ use radroots_events::{
     RadrootsNostrEvent, RadrootsNostrEventPtr,
     contract::RadrootsActorRole,
     farm::RadrootsFarm,
+    listing::RadrootsListing,
     order::{
         RadrootsOrderCancellation, RadrootsOrderDecision, RadrootsOrderFulfillmentUpdate,
         RadrootsOrderReceipt, RadrootsOrderRequest, RadrootsOrderRevisionDecision,
@@ -24,7 +25,8 @@ use radroots_events::{
 use radroots_nostr::prelude::RadrootsNostrKeys;
 use radroots_sdk::{
     FARM_PUBLISH_OPERATION_KIND, FarmEnqueuePublishRequest, FarmEnqueueReceipt, IntegrityReceipt,
-    IntegrityRequest, ORDER_CANCELLATION_OPERATION_KIND, ORDER_DECISION_OPERATION_KIND,
+    IntegrityRequest, LISTING_PUBLISH_OPERATION_KIND, ListingEnqueuePublishRequest,
+    ListingEnqueueReceipt, ORDER_CANCELLATION_OPERATION_KIND, ORDER_DECISION_OPERATION_KIND,
     ORDER_FULFILLMENT_UPDATE_OPERATION_KIND, ORDER_RECEIPT_RECORD_OPERATION_KIND,
     ORDER_REVISION_DECISION_OPERATION_KIND, ORDER_REVISION_PROPOSAL_OPERATION_KIND,
     ORDER_SUBMIT_OPERATION_KIND, OrderCancellationEnqueueRequest, OrderCancellationReceipt,
@@ -214,6 +216,16 @@ pub struct AppSdkFarmPublishRequest {
     pub idempotency_key: Option<String>,
 }
 
+pub struct AppSdkListingPublishRequest {
+    pub actor_account_id: String,
+    pub actor_pubkey: String,
+    pub signer_keys: RadrootsNostrKeys,
+    pub listing: RadrootsListing,
+    pub target_relays: Vec<String>,
+    pub relay_url_policy: AppSdkRelayUrlPolicy,
+    pub idempotency_key: Option<String>,
+}
+
 pub struct AppSdkOrderSubmitRequest {
     pub actor_account_id: String,
     pub actor_pubkey: String,
@@ -398,6 +410,10 @@ enum AppSdkWorkerCommand {
         AppSdkFarmPublishRequest,
         mpsc::Sender<Result<AppSdkWorkflowReceipt, AppSdkRuntimeIssue>>,
     ),
+    EnqueueListingPublish(
+        AppSdkListingPublishRequest,
+        mpsc::Sender<Result<AppSdkWorkflowReceipt, AppSdkRuntimeIssue>>,
+    ),
     EnqueueOrderSubmit(
         AppSdkOrderSubmitRequest,
         mpsc::Sender<Result<AppSdkWorkflowReceipt, AppSdkRuntimeIssue>>,
@@ -443,6 +459,7 @@ impl fmt::Debug for AppSdkWorkerCommand {
             Self::Diagnostics(_) => formatter.write_str("Diagnostics"),
             Self::RestorePreflight(_, _) => formatter.write_str("RestorePreflight"),
             Self::EnqueueFarmPublish(_, _) => formatter.write_str("EnqueueFarmPublish"),
+            Self::EnqueueListingPublish(_, _) => formatter.write_str("EnqueueListingPublish"),
             Self::EnqueueOrderSubmit(_, _) => formatter.write_str("EnqueueOrderSubmit"),
             Self::EnqueueOrderDecision(_, _) => formatter.write_str("EnqueueOrderDecision"),
             Self::EnqueueOrderRevisionProposal(_, _) => {
@@ -585,6 +602,15 @@ impl AppSdkRuntime {
     ) -> Result<AppSdkWorkflowReceipt, AppSdkRuntimeError> {
         self.run_command(|response_sender| {
             AppSdkWorkerCommand::EnqueueFarmPublish(request, response_sender)
+        })
+    }
+
+    pub fn enqueue_listing_publish(
+        &self,
+        request: AppSdkListingPublishRequest,
+    ) -> Result<AppSdkWorkflowReceipt, AppSdkRuntimeError> {
+        self.run_command(|response_sender| {
+            AppSdkWorkerCommand::EnqueueListingPublish(request, response_sender)
         })
     }
 
@@ -1127,6 +1153,17 @@ fn run_app_sdk_worker(
                 };
                 send_worker_result(&shared, response_sender, result);
             }
+            AppSdkWorkerCommand::EnqueueListingPublish(request, response_sender) => {
+                let result = if let Some(issue) = lifecycle_busy_issue(&shared) {
+                    Err(issue)
+                } else {
+                    match sdk.as_ref() {
+                        Some(sdk) => enqueue_listing_publish_with_sdk(&runtime, sdk, request),
+                        None => Err(runtime_unavailable_issue(&shared)),
+                    }
+                };
+                send_worker_result(&shared, response_sender, result);
+            }
             AppSdkWorkerCommand::EnqueueOrderSubmit(request, response_sender) => {
                 let result = if let Some(issue) = lifecycle_busy_issue(&shared) {
                     Err(issue)
@@ -1278,6 +1315,13 @@ fn run_degraded_worker(
                 );
             }
             AppSdkWorkerCommand::EnqueueFarmPublish(_, response_sender) => {
+                send_worker_result(
+                    &shared,
+                    response_sender,
+                    Err(runtime_unavailable_issue(&shared)),
+                );
+            }
+            AppSdkWorkerCommand::EnqueueListingPublish(_, response_sender) => {
                 send_worker_result(
                     &shared,
                     response_sender,
@@ -1442,6 +1486,30 @@ fn enqueue_farm_publish_with_sdk(
         .block_on(sdk.farms().enqueue_publish(enqueue, &signer))
         .map_err(|error| AppSdkRuntimeIssue::from_sdk_error(&error))?;
     Ok(app_sdk_farm_receipt(receipt, request.actor_pubkey))
+}
+
+fn enqueue_listing_publish_with_sdk(
+    runtime: &tokio::runtime::Runtime,
+    sdk: &RadrootsSdk,
+    request: AppSdkListingPublishRequest,
+) -> Result<AppSdkWorkflowReceipt, AppSdkRuntimeIssue> {
+    let actor = sdk_actor_context(
+        request.actor_pubkey.as_str(),
+        request.actor_account_id.as_str(),
+        RadrootsActorRole::Seller,
+    )?;
+    let signer = sdk_local_signer(request.signer_keys)?;
+    let target_relays = sdk_relay_targets(request.target_relays, request.relay_url_policy)?;
+    let mut enqueue = ListingEnqueuePublishRequest::new(actor, request.listing, target_relays);
+    if let Some(idempotency_key) = request.idempotency_key.as_deref() {
+        enqueue = enqueue
+            .try_with_idempotency_key(idempotency_key)
+            .map_err(|error| AppSdkRuntimeIssue::from_sdk_error(&error))?;
+    }
+    let receipt = runtime
+        .block_on(sdk.listings().enqueue_publish(enqueue, &signer))
+        .map_err(|error| AppSdkRuntimeIssue::from_sdk_error(&error))?;
+    Ok(app_sdk_listing_receipt(receipt, request.actor_pubkey))
 }
 
 fn enqueue_order_submit_with_sdk(
@@ -1737,6 +1805,22 @@ fn app_sdk_farm_receipt(
     }
 }
 
+fn app_sdk_listing_receipt(
+    receipt: ListingEnqueueReceipt,
+    actor_pubkey: String,
+) -> AppSdkWorkflowReceipt {
+    AppSdkWorkflowReceipt {
+        operation_kind: LISTING_PUBLISH_OPERATION_KIND.to_owned(),
+        expected_event_id: receipt.expected_event_id.as_str().to_owned(),
+        signed_event_id: receipt.signed_event_id.as_str().to_owned(),
+        outbox_operation_id: receipt.outbox_operation_id,
+        outbox_event_id: receipt.outbox_event_id,
+        state: sdk_mutation_state_key(receipt.state).to_owned(),
+        idempotency_digest_prefix: receipt.idempotency_digest_prefix,
+        actor_pubkey,
+    }
+}
+
 fn app_sdk_order_receipt(
     receipt: OrderSubmitReceipt,
     actor_pubkey: String,
@@ -1990,7 +2074,24 @@ mod tests {
         time::{Duration, SystemTime, UNIX_EPOCH},
     };
 
-    use radroots_sdk::{BackupRequest, RadrootsSdk, SdkRelayUrlPolicy as SdkRuntimeRelayUrlPolicy};
+    use radroots_core::{
+        RadrootsCoreCurrency, RadrootsCoreDecimal, RadrootsCoreMoney, RadrootsCoreQuantity,
+        RadrootsCoreQuantityPrice, RadrootsCoreUnit,
+    };
+    use radroots_events::{
+        farm::RadrootsFarmRef,
+        ids::{RadrootsDTag, RadrootsInventoryBinId},
+        listing::{
+            RadrootsListing, RadrootsListingAvailability, RadrootsListingBin,
+            RadrootsListingDeliveryMethod, RadrootsListingLocation, RadrootsListingProduct,
+            RadrootsListingStatus,
+        },
+    };
+    use radroots_nostr::prelude::{RadrootsNostrKeys, RadrootsNostrSecretKey};
+    use radroots_sdk::{
+        BackupRequest, LISTING_PUBLISH_OPERATION_KIND, RadrootsSdk,
+        SdkRelayUrlPolicy as SdkRuntimeRelayUrlPolicy,
+    };
 
     use crate::{
         APP_RUNTIME_NAMESPACE, AppDesktopRuntimePaths, AppRuntimeHostEnvironment,
@@ -1998,11 +2099,14 @@ mod tests {
     };
 
     use super::{
-        APP_SDK_STORAGE_DIR_NAME, AppSdkConfig, AppSdkLifecycleState,
+        APP_SDK_STORAGE_DIR_NAME, AppSdkConfig, AppSdkLifecycleState, AppSdkListingPublishRequest,
         AppSdkProjectionLifecycleState, AppSdkRelayUrlPolicy, AppSdkRestorePreflightRequest,
         AppSdkRuntime, AppSdkRuntimeError, AppSdkRuntimeShared, AppSdkRuntimeStatus,
         AppSdkWorkerCommand, app_sdk_storage_root_from_data_root, transition_status_state,
     };
+
+    const SDK_TEST_SELLER_SECRET_KEY_HEX: &str =
+        "10c5304d6c9ae3a1a16f7860f1cc8f5e3a76225a2663b3a989a0d775919b7df5";
 
     #[test]
     fn sdk_config_uses_app_data_sdk_storage_root() {
@@ -2090,6 +2194,51 @@ mod tests {
         assert_eq!(diagnostics.sync.relay_targets.configured_count, 1);
         runtime.shutdown().expect("sdk runtime should shut down");
         assert_eq!(runtime.status().state, AppSdkLifecycleState::Stopped);
+        let _ = fs::remove_dir_all(storage_root);
+    }
+
+    #[test]
+    fn sdk_runtime_enqueues_listing_publish_work() {
+        let storage_root = temp_storage_root("listing_enqueue");
+        let config = AppSdkConfig::from_app_data_root(
+            storage_root
+                .parent()
+                .expect("storage root should have parent"),
+            vec!["ws://127.0.0.1:8080".to_owned()],
+        );
+        let runtime = AppSdkRuntime::start(config).expect("sdk runtime should start");
+        assert_eq!(
+            runtime.wait_for_startup(Duration::from_secs(5)).state,
+            AppSdkLifecycleState::Ready
+        );
+        let secret_key = RadrootsNostrSecretKey::from_hex(SDK_TEST_SELLER_SECRET_KEY_HEX)
+            .expect("secret key should parse");
+        let signer_keys = RadrootsNostrKeys::new(secret_key);
+        let seller_pubkey = signer_keys.public_key().to_hex();
+
+        let receipt = runtime
+            .enqueue_listing_publish(AppSdkListingPublishRequest {
+                actor_account_id: "seller-account".to_owned(),
+                actor_pubkey: seller_pubkey.clone(),
+                signer_keys,
+                listing: test_listing(seller_pubkey.as_str()),
+                target_relays: vec!["ws://127.0.0.1:8080".to_owned()],
+                relay_url_policy: AppSdkRelayUrlPolicy::Localhost,
+                idempotency_key: Some("listing-enqueue-idempotency".to_owned()),
+            })
+            .expect("listing publish should enqueue");
+
+        assert_eq!(receipt.operation_kind, LISTING_PUBLISH_OPERATION_KIND);
+        assert_eq!(receipt.actor_pubkey, seller_pubkey);
+        assert_eq!(receipt.state, "enqueued");
+        assert!(!receipt.expected_event_id.is_empty());
+        assert_eq!(receipt.expected_event_id, receipt.signed_event_id);
+        assert!(receipt.outbox_operation_id > 0);
+        assert!(receipt.outbox_event_id > 0);
+        assert!(receipt.idempotency_digest_prefix.is_some());
+        let sync = runtime.sync_status().expect("sync diagnostics should load");
+        assert_eq!(sync.outbox.ready_signed_events, 1);
+        runtime.shutdown().expect("sdk runtime should shut down");
         let _ = fs::remove_dir_all(storage_root);
     }
 
@@ -2318,5 +2467,69 @@ mod tests {
         std::env::temp_dir()
             .join(format!("radroots_studio_app_sdk_runtime_{label}_{nanos}"))
             .join(APP_SDK_STORAGE_DIR_NAME)
+    }
+
+    fn test_listing(seller_pubkey: &str) -> RadrootsListing {
+        let bin_id = RadrootsInventoryBinId::parse("bin-1").expect("bin id");
+        RadrootsListing {
+            d_tag: RadrootsDTag::parse("AAAAAAAAAAAAAAAAAAAAAQ").expect("d tag"),
+            published_at: None,
+            farm: RadrootsFarmRef {
+                pubkey: seller_pubkey.to_owned(),
+                d_tag: "AAAAAAAAAAAAAAAAAAAAAA".to_owned(),
+            },
+            product: RadrootsListingProduct {
+                key: "coffee".to_owned(),
+                title: "Coffee".to_owned(),
+                category: "coffee".to_owned(),
+                summary: Some("Single origin coffee".to_owned()),
+                process: None,
+                lot: None,
+                location: None,
+                profile: None,
+                year: None,
+            },
+            primary_bin_id: bin_id.clone(),
+            bins: vec![RadrootsListingBin {
+                bin_id,
+                quantity: RadrootsCoreQuantity::new(
+                    RadrootsCoreDecimal::from(1000u32),
+                    RadrootsCoreUnit::MassG,
+                ),
+                price_per_canonical_unit: RadrootsCoreQuantityPrice {
+                    amount: RadrootsCoreMoney::new(
+                        RadrootsCoreDecimal::from(20u32),
+                        RadrootsCoreCurrency::USD,
+                    ),
+                    quantity: RadrootsCoreQuantity::new(
+                        RadrootsCoreDecimal::from(1u32),
+                        RadrootsCoreUnit::MassG,
+                    ),
+                },
+                display_amount: None,
+                display_unit: None,
+                display_label: None,
+                display_price: None,
+                display_price_unit: None,
+            }],
+            resource_area: None,
+            plot: None,
+            discounts: None,
+            inventory_available: Some(RadrootsCoreDecimal::from(5u32)),
+            availability: Some(RadrootsListingAvailability::Status {
+                status: RadrootsListingStatus::Active,
+            }),
+            delivery_method: Some(RadrootsListingDeliveryMethod::Pickup),
+            location: Some(RadrootsListingLocation {
+                primary: "North Farm".to_owned(),
+                city: None,
+                region: None,
+                country: Some("US".to_owned()),
+                lat: None,
+                lng: None,
+                geohash: None,
+            }),
+            images: None,
+        }
     }
 }
