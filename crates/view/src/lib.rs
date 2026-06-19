@@ -3240,6 +3240,7 @@ mod tests {
             agreement_event_id: Some(test_event_id(
                 "2222222222222222222222222222222222222222222222222222222222222222",
             )),
+            pending_revision_event_id: None,
             listing_addr: Some(test_listing_addr(
                 "30402:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb:AAAAAAAAAAAAAAAAAAAAAg",
             )),
