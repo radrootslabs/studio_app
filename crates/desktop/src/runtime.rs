@@ -304,11 +304,11 @@ enum AppDirectRelayIngestError {
 }
 
 #[derive(Clone)]
-struct SdkDirectRelayAppSyncTransport {
+struct ConfiguredRelayAppSyncTransport {
     relay_urls: Vec<String>,
 }
 
-impl SdkDirectRelayAppSyncTransport {
+impl ConfiguredRelayAppSyncTransport {
     fn new(_accounts_manager: RadrootsNostrAccountsManager, nostr_relay_urls: Vec<String>) -> Self {
         Self {
             relay_urls: nostr_relay_urls,
@@ -401,7 +401,7 @@ fn publish_payload_context(publish_payload: &AppPublishPayload) -> &AppPublishCo
     }
 }
 
-impl AppSyncTransport for SdkDirectRelayAppSyncTransport {
+impl AppSyncTransport for ConfiguredRelayAppSyncTransport {
     fn sync(&mut self, request: AppSyncRequest) -> Result<AppSyncResult, AppSyncTransportError> {
         self.sync_with_sdk(request)
     }
@@ -1694,7 +1694,7 @@ impl DesktopAppRuntimeState {
         ));
         let sync_transport: Box<dyn AppSyncTransport + Send> =
             match accounts_bootstrap.accounts_manager.as_ref() {
-                Some(accounts_manager) => Box::new(SdkDirectRelayAppSyncTransport::new(
+                Some(accounts_manager) => Box::new(ConfiguredRelayAppSyncTransport::new(
                     accounts_manager.clone(),
                     nostr_relay_urls.clone(),
                 )),
@@ -10714,11 +10714,11 @@ mod tests {
         "585591529da0bab31b3b1b1f986611cf5f435dca84f978c89ee8a40cca7103df";
 
     use super::{
-        APP_DATABASE_FILE_NAME, APP_SYNC_PUBLISH_USES_SDK_RUNTIME_MESSAGE, DesktopAppRuntime,
-        DesktopAppRuntimeActivityContextError, DesktopAppRuntimeCommandError,
-        DesktopAppRuntimeMetadataSummary, DesktopAppRuntimeState, DesktopAppSdkDiagnosticsState,
-        DesktopAppSyncStatusSummary, DesktopRemoteSignerPaths, SYNC_TRANSPORT_UNAVAILABLE_MESSAGE,
-        SdkDirectRelayAppSyncTransport, TokioRuntimeBuilder, default_sync_transport,
+        APP_DATABASE_FILE_NAME, APP_SYNC_PUBLISH_USES_SDK_RUNTIME_MESSAGE,
+        ConfiguredRelayAppSyncTransport, DesktopAppRuntime, DesktopAppRuntimeActivityContextError,
+        DesktopAppRuntimeCommandError, DesktopAppRuntimeMetadataSummary, DesktopAppRuntimeState,
+        DesktopAppSdkDiagnosticsState, DesktopAppSyncStatusSummary, DesktopRemoteSignerPaths,
+        SYNC_TRANSPORT_UNAVAILABLE_MESSAGE, TokioRuntimeBuilder, default_sync_transport,
         direct_relay_event_source_runtime, farm_sync_payload, is_hex_64,
         order_decision_publish_payload_to_sdk_decision, pending_sync_upsert,
         signed_event_from_local_record,
@@ -11084,7 +11084,7 @@ mod tests {
             .clone();
         runtime.lock_state_mut().nostr_relay_urls = vec![relay.url().to_owned()];
         runtime.lock_state_mut().sync_transport =
-            Box::new(SdkDirectRelayAppSyncTransport::with_relay_urls(
+            Box::new(ConfiguredRelayAppSyncTransport::with_relay_urls(
                 accounts_manager,
                 vec![relay.url().to_owned()],
             ));
@@ -11112,7 +11112,7 @@ mod tests {
         });
         let operation = PendingSyncOperation::from_publish_payload(payload, "2026-05-24T12:00:00Z")
             .expect("typed farm publish work should serialize");
-        let mut transport = SdkDirectRelayAppSyncTransport::with_relay_urls(
+        let mut transport = ConfiguredRelayAppSyncTransport::with_relay_urls(
             manager,
             vec![relay_a.url().to_owned(), relay_b.url().to_owned()],
         );
@@ -11150,7 +11150,7 @@ mod tests {
         let operation = PendingSyncOperation::from_publish_payload(payload, "2026-05-24T12:00:00Z")
             .expect("typed listing publish work should serialize");
         let mut transport =
-            SdkDirectRelayAppSyncTransport::with_relay_urls(manager, vec![relay.url().to_owned()]);
+            ConfiguredRelayAppSyncTransport::with_relay_urls(manager, vec![relay.url().to_owned()]);
 
         let error = transport
             .sync(AppSyncRequest {
@@ -11242,7 +11242,7 @@ mod tests {
         let operation = PendingSyncOperation::from_publish_payload(payload, "2026-05-24T12:00:00Z")
             .expect("typed order request publish work should serialize");
         let mut transport =
-            SdkDirectRelayAppSyncTransport::with_relay_urls(manager, vec![relay.url().to_owned()]);
+            ConfiguredRelayAppSyncTransport::with_relay_urls(manager, vec![relay.url().to_owned()]);
 
         let error = transport
             .sync(AppSyncRequest {
@@ -11289,7 +11289,7 @@ mod tests {
         let operation = PendingSyncOperation::from_publish_payload(payload, "2026-05-24T12:00:00Z")
             .expect("typed order decision publish work should serialize");
         let mut transport =
-            SdkDirectRelayAppSyncTransport::with_relay_urls(manager, vec![relay.url().to_owned()]);
+            ConfiguredRelayAppSyncTransport::with_relay_urls(manager, vec![relay.url().to_owned()]);
 
         let error = transport
             .sync(AppSyncRequest {
@@ -11459,7 +11459,7 @@ mod tests {
         })
         .collect::<Vec<_>>();
         let mut transport =
-            SdkDirectRelayAppSyncTransport::with_relay_urls(manager, vec![relay.url().to_owned()]);
+            ConfiguredRelayAppSyncTransport::with_relay_urls(manager, vec![relay.url().to_owned()]);
 
         let error = transport
             .sync(AppSyncRequest {
@@ -11891,7 +11891,7 @@ mod tests {
             "2026-05-24T12:01:00Z",
         );
         let mut transport =
-            SdkDirectRelayAppSyncTransport::with_relay_urls(manager, vec![relay.url().to_owned()]);
+            ConfiguredRelayAppSyncTransport::with_relay_urls(manager, vec![relay.url().to_owned()]);
 
         let error = transport
             .sync(AppSyncRequest {
@@ -12001,7 +12001,7 @@ mod tests {
         let operation = PendingSyncOperation::from_publish_payload(payload, "2026-05-25T07:00:00Z")
             .expect("order publish payload should serialize");
         let mut transport =
-            SdkDirectRelayAppSyncTransport::with_relay_urls(manager, vec![relay.url().to_owned()]);
+            ConfiguredRelayAppSyncTransport::with_relay_urls(manager, vec![relay.url().to_owned()]);
 
         let error = transport
             .sync(AppSyncRequest {
@@ -12035,7 +12035,7 @@ mod tests {
         let operation = PendingSyncOperation::from_publish_payload(payload, "2026-05-24T12:00:00Z")
             .expect("typed listing publish work should serialize");
         let mut transport =
-            SdkDirectRelayAppSyncTransport::with_relay_urls(manager, vec![relay.url().to_owned()]);
+            ConfiguredRelayAppSyncTransport::with_relay_urls(manager, vec![relay.url().to_owned()]);
 
         let error = transport
             .sync(AppSyncRequest {
@@ -12065,7 +12065,7 @@ mod tests {
         let operation = PendingSyncOperation::from_publish_payload(payload, "2026-05-24T12:00:00Z")
             .expect("typed farm publish work should serialize");
         let mut transport =
-            SdkDirectRelayAppSyncTransport::with_relay_urls(manager, vec![relay.url().to_owned()]);
+            ConfiguredRelayAppSyncTransport::with_relay_urls(manager, vec![relay.url().to_owned()]);
 
         let error = transport
             .sync(AppSyncRequest {
@@ -12097,7 +12097,7 @@ mod tests {
         let operation = PendingSyncOperation::from_publish_payload(payload, "2026-05-24T12:00:00Z")
             .expect("typed farm publish work should serialize");
         let mut transport =
-            SdkDirectRelayAppSyncTransport::with_relay_urls(manager, vec![relay.url().to_owned()]);
+            ConfiguredRelayAppSyncTransport::with_relay_urls(manager, vec![relay.url().to_owned()]);
 
         let error = transport
             .sync(AppSyncRequest {
@@ -12143,7 +12143,7 @@ mod tests {
         let operation = PendingSyncOperation::from_publish_payload(payload, "2026-05-24T12:00:00Z")
             .expect("typed farm publish work should serialize");
         let mut transport =
-            SdkDirectRelayAppSyncTransport::with_relay_urls(manager, vec![relay.url().to_owned()]);
+            ConfiguredRelayAppSyncTransport::with_relay_urls(manager, vec![relay.url().to_owned()]);
 
         let error = transport
             .sync(AppSyncRequest {

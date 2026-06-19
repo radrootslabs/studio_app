@@ -1308,55 +1308,6 @@ const STRICT_SDK_BOUNDARY_FORBIDDEN_PATTERNS: &[SdkBoundaryForbiddenPattern] = &
 
 const LEGACY_SDK_BOUNDARY_ALLOWLIST: &[LegacySdkBoundaryAllowlistEntry] = &[
     LegacySdkBoundaryAllowlistEntry {
-        path: "crates/desktop/src/runtime.rs",
-        pattern: "SdkDirectRelayAppSyncTransport",
-        owner: "rpv1-app-sdk-refactor.07",
-        reason: "desktop runtime still owns deferred direct relay publish transport for listing publish",
-        removal_condition: "remove when listing publish workflow enqueues through AppSdkRuntime",
-    },
-    LegacySdkBoundaryAllowlistEntry {
-        path: "crates/desktop/src/runtime.rs",
-        pattern: "RadrootsSdkClient",
-        owner: "rpv1-app-sdk-refactor.07",
-        reason: "desktop runtime still constructs the legacy direct publish client for listing publish",
-        removal_condition: "remove when direct publish workflows no longer construct SDK clients outside AppSdkRuntime",
-    },
-    LegacySdkBoundaryAllowlistEntry {
-        path: "crates/desktop/src/runtime.rs",
-        pattern: "RadrootsSdkConfig",
-        owner: "rpv1-app-sdk-refactor.07",
-        reason: "desktop runtime still configures the legacy direct publish client for listing publish",
-        removal_condition: "remove when direct publish workflows no longer configure SDK clients outside AppSdkRuntime",
-    },
-    LegacySdkBoundaryAllowlistEntry {
-        path: "crates/desktop/src/runtime.rs",
-        pattern: "SdkTransportMode::RelayDirect",
-        owner: "rpv1-app-sdk-refactor.07",
-        reason: "desktop runtime still uses relay direct publish transport for listing publish",
-        removal_condition: "remove when listing publish workflow routes through SDK canonical outbox and sync APIs",
-    },
-    LegacySdkBoundaryAllowlistEntry {
-        path: "crates/desktop/src/runtime.rs",
-        pattern: "SignerConfig::LocalIdentity",
-        owner: "rpv1-app-sdk-refactor.07",
-        reason: "desktop runtime still configures direct local signing for listing publish",
-        removal_condition: "remove when publish signing is mediated by AppSdkRuntime and SDK signer adapters",
-    },
-    LegacySdkBoundaryAllowlistEntry {
-        path: "crates/desktop/src/runtime.rs",
-        pattern: "PendingSyncOperation::from_publish_payload",
-        owner: "rpv1-app-sdk-refactor.07",
-        reason: "desktop runtime still creates legacy local outbox publish work for listing publish",
-        removal_condition: "remove when listing publish writes SDK canonical outbox requests instead of app local_outbox operations",
-    },
-    LegacySdkBoundaryAllowlistEntry {
-        path: "crates/desktop/src/runtime.rs",
-        pattern: "publish_with_identity",
-        owner: "rpv1-app-sdk-refactor.07",
-        reason: "desktop runtime still calls legacy direct SDK listing publish APIs",
-        removal_condition: "remove when listing publish workflow enqueues through AppSdkRuntime",
-    },
-    LegacySdkBoundaryAllowlistEntry {
         path: "crates/desktop/src/accounts.rs",
         pattern: "RadrootsIdentity::from_secret_key_str",
         owner: "rpv1-app-sdk-hardening.04",
@@ -1383,20 +1334,6 @@ const LEGACY_SDK_BOUNDARY_ALLOWLIST: &[LegacySdkBoundaryAllowlistEntry] = &[
         owner: "rpv1-app-sdk-hardening.04",
         reason: "remote signer protocol connection still materializes client identity from local pending-session custody",
         removal_condition: "remove when remote signer protocol sessions are mediated by SDK signer adapters and protected store APIs",
-    },
-    LegacySdkBoundaryAllowlistEntry {
-        path: "crates/sync/src/publish.rs",
-        pattern: "SdkTransportMode::RelayDirect",
-        owner: "rpv1-app-sdk-refactor.07",
-        reason: "sync payload metadata still marks legacy listing local outbox publish work as relay direct",
-        removal_condition: "remove when listing publish payload metadata is replaced by SDK canonical outbox requests",
-    },
-    LegacySdkBoundaryAllowlistEntry {
-        path: "crates/sync/src/publish.rs",
-        pattern: "publish_draft_with_identity",
-        owner: "rpv1-app-sdk-refactor.07",
-        reason: "sync payload metadata still names legacy listing SDK publish operations",
-        removal_condition: "remove when listing publish payload metadata is replaced by SDK canonical outbox requests",
     },
     LegacySdkBoundaryAllowlistEntry {
         path: "crates/store/src/lib.rs",
@@ -1616,10 +1553,16 @@ fn strict_sdk_boundary_scanner_rejects_unallowlisted_new_production_paths() {
 
     assert_eq!(findings.len(), 1);
     assert_eq!(findings[0].pattern, "RadrootsSdkClient");
+    let runtime_findings = unallowlisted_sdk_boundary_patterns(
+        "crates/desktop/src/runtime.rs",
+        "fn publish() { let _ = RadrootsSdkClient::from_config(config); }",
+    );
+    assert_eq!(runtime_findings.len(), 1);
+    assert_eq!(runtime_findings[0].pattern, "RadrootsSdkClient");
     assert!(
         unallowlisted_sdk_boundary_patterns(
-            "crates/desktop/src/runtime.rs",
-            "fn publish() { let _ = RadrootsSdkClient::from_config(config); }",
+            "crates/desktop/src/accounts.rs",
+            "fn import() { let _ = RawSecretKey; }",
         )
         .is_empty()
     );
