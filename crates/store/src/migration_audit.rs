@@ -14,7 +14,10 @@ use radroots_sql_core::SqlExecutor;
 use rusqlite::params;
 use serde_json::Value;
 
-use crate::{AppSqliteError, AppSqliteStore};
+use crate::{
+    AppSdkMigrationReceipt, AppSdkMigrationReceiptSourceKind, AppSdkMigrationState, AppSqliteError,
+    AppSqliteStore,
+};
 
 pub const APP_SDK_MIGRATION_AUDIT_DEFAULT_BATCH_SIZE: u32 = 500;
 pub const APP_SDK_MIGRATION_AUDIT_MAX_BATCH_SIZE: u32 = 1_000;
@@ -94,6 +97,9 @@ pub enum AppSdkMigrationAuditSource {
 pub enum AppSdkMigrationAuditClassification {
     PublishableCandidate,
     AlreadyRepresentedCandidate,
+    RepresentedRecord,
+    SkippedRecord,
+    FailedRecord,
     LocalWorkDeferred,
     ManualReviewRequired,
     PaymentDeferred,
@@ -108,6 +114,9 @@ impl AppSdkMigrationAuditClassification {
         match self {
             Self::PublishableCandidate => "publishable_candidate",
             Self::AlreadyRepresentedCandidate => "already_represented_candidate",
+            Self::RepresentedRecord => "represented_record",
+            Self::SkippedRecord => "skipped_record",
+            Self::FailedRecord => "failed_record",
             Self::LocalWorkDeferred => "local_work_deferred",
             Self::ManualReviewRequired => "manual_review_required",
             Self::PaymentDeferred => "payment_deferred",
@@ -130,7 +139,7 @@ impl AppSqliteStore {
     {
         let local_outbox = self.audit_sdk_migration_local_outbox(request)?;
         let shared_local_events =
-            audit_sdk_migration_shared_local_events(shared_local_events, request)?;
+            self.audit_sdk_migration_shared_local_events(shared_local_events, request)?;
         let issues = local_outbox
             .issues
             .iter()
@@ -164,7 +173,11 @@ impl AppSqliteStore {
             report.batch_count += 1;
             for row in &rows {
                 last_rowid = row.rowid;
-                audit_local_outbox_row(row, &mut report);
+                let receipt = self.sdk_migration_receipt_repository().load_receipt(
+                    AppSdkMigrationReceiptSourceKind::LocalOutbox,
+                    row.id.as_str(),
+                )?;
+                audit_local_outbox_row(row, receipt.as_ref(), &mut report);
             }
             if rows.len() < batch_size as usize {
                 break;
@@ -173,11 +186,28 @@ impl AppSqliteStore {
 
         Ok(report.finish())
     }
+
+    pub fn audit_sdk_migration_shared_local_events<E>(
+        &self,
+        store: &LocalEventsStore<E>,
+        request: AppSdkMigrationAuditRequest,
+    ) -> Result<AppSdkMigrationAuditSourceReport, AppSqliteError>
+    where
+        E: SqlExecutor,
+    {
+        audit_sdk_migration_shared_local_events_with_receipts(store, request, |record_id| {
+            self.sdk_migration_receipt_repository().load_receipt(
+                AppSdkMigrationReceiptSourceKind::SharedLocalEvent,
+                record_id,
+            )
+        })
+    }
 }
 
-pub fn audit_sdk_migration_shared_local_events<E>(
+fn audit_sdk_migration_shared_local_events_with_receipts<E>(
     store: &LocalEventsStore<E>,
     request: AppSdkMigrationAuditRequest,
+    mut load_receipt: impl FnMut(&str) -> Result<Option<AppSdkMigrationReceipt>, AppSqliteError>,
 ) -> Result<AppSdkMigrationAuditSourceReport, AppSqliteError>
 where
     E: SqlExecutor,
@@ -202,7 +232,8 @@ where
         report.batch_count += 1;
         for record in &records {
             after_change_seq = record.change_seq;
-            audit_shared_local_event_record(record, &mut report);
+            let receipt = load_receipt(record.record_id.as_str())?;
+            audit_shared_local_event_record(record, receipt.as_ref(), &mut report);
         }
         if records.len() < batch_size as usize {
             break;
@@ -364,10 +395,11 @@ struct DuplicateIdentity {
 
 fn audit_local_outbox_row(
     row: &LocalOutboxAuditRow,
+    receipt: Option<&AppSdkMigrationReceipt>,
     report: &mut AppSdkMigrationAuditSourceBuilder,
 ) {
     let payload = serde_json::from_str::<AppPublishPayload>(row.payload_json.as_str());
-    let (kind, classification) = match payload {
+    let (kind, source_classification) = match payload {
         Ok(payload) => {
             if row.operation_kind == SyncOperationKind::Delete.storage_key() {
                 report.issue(
@@ -404,6 +436,8 @@ fn audit_local_outbox_row(
             )
         }
     };
+    let classification =
+        classify_receipt_overlay(row.id.as_str(), source_classification, receipt, report);
     let identities = vec![
         DuplicateIdentity {
             kind: "operation".to_owned(),
@@ -462,10 +496,17 @@ fn classify_local_outbox_state(
 
 fn audit_shared_local_event_record(
     record: &LocalEventRecord,
+    receipt: Option<&AppSdkMigrationReceipt>,
     report: &mut AppSdkMigrationAuditSourceBuilder,
 ) {
     let kind = shared_local_event_kind(record);
-    let classification = shared_local_event_classification(record, report);
+    let source_classification = shared_local_event_classification(record, report);
+    let classification = classify_receipt_overlay(
+        record.record_id.as_str(),
+        source_classification,
+        receipt,
+        report,
+    );
     report.record(
         record.record_id.as_str(),
         kind,
@@ -477,6 +518,92 @@ fn audit_shared_local_event_record(
         classification,
         shared_local_event_duplicate_identities(record),
     );
+}
+
+fn classify_receipt_overlay(
+    record_id: &str,
+    source_classification: AppSdkMigrationAuditClassification,
+    receipt: Option<&AppSdkMigrationReceipt>,
+    report: &mut AppSdkMigrationAuditSourceBuilder,
+) -> AppSdkMigrationAuditClassification {
+    let Some(receipt) = receipt else {
+        return source_classification;
+    };
+    if !receipt_allowed_for_source_classification(source_classification) {
+        report.issue(
+            "sdk_migration_receipt_for_non_migratable_source",
+            Some(record_id),
+            format!(
+                "SDK migration receipt `{}` for operation `{}` cannot override source classification `{}`",
+                receipt.id,
+                receipt.sdk_operation_kind,
+                source_classification.storage_key()
+            ),
+        );
+        return source_classification;
+    }
+
+    match receipt.migration_state {
+        AppSdkMigrationState::Pending | AppSdkMigrationState::Prepared => source_classification,
+        AppSdkMigrationState::Enqueued | AppSdkMigrationState::Pushed => {
+            AppSdkMigrationAuditClassification::RepresentedRecord
+        }
+        AppSdkMigrationState::Skipped => AppSdkMigrationAuditClassification::SkippedRecord,
+        AppSdkMigrationState::Failed => {
+            report.issue(
+                "sdk_migration_receipt_failed",
+                Some(record_id),
+                format!(
+                    "SDK migration receipt `{}` for operation `{}` is failed",
+                    receipt.id, receipt.sdk_operation_kind
+                ),
+            );
+            AppSdkMigrationAuditClassification::FailedRecord
+        }
+        AppSdkMigrationState::Blocked | AppSdkMigrationState::ManualReview => {
+            report.issue(
+                "sdk_migration_receipt_manual_review",
+                Some(record_id),
+                format!(
+                    "SDK migration receipt `{}` for operation `{}` requires manual review",
+                    receipt.id, receipt.sdk_operation_kind
+                ),
+            );
+            AppSdkMigrationAuditClassification::ManualReviewRequired
+        }
+        AppSdkMigrationState::Unsupported => {
+            report.issue(
+                "sdk_migration_receipt_unsupported",
+                Some(record_id),
+                format!(
+                    "SDK migration receipt `{}` for operation `{}` is unsupported",
+                    receipt.id, receipt.sdk_operation_kind
+                ),
+            );
+            AppSdkMigrationAuditClassification::Unsupported
+        }
+        AppSdkMigrationState::Unknown => {
+            report.issue(
+                "sdk_migration_receipt_unknown",
+                Some(record_id),
+                format!(
+                    "SDK migration receipt `{}` for operation `{}` is unknown",
+                    receipt.id, receipt.sdk_operation_kind
+                ),
+            );
+            AppSdkMigrationAuditClassification::Unknown
+        }
+    }
+}
+
+fn receipt_allowed_for_source_classification(
+    classification: AppSdkMigrationAuditClassification,
+) -> bool {
+    matches!(
+        classification,
+        AppSdkMigrationAuditClassification::PublishableCandidate
+            | AppSdkMigrationAuditClassification::AlreadyRepresentedCandidate
+    )
 }
 
 fn shared_local_event_kind(record: &LocalEventRecord) -> String {
@@ -746,8 +873,9 @@ mod tests {
     use serde_json::json;
 
     use crate::{
-        AppSdkMigrationAuditClassification, AppSdkMigrationAuditRequest, AppSqliteStore,
-        DatabaseTarget,
+        AppSdkMigrationAuditClassification, AppSdkMigrationAuditRequest,
+        AppSdkMigrationReceiptInput, AppSdkMigrationReceiptSourceKind, AppSdkMigrationState,
+        AppSqliteStore, DatabaseTarget,
     };
 
     fn local_events_store() -> LocalEventsStore<SqliteExecutor> {
@@ -929,6 +1057,141 @@ mod tests {
                 .filter(|issue| issue.code == "manual_review_local_outbox_state")
                 .count(),
             2
+        );
+    }
+
+    #[test]
+    fn local_outbox_audit_uses_migration_receipts_for_migratable_records() {
+        let store = AppSqliteStore::open(DatabaseTarget::InMemory).expect("open app store");
+        let shared_events = local_events_store();
+        let operation = farm_profile_operation("acct_seed", "receipt_matrix");
+
+        for (id, state) in [
+            ("represented-source", AppSdkMigrationState::Enqueued),
+            ("skipped-source", AppSdkMigrationState::Skipped),
+            ("failed-source", AppSdkMigrationState::Failed),
+        ] {
+            insert_local_outbox_audit_row(&store, id, id, "pending", &operation);
+            record_local_outbox_receipt(&store, id, state);
+        }
+
+        let report = store
+            .audit_sdk_migration(
+                &shared_events,
+                AppSdkMigrationAuditRequest { batch_size: 10 },
+            )
+            .expect("audit should run");
+
+        assert_eq!(report.local_outbox.scanned_records, 3);
+        assert_eq!(
+            count_named(
+                &report.local_outbox.classification_counts,
+                AppSdkMigrationAuditClassification::RepresentedRecord.storage_key()
+            ),
+            1
+        );
+        assert_eq!(
+            count_named(
+                &report.local_outbox.classification_counts,
+                AppSdkMigrationAuditClassification::SkippedRecord.storage_key()
+            ),
+            1
+        );
+        assert_eq!(
+            count_named(
+                &report.local_outbox.classification_counts,
+                AppSdkMigrationAuditClassification::FailedRecord.storage_key()
+            ),
+            1
+        );
+        assert!(
+            report
+                .local_outbox
+                .issues
+                .iter()
+                .any(|issue| issue.code == "sdk_migration_receipt_failed")
+        );
+    }
+
+    #[test]
+    fn local_outbox_audit_does_not_let_receipts_hide_non_migratable_rows() {
+        let store = AppSqliteStore::open(DatabaseTarget::InMemory).expect("open app store");
+        let shared_events = local_events_store();
+        let operation = farm_profile_operation("acct_seed", "non_migratable");
+
+        insert_local_outbox_audit_row(&store, "failed-source", "acct_failed", "failed", &operation);
+        record_local_outbox_receipt(&store, "failed-source", AppSdkMigrationState::Enqueued);
+        insert_local_outbox_audit_row(
+            &store,
+            "unsupported-source",
+            "acct_unsupported",
+            "pending",
+            &PendingSyncOperation {
+                operation: radroots_studio_app_sync::SyncOperationKind::Delete,
+                ..operation.clone()
+            },
+        );
+        record_local_outbox_receipt(&store, "unsupported-source", AppSdkMigrationState::Enqueued);
+        store
+            .connection()
+            .execute_batch("PRAGMA ignore_check_constraints = ON")
+            .expect("disable sqlite checks for defensive unknown state row");
+        insert_local_outbox_audit_row(
+            &store,
+            "unknown-source",
+            "acct_unknown",
+            "mystery",
+            &operation,
+        );
+        store
+            .connection()
+            .execute_batch("PRAGMA ignore_check_constraints = OFF")
+            .expect("restore sqlite checks");
+        record_local_outbox_receipt(&store, "unknown-source", AppSdkMigrationState::Enqueued);
+
+        let report = store
+            .audit_sdk_migration(
+                &shared_events,
+                AppSdkMigrationAuditRequest { batch_size: 10 },
+            )
+            .expect("audit should run");
+
+        assert_eq!(
+            count_named(
+                &report.local_outbox.classification_counts,
+                AppSdkMigrationAuditClassification::RepresentedRecord.storage_key()
+            ),
+            0
+        );
+        assert_eq!(
+            count_named(
+                &report.local_outbox.classification_counts,
+                AppSdkMigrationAuditClassification::ManualReviewRequired.storage_key()
+            ),
+            1
+        );
+        assert_eq!(
+            count_named(
+                &report.local_outbox.classification_counts,
+                AppSdkMigrationAuditClassification::Unsupported.storage_key()
+            ),
+            1
+        );
+        assert_eq!(
+            count_named(
+                &report.local_outbox.classification_counts,
+                AppSdkMigrationAuditClassification::Unknown.storage_key()
+            ),
+            1
+        );
+        assert_eq!(
+            report
+                .local_outbox
+                .issues
+                .iter()
+                .filter(|issue| issue.code == "sdk_migration_receipt_for_non_migratable_source")
+                .count(),
+            3
         );
     }
 
@@ -1204,6 +1467,28 @@ mod tests {
                 ],
             )
             .expect("insert local outbox audit row");
+    }
+
+    fn record_local_outbox_receipt(
+        store: &AppSqliteStore,
+        source_record_id: &str,
+        migration_state: AppSdkMigrationState,
+    ) {
+        store
+            .sdk_migration_receipt_repository()
+            .record_receipt(&AppSdkMigrationReceiptInput {
+                source_kind: AppSdkMigrationReceiptSourceKind::LocalOutbox,
+                source_record_id: source_record_id.to_owned(),
+                sdk_operation_kind: "farm.publish".to_owned(),
+                sdk_outbox_event_ids: vec![format!("sdk-outbox-{source_record_id}")],
+                expected_event_id: Some(format!("event-{source_record_id}")),
+                actor_pubkey: Some("actor-pubkey".to_owned()),
+                idempotency_digest_prefix: Some("digest-prefix".to_owned()),
+                migration_state,
+                recorded_at: "2026-06-18T12:00:00Z".to_owned(),
+                detail_json: json!({"source": source_record_id}),
+            })
+            .expect("record local outbox receipt");
     }
 
     fn local_work_record(

@@ -114,6 +114,10 @@ const MIGRATIONS: &[Migration] = &[
             "../migrations/0027_local_interop_validation_receipt_projection_kind.sql"
         ),
     },
+    Migration {
+        version: 28,
+        sql: include_str!("../migrations/0028_sdk_migration_receipts.sql"),
+    },
 ];
 
 pub fn latest_schema_version() -> u32 {

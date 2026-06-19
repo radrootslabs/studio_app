@@ -73,6 +73,18 @@ pub enum AppSqliteError {
         #[source]
         source: rusqlite::Error,
     },
+    #[error("failed to encode sqlite JSON column `{field}`")]
+    EncodeJson {
+        field: &'static str,
+        #[source]
+        source: serde_json::Error,
+    },
+    #[error("failed to decode sqlite JSON column `{field}`")]
+    DecodeJson {
+        field: &'static str,
+        #[source]
+        source: serde_json::Error,
+    },
     #[error("invalid sqlite id in `{field}`: `{value}`")]
     DecodeId { field: &'static str, value: String },
     #[error("missing required sqlite column `{field}`")]
