@@ -102,7 +102,8 @@ use crate::pack_day_print::{
     PackDayPrintError, execute_pack_day_batch_print_plan, execute_pack_day_print_plan,
 };
 use crate::runtime::{
-    DesktopAppRuntime, DesktopAppRuntimeProductEditorSaveError, DesktopAppRuntimeSummary,
+    DesktopAppRuntime, DesktopAppRuntimeProductEditorSaveError,
+    DesktopAppRuntimeProductStockUpdateError, DesktopAppRuntimeSummary,
     DesktopAppSdkDiagnosticsState, DesktopAppSdkDiagnosticsSummary, DesktopAppSdkIssueSummary,
     DesktopAppSdkReadyDiagnosticsSummary, DesktopAppSdkStatusSummary,
     DesktopAppSyncConflictSummary, DesktopAppSyncStatusSummary,
@@ -3251,11 +3252,11 @@ impl HomeView {
             return;
         };
 
-        if editor.input != *state || !editor.save_failed {
+        if editor.input != *state || editor.save_issue.is_none() {
             return;
         }
 
-        editor.save_failed = false;
+        editor.save_issue = None;
         cx.notify();
     }
 
@@ -3290,7 +3291,12 @@ impl HomeView {
                 );
 
                 if let Some(editor) = self.products_stock_editor.as_mut() {
-                    editor.save_failed = true;
+                    let save_issue =
+                        ProductsStockEditorSaveIssue::from_runtime_error(&runtime_error);
+                    if save_issue == ProductsStockEditorSaveIssue::PublishQueueFailed {
+                        editor.initial_stock_quantity = Some(stock_quantity);
+                    }
+                    editor.save_issue = Some(save_issue);
                 }
                 cx.notify();
             }
@@ -3433,6 +3439,9 @@ impl HomeView {
                     product_id = %form.product_id,
                     "failed to save product editor draft"
                 );
+                if runtime_error.is_listing_publish_sdk_enqueue_failed() {
+                    form.initial_draft = draft;
+                }
                 form.save_issue = Some(ProductEditorSaveIssue::from_runtime_error(&runtime_error));
                 cx.notify();
             }
@@ -6089,7 +6098,7 @@ struct ProductsStockEditorState {
     initial_stock_quantity: Option<u32>,
     input: Entity<InputState>,
     _input_subscription: Subscription,
-    save_failed: bool,
+    save_issue: Option<ProductsStockEditorSaveIssue>,
 }
 
 impl ProductsStockEditorState {
@@ -6118,7 +6127,7 @@ impl ProductsStockEditorState {
             initial_stock_quantity: stock_quantity,
             input,
             _input_subscription: input_subscription,
-            save_failed: false,
+            save_issue: None,
         }
     }
 
@@ -6130,6 +6139,29 @@ impl ProductsStockEditorState {
         self.parsed_stock_quantity(cx)
             .map(|stock_quantity| Some(stock_quantity) != self.initial_stock_quantity)
             .unwrap_or(false)
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum ProductsStockEditorSaveIssue {
+    SaveFailed,
+    PublishQueueFailed,
+}
+
+impl ProductsStockEditorSaveIssue {
+    fn from_runtime_error(error: &DesktopAppRuntimeProductStockUpdateError) -> Self {
+        if error.is_listing_publish_sdk_enqueue_failed() {
+            Self::PublishQueueFailed
+        } else {
+            Self::SaveFailed
+        }
+    }
+
+    fn text_key(self) -> AppTextKey {
+        match self {
+            Self::SaveFailed => AppTextKey::ProductsStockEditorSaveFailed,
+            Self::PublishQueueFailed => AppTextKey::ProductsStockEditorPublishQueueFailed,
+        }
     }
 }
 
@@ -15535,7 +15567,12 @@ fn products_stock_editor_card(
     cx: &App,
 ) -> impl IntoElement {
     let validation_key = products_stock_editor_validation_key(editor, cx);
-    let save_ready = editor.has_changes(cx) && editor.parsed_stock_quantity(cx).is_some();
+    let save_ready = (editor.has_changes(cx)
+        || matches!(
+            editor.save_issue,
+            Some(ProductsStockEditorSaveIssue::PublishQueueFailed)
+        ))
+        && editor.parsed_stock_quantity(cx).is_some();
 
     div()
         .w_full()
@@ -15602,7 +15639,7 @@ fn products_stock_editor_card(
                                     .child(app_shared_text(key)),
                             )
                         })
-                        .when(editor.save_failed, |this| {
+                        .when_some(editor.save_issue, |this, issue| {
                             this.child(
                                 div()
                                     .text_size(px(APP_UI_THEME
@@ -15611,9 +15648,7 @@ fn products_stock_editor_card(
                                         .utility_title_text_px))
                                     .line_height(relative(1.2))
                                     .text_color(rgb(APP_UI_THEME.foundation.text.secondary))
-                                    .child(app_shared_text(
-                                        AppTextKey::ProductsStockEditorSaveFailed,
-                                    )),
+                                    .child(app_shared_text(issue.text_key())),
                             )
                         }),
                 )
@@ -15665,7 +15700,12 @@ fn products_editor_surface(
     cx: &mut Context<HomeView>,
 ) -> AnyElement {
     let validation_keys = products_editor_validation_keys(form, cx);
-    let save_ready = form.has_changes(cx) && validation_keys.is_empty();
+    let save_ready = (form.has_changes(cx)
+        || matches!(
+            form.save_issue,
+            Some(ProductEditorSaveIssue::PublishQueueFailed)
+        ))
+        && validation_keys.is_empty();
 
     let save_action = if save_ready {
         action_button_primary(

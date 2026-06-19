@@ -627,6 +627,7 @@
   "products.stock_editor.action.cancel": "Cancel",
   "products.stock_editor.invalid_quantity": "Enter a whole number.",
   "products.stock_editor.save_failed": "Couldn't save stock. Try again.",
+  "products.stock_editor.publish_queue_failed": "Stock was saved, but publishing couldn't be queued. Try again.",
   "products.status.draft": "Draft",
   "products.status.live": "Live",
   "products.status.paused": "Paused",

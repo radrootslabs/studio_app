@@ -648,6 +648,7 @@ define_app_text_keys! {
     ProductsStockEditorCancelAction => "products.stock_editor.action.cancel",
     ProductsStockEditorInvalidQuantity => "products.stock_editor.invalid_quantity",
     ProductsStockEditorSaveFailed => "products.stock_editor.save_failed",
+    ProductsStockEditorPublishQueueFailed => "products.stock_editor.publish_queue_failed",
     ProductsStatusDraft => "products.status.draft",
     ProductsStatusLive => "products.status.live",
     ProductsStatusPaused => "products.status.paused",

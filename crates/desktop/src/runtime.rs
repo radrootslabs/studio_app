@@ -164,7 +164,6 @@ use crate::remote_signer::{
 const APP_DATABASE_FILE_NAME: &str = "app.sqlite3";
 const SYNC_TRANSPORT_UNAVAILABLE_MESSAGE: &str = "remote sync transport is not configured";
 const APP_SYNC_PUBLISH_USES_SDK_RUNTIME_MESSAGE: &str = "app sync publish work uses AppSdkRuntime";
-const LISTING_PUBLISH_SDK_ENQUEUE_FAILED_REASON: &str = "listing publish SDK enqueue failed";
 const APP_DIRECT_RELAY_SYNC_TIMEOUT_MS: u64 = 2_000;
 const APP_DIRECT_RELAY_CONNECT_TIMEOUT: StdDuration = StdDuration::from_secs(10);
 const APP_DIRECT_RELAY_INGEST_LIMIT: usize = 1_000;
@@ -1017,7 +1016,7 @@ impl DesktopAppRuntime {
         &self,
         product_id: ProductId,
         stock_quantity: u32,
-    ) -> Result<bool, AppSqliteError> {
+    ) -> Result<bool, DesktopAppRuntimeProductStockUpdateError> {
         self.lock_state_mut()
             .update_product_stock(product_id, stock_quantity)
     }
@@ -3852,7 +3851,7 @@ impl DesktopAppRuntimeState {
         &mut self,
         product_id: ProductId,
         stock_quantity: u32,
-    ) -> Result<bool, AppSqliteError> {
+    ) -> Result<bool, DesktopAppRuntimeProductStockUpdateError> {
         let Some(sqlite_store) = self.sqlite_store.as_ref() else {
             return Ok(false);
         };
@@ -3869,9 +3868,6 @@ impl DesktopAppRuntimeState {
         }
 
         let updated = sqlite_store.update_product_stock(product_id, stock_quantity)?;
-        if !updated {
-            return Ok(false);
-        }
 
         let continuity_state =
             self.continuity_state_with_order_detail(self.selected_order_detail_id());
@@ -4945,11 +4941,13 @@ impl DesktopAppRuntimeState {
         product_id: ProductId,
         source: &str,
         source_local_event_id: Option<&str>,
-    ) -> Result<bool, AppSqliteError> {
+    ) -> Result<bool, DesktopAppRuntimeProductPublishError> {
         let Some(payload) =
             self.product_publish_payload(product_id, source, source_local_event_id)?
         else {
-            return self.refresh_selected_account_sync();
+            return self
+                .refresh_selected_account_sync()
+                .map_err(DesktopAppRuntimeProductPublishError::from);
         };
 
         let (source_kind, source_record_id) = listing_publish_source_record(
@@ -4958,7 +4956,8 @@ impl DesktopAppRuntimeState {
             payload.context.source_local_event_id.as_deref(),
         );
         self.enqueue_listing_payload_via_sdk(&payload, source_kind, source_record_id.as_str())?;
-        self.refresh_selected_account_sync()
+        let _ = self.refresh_selected_account_sync()?;
+        Ok(true)
     }
 
     fn farm_profile_publish_payload(
@@ -5188,7 +5187,7 @@ impl DesktopAppRuntimeState {
         payload: &AppListingPublishPayload,
         source_kind: AppSdkMigrationReceiptSourceKind,
         source_record_id: &str,
-    ) -> Result<(), AppSqliteError> {
+    ) -> Result<(), DesktopAppRuntimeProductPublishError> {
         let operation_kind = LISTING_PUBLISH_OPERATION_KIND;
         let actor_pubkey = self
             .local_signing_identity_for_publish_payload(&AppPublishPayload::Listing(
@@ -5210,13 +5209,15 @@ impl DesktopAppRuntimeState {
                     .map_err(sync_transport_error_from_sdk_runtime_error)
             });
         match actor_pubkey {
-            Ok((actor_pubkey, receipt)) => self.record_app_sdk_migration_success(
-                source_kind,
-                source_record_id,
-                operation_kind,
-                actor_pubkey.as_str(),
-                &receipt,
-            ),
+            Ok((actor_pubkey, receipt)) => self
+                .record_app_sdk_migration_success(
+                    source_kind,
+                    source_record_id,
+                    operation_kind,
+                    actor_pubkey.as_str(),
+                    &receipt,
+                )
+                .map_err(DesktopAppRuntimeProductPublishError::from),
             Err(error) => {
                 self.record_app_sdk_migration_failure(
                     source_kind,
@@ -5225,9 +5226,7 @@ impl DesktopAppRuntimeState {
                     None,
                     sync_transport_error_detail_json(&error),
                 )?;
-                Err(AppSqliteError::ProductPublish {
-                    reason: LISTING_PUBLISH_SDK_ENQUEUE_FAILED_REASON,
-                })
+                Err(DesktopAppRuntimeProductPublishError::ListingPublishSdkEnqueueFailed)
             }
         }
     }
@@ -7343,6 +7342,14 @@ pub enum DesktopAppRuntimeCommandError {
 }
 
 #[derive(Debug, Error)]
+enum DesktopAppRuntimeProductPublishError {
+    #[error(transparent)]
+    Sqlite(#[from] AppSqliteError),
+    #[error("listing publish could not be queued through the SDK runtime")]
+    ListingPublishSdkEnqueueFailed,
+}
+
+#[derive(Debug, Error)]
 pub enum DesktopAppRuntimeProductEditorSaveError {
     #[error(transparent)]
     Sqlite(AppSqliteError),
@@ -7354,18 +7361,53 @@ pub enum DesktopAppRuntimeProductEditorSaveError {
 
 impl From<AppSqliteError> for DesktopAppRuntimeProductEditorSaveError {
     fn from(error: AppSqliteError) -> Self {
+        Self::Sqlite(error)
+    }
+}
+
+impl From<DesktopAppRuntimeProductPublishError> for DesktopAppRuntimeProductEditorSaveError {
+    fn from(error: DesktopAppRuntimeProductPublishError) -> Self {
         match error {
-            AppSqliteError::ProductPublish { reason }
-                if reason == LISTING_PUBLISH_SDK_ENQUEUE_FAILED_REASON =>
-            {
+            DesktopAppRuntimeProductPublishError::Sqlite(error) => Self::Sqlite(error),
+            DesktopAppRuntimeProductPublishError::ListingPublishSdkEnqueueFailed => {
                 Self::ListingPublishSdkEnqueueFailed
             }
-            error => Self::Sqlite(error),
         }
     }
 }
 
 impl DesktopAppRuntimeProductEditorSaveError {
+    pub fn is_listing_publish_sdk_enqueue_failed(&self) -> bool {
+        matches!(self, Self::ListingPublishSdkEnqueueFailed)
+    }
+}
+
+#[derive(Debug, Error)]
+pub enum DesktopAppRuntimeProductStockUpdateError {
+    #[error(transparent)]
+    Sqlite(AppSqliteError),
+    #[error("stock was saved, but listing publish could not be queued through the SDK runtime")]
+    ListingPublishSdkEnqueueFailed,
+}
+
+impl From<AppSqliteError> for DesktopAppRuntimeProductStockUpdateError {
+    fn from(error: AppSqliteError) -> Self {
+        Self::Sqlite(error)
+    }
+}
+
+impl From<DesktopAppRuntimeProductPublishError> for DesktopAppRuntimeProductStockUpdateError {
+    fn from(error: DesktopAppRuntimeProductPublishError) -> Self {
+        match error {
+            DesktopAppRuntimeProductPublishError::Sqlite(error) => Self::Sqlite(error),
+            DesktopAppRuntimeProductPublishError::ListingPublishSdkEnqueueFailed => {
+                Self::ListingPublishSdkEnqueueFailed
+            }
+        }
+    }
+}
+
+impl DesktopAppRuntimeProductStockUpdateError {
     pub fn is_listing_publish_sdk_enqueue_failed(&self) -> bool {
         matches!(self, Self::ListingPublishSdkEnqueueFailed)
     }
@@ -12815,7 +12857,7 @@ mod tests {
                 .expect("sqlite store")
                 .load_product_editor_draft(product_id)
                 .expect("saved product draft should load"),
-            Some(draft)
+            Some(draft.clone())
         );
 
         let records = shared_local_event_records(&paths);
@@ -12851,6 +12893,192 @@ mod tests {
         assert_eq!(receipt.detail_json["code"], "sdk_runtime_not_available");
         assert_eq!(receipt.detail_json["class"], "runtime");
         assert_eq!(receipt.detail_json["retryable"], true);
+
+        restore_sdk_runtime(&runtime, &paths);
+        assert!(
+            runtime
+                .save_product_editor_draft(draft.clone())
+                .expect("retry should enqueue listing publish through SDK runtime")
+        );
+        let retry_records = shared_local_event_records(&paths);
+        let enqueued_listing_receipts = {
+            let state = runtime.lock_state();
+            let repository = state
+                .sqlite_store
+                .as_ref()
+                .expect("sqlite store")
+                .sdk_migration_receipt_repository();
+            retry_records
+                .iter()
+                .filter(|record| {
+                    record
+                        .local_work_json
+                        .as_ref()
+                        .and_then(|payload| payload["record_kind"].as_str())
+                        == Some("listing_draft_v1")
+                })
+                .filter_map(|record| {
+                    repository
+                        .load_receipt(
+                            AppSdkMigrationReceiptSourceKind::SharedLocalEvent,
+                            record.record_id.as_str(),
+                        )
+                        .expect("retry listing SDK migration receipt should load")
+                })
+                .filter(|receipt| receipt.migration_state == AppSdkMigrationState::Enqueued)
+                .count()
+        };
+        assert!(enqueued_listing_receipts >= 1);
+        assert!(
+            runtime
+                .shutdown_sdk_runtime()
+                .expect("sdk runtime should shut down after retry")
+        );
+
+        cleanup_bootstrapped_runtime_paths(&paths);
+    }
+
+    #[test]
+    fn runtime_product_stock_update_retries_sdk_listing_enqueue_after_local_save() {
+        let (runtime, paths) = bootstrapped_runtime("stock_listing_sdk_retry");
+        let (_account_id, farm_id) = provision_ready_farmer_account(&runtime);
+        let pickup_location_id = PickupLocationId::new();
+        let fulfillment_window_id = FulfillmentWindowId::new();
+
+        runtime
+            .save_farm_rules_projection(FarmRulesProjection {
+                farm_profile: Some(FarmProfileRecord {
+                    farm_id,
+                    display_name: "North field farm".to_owned(),
+                    timezone: "UTC".to_owned(),
+                    currency_code: "USD".to_owned(),
+                }),
+                pickup_locations: vec![PickupLocationRecord {
+                    pickup_location_id,
+                    farm_id,
+                    label: "Barn pickup".to_owned(),
+                    address_line: "14 Orchard Lane".to_owned(),
+                    directions: None,
+                    is_default: true,
+                }],
+                operating_rules: Some(FarmOperatingRulesRecord {
+                    farm_id,
+                    promise_lead_hours: 24,
+                    substitution_policy: "ask_customer".to_owned(),
+                    missed_pickup_policy: "hold_next_window".to_owned(),
+                }),
+                fulfillment_windows: vec![FulfillmentWindowRecord {
+                    fulfillment_window_id,
+                    farm_id,
+                    pickup_location_id,
+                    label: "Friday pickup".to_owned(),
+                    starts_at: "2099-04-25T14:00:00Z".to_owned(),
+                    ends_at: "2099-04-25T18:00:00Z".to_owned(),
+                    order_cutoff_at: "2099-04-24T18:00:00Z".to_owned(),
+                }],
+                blackout_periods: Vec::new(),
+                ..runtime
+                    .load_farm_rules_projection()
+                    .expect("farm rules projection should load")
+            })
+            .expect("farm rules should save");
+
+        assert!(
+            runtime
+                .open_new_product_editor()
+                .expect("new product editor should open")
+        );
+        let product_id = match runtime.summary().products_projection.editor {
+            radroots_studio_app_state::ProductEditorState::Open(session) => session
+                .selected_product_id
+                .expect("open product editor should select a product"),
+            radroots_studio_app_state::ProductEditorState::Closed => {
+                panic!("product editor should be open")
+            }
+        };
+        let draft = ProductEditorDraft {
+            title: "Salad mix".to_owned(),
+            subtitle: "Cut this morning".to_owned(),
+            category: "greens".to_owned(),
+            unit_label: "each".to_owned(),
+            price_minor_units: Some(900),
+            price_currency: "USD".to_owned(),
+            stock_quantity: Some(11),
+            availability_window_id: Some(fulfillment_window_id),
+            status: ProductStatus::Published,
+        };
+        assert!(
+            runtime
+                .save_product_editor_draft(draft)
+                .expect("initial published product save should enqueue")
+        );
+        assert!(
+            runtime
+                .shutdown_sdk_runtime()
+                .expect("sdk runtime should shut down")
+        );
+
+        let error = runtime
+            .update_product_stock(product_id, 13)
+            .expect_err("SDK listing enqueue failure should fail stock update action");
+        assert!(matches!(
+            error,
+            super::DesktopAppRuntimeProductStockUpdateError::ListingPublishSdkEnqueueFailed
+        ));
+        assert_eq!(
+            runtime
+                .lock_state()
+                .sqlite_store
+                .as_ref()
+                .expect("sqlite store")
+                .load_product_editor_draft(product_id)
+                .expect("saved product draft should load")
+                .expect("saved product draft should exist")
+                .stock_quantity,
+            Some(13)
+        );
+        let (source_kind, source_record_id) =
+            super::listing_publish_source_record(product_id, "update_product_stock", None);
+        let failed_receipt = runtime
+            .lock_state()
+            .sqlite_store
+            .as_ref()
+            .expect("sqlite store")
+            .sdk_migration_receipt_repository()
+            .load_receipt(source_kind, source_record_id.as_str())
+            .expect("failed stock listing SDK migration receipt should load")
+            .expect("failed stock listing SDK migration receipt should exist");
+        assert_eq!(failed_receipt.migration_state, AppSdkMigrationState::Failed);
+        assert_eq!(
+            failed_receipt.detail_json["code"],
+            "sdk_runtime_not_available"
+        );
+
+        restore_sdk_runtime(&runtime, &paths);
+        assert!(
+            runtime
+                .update_product_stock(product_id, 13)
+                .expect("retry should enqueue stock listing publish through SDK runtime")
+        );
+        let retry_receipt = runtime
+            .lock_state()
+            .sqlite_store
+            .as_ref()
+            .expect("sqlite store")
+            .sdk_migration_receipt_repository()
+            .load_receipt(source_kind, source_record_id.as_str())
+            .expect("retry stock listing SDK migration receipt should load")
+            .expect("retry stock listing SDK migration receipt should exist");
+        assert_eq!(
+            retry_receipt.migration_state,
+            AppSdkMigrationState::Enqueued
+        );
+        assert!(retry_receipt.expected_event_id.is_some());
+        assert!(
+            runtime
+                .shutdown_sdk_runtime()
+                .expect("sdk runtime should shut down after retry")
+        );
 
         cleanup_bootstrapped_runtime_paths(&paths);
     }
@@ -21272,6 +21500,20 @@ mod tests {
             vec!["ws://127.0.0.1:8080".to_owned()],
             super::default_runtime_snapshot(),
         )
+    }
+
+    fn restore_sdk_runtime(runtime: &DesktopAppRuntime, paths: &AppDesktopRuntimePaths) {
+        let sdk_runtime =
+            super::start_desktop_sdk_runtime(paths, vec!["ws://127.0.0.1:8080".to_owned()])
+                .expect("sdk runtime should restart");
+        {
+            let mut handle = runtime.sdk_runtime.lock().expect("sdk runtime lock");
+            *handle = Some(sdk_runtime);
+        }
+        let status = runtime
+            .wait_for_sdk_startup(StdDuration::from_secs(5))
+            .expect("sdk runtime should be present after restart");
+        assert_eq!(status.state, AppSdkLifecycleState::Ready);
     }
 
     fn temp_shared_accounts_paths(label: &str) -> AppSharedAccountsPaths {
