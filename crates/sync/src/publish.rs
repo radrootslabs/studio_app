@@ -1,16 +1,15 @@
 use radroots_studio_app_view::{
     FarmId, FarmReadiness, FulfillmentWindowId, OrderId, ProductId, ProductStatus,
 };
-use radroots_sdk::SdkTransportMode;
 use radroots_sdk::protocol::order::{
     RadrootsOrderEconomics, RadrootsOrderFulfillmentState, RadrootsOrderItem,
     RadrootsOrderRevisionOutcome,
 };
 use radroots_sdk::{
-    FARM_PUBLISH_OPERATION_KIND, ORDER_CANCELLATION_OPERATION_KIND, ORDER_DECISION_OPERATION_KIND,
-    ORDER_FULFILLMENT_UPDATE_OPERATION_KIND, ORDER_RECEIPT_RECORD_OPERATION_KIND,
-    ORDER_REVISION_DECISION_OPERATION_KIND, ORDER_REVISION_PROPOSAL_OPERATION_KIND,
-    ORDER_SUBMIT_OPERATION_KIND,
+    FARM_PUBLISH_OPERATION_KIND, LISTING_PUBLISH_OPERATION_KIND, ORDER_CANCELLATION_OPERATION_KIND,
+    ORDER_DECISION_OPERATION_KIND, ORDER_FULFILLMENT_UPDATE_OPERATION_KIND,
+    ORDER_RECEIPT_RECORD_OPERATION_KIND, ORDER_REVISION_DECISION_OPERATION_KIND,
+    ORDER_REVISION_PROPOSAL_OPERATION_KIND, ORDER_SUBMIT_OPERATION_KIND,
 };
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -49,7 +48,7 @@ impl AppPublishWorkKind {
     pub const fn sdk_operation(self) -> &'static str {
         match self {
             Self::FarmProfile => FARM_PUBLISH_OPERATION_KIND,
-            Self::Listing => "listing.publish_draft_with_identity",
+            Self::Listing => LISTING_PUBLISH_OPERATION_KIND,
             Self::OrderRequest => ORDER_SUBMIT_OPERATION_KIND,
             Self::OrderDecision => ORDER_DECISION_OPERATION_KIND,
             Self::OrderRevisionProposal => ORDER_REVISION_PROPOSAL_OPERATION_KIND,
@@ -318,20 +317,6 @@ impl AppPublishPayload {
             Self::OrderCancellation(_) => AppPublishWorkKind::OrderCancellation,
             Self::OrderFulfillment(_) => AppPublishWorkKind::OrderFulfillment,
             Self::OrderReceipt(_) => AppPublishWorkKind::OrderReceipt,
-        }
-    }
-
-    pub const fn legacy_sdk_transport_mode(&self) -> Option<SdkTransportMode> {
-        match self {
-            Self::Listing(_) => Some(SdkTransportMode::RelayDirect),
-            Self::FarmProfile(_)
-            | Self::OrderRequest(_)
-            | Self::OrderDecision(_)
-            | Self::OrderRevisionProposal(_)
-            | Self::OrderRevisionDecision(_)
-            | Self::OrderCancellation(_)
-            | Self::OrderFulfillment(_)
-            | Self::OrderReceipt(_) => None,
         }
     }
 
@@ -836,7 +821,6 @@ mod tests {
             payload.work_kind().sdk_operation(),
             FARM_PUBLISH_OPERATION_KIND
         );
-        assert_eq!(payload.legacy_sdk_transport_mode(), None);
         assert_eq!(payload.validation_failures(), Vec::new());
 
         let operation =
