@@ -7,7 +7,10 @@ use radroots_sdk::protocol::order::{
     RadrootsOrderRevisionOutcome,
 };
 use radroots_sdk::{
-    FARM_PUBLISH_OPERATION_KIND, ORDER_DECISION_OPERATION_KIND, ORDER_SUBMIT_OPERATION_KIND,
+    FARM_PUBLISH_OPERATION_KIND, ORDER_CANCELLATION_OPERATION_KIND, ORDER_DECISION_OPERATION_KIND,
+    ORDER_FULFILLMENT_UPDATE_OPERATION_KIND, ORDER_RECEIPT_RECORD_OPERATION_KIND,
+    ORDER_REVISION_DECISION_OPERATION_KIND, ORDER_REVISION_PROPOSAL_OPERATION_KIND,
+    ORDER_SUBMIT_OPERATION_KIND,
 };
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -49,11 +52,11 @@ impl AppPublishWorkKind {
             Self::Listing => "listing.publish_draft_with_identity",
             Self::OrderRequest => ORDER_SUBMIT_OPERATION_KIND,
             Self::OrderDecision => ORDER_DECISION_OPERATION_KIND,
-            Self::OrderRevisionProposal => "trade.publish_order_revision_proposal_with_identity",
-            Self::OrderRevisionDecision => "trade.publish_order_revision_decision_with_identity",
-            Self::OrderCancellation => "trade.publish_order_cancellation_with_identity",
-            Self::OrderFulfillment => "trade.publish_fulfillment_update_with_identity",
-            Self::OrderReceipt => "trade.publish_buyer_receipt_with_identity",
+            Self::OrderRevisionProposal => ORDER_REVISION_PROPOSAL_OPERATION_KIND,
+            Self::OrderRevisionDecision => ORDER_REVISION_DECISION_OPERATION_KIND,
+            Self::OrderCancellation => ORDER_CANCELLATION_OPERATION_KIND,
+            Self::OrderFulfillment => ORDER_FULFILLMENT_UPDATE_OPERATION_KIND,
+            Self::OrderReceipt => ORDER_RECEIPT_RECORD_OPERATION_KIND,
         }
     }
 }
@@ -320,13 +323,15 @@ impl AppPublishPayload {
 
     pub const fn legacy_sdk_transport_mode(&self) -> Option<SdkTransportMode> {
         match self {
-            Self::FarmProfile(_) | Self::OrderRequest(_) | Self::OrderDecision(_) => None,
-            Self::Listing(_)
+            Self::Listing(_) => Some(SdkTransportMode::RelayDirect),
+            Self::FarmProfile(_)
+            | Self::OrderRequest(_)
+            | Self::OrderDecision(_)
             | Self::OrderRevisionProposal(_)
             | Self::OrderRevisionDecision(_)
             | Self::OrderCancellation(_)
             | Self::OrderFulfillment(_)
-            | Self::OrderReceipt(_) => Some(SdkTransportMode::RelayDirect),
+            | Self::OrderReceipt(_) => None,
         }
     }
 
@@ -801,7 +806,9 @@ mod tests {
         AppOrderRequestPublishPayload, AppOrderRevisionDecisionPublishPayload,
         AppOrderRevisionProposalPublishPayload, AppPublishContext, AppPublishPayload,
         AppPublishValidationFailure, AppPublishWorkKind, FARM_PUBLISH_OPERATION_KIND,
-        ORDER_DECISION_OPERATION_KIND,
+        ORDER_CANCELLATION_OPERATION_KIND, ORDER_DECISION_OPERATION_KIND,
+        ORDER_FULFILLMENT_UPDATE_OPERATION_KIND, ORDER_RECEIPT_RECORD_OPERATION_KIND,
+        ORDER_REVISION_DECISION_OPERATION_KIND, ORDER_REVISION_PROPOSAL_OPERATION_KIND,
     };
     use crate::{
         PendingSyncOperation, PendingSyncOperationState, SyncAggregateRef, SyncOperationKind,
@@ -1067,15 +1074,15 @@ mod tests {
 
         assert_eq!(
             cancellation.work_kind().sdk_operation(),
-            "trade.publish_order_cancellation_with_identity"
+            ORDER_CANCELLATION_OPERATION_KIND
         );
         assert_eq!(
             fulfillment.work_kind().sdk_operation(),
-            "trade.publish_fulfillment_update_with_identity"
+            ORDER_FULFILLMENT_UPDATE_OPERATION_KIND
         );
         assert_eq!(
             receipt.work_kind().sdk_operation(),
-            "trade.publish_buyer_receipt_with_identity"
+            ORDER_RECEIPT_RECORD_OPERATION_KIND
         );
         assert_eq!(fulfillment.validation_failures(), Vec::new());
 
@@ -1224,12 +1231,12 @@ mod tests {
 
         assert_eq!(
             valid_proposal.work_kind().sdk_operation(),
-            "trade.publish_order_revision_proposal_with_identity"
+            ORDER_REVISION_PROPOSAL_OPERATION_KIND
         );
         assert_eq!(valid_proposal.validation_failures(), Vec::new());
         assert_eq!(
             invalid_decision.work_kind().sdk_operation(),
-            "trade.publish_order_revision_decision_with_identity"
+            ORDER_REVISION_DECISION_OPERATION_KIND
         );
 
         let proposal_reason_codes: Vec<&str> = invalid_proposal

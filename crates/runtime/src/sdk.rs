@@ -15,17 +15,27 @@ use radroots_events::{
     RadrootsNostrEvent, RadrootsNostrEventPtr,
     contract::RadrootsActorRole,
     farm::RadrootsFarm,
-    order::{RadrootsOrderDecision, RadrootsOrderRequest},
+    order::{
+        RadrootsOrderCancellation, RadrootsOrderDecision, RadrootsOrderFulfillmentUpdate,
+        RadrootsOrderReceipt, RadrootsOrderRequest, RadrootsOrderRevisionDecision,
+        RadrootsOrderRevisionProposal,
+    },
 };
 use radroots_nostr::prelude::RadrootsNostrKeys;
 use radroots_sdk::{
     FARM_PUBLISH_OPERATION_KIND, FarmEnqueuePublishRequest, FarmEnqueueReceipt, IntegrityReceipt,
-    IntegrityRequest, ORDER_DECISION_OPERATION_KIND, ORDER_SUBMIT_OPERATION_KIND,
-    OrderDecisionEnqueueRequest, OrderDecisionReceipt, OrderRequestEvidenceIngestRequest,
-    OrderSubmitEnqueueRequest, OrderSubmitReceipt, RadrootsSdk, RadrootsSdkError,
-    RadrootsSdkStoragePaths, RestoreReceipt, RestoreRequest, SdkBackupVerification,
-    SdkRelayUrlPolicy as SdkRuntimeRelayUrlPolicy, StorageStatusReceipt, StorageStatusRequest,
-    SyncStatusReceipt, SyncStatusRequest,
+    IntegrityRequest, ORDER_CANCELLATION_OPERATION_KIND, ORDER_DECISION_OPERATION_KIND,
+    ORDER_FULFILLMENT_UPDATE_OPERATION_KIND, ORDER_RECEIPT_RECORD_OPERATION_KIND,
+    ORDER_REVISION_DECISION_OPERATION_KIND, ORDER_REVISION_PROPOSAL_OPERATION_KIND,
+    ORDER_SUBMIT_OPERATION_KIND, OrderCancellationEnqueueRequest, OrderCancellationReceipt,
+    OrderDecisionEnqueueRequest, OrderDecisionReceipt, OrderEvidenceIngestRequest,
+    OrderFulfillmentUpdateEnqueueRequest, OrderFulfillmentUpdateReceipt,
+    OrderReceiptRecordEnqueueRequest, OrderReceiptRecordReceipt, OrderRequestEvidenceIngestRequest,
+    OrderRevisionDecisionEnqueueRequest, OrderRevisionDecisionReceipt,
+    OrderRevisionProposalEnqueueRequest, OrderRevisionProposalReceipt, OrderSubmitEnqueueRequest,
+    OrderSubmitReceipt, RadrootsSdk, RadrootsSdkError, RadrootsSdkStoragePaths, RestoreReceipt,
+    RestoreRequest, SdkBackupVerification, SdkRelayUrlPolicy as SdkRuntimeRelayUrlPolicy,
+    StorageStatusReceipt, StorageStatusRequest, SyncStatusReceipt, SyncStatusRequest,
 };
 use radroots_sdk::{SdkMutationState, SdkRelayTargetPolicy};
 use serde::Serialize;
@@ -227,6 +237,71 @@ pub struct AppSdkOrderDecisionRequest {
     pub idempotency_key: Option<String>,
 }
 
+pub struct AppSdkOrderRevisionProposalRequest {
+    pub actor_account_id: String,
+    pub actor_pubkey: String,
+    pub signer_keys: RadrootsNostrKeys,
+    pub evidence_events: Vec<RadrootsNostrEvent>,
+    pub root_event: RadrootsNostrEventPtr,
+    pub previous_event: RadrootsNostrEventPtr,
+    pub proposal: RadrootsOrderRevisionProposal,
+    pub target_relays: Vec<String>,
+    pub relay_url_policy: AppSdkRelayUrlPolicy,
+    pub idempotency_key: Option<String>,
+}
+
+pub struct AppSdkOrderRevisionDecisionRequest {
+    pub actor_account_id: String,
+    pub actor_pubkey: String,
+    pub signer_keys: RadrootsNostrKeys,
+    pub evidence_events: Vec<RadrootsNostrEvent>,
+    pub root_event: RadrootsNostrEventPtr,
+    pub previous_event: RadrootsNostrEventPtr,
+    pub decision: RadrootsOrderRevisionDecision,
+    pub target_relays: Vec<String>,
+    pub relay_url_policy: AppSdkRelayUrlPolicy,
+    pub idempotency_key: Option<String>,
+}
+
+pub struct AppSdkOrderCancellationRequest {
+    pub actor_account_id: String,
+    pub actor_pubkey: String,
+    pub signer_keys: RadrootsNostrKeys,
+    pub evidence_events: Vec<RadrootsNostrEvent>,
+    pub root_event: RadrootsNostrEventPtr,
+    pub previous_event: RadrootsNostrEventPtr,
+    pub cancellation: RadrootsOrderCancellation,
+    pub target_relays: Vec<String>,
+    pub relay_url_policy: AppSdkRelayUrlPolicy,
+    pub idempotency_key: Option<String>,
+}
+
+pub struct AppSdkOrderFulfillmentUpdateRequest {
+    pub actor_account_id: String,
+    pub actor_pubkey: String,
+    pub signer_keys: RadrootsNostrKeys,
+    pub evidence_events: Vec<RadrootsNostrEvent>,
+    pub root_event: RadrootsNostrEventPtr,
+    pub previous_event: RadrootsNostrEventPtr,
+    pub fulfillment: RadrootsOrderFulfillmentUpdate,
+    pub target_relays: Vec<String>,
+    pub relay_url_policy: AppSdkRelayUrlPolicy,
+    pub idempotency_key: Option<String>,
+}
+
+pub struct AppSdkOrderReceiptRecordRequest {
+    pub actor_account_id: String,
+    pub actor_pubkey: String,
+    pub signer_keys: RadrootsNostrKeys,
+    pub evidence_events: Vec<RadrootsNostrEvent>,
+    pub root_event: RadrootsNostrEventPtr,
+    pub previous_event: RadrootsNostrEventPtr,
+    pub receipt: RadrootsOrderReceipt,
+    pub target_relays: Vec<String>,
+    pub relay_url_policy: AppSdkRelayUrlPolicy,
+    pub idempotency_key: Option<String>,
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct AppSdkWorkflowReceipt {
     pub operation_kind: String,
@@ -331,6 +406,26 @@ enum AppSdkWorkerCommand {
         AppSdkOrderDecisionRequest,
         mpsc::Sender<Result<AppSdkWorkflowReceipt, AppSdkRuntimeIssue>>,
     ),
+    EnqueueOrderRevisionProposal(
+        AppSdkOrderRevisionProposalRequest,
+        mpsc::Sender<Result<AppSdkWorkflowReceipt, AppSdkRuntimeIssue>>,
+    ),
+    EnqueueOrderRevisionDecision(
+        AppSdkOrderRevisionDecisionRequest,
+        mpsc::Sender<Result<AppSdkWorkflowReceipt, AppSdkRuntimeIssue>>,
+    ),
+    EnqueueOrderCancellation(
+        AppSdkOrderCancellationRequest,
+        mpsc::Sender<Result<AppSdkWorkflowReceipt, AppSdkRuntimeIssue>>,
+    ),
+    EnqueueOrderFulfillmentUpdate(
+        AppSdkOrderFulfillmentUpdateRequest,
+        mpsc::Sender<Result<AppSdkWorkflowReceipt, AppSdkRuntimeIssue>>,
+    ),
+    EnqueueOrderReceiptRecord(
+        AppSdkOrderReceiptRecordRequest,
+        mpsc::Sender<Result<AppSdkWorkflowReceipt, AppSdkRuntimeIssue>>,
+    ),
     BeginProjectionRebuild(
         mpsc::Sender<Result<AppSdkProjectionLifecycleStatus, AppSdkRuntimeIssue>>,
     ),
@@ -350,6 +445,19 @@ impl fmt::Debug for AppSdkWorkerCommand {
             Self::EnqueueFarmPublish(_, _) => formatter.write_str("EnqueueFarmPublish"),
             Self::EnqueueOrderSubmit(_, _) => formatter.write_str("EnqueueOrderSubmit"),
             Self::EnqueueOrderDecision(_, _) => formatter.write_str("EnqueueOrderDecision"),
+            Self::EnqueueOrderRevisionProposal(_, _) => {
+                formatter.write_str("EnqueueOrderRevisionProposal")
+            }
+            Self::EnqueueOrderRevisionDecision(_, _) => {
+                formatter.write_str("EnqueueOrderRevisionDecision")
+            }
+            Self::EnqueueOrderCancellation(_, _) => formatter.write_str("EnqueueOrderCancellation"),
+            Self::EnqueueOrderFulfillmentUpdate(_, _) => {
+                formatter.write_str("EnqueueOrderFulfillmentUpdate")
+            }
+            Self::EnqueueOrderReceiptRecord(_, _) => {
+                formatter.write_str("EnqueueOrderReceiptRecord")
+            }
             Self::BeginProjectionRebuild(_) => formatter.write_str("BeginProjectionRebuild"),
             Self::CompleteProjectionRebuild(_) => formatter.write_str("CompleteProjectionRebuild"),
         }
@@ -495,6 +603,51 @@ impl AppSdkRuntime {
     ) -> Result<AppSdkWorkflowReceipt, AppSdkRuntimeError> {
         self.run_command(|response_sender| {
             AppSdkWorkerCommand::EnqueueOrderDecision(request, response_sender)
+        })
+    }
+
+    pub fn enqueue_order_revision_proposal(
+        &self,
+        request: AppSdkOrderRevisionProposalRequest,
+    ) -> Result<AppSdkWorkflowReceipt, AppSdkRuntimeError> {
+        self.run_command(|response_sender| {
+            AppSdkWorkerCommand::EnqueueOrderRevisionProposal(request, response_sender)
+        })
+    }
+
+    pub fn enqueue_order_revision_decision(
+        &self,
+        request: AppSdkOrderRevisionDecisionRequest,
+    ) -> Result<AppSdkWorkflowReceipt, AppSdkRuntimeError> {
+        self.run_command(|response_sender| {
+            AppSdkWorkerCommand::EnqueueOrderRevisionDecision(request, response_sender)
+        })
+    }
+
+    pub fn enqueue_order_cancellation(
+        &self,
+        request: AppSdkOrderCancellationRequest,
+    ) -> Result<AppSdkWorkflowReceipt, AppSdkRuntimeError> {
+        self.run_command(|response_sender| {
+            AppSdkWorkerCommand::EnqueueOrderCancellation(request, response_sender)
+        })
+    }
+
+    pub fn enqueue_order_fulfillment_update(
+        &self,
+        request: AppSdkOrderFulfillmentUpdateRequest,
+    ) -> Result<AppSdkWorkflowReceipt, AppSdkRuntimeError> {
+        self.run_command(|response_sender| {
+            AppSdkWorkerCommand::EnqueueOrderFulfillmentUpdate(request, response_sender)
+        })
+    }
+
+    pub fn enqueue_order_receipt_record(
+        &self,
+        request: AppSdkOrderReceiptRecordRequest,
+    ) -> Result<AppSdkWorkflowReceipt, AppSdkRuntimeError> {
+        self.run_command(|response_sender| {
+            AppSdkWorkerCommand::EnqueueOrderReceiptRecord(request, response_sender)
         })
     }
 
@@ -996,6 +1149,67 @@ fn run_app_sdk_worker(
                 };
                 send_worker_result(&shared, response_sender, result);
             }
+            AppSdkWorkerCommand::EnqueueOrderRevisionProposal(request, response_sender) => {
+                let result = if let Some(issue) = lifecycle_busy_issue(&shared) {
+                    Err(issue)
+                } else {
+                    match sdk.as_ref() {
+                        Some(sdk) => {
+                            enqueue_order_revision_proposal_with_sdk(&runtime, sdk, request)
+                        }
+                        None => Err(runtime_unavailable_issue(&shared)),
+                    }
+                };
+                send_worker_result(&shared, response_sender, result);
+            }
+            AppSdkWorkerCommand::EnqueueOrderRevisionDecision(request, response_sender) => {
+                let result = if let Some(issue) = lifecycle_busy_issue(&shared) {
+                    Err(issue)
+                } else {
+                    match sdk.as_ref() {
+                        Some(sdk) => {
+                            enqueue_order_revision_decision_with_sdk(&runtime, sdk, request)
+                        }
+                        None => Err(runtime_unavailable_issue(&shared)),
+                    }
+                };
+                send_worker_result(&shared, response_sender, result);
+            }
+            AppSdkWorkerCommand::EnqueueOrderCancellation(request, response_sender) => {
+                let result = if let Some(issue) = lifecycle_busy_issue(&shared) {
+                    Err(issue)
+                } else {
+                    match sdk.as_ref() {
+                        Some(sdk) => enqueue_order_cancellation_with_sdk(&runtime, sdk, request),
+                        None => Err(runtime_unavailable_issue(&shared)),
+                    }
+                };
+                send_worker_result(&shared, response_sender, result);
+            }
+            AppSdkWorkerCommand::EnqueueOrderFulfillmentUpdate(request, response_sender) => {
+                let result = if let Some(issue) = lifecycle_busy_issue(&shared) {
+                    Err(issue)
+                } else {
+                    match sdk.as_ref() {
+                        Some(sdk) => {
+                            enqueue_order_fulfillment_update_with_sdk(&runtime, sdk, request)
+                        }
+                        None => Err(runtime_unavailable_issue(&shared)),
+                    }
+                };
+                send_worker_result(&shared, response_sender, result);
+            }
+            AppSdkWorkerCommand::EnqueueOrderReceiptRecord(request, response_sender) => {
+                let result = if let Some(issue) = lifecycle_busy_issue(&shared) {
+                    Err(issue)
+                } else {
+                    match sdk.as_ref() {
+                        Some(sdk) => enqueue_order_receipt_record_with_sdk(&runtime, sdk, request),
+                        None => Err(runtime_unavailable_issue(&shared)),
+                    }
+                };
+                send_worker_result(&shared, response_sender, result);
+            }
             AppSdkWorkerCommand::BeginProjectionRebuild(response_sender) => {
                 let result = match sdk.as_ref() {
                     Some(_) => Ok(begin_projection_rebuild(&shared)),
@@ -1078,6 +1292,41 @@ fn run_degraded_worker(
                 );
             }
             AppSdkWorkerCommand::EnqueueOrderDecision(_, response_sender) => {
+                send_worker_result(
+                    &shared,
+                    response_sender,
+                    Err(runtime_unavailable_issue(&shared)),
+                );
+            }
+            AppSdkWorkerCommand::EnqueueOrderRevisionProposal(_, response_sender) => {
+                send_worker_result(
+                    &shared,
+                    response_sender,
+                    Err(runtime_unavailable_issue(&shared)),
+                );
+            }
+            AppSdkWorkerCommand::EnqueueOrderRevisionDecision(_, response_sender) => {
+                send_worker_result(
+                    &shared,
+                    response_sender,
+                    Err(runtime_unavailable_issue(&shared)),
+                );
+            }
+            AppSdkWorkerCommand::EnqueueOrderCancellation(_, response_sender) => {
+                send_worker_result(
+                    &shared,
+                    response_sender,
+                    Err(runtime_unavailable_issue(&shared)),
+                );
+            }
+            AppSdkWorkerCommand::EnqueueOrderFulfillmentUpdate(_, response_sender) => {
+                send_worker_result(
+                    &shared,
+                    response_sender,
+                    Err(runtime_unavailable_issue(&shared)),
+                );
+            }
+            AppSdkWorkerCommand::EnqueueOrderReceiptRecord(_, response_sender) => {
                 send_worker_result(
                     &shared,
                     response_sender,
@@ -1260,6 +1509,192 @@ fn enqueue_order_decision_with_sdk(
     ))
 }
 
+fn enqueue_order_revision_proposal_with_sdk(
+    runtime: &tokio::runtime::Runtime,
+    sdk: &RadrootsSdk,
+    request: AppSdkOrderRevisionProposalRequest,
+) -> Result<AppSdkWorkflowReceipt, AppSdkRuntimeIssue> {
+    let actor = sdk_actor_context(
+        request.actor_pubkey.as_str(),
+        request.actor_account_id.as_str(),
+        RadrootsActorRole::Seller,
+    )?;
+    let signer = sdk_local_signer(request.signer_keys)?;
+    let target_relays = sdk_relay_targets(request.target_relays, request.relay_url_policy)?;
+    ingest_order_evidence_with_sdk(runtime, sdk, request.evidence_events)?;
+    let mut enqueue = OrderRevisionProposalEnqueueRequest::new(
+        actor,
+        request.root_event,
+        request.previous_event,
+        request.proposal,
+        target_relays,
+    );
+    if let Some(idempotency_key) = request.idempotency_key.as_deref() {
+        enqueue = enqueue
+            .try_with_idempotency_key(idempotency_key)
+            .map_err(|error| AppSdkRuntimeIssue::from_sdk_error(&error))?;
+    }
+    let receipt = runtime
+        .block_on(sdk.orders().enqueue_revision_proposal(enqueue, &signer))
+        .map_err(|error| AppSdkRuntimeIssue::from_sdk_error(&error))?;
+    Ok(app_sdk_order_revision_proposal_receipt(
+        receipt,
+        request.actor_pubkey,
+    ))
+}
+
+fn enqueue_order_revision_decision_with_sdk(
+    runtime: &tokio::runtime::Runtime,
+    sdk: &RadrootsSdk,
+    request: AppSdkOrderRevisionDecisionRequest,
+) -> Result<AppSdkWorkflowReceipt, AppSdkRuntimeIssue> {
+    let actor = sdk_actor_context(
+        request.actor_pubkey.as_str(),
+        request.actor_account_id.as_str(),
+        RadrootsActorRole::Buyer,
+    )?;
+    let signer = sdk_local_signer(request.signer_keys)?;
+    let target_relays = sdk_relay_targets(request.target_relays, request.relay_url_policy)?;
+    ingest_order_evidence_with_sdk(runtime, sdk, request.evidence_events)?;
+    let mut enqueue = OrderRevisionDecisionEnqueueRequest::new(
+        actor,
+        request.root_event,
+        request.previous_event,
+        request.decision,
+        target_relays,
+    );
+    if let Some(idempotency_key) = request.idempotency_key.as_deref() {
+        enqueue = enqueue
+            .try_with_idempotency_key(idempotency_key)
+            .map_err(|error| AppSdkRuntimeIssue::from_sdk_error(&error))?;
+    }
+    let receipt = runtime
+        .block_on(sdk.orders().enqueue_revision_decision(enqueue, &signer))
+        .map_err(|error| AppSdkRuntimeIssue::from_sdk_error(&error))?;
+    Ok(app_sdk_order_revision_decision_receipt(
+        receipt,
+        request.actor_pubkey,
+    ))
+}
+
+fn enqueue_order_cancellation_with_sdk(
+    runtime: &tokio::runtime::Runtime,
+    sdk: &RadrootsSdk,
+    request: AppSdkOrderCancellationRequest,
+) -> Result<AppSdkWorkflowReceipt, AppSdkRuntimeIssue> {
+    let actor = sdk_actor_context(
+        request.actor_pubkey.as_str(),
+        request.actor_account_id.as_str(),
+        RadrootsActorRole::Buyer,
+    )?;
+    let signer = sdk_local_signer(request.signer_keys)?;
+    let target_relays = sdk_relay_targets(request.target_relays, request.relay_url_policy)?;
+    ingest_order_evidence_with_sdk(runtime, sdk, request.evidence_events)?;
+    let mut enqueue = OrderCancellationEnqueueRequest::new(
+        actor,
+        request.root_event,
+        request.previous_event,
+        request.cancellation,
+        target_relays,
+    );
+    if let Some(idempotency_key) = request.idempotency_key.as_deref() {
+        enqueue = enqueue
+            .try_with_idempotency_key(idempotency_key)
+            .map_err(|error| AppSdkRuntimeIssue::from_sdk_error(&error))?;
+    }
+    let receipt = runtime
+        .block_on(sdk.orders().enqueue_cancellation(enqueue, &signer))
+        .map_err(|error| AppSdkRuntimeIssue::from_sdk_error(&error))?;
+    Ok(app_sdk_order_cancellation_receipt(
+        receipt,
+        request.actor_pubkey,
+    ))
+}
+
+fn enqueue_order_fulfillment_update_with_sdk(
+    runtime: &tokio::runtime::Runtime,
+    sdk: &RadrootsSdk,
+    request: AppSdkOrderFulfillmentUpdateRequest,
+) -> Result<AppSdkWorkflowReceipt, AppSdkRuntimeIssue> {
+    let actor = sdk_actor_context(
+        request.actor_pubkey.as_str(),
+        request.actor_account_id.as_str(),
+        RadrootsActorRole::Seller,
+    )?;
+    let signer = sdk_local_signer(request.signer_keys)?;
+    let target_relays = sdk_relay_targets(request.target_relays, request.relay_url_policy)?;
+    ingest_order_evidence_with_sdk(runtime, sdk, request.evidence_events)?;
+    let mut enqueue = OrderFulfillmentUpdateEnqueueRequest::new(
+        actor,
+        request.root_event,
+        request.previous_event,
+        request.fulfillment,
+        target_relays,
+    );
+    if let Some(idempotency_key) = request.idempotency_key.as_deref() {
+        enqueue = enqueue
+            .try_with_idempotency_key(idempotency_key)
+            .map_err(|error| AppSdkRuntimeIssue::from_sdk_error(&error))?;
+    }
+    let receipt = runtime
+        .block_on(sdk.orders().enqueue_fulfillment_update(enqueue, &signer))
+        .map_err(|error| AppSdkRuntimeIssue::from_sdk_error(&error))?;
+    Ok(app_sdk_order_fulfillment_update_receipt(
+        receipt,
+        request.actor_pubkey,
+    ))
+}
+
+fn enqueue_order_receipt_record_with_sdk(
+    runtime: &tokio::runtime::Runtime,
+    sdk: &RadrootsSdk,
+    request: AppSdkOrderReceiptRecordRequest,
+) -> Result<AppSdkWorkflowReceipt, AppSdkRuntimeIssue> {
+    let actor = sdk_actor_context(
+        request.actor_pubkey.as_str(),
+        request.actor_account_id.as_str(),
+        RadrootsActorRole::Buyer,
+    )?;
+    let signer = sdk_local_signer(request.signer_keys)?;
+    let target_relays = sdk_relay_targets(request.target_relays, request.relay_url_policy)?;
+    ingest_order_evidence_with_sdk(runtime, sdk, request.evidence_events)?;
+    let mut enqueue = OrderReceiptRecordEnqueueRequest::new(
+        actor,
+        request.root_event,
+        request.previous_event,
+        request.receipt,
+        target_relays,
+    );
+    if let Some(idempotency_key) = request.idempotency_key.as_deref() {
+        enqueue = enqueue
+            .try_with_idempotency_key(idempotency_key)
+            .map_err(|error| AppSdkRuntimeIssue::from_sdk_error(&error))?;
+    }
+    let receipt = runtime
+        .block_on(sdk.orders().enqueue_receipt_record(enqueue, &signer))
+        .map_err(|error| AppSdkRuntimeIssue::from_sdk_error(&error))?;
+    Ok(app_sdk_order_receipt_record_receipt(
+        receipt,
+        request.actor_pubkey,
+    ))
+}
+
+fn ingest_order_evidence_with_sdk(
+    runtime: &tokio::runtime::Runtime,
+    sdk: &RadrootsSdk,
+    evidence_events: Vec<RadrootsNostrEvent>,
+) -> Result<(), AppSdkRuntimeIssue> {
+    for event in evidence_events {
+        runtime
+            .block_on(
+                sdk.orders()
+                    .ingest_evidence(OrderEvidenceIngestRequest::new(event)),
+            )
+            .map_err(|error| AppSdkRuntimeIssue::from_sdk_error(&error))?;
+    }
+    Ok(())
+}
+
 fn sdk_actor_context(
     actor_pubkey: &str,
     actor_account_id: &str,
@@ -1324,6 +1759,86 @@ fn app_sdk_order_decision_receipt(
 ) -> AppSdkWorkflowReceipt {
     AppSdkWorkflowReceipt {
         operation_kind: ORDER_DECISION_OPERATION_KIND.to_owned(),
+        expected_event_id: receipt.expected_event_id.as_str().to_owned(),
+        signed_event_id: receipt.signed_event_id.as_str().to_owned(),
+        outbox_operation_id: receipt.outbox_operation_id,
+        outbox_event_id: receipt.outbox_event_id,
+        state: sdk_mutation_state_key(receipt.state).to_owned(),
+        idempotency_digest_prefix: receipt.idempotency_digest_prefix,
+        actor_pubkey,
+    }
+}
+
+fn app_sdk_order_revision_proposal_receipt(
+    receipt: OrderRevisionProposalReceipt,
+    actor_pubkey: String,
+) -> AppSdkWorkflowReceipt {
+    AppSdkWorkflowReceipt {
+        operation_kind: ORDER_REVISION_PROPOSAL_OPERATION_KIND.to_owned(),
+        expected_event_id: receipt.expected_event_id.as_str().to_owned(),
+        signed_event_id: receipt.signed_event_id.as_str().to_owned(),
+        outbox_operation_id: receipt.outbox_operation_id,
+        outbox_event_id: receipt.outbox_event_id,
+        state: sdk_mutation_state_key(receipt.state).to_owned(),
+        idempotency_digest_prefix: receipt.idempotency_digest_prefix,
+        actor_pubkey,
+    }
+}
+
+fn app_sdk_order_revision_decision_receipt(
+    receipt: OrderRevisionDecisionReceipt,
+    actor_pubkey: String,
+) -> AppSdkWorkflowReceipt {
+    AppSdkWorkflowReceipt {
+        operation_kind: ORDER_REVISION_DECISION_OPERATION_KIND.to_owned(),
+        expected_event_id: receipt.expected_event_id.as_str().to_owned(),
+        signed_event_id: receipt.signed_event_id.as_str().to_owned(),
+        outbox_operation_id: receipt.outbox_operation_id,
+        outbox_event_id: receipt.outbox_event_id,
+        state: sdk_mutation_state_key(receipt.state).to_owned(),
+        idempotency_digest_prefix: receipt.idempotency_digest_prefix,
+        actor_pubkey,
+    }
+}
+
+fn app_sdk_order_cancellation_receipt(
+    receipt: OrderCancellationReceipt,
+    actor_pubkey: String,
+) -> AppSdkWorkflowReceipt {
+    AppSdkWorkflowReceipt {
+        operation_kind: ORDER_CANCELLATION_OPERATION_KIND.to_owned(),
+        expected_event_id: receipt.expected_event_id.as_str().to_owned(),
+        signed_event_id: receipt.signed_event_id.as_str().to_owned(),
+        outbox_operation_id: receipt.outbox_operation_id,
+        outbox_event_id: receipt.outbox_event_id,
+        state: sdk_mutation_state_key(receipt.state).to_owned(),
+        idempotency_digest_prefix: receipt.idempotency_digest_prefix,
+        actor_pubkey,
+    }
+}
+
+fn app_sdk_order_fulfillment_update_receipt(
+    receipt: OrderFulfillmentUpdateReceipt,
+    actor_pubkey: String,
+) -> AppSdkWorkflowReceipt {
+    AppSdkWorkflowReceipt {
+        operation_kind: ORDER_FULFILLMENT_UPDATE_OPERATION_KIND.to_owned(),
+        expected_event_id: receipt.expected_event_id.as_str().to_owned(),
+        signed_event_id: receipt.signed_event_id.as_str().to_owned(),
+        outbox_operation_id: receipt.outbox_operation_id,
+        outbox_event_id: receipt.outbox_event_id,
+        state: sdk_mutation_state_key(receipt.state).to_owned(),
+        idempotency_digest_prefix: receipt.idempotency_digest_prefix,
+        actor_pubkey,
+    }
+}
+
+fn app_sdk_order_receipt_record_receipt(
+    receipt: OrderReceiptRecordReceipt,
+    actor_pubkey: String,
+) -> AppSdkWorkflowReceipt {
+    AppSdkWorkflowReceipt {
+        operation_kind: ORDER_RECEIPT_RECORD_OPERATION_KIND.to_owned(),
         expected_event_id: receipt.expected_event_id.as_str().to_owned(),
         signed_event_id: receipt.signed_event_id.as_str().to_owned(),
         outbox_operation_id: receipt.outbox_operation_id,

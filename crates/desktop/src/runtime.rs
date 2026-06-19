@@ -9,11 +9,13 @@ use chrono::{DateTime, Duration, Utc};
 use radroots_studio_app_core::{
     AppBuildIdentity, AppDesktopRuntimePaths, AppRuntimeCapture, AppRuntimeMode,
     AppRuntimePathsError, AppRuntimeSnapshot, AppSdkConfig, AppSdkDiagnostics,
-    AppSdkFarmPublishRequest, AppSdkLifecycleState, AppSdkOrderDecisionRequest,
-    AppSdkOrderSubmitRequest, AppSdkProjectionLifecycleState, AppSdkRelayUrlPolicy, AppSdkRuntime,
-    AppSdkRuntimeError, AppSdkRuntimeIssue, AppSdkRuntimeStatus, AppSdkStoragePaths,
-    AppSdkWorkflowReceipt, AppSharedAccountsPaths, PackDayExportWriteError,
-    prepare_pack_day_export_bundle_at_data_root,
+    AppSdkFarmPublishRequest, AppSdkLifecycleState, AppSdkOrderCancellationRequest,
+    AppSdkOrderDecisionRequest, AppSdkOrderFulfillmentUpdateRequest,
+    AppSdkOrderReceiptRecordRequest, AppSdkOrderRevisionDecisionRequest,
+    AppSdkOrderRevisionProposalRequest, AppSdkOrderSubmitRequest, AppSdkProjectionLifecycleState,
+    AppSdkRelayUrlPolicy, AppSdkRuntime, AppSdkRuntimeError, AppSdkRuntimeIssue,
+    AppSdkRuntimeStatus, AppSdkStoragePaths, AppSdkWorkflowReceipt, AppSharedAccountsPaths,
+    PackDayExportWriteError, prepare_pack_day_export_bundle_at_data_root,
     shared_local_events_database_path_from_shared_accounts, write_prepared_pack_day_export_bundle,
 };
 use radroots_studio_app_remote_signer::{
@@ -117,9 +119,11 @@ use radroots_sdk::protocol::order::{
     RadrootsOrderRevisionProposal,
 };
 use radroots_sdk::{
-    FARM_PUBLISH_OPERATION_KIND, ORDER_DECISION_OPERATION_KIND, ORDER_SUBMIT_OPERATION_KIND,
-    RadrootsSdkClient, RadrootsSdkConfig, RelayConfig, SdkEnvironment, SdkPublishReceipt,
-    SdkTransportMode, SdkTransportReceipt, SignerConfig,
+    FARM_PUBLISH_OPERATION_KIND, ORDER_CANCELLATION_OPERATION_KIND, ORDER_DECISION_OPERATION_KIND,
+    ORDER_FULFILLMENT_UPDATE_OPERATION_KIND, ORDER_RECEIPT_RECORD_OPERATION_KIND,
+    ORDER_REVISION_DECISION_OPERATION_KIND, ORDER_REVISION_PROPOSAL_OPERATION_KIND,
+    ORDER_SUBMIT_OPERATION_KIND, RadrootsSdkClient, RadrootsSdkConfig, RelayConfig, SdkEnvironment,
+    SdkPublishReceipt, SdkTransportMode, SdkTransportReceipt, SignerConfig,
 };
 use radroots_sql_core::SqliteExecutor;
 use radroots_trade::listing::parse_public_listing_address;
@@ -258,6 +262,7 @@ struct ResolvedAppOrderFulfillmentEvidence {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 struct ResolvedAppOrderLifecycleEvidence {
+    evidence_events: Vec<SdkRadrootsNostrEvent>,
     status: RadrootsOrderStatus,
     payment_state: RadrootsOrderPaymentState,
     agreement_event_id: Option<String>,
@@ -2954,15 +2959,14 @@ impl DesktopAppRuntimeState {
         status: RadrootsOrderFulfillmentState,
     ) -> Result<bool, AppSqliteError> {
         let payload = self.prepare_seller_order_fulfillment(order_id, status)?;
-        let operation = PendingSyncOperation::from_publish_payload(
-            AppPublishPayload::OrderFulfillment(payload),
-            current_utc_timestamp(),
-        )
-        .map_err(|_| AppSqliteError::InvalidProjection {
-            reason: "seller order fulfillment publish payload must serialize",
-        })?;
-        let _ = self.enqueue_selected_account_sync_operation_once(operation)?;
-        self.attempt_sync(SyncTrigger::ManualRefresh)
+        let source_record_id = order_fulfillment_sdk_source_record_id(&payload);
+        self.enqueue_order_fulfillment_payload_via_sdk(
+            &payload,
+            AppSdkMigrationReceiptSourceKind::LocalOutbox,
+            source_record_id.as_str(),
+        )?;
+        let _ = self.refresh_selected_account_sync()?;
+        Ok(true)
     }
 
     fn prepare_seller_order_revision_proposal(
@@ -3105,15 +3109,14 @@ impl DesktopAppRuntimeState {
     ) -> Result<bool, AppSqliteError> {
         let payload =
             self.prepare_seller_order_revision_proposal(order_id, items, economics, reason)?;
-        let operation = PendingSyncOperation::from_publish_payload(
-            AppPublishPayload::OrderRevisionProposal(payload),
-            current_utc_timestamp(),
-        )
-        .map_err(|_| AppSqliteError::InvalidProjection {
-            reason: "seller order revision publish payload must serialize",
-        })?;
-        let _ = self.enqueue_selected_account_sync_operation_once(operation)?;
-        self.attempt_sync(SyncTrigger::ManualRefresh)
+        let source_record_id = order_revision_proposal_sdk_source_record_id(&payload);
+        self.enqueue_order_revision_proposal_payload_via_sdk(
+            &payload,
+            AppSdkMigrationReceiptSourceKind::LocalOutbox,
+            source_record_id.as_str(),
+        )?;
+        let _ = self.refresh_selected_account_sync()?;
+        Ok(true)
     }
 
     fn prepare_buyer_order_revision_decision(
@@ -3246,15 +3249,14 @@ impl DesktopAppRuntimeState {
         decision: RadrootsOrderRevisionOutcome,
     ) -> Result<bool, AppSqliteError> {
         let payload = self.prepare_buyer_order_revision_decision(order_id, decision)?;
-        let operation = PendingSyncOperation::from_publish_payload(
-            AppPublishPayload::OrderRevisionDecision(payload),
-            current_utc_timestamp(),
-        )
-        .map_err(|_| AppSqliteError::InvalidProjection {
-            reason: "buyer order revision publish payload must serialize",
-        })?;
-        let _ = self.enqueue_selected_account_sync_operation_once(operation)?;
-        self.attempt_sync(SyncTrigger::ManualRefresh)
+        let source_record_id = order_revision_decision_sdk_source_record_id(&payload);
+        self.enqueue_order_revision_decision_payload_via_sdk(
+            &payload,
+            AppSdkMigrationReceiptSourceKind::LocalOutbox,
+            source_record_id.as_str(),
+        )?;
+        let _ = self.refresh_selected_account_sync()?;
+        Ok(true)
     }
 
     fn prepare_buyer_order_cancellation(
@@ -3372,15 +3374,14 @@ impl DesktopAppRuntimeState {
         order_id: OrderId,
     ) -> Result<bool, AppSqliteError> {
         let payload = self.prepare_buyer_order_cancellation(order_id)?;
-        let operation = PendingSyncOperation::from_publish_payload(
-            AppPublishPayload::OrderCancellation(payload),
-            current_utc_timestamp(),
-        )
-        .map_err(|_| AppSqliteError::InvalidProjection {
-            reason: "buyer order cancellation publish payload must serialize",
-        })?;
-        let _ = self.enqueue_selected_account_sync_operation_once(operation)?;
-        self.attempt_sync(SyncTrigger::ManualRefresh)
+        let source_record_id = order_cancellation_sdk_source_record_id(&payload);
+        self.enqueue_order_cancellation_payload_via_sdk(
+            &payload,
+            AppSdkMigrationReceiptSourceKind::LocalOutbox,
+            source_record_id.as_str(),
+        )?;
+        let _ = self.refresh_selected_account_sync()?;
+        Ok(true)
     }
 
     fn prepare_buyer_order_receipt(
@@ -3491,15 +3492,14 @@ impl DesktopAppRuntimeState {
         outcome: AppOrderReceiptOutcome,
     ) -> Result<bool, AppSqliteError> {
         let payload = self.prepare_buyer_order_receipt(order_id, outcome)?;
-        let operation = PendingSyncOperation::from_publish_payload(
-            AppPublishPayload::OrderReceipt(payload),
-            current_utc_timestamp(),
-        )
-        .map_err(|_| AppSqliteError::InvalidProjection {
-            reason: "buyer order receipt publish payload must serialize",
-        })?;
-        let _ = self.enqueue_selected_account_sync_operation_once(operation)?;
-        self.attempt_sync(SyncTrigger::ManualRefresh)
+        let source_record_id = order_receipt_sdk_source_record_id(&payload);
+        self.enqueue_order_receipt_payload_via_sdk(
+            &payload,
+            AppSdkMigrationReceiptSourceKind::LocalOutbox,
+            source_record_id.as_str(),
+        )?;
+        let _ = self.refresh_selected_account_sync()?;
+        Ok(true)
     }
 
     fn start_order_recovery(
@@ -5017,37 +5017,6 @@ impl DesktopAppRuntimeState {
         self.refresh_selected_account_sync()
     }
 
-    fn enqueue_selected_account_sync_operation_once(
-        &mut self,
-        operation: PendingSyncOperation,
-    ) -> Result<bool, AppSqliteError> {
-        let Some(account_id) = self
-            .state_store
-            .identity_projection()
-            .selected_account
-            .as_ref()
-            .map(|account| account.account.account_id.clone())
-        else {
-            return Ok(false);
-        };
-        let already_enqueued = {
-            let Some(sqlite_store) = self.sqlite_store.as_ref() else {
-                return Ok(false);
-            };
-            let existing = sqlite_store.load_pending_sync_operations(account_id.as_str())?;
-            existing.iter().any(|pending| {
-                pending.operation.aggregate == operation.aggregate
-                    && pending.operation.operation == operation.operation
-                    && pending.operation.payload_json == operation.payload_json
-            })
-        };
-        if already_enqueued {
-            return self.refresh_selected_account_sync();
-        }
-
-        self.enqueue_selected_account_sync_operations(vec![operation])
-    }
-
     fn enqueue_selected_account_product_publish_operation(
         &mut self,
         product_id: ProductId,
@@ -5384,6 +5353,298 @@ impl DesktopAppRuntimeState {
         }
     }
 
+    fn enqueue_order_revision_proposal_payload_via_sdk(
+        &self,
+        payload: &AppOrderRevisionProposalPublishPayload,
+        source_kind: AppSdkMigrationReceiptSourceKind,
+        source_record_id: &str,
+    ) -> Result<(), AppSqliteError> {
+        let operation_kind = ORDER_REVISION_PROPOSAL_OPERATION_KIND;
+        let request_evidence = self.resolve_seller_order_request_evidence(payload.app_order_id)?;
+        let lifecycle = self.resolve_order_lifecycle_evidence(&request_evidence)?;
+        let actor_pubkey = self
+            .local_signing_identity_for_publish_payload(&AppPublishPayload::OrderRevisionProposal(
+                payload.clone(),
+            ))
+            .and_then(|identity| {
+                let actor_pubkey = identity.public_key_hex();
+                let target_relays = normalized_app_sync_relay_urls(&self.nostr_relay_urls)?;
+                let request = AppSdkOrderRevisionProposalRequest {
+                    actor_account_id: payload.context.account_id.clone(),
+                    actor_pubkey: actor_pubkey.clone(),
+                    signer_keys: identity.into_keys(),
+                    evidence_events: lifecycle.evidence_events,
+                    root_event: order_lifecycle_sdk_event_ptr(
+                        payload.request_event_id.as_str(),
+                        target_relays.as_slice(),
+                        "order revision proposal requires request event id",
+                    )?,
+                    previous_event: order_lifecycle_sdk_event_ptr(
+                        payload.prev_event_id.as_str(),
+                        target_relays.as_slice(),
+                        "order revision proposal requires previous event id",
+                    )?,
+                    proposal: order_revision_proposal_publish_payload_to_sdk_revision(payload)?,
+                    relay_url_policy: sdk_relay_url_policy_for_targets(target_relays.as_slice()),
+                    target_relays,
+                    idempotency_key: Some(sdk_idempotency_key(source_record_id)),
+                };
+                self.enqueue_app_sdk_order_revision_proposal(request)
+                    .map(|receipt| (actor_pubkey, receipt))
+                    .map_err(sync_transport_error_from_sdk_runtime_error)
+            });
+        match actor_pubkey {
+            Ok((actor_pubkey, receipt)) => self.record_app_sdk_migration_success(
+                source_kind,
+                source_record_id,
+                operation_kind,
+                actor_pubkey.as_str(),
+                &receipt,
+            ),
+            Err(error) => self.record_app_sdk_migration_failure(
+                source_kind,
+                source_record_id,
+                operation_kind,
+                None,
+                sync_transport_error_detail_json(&error),
+            ),
+        }
+    }
+
+    fn enqueue_order_revision_decision_payload_via_sdk(
+        &self,
+        payload: &AppOrderRevisionDecisionPublishPayload,
+        source_kind: AppSdkMigrationReceiptSourceKind,
+        source_record_id: &str,
+    ) -> Result<(), AppSqliteError> {
+        let operation_kind = ORDER_REVISION_DECISION_OPERATION_KIND;
+        let request_evidence = self.resolve_seller_order_request_evidence(payload.app_order_id)?;
+        let lifecycle = self.resolve_order_lifecycle_evidence(&request_evidence)?;
+        let actor_pubkey = self
+            .local_signing_identity_for_publish_payload(&AppPublishPayload::OrderRevisionDecision(
+                payload.clone(),
+            ))
+            .and_then(|identity| {
+                let actor_pubkey = identity.public_key_hex();
+                let target_relays = normalized_app_sync_relay_urls(&self.nostr_relay_urls)?;
+                let request = AppSdkOrderRevisionDecisionRequest {
+                    actor_account_id: payload.context.account_id.clone(),
+                    actor_pubkey: actor_pubkey.clone(),
+                    signer_keys: identity.into_keys(),
+                    evidence_events: lifecycle.evidence_events,
+                    root_event: order_lifecycle_sdk_event_ptr(
+                        payload.request_event_id.as_str(),
+                        target_relays.as_slice(),
+                        "order revision decision requires request event id",
+                    )?,
+                    previous_event: order_lifecycle_sdk_event_ptr(
+                        payload.prev_event_id.as_str(),
+                        target_relays.as_slice(),
+                        "order revision decision requires previous event id",
+                    )?,
+                    decision: order_revision_decision_publish_payload_to_sdk_revision_decision(
+                        payload,
+                    )?,
+                    relay_url_policy: sdk_relay_url_policy_for_targets(target_relays.as_slice()),
+                    target_relays,
+                    idempotency_key: Some(sdk_idempotency_key(source_record_id)),
+                };
+                self.enqueue_app_sdk_order_revision_decision(request)
+                    .map(|receipt| (actor_pubkey, receipt))
+                    .map_err(sync_transport_error_from_sdk_runtime_error)
+            });
+        match actor_pubkey {
+            Ok((actor_pubkey, receipt)) => self.record_app_sdk_migration_success(
+                source_kind,
+                source_record_id,
+                operation_kind,
+                actor_pubkey.as_str(),
+                &receipt,
+            ),
+            Err(error) => self.record_app_sdk_migration_failure(
+                source_kind,
+                source_record_id,
+                operation_kind,
+                None,
+                sync_transport_error_detail_json(&error),
+            ),
+        }
+    }
+
+    fn enqueue_order_cancellation_payload_via_sdk(
+        &self,
+        payload: &AppOrderCancellationPublishPayload,
+        source_kind: AppSdkMigrationReceiptSourceKind,
+        source_record_id: &str,
+    ) -> Result<(), AppSqliteError> {
+        let operation_kind = ORDER_CANCELLATION_OPERATION_KIND;
+        let request_evidence = self.resolve_seller_order_request_evidence(payload.app_order_id)?;
+        let lifecycle = self.resolve_order_lifecycle_evidence(&request_evidence)?;
+        let actor_pubkey = self
+            .local_signing_identity_for_publish_payload(&AppPublishPayload::OrderCancellation(
+                payload.clone(),
+            ))
+            .and_then(|identity| {
+                let actor_pubkey = identity.public_key_hex();
+                let target_relays = normalized_app_sync_relay_urls(&self.nostr_relay_urls)?;
+                let request = AppSdkOrderCancellationRequest {
+                    actor_account_id: payload.context.account_id.clone(),
+                    actor_pubkey: actor_pubkey.clone(),
+                    signer_keys: identity.into_keys(),
+                    evidence_events: lifecycle.evidence_events,
+                    root_event: order_lifecycle_sdk_event_ptr(
+                        payload.request_event_id.as_str(),
+                        target_relays.as_slice(),
+                        "order cancellation requires request event id",
+                    )?,
+                    previous_event: order_lifecycle_sdk_event_ptr(
+                        payload.prev_event_id.as_str(),
+                        target_relays.as_slice(),
+                        "order cancellation requires previous event id",
+                    )?,
+                    cancellation: order_cancellation_publish_payload_to_sdk_cancellation(payload)?,
+                    relay_url_policy: sdk_relay_url_policy_for_targets(target_relays.as_slice()),
+                    target_relays,
+                    idempotency_key: Some(sdk_idempotency_key(source_record_id)),
+                };
+                self.enqueue_app_sdk_order_cancellation(request)
+                    .map(|receipt| (actor_pubkey, receipt))
+                    .map_err(sync_transport_error_from_sdk_runtime_error)
+            });
+        match actor_pubkey {
+            Ok((actor_pubkey, receipt)) => self.record_app_sdk_migration_success(
+                source_kind,
+                source_record_id,
+                operation_kind,
+                actor_pubkey.as_str(),
+                &receipt,
+            ),
+            Err(error) => self.record_app_sdk_migration_failure(
+                source_kind,
+                source_record_id,
+                operation_kind,
+                None,
+                sync_transport_error_detail_json(&error),
+            ),
+        }
+    }
+
+    fn enqueue_order_fulfillment_payload_via_sdk(
+        &self,
+        payload: &AppOrderFulfillmentPublishPayload,
+        source_kind: AppSdkMigrationReceiptSourceKind,
+        source_record_id: &str,
+    ) -> Result<(), AppSqliteError> {
+        let operation_kind = ORDER_FULFILLMENT_UPDATE_OPERATION_KIND;
+        let request_evidence = self.resolve_seller_order_request_evidence(payload.app_order_id)?;
+        let lifecycle = self.resolve_order_lifecycle_evidence(&request_evidence)?;
+        let actor_pubkey = self
+            .local_signing_identity_for_publish_payload(&AppPublishPayload::OrderFulfillment(
+                payload.clone(),
+            ))
+            .and_then(|identity| {
+                let actor_pubkey = identity.public_key_hex();
+                let target_relays = normalized_app_sync_relay_urls(&self.nostr_relay_urls)?;
+                let request = AppSdkOrderFulfillmentUpdateRequest {
+                    actor_account_id: payload.context.account_id.clone(),
+                    actor_pubkey: actor_pubkey.clone(),
+                    signer_keys: identity.into_keys(),
+                    evidence_events: lifecycle.evidence_events,
+                    root_event: order_lifecycle_sdk_event_ptr(
+                        payload.request_event_id.as_str(),
+                        target_relays.as_slice(),
+                        "order fulfillment requires request event id",
+                    )?,
+                    previous_event: order_lifecycle_sdk_event_ptr(
+                        payload.prev_event_id.as_str(),
+                        target_relays.as_slice(),
+                        "order fulfillment requires previous event id",
+                    )?,
+                    fulfillment: order_fulfillment_publish_payload_to_sdk_fulfillment(payload)?,
+                    relay_url_policy: sdk_relay_url_policy_for_targets(target_relays.as_slice()),
+                    target_relays,
+                    idempotency_key: Some(sdk_idempotency_key(source_record_id)),
+                };
+                self.enqueue_app_sdk_order_fulfillment_update(request)
+                    .map(|receipt| (actor_pubkey, receipt))
+                    .map_err(sync_transport_error_from_sdk_runtime_error)
+            });
+        match actor_pubkey {
+            Ok((actor_pubkey, receipt)) => self.record_app_sdk_migration_success(
+                source_kind,
+                source_record_id,
+                operation_kind,
+                actor_pubkey.as_str(),
+                &receipt,
+            ),
+            Err(error) => self.record_app_sdk_migration_failure(
+                source_kind,
+                source_record_id,
+                operation_kind,
+                None,
+                sync_transport_error_detail_json(&error),
+            ),
+        }
+    }
+
+    fn enqueue_order_receipt_payload_via_sdk(
+        &self,
+        payload: &AppOrderReceiptPublishPayload,
+        source_kind: AppSdkMigrationReceiptSourceKind,
+        source_record_id: &str,
+    ) -> Result<(), AppSqliteError> {
+        let operation_kind = ORDER_RECEIPT_RECORD_OPERATION_KIND;
+        let request_evidence = self.resolve_seller_order_request_evidence(payload.app_order_id)?;
+        let lifecycle = self.resolve_order_lifecycle_evidence(&request_evidence)?;
+        let actor_pubkey = self
+            .local_signing_identity_for_publish_payload(&AppPublishPayload::OrderReceipt(
+                payload.clone(),
+            ))
+            .and_then(|identity| {
+                let actor_pubkey = identity.public_key_hex();
+                let target_relays = normalized_app_sync_relay_urls(&self.nostr_relay_urls)?;
+                let request = AppSdkOrderReceiptRecordRequest {
+                    actor_account_id: payload.context.account_id.clone(),
+                    actor_pubkey: actor_pubkey.clone(),
+                    signer_keys: identity.into_keys(),
+                    evidence_events: lifecycle.evidence_events,
+                    root_event: order_lifecycle_sdk_event_ptr(
+                        payload.request_event_id.as_str(),
+                        target_relays.as_slice(),
+                        "order receipt requires request event id",
+                    )?,
+                    previous_event: order_lifecycle_sdk_event_ptr(
+                        payload.prev_event_id.as_str(),
+                        target_relays.as_slice(),
+                        "order receipt requires previous event id",
+                    )?,
+                    receipt: order_receipt_publish_payload_to_sdk_receipt(payload)?,
+                    relay_url_policy: sdk_relay_url_policy_for_targets(target_relays.as_slice()),
+                    target_relays,
+                    idempotency_key: Some(sdk_idempotency_key(source_record_id)),
+                };
+                self.enqueue_app_sdk_order_receipt_record(request)
+                    .map(|receipt| (actor_pubkey, receipt))
+                    .map_err(sync_transport_error_from_sdk_runtime_error)
+            });
+        match actor_pubkey {
+            Ok((actor_pubkey, receipt)) => self.record_app_sdk_migration_success(
+                source_kind,
+                source_record_id,
+                operation_kind,
+                actor_pubkey.as_str(),
+                &receipt,
+            ),
+            Err(error) => self.record_app_sdk_migration_failure(
+                source_kind,
+                source_record_id,
+                operation_kind,
+                None,
+                sync_transport_error_detail_json(&error),
+            ),
+        }
+    }
+
     fn local_signing_identity_for_publish_payload(
         &self,
         payload: &AppPublishPayload,
@@ -5413,6 +5674,41 @@ impl DesktopAppRuntimeState {
         request: AppSdkOrderDecisionRequest,
     ) -> Result<AppSdkWorkflowReceipt, AppSdkRuntimeError> {
         self.with_app_sdk_runtime(|runtime| runtime.enqueue_order_decision(request))
+    }
+
+    fn enqueue_app_sdk_order_revision_proposal(
+        &self,
+        request: AppSdkOrderRevisionProposalRequest,
+    ) -> Result<AppSdkWorkflowReceipt, AppSdkRuntimeError> {
+        self.with_app_sdk_runtime(|runtime| runtime.enqueue_order_revision_proposal(request))
+    }
+
+    fn enqueue_app_sdk_order_revision_decision(
+        &self,
+        request: AppSdkOrderRevisionDecisionRequest,
+    ) -> Result<AppSdkWorkflowReceipt, AppSdkRuntimeError> {
+        self.with_app_sdk_runtime(|runtime| runtime.enqueue_order_revision_decision(request))
+    }
+
+    fn enqueue_app_sdk_order_cancellation(
+        &self,
+        request: AppSdkOrderCancellationRequest,
+    ) -> Result<AppSdkWorkflowReceipt, AppSdkRuntimeError> {
+        self.with_app_sdk_runtime(|runtime| runtime.enqueue_order_cancellation(request))
+    }
+
+    fn enqueue_app_sdk_order_fulfillment_update(
+        &self,
+        request: AppSdkOrderFulfillmentUpdateRequest,
+    ) -> Result<AppSdkWorkflowReceipt, AppSdkRuntimeError> {
+        self.with_app_sdk_runtime(|runtime| runtime.enqueue_order_fulfillment_update(request))
+    }
+
+    fn enqueue_app_sdk_order_receipt_record(
+        &self,
+        request: AppSdkOrderReceiptRecordRequest,
+    ) -> Result<AppSdkWorkflowReceipt, AppSdkRuntimeError> {
+        self.with_app_sdk_runtime(|runtime| runtime.enqueue_order_receipt_record(request))
     }
 
     fn with_app_sdk_runtime<T>(
@@ -5915,6 +6211,7 @@ impl DesktopAppRuntimeState {
                 .then_with(|| left.id.cmp(&right.id))
         });
 
+        let mut evidence_events = vec![request.request_event.clone()];
         let mut buckets = AppActiveOrderEvidenceBuckets::default();
         let request_event_id =
             active_order_event_id(request.request_event_id.as_str(), "request_event_id")?;
@@ -5933,6 +6230,7 @@ impl DesktopAppRuntimeState {
             {
                 continue;
             }
+            evidence_events.push(event.clone());
             let event_id = active_order_event_id(event.id.as_str(), "event_id")?;
             let author_pubkey = active_order_pubkey(event.author.as_str(), "author_pubkey")?;
             match event.kind {
@@ -6141,6 +6439,7 @@ impl DesktopAppRuntimeState {
             .transpose()?;
 
         Ok(ResolvedAppOrderLifecycleEvidence {
+            evidence_events,
             status: projection.status,
             payment_state: projection.payment.state,
             agreement_event_id: projection
@@ -7687,6 +7986,40 @@ fn order_decision_sdk_source_record_id(payload: &AppOrderDecisionPublishPayload)
     format!("app:order_decision:{}", payload.app_order_id)
 }
 
+fn order_revision_proposal_sdk_source_record_id(
+    payload: &AppOrderRevisionProposalPublishPayload,
+) -> String {
+    format!(
+        "app:order_revision_proposal:{}:{}",
+        payload.app_order_id, payload.revision_id
+    )
+}
+
+fn order_revision_decision_sdk_source_record_id(
+    payload: &AppOrderRevisionDecisionPublishPayload,
+) -> String {
+    format!(
+        "app:order_revision_decision:{}:{}",
+        payload.app_order_id, payload.revision_id
+    )
+}
+
+fn order_cancellation_sdk_source_record_id(payload: &AppOrderCancellationPublishPayload) -> String {
+    format!("app:order_cancellation:{}", payload.app_order_id)
+}
+
+fn order_fulfillment_sdk_source_record_id(payload: &AppOrderFulfillmentPublishPayload) -> String {
+    format!(
+        "app:order_fulfillment:{}:{}",
+        payload.app_order_id,
+        order_fulfillment_status_storage_key(payload.status)
+    )
+}
+
+fn order_receipt_sdk_source_record_id(payload: &AppOrderReceiptPublishPayload) -> String {
+    format!("app:order_receipt:{}", payload.app_order_id)
+}
+
 fn sdk_relay_url_policy_for_targets(target_relays: &[String]) -> AppSdkRelayUrlPolicy {
     if target_relays
         .iter()
@@ -7854,82 +8187,21 @@ async fn publish_app_payload(
         AppPublishPayload::OrderDecision(_) => Err(AppSyncTransportError::failed(
             "order decision publish uses AppSdkRuntime",
         )),
-        AppPublishPayload::OrderRevisionProposal(payload) => {
-            let proposal = order_revision_proposal_publish_payload_to_sdk_revision(payload)?;
-            let request_event_id = publish_event_id(payload.request_event_id.as_str())?;
-            let prev_event_id = publish_event_id(payload.prev_event_id.as_str())?;
-            client
-                .order()
-                .publish_order_revision_proposal_with_identity(
-                    identity,
-                    &request_event_id,
-                    &prev_event_id,
-                    &proposal,
-                )
-                .await
-                .map_err(|error| AppSyncTransportError::failed(error.to_string()))
-        }
-        AppPublishPayload::OrderRevisionDecision(payload) => {
-            let decision =
-                order_revision_decision_publish_payload_to_sdk_revision_decision(payload)?;
-            let request_event_id = publish_event_id(payload.request_event_id.as_str())?;
-            let prev_event_id = publish_event_id(payload.prev_event_id.as_str())?;
-            client
-                .order()
-                .publish_order_revision_decision_with_identity(
-                    identity,
-                    &request_event_id,
-                    &prev_event_id,
-                    &decision,
-                )
-                .await
-                .map_err(|error| AppSyncTransportError::failed(error.to_string()))
-        }
-        AppPublishPayload::OrderCancellation(payload) => {
-            let cancellation = order_cancellation_publish_payload_to_sdk_cancellation(payload)?;
-            let request_event_id = publish_event_id(payload.request_event_id.as_str())?;
-            let prev_event_id = publish_event_id(payload.prev_event_id.as_str())?;
-            client
-                .order()
-                .publish_order_cancellation_with_identity(
-                    identity,
-                    &request_event_id,
-                    &prev_event_id,
-                    &cancellation,
-                )
-                .await
-                .map_err(|error| AppSyncTransportError::failed(error.to_string()))
-        }
-        AppPublishPayload::OrderFulfillment(payload) => {
-            let fulfillment = order_fulfillment_publish_payload_to_sdk_fulfillment(payload)?;
-            let request_event_id = publish_event_id(payload.request_event_id.as_str())?;
-            let prev_event_id = publish_event_id(payload.prev_event_id.as_str())?;
-            client
-                .order()
-                .publish_fulfillment_update_with_identity(
-                    identity,
-                    &request_event_id,
-                    &prev_event_id,
-                    &fulfillment,
-                )
-                .await
-                .map_err(|error| AppSyncTransportError::failed(error.to_string()))
-        }
-        AppPublishPayload::OrderReceipt(payload) => {
-            let receipt = order_receipt_publish_payload_to_sdk_receipt(payload)?;
-            let request_event_id = publish_event_id(payload.request_event_id.as_str())?;
-            let prev_event_id = publish_event_id(payload.prev_event_id.as_str())?;
-            client
-                .order()
-                .publish_buyer_receipt_with_identity(
-                    identity,
-                    &request_event_id,
-                    &prev_event_id,
-                    &receipt,
-                )
-                .await
-                .map_err(|error| AppSyncTransportError::failed(error.to_string()))
-        }
+        AppPublishPayload::OrderRevisionProposal(_) => Err(AppSyncTransportError::failed(
+            "order revision proposal publish uses AppSdkRuntime",
+        )),
+        AppPublishPayload::OrderRevisionDecision(_) => Err(AppSyncTransportError::failed(
+            "order revision decision publish uses AppSdkRuntime",
+        )),
+        AppPublishPayload::OrderCancellation(_) => Err(AppSyncTransportError::failed(
+            "order cancellation publish uses AppSdkRuntime",
+        )),
+        AppPublishPayload::OrderFulfillment(_) => Err(AppSyncTransportError::failed(
+            "order fulfillment publish uses AppSdkRuntime",
+        )),
+        AppPublishPayload::OrderReceipt(_) => Err(AppSyncTransportError::failed(
+            "order receipt publish uses AppSdkRuntime",
+        )),
     }
 }
 
@@ -8177,6 +8449,32 @@ fn order_decision_sdk_request_event_ptr(
         id: request_event_id.to_owned(),
         relays: target_relays.first().cloned(),
     })
+}
+
+fn order_lifecycle_sdk_event_ptr(
+    event_id: &str,
+    target_relays: &[String],
+    missing_message: &'static str,
+) -> Result<RadrootsNostrEventPtr, AppSyncTransportError> {
+    let event_id = event_id.trim();
+    if event_id.is_empty() {
+        return Err(AppSyncTransportError::failed(missing_message));
+    }
+    Ok(RadrootsNostrEventPtr {
+        id: event_id.to_owned(),
+        relays: target_relays.first().cloned(),
+    })
+}
+
+fn order_fulfillment_status_storage_key(status: RadrootsOrderFulfillmentState) -> &'static str {
+    match status {
+        RadrootsOrderFulfillmentState::AcceptedNotFulfilled => "accepted_not_fulfilled",
+        RadrootsOrderFulfillmentState::Preparing => "preparing",
+        RadrootsOrderFulfillmentState::ReadyForPickup => "ready_for_pickup",
+        RadrootsOrderFulfillmentState::OutForDelivery => "out_for_delivery",
+        RadrootsOrderFulfillmentState::Delivered => "delivered",
+        RadrootsOrderFulfillmentState::SellerCancelled => "seller_cancelled",
+    }
 }
 
 #[cfg(test)]
