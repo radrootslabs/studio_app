@@ -604,6 +604,7 @@
   "products.editor.action.close": "Close",
   "products.editor.action.save": "Save changes",
   "products.editor.save_failed": "Couldn't save product details. Try again.",
+  "products.editor.publish_queue_failed": "Product details were saved, but publishing couldn't be queued. Try again.",
   "products.editor.invalid_price": "Enter dollars and cents, for example 6.50.",
   "products.editor.invalid_stock": "Enter a whole number or leave blank.",
   "products.editor.publish_readiness.title": "Publish readiness",

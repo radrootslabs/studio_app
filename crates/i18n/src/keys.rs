@@ -625,6 +625,7 @@ define_app_text_keys! {
     ProductsEditorCloseAction => "products.editor.action.close",
     ProductsEditorSaveAction => "products.editor.action.save",
     ProductsEditorSaveFailed => "products.editor.save_failed",
+    ProductsEditorPublishQueueFailed => "products.editor.publish_queue_failed",
     ProductsEditorInvalidPrice => "products.editor.invalid_price",
     ProductsEditorInvalidStock => "products.editor.invalid_stock",
     ProductsEditorPublishReadinessTitle => "products.editor.publish_readiness.title",

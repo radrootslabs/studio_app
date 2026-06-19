@@ -164,6 +164,7 @@ use crate::remote_signer::{
 const APP_DATABASE_FILE_NAME: &str = "app.sqlite3";
 const SYNC_TRANSPORT_UNAVAILABLE_MESSAGE: &str = "remote sync transport is not configured";
 const APP_SYNC_PUBLISH_USES_SDK_RUNTIME_MESSAGE: &str = "app sync publish work uses AppSdkRuntime";
+const LISTING_PUBLISH_SDK_ENQUEUE_FAILED_REASON: &str = "listing publish SDK enqueue failed";
 const APP_DIRECT_RELAY_SYNC_TIMEOUT_MS: u64 = 2_000;
 const APP_DIRECT_RELAY_CONNECT_TIMEOUT: StdDuration = StdDuration::from_secs(10);
 const APP_DIRECT_RELAY_INGEST_LIMIT: usize = 1_000;
@@ -1036,7 +1037,7 @@ impl DesktopAppRuntime {
     pub fn save_product_editor_draft(
         &self,
         draft: ProductEditorDraft,
-    ) -> Result<bool, AppSqliteError> {
+    ) -> Result<bool, DesktopAppRuntimeProductEditorSaveError> {
         self.lock_state_mut().save_product_editor_draft(draft)
     }
 
@@ -3941,7 +3942,7 @@ impl DesktopAppRuntimeState {
     fn save_product_editor_draft(
         &mut self,
         draft: ProductEditorDraft,
-    ) -> Result<bool, AppSqliteError> {
+    ) -> Result<bool, DesktopAppRuntimeProductEditorSaveError> {
         let Some(product_id) = self.selected_product_editor_id() else {
             return Ok(false);
         };
@@ -5216,13 +5217,18 @@ impl DesktopAppRuntimeState {
                 actor_pubkey.as_str(),
                 &receipt,
             ),
-            Err(error) => self.record_app_sdk_migration_failure(
-                source_kind,
-                source_record_id,
-                operation_kind,
-                None,
-                sync_transport_error_detail_json(&error),
-            ),
+            Err(error) => {
+                self.record_app_sdk_migration_failure(
+                    source_kind,
+                    source_record_id,
+                    operation_kind,
+                    None,
+                    sync_transport_error_detail_json(&error),
+                )?;
+                Err(AppSqliteError::ProductPublish {
+                    reason: LISTING_PUBLISH_SDK_ENQUEUE_FAILED_REASON,
+                })
+            }
         }
     }
 
@@ -7334,6 +7340,35 @@ pub enum DesktopAppRuntimeCommandError {
     PackDayPrint(#[from] PackDayPrintError),
     #[error(transparent)]
     PackDayBatchPrint(#[from] PackDayBatchPrintError),
+}
+
+#[derive(Debug, Error)]
+pub enum DesktopAppRuntimeProductEditorSaveError {
+    #[error(transparent)]
+    Sqlite(AppSqliteError),
+    #[error(
+        "product details were saved, but listing publish could not be queued through the SDK runtime"
+    )]
+    ListingPublishSdkEnqueueFailed,
+}
+
+impl From<AppSqliteError> for DesktopAppRuntimeProductEditorSaveError {
+    fn from(error: AppSqliteError) -> Self {
+        match error {
+            AppSqliteError::ProductPublish { reason }
+                if reason == LISTING_PUBLISH_SDK_ENQUEUE_FAILED_REASON =>
+            {
+                Self::ListingPublishSdkEnqueueFailed
+            }
+            error => Self::Sqlite(error),
+        }
+    }
+}
+
+impl DesktopAppRuntimeProductEditorSaveError {
+    pub fn is_listing_publish_sdk_enqueue_failed(&self) -> bool {
+        matches!(self, Self::ListingPublishSdkEnqueueFailed)
+    }
 }
 
 impl From<DesktopRemoteSignerError> for DesktopAppRuntimeCommandError {
@@ -12686,6 +12721,136 @@ mod tests {
             receipt.detail_json["operation_kind"],
             LISTING_PUBLISH_OPERATION_KIND
         );
+
+        cleanup_bootstrapped_runtime_paths(&paths);
+    }
+
+    #[test]
+    fn runtime_product_publishable_save_returns_error_when_sdk_listing_enqueue_fails() {
+        let (runtime, paths) = bootstrapped_runtime("publishable_product_listing_sdk_failure");
+        let (_account_id, farm_id) = provision_ready_farmer_account(&runtime);
+        let pickup_location_id = PickupLocationId::new();
+        let fulfillment_window_id = FulfillmentWindowId::new();
+
+        runtime
+            .save_farm_rules_projection(FarmRulesProjection {
+                farm_profile: Some(FarmProfileRecord {
+                    farm_id,
+                    display_name: "North field farm".to_owned(),
+                    timezone: "UTC".to_owned(),
+                    currency_code: "USD".to_owned(),
+                }),
+                pickup_locations: vec![PickupLocationRecord {
+                    pickup_location_id,
+                    farm_id,
+                    label: "Barn pickup".to_owned(),
+                    address_line: "14 Orchard Lane".to_owned(),
+                    directions: None,
+                    is_default: true,
+                }],
+                operating_rules: Some(FarmOperatingRulesRecord {
+                    farm_id,
+                    promise_lead_hours: 24,
+                    substitution_policy: "ask_customer".to_owned(),
+                    missed_pickup_policy: "hold_next_window".to_owned(),
+                }),
+                fulfillment_windows: vec![FulfillmentWindowRecord {
+                    fulfillment_window_id,
+                    farm_id,
+                    pickup_location_id,
+                    label: "Friday pickup".to_owned(),
+                    starts_at: "2099-04-25T14:00:00Z".to_owned(),
+                    ends_at: "2099-04-25T18:00:00Z".to_owned(),
+                    order_cutoff_at: "2099-04-24T18:00:00Z".to_owned(),
+                }],
+                blackout_periods: Vec::new(),
+                ..runtime
+                    .load_farm_rules_projection()
+                    .expect("farm rules projection should load")
+            })
+            .expect("farm rules should save");
+
+        assert!(
+            runtime
+                .open_new_product_editor()
+                .expect("new product editor should open")
+        );
+        let product_id = match runtime.summary().products_projection.editor {
+            radroots_studio_app_state::ProductEditorState::Open(session) => session
+                .selected_product_id
+                .expect("open product editor should select a product"),
+            radroots_studio_app_state::ProductEditorState::Closed => {
+                panic!("product editor should be open")
+            }
+        };
+        assert!(
+            runtime
+                .shutdown_sdk_runtime()
+                .expect("sdk runtime should shut down")
+        );
+        let draft = ProductEditorDraft {
+            title: "Salad mix".to_owned(),
+            subtitle: "Cut this morning".to_owned(),
+            category: "greens".to_owned(),
+            unit_label: "each".to_owned(),
+            price_minor_units: Some(900),
+            price_currency: "USD".to_owned(),
+            stock_quantity: Some(11),
+            availability_window_id: Some(fulfillment_window_id),
+            status: ProductStatus::Published,
+        };
+
+        let error = runtime
+            .save_product_editor_draft(draft.clone())
+            .expect_err("SDK listing enqueue failure should fail the save action");
+        assert!(matches!(
+            error,
+            super::DesktopAppRuntimeProductEditorSaveError::ListingPublishSdkEnqueueFailed
+        ));
+        assert_eq!(
+            runtime
+                .lock_state()
+                .sqlite_store
+                .as_ref()
+                .expect("sqlite store")
+                .load_product_editor_draft(product_id)
+                .expect("saved product draft should load"),
+            Some(draft)
+        );
+
+        let records = shared_local_event_records(&paths);
+        let listing_record = records
+            .iter()
+            .find(|record| {
+                record
+                    .local_work_json
+                    .as_ref()
+                    .and_then(|payload| payload["record_kind"].as_str())
+                    == Some("listing_draft_v1")
+            })
+            .expect("listing local work record");
+        let receipt = runtime
+            .lock_state()
+            .sqlite_store
+            .as_ref()
+            .expect("sqlite store")
+            .sdk_migration_receipt_repository()
+            .load_receipt(
+                AppSdkMigrationReceiptSourceKind::SharedLocalEvent,
+                listing_record.record_id.as_str(),
+            )
+            .expect("failed listing SDK migration receipt should load")
+            .expect("failed listing SDK migration receipt should exist");
+        assert_eq!(receipt.source_record_id, listing_record.record_id);
+        assert_eq!(receipt.sdk_operation_kind, LISTING_PUBLISH_OPERATION_KIND);
+        assert_eq!(receipt.migration_state, AppSdkMigrationState::Failed);
+        assert!(receipt.sdk_outbox_event_ids.is_empty());
+        assert!(receipt.expected_event_id.is_none());
+        assert!(receipt.actor_pubkey.is_none());
+        assert!(receipt.idempotency_digest_prefix.is_none());
+        assert_eq!(receipt.detail_json["code"], "sdk_runtime_not_available");
+        assert_eq!(receipt.detail_json["class"], "runtime");
+        assert_eq!(receipt.detail_json["retryable"], true);
 
         cleanup_bootstrapped_runtime_paths(&paths);
     }

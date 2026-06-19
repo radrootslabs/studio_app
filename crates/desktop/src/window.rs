@@ -102,8 +102,8 @@ use crate::pack_day_print::{
     PackDayPrintError, execute_pack_day_batch_print_plan, execute_pack_day_print_plan,
 };
 use crate::runtime::{
-    DesktopAppRuntime, DesktopAppRuntimeSummary, DesktopAppSdkDiagnosticsState,
-    DesktopAppSdkDiagnosticsSummary, DesktopAppSdkIssueSummary,
+    DesktopAppRuntime, DesktopAppRuntimeProductEditorSaveError, DesktopAppRuntimeSummary,
+    DesktopAppSdkDiagnosticsState, DesktopAppSdkDiagnosticsSummary, DesktopAppSdkIssueSummary,
     DesktopAppSdkReadyDiagnosticsSummary, DesktopAppSdkStatusSummary,
     DesktopAppSyncConflictSummary, DesktopAppSyncStatusSummary,
 };
@@ -3371,8 +3371,8 @@ impl HomeView {
             return;
         }
 
-        if form.save_failed {
-            form.save_failed = false;
+        if form.save_issue.is_some() {
+            form.save_issue = None;
         }
 
         cx.notify();
@@ -3392,7 +3392,7 @@ impl HomeView {
         }
 
         form.selected_availability_window_id = Some(availability_window_id);
-        form.save_failed = false;
+        form.save_issue = None;
         cx.notify();
     }
 
@@ -3406,7 +3406,7 @@ impl HomeView {
         }
 
         form.status = status;
-        form.save_failed = false;
+        form.save_issue = None;
         cx.notify();
     }
 
@@ -3421,7 +3421,7 @@ impl HomeView {
         match self.runtime.save_product_editor_draft(draft.clone()) {
             Ok(true) => {
                 form.initial_draft = draft;
-                form.save_failed = false;
+                form.save_issue = None;
                 cx.notify();
             }
             Ok(false) => {}
@@ -3433,7 +3433,7 @@ impl HomeView {
                     product_id = %form.product_id,
                     "failed to save product editor draft"
                 );
-                form.save_failed = true;
+                form.save_issue = Some(ProductEditorSaveIssue::from_runtime_error(&runtime_error));
                 cx.notify();
             }
         }
@@ -6151,7 +6151,30 @@ struct ProductEditorFormState {
     _unit_subscription: Subscription,
     _price_subscription: Subscription,
     _stock_subscription: Subscription,
-    save_failed: bool,
+    save_issue: Option<ProductEditorSaveIssue>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum ProductEditorSaveIssue {
+    SaveFailed,
+    PublishQueueFailed,
+}
+
+impl ProductEditorSaveIssue {
+    fn from_runtime_error(error: &DesktopAppRuntimeProductEditorSaveError) -> Self {
+        if error.is_listing_publish_sdk_enqueue_failed() {
+            Self::PublishQueueFailed
+        } else {
+            Self::SaveFailed
+        }
+    }
+
+    fn text_key(self) -> AppTextKey {
+        match self {
+            Self::SaveFailed => AppTextKey::ProductsEditorSaveFailed,
+            Self::PublishQueueFailed => AppTextKey::ProductsEditorPublishQueueFailed,
+        }
+    }
 }
 
 impl ProductEditorFormState {
@@ -6232,7 +6255,7 @@ impl ProductEditorFormState {
             _unit_subscription: unit_subscription,
             _price_subscription: price_subscription,
             _stock_subscription: stock_subscription,
-            save_failed: false,
+            save_issue: None,
         }
     }
 
@@ -15738,10 +15761,8 @@ fn products_editor_surface(
                 cx,
             ))
             .child(products_editor_publish_readiness_section(form, runtime, cx))
-            .when(form.save_failed, |this| {
-                this.child(home_body_text(app_shared_text(
-                    AppTextKey::ProductsEditorSaveFailed,
-                )))
+            .when_some(form.save_issue, |this, issue| {
+                this.child(home_body_text(app_shared_text(issue.text_key())))
             })
             .child(
                 div()

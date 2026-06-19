@@ -93,6 +93,8 @@ pub enum AppSqliteError {
     DecodeEnum { field: &'static str, value: String },
     #[error("invalid farm-rules projection: {reason}")]
     InvalidProjection { reason: &'static str },
+    #[error("product publish operation failed: {reason}")]
+    ProductPublish { reason: &'static str },
     #[error("failed to access shared local events store during {operation}")]
     LocalEventsSql {
         operation: &'static str,
