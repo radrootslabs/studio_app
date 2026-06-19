@@ -9,8 +9,9 @@ use chrono::{DateTime, Duration, Utc};
 use radroots_studio_app_core::{
     AppBuildIdentity, AppDesktopRuntimePaths, AppRuntimeCapture, AppRuntimeMode,
     AppRuntimePathsError, AppRuntimeSnapshot, AppSdkConfig, AppSdkDiagnostics,
-    AppSdkLifecycleState, AppSdkProjectionLifecycleState, AppSdkRelayUrlPolicy, AppSdkRuntime,
-    AppSdkRuntimeError, AppSdkRuntimeIssue, AppSdkRuntimeStatus, AppSdkStoragePaths,
+    AppSdkFarmPublishRequest, AppSdkLifecycleState, AppSdkOrderSubmitRequest,
+    AppSdkProjectionLifecycleState, AppSdkRelayUrlPolicy, AppSdkRuntime, AppSdkRuntimeError,
+    AppSdkRuntimeIssue, AppSdkRuntimeStatus, AppSdkStoragePaths, AppSdkWorkflowReceipt,
     AppSharedAccountsPaths, PackDayExportWriteError, prepare_pack_day_export_bundle_at_data_root,
     shared_local_events_database_path_from_shared_accounts, write_prepared_pack_day_export_bundle,
 };
@@ -18,7 +19,8 @@ use radroots_studio_app_remote_signer::{
     RadrootsAppRemoteSignerApprovedSession, RadrootsAppRemoteSignerPendingSession,
 };
 use radroots_studio_app_sqlite::{
-    APP_ACTIVITY_CONTEXT_LIMIT, AppLocalInteropImportReport, AppSqliteError, AppSqliteStore,
+    APP_ACTIVITY_CONTEXT_LIMIT, AppLocalInteropImportReport, AppSdkMigrationReceiptInput,
+    AppSdkMigrationReceiptSourceKind, AppSdkMigrationState, AppSqliteError, AppSqliteStore,
     BuyerOrderLocalEventExport, BuyerOrderLocalEventLine, BuyerRepeatDemandApplyOutcome,
     DatabaseTarget, SelectedBuyerOrderScope, SellerOrderDecisionExport, StoredPendingSyncOperation,
     StoredRelayIngestCursor, StoredSyncConflict, derive_farm_rules_readiness,
@@ -114,8 +116,9 @@ use radroots_sdk::protocol::order::{
     RadrootsOrderRevisionProposal,
 };
 use radroots_sdk::{
-    RadrootsSdkClient, RadrootsSdkConfig, RelayConfig, SdkEnvironment, SdkPublishReceipt,
-    SdkTransportMode, SdkTransportReceipt, SignerConfig,
+    FARM_PUBLISH_OPERATION_KIND, ORDER_SUBMIT_OPERATION_KIND, RadrootsSdkClient, RadrootsSdkConfig,
+    RelayConfig, SdkEnvironment, SdkPublishReceipt, SdkTransportMode, SdkTransportReceipt,
+    SignerConfig,
 };
 use radroots_sql_core::SqliteExecutor;
 use radroots_trade::listing::parse_public_listing_address;
@@ -524,7 +527,19 @@ impl DesktopAppRuntime {
         };
 
         match start_desktop_sdk_runtime(&paths, nostr_relay_urls) {
-            Ok(sdk_runtime) => Self::from_state_with_sdk_runtime(state, sdk_runtime),
+            Ok(sdk_runtime) => {
+                let runtime = Self::from_state_with_sdk_runtime(state, sdk_runtime);
+                let _ = runtime.wait_for_sdk_startup(StdDuration::from_secs(5));
+                if let Err(error) = runtime.retry_pending_personal_order_coordination() {
+                    error!(
+                        target: "buyer_order",
+                        event = "buyer_order.coordination_bootstrap_retry_failed",
+                        error = %error,
+                        "failed to retry pending buyer order coordination during bootstrap"
+                    );
+                }
+                runtime
+            }
             Err(error) => {
                 let mut state = state;
                 state.startup_issue = Some(error.to_string());
@@ -1252,19 +1267,22 @@ impl DesktopAppRuntime {
     }
 
     fn from_state(state: DesktopAppRuntimeState) -> Self {
+        let sdk_runtime = Arc::new(Mutex::new(None));
         Self {
             state: Arc::new(Mutex::new(state)),
-            sdk_runtime: Arc::new(Mutex::new(None)),
+            sdk_runtime,
         }
     }
 
     fn from_state_with_sdk_runtime(
-        state: DesktopAppRuntimeState,
+        mut state: DesktopAppRuntimeState,
         sdk_runtime: AppSdkRuntime,
     ) -> Self {
+        let sdk_runtime = Arc::new(Mutex::new(Some(sdk_runtime)));
+        state.sdk_runtime = Some(Arc::clone(&sdk_runtime));
         Self {
             state: Arc::new(Mutex::new(state)),
-            sdk_runtime: Arc::new(Mutex::new(Some(sdk_runtime))),
+            sdk_runtime,
         }
     }
 
@@ -1631,6 +1649,7 @@ struct DesktopAppRuntimeState {
     remote_signer_paths: Option<DesktopRemoteSignerPaths>,
     accounts_manager: Option<RadrootsNostrAccountsManager>,
     sqlite_store: Option<AppSqliteStore>,
+    sdk_runtime: Option<Arc<Mutex<Option<AppSdkRuntime>>>>,
     sync_transport: Box<dyn AppSyncTransport + Send>,
     runtime_metadata: DesktopAppRuntimeMetadataSummary,
     selected_account_pending_sync_write_count: usize,
@@ -1659,6 +1678,10 @@ impl fmt::Debug for DesktopAppRuntimeState {
             .field(
                 "sqlite_store",
                 &self.sqlite_store.as_ref().map(|_| "available"),
+            )
+            .field(
+                "sdk_runtime",
+                &self.sdk_runtime.as_ref().map(|_| "available"),
             )
             .field("sync_transport", &"configured")
             .field("runtime_metadata", &self.runtime_metadata)
@@ -1755,6 +1778,7 @@ impl DesktopAppRuntimeState {
             remote_signer_paths: Some(remote_signer_paths),
             accounts_manager: accounts_bootstrap.accounts_manager,
             sqlite_store: Some(sqlite_store),
+            sdk_runtime: None,
             sync_transport,
             runtime_metadata: DesktopAppRuntimeMetadataSummary::available(
                 runtime_snapshot,
@@ -1768,14 +1792,6 @@ impl DesktopAppRuntimeState {
             startup_issue: None,
         };
         let _ = state.apply_selected_account_context(&selected_account_context);
-        if let Err(error) = state.retry_pending_personal_order_coordination() {
-            error!(
-                target: "buyer_order",
-                event = "buyer_order.coordination_bootstrap_retry_failed",
-                error = %error,
-                "failed to retry pending buyer order coordination during bootstrap"
-            );
-        }
 
         Ok(state)
     }
@@ -1797,6 +1813,7 @@ impl DesktopAppRuntimeState {
             remote_signer_paths: None,
             accounts_manager: None,
             sqlite_store: None,
+            sdk_runtime: None,
             sync_transport: default_sync_transport(),
             runtime_metadata: DesktopAppRuntimeMetadataSummary::unavailable(runtime_snapshot),
             selected_account_pending_sync_write_count: 0,
@@ -4949,13 +4966,22 @@ impl DesktopAppRuntimeState {
         order: &BuyerOrderLocalEventExport,
         local_work: Option<&AppOrderLocalWorkPublishSource>,
     ) -> Result<bool, AppSqliteError> {
-        let Some(operation) =
-            self.order_request_publish_operation(buyer_context, order, local_work)?
+        let Some(payload) = self.order_request_publish_payload(buyer_context, order, local_work)?
         else {
             return self.refresh_selected_account_sync();
         };
 
-        self.enqueue_selected_account_sync_operation_once(operation)
+        let source_record_id = payload
+            .context
+            .source_local_event_id
+            .clone()
+            .unwrap_or_else(|| format!("app:order_request:{}", payload.order_id));
+        self.enqueue_order_request_payload_via_sdk(
+            &payload,
+            AppSdkMigrationReceiptSourceKind::SharedLocalEvent,
+            source_record_id.as_str(),
+        )?;
+        self.refresh_selected_account_sync()
     }
 
     fn enqueue_selected_account_farm_publish_operation(
@@ -4966,15 +4992,7 @@ impl DesktopAppRuntimeState {
         source: &str,
         source_local_event_id: Option<&str>,
     ) -> Result<bool, AppSqliteError> {
-        let existing_source_local_event_id = if source_local_event_id.is_none() {
-            self.selected_account_pending_farm_source_local_event_id(farm_id)?
-        } else {
-            None
-        };
-        let source_local_event_id =
-            source_local_event_id.or(existing_source_local_event_id.as_deref());
-
-        let Some(operation) = self.farm_profile_publish_operation(
+        let Some(payload) = self.farm_profile_publish_payload(
             farm_id,
             display_name,
             readiness,
@@ -4985,49 +5003,17 @@ impl DesktopAppRuntimeState {
             return self.refresh_selected_account_sync();
         };
 
-        self.enqueue_selected_account_sync_operations(vec![operation])
-    }
-
-    fn selected_account_pending_farm_source_local_event_id(
-        &self,
-        farm_id: FarmId,
-    ) -> Result<Option<String>, AppSqliteError> {
-        let Some(account_id) = self
-            .state_store
-            .identity_projection()
-            .selected_account
-            .as_ref()
-            .map(|account| account.account.account_id.clone())
-        else {
-            return Ok(None);
-        };
-        let Some(sqlite_store) = self.sqlite_store.as_ref() else {
-            return Ok(None);
-        };
-        let existing = sqlite_store.load_pending_sync_operations(account_id.as_str())?;
-        existing
-            .iter()
-            .find(|pending| {
-                pending.operation.aggregate == SyncAggregateRef::Farm(farm_id)
-                    && pending.operation.operation == SyncOperationKind::Upsert
-            })
-            .map(|pending| {
-                pending
-                    .operation
-                    .publish_payload()
-                    .map_err(|_| AppSqliteError::InvalidProjection {
-                        reason: "farm profile publish payload must parse",
-                    })
-            })
-            .transpose()
-            .map(|payload| {
-                payload.and_then(|payload| match payload {
-                    AppPublishPayload::FarmProfile(payload) => {
-                        payload.context.source_local_event_id
-                    }
-                    _ => None,
-                })
-            })
+        let (source_kind, source_record_id) = farm_publish_source_record(
+            farm_id,
+            source,
+            payload.context.source_local_event_id.as_deref(),
+        );
+        self.enqueue_farm_profile_payload_via_sdk(
+            &payload,
+            source_kind,
+            source_record_id.as_str(),
+        )?;
+        self.refresh_selected_account_sync()
     }
 
     fn enqueue_selected_account_sync_operation_once(
@@ -5076,14 +5062,14 @@ impl DesktopAppRuntimeState {
         self.enqueue_selected_account_sync_operations(vec![operation])
     }
 
-    fn farm_profile_publish_operation(
+    fn farm_profile_publish_payload(
         &self,
         farm_id: FarmId,
         display_name: &str,
         readiness: Option<FarmReadiness>,
         source: &str,
         source_local_event_id: Option<&str>,
-    ) -> Result<Option<PendingSyncOperation>, AppSqliteError> {
+    ) -> Result<Option<AppFarmProfilePublishPayload>, AppSqliteError> {
         let Some(selected_account) = self
             .state_store
             .identity_projection()
@@ -5099,21 +5085,20 @@ impl DesktopAppRuntimeState {
         if let Some(source_local_event_id) = source_local_event_id {
             context = context.with_source_local_event_id(source_local_event_id.to_owned());
         }
-        let payload = AppPublishPayload::FarmProfile(AppFarmProfilePublishPayload {
+        let payload = AppFarmProfilePublishPayload {
             context,
             farm_id,
             display_name: display_name.trim().to_owned(),
             readiness,
-        });
-        if payload.validate().is_err() {
+        };
+        if AppPublishPayload::FarmProfile(payload.clone())
+            .validate()
+            .is_err()
+        {
             return Ok(None);
         }
 
-        PendingSyncOperation::from_publish_payload(payload, current_utc_timestamp())
-            .map(Some)
-            .map_err(|_| AppSqliteError::InvalidProjection {
-                reason: "farm profile publish payload must serialize",
-            })
+        Ok(Some(payload))
     }
 
     fn product_publish_operation(
@@ -5198,12 +5183,12 @@ impl DesktopAppRuntimeState {
             })
     }
 
-    fn order_request_publish_operation(
+    fn order_request_publish_payload(
         &self,
         buyer_context: &BuyerContext,
         order: &BuyerOrderLocalEventExport,
         local_work: Option<&AppOrderLocalWorkPublishSource>,
-    ) -> Result<Option<PendingSyncOperation>, AppSqliteError> {
+    ) -> Result<Option<AppOrderRequestPublishPayload>, AppSqliteError> {
         let Some(local_work) = local_work else {
             return Ok(None);
         };
@@ -5223,7 +5208,7 @@ impl DesktopAppRuntimeState {
             "place_personal_order",
         )
         .with_source_local_event_id(local_work.record_id.clone());
-        let payload = AppPublishPayload::OrderRequest(AppOrderRequestPublishPayload {
+        let payload = AppOrderRequestPublishPayload {
             context,
             order_id: order.order_id,
             farm_id: order.farm_id,
@@ -5245,16 +5230,209 @@ impl DesktopAppRuntimeState {
             currency_code: Some(currency_code),
             total_minor_units: Some(total_minor_units),
             note: non_empty_string(order.buyer_order_note.as_str()),
-        });
-        if payload.validate().is_err() {
+        };
+        if AppPublishPayload::OrderRequest(payload.clone())
+            .validate()
+            .is_err()
+        {
             return Ok(None);
         }
 
-        PendingSyncOperation::from_publish_payload(payload, current_utc_timestamp())
-            .map(Some)
-            .map_err(|_| AppSqliteError::InvalidProjection {
-                reason: "order request publish payload must serialize",
-            })
+        Ok(Some(payload))
+    }
+
+    fn enqueue_farm_profile_payload_via_sdk(
+        &self,
+        payload: &AppFarmProfilePublishPayload,
+        source_kind: AppSdkMigrationReceiptSourceKind,
+        source_record_id: &str,
+    ) -> Result<(), AppSqliteError> {
+        let operation_kind = FARM_PUBLISH_OPERATION_KIND;
+        let actor_pubkey = self
+            .local_signing_identity_for_publish_payload(&AppPublishPayload::FarmProfile(
+                payload.clone(),
+            ))
+            .and_then(|identity| {
+                let actor_pubkey = identity.public_key_hex();
+                let request = AppSdkFarmPublishRequest {
+                    actor_account_id: payload.context.account_id.clone(),
+                    actor_pubkey: actor_pubkey.clone(),
+                    signer_keys: identity.into_keys(),
+                    farm: farm_profile_publish_payload_to_sdk_farm(payload),
+                    target_relays: normalized_app_sync_relay_urls(&self.nostr_relay_urls)?,
+                    relay_url_policy: sdk_relay_url_policy_for_targets(&self.nostr_relay_urls),
+                    idempotency_key: Some(sdk_idempotency_key(source_record_id)),
+                };
+                self.enqueue_app_sdk_farm_publish(request)
+                    .map(|receipt| (actor_pubkey, receipt))
+                    .map_err(sync_transport_error_from_sdk_runtime_error)
+            });
+        match actor_pubkey {
+            Ok((actor_pubkey, receipt)) => self.record_app_sdk_migration_success(
+                source_kind,
+                source_record_id,
+                operation_kind,
+                actor_pubkey.as_str(),
+                &receipt,
+            ),
+            Err(error) => self.record_app_sdk_migration_failure(
+                source_kind,
+                source_record_id,
+                operation_kind,
+                None,
+                sync_transport_error_detail_json(&error),
+            ),
+        }
+    }
+
+    fn enqueue_order_request_payload_via_sdk(
+        &self,
+        payload: &AppOrderRequestPublishPayload,
+        source_kind: AppSdkMigrationReceiptSourceKind,
+        source_record_id: &str,
+    ) -> Result<(), AppSqliteError> {
+        let operation_kind = ORDER_SUBMIT_OPERATION_KIND;
+        let actor_pubkey = self
+            .local_signing_identity_for_publish_payload(&AppPublishPayload::OrderRequest(
+                payload.clone(),
+            ))
+            .and_then(|identity| {
+                let actor_pubkey = identity.public_key_hex();
+                let target_relays =
+                    order_request_sdk_target_relays(payload, self.nostr_relay_urls.as_slice())?;
+                let request = AppSdkOrderSubmitRequest {
+                    actor_account_id: payload.context.account_id.clone(),
+                    actor_pubkey: actor_pubkey.clone(),
+                    signer_keys: identity.into_keys(),
+                    listing_event: order_request_sdk_listing_event_ptr(payload)?,
+                    order: order_request_publish_payload_to_sdk_order(payload)?,
+                    relay_url_policy: sdk_relay_url_policy_for_targets(target_relays.as_slice()),
+                    target_relays,
+                    idempotency_key: Some(sdk_idempotency_key(source_record_id)),
+                };
+                self.enqueue_app_sdk_order_submit(request)
+                    .map(|receipt| (actor_pubkey, receipt))
+                    .map_err(sync_transport_error_from_sdk_runtime_error)
+            });
+        match actor_pubkey {
+            Ok((actor_pubkey, receipt)) => self.record_app_sdk_migration_success(
+                source_kind,
+                source_record_id,
+                operation_kind,
+                actor_pubkey.as_str(),
+                &receipt,
+            ),
+            Err(error) => self.record_app_sdk_migration_failure(
+                source_kind,
+                source_record_id,
+                operation_kind,
+                None,
+                sync_transport_error_detail_json(&error),
+            ),
+        }
+    }
+
+    fn local_signing_identity_for_publish_payload(
+        &self,
+        payload: &AppPublishPayload,
+    ) -> Result<RadrootsIdentity, AppSyncTransportError> {
+        let accounts_manager = self.accounts_manager.as_ref().ok_or_else(|| {
+            AppSyncTransportError::unavailable("app account manager is not configured")
+        })?;
+        signing_identity_for_publish_payload(accounts_manager, payload)
+    }
+
+    fn enqueue_app_sdk_farm_publish(
+        &self,
+        request: AppSdkFarmPublishRequest,
+    ) -> Result<AppSdkWorkflowReceipt, AppSdkRuntimeError> {
+        self.with_app_sdk_runtime(|runtime| runtime.enqueue_farm_publish(request))
+    }
+
+    fn enqueue_app_sdk_order_submit(
+        &self,
+        request: AppSdkOrderSubmitRequest,
+    ) -> Result<AppSdkWorkflowReceipt, AppSdkRuntimeError> {
+        self.with_app_sdk_runtime(|runtime| runtime.enqueue_order_submit(request))
+    }
+
+    fn with_app_sdk_runtime<T>(
+        &self,
+        command: impl FnOnce(&AppSdkRuntime) -> Result<T, AppSdkRuntimeError>,
+    ) -> Result<T, AppSdkRuntimeError> {
+        let Some(handle) = self.sdk_runtime.as_ref() else {
+            return Err(sdk_runtime_unavailable_error());
+        };
+        let sdk_runtime = handle.lock().unwrap_or_else(PoisonError::into_inner);
+        let Some(runtime) = sdk_runtime.as_ref() else {
+            return Err(sdk_runtime_unavailable_error());
+        };
+        command(runtime)
+    }
+
+    fn record_app_sdk_migration_success(
+        &self,
+        source_kind: AppSdkMigrationReceiptSourceKind,
+        source_record_id: &str,
+        operation_kind: &str,
+        actor_pubkey: &str,
+        receipt: &AppSdkWorkflowReceipt,
+    ) -> Result<(), AppSqliteError> {
+        let detail_json = json!({
+            "operation_kind": receipt.operation_kind,
+            "expected_event_id": receipt.expected_event_id,
+            "signed_event_id": receipt.signed_event_id,
+            "outbox_operation_id": receipt.outbox_operation_id,
+            "outbox_event_id": receipt.outbox_event_id,
+            "state": receipt.state,
+        });
+        self.record_app_sdk_migration_receipt(AppSdkMigrationReceiptInput {
+            source_kind,
+            source_record_id: source_record_id.to_owned(),
+            sdk_operation_kind: operation_kind.to_owned(),
+            sdk_outbox_event_ids: vec![receipt.outbox_event_id.to_string()],
+            expected_event_id: Some(receipt.expected_event_id.clone()),
+            actor_pubkey: Some(actor_pubkey.to_owned()),
+            idempotency_digest_prefix: receipt.idempotency_digest_prefix.clone(),
+            migration_state: AppSdkMigrationState::Enqueued,
+            recorded_at: current_utc_timestamp(),
+            detail_json,
+        })
+    }
+
+    fn record_app_sdk_migration_failure(
+        &self,
+        source_kind: AppSdkMigrationReceiptSourceKind,
+        source_record_id: &str,
+        operation_kind: &str,
+        actor_pubkey: Option<&str>,
+        detail_json: serde_json::Value,
+    ) -> Result<(), AppSqliteError> {
+        self.record_app_sdk_migration_receipt(AppSdkMigrationReceiptInput {
+            source_kind,
+            source_record_id: source_record_id.to_owned(),
+            sdk_operation_kind: operation_kind.to_owned(),
+            sdk_outbox_event_ids: Vec::new(),
+            expected_event_id: None,
+            actor_pubkey: actor_pubkey.map(str::to_owned),
+            idempotency_digest_prefix: None,
+            migration_state: AppSdkMigrationState::Failed,
+            recorded_at: current_utc_timestamp(),
+            detail_json,
+        })
+    }
+
+    fn record_app_sdk_migration_receipt(
+        &self,
+        input: AppSdkMigrationReceiptInput,
+    ) -> Result<(), AppSqliteError> {
+        let Some(sqlite_store) = self.sqlite_store.as_ref() else {
+            return Ok(());
+        };
+        let _ = sqlite_store
+            .sdk_migration_receipt_repository()
+            .record_receipt(&input)?;
+        Ok(())
     }
 
     fn selected_account_id(&self) -> Result<String, DesktopAppRuntimeFarmSetupError> {
@@ -7408,6 +7586,159 @@ fn listing_fulfillment_location(
         .or_else(|| non_empty_string(farm_setup.draft.location_or_service_area.as_str()))
 }
 
+fn farm_profile_publish_payload_to_sdk_farm(
+    payload: &AppFarmProfilePublishPayload,
+) -> RadrootsFarm {
+    RadrootsFarm {
+        d_tag: d_tag_from_uuid(payload.farm_id.as_uuid()),
+        name: payload.display_name.trim().to_owned(),
+        about: None,
+        website: None,
+        picture: None,
+        banner: None,
+        location: None,
+        tags: payload.readiness.map(|readiness| match readiness {
+            FarmReadiness::Incomplete => vec!["radroots:readiness:incomplete".to_owned()],
+            FarmReadiness::Ready => vec!["radroots:readiness:ready".to_owned()],
+        }),
+    }
+}
+
+fn farm_publish_source_record(
+    farm_id: FarmId,
+    source: &str,
+    source_local_event_id: Option<&str>,
+) -> (AppSdkMigrationReceiptSourceKind, String) {
+    source_local_event_id
+        .map(|record_id| {
+            (
+                AppSdkMigrationReceiptSourceKind::SharedLocalEvent,
+                record_id.to_owned(),
+            )
+        })
+        .unwrap_or_else(|| {
+            (
+                AppSdkMigrationReceiptSourceKind::LocalOutbox,
+                format!("app:farm_publish:{farm_id}:{source}"),
+            )
+        })
+}
+
+fn sdk_relay_url_policy_for_targets(target_relays: &[String]) -> AppSdkRelayUrlPolicy {
+    if target_relays
+        .iter()
+        .any(|relay_url| relay_url.trim().starts_with("ws://"))
+    {
+        AppSdkRelayUrlPolicy::Localhost
+    } else {
+        AppSdkRelayUrlPolicy::Public
+    }
+}
+
+fn sdk_idempotency_key(source_record_id: &str) -> String {
+    format!(
+        "app-{}",
+        Uuid::new_v5(&Uuid::NAMESPACE_URL, source_record_id.as_bytes())
+    )
+}
+
+fn sdk_runtime_unavailable_error() -> AppSdkRuntimeError {
+    AppSdkRuntimeError::CommandFailed(AppSdkRuntimeIssue {
+        code: "sdk_runtime_not_available".to_owned(),
+        class: "runtime".to_owned(),
+        retryable: true,
+        message: "app SDK runtime is not available".to_owned(),
+        recovery_actions: vec!["retry_startup".to_owned()],
+        detail_json: json!({
+            "code": "sdk_runtime_not_available",
+            "class": "runtime",
+            "retryable": true,
+            "recovery_actions": ["retry_startup"],
+        }),
+    })
+}
+
+fn sync_transport_error_from_sdk_runtime_error(error: AppSdkRuntimeError) -> AppSyncTransportError {
+    AppSyncTransportError::failed(sdk_runtime_error_detail_json(&error).to_string())
+}
+
+fn sdk_runtime_error_detail_json(error: &AppSdkRuntimeError) -> serde_json::Value {
+    match error {
+        AppSdkRuntimeError::CommandFailed(issue) => issue.detail_json.clone(),
+        AppSdkRuntimeError::CommandQueueCapacityZero => json!({
+            "code": "sdk_command_queue_capacity_zero",
+            "class": "runtime",
+            "retryable": false,
+            "message": error.to_string(),
+            "recovery_actions": ["review_runtime_configuration"],
+        }),
+        AppSdkRuntimeError::WorkerSpawn(_) => json!({
+            "code": "sdk_worker_spawn_failed",
+            "class": "runtime",
+            "retryable": true,
+            "message": error.to_string(),
+            "recovery_actions": ["retry_startup"],
+        }),
+        AppSdkRuntimeError::CommandQueueFull => json!({
+            "code": "sdk_command_queue_full",
+            "class": "runtime",
+            "retryable": true,
+            "message": error.to_string(),
+            "recovery_actions": ["retry_command"],
+        }),
+        AppSdkRuntimeError::CommandQueueClosed => json!({
+            "code": "sdk_command_queue_closed",
+            "class": "runtime",
+            "retryable": true,
+            "message": error.to_string(),
+            "recovery_actions": ["restart_runtime"],
+        }),
+        AppSdkRuntimeError::CommandResponseClosed => json!({
+            "code": "sdk_command_response_closed",
+            "class": "runtime",
+            "retryable": true,
+            "message": error.to_string(),
+            "recovery_actions": ["restart_runtime"],
+        }),
+        AppSdkRuntimeError::ShutdownAck => json!({
+            "code": "sdk_shutdown_ack_failed",
+            "class": "runtime",
+            "retryable": true,
+            "message": error.to_string(),
+            "recovery_actions": ["restart_runtime"],
+        }),
+        AppSdkRuntimeError::WorkerJoin => json!({
+            "code": "sdk_worker_join_failed",
+            "class": "runtime",
+            "retryable": true,
+            "message": error.to_string(),
+            "recovery_actions": ["restart_runtime"],
+        }),
+    }
+}
+
+fn sync_transport_error_detail_json(error: &AppSyncTransportError) -> serde_json::Value {
+    match error {
+        AppSyncTransportError::Unavailable { message } => json!({
+            "code": "app_sync_transport_unavailable",
+            "class": "runtime",
+            "retryable": true,
+            "message": message,
+            "recovery_actions": ["retry_after_runtime_ready"],
+        }),
+        AppSyncTransportError::Failed { message } => serde_json::from_str(message.as_str())
+            .unwrap_or_else(|_| {
+                json!({
+                    "code": "app_sync_transport_failed",
+                    "class": "operation",
+                    "retryable": true,
+                    "message": message,
+                    "recovery_actions": ["retry_publish"],
+                })
+            }),
+    }
+}
+
 fn direct_relay_sdk_client(
     relay_urls: Vec<String>,
     timeout_ms: u64,
@@ -7440,31 +7771,12 @@ async fn publish_app_payload(
     client: &RadrootsSdkClient,
     identity: &RadrootsIdentity,
     payload: &AppPublishPayload,
-    configured_relay_urls: &[String],
+    _configured_relay_urls: &[String],
 ) -> Result<SdkPublishReceipt, AppSyncTransportError> {
     match payload {
-        AppPublishPayload::FarmProfile(payload) => {
-            let farm = RadrootsFarm {
-                d_tag: d_tag_from_uuid(payload.farm_id.as_uuid()),
-                name: payload.display_name.trim().to_owned(),
-                about: None,
-                website: None,
-                picture: None,
-                banner: None,
-                location: None,
-                tags: payload.readiness.map(|readiness| match readiness {
-                    FarmReadiness::Incomplete => {
-                        vec!["radroots:readiness:incomplete".to_owned()]
-                    }
-                    FarmReadiness::Ready => vec!["radroots:readiness:ready".to_owned()],
-                }),
-            };
-            client
-                .farm()
-                .publish_with_identity(identity, &farm)
-                .await
-                .map_err(|error| AppSyncTransportError::failed(error.to_string()))
-        }
+        AppPublishPayload::FarmProfile(_) => Err(AppSyncTransportError::failed(
+            "farm profile publish uses AppSdkRuntime",
+        )),
         AppPublishPayload::Listing(payload) => {
             let listing = listing_publish_payload_to_sdk_listing(payload)?;
             client
@@ -7473,15 +7785,9 @@ async fn publish_app_payload(
                 .await
                 .map_err(|error| AppSyncTransportError::failed(error.to_string()))
         }
-        AppPublishPayload::OrderRequest(payload) => {
-            let listing_event = order_request_listing_event_ptr(payload, configured_relay_urls)?;
-            let order = order_request_publish_payload_to_sdk_order(payload)?;
-            client
-                .order()
-                .publish_order_request_with_identity(identity, &listing_event, &order)
-                .await
-                .map_err(|error| AppSyncTransportError::failed(error.to_string()))
-        }
+        AppPublishPayload::OrderRequest(_) => Err(AppSyncTransportError::failed(
+            "order request publish uses AppSdkRuntime",
+        )),
         AppPublishPayload::OrderDecision(payload) => {
             let decision = order_decision_publish_payload_to_sdk_decision(payload)?;
             let request_event_id = publish_event_id(payload.request_event_id.as_str())?;
@@ -7759,9 +8065,8 @@ fn parse_app_listing_delivery_method(
     }
 }
 
-fn order_request_listing_event_ptr(
+fn order_request_sdk_listing_event_ptr(
     payload: &AppOrderRequestPublishPayload,
-    configured_relay_urls: &[String],
 ) -> Result<RadrootsNostrEventPtr, AppSyncTransportError> {
     let listing_event_id = payload
         .listing_event_id
@@ -7771,18 +8076,61 @@ fn order_request_listing_event_ptr(
         })?
         .trim()
         .to_owned();
-    let listing_relay = selected_listing_relay(&payload.listing_relays, configured_relay_urls)?;
+    let listing_relay = normalized_listing_relays(payload.listing_relays.as_slice())?
+        .into_iter()
+        .next();
 
     Ok(RadrootsNostrEventPtr {
         id: listing_event_id,
-        relays: Some(listing_relay),
+        relays: listing_relay,
     })
 }
 
+fn order_request_sdk_target_relays(
+    payload: &AppOrderRequestPublishPayload,
+    configured_relay_urls: &[String],
+) -> Result<Vec<String>, AppSyncTransportError> {
+    let known_relays = normalized_listing_relays(payload.listing_relays.as_slice())?;
+    let configured_relays = configured_relay_urls
+        .iter()
+        .map(|relay| relay.trim())
+        .filter(|relay| !relay.is_empty())
+        .map(str::to_owned)
+        .collect::<BTreeSet<_>>();
+    if configured_relays.is_empty() {
+        return Ok(known_relays);
+    }
+    let selected_relays = known_relays
+        .iter()
+        .filter(|relay| configured_relays.contains(*relay))
+        .cloned()
+        .collect::<Vec<_>>();
+    if selected_relays.is_empty() {
+        return Ok(known_relays);
+    }
+    Ok(selected_relays)
+}
+
+#[cfg(test)]
 fn selected_listing_relay(
     listing_relays: &[String],
     configured_relay_urls: &[String],
 ) -> Result<String, AppSyncTransportError> {
+    let known_relays = normalized_listing_relays(listing_relays)?;
+    for configured_relay in configured_relay_urls {
+        let configured_relay = configured_relay.trim();
+        if !configured_relay.is_empty()
+            && known_relays.iter().any(|relay| relay == configured_relay)
+        {
+            return Ok(configured_relay.to_owned());
+        }
+    }
+    Err(missing_listing_provenance_relay_error(&known_relays))
+}
+
+fn normalized_listing_relays(
+    listing_relays: &[String],
+) -> Result<Vec<String>, AppSyncTransportError> {
     let mut seen = BTreeSet::new();
     let mut known_relays = Vec::new();
     for relay in listing_relays {
@@ -7796,17 +8144,10 @@ fn selected_listing_relay(
             "order request publish requires listing relay",
         ));
     }
-    for configured_relay in configured_relay_urls {
-        let configured_relay = configured_relay.trim();
-        if !configured_relay.is_empty()
-            && known_relays.iter().any(|relay| relay == configured_relay)
-        {
-            return Ok(configured_relay.to_owned());
-        }
-    }
-    Err(missing_listing_provenance_relay_error(&known_relays))
+    Ok(known_relays)
 }
 
+#[cfg(test)]
 fn missing_listing_provenance_relay_error(known_relays: &[String]) -> AppSyncTransportError {
     AppSyncTransportError::failed(
         json!({
@@ -10087,8 +10428,9 @@ mod tests {
         RadrootsAppRemoteSignerPendingSession, RadrootsAppRemoteSignerSessionRecord,
     };
     use radroots_studio_app_sqlite::{
-        AppSqliteError, AppSqliteStore, BuyerOrderCoordinationState, DatabaseTarget,
-        latest_schema_version, projected_order_id_from_trade_request,
+        AppSdkMigrationReceiptSourceKind, AppSdkMigrationState, AppSqliteError, AppSqliteStore,
+        BuyerOrderCoordinationState, DatabaseTarget, latest_schema_version,
+        projected_order_id_from_trade_request,
     };
     use radroots_studio_app_state::{
         APP_STATE_FILE_NAME, AppStateCommand, AppStatePersistenceRepository, AppStateRepository,
@@ -10139,10 +10481,9 @@ mod tests {
     };
     use radroots_identity::{RadrootsIdentity, RadrootsIdentityId};
     use radroots_local_events::{
-        BUYER_ORDER_REQUEST_LOCAL_WORK_RECORD_KIND, CANONICAL_RELAY_SET_FINGERPRINT_VERSION,
-        LocalEventRecord, LocalEventRecordInput, LocalEventsStore, LocalRecordFamily,
-        LocalRecordStatus, PublishOutboxStatus, RelayDeliveryEvidence, SourceRuntime,
-        canonical_relay_set_fingerprint,
+        BUYER_ORDER_REQUEST_LOCAL_WORK_RECORD_KIND, LocalEventRecord, LocalEventRecordInput,
+        LocalEventsStore, LocalRecordFamily, LocalRecordStatus, PublishOutboxStatus,
+        RelayDeliveryEvidence, SourceRuntime,
     };
     use radroots_nostr::prelude::radroots_nostr_build_event;
     use radroots_nostr_accounts::prelude::{
@@ -10150,6 +10491,7 @@ mod tests {
         RadrootsNostrMemoryAccountStore, RadrootsNostrSecretVaultMemory, RadrootsSecretVault,
         account_secret_slot,
     };
+    use radroots_sdk::ORDER_SUBMIT_OPERATION_KIND;
     use radroots_sdk::protocol::events::{
         RadrootsNostrEvent as SdkRadrootsNostrEvent, RadrootsNostrEventPtr,
     };
@@ -10186,6 +10528,9 @@ mod tests {
         PackDayBatchPrintError, PackDayPrintCommandResult, PackDayPrintError,
         execute_pack_day_batch_print_plan_with, prepared_customer_label_asset_root,
     };
+
+    const BUYER_VISIBLE_SELLER_PUBKEY: &str =
+        "2222222222222222222222222222222222222222222222222222222222222222";
 
     #[derive(Clone)]
     struct SharedRecordedSyncTransport(Arc<Mutex<RecordedAppSyncTransport>>);
@@ -10379,6 +10724,46 @@ mod tests {
         assert_eq!(value["missing_provenance_relays"], json!([relay_url]));
     }
 
+    fn assert_migrated_payload_uses_sdk_runtime(
+        error: AppSyncTransportError,
+        expected_message: &str,
+    ) {
+        match error {
+            AppSyncTransportError::Failed { message } => assert_eq!(message, expected_message),
+            unexpected => panic!("unexpected migrated payload error: {unexpected}"),
+        }
+    }
+
+    fn direct_relay_listing_payload(
+        account_id: &str,
+        farm_pubkey: String,
+        source: &str,
+    ) -> AppPublishPayload {
+        let farm_id = FarmId::new();
+        let product_id = ProductId::new();
+        AppPublishPayload::Listing(AppListingPublishPayload {
+            context: AppPublishContext::new(account_id.to_owned(), source),
+            product_id,
+            listing_d_tag: Some(super::d_tag_from_uuid(product_id.as_uuid())),
+            farm_id: Some(farm_id),
+            farm_pubkey: Some(farm_pubkey),
+            farm_d_tag: Some(super::d_tag_from_uuid(farm_id.as_uuid())),
+            title: "North field eggs".to_owned(),
+            subtitle: Some("Pasture raised".to_owned()),
+            category: Some("eggs".to_owned()),
+            unit_label: "each".to_owned(),
+            price_minor_units: Some(750),
+            price_currency: "USD".to_owned(),
+            stock_quantity: Some(12),
+            availability_window_id: Some(FulfillmentWindowId::new()),
+            availability_starts_at: Some("2099-05-25T14:00:00Z".to_owned()),
+            availability_ends_at: Some("2099-05-25T18:00:00Z".to_owned()),
+            fulfillment_method: Some("pickup".to_owned()),
+            fulfillment_location: Some("farmstand".to_owned()),
+            status: ProductStatus::Published,
+        })
+    }
+
     impl Drop for ThreadedAckRelay {
         fn drop(&mut self) {
             if let Some(shutdown_tx) = self.shutdown_tx.take() {
@@ -10506,46 +10891,18 @@ mod tests {
             vec![relay_a.url().to_owned(), relay_b.url().to_owned()],
         );
 
-        let result = transport
+        let error = transport
             .sync(AppSyncRequest {
                 trigger: SyncTrigger::ManualRefresh,
                 checkpoint: SyncCheckpointStatus::never_synced(),
                 pending_operations: vec![operation],
                 known_conflicts: Vec::new(),
             })
-            .expect("direct relay farm publish should succeed");
+            .expect_err("direct relay farm publish should use AppSdkRuntime");
 
-        assert_eq!(result.run_status, AppSyncRunStatus::Succeeded);
-        assert_eq!(result.pushed_operation_count, 1);
-        assert_eq!(result.published_receipts.len(), 1);
-        assert_eq!(result.published_receipts[0].event_kind, 30340);
-        assert_eq!(
-            result.published_receipts[0].source_account_id,
-            account_id.to_string()
-        );
-        assert_eq!(
-            result.published_receipts[0].relay_set_fingerprint,
-            canonical_relay_set_fingerprint([relay_a.url(), relay_b.url()]).expect("fingerprint")
-        );
-        assert!(
-            result.published_receipts[0]
-                .relay_set_fingerprint
-                .starts_with(CANONICAL_RELAY_SET_FINGERPRINT_VERSION)
-        );
-        assert_eq!(
-            result.published_receipts[0]
-                .source_local_event_id
-                .as_deref(),
-            Some("app:local_work:farm:direct")
-        );
-        assert_eq!(
-            result.published_receipts[0].relay_delivery_json["acknowledged_relays"],
-            json!([relay_a.url(), relay_b.url()])
-        );
-        assert_eq!(
-            result.published_receipts[0].relay_delivery_json["state"],
-            json!("acknowledged")
-        );
+        assert_migrated_payload_uses_sdk_runtime(error, "farm profile publish uses AppSdkRuntime");
+        assert_eq!(relay_a.event_count(), 0);
+        assert_eq!(relay_b.event_count(), 0);
     }
 
     #[test]
@@ -10693,30 +11050,17 @@ mod tests {
         let mut transport =
             SdkDirectRelayAppSyncTransport::with_relay_urls(manager, vec![relay.url().to_owned()]);
 
-        let result = transport
+        let error = transport
             .sync(AppSyncRequest {
                 trigger: SyncTrigger::ManualRefresh,
                 checkpoint: SyncCheckpointStatus::never_synced(),
                 pending_operations: vec![operation],
                 known_conflicts: Vec::new(),
             })
-            .expect("direct relay order request publish should succeed");
+            .expect_err("direct relay order request publish should use AppSdkRuntime");
 
-        assert_eq!(result.run_status, AppSyncRunStatus::Succeeded);
-        assert_eq!(result.pushed_operation_count, 1);
-        assert_eq!(result.published_receipts.len(), 1);
-        assert_eq!(result.published_receipts[0].event_kind, 3422);
-        assert_eq!(
-            result.published_receipts[0].event_pubkey,
-            buyer_identity.public_key_hex()
-        );
-        assert_eq!(
-            result.published_receipts[0]
-                .source_local_event_id
-                .as_deref(),
-            Some("app:local_work:order_request:direct")
-        );
-        assert_eq!(relay.event_count(), 1);
+        assert_migrated_payload_uses_sdk_runtime(error, "order request publish uses AppSdkRuntime");
+        assert_eq!(relay.event_count(), 0);
     }
 
     #[test]
@@ -11104,12 +11448,6 @@ mod tests {
             Some(seller_pubkey.as_str()),
             listing_d_tag.as_str(),
         );
-        let farm_payload = AppPublishPayload::FarmProfile(AppFarmProfilePublishPayload {
-            context: AppPublishContext::new(account_id.to_string(), "relay_ingest_farm"),
-            farm_id,
-            display_name: "Relay test farm".to_owned(),
-            readiness: Some(FarmReadiness::Ready),
-        });
         let listing_payload = AppPublishPayload::Listing(AppListingPublishPayload {
             context: AppPublishContext::new(account_id.to_string(), "relay_ingest_listing"),
             product_id,
@@ -11139,11 +11477,6 @@ mod tests {
                 checkpoint: SyncCheckpointStatus::never_synced(),
                 pending_operations: vec![
                     PendingSyncOperation::from_publish_payload(
-                        farm_payload,
-                        "2026-05-25T07:00:00Z",
-                    )
-                    .expect("farm publish payload should serialize"),
-                    PendingSyncOperation::from_publish_payload(
                         listing_payload,
                         "2026-05-25T07:00:01Z",
                     )
@@ -11153,7 +11486,7 @@ mod tests {
             })
             .expect("seller relay publish should succeed");
         assert_eq!(result.run_status, AppSyncRunStatus::Succeeded);
-        assert_eq!(result.published_receipts.len(), 2);
+        assert_eq!(result.published_receipts.len(), 1);
 
         projected_product_id
     }
@@ -11196,7 +11529,7 @@ mod tests {
             .find(|listing| listing.product_id == projected_product_id)
             .expect("fresh buyer app should project relay listing");
         assert_eq!(listing.title, "Relay ingest lettuce");
-        assert_eq!(listing.farm_display_name, "Relay test farm");
+        assert_eq!(listing.farm_display_name, "Local farm");
         assert_eq!(listing.listing_relays, vec![relay_url.to_owned()]);
         let relay_ingest = runtime
             .lock_state()
@@ -11407,16 +11740,18 @@ mod tests {
         let account_id = manager
             .generate_identity(Some("Farmer".to_owned()), true)
             .expect("local signing account should generate");
-        let farm_id = FarmId::new();
-        let payload = AppPublishPayload::FarmProfile(AppFarmProfilePublishPayload {
-            context: AppPublishContext::new(account_id.to_string(), "farm_setup"),
-            farm_id,
-            display_name: "North field farm".to_owned(),
-            readiness: Some(FarmReadiness::Ready),
-        });
+        let identity = manager
+            .get_signing_identity(&account_id)
+            .expect("farmer signer lookup should succeed")
+            .expect("farmer account should have local signer");
+        let payload = direct_relay_listing_payload(
+            account_id.to_string().as_str(),
+            identity.public_key_hex(),
+            "listing_publish",
+        );
         let successful_operation =
             PendingSyncOperation::from_publish_payload(payload, "2026-05-24T12:00:00Z")
-                .expect("typed farm publish work should serialize");
+                .expect("typed listing publish work should serialize");
         let unsupported_operation = PendingSyncOperation::new(
             SyncAggregateRef::Product(ProductId::new()),
             SyncOperationKind::Delete,
@@ -11552,9 +11887,9 @@ mod tests {
                 pending_operations: vec![operation],
                 known_conflicts: Vec::new(),
             })
-            .expect_err("missing listing provenance relay should fail");
+            .expect_err("direct relay order request should use AppSdkRuntime");
 
-        assert_missing_listing_provenance_relay_error(&error, "wss://listing.example");
+        assert_migrated_payload_uses_sdk_runtime(error, "order request publish uses AppSdkRuntime");
         assert_eq!(relay.event_count(), 0);
     }
 
@@ -11576,14 +11911,13 @@ mod tests {
             .get_signing_identity(&second_account_id)
             .expect("second signer")
             .expect("second local signer");
-        let payload = AppPublishPayload::FarmProfile(AppFarmProfilePublishPayload {
-            context: AppPublishContext::new(first_account_id.to_string(), "farm_setup"),
-            farm_id: FarmId::new(),
-            display_name: "North field farm".to_owned(),
-            readiness: Some(FarmReadiness::Ready),
-        });
+        let payload = direct_relay_listing_payload(
+            first_account_id.to_string().as_str(),
+            first_identity.public_key_hex(),
+            "listing_publish",
+        );
         let operation = PendingSyncOperation::from_publish_payload(payload, "2026-05-24T12:00:00Z")
-            .expect("typed farm publish work should serialize");
+            .expect("typed listing publish work should serialize");
         let mut transport =
             SdkDirectRelayAppSyncTransport::with_relay_urls(manager, vec![relay.url().to_owned()]);
 
@@ -11784,6 +12118,7 @@ mod tests {
                 AppSqliteStore::open(DatabaseTarget::InMemory)
                     .expect("in-memory sqlite store should open"),
             ),
+            sdk_runtime: None,
             sync_transport: default_sync_transport(),
             runtime_metadata: DesktopAppRuntimeMetadataSummary::default(),
             selected_account_pending_sync_write_count: 0,
@@ -11839,6 +12174,7 @@ mod tests {
                 AppSqliteStore::open(DatabaseTarget::InMemory)
                     .expect("in-memory sqlite store should open"),
             ),
+            sdk_runtime: None,
             sync_transport: default_sync_transport(),
             runtime_metadata: DesktopAppRuntimeMetadataSummary::default(),
             selected_account_pending_sync_write_count: 0,
@@ -13827,6 +14163,7 @@ mod tests {
                 AppSqliteStore::open(DatabaseTarget::InMemory)
                     .expect("in-memory sqlite store should open"),
             ),
+            sdk_runtime: None,
             sync_transport: default_sync_transport(),
             runtime_metadata: DesktopAppRuntimeMetadataSummary::default(),
             selected_account_pending_sync_write_count: 0,
@@ -13859,6 +14196,7 @@ mod tests {
                 AppSqliteStore::open(DatabaseTarget::InMemory)
                     .expect("in-memory sqlite store should open"),
             ),
+            sdk_runtime: None,
             sync_transport: default_sync_transport(),
             runtime_metadata: DesktopAppRuntimeMetadataSummary::default(),
             selected_account_pending_sync_write_count: 0,
@@ -14269,6 +14607,7 @@ mod tests {
                 AppSqliteStore::open(DatabaseTarget::InMemory)
                     .expect("in-memory sqlite store should open"),
             ),
+            sdk_runtime: None,
             sync_transport: default_sync_transport(),
             runtime_metadata: DesktopAppRuntimeMetadataSummary::default(),
             selected_account_pending_sync_write_count: 0,
@@ -14372,6 +14711,7 @@ mod tests {
                 AppSqliteStore::open(DatabaseTarget::InMemory)
                     .expect("in-memory sqlite store should open"),
             ),
+            sdk_runtime: None,
             sync_transport: default_sync_transport(),
             runtime_metadata: DesktopAppRuntimeMetadataSummary::default(),
             selected_account_pending_sync_write_count: 0,
@@ -14426,6 +14766,7 @@ mod tests {
                 AppSqliteStore::open(DatabaseTarget::InMemory)
                     .expect("in-memory sqlite store should open"),
             ),
+            sdk_runtime: None,
             sync_transport: default_sync_transport(),
             runtime_metadata: DesktopAppRuntimeMetadataSummary::default(),
             selected_account_pending_sync_write_count: 0,
@@ -14464,6 +14805,7 @@ mod tests {
                 AppSqliteStore::open(DatabaseTarget::InMemory)
                     .expect("in-memory sqlite store should open"),
             ),
+            sdk_runtime: None,
             sync_transport: default_sync_transport(),
             runtime_metadata: DesktopAppRuntimeMetadataSummary::default(),
             selected_account_pending_sync_write_count: 0,
@@ -14500,6 +14842,7 @@ mod tests {
                 AppSqliteStore::open(DatabaseTarget::InMemory)
                     .expect("in-memory sqlite store should open"),
             ),
+            sdk_runtime: None,
             sync_transport: default_sync_transport(),
             runtime_metadata: DesktopAppRuntimeMetadataSummary::default(),
             selected_account_pending_sync_write_count: 0,
@@ -16349,7 +16692,7 @@ mod tests {
             "dozen-eggs",
         );
         let product_id =
-            deterministic_cli_listing_product_id(Some("buyer-visible-seller-pubkey"), listing_key);
+            deterministic_cli_listing_product_id(Some(BUYER_VISIBLE_SELLER_PUBKEY), listing_key);
 
         assert!(
             runtime
@@ -16389,51 +16732,16 @@ mod tests {
                 .expect("buyer order should place")
         );
         let order_id = runtime.summary().personal_projection.orders.list.rows[0].order_id;
-        let order_farm_id = runtime
-            .summary()
-            .personal_projection
-            .orders
-            .detail
-            .as_ref()
-            .expect("buyer order detail")
-            .farm_id;
-        let pending_payload = assert_single_order_request_publish_payload(
+        assert_no_order_request_pending_sync_payloads(
             &runtime,
             buyer_account_id.as_str(),
             order_id,
-            order_farm_id,
-            "needs_action",
         );
-        assert_eq!(
-            pending_payload.context.source_local_event_id.as_deref(),
-            Some(format!("app:local_work:order_request:{order_id}").as_str())
+        assert_order_request_sdk_migration_receipt(
+            &runtime,
+            order_id,
+            AppSdkMigrationState::Enqueued,
         );
-        assert_eq!(
-            pending_payload.listing_addr.as_deref(),
-            Some(format!("30402:buyer-visible-seller-pubkey:{listing_key}").as_str())
-        );
-        assert_eq!(
-            pending_payload.listing_event_id.as_deref(),
-            Some(signed_event_id("cli:signed_event:buyer-order-supported-listing").as_str())
-        );
-        assert_eq!(pending_payload.listing_relays, vec!["ws://127.0.0.1:1234/"]);
-        assert_eq!(
-            pending_payload.seller_pubkey.as_deref(),
-            Some("buyer-visible-seller-pubkey")
-        );
-        assert!(
-            pending_payload
-                .buyer_pubkey
-                .as_deref()
-                .is_some_and(is_hex_64)
-        );
-        assert_eq!(pending_payload.items.len(), 1);
-        assert_eq!(pending_payload.items[0].product_id, product_id);
-        assert_eq!(pending_payload.items[0].quantity, 2);
-        assert_eq!(pending_payload.currency_code.as_deref(), Some("USD"));
-        assert_eq!(pending_payload.total_minor_units, Some(1600));
-        assert_eq!(pending_payload.note.as_deref(), Some("Leave by the cooler"));
-        assert!(pending_payload.order_document_json.is_some());
 
         {
             let state = runtime.lock_state_mut();
@@ -16503,7 +16811,7 @@ mod tests {
         assert!(order_record.owner_pubkey.as_deref().is_some_and(is_hex_64));
         assert_eq!(
             order_record.listing_addr.as_deref(),
-            Some(format!("30402:buyer-visible-seller-pubkey:{listing_key}").as_str())
+            Some(format!("30402:{BUYER_VISIBLE_SELLER_PUBKEY}:{listing_key}").as_str())
         );
         let payload = order_record
             .local_work_json
@@ -16528,7 +16836,7 @@ mod tests {
         );
         assert_eq!(
             payload["document"]["order"]["seller_pubkey"],
-            "buyer-visible-seller-pubkey"
+            BUYER_VISIBLE_SELLER_PUBKEY
         );
         assert_eq!(
             payload["document"]["order"]["items"][0]["bin_id"],
@@ -16565,7 +16873,7 @@ mod tests {
 
     #[test]
     fn runtime_buyer_order_shared_append_failure_is_recoverable_in_same_session() {
-        let (runtime, paths, buyer_account_id, order_id, order_farm_id) =
+        let (runtime, paths, buyer_account_id, order_id) =
             blocked_buyer_order_runtime("buyer_order_append_failure_same_session");
         {
             let state = runtime.lock_state_mut();
@@ -16591,12 +16899,15 @@ mod tests {
                 .orders
                 .has_recoverable_coordination
         );
-        assert_single_order_request_publish_payload(
+        assert_no_order_request_pending_sync_payloads(
             &runtime,
             buyer_account_id.as_str(),
             order_id,
-            order_farm_id,
-            "scheduled",
+        );
+        assert_order_request_sdk_migration_receipt(
+            &runtime,
+            order_id,
+            AppSdkMigrationState::Enqueued,
         );
         assert_eq!(
             summary_after_retry
@@ -16650,12 +16961,15 @@ mod tests {
                 .retry_pending_personal_order_coordination()
                 .expect("same-session synced buyer order recovery retry should be idempotent")
         );
-        assert_single_order_request_publish_payload(
+        assert_no_order_request_pending_sync_payloads(
             &runtime,
             buyer_account_id.as_str(),
             order_id,
-            order_farm_id,
-            "scheduled",
+        );
+        assert_order_request_sdk_migration_receipt(
+            &runtime,
+            order_id,
+            AppSdkMigrationState::Enqueued,
         );
 
         cleanup_bootstrapped_runtime_paths(&paths);
@@ -16663,7 +16977,7 @@ mod tests {
 
     #[test]
     fn runtime_buyer_order_shared_append_failure_is_recoverable_after_restart() {
-        let (runtime, paths, buyer_account_id, order_id, order_farm_id) =
+        let (runtime, paths, buyer_account_id, order_id) =
             blocked_buyer_order_runtime("buyer_order_append_failure_restart");
         unblock_shared_local_events_database(&paths);
         drop(runtime);
@@ -16716,12 +17030,15 @@ mod tests {
                 .retry_pending_personal_order_coordination()
                 .expect("synced buyer order recovery retry should be idempotent")
         );
-        assert_single_order_request_publish_payload(
+        assert_no_order_request_pending_sync_payloads(
             &restarted_runtime,
             buyer_account_id.as_str(),
             order_id,
-            order_farm_id,
-            "needs_action",
+        );
+        assert_order_request_sdk_migration_receipt(
+            &restarted_runtime,
+            order_id,
+            AppSdkMigrationState::Enqueued,
         );
 
         cleanup_bootstrapped_runtime_paths(&paths);
@@ -16730,7 +17047,7 @@ mod tests {
     #[test]
     fn runtime_outbox_recovery_buyer_order_shared_append_failure_is_recoverable_on_foreground_resume()
      {
-        let (runtime, paths, buyer_account_id, order_id, order_farm_id) =
+        let (runtime, paths, buyer_account_id, order_id) =
             blocked_buyer_order_runtime("buyer_order_append_failure_foreground_resume");
         unblock_shared_local_events_database(&paths);
         assert!(
@@ -16749,12 +17066,15 @@ mod tests {
             buyer_order_local_work_record_ids(&paths),
             vec![format!("app:local_work:order_request:{order_id}")]
         );
-        assert_single_order_request_publish_payload(
+        assert_no_order_request_pending_sync_payloads(
             &runtime,
             buyer_account_id.as_str(),
             order_id,
-            order_farm_id,
-            "needs_action",
+        );
+        assert_order_request_sdk_migration_receipt(
+            &runtime,
+            order_id,
+            AppSdkMigrationState::Enqueued,
         );
         {
             let state = runtime.lock_state_mut();
@@ -20662,6 +20982,7 @@ mod tests {
                 AppSqliteStore::open(DatabaseTarget::InMemory)
                     .expect("in-memory sqlite store should open"),
             ),
+            sdk_runtime: None,
             sync_transport: default_sync_transport(),
             runtime_metadata: DesktopAppRuntimeMetadataSummary::default(),
             selected_account_pending_sync_write_count: 0,
@@ -20698,6 +21019,7 @@ mod tests {
                 AppSqliteStore::open(DatabaseTarget::InMemory)
                     .expect("in-memory sqlite store should open"),
             ),
+            sdk_runtime: None,
             sync_transport: default_sync_transport(),
             runtime_metadata: DesktopAppRuntimeMetadataSummary::default(),
             selected_account_pending_sync_write_count: 0,
@@ -20732,6 +21054,7 @@ mod tests {
                     AppSqliteStore::open(DatabaseTarget::InMemory)
                         .expect("in-memory sqlite store should open"),
                 ),
+                sdk_runtime: None,
                 sync_transport: default_sync_transport(),
                 runtime_metadata: DesktopAppRuntimeMetadataSummary::default(),
                 selected_account_pending_sync_write_count: 0,
@@ -20750,13 +21073,10 @@ mod tests {
     }
 
     fn restart_runtime(paths: AppDesktopRuntimePaths) -> DesktopAppRuntime {
-        DesktopAppRuntime::from_state(
-            DesktopAppRuntimeState::bootstrap_from_paths(
-                paths,
-                vec!["ws://127.0.0.1:8080".to_owned()],
-                super::default_runtime_snapshot(),
-            )
-            .expect("runtime bootstrap should succeed"),
+        DesktopAppRuntime::bootstrap_from_paths_with_snapshot(
+            paths.clone(),
+            vec!["ws://127.0.0.1:8080".to_owned()],
+            super::default_runtime_snapshot(),
         )
     }
 
@@ -20944,7 +21264,7 @@ mod tests {
         let store = LocalEventsStore::new(executor);
         store.migrate_up().expect("migrate shared local events");
         let farm_key = "CCCCCCCCCCCCCCCCCCCCCC";
-        let owner_pubkey = "buyer-visible-seller-pubkey";
+        let owner_pubkey = BUYER_VISIBLE_SELLER_PUBKEY;
         let record_id = format!("cli:signed_event:{record_suffix}");
         let content = json!({
             "d_tag": listing_key,
@@ -22267,7 +22587,7 @@ mod tests {
             1100,
         );
         let product_id =
-            deterministic_cli_listing_product_id(Some("buyer-visible-seller-pubkey"), listing_key);
+            deterministic_cli_listing_product_id(Some(BUYER_VISIBLE_SELLER_PUBKEY), listing_key);
 
         assert!(
             runtime
@@ -22479,44 +22799,44 @@ mod tests {
             .collect()
     }
 
-    fn pending_order_request_publish_payloads(
+    fn assert_no_order_request_pending_sync_payloads(
         runtime: &DesktopAppRuntime,
         account_id: &str,
         order_id: OrderId,
-    ) -> Vec<AppOrderRequestPublishPayload> {
-        pending_order_sync_payloads(runtime, account_id, order_id)
-            .into_iter()
-            .map(|payload_json| {
-                match serde_json::from_str::<AppPublishPayload>(payload_json.as_str())
-                    .expect("pending order payload should be typed app publish work")
-                {
-                    AppPublishPayload::OrderRequest(payload) => payload,
-                    payload => panic!("expected order request publish payload, got {payload:?}"),
-                }
-            })
-            .collect()
+    ) {
+        assert!(pending_order_sync_payloads(runtime, account_id, order_id).is_empty());
     }
 
-    fn assert_single_order_request_publish_payload(
+    fn assert_order_request_sdk_migration_receipt(
         runtime: &DesktopAppRuntime,
-        account_id: &str,
         order_id: OrderId,
-        farm_id: FarmId,
-        status: &str,
-    ) -> AppOrderRequestPublishPayload {
-        let pending_payloads =
-            pending_order_request_publish_payloads(runtime, account_id, order_id);
-        assert_eq!(pending_payloads.len(), 1);
-        let payload = pending_payloads
-            .into_iter()
-            .next()
-            .expect("single order request publish payload");
-        assert_eq!(payload.context.account_id, account_id);
-        assert_eq!(payload.context.source, "place_personal_order");
-        assert_eq!(payload.order_id, order_id);
-        assert_eq!(payload.farm_id, farm_id);
-        assert_eq!(payload.status.as_deref(), Some(status));
-        payload
+        expected_state: AppSdkMigrationState,
+    ) {
+        let source_record_id = format!("app:local_work:order_request:{order_id}");
+        let receipt = runtime
+            .lock_state()
+            .sqlite_store
+            .as_ref()
+            .expect("sqlite store")
+            .sdk_migration_receipt_repository()
+            .load_receipt(
+                AppSdkMigrationReceiptSourceKind::SharedLocalEvent,
+                source_record_id.as_str(),
+            )
+            .expect("SDK migration receipt should load")
+            .expect("SDK migration receipt should exist");
+        assert_eq!(receipt.source_record_id, source_record_id);
+        assert_eq!(receipt.sdk_operation_kind, ORDER_SUBMIT_OPERATION_KIND);
+        assert_eq!(
+            receipt.migration_state, expected_state,
+            "receipt detail: {}",
+            receipt.detail_json
+        );
+        if expected_state == AppSdkMigrationState::Enqueued {
+            assert!(receipt.expected_event_id.is_some());
+            assert!(receipt.actor_pubkey.as_deref().is_some_and(is_hex_64));
+            assert!(!receipt.sdk_outbox_event_ids.is_empty());
+        }
     }
 
     fn buyer_order_local_work_record_ids(paths: &AppDesktopRuntimePaths) -> Vec<String> {
@@ -22536,13 +22856,7 @@ mod tests {
 
     fn blocked_buyer_order_runtime(
         label: &str,
-    ) -> (
-        DesktopAppRuntime,
-        AppDesktopRuntimePaths,
-        String,
-        OrderId,
-        FarmId,
-    ) {
+    ) -> (DesktopAppRuntime, AppDesktopRuntimePaths, String, OrderId) {
         let (runtime, paths) = bootstrapped_runtime(label);
         let _ = install_recorded_sync_transport(
             &runtime,
@@ -22578,7 +22892,7 @@ mod tests {
             1100,
         );
         let product_id =
-            deterministic_cli_listing_product_id(Some("buyer-visible-seller-pubkey"), listing_key);
+            deterministic_cli_listing_product_id(Some(BUYER_VISIBLE_SELLER_PUBKEY), listing_key);
         assert!(
             runtime
                 .open_personal_product_detail(PersonalSection::Browse, product_id)
@@ -22634,7 +22948,6 @@ mod tests {
             .as_ref()
             .expect("buyer order detail should remain visible after coordination failure");
         assert_eq!(order_detail.order_id, visible_order_id);
-        let order_farm_id = order_detail.farm_id;
         {
             let state = runtime.lock_state_mut();
             let buyer_context = state.state_store.identity_projection().buyer_context();
@@ -22660,13 +22973,7 @@ mod tests {
                 .is_empty()
         );
 
-        (
-            runtime,
-            paths,
-            buyer_account_id,
-            visible_order_id,
-            order_farm_id,
-        )
+        (runtime, paths, buyer_account_id, visible_order_id)
     }
 
     fn block_shared_local_events_database(paths: &AppDesktopRuntimePaths) {

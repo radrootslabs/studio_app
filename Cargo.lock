@@ -5136,7 +5136,10 @@ version = "0.1.0"
 dependencies = [
  "chrono",
  "radroots_studio_app_view",
+ "radroots_authority",
+ "radroots_events",
  "radroots_local_events",
+ "radroots_nostr",
  "radroots_runtime_paths",
  "radroots_sdk",
  "serde",

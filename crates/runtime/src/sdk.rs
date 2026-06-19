@@ -10,12 +10,20 @@ use std::{
     time::{Duration, Instant},
 };
 
-use radroots_sdk::{
-    IntegrityReceipt, IntegrityRequest, RadrootsSdk, RadrootsSdkError, RadrootsSdkStoragePaths,
-    RestoreReceipt, RestoreRequest, SdkBackupVerification,
-    SdkRelayUrlPolicy as SdkRuntimeRelayUrlPolicy, StorageStatusReceipt, StorageStatusRequest,
-    SyncStatusReceipt, SyncStatusRequest,
+use radroots_authority::{RadrootsActorContext, RadrootsLocalEventSigner};
+use radroots_events::{
+    RadrootsNostrEventPtr, contract::RadrootsActorRole, farm::RadrootsFarm,
+    order::RadrootsOrderRequest,
 };
+use radroots_nostr::prelude::RadrootsNostrKeys;
+use radroots_sdk::{
+    FARM_PUBLISH_OPERATION_KIND, FarmEnqueuePublishRequest, FarmEnqueueReceipt, IntegrityReceipt,
+    IntegrityRequest, ORDER_SUBMIT_OPERATION_KIND, OrderSubmitEnqueueRequest, OrderSubmitReceipt,
+    RadrootsSdk, RadrootsSdkError, RadrootsSdkStoragePaths, RestoreReceipt, RestoreRequest,
+    SdkBackupVerification, SdkRelayUrlPolicy as SdkRuntimeRelayUrlPolicy, StorageStatusReceipt,
+    StorageStatusRequest, SyncStatusReceipt, SyncStatusRequest,
+};
+use radroots_sdk::{SdkMutationState, SdkRelayTargetPolicy};
 use serde::Serialize;
 use serde_json::{Value, json};
 use thiserror::Error;
@@ -182,6 +190,39 @@ pub struct AppSdkRestorePreflightRequest {
     pub overwrite_existing_sdk_storage: bool,
 }
 
+pub struct AppSdkFarmPublishRequest {
+    pub actor_account_id: String,
+    pub actor_pubkey: String,
+    pub signer_keys: RadrootsNostrKeys,
+    pub farm: RadrootsFarm,
+    pub target_relays: Vec<String>,
+    pub relay_url_policy: AppSdkRelayUrlPolicy,
+    pub idempotency_key: Option<String>,
+}
+
+pub struct AppSdkOrderSubmitRequest {
+    pub actor_account_id: String,
+    pub actor_pubkey: String,
+    pub signer_keys: RadrootsNostrKeys,
+    pub listing_event: RadrootsNostrEventPtr,
+    pub order: RadrootsOrderRequest,
+    pub target_relays: Vec<String>,
+    pub relay_url_policy: AppSdkRelayUrlPolicy,
+    pub idempotency_key: Option<String>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct AppSdkWorkflowReceipt {
+    pub operation_kind: String,
+    pub expected_event_id: String,
+    pub signed_event_id: String,
+    pub outbox_operation_id: i64,
+    pub outbox_event_id: i64,
+    pub state: String,
+    pub idempotency_digest_prefix: Option<String>,
+    pub actor_pubkey: String,
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct AppSdkRestorePreflightReceipt {
     pub source: PathBuf,
@@ -262,6 +303,14 @@ enum AppSdkWorkerCommand {
         AppSdkRestorePreflightRequest,
         mpsc::Sender<Result<AppSdkRestorePreflightReceipt, AppSdkRuntimeIssue>>,
     ),
+    EnqueueFarmPublish(
+        AppSdkFarmPublishRequest,
+        mpsc::Sender<Result<AppSdkWorkflowReceipt, AppSdkRuntimeIssue>>,
+    ),
+    EnqueueOrderSubmit(
+        AppSdkOrderSubmitRequest,
+        mpsc::Sender<Result<AppSdkWorkflowReceipt, AppSdkRuntimeIssue>>,
+    ),
     BeginProjectionRebuild(
         mpsc::Sender<Result<AppSdkProjectionLifecycleStatus, AppSdkRuntimeIssue>>,
     ),
@@ -278,6 +327,8 @@ impl fmt::Debug for AppSdkWorkerCommand {
             Self::SyncStatus(_) => formatter.write_str("SyncStatus"),
             Self::Diagnostics(_) => formatter.write_str("Diagnostics"),
             Self::RestorePreflight(_, _) => formatter.write_str("RestorePreflight"),
+            Self::EnqueueFarmPublish(_, _) => formatter.write_str("EnqueueFarmPublish"),
+            Self::EnqueueOrderSubmit(_, _) => formatter.write_str("EnqueueOrderSubmit"),
             Self::BeginProjectionRebuild(_) => formatter.write_str("BeginProjectionRebuild"),
             Self::CompleteProjectionRebuild(_) => formatter.write_str("CompleteProjectionRebuild"),
         }
@@ -396,6 +447,24 @@ impl AppSdkRuntime {
     ) -> Result<AppSdkRestorePreflightReceipt, AppSdkRuntimeError> {
         self.run_command(|response_sender| {
             AppSdkWorkerCommand::RestorePreflight(request, response_sender)
+        })
+    }
+
+    pub fn enqueue_farm_publish(
+        &self,
+        request: AppSdkFarmPublishRequest,
+    ) -> Result<AppSdkWorkflowReceipt, AppSdkRuntimeError> {
+        self.run_command(|response_sender| {
+            AppSdkWorkerCommand::EnqueueFarmPublish(request, response_sender)
+        })
+    }
+
+    pub fn enqueue_order_submit(
+        &self,
+        request: AppSdkOrderSubmitRequest,
+    ) -> Result<AppSdkWorkflowReceipt, AppSdkRuntimeError> {
+        self.run_command(|response_sender| {
+            AppSdkWorkerCommand::EnqueueOrderSubmit(request, response_sender)
         })
     }
 
@@ -864,6 +933,28 @@ fn run_app_sdk_worker(
                 };
                 send_worker_result(&shared, response_sender, result);
             }
+            AppSdkWorkerCommand::EnqueueFarmPublish(request, response_sender) => {
+                let result = if let Some(issue) = lifecycle_busy_issue(&shared) {
+                    Err(issue)
+                } else {
+                    match sdk.as_ref() {
+                        Some(sdk) => enqueue_farm_publish_with_sdk(&runtime, sdk, request),
+                        None => Err(runtime_unavailable_issue(&shared)),
+                    }
+                };
+                send_worker_result(&shared, response_sender, result);
+            }
+            AppSdkWorkerCommand::EnqueueOrderSubmit(request, response_sender) => {
+                let result = if let Some(issue) = lifecycle_busy_issue(&shared) {
+                    Err(issue)
+                } else {
+                    match sdk.as_ref() {
+                        Some(sdk) => enqueue_order_submit_with_sdk(&runtime, sdk, request),
+                        None => Err(runtime_unavailable_issue(&shared)),
+                    }
+                };
+                send_worker_result(&shared, response_sender, result);
+            }
             AppSdkWorkerCommand::BeginProjectionRebuild(response_sender) => {
                 let result = match sdk.as_ref() {
                     Some(_) => Ok(begin_projection_rebuild(&shared)),
@@ -925,6 +1016,20 @@ fn run_degraded_worker(
                 );
             }
             AppSdkWorkerCommand::RestorePreflight(_, response_sender) => {
+                send_worker_result(
+                    &shared,
+                    response_sender,
+                    Err(runtime_unavailable_issue(&shared)),
+                );
+            }
+            AppSdkWorkerCommand::EnqueueFarmPublish(_, response_sender) => {
+                send_worker_result(
+                    &shared,
+                    response_sender,
+                    Err(runtime_unavailable_issue(&shared)),
+                );
+            }
+            AppSdkWorkerCommand::EnqueueOrderSubmit(_, response_sender) => {
                 send_worker_result(
                     &shared,
                     response_sender,
@@ -1016,6 +1121,121 @@ async fn collect_sdk_diagnostics(
         integrity: integrity.into(),
         sync: sync.into(),
     })
+}
+
+fn enqueue_farm_publish_with_sdk(
+    runtime: &tokio::runtime::Runtime,
+    sdk: &RadrootsSdk,
+    request: AppSdkFarmPublishRequest,
+) -> Result<AppSdkWorkflowReceipt, AppSdkRuntimeIssue> {
+    let actor = sdk_actor_context(
+        request.actor_pubkey.as_str(),
+        request.actor_account_id.as_str(),
+        RadrootsActorRole::Farmer,
+    )?;
+    let signer = sdk_local_signer(request.signer_keys)?;
+    let target_relays = sdk_relay_targets(request.target_relays, request.relay_url_policy)?;
+    let mut enqueue = FarmEnqueuePublishRequest::new(actor, request.farm, target_relays);
+    if let Some(idempotency_key) = request.idempotency_key.as_deref() {
+        enqueue = enqueue
+            .try_with_idempotency_key(idempotency_key)
+            .map_err(|error| AppSdkRuntimeIssue::from_sdk_error(&error))?;
+    }
+    let receipt = runtime
+        .block_on(sdk.farms().enqueue_publish(enqueue, &signer))
+        .map_err(|error| AppSdkRuntimeIssue::from_sdk_error(&error))?;
+    Ok(app_sdk_farm_receipt(receipt, request.actor_pubkey))
+}
+
+fn enqueue_order_submit_with_sdk(
+    runtime: &tokio::runtime::Runtime,
+    sdk: &RadrootsSdk,
+    request: AppSdkOrderSubmitRequest,
+) -> Result<AppSdkWorkflowReceipt, AppSdkRuntimeIssue> {
+    let actor = sdk_actor_context(
+        request.actor_pubkey.as_str(),
+        request.actor_account_id.as_str(),
+        RadrootsActorRole::Buyer,
+    )?;
+    let signer = sdk_local_signer(request.signer_keys)?;
+    let target_relays = sdk_relay_targets(request.target_relays, request.relay_url_policy)?;
+    let mut enqueue =
+        OrderSubmitEnqueueRequest::new(actor, request.listing_event, request.order, target_relays);
+    if let Some(idempotency_key) = request.idempotency_key.as_deref() {
+        enqueue = enqueue
+            .try_with_idempotency_key(idempotency_key)
+            .map_err(|error| AppSdkRuntimeIssue::from_sdk_error(&error))?;
+    }
+    let receipt = runtime
+        .block_on(sdk.orders().enqueue_submit(enqueue, &signer))
+        .map_err(|error| AppSdkRuntimeIssue::from_sdk_error(&error))?;
+    Ok(app_sdk_order_receipt(receipt, request.actor_pubkey))
+}
+
+fn sdk_actor_context(
+    actor_pubkey: &str,
+    actor_account_id: &str,
+    role: RadrootsActorRole,
+) -> Result<RadrootsActorContext, AppSdkRuntimeIssue> {
+    RadrootsActorContext::local_account(actor_pubkey, actor_account_id.to_owned(), [role]).map_err(
+        |error| AppSdkRuntimeIssue::runtime_error("sdk_actor_context_invalid", error.to_string()),
+    )
+}
+
+fn sdk_local_signer(
+    keys: RadrootsNostrKeys,
+) -> Result<RadrootsLocalEventSigner, AppSdkRuntimeIssue> {
+    RadrootsLocalEventSigner::new(keys).map_err(|error| {
+        AppSdkRuntimeIssue::runtime_error("sdk_signer_init_failed", error.to_string())
+    })
+}
+
+fn sdk_relay_targets(
+    relays: Vec<String>,
+    policy: AppSdkRelayUrlPolicy,
+) -> Result<SdkRelayTargetPolicy, AppSdkRuntimeIssue> {
+    SdkRelayTargetPolicy::try_explicit(relays, policy.into())
+        .map_err(|error| AppSdkRuntimeIssue::from_sdk_error(&error))
+}
+
+fn app_sdk_farm_receipt(
+    receipt: FarmEnqueueReceipt,
+    actor_pubkey: String,
+) -> AppSdkWorkflowReceipt {
+    AppSdkWorkflowReceipt {
+        operation_kind: FARM_PUBLISH_OPERATION_KIND.to_owned(),
+        expected_event_id: receipt.expected_event_id.as_str().to_owned(),
+        signed_event_id: receipt.signed_event_id.as_str().to_owned(),
+        outbox_operation_id: receipt.outbox_operation_id,
+        outbox_event_id: receipt.outbox_event_id,
+        state: sdk_mutation_state_key(receipt.state).to_owned(),
+        idempotency_digest_prefix: receipt.idempotency_digest_prefix,
+        actor_pubkey,
+    }
+}
+
+fn app_sdk_order_receipt(
+    receipt: OrderSubmitReceipt,
+    actor_pubkey: String,
+) -> AppSdkWorkflowReceipt {
+    AppSdkWorkflowReceipt {
+        operation_kind: ORDER_SUBMIT_OPERATION_KIND.to_owned(),
+        expected_event_id: receipt.expected_event_id.as_str().to_owned(),
+        signed_event_id: receipt.signed_event_id.as_str().to_owned(),
+        outbox_operation_id: receipt.outbox_operation_id,
+        outbox_event_id: receipt.outbox_event_id,
+        state: sdk_mutation_state_key(receipt.state).to_owned(),
+        idempotency_digest_prefix: receipt.idempotency_digest_prefix,
+        actor_pubkey,
+    }
+}
+
+fn sdk_mutation_state_key(state: SdkMutationState) -> &'static str {
+    match state {
+        SdkMutationState::StoredAndQueued => "enqueued",
+        SdkMutationState::AlreadyQueued => "already_queued",
+        _ => "unknown",
+    }
 }
 
 fn send_worker_result<T>(

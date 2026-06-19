@@ -31,6 +31,7 @@ gpui-component = "0.5.1"
 gpui-component-assets = "0.5.1"
 mf2_i18n = { git = "https://github.com/triesap/mf2_i18n.git", rev = "e2ad58d5863d9dd98f2f38d1f08b2140bf34b0a1" }
 radroots_core = { path = "../lib/crates/core", default-features = false, features = ["std"] }
+radroots_authority = { path = "../lib/crates/authority" }
 radroots_events = { path = "../lib/crates/events", default-features = false, features = ["serde", "std"] }
 radroots_events_codec = { path = "../lib/crates/events_codec", features = ["serde_json"] }
 radroots_identity = { path = "../lib/crates/identity" }

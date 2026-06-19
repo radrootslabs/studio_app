@@ -6,6 +6,7 @@ use radroots_sdk::protocol::order::{
     RadrootsOrderEconomics, RadrootsOrderFulfillmentState, RadrootsOrderItem,
     RadrootsOrderRevisionOutcome,
 };
+use radroots_sdk::{FARM_PUBLISH_OPERATION_KIND, ORDER_SUBMIT_OPERATION_KIND};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
@@ -42,9 +43,9 @@ impl AppPublishWorkKind {
 
     pub const fn sdk_operation(self) -> &'static str {
         match self {
-            Self::FarmProfile => "farm.publish_draft_with_identity",
+            Self::FarmProfile => FARM_PUBLISH_OPERATION_KIND,
             Self::Listing => "listing.publish_draft_with_identity",
-            Self::OrderRequest => "trade.publish_order_request_with_identity",
+            Self::OrderRequest => ORDER_SUBMIT_OPERATION_KIND,
             Self::OrderDecision => "trade.publish_order_decision_with_identity",
             Self::OrderRevisionProposal => "trade.publish_order_revision_proposal_with_identity",
             Self::OrderRevisionDecision => "trade.publish_order_revision_decision_with_identity",
@@ -315,8 +316,17 @@ impl AppPublishPayload {
         }
     }
 
-    pub const fn sdk_transport_mode(&self) -> SdkTransportMode {
-        SdkTransportMode::RelayDirect
+    pub const fn legacy_sdk_transport_mode(&self) -> Option<SdkTransportMode> {
+        match self {
+            Self::FarmProfile(_) | Self::OrderRequest(_) => None,
+            Self::Listing(_)
+            | Self::OrderDecision(_)
+            | Self::OrderRevisionProposal(_)
+            | Self::OrderRevisionDecision(_)
+            | Self::OrderCancellation(_)
+            | Self::OrderFulfillment(_)
+            | Self::OrderReceipt(_) => Some(SdkTransportMode::RelayDirect),
+        }
     }
 
     pub const fn operation_kind(&self) -> SyncOperationKind {
@@ -789,7 +799,7 @@ mod tests {
         AppOrderReceiptOutcome, AppOrderReceiptPublishPayload, AppOrderRequestItemPayload,
         AppOrderRequestPublishPayload, AppOrderRevisionDecisionPublishPayload,
         AppOrderRevisionProposalPublishPayload, AppPublishContext, AppPublishPayload,
-        AppPublishValidationFailure, AppPublishWorkKind,
+        AppPublishValidationFailure, AppPublishWorkKind, FARM_PUBLISH_OPERATION_KIND,
     };
     use crate::{
         PendingSyncOperation, PendingSyncOperationState, SyncAggregateRef, SyncOperationKind,
@@ -815,12 +825,9 @@ mod tests {
         assert_eq!(payload.work_kind().storage_key(), "farm_profile");
         assert_eq!(
             payload.work_kind().sdk_operation(),
-            "farm.publish_draft_with_identity"
+            FARM_PUBLISH_OPERATION_KIND
         );
-        assert_eq!(
-            payload.sdk_transport_mode(),
-            radroots_sdk::SdkTransportMode::RelayDirect
-        );
+        assert_eq!(payload.legacy_sdk_transport_mode(), None);
         assert_eq!(payload.validation_failures(), Vec::new());
 
         let operation =
