@@ -5,9 +5,9 @@ DROP INDEX IF EXISTS idx_orders_farm_status;
 DROP INDEX IF EXISTS idx_orders_farm_window_status_updated_at;
 DROP INDEX IF EXISTS idx_orders_buyer_context_updated_at;
 
-ALTER TABLE order_lines RENAME TO order_lines_receipt_display_legacy;
-ALTER TABLE buyer_order_coordination_records RENAME TO buyer_order_coordination_records_receipt_display_legacy;
-ALTER TABLE orders RENAME TO orders_receipt_display_legacy;
+ALTER TABLE order_lines RENAME TO order_lines_agreement_legacy;
+ALTER TABLE buyer_order_coordination_records RENAME TO buyer_order_coordination_records_agreement_legacy;
+ALTER TABLE orders RENAME TO orders_agreement_legacy;
 
 CREATE TABLE orders (
     id TEXT PRIMARY KEY NOT NULL,
@@ -16,7 +16,7 @@ CREATE TABLE orders (
     order_number TEXT NOT NULL,
     customer_display_name TEXT NOT NULL,
     status TEXT NOT NULL CHECK (
-        status IN ('needs_action', 'scheduled', 'packed', 'completed', 'declined', 'refunded', 'needs_review')
+        status IN ('needs_action', 'scheduled', 'packed', 'completed', 'declined', 'needs_review')
     ),
     updated_at TEXT NOT NULL,
     buyer_context_key TEXT,
@@ -27,24 +27,10 @@ CREATE TABLE orders (
         workflow_revision IN ('none', 'change_proposed', 'updated', 'kept_as_placed')
     ),
     workflow_agreement TEXT NOT NULL DEFAULT 'ordered' CHECK (
-        workflow_agreement IN ('ordered', 'confirmed', 'declined', 'cancelled', 'completed', 'needs_review')
-    ),
-    workflow_fulfillment TEXT CHECK (
-        workflow_fulfillment IS NULL OR workflow_fulfillment IN ('confirmed', 'preparing', 'ready_for_pickup', 'out_for_delivery', 'delivered', 'cancelled')
-    ),
-    workflow_receipt_event_id TEXT,
-    workflow_receipt_received INTEGER CHECK (
-        workflow_receipt_received IS NULL OR workflow_receipt_received IN (0, 1)
-    ),
-    workflow_receipt_issue TEXT,
-    workflow_receipt_received_at INTEGER CHECK (
-        workflow_receipt_received_at IS NULL OR workflow_receipt_received_at >= 0
+        workflow_agreement IN ('ordered', 'confirmed', 'declined', 'cancelled', 'needs_review')
     ),
     workflow_inventory TEXT NOT NULL DEFAULT 'needs_review' CHECK (
         workflow_inventory IN ('available', 'reserved', 'sold_out', 'needs_review')
-    ),
-    workflow_payment TEXT NOT NULL DEFAULT 'not_recorded' CHECK (
-        workflow_payment IN ('not_recorded', 'pending', 'recorded', 'settled', 'needs_review')
     ),
     workflow_provenance_source TEXT NOT NULL DEFAULT 'unknown' CHECK (
         workflow_provenance_source IN ('app', 'cli', 'relay', 'local_events', 'unknown')
@@ -66,9 +52,7 @@ INSERT INTO orders (
     buyer_order_note,
     workflow_revision,
     workflow_agreement,
-    workflow_fulfillment,
     workflow_inventory,
-    workflow_payment,
     workflow_provenance_source,
     workflow_provenance_last_event_id
 )
@@ -86,12 +70,10 @@ SELECT
     buyer_order_note,
     workflow_revision,
     workflow_agreement,
-    workflow_fulfillment,
     workflow_inventory,
-    workflow_payment,
     workflow_provenance_source,
     workflow_provenance_last_event_id
-FROM orders_receipt_display_legacy;
+FROM orders_agreement_legacy;
 
 CREATE TABLE order_lines (
     id TEXT PRIMARY KEY NOT NULL,
@@ -146,7 +128,7 @@ SELECT
     listing_event_id,
     seller_pubkey,
     listing_relays_json
-FROM order_lines_receipt_display_legacy;
+FROM order_lines_agreement_legacy;
 
 CREATE TABLE buyer_order_coordination_records (
     order_id TEXT PRIMARY KEY NOT NULL REFERENCES orders(id) ON DELETE CASCADE,
@@ -184,7 +166,7 @@ SELECT
     created_at,
     updated_at,
     synced_at
-FROM buyer_order_coordination_records_receipt_display_legacy;
+FROM buyer_order_coordination_records_agreement_legacy;
 
 CREATE INDEX idx_orders_farm_status ON orders(farm_id, status);
 CREATE INDEX idx_orders_farm_window_status_updated_at
@@ -199,6 +181,6 @@ CREATE INDEX idx_buyer_order_coordination_context_state_updated_at
 CREATE INDEX idx_buyer_order_coordination_state_updated_at
     ON buyer_order_coordination_records(state, updated_at);
 
-DROP TABLE order_lines_receipt_display_legacy;
-DROP TABLE buyer_order_coordination_records_receipt_display_legacy;
-DROP TABLE orders_receipt_display_legacy;
+DROP TABLE order_lines_agreement_legacy;
+DROP TABLE buyer_order_coordination_records_agreement_legacy;
+DROP TABLE orders_agreement_legacy;

@@ -2273,8 +2273,7 @@ mod tests {
         ProductsSort, ReminderDeliveryState, ReminderFeedProjection, ReminderKind,
         ReminderLogEntryProjection, ReminderLogProjection, SelectedAccountProjection,
         SelectedSurfaceProjection, SettingsSection, ShellSection, TodayAgendaProjection,
-        TodaySetupTask, TodaySetupTaskKind, TradeEconomicsProjection, TradePaymentDisplayStatus,
-        TradeWorkflowProjection,
+        TodaySetupTask, TodaySetupTaskKind, TradeEconomicsProjection, TradeWorkflowProjection,
     };
 
     struct FailingRepository;
@@ -2506,7 +2505,6 @@ mod tests {
             currency_code: Some("USD".to_owned()),
             ..TradeEconomicsProjection::default()
         };
-        let order_payment = TradePaymentDisplayStatus::NotRecorded;
         let orders_list = OrdersListProjection {
             summary: OrdersListSummary {
                 total_orders: 2,
@@ -2528,7 +2526,6 @@ mod tests {
                     OrderStatus::NeedsAction,
                 ),
                 primary_action: Some(OrderPrimaryAction::Review),
-                fulfillment_actions: Vec::new(),
             }],
         };
         let order_detail = OrderDetailProjection {
@@ -2551,15 +2548,13 @@ mod tests {
                 line_total_minor_units: Some(1300),
             }],
             economics: order_economics.clone(),
-            payment: order_payment,
             workflow: TradeWorkflowProjection::from_order_status(
                 order_id,
                 OrderStatus::NeedsAction,
             )
-            .with_economics_and_payment(order_economics, order_payment),
+            .with_economics(order_economics),
             validation_receipts: Vec::new(),
             primary_action: Some(OrderPrimaryAction::Review),
-            fulfillment_actions: Vec::new(),
             recoveries: Vec::new(),
         };
         let orders_reminders = ReminderFeedProjection {

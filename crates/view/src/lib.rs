@@ -3,11 +3,8 @@
 pub use radroots_studio_app_types::*;
 
 use radroots_core::RadrootsCoreMoney;
-use radroots_events::order::{RadrootsOrderEconomics, RadrootsOrderFulfillmentState};
-use radroots_trade::order::{
-    RadrootsOrderPaymentProjection, RadrootsOrderPaymentState, RadrootsOrderProjection,
-    RadrootsOrderSettlementState, RadrootsOrderStatus,
-};
+use radroots_events::order::RadrootsOrderEconomics;
+use radroots_trade::order::{RadrootsOrderProjection, RadrootsOrderStatus};
 use radroots_trade::validation_receipt::{
     RadrootsValidationReceiptProofSystem, RadrootsValidationReceiptResult,
     RadrootsValidationReceiptType,
@@ -1079,7 +1076,6 @@ pub enum TradeAgreementStatus {
     Confirmed,
     Declined,
     Cancelled,
-    Completed,
     NeedsReview,
 }
 
@@ -1090,7 +1086,6 @@ impl TradeAgreementStatus {
             Self::Confirmed => "confirmed",
             Self::Declined => "declined",
             Self::Cancelled => "cancelled",
-            Self::Completed => "completed",
             Self::NeedsReview => "needs_review",
         }
     }
@@ -1101,7 +1096,6 @@ impl TradeAgreementStatus {
             Self::Confirmed => "messages.trade.workflow.agreement.confirmed",
             Self::Declined => "messages.trade.workflow.agreement.declined",
             Self::Cancelled => "messages.trade.workflow.agreement.cancelled",
-            Self::Completed => "messages.trade.workflow.agreement.completed",
             Self::NeedsReview => "messages.trade.workflow.agreement.needs_review",
         }
     }
@@ -1113,8 +1107,7 @@ impl TradeAgreementStatus {
             RadrootsOrderStatus::Accepted => Self::Confirmed,
             RadrootsOrderStatus::Declined => Self::Declined,
             RadrootsOrderStatus::Cancelled => Self::Cancelled,
-            RadrootsOrderStatus::Completed => Self::Completed,
-            RadrootsOrderStatus::Disputed | RadrootsOrderStatus::Invalid => Self::NeedsReview,
+            RadrootsOrderStatus::Invalid => Self::NeedsReview,
         }
     }
 }
@@ -1188,59 +1181,6 @@ impl TradeRevisionStatus {
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub enum TradeFulfillmentStatus {
-    #[default]
-    Confirmed,
-    Preparing,
-    ReadyForPickup,
-    OutForDelivery,
-    Delivered,
-    Cancelled,
-}
-
-impl TradeFulfillmentStatus {
-    pub const fn storage_key(self) -> &'static str {
-        match self {
-            Self::Confirmed => "confirmed",
-            Self::Preparing => "preparing",
-            Self::ReadyForPickup => "ready_for_pickup",
-            Self::OutForDelivery => "out_for_delivery",
-            Self::Delivered => "delivered",
-            Self::Cancelled => "cancelled",
-        }
-    }
-
-    pub const fn label_key_id(self) -> &'static str {
-        match self {
-            Self::Confirmed => "messages.trade.workflow.fulfillment.confirmed",
-            Self::Preparing => "messages.trade.workflow.fulfillment.preparing",
-            Self::ReadyForPickup => "messages.trade.workflow.fulfillment.ready_for_pickup",
-            Self::OutForDelivery => "messages.trade.workflow.fulfillment.out_for_delivery",
-            Self::Delivered => "messages.trade.workflow.fulfillment.delivered",
-            Self::Cancelled => "messages.trade.workflow.fulfillment.cancelled",
-        }
-    }
-
-    pub const fn from_active_fulfillment_status(status: &RadrootsOrderFulfillmentState) -> Self {
-        match status {
-            RadrootsOrderFulfillmentState::AcceptedNotFulfilled => Self::Confirmed,
-            RadrootsOrderFulfillmentState::Preparing => Self::Preparing,
-            RadrootsOrderFulfillmentState::ReadyForPickup => Self::ReadyForPickup,
-            RadrootsOrderFulfillmentState::OutForDelivery => Self::OutForDelivery,
-            RadrootsOrderFulfillmentState::Delivered => Self::Delivered,
-            RadrootsOrderFulfillmentState::SellerCancelled => Self::Cancelled,
-        }
-    }
-}
-
-impl From<&RadrootsOrderFulfillmentState> for TradeFulfillmentStatus {
-    fn from(status: &RadrootsOrderFulfillmentState) -> Self {
-        Self::from_active_fulfillment_status(status)
-    }
-}
-
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
 pub enum TradeInventoryStatus {
     Available,
     Reserved,
@@ -1269,95 +1209,11 @@ impl TradeInventoryStatus {
     }
 
     pub fn from_active_order_projection(projection: &RadrootsOrderProjection) -> Self {
-        match (&projection.status, projection.fulfillment_status.as_ref()) {
-            (RadrootsOrderStatus::Requested, _) => Self::NeedsReview,
-            (
-                RadrootsOrderStatus::Accepted,
-                Some(RadrootsOrderFulfillmentState::SellerCancelled),
-            ) => Self::Available,
-            (RadrootsOrderStatus::Accepted, _) => Self::Reserved,
-            (RadrootsOrderStatus::Declined | RadrootsOrderStatus::Cancelled, _) => Self::Available,
-            (RadrootsOrderStatus::Completed, _) => Self::Reserved,
-            (
-                RadrootsOrderStatus::Missing
-                | RadrootsOrderStatus::Disputed
-                | RadrootsOrderStatus::Invalid,
-                _,
-            ) => Self::NeedsReview,
-        }
-    }
-}
-
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum TradePaymentDisplayStatus {
-    #[default]
-    NotRecorded,
-    Pending,
-    Recorded,
-    Settled,
-    NeedsReview,
-}
-
-impl TradePaymentDisplayStatus {
-    pub const fn storage_key(self) -> &'static str {
-        match self {
-            Self::NotRecorded => "not_recorded",
-            Self::Pending => "pending",
-            Self::Recorded => "recorded",
-            Self::Settled => "settled",
-            Self::NeedsReview => "needs_review",
-        }
-    }
-
-    pub const fn label_key_id(self) -> &'static str {
-        match self {
-            Self::NotRecorded => "messages.trade.workflow.payment.not_recorded",
-            Self::Pending => "messages.trade.workflow.payment.pending",
-            Self::Recorded => "messages.trade.workflow.payment.recorded",
-            Self::Settled => "messages.trade.workflow.payment.settled",
-            Self::NeedsReview => "messages.trade.workflow.payment.needs_review",
-        }
-    }
-
-    pub const fn allows_payment_action(self) -> bool {
-        false
-    }
-
-    pub fn from_active_payment_state(status: &RadrootsOrderPaymentState) -> Self {
-        match status {
-            RadrootsOrderPaymentState::NotRecorded => Self::NotRecorded,
-            RadrootsOrderPaymentState::Recorded => Self::Recorded,
-            RadrootsOrderPaymentState::Settled => Self::Settled,
-            RadrootsOrderPaymentState::Rejected | RadrootsOrderPaymentState::Invalid => {
-                Self::NeedsReview
-            }
-        }
-    }
-
-    pub fn from_active_payment_projection(payment: &RadrootsOrderPaymentProjection) -> Self {
-        match (&payment.state, &payment.settlement_state) {
-            (RadrootsOrderPaymentState::NotRecorded, RadrootsOrderSettlementState::NotRequired) => {
-                Self::NotRecorded
-            }
-            (RadrootsOrderPaymentState::NotRecorded, _) => Self::NeedsReview,
-            (RadrootsOrderPaymentState::Recorded, RadrootsOrderSettlementState::Pending) => {
-                Self::Pending
-            }
-            (RadrootsOrderPaymentState::Recorded, RadrootsOrderSettlementState::NotRequired) => {
-                Self::Recorded
-            }
-            (RadrootsOrderPaymentState::Recorded, RadrootsOrderSettlementState::Accepted) => {
-                Self::Settled
-            }
-            (
-                RadrootsOrderPaymentState::Recorded,
-                RadrootsOrderSettlementState::Rejected | RadrootsOrderSettlementState::Invalid,
-            ) => Self::NeedsReview,
-            (RadrootsOrderPaymentState::Settled, _) => Self::Settled,
-            (RadrootsOrderPaymentState::Rejected | RadrootsOrderPaymentState::Invalid, _) => {
-                Self::NeedsReview
-            }
+        match projection.status {
+            RadrootsOrderStatus::Requested => Self::NeedsReview,
+            RadrootsOrderStatus::Accepted => Self::Reserved,
+            RadrootsOrderStatus::Declined | RadrootsOrderStatus::Cancelled => Self::Available,
+            RadrootsOrderStatus::Missing | RadrootsOrderStatus::Invalid => Self::NeedsReview,
         }
     }
 }
@@ -1460,25 +1316,6 @@ impl TradeProvenanceProjection {
 impl Default for TradeProvenanceProjection {
     fn default() -> Self {
         Self::from_primary_source(TradeWorkflowSource::Unknown)
-    }
-}
-
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
-pub struct TradeReceiptProjection {
-    pub event_id: String,
-    pub received: bool,
-    pub issue: Option<String>,
-    pub received_at: u64,
-}
-
-impl TradeReceiptProjection {
-    pub fn from_active_order_projection(projection: &RadrootsOrderProjection) -> Option<Self> {
-        Some(Self {
-            event_id: projection.receipt_event_id.as_ref()?.to_string(),
-            received: projection.receipt_received?,
-            issue: projection.receipt_issue.clone(),
-            received_at: projection.receipt_received_at?,
-        })
     }
 }
 
@@ -1615,11 +1452,8 @@ pub struct TradeWorkflowProjection {
     pub order_id: OrderId,
     pub agreement: TradeAgreementStatus,
     pub revision: TradeRevisionStatus,
-    pub fulfillment: Option<TradeFulfillmentStatus>,
-    pub receipt: Option<TradeReceiptProjection>,
     pub economics: TradeEconomicsProjection,
     pub inventory: TradeInventoryStatus,
-    pub payment: TradePaymentDisplayStatus,
     pub provenance: TradeProvenanceProjection,
 }
 
@@ -1629,11 +1463,8 @@ impl TradeWorkflowProjection {
             order_id,
             agreement,
             revision: TradeRevisionStatus::None,
-            fulfillment: None,
-            receipt: None,
             economics: TradeEconomicsProjection::default(),
             inventory: TradeInventoryStatus::NeedsReview,
-            payment: TradePaymentDisplayStatus::NotRecorded,
             provenance: TradeProvenanceProjection::default(),
         }
     }
@@ -1649,19 +1480,12 @@ impl TradeWorkflowProjection {
             TradeAgreementStatus::from_active_order_status(&projection.status),
         );
         workflow.revision = revision;
-        workflow.fulfillment = projection
-            .fulfillment_status
-            .as_ref()
-            .map(TradeFulfillmentStatus::from_active_fulfillment_status);
-        workflow.receipt = TradeReceiptProjection::from_active_order_projection(projection);
         workflow.economics = projection
             .economics
             .as_ref()
             .map(TradeEconomicsProjection::from_trade_order_economics)
             .unwrap_or_default();
         workflow.inventory = TradeInventoryStatus::from_active_order_projection(projection);
-        workflow.payment =
-            TradePaymentDisplayStatus::from_active_payment_projection(&projection.payment);
         workflow.provenance = provenance
             .with_last_event_id(projection.last_event_id.as_ref().map(ToString::to_string));
         workflow
@@ -1672,34 +1496,26 @@ impl TradeWorkflowProjection {
             OrderStatus::NeedsAction => Self::new(order_id, TradeAgreementStatus::Ordered),
             OrderStatus::Scheduled => Self::new(order_id, TradeAgreementStatus::Confirmed),
             OrderStatus::Packed => Self::new(order_id, TradeAgreementStatus::Confirmed),
-            OrderStatus::Completed => Self::new(order_id, TradeAgreementStatus::Completed),
+            OrderStatus::Completed => Self::new(order_id, TradeAgreementStatus::Confirmed),
             OrderStatus::Declined => Self::new(order_id, TradeAgreementStatus::Declined),
-            OrderStatus::Refunded | OrderStatus::NeedsReview => {
-                Self::new(order_id, TradeAgreementStatus::NeedsReview)
-            }
+            OrderStatus::NeedsReview => Self::new(order_id, TradeAgreementStatus::NeedsReview),
         };
 
         match status {
             OrderStatus::NeedsAction => {}
             OrderStatus::Scheduled => {
-                projection.fulfillment = Some(TradeFulfillmentStatus::Confirmed);
                 projection.inventory = TradeInventoryStatus::Reserved;
             }
             OrderStatus::Packed => {
-                projection.fulfillment = Some(TradeFulfillmentStatus::ReadyForPickup);
                 projection.inventory = TradeInventoryStatus::Reserved;
             }
             OrderStatus::Completed => {
-                projection.fulfillment = Some(TradeFulfillmentStatus::Delivered);
                 projection.inventory = TradeInventoryStatus::Reserved;
             }
             OrderStatus::Declined => {
-                projection.fulfillment = Some(TradeFulfillmentStatus::Cancelled);
                 projection.inventory = TradeInventoryStatus::Available;
             }
-            OrderStatus::Refunded | OrderStatus::NeedsReview => {
-                projection.payment = TradePaymentDisplayStatus::NeedsReview;
-            }
+            OrderStatus::NeedsReview => {}
         }
 
         projection
@@ -1710,34 +1526,26 @@ impl TradeWorkflowProjection {
             BuyerOrderStatus::Placed => Self::new(order_id, TradeAgreementStatus::Ordered),
             BuyerOrderStatus::Scheduled => Self::new(order_id, TradeAgreementStatus::Confirmed),
             BuyerOrderStatus::Ready => Self::new(order_id, TradeAgreementStatus::Confirmed),
-            BuyerOrderStatus::Completed => Self::new(order_id, TradeAgreementStatus::Completed),
+            BuyerOrderStatus::Completed => Self::new(order_id, TradeAgreementStatus::Confirmed),
             BuyerOrderStatus::Declined => Self::new(order_id, TradeAgreementStatus::Declined),
-            BuyerOrderStatus::Refunded | BuyerOrderStatus::NeedsReview => {
-                Self::new(order_id, TradeAgreementStatus::NeedsReview)
-            }
+            BuyerOrderStatus::NeedsReview => Self::new(order_id, TradeAgreementStatus::NeedsReview),
         };
 
         match status {
             BuyerOrderStatus::Placed => {}
             BuyerOrderStatus::Scheduled => {
-                projection.fulfillment = Some(TradeFulfillmentStatus::Confirmed);
                 projection.inventory = TradeInventoryStatus::Reserved;
             }
             BuyerOrderStatus::Ready => {
-                projection.fulfillment = Some(TradeFulfillmentStatus::ReadyForPickup);
                 projection.inventory = TradeInventoryStatus::Reserved;
             }
             BuyerOrderStatus::Completed => {
-                projection.fulfillment = Some(TradeFulfillmentStatus::Delivered);
                 projection.inventory = TradeInventoryStatus::Reserved;
             }
             BuyerOrderStatus::Declined => {
-                projection.fulfillment = Some(TradeFulfillmentStatus::Cancelled);
                 projection.inventory = TradeInventoryStatus::Available;
             }
-            BuyerOrderStatus::Refunded | BuyerOrderStatus::NeedsReview => {
-                projection.payment = TradePaymentDisplayStatus::NeedsReview;
-            }
+            BuyerOrderStatus::NeedsReview => {}
         }
 
         projection
@@ -1748,56 +1556,23 @@ impl TradeWorkflowProjection {
         self
     }
 
-    pub fn with_payment(mut self, payment: TradePaymentDisplayStatus) -> Self {
-        self.payment = payment;
-        self
-    }
-
     pub fn with_revision(mut self, revision: TradeRevisionStatus) -> Self {
         self.revision = revision;
         self
-    }
-
-    pub fn with_economics_and_payment(
-        self,
-        economics: TradeEconomicsProjection,
-        payment: TradePaymentDisplayStatus,
-    ) -> Self {
-        self.with_economics(economics).with_payment(payment)
     }
 }
 
 pub fn order_status_from_active_order_projection(
     projection: &RadrootsOrderProjection,
 ) -> Option<OrderStatus> {
-    match (&projection.status, projection.fulfillment_status.as_ref()) {
-        (RadrootsOrderStatus::Missing, _) => None,
-        (RadrootsOrderStatus::Requested, _) => Some(OrderStatus::NeedsAction),
-        (
-            RadrootsOrderStatus::Accepted,
-            Some(
-                RadrootsOrderFulfillmentState::ReadyForPickup
-                | RadrootsOrderFulfillmentState::OutForDelivery
-                | RadrootsOrderFulfillmentState::Delivered,
-            ),
-        ) => Some(OrderStatus::Packed),
-        (RadrootsOrderStatus::Accepted, Some(RadrootsOrderFulfillmentState::SellerCancelled)) => {
+    match projection.status {
+        RadrootsOrderStatus::Missing => None,
+        RadrootsOrderStatus::Requested => Some(OrderStatus::NeedsAction),
+        RadrootsOrderStatus::Accepted => Some(OrderStatus::Scheduled),
+        RadrootsOrderStatus::Declined | RadrootsOrderStatus::Cancelled => {
             Some(OrderStatus::Declined)
         }
-        (
-            RadrootsOrderStatus::Accepted,
-            Some(
-                RadrootsOrderFulfillmentState::Preparing
-                | RadrootsOrderFulfillmentState::AcceptedNotFulfilled,
-            )
-            | None,
-        ) => Some(OrderStatus::Scheduled),
-        (RadrootsOrderStatus::Declined | RadrootsOrderStatus::Cancelled, _) => {
-            Some(OrderStatus::Declined)
-        }
-        (RadrootsOrderStatus::Completed, _) => Some(OrderStatus::Completed),
-        (RadrootsOrderStatus::Disputed, _) => Some(OrderStatus::NeedsReview),
-        (RadrootsOrderStatus::Invalid, _) => Some(OrderStatus::NeedsAction),
+        RadrootsOrderStatus::Invalid => Some(OrderStatus::NeedsAction),
     }
 }
 
@@ -1810,7 +1585,6 @@ pub enum OrdersFilter {
     Scheduled,
     Packed,
     Completed,
-    Refunded,
 }
 
 impl OrdersFilter {
@@ -1821,7 +1595,6 @@ impl OrdersFilter {
             Self::Scheduled => "scheduled",
             Self::Packed => "packed",
             Self::Completed => "completed",
-            Self::Refunded => "refunded",
         }
     }
 }
@@ -1834,87 +1607,14 @@ pub struct OrdersScreenQueryState {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub enum OrderFulfillmentAction {
-    Preparing,
-    ReadyForPickup,
-    OutForDelivery,
-    Delivered,
-    SellerCancelled,
-}
-
-impl OrderFulfillmentAction {
-    pub const ALL: &'static [Self] = &[
-        Self::Preparing,
-        Self::ReadyForPickup,
-        Self::OutForDelivery,
-        Self::Delivered,
-        Self::SellerCancelled,
-    ];
-
-    pub const fn storage_key(self) -> &'static str {
-        match self {
-            Self::Preparing => "publish_preparing",
-            Self::ReadyForPickup => "publish_ready_for_pickup",
-            Self::OutForDelivery => "publish_out_for_delivery",
-            Self::Delivered => "publish_delivered",
-            Self::SellerCancelled => "publish_seller_cancelled",
-        }
-    }
-
-    pub const fn fulfillment_status(self) -> RadrootsOrderFulfillmentState {
-        match self {
-            Self::Preparing => RadrootsOrderFulfillmentState::Preparing,
-            Self::ReadyForPickup => RadrootsOrderFulfillmentState::ReadyForPickup,
-            Self::OutForDelivery => RadrootsOrderFulfillmentState::OutForDelivery,
-            Self::Delivered => RadrootsOrderFulfillmentState::Delivered,
-            Self::SellerCancelled => RadrootsOrderFulfillmentState::SellerCancelled,
-        }
-    }
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
 pub enum OrderPrimaryAction {
     Review,
-    PublishPreparing,
-    PublishReadyForPickup,
-    PublishOutForDelivery,
-    PublishDelivered,
-    PublishSellerCancelled,
 }
 
 impl OrderPrimaryAction {
     pub const fn storage_key(self) -> &'static str {
         match self {
             Self::Review => "review",
-            Self::PublishPreparing => "publish_preparing",
-            Self::PublishReadyForPickup => "publish_ready_for_pickup",
-            Self::PublishOutForDelivery => "publish_out_for_delivery",
-            Self::PublishDelivered => "publish_delivered",
-            Self::PublishSellerCancelled => "publish_seller_cancelled",
-        }
-    }
-
-    pub const fn fulfillment_action(self) -> Option<OrderFulfillmentAction> {
-        match self {
-            Self::Review => None,
-            Self::PublishPreparing => Some(OrderFulfillmentAction::Preparing),
-            Self::PublishReadyForPickup => Some(OrderFulfillmentAction::ReadyForPickup),
-            Self::PublishOutForDelivery => Some(OrderFulfillmentAction::OutForDelivery),
-            Self::PublishDelivered => Some(OrderFulfillmentAction::Delivered),
-            Self::PublishSellerCancelled => Some(OrderFulfillmentAction::SellerCancelled),
-        }
-    }
-}
-
-impl From<OrderFulfillmentAction> for OrderPrimaryAction {
-    fn from(action: OrderFulfillmentAction) -> Self {
-        match action {
-            OrderFulfillmentAction::Preparing => Self::PublishPreparing,
-            OrderFulfillmentAction::ReadyForPickup => Self::PublishReadyForPickup,
-            OrderFulfillmentAction::OutForDelivery => Self::PublishOutForDelivery,
-            OrderFulfillmentAction::Delivered => Self::PublishDelivered,
-            OrderFulfillmentAction::SellerCancelled => Self::PublishSellerCancelled,
         }
     }
 }
@@ -1945,7 +1645,6 @@ pub struct OrdersListRow {
     pub status: OrderStatus,
     pub workflow: TradeWorkflowProjection,
     pub primary_action: Option<OrderPrimaryAction>,
-    pub fulfillment_actions: Vec<OrderFulfillmentAction>,
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
@@ -1980,11 +1679,9 @@ pub struct OrderDetailProjection {
     pub pickup_location_label: Option<String>,
     pub items: Vec<OrderDetailItemRow>,
     pub economics: TradeEconomicsProjection,
-    pub payment: TradePaymentDisplayStatus,
     pub workflow: TradeWorkflowProjection,
     pub validation_receipts: Vec<TradeValidationReceiptProjection>,
     pub primary_action: Option<OrderPrimaryAction>,
-    pub fulfillment_actions: Vec<OrderFulfillmentAction>,
     pub recoveries: Vec<OrderRecoveryProjection>,
 }
 
@@ -2021,7 +1718,6 @@ pub struct BuyerOrderDetailProjection {
     pub status: BuyerOrderStatus,
     pub items: Vec<OrderDetailItemRow>,
     pub economics: TradeEconomicsProjection,
-    pub payment: TradePaymentDisplayStatus,
     pub workflow: TradeWorkflowProjection,
     pub validation_receipts: Vec<TradeValidationReceiptProjection>,
     pub order_note: Option<String>,
@@ -2441,13 +2137,9 @@ mod tests {
         RadrootsOrderQuoteId, RadrootsPublicKey,
     };
     use radroots_events::order::{
-        RadrootsOrderEconomicItem, RadrootsOrderEconomics, RadrootsOrderFulfillmentState,
-        RadrootsOrderPricingBasis,
+        RadrootsOrderEconomicItem, RadrootsOrderEconomics, RadrootsOrderPricingBasis,
     };
-    use radroots_trade::order::{
-        RadrootsOrderPaymentProjection, RadrootsOrderPaymentState, RadrootsOrderProjection,
-        RadrootsOrderSettlementState, RadrootsOrderStatus,
-    };
+    use radroots_trade::order::{RadrootsOrderProjection, RadrootsOrderStatus};
     use radroots_trade::validation_receipt::{
         RadrootsValidationReceiptProofSystem, RadrootsValidationReceiptResult,
         RadrootsValidationReceiptType,
@@ -2465,12 +2157,12 @@ mod tests {
         FarmSetupProjection, FarmSetupReadiness, FarmSetupSection, FarmTimingConflict,
         FarmTimingConflictKind, FarmerActivationProjection, FarmerSection, FulfillmentWindowId,
         IdentityBlockedReason, IdentityReadiness, LoggedOutStartupPhase,
-        LoggedOutStartupProjection, OrderDetailItemRow, OrderDetailProjection,
-        OrderFulfillmentAction, OrderId, OrderListRow, OrderPrimaryAction, OrderRecoveryProjection,
-        OrderStatus, OrdersFilter, OrdersListProjection, OrdersListRow, OrdersListSummary,
-        OrdersScreenQueryState, PackDayBatchPrintArtifact, PackDayBatchPrintFailureKind,
-        PackDayBatchPrintStatus, PackDayExportArtifact, PackDayExportArtifactKind,
-        PackDayExportBundle, PackDayExportInstanceId, PackDayExportStatus, PackDayHostHandoffKind,
+        LoggedOutStartupProjection, OrderDetailItemRow, OrderDetailProjection, OrderId,
+        OrderListRow, OrderPrimaryAction, OrderRecoveryProjection, OrderStatus, OrdersFilter,
+        OrdersListProjection, OrdersListRow, OrdersListSummary, OrdersScreenQueryState,
+        PackDayBatchPrintArtifact, PackDayBatchPrintFailureKind, PackDayBatchPrintStatus,
+        PackDayExportArtifact, PackDayExportArtifactKind, PackDayExportBundle,
+        PackDayExportInstanceId, PackDayExportStatus, PackDayHostHandoffKind,
         PackDayHostHandoffStatus, PackDayOutputCustomerOrder, PackDayOutputOrderState,
         PackDayOutputPackListEntry, PackDayOutputProductTotal, PackDayOutputQuantity,
         PackDayOutputSource, PackDayOutputWindow, PackDayPackListRow, PackDayPrintFailureKind,
@@ -2488,11 +2180,10 @@ mod tests {
         SelectedAccountProjection, SelectedSurfaceProjection, SettingsPreference, SettingsSection,
         ShellSection, StartupSignerEntryProjection, StartupSignerSource, StartupSignerSourceKind,
         TodayAgendaProjection, TodaySetupTask, TodaySetupTaskKind, TodaySummary,
-        TradeAgreementStatus, TradeEconomicsProjection, TradeFulfillmentStatus,
-        TradeInventoryStatus, TradePaymentDisplayStatus, TradeProvenanceProjection,
-        TradeRevisionStatus, TradeValidationReceiptProofSystem, TradeValidationReceiptResult,
-        TradeValidationReceiptType, TradeWorkflowProjection, TradeWorkflowSource,
-        order_status_from_active_order_projection,
+        TradeAgreementStatus, TradeEconomicsProjection, TradeInventoryStatus,
+        TradeProvenanceProjection, TradeRevisionStatus, TradeValidationReceiptProofSystem,
+        TradeValidationReceiptResult, TradeValidationReceiptType, TradeWorkflowProjection,
+        TradeWorkflowSource, order_status_from_active_order_projection,
     };
     use std::{collections::BTreeSet, str::FromStr};
     use uuid::Uuid;
@@ -3067,14 +2758,12 @@ mod tests {
         assert_eq!(OrderStatus::Packed.storage_key(), "packed");
         assert_eq!(OrderStatus::Completed.storage_key(), "completed");
         assert_eq!(OrderStatus::Declined.storage_key(), "declined");
-        assert_eq!(OrderStatus::Refunded.storage_key(), "refunded");
         assert_eq!(OrderStatus::NeedsReview.storage_key(), "needs_review");
         assert_eq!(BuyerOrderStatus::Placed.storage_key(), "placed");
         assert_eq!(BuyerOrderStatus::Scheduled.storage_key(), "scheduled");
         assert_eq!(BuyerOrderStatus::Ready.storage_key(), "ready");
         assert_eq!(BuyerOrderStatus::Completed.storage_key(), "completed");
         assert_eq!(BuyerOrderStatus::Declined.storage_key(), "declined");
-        assert_eq!(BuyerOrderStatus::Refunded.storage_key(), "refunded");
         assert_eq!(BuyerOrderStatus::NeedsReview.storage_key(), "needs_review");
         assert_eq!(
             BuyerOrderStatus::from(OrderStatus::NeedsAction),
@@ -3099,45 +2788,8 @@ mod tests {
         assert_eq!(OrdersFilter::Scheduled.storage_key(), "scheduled");
         assert_eq!(OrdersFilter::Packed.storage_key(), "packed");
         assert_eq!(OrdersFilter::Completed.storage_key(), "completed");
-        assert_eq!(OrdersFilter::Refunded.storage_key(), "refunded");
 
         assert_eq!(OrderPrimaryAction::Review.storage_key(), "review");
-        assert_eq!(
-            OrderFulfillmentAction::Preparing.storage_key(),
-            "publish_preparing"
-        );
-        assert_eq!(
-            OrderFulfillmentAction::ReadyForPickup.storage_key(),
-            "publish_ready_for_pickup"
-        );
-        assert_eq!(
-            OrderFulfillmentAction::OutForDelivery.storage_key(),
-            "publish_out_for_delivery"
-        );
-        assert_eq!(
-            OrderFulfillmentAction::Delivered.storage_key(),
-            "publish_delivered"
-        );
-        assert_eq!(
-            OrderFulfillmentAction::SellerCancelled.storage_key(),
-            "publish_seller_cancelled"
-        );
-        assert_eq!(
-            OrderFulfillmentAction::Preparing.fulfillment_status(),
-            RadrootsOrderFulfillmentState::Preparing
-        );
-        assert_eq!(
-            OrderPrimaryAction::PublishReadyForPickup.storage_key(),
-            "publish_ready_for_pickup"
-        );
-        assert_eq!(
-            OrderPrimaryAction::PublishOutForDelivery.storage_key(),
-            "publish_out_for_delivery"
-        );
-        assert_eq!(
-            OrderPrimaryAction::PublishDelivered.storage_key(),
-            "publish_delivered"
-        );
     }
 
     fn test_decimal(raw: &str) -> RadrootsCoreDecimal {
@@ -3196,26 +2848,7 @@ mod tests {
         }
     }
 
-    fn test_payment_projection(state: RadrootsOrderPaymentState) -> RadrootsOrderPaymentProjection {
-        let mut projection = RadrootsOrderPaymentProjection::not_recorded();
-        projection.payment_event_id = (!matches!(&state, RadrootsOrderPaymentState::NotRecorded))
-            .then(|| {
-                test_event_id("4444444444444444444444444444444444444444444444444444444444444444")
-            });
-        projection.settlement_state = match &state {
-            RadrootsOrderPaymentState::Settled => RadrootsOrderSettlementState::Accepted,
-            RadrootsOrderPaymentState::Invalid => RadrootsOrderSettlementState::Invalid,
-            _ => RadrootsOrderSettlementState::NotRequired,
-        };
-        projection.state = state;
-        projection
-    }
-
-    fn test_active_order_projection(
-        status: RadrootsOrderStatus,
-        fulfillment_status: Option<RadrootsOrderFulfillmentState>,
-        payment_state: RadrootsOrderPaymentState,
-    ) -> RadrootsOrderProjection {
+    fn test_active_order_projection(status: RadrootsOrderStatus) -> RadrootsOrderProjection {
         RadrootsOrderProjection {
             order_id: test_order_id("ord_AAAAAAAAAAAAAAAAAAAAAg"),
             status,
@@ -3225,17 +2858,8 @@ mod tests {
             decision_event_id: Some(test_event_id(
                 "2222222222222222222222222222222222222222222222222222222222222222",
             )),
-            fulfillment_event_id: fulfillment_status.as_ref().map(|_| {
-                test_event_id("3333333333333333333333333333333333333333333333333333333333333333")
-            }),
-            fulfillment_status,
             cancellation_event_id: None,
-            receipt_event_id: None,
-            receipt_received: None,
-            receipt_issue: None,
-            receipt_received_at: None,
             lifecycle_terminal: false,
-            payment: test_payment_projection(payment_state),
             economics: Some(test_trade_economics()),
             agreement_event_id: Some(test_event_id(
                 "2222222222222222222222222222222222222222222222222222222222222222",
@@ -3268,36 +2892,8 @@ mod tests {
             TradeAgreementStatus::Confirmed
         );
         assert_eq!(
-            TradeAgreementStatus::from_active_order_status(&RadrootsOrderStatus::Disputed),
-            TradeAgreementStatus::NeedsReview
-        );
-        assert_eq!(
             TradeAgreementStatus::from_active_order_status(&RadrootsOrderStatus::Invalid),
             TradeAgreementStatus::NeedsReview
-        );
-        assert_eq!(
-            TradeFulfillmentStatus::from_active_fulfillment_status(
-                &RadrootsOrderFulfillmentState::AcceptedNotFulfilled
-            ),
-            TradeFulfillmentStatus::Confirmed
-        );
-        assert_eq!(
-            TradeFulfillmentStatus::from_active_fulfillment_status(
-                &RadrootsOrderFulfillmentState::SellerCancelled
-            ),
-            TradeFulfillmentStatus::Cancelled
-        );
-        assert_eq!(
-            TradePaymentDisplayStatus::from_active_payment_state(
-                &RadrootsOrderPaymentState::Settled
-            ),
-            TradePaymentDisplayStatus::Settled
-        );
-        assert_eq!(
-            TradePaymentDisplayStatus::from_active_payment_state(
-                &RadrootsOrderPaymentState::Rejected
-            ),
-            TradePaymentDisplayStatus::NeedsReview
         );
         assert_eq!(
             TradeRevisionStatus::try_from_storage_key("none"),
@@ -3327,11 +2923,7 @@ mod tests {
         );
 
         let order_id = OrderId::new();
-        let active_order = test_active_order_projection(
-            RadrootsOrderStatus::Accepted,
-            Some(RadrootsOrderFulfillmentState::ReadyForPickup),
-            RadrootsOrderPaymentState::Recorded,
-        );
+        let active_order = test_active_order_projection(RadrootsOrderStatus::Accepted);
         let projection = TradeWorkflowProjection::from_active_order_projection(
             order_id,
             &active_order,
@@ -3341,15 +2933,9 @@ mod tests {
         assert_eq!(projection.order_id, order_id);
         assert_eq!(projection.agreement, TradeAgreementStatus::Confirmed);
         assert_eq!(projection.revision, TradeRevisionStatus::Updated);
-        assert_eq!(
-            projection.fulfillment,
-            Some(TradeFulfillmentStatus::ReadyForPickup)
-        );
         assert_eq!(projection.inventory, TradeInventoryStatus::Reserved);
-        assert_eq!(projection.payment, TradePaymentDisplayStatus::Recorded);
         assert_eq!(projection.economics.total_minor_units, Some(1234));
         assert_eq!(projection.economics.currency_code.as_deref(), Some("USD"));
-        assert!(!projection.payment.allows_payment_action());
         assert_eq!(
             projection.provenance,
             TradeProvenanceProjection::from_primary_source(TradeWorkflowSource::LocalEvents)
@@ -3359,14 +2945,10 @@ mod tests {
         );
         assert_eq!(
             order_status_from_active_order_projection(&active_order),
-            Some(OrderStatus::Packed)
+            Some(OrderStatus::Scheduled)
         );
 
-        let requested_order = test_active_order_projection(
-            RadrootsOrderStatus::Requested,
-            None,
-            RadrootsOrderPaymentState::NotRecorded,
-        );
+        let requested_order = test_active_order_projection(RadrootsOrderStatus::Requested);
         let requested_projection = TradeWorkflowProjection::from_active_order_projection(
             order_id,
             &requested_order,
@@ -3377,108 +2959,9 @@ mod tests {
             requested_projection.agreement,
             TradeAgreementStatus::Ordered
         );
-        assert_eq!(requested_projection.fulfillment, None);
-        assert_eq!(
-            requested_projection.payment,
-            TradePaymentDisplayStatus::NotRecorded
-        );
         assert_eq!(
             requested_projection.inventory,
             TradeInventoryStatus::NeedsReview
-        );
-
-        let invalid_payment_order = test_active_order_projection(
-            RadrootsOrderStatus::Accepted,
-            None,
-            RadrootsOrderPaymentState::Invalid,
-        );
-        let invalid_payment_projection = TradeWorkflowProjection::from_active_order_projection(
-            order_id,
-            &invalid_payment_order,
-            TradeRevisionStatus::None,
-            TradeProvenanceProjection::from_primary_source(TradeWorkflowSource::LocalEvents),
-        );
-        assert_eq!(
-            invalid_payment_projection.payment,
-            TradePaymentDisplayStatus::NeedsReview
-        );
-
-        let mut pending_payment_order = test_active_order_projection(
-            RadrootsOrderStatus::Accepted,
-            None,
-            RadrootsOrderPaymentState::Recorded,
-        );
-        pending_payment_order.payment.settlement_state = RadrootsOrderSettlementState::Pending;
-        let pending_payment_projection = TradeWorkflowProjection::from_active_order_projection(
-            order_id,
-            &pending_payment_order,
-            TradeRevisionStatus::None,
-            TradeProvenanceProjection::from_primary_source(TradeWorkflowSource::LocalEvents),
-        );
-        assert_eq!(
-            pending_payment_projection.payment,
-            TradePaymentDisplayStatus::Pending
-        );
-
-        let settled_payment_order = test_active_order_projection(
-            RadrootsOrderStatus::Completed,
-            None,
-            RadrootsOrderPaymentState::Settled,
-        );
-        let settled_payment_projection = TradeWorkflowProjection::from_active_order_projection(
-            order_id,
-            &settled_payment_order,
-            TradeRevisionStatus::None,
-            TradeProvenanceProjection::from_primary_source(TradeWorkflowSource::LocalEvents),
-        );
-        assert_eq!(
-            settled_payment_projection.payment,
-            TradePaymentDisplayStatus::Settled
-        );
-    }
-
-    #[test]
-    fn trade_payment_display_statuses_do_not_enable_payment_actions() {
-        for status in [
-            TradePaymentDisplayStatus::NotRecorded,
-            TradePaymentDisplayStatus::Pending,
-            TradePaymentDisplayStatus::Recorded,
-            TradePaymentDisplayStatus::Settled,
-            TradePaymentDisplayStatus::NeedsReview,
-        ] {
-            assert!(!status.allows_payment_action());
-        }
-    }
-
-    #[test]
-    fn trade_payment_display_projection_maps_reducer_payment_states() {
-        let mut pending = RadrootsOrderPaymentProjection::not_recorded();
-        pending.state = RadrootsOrderPaymentState::Recorded;
-        pending.payment_event_id = Some(test_event_id(
-            "4444444444444444444444444444444444444444444444444444444444444444",
-        ));
-        pending.settlement_state = RadrootsOrderSettlementState::Pending;
-        assert_eq!(
-            TradePaymentDisplayStatus::from_active_payment_projection(&pending),
-            TradePaymentDisplayStatus::Pending
-        );
-
-        let mut settled = RadrootsOrderPaymentProjection::not_recorded();
-        settled.state = RadrootsOrderPaymentState::Settled;
-        settled.payment_event_id = Some(test_event_id(
-            "4444444444444444444444444444444444444444444444444444444444444444",
-        ));
-        settled.settlement_state = RadrootsOrderSettlementState::Accepted;
-        assert_eq!(
-            TradePaymentDisplayStatus::from_active_payment_projection(&settled),
-            TradePaymentDisplayStatus::Settled
-        );
-
-        let mut inconsistent = RadrootsOrderPaymentProjection::not_recorded();
-        inconsistent.settlement_state = RadrootsOrderSettlementState::Accepted;
-        assert_eq!(
-            TradePaymentDisplayStatus::from_active_payment_projection(&inconsistent),
-            TradePaymentDisplayStatus::NeedsReview
         );
     }
 
@@ -3544,27 +3027,10 @@ mod tests {
         );
         assert_eq!(TradeAgreementStatus::Ordered.storage_key(), "ordered");
         assert_eq!(
-            TradeFulfillmentStatus::from_active_fulfillment_status(
-                &RadrootsOrderFulfillmentState::AcceptedNotFulfilled
-            )
-            .storage_key(),
-            "confirmed"
-        );
-        assert_eq!(
-            TradeFulfillmentStatus::ReadyForPickup.storage_key(),
-            "ready_for_pickup"
-        );
-        assert_eq!(
             TradeRevisionStatus::KeptAsPlaced.storage_key(),
             "kept_as_placed"
         );
         assert_eq!(TradeInventoryStatus::Reserved.storage_key(), "reserved");
-        assert_eq!(
-            TradePaymentDisplayStatus::NotRecorded.storage_key(),
-            "not_recorded"
-        );
-        assert_eq!(TradePaymentDisplayStatus::Pending.storage_key(), "pending");
-        assert_eq!(TradePaymentDisplayStatus::Settled.storage_key(), "settled");
         assert_eq!(
             TradeWorkflowSource::LocalEvents.storage_key(),
             "local_events"
@@ -3583,24 +3049,8 @@ mod tests {
             "messages.trade.workflow.revision.change_proposed"
         );
         assert_eq!(
-            TradeFulfillmentStatus::ReadyForPickup.label_key_id(),
-            "messages.trade.workflow.fulfillment.ready_for_pickup"
-        );
-        assert_eq!(
             TradeInventoryStatus::SoldOut.label_key_id(),
             "messages.trade.workflow.inventory.sold_out"
-        );
-        assert_eq!(
-            TradePaymentDisplayStatus::NotRecorded.label_key_id(),
-            "messages.trade.workflow.payment.not_recorded"
-        );
-        assert_eq!(
-            TradePaymentDisplayStatus::Pending.label_key_id(),
-            "messages.trade.workflow.payment.pending"
-        );
-        assert_eq!(
-            TradePaymentDisplayStatus::Settled.label_key_id(),
-            "messages.trade.workflow.payment.settled"
         );
         assert_eq!(
             TradeWorkflowSource::Cli.label_key_id(),
@@ -3844,10 +3294,6 @@ mod tests {
             None
         );
         assert_eq!(
-            PackDayOutputOrderState::from_order_status(OrderStatus::Refunded),
-            None
-        );
-        assert_eq!(
             PackDayOutputOrderState::from_order_status(OrderStatus::NeedsReview),
             None
         );
@@ -3944,7 +3390,6 @@ mod tests {
             currency_code: Some("USD".to_owned()),
             ..TradeEconomicsProjection::default()
         };
-        let order_payment = TradePaymentDisplayStatus::NotRecorded;
         let orders_list = OrdersListProjection {
             summary: OrdersListSummary {
                 total_orders: 3,
@@ -3965,8 +3410,7 @@ mod tests {
                     order_id,
                     OrderStatus::Scheduled,
                 ),
-                primary_action: Some(OrderPrimaryAction::PublishPreparing),
-                fulfillment_actions: OrderFulfillmentAction::ALL.to_vec(),
+                primary_action: None,
             }],
         };
         let order_detail = OrderDetailProjection {
@@ -3989,12 +3433,10 @@ mod tests {
                 line_total_minor_units: Some(1300),
             }],
             economics: order_economics.clone(),
-            payment: order_payment,
             workflow: TradeWorkflowProjection::from_order_status(order_id, OrderStatus::Scheduled)
-                .with_economics_and_payment(order_economics, order_payment),
+                .with_economics(order_economics),
             validation_receipts: Vec::new(),
-            primary_action: Some(OrderPrimaryAction::PublishPreparing),
-            fulfillment_actions: OrderFulfillmentAction::ALL.to_vec(),
+            primary_action: None,
             recoveries: Vec::new(),
         };
         let pack_day = PackDayProjection {
@@ -4022,22 +3464,15 @@ mod tests {
 
         assert!(orders_list.summary.has_orders());
         assert!(!orders_list.is_empty());
-        assert_eq!(
-            orders_list.rows[0].primary_action,
-            Some(OrderPrimaryAction::PublishPreparing)
-        );
-        assert_eq!(
-            orders_list.rows[0].fulfillment_actions,
-            OrderFulfillmentAction::ALL.to_vec()
-        );
+        assert_eq!(orders_list.rows[0].primary_action, None);
         assert_eq!(
             orders_list.rows[0].workflow.agreement,
             TradeAgreementStatus::Confirmed
         );
         assert_eq!(order_detail.items[0].quantity_display, "2 bags");
         assert_eq!(
-            order_detail.workflow.fulfillment,
-            Some(TradeFulfillmentStatus::Confirmed)
+            order_detail.workflow.inventory,
+            TradeInventoryStatus::Reserved
         );
         assert!(!pack_day.is_empty());
         assert_eq!(pack_day.pickup_roster[0].order_number, "R-1001");
@@ -4054,7 +3489,6 @@ mod tests {
             currency_code: Some("USD".to_owned()),
             ..TradeEconomicsProjection::default()
         };
-        let buyer_order_payment = TradePaymentDisplayStatus::NotRecorded;
         let listing = BuyerListingRow {
             product_id,
             farm_id,
@@ -4153,12 +3587,11 @@ mod tests {
                 line_total_minor_units: Some(1300),
             }],
             economics: buyer_order_economics.clone(),
-            payment: buyer_order_payment,
             workflow: TradeWorkflowProjection::from_buyer_order_status(
                 order_id,
                 BuyerOrderStatus::Scheduled,
             )
-            .with_economics_and_payment(buyer_order_economics, buyer_order_payment),
+            .with_economics(buyer_order_economics),
             validation_receipts: Vec::new(),
             order_note: Some("Leave by the cooler".to_owned()),
             repeat_demand: None,
@@ -4204,7 +3637,6 @@ mod tests {
                 OrderStatus::Completed,
             ),
             primary_action: None,
-            fulfillment_actions: Vec::new(),
         };
 
         assert_eq!(today.orders_needing_action.len(), 1);
@@ -4294,18 +3726,15 @@ mod tests {
 
         assert_eq!(ReminderSurface::PackDay.storage_key(), "pack_day");
         assert_eq!(
-            ReminderKind::RefundRecovery.storage_key(),
-            "refund_recovery"
+            ReminderKind::MissedPickupRecovery.storage_key(),
+            "missed_pickup_recovery"
         );
         assert_eq!(ReminderUrgency::DueSoon.storage_key(), "due_soon");
         assert_eq!(
             ReminderDeliveryState::Acknowledged.storage_key(),
             "acknowledged"
         );
-        assert_eq!(
-            RecoveryKind::RefundFollowUp.storage_key(),
-            "refund_follow_up"
-        );
+        assert_eq!(RecoveryKind::MissedPickup.storage_key(), "missed_pickup");
         assert_eq!(RecoveryState::InReview.storage_key(), "in_review");
         assert_eq!(
             RepeatDemandEligibility::Unavailable.storage_key(),

@@ -492,40 +492,11 @@ mod tests {
             app_text(AppTextKey::OrdersStatusNeedsReview),
             "Needs review"
         );
-        assert_eq!(
-            app_text(AppTextKey::OrdersActionReadyForPickup),
-            "Ready for pickup"
-        );
-        assert_eq!(app_text(AppTextKey::OrdersActionPreparing), "Preparing");
-        assert_eq!(
-            app_text(AppTextKey::OrdersActionOutForDelivery),
-            "Out for delivery"
-        );
-        assert_eq!(
-            app_text(AppTextKey::OrdersActionMarkDelivered),
-            "Mark delivered"
-        );
-        assert_eq!(
-            app_text(AppTextKey::OrdersActionCancelFulfillment),
-            "Cancel fulfillment"
-        );
-        assert_eq!(
-            app_text(AppTextKey::OrdersActionUpdateFulfillment),
-            "Update"
-        );
         assert_eq!(app_text(AppTextKey::OrdersDetailTitle), "Order detail");
         assert_eq!(app_text(AppTextKey::OrdersRecoverySectionTitle), "Recovery");
         assert_eq!(
             app_text(AppTextKey::OrdersRecoveryMissedPickupTitle),
             "Missed pickup"
-        );
-        assert_eq!(
-            app_text(AppTextKey::OrdersRecoveryRefundFollowUpTitle),
-            "Payment status"
-        );
-        assert_eq!(
-            app_text(AppTextKey::OrdersRecoveryRefundFollowUpBody),
-            "Track the recorded payment state for this order."
         );
         assert_eq!(
             app_text(AppTextKey::OrdersRecoveryActionResolve),
@@ -674,12 +645,6 @@ mod tests {
             app_text(AppTextKey::TradeWorkflowAxisAgreement),
             "Agreement"
         );
-        assert_eq!(
-            app_text(AppTextKey::TradeWorkflowAxisFulfillment),
-            "Fulfillment"
-        );
-        assert_eq!(app_text(AppTextKey::TradeWorkflowAxisPayment), "Payment");
-        assert_eq!(app_text(AppTextKey::TradeWorkflowAxisReceipt), "Receipt");
         assert_eq!(app_text(AppTextKey::TradeWorkflowAxisSource), "Source");
         assert_eq!(
             app_text(AppTextKey::TradeWorkflowAgreementOrdered),
@@ -702,30 +667,8 @@ mod tests {
             "Kept as placed"
         );
         assert_eq!(
-            app_text(AppTextKey::TradeWorkflowFulfillmentReadyForPickup),
-            "Ready for pickup"
-        );
-        assert_eq!(
             app_text(AppTextKey::TradeWorkflowInventoryReserved),
             "Reserved"
-        );
-        assert_eq!(
-            app_text(AppTextKey::TradeWorkflowPaymentNotRecorded),
-            "Not recorded"
-        );
-        assert_eq!(app_text(AppTextKey::TradeWorkflowPaymentPending), "Pending");
-        assert_eq!(
-            app_text(AppTextKey::TradeWorkflowPaymentRecorded),
-            "Recorded"
-        );
-        assert_eq!(app_text(AppTextKey::TradeWorkflowPaymentSettled), "Settled");
-        assert_eq!(
-            app_text(AppTextKey::TradeWorkflowReceiptReceived),
-            "Received"
-        );
-        assert_eq!(
-            app_text(AppTextKey::TradeWorkflowReceiptNeedsReview),
-            "Needs review"
         );
         assert_eq!(app_text(AppTextKey::TradeWorkflowProvenanceCli), "CLI");
         assert_eq!(
@@ -734,20 +677,6 @@ mod tests {
         );
     }
 
-    #[test]
-    fn payment_workflow_copy_covers_passive_statuses() {
-        for (key, expected) in [
-            (AppTextKey::TradeWorkflowPaymentNotRecorded, "Not recorded"),
-            (AppTextKey::TradeWorkflowPaymentPending, "Pending"),
-            (AppTextKey::TradeWorkflowPaymentRecorded, "Recorded"),
-            (AppTextKey::TradeWorkflowPaymentSettled, "Settled"),
-            (AppTextKey::TradeWorkflowPaymentNeedsReview, "Needs review"),
-        ] {
-            assert_eq!(app_text(key), expected);
-        }
-    }
-
-    #[test]
     fn validation_receipt_copy_covers_passive_evidence() {
         for (key, expected) in [
             (AppTextKey::TradeValidationReceiptSectionLabel, "Validation"),
@@ -843,10 +772,6 @@ mod tests {
             "Declined"
         );
         assert_eq!(
-            app_text(AppTextKey::PersonalOrdersStatusRefunded),
-            "Refunded"
-        );
-        assert_eq!(
             app_text(AppTextKey::PersonalOrdersStatusNeedsReview),
             "Needs review"
         );
@@ -867,10 +792,6 @@ mod tests {
             "Order note"
         );
         assert_eq!(
-            app_text(AppTextKey::PersonalOrdersDetailReceiptLabel),
-            "Receipt"
-        );
-        assert_eq!(
             app_text(AppTextKey::PersonalOrdersActionCancel),
             "Cancel order"
         );
@@ -881,22 +802,6 @@ mod tests {
         assert_eq!(
             app_text(AppTextKey::PersonalOrdersActionKeepOrder),
             "Keep order"
-        );
-        assert_eq!(
-            app_text(AppTextKey::PersonalOrdersActionMarkReceived),
-            "Mark received"
-        );
-        assert_eq!(
-            app_text(AppTextKey::PersonalOrdersActionReportIssue),
-            "Report issue"
-        );
-        assert_eq!(
-            app_text(AppTextKey::PersonalOrdersActionSendReceiptIssue),
-            "Send update"
-        );
-        assert_eq!(
-            app_text(AppTextKey::PersonalOrdersReceiptIssuePlaceholder),
-            "What needs review"
         );
         assert_eq!(
             app_text(AppTextKey::PersonalOrdersRepeatDemandTitle),

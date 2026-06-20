@@ -2,12 +2,12 @@ use std::collections::BTreeMap;
 
 use radroots_studio_app_view::{
     FarmId, FulfillmentWindowId, FulfillmentWindowSummary, OrderDetailItemRow,
-    OrderDetailProjection, OrderFulfillmentAction, OrderId, OrderPrimaryAction, OrderStatus,
-    OrdersFilter, OrdersListProjection, OrdersListRow, OrdersListSummary, OrdersScreenQueryState,
+    OrderDetailProjection, OrderId, OrderPrimaryAction, OrderStatus, OrdersFilter,
+    OrdersListProjection, OrdersListRow, OrdersListSummary, OrdersScreenQueryState,
     PackDayOutputCustomerOrder, PackDayOutputOrderState, PackDayOutputPackListEntry,
     PackDayOutputProductTotal, PackDayOutputQuantity, PackDayOutputSource, PackDayOutputWindow,
     PackDayPackListRow, PackDayProductTotalRow, PackDayProjection, PackDayRosterRow,
-    PackDayScreenQueryState, ProductId, TradeFulfillmentStatus, TradeWorkflowProjection,
+    PackDayScreenQueryState, ProductId, TradeWorkflowProjection,
 };
 use rusqlite::{Connection, OptionalExtension, params};
 
@@ -80,13 +80,7 @@ impl<'a> AppOrdersRepository<'a> {
                     o.fulfillment_window_id,
                     o.workflow_revision,
                     o.workflow_agreement,
-                    o.workflow_fulfillment,
-                    o.workflow_receipt_event_id,
-                    o.workflow_receipt_received,
-                    o.workflow_receipt_issue,
-                    o.workflow_receipt_received_at,
                     o.workflow_inventory,
-                    o.workflow_payment,
                     o.workflow_provenance_source,
                     o.workflow_provenance_last_event_id,
                     fw.label,
@@ -107,17 +101,11 @@ impl<'a> AppOrdersRepository<'a> {
                         row.get::<_, Option<String>>(5)?,
                         row.get::<_, String>(6)?,
                         row.get::<_, String>(7)?,
-                        row.get::<_, Option<String>>(8)?,
-                        row.get::<_, Option<String>>(9)?,
-                        row.get::<_, Option<i64>>(10)?,
+                        row.get::<_, String>(8)?,
+                        row.get::<_, String>(9)?,
+                        row.get::<_, Option<String>>(10)?,
                         row.get::<_, Option<String>>(11)?,
-                        row.get::<_, Option<i64>>(12)?,
-                        row.get::<_, String>(13)?,
-                        row.get::<_, String>(14)?,
-                        row.get::<_, String>(15)?,
-                        row.get::<_, Option<String>>(16)?,
-                        row.get::<_, Option<String>>(17)?,
-                        row.get::<_, Option<String>>(18)?,
+                        row.get::<_, Option<String>>(12)?,
                     ))
                 },
             )
@@ -138,13 +126,7 @@ impl<'a> AppOrdersRepository<'a> {
                     fulfillment_window_id,
                     workflow_revision,
                     workflow_agreement,
-                    workflow_fulfillment,
-                    workflow_receipt_event_id,
-                    workflow_receipt_received,
-                    workflow_receipt_issue,
-                    workflow_receipt_received_at,
                     workflow_inventory,
-                    workflow_payment,
                     workflow_provenance_source,
                     workflow_provenance_last_event_id,
                     fulfillment_window_label,
@@ -163,17 +145,10 @@ impl<'a> AppOrdersRepository<'a> {
                             revision,
                             economics: economics.clone(),
                             agreement: workflow_agreement,
-                            fulfillment: workflow_fulfillment,
-                            receipt_event_id: workflow_receipt_event_id,
-                            receipt_received: workflow_receipt_received,
-                            receipt_issue: workflow_receipt_issue,
-                            receipt_received_at: workflow_receipt_received_at,
                             inventory: workflow_inventory,
-                            payment: workflow_payment,
                             provenance_source: workflow_provenance_source,
                             provenance_last_event_id: workflow_provenance_last_event_id,
                         })?;
-                    let payment = workflow.payment;
                     let validation_receipts = order_validation_receipts(self.connection, order_id)?;
                     Ok(OrderDetailProjection {
                         order_id,
@@ -189,10 +164,8 @@ impl<'a> AppOrdersRepository<'a> {
                         pickup_location_label: empty_string_to_none(pickup_location_label),
                         items,
                         economics,
-                        payment,
                         validation_receipts,
                         primary_action: primary_action_for_order(status, &workflow),
-                        fulfillment_actions: fulfillment_actions_for_order(status, &workflow),
                         workflow,
                         recoveries: Vec::new(),
                     })
@@ -315,13 +288,7 @@ impl<'a> AppOrdersRepository<'a> {
                     o.status,
                     o.workflow_revision,
                     o.workflow_agreement,
-                    o.workflow_fulfillment,
-                    o.workflow_receipt_event_id,
-                    o.workflow_receipt_received,
-                    o.workflow_receipt_issue,
-                    o.workflow_receipt_received_at,
                     o.workflow_inventory,
-                    o.workflow_payment,
                     o.workflow_provenance_source,
                     o.workflow_provenance_last_event_id,
                     fw.label,
@@ -353,17 +320,11 @@ impl<'a> AppOrdersRepository<'a> {
                         row.get::<_, String>(5)?,
                         row.get::<_, String>(6)?,
                         row.get::<_, String>(7)?,
-                        row.get::<_, Option<String>>(8)?,
-                        row.get::<_, Option<String>>(9)?,
-                        row.get::<_, Option<i64>>(10)?,
+                        row.get::<_, String>(8)?,
+                        row.get::<_, String>(9)?,
+                        row.get::<_, Option<String>>(10)?,
                         row.get::<_, Option<String>>(11)?,
-                        row.get::<_, Option<i64>>(12)?,
-                        row.get::<_, String>(13)?,
-                        row.get::<_, String>(14)?,
-                        row.get::<_, String>(15)?,
-                        row.get::<_, Option<String>>(16)?,
-                        row.get::<_, Option<String>>(17)?,
-                        row.get::<_, Option<String>>(18)?,
+                        row.get::<_, Option<String>>(12)?,
                     ))
                 },
             )
@@ -383,13 +344,7 @@ impl<'a> AppOrdersRepository<'a> {
                 status,
                 workflow_revision,
                 workflow_agreement,
-                workflow_fulfillment,
-                workflow_receipt_event_id,
-                workflow_receipt_received,
-                workflow_receipt_issue,
-                workflow_receipt_received_at,
                 workflow_inventory,
-                workflow_payment,
                 workflow_provenance_source,
                 workflow_provenance_last_event_id,
                 fulfillment_window_label,
@@ -410,13 +365,7 @@ impl<'a> AppOrdersRepository<'a> {
                 revision,
                 economics,
                 agreement: workflow_agreement,
-                fulfillment: workflow_fulfillment,
-                receipt_event_id: workflow_receipt_event_id,
-                receipt_received: workflow_receipt_received,
-                receipt_issue: workflow_receipt_issue,
-                receipt_received_at: workflow_receipt_received_at,
                 inventory: workflow_inventory,
-                payment: workflow_payment,
                 provenance_source: workflow_provenance_source,
                 provenance_last_event_id: workflow_provenance_last_event_id,
             })?;
@@ -1187,7 +1136,6 @@ impl OrderRecord {
             OrdersFilter::Scheduled => self.status == OrderStatus::Scheduled,
             OrdersFilter::Packed => self.status == OrderStatus::Packed,
             OrdersFilter::Completed => self.status == OrderStatus::Completed,
-            OrdersFilter::Refunded => self.status == OrderStatus::Refunded,
         }
     }
 
@@ -1202,7 +1150,6 @@ impl OrderRecord {
             pickup_location_label: self.pickup_location_label,
             status: self.status,
             primary_action: primary_action_for_order(self.status, &self.workflow),
-            fulfillment_actions: fulfillment_actions_for_order(self.status, &self.workflow),
             workflow: self.workflow,
         }
     }
@@ -1219,7 +1166,7 @@ fn summarize_orders(records: &[OrderRecord]) -> OrdersListSummary {
             OrderStatus::NeedsAction | OrderStatus::NeedsReview => summary.needs_action_orders += 1,
             OrderStatus::Scheduled => summary.scheduled_orders += 1,
             OrderStatus::Packed => summary.packed_orders += 1,
-            OrderStatus::Completed | OrderStatus::Declined | OrderStatus::Refunded => {}
+            OrderStatus::Completed | OrderStatus::Declined => {}
         }
     }
 
@@ -1228,42 +1175,15 @@ fn summarize_orders(records: &[OrderRecord]) -> OrdersListSummary {
 
 fn primary_action_for_order(
     status: OrderStatus,
-    workflow: &TradeWorkflowProjection,
+    _workflow: &TradeWorkflowProjection,
 ) -> Option<OrderPrimaryAction> {
     match status {
         OrderStatus::NeedsAction => Some(OrderPrimaryAction::Review),
-        OrderStatus::Scheduled | OrderStatus::Packed => match workflow.fulfillment {
-            None | Some(TradeFulfillmentStatus::Confirmed | TradeFulfillmentStatus::Preparing) => {
-                Some(OrderPrimaryAction::PublishPreparing)
-            }
-            Some(
-                TradeFulfillmentStatus::ReadyForPickup | TradeFulfillmentStatus::OutForDelivery,
-            ) => Some(OrderPrimaryAction::PublishDelivered),
-            Some(TradeFulfillmentStatus::Delivered | TradeFulfillmentStatus::Cancelled) => None,
-        },
-        OrderStatus::Completed
+        OrderStatus::Scheduled
+        | OrderStatus::Packed
+        | OrderStatus::Completed
         | OrderStatus::Declined
-        | OrderStatus::Refunded
         | OrderStatus::NeedsReview => None,
-    }
-}
-
-fn fulfillment_actions_for_order(
-    status: OrderStatus,
-    workflow: &TradeWorkflowProjection,
-) -> Vec<OrderFulfillmentAction> {
-    match (status, workflow.fulfillment) {
-        (
-            OrderStatus::Scheduled | OrderStatus::Packed,
-            None
-            | Some(
-                TradeFulfillmentStatus::Confirmed
-                | TradeFulfillmentStatus::Preparing
-                | TradeFulfillmentStatus::ReadyForPickup
-                | TradeFulfillmentStatus::OutForDelivery,
-            ),
-        ) => OrderFulfillmentAction::ALL.to_vec(),
-        _ => Vec::new(),
     }
 }
 
@@ -1321,7 +1241,6 @@ fn parse_order_status(field: &'static str, value: String) -> Result<OrderStatus,
         "packed" => Ok(OrderStatus::Packed),
         "completed" => Ok(OrderStatus::Completed),
         "declined" => Ok(OrderStatus::Declined),
-        "refunded" => Ok(OrderStatus::Refunded),
         "needs_review" => Ok(OrderStatus::NeedsReview),
         _ => Err(AppSqliteError::DecodeEnum { field, value }),
     }
@@ -1351,10 +1270,9 @@ fn empty_string_to_none(value: Option<String>) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use radroots_studio_app_view::{
-        FarmId, FulfillmentWindowId, OrderFulfillmentAction, OrderId, OrderPrimaryAction,
-        OrderStatus, OrdersFilter, OrdersScreenQueryState, PackDayOutputOrderState,
-        PackDayProductTotalRow, PackDayScreenQueryState, PickupLocationId, TradeAgreementStatus,
-        TradeFulfillmentStatus, TradeInventoryStatus, TradePaymentDisplayStatus,
+        FarmId, FulfillmentWindowId, OrderId, OrderPrimaryAction, OrderStatus, OrdersFilter,
+        OrdersScreenQueryState, PackDayOutputOrderState, PackDayProductTotalRow,
+        PackDayScreenQueryState, PickupLocationId, TradeAgreementStatus, TradeInventoryStatus,
         TradeRevisionStatus, TradeWorkflowSource,
     };
     use rusqlite::{Connection, params};
@@ -1453,7 +1371,7 @@ mod tests {
             None,
             "R-104",
             "Alex",
-            "refunded",
+            "needs_review",
             "2026-04-17T14:00:00Z",
         );
         insert_order(
@@ -1573,15 +1491,7 @@ mod tests {
         assert_eq!(detail.items[1].quantity_display, "1 bunch");
         assert_eq!(detail.economics.total_minor_units, Some(1950));
         assert_eq!(detail.economics.currency_code.as_deref(), Some("USD"));
-        assert_eq!(detail.payment, TradePaymentDisplayStatus::NotRecorded);
-        assert_eq!(
-            detail.primary_action,
-            Some(OrderPrimaryAction::PublishPreparing)
-        );
-        assert_eq!(
-            detail.fulfillment_actions,
-            OrderFulfillmentAction::ALL.to_vec()
-        );
+        assert_eq!(detail.primary_action, None);
     }
 
     #[test]
@@ -1693,9 +1603,7 @@ mod tests {
             connection,
             order_id,
             "confirmed",
-            Some("ready_for_pickup"),
             "reserved",
-            "recorded",
             "local_events",
             Some("seller-workflow-event"),
         );
@@ -1717,12 +1625,7 @@ mod tests {
 
         assert_eq!(workflow.agreement, TradeAgreementStatus::Confirmed);
         assert_eq!(workflow.revision, TradeRevisionStatus::Updated);
-        assert_eq!(
-            workflow.fulfillment,
-            Some(TradeFulfillmentStatus::ReadyForPickup)
-        );
         assert_eq!(workflow.inventory, TradeInventoryStatus::Reserved);
-        assert_eq!(workflow.payment, TradePaymentDisplayStatus::Recorded);
         assert_eq!(
             workflow.provenance.primary_source,
             TradeWorkflowSource::LocalEvents
@@ -1733,84 +1636,9 @@ mod tests {
         );
         assert_eq!(workflow.economics.total_minor_units, Some(1300));
         assert_eq!(workflow.economics.currency_code.as_deref(), Some("USD"));
-        assert_eq!(detail.payment, TradePaymentDisplayStatus::Recorded);
         assert_eq!(detail.workflow, *workflow);
-        assert_eq!(
-            list.rows[0].primary_action,
-            Some(OrderPrimaryAction::PublishDelivered)
-        );
-        assert_eq!(
-            list.rows[0].fulfillment_actions,
-            OrderFulfillmentAction::ALL.to_vec()
-        );
-        assert_eq!(
-            detail.primary_action,
-            Some(OrderPrimaryAction::PublishDelivered)
-        );
-        assert_eq!(
-            detail.fulfillment_actions,
-            OrderFulfillmentAction::ALL.to_vec()
-        );
-    }
-
-    #[test]
-    fn seller_delivered_workflow_exposes_no_duplicate_primary_action() {
-        let store = AppSqliteStore::open(DatabaseTarget::InMemory).expect("store should open");
-        let connection = store.connection();
-        let farm_id = FarmId::new();
-        let order_id = OrderId::new();
-
-        insert_farm(
-            connection,
-            farm_id,
-            "Willow farm",
-            "ready",
-            "2026-04-17T08:00:00Z",
-        );
-        insert_order(
-            connection,
-            order_id,
-            farm_id,
-            None,
-            "R-101",
-            "Casey",
-            "packed",
-            "2026-04-17T10:00:00Z",
-        );
-        set_order_workflow_display_projection(
-            connection,
-            order_id,
-            "confirmed",
-            Some("delivered"),
-            "reserved",
-            "not_recorded",
-            "local_events",
-            Some("seller-delivered-event"),
-        );
-
-        let list = store
-            .load_orders_list(
-                farm_id,
-                &OrdersScreenQueryState {
-                    filter: OrdersFilter::Packed,
-                    fulfillment_window_id: None,
-                },
-            )
-            .expect("seller list should load");
-        let detail = store
-            .load_order_detail(farm_id, order_id)
-            .expect("seller detail should load")
-            .expect("seller detail should exist");
-
-        assert_eq!(list.rows[0].status, OrderStatus::Packed);
-        assert_eq!(
-            list.rows[0].workflow.fulfillment,
-            Some(TradeFulfillmentStatus::Delivered)
-        );
         assert_eq!(list.rows[0].primary_action, None);
-        assert_eq!(list.rows[0].fulfillment_actions, Vec::new());
         assert_eq!(detail.primary_action, None);
-        assert_eq!(detail.fulfillment_actions, Vec::new());
     }
 
     #[test]
@@ -1841,18 +1669,14 @@ mod tests {
             connection,
             order_id,
             "confirmed",
-            Some("ready_for_pickup"),
             "reserved",
-            "recorded",
             "local_events",
             Some("seller-workflow-event"),
         );
 
         for (column, expected_field) in [
             ("workflow_agreement", "orders.workflow_agreement"),
-            ("workflow_fulfillment", "orders.workflow_fulfillment"),
             ("workflow_inventory", "orders.workflow_inventory"),
-            ("workflow_payment", "orders.workflow_payment"),
             (
                 "workflow_provenance_source",
                 "orders.workflow_provenance_source",
@@ -1862,9 +1686,7 @@ mod tests {
                 connection,
                 order_id,
                 "confirmed",
-                Some("ready_for_pickup"),
                 "reserved",
-                "recorded",
                 "local_events",
                 Some("seller-workflow-event"),
             );
@@ -2389,9 +2211,7 @@ mod tests {
         connection: &Connection,
         order_id: OrderId,
         agreement: &str,
-        fulfillment: Option<&str>,
         inventory: &str,
-        payment: &str,
         provenance_source: &str,
         provenance_last_event_id: Option<&str>,
     ) {
@@ -2399,17 +2219,13 @@ mod tests {
             .execute(
                 "update orders
                  set workflow_agreement = ?1,
-                     workflow_fulfillment = ?2,
-                     workflow_inventory = ?3,
-                     workflow_payment = ?4,
-                     workflow_provenance_source = ?5,
-                     workflow_provenance_last_event_id = ?6
-                 where id = ?7",
+                     workflow_inventory = ?2,
+                     workflow_provenance_source = ?3,
+                     workflow_provenance_last_event_id = ?4
+                 where id = ?5",
                 params![
                     agreement,
-                    fulfillment,
                     inventory,
-                    payment,
                     provenance_source,
                     provenance_last_event_id,
                     order_id.to_string(),
@@ -2429,9 +2245,7 @@ mod tests {
             .expect("check constraints should disable");
         let statement = match column {
             "workflow_agreement" => "update orders set workflow_agreement = ?1 where id = ?2",
-            "workflow_fulfillment" => "update orders set workflow_fulfillment = ?1 where id = ?2",
             "workflow_inventory" => "update orders set workflow_inventory = ?1 where id = ?2",
-            "workflow_payment" => "update orders set workflow_payment = ?1 where id = ?2",
             "workflow_provenance_source" => {
                 "update orders set workflow_provenance_source = ?1 where id = ?2"
             }

@@ -1149,9 +1149,23 @@ mod tests {
     }
 
     #[test]
-    fn workflow_payment_display_schema_accepts_pending_and_settled_states() {
+    fn order_workflow_schema_is_agreement_only() {
         let store = AppSqliteStore::open(DatabaseTarget::InMemory).expect("store should open");
         let connection = store.connection();
+        assert!(column_exists(connection, "orders", "workflow_agreement"));
+        assert!(column_exists(connection, "orders", "workflow_inventory"));
+        assert!(column_exists(
+            connection,
+            "orders",
+            "workflow_provenance_source"
+        ));
+        assert!(!column_exists(connection, "orders", "workflow_fulfillment"));
+        assert!(!column_exists(connection, "orders", "workflow_payment"));
+        assert!(!column_exists(
+            connection,
+            "orders",
+            "workflow_receipt_event_id"
+        ));
         connection
             .execute(
                 "INSERT INTO farms (id, display_name, readiness, created_at, updated_at)
@@ -1159,27 +1173,6 @@ mod tests {
                 params!["farm_schema"],
             )
             .expect("farm should insert");
-
-        for (order_id, workflow_payment) in [
-            ("order_payment_pending", "pending"),
-            ("order_payment_settled", "settled"),
-        ] {
-            connection
-                .execute(
-                    "INSERT INTO orders (
-                        id,
-                        farm_id,
-                        order_number,
-                        customer_display_name,
-                        status,
-                        updated_at,
-                        workflow_payment
-                     ) VALUES (?1, 'farm_schema', ?2, 'Buyer', 'scheduled', '2026-01-01T00:00:00Z', ?3)",
-                    params![order_id, order_id, workflow_payment],
-                )
-                .expect("expanded workflow payment state should insert");
-        }
-
         connection
             .execute(
                 "INSERT INTO orders (
@@ -1189,25 +1182,21 @@ mod tests {
                     customer_display_name,
                     status,
                     updated_at,
-                    workflow_receipt_event_id,
-                    workflow_receipt_received,
-                    workflow_receipt_issue,
-                    workflow_receipt_received_at
+                    workflow_agreement,
+                    workflow_inventory
                  ) VALUES (
-                    'order_issue_receipt',
+                    'order_needs_review',
                     'farm_schema',
-                    'issue receipt',
+                    'needs review',
                     'Buyer',
                     'needs_review',
                     '2026-01-01T00:00:00Z',
-                    'receipt-event-1',
-                    0,
-                    'items need review',
-                    1777665700
+                    'needs_review',
+                    'needs_review'
                  )",
                 [],
             )
-            .expect("receipt projection should insert");
+            .expect("agreement-only workflow projection should insert");
 
         let invalid_result = connection.execute(
             "INSERT INTO orders (
@@ -1217,37 +1206,11 @@ mod tests {
                 customer_display_name,
                 status,
                 updated_at,
-                workflow_payment
-             ) VALUES ('order_payment_invalid', 'farm_schema', 'invalid', 'Buyer', 'scheduled', '2026-01-01T00:00:00Z', 'collect')",
+                workflow_agreement
+             ) VALUES ('order_agreement_invalid', 'farm_schema', 'invalid', 'Buyer', 'scheduled', '2026-01-01T00:00:00Z', 'complete')",
             [],
         );
         assert!(invalid_result.is_err());
-
-        let invalid_receipt_result = connection.execute(
-            "INSERT INTO orders (
-                id,
-                farm_id,
-                order_number,
-                customer_display_name,
-                status,
-                updated_at,
-                workflow_receipt_event_id,
-                workflow_receipt_received,
-                workflow_receipt_received_at
-             ) VALUES (
-                'order_receipt_invalid',
-                'farm_schema',
-                'invalid receipt',
-                'Buyer',
-                'needs_review',
-                '2026-01-01T00:00:00Z',
-                'receipt-event-invalid',
-                2,
-                1777665700
-             )",
-            [],
-        );
-        assert!(invalid_receipt_result.is_err());
     }
 
     #[test]

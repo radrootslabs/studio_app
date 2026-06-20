@@ -29,8 +29,8 @@ use radroots_studio_app_state::{
     PackDayPrintRequest, derive_product_publish_blockers,
 };
 use radroots_studio_app_sync::{
-    AppOrderReceiptOutcome, AppSyncRunStatus, SyncAggregateRef, SyncCheckpointState, SyncConflict,
-    SyncConflictKind, SyncConflictResolutionStatus, SyncConflictSeverity,
+    AppSyncRunStatus, SyncAggregateRef, SyncCheckpointState, SyncConflict, SyncConflictKind,
+    SyncConflictResolutionStatus, SyncConflictSeverity,
 };
 use radroots_studio_app_ui::{
     APP_UI_THEME, AppCheckboxFieldSpec, AppFormFieldSpec, AppPillTabSpec,
@@ -68,8 +68,8 @@ use radroots_studio_app_view::{
     FarmProfileRecord, FarmReadinessBlocker, FarmRulesProjection, FarmRulesReadiness,
     FarmSetupBlocker, FarmSetupDraft, FarmSummary, FarmTimingConflictKind, FarmerSection,
     FulfillmentWindowId, FulfillmentWindowRecord, FulfillmentWindowSummary, LoggedOutStartupPhase,
-    OrderDetailItemRow, OrderDetailProjection, OrderFulfillmentAction, OrderId, OrderListRow,
-    OrderPrimaryAction, OrderRecoveryProjection, OrderStatus, OrdersFilter, OrdersListRow,
+    OrderDetailItemRow, OrderDetailProjection, OrderId, OrderListRow, OrderPrimaryAction,
+    OrderRecoveryProjection, OrderStatus, OrdersFilter, OrdersListRow,
     PackDayBatchPrintFailureKind, PackDayBatchPrintStatus, PackDayExportBundle,
     PackDayExportStatus, PackDayHostHandoffKind, PackDayHostHandoffStatus, PackDayPackListRow,
     PackDayPrintFailureKind, PackDayPrintKind, PackDayPrintStatus, PackDayProductTotalRow,
@@ -80,8 +80,7 @@ use radroots_studio_app_view::{
     ReminderLogEntryProjection, ReminderLogProjection, ReminderSurface, ReminderUrgency,
     RepeatDemandEligibility, RepeatDemandHandoffProjection, SettingsAccountProjection,
     ShellSection, TodayAgendaProjection, TodaySetupTaskKind, TradeAgreementStatus,
-    TradeEconomicsProjection, TradeFulfillmentStatus, TradeInventoryStatus,
-    TradePaymentDisplayStatus, TradeReceiptProjection, TradeRevisionStatus,
+    TradeEconomicsProjection, TradeInventoryStatus, TradeRevisionStatus,
     TradeValidationReceiptProjection, TradeValidationReceiptResult, TradeValidationReceiptType,
     TradeWorkflowProjection, TradeWorkflowSource,
 };
@@ -176,7 +175,6 @@ enum HomeFocusedView {
     BuyerProductDetail(PersonalSection),
     BuyerOrderReview,
     BuyerOrderDetail(OrderId),
-    BuyerReceiptIssue(OrderId),
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -801,13 +799,6 @@ fn farmer_order_detail_focus_after_open(
     }
 }
 
-fn buyer_receipt_issue_focus_after_submit(
-    runtime_changed: bool,
-    order_id: OrderId,
-) -> Option<HomeFocusedView> {
-    runtime_changed.then_some(HomeFocusedView::BuyerOrderDetail(order_id))
-}
-
 pub fn home_window_options(cx: &mut App) -> WindowOptions {
     let (launch_width_px, launch_height_px) = home_window_launch_size_px();
     let (minimum_width_px, minimum_height_px) = home_window_minimum_size_px();
@@ -885,7 +876,6 @@ pub struct HomeView {
     farm_setup_form: Option<FarmSetupFormState>,
     personal_search: Option<PersonalSearchState>,
     buyer_order_review_form: Option<BuyerOrderReviewFormState>,
-    buyer_receipt_issue_form: Option<BuyerReceiptIssueFormState>,
     products_search: Option<ProductsSearchState>,
     products_stock_editor: Option<ProductsStockEditorState>,
     product_editor_form: Option<ProductEditorFormState>,
@@ -937,7 +927,6 @@ struct HomeAutoFocusState {
     has_farm_setup_form: bool,
     has_personal_search_input: bool,
     has_buyer_order_review_form: bool,
-    has_buyer_receipt_issue_form: bool,
     has_products_search_input: bool,
     has_products_stock_editor: bool,
     has_product_editor_form: bool,
@@ -954,7 +943,6 @@ enum HomeAutoFocusTarget {
     BuyerDetailBack,
     BuyerCartOpenOrderReview,
     BuyerOrderReviewNameInput,
-    BuyerReceiptIssueInput,
     BuyerOrderOpenFirst,
     BuyerOrderConfirmReplace,
     BuyerOrderRepeatDemand,
@@ -973,7 +961,6 @@ enum HomeAutoFocusTarget {
     ProductsStockInput,
     ProductEditorTitleInput,
     OrdersRowOpenFirst,
-    OrdersDetailPublishFulfillmentFirst,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -1011,7 +998,6 @@ impl HomeView {
             farm_setup_form: None,
             personal_search: None,
             buyer_order_review_form: None,
-            buyer_receipt_issue_form: None,
             products_search: None,
             products_stock_editor: None,
             product_editor_form: None,
@@ -1037,7 +1023,6 @@ impl HomeView {
             has_farm_setup_form: self.farm_setup_form.is_some(),
             has_personal_search_input: self.personal_search.is_some(),
             has_buyer_order_review_form: self.buyer_order_review_form.is_some(),
-            has_buyer_receipt_issue_form: self.buyer_receipt_issue_form.is_some(),
             has_products_search_input: self.products_search.is_some(),
             has_products_stock_editor: self.products_stock_editor.is_some(),
             has_product_editor_form: self.product_editor_form.is_some(),
@@ -1110,12 +1095,6 @@ impl HomeView {
                             .update(cx, |input, cx| input.focus(window, cx));
                     }
                 }
-                HomeAutoFocusTarget::BuyerReceiptIssueInput => {
-                    if let Some(form) = self.buyer_receipt_issue_form.as_ref() {
-                        form.issue_input
-                            .update(cx, |input, cx| input.focus(window, cx));
-                    }
-                }
                 HomeAutoFocusTarget::BuyerOrderOpenFirst => {
                     focus_button(window, ("buyer-order-open", 0_usize), cx);
                 }
@@ -1179,9 +1158,6 @@ impl HomeView {
                 }
                 HomeAutoFocusTarget::OrdersRowOpenFirst => {
                     focus_button(window, ("orders-row-open", 0_usize), cx);
-                }
-                HomeAutoFocusTarget::OrdersDetailPublishFulfillmentFirst => {
-                    focus_button(window, "orders-detail-publish-preparing", cx);
                 }
             }
         }
@@ -1778,28 +1754,6 @@ impl HomeView {
         }
     }
 
-    fn sync_buyer_receipt_issue_form(&mut self, runtime_summary: &DesktopAppRuntimeSummary) {
-        let Some(form) = self.buyer_receipt_issue_form.as_ref() else {
-            return;
-        };
-
-        if home_stage(runtime_summary) != HomeStage::BuyerWorkspace
-            || selected_personal_section(runtime_summary) != PersonalSection::Orders
-        {
-            self.buyer_receipt_issue_form = None;
-            return;
-        }
-
-        let Some(detail) = runtime_summary.personal_projection.orders.detail.as_ref() else {
-            self.buyer_receipt_issue_form = None;
-            return;
-        };
-
-        if detail.order_id != form.order_id || !buyer_receipt_actions_available(detail) {
-            self.buyer_receipt_issue_form = None;
-        }
-    }
-
     fn sync_products_stock_editor(&mut self, runtime_summary: &DesktopAppRuntimeSummary) {
         let Some(editor) = self.products_stock_editor.as_ref() else {
             return;
@@ -2138,25 +2092,6 @@ impl HomeView {
         }
     }
 
-    fn handle_buyer_receipt_issue_input_event(
-        &mut self,
-        state: &Entity<InputState>,
-        event: &InputEvent,
-        _: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        if !matches!(event, InputEvent::Change) {
-            return;
-        }
-
-        let Some(form) = self.buyer_receipt_issue_form.as_ref() else {
-            return;
-        };
-        if form.issue_input == *state {
-            cx.notify();
-        }
-    }
-
     fn toggle_personal_search_fulfillment_method(
         &mut self,
         method: FarmOrderMethod,
@@ -2418,13 +2353,6 @@ impl HomeView {
                 ) else {
                     return;
                 };
-                if self
-                    .buyer_receipt_issue_form
-                    .as_ref()
-                    .is_some_and(|form| form.order_id != order_id)
-                {
-                    self.buyer_receipt_issue_form = None;
-                }
                 self.focused_view = Some(focused_view);
                 cx.notify();
             }
@@ -2937,31 +2865,6 @@ impl HomeView {
         }
     }
 
-    fn publish_order_fulfillment_update(
-        &mut self,
-        order_id: OrderId,
-        action: OrderFulfillmentAction,
-        cx: &mut Context<Self>,
-    ) {
-        match self
-            .runtime
-            .publish_order_fulfillment_update(order_id, action)
-        {
-            Ok(true) => cx.notify(),
-            Ok(false) => {}
-            Err(runtime_error) => {
-                error!(
-                    target: "orders",
-                    event = "orders.fulfillment_publish_failed",
-                    error = %runtime_error,
-                    order_id = %order_id,
-                    fulfillment_state = action.storage_key(),
-                    "failed to publish order fulfillment update"
-                );
-            }
-        }
-    }
-
     fn cancel_buyer_order(&mut self, order_id: OrderId, cx: &mut Context<Self>) {
         match self.runtime.publish_buyer_order_cancel(order_id) {
             Ok(true) => cx.notify(),
@@ -3005,98 +2908,6 @@ impl HomeView {
                     error = %runtime_error,
                     order_id = %order_id,
                     "failed to keep buyer order"
-                );
-            }
-        }
-    }
-
-    fn open_buyer_receipt_issue_form(
-        &mut self,
-        order_id: OrderId,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        self.buyer_receipt_issue_form = Some(BuyerReceiptIssueFormState::new(order_id, window, cx));
-        self.focused_view = Some(HomeFocusedView::BuyerReceiptIssue(order_id));
-        cx.notify();
-    }
-
-    fn close_buyer_receipt_issue_form(&mut self, cx: &mut Context<Self>) {
-        let order_id = self
-            .buyer_receipt_issue_form
-            .as_ref()
-            .map(|form| form.order_id);
-        let cleared = self.buyer_receipt_issue_form.take().is_some();
-        let focus_changed = order_id
-            .map(|order_id| {
-                self.clear_focused_view_matching(HomeFocusedView::BuyerReceiptIssue(order_id))
-            })
-            .unwrap_or(false);
-        if focus_changed {
-            if let Some(order_id) = order_id {
-                self.focused_view = Some(HomeFocusedView::BuyerOrderDetail(order_id));
-            }
-        }
-        if cleared || focus_changed {
-            cx.notify();
-        }
-    }
-
-    fn mark_buyer_order_received(&mut self, order_id: OrderId, cx: &mut Context<Self>) {
-        match self
-            .runtime
-            .publish_buyer_order_receipt(order_id, AppOrderReceiptOutcome::Received)
-        {
-            Ok(true) => {
-                if self
-                    .buyer_receipt_issue_form
-                    .as_ref()
-                    .is_some_and(|form| form.order_id == order_id)
-                {
-                    self.buyer_receipt_issue_form = None;
-                }
-                cx.notify();
-            }
-            Ok(false) => {}
-            Err(runtime_error) => {
-                error!(
-                    target: "personal_orders",
-                    event = "buyer.order_receipt_failed",
-                    error = %runtime_error,
-                    order_id = %order_id,
-                    "failed to mark buyer order received"
-                );
-            }
-        }
-    }
-
-    fn submit_buyer_order_issue_receipt(&mut self, order_id: OrderId, cx: &mut Context<Self>) {
-        let Some(issue) = self
-            .buyer_receipt_issue_form
-            .as_ref()
-            .filter(|form| form.order_id == order_id)
-            .and_then(|form| AppOrderReceiptOutcome::issue(form.issue_text(cx)))
-        else {
-            return;
-        };
-
-        match self.runtime.publish_buyer_order_receipt(order_id, issue) {
-            Ok(runtime_changed) => {
-                if let Some(focused_view) =
-                    buyer_receipt_issue_focus_after_submit(runtime_changed, order_id)
-                {
-                    self.buyer_receipt_issue_form = None;
-                    self.focused_view = Some(focused_view);
-                    cx.notify();
-                }
-            }
-            Err(runtime_error) => {
-                error!(
-                    target: "personal_orders",
-                    event = "buyer.order_issue_receipt_failed",
-                    error = %runtime_error,
-                    order_id = %order_id,
-                    "failed to report buyer order issue"
                 );
             }
         }
@@ -3911,7 +3722,6 @@ impl HomeView {
                 Some(
                     buyer_order_detail_card(
                         detail,
-                        None,
                         runtime
                             .personal_projection
                             .cart
@@ -3925,19 +3735,6 @@ impl HomeView {
                     )
                     .into_any_element(),
                 )
-            }
-            HomeFocusedView::BuyerReceiptIssue(order_id) => {
-                let detail = runtime
-                    .personal_projection
-                    .orders
-                    .detail
-                    .as_ref()
-                    .filter(|detail| detail.order_id == order_id)?;
-                let issue_form = self
-                    .buyer_receipt_issue_form
-                    .as_ref()
-                    .filter(|form| form.order_id == order_id)?;
-                Some(buyer_receipt_issue_focused_view(detail, issue_form, cx))
             }
             HomeFocusedView::FarmSetup
             | HomeFocusedView::ProductEditor
@@ -4311,8 +4108,7 @@ impl HomeView {
             }
             HomeFocusedView::BuyerProductDetail(_)
             | HomeFocusedView::BuyerOrderReview
-            | HomeFocusedView::BuyerOrderDetail(_)
-            | HomeFocusedView::BuyerReceiptIssue(_) => None,
+            | HomeFocusedView::BuyerOrderDetail(_) => None,
         }
     }
 
@@ -4474,15 +4270,6 @@ impl HomeView {
                         projection.query.filter == OrdersFilter::Completed,
                         cx.listener(|this, _, _, cx| {
                             this.select_orders_filter(OrdersFilter::Completed, cx)
-                        }),
-                        cx,
-                    ))
-                    .child(choice_button(
-                        "orders-filter-refunded",
-                        app_shared_text(AppTextKey::OrdersStatusRefunded),
-                        projection.query.filter == OrdersFilter::Refunded,
-                        cx.listener(|this, _, _, cx| {
-                            this.select_orders_filter(OrdersFilter::Refunded, cx)
                         }),
                         cx,
                     )),
@@ -5094,33 +4881,6 @@ impl HomeView {
         on_close: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let fulfillment_actions = (!detail.fulfillment_actions.is_empty()).then(|| {
-            app_form_section(
-                app_shared_text(AppTextKey::TradeWorkflowAxisFulfillment),
-                app_cluster(APP_UI_THEME.foundation.spacing.tight_px).children(
-                    detail
-                        .fulfillment_actions
-                        .iter()
-                        .copied()
-                        .map(|action| {
-                            action_button_compact(
-                                order_detail_fulfillment_action_id(action),
-                                app_shared_text(order_fulfillment_action_label_key(action)),
-                                cx.listener({
-                                    let order_id = detail.order_id;
-                                    move |this, _, _, cx| {
-                                        this.publish_order_fulfillment_update(order_id, action, cx)
-                                    }
-                                }),
-                                cx,
-                            )
-                            .into_any_element()
-                        })
-                        .collect::<Vec<_>>(),
-                ),
-            )
-        });
-
         app_focused_detail_view(
             app_shared_text(AppTextKey::OrdersDetailTitle),
             app_stack_v(APP_UI_THEME.shells.home_stack_gap_px)
@@ -5169,10 +4929,7 @@ impl HomeView {
                             this.child(home_body_text(app_shared_text(AppTextKey::ValueNone)))
                         }),
                 ))
-                .child(self.render_order_recovery_section(detail, cx))
-                .when_some(fulfillment_actions, |this, fulfillment_actions| {
-                    this.child(fulfillment_actions)
-                }),
+                .child(self.render_order_recovery_section(detail, cx)),
             text_button(
                 "orders-detail-back",
                 app_shared_text(AppTextKey::PersonalDetailBackAction),
@@ -5202,17 +4959,6 @@ impl HomeView {
                             .recoveries
                             .iter()
                             .find(|record| record.kind == RecoveryKind::MissedPickup),
-                        cx,
-                    ),
-                )
-                .child(
-                    self.render_order_recovery_card(
-                        detail.order_id,
-                        RecoveryKind::RefundFollowUp,
-                        detail
-                            .recoveries
-                            .iter()
-                            .find(|record| record.kind == RecoveryKind::RefundFollowUp),
                         cx,
                     ),
                 ),
@@ -5484,17 +5230,6 @@ impl HomeView {
                 let order_id = row.order_id;
                 move |this, _, _, cx| this.open_order_detail(order_id, cx)
             }),
-            cx.listener({
-                let order_id = row.order_id;
-                let action = row
-                    .primary_action
-                    .and_then(OrderPrimaryAction::fulfillment_action);
-                move |this, _, _, cx| {
-                    if let Some(action) = action {
-                        this.publish_order_fulfillment_update(order_id, action, cx);
-                    }
-                }
-            }),
             cx,
         );
 
@@ -5512,7 +5247,6 @@ impl Render for HomeView {
         self.sync_farm_setup_form(&runtime_summary, window, cx);
         self.sync_personal_search(&runtime_summary, window, cx);
         self.sync_buyer_order_review_form(&runtime_summary, window, cx);
-        self.sync_buyer_receipt_issue_form(&runtime_summary);
         self.sync_products_search(&runtime_summary, window, cx);
         self.sync_products_stock_editor(&runtime_summary);
         self.sync_product_editor_form(&runtime_summary, window, cx);
@@ -5980,43 +5714,6 @@ fn sync_order_review_input(
     input.update(cx, |input, cx| {
         input.set_value(value.to_owned(), window, cx);
     });
-}
-
-struct BuyerReceiptIssueFormState {
-    order_id: OrderId,
-    issue_input: Entity<InputState>,
-    _issue_subscription: Subscription,
-}
-
-impl BuyerReceiptIssueFormState {
-    fn new(order_id: OrderId, window: &mut Window, cx: &mut Context<HomeView>) -> Self {
-        let issue_input = cx.new(|cx| {
-            InputState::new(window, cx)
-                .placeholder(app_shared_text(
-                    AppTextKey::PersonalOrdersReceiptIssuePlaceholder,
-                ))
-                .default_value(String::new())
-        });
-        let issue_subscription = cx.subscribe_in(
-            &issue_input,
-            window,
-            HomeView::handle_buyer_receipt_issue_input_event,
-        );
-
-        Self {
-            order_id,
-            issue_input,
-            _issue_subscription: issue_subscription,
-        }
-    }
-
-    fn issue_text(&self, cx: &App) -> String {
-        self.issue_input.read(cx).value().trim().to_owned()
-    }
-
-    fn can_submit(&self, cx: &App) -> bool {
-        !self.issue_text(cx).is_empty()
-    }
 }
 
 struct ProductsSearchState {
@@ -9363,9 +9060,7 @@ fn buyer_auto_focus_target(
                     .is_some_and(|confirmation| {
                         confirmation.incoming_farm_display_name == detail.farm_display_name
                     });
-                if state.has_buyer_receipt_issue_form {
-                    Some(HomeAutoFocusTarget::BuyerReceiptIssueInput)
-                } else if replace_confirmation {
+                if replace_confirmation {
                     Some(HomeAutoFocusTarget::BuyerOrderConfirmReplace)
                 } else if detail.repeat_demand.as_ref().is_some_and(|repeat_demand| {
                     repeat_demand.eligibility != RepeatDemandEligibility::Unavailable
@@ -9412,15 +9107,7 @@ fn farmer_auto_focus_target(
             }
         }
         FarmerSection::Orders if farmer_products_available(runtime) => {
-            if let Some(detail) = runtime.orders_projection.detail.as_ref() {
-                if !detail.fulfillment_actions.is_empty() {
-                    Some(HomeAutoFocusTarget::OrdersDetailPublishFulfillmentFirst)
-                } else if !runtime.orders_projection.list.rows.is_empty() {
-                    Some(HomeAutoFocusTarget::OrdersRowOpenFirst)
-                } else {
-                    None
-                }
-            } else if !runtime.orders_projection.list.rows.is_empty() {
+            if !runtime.orders_projection.list.rows.is_empty() {
                 Some(HomeAutoFocusTarget::OrdersRowOpenFirst)
             } else {
                 None
@@ -12183,26 +11870,9 @@ fn trade_workflow_detail_badge_strip(workflow: &TradeWorkflowProjection) -> AnyE
         ),
     ];
 
-    if let Some(fulfillment) = workflow.fulfillment {
-        badges.push(trade_workflow_labeled_key_badge(
-            AppTextKey::TradeWorkflowAxisFulfillment,
-            trade_fulfillment_status_key(fulfillment),
-        ));
-    }
-    if let Some(receipt) = workflow.receipt.as_ref() {
-        badges.push(trade_workflow_labeled_key_badge(
-            AppTextKey::TradeWorkflowAxisReceipt,
-            buyer_receipt_status_key(receipt),
-        ));
-    }
-
     badges.push(trade_workflow_labeled_key_badge(
         AppTextKey::TradeWorkflowAxisInventory,
         trade_inventory_status_key(workflow.inventory),
-    ));
-    badges.push(trade_workflow_labeled_key_badge(
-        AppTextKey::TradeWorkflowAxisPayment,
-        trade_payment_display_status_key(workflow.payment),
     ));
     if workflow.provenance.primary_source != TradeWorkflowSource::Unknown {
         badges.push(trade_workflow_labeled_key_badge(
@@ -12228,21 +11898,9 @@ fn trade_workflow_list_badge_strip(workflow: &TradeWorkflowProjection) -> AnyEle
         )));
     }
 
-    if let Some(fulfillment) = workflow.fulfillment {
-        badges.push(trade_workflow_value_badge(trade_fulfillment_status_key(
-            fulfillment,
-        )));
-    }
-    if let Some(receipt) = workflow.receipt.as_ref() {
-        badges.push(trade_workflow_value_badge(buyer_receipt_status_key(
-            receipt,
-        )));
-    }
-
-    badges.push(trade_workflow_labeled_key_badge(
-        AppTextKey::TradeWorkflowAxisPayment,
-        trade_payment_display_status_key(workflow.payment),
-    ));
+    badges.push(trade_workflow_value_badge(trade_inventory_status_key(
+        workflow.inventory,
+    )));
 
     app_cluster(APP_UI_THEME.foundation.spacing.tight_px)
         .w_full()
@@ -12256,16 +11914,9 @@ fn trade_workflow_status_stack(workflow: &TradeWorkflowProjection) -> AnyElement
         .child(trade_workflow_value_badge(trade_agreement_status_key(
             workflow.agreement,
         )))
-        .when_some(workflow.fulfillment, |this, fulfillment| {
-            this.child(trade_workflow_value_badge(trade_fulfillment_status_key(
-                fulfillment,
-            )))
-        })
-        .when_some(workflow.receipt.as_ref(), |this, receipt| {
-            this.child(trade_workflow_value_badge(buyer_receipt_status_key(
-                receipt,
-            )))
-        })
+        .child(trade_workflow_value_badge(trade_inventory_status_key(
+            workflow.inventory,
+        )))
         .into_any_element()
 }
 
@@ -12284,7 +11935,6 @@ fn trade_agreement_status_key(status: TradeAgreementStatus) -> AppTextKey {
         TradeAgreementStatus::Confirmed => AppTextKey::TradeWorkflowAgreementConfirmed,
         TradeAgreementStatus::Declined => AppTextKey::TradeWorkflowAgreementDeclined,
         TradeAgreementStatus::Cancelled => AppTextKey::TradeWorkflowAgreementCancelled,
-        TradeAgreementStatus::Completed => AppTextKey::TradeWorkflowAgreementCompleted,
         TradeAgreementStatus::NeedsReview => AppTextKey::TradeWorkflowAgreementNeedsReview,
     }
 }
@@ -12298,37 +11948,12 @@ fn trade_revision_status_key(status: TradeRevisionStatus) -> AppTextKey {
     }
 }
 
-fn trade_fulfillment_status_key(status: TradeFulfillmentStatus) -> AppTextKey {
-    match status {
-        TradeFulfillmentStatus::Confirmed => AppTextKey::TradeWorkflowFulfillmentConfirmed,
-        TradeFulfillmentStatus::Preparing => AppTextKey::TradeWorkflowFulfillmentPreparing,
-        TradeFulfillmentStatus::ReadyForPickup => {
-            AppTextKey::TradeWorkflowFulfillmentReadyForPickup
-        }
-        TradeFulfillmentStatus::OutForDelivery => {
-            AppTextKey::TradeWorkflowFulfillmentOutForDelivery
-        }
-        TradeFulfillmentStatus::Delivered => AppTextKey::TradeWorkflowFulfillmentDelivered,
-        TradeFulfillmentStatus::Cancelled => AppTextKey::TradeWorkflowFulfillmentCancelled,
-    }
-}
-
 fn trade_inventory_status_key(status: TradeInventoryStatus) -> AppTextKey {
     match status {
         TradeInventoryStatus::Available => AppTextKey::TradeWorkflowInventoryAvailable,
         TradeInventoryStatus::Reserved => AppTextKey::TradeWorkflowInventoryReserved,
         TradeInventoryStatus::SoldOut => AppTextKey::TradeWorkflowInventorySoldOut,
         TradeInventoryStatus::NeedsReview => AppTextKey::TradeWorkflowInventoryNeedsReview,
-    }
-}
-
-fn trade_payment_display_status_key(status: TradePaymentDisplayStatus) -> AppTextKey {
-    match status {
-        TradePaymentDisplayStatus::NotRecorded => AppTextKey::TradeWorkflowPaymentNotRecorded,
-        TradePaymentDisplayStatus::Pending => AppTextKey::TradeWorkflowPaymentPending,
-        TradePaymentDisplayStatus::Recorded => AppTextKey::TradeWorkflowPaymentRecorded,
-        TradePaymentDisplayStatus::Settled => AppTextKey::TradeWorkflowPaymentSettled,
-        TradePaymentDisplayStatus::NeedsReview => AppTextKey::TradeWorkflowPaymentNeedsReview,
     }
 }
 
@@ -12457,7 +12082,6 @@ fn buyer_orders_list_entry(
 
 fn buyer_order_detail_card(
     detail: &BuyerOrderDetailProjection,
-    issue_form: Option<&BuyerReceiptIssueFormState>,
     replace_confirmation: Option<&BuyerCartReplaceConfirmationProjection>,
     on_close: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
     cx: &mut Context<HomeView>,
@@ -12490,9 +12114,6 @@ fn buyer_order_detail_card(
                     order_optional_text(detail.order_note.as_deref()),
                 ),
             ]))
-            .when_some(detail.workflow.receipt.as_ref(), |this, receipt| {
-                this.child(buyer_receipt_summary_section(receipt))
-            })
             .when(!detail.validation_receipts.is_empty(), |this| {
                 this.child(validation_receipts_summary_section(
                     &detail.validation_receipts,
@@ -12548,57 +12169,16 @@ fn buyer_order_detail_card(
                     )
                 },
             )
-            .when(
-                matches!(
-                    detail.status,
-                    BuyerOrderStatus::Placed | BuyerOrderStatus::Scheduled
-                ),
-                |this| {
-                    this.child(action_button_compact(
-                        "buyer-order-cancel",
-                        app_shared_text(AppTextKey::PersonalOrdersActionCancel),
-                        cx.listener({
-                            let order_id = detail.order_id;
-                            move |this, _, _, cx| this.cancel_buyer_order(order_id, cx)
-                        }),
-                        cx,
-                    ))
-                },
-            )
-            .when(buyer_receipt_actions_available(detail), |this| {
-                this.child(
-                    app_stack_v(APP_UI_THEME.foundation.spacing.small_px)
-                        .w_full()
-                        .child(
-                            app_cluster(APP_UI_THEME.foundation.spacing.small_px)
-                                .w_full()
-                                .child(action_button_primary(
-                                    "buyer-order-mark-received",
-                                    app_shared_text(AppTextKey::PersonalOrdersActionMarkReceived),
-                                    cx.listener({
-                                        let order_id = detail.order_id;
-                                        move |this, _, _, cx| {
-                                            this.mark_buyer_order_received(order_id, cx)
-                                        }
-                                    }),
-                                    cx,
-                                ))
-                                .child(action_button_compact(
-                                    "buyer-order-report-issue",
-                                    app_shared_text(AppTextKey::PersonalOrdersActionReportIssue),
-                                    cx.listener({
-                                        let order_id = detail.order_id;
-                                        move |this, _, window, cx| {
-                                            this.open_buyer_receipt_issue_form(order_id, window, cx)
-                                        }
-                                    }),
-                                    cx,
-                                )),
-                        )
-                        .when_some(issue_form, |this, form| {
-                            this.child(buyer_receipt_issue_form_section(form, cx))
-                        }),
-                )
+            .when(detail.status == BuyerOrderStatus::Placed, |this| {
+                this.child(action_button_compact(
+                    "buyer-order-cancel",
+                    app_shared_text(AppTextKey::PersonalOrdersActionCancel),
+                    cx.listener({
+                        let order_id = detail.order_id;
+                        move |this, _, _, cx| this.cancel_buyer_order(order_id, cx)
+                    }),
+                    cx,
+                ))
             })
             .when_some(detail.repeat_demand.as_ref(), |this, repeat_demand| {
                 this.child(app_form_section(
@@ -12684,21 +12264,6 @@ fn buyer_order_detail_card(
     )
 }
 
-fn buyer_receipt_summary_section(receipt: &TradeReceiptProjection) -> AnyElement {
-    app_form_section(
-        app_shared_text(AppTextKey::PersonalOrdersDetailReceiptLabel),
-        app_stack_v(APP_UI_THEME.foundation.spacing.small_px)
-            .w_full()
-            .child(trade_workflow_value_badge(buyer_receipt_status_key(
-                receipt,
-            )))
-            .when_some(receipt.issue.as_ref(), |this, issue| {
-                this.child(home_body_text(issue.clone()))
-            }),
-    )
-    .into_any_element()
-}
-
 fn validation_receipts_summary_section(
     receipts: &[TradeValidationReceiptProjection],
 ) -> AnyElement {
@@ -12738,120 +12303,6 @@ fn validation_receipt_summary_panel(receipt: &TradeValidationReceiptProjection) 
             ))),
     )
     .into_any_element()
-}
-
-fn buyer_receipt_issue_form_section(
-    form: &BuyerReceiptIssueFormState,
-    cx: &mut Context<HomeView>,
-) -> AnyElement {
-    let order_id = form.order_id;
-    let submit_action = if form.can_submit(cx) {
-        action_button_primary(
-            "buyer-order-send-issue",
-            app_shared_text(AppTextKey::PersonalOrdersActionSendReceiptIssue),
-            cx.listener(move |this, _, _, cx| this.submit_buyer_order_issue_receipt(order_id, cx)),
-            cx,
-        )
-        .into_any_element()
-    } else {
-        action_button_primary_disabled(
-            "buyer-order-send-issue",
-            app_shared_text(AppTextKey::PersonalOrdersActionSendReceiptIssue),
-            cx,
-        )
-        .into_any_element()
-    };
-
-    app_form_section(
-        app_shared_text(AppTextKey::PersonalOrdersDetailReceiptLabel),
-        app_stack_v(APP_UI_THEME.foundation.spacing.small_px)
-            .w_full()
-            .child(app_form_input_text(
-                AppFormFieldSpec::new(
-                    app_shared_text(AppTextKey::PersonalOrdersReceiptIssueLabel),
-                    Option::<SharedString>::None,
-                ),
-                &form.issue_input,
-                false,
-            ))
-            .child(
-                app_cluster(APP_UI_THEME.foundation.spacing.small_px)
-                    .w_full()
-                    .child(submit_action)
-                    .child(action_button_compact(
-                        "buyer-order-close-issue",
-                        app_shared_text(AppTextKey::PersonalOrdersActionCloseReceiptIssue),
-                        cx.listener(|this, _, _, cx| this.close_buyer_receipt_issue_form(cx)),
-                        cx,
-                    )),
-            ),
-    )
-    .into_any_element()
-}
-
-fn buyer_receipt_issue_focused_view(
-    detail: &BuyerOrderDetailProjection,
-    form: &BuyerReceiptIssueFormState,
-    cx: &mut Context<HomeView>,
-) -> AnyElement {
-    let order_id = form.order_id;
-    let submit_action = if form.can_submit(cx) {
-        action_button_primary(
-            "buyer-order-send-issue",
-            app_shared_text(AppTextKey::PersonalOrdersActionSendReceiptIssue),
-            cx.listener(move |this, _, _, cx| this.submit_buyer_order_issue_receipt(order_id, cx)),
-            cx,
-        )
-        .into_any_element()
-    } else {
-        action_button_primary_disabled(
-            "buyer-order-send-issue",
-            app_shared_text(AppTextKey::PersonalOrdersActionSendReceiptIssue),
-            cx,
-        )
-        .into_any_element()
-    };
-
-    app_focused_task_view(
-        app_shared_text(AppTextKey::PersonalOrdersActionReportIssue),
-        app_stack_v(APP_UI_THEME.shells.home_stack_gap_px)
-            .w_full()
-            .child(app_heading_section(detail.order_number.clone()))
-            .child(settings_badge_text(detail.farm_display_name.clone()))
-            .child(home_body_text(detail.fulfillment_summary.clone()))
-            .child(app_form_input_text(
-                AppFormFieldSpec::new(
-                    app_shared_text(AppTextKey::PersonalOrdersReceiptIssueLabel),
-                    Option::<SharedString>::None,
-                ),
-                &form.issue_input,
-                false,
-            ))
-            .child(submit_action),
-        text_button(
-            "buyer-order-close-issue",
-            app_shared_text(AppTextKey::PersonalDetailBackAction),
-            cx.listener(|this, _, _, cx| this.close_buyer_receipt_issue_form(cx)),
-            cx,
-        ),
-    )
-}
-
-fn buyer_receipt_actions_available(detail: &BuyerOrderDetailProjection) -> bool {
-    detail.workflow.receipt.is_none()
-        && detail.workflow.agreement == TradeAgreementStatus::Confirmed
-        && matches!(
-            detail.workflow.fulfillment,
-            Some(TradeFulfillmentStatus::ReadyForPickup | TradeFulfillmentStatus::Delivered)
-        )
-}
-
-fn buyer_receipt_status_key(receipt: &TradeReceiptProjection) -> AppTextKey {
-    if receipt.received {
-        AppTextKey::TradeWorkflowReceiptReceived
-    } else {
-        AppTextKey::TradeWorkflowReceiptNeedsReview
-    }
 }
 
 fn validation_receipt_result_key(result: TradeValidationReceiptResult) -> AppTextKey {
@@ -12917,7 +12368,6 @@ fn buyer_orders_status_color(status: BuyerOrderStatus) -> u32 {
         }
         BuyerOrderStatus::Completed
         | BuyerOrderStatus::Declined
-        | BuyerOrderStatus::Refunded
         | BuyerOrderStatus::NeedsReview => APP_UI_THEME.components.app_status_indicator.offline,
     }
 }
@@ -14109,11 +13559,6 @@ fn orders_table_header() -> impl IntoElement {
             false,
         ))
         .child(products_table_header_column(
-            AppTextKey::TradeWorkflowAxisPayment,
-            Some(128.0),
-            false,
-        ))
-        .child(products_table_header_column(
             AppTextKey::OrdersColumnWindow,
             Some(160.0),
             false,
@@ -14158,9 +13603,6 @@ fn orders_table_row(
                 .text_color(rgb(APP_UI_THEME.foundation.text.primary))
                 .child(trade_economics_total_text(&row.workflow.economics)),
         )
-        .child(div().w(px(128.0)).child(trade_workflow_value_badge(
-            trade_payment_display_status_key(row.workflow.payment),
-        )))
         .child(
             div()
                 .w(px(160.0))
@@ -14184,7 +13626,6 @@ fn orders_table_action(
     index: usize,
     row: &OrdersListRow,
     on_review: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
-    on_publish_fulfillment: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
     cx: &App,
 ) -> AnyElement {
     match row.primary_action {
@@ -14195,44 +13636,11 @@ fn orders_table_action(
             cx,
         )
         .into_any_element(),
-        Some(
-            OrderPrimaryAction::PublishPreparing
-            | OrderPrimaryAction::PublishReadyForPickup
-            | OrderPrimaryAction::PublishOutForDelivery
-            | OrderPrimaryAction::PublishDelivered
-            | OrderPrimaryAction::PublishSellerCancelled,
-        ) => action_button_compact(
-            ("orders-row-action-publish-fulfillment", index),
-            app_shared_text(AppTextKey::OrdersActionUpdateFulfillment),
-            on_publish_fulfillment,
-            cx,
-        )
-        .into_any_element(),
         None => div()
             .text_size(px(APP_UI_THEME.foundation.typography.utility_title_text_px))
             .text_color(rgb(APP_UI_THEME.foundation.text.secondary))
             .child(app_shared_text(AppTextKey::ValueNone))
             .into_any_element(),
-    }
-}
-
-fn order_detail_fulfillment_action_id(action: OrderFulfillmentAction) -> &'static str {
-    match action {
-        OrderFulfillmentAction::Preparing => "orders-detail-publish-preparing",
-        OrderFulfillmentAction::ReadyForPickup => "orders-detail-publish-ready-for-pickup",
-        OrderFulfillmentAction::OutForDelivery => "orders-detail-publish-out-for-delivery",
-        OrderFulfillmentAction::Delivered => "orders-detail-publish-delivered",
-        OrderFulfillmentAction::SellerCancelled => "orders-detail-publish-seller-cancelled",
-    }
-}
-
-fn order_fulfillment_action_label_key(action: OrderFulfillmentAction) -> AppTextKey {
-    match action {
-        OrderFulfillmentAction::Preparing => AppTextKey::OrdersActionPreparing,
-        OrderFulfillmentAction::ReadyForPickup => AppTextKey::OrdersActionReadyForPickup,
-        OrderFulfillmentAction::OutForDelivery => AppTextKey::OrdersActionOutForDelivery,
-        OrderFulfillmentAction::Delivered => AppTextKey::OrdersActionMarkDelivered,
-        OrderFulfillmentAction::SellerCancelled => AppTextKey::OrdersActionCancelFulfillment,
     }
 }
 
@@ -14255,24 +13663,21 @@ fn orders_status_color(status: OrderStatus) -> u32 {
         OrderStatus::Scheduled | OrderStatus::Packed => {
             APP_UI_THEME.components.app_status_indicator.online
         }
-        OrderStatus::Completed
-        | OrderStatus::Declined
-        | OrderStatus::Refunded
-        | OrderStatus::NeedsReview => APP_UI_THEME.components.app_status_indicator.offline,
+        OrderStatus::Completed | OrderStatus::Declined | OrderStatus::NeedsReview => {
+            APP_UI_THEME.components.app_status_indicator.offline
+        }
     }
 }
 
 fn order_recovery_title_key(kind: RecoveryKind) -> AppTextKey {
     match kind {
         RecoveryKind::MissedPickup => AppTextKey::OrdersRecoveryMissedPickupTitle,
-        RecoveryKind::RefundFollowUp => AppTextKey::OrdersRecoveryRefundFollowUpTitle,
     }
 }
 
 fn order_recovery_empty_body_key(kind: RecoveryKind) -> AppTextKey {
     match kind {
         RecoveryKind::MissedPickup => AppTextKey::OrdersRecoveryMissedPickupBody,
-        RecoveryKind::RefundFollowUp => AppTextKey::OrdersRecoveryRefundFollowUpBody,
     }
 }
 
@@ -14304,7 +13709,6 @@ fn order_recovery_state_badge(state: RecoveryState) -> AnyElement {
 fn order_recovery_kind_index(kind: RecoveryKind) -> usize {
     match kind {
         RecoveryKind::MissedPickup => 0,
-        RecoveryKind::RefundFollowUp => 1,
     }
 }
 
@@ -17205,8 +16609,7 @@ mod tests {
         about_conflict_review_body_key, about_manual_refresh_enabled, about_runtime_rows,
         about_status_rows, account_display_name, app_text,
         buyer_order_coordination_notice_forces_redraw, buyer_order_detail_focus_after_open,
-        buyer_orders_retry_action_visible, buyer_receipt_issue_focus_after_submit,
-        buyer_receipt_status_key, farm_setup_onboarding_card_spec, farmer_home_farm_state,
+        buyer_orders_retry_action_visible, farm_setup_onboarding_card_spec, farmer_home_farm_state,
         farmer_order_detail_focus_after_open, farmer_pack_day_available, home_auto_focus_target,
         home_content_scroll_id, home_saved_farm, home_sidebar_navigation_sections, home_stage,
         home_window_launch_size_px, home_window_minimum_size_px,
@@ -17223,8 +16626,8 @@ mod tests {
         startup_issue_summary_text, startup_notice_text, startup_signer_preview_summary,
         startup_signer_preview_summary_for_connect_state, startup_signer_source_input_is_editable,
         startup_signer_status_spec, startup_signer_transport_failure_requires_notice,
-        trade_agreement_status_key, trade_fulfillment_status_key, trade_inventory_status_key,
-        trade_payment_display_status_key, trade_revision_status_key, trade_workflow_source_key,
+        trade_agreement_status_key, trade_inventory_status_key, trade_revision_status_key,
+        trade_workflow_source_key,
     };
     use crate::runtime::{
         DesktopAppRuntimeMetadataSummary, DesktopAppRuntimeSummary, DesktopAppSdkDiagnosticsState,
@@ -17256,17 +16659,16 @@ mod tests {
         BuyerOrderStatus, BuyerOrdersListRow, FarmId, FarmOrderMethod, FarmReadiness,
         FarmSetupDraft, FarmSetupProjection, FarmSummary, FarmerSection, FulfillmentWindowId,
         FulfillmentWindowSummary, LoggedOutStartupPhase, LoggedOutStartupProjection,
-        OrderDetailProjection, OrderFulfillmentAction, OrderId, OrderPrimaryAction, OrderStatus,
-        OrdersListRow, PackDayBatchPrintArtifact, PackDayBatchPrintFailureKind,
-        PackDayExportArtifact, PackDayExportArtifactKind, PackDayExportBundle,
-        PackDayHostHandoffKind, PackDayHostHandoffStatus, PackDayPrintFailureKind,
-        PackDayPrintKind, PackDayPrintStatus, PackDayProductTotalRow, PackDayProjection,
-        PersonalSection, ProductId, ReminderDeadlineProjection, ReminderDeliveryState, ReminderId,
-        ReminderKind, ReminderSurface, ReminderUrgency, RepeatDemandEligibility,
-        RepeatDemandHandoffProjection, ShellSection, TodayAgendaProjection, TodaySetupTask,
-        TodaySetupTaskKind, TradeAgreementStatus, TradeEconomicsProjection, TradeFulfillmentStatus,
-        TradeInventoryStatus, TradePaymentDisplayStatus, TradeReceiptProjection,
-        TradeRevisionStatus, TradeWorkflowProjection, TradeWorkflowSource,
+        OrderDetailProjection, OrderId, OrderStatus, OrdersListRow, PackDayBatchPrintArtifact,
+        PackDayBatchPrintFailureKind, PackDayExportArtifact, PackDayExportArtifactKind,
+        PackDayExportBundle, PackDayHostHandoffKind, PackDayHostHandoffStatus,
+        PackDayPrintFailureKind, PackDayPrintKind, PackDayPrintStatus, PackDayProductTotalRow,
+        PackDayProjection, PersonalSection, ProductId, ReminderDeadlineProjection,
+        ReminderDeliveryState, ReminderId, ReminderKind, ReminderSurface, ReminderUrgency,
+        RepeatDemandEligibility, RepeatDemandHandoffProjection, ShellSection,
+        TodayAgendaProjection, TodaySetupTask, TodaySetupTaskKind, TradeAgreementStatus,
+        TradeEconomicsProjection, TradeInventoryStatus, TradeRevisionStatus,
+        TradeWorkflowProjection, TradeWorkflowSource,
     };
     use radroots_identity::RadrootsIdentity;
     use std::{
@@ -17420,7 +16822,6 @@ mod tests {
             status: BuyerOrderStatus::Placed,
             items: Vec::new(),
             economics: TradeEconomicsProjection::default(),
-            payment: TradePaymentDisplayStatus::NotRecorded,
             workflow: TradeWorkflowProjection::from_buyer_order_status(
                 order_id,
                 BuyerOrderStatus::Placed,
@@ -17466,11 +16867,9 @@ mod tests {
             pickup_location_label: None,
             items: Vec::new(),
             economics: TradeEconomicsProjection::default(),
-            payment: TradePaymentDisplayStatus::NotRecorded,
             workflow: TradeWorkflowProjection::from_order_status(order_id, OrderStatus::Scheduled),
             validation_receipts: Vec::new(),
-            primary_action: Some(OrderPrimaryAction::PublishPreparing),
-            fulfillment_actions: OrderFulfillmentAction::ALL.to_vec(),
+            primary_action: None,
             recoveries: Vec::new(),
         });
 
@@ -17480,20 +16879,6 @@ mod tests {
         );
         assert_eq!(
             farmer_order_detail_focus_after_open(false, &runtime, OrderId::new()),
-            None
-        );
-    }
-
-    #[test]
-    fn buyer_receipt_issue_submit_returns_to_order_detail() {
-        let order_id = OrderId::new();
-
-        assert_eq!(
-            buyer_receipt_issue_focus_after_submit(true, order_id),
-            Some(HomeFocusedView::BuyerOrderDetail(order_id))
-        );
-        assert_eq!(
-            buyer_receipt_issue_focus_after_submit(false, order_id),
             None
         );
     }
@@ -17711,10 +17096,6 @@ mod tests {
                 AppTextKey::TradeWorkflowAgreementCancelled,
             ),
             (
-                TradeAgreementStatus::Completed,
-                AppTextKey::TradeWorkflowAgreementCompleted,
-            ),
-            (
                 TradeAgreementStatus::NeedsReview,
                 AppTextKey::TradeWorkflowAgreementNeedsReview,
             ),
@@ -17747,36 +17128,6 @@ mod tests {
 
         for (status, key) in [
             (
-                TradeFulfillmentStatus::Confirmed,
-                AppTextKey::TradeWorkflowFulfillmentConfirmed,
-            ),
-            (
-                TradeFulfillmentStatus::Preparing,
-                AppTextKey::TradeWorkflowFulfillmentPreparing,
-            ),
-            (
-                TradeFulfillmentStatus::ReadyForPickup,
-                AppTextKey::TradeWorkflowFulfillmentReadyForPickup,
-            ),
-            (
-                TradeFulfillmentStatus::OutForDelivery,
-                AppTextKey::TradeWorkflowFulfillmentOutForDelivery,
-            ),
-            (
-                TradeFulfillmentStatus::Delivered,
-                AppTextKey::TradeWorkflowFulfillmentDelivered,
-            ),
-            (
-                TradeFulfillmentStatus::Cancelled,
-                AppTextKey::TradeWorkflowFulfillmentCancelled,
-            ),
-        ] {
-            assert_eq!(trade_fulfillment_status_key(status), key);
-            assert!(!app_text(key).is_empty());
-        }
-
-        for (status, key) in [
-            (
                 TradeInventoryStatus::Available,
                 AppTextKey::TradeWorkflowInventoryAvailable,
             ),
@@ -17794,56 +17145,6 @@ mod tests {
             ),
         ] {
             assert_eq!(trade_inventory_status_key(status), key);
-            assert!(!app_text(key).is_empty());
-        }
-
-        for (status, key) in [
-            (
-                TradePaymentDisplayStatus::NotRecorded,
-                AppTextKey::TradeWorkflowPaymentNotRecorded,
-            ),
-            (
-                TradePaymentDisplayStatus::Pending,
-                AppTextKey::TradeWorkflowPaymentPending,
-            ),
-            (
-                TradePaymentDisplayStatus::Recorded,
-                AppTextKey::TradeWorkflowPaymentRecorded,
-            ),
-            (
-                TradePaymentDisplayStatus::Settled,
-                AppTextKey::TradeWorkflowPaymentSettled,
-            ),
-            (
-                TradePaymentDisplayStatus::NeedsReview,
-                AppTextKey::TradeWorkflowPaymentNeedsReview,
-            ),
-        ] {
-            assert_eq!(trade_payment_display_status_key(status), key);
-            assert!(!app_text(key).is_empty());
-        }
-
-        for (receipt, key) in [
-            (
-                TradeReceiptProjection {
-                    event_id: "receipt-clean".to_owned(),
-                    received: true,
-                    issue: None,
-                    received_at: 1_774_000_030,
-                },
-                AppTextKey::TradeWorkflowReceiptReceived,
-            ),
-            (
-                TradeReceiptProjection {
-                    event_id: "receipt-issue".to_owned(),
-                    received: false,
-                    issue: Some("items need review".to_owned()),
-                    received_at: 1_774_000_031,
-                },
-                AppTextKey::TradeWorkflowReceiptNeedsReview,
-            ),
-        ] {
-            assert_eq!(buyer_receipt_status_key(&receipt), key);
             assert!(!app_text(key).is_empty());
         }
 
@@ -17870,35 +17171,6 @@ mod tests {
             ),
         ] {
             assert_eq!(trade_workflow_source_key(source), key);
-            assert!(!app_text(key).is_empty());
-        }
-    }
-
-    #[test]
-    fn trade_payment_display_status_keys_cover_passive_states() {
-        for (status, key) in [
-            (
-                TradePaymentDisplayStatus::NotRecorded,
-                AppTextKey::TradeWorkflowPaymentNotRecorded,
-            ),
-            (
-                TradePaymentDisplayStatus::Pending,
-                AppTextKey::TradeWorkflowPaymentPending,
-            ),
-            (
-                TradePaymentDisplayStatus::Recorded,
-                AppTextKey::TradeWorkflowPaymentRecorded,
-            ),
-            (
-                TradePaymentDisplayStatus::Settled,
-                AppTextKey::TradeWorkflowPaymentSettled,
-            ),
-            (
-                TradePaymentDisplayStatus::NeedsReview,
-                AppTextKey::TradeWorkflowPaymentNeedsReview,
-            ),
-        ] {
-            assert_eq!(trade_payment_display_status_key(status), key);
             assert!(!app_text(key).is_empty());
         }
     }
@@ -18126,7 +17398,6 @@ mod tests {
             status: BuyerOrderStatus::Placed,
             items: Vec::new(),
             economics: TradeEconomicsProjection::default(),
-            payment: TradePaymentDisplayStatus::NotRecorded,
             workflow: TradeWorkflowProjection::from_buyer_order_status(
                 order_id,
                 BuyerOrderStatus::Placed,
@@ -18144,16 +17415,6 @@ mod tests {
         assert_eq!(
             home_auto_focus_target(&buyer_orders, HomeAutoFocusState::default()),
             Some(HomeAutoFocusTarget::BuyerOrderRepeatDemand)
-        );
-        assert_eq!(
-            home_auto_focus_target(
-                &buyer_orders,
-                HomeAutoFocusState {
-                    has_buyer_receipt_issue_form: true,
-                    ..HomeAutoFocusState::default()
-                },
-            ),
-            Some(HomeAutoFocusTarget::BuyerReceiptIssueInput)
         );
     }
 
@@ -18261,8 +17522,7 @@ mod tests {
                 farmer_order_id,
                 OrderStatus::Scheduled,
             ),
-            primary_action: Some(OrderPrimaryAction::PublishPreparing),
-            fulfillment_actions: OrderFulfillmentAction::ALL.to_vec(),
+            primary_action: None,
         }];
         orders.orders_projection.detail = Some(OrderDetailProjection {
             order_id: farmer_order_id,
@@ -18275,19 +17535,17 @@ mod tests {
             pickup_location_label: None,
             items: Vec::new(),
             economics: TradeEconomicsProjection::default(),
-            payment: TradePaymentDisplayStatus::NotRecorded,
             workflow: TradeWorkflowProjection::from_order_status(
                 farmer_order_id,
                 OrderStatus::Scheduled,
             ),
             validation_receipts: Vec::new(),
-            primary_action: Some(OrderPrimaryAction::PublishPreparing),
-            fulfillment_actions: OrderFulfillmentAction::ALL.to_vec(),
+            primary_action: None,
             recoveries: Vec::new(),
         });
         assert_eq!(
             home_auto_focus_target(&orders, HomeAutoFocusState::default()),
-            Some(HomeAutoFocusTarget::OrdersDetailPublishFulfillmentFirst)
+            Some(HomeAutoFocusTarget::OrdersRowOpenFirst)
         );
     }
 

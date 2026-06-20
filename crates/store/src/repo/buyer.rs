@@ -808,13 +808,7 @@ impl<'a> AppBuyerRepository<'a> {
                 o.status,
                 o.workflow_revision,
                 o.workflow_agreement,
-                o.workflow_fulfillment,
-                o.workflow_receipt_event_id,
-                o.workflow_receipt_received,
-                o.workflow_receipt_issue,
-                o.workflow_receipt_received_at,
                 o.workflow_inventory,
-                o.workflow_payment,
                 o.workflow_provenance_source,
                 o.workflow_provenance_last_event_id,
                 f.display_name,
@@ -843,19 +837,13 @@ impl<'a> AppBuyerRepository<'a> {
                     row.get::<_, String>(3)?,
                     row.get::<_, String>(4)?,
                     row.get::<_, String>(5)?,
-                    row.get::<_, Option<String>>(6)?,
-                    row.get::<_, Option<String>>(7)?,
-                    row.get::<_, Option<i64>>(8)?,
-                    row.get::<_, Option<String>>(9)?,
-                    row.get::<_, Option<i64>>(10)?,
-                    row.get::<_, String>(11)?,
-                    row.get::<_, String>(12)?,
-                    row.get::<_, String>(13)?,
-                    row.get::<_, Option<String>>(14)?,
-                    row.get::<_, String>(15)?,
-                    row.get::<_, Option<String>>(16)?,
-                    row.get::<_, Option<String>>(17)?,
-                    row.get::<_, Option<String>>(18)?,
+                    row.get::<_, String>(6)?,
+                    row.get::<_, String>(7)?,
+                    row.get::<_, Option<String>>(8)?,
+                    row.get::<_, String>(9)?,
+                    row.get::<_, Option<String>>(10)?,
+                    row.get::<_, Option<String>>(11)?,
+                    row.get::<_, Option<String>>(12)?,
                 ))
             })
             .map_err(|source| AppSqliteError::Query {
@@ -872,13 +860,7 @@ impl<'a> AppBuyerRepository<'a> {
                 status,
                 workflow_revision,
                 workflow_agreement,
-                workflow_fulfillment,
-                workflow_receipt_event_id,
-                workflow_receipt_received,
-                workflow_receipt_issue,
-                workflow_receipt_received_at,
                 workflow_inventory,
-                workflow_payment,
                 workflow_provenance_source,
                 workflow_provenance_last_event_id,
                 farm_display_name,
@@ -901,13 +883,7 @@ impl<'a> AppBuyerRepository<'a> {
                 revision,
                 economics,
                 agreement: workflow_agreement,
-                fulfillment: workflow_fulfillment,
-                receipt_event_id: workflow_receipt_event_id,
-                receipt_received: workflow_receipt_received,
-                receipt_issue: workflow_receipt_issue,
-                receipt_received_at: workflow_receipt_received_at,
                 inventory: workflow_inventory,
-                payment: workflow_payment,
                 provenance_source: workflow_provenance_source,
                 provenance_last_event_id: workflow_provenance_last_event_id,
             })?;
@@ -968,13 +944,7 @@ impl<'a> AppBuyerRepository<'a> {
                 o.buyer_order_note,
                 o.workflow_revision,
                 o.workflow_agreement,
-                o.workflow_fulfillment,
-                o.workflow_receipt_event_id,
-                o.workflow_receipt_received,
-                o.workflow_receipt_issue,
-                o.workflow_receipt_received_at,
                 o.workflow_inventory,
-                o.workflow_payment,
                 o.workflow_provenance_source,
                 o.workflow_provenance_last_event_id,
                 f.display_name,
@@ -1000,19 +970,13 @@ impl<'a> AppBuyerRepository<'a> {
                     row.get::<_, String>(4)?,
                     row.get::<_, String>(5)?,
                     row.get::<_, String>(6)?,
-                    row.get::<_, Option<String>>(7)?,
-                    row.get::<_, Option<String>>(8)?,
-                    row.get::<_, Option<i64>>(9)?,
-                    row.get::<_, Option<String>>(10)?,
-                    row.get::<_, Option<i64>>(11)?,
-                    row.get::<_, String>(12)?,
-                    row.get::<_, String>(13)?,
-                    row.get::<_, String>(14)?,
-                    row.get::<_, Option<String>>(15)?,
-                    row.get::<_, String>(16)?,
-                    row.get::<_, Option<String>>(17)?,
-                    row.get::<_, Option<String>>(18)?,
-                    row.get::<_, Option<String>>(19)?,
+                    row.get::<_, String>(7)?,
+                    row.get::<_, String>(8)?,
+                    row.get::<_, Option<String>>(9)?,
+                    row.get::<_, String>(10)?,
+                    row.get::<_, Option<String>>(11)?,
+                    row.get::<_, Option<String>>(12)?,
+                    row.get::<_, Option<String>>(13)?,
                 ))
             })
             .optional()
@@ -1031,13 +995,7 @@ impl<'a> AppBuyerRepository<'a> {
                     order_note,
                     workflow_revision,
                     workflow_agreement,
-                    workflow_fulfillment,
-                    workflow_receipt_event_id,
-                    workflow_receipt_received,
-                    workflow_receipt_issue,
-                    workflow_receipt_received_at,
                     workflow_inventory,
-                    workflow_payment,
                     workflow_provenance_source,
                     workflow_provenance_last_event_id,
                     farm_display_name,
@@ -1059,17 +1017,10 @@ impl<'a> AppBuyerRepository<'a> {
                             revision,
                             economics: economics.clone(),
                             agreement: workflow_agreement,
-                            fulfillment: workflow_fulfillment,
-                            receipt_event_id: workflow_receipt_event_id,
-                            receipt_received: workflow_receipt_received,
-                            receipt_issue: workflow_receipt_issue,
-                            receipt_received_at: workflow_receipt_received_at,
                             inventory: workflow_inventory,
-                            payment: workflow_payment,
                             provenance_source: workflow_provenance_source,
                             provenance_last_event_id: workflow_provenance_last_event_id,
                         })?;
-                    let payment = workflow.payment;
                     let validation_receipts = order_validation_receipts(self.connection, order_id)?;
                     Ok(BuyerOrderDetailProjection {
                         order_id,
@@ -1084,7 +1035,6 @@ impl<'a> AppBuyerRepository<'a> {
                         status,
                         items,
                         economics,
-                        payment,
                         workflow,
                         validation_receipts,
                         order_note: empty_string_to_none(order_note),
@@ -2913,7 +2863,6 @@ fn parse_order_status(field: &'static str, value: String) -> Result<OrderStatus,
         "packed" => Ok(OrderStatus::Packed),
         "completed" => Ok(OrderStatus::Completed),
         "declined" => Ok(OrderStatus::Declined),
-        "refunded" => Ok(OrderStatus::Refunded),
         "needs_review" => Ok(OrderStatus::NeedsReview),
         _ => Err(AppSqliteError::DecodeEnum { field, value }),
     }
@@ -2997,8 +2946,7 @@ mod tests {
     use radroots_studio_app_view::{
         BuyerContext, BuyerOrderReviewDisabledReason, BuyerOrderStatus, FarmId, FarmOrderMethod,
         FulfillmentWindowId, OrderId, PickupLocationId, ProductId, TradeAgreementStatus,
-        TradeFulfillmentStatus, TradeInventoryStatus, TradePaymentDisplayStatus,
-        TradeRevisionStatus, TradeWorkflowSource,
+        TradeInventoryStatus, TradeRevisionStatus, TradeWorkflowSource,
     };
     use rusqlite::{Connection, params};
     use serde_json::json;
@@ -3503,10 +3451,6 @@ mod tests {
             buyer_order_detail.economics.currency_code.as_deref(),
             Some("USD")
         );
-        assert_eq!(
-            buyer_order_detail.payment,
-            TradePaymentDisplayStatus::NotRecorded
-        );
     }
 
     #[test]
@@ -3880,11 +3824,9 @@ mod tests {
             connection,
             order_id,
             "confirmed",
-            Some("ready_for_pickup"),
             "reserved",
-            "recorded",
             "local_events",
-            Some("payment-event-1"),
+            Some("agreement-event-1"),
         );
 
         let list = repository
@@ -3898,24 +3840,18 @@ mod tests {
 
         assert_eq!(list.rows.len(), 1);
         assert_eq!(row.workflow.agreement, TradeAgreementStatus::Confirmed);
-        assert_eq!(
-            row.workflow.fulfillment,
-            Some(TradeFulfillmentStatus::ReadyForPickup)
-        );
         assert_eq!(row.workflow.inventory, TradeInventoryStatus::Reserved);
-        assert_eq!(row.workflow.payment, TradePaymentDisplayStatus::Recorded);
         assert_eq!(
             row.workflow.provenance.primary_source,
             TradeWorkflowSource::LocalEvents
         );
         assert_eq!(
             row.workflow.provenance.last_event_id.as_deref(),
-            Some("payment-event-1")
+            Some("agreement-event-1")
         );
         assert_eq!(row.workflow.economics.total_minor_units, Some(1300));
         assert_eq!(row.workflow.economics.currency_code.as_deref(), Some("USD"));
         assert_eq!(detail.workflow, row.workflow);
-        assert_eq!(detail.payment, TradePaymentDisplayStatus::Recorded);
     }
 
     #[test]
@@ -3942,18 +3878,14 @@ mod tests {
             connection,
             order_id,
             "confirmed",
-            Some("ready_for_pickup"),
             "reserved",
-            "recorded",
             "local_events",
             Some("buyer-workflow-event"),
         );
 
         for (column, expected_field) in [
             ("workflow_agreement", "orders.workflow_agreement"),
-            ("workflow_fulfillment", "orders.workflow_fulfillment"),
             ("workflow_inventory", "orders.workflow_inventory"),
-            ("workflow_payment", "orders.workflow_payment"),
             (
                 "workflow_provenance_source",
                 "orders.workflow_provenance_source",
@@ -3963,9 +3895,7 @@ mod tests {
                 connection,
                 order_id,
                 "confirmed",
-                Some("ready_for_pickup"),
                 "reserved",
-                "recorded",
                 "local_events",
                 Some("buyer-workflow-event"),
             );
@@ -4253,9 +4183,7 @@ mod tests {
         connection: &Connection,
         order_id: OrderId,
         agreement: &str,
-        fulfillment: Option<&str>,
         inventory: &str,
-        payment: &str,
         provenance_source: &str,
         provenance_last_event_id: Option<&str>,
     ) {
@@ -4263,17 +4191,13 @@ mod tests {
             .execute(
                 "update orders
                  set workflow_agreement = ?1,
-                     workflow_fulfillment = ?2,
-                     workflow_inventory = ?3,
-                     workflow_payment = ?4,
-                     workflow_provenance_source = ?5,
-                     workflow_provenance_last_event_id = ?6
-                 where id = ?7",
+                     workflow_inventory = ?2,
+                     workflow_provenance_source = ?3,
+                     workflow_provenance_last_event_id = ?4
+                 where id = ?5",
                 params![
                     agreement,
-                    fulfillment,
                     inventory,
-                    payment,
                     provenance_source,
                     provenance_last_event_id,
                     order_id.to_string(),
@@ -4344,9 +4268,7 @@ mod tests {
             .expect("check constraints should disable");
         let statement = match column {
             "workflow_agreement" => "update orders set workflow_agreement = ?1 where id = ?2",
-            "workflow_fulfillment" => "update orders set workflow_fulfillment = ?1 where id = ?2",
             "workflow_inventory" => "update orders set workflow_inventory = ?1 where id = ?2",
-            "workflow_payment" => "update orders set workflow_payment = ?1 where id = ?2",
             "workflow_provenance_source" => {
                 "update orders set workflow_provenance_source = ?1 where id = ?2"
             }

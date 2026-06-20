@@ -9,7 +9,6 @@ CREATE TABLE reminder_schedules (
             'fulfillment_window',
             'order_action',
             'missed_pickup_recovery',
-            'refund_recovery',
             'sync_impact'
         )
     ),
@@ -39,7 +38,6 @@ CREATE TABLE reminder_log_entries (
             'fulfillment_window',
             'order_action',
             'missed_pickup_recovery',
-            'refund_recovery',
             'sync_impact'
         )
     ),
@@ -57,7 +55,7 @@ CREATE TABLE order_recovery_records (
     farm_id TEXT NOT NULL,
     order_id TEXT NOT NULL,
     recovery_kind TEXT NOT NULL CHECK (
-        recovery_kind IN ('missed_pickup', 'refund_follow_up')
+        recovery_kind IN ('missed_pickup')
     ),
     recovery_state TEXT NOT NULL CHECK (
         recovery_state IN ('open', 'in_review', 'resolved')

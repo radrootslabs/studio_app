@@ -341,7 +341,6 @@ pub enum OrderStatus {
     Packed,
     Completed,
     Declined,
-    Refunded,
     NeedsReview,
 }
 
@@ -353,7 +352,6 @@ impl OrderStatus {
             Self::Packed => "packed",
             Self::Completed => "completed",
             Self::Declined => "declined",
-            Self::Refunded => "refunded",
             Self::NeedsReview => "needs_review",
         }
     }
@@ -367,7 +365,6 @@ pub enum BuyerOrderStatus {
     Ready,
     Completed,
     Declined,
-    Refunded,
     NeedsReview,
 }
 
@@ -379,7 +376,6 @@ impl BuyerOrderStatus {
             Self::Ready => "ready",
             Self::Completed => "completed",
             Self::Declined => "declined",
-            Self::Refunded => "refunded",
             Self::NeedsReview => "needs_review",
         }
     }
@@ -393,7 +389,6 @@ impl From<OrderStatus> for BuyerOrderStatus {
             OrderStatus::Packed => Self::Ready,
             OrderStatus::Completed => Self::Completed,
             OrderStatus::Declined => Self::Declined,
-            OrderStatus::Refunded => Self::Refunded,
             OrderStatus::NeedsReview => Self::NeedsReview,
         }
     }
@@ -695,10 +690,7 @@ impl PackDayOutputOrderState {
             OrderStatus::NeedsAction => Some(Self::NeedsAction),
             OrderStatus::Scheduled => Some(Self::Scheduled),
             OrderStatus::Packed => Some(Self::Packed),
-            OrderStatus::Completed
-            | OrderStatus::Declined
-            | OrderStatus::Refunded
-            | OrderStatus::NeedsReview => None,
+            OrderStatus::Completed | OrderStatus::Declined | OrderStatus::NeedsReview => None,
         }
     }
 }
@@ -845,7 +837,6 @@ pub enum ReminderKind {
     FulfillmentWindow,
     OrderAction,
     MissedPickupRecovery,
-    RefundRecovery,
     SyncImpact,
 }
 
@@ -855,7 +846,6 @@ impl ReminderKind {
             Self::FulfillmentWindow => "fulfillment_window",
             Self::OrderAction => "order_action",
             Self::MissedPickupRecovery => "missed_pickup_recovery",
-            Self::RefundRecovery => "refund_recovery",
             Self::SyncImpact => "sync_impact",
         }
     }
@@ -905,14 +895,12 @@ impl ReminderDeliveryState {
 #[serde(rename_all = "snake_case")]
 pub enum RecoveryKind {
     MissedPickup,
-    RefundFollowUp,
 }
 
 impl RecoveryKind {
     pub const fn storage_key(self) -> &'static str {
         match self {
             Self::MissedPickup => "missed_pickup",
-            Self::RefundFollowUp => "refund_follow_up",
         }
     }
 }

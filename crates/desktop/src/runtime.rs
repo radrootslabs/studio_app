@@ -10,13 +10,11 @@ use radroots_studio_app_core::{
     AppBuildIdentity, AppDesktopRuntimePaths, AppRuntimeCapture, AppRuntimeMode,
     AppRuntimePathsError, AppRuntimeSnapshot, AppSdkConfig, AppSdkDiagnostics,
     AppSdkFarmPublishRequest, AppSdkLifecycleState, AppSdkListingPublishRequest,
-    AppSdkOrderCancellationRequest, AppSdkOrderDecisionRequest,
-    AppSdkOrderFulfillmentUpdateRequest, AppSdkOrderReceiptRecordRequest,
-    AppSdkOrderRevisionDecisionRequest, AppSdkOrderRevisionProposalRequest,
-    AppSdkOrderSubmitRequest, AppSdkProjectionLifecycleState, AppSdkRelayUrlPolicy, AppSdkRuntime,
-    AppSdkRuntimeError, AppSdkRuntimeIssue, AppSdkRuntimeStatus, AppSdkStoragePaths,
-    AppSdkWorkflowReceipt, AppSharedAccountsPaths, PackDayExportWriteError,
-    prepare_pack_day_export_bundle_at_data_root,
+    AppSdkOrderCancellationRequest, AppSdkOrderDecisionRequest, AppSdkOrderRevisionDecisionRequest,
+    AppSdkOrderRevisionProposalRequest, AppSdkOrderSubmitRequest, AppSdkProjectionLifecycleState,
+    AppSdkRelayUrlPolicy, AppSdkRuntime, AppSdkRuntimeError, AppSdkRuntimeIssue,
+    AppSdkRuntimeStatus, AppSdkStoragePaths, AppSdkWorkflowReceipt, AppSharedAccountsPaths,
+    PackDayExportWriteError, prepare_pack_day_export_bundle_at_data_root,
     shared_local_events_database_path_from_shared_accounts, write_prepared_pack_day_export_bundle,
 };
 use radroots_studio_app_remote_signer::{
@@ -43,7 +41,6 @@ use radroots_studio_app_state::{
 use radroots_studio_app_sync::{
     AppFarmProfilePublishPayload, AppListingPublishPayload, AppOrderCancellationPublishPayload,
     AppOrderDecisionInventoryCommitment, AppOrderDecisionPayload, AppOrderDecisionPublishPayload,
-    AppOrderFulfillmentPublishPayload, AppOrderReceiptOutcome, AppOrderReceiptPublishPayload,
     AppOrderRequestItemPayload, AppOrderRequestPublishPayload,
     AppOrderRevisionDecisionPublishPayload, AppOrderRevisionProposalPublishPayload,
     AppPublishContext, AppPublishPayload, AppPublishedOperationReceipt,
@@ -57,8 +54,8 @@ use radroots_studio_app_view::{
     BuyerContext, BuyerOrderDetailProjection, BuyerOrderReviewDraft, BuyerOrderStatus,
     BuyerProductDetailProjection, FarmId, FarmOrderMethod, FarmProfileRecord, FarmReadiness,
     FarmRulesProjection, FarmSetupDraft, FarmSetupProjection, FarmSummary, FarmerSection,
-    FulfillmentWindowId, LoggedOutStartupProjection, OrderDetailProjection, OrderFulfillmentAction,
-    OrderId, OrderRecoveryProjection, OrderStatus, OrdersFilter, OrdersListProjection,
+    FulfillmentWindowId, LoggedOutStartupProjection, OrderDetailProjection, OrderId,
+    OrderRecoveryProjection, OrderStatus, OrdersFilter, OrdersListProjection,
     OrdersScreenQueryState, PackDayBatchPrintStatus, PackDayExportBundle, PackDayExportInstanceId,
     PackDayExportStatus, PackDayHostHandoffKind, PackDayHostHandoffStatus, PackDayPrintKind,
     PackDayPrintStatus, PackDayProjection, PackDayScreenQueryState, PersonalSection,
@@ -80,15 +77,11 @@ use radroots_events::{
     },
     kinds::{
         KIND_FARM, KIND_LISTING, KIND_LISTING_DRAFT, KIND_ORDER_CANCELLATION, KIND_ORDER_DECISION,
-        KIND_ORDER_FULFILLMENT_UPDATE, KIND_ORDER_PAYMENT_RECORD, KIND_ORDER_RECEIPT,
         KIND_ORDER_REQUEST, KIND_ORDER_REVISION_DECISION, KIND_ORDER_REVISION_PROPOSAL,
-        KIND_ORDER_SETTLEMENT_DECISION, KIND_PROFILE,
+        KIND_PROFILE,
     },
 };
-use radroots_events_codec::order::{
-    order_event_context_from_tags, order_payment_record_from_event,
-    order_settlement_decision_from_event,
-};
+use radroots_events_codec::order::order_event_context_from_tags;
 use radroots_identity::{RadrootsIdentity, RadrootsIdentityId};
 use radroots_local_events::{
     BUYER_ORDER_REQUEST_ACTOR_SOURCE_RESOLVED_ACCOUNT,
@@ -114,25 +107,21 @@ use radroots_sdk::protocol::listing::{
 };
 use radroots_sdk::protocol::order::{
     RadrootsOrderCancellation, RadrootsOrderDecision, RadrootsOrderDecisionOutcome,
-    RadrootsOrderEconomics, RadrootsOrderFulfillmentState, RadrootsOrderFulfillmentUpdate,
-    RadrootsOrderInventoryCommitment, RadrootsOrderItem, RadrootsOrderReceipt,
+    RadrootsOrderEconomics, RadrootsOrderInventoryCommitment, RadrootsOrderItem,
     RadrootsOrderRequest, RadrootsOrderRevisionDecision, RadrootsOrderRevisionOutcome,
     RadrootsOrderRevisionProposal,
 };
 use radroots_sdk::{
     FARM_PUBLISH_OPERATION_KIND, LISTING_PUBLISH_OPERATION_KIND, ORDER_CANCELLATION_OPERATION_KIND,
-    ORDER_DECISION_OPERATION_KIND, ORDER_FULFILLMENT_UPDATE_OPERATION_KIND,
-    ORDER_RECEIPT_RECORD_OPERATION_KIND, ORDER_REVISION_DECISION_OPERATION_KIND,
+    ORDER_DECISION_OPERATION_KIND, ORDER_REVISION_DECISION_OPERATION_KIND,
     ORDER_REVISION_PROPOSAL_OPERATION_KIND, ORDER_SUBMIT_OPERATION_KIND,
 };
 use radroots_sql_core::SqliteExecutor;
 use radroots_trade::listing::parse_public_listing_address;
 use radroots_trade::order::{
-    RadrootsOrderCancellationRecord, RadrootsOrderDecisionRecord, RadrootsOrderFulfillmentRecord,
-    RadrootsOrderPaymentEventRecord, RadrootsOrderPaymentState, RadrootsOrderReceiptRecord,
-    RadrootsOrderReductionInputs, RadrootsOrderRequestRecord, RadrootsOrderRevisionDecisionRecord,
-    RadrootsOrderRevisionProposalRecord, RadrootsOrderSettlementRecord, RadrootsOrderStatus,
-    reduce_order_events,
+    RadrootsOrderCancellationRecord, RadrootsOrderDecisionRecord, RadrootsOrderReductionInputs,
+    RadrootsOrderRequestRecord, RadrootsOrderRevisionDecisionRecord,
+    RadrootsOrderRevisionProposalRecord, RadrootsOrderStatus, reduce_order_events,
 };
 use serde_json::json;
 use thiserror::Error;
@@ -181,10 +170,6 @@ const APP_DIRECT_RELAY_INGEST_KINDS: &[u16] = &[
     KIND_ORDER_REVISION_PROPOSAL as u16,
     KIND_ORDER_REVISION_DECISION as u16,
     KIND_ORDER_CANCELLATION as u16,
-    KIND_ORDER_FULFILLMENT_UPDATE as u16,
-    KIND_ORDER_RECEIPT as u16,
-    KIND_ORDER_PAYMENT_RECORD as u16,
-    KIND_ORDER_SETTLEMENT_DECISION as u16,
 ];
 
 #[derive(Debug, Default)]
@@ -256,24 +241,15 @@ struct ResolvedAppOrderRevisionDecisionEvidence {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-struct ResolvedAppOrderFulfillmentEvidence {
-    event_id: String,
-    status: RadrootsOrderFulfillmentState,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
 struct ResolvedAppOrderLifecycleEvidence {
     evidence_events: Vec<SdkRadrootsNostrEvent>,
     status: RadrootsOrderStatus,
-    payment_state: RadrootsOrderPaymentState,
     agreement_event_id: Option<String>,
     last_event_id: Option<String>,
     decision: Option<ResolvedAppOrderDecisionEvidence>,
     revision_proposals: Vec<ResolvedAppOrderRevisionProposalEvidence>,
     revision_decisions: Vec<ResolvedAppOrderRevisionDecisionEvidence>,
-    latest_fulfillment: Option<ResolvedAppOrderFulfillmentEvidence>,
     cancellation_event_id: Option<String>,
-    receipt_event_id: Option<String>,
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
@@ -282,11 +258,7 @@ struct AppActiveOrderEvidenceBuckets {
     decisions: Vec<RadrootsOrderDecisionRecord>,
     revision_proposals: Vec<RadrootsOrderRevisionProposalRecord>,
     revision_decisions: Vec<RadrootsOrderRevisionDecisionRecord>,
-    fulfillments: Vec<RadrootsOrderFulfillmentRecord>,
     cancellations: Vec<RadrootsOrderCancellationRecord>,
-    receipts: Vec<RadrootsOrderReceiptRecord>,
-    payments: Vec<RadrootsOrderPaymentEventRecord>,
-    settlements: Vec<RadrootsOrderSettlementRecord>,
 }
 
 #[derive(Debug, Default)]
@@ -396,8 +368,6 @@ fn publish_payload_context(publish_payload: &AppPublishPayload) -> &AppPublishCo
         AppPublishPayload::OrderRevisionProposal(payload) => &payload.context,
         AppPublishPayload::OrderRevisionDecision(payload) => &payload.context,
         AppPublishPayload::OrderCancellation(payload) => &payload.context,
-        AppPublishPayload::OrderFulfillment(payload) => &payload.context,
-        AppPublishPayload::OrderReceipt(payload) => &payload.context,
     }
 }
 
@@ -866,15 +836,6 @@ impl DesktopAppRuntime {
         )
     }
 
-    pub fn publish_order_fulfillment_update(
-        &self,
-        order_id: OrderId,
-        action: OrderFulfillmentAction,
-    ) -> Result<bool, AppSqliteError> {
-        self.lock_state_mut()
-            .publish_seller_order_fulfillment(order_id, action.fulfillment_status())
-    }
-
     pub fn publish_order_revision_proposal(
         &self,
         order_id: OrderId,
@@ -905,15 +866,6 @@ impl DesktopAppRuntime {
     ) -> Result<bool, AppSqliteError> {
         self.lock_state_mut()
             .publish_buyer_order_revision_decline(order_id)
-    }
-
-    pub fn publish_buyer_order_receipt(
-        &self,
-        order_id: OrderId,
-        outcome: AppOrderReceiptOutcome,
-    ) -> Result<bool, AppSqliteError> {
-        self.lock_state_mut()
-            .publish_buyer_order_receipt(order_id, outcome)
     }
 
     pub fn start_order_recovery(
@@ -2755,142 +2707,6 @@ impl DesktopAppRuntimeState {
         Ok(true)
     }
 
-    fn prepare_seller_order_fulfillment(
-        &mut self,
-        order_id: OrderId,
-        status: RadrootsOrderFulfillmentState,
-    ) -> Result<AppOrderFulfillmentPublishPayload, AppSqliteError> {
-        let _ = self.import_shared_local_events()?;
-        let relay_urls = normalized_app_sync_relay_urls(&self.nostr_relay_urls).map_err(|_| {
-            AppSqliteError::InvalidProjection {
-                reason: "seller order fulfillment requires valid configured relays",
-            }
-        })?;
-        if relay_urls.is_empty() {
-            return Err(AppSqliteError::InvalidProjection {
-                reason: "seller order fulfillment requires configured relays",
-            });
-        }
-        self.refresh_configured_relay_state_before_order_lifecycle()?;
-        let Some(sqlite_store) = self.sqlite_store.as_ref() else {
-            return Err(AppSqliteError::InvalidProjection {
-                reason: "seller order fulfillment requires local state",
-            });
-        };
-        let Some(farm_id) = self.selected_farm_id() else {
-            return Err(AppSqliteError::InvalidProjection {
-                reason: "seller order fulfillment requires a selected farm",
-            });
-        };
-        let Some(selected_account) = self
-            .state_store
-            .identity_projection()
-            .selected_account
-            .as_ref()
-        else {
-            return Err(AppSqliteError::InvalidProjection {
-                reason: "seller order fulfillment requires a selected seller account",
-            });
-        };
-        let account_id = selected_account.account.account_id.clone();
-        let seller_pubkey = self.local_events_owner_pubkey(selected_account).ok_or(
-            AppSqliteError::InvalidProjection {
-                reason: "seller order fulfillment requires a selected seller public key",
-            },
-        )?;
-        let request = self.resolve_seller_order_request_evidence(order_id)?;
-        if request.payload.seller_pubkey.trim() != seller_pubkey.as_str() {
-            return Err(AppSqliteError::InvalidProjection {
-                reason: "seller order fulfillment seller account does not match order seller",
-            });
-        }
-        let lifecycle = self.resolve_order_lifecycle_evidence(&request)?;
-        let Some(decision) = lifecycle.decision.as_ref() else {
-            return Err(AppSqliteError::InvalidProjection {
-                reason: "seller order fulfillment requires accepted order decision evidence",
-            });
-        };
-        if !matches!(
-            decision.payload.decision,
-            RadrootsOrderDecisionOutcome::Accepted { .. }
-        ) {
-            return Err(AppSqliteError::InvalidProjection {
-                reason: "seller order fulfillment requires accepted order decision evidence",
-            });
-        }
-        if lifecycle.cancellation_event_id.is_some() || lifecycle.receipt_event_id.is_some() {
-            return Err(AppSqliteError::InvalidProjection {
-                reason: "seller order fulfillment requires an active order",
-            });
-        }
-        if lifecycle
-            .latest_fulfillment
-            .as_ref()
-            .is_some_and(|fulfillment| {
-                matches!(
-                    fulfillment.status,
-                    RadrootsOrderFulfillmentState::Delivered
-                        | RadrootsOrderFulfillmentState::SellerCancelled
-                )
-            })
-        {
-            return Err(AppSqliteError::InvalidProjection {
-                reason: "seller order fulfillment is already terminal",
-            });
-        }
-        if sqlite_store.load_order_detail(farm_id, order_id)?.is_none() {
-            return Err(AppSqliteError::InvalidProjection {
-                reason: "seller order fulfillment requires a visible seller order",
-            });
-        };
-        if !status.is_publishable_update() {
-            return Err(AppSqliteError::InvalidProjection {
-                reason: "seller order fulfillment status must be publishable",
-            });
-        }
-        let prev_event_id = match lifecycle.latest_fulfillment.as_ref() {
-            Some(fulfillment) => fulfillment.event_id.clone(),
-            None => active_order_current_parent_event_id(
-                &lifecycle,
-                "seller order fulfillment requires current lifecycle parent evidence",
-            )?,
-        };
-        let payload = AppOrderFulfillmentPublishPayload {
-            context: AppPublishContext::new(account_id, "seller_order_fulfillment"),
-            app_order_id: order_id,
-            farm_id,
-            trade_order_id: request.payload.order_id.to_string(),
-            request_event_id: request.request_event_id,
-            prev_event_id,
-            listing_addr: request.payload.listing_addr.to_string(),
-            buyer_pubkey: request.payload.buyer_pubkey.to_string(),
-            seller_pubkey: request.payload.seller_pubkey.to_string(),
-            status,
-        };
-        AppPublishPayload::OrderFulfillment(payload.clone())
-            .validate()
-            .map_err(|_| AppSqliteError::InvalidProjection {
-                reason: "seller order fulfillment publish payload is invalid",
-            })?;
-        Ok(payload)
-    }
-
-    fn publish_seller_order_fulfillment(
-        &mut self,
-        order_id: OrderId,
-        status: RadrootsOrderFulfillmentState,
-    ) -> Result<bool, AppSqliteError> {
-        let payload = self.prepare_seller_order_fulfillment(order_id, status)?;
-        let source_record_id = order_fulfillment_sdk_source_record_id(&payload);
-        self.enqueue_order_fulfillment_payload_via_sdk(
-            &payload,
-            AppSdkMigrationReceiptSourceKind::LocalOutbox,
-            source_record_id.as_str(),
-        )?;
-        let _ = self.refresh_selected_account_sync()?;
-        Ok(true)
-    }
-
     fn prepare_seller_order_revision_proposal(
         &mut self,
         order_id: OrderId,
@@ -2965,17 +2781,9 @@ impl DesktopAppRuntimeState {
                 reason: "seller order revision requires accepted order decision evidence",
             });
         }
-        if active_order_payment_blocks_lifecycle_write(&lifecycle) {
+        if lifecycle.cancellation_event_id.is_some() {
             return Err(AppSqliteError::InvalidProjection {
-                reason: "seller order revision requires no recorded or settled payment",
-            });
-        }
-        if lifecycle.cancellation_event_id.is_some()
-            || lifecycle.receipt_event_id.is_some()
-            || lifecycle.latest_fulfillment.is_some()
-        {
-            return Err(AppSqliteError::InvalidProjection {
-                reason: "seller order revision requires an unfulfilled active order",
+                reason: "seller order revision requires an active order",
             });
         }
         let Some(order_detail) = sqlite_store.load_order_detail(farm_id, order_id)? else {
@@ -3112,12 +2920,9 @@ impl DesktopAppRuntimeState {
                 reason: "buyer order revision requires accepted order decision evidence",
             });
         }
-        if lifecycle.cancellation_event_id.is_some()
-            || lifecycle.receipt_event_id.is_some()
-            || lifecycle.latest_fulfillment.is_some()
-        {
+        if lifecycle.cancellation_event_id.is_some() {
             return Err(AppSqliteError::InvalidProjection {
-                reason: "buyer order revision requires an unfulfilled active order",
+                reason: "buyer order revision requires an active order",
             });
         }
         let Some(proposal) = active_order_pending_revision_proposal(&lifecycle) else {
@@ -3226,12 +3031,9 @@ impl DesktopAppRuntimeState {
                 reason: "buyer order cancellation requires a visible buyer order",
             });
         };
-        if !matches!(
-            detail.status,
-            BuyerOrderStatus::Placed | BuyerOrderStatus::Scheduled
-        ) {
+        if !matches!(detail.status, BuyerOrderStatus::Placed) {
             return Err(AppSqliteError::InvalidProjection {
-                reason: "buyer order cancellation requires an open order",
+                reason: "buyer order cancellation requires an open pre-agreement order",
             });
         }
         let request = self.resolve_seller_order_request_evidence(order_id)?;
@@ -3241,33 +3043,24 @@ impl DesktopAppRuntimeState {
             });
         }
         let lifecycle = self.resolve_order_lifecycle_evidence(&request)?;
-        if lifecycle.cancellation_event_id.is_some()
-            || lifecycle.receipt_event_id.is_some()
-            || lifecycle.latest_fulfillment.is_some()
-        {
+        if lifecycle.cancellation_event_id.is_some() {
             return Err(AppSqliteError::InvalidProjection {
-                reason: "buyer order cancellation requires an unfulfilled order",
-            });
-        }
-        if active_order_payment_blocks_lifecycle_write(&lifecycle) {
-            return Err(AppSqliteError::InvalidProjection {
-                reason: "buyer order cancellation requires no recorded or settled payment",
+                reason: "buyer order cancellation requires an open pre-agreement order",
             });
         }
         let prev_event_id = match lifecycle.status {
             RadrootsOrderStatus::Requested => request.request_event_id.clone(),
-            RadrootsOrderStatus::Accepted => active_order_current_parent_event_id(
-                &lifecycle,
-                "buyer order cancellation requires order decision evidence",
-            )?,
+            RadrootsOrderStatus::Accepted => {
+                return Err(AppSqliteError::InvalidProjection {
+                    reason: "buyer order cancellation requires an open pre-agreement order",
+                });
+            }
             RadrootsOrderStatus::Missing
             | RadrootsOrderStatus::Declined
             | RadrootsOrderStatus::Cancelled
-            | RadrootsOrderStatus::Completed
-            | RadrootsOrderStatus::Disputed
             | RadrootsOrderStatus::Invalid => {
                 return Err(AppSqliteError::InvalidProjection {
-                    reason: "buyer order cancellation requires an open order",
+                    reason: "buyer order cancellation requires an open pre-agreement order",
                 });
             }
         };
@@ -3298,124 +3091,6 @@ impl DesktopAppRuntimeState {
         let payload = self.prepare_buyer_order_cancellation(order_id)?;
         let source_record_id = order_cancellation_sdk_source_record_id(&payload);
         self.enqueue_order_cancellation_payload_via_sdk(
-            &payload,
-            AppSdkMigrationReceiptSourceKind::LocalOutbox,
-            source_record_id.as_str(),
-        )?;
-        let _ = self.refresh_selected_account_sync()?;
-        Ok(true)
-    }
-
-    fn prepare_buyer_order_receipt(
-        &mut self,
-        order_id: OrderId,
-        outcome: AppOrderReceiptOutcome,
-    ) -> Result<AppOrderReceiptPublishPayload, AppSqliteError> {
-        let _ = self.import_shared_local_events()?;
-        let relay_urls = normalized_app_sync_relay_urls(&self.nostr_relay_urls).map_err(|_| {
-            AppSqliteError::InvalidProjection {
-                reason: "buyer order receipt requires valid configured relays",
-            }
-        })?;
-        if relay_urls.is_empty() {
-            return Err(AppSqliteError::InvalidProjection {
-                reason: "buyer order receipt requires configured relays",
-            });
-        }
-        self.refresh_configured_relay_state_before_order_lifecycle()?;
-        let buyer_context = self.state_store.identity_projection().buyer_context();
-        let BuyerContext::Account(account_id) = &buyer_context else {
-            return Err(AppSqliteError::InvalidProjection {
-                reason: "buyer order receipt requires a selected buyer account",
-            });
-        };
-        let Some(selected_account) = self.selected_buyer_account(&buyer_context) else {
-            return Err(AppSqliteError::InvalidProjection {
-                reason: "buyer order receipt requires a selected buyer account",
-            });
-        };
-        let buyer_pubkey = self.local_events_owner_pubkey(selected_account).ok_or(
-            AppSqliteError::InvalidProjection {
-                reason: "buyer order receipt requires a selected buyer public key",
-            },
-        )?;
-        let Some(sqlite_store) = self.sqlite_store.as_ref() else {
-            return Err(AppSqliteError::InvalidProjection {
-                reason: "buyer order receipt requires local state",
-            });
-        };
-        let buyer_order_scope = selected_buyer_order_scope(self.state_store.identity_projection());
-        let Some(detail) =
-            sqlite_store.load_buyer_order_detail_for_scope(&buyer_order_scope, order_id)?
-        else {
-            return Err(AppSqliteError::InvalidProjection {
-                reason: "buyer order receipt requires a visible buyer order",
-            });
-        };
-        let request = self.resolve_seller_order_request_evidence(order_id)?;
-        if request.payload.buyer_pubkey.trim() != buyer_pubkey.as_str() {
-            return Err(AppSqliteError::InvalidProjection {
-                reason: "buyer order receipt buyer account does not match order buyer",
-            });
-        }
-        let lifecycle = self.resolve_order_lifecycle_evidence(&request)?;
-        if lifecycle.cancellation_event_id.is_some() || lifecycle.receipt_event_id.is_some() {
-            return Err(AppSqliteError::InvalidProjection {
-                reason: "buyer order receipt requires an active ready order",
-            });
-        }
-        let fulfillment =
-            lifecycle
-                .latest_fulfillment
-                .as_ref()
-                .ok_or(AppSqliteError::InvalidProjection {
-                    reason: "buyer order receipt requires fulfillment evidence",
-                })?;
-        if !matches!(
-            fulfillment.status,
-            RadrootsOrderFulfillmentState::ReadyForPickup
-                | RadrootsOrderFulfillmentState::Delivered
-        ) {
-            return Err(AppSqliteError::InvalidProjection {
-                reason: "buyer order receipt requires ready fulfillment evidence",
-            });
-        }
-        let received_at = u64::try_from(current_runtime_time_seconds()?).map_err(|_| {
-            AppSqliteError::InvalidProjection {
-                reason: "buyer order receipt timestamp must be non-negative",
-            }
-        })?;
-        let received = outcome.received();
-        let payload = AppOrderReceiptPublishPayload {
-            context: AppPublishContext::new(account_id.clone(), "buyer_order_receipt"),
-            app_order_id: order_id,
-            farm_id: detail.farm_id,
-            trade_order_id: request.payload.order_id.to_string(),
-            request_event_id: request.request_event_id,
-            prev_event_id: fulfillment.event_id.clone(),
-            listing_addr: request.payload.listing_addr.to_string(),
-            buyer_pubkey: request.payload.buyer_pubkey.to_string(),
-            seller_pubkey: request.payload.seller_pubkey.to_string(),
-            received,
-            issue: outcome.issue_text(),
-            received_at,
-        };
-        AppPublishPayload::OrderReceipt(payload.clone())
-            .validate()
-            .map_err(|_| AppSqliteError::InvalidProjection {
-                reason: "buyer order receipt publish payload is invalid",
-            })?;
-        Ok(payload)
-    }
-
-    fn publish_buyer_order_receipt(
-        &mut self,
-        order_id: OrderId,
-        outcome: AppOrderReceiptOutcome,
-    ) -> Result<bool, AppSqliteError> {
-        let payload = self.prepare_buyer_order_receipt(order_id, outcome)?;
-        let source_record_id = order_receipt_sdk_source_record_id(&payload);
-        self.enqueue_order_receipt_payload_via_sdk(
             &payload,
             AppSdkMigrationReceiptSourceKind::LocalOutbox,
             source_record_id.as_str(),
@@ -5505,122 +5180,6 @@ impl DesktopAppRuntimeState {
         }
     }
 
-    fn enqueue_order_fulfillment_payload_via_sdk(
-        &self,
-        payload: &AppOrderFulfillmentPublishPayload,
-        source_kind: AppSdkMigrationReceiptSourceKind,
-        source_record_id: &str,
-    ) -> Result<(), AppSqliteError> {
-        let operation_kind = ORDER_FULFILLMENT_UPDATE_OPERATION_KIND;
-        let request_evidence = self.resolve_seller_order_request_evidence(payload.app_order_id)?;
-        let lifecycle = self.resolve_order_lifecycle_evidence(&request_evidence)?;
-        let actor_pubkey = self
-            .local_signing_identity_for_publish_payload(&AppPublishPayload::OrderFulfillment(
-                payload.clone(),
-            ))
-            .and_then(|identity| {
-                let actor_pubkey = identity.public_key_hex();
-                let target_relays = normalized_app_sync_relay_urls(&self.nostr_relay_urls)?;
-                let request = AppSdkOrderFulfillmentUpdateRequest {
-                    actor_account_id: payload.context.account_id.clone(),
-                    actor_pubkey: actor_pubkey.clone(),
-                    signer_keys: identity.into_keys(),
-                    evidence_events: lifecycle.evidence_events,
-                    root_event: order_lifecycle_sdk_event_ptr(
-                        payload.request_event_id.as_str(),
-                        target_relays.as_slice(),
-                        "order fulfillment requires request event id",
-                    )?,
-                    previous_event: order_lifecycle_sdk_event_ptr(
-                        payload.prev_event_id.as_str(),
-                        target_relays.as_slice(),
-                        "order fulfillment requires previous event id",
-                    )?,
-                    fulfillment: order_fulfillment_publish_payload_to_sdk_fulfillment(payload)?,
-                    relay_url_policy: sdk_relay_url_policy_for_targets(target_relays.as_slice()),
-                    target_relays,
-                    idempotency_key: Some(sdk_idempotency_key(source_record_id)),
-                };
-                self.enqueue_app_sdk_order_fulfillment_update(request)
-                    .map(|receipt| (actor_pubkey, receipt))
-                    .map_err(sync_transport_error_from_sdk_runtime_error)
-            });
-        match actor_pubkey {
-            Ok((actor_pubkey, receipt)) => self.record_app_sdk_migration_success(
-                source_kind,
-                source_record_id,
-                operation_kind,
-                actor_pubkey.as_str(),
-                &receipt,
-            ),
-            Err(error) => self.record_app_sdk_migration_failure(
-                source_kind,
-                source_record_id,
-                operation_kind,
-                None,
-                sync_transport_error_detail_json(&error),
-            ),
-        }
-    }
-
-    fn enqueue_order_receipt_payload_via_sdk(
-        &self,
-        payload: &AppOrderReceiptPublishPayload,
-        source_kind: AppSdkMigrationReceiptSourceKind,
-        source_record_id: &str,
-    ) -> Result<(), AppSqliteError> {
-        let operation_kind = ORDER_RECEIPT_RECORD_OPERATION_KIND;
-        let request_evidence = self.resolve_seller_order_request_evidence(payload.app_order_id)?;
-        let lifecycle = self.resolve_order_lifecycle_evidence(&request_evidence)?;
-        let actor_pubkey = self
-            .local_signing_identity_for_publish_payload(&AppPublishPayload::OrderReceipt(
-                payload.clone(),
-            ))
-            .and_then(|identity| {
-                let actor_pubkey = identity.public_key_hex();
-                let target_relays = normalized_app_sync_relay_urls(&self.nostr_relay_urls)?;
-                let request = AppSdkOrderReceiptRecordRequest {
-                    actor_account_id: payload.context.account_id.clone(),
-                    actor_pubkey: actor_pubkey.clone(),
-                    signer_keys: identity.into_keys(),
-                    evidence_events: lifecycle.evidence_events,
-                    root_event: order_lifecycle_sdk_event_ptr(
-                        payload.request_event_id.as_str(),
-                        target_relays.as_slice(),
-                        "order receipt requires request event id",
-                    )?,
-                    previous_event: order_lifecycle_sdk_event_ptr(
-                        payload.prev_event_id.as_str(),
-                        target_relays.as_slice(),
-                        "order receipt requires previous event id",
-                    )?,
-                    receipt: order_receipt_publish_payload_to_sdk_receipt(payload)?,
-                    relay_url_policy: sdk_relay_url_policy_for_targets(target_relays.as_slice()),
-                    target_relays,
-                    idempotency_key: Some(sdk_idempotency_key(source_record_id)),
-                };
-                self.enqueue_app_sdk_order_receipt_record(request)
-                    .map(|receipt| (actor_pubkey, receipt))
-                    .map_err(sync_transport_error_from_sdk_runtime_error)
-            });
-        match actor_pubkey {
-            Ok((actor_pubkey, receipt)) => self.record_app_sdk_migration_success(
-                source_kind,
-                source_record_id,
-                operation_kind,
-                actor_pubkey.as_str(),
-                &receipt,
-            ),
-            Err(error) => self.record_app_sdk_migration_failure(
-                source_kind,
-                source_record_id,
-                operation_kind,
-                None,
-                sync_transport_error_detail_json(&error),
-            ),
-        }
-    }
-
     fn local_signing_identity_for_publish_payload(
         &self,
         payload: &AppPublishPayload,
@@ -5678,20 +5237,6 @@ impl DesktopAppRuntimeState {
         request: AppSdkOrderCancellationRequest,
     ) -> Result<AppSdkWorkflowReceipt, AppSdkRuntimeError> {
         self.with_app_sdk_runtime(|runtime| runtime.enqueue_order_cancellation(request))
-    }
-
-    fn enqueue_app_sdk_order_fulfillment_update(
-        &self,
-        request: AppSdkOrderFulfillmentUpdateRequest,
-    ) -> Result<AppSdkWorkflowReceipt, AppSdkRuntimeError> {
-        self.with_app_sdk_runtime(|runtime| runtime.enqueue_order_fulfillment_update(request))
-    }
-
-    fn enqueue_app_sdk_order_receipt_record(
-        &self,
-        request: AppSdkOrderReceiptRecordRequest,
-    ) -> Result<AppSdkWorkflowReceipt, AppSdkRuntimeError> {
-        self.with_app_sdk_runtime(|runtime| runtime.enqueue_order_receipt_record(request))
     }
 
     fn with_app_sdk_runtime<T>(
@@ -6290,73 +5835,6 @@ impl DesktopAppRuntimeState {
                         payload: envelope.payload,
                     });
                 }
-                KIND_ORDER_FULFILLMENT_UPDATE => {
-                    let Ok(envelope) =
-                        radroots_sdk::protocol::order::parse_fulfillment_update(&event)
-                    else {
-                        return Err(AppSqliteError::InvalidProjection {
-                            reason: "order lifecycle evidence is invalid",
-                        });
-                    };
-                    let context = active_order_event_record_context(&event, envelope.message_type)?;
-                    buckets.fulfillments.push(RadrootsOrderFulfillmentRecord {
-                        event_id,
-                        author_pubkey,
-                        counterparty_pubkey: context.0,
-                        root_event_id: context.1,
-                        prev_event_id: context.2,
-                        payload: envelope.payload,
-                    });
-                }
-                KIND_ORDER_RECEIPT => {
-                    let Ok(envelope) = radroots_sdk::protocol::order::parse_buyer_receipt(&event)
-                    else {
-                        return Err(AppSqliteError::InvalidProjection {
-                            reason: "order lifecycle evidence is invalid",
-                        });
-                    };
-                    let context = active_order_event_record_context(&event, envelope.message_type)?;
-                    buckets.receipts.push(RadrootsOrderReceiptRecord {
-                        event_id,
-                        author_pubkey,
-                        counterparty_pubkey: context.0,
-                        root_event_id: context.1,
-                        prev_event_id: context.2,
-                        payload: envelope.payload,
-                    });
-                }
-                KIND_ORDER_PAYMENT_RECORD => {
-                    let envelope = order_payment_record_from_event(&event).map_err(|_| {
-                        AppSqliteError::InvalidProjection {
-                            reason: "order lifecycle evidence is invalid",
-                        }
-                    })?;
-                    let context = active_order_event_record_context(&event, envelope.message_type)?;
-                    buckets.payments.push(RadrootsOrderPaymentEventRecord {
-                        event_id,
-                        author_pubkey,
-                        counterparty_pubkey: context.0,
-                        root_event_id: context.1,
-                        prev_event_id: context.2,
-                        payload: envelope.payload,
-                    });
-                }
-                KIND_ORDER_SETTLEMENT_DECISION => {
-                    let envelope = order_settlement_decision_from_event(&event).map_err(|_| {
-                        AppSqliteError::InvalidProjection {
-                            reason: "order lifecycle evidence is invalid",
-                        }
-                    })?;
-                    let context = active_order_event_record_context(&event, envelope.message_type)?;
-                    buckets.settlements.push(RadrootsOrderSettlementRecord {
-                        event_id,
-                        author_pubkey,
-                        counterparty_pubkey: context.0,
-                        root_event_id: context.1,
-                        prev_event_id: context.2,
-                        payload: envelope.payload,
-                    });
-                }
                 _ => {}
             }
         }
@@ -6368,11 +5846,7 @@ impl DesktopAppRuntimeState {
                 decisions: buckets.decisions.clone(),
                 revision_proposals: buckets.revision_proposals.clone(),
                 revision_decisions: buckets.revision_decisions.clone(),
-                fulfillments: buckets.fulfillments.clone(),
                 cancellations: buckets.cancellations.clone(),
-                receipts: buckets.receipts.clone(),
-                payments: buckets.payments.clone(),
-                settlements: buckets.settlements.clone(),
             },
         );
         if !projection.issues.is_empty() || projection.status == RadrootsOrderStatus::Invalid {
@@ -6403,28 +5877,9 @@ impl DesktopAppRuntimeState {
                     })
             })
             .transpose()?;
-        let latest_fulfillment = projection
-            .fulfillment_event_id
-            .as_ref()
-            .map(|event_id| {
-                buckets
-                    .fulfillments
-                    .iter()
-                    .find(|fulfillment| fulfillment.event_id == *event_id)
-                    .map(|fulfillment| ResolvedAppOrderFulfillmentEvidence {
-                        event_id: fulfillment.event_id.to_string(),
-                        status: fulfillment.payload.status,
-                    })
-                    .ok_or(AppSqliteError::InvalidProjection {
-                        reason: "order lifecycle evidence is invalid",
-                    })
-            })
-            .transpose()?;
-
         Ok(ResolvedAppOrderLifecycleEvidence {
             evidence_events,
             status: projection.status,
-            payment_state: projection.payment.state,
             agreement_event_id: projection
                 .agreement_event_id
                 .map(|event_id| event_id.to_string()),
@@ -6448,12 +5903,8 @@ impl DesktopAppRuntimeState {
                     payload: decision.payload,
                 })
                 .collect(),
-            latest_fulfillment,
             cancellation_event_id: projection
                 .cancellation_event_id
-                .map(|event_id| event_id.to_string()),
-            receipt_event_id: projection
-                .receipt_event_id
                 .map(|event_id| event_id.to_string()),
         })
     }
@@ -6468,10 +5919,6 @@ impl DesktopAppRuntimeState {
             KIND_ORDER_REVISION_PROPOSAL,
             KIND_ORDER_REVISION_DECISION,
             KIND_ORDER_CANCELLATION,
-            KIND_ORDER_FULFILLMENT_UPDATE,
-            KIND_ORDER_RECEIPT,
-            KIND_ORDER_PAYMENT_RECORD,
-            KIND_ORDER_SETTLEMENT_DECISION,
         ];
 
         if let Some(sqlite_store) = self.sqlite_store.as_ref() {
@@ -8083,18 +7530,6 @@ fn order_cancellation_sdk_source_record_id(payload: &AppOrderCancellationPublish
     format!("app:order_cancellation:{}", payload.app_order_id)
 }
 
-fn order_fulfillment_sdk_source_record_id(payload: &AppOrderFulfillmentPublishPayload) -> String {
-    format!(
-        "app:order_fulfillment:{}:{}",
-        payload.app_order_id,
-        order_fulfillment_status_storage_key(payload.status)
-    )
-}
-
-fn order_receipt_sdk_source_record_id(payload: &AppOrderReceiptPublishPayload) -> String {
-    format!("app:order_receipt:{}", payload.app_order_id)
-}
-
 fn sdk_relay_url_policy_for_targets(target_relays: &[String]) -> AppSdkRelayUrlPolicy {
     if target_relays
         .iter()
@@ -8471,17 +7906,6 @@ fn order_lifecycle_sdk_event_ptr(
     })
 }
 
-fn order_fulfillment_status_storage_key(status: RadrootsOrderFulfillmentState) -> &'static str {
-    match status {
-        RadrootsOrderFulfillmentState::AcceptedNotFulfilled => "accepted_not_fulfilled",
-        RadrootsOrderFulfillmentState::Preparing => "preparing",
-        RadrootsOrderFulfillmentState::ReadyForPickup => "ready_for_pickup",
-        RadrootsOrderFulfillmentState::OutForDelivery => "out_for_delivery",
-        RadrootsOrderFulfillmentState::Delivered => "delivered",
-        RadrootsOrderFulfillmentState::SellerCancelled => "seller_cancelled",
-    }
-}
-
 #[cfg(test)]
 fn selected_listing_relay(
     listing_relays: &[String],
@@ -8790,10 +8214,6 @@ fn buyer_order_request_local_work_payload(
             "order_id": order.order_id.to_string(),
             "order_updated_at": order.updated_at,
             "created_at_ms": timestamp,
-        },
-        "payment_display": {
-            "state": "not_recorded",
-            "allows_payment_action": false,
         },
         "document": {
             "version": 1,
@@ -9376,13 +8796,11 @@ fn load_selected_account_reminder_context_with_options(
         .items
         .iter()
         .filter(|item| {
-            !matches!(
-                item.kind,
-                ReminderKind::MissedPickupRecovery | ReminderKind::RefundRecovery
-            ) && matches!(
-                item.urgency,
-                ReminderUrgency::DueSoon | ReminderUrgency::Overdue | ReminderUrgency::Blocking
-            )
+            !matches!(item.kind, ReminderKind::MissedPickupRecovery)
+                && matches!(
+                    item.urgency,
+                    ReminderUrgency::DueSoon | ReminderUrgency::Overdue | ReminderUrgency::Blocking
+                )
         })
         .count() as u32;
     let recovery_actions_open = recovery_queue
@@ -9538,7 +8956,6 @@ fn derive_selected_account_reminder_schedule(
     {
         let kind = match record.kind {
             RecoveryKind::MissedPickup => ReminderKind::MissedPickupRecovery,
-            RecoveryKind::RefundFollowUp => ReminderKind::RefundRecovery,
         };
         items.push(build_reminder_projection(
             farm_id,
@@ -9852,7 +9269,6 @@ fn ordered_order_recoveries_for_detail(
 fn order_recovery_kind_rank(kind: RecoveryKind) -> u8 {
     match kind {
         RecoveryKind::MissedPickup => 0,
-        RecoveryKind::RefundFollowUp => 1,
     }
 }
 
@@ -9864,13 +9280,6 @@ fn order_recovery_summary(kind: RecoveryKind, state: RecoveryState) -> &'static 
         }
         (RecoveryKind::MissedPickup, RecoveryState::Resolved) => {
             "Missed pickup follow-up is resolved"
-        }
-        (RecoveryKind::RefundFollowUp, RecoveryState::Open) => "Payment status follow-up is open",
-        (RecoveryKind::RefundFollowUp, RecoveryState::InReview) => {
-            "Payment status follow-up is in review"
-        }
-        (RecoveryKind::RefundFollowUp, RecoveryState::Resolved) => {
-            "Payment status follow-up is resolved"
         }
     }
 }
@@ -9885,15 +9294,6 @@ fn order_recovery_note(kind: RecoveryKind, state: RecoveryState) -> &'static str
         }
         (RecoveryKind::MissedPickup, RecoveryState::Resolved) => {
             "The seller and buyer have agreed on the next step."
-        }
-        (RecoveryKind::RefundFollowUp, RecoveryState::Open) => {
-            "Review the order record and agree on the next step."
-        }
-        (RecoveryKind::RefundFollowUp, RecoveryState::InReview) => {
-            "Confirm the outcome with the order parties."
-        }
-        (RecoveryKind::RefundFollowUp, RecoveryState::Resolved) => {
-            "The payment status follow-up is resolved."
         }
     }
 }
@@ -10352,25 +9752,6 @@ fn active_order_event_record_context(
     Ok((context.counterparty_pubkey, root_event_id, prev_event_id))
 }
 
-fn active_order_current_parent_event_id(
-    lifecycle: &ResolvedAppOrderLifecycleEvidence,
-    reason: &'static str,
-) -> Result<String, AppSqliteError> {
-    lifecycle
-        .last_event_id
-        .clone()
-        .ok_or(AppSqliteError::InvalidProjection { reason })
-}
-
-fn active_order_payment_blocks_lifecycle_write(
-    lifecycle: &ResolvedAppOrderLifecycleEvidence,
-) -> bool {
-    !matches!(
-        lifecycle.payment_state,
-        RadrootsOrderPaymentState::NotRecorded
-    )
-}
-
 fn active_order_revision_parent_event_id(
     lifecycle: &ResolvedAppOrderLifecycleEvidence,
 ) -> Option<String> {
@@ -10584,18 +9965,6 @@ fn order_revision_decision_publish_payload_to_sdk_revision_decision(
     })
 }
 
-fn order_fulfillment_publish_payload_to_sdk_fulfillment(
-    payload: &AppOrderFulfillmentPublishPayload,
-) -> Result<RadrootsOrderFulfillmentUpdate, AppSyncTransportError> {
-    Ok(RadrootsOrderFulfillmentUpdate {
-        order_id: publish_order_id(payload.trade_order_id.as_str())?,
-        listing_addr: publish_listing_addr(payload.listing_addr.as_str())?,
-        buyer_pubkey: publish_pubkey(payload.buyer_pubkey.as_str())?,
-        seller_pubkey: publish_pubkey(payload.seller_pubkey.as_str())?,
-        status: payload.status,
-    })
-}
-
 fn order_cancellation_publish_payload_to_sdk_cancellation(
     payload: &AppOrderCancellationPublishPayload,
 ) -> Result<RadrootsOrderCancellation, AppSyncTransportError> {
@@ -10605,20 +9974,6 @@ fn order_cancellation_publish_payload_to_sdk_cancellation(
         buyer_pubkey: publish_pubkey(payload.buyer_pubkey.as_str())?,
         seller_pubkey: publish_pubkey(payload.seller_pubkey.as_str())?,
         reason: payload.reason.clone(),
-    })
-}
-
-fn order_receipt_publish_payload_to_sdk_receipt(
-    payload: &AppOrderReceiptPublishPayload,
-) -> Result<RadrootsOrderReceipt, AppSyncTransportError> {
-    Ok(RadrootsOrderReceipt {
-        order_id: publish_order_id(payload.trade_order_id.as_str())?,
-        listing_addr: publish_listing_addr(payload.listing_addr.as_str())?,
-        buyer_pubkey: publish_pubkey(payload.buyer_pubkey.as_str())?,
-        seller_pubkey: publish_pubkey(payload.seller_pubkey.as_str())?,
-        received: payload.received,
-        issue: payload.issue.clone(),
-        received_at: payload.received_at,
     })
 }
 
@@ -10706,8 +10061,7 @@ mod tests {
     use radroots_studio_app_sync::{
         AppFarmProfilePublishPayload, AppListingPublishPayload, AppOrderCancellationPublishPayload,
         AppOrderDecisionInventoryCommitment, AppOrderDecisionPayload,
-        AppOrderDecisionPublishPayload, AppOrderFulfillmentPublishPayload, AppOrderReceiptOutcome,
-        AppOrderReceiptPublishPayload, AppOrderRequestItemPayload, AppOrderRequestPublishPayload,
+        AppOrderDecisionPublishPayload, AppOrderRequestItemPayload, AppOrderRequestPublishPayload,
         AppOrderRevisionDecisionPublishPayload, AppOrderRevisionProposalPublishPayload,
         AppPublishContext, AppPublishPayload, AppPublishedOperationReceipt,
         AppRelayIngestScopeFreshness, AppRelayIngestScopeStatus, AppSyncRequest, AppSyncResult,
@@ -10723,10 +10077,10 @@ mod tests {
         BuyerOrderStatus, FarmId, FarmOperatingRulesRecord, FarmOrderMethod, FarmProfileRecord,
         FarmReadiness, FarmReadinessBlocker, FarmRulesProjection, FarmSetupDraft,
         FarmSetupProjection, FarmSummary, FarmerActivationProjection, FarmerSection,
-        FulfillmentWindowId, FulfillmentWindowRecord, LoggedOutStartupProjection,
-        OrderFulfillmentAction, OrderId, OrderStatus, OrdersFilter, PackDayBatchPrintArtifact,
-        PackDayBatchPrintFailureKind, PackDayBatchPrintStatus, PackDayExportInstanceId,
-        PackDayExportStatus, PackDayHostHandoffKind, PackDayHostHandoffStatus, PackDayPackListRow,
+        FulfillmentWindowId, FulfillmentWindowRecord, LoggedOutStartupProjection, OrderId,
+        OrderStatus, OrdersFilter, PackDayBatchPrintArtifact, PackDayBatchPrintFailureKind,
+        PackDayBatchPrintStatus, PackDayExportInstanceId, PackDayExportStatus,
+        PackDayHostHandoffKind, PackDayHostHandoffStatus, PackDayPackListRow,
         PackDayPrintFailureKind, PackDayPrintKind, PackDayPrintStatus, PackDayProductTotalRow,
         PackDayProjection, PackDayRosterRow, PersonalSection, PickupLocationId,
         PickupLocationRecord, ProductEditorDraft, ProductId, ProductPublishBlocker, ProductStatus,
@@ -10739,11 +10093,8 @@ mod tests {
         RadrootsCoreCurrency, RadrootsCoreDecimal, RadrootsCoreMoney, RadrootsCoreUnit,
     };
     use radroots_events::ids::{
-        RadrootsEconomicsDigest, RadrootsEventId, RadrootsInventoryBinId, RadrootsListingAddress,
-        RadrootsOrderId, RadrootsOrderQuoteId, RadrootsOrderRevisionId, RadrootsPublicKey,
-    };
-    use radroots_events_codec::order::{
-        order_payment_record_event_build, order_settlement_decision_event_build,
+        RadrootsEventId, RadrootsInventoryBinId, RadrootsListingAddress, RadrootsOrderId,
+        RadrootsOrderQuoteId, RadrootsOrderRevisionId, RadrootsPublicKey,
     };
     use radroots_events_codec::wire::WireEventParts;
     use radroots_identity::{RadrootsIdentity, RadrootsIdentityId};
@@ -10766,21 +10117,16 @@ mod tests {
     };
     use radroots_sdk::protocol::order::{
         RadrootsOrderCancellation, RadrootsOrderDecision, RadrootsOrderDecisionOutcome,
-        RadrootsOrderEconomicItem, RadrootsOrderEconomics, RadrootsOrderFulfillmentState,
-        RadrootsOrderFulfillmentUpdate, RadrootsOrderInventoryCommitment, RadrootsOrderItem,
-        RadrootsOrderPaymentMethod, RadrootsOrderPaymentRecord, RadrootsOrderPricingBasis,
-        RadrootsOrderReceipt, RadrootsOrderRequest, RadrootsOrderRevisionDecision,
-        RadrootsOrderRevisionOutcome, RadrootsOrderRevisionProposal,
-        RadrootsOrderSettlementDecision, RadrootsOrderSettlementOutcome,
+        RadrootsOrderEconomicItem, RadrootsOrderEconomics, RadrootsOrderInventoryCommitment,
+        RadrootsOrderItem, RadrootsOrderPricingBasis, RadrootsOrderRequest,
+        RadrootsOrderRevisionDecision, RadrootsOrderRevisionOutcome, RadrootsOrderRevisionProposal,
     };
     use radroots_sdk::{
         LISTING_PUBLISH_OPERATION_KIND, ORDER_CANCELLATION_OPERATION_KIND,
-        ORDER_DECISION_OPERATION_KIND, ORDER_FULFILLMENT_UPDATE_OPERATION_KIND,
-        ORDER_RECEIPT_RECORD_OPERATION_KIND, ORDER_REVISION_DECISION_OPERATION_KIND,
+        ORDER_DECISION_OPERATION_KIND, ORDER_REVISION_DECISION_OPERATION_KIND,
         ORDER_SUBMIT_OPERATION_KIND,
     };
     use radroots_sql_core::{SqlExecutor, SqliteExecutor};
-    use radroots_trade::order::radroots_order_economics_digest;
     use serde_json::json;
     use tokio::net::TcpListener;
     use tokio::sync::oneshot;
@@ -10805,8 +10151,8 @@ mod tests {
         DesktopAppSdkDiagnosticsState, DesktopAppSyncStatusSummary, DesktopRemoteSignerPaths,
         SYNC_TRANSPORT_UNAVAILABLE_MESSAGE, TokioRuntimeBuilder, default_sync_transport,
         direct_relay_event_source_runtime, farm_sync_payload, is_hex_64,
-        order_decision_publish_payload_to_sdk_decision, order_fulfillment_status_storage_key,
-        pending_sync_upsert, signed_event_from_local_record,
+        order_decision_publish_payload_to_sdk_decision, pending_sync_upsert,
+        signed_event_from_local_record,
     };
     use crate::pack_day_host_handoff::PackDayHostHandoffError;
     use crate::pack_day_print::{
@@ -10955,13 +10301,6 @@ mod tests {
 
         fn event_count(&self) -> usize {
             self.events.lock().expect("relay events lock").len()
-        }
-
-        fn push_event(&self, event: &radroots_nostr::prelude::RadrootsNostrEvent) {
-            self.events
-                .lock()
-                .expect("relay events lock")
-                .push(serde_json::to_value(event).expect("relay event json"));
         }
     }
 
@@ -11207,10 +10546,6 @@ mod tests {
 
     fn test_listing_addr(value: &str) -> RadrootsListingAddress {
         RadrootsListingAddress::parse(value).expect("listing address")
-    }
-
-    fn test_economics_digest(value: impl AsRef<str>) -> RadrootsEconomicsDigest {
-        RadrootsEconomicsDigest::parse(value).expect("economics digest")
     }
 
     fn install_recorded_sync_transport(
@@ -11564,48 +10899,13 @@ mod tests {
                 seller_pubkey: common.6.clone(),
                 reason: "buyer cancelled order".to_owned(),
             });
-        let fulfillment = AppPublishPayload::OrderFulfillment(AppOrderFulfillmentPublishPayload {
-            context: AppPublishContext::new(
-                seller_account_id.to_string(),
-                "seller_order_fulfillment",
-            ),
-            app_order_id: common.0,
-            farm_id: common.1,
-            trade_order_id: common.2.clone(),
-            request_event_id: common.3.clone(),
-            prev_event_id: test_event_id_seed("order-decision-event-1"),
-            listing_addr: common.4.clone(),
-            buyer_pubkey: common.5.clone(),
-            seller_pubkey: common.6.clone(),
-            status: RadrootsOrderFulfillmentState::ReadyForPickup,
-        });
-        let receipt = AppPublishPayload::OrderReceipt(AppOrderReceiptPublishPayload {
-            context: AppPublishContext::new(buyer_account_id.to_string(), "buyer_order_receipt"),
-            app_order_id: common.0,
-            farm_id: common.1,
-            trade_order_id: common.2.clone(),
-            request_event_id: common.3.clone(),
-            prev_event_id: test_event_id_seed("fulfillment-event-1"),
-            listing_addr: common.4.clone(),
-            buyer_pubkey: common.5.clone(),
-            seller_pubkey: common.6.clone(),
-            received: true,
-            issue: None,
-            received_at: 1_785_000_000,
-        });
-        let operations = [
-            revision_proposal,
-            revision_decision,
-            cancellation,
-            fulfillment,
-            receipt,
-        ]
-        .into_iter()
-        .map(|payload| {
-            PendingSyncOperation::from_publish_payload(payload, "2026-05-24T12:00:00Z")
-                .expect("typed lifecycle publish work should serialize")
-        })
-        .collect::<Vec<_>>();
+        let operations = [revision_proposal, revision_decision, cancellation]
+            .into_iter()
+            .map(|payload| {
+                PendingSyncOperation::from_publish_payload(payload, "2026-05-24T12:00:00Z")
+                    .expect("typed lifecycle publish work should serialize")
+            })
+            .collect::<Vec<_>>();
         let mut transport =
             ConfiguredRelayAppSyncTransport::with_relay_urls(manager, vec![relay.url().to_owned()]);
 
@@ -16507,403 +15807,6 @@ mod tests {
     }
 
     #[test]
-    fn runtime_publishes_all_seller_fulfillment_states_and_projects_signed_evidence() {
-        for (label, action, expected_status) in [
-            (
-                "preparing",
-                OrderFulfillmentAction::Preparing,
-                RadrootsOrderFulfillmentState::Preparing,
-            ),
-            (
-                "ready_for_pickup",
-                OrderFulfillmentAction::ReadyForPickup,
-                RadrootsOrderFulfillmentState::ReadyForPickup,
-            ),
-            (
-                "out_for_delivery",
-                OrderFulfillmentAction::OutForDelivery,
-                RadrootsOrderFulfillmentState::OutForDelivery,
-            ),
-            (
-                "delivered",
-                OrderFulfillmentAction::Delivered,
-                RadrootsOrderFulfillmentState::Delivered,
-            ),
-            (
-                "seller_cancelled",
-                OrderFulfillmentAction::SellerCancelled,
-                RadrootsOrderFulfillmentState::SellerCancelled,
-            ),
-        ] {
-            let relay = ThreadedAckRelay::spawn();
-            let runtime_label = format!("seller_order_fulfillment_publish_{label}");
-            let (runtime, paths, order_id, product_id, seller_pubkey, buyer_pubkey) =
-                seller_order_decision_runtime(runtime_label.as_str(), 6, 2);
-            install_direct_relay_sync_transport(&runtime, &relay);
-            publish_prior_relay_seller_order_accept(
-                &runtime,
-                &relay,
-                order_id,
-                product_id,
-                seller_pubkey.as_str(),
-                buyer_pubkey.as_str(),
-            );
-
-            assert!(
-                runtime
-                    .publish_order_fulfillment_update(order_id, action)
-                    .expect("seller fulfillment update should publish")
-            );
-
-            assert_eq!(persisted_order_status(&runtime, order_id), "scheduled");
-            assert_eq!(relay.event_count(), 1);
-            let fulfillment_events =
-                shared_order_events_by_kind(&paths, 3433, seller_pubkey.as_str());
-            assert!(fulfillment_events.is_empty());
-            assert_order_fulfillment_sdk_migration_receipt(
-                &runtime,
-                order_id,
-                expected_status,
-                AppSdkMigrationState::Enqueued,
-            );
-
-            cleanup_bootstrapped_runtime_paths(&paths);
-        }
-    }
-
-    #[test]
-    fn runtime_publishes_seller_order_fulfillment_ready_from_revision_parent() {
-        for (label, revision_decision) in [
-            ("accepted", RadrootsOrderRevisionOutcome::Accepted),
-            (
-                "declined",
-                RadrootsOrderRevisionOutcome::Declined {
-                    reason: "keep original order".to_owned(),
-                },
-            ),
-        ] {
-            let relay = ThreadedAckRelay::spawn();
-            let runtime_label = format!("seller_order_fulfillment_revision_parent_{label}");
-            let (runtime, paths, order_id, product_id, seller_pubkey, buyer_pubkey) =
-                seller_order_decision_runtime(runtime_label.as_str(), 6, 2);
-            install_direct_relay_sync_transport(&runtime, &relay);
-            let listing_key = super::d_tag_from_uuid(product_id.as_uuid());
-            let listing_addr = format!("30402:{seller_pubkey}:{listing_key}");
-            let request_event_id = shared_order_request_event_id(&paths, "seller-order-decision-1");
-            let request_event_id = request_event_id.as_str();
-            let decision_event_id = append_signed_order_decision_record(
-                &paths,
-                "seller-order-decision-1",
-                request_event_id,
-                listing_addr.as_str(),
-                buyer_pubkey.as_str(),
-                seller_pubkey.as_str(),
-                2,
-            );
-            let proposal_key = format!("seller-order-ready-revision-{label}-proposal");
-            let proposal_event_id = append_signed_order_revision_proposal_record_with_prev(
-                &paths,
-                "seller-order-decision-1",
-                proposal_key.as_str(),
-                request_event_id,
-                decision_event_id.as_str(),
-                listing_addr.as_str(),
-                buyer_pubkey.as_str(),
-                seller_pubkey.as_str(),
-            );
-            let revision_id = format!("revision-{proposal_key}");
-            let _revision_decision_event_id =
-                append_signed_order_revision_decision_record_with_prev(
-                    &paths,
-                    "seller-order-decision-1",
-                    format!("seller-order-ready-revision-{label}-decision").as_str(),
-                    request_event_id,
-                    proposal_event_id.as_str(),
-                    revision_id.as_str(),
-                    listing_addr.as_str(),
-                    buyer_pubkey.as_str(),
-                    seller_pubkey.as_str(),
-                    revision_decision,
-                );
-            runtime
-                .refresh_shared_local_events()
-                .expect("seller revision fixture should import");
-            set_persisted_order_status(&runtime, order_id, "scheduled");
-
-            assert!(
-                runtime
-                    .publish_order_fulfillment_update(
-                        order_id,
-                        OrderFulfillmentAction::ReadyForPickup,
-                    )
-                    .expect("seller ready fulfillment should publish from revision parent")
-            );
-
-            assert_eq!(relay.event_count(), 0);
-            let fulfillment_events =
-                shared_order_events_by_kind(&paths, 3433, seller_pubkey.as_str());
-            assert!(fulfillment_events.is_empty());
-            assert_order_fulfillment_sdk_migration_receipt(
-                &runtime,
-                order_id,
-                RadrootsOrderFulfillmentState::ReadyForPickup,
-                AppSdkMigrationState::Enqueued,
-            );
-
-            cleanup_bootstrapped_runtime_paths(&paths);
-        }
-    }
-
-    #[test]
-    fn runtime_publishes_seller_order_fulfillment_delivered_when_coarse_status_lags() {
-        let relay = ThreadedAckRelay::spawn();
-        let (runtime, paths, order_id, product_id, seller_pubkey, buyer_pubkey) =
-            seller_order_decision_runtime("seller_order_fulfillment_delivery_status_lag", 6, 2);
-        install_direct_relay_sync_transport(&runtime, &relay);
-        let listing_key = super::d_tag_from_uuid(product_id.as_uuid());
-        let listing_addr = format!("30402:{seller_pubkey}:{listing_key}");
-        let request_event_id = shared_order_request_event_id(&paths, "seller-order-decision-1");
-        let request_event_id = request_event_id.as_str();
-        let decision_event_id = append_signed_order_decision_record(
-            &paths,
-            "seller-order-decision-1",
-            request_event_id,
-            listing_addr.as_str(),
-            buyer_pubkey.as_str(),
-            seller_pubkey.as_str(),
-            2,
-        );
-        let _ready_event_id = append_signed_order_fulfillment_record_with_status(
-            &paths,
-            "seller-order-decision-1",
-            request_event_id,
-            decision_event_id.as_str(),
-            listing_addr.as_str(),
-            buyer_pubkey.as_str(),
-            seller_pubkey.as_str(),
-            RadrootsOrderFulfillmentState::ReadyForPickup,
-        );
-        runtime
-            .refresh_shared_local_events()
-            .expect("seller ready fulfillment should import");
-        assert_eq!(persisted_order_status(&runtime, order_id), "packed");
-        set_persisted_order_status(&runtime, order_id, "scheduled");
-
-        assert!(
-            runtime
-                .publish_order_fulfillment_update(order_id, OrderFulfillmentAction::Delivered)
-                .expect("seller delivered fulfillment should publish from workflow evidence")
-        );
-
-        assert_eq!(persisted_order_status(&runtime, order_id), "scheduled");
-        assert_eq!(relay.event_count(), 0);
-        let fulfillment_events = shared_order_events_by_kind(&paths, 3433, seller_pubkey.as_str());
-        assert_eq!(fulfillment_events.len(), 1);
-        assert_order_fulfillment_sdk_migration_receipt(
-            &runtime,
-            order_id,
-            RadrootsOrderFulfillmentState::Delivered,
-            AppSdkMigrationState::Enqueued,
-        );
-
-        cleanup_bootstrapped_runtime_paths(&paths);
-    }
-
-    #[test]
-    fn runtime_publishes_seller_order_fulfillment_delivered_without_ready_evidence() {
-        for (label, latest_fulfillment) in [
-            ("seller_order_fulfillment_delivery_missing_ready", None),
-            (
-                "seller_order_fulfillment_delivery_preparing",
-                Some(RadrootsOrderFulfillmentState::Preparing),
-            ),
-        ] {
-            let relay = ThreadedAckRelay::spawn();
-            let (runtime, paths, order_id, product_id, seller_pubkey, buyer_pubkey) =
-                seller_order_decision_runtime(label, 6, 2);
-            install_direct_relay_sync_transport(&runtime, &relay);
-            let listing_key = super::d_tag_from_uuid(product_id.as_uuid());
-            let listing_addr = format!("30402:{seller_pubkey}:{listing_key}");
-            let request_event_id = shared_order_request_event_id(&paths, "seller-order-decision-1");
-            let request_event_id = request_event_id.as_str();
-            let decision_event_id = append_signed_order_decision_record(
-                &paths,
-                "seller-order-decision-1",
-                request_event_id,
-                listing_addr.as_str(),
-                buyer_pubkey.as_str(),
-                seller_pubkey.as_str(),
-                2,
-            );
-            if let Some(status) = latest_fulfillment {
-                append_signed_order_fulfillment_record_with_status(
-                    &paths,
-                    "seller-order-decision-1",
-                    request_event_id,
-                    decision_event_id.as_str(),
-                    listing_addr.as_str(),
-                    buyer_pubkey.as_str(),
-                    seller_pubkey.as_str(),
-                    status,
-                );
-            }
-            runtime
-                .refresh_shared_local_events()
-                .expect("seller fulfillment fixture should import");
-
-            assert!(
-                runtime
-                    .publish_order_fulfillment_update(order_id, OrderFulfillmentAction::Delivered)
-                    .expect("seller delivered fulfillment should publish")
-            );
-
-            assert_eq!(persisted_order_status(&runtime, order_id), "scheduled");
-            assert_eq!(relay.event_count(), 0);
-            let fulfillment_events =
-                shared_order_events_by_kind(&paths, 3433, seller_pubkey.as_str());
-            assert_eq!(
-                fulfillment_events.len(),
-                usize::from(latest_fulfillment.is_some())
-            );
-            assert_order_fulfillment_sdk_migration_receipt(
-                &runtime,
-                order_id,
-                RadrootsOrderFulfillmentState::Delivered,
-                AppSdkMigrationState::Enqueued,
-            );
-            cleanup_bootstrapped_runtime_paths(&paths);
-        }
-    }
-
-    #[test]
-    fn runtime_rejects_seller_order_fulfillment_delivered_with_reducer_invalid_ready_evidence() {
-        for label in [
-            "seller_order_fulfillment_delivery_unchained_ready",
-            "seller_order_fulfillment_delivery_forked_ready",
-        ] {
-            let relay = ThreadedAckRelay::spawn();
-            let (runtime, paths, order_id, product_id, seller_pubkey, buyer_pubkey) =
-                seller_order_decision_runtime(label, 6, 2);
-            install_direct_relay_sync_transport(&runtime, &relay);
-            let listing_key = super::d_tag_from_uuid(product_id.as_uuid());
-            let listing_addr = format!("30402:{seller_pubkey}:{listing_key}");
-            let request_event_id = shared_order_request_event_id(&paths, "seller-order-decision-1");
-            let request_event_id = request_event_id.as_str();
-            let decision_event_id = append_signed_order_decision_record(
-                &paths,
-                "seller-order-decision-1",
-                request_event_id,
-                listing_addr.as_str(),
-                buyer_pubkey.as_str(),
-                seller_pubkey.as_str(),
-                2,
-            );
-            if label.ends_with("unchained_ready") {
-                append_signed_order_fulfillment_record_with_status_and_key(
-                    &paths,
-                    "seller-order-decision-1",
-                    "seller-order-decision-1-unchained-ready",
-                    request_event_id,
-                    request_event_id,
-                    listing_addr.as_str(),
-                    buyer_pubkey.as_str(),
-                    seller_pubkey.as_str(),
-                    RadrootsOrderFulfillmentState::ReadyForPickup,
-                );
-            } else {
-                append_signed_order_fulfillment_record_with_status_and_key(
-                    &paths,
-                    "seller-order-decision-1",
-                    "seller-order-decision-1-forked-preparing",
-                    request_event_id,
-                    decision_event_id.as_str(),
-                    listing_addr.as_str(),
-                    buyer_pubkey.as_str(),
-                    seller_pubkey.as_str(),
-                    RadrootsOrderFulfillmentState::Preparing,
-                );
-                append_signed_order_fulfillment_record_with_status_and_key(
-                    &paths,
-                    "seller-order-decision-1",
-                    "seller-order-decision-1-forked-ready",
-                    request_event_id,
-                    decision_event_id.as_str(),
-                    listing_addr.as_str(),
-                    buyer_pubkey.as_str(),
-                    seller_pubkey.as_str(),
-                    RadrootsOrderFulfillmentState::ReadyForPickup,
-                );
-            }
-
-            let error = runtime
-                .publish_order_fulfillment_update(order_id, OrderFulfillmentAction::Delivered)
-                .expect_err("seller delivered fulfillment should reject reducer-invalid evidence");
-
-            assert_order_lifecycle_evidence_invalid(error);
-            assert_eq!(relay.event_count(), 0);
-            cleanup_bootstrapped_runtime_paths(&paths);
-        }
-    }
-
-    #[test]
-    fn runtime_rejects_seller_order_fulfillment_ready_with_invalid_terminal_evidence() {
-        for label in [
-            "seller_order_fulfillment_invalid_cancellation",
-            "seller_order_fulfillment_invalid_receipt",
-        ] {
-            let relay = ThreadedAckRelay::spawn();
-            let (runtime, paths, order_id, product_id, seller_pubkey, buyer_pubkey) =
-                seller_order_decision_runtime(label, 6, 2);
-            install_direct_relay_sync_transport(&runtime, &relay);
-            let listing_key = super::d_tag_from_uuid(product_id.as_uuid());
-            let listing_addr = format!("30402:{seller_pubkey}:{listing_key}");
-            let request_event_id = shared_order_request_event_id(&paths, "seller-order-decision-1");
-            let request_event_id = request_event_id.as_str();
-            append_signed_order_decision_record(
-                &paths,
-                "seller-order-decision-1",
-                request_event_id,
-                listing_addr.as_str(),
-                buyer_pubkey.as_str(),
-                seller_pubkey.as_str(),
-                2,
-            );
-            if label.ends_with("invalid_cancellation") {
-                append_signed_order_cancellation_record_with_prev(
-                    &paths,
-                    "seller-order-decision-1",
-                    "seller-order-decision-1-invalid-cancellation",
-                    request_event_id,
-                    request_event_id,
-                    listing_addr.as_str(),
-                    buyer_pubkey.as_str(),
-                    seller_pubkey.as_str(),
-                );
-            } else {
-                append_signed_order_receipt_record_with_prev(
-                    &paths,
-                    "seller-order-decision-1",
-                    "seller-order-decision-1-invalid-receipt",
-                    request_event_id,
-                    request_event_id,
-                    listing_addr.as_str(),
-                    buyer_pubkey.as_str(),
-                    seller_pubkey.as_str(),
-                    true,
-                );
-            }
-
-            let error = runtime
-                .publish_order_fulfillment_update(order_id, OrderFulfillmentAction::ReadyForPickup)
-                .expect_err("seller ready fulfillment should reject invalid terminal evidence");
-
-            assert_order_lifecycle_evidence_invalid(error);
-            assert_eq!(relay.event_count(), 0);
-            cleanup_bootstrapped_runtime_paths(&paths);
-        }
-    }
-
-    #[test]
     fn runtime_rejects_seller_order_revision_with_reducer_invalid_parent_evidence() {
         let relay = ThreadedAckRelay::spawn();
         let (runtime, paths, order_id, product_id, seller_pubkey, buyer_pubkey) =
@@ -16941,200 +15844,6 @@ mod tests {
                 "harvest count updated",
             )
             .expect_err("seller revision proposal should reject reducer-invalid parent evidence");
-
-        assert_order_lifecycle_evidence_invalid(error);
-        assert_eq!(relay.event_count(), 0);
-        cleanup_bootstrapped_runtime_paths(&paths);
-    }
-
-    #[test]
-    fn runtime_rejects_seller_order_revision_after_recorded_or_settled_payment_evidence() {
-        for (label, settlement) in [
-            ("recorded", None),
-            ("settled", Some(RadrootsOrderSettlementOutcome::Accepted)),
-        ] {
-            let relay = ThreadedAckRelay::spawn();
-            let runtime_label = format!("seller_order_revision_payment_{label}");
-            let (runtime, paths, order_id, product_id, seller_pubkey, buyer_pubkey) =
-                seller_order_decision_runtime(runtime_label.as_str(), 6, 2);
-            install_direct_relay_sync_transport(&runtime, &relay);
-            let listing_key = super::d_tag_from_uuid(product_id.as_uuid());
-            let listing_addr = format!("30402:{seller_pubkey}:{listing_key}");
-            let request_event_id = shared_order_request_event_id(&paths, "seller-order-decision-1");
-            let request_event_id = request_event_id.as_str();
-            let decision_event_id = append_signed_order_decision_record(
-                &paths,
-                "seller-order-decision-1",
-                request_event_id,
-                listing_addr.as_str(),
-                buyer_pubkey.as_str(),
-                seller_pubkey.as_str(),
-                2,
-            );
-            let payment_event_id = append_signed_payment_record(
-                &paths,
-                "seller-order-decision-1",
-                format!("seller-order-revision-payment-{label}").as_str(),
-                request_event_id,
-                decision_event_id.as_str(),
-                listing_addr.as_str(),
-                buyer_pubkey.as_str(),
-                seller_pubkey.as_str(),
-                2,
-            );
-            if let Some(decision) = settlement {
-                append_signed_settlement_decision_record(
-                    &paths,
-                    "seller-order-decision-1",
-                    format!("seller-order-revision-k3436-{label}").as_str(),
-                    request_event_id,
-                    decision_event_id.as_str(),
-                    payment_event_id.as_str(),
-                    listing_addr.as_str(),
-                    buyer_pubkey.as_str(),
-                    seller_pubkey.as_str(),
-                    2,
-                    decision,
-                );
-            }
-            runtime
-                .refresh_shared_local_events()
-                .expect("seller payment evidence should import");
-            set_persisted_order_status(&runtime, order_id, "scheduled");
-
-            let error = runtime
-                .publish_order_revision_proposal(
-                    order_id,
-                    revision_test_order_items(),
-                    revision_test_order_economics(),
-                    "harvest count updated",
-                )
-                .expect_err("seller revision proposal should reject payment evidence");
-
-            assert!(matches!(
-                error,
-                AppSqliteError::InvalidProjection {
-                    reason: "seller order revision requires no recorded or settled payment"
-                }
-            ));
-            assert_eq!(relay.event_count(), 0);
-            cleanup_bootstrapped_runtime_paths(&paths);
-        }
-    }
-
-    #[test]
-    fn runtime_rejects_seller_order_revision_after_rejected_settlement_evidence() {
-        let relay = ThreadedAckRelay::spawn();
-        let (runtime, paths, order_id, product_id, seller_pubkey, buyer_pubkey) =
-            seller_order_decision_runtime("seller_order_revision_rejected_payment", 6, 2);
-        install_direct_relay_sync_transport(&runtime, &relay);
-        let listing_key = super::d_tag_from_uuid(product_id.as_uuid());
-        let listing_addr = format!("30402:{seller_pubkey}:{listing_key}");
-        let request_event_id = shared_order_request_event_id(&paths, "seller-order-decision-1");
-        let request_event_id = request_event_id.as_str();
-        let decision_event_id = append_signed_order_decision_record(
-            &paths,
-            "seller-order-decision-1",
-            request_event_id,
-            listing_addr.as_str(),
-            buyer_pubkey.as_str(),
-            seller_pubkey.as_str(),
-            2,
-        );
-        let payment_event_id = append_signed_payment_record(
-            &paths,
-            "seller-order-decision-1",
-            "seller-order-revision-payment-rejected",
-            request_event_id,
-            decision_event_id.as_str(),
-            listing_addr.as_str(),
-            buyer_pubkey.as_str(),
-            seller_pubkey.as_str(),
-            2,
-        );
-        append_signed_settlement_decision_record(
-            &paths,
-            "seller-order-decision-1",
-            "seller-order-revision-k3436-rejected",
-            request_event_id,
-            decision_event_id.as_str(),
-            payment_event_id.as_str(),
-            listing_addr.as_str(),
-            buyer_pubkey.as_str(),
-            seller_pubkey.as_str(),
-            2,
-            RadrootsOrderSettlementOutcome::Rejected,
-        );
-        runtime
-            .refresh_shared_local_events()
-            .expect("seller rejected payment evidence should import");
-        set_persisted_order_status(&runtime, order_id, "scheduled");
-
-        let error = runtime
-            .publish_order_revision_proposal(
-                order_id,
-                revision_test_order_items(),
-                revision_test_order_economics(),
-                "harvest count updated",
-            )
-            .expect_err("seller revision proposal should reject rejected 3436 payment evidence");
-
-        assert!(matches!(
-            error,
-            AppSqliteError::InvalidProjection {
-                reason: "seller order revision requires no recorded or settled payment"
-            }
-        ));
-        assert_eq!(relay.event_count(), 0);
-        let revision_events = shared_order_events_by_kind(&paths, 3424, seller_pubkey.as_str());
-        assert!(revision_events.is_empty());
-        cleanup_bootstrapped_runtime_paths(&paths);
-    }
-
-    #[test]
-    fn runtime_rejects_seller_order_revision_with_invalid_payment_evidence() {
-        let relay = ThreadedAckRelay::spawn();
-        let (runtime, paths, order_id, product_id, seller_pubkey, buyer_pubkey) =
-            seller_order_decision_runtime("seller_order_revision_invalid_payment", 6, 2);
-        install_direct_relay_sync_transport(&runtime, &relay);
-        let listing_key = super::d_tag_from_uuid(product_id.as_uuid());
-        let listing_addr = format!("30402:{seller_pubkey}:{listing_key}");
-        let request_event_id = shared_order_request_event_id(&paths, "seller-order-decision-1");
-        let request_event_id = request_event_id.as_str();
-        let decision_event_id = append_signed_order_decision_record(
-            &paths,
-            "seller-order-decision-1",
-            request_event_id,
-            listing_addr.as_str(),
-            buyer_pubkey.as_str(),
-            seller_pubkey.as_str(),
-            2,
-        );
-        append_signed_payment_record_with_prev(
-            &paths,
-            "seller-order-decision-1",
-            "seller-order-revision-invalid-payment",
-            request_event_id,
-            request_event_id,
-            decision_event_id.as_str(),
-            listing_addr.as_str(),
-            buyer_pubkey.as_str(),
-            seller_pubkey.as_str(),
-            2,
-        );
-        runtime
-            .refresh_shared_local_events()
-            .expect("seller invalid payment evidence should import");
-        set_persisted_order_status(&runtime, order_id, "scheduled");
-
-        let error = runtime
-            .publish_order_revision_proposal(
-                order_id,
-                revision_test_order_items(),
-                revision_test_order_economics(),
-                "harvest count updated",
-            )
-            .expect_err("seller revision proposal should reject invalid payment evidence");
 
         assert_order_lifecycle_evidence_invalid(error);
         assert_eq!(relay.event_count(), 0);
@@ -17299,8 +16008,6 @@ mod tests {
             .as_ref()
             .expect("order local work payload");
         assert_eq!(payload["support_status"]["state"], "supported");
-        assert_eq!(payload["payment_display"]["state"], "not_recorded");
-        assert_eq!(payload["payment_display"]["allows_payment_action"], false);
         assert_eq!(payload["currentness"]["current"], true);
         assert_eq!(payload["document"]["kind"], "order_draft_v1");
         assert_eq!(
@@ -17673,7 +16380,7 @@ mod tests {
 
     #[test]
     fn runtime_opens_linked_buyer_order_detail_from_selected_account_nostr_scope() {
-        let fixture = linked_buyer_lifecycle_runtime("linked_buyer_order_open", false);
+        let fixture = linked_buyer_lifecycle_runtime("linked_buyer_order_open");
         let report = fixture
             .runtime
             .refresh_shared_local_events()
@@ -17716,7 +16423,7 @@ mod tests {
     #[test]
     fn runtime_publishes_linked_buyer_cancellation_from_selected_account_nostr_scope() {
         let relay = ThreadedAckRelay::spawn();
-        let fixture = linked_buyer_lifecycle_runtime("linked_buyer_order_cancel", false);
+        let fixture = linked_buyer_lifecycle_runtime("linked_buyer_order_cancel");
         install_direct_relay_sync_transport(&fixture.runtime, &relay);
         fixture
             .runtime
@@ -17754,298 +16461,6 @@ mod tests {
     }
 
     #[test]
-    fn runtime_rejects_linked_buyer_cancellation_after_recorded_or_settled_payment_evidence() {
-        for (label, settlement) in [
-            ("recorded", None),
-            ("settled", Some(RadrootsOrderSettlementOutcome::Accepted)),
-        ] {
-            let relay = ThreadedAckRelay::spawn();
-            let fixture_label = format!("linked_buyer_order_cancel_payment_{label}");
-            let fixture = linked_buyer_lifecycle_runtime(fixture_label.as_str(), false);
-            install_direct_relay_sync_transport(&fixture.runtime, &relay);
-            let payment_event_id = append_signed_payment_record(
-                &fixture.paths,
-                fixture.trade_order_id.as_str(),
-                format!("linked-buyer-cancel-payment-{label}").as_str(),
-                fixture.request_event_id.as_str(),
-                fixture.decision_event_id.as_str(),
-                fixture.listing_addr.as_str(),
-                fixture.buyer_pubkey.as_str(),
-                fixture.seller_pubkey.as_str(),
-                2,
-            );
-            if let Some(decision) = settlement {
-                append_signed_settlement_decision_record(
-                    &fixture.paths,
-                    fixture.trade_order_id.as_str(),
-                    format!("linked-buyer-cancel-k3436-{label}").as_str(),
-                    fixture.request_event_id.as_str(),
-                    fixture.decision_event_id.as_str(),
-                    payment_event_id.as_str(),
-                    fixture.listing_addr.as_str(),
-                    fixture.buyer_pubkey.as_str(),
-                    fixture.seller_pubkey.as_str(),
-                    2,
-                    decision,
-                );
-            }
-            fixture
-                .runtime
-                .refresh_shared_local_events()
-                .expect("linked buyer payment evidence should import");
-            assert!(
-                fixture
-                    .runtime
-                    .open_personal_order_detail(fixture.order_id)
-                    .expect("linked buyer order detail should open")
-            );
-
-            let error = fixture
-                .runtime
-                .publish_buyer_order_cancel(fixture.order_id)
-                .expect_err("linked buyer cancellation should reject payment evidence");
-
-            assert!(matches!(
-                error,
-                AppSqliteError::InvalidProjection {
-                    reason: "buyer order cancellation requires no recorded or settled payment"
-                }
-            ));
-            assert_eq!(relay.event_count(), 0);
-            cleanup_bootstrapped_runtime_paths(&fixture.paths);
-        }
-    }
-
-    #[test]
-    fn runtime_rejects_linked_buyer_cancellation_after_rejected_settlement_evidence() {
-        let relay = ThreadedAckRelay::spawn();
-        let fixture =
-            linked_buyer_lifecycle_runtime("linked_buyer_order_cancel_rejected_payment", false);
-        install_direct_relay_sync_transport(&fixture.runtime, &relay);
-        let payment_event_id = append_signed_payment_record(
-            &fixture.paths,
-            fixture.trade_order_id.as_str(),
-            "linked-buyer-cancel-payment-rejected",
-            fixture.request_event_id.as_str(),
-            fixture.decision_event_id.as_str(),
-            fixture.listing_addr.as_str(),
-            fixture.buyer_pubkey.as_str(),
-            fixture.seller_pubkey.as_str(),
-            2,
-        );
-        append_signed_settlement_decision_record(
-            &fixture.paths,
-            fixture.trade_order_id.as_str(),
-            "linked-buyer-cancel-k3436-rejected",
-            fixture.request_event_id.as_str(),
-            fixture.decision_event_id.as_str(),
-            payment_event_id.as_str(),
-            fixture.listing_addr.as_str(),
-            fixture.buyer_pubkey.as_str(),
-            fixture.seller_pubkey.as_str(),
-            2,
-            RadrootsOrderSettlementOutcome::Rejected,
-        );
-        fixture
-            .runtime
-            .refresh_shared_local_events()
-            .expect("linked buyer rejected payment evidence should import");
-        assert!(
-            fixture
-                .runtime
-                .open_personal_order_detail(fixture.order_id)
-                .expect("linked buyer order detail should open")
-        );
-
-        let error = fixture
-            .runtime
-            .publish_buyer_order_cancel(fixture.order_id)
-            .expect_err("linked buyer cancellation should reject rejected 3436 payment evidence");
-
-        assert!(matches!(
-            error,
-            AppSqliteError::InvalidProjection {
-                reason: "buyer order cancellation requires no recorded or settled payment"
-            }
-        ));
-        assert_eq!(relay.event_count(), 0);
-        let cancellation_events =
-            shared_order_events_by_kind(&fixture.paths, 3432, fixture.buyer_pubkey.as_str());
-        assert!(cancellation_events.is_empty());
-        cleanup_bootstrapped_runtime_paths(&fixture.paths);
-    }
-
-    #[test]
-    fn runtime_rejects_linked_buyer_cancellation_with_invalid_payment_evidence() {
-        let relay = ThreadedAckRelay::spawn();
-        let fixture =
-            linked_buyer_lifecycle_runtime("linked_buyer_order_cancel_invalid_payment", false);
-        install_direct_relay_sync_transport(&fixture.runtime, &relay);
-        append_signed_payment_record_with_prev(
-            &fixture.paths,
-            fixture.trade_order_id.as_str(),
-            "linked-buyer-cancel-invalid-payment",
-            fixture.request_event_id.as_str(),
-            fixture.request_event_id.as_str(),
-            fixture.decision_event_id.as_str(),
-            fixture.listing_addr.as_str(),
-            fixture.buyer_pubkey.as_str(),
-            fixture.seller_pubkey.as_str(),
-            2,
-        );
-        fixture
-            .runtime
-            .refresh_shared_local_events()
-            .expect("linked buyer invalid payment evidence should import");
-        assert!(
-            fixture
-                .runtime
-                .open_personal_order_detail(fixture.order_id)
-                .expect("linked buyer order detail should open")
-        );
-
-        let error = fixture
-            .runtime
-            .publish_buyer_order_cancel(fixture.order_id)
-            .expect_err("linked buyer cancellation should reject invalid payment evidence");
-
-        assert_order_lifecycle_evidence_invalid(error);
-        assert_eq!(relay.event_count(), 0);
-        cleanup_bootstrapped_runtime_paths(&fixture.paths);
-    }
-
-    #[test]
-    fn runtime_rejects_linked_buyer_cancellation_after_relay_payment_evidence() {
-        let relay = ThreadedAckRelay::spawn();
-        let fixture =
-            linked_buyer_lifecycle_runtime("linked_buyer_order_cancel_relay_payment", false);
-        configure_runtime_relay_ingest(&fixture.runtime, &relay);
-        fixture
-            .runtime
-            .refresh_shared_local_events()
-            .expect("linked buyer local events should import");
-        assert!(
-            fixture
-                .runtime
-                .open_personal_order_detail(fixture.order_id)
-                .expect("linked buyer order detail should open")
-        );
-        let buyer_identity = selected_account_signing_identity(&fixture.runtime);
-        let payment_event = signed_payment_recorded_relay_event(
-            &buyer_identity,
-            fixture.trade_order_id.as_str(),
-            fixture.request_event_id.as_str(),
-            fixture.decision_event_id.as_str(),
-            fixture.listing_addr.as_str(),
-            fixture.buyer_pubkey.as_str(),
-            fixture.seller_pubkey.as_str(),
-            2,
-        );
-        let payment_event_id = payment_event.id.to_hex();
-        relay.push_event(&payment_event);
-
-        let error = fixture
-            .runtime
-            .publish_buyer_order_cancel(fixture.order_id)
-            .expect_err("linked buyer cancellation should reject relay payment evidence");
-
-        assert!(matches!(
-            error,
-            AppSqliteError::InvalidProjection {
-                reason: "buyer order cancellation requires no recorded or settled payment"
-            }
-        ));
-        let payment_events = fixture
-            .runtime
-            .lock_state()
-            .sqlite_store
-            .as_ref()
-            .expect("sqlite store")
-            .load_local_interop_signed_events_by_kind(3435)
-            .expect("relay payment evidence should load from local interop");
-        assert!(
-            payment_events
-                .iter()
-                .any(|event| event.id == payment_event_id)
-        );
-        assert_eq!(relay.event_count(), 1);
-        cleanup_bootstrapped_runtime_paths(&fixture.paths);
-    }
-
-    #[test]
-    fn runtime_rejects_linked_buyer_cancellation_after_relay_settlement_evidence() {
-        let relay = ThreadedAckRelay::spawn();
-        let seller_identity = RadrootsIdentity::generate();
-        let seller_pubkey = seller_identity.public_key_hex();
-        let fixture = linked_buyer_lifecycle_runtime_with_seller_pubkey(
-            "linked_buyer_order_cancel_relay_k3436",
-            false,
-            seller_pubkey.as_str(),
-        );
-        configure_runtime_relay_ingest(&fixture.runtime, &relay);
-        fixture
-            .runtime
-            .refresh_shared_local_events()
-            .expect("linked buyer local events should import");
-        assert!(
-            fixture
-                .runtime
-                .open_personal_order_detail(fixture.order_id)
-                .expect("linked buyer order detail should open")
-        );
-        let buyer_identity = selected_account_signing_identity(&fixture.runtime);
-        let payment_event = signed_payment_recorded_relay_event(
-            &buyer_identity,
-            fixture.trade_order_id.as_str(),
-            fixture.request_event_id.as_str(),
-            fixture.decision_event_id.as_str(),
-            fixture.listing_addr.as_str(),
-            fixture.buyer_pubkey.as_str(),
-            fixture.seller_pubkey.as_str(),
-            2,
-        );
-        let payment_event_id = payment_event.id.to_hex();
-        let k3436_event = signed_settlement_decision_relay_event(
-            &seller_identity,
-            fixture.trade_order_id.as_str(),
-            fixture.request_event_id.as_str(),
-            fixture.decision_event_id.as_str(),
-            payment_event_id.as_str(),
-            fixture.listing_addr.as_str(),
-            fixture.buyer_pubkey.as_str(),
-            fixture.seller_pubkey.as_str(),
-            2,
-            RadrootsOrderSettlementOutcome::Accepted,
-        );
-        let k3436_event_id = k3436_event.id.to_hex();
-        relay.push_event(&payment_event);
-        relay.push_event(&k3436_event);
-
-        let error = fixture
-            .runtime
-            .publish_buyer_order_cancel(fixture.order_id)
-            .expect_err("linked buyer cancellation should reject relay k3436 evidence");
-
-        assert!(matches!(
-            error,
-            AppSqliteError::InvalidProjection {
-                reason: "buyer order cancellation requires no recorded or settled payment"
-            }
-        ));
-        let k3436_events = fixture
-            .runtime
-            .lock_state()
-            .sqlite_store
-            .as_ref()
-            .expect("sqlite store")
-            .load_local_interop_signed_events_by_kind(3436)
-            .expect("relay k3436 evidence should load from local interop");
-        assert!(k3436_events.iter().any(|event| event.id == k3436_event_id));
-        assert_eq!(relay.event_count(), 2);
-        cleanup_bootstrapped_runtime_paths(&fixture.paths);
-    }
-
-    #[test]
     fn runtime_publishes_linked_buyer_cancellation_from_revision_parent() {
         for (label, revision_decision) in [
             ("accepted", RadrootsOrderRevisionOutcome::Accepted),
@@ -18058,7 +16473,7 @@ mod tests {
         ] {
             let relay = ThreadedAckRelay::spawn();
             let fixture_label = format!("linked_buyer_order_cancel_revision_{label}");
-            let fixture = linked_buyer_lifecycle_runtime(fixture_label.as_str(), false);
+            let fixture = linked_buyer_lifecycle_runtime(fixture_label.as_str());
             let proposal_key = format!("linked-buyer-order-cancel-revision-{label}-proposal");
             let proposal_event_id = append_signed_order_revision_proposal_record_with_prev(
                 &fixture.paths,
@@ -18119,170 +16534,9 @@ mod tests {
     }
 
     #[test]
-    fn runtime_publishes_linked_buyer_receipt_from_selected_account_nostr_scope() {
-        let relay = ThreadedAckRelay::spawn();
-        let fixture = linked_buyer_lifecycle_runtime("linked_buyer_order_receipt", true);
-        let _fulfillment_event_id = fixture
-            .fulfillment_event_id
-            .as_deref()
-            .expect("ready fixture should include fulfillment event")
-            .to_owned();
-        install_direct_relay_sync_transport(&fixture.runtime, &relay);
-        fixture
-            .runtime
-            .refresh_shared_local_events()
-            .expect("linked buyer local events should import");
-        assert!(
-            fixture
-                .runtime
-                .open_personal_order_detail(fixture.order_id)
-                .expect("linked ready buyer order detail should open")
-        );
-        assert_eq!(
-            fixture
-                .runtime
-                .summary()
-                .personal_projection
-                .orders
-                .detail
-                .as_ref()
-                .expect("linked ready buyer detail")
-                .status,
-            BuyerOrderStatus::Ready
-        );
-
-        assert!(
-            fixture
-                .runtime
-                .publish_buyer_order_receipt(fixture.order_id, AppOrderReceiptOutcome::Received)
-                .expect("linked buyer receipt should publish")
-        );
-
-        assert_eq!(
-            persisted_order_status(&fixture.runtime, fixture.order_id),
-            "packed"
-        );
-        assert_eq!(relay.event_count(), 0);
-        let receipt_events =
-            shared_order_events_by_kind(&fixture.paths, 3434, fixture.buyer_pubkey.as_str());
-        assert!(receipt_events.is_empty());
-        assert_order_receipt_sdk_migration_receipt(
-            &fixture.runtime,
-            fixture.order_id,
-            AppSdkMigrationState::Enqueued,
-        );
-
-        cleanup_bootstrapped_runtime_paths(&fixture.paths);
-    }
-
-    #[test]
-    fn runtime_publishes_linked_buyer_receipt_after_direct_delivered_fulfillment() {
-        let relay = ThreadedAckRelay::spawn();
-        let fixture = linked_buyer_lifecycle_runtime("linked_buyer_order_receipt_delivered", false);
-        let _fulfillment_event_id = append_signed_order_fulfillment_record_with_status(
-            &fixture.paths,
-            fixture.trade_order_id.as_str(),
-            fixture.request_event_id.as_str(),
-            fixture.decision_event_id.as_str(),
-            fixture.listing_addr.as_str(),
-            fixture.buyer_pubkey.as_str(),
-            fixture.seller_pubkey.as_str(),
-            RadrootsOrderFulfillmentState::Delivered,
-        );
-        install_direct_relay_sync_transport(&fixture.runtime, &relay);
-        fixture
-            .runtime
-            .refresh_shared_local_events()
-            .expect("linked buyer delivered local events should import");
-        assert!(
-            fixture
-                .runtime
-                .open_personal_order_detail(fixture.order_id)
-                .expect("linked delivered buyer order detail should open")
-        );
-
-        assert!(
-            fixture
-                .runtime
-                .publish_buyer_order_receipt(fixture.order_id, AppOrderReceiptOutcome::Received)
-                .expect("linked delivered buyer receipt should publish")
-        );
-
-        assert_eq!(
-            persisted_order_status(&fixture.runtime, fixture.order_id),
-            "packed"
-        );
-        assert_eq!(relay.event_count(), 0);
-        let receipt_events =
-            shared_order_events_by_kind(&fixture.paths, 3434, fixture.buyer_pubkey.as_str());
-        assert!(receipt_events.is_empty());
-        assert_order_receipt_sdk_migration_receipt(
-            &fixture.runtime,
-            fixture.order_id,
-            AppSdkMigrationState::Enqueued,
-        );
-
-        cleanup_bootstrapped_runtime_paths(&fixture.paths);
-    }
-
-    #[test]
-    fn runtime_publishes_linked_buyer_issue_receipt_from_selected_account_nostr_scope() {
-        let relay = ThreadedAckRelay::spawn();
-        let fixture = linked_buyer_lifecycle_runtime("linked_buyer_order_issue_receipt", true);
-        install_direct_relay_sync_transport(&fixture.runtime, &relay);
-        fixture
-            .runtime
-            .refresh_shared_local_events()
-            .expect("linked buyer local events should import");
-        assert!(
-            fixture
-                .runtime
-                .open_personal_order_detail(fixture.order_id)
-                .expect("linked ready buyer order detail should open")
-        );
-
-        assert!(
-            fixture
-                .runtime
-                .publish_buyer_order_receipt(
-                    fixture.order_id,
-                    AppOrderReceiptOutcome::issue("items need review")
-                        .expect("issue receipt text should be accepted"),
-                )
-                .expect("linked buyer issue receipt should publish")
-        );
-
-        assert_eq!(
-            persisted_order_status(&fixture.runtime, fixture.order_id),
-            "packed"
-        );
-        assert_eq!(relay.event_count(), 0);
-        let receipt_events =
-            shared_order_events_by_kind(&fixture.paths, 3434, fixture.buyer_pubkey.as_str());
-        assert!(receipt_events.is_empty());
-        let buyer_detail = fixture
-            .runtime
-            .summary()
-            .personal_projection
-            .orders
-            .detail
-            .as_ref()
-            .expect("linked buyer issue receipt detail")
-            .clone();
-        assert_eq!(buyer_detail.status, BuyerOrderStatus::Ready);
-        assert_order_receipt_sdk_migration_receipt(
-            &fixture.runtime,
-            fixture.order_id,
-            AppSdkMigrationState::Enqueued,
-        );
-
-        cleanup_bootstrapped_runtime_paths(&fixture.paths);
-    }
-
-    #[test]
     fn runtime_rejects_linked_buyer_cancellation_with_reducer_invalid_evidence() {
         let relay = ThreadedAckRelay::spawn();
-        let fixture = linked_buyer_lifecycle_runtime("linked_buyer_order_cancel_invalid", false);
+        let fixture = linked_buyer_lifecycle_runtime("linked_buyer_order_cancel_invalid");
         install_direct_relay_sync_transport(&fixture.runtime, &relay);
         fixture
             .runtime
@@ -18326,59 +16580,9 @@ mod tests {
     }
 
     #[test]
-    fn runtime_rejects_linked_buyer_receipt_with_reducer_invalid_fulfillment_evidence() {
-        let relay = ThreadedAckRelay::spawn();
-        let fixture = linked_buyer_lifecycle_runtime("linked_buyer_order_receipt_invalid", true);
-        install_direct_relay_sync_transport(&fixture.runtime, &relay);
-        fixture
-            .runtime
-            .refresh_shared_local_events()
-            .expect("linked buyer local events should import");
-        assert!(
-            fixture
-                .runtime
-                .open_personal_order_detail(fixture.order_id)
-                .expect("linked buyer order detail should open")
-        );
-        append_signed_order_fulfillment_record_with_status_and_key(
-            &fixture.paths,
-            fixture.trade_order_id.as_str(),
-            "linked-buyer-order-receipt-forked-ready",
-            fixture.request_event_id.as_str(),
-            fixture.decision_event_id.as_str(),
-            fixture.listing_addr.as_str(),
-            fixture.buyer_pubkey.as_str(),
-            fixture.seller_pubkey.as_str(),
-            RadrootsOrderFulfillmentState::ReadyForPickup,
-        );
-        let resolver_error = {
-            let state = fixture.runtime.lock_state();
-            let request = state
-                .resolve_seller_order_request_evidence(fixture.order_id)
-                .expect("linked buyer request evidence should resolve");
-            state
-                .resolve_order_lifecycle_evidence(&request)
-                .expect_err("linked buyer receipt evidence should be reducer-invalid")
-        };
-        assert_order_lifecycle_evidence_invalid(resolver_error);
-
-        let error = fixture
-            .runtime
-            .publish_buyer_order_receipt(fixture.order_id, AppOrderReceiptOutcome::Received)
-            .expect_err("linked buyer receipt should reject reducer-invalid fulfillment evidence");
-
-        assert!(
-            matches!(error, AppSqliteError::InvalidProjection { .. }),
-            "{error:?}"
-        );
-        assert_eq!(relay.event_count(), 0);
-        cleanup_bootstrapped_runtime_paths(&fixture.paths);
-    }
-
-    #[test]
     fn runtime_publishes_linked_buyer_revision_decision_from_reducer_valid_parent() {
         let relay = ThreadedAckRelay::spawn();
-        let fixture = linked_buyer_lifecycle_runtime("linked_buyer_order_revision", false);
+        let fixture = linked_buyer_lifecycle_runtime("linked_buyer_order_revision");
         let proposal_key = "linked-buyer-order-revision-proposal";
         let _proposal_event_id = append_signed_order_revision_proposal_record_with_prev(
             &fixture.paths,
@@ -21786,26 +19990,17 @@ mod tests {
         trade_order_id: String,
         request_event_id: String,
         decision_event_id: String,
-        fulfillment_event_id: Option<String>,
         listing_addr: String,
         buyer_pubkey: String,
         seller_pubkey: String,
     }
 
-    fn linked_buyer_lifecycle_runtime(
-        label: &str,
-        include_ready_fulfillment: bool,
-    ) -> LinkedBuyerLifecycleFixture {
-        linked_buyer_lifecycle_runtime_with_seller_pubkey(
-            label,
-            include_ready_fulfillment,
-            SDK_TEST_SELLER_PUBLIC_KEY_HEX,
-        )
+    fn linked_buyer_lifecycle_runtime(label: &str) -> LinkedBuyerLifecycleFixture {
+        linked_buyer_lifecycle_runtime_with_seller_pubkey(label, SDK_TEST_SELLER_PUBLIC_KEY_HEX)
     }
 
     fn linked_buyer_lifecycle_runtime_with_seller_pubkey(
         label: &str,
-        include_ready_fulfillment: bool,
         seller_pubkey: &str,
     ) -> LinkedBuyerLifecycleFixture {
         let (runtime, paths) = bootstrapped_runtime(label);
@@ -21873,20 +20068,6 @@ mod tests {
             seller_pubkey,
             2,
         );
-        let fulfillment_event_id = if include_ready_fulfillment {
-            Some(append_signed_order_fulfillment_record(
-                &paths,
-                trade_order_id.as_str(),
-                request_event_id.as_str(),
-                decision_event_id.as_str(),
-                listing_addr.as_str(),
-                buyer_pubkey.as_str(),
-                seller_pubkey,
-            ))
-        } else {
-            None
-        };
-
         LinkedBuyerLifecycleFixture {
             runtime,
             paths,
@@ -21894,7 +20075,6 @@ mod tests {
             trade_order_id,
             request_event_id,
             decision_event_id,
-            fulfillment_event_id,
             listing_addr,
             buyer_pubkey,
             seller_pubkey: seller_pubkey.to_owned(),
@@ -22468,320 +20648,6 @@ mod tests {
         )
     }
 
-    fn append_signed_payment_record(
-        paths: &AppDesktopRuntimePaths,
-        trade_order_id: &str,
-        event_key: &str,
-        request_event_id: &str,
-        agreement_event_id: &str,
-        listing_addr: &str,
-        buyer_pubkey: &str,
-        seller_pubkey: &str,
-        order_quantity: u32,
-    ) -> String {
-        append_signed_payment_record_with_prev(
-            paths,
-            trade_order_id,
-            event_key,
-            request_event_id,
-            agreement_event_id,
-            agreement_event_id,
-            listing_addr,
-            buyer_pubkey,
-            seller_pubkey,
-            order_quantity,
-        )
-    }
-
-    fn append_signed_payment_record_with_prev(
-        paths: &AppDesktopRuntimePaths,
-        trade_order_id: &str,
-        event_key: &str,
-        request_event_id: &str,
-        prev_event_id: &str,
-        agreement_event_id: &str,
-        listing_addr: &str,
-        buyer_pubkey: &str,
-        seller_pubkey: &str,
-        order_quantity: u32,
-    ) -> String {
-        let economics = signed_order_request_economics(trade_order_id, order_quantity);
-        let request_event_id = test_event_id(request_event_id);
-        let prev_event_id = test_event_id(prev_event_id);
-        let agreement_event_id = test_event_id(agreement_event_id);
-        let payload = RadrootsOrderPaymentRecord {
-            order_id: test_order_id(trade_order_id),
-            listing_addr: test_listing_addr(listing_addr),
-            buyer_pubkey: test_pubkey(buyer_pubkey),
-            seller_pubkey: test_pubkey(seller_pubkey),
-            root_event_id: request_event_id.clone(),
-            previous_event_id: prev_event_id.clone(),
-            agreement_event_id,
-            quote_id: economics.quote_id.clone(),
-            quote_version: economics.quote_version,
-            economics_digest: test_economics_digest(
-                radroots_order_economics_digest(&economics).expect("payment economics digest"),
-            ),
-            amount: economics.total.amount,
-            currency: economics.total.currency,
-            method: RadrootsOrderPaymentMethod::ManualTransfer,
-            reference: Some(format!("memo-{event_key}")),
-            paid_at: Some(1_774_000_050),
-        };
-        let parts = order_payment_record_event_build(&request_event_id, &prev_event_id, &payload)
-            .expect("payment recorded draft should build");
-        let record_id = format!("app:signed_event:payment:{event_key}");
-        append_trade_signed_event_record(
-            paths,
-            record_id.as_str(),
-            buyer_pubkey,
-            listing_addr,
-            parts,
-        )
-    }
-
-    fn append_signed_settlement_decision_record(
-        paths: &AppDesktopRuntimePaths,
-        trade_order_id: &str,
-        event_key: &str,
-        request_event_id: &str,
-        agreement_event_id: &str,
-        payment_event_id: &str,
-        listing_addr: &str,
-        buyer_pubkey: &str,
-        seller_pubkey: &str,
-        order_quantity: u32,
-        decision: RadrootsOrderSettlementOutcome,
-    ) -> String {
-        let economics = signed_order_request_economics(trade_order_id, order_quantity);
-        let request_event_id = test_event_id(request_event_id);
-        let payment_event_id = test_event_id(payment_event_id);
-        let agreement_event_id = test_event_id(agreement_event_id);
-        let payload = RadrootsOrderSettlementDecision {
-            order_id: test_order_id(trade_order_id),
-            listing_addr: test_listing_addr(listing_addr),
-            seller_pubkey: test_pubkey(seller_pubkey),
-            buyer_pubkey: test_pubkey(buyer_pubkey),
-            root_event_id: request_event_id.clone(),
-            previous_event_id: payment_event_id.clone(),
-            agreement_event_id,
-            payment_event_id: payment_event_id.clone(),
-            quote_id: economics.quote_id.clone(),
-            quote_version: economics.quote_version,
-            economics_digest: test_economics_digest(
-                radroots_order_economics_digest(&economics).expect("k3436 economics digest"),
-            ),
-            amount: economics.total.amount,
-            currency: economics.total.currency,
-            decision,
-            reason: (decision == RadrootsOrderSettlementOutcome::Rejected)
-                .then(|| "reference mismatch".to_owned()),
-        };
-        let parts =
-            order_settlement_decision_event_build(&request_event_id, &payment_event_id, &payload)
-                .expect("k3436 draft should build");
-        let record_id = format!("app:signed_event:k3436:{event_key}");
-        append_trade_signed_event_record(
-            paths,
-            record_id.as_str(),
-            seller_pubkey,
-            listing_addr,
-            parts,
-        )
-    }
-
-    fn signed_payment_recorded_relay_event(
-        buyer: &RadrootsIdentity,
-        trade_order_id: &str,
-        request_event_id: &str,
-        agreement_event_id: &str,
-        listing_addr: &str,
-        buyer_pubkey: &str,
-        seller_pubkey: &str,
-        order_quantity: u32,
-    ) -> radroots_nostr::prelude::RadrootsNostrEvent {
-        let economics = signed_order_request_economics(trade_order_id, order_quantity);
-        let request_event_id = test_event_id(request_event_id);
-        let agreement_event_id = test_event_id(agreement_event_id);
-        let payload = RadrootsOrderPaymentRecord {
-            order_id: test_order_id(trade_order_id),
-            listing_addr: test_listing_addr(listing_addr),
-            buyer_pubkey: test_pubkey(buyer_pubkey),
-            seller_pubkey: test_pubkey(seller_pubkey),
-            root_event_id: request_event_id.clone(),
-            previous_event_id: agreement_event_id.clone(),
-            agreement_event_id: agreement_event_id.clone(),
-            quote_id: economics.quote_id.clone(),
-            quote_version: economics.quote_version,
-            economics_digest: test_economics_digest(
-                radroots_order_economics_digest(&economics)
-                    .expect("relay payment economics digest"),
-            ),
-            amount: economics.total.amount,
-            currency: economics.total.currency,
-            method: RadrootsOrderPaymentMethod::ManualTransfer,
-            reference: Some("relay-memo-1".to_owned()),
-            paid_at: Some(1_774_000_050),
-        };
-        let parts =
-            order_payment_record_event_build(&request_event_id, &agreement_event_id, &payload)
-                .expect("relay payment draft should build");
-
-        radroots_nostr_build_event(parts.kind, parts.content, parts.tags)
-            .expect("relay payment builder")
-            .sign_with_keys(buyer.keys())
-            .expect("relay payment should sign")
-    }
-
-    fn signed_settlement_decision_relay_event(
-        seller: &RadrootsIdentity,
-        trade_order_id: &str,
-        request_event_id: &str,
-        agreement_event_id: &str,
-        payment_event_id: &str,
-        listing_addr: &str,
-        buyer_pubkey: &str,
-        seller_pubkey: &str,
-        order_quantity: u32,
-        decision: RadrootsOrderSettlementOutcome,
-    ) -> radroots_nostr::prelude::RadrootsNostrEvent {
-        let economics = signed_order_request_economics(trade_order_id, order_quantity);
-        let request_event_id = test_event_id(request_event_id);
-        let agreement_event_id = test_event_id(agreement_event_id);
-        let payment_event_id = test_event_id(payment_event_id);
-        let payload = RadrootsOrderSettlementDecision {
-            order_id: test_order_id(trade_order_id),
-            listing_addr: test_listing_addr(listing_addr),
-            seller_pubkey: test_pubkey(seller_pubkey),
-            buyer_pubkey: test_pubkey(buyer_pubkey),
-            root_event_id: request_event_id.clone(),
-            previous_event_id: payment_event_id.clone(),
-            agreement_event_id,
-            payment_event_id: payment_event_id.clone(),
-            quote_id: economics.quote_id.clone(),
-            quote_version: economics.quote_version,
-            economics_digest: test_economics_digest(
-                radroots_order_economics_digest(&economics).expect("relay k3436 economics digest"),
-            ),
-            amount: economics.total.amount,
-            currency: economics.total.currency,
-            decision,
-            reason: (decision == RadrootsOrderSettlementOutcome::Rejected)
-                .then(|| "reference mismatch".to_owned()),
-        };
-        let parts =
-            order_settlement_decision_event_build(&request_event_id, &payment_event_id, &payload)
-                .expect("relay k3436 draft should build");
-
-        radroots_nostr_build_event(parts.kind, parts.content, parts.tags)
-            .expect("relay k3436 builder")
-            .sign_with_keys(seller.keys())
-            .expect("relay k3436 should sign")
-    }
-
-    fn selected_account_signing_identity(runtime: &DesktopAppRuntime) -> RadrootsIdentity {
-        let account_id = runtime
-            .summary()
-            .settings_account_projection
-            .selected_account
-            .as_ref()
-            .expect("selected account")
-            .account
-            .account_id
-            .clone();
-        let account_id =
-            RadrootsIdentityId::parse(account_id.as_str()).expect("selected account id");
-        runtime
-            .lock_state()
-            .accounts_manager
-            .as_ref()
-            .expect("accounts manager")
-            .get_signing_identity(&account_id)
-            .expect("signer lookup should succeed")
-            .expect("selected account should have local signer")
-    }
-
-    fn append_signed_order_fulfillment_record(
-        paths: &AppDesktopRuntimePaths,
-        trade_order_id: &str,
-        request_event_id: &str,
-        decision_event_id: &str,
-        listing_addr: &str,
-        buyer_pubkey: &str,
-        seller_pubkey: &str,
-    ) -> String {
-        append_signed_order_fulfillment_record_with_status(
-            paths,
-            trade_order_id,
-            request_event_id,
-            decision_event_id,
-            listing_addr,
-            buyer_pubkey,
-            seller_pubkey,
-            RadrootsOrderFulfillmentState::ReadyForPickup,
-        )
-    }
-
-    fn append_signed_order_fulfillment_record_with_status(
-        paths: &AppDesktopRuntimePaths,
-        trade_order_id: &str,
-        request_event_id: &str,
-        decision_event_id: &str,
-        listing_addr: &str,
-        buyer_pubkey: &str,
-        seller_pubkey: &str,
-        status: RadrootsOrderFulfillmentState,
-    ) -> String {
-        append_signed_order_fulfillment_record_with_status_and_key(
-            paths,
-            trade_order_id,
-            trade_order_id,
-            request_event_id,
-            decision_event_id,
-            listing_addr,
-            buyer_pubkey,
-            seller_pubkey,
-            status,
-        )
-    }
-
-    fn append_signed_order_fulfillment_record_with_status_and_key(
-        paths: &AppDesktopRuntimePaths,
-        trade_order_id: &str,
-        event_key: &str,
-        request_event_id: &str,
-        prev_event_id: &str,
-        listing_addr: &str,
-        buyer_pubkey: &str,
-        seller_pubkey: &str,
-        status: RadrootsOrderFulfillmentState,
-    ) -> String {
-        let request_event_id = test_event_id(request_event_id);
-        let prev_event_id = test_event_id(prev_event_id);
-        let payload = RadrootsOrderFulfillmentUpdate {
-            order_id: test_order_id(trade_order_id),
-            listing_addr: test_listing_addr(listing_addr),
-            buyer_pubkey: test_pubkey(buyer_pubkey),
-            seller_pubkey: test_pubkey(seller_pubkey),
-            status,
-        };
-        let parts = radroots_sdk::protocol::order::build_fulfillment_update_draft(
-            &request_event_id,
-            &prev_event_id,
-            &payload,
-        )
-        .expect("fulfillment update draft should build")
-        .into_wire_parts();
-        let record_id = format!("app:signed_event:fulfillment:{event_key}");
-        append_trade_signed_event_record(
-            paths,
-            record_id.as_str(),
-            seller_pubkey,
-            listing_addr,
-            parts,
-        )
-    }
-
     fn append_signed_order_cancellation_record_with_prev(
         paths: &AppDesktopRuntimePaths,
         trade_order_id: &str,
@@ -22809,45 +20675,6 @@ mod tests {
         .expect("order cancellation draft should build")
         .into_wire_parts();
         let record_id = format!("app:signed_event:cancellation:{event_key}");
-        append_trade_signed_event_record(
-            paths,
-            record_id.as_str(),
-            buyer_pubkey,
-            listing_addr,
-            parts,
-        )
-    }
-
-    fn append_signed_order_receipt_record_with_prev(
-        paths: &AppDesktopRuntimePaths,
-        trade_order_id: &str,
-        event_key: &str,
-        request_event_id: &str,
-        prev_event_id: &str,
-        listing_addr: &str,
-        buyer_pubkey: &str,
-        seller_pubkey: &str,
-        received: bool,
-    ) -> String {
-        let request_event_id = test_event_id(request_event_id);
-        let prev_event_id = test_event_id(prev_event_id);
-        let payload = RadrootsOrderReceipt {
-            order_id: test_order_id(trade_order_id),
-            listing_addr: test_listing_addr(listing_addr),
-            buyer_pubkey: test_pubkey(buyer_pubkey),
-            seller_pubkey: test_pubkey(seller_pubkey),
-            received,
-            issue: (!received).then(|| "items need review".to_owned()),
-            received_at: 1_774_000_030,
-        };
-        let parts = radroots_sdk::protocol::order::build_buyer_receipt_draft(
-            &request_event_id,
-            &prev_event_id,
-            &payload,
-        )
-        .expect("buyer receipt draft should build")
-        .into_wire_parts();
-        let record_id = format!("app:signed_event:receipt:{event_key}");
         append_trade_signed_event_record(
             paths,
             record_id.as_str(),
@@ -23448,37 +21275,6 @@ mod tests {
             runtime,
             format!("app:order_cancellation:{order_id}").as_str(),
             ORDER_CANCELLATION_OPERATION_KIND,
-            expected_state,
-        );
-    }
-
-    fn assert_order_fulfillment_sdk_migration_receipt(
-        runtime: &DesktopAppRuntime,
-        order_id: OrderId,
-        fulfillment: RadrootsOrderFulfillmentState,
-        expected_state: AppSdkMigrationState,
-    ) {
-        assert_order_sdk_migration_receipt(
-            runtime,
-            format!(
-                "app:order_fulfillment:{order_id}:{}",
-                order_fulfillment_status_storage_key(fulfillment)
-            )
-            .as_str(),
-            ORDER_FULFILLMENT_UPDATE_OPERATION_KIND,
-            expected_state,
-        );
-    }
-
-    fn assert_order_receipt_sdk_migration_receipt(
-        runtime: &DesktopAppRuntime,
-        order_id: OrderId,
-        expected_state: AppSdkMigrationState,
-    ) {
-        assert_order_sdk_migration_receipt(
-            runtime,
-            format!("app:order_receipt:{order_id}").as_str(),
-            ORDER_RECEIPT_RECORD_OPERATION_KIND,
             expected_state,
         );
     }

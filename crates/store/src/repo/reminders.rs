@@ -536,7 +536,6 @@ fn parse_reminder_kind(value: String) -> Result<ReminderKind, AppSqliteError> {
         "fulfillment_window" => Ok(ReminderKind::FulfillmentWindow),
         "order_action" => Ok(ReminderKind::OrderAction),
         "missed_pickup_recovery" => Ok(ReminderKind::MissedPickupRecovery),
-        "refund_recovery" => Ok(ReminderKind::RefundRecovery),
         "sync_impact" => Ok(ReminderKind::SyncImpact),
         _ => Err(AppSqliteError::DecodeEnum {
             field: "reminder_schedules.reminder_kind",
@@ -586,7 +585,6 @@ fn parse_reminder_delivery_state(value: String) -> Result<ReminderDeliveryState,
 fn parse_recovery_kind(value: String) -> Result<RecoveryKind, AppSqliteError> {
     match value.as_str() {
         "missed_pickup" => Ok(RecoveryKind::MissedPickup),
-        "refund_follow_up" => Ok(RecoveryKind::RefundFollowUp),
         _ => Err(AppSqliteError::DecodeEnum {
             field: "order_recovery_records.recovery_kind",
             value,
@@ -718,8 +716,8 @@ mod tests {
                 farm_id,
                 &ReminderLogEntryProjection {
                     reminder_id: second_reminder_id,
-                    kind: ReminderKind::RefundRecovery,
-                    title: "Refund follow-up pending".to_owned(),
+                    kind: ReminderKind::MissedPickupRecovery,
+                    title: "Pickup follow-up pending".to_owned(),
                     recorded_at: "2026-04-25T13:00:00Z".to_owned(),
                     delivery_state: ReminderDeliveryState::Acknowledged,
                     detail: Some("Customer requested a callback.".to_owned()),

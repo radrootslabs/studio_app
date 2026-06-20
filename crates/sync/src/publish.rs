@@ -2,13 +2,11 @@ use radroots_studio_app_view::{
     FarmId, FarmReadiness, FulfillmentWindowId, OrderId, ProductId, ProductStatus,
 };
 use radroots_sdk::protocol::order::{
-    RadrootsOrderEconomics, RadrootsOrderFulfillmentState, RadrootsOrderItem,
-    RadrootsOrderRevisionOutcome,
+    RadrootsOrderEconomics, RadrootsOrderItem, RadrootsOrderRevisionOutcome,
 };
 use radroots_sdk::{
     FARM_PUBLISH_OPERATION_KIND, LISTING_PUBLISH_OPERATION_KIND, ORDER_CANCELLATION_OPERATION_KIND,
-    ORDER_DECISION_OPERATION_KIND, ORDER_FULFILLMENT_UPDATE_OPERATION_KIND,
-    ORDER_RECEIPT_RECORD_OPERATION_KIND, ORDER_REVISION_DECISION_OPERATION_KIND,
+    ORDER_DECISION_OPERATION_KIND, ORDER_REVISION_DECISION_OPERATION_KIND,
     ORDER_REVISION_PROPOSAL_OPERATION_KIND, ORDER_SUBMIT_OPERATION_KIND,
 };
 use serde::{Deserialize, Serialize};
@@ -26,8 +24,6 @@ pub enum AppPublishWorkKind {
     OrderRevisionProposal,
     OrderRevisionDecision,
     OrderCancellation,
-    OrderFulfillment,
-    OrderReceipt,
 }
 
 impl AppPublishWorkKind {
@@ -40,8 +36,6 @@ impl AppPublishWorkKind {
             Self::OrderRevisionProposal => "order_revision_proposal",
             Self::OrderRevisionDecision => "order_revision_decision",
             Self::OrderCancellation => "order_cancellation",
-            Self::OrderFulfillment => "order_fulfillment",
-            Self::OrderReceipt => "order_receipt",
         }
     }
 
@@ -54,8 +48,6 @@ impl AppPublishWorkKind {
             Self::OrderRevisionProposal => ORDER_REVISION_PROPOSAL_OPERATION_KIND,
             Self::OrderRevisionDecision => ORDER_REVISION_DECISION_OPERATION_KIND,
             Self::OrderCancellation => ORDER_CANCELLATION_OPERATION_KIND,
-            Self::OrderFulfillment => ORDER_FULFILLMENT_UPDATE_OPERATION_KIND,
-            Self::OrderReceipt => ORDER_RECEIPT_RECORD_OPERATION_KIND,
         }
     }
 }
@@ -220,20 +212,6 @@ pub struct AppOrderRevisionDecisionPublishPayload {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
-pub struct AppOrderFulfillmentPublishPayload {
-    pub context: AppPublishContext,
-    pub app_order_id: OrderId,
-    pub farm_id: FarmId,
-    pub trade_order_id: String,
-    pub request_event_id: String,
-    pub prev_event_id: String,
-    pub listing_addr: String,
-    pub buyer_pubkey: String,
-    pub seller_pubkey: String,
-    pub status: RadrootsOrderFulfillmentState,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct AppOrderCancellationPublishPayload {
     pub context: AppPublishContext,
     pub app_order_id: OrderId,
@@ -248,50 +226,6 @@ pub struct AppOrderCancellationPublishPayload {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
-pub struct AppOrderReceiptPublishPayload {
-    pub context: AppPublishContext,
-    pub app_order_id: OrderId,
-    pub farm_id: FarmId,
-    pub trade_order_id: String,
-    pub request_event_id: String,
-    pub prev_event_id: String,
-    pub listing_addr: String,
-    pub buyer_pubkey: String,
-    pub seller_pubkey: String,
-    pub received: bool,
-    pub issue: Option<String>,
-    pub received_at: u64,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub enum AppOrderReceiptOutcome {
-    Received,
-    Issue { issue: String },
-}
-
-impl AppOrderReceiptOutcome {
-    pub fn issue(issue: impl Into<String>) -> Option<Self> {
-        let issue = issue.into().trim().to_owned();
-        if issue.is_empty() {
-            None
-        } else {
-            Some(Self::Issue { issue })
-        }
-    }
-
-    pub const fn received(&self) -> bool {
-        matches!(self, Self::Received)
-    }
-
-    pub fn issue_text(self) -> Option<String> {
-        match self {
-            Self::Received => None,
-            Self::Issue { issue } => Some(issue),
-        }
-    }
-}
-
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "publish_kind", content = "payload", rename_all = "snake_case")]
 pub enum AppPublishPayload {
     FarmProfile(AppFarmProfilePublishPayload),
@@ -301,8 +235,6 @@ pub enum AppPublishPayload {
     OrderRevisionProposal(AppOrderRevisionProposalPublishPayload),
     OrderRevisionDecision(AppOrderRevisionDecisionPublishPayload),
     OrderCancellation(AppOrderCancellationPublishPayload),
-    OrderFulfillment(AppOrderFulfillmentPublishPayload),
-    OrderReceipt(AppOrderReceiptPublishPayload),
 }
 
 impl AppPublishPayload {
@@ -315,8 +247,6 @@ impl AppPublishPayload {
             Self::OrderRevisionProposal(_) => AppPublishWorkKind::OrderRevisionProposal,
             Self::OrderRevisionDecision(_) => AppPublishWorkKind::OrderRevisionDecision,
             Self::OrderCancellation(_) => AppPublishWorkKind::OrderCancellation,
-            Self::OrderFulfillment(_) => AppPublishWorkKind::OrderFulfillment,
-            Self::OrderReceipt(_) => AppPublishWorkKind::OrderReceipt,
         }
     }
 
@@ -333,8 +263,6 @@ impl AppPublishPayload {
             Self::OrderRevisionProposal(payload) => SyncAggregateRef::Order(payload.app_order_id),
             Self::OrderRevisionDecision(payload) => SyncAggregateRef::Order(payload.app_order_id),
             Self::OrderCancellation(payload) => SyncAggregateRef::Order(payload.app_order_id),
-            Self::OrderFulfillment(payload) => SyncAggregateRef::Order(payload.app_order_id),
-            Self::OrderReceipt(payload) => SyncAggregateRef::Order(payload.app_order_id),
         }
     }
 
@@ -562,44 +490,6 @@ impl AppPublishPayload {
                     failures.push(AppPublishValidationFailure::MissingOrderCancellationReason);
                 }
             }
-            Self::OrderFulfillment(payload) => {
-                validate_lifecycle_order_fields(
-                    &payload.context,
-                    payload.trade_order_id.as_str(),
-                    payload.request_event_id.as_str(),
-                    payload.prev_event_id.as_str(),
-                    payload.listing_addr.as_str(),
-                    payload.buyer_pubkey.as_str(),
-                    payload.seller_pubkey.as_str(),
-                    &mut failures,
-                );
-                if !payload.status.is_publishable_update() {
-                    failures.push(AppPublishValidationFailure::InvalidOrderFulfillmentStatus);
-                }
-            }
-            Self::OrderReceipt(payload) => {
-                validate_lifecycle_order_fields(
-                    &payload.context,
-                    payload.trade_order_id.as_str(),
-                    payload.request_event_id.as_str(),
-                    payload.prev_event_id.as_str(),
-                    payload.listing_addr.as_str(),
-                    payload.buyer_pubkey.as_str(),
-                    payload.seller_pubkey.as_str(),
-                    &mut failures,
-                );
-                if payload.received {
-                    if payload.issue.is_some() {
-                        failures.push(AppPublishValidationFailure::UnexpectedOrderReceiptIssue);
-                    }
-                } else if payload
-                    .issue
-                    .as_deref()
-                    .is_none_or(|value| value.trim().is_empty())
-                {
-                    failures.push(AppPublishValidationFailure::MissingOrderReceiptIssue);
-                }
-            }
         }
 
         failures
@@ -689,9 +579,6 @@ pub enum AppPublishValidationFailure {
     MissingOrderRevisionReason,
     MissingOrderRevisionDecisionReason,
     MissingOrderCancellationReason,
-    InvalidOrderFulfillmentStatus,
-    MissingOrderReceiptIssue,
-    UnexpectedOrderReceiptIssue,
 }
 
 impl AppPublishValidationFailure {
@@ -731,9 +618,6 @@ impl AppPublishValidationFailure {
             Self::MissingOrderRevisionReason => "missing_order_revision_reason",
             Self::MissingOrderRevisionDecisionReason => "missing_order_revision_decision_reason",
             Self::MissingOrderCancellationReason => "missing_order_cancellation_reason",
-            Self::InvalidOrderFulfillmentStatus => "invalid_order_fulfillment_status",
-            Self::MissingOrderReceiptIssue => "missing_order_receipt_issue",
-            Self::UnexpectedOrderReceiptIssue => "unexpected_order_receipt_issue",
         }
     }
 }
@@ -786,13 +670,11 @@ impl PendingSyncOperation {
 mod tests {
     use super::{
         AppFarmProfilePublishPayload, AppListingPublishPayload, AppOrderCancellationPublishPayload,
-        AppOrderDecisionPayload, AppOrderDecisionPublishPayload, AppOrderFulfillmentPublishPayload,
-        AppOrderReceiptOutcome, AppOrderReceiptPublishPayload, AppOrderRequestItemPayload,
+        AppOrderDecisionPayload, AppOrderDecisionPublishPayload, AppOrderRequestItemPayload,
         AppOrderRequestPublishPayload, AppOrderRevisionDecisionPublishPayload,
         AppOrderRevisionProposalPublishPayload, AppPublishContext, AppPublishPayload,
         AppPublishValidationFailure, AppPublishWorkKind, FARM_PUBLISH_OPERATION_KIND,
         ORDER_CANCELLATION_OPERATION_KIND, ORDER_DECISION_OPERATION_KIND,
-        ORDER_FULFILLMENT_UPDATE_OPERATION_KIND, ORDER_RECEIPT_RECORD_OPERATION_KIND,
         ORDER_REVISION_DECISION_OPERATION_KIND, ORDER_REVISION_PROPOSAL_OPERATION_KIND,
     };
     use crate::{
@@ -800,8 +682,7 @@ mod tests {
     };
     use radroots_studio_app_view::{FarmId, FarmReadiness, OrderId, ProductId, ProductStatus};
     use radroots_sdk::protocol::order::{
-        RadrootsOrderEconomics, RadrootsOrderFulfillmentState, RadrootsOrderItem,
-        RadrootsOrderRevisionOutcome,
+        RadrootsOrderEconomics, RadrootsOrderItem, RadrootsOrderRevisionOutcome,
     };
     use serde_json::json;
 
@@ -840,18 +721,7 @@ mod tests {
     }
 
     #[test]
-    fn order_receipt_outcome_requires_non_empty_issue_text() {
-        assert_eq!(AppOrderReceiptOutcome::issue("   "), None);
-        assert!(AppOrderReceiptOutcome::Received.received());
-
-        let issue = AppOrderReceiptOutcome::issue("  items need review  ")
-            .expect("issue text should normalize");
-        assert!(!issue.received());
-        assert_eq!(issue.issue_text().as_deref(), Some("items need review"));
-    }
-
-    #[test]
-    fn publish_work_kinds_keep_payment_and_checkout_surfaces_reserved() {
+    fn publish_work_kinds_are_current_agreement_surface() {
         let work_kinds = [
             AppPublishWorkKind::FarmProfile,
             AppPublishWorkKind::Listing,
@@ -860,31 +730,16 @@ mod tests {
             AppPublishWorkKind::OrderRevisionProposal,
             AppPublishWorkKind::OrderRevisionDecision,
             AppPublishWorkKind::OrderCancellation,
-            AppPublishWorkKind::OrderFulfillment,
-            AppPublishWorkKind::OrderReceipt,
-        ];
-        let reserved_publish_tokens = [
-            "payment",
-            "settlement",
-            "checkout",
-            "refund",
-            "wallet",
-            "invoice",
-            "processor",
-            "provider",
-            "escrow",
-            "custody",
         ];
 
-        assert_eq!(work_kinds.len(), 9);
-        for work_kind in work_kinds {
-            let storage_key = work_kind.storage_key();
-            let sdk_operation = work_kind.sdk_operation();
-            for reserved_token in reserved_publish_tokens {
-                assert!(!storage_key.contains(reserved_token));
-                assert!(!sdk_operation.contains(reserved_token));
-            }
-        }
+        assert_eq!(work_kinds.len(), 7);
+        assert_eq!(work_kinds[0].storage_key(), "farm_profile");
+        assert_eq!(work_kinds[1].storage_key(), "listing");
+        assert_eq!(work_kinds[2].storage_key(), "order_request");
+        assert_eq!(work_kinds[3].storage_key(), "order_decision");
+        assert_eq!(work_kinds[4].storage_key(), "order_revision_proposal");
+        assert_eq!(work_kinds[5].storage_key(), "order_revision_decision");
+        assert_eq!(work_kinds[6].storage_key(), "order_cancellation");
     }
 
     #[test]
@@ -1025,7 +880,7 @@ mod tests {
     }
 
     #[test]
-    fn lifecycle_publish_payloads_report_stable_validation_reason_codes() {
+    fn cancellation_publish_payload_reports_stable_validation_reason_codes() {
         let order_id = OrderId::new();
         let farm_id = FarmId::new();
         let cancellation =
@@ -1041,53 +896,13 @@ mod tests {
                 seller_pubkey: String::new(),
                 reason: " ".to_owned(),
             });
-        let fulfillment = AppPublishPayload::OrderFulfillment(AppOrderFulfillmentPublishPayload {
-            context: AppPublishContext::new("acct_local", "seller_order_fulfillment"),
-            app_order_id: order_id,
-            farm_id,
-            trade_order_id: "order-1".to_owned(),
-            request_event_id: "request-event-1".to_owned(),
-            prev_event_id: "decision-event-1".to_owned(),
-            listing_addr: "30402:seller:listing".to_owned(),
-            buyer_pubkey: "buyer".to_owned(),
-            seller_pubkey: "seller".to_owned(),
-            status: RadrootsOrderFulfillmentState::ReadyForPickup,
-        });
-        let receipt = AppPublishPayload::OrderReceipt(AppOrderReceiptPublishPayload {
-            context: AppPublishContext::new("acct_local", "buyer_order_receipt"),
-            app_order_id: order_id,
-            farm_id,
-            trade_order_id: "order-1".to_owned(),
-            request_event_id: "request-event-1".to_owned(),
-            prev_event_id: "fulfillment-event-1".to_owned(),
-            listing_addr: "30402:seller:listing".to_owned(),
-            buyer_pubkey: "buyer".to_owned(),
-            seller_pubkey: "seller".to_owned(),
-            received: true,
-            issue: Some("late".to_owned()),
-            received_at: 1_785_000_000,
-        });
 
         assert_eq!(
             cancellation.work_kind().sdk_operation(),
             ORDER_CANCELLATION_OPERATION_KIND
         );
-        assert_eq!(
-            fulfillment.work_kind().sdk_operation(),
-            ORDER_FULFILLMENT_UPDATE_OPERATION_KIND
-        );
-        assert_eq!(
-            receipt.work_kind().sdk_operation(),
-            ORDER_RECEIPT_RECORD_OPERATION_KIND
-        );
-        assert_eq!(fulfillment.validation_failures(), Vec::new());
 
         let cancellation_reason_codes: Vec<&str> = cancellation
-            .validation_failures()
-            .into_iter()
-            .map(AppPublishValidationFailure::storage_key)
-            .collect();
-        let receipt_reason_codes: Vec<&str> = receipt
             .validation_failures()
             .into_iter()
             .map(AppPublishValidationFailure::storage_key)
@@ -1107,33 +922,10 @@ mod tests {
                 "missing_order_cancellation_reason",
             ]
         );
-        assert_eq!(receipt_reason_codes, vec!["unexpected_order_receipt_issue"]);
-
-        let invalid_fulfillment_reason_codes: Vec<&str> =
-            AppPublishPayload::OrderFulfillment(AppOrderFulfillmentPublishPayload {
-                context: AppPublishContext::new("acct_local", "seller_order_fulfillment"),
-                app_order_id: order_id,
-                farm_id,
-                trade_order_id: "order-1".to_owned(),
-                request_event_id: "request-event-1".to_owned(),
-                prev_event_id: "decision-event-1".to_owned(),
-                listing_addr: "30402:seller:listing".to_owned(),
-                buyer_pubkey: "buyer".to_owned(),
-                seller_pubkey: "seller".to_owned(),
-                status: RadrootsOrderFulfillmentState::AcceptedNotFulfilled,
-            })
-            .validation_failures()
-            .into_iter()
-            .map(AppPublishValidationFailure::storage_key)
-            .collect();
-        assert_eq!(
-            invalid_fulfillment_reason_codes,
-            vec!["invalid_order_fulfillment_status"]
-        );
 
         let operation = PendingSyncOperation::from_publish_payload(
-            AppPublishPayload::OrderFulfillment(AppOrderFulfillmentPublishPayload {
-                context: AppPublishContext::new("acct_local", "seller_order_fulfillment"),
+            AppPublishPayload::OrderCancellation(AppOrderCancellationPublishPayload {
+                context: AppPublishContext::new("acct_local", "buyer_order_cancellation"),
                 app_order_id: order_id,
                 farm_id,
                 trade_order_id: "order-1".to_owned(),
@@ -1142,7 +934,7 @@ mod tests {
                 listing_addr: "30402:seller:listing".to_owned(),
                 buyer_pubkey: "buyer".to_owned(),
                 seller_pubkey: "seller".to_owned(),
-                status: RadrootsOrderFulfillmentState::Delivered,
+                reason: "buyer cancelled order".to_owned(),
             }),
             "2026-04-20T18:00:00Z",
         )
@@ -1153,8 +945,8 @@ mod tests {
         assert_eq!(operation.operation, SyncOperationKind::Upsert);
         assert_eq!(
             operation.publish_payload().expect("payload should parse"),
-            AppPublishPayload::OrderFulfillment(AppOrderFulfillmentPublishPayload {
-                context: AppPublishContext::new("acct_local", "seller_order_fulfillment"),
+            AppPublishPayload::OrderCancellation(AppOrderCancellationPublishPayload {
+                context: AppPublishContext::new("acct_local", "buyer_order_cancellation"),
                 app_order_id: order_id,
                 farm_id,
                 trade_order_id: "order-1".to_owned(),
@@ -1163,7 +955,7 @@ mod tests {
                 listing_addr: "30402:seller:listing".to_owned(),
                 buyer_pubkey: "buyer".to_owned(),
                 seller_pubkey: "seller".to_owned(),
-                status: RadrootsOrderFulfillmentState::Delivered,
+                reason: "buyer cancelled order".to_owned(),
             })
         );
     }

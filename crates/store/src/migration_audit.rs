@@ -3,9 +3,8 @@ use std::collections::{BTreeMap, BTreeSet};
 use radroots_studio_app_sync::{AppPublishPayload, SyncOperationKind};
 use radroots_events::kinds::{
     KIND_FARM, KIND_LISTING, KIND_LISTING_DRAFT, KIND_ORDER_CANCELLATION, KIND_ORDER_DECISION,
-    KIND_ORDER_FULFILLMENT_UPDATE, KIND_ORDER_PAYMENT_RECORD, KIND_ORDER_RECEIPT,
     KIND_ORDER_REQUEST, KIND_ORDER_REVISION_DECISION, KIND_ORDER_REVISION_PROPOSAL,
-    KIND_ORDER_SETTLEMENT_DECISION, KIND_TRADE_VALIDATION_RECEIPT,
+    KIND_TRADE_VALIDATION_RECEIPT,
 };
 use radroots_local_events::{
     LocalEventRecord, LocalEventsStore, LocalRecordFamily, LocalRecordStatus, PublishOutboxStatus,
@@ -102,8 +101,6 @@ pub enum AppSdkMigrationAuditClassification {
     FailedRecord,
     LocalWorkDeferred,
     ManualReviewRequired,
-    PaymentDeferred,
-    SettlementDeferred,
     ValidationReceiptDeferred,
     Unsupported,
     Unknown,
@@ -119,8 +116,6 @@ impl AppSdkMigrationAuditClassification {
             Self::FailedRecord => "failed_record",
             Self::LocalWorkDeferred => "local_work_deferred",
             Self::ManualReviewRequired => "manual_review_required",
-            Self::PaymentDeferred => "payment_deferred",
-            Self::SettlementDeferred => "settlement_deferred",
             Self::ValidationReceiptDeferred => "validation_receipt_deferred",
             Self::Unsupported => "unsupported",
             Self::Unknown => "unknown",
@@ -686,12 +681,6 @@ fn classify_shared_signed_event(
     report: &mut AppSdkMigrationAuditSourceBuilder,
 ) -> AppSdkMigrationAuditClassification {
     match record.event_kind {
-        Some(kind) if kind == KIND_ORDER_PAYMENT_RECORD as i64 => {
-            AppSdkMigrationAuditClassification::PaymentDeferred
-        }
-        Some(kind) if kind == KIND_ORDER_SETTLEMENT_DECISION as i64 => {
-            AppSdkMigrationAuditClassification::SettlementDeferred
-        }
         Some(kind) if kind == KIND_TRADE_VALIDATION_RECEIPT as i64 => {
             AppSdkMigrationAuditClassification::ValidationReceiptDeferred
         }
@@ -795,8 +784,6 @@ fn supported_signed_event_kind(kind: i64) -> bool {
             || value == KIND_ORDER_REVISION_PROPOSAL as i64
             || value == KIND_ORDER_REVISION_DECISION as i64
             || value == KIND_ORDER_CANCELLATION as i64
-            || value == KIND_ORDER_FULFILLMENT_UPDATE as i64
-            || value == KIND_ORDER_RECEIPT as i64
     )
 }
 
@@ -810,10 +797,6 @@ fn shared_signed_event_kind(kind: i64) -> String {
         value if value == KIND_ORDER_REVISION_PROPOSAL as i64 => "order_revision_proposal",
         value if value == KIND_ORDER_REVISION_DECISION as i64 => "order_revision_decision",
         value if value == KIND_ORDER_CANCELLATION as i64 => "order_cancellation",
-        value if value == KIND_ORDER_FULFILLMENT_UPDATE as i64 => "order_fulfillment",
-        value if value == KIND_ORDER_RECEIPT as i64 => "order_receipt",
-        value if value == KIND_ORDER_PAYMENT_RECORD as i64 => "order_payment",
-        value if value == KIND_ORDER_SETTLEMENT_DECISION as i64 => "order_settlement",
         value if value == KIND_TRADE_VALIDATION_RECEIPT as i64 => "trade_validation_receipt",
         _ => "unsupported",
     };
@@ -860,10 +843,7 @@ mod tests {
         AppFarmProfilePublishPayload, AppPublishContext, AppPublishPayload, PendingSyncOperation,
     };
     use radroots_studio_app_view::{FarmId, FarmReadiness};
-    use radroots_events::kinds::{
-        KIND_LISTING, KIND_ORDER_PAYMENT_RECORD, KIND_ORDER_SETTLEMENT_DECISION,
-        KIND_TRADE_VALIDATION_RECEIPT,
-    };
+    use radroots_events::kinds::{KIND_LISTING, KIND_ORDER_REQUEST, KIND_TRADE_VALIDATION_RECEIPT};
     use radroots_local_events::{
         LocalEventRecord, LocalEventRecordInput, LocalEventsStore, LocalRecordFamily,
         LocalRecordStatus, PublishOutboxStatus, SourceRuntime,
@@ -1196,7 +1176,7 @@ mod tests {
     }
 
     #[test]
-    fn shared_local_events_audit_defers_payment_and_settlement() {
+    fn shared_local_events_audit_classifies_supported_events_and_validation_receipts() {
         let store = AppSqliteStore::open(DatabaseTarget::InMemory).expect("open app store");
         let shared_events = local_events_store();
         shared_events
@@ -1215,18 +1195,11 @@ mod tests {
             .expect("append listing b");
         shared_events
             .append_record(&signed_event_record(
-                "payment",
-                "payment-event",
-                KIND_ORDER_PAYMENT_RECORD as i64,
+                "request",
+                "request-event",
+                KIND_ORDER_REQUEST as i64,
             ))
-            .expect("append payment");
-        shared_events
-            .append_record(&signed_event_record(
-                "settlement",
-                "settlement-event",
-                KIND_ORDER_SETTLEMENT_DECISION as i64,
-            ))
-            .expect("append settlement");
+            .expect("append request");
         shared_events
             .append_record(&signed_event_record(
                 "validation-receipt",
@@ -1253,28 +1226,14 @@ mod tests {
                 .len(),
             before_records
         );
-        assert_eq!(report.shared_local_events.batch_count, 5);
-        assert_eq!(report.shared_local_events.scanned_records, 5);
+        assert_eq!(report.shared_local_events.batch_count, 4);
+        assert_eq!(report.shared_local_events.scanned_records, 4);
         assert_eq!(
             count_named(
                 &report.shared_local_events.classification_counts,
                 AppSdkMigrationAuditClassification::AlreadyRepresentedCandidate.storage_key()
             ),
-            2
-        );
-        assert_eq!(
-            count_named(
-                &report.shared_local_events.classification_counts,
-                AppSdkMigrationAuditClassification::PaymentDeferred.storage_key()
-            ),
-            1
-        );
-        assert_eq!(
-            count_named(
-                &report.shared_local_events.classification_counts,
-                AppSdkMigrationAuditClassification::SettlementDeferred.storage_key()
-            ),
-            1
+            3
         );
         assert_eq!(
             count_named(

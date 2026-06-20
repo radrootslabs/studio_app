@@ -32,7 +32,7 @@ CREATE TABLE orders (
     order_number TEXT NOT NULL,
     customer_display_name TEXT NOT NULL,
     status TEXT NOT NULL CHECK (
-        status IN ('needs_action', 'scheduled', 'packed', 'completed', 'refunded')
+        status IN ('needs_action', 'scheduled', 'packed', 'completed')
     ),
     updated_at TEXT NOT NULL
 );

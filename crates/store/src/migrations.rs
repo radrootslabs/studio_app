@@ -98,11 +98,11 @@ const MIGRATIONS: &[Migration] = &[
     },
     Migration {
         version: 24,
-        sql: include_str!("../migrations/0024_order_workflow_payment_display_states.sql"),
+        sql: include_str!("../migrations/0024_order_workflow_agreement_states.sql"),
     },
     Migration {
         version: 25,
-        sql: include_str!("../migrations/0025_order_receipt_display_projection.sql"),
+        sql: include_str!("../migrations/0025_order_workflow_agreement_projection.sql"),
     },
     Migration {
         version: 26,
