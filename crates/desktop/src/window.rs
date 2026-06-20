@@ -69,18 +69,17 @@ use radroots_studio_app_view::{
     FarmSetupBlocker, FarmSetupDraft, FarmSummary, FarmTimingConflictKind, FarmerSection,
     FulfillmentWindowId, FulfillmentWindowRecord, FulfillmentWindowSummary, LoggedOutStartupPhase,
     OrderDetailItemRow, OrderDetailProjection, OrderId, OrderListRow, OrderPrimaryAction,
-    OrderRecoveryProjection, OrderStatus, OrdersFilter, OrdersListRow,
-    PackDayBatchPrintFailureKind, PackDayBatchPrintStatus, PackDayExportBundle,
-    PackDayExportStatus, PackDayHostHandoffKind, PackDayHostHandoffStatus, PackDayPackListRow,
-    PackDayPrintFailureKind, PackDayPrintKind, PackDayPrintStatus, PackDayProductTotalRow,
-    PackDayRosterRow, PersonalEntryState, PersonalSection, PickupLocationId, PickupLocationRecord,
-    ProductAttentionState, ProductEditorDraft, ProductId, ProductListRow, ProductPricePresentation,
-    ProductPublishBlocker, ProductStatus, ProductsFilter, ProductsListRow, ProductsSort,
-    RecoveryKind, RecoveryState, ReminderDeadlineProjection, ReminderDeliveryState, ReminderId,
-    ReminderLogEntryProjection, ReminderLogProjection, ReminderSurface, ReminderUrgency,
-    RepeatDemandEligibility, RepeatDemandHandoffProjection, SettingsAccountProjection,
-    ShellSection, TodayAgendaProjection, TodaySetupTaskKind, TradeAgreementStatus,
-    TradeEconomicsProjection, TradeInventoryStatus, TradeRevisionStatus,
+    OrderStatus, OrdersFilter, OrdersListRow, PackDayBatchPrintFailureKind,
+    PackDayBatchPrintStatus, PackDayExportBundle, PackDayExportStatus, PackDayHostHandoffKind,
+    PackDayHostHandoffStatus, PackDayPackListRow, PackDayPrintFailureKind, PackDayPrintKind,
+    PackDayPrintStatus, PackDayProductTotalRow, PackDayRosterRow, PersonalEntryState,
+    PersonalSection, PickupLocationId, PickupLocationRecord, ProductAttentionState,
+    ProductEditorDraft, ProductId, ProductListRow, ProductPricePresentation, ProductPublishBlocker,
+    ProductStatus, ProductsFilter, ProductsListRow, ProductsSort, ReminderDeadlineProjection,
+    ReminderDeliveryState, ReminderId, ReminderLogEntryProjection, ReminderLogProjection,
+    ReminderSurface, ReminderUrgency, RepeatDemandEligibility, RepeatDemandHandoffProjection,
+    SettingsAccountProjection, ShellSection, TodayAgendaProjection, TodaySetupTaskKind,
+    TradeAgreementStatus, TradeEconomicsProjection, TradeInventoryStatus, TradeRevisionStatus,
     TradeValidationReceiptProjection, TradeValidationReceiptResult, TradeValidationReceiptType,
     TradeWorkflowProjection, TradeWorkflowSource,
 };
@@ -2913,94 +2912,6 @@ impl HomeView {
         }
     }
 
-    fn start_order_recovery(
-        &mut self,
-        order_id: OrderId,
-        kind: RecoveryKind,
-        cx: &mut Context<Self>,
-    ) {
-        match self.runtime.start_order_recovery(order_id, kind) {
-            Ok(true) => cx.notify(),
-            Ok(false) => {}
-            Err(runtime_error) => {
-                error!(
-                    target: "orders",
-                    event = "orders.recovery_start_failed",
-                    error = %runtime_error,
-                    order_id = %order_id,
-                    recovery_kind = kind.storage_key(),
-                    "failed to start order recovery"
-                );
-            }
-        }
-    }
-
-    fn review_order_recovery(
-        &mut self,
-        order_id: OrderId,
-        kind: RecoveryKind,
-        cx: &mut Context<Self>,
-    ) {
-        match self.runtime.review_order_recovery(order_id, kind) {
-            Ok(true) => cx.notify(),
-            Ok(false) => {}
-            Err(runtime_error) => {
-                error!(
-                    target: "orders",
-                    event = "orders.recovery_review_failed",
-                    error = %runtime_error,
-                    order_id = %order_id,
-                    recovery_kind = kind.storage_key(),
-                    "failed to review order recovery"
-                );
-            }
-        }
-    }
-
-    fn reopen_order_recovery(
-        &mut self,
-        order_id: OrderId,
-        kind: RecoveryKind,
-        cx: &mut Context<Self>,
-    ) {
-        match self.runtime.reopen_order_recovery(order_id, kind) {
-            Ok(true) => cx.notify(),
-            Ok(false) => {}
-            Err(runtime_error) => {
-                error!(
-                    target: "orders",
-                    event = "orders.recovery_reopen_failed",
-                    error = %runtime_error,
-                    order_id = %order_id,
-                    recovery_kind = kind.storage_key(),
-                    "failed to reopen order recovery"
-                );
-            }
-        }
-    }
-
-    fn resolve_order_recovery(
-        &mut self,
-        order_id: OrderId,
-        kind: RecoveryKind,
-        cx: &mut Context<Self>,
-    ) {
-        match self.runtime.resolve_order_recovery(order_id, kind) {
-            Ok(true) => cx.notify(),
-            Ok(false) => {}
-            Err(runtime_error) => {
-                error!(
-                    target: "orders",
-                    event = "orders.recovery_resolve_failed",
-                    error = %runtime_error,
-                    order_id = %order_id,
-                    recovery_kind = kind.storage_key(),
-                    "failed to resolve order recovery"
-                );
-            }
-        }
-    }
-
     fn open_products_stock_editor(
         &mut self,
         product_id: ProductId,
@@ -4928,8 +4839,7 @@ impl HomeView {
                         .when(detail.items.is_empty(), |this| {
                             this.child(home_body_text(app_shared_text(AppTextKey::ValueNone)))
                         }),
-                ))
-                .child(self.render_order_recovery_section(detail, cx)),
+                )),
             text_button(
                 "orders-detail-back",
                 app_shared_text(AppTextKey::PersonalDetailBackAction),
@@ -4937,198 +4847,6 @@ impl HomeView {
                 cx,
             ),
         )
-    }
-
-    fn render_order_recovery_section(
-        &mut self,
-        detail: &OrderDetailProjection,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
-        app_form_section(
-            app_shared_text(AppTextKey::OrdersRecoverySectionTitle),
-            div()
-                .w_full()
-                .flex()
-                .flex_col()
-                .gap(px(APP_UI_THEME.foundation.spacing.medium_px))
-                .child(
-                    self.render_order_recovery_card(
-                        detail.order_id,
-                        RecoveryKind::MissedPickup,
-                        detail
-                            .recoveries
-                            .iter()
-                            .find(|record| record.kind == RecoveryKind::MissedPickup),
-                        cx,
-                    ),
-                ),
-        )
-        .into_any_element()
-    }
-
-    fn render_order_recovery_card(
-        &mut self,
-        order_id: OrderId,
-        kind: RecoveryKind,
-        recovery: Option<&OrderRecoveryProjection>,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
-        let title_key = order_recovery_title_key(kind);
-        let body = recovery.map_or_else(
-            || {
-                home_body_text(app_shared_text(order_recovery_empty_body_key(kind)))
-                    .into_any_element()
-            },
-            |record| {
-                app_stack_v(APP_UI_THEME.foundation.spacing.tight_px)
-                    .w_full()
-                    .child(home_body_text(record.summary.clone()))
-                    .when_some(
-                        record
-                            .note
-                            .as_ref()
-                            .map(|note| note.trim())
-                            .filter(|note| !note.is_empty()),
-                        |this, note| this.child(home_body_text(note.to_owned())),
-                    )
-                    .child(
-                        div()
-                            .text_size(px(APP_UI_THEME.foundation.typography.utility_title_text_px))
-                            .text_color(rgb(APP_UI_THEME.foundation.text.secondary))
-                            .child(format!(
-                                "{}: {}",
-                                app_text(AppTextKey::OrdersRecoveryLastUpdatedLabel),
-                                record.last_updated_at
-                            )),
-                    )
-                    .into_any_element()
-            },
-        );
-
-        app_surface_card(
-            app_stack_v(APP_UI_THEME.foundation.spacing.medium_px)
-                .w_full()
-                .child(
-                    div()
-                        .w_full()
-                        .min_w_0()
-                        .flex()
-                        .items_start()
-                        .justify_between()
-                        .gap(px(APP_UI_THEME.foundation.spacing.tight_px))
-                        .child(
-                            div()
-                                .flex_1()
-                                .min_w_0()
-                                .text_size(px(APP_UI_THEME.foundation.typography.body_text_px))
-                                .font_weight(gpui::FontWeight::SEMIBOLD)
-                                .line_height(relative(1.2))
-                                .text_color(rgb(APP_UI_THEME.foundation.text.primary))
-                                .child(app_shared_text(title_key)),
-                        )
-                        .when_some(
-                            recovery.map(|record| order_recovery_state_badge(record.state)),
-                            |this, badge| this.child(badge),
-                        ),
-                )
-                .child(body)
-                .when_some(
-                    self.render_order_recovery_actions(order_id, kind, recovery, cx),
-                    |this, actions| {
-                        this.child(
-                            div()
-                                .w_full()
-                                .flex()
-                                .items_center()
-                                .justify_end()
-                                .gap(px(APP_UI_THEME.foundation.spacing.tight_px))
-                                .child(actions),
-                        )
-                    },
-                ),
-        )
-        .into_any_element()
-    }
-
-    fn render_order_recovery_actions(
-        &mut self,
-        order_id: OrderId,
-        kind: RecoveryKind,
-        recovery: Option<&OrderRecoveryProjection>,
-        cx: &mut Context<Self>,
-    ) -> Option<AnyElement> {
-        let index = order_recovery_kind_index(kind);
-
-        match recovery.map(|record| record.state) {
-            None => Some(
-                action_button_primary(
-                    ("orders-recovery-open", index),
-                    app_shared_text(AppTextKey::OrdersRecoveryActionOpenFollowUp),
-                    cx.listener(move |this, _, _, cx| {
-                        this.start_order_recovery(order_id, kind, cx)
-                    }),
-                    cx,
-                )
-                .into_any_element(),
-            ),
-            Some(RecoveryState::Open) => Some(
-                div()
-                    .flex()
-                    .items_center()
-                    .gap(px(APP_UI_THEME.foundation.spacing.tight_px))
-                    .child(action_button_compact(
-                        ("orders-recovery-review", index),
-                        app_shared_text(AppTextKey::OrdersRecoveryActionStartReview),
-                        cx.listener(move |this, _, _, cx| {
-                            this.review_order_recovery(order_id, kind, cx)
-                        }),
-                        cx,
-                    ))
-                    .child(action_button_primary(
-                        ("orders-recovery-resolve", index),
-                        app_shared_text(AppTextKey::OrdersRecoveryActionResolve),
-                        cx.listener(move |this, _, _, cx| {
-                            this.resolve_order_recovery(order_id, kind, cx)
-                        }),
-                        cx,
-                    ))
-                    .into_any_element(),
-            ),
-            Some(RecoveryState::InReview) => Some(
-                div()
-                    .flex()
-                    .items_center()
-                    .gap(px(APP_UI_THEME.foundation.spacing.tight_px))
-                    .child(action_button_compact(
-                        ("orders-recovery-reopen", index),
-                        app_shared_text(AppTextKey::OrdersRecoveryActionMarkOpen),
-                        cx.listener(move |this, _, _, cx| {
-                            this.reopen_order_recovery(order_id, kind, cx)
-                        }),
-                        cx,
-                    ))
-                    .child(action_button_primary(
-                        ("orders-recovery-resolve", index),
-                        app_shared_text(AppTextKey::OrdersRecoveryActionResolve),
-                        cx.listener(move |this, _, _, cx| {
-                            this.resolve_order_recovery(order_id, kind, cx)
-                        }),
-                        cx,
-                    ))
-                    .into_any_element(),
-            ),
-            Some(RecoveryState::Resolved) => Some(
-                action_button_compact(
-                    ("orders-recovery-reopen", index),
-                    app_shared_text(AppTextKey::OrdersRecoveryActionMarkOpen),
-                    cx.listener(move |this, _, _, cx| {
-                        this.reopen_order_recovery(order_id, kind, cx)
-                    }),
-                    cx,
-                )
-                .into_any_element(),
-            ),
-        }
     }
 
     fn render_products_table_entry(
@@ -6164,10 +5882,8 @@ impl SettingsPickupLocationDraft {
 struct SettingsOperatingRulesFormState {
     promise_lead_hours_input: Entity<InputState>,
     substitution_policy_input: Entity<InputState>,
-    missed_pickup_policy_input: Entity<InputState>,
     _promise_lead_hours_subscription: Subscription,
     _substitution_policy_subscription: Subscription,
-    _missed_pickup_policy_subscription: Subscription,
 }
 
 impl SettingsOperatingRulesFormState {
@@ -6190,13 +5906,6 @@ impl SettingsOperatingRulesFormState {
                     .unwrap_or_default(),
             )
         });
-        let missed_pickup_policy_input = cx.new(|cx| {
-            InputState::new(window, cx).default_value(
-                record
-                    .map(|record| record.missed_pickup_policy.clone())
-                    .unwrap_or_default(),
-            )
-        });
         let promise_lead_hours_subscription = cx.subscribe_in(
             &promise_lead_hours_input,
             window,
@@ -6207,19 +5916,12 @@ impl SettingsOperatingRulesFormState {
             window,
             SettingsWindowView::handle_farm_rules_input_event,
         );
-        let missed_pickup_policy_subscription = cx.subscribe_in(
-            &missed_pickup_policy_input,
-            window,
-            SettingsWindowView::handle_farm_rules_input_event,
-        );
 
         Self {
             promise_lead_hours_input,
             substitution_policy_input,
-            missed_pickup_policy_input,
             _promise_lead_hours_subscription: promise_lead_hours_subscription,
             _substitution_policy_subscription: substitution_policy_subscription,
-            _missed_pickup_policy_subscription: missed_pickup_policy_subscription,
         }
     }
 
@@ -6227,7 +5929,6 @@ impl SettingsOperatingRulesFormState {
         SettingsOperatingRulesDraft {
             promise_lead_hours: self.promise_lead_hours_input.read(cx).value().to_string(),
             substitution_policy: self.substitution_policy_input.read(cx).value().to_string(),
-            missed_pickup_policy: self.missed_pickup_policy_input.read(cx).value().to_string(),
         }
     }
 }
@@ -6236,7 +5937,6 @@ impl SettingsOperatingRulesFormState {
 struct SettingsOperatingRulesDraft {
     promise_lead_hours: String,
     substitution_policy: String,
-    missed_pickup_policy: String,
 }
 
 impl SettingsOperatingRulesDraft {
@@ -6248,16 +5948,11 @@ impl SettingsOperatingRulesDraft {
             substitution_policy: record
                 .map(|record| record.substitution_policy.clone())
                 .unwrap_or_default(),
-            missed_pickup_policy: record
-                .map(|record| record.missed_pickup_policy.clone())
-                .unwrap_or_default(),
         }
     }
 
     fn is_empty(&self) -> bool {
-        self.promise_lead_hours.trim().is_empty()
-            && self.substitution_policy.trim().is_empty()
-            && self.missed_pickup_policy.trim().is_empty()
+        self.promise_lead_hours.trim().is_empty() && self.substitution_policy.trim().is_empty()
     }
 }
 
@@ -6795,7 +6490,6 @@ impl SettingsFarmPanelState {
                 farm_id: self.farm_id,
                 promise_lead_hours,
                 substitution_policy: draft.operating_rules.substitution_policy.trim().to_owned(),
-                missed_pickup_policy: draft.operating_rules.missed_pickup_policy.trim().to_owned(),
             })
         };
         let mut fulfillment_windows = Vec::new();
@@ -7734,16 +7428,6 @@ impl SettingsWindowView {
                                 Option::<SharedString>::None,
                             ),
                             &form.operating_rules.substitution_policy_input,
-                            false,
-                        ))
-                        .child(app_form_input_text(
-                            AppFormFieldSpec::new(
-                                app_shared_text(
-                                    AppTextKey::SettingsOperatingRulesFieldMissedPickupPolicy,
-                                ),
-                                Option::<SharedString>::None,
-                            ),
-                            &form.operating_rules.missed_pickup_policy_input,
                             false,
                         ))
                         .children(
@@ -9294,7 +8978,6 @@ const SETTINGS_PICKUP_LOCATIONS_SECTION_FIELDS: &[AppTextKey] = &[
 const SETTINGS_OPERATING_RULES_SECTION_FIELDS: &[AppTextKey] = &[
     AppTextKey::SettingsOperatingRulesFieldPromiseLeadTime,
     AppTextKey::SettingsOperatingRulesFieldSubstitutionPolicy,
-    AppTextKey::SettingsOperatingRulesFieldMissedPickupPolicy,
 ];
 
 #[cfg(test)]
@@ -13669,49 +13352,6 @@ fn orders_status_color(status: OrderStatus) -> u32 {
     }
 }
 
-fn order_recovery_title_key(kind: RecoveryKind) -> AppTextKey {
-    match kind {
-        RecoveryKind::MissedPickup => AppTextKey::OrdersRecoveryMissedPickupTitle,
-    }
-}
-
-fn order_recovery_empty_body_key(kind: RecoveryKind) -> AppTextKey {
-    match kind {
-        RecoveryKind::MissedPickup => AppTextKey::OrdersRecoveryMissedPickupBody,
-    }
-}
-
-fn order_recovery_state_key(state: RecoveryState) -> AppTextKey {
-    match state {
-        RecoveryState::Open => AppTextKey::OrdersRecoveryStateOpen,
-        RecoveryState::InReview => AppTextKey::OrdersRecoveryStateInReview,
-        RecoveryState::Resolved => AppTextKey::OrdersRecoveryStateResolved,
-    }
-}
-
-fn order_recovery_state_color(state: RecoveryState) -> u32 {
-    match state {
-        RecoveryState::Open => APP_UI_THEME.components.app_status_indicator.attention,
-        RecoveryState::InReview => APP_UI_THEME.foundation.text.accent,
-        RecoveryState::Resolved => APP_UI_THEME.components.app_status_indicator.online,
-    }
-}
-
-fn order_recovery_state_badge(state: RecoveryState) -> AnyElement {
-    div()
-        .text_size(px(APP_UI_THEME.foundation.typography.utility_title_text_px))
-        .font_weight(gpui::FontWeight::SEMIBOLD)
-        .text_color(rgb(order_recovery_state_color(state)))
-        .child(app_shared_text(order_recovery_state_key(state)))
-        .into_any_element()
-}
-
-fn order_recovery_kind_index(kind: RecoveryKind) -> usize {
-    match kind {
-        RecoveryKind::MissedPickup => 0,
-    }
-}
-
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 struct PackDayExportStatusPresentation {
     indicator_color: u32,
@@ -16870,7 +16510,6 @@ mod tests {
             workflow: TradeWorkflowProjection::from_order_status(order_id, OrderStatus::Scheduled),
             validation_receipts: Vec::new(),
             primary_action: None,
-            recoveries: Vec::new(),
         });
 
         assert_eq!(
@@ -17041,7 +16680,6 @@ mod tests {
                     field_keys: &[
                         AppTextKey::SettingsOperatingRulesFieldPromiseLeadTime,
                         AppTextKey::SettingsOperatingRulesFieldSubstitutionPolicy,
-                        AppTextKey::SettingsOperatingRulesFieldMissedPickupPolicy,
                     ],
                 },
                 SettingsInventorySectionSpec {
@@ -17541,7 +17179,6 @@ mod tests {
             ),
             validation_receipts: Vec::new(),
             primary_action: None,
-            recoveries: Vec::new(),
         });
         assert_eq!(
             home_auto_focus_target(&orders, HomeAutoFocusState::default()),

@@ -117,8 +117,6 @@ typed_id!(ActivityEventId);
 
 typed_id!(ReminderId);
 
-typed_id!(RecoveryRecordId);
-
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum AccountCustody {
@@ -157,7 +155,6 @@ pub struct FarmOperatingRulesRecord {
     pub farm_id: FarmId,
     pub promise_lead_hours: u16,
     pub substitution_policy: String,
-    pub missed_pickup_policy: String,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -836,7 +833,6 @@ impl ReminderSurface {
 pub enum ReminderKind {
     FulfillmentWindow,
     OrderAction,
-    MissedPickupRecovery,
     SyncImpact,
 }
 
@@ -845,7 +841,6 @@ impl ReminderKind {
         match self {
             Self::FulfillmentWindow => "fulfillment_window",
             Self::OrderAction => "order_action",
-            Self::MissedPickupRecovery => "missed_pickup_recovery",
             Self::SyncImpact => "sync_impact",
         }
     }
@@ -886,38 +881,6 @@ impl ReminderDeliveryState {
             Self::Scheduled => "scheduled",
             Self::Presented => "presented",
             Self::Acknowledged => "acknowledged",
-            Self::Resolved => "resolved",
-        }
-    }
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum RecoveryKind {
-    MissedPickup,
-}
-
-impl RecoveryKind {
-    pub const fn storage_key(self) -> &'static str {
-        match self {
-            Self::MissedPickup => "missed_pickup",
-        }
-    }
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum RecoveryState {
-    Open,
-    InReview,
-    Resolved,
-}
-
-impl RecoveryState {
-    pub const fn storage_key(self) -> &'static str {
-        match self {
-            Self::Open => "open",
-            Self::InReview => "in_review",
             Self::Resolved => "resolved",
         }
     }

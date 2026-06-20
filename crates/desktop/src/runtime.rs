@@ -45,24 +45,25 @@ use radroots_studio_app_sync::{
     AppOrderRevisionDecisionPublishPayload, AppOrderRevisionProposalPublishPayload,
     AppPublishContext, AppPublishPayload, AppPublishedOperationReceipt,
     AppRelayIngestScopeFreshness, AppSyncProjection, AppSyncRequest, AppSyncResult,
-    AppSyncRunStatus, AppSyncTransport, AppSyncTransportError, PendingSyncOperation,
-    SyncAggregateRef, SyncCheckpointStatus, SyncConflictSeverity, SyncOperationKind, SyncTrigger,
+    AppSyncRunStatus, AppSyncTransport, AppSyncTransportError, SyncCheckpointStatus,
+    SyncConflictSeverity, SyncTrigger,
 };
+#[cfg(test)]
+use radroots_studio_app_sync::{PendingSyncOperation, SyncAggregateRef, SyncOperationKind};
 use radroots_studio_app_view::{
     ActiveSurface, AppActivityContext, AppActivityKind, AppIdentityProjection, AppStartupGate,
     BuyerCartLineProjection, BuyerCartProjection, BuyerCartReplaceConfirmationProjection,
     BuyerContext, BuyerOrderDetailProjection, BuyerOrderReviewDraft, BuyerOrderStatus,
     BuyerProductDetailProjection, FarmId, FarmOrderMethod, FarmProfileRecord, FarmReadiness,
     FarmRulesProjection, FarmSetupDraft, FarmSetupProjection, FarmSummary, FarmerSection,
-    FulfillmentWindowId, LoggedOutStartupProjection, OrderDetailProjection, OrderId,
-    OrderRecoveryProjection, OrderStatus, OrdersFilter, OrdersListProjection,
-    OrdersScreenQueryState, PackDayBatchPrintStatus, PackDayExportBundle, PackDayExportInstanceId,
-    PackDayExportStatus, PackDayHostHandoffKind, PackDayHostHandoffStatus, PackDayPrintKind,
-    PackDayPrintStatus, PackDayProjection, PackDayScreenQueryState, PersonalSection,
-    PickupLocationRecord, ProductEditorDraft, ProductId, ProductStatus, ProductsFilter,
-    ProductsListProjection, ProductsSort, RecoveryKind, RecoveryQueueProjection, RecoveryRecordId,
-    RecoveryState, ReminderDeadlineProjection, ReminderDeliveryState, ReminderFeedProjection,
-    ReminderId, ReminderKind, ReminderLogEntryProjection, ReminderLogProjection, ReminderSurface,
+    FulfillmentWindowId, LoggedOutStartupProjection, OrderDetailProjection, OrderId, OrderStatus,
+    OrdersFilter, OrdersListProjection, OrdersScreenQueryState, PackDayBatchPrintStatus,
+    PackDayExportBundle, PackDayExportInstanceId, PackDayExportStatus, PackDayHostHandoffKind,
+    PackDayHostHandoffStatus, PackDayPrintKind, PackDayPrintStatus, PackDayProjection,
+    PackDayScreenQueryState, PersonalSection, PickupLocationRecord, ProductEditorDraft, ProductId,
+    ProductStatus, ProductsFilter, ProductsListProjection, ProductsSort,
+    ReminderDeadlineProjection, ReminderDeliveryState, ReminderFeedProjection, ReminderId,
+    ReminderKind, ReminderLogEntryProjection, ReminderLogProjection, ReminderSurface,
     ReminderUrgency, SettingsAccountProjection, SettingsPreference, SettingsSection, ShellSection,
     TodayAgendaProjection,
 };
@@ -243,6 +244,7 @@ struct ResolvedAppOrderRevisionDecisionEvidence {
 #[derive(Clone, Debug, Eq, PartialEq)]
 struct ResolvedAppOrderLifecycleEvidence {
     evidence_events: Vec<SdkRadrootsNostrEvent>,
+    request_event_id: String,
     status: RadrootsOrderStatus,
     agreement_event_id: Option<String>,
     last_event_id: Option<String>,
@@ -868,38 +870,6 @@ impl DesktopAppRuntime {
             .publish_buyer_order_revision_decline(order_id)
     }
 
-    pub fn start_order_recovery(
-        &self,
-        order_id: OrderId,
-        kind: RecoveryKind,
-    ) -> Result<bool, AppSqliteError> {
-        self.lock_state_mut().start_order_recovery(order_id, kind)
-    }
-
-    pub fn review_order_recovery(
-        &self,
-        order_id: OrderId,
-        kind: RecoveryKind,
-    ) -> Result<bool, AppSqliteError> {
-        self.lock_state_mut().review_order_recovery(order_id, kind)
-    }
-
-    pub fn reopen_order_recovery(
-        &self,
-        order_id: OrderId,
-        kind: RecoveryKind,
-    ) -> Result<bool, AppSqliteError> {
-        self.lock_state_mut().reopen_order_recovery(order_id, kind)
-    }
-
-    pub fn resolve_order_recovery(
-        &self,
-        order_id: OrderId,
-        kind: RecoveryKind,
-    ) -> Result<bool, AppSqliteError> {
-        self.lock_state_mut().resolve_order_recovery(order_id, kind)
-    }
-
     pub fn open_pack_day(
         &self,
         fulfillment_window_id: Option<FulfillmentWindowId>,
@@ -1479,7 +1449,6 @@ struct DesktopSelectedAccountContext {
     orders_query: OrdersScreenQueryState,
     orders_list: OrdersListProjection,
     orders_reminders: ReminderFeedProjection,
-    recovery_queue: RecoveryQueueProjection,
     order_detail: Option<OrderDetailProjection>,
     pack_day_query: PackDayScreenQueryState,
     pack_day_projection: PackDayProjection,
@@ -1492,10 +1461,7 @@ struct DesktopSellerReminderContext {
     today_feed: ReminderFeedProjection,
     orders_feed: ReminderFeedProjection,
     pack_day_feed: ReminderFeedProjection,
-    recovery_queue: RecoveryQueueProjection,
-    selected_order_recoveries: Vec<OrderRecoveryProjection>,
     due_soon_count: u32,
-    recovery_actions_open: u32,
     reminder_log: ReminderLogProjection,
 }
 
@@ -2768,22 +2734,14 @@ impl DesktopAppRuntimeState {
             });
         }
         let lifecycle = self.resolve_order_lifecycle_evidence(&request)?;
-        let Some(decision) = lifecycle.decision.as_ref() else {
+        if lifecycle.decision.is_some() || lifecycle.status != RadrootsOrderStatus::Requested {
             return Err(AppSqliteError::InvalidProjection {
-                reason: "seller order revision requires accepted order decision evidence",
-            });
-        };
-        if !matches!(
-            decision.payload.decision,
-            RadrootsOrderDecisionOutcome::Accepted { .. }
-        ) {
-            return Err(AppSqliteError::InvalidProjection {
-                reason: "seller order revision requires accepted order decision evidence",
+                reason: "seller order revision requires an undecided order",
             });
         }
         if lifecycle.cancellation_event_id.is_some() {
             return Err(AppSqliteError::InvalidProjection {
-                reason: "seller order revision requires an active order",
+                reason: "seller order revision requires an undecided order",
             });
         }
         let Some(order_detail) = sqlite_store.load_order_detail(farm_id, order_id)? else {
@@ -2791,16 +2749,16 @@ impl DesktopAppRuntimeState {
                 reason: "seller order revision requires a visible seller order",
             });
         };
-        if order_detail.status != OrderStatus::Scheduled {
+        if order_detail.status != OrderStatus::NeedsAction {
             return Err(AppSqliteError::InvalidProjection {
-                reason: "seller order revision requires a scheduled order",
+                reason: "seller order revision requires an undecided order",
             });
         }
-        let Some(prev_event_id) = active_order_revision_parent_event_id(&lifecycle) else {
+        if active_order_pending_revision_proposal(&lifecycle).is_some() {
             return Err(AppSqliteError::InvalidProjection {
                 reason: "seller order revision requires no pending revision proposal",
             });
-        };
+        }
         let reason = reason.trim();
         if reason.is_empty() {
             return Err(AppSqliteError::InvalidProjection {
@@ -2813,7 +2771,7 @@ impl DesktopAppRuntimeState {
             farm_id,
             trade_order_id: request.payload.order_id.to_string(),
             request_event_id: request.request_event_id,
-            prev_event_id,
+            prev_event_id: lifecycle.request_event_id,
             revision_id: format!("app-revision-{}", d_tag_from_uuid(Uuid::now_v7())),
             listing_addr: request.payload.listing_addr.to_string(),
             buyer_pubkey: request.payload.buyer_pubkey.to_string(),
@@ -2895,9 +2853,12 @@ impl DesktopAppRuntimeState {
                 reason: "buyer order revision requires a visible buyer order",
             });
         };
-        if detail.status != BuyerOrderStatus::Scheduled {
+        if matches!(
+            detail.status,
+            BuyerOrderStatus::Ready | BuyerOrderStatus::Completed | BuyerOrderStatus::Declined
+        ) {
             return Err(AppSqliteError::InvalidProjection {
-                reason: "buyer order revision requires a scheduled order",
+                reason: "buyer order revision requires an active negotiated order",
             });
         }
         let request = self.resolve_seller_order_request_evidence(order_id)?;
@@ -2907,22 +2868,14 @@ impl DesktopAppRuntimeState {
             });
         }
         let lifecycle = self.resolve_order_lifecycle_evidence(&request)?;
-        let Some(order_decision) = lifecycle.decision.as_ref() else {
+        if lifecycle.decision.is_some() || lifecycle.status != RadrootsOrderStatus::Requested {
             return Err(AppSqliteError::InvalidProjection {
-                reason: "buyer order revision requires accepted order decision evidence",
-            });
-        };
-        if !matches!(
-            order_decision.payload.decision,
-            RadrootsOrderDecisionOutcome::Accepted { .. }
-        ) {
-            return Err(AppSqliteError::InvalidProjection {
-                reason: "buyer order revision requires accepted order decision evidence",
+                reason: "buyer order revision requires active pre-agreement negotiation",
             });
         }
         if lifecycle.cancellation_event_id.is_some() {
             return Err(AppSqliteError::InvalidProjection {
-                reason: "buyer order revision requires an active order",
+                reason: "buyer order revision requires active pre-agreement negotiation",
             });
         }
         let Some(proposal) = active_order_pending_revision_proposal(&lifecycle) else {
@@ -3049,7 +3002,14 @@ impl DesktopAppRuntimeState {
             });
         }
         let prev_event_id = match lifecycle.status {
-            RadrootsOrderStatus::Requested => request.request_event_id.clone(),
+            RadrootsOrderStatus::Requested => {
+                if active_order_pending_revision_proposal(&lifecycle).is_some() {
+                    return Err(AppSqliteError::InvalidProjection {
+                        reason: "buyer order cancellation requires no pending seller proposal",
+                    });
+                }
+                request.request_event_id.clone()
+            }
             RadrootsOrderStatus::Accepted => {
                 return Err(AppSqliteError::InvalidProjection {
                     reason: "buyer order cancellation requires an open pre-agreement order",
@@ -3097,116 +3057,6 @@ impl DesktopAppRuntimeState {
         )?;
         let _ = self.refresh_selected_account_sync()?;
         Ok(true)
-    }
-
-    fn start_order_recovery(
-        &mut self,
-        order_id: OrderId,
-        kind: RecoveryKind,
-    ) -> Result<bool, AppSqliteError> {
-        self.upsert_order_recovery(order_id, kind, RecoveryState::Open, "start_order_recovery")
-    }
-
-    fn review_order_recovery(
-        &mut self,
-        order_id: OrderId,
-        kind: RecoveryKind,
-    ) -> Result<bool, AppSqliteError> {
-        self.upsert_order_recovery(
-            order_id,
-            kind,
-            RecoveryState::InReview,
-            "review_order_recovery",
-        )
-    }
-
-    fn reopen_order_recovery(
-        &mut self,
-        order_id: OrderId,
-        kind: RecoveryKind,
-    ) -> Result<bool, AppSqliteError> {
-        self.upsert_order_recovery(order_id, kind, RecoveryState::Open, "reopen_order_recovery")
-    }
-
-    fn resolve_order_recovery(
-        &mut self,
-        order_id: OrderId,
-        kind: RecoveryKind,
-    ) -> Result<bool, AppSqliteError> {
-        self.upsert_order_recovery(
-            order_id,
-            kind,
-            RecoveryState::Resolved,
-            "resolve_order_recovery",
-        )
-    }
-
-    fn upsert_order_recovery(
-        &mut self,
-        order_id: OrderId,
-        kind: RecoveryKind,
-        state: RecoveryState,
-        source: &str,
-    ) -> Result<bool, AppSqliteError> {
-        let Some(sqlite_store) = self.sqlite_store.as_ref() else {
-            return Ok(false);
-        };
-        let Some(selected_account) = self
-            .state_store
-            .identity_projection()
-            .selected_account
-            .as_ref()
-        else {
-            return Ok(false);
-        };
-        let Some(farm_id) = self.selected_farm_id() else {
-            return Ok(false);
-        };
-        let Some(_) = sqlite_store.load_order_detail(farm_id, order_id)? else {
-            return Ok(false);
-        };
-
-        let account_id = selected_account.account.account_id.as_str();
-        let last_updated_at = current_utc_timestamp();
-        let summary = order_recovery_summary(kind, state).to_owned();
-        let note = Some(order_recovery_note(kind, state).to_owned());
-        let mut record = sqlite_store
-            .load_recovery_record(account_id, order_id, kind)?
-            .unwrap_or(OrderRecoveryProjection {
-                recovery_record_id: RecoveryRecordId::new(),
-                order_id,
-                kind,
-                state,
-                summary: summary.clone(),
-                note: note.clone(),
-                last_updated_at: last_updated_at.clone(),
-            });
-
-        if record.state == state && record.summary == summary && record.note == note {
-            return Ok(false);
-        }
-
-        record.state = state;
-        record.summary = summary;
-        record.note = note;
-        record.last_updated_at = last_updated_at;
-        sqlite_store.save_recovery_record(account_id, farm_id, &record)?;
-
-        let continuity_state = self
-            .continuity_state_with_order_detail(self.selected_order_detail_id().or(Some(order_id)));
-        let selected_account_context = load_selected_account_context(
-            sqlite_store,
-            self.state_store.identity_projection(),
-            &continuity_state,
-        )?;
-        let context_changed = self.apply_selected_account_context(&selected_account_context);
-        let pending_changed =
-            self.enqueue_selected_account_sync_operations(vec![pending_sync_upsert(
-                SyncAggregateRef::Order(order_id),
-                order_recovery_sync_payload(order_id, farm_id, kind, state, source),
-            )])?;
-
-        Ok(context_changed || pending_changed)
     }
 
     fn open_pack_day(
@@ -3932,11 +3782,6 @@ impl DesktopAppRuntimeState {
                 .apply_in_memory(AppStateCommand::replace_orders_reminders(
                     context.orders_reminders.clone(),
                 ));
-        let recovery_queue_changed =
-            self.state_store
-                .apply_in_memory(AppStateCommand::replace_orders_recovery_queue(
-                    context.recovery_queue.clone(),
-                ));
         let reminder_log_changed =
             self.state_store
                 .apply_in_memory(AppStateCommand::replace_reminder_log(
@@ -3982,7 +3827,6 @@ impl DesktopAppRuntimeState {
             || orders_query_changed
             || orders_changed
             || orders_reminders_changed
-            || recovery_queue_changed
             || reminder_log_changed
             || order_detail_changed
             || pack_day_query_changed
@@ -4524,6 +4368,7 @@ impl DesktopAppRuntimeState {
         self.refresh_selected_account_sync()
     }
 
+    #[cfg(test)]
     fn enqueue_selected_account_sync_operations(
         &mut self,
         operations: Vec<PendingSyncOperation>,
@@ -5879,6 +5724,7 @@ impl DesktopAppRuntimeState {
             .transpose()?;
         Ok(ResolvedAppOrderLifecycleEvidence {
             evidence_events,
+            request_event_id: request.request_event_id.clone(),
             status: projection.status,
             agreement_event_id: projection
                 .agreement_event_id
@@ -8548,7 +8394,6 @@ fn load_selected_account_context_with_options(
             orders_list: OrdersListProjection::default(),
             orders_query: OrdersScreenQueryState::default(),
             orders_reminders: ReminderFeedProjection::default(),
-            recovery_queue: RecoveryQueueProjection::default(),
             pack_day_query: PackDayScreenQueryState::default(),
             product_editor_draft: None,
             reminder_log: ReminderLogProjection::default(),
@@ -8566,7 +8411,7 @@ fn load_selected_account_context_with_options(
         orders_query,
         orders_list,
         canonical_orders_list,
-        mut order_detail,
+        order_detail,
         pack_day_query,
         mut pack_day_projection,
         product_editor_draft,
@@ -8645,7 +8490,7 @@ fn load_selected_account_context_with_options(
             None,
         ),
     };
-    let (orders_reminders, recovery_queue, reminder_log) = match today_farm_id {
+    let (orders_reminders, reminder_log) = match today_farm_id {
         Some(farm_id) => {
             let reminder_context = load_selected_account_reminder_context_with_options(
                 sqlite_store,
@@ -8660,22 +8505,13 @@ fn load_selected_account_context_with_options(
             today_projection.reminders = reminder_context.today_feed;
             if let Some(summary) = today_projection.summary.as_mut() {
                 summary.reminders_due_soon = reminder_context.due_soon_count;
-                summary.recovery_actions_open = reminder_context.recovery_actions_open;
-            }
-            if let Some(detail) = order_detail.as_mut() {
-                detail.recoveries = reminder_context.selected_order_recoveries;
             }
             pack_day_projection.reminders = reminder_context.pack_day_feed;
 
-            (
-                reminder_context.orders_feed,
-                reminder_context.recovery_queue,
-                reminder_context.reminder_log,
-            )
+            (reminder_context.orders_feed, reminder_context.reminder_log)
         }
         None => (
             ReminderFeedProjection::default(),
-            RecoveryQueueProjection::default(),
             ReminderLogProjection::default(),
         ),
     };
@@ -8690,7 +8526,6 @@ fn load_selected_account_context_with_options(
         orders_query,
         orders_list,
         orders_reminders,
-        recovery_queue,
         reminder_log,
         order_detail,
         pack_day_query,
@@ -8757,18 +8592,16 @@ fn load_selected_account_reminder_context_with_options(
     today_projection: &TodayAgendaProjection,
     canonical_orders_list: &OrdersListProjection,
     pack_day_projection: &PackDayProjection,
-    selected_order_detail: Option<&OrderDetailProjection>,
+    _selected_order_detail: Option<&OrderDetailProjection>,
     allow_auto_present: bool,
 ) -> Result<DesktopSellerReminderContext, AppSqliteError> {
     let existing_schedule = sqlite_store.load_reminder_schedule(account_id, farm_id)?;
-    let recovery_queue = sqlite_store.load_recovery_queue(account_id, farm_id)?;
     let sync_truth = load_selected_account_reminder_sync_truth(sqlite_store, account_id)?;
     let mut schedule = derive_selected_account_reminder_schedule(
         farm_id,
         today_projection,
         canonical_orders_list,
         pack_day_projection,
-        &recovery_queue,
         &sync_truth,
         &existing_schedule,
     );
@@ -8789,34 +8622,22 @@ fn load_selected_account_reminder_context_with_options(
     }
     let reminder_log = sqlite_store.load_reminder_log(account_id, farm_id, 8)?;
 
-    let selected_order_recoveries = selected_order_detail
-        .map(|detail| ordered_order_recoveries_for_detail(&recovery_queue, detail.order_id))
-        .unwrap_or_default();
     let due_soon_count = schedule
         .items
         .iter()
         .filter(|item| {
-            !matches!(item.kind, ReminderKind::MissedPickupRecovery)
-                && matches!(
-                    item.urgency,
-                    ReminderUrgency::DueSoon | ReminderUrgency::Overdue | ReminderUrgency::Blocking
-                )
+            matches!(
+                item.urgency,
+                ReminderUrgency::DueSoon | ReminderUrgency::Overdue | ReminderUrgency::Blocking
+            )
         })
-        .count() as u32;
-    let recovery_actions_open = recovery_queue
-        .items
-        .iter()
-        .filter(|record| record.state != RecoveryState::Resolved)
         .count() as u32;
 
     Ok(DesktopSellerReminderContext {
         today_feed: filter_reminder_surface(&schedule, ReminderSurface::Today),
         orders_feed: filter_reminder_surface(&schedule, ReminderSurface::Orders),
         pack_day_feed: filter_reminder_surface(&schedule, ReminderSurface::PackDay),
-        recovery_queue,
-        selected_order_recoveries,
         due_soon_count,
-        recovery_actions_open,
         reminder_log,
     })
 }
@@ -8853,7 +8674,6 @@ fn derive_selected_account_reminder_schedule(
     today_projection: &TodayAgendaProjection,
     canonical_orders_list: &OrdersListProjection,
     pack_day_projection: &PackDayProjection,
-    recovery_queue: &RecoveryQueueProjection,
     sync_truth: &DesktopReminderSyncTruth,
     existing_schedule: &ReminderFeedProjection,
 ) -> ReminderFeedProjection {
@@ -8947,37 +8767,6 @@ fn derive_selected_account_reminder_schedule(
         build_sync_reminder_projection(farm_id, sync_truth, existing_schedule)
     {
         items.push(sync_reminder);
-    }
-
-    for record in recovery_queue
-        .items
-        .iter()
-        .filter(|record| record.state != RecoveryState::Resolved)
-    {
-        let kind = match record.kind {
-            RecoveryKind::MissedPickup => ReminderKind::MissedPickupRecovery,
-        };
-        items.push(build_reminder_projection(
-            farm_id,
-            format!(
-                "reminder:orders:recovery:{}:{}",
-                record.kind.storage_key(),
-                record.order_id
-            ),
-            Some(record.order_id),
-            None,
-            kind,
-            ReminderSurface::Orders,
-            record.summary.clone(),
-            record
-                .note
-                .clone()
-                .unwrap_or_else(|| "Recovery follow-up is still open.".to_owned()),
-            record.last_updated_at.clone(),
-            Some("Review".to_owned()),
-            None,
-            existing_schedule,
-        ));
     }
 
     items.sort_by(|left, right| {
@@ -9245,75 +9034,6 @@ fn build_reminder_log_entry(
         delivery_state,
         detail: (!reminder.detail.trim().is_empty()).then_some(reminder.detail.clone()),
     }
-}
-
-fn ordered_order_recoveries_for_detail(
-    recovery_queue: &RecoveryQueueProjection,
-    order_id: OrderId,
-) -> Vec<OrderRecoveryProjection> {
-    let mut items = recovery_queue
-        .items
-        .iter()
-        .filter(|record| record.order_id == order_id)
-        .cloned()
-        .collect::<Vec<_>>();
-    items.sort_by(|left, right| {
-        order_recovery_kind_rank(left.kind)
-            .cmp(&order_recovery_kind_rank(right.kind))
-            .then_with(|| right.last_updated_at.cmp(&left.last_updated_at))
-            .then_with(|| left.recovery_record_id.cmp(&right.recovery_record_id))
-    });
-    items
-}
-
-fn order_recovery_kind_rank(kind: RecoveryKind) -> u8 {
-    match kind {
-        RecoveryKind::MissedPickup => 0,
-    }
-}
-
-fn order_recovery_summary(kind: RecoveryKind, state: RecoveryState) -> &'static str {
-    match (kind, state) {
-        (RecoveryKind::MissedPickup, RecoveryState::Open) => "Missed pickup follow-up is open",
-        (RecoveryKind::MissedPickup, RecoveryState::InReview) => {
-            "Missed pickup follow-up is in review"
-        }
-        (RecoveryKind::MissedPickup, RecoveryState::Resolved) => {
-            "Missed pickup follow-up is resolved"
-        }
-    }
-}
-
-fn order_recovery_note(kind: RecoveryKind, state: RecoveryState) -> &'static str {
-    match (kind, state) {
-        (RecoveryKind::MissedPickup, RecoveryState::Open) => {
-            "Check in with the buyer and agree on the next step."
-        }
-        (RecoveryKind::MissedPickup, RecoveryState::InReview) => {
-            "Use notes outside the app to confirm a new pickup or another resolution."
-        }
-        (RecoveryKind::MissedPickup, RecoveryState::Resolved) => {
-            "The seller and buyer have agreed on the next step."
-        }
-    }
-}
-
-fn order_recovery_sync_payload(
-    order_id: OrderId,
-    farm_id: FarmId,
-    kind: RecoveryKind,
-    state: RecoveryState,
-    source: &str,
-) -> String {
-    json!({
-        "aggregate_kind": "order_recovery",
-        "order_id": order_id.to_string(),
-        "farm_id": farm_id.to_string(),
-        "recovery_kind": kind.storage_key(),
-        "recovery_state": state.storage_key(),
-        "source": source,
-    })
-    .to_string()
 }
 
 fn load_selected_account_sync_context(
@@ -9586,8 +9306,6 @@ fn normalize_farm_rules_projection(
     if let Some(operating_rules) = projection.operating_rules.as_mut() {
         operating_rules.farm_id = fallback_profile.farm_id;
         operating_rules.substitution_policy = operating_rules.substitution_policy.trim().to_owned();
-        operating_rules.missed_pickup_policy =
-            operating_rules.missed_pickup_policy.trim().to_owned();
     }
 
     for fulfillment_window in &mut projection.fulfillment_windows {
@@ -9752,21 +9470,10 @@ fn active_order_event_record_context(
     Ok((context.counterparty_pubkey, root_event_id, prev_event_id))
 }
 
-fn active_order_revision_parent_event_id(
-    lifecycle: &ResolvedAppOrderLifecycleEvidence,
-) -> Option<String> {
-    if active_order_pending_revision_proposal(lifecycle).is_some() {
-        None
-    } else {
-        lifecycle.last_event_id.clone()
-    }
-}
-
 fn active_order_pending_revision_proposal(
     lifecycle: &ResolvedAppOrderLifecycleEvidence,
 ) -> Option<&ResolvedAppOrderRevisionProposalEvidence> {
-    let decision = lifecycle.decision.as_ref()?;
-    let mut parent_event_id = decision.event_id.as_str();
+    let mut parent_event_id = lifecycle.request_event_id.as_str();
     loop {
         let proposals = lifecycle
             .revision_proposals
@@ -9977,6 +9684,7 @@ fn order_cancellation_publish_payload_to_sdk_cancellation(
     })
 }
 
+#[cfg(test)]
 fn pending_sync_upsert(aggregate: SyncAggregateRef, payload_json: String) -> PendingSyncOperation {
     let created_at = current_utc_timestamp();
 
@@ -10084,10 +9792,9 @@ mod tests {
         PackDayPrintFailureKind, PackDayPrintKind, PackDayPrintStatus, PackDayProductTotalRow,
         PackDayProjection, PackDayRosterRow, PersonalSection, PickupLocationId,
         PickupLocationRecord, ProductEditorDraft, ProductId, ProductPublishBlocker, ProductStatus,
-        ProductsFilter, ProductsSort, RecoveryKind, RecoveryRecordId, ReminderDeliveryState,
-        ReminderFeedProjection, ReminderKind, SelectedAccountProjection, SelectedSurfaceProjection,
-        SettingsPreference, SettingsSection, ShellSection, TodayAgendaProjection, TodaySetupTask,
-        TodaySetupTaskKind, TodaySummary,
+        ProductsFilter, ProductsSort, ReminderDeliveryState, ReminderFeedProjection, ReminderKind,
+        SelectedAccountProjection, SelectedSurfaceProjection, SettingsPreference, SettingsSection,
+        ShellSection, TodayAgendaProjection, TodaySetupTask, TodaySetupTaskKind, TodaySummary,
     };
     use radroots_core::{
         RadrootsCoreCurrency, RadrootsCoreDecimal, RadrootsCoreMoney, RadrootsCoreUnit,
@@ -10119,7 +9826,7 @@ mod tests {
         RadrootsOrderCancellation, RadrootsOrderDecision, RadrootsOrderDecisionOutcome,
         RadrootsOrderEconomicItem, RadrootsOrderEconomics, RadrootsOrderInventoryCommitment,
         RadrootsOrderItem, RadrootsOrderPricingBasis, RadrootsOrderRequest,
-        RadrootsOrderRevisionDecision, RadrootsOrderRevisionOutcome, RadrootsOrderRevisionProposal,
+        RadrootsOrderRevisionOutcome, RadrootsOrderRevisionProposal,
     };
     use radroots_sdk::{
         LISTING_PUBLISH_OPERATION_KIND, ORDER_CANCELLATION_OPERATION_KIND,
@@ -11946,7 +11653,6 @@ mod tests {
                     farm_id,
                     promise_lead_hours: 24,
                     substitution_policy: "ask_customer".to_owned(),
-                    missed_pickup_policy: "hold_next_window".to_owned(),
                 }),
                 fulfillment_windows: vec![FulfillmentWindowRecord {
                     fulfillment_window_id,
@@ -12094,7 +11800,6 @@ mod tests {
                     farm_id,
                     promise_lead_hours: 24,
                     substitution_policy: "ask_customer".to_owned(),
-                    missed_pickup_policy: "hold_next_window".to_owned(),
                 }),
                 fulfillment_windows: vec![FulfillmentWindowRecord {
                     fulfillment_window_id,
@@ -12265,7 +11970,6 @@ mod tests {
                     farm_id,
                     promise_lead_hours: 24,
                     substitution_policy: "ask_customer".to_owned(),
-                    missed_pickup_policy: "hold_next_window".to_owned(),
                 }),
                 fulfillment_windows: vec![FulfillmentWindowRecord {
                     fulfillment_window_id,
@@ -12411,7 +12115,6 @@ mod tests {
                     farm_id,
                     promise_lead_hours: 24,
                     substitution_policy: "ask_customer".to_owned(),
-                    missed_pickup_policy: "hold_next_window".to_owned(),
                 }),
                 fulfillment_windows: vec![FulfillmentWindowRecord {
                     fulfillment_window_id: active_window_id,
@@ -14469,7 +14172,6 @@ mod tests {
                 low_stock_products: 1,
                 draft_products: 3,
                 reminders_due_soon: 0,
-                recovery_actions_open: 0,
             }),
             setup_checklist: vec![TodaySetupTask {
                 kind: TodaySetupTaskKind::AddFulfillmentWindow,
@@ -16078,7 +15780,7 @@ mod tests {
         assert!(
             runtime
                 .retry_pending_personal_order_coordination()
-                .expect("same-session buyer order recovery retry should sync")
+                .expect("same-session buyer order coordination retry should sync")
         );
         let summary_after_retry = runtime.summary();
         assert!(
@@ -16147,7 +15849,7 @@ mod tests {
         assert!(
             !runtime
                 .retry_pending_personal_order_coordination()
-                .expect("same-session synced buyer order recovery retry should be idempotent")
+                .expect("same-session synced buyer order coordination retry should be idempotent")
         );
         assert_no_order_request_pending_sync_payloads(
             &runtime,
@@ -16216,7 +15918,7 @@ mod tests {
         assert!(
             !restarted_runtime
                 .retry_pending_personal_order_coordination()
-                .expect("synced buyer order recovery retry should be idempotent")
+                .expect("synced buyer order coordination retry should be idempotent")
         );
         assert_no_order_request_pending_sync_payloads(
             &restarted_runtime,
@@ -16423,7 +16125,7 @@ mod tests {
     #[test]
     fn runtime_publishes_linked_buyer_cancellation_from_selected_account_nostr_scope() {
         let relay = ThreadedAckRelay::spawn();
-        let fixture = linked_buyer_lifecycle_runtime("linked_buyer_order_cancel");
+        let fixture = linked_buyer_request_runtime("linked_buyer_order_cancel");
         install_direct_relay_sync_transport(&fixture.runtime, &relay);
         fixture
             .runtime
@@ -16445,7 +16147,7 @@ mod tests {
 
         assert_eq!(
             persisted_order_status(&fixture.runtime, fixture.order_id),
-            "scheduled"
+            "needs_action"
         );
         assert_eq!(relay.event_count(), 0);
         let cancellation_events =
@@ -16461,76 +16163,80 @@ mod tests {
     }
 
     #[test]
-    fn runtime_publishes_linked_buyer_cancellation_from_revision_parent() {
-        for (label, revision_decision) in [
-            ("accepted", RadrootsOrderRevisionOutcome::Accepted),
-            (
-                "declined",
-                RadrootsOrderRevisionOutcome::Declined {
-                    reason: "keep original order".to_owned(),
-                },
-            ),
-        ] {
-            let relay = ThreadedAckRelay::spawn();
-            let fixture_label = format!("linked_buyer_order_cancel_revision_{label}");
-            let fixture = linked_buyer_lifecycle_runtime(fixture_label.as_str());
-            let proposal_key = format!("linked-buyer-order-cancel-revision-{label}-proposal");
-            let proposal_event_id = append_signed_order_revision_proposal_record_with_prev(
-                &fixture.paths,
-                fixture.trade_order_id.as_str(),
-                proposal_key.as_str(),
-                fixture.request_event_id.as_str(),
-                fixture.decision_event_id.as_str(),
-                fixture.listing_addr.as_str(),
-                fixture.buyer_pubkey.as_str(),
-                fixture.seller_pubkey.as_str(),
-            );
-            let revision_id = format!("revision-{proposal_key}");
-            let _revision_decision_event_id =
-                append_signed_order_revision_decision_record_with_prev(
-                    &fixture.paths,
-                    fixture.trade_order_id.as_str(),
-                    format!("linked-buyer-order-cancel-revision-{label}-decision").as_str(),
-                    fixture.request_event_id.as_str(),
-                    proposal_event_id.as_str(),
-                    revision_id.as_str(),
-                    fixture.listing_addr.as_str(),
-                    fixture.buyer_pubkey.as_str(),
-                    fixture.seller_pubkey.as_str(),
-                    revision_decision,
-                );
-            install_direct_relay_sync_transport(&fixture.runtime, &relay);
+    fn runtime_rejects_linked_buyer_cancellation_from_pending_revision_proposal() {
+        let relay = ThreadedAckRelay::spawn();
+        let fixture = linked_buyer_request_runtime("linked_buyer_order_cancel_revision");
+        let proposal_key = "linked-buyer-order-cancel-revision-proposal";
+        append_signed_order_revision_proposal_record_with_prev(
+            &fixture.paths,
+            fixture.trade_order_id.as_str(),
+            proposal_key,
+            fixture.request_event_id.as_str(),
+            fixture.request_event_id.as_str(),
+            fixture.listing_addr.as_str(),
+            fixture.buyer_pubkey.as_str(),
+            fixture.seller_pubkey.as_str(),
+        );
+        install_direct_relay_sync_transport(&fixture.runtime, &relay);
+        fixture
+            .runtime
+            .refresh_shared_local_events()
+            .expect("linked buyer revision proposal should import");
+        assert!(
             fixture
                 .runtime
-                .refresh_shared_local_events()
-                .expect("linked buyer revision events should import");
-            assert!(
-                fixture
-                    .runtime
-                    .open_personal_order_detail(fixture.order_id)
-                    .expect("linked buyer order detail should open")
-            );
-            set_persisted_order_status(&fixture.runtime, fixture.order_id, "scheduled");
+                .open_personal_order_detail(fixture.order_id)
+                .expect("linked buyer order detail should open")
+        );
 
-            assert!(
-                fixture
-                    .runtime
-                    .publish_buyer_order_cancel(fixture.order_id)
-                    .expect("linked buyer cancellation should publish from revision parent")
-            );
+        let error = fixture
+            .runtime
+            .publish_buyer_order_cancel(fixture.order_id)
+            .expect_err("linked buyer cancellation should reject from pending proposal");
 
-            assert_eq!(relay.event_count(), 0);
-            let cancellation_events =
-                shared_order_events_by_kind(&fixture.paths, 3432, fixture.buyer_pubkey.as_str());
-            assert!(cancellation_events.is_empty());
-            assert_order_cancellation_sdk_migration_receipt(
-                &fixture.runtime,
-                fixture.order_id,
-                AppSdkMigrationState::Enqueued,
-            );
+        assert_invalid_projection_reason(
+            error,
+            "buyer order cancellation requires no pending seller proposal",
+        );
+        assert_eq!(relay.event_count(), 0);
+        let cancellation_events =
+            shared_order_events_by_kind(&fixture.paths, 3432, fixture.buyer_pubkey.as_str());
+        assert!(cancellation_events.is_empty());
 
-            cleanup_bootstrapped_runtime_paths(&fixture.paths);
-        }
+        cleanup_bootstrapped_runtime_paths(&fixture.paths);
+    }
+
+    #[test]
+    fn runtime_rejects_linked_buyer_cancellation_after_agreement() {
+        let relay = ThreadedAckRelay::spawn();
+        let fixture = linked_buyer_lifecycle_runtime("linked_buyer_order_cancel_after_agreement");
+        install_direct_relay_sync_transport(&fixture.runtime, &relay);
+        fixture
+            .runtime
+            .refresh_shared_local_events()
+            .expect("linked buyer local events should import");
+        assert!(
+            fixture
+                .runtime
+                .open_personal_order_detail(fixture.order_id)
+                .expect("linked buyer order detail should open")
+        );
+
+        let error = fixture
+            .runtime
+            .publish_buyer_order_cancel(fixture.order_id)
+            .expect_err("post-agreement buyer cancellation should reject");
+
+        assert_invalid_projection_reason(
+            error,
+            "buyer order cancellation requires an open pre-agreement order",
+        );
+        assert_eq!(relay.event_count(), 0);
+        let cancellation_events =
+            shared_order_events_by_kind(&fixture.paths, 3432, fixture.buyer_pubkey.as_str());
+        assert!(cancellation_events.is_empty());
+
+        cleanup_bootstrapped_runtime_paths(&fixture.paths);
     }
 
     #[test]
@@ -16582,14 +16288,14 @@ mod tests {
     #[test]
     fn runtime_publishes_linked_buyer_revision_decision_from_reducer_valid_parent() {
         let relay = ThreadedAckRelay::spawn();
-        let fixture = linked_buyer_lifecycle_runtime("linked_buyer_order_revision");
+        let fixture = linked_buyer_request_runtime("linked_buyer_order_revision");
         let proposal_key = "linked-buyer-order-revision-proposal";
         let _proposal_event_id = append_signed_order_revision_proposal_record_with_prev(
             &fixture.paths,
             fixture.trade_order_id.as_str(),
             proposal_key,
             fixture.request_event_id.as_str(),
-            fixture.decision_event_id.as_str(),
+            fixture.request_event_id.as_str(),
             fixture.listing_addr.as_str(),
             fixture.buyer_pubkey.as_str(),
             fixture.seller_pubkey.as_str(),
@@ -18089,15 +17795,6 @@ mod tests {
             summary.pack_day_projection.projection.reminders.items[0].kind,
             ReminderKind::FulfillmentWindow
         );
-        assert_eq!(
-            summary
-                .today_projection
-                .summary
-                .as_ref()
-                .expect("today summary")
-                .recovery_actions_open,
-            0
-        );
     }
 
     #[test]
@@ -18274,81 +17971,6 @@ mod tests {
             entry.reminder_id == reminder_id
                 && entry.delivery_state == ReminderDeliveryState::Resolved
         }));
-    }
-
-    #[test]
-    fn runtime_threads_recovery_queue_into_today_counts_and_order_detail() {
-        let runtime = memory_runtime();
-        let (_, farm_id) = provision_ready_farmer_account(&runtime);
-        let (_, order_id) = seed_order_workspace(&runtime, farm_id);
-        let recovery_record_id = RecoveryRecordId::new();
-        let sql = format!(
-            "insert into order_recovery_records (
-                recovery_record_id,
-                account_id,
-                farm_id,
-                order_id,
-                recovery_kind,
-                recovery_state,
-                summary,
-                note,
-                last_updated_at
-             ) values (
-                '{recovery_record_id}',
-                '{}',
-                '{farm_id}',
-                '{order_id}',
-                'missed_pickup',
-                'open',
-                'Follow up on the missed pickup',
-                'Confirm a new pickup time.',
-                '2026-04-18T18:30:00Z'
-             )",
-            runtime
-                .summary()
-                .settings_account_projection
-                .selected_account
-                .as_ref()
-                .expect("selected account")
-                .account
-                .account_id
-        );
-        runtime
-            .lock_state()
-            .sqlite_store
-            .as_ref()
-            .expect("sqlite store")
-            .connection()
-            .execute_batch(&sql)
-            .expect("recovery record should seed");
-
-        assert!(
-            runtime
-                .open_order_detail(order_id)
-                .expect("order detail should open")
-        );
-        let summary = runtime.summary();
-
-        assert_eq!(summary.orders_projection.recovery_queue.items.len(), 1);
-        assert_eq!(
-            summary
-                .today_projection
-                .summary
-                .as_ref()
-                .expect("today summary")
-                .recovery_actions_open,
-            1
-        );
-        assert_eq!(
-            summary
-                .orders_projection
-                .detail
-                .as_ref()
-                .and_then(|detail| detail.recoveries.first())
-                .expect("order recovery")
-                .kind,
-            RecoveryKind::MissedPickup
-        );
     }
 
     #[test]
@@ -19416,7 +19038,6 @@ mod tests {
                     farm_id,
                     promise_lead_hours: 24,
                     substitution_policy: "  ask_customer  ".to_owned(),
-                    missed_pickup_policy: "  hold_next_window  ".to_owned(),
                 }),
                 fulfillment_windows: vec![FulfillmentWindowRecord {
                     fulfillment_window_id,
@@ -19466,7 +19087,6 @@ mod tests {
                 farm_id,
                 promise_lead_hours: 24,
                 substitution_policy: "ask_customer".to_owned(),
-                missed_pickup_policy: "hold_next_window".to_owned(),
             })
         );
         assert_eq!(
@@ -19999,9 +19619,21 @@ mod tests {
         linked_buyer_lifecycle_runtime_with_seller_pubkey(label, SDK_TEST_SELLER_PUBLIC_KEY_HEX)
     }
 
+    fn linked_buyer_request_runtime(label: &str) -> LinkedBuyerLifecycleFixture {
+        linked_buyer_runtime_with_seller_pubkey(label, SDK_TEST_SELLER_PUBLIC_KEY_HEX, false)
+    }
+
     fn linked_buyer_lifecycle_runtime_with_seller_pubkey(
         label: &str,
         seller_pubkey: &str,
+    ) -> LinkedBuyerLifecycleFixture {
+        linked_buyer_runtime_with_seller_pubkey(label, seller_pubkey, true)
+    }
+
+    fn linked_buyer_runtime_with_seller_pubkey(
+        label: &str,
+        seller_pubkey: &str,
+        append_decision: bool,
     ) -> LinkedBuyerLifecycleFixture {
         let (runtime, paths) = bootstrapped_runtime(label);
         assert!(
@@ -20059,15 +19691,19 @@ mod tests {
             seller_pubkey,
             2,
         );
-        let decision_event_id = append_signed_order_decision_record(
-            &paths,
-            trade_order_id.as_str(),
-            request_event_id.as_str(),
-            listing_addr.as_str(),
-            buyer_pubkey.as_str(),
-            seller_pubkey,
-            2,
-        );
+        let decision_event_id = if append_decision {
+            append_signed_order_decision_record(
+                &paths,
+                trade_order_id.as_str(),
+                request_event_id.as_str(),
+                listing_addr.as_str(),
+                buyer_pubkey.as_str(),
+                seller_pubkey,
+                2,
+            )
+        } else {
+            String::new()
+        };
         LinkedBuyerLifecycleFixture {
             runtime,
             paths,
@@ -20725,47 +20361,6 @@ mod tests {
         )
     }
 
-    fn append_signed_order_revision_decision_record_with_prev(
-        paths: &AppDesktopRuntimePaths,
-        trade_order_id: &str,
-        event_key: &str,
-        request_event_id: &str,
-        proposal_event_id: &str,
-        revision_id: &str,
-        listing_addr: &str,
-        buyer_pubkey: &str,
-        seller_pubkey: &str,
-        decision: RadrootsOrderRevisionOutcome,
-    ) -> String {
-        let request_event_id = test_event_id(request_event_id);
-        let proposal_event_id = test_event_id(proposal_event_id);
-        let payload = RadrootsOrderRevisionDecision {
-            revision_id: test_revision_id(revision_id),
-            order_id: test_order_id(trade_order_id),
-            listing_addr: test_listing_addr(listing_addr),
-            buyer_pubkey: test_pubkey(buyer_pubkey),
-            seller_pubkey: test_pubkey(seller_pubkey),
-            root_event_id: request_event_id.clone(),
-            prev_event_id: proposal_event_id.clone(),
-            decision,
-        };
-        let parts = radroots_sdk::protocol::order::build_order_revision_decision_draft(
-            &request_event_id,
-            &proposal_event_id,
-            &payload,
-        )
-        .expect("order revision decision draft should build")
-        .into_wire_parts();
-        let record_id = format!("app:signed_event:revision-decision:{event_key}");
-        append_trade_signed_event_record(
-            paths,
-            record_id.as_str(),
-            buyer_pubkey,
-            listing_addr,
-            parts,
-        )
-    }
-
     fn revision_test_order_items() -> Vec<RadrootsOrderItem> {
         vec![RadrootsOrderItem {
             bin_id: test_bin_id("seller-order-primary-bin"),
@@ -20807,6 +20402,16 @@ mod tests {
                 AppSqliteError::InvalidProjection {
                     reason: "order lifecycle evidence is invalid"
                 }
+            ),
+            "{error:?}"
+        );
+    }
+
+    fn assert_invalid_projection_reason(error: AppSqliteError, expected_reason: &'static str) {
+        assert!(
+            matches!(
+                error,
+                AppSqliteError::InvalidProjection { reason } if reason == expected_reason
             ),
             "{error:?}"
         );
@@ -21142,21 +20747,6 @@ mod tests {
                 |row| row.get::<_, String>(0),
             )
             .expect("order status should load")
-    }
-
-    fn set_persisted_order_status(runtime: &DesktopAppRuntime, order_id: OrderId, status: &str) {
-        let order_id = order_id.to_string();
-        runtime
-            .lock_state()
-            .sqlite_store
-            .as_ref()
-            .expect("sqlite store")
-            .connection()
-            .execute(
-                "update orders set status = ?1 where id = ?2",
-                [status, order_id.as_str()],
-            )
-            .expect("order status should update");
     }
 
     fn pending_order_sync_payloads(

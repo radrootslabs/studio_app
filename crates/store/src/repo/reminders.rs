@@ -1,9 +1,9 @@
 use radroots_studio_app_view::{
-    FarmId, OrderId, OrderRecoveryProjection, RecoveryKind, RecoveryQueueProjection, RecoveryState,
-    ReminderDeadlineProjection, ReminderDeliveryState, ReminderFeedProjection, ReminderKind,
-    ReminderLogEntryProjection, ReminderLogProjection, ReminderSurface, ReminderUrgency,
+    FarmId, ReminderDeadlineProjection, ReminderDeliveryState, ReminderFeedProjection,
+    ReminderKind, ReminderLogEntryProjection, ReminderLogProjection, ReminderSurface,
+    ReminderUrgency,
 };
-use rusqlite::{Connection, OptionalExtension, params};
+use rusqlite::{Connection, params};
 use std::str::FromStr;
 use uuid::Uuid;
 
@@ -343,199 +343,12 @@ impl<'a> AppRemindersRepository<'a> {
 
         Ok(ReminderLogProjection { entries })
     }
-
-    pub fn load_recovery_queue(
-        &self,
-        account_id: &str,
-        farm_id: FarmId,
-    ) -> Result<RecoveryQueueProjection, AppSqliteError> {
-        let mut statement = self
-            .connection
-            .prepare(
-                "SELECT
-                    recovery_record_id,
-                    order_id,
-                    recovery_kind,
-                    recovery_state,
-                    summary,
-                    note,
-                    last_updated_at
-                 FROM order_recovery_records
-                 WHERE account_id = ?1 AND farm_id = ?2
-                 ORDER BY last_updated_at DESC, recovery_record_id DESC",
-            )
-            .map_err(|source| AppSqliteError::Query {
-                operation: "prepare recovery queue query",
-                source,
-            })?;
-        let rows = statement
-            .query_map(params![account_id, farm_id.to_string()], |row| {
-                Ok((
-                    row.get::<_, String>(0)?,
-                    row.get::<_, String>(1)?,
-                    row.get::<_, String>(2)?,
-                    row.get::<_, String>(3)?,
-                    row.get::<_, String>(4)?,
-                    row.get::<_, Option<String>>(5)?,
-                    row.get::<_, String>(6)?,
-                ))
-            })
-            .map_err(|source| AppSqliteError::Query {
-                operation: "query recovery queue",
-                source,
-            })?;
-
-        let items = rows
-            .map(|row| {
-                let (
-                    recovery_record_id,
-                    order_id,
-                    recovery_kind,
-                    recovery_state,
-                    summary,
-                    note,
-                    last_updated_at,
-                ) = row.map_err(|source| AppSqliteError::Query {
-                    operation: "read recovery queue row",
-                    source,
-                })?;
-
-                Ok(OrderRecoveryProjection {
-                    recovery_record_id: parse_typed_id(
-                        "order_recovery_records.recovery_record_id",
-                        recovery_record_id,
-                    )?,
-                    order_id: parse_typed_id("order_recovery_records.order_id", order_id)?,
-                    kind: parse_recovery_kind(recovery_kind)?,
-                    state: parse_recovery_state(recovery_state)?,
-                    summary,
-                    note,
-                    last_updated_at,
-                })
-            })
-            .collect::<Result<Vec<_>, AppSqliteError>>()?;
-
-        Ok(RecoveryQueueProjection { items })
-    }
-
-    pub fn load_recovery_record(
-        &self,
-        account_id: &str,
-        order_id: OrderId,
-        kind: RecoveryKind,
-    ) -> Result<Option<OrderRecoveryProjection>, AppSqliteError> {
-        let row = self
-            .connection
-            .query_row(
-                "SELECT
-                    recovery_record_id,
-                    order_id,
-                    recovery_kind,
-                    recovery_state,
-                    summary,
-                    note,
-                    last_updated_at
-                 FROM order_recovery_records
-                 WHERE account_id = ?1 AND order_id = ?2 AND recovery_kind = ?3
-                 LIMIT 1",
-                params![account_id, order_id.to_string(), kind.storage_key()],
-                |row| {
-                    Ok((
-                        row.get::<_, String>(0)?,
-                        row.get::<_, String>(1)?,
-                        row.get::<_, String>(2)?,
-                        row.get::<_, String>(3)?,
-                        row.get::<_, String>(4)?,
-                        row.get::<_, Option<String>>(5)?,
-                        row.get::<_, String>(6)?,
-                    ))
-                },
-            )
-            .optional()
-            .map_err(|source| AppSqliteError::Query {
-                operation: "load recovery record",
-                source,
-            })?;
-
-        row.map_or_else(
-            || Ok(None),
-            |(
-                recovery_record_id,
-                order_id,
-                recovery_kind,
-                recovery_state,
-                summary,
-                note,
-                last_updated_at,
-            )| {
-                Ok(Some(OrderRecoveryProjection {
-                    recovery_record_id: parse_typed_id(
-                        "order_recovery_records.recovery_record_id",
-                        recovery_record_id,
-                    )?,
-                    order_id: parse_typed_id("order_recovery_records.order_id", order_id)?,
-                    kind: parse_recovery_kind(recovery_kind)?,
-                    state: parse_recovery_state(recovery_state)?,
-                    summary,
-                    note,
-                    last_updated_at,
-                }))
-            },
-        )
-    }
-
-    pub fn save_recovery_record(
-        &self,
-        account_id: &str,
-        farm_id: FarmId,
-        record: &OrderRecoveryProjection,
-    ) -> Result<(), AppSqliteError> {
-        self.connection
-            .execute(
-                "INSERT INTO order_recovery_records (
-                    recovery_record_id,
-                    account_id,
-                    farm_id,
-                    order_id,
-                    recovery_kind,
-                    recovery_state,
-                    summary,
-                    note,
-                    last_updated_at
-                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
-                ON CONFLICT(account_id, order_id, recovery_kind) DO UPDATE SET
-                    recovery_record_id = excluded.recovery_record_id,
-                    farm_id = excluded.farm_id,
-                    recovery_state = excluded.recovery_state,
-                    summary = excluded.summary,
-                    note = excluded.note,
-                    last_updated_at = excluded.last_updated_at",
-                params![
-                    record.recovery_record_id.to_string(),
-                    account_id,
-                    farm_id.to_string(),
-                    record.order_id.to_string(),
-                    record.kind.storage_key(),
-                    record.state.storage_key(),
-                    record.summary,
-                    record.note,
-                    record.last_updated_at,
-                ],
-            )
-            .map_err(|source| AppSqliteError::Query {
-                operation: "save recovery record",
-                source,
-            })?;
-
-        Ok(())
-    }
 }
 
 fn parse_reminder_kind(value: String) -> Result<ReminderKind, AppSqliteError> {
     match value.as_str() {
         "fulfillment_window" => Ok(ReminderKind::FulfillmentWindow),
         "order_action" => Ok(ReminderKind::OrderAction),
-        "missed_pickup_recovery" => Ok(ReminderKind::MissedPickupRecovery),
         "sync_impact" => Ok(ReminderKind::SyncImpact),
         _ => Err(AppSqliteError::DecodeEnum {
             field: "reminder_schedules.reminder_kind",
@@ -582,28 +395,6 @@ fn parse_reminder_delivery_state(value: String) -> Result<ReminderDeliveryState,
     }
 }
 
-fn parse_recovery_kind(value: String) -> Result<RecoveryKind, AppSqliteError> {
-    match value.as_str() {
-        "missed_pickup" => Ok(RecoveryKind::MissedPickup),
-        _ => Err(AppSqliteError::DecodeEnum {
-            field: "order_recovery_records.recovery_kind",
-            value,
-        }),
-    }
-}
-
-fn parse_recovery_state(value: String) -> Result<RecoveryState, AppSqliteError> {
-    match value.as_str() {
-        "open" => Ok(RecoveryState::Open),
-        "in_review" => Ok(RecoveryState::InReview),
-        "resolved" => Ok(RecoveryState::Resolved),
-        _ => Err(AppSqliteError::DecodeEnum {
-            field: "order_recovery_records.recovery_state",
-            value,
-        }),
-    }
-}
-
 fn parse_typed_id<T>(field: &'static str, value: String) -> Result<T, AppSqliteError>
 where
     T: FromStr<Err = uuid::Error>,
@@ -626,9 +417,8 @@ mod tests {
     use super::AppRemindersRepository;
     use crate::{AppSqliteStore, DatabaseTarget};
     use radroots_studio_app_view::{
-        FarmId, OrderId, OrderRecoveryProjection, RecoveryKind, RecoveryRecordId, RecoveryState,
-        ReminderDeadlineProjection, ReminderDeliveryState, ReminderFeedProjection, ReminderId,
-        ReminderKind, ReminderLogEntryProjection, ReminderSurface, ReminderUrgency,
+        FarmId, OrderId, ReminderDeadlineProjection, ReminderDeliveryState, ReminderFeedProjection,
+        ReminderId, ReminderKind, ReminderLogEntryProjection, ReminderSurface, ReminderUrgency,
     };
 
     #[test]
@@ -716,11 +506,11 @@ mod tests {
                 farm_id,
                 &ReminderLogEntryProjection {
                     reminder_id: second_reminder_id,
-                    kind: ReminderKind::MissedPickupRecovery,
-                    title: "Pickup follow-up pending".to_owned(),
+                    kind: ReminderKind::SyncImpact,
+                    title: "Sync attention needed".to_owned(),
                     recorded_at: "2026-04-25T13:00:00Z".to_owned(),
                     delivery_state: ReminderDeliveryState::Acknowledged,
-                    detail: Some("Customer requested a callback.".to_owned()),
+                    detail: Some("A local sync issue needs review.".to_owned()),
                 },
             )
             .expect("second log entry should save");
@@ -735,51 +525,5 @@ mod tests {
             loaded.entries[0].delivery_state,
             ReminderDeliveryState::Acknowledged
         );
-    }
-
-    #[test]
-    fn recovery_records_round_trip_and_upsert_by_account_order_and_kind() {
-        let store = AppSqliteStore::open(DatabaseTarget::InMemory).expect("store should open");
-        let repository = AppRemindersRepository::new(store.connection());
-        let farm_id = FarmId::new();
-        let order_id = OrderId::new();
-
-        let first = OrderRecoveryProjection {
-            recovery_record_id: RecoveryRecordId::new(),
-            order_id,
-            kind: RecoveryKind::MissedPickup,
-            state: RecoveryState::Open,
-            summary: "Customer missed pickup".to_owned(),
-            note: Some("Hold until Friday".to_owned()),
-            last_updated_at: "2026-04-25T17:00:00Z".to_owned(),
-        };
-        let updated = OrderRecoveryProjection {
-            recovery_record_id: RecoveryRecordId::new(),
-            order_id,
-            kind: RecoveryKind::MissedPickup,
-            state: RecoveryState::InReview,
-            summary: "Pickup follow-up underway".to_owned(),
-            note: Some("Customer will confirm by tonight".to_owned()),
-            last_updated_at: "2026-04-25T18:00:00Z".to_owned(),
-        };
-
-        repository
-            .save_recovery_record("acct_farmer", farm_id, &first)
-            .expect("first recovery should save");
-        repository
-            .save_recovery_record("acct_farmer", farm_id, &updated)
-            .expect("updated recovery should save");
-
-        let loaded = repository
-            .load_recovery_queue("acct_farmer", farm_id)
-            .expect("recovery queue should load");
-        let one = repository
-            .load_recovery_record("acct_farmer", order_id, RecoveryKind::MissedPickup)
-            .expect("recovery record should load")
-            .expect("recovery record should exist");
-
-        assert_eq!(loaded.items.len(), 1);
-        assert_eq!(loaded.items[0], updated);
-        assert_eq!(one, updated);
     }
 }

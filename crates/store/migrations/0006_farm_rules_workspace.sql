@@ -5,7 +5,6 @@ CREATE TABLE farm_operating_rules (
     farm_id TEXT PRIMARY KEY NOT NULL REFERENCES farms(id) ON DELETE CASCADE,
     promise_lead_hours INTEGER NOT NULL CHECK (promise_lead_hours >= 0),
     substitution_policy TEXT NOT NULL,
-    missed_pickup_policy TEXT NOT NULL,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
 );

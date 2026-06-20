@@ -495,19 +495,6 @@ mod tests {
             "Needs review"
         );
         assert_eq!(app_text(AppTextKey::OrdersDetailTitle), "Order detail");
-        assert_eq!(app_text(AppTextKey::OrdersRecoverySectionTitle), "Recovery");
-        assert_eq!(
-            app_text(AppTextKey::OrdersRecoveryMissedPickupTitle),
-            "Missed pickup"
-        );
-        assert_eq!(
-            app_text(AppTextKey::OrdersRecoveryActionResolve),
-            "Mark resolved"
-        );
-        assert_eq!(
-            app_text(AppTextKey::OrdersRecoveryStateInReview),
-            "In review"
-        );
     }
 
     #[test]
@@ -573,7 +560,6 @@ mod tests {
 
         assert!(action_keys.contains(&AppTextKey::PersonalCartReviewOrderAction));
         assert!(action_keys.contains(&AppTextKey::PersonalOrderReviewPlaceOrderAction));
-        assert!(action_keys.contains(&AppTextKey::OrdersRecoveryActionResolve));
 
         for key in action_keys {
             let copy = app_text(key).to_lowercase();

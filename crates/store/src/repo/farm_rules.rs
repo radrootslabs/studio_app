@@ -202,7 +202,7 @@ impl<'a> AppFarmRulesRepository<'a> {
         let row = self
             .connection
             .query_row(
-                "select farm_id, promise_lead_hours, substitution_policy, missed_pickup_policy
+                "select farm_id, promise_lead_hours, substitution_policy
                  from farm_operating_rules
                  where farm_id = ?1
                  limit 1",
@@ -212,7 +212,6 @@ impl<'a> AppFarmRulesRepository<'a> {
                         row.get::<_, String>(0)?,
                         row.get::<_, i64>(1)?,
                         row.get::<_, String>(2)?,
-                        row.get::<_, String>(3)?,
                     ))
                 },
             )
@@ -222,19 +221,16 @@ impl<'a> AppFarmRulesRepository<'a> {
                 source,
             })?;
 
-        row.map(
-            |(farm_id, promise_lead_hours, substitution_policy, missed_pickup_policy)| {
-                Ok(FarmOperatingRulesRecord {
-                    farm_id: parse_typed_id("farm_operating_rules.farm_id", farm_id)?,
-                    promise_lead_hours: parse_u16(
-                        "farm_operating_rules.promise_lead_hours",
-                        promise_lead_hours,
-                    )?,
-                    substitution_policy,
-                    missed_pickup_policy,
-                })
-            },
-        )
+        row.map(|(farm_id, promise_lead_hours, substitution_policy)| {
+            Ok(FarmOperatingRulesRecord {
+                farm_id: parse_typed_id("farm_operating_rules.farm_id", farm_id)?,
+                promise_lead_hours: parse_u16(
+                    "farm_operating_rules.promise_lead_hours",
+                    promise_lead_hours,
+                )?,
+                substitution_policy,
+            })
+        })
         .transpose()
     }
 
@@ -417,27 +413,23 @@ impl<'a> AppFarmRulesRepository<'a> {
                     farm_id,
                     promise_lead_hours,
                     substitution_policy,
-                    missed_pickup_policy,
                     created_at,
                     updated_at
                  ) values (
                     ?1,
                     ?2,
                     ?3,
-                    ?4,
                     strftime('%Y-%m-%dT%H:%M:%fZ', 'now'),
                     strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
                  )
                  on conflict(farm_id) do update set
                     promise_lead_hours = excluded.promise_lead_hours,
                     substitution_policy = excluded.substitution_policy,
-                    missed_pickup_policy = excluded.missed_pickup_policy,
                     updated_at = excluded.updated_at",
                 params![
                     operating_rules.farm_id.to_string(),
                     i64::from(operating_rules.promise_lead_hours),
                     operating_rules.substitution_policy,
-                    operating_rules.missed_pickup_policy,
                 ],
             )
             .map_err(|source| AppSqliteError::Query {
@@ -778,7 +770,6 @@ fn derive_farm_rules_readiness_parts(
     if operating_rules.is_none_or(|operating_rules| {
         operating_rules.promise_lead_hours == 0
             || operating_rules.substitution_policy.trim().is_empty()
-            || operating_rules.missed_pickup_policy.trim().is_empty()
     }) {
         blockers.push(FarmReadinessBlocker::MissingOperatingRules);
     }
@@ -988,7 +979,6 @@ mod tests {
                 farm_id,
                 promise_lead_hours: 24,
                 substitution_policy: "ask_customer".to_owned(),
-                missed_pickup_policy: "hold_next_window".to_owned(),
             }),
             fulfillment_windows: vec![FulfillmentWindowRecord {
                 fulfillment_window_id,
@@ -1121,7 +1111,6 @@ mod tests {
                 farm_id,
                 promise_lead_hours: 24,
                 substitution_policy: "ask_customer".to_owned(),
-                missed_pickup_policy: "hold_next_window".to_owned(),
             }),
             fulfillment_windows: Vec::new(),
             blackout_periods: Vec::new(),
@@ -1163,7 +1152,6 @@ mod tests {
                 farm_id,
                 promise_lead_hours: 0,
                 substitution_policy: "ask_customer".to_owned(),
-                missed_pickup_policy: "hold_next_window".to_owned(),
             }),
             fulfillment_windows: vec![FulfillmentWindowRecord {
                 fulfillment_window_id: FulfillmentWindowId::new(),
@@ -1208,7 +1196,6 @@ mod tests {
                 farm_id,
                 promise_lead_hours: 24,
                 substitution_policy: "ask_customer".to_owned(),
-                missed_pickup_policy: "hold_next_window".to_owned(),
             }),
             fulfillment_windows: vec![FulfillmentWindowRecord {
                 fulfillment_window_id: FulfillmentWindowId::new(),

@@ -167,7 +167,6 @@ impl<'a> AppOrdersRepository<'a> {
                         validation_receipts,
                         primary_action: primary_action_for_order(status, &workflow),
                         workflow,
-                        recoveries: Vec::new(),
                     })
                 },
             )

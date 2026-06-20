@@ -46,7 +46,7 @@ const MIGRATIONS: &[Migration] = &[
     },
     Migration {
         version: 11,
-        sql: include_str!("../migrations/0011_reminders_and_recovery.sql"),
+        sql: include_str!("../migrations/0011_reminders.sql"),
     },
     Migration {
         version: 12,

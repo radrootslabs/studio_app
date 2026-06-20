@@ -24,9 +24,9 @@ use radroots_studio_app_view::{
     PackDayPrintFailureKind, PackDayPrintKind, PackDayPrintLabelStock, PackDayPrintStatus,
     PackDayProjection, PackDayScreenQueryState, PersonalEntryProjection, ProductEditorDraft,
     ProductId, ProductPublishBlocker, ProductsFilter, ProductsListProjection, ProductsSort,
-    RecoveryQueueProjection, ReminderFeedProjection, ReminderLogProjection,
-    SelectedSurfaceProjection, SettingsAccountProjection, SettingsPreference, SettingsSection,
-    ShellSection, TodayAgendaProjection, TodaySetupTask, TodaySetupTaskKind,
+    ReminderFeedProjection, ReminderLogProjection, SelectedSurfaceProjection,
+    SettingsAccountProjection, SettingsPreference, SettingsSection, ShellSection,
+    TodayAgendaProjection, TodaySetupTask, TodaySetupTaskKind,
 };
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -306,7 +306,6 @@ pub struct OrdersScreenProjection {
     pub list: OrdersListProjection,
     pub query: OrdersScreenQueryState,
     pub reminders: ReminderFeedProjection,
-    pub recovery_queue: RecoveryQueueProjection,
     pub detail: Option<OrderDetailProjection>,
 }
 
@@ -1052,7 +1051,6 @@ pub enum AppStateCommand {
     SelectOrdersFulfillmentWindow(Option<FulfillmentWindowId>),
     ReplaceOrdersList(OrdersListProjection),
     ReplaceOrdersReminders(ReminderFeedProjection),
-    ReplaceOrdersRecoveryQueue(RecoveryQueueProjection),
     ReplaceReminderLog(ReminderLogProjection),
     ReplaceOrderDetail(Option<OrderDetailProjection>),
     SetPackDayFulfillmentWindow(Option<FulfillmentWindowId>),
@@ -1188,10 +1186,6 @@ impl AppStateCommand {
 
     pub fn replace_orders_reminders(projection: ReminderFeedProjection) -> Self {
         Self::ReplaceOrdersReminders(projection)
-    }
-
-    pub fn replace_orders_recovery_queue(projection: RecoveryQueueProjection) -> Self {
-        Self::ReplaceOrdersRecoveryQueue(projection)
     }
 
     pub fn replace_reminder_log(projection: ReminderLogProjection) -> Self {
@@ -1774,9 +1768,6 @@ fn apply_command(projection: &mut AppProjection, command: AppStateCommand) -> Ap
         }
         AppStateCommand::ReplaceOrdersReminders(reminders_projection) => {
             projection.orders.reminders = reminders_projection;
-        }
-        AppStateCommand::ReplaceOrdersRecoveryQueue(recovery_queue_projection) => {
-            projection.orders.recovery_queue = recovery_queue_projection;
         }
         AppStateCommand::ReplaceReminderLog(reminder_log_projection) => {
             projection.reminder_log = reminder_log_projection;
@@ -2555,7 +2546,6 @@ mod tests {
             .with_economics(order_economics),
             validation_receipts: Vec::new(),
             primary_action: Some(OrderPrimaryAction::Review),
-            recoveries: Vec::new(),
         };
         let orders_reminders = ReminderFeedProjection {
             items: vec![radroots_studio_app_view::ReminderDeadlineProjection {
@@ -2571,17 +2561,6 @@ mod tests {
                 deadline_at: "2026-04-18T15:00:00Z".to_owned(),
                 action_label: Some("Review".to_owned()),
                 delivery_state: radroots_studio_app_view::ReminderDeliveryState::Scheduled,
-            }],
-        };
-        let recovery_queue = radroots_studio_app_view::RecoveryQueueProjection {
-            items: vec![radroots_studio_app_view::OrderRecoveryProjection {
-                recovery_record_id: radroots_studio_app_view::RecoveryRecordId::new(),
-                order_id,
-                kind: radroots_studio_app_view::RecoveryKind::MissedPickup,
-                state: radroots_studio_app_view::RecoveryState::Open,
-                summary: "Follow up on pickup".to_owned(),
-                note: None,
-                last_updated_at: "2026-04-18T19:00:00Z".to_owned(),
             }],
         };
         let reminder_log = ReminderLogProjection {
@@ -2647,12 +2626,6 @@ mod tests {
             Ok(true)
         );
         assert_eq!(
-            store.apply(AppStateCommand::replace_orders_recovery_queue(
-                recovery_queue.clone()
-            )),
-            Ok(true)
-        );
-        assert_eq!(
             store.apply(AppStateCommand::replace_reminder_log(reminder_log.clone())),
             Ok(true)
         );
@@ -2683,7 +2656,6 @@ mod tests {
         );
         assert_eq!(store.projection().orders.list, orders_list);
         assert_eq!(store.projection().orders.reminders, orders_reminders);
-        assert_eq!(store.projection().orders.recovery_queue, recovery_queue);
         assert_eq!(store.projection().reminder_log, reminder_log);
         assert_eq!(store.projection().orders.detail, Some(order_detail));
         assert_eq!(
@@ -3638,7 +3610,6 @@ mod tests {
                         farm_id,
                         promise_lead_hours: 24,
                         substitution_policy: "ask_customer".to_owned(),
-                        missed_pickup_policy: "hold_next_window".to_owned(),
                     }),
                     fulfillment_windows: vec![FulfillmentWindowRecord {
                         fulfillment_window_id: active_window_id,
@@ -4363,7 +4334,6 @@ mod tests {
 
         assert!(projection.today.reminders.is_empty());
         assert!(projection.orders.reminders.is_empty());
-        assert!(projection.orders.recovery_queue.is_empty());
         assert!(projection.reminder_log.is_empty());
         assert!(projection.pack_day.projection.reminders.is_empty());
         assert_eq!(

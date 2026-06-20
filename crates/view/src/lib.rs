@@ -1682,7 +1682,6 @@ pub struct OrderDetailProjection {
     pub workflow: TradeWorkflowProjection,
     pub validation_receipts: Vec<TradeValidationReceiptProjection>,
     pub primary_action: Option<OrderPrimaryAction>,
-    pub recoveries: Vec<OrderRecoveryProjection>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -1959,7 +1958,6 @@ pub struct TodaySummary {
     pub low_stock_products: u32,
     pub draft_products: u32,
     pub reminders_due_soon: u32,
-    pub recovery_actions_open: u32,
 }
 
 impl TodaySummary {
@@ -1968,7 +1966,6 @@ impl TodaySummary {
             || self.low_stock_products > 0
             || self.draft_products > 0
             || self.reminders_due_soon > 0
-            || self.recovery_actions_open > 0
     }
 }
 
@@ -2029,28 +2026,6 @@ pub struct ReminderLogProjection {
 impl ReminderLogProjection {
     pub fn is_empty(&self) -> bool {
         self.entries.is_empty()
-    }
-}
-
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
-pub struct OrderRecoveryProjection {
-    pub recovery_record_id: RecoveryRecordId,
-    pub order_id: OrderId,
-    pub kind: RecoveryKind,
-    pub state: RecoveryState,
-    pub summary: String,
-    pub note: Option<String>,
-    pub last_updated_at: String,
-}
-
-#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
-pub struct RecoveryQueueProjection {
-    pub items: Vec<OrderRecoveryProjection>,
-}
-
-impl RecoveryQueueProjection {
-    pub fn is_empty(&self) -> bool {
-        self.items.is_empty()
     }
 }
 
@@ -2158,32 +2133,31 @@ mod tests {
         FarmTimingConflictKind, FarmerActivationProjection, FarmerSection, FulfillmentWindowId,
         IdentityBlockedReason, IdentityReadiness, LoggedOutStartupPhase,
         LoggedOutStartupProjection, OrderDetailItemRow, OrderDetailProjection, OrderId,
-        OrderListRow, OrderPrimaryAction, OrderRecoveryProjection, OrderStatus, OrdersFilter,
-        OrdersListProjection, OrdersListRow, OrdersListSummary, OrdersScreenQueryState,
-        PackDayBatchPrintArtifact, PackDayBatchPrintFailureKind, PackDayBatchPrintStatus,
-        PackDayExportArtifact, PackDayExportArtifactKind, PackDayExportBundle,
-        PackDayExportInstanceId, PackDayExportStatus, PackDayHostHandoffKind,
-        PackDayHostHandoffStatus, PackDayOutputCustomerOrder, PackDayOutputOrderState,
-        PackDayOutputPackListEntry, PackDayOutputProductTotal, PackDayOutputQuantity,
-        PackDayOutputSource, PackDayOutputWindow, PackDayPackListRow, PackDayPrintFailureKind,
-        PackDayPrintKind, PackDayPrintLabelStock, PackDayPrintStatus, PackDayProductTotalRow,
-        PackDayProjection, PackDayRosterRow, PackDayScreenQueryState,
-        ParseStartupSignerSourceError, PersonalEntryProjection, PersonalEntryState,
-        PersonalSection, PickupLocationId, ProductAttentionState, ProductAvailabilityState,
-        ProductAvailabilitySummary, ProductEditorDraft, ProductListRow, ProductPricePresentation,
-        ProductPublishBlocker, ProductStatus, ProductStockState, ProductStockSummary,
-        ProductsFilter, ProductsListProjection, ProductsListRow, ProductsListSummary, ProductsSort,
-        RecoveryKind, RecoveryQueueProjection, RecoveryRecordId, RecoveryState,
-        ReminderDeadlineProjection, ReminderDeliveryState, ReminderFeedProjection, ReminderId,
-        ReminderKind, ReminderLogEntryProjection, ReminderLogProjection, ReminderSurface,
-        ReminderUrgency, RepeatDemandEligibility, RepeatDemandHandoffProjection,
-        SelectedAccountProjection, SelectedSurfaceProjection, SettingsPreference, SettingsSection,
-        ShellSection, StartupSignerEntryProjection, StartupSignerSource, StartupSignerSourceKind,
-        TodayAgendaProjection, TodaySetupTask, TodaySetupTaskKind, TodaySummary,
-        TradeAgreementStatus, TradeEconomicsProjection, TradeInventoryStatus,
-        TradeProvenanceProjection, TradeRevisionStatus, TradeValidationReceiptProofSystem,
-        TradeValidationReceiptResult, TradeValidationReceiptType, TradeWorkflowProjection,
-        TradeWorkflowSource, order_status_from_active_order_projection,
+        OrderListRow, OrderPrimaryAction, OrderStatus, OrdersFilter, OrdersListProjection,
+        OrdersListRow, OrdersListSummary, OrdersScreenQueryState, PackDayBatchPrintArtifact,
+        PackDayBatchPrintFailureKind, PackDayBatchPrintStatus, PackDayExportArtifact,
+        PackDayExportArtifactKind, PackDayExportBundle, PackDayExportInstanceId,
+        PackDayExportStatus, PackDayHostHandoffKind, PackDayHostHandoffStatus,
+        PackDayOutputCustomerOrder, PackDayOutputOrderState, PackDayOutputPackListEntry,
+        PackDayOutputProductTotal, PackDayOutputQuantity, PackDayOutputSource, PackDayOutputWindow,
+        PackDayPackListRow, PackDayPrintFailureKind, PackDayPrintKind, PackDayPrintLabelStock,
+        PackDayPrintStatus, PackDayProductTotalRow, PackDayProjection, PackDayRosterRow,
+        PackDayScreenQueryState, ParseStartupSignerSourceError, PersonalEntryProjection,
+        PersonalEntryState, PersonalSection, PickupLocationId, ProductAttentionState,
+        ProductAvailabilityState, ProductAvailabilitySummary, ProductEditorDraft, ProductListRow,
+        ProductPricePresentation, ProductPublishBlocker, ProductStatus, ProductStockState,
+        ProductStockSummary, ProductsFilter, ProductsListProjection, ProductsListRow,
+        ProductsListSummary, ProductsSort, ReminderDeadlineProjection, ReminderDeliveryState,
+        ReminderFeedProjection, ReminderId, ReminderKind, ReminderLogEntryProjection,
+        ReminderLogProjection, ReminderSurface, ReminderUrgency, RepeatDemandEligibility,
+        RepeatDemandHandoffProjection, SelectedAccountProjection, SelectedSurfaceProjection,
+        SettingsPreference, SettingsSection, ShellSection, StartupSignerEntryProjection,
+        StartupSignerSource, StartupSignerSourceKind, TodayAgendaProjection, TodaySetupTask,
+        TodaySetupTaskKind, TodaySummary, TradeAgreementStatus, TradeEconomicsProjection,
+        TradeInventoryStatus, TradeProvenanceProjection, TradeRevisionStatus,
+        TradeValidationReceiptProofSystem, TradeValidationReceiptResult,
+        TradeValidationReceiptType, TradeWorkflowProjection, TradeWorkflowSource,
+        order_status_from_active_order_projection,
     };
     use std::{collections::BTreeSet, str::FromStr};
     use uuid::Uuid;
@@ -3437,7 +3411,6 @@ mod tests {
                 .with_economics(order_economics),
             validation_receipts: Vec::new(),
             primary_action: None,
-            recoveries: Vec::new(),
         };
         let pack_day = PackDayProjection {
             fulfillment_window: Some(super::FulfillmentWindowSummary {
@@ -3656,7 +3629,6 @@ mod tests {
             low_stock_products: 0,
             draft_products: 0,
             reminders_due_soon: 0,
-            recovery_actions_open: 0,
         };
         let busy = TodaySummary {
             farm_id: FarmId::new(),
@@ -3664,7 +3636,6 @@ mod tests {
             low_stock_products: 0,
             draft_products: 0,
             reminders_due_soon: 0,
-            recovery_actions_open: 0,
         };
 
         assert!(!quiet.has_attention_items());
@@ -3672,7 +3643,7 @@ mod tests {
     }
 
     #[test]
-    fn reminder_recovery_and_repeat_demand_contracts_are_explicit() {
+    fn reminder_and_repeat_demand_contracts_are_explicit() {
         let farm_id = FarmId::new();
         let order_id = OrderId::new();
         let fulfillment_window_id = FulfillmentWindowId::new();
@@ -3689,15 +3660,6 @@ mod tests {
             deadline_at: "2026-04-24T15:00:00Z".to_owned(),
             action_label: Some("Open pack day".to_owned()),
             delivery_state: ReminderDeliveryState::Scheduled,
-        };
-        let recovery = OrderRecoveryProjection {
-            recovery_record_id: RecoveryRecordId::new(),
-            order_id,
-            kind: RecoveryKind::MissedPickup,
-            state: RecoveryState::Open,
-            summary: "Customer missed pickup".to_owned(),
-            note: Some("Hold one extra day".to_owned()),
-            last_updated_at: "2026-04-24T18:00:00Z".to_owned(),
         };
         let repeat_demand = RepeatDemandHandoffProjection {
             order_id,
@@ -3720,29 +3682,19 @@ mod tests {
                 detail: Some(reminder.detail.clone()),
             }],
         };
-        let recovery_queue = RecoveryQueueProjection {
-            items: vec![recovery.clone()],
-        };
 
         assert_eq!(ReminderSurface::PackDay.storage_key(), "pack_day");
-        assert_eq!(
-            ReminderKind::MissedPickupRecovery.storage_key(),
-            "missed_pickup_recovery"
-        );
         assert_eq!(ReminderUrgency::DueSoon.storage_key(), "due_soon");
         assert_eq!(
             ReminderDeliveryState::Acknowledged.storage_key(),
             "acknowledged"
         );
-        assert_eq!(RecoveryKind::MissedPickup.storage_key(), "missed_pickup");
-        assert_eq!(RecoveryState::InReview.storage_key(), "in_review");
         assert_eq!(
             RepeatDemandEligibility::Unavailable.storage_key(),
             "unavailable"
         );
         assert_eq!(reminder_feed.due_soon_count(), 1);
         assert!(!reminder_log.is_empty());
-        assert!(!recovery_queue.is_empty());
         assert_eq!(repeat_demand.unavailable_item_count, 1);
     }
 
@@ -3963,7 +3915,6 @@ mod tests {
                 farm_id,
                 promise_lead_hours: 24,
                 substitution_policy: "ask_customer".to_owned(),
-                missed_pickup_policy: "hold_next_window".to_owned(),
             }),
             fulfillment_windows: vec![super::FulfillmentWindowRecord {
                 fulfillment_window_id,

@@ -20,10 +20,9 @@ use radroots_studio_app_view::{
     BuyerOrderReviewDraft, BuyerOrderReviewProjection, BuyerOrdersProjection,
     BuyerProductDetailProjection, FarmId, FarmOrderMethod, FarmRulesProjection,
     FarmSetupProjection, FarmSummary, FulfillmentWindowId, OrderDetailProjection, OrderId,
-    OrderRecoveryProjection, OrdersListProjection, OrdersScreenQueryState, PackDayOutputSource,
-    PackDayProjection, PackDayScreenQueryState, ProductEditorDraft, ProductId,
-    ProductPublishBlocker, ProductsFilter, ProductsListProjection, ProductsSort, RecoveryKind,
-    RecoveryQueueProjection, ReminderFeedProjection, ReminderLogEntryProjection,
+    OrdersListProjection, OrdersScreenQueryState, PackDayOutputSource, PackDayProjection,
+    PackDayScreenQueryState, ProductEditorDraft, ProductId, ProductPublishBlocker, ProductsFilter,
+    ProductsListProjection, ProductsSort, ReminderFeedProjection, ReminderLogEntryProjection,
     ReminderLogProjection, TodayAgendaProjection,
 };
 use rusqlite::Connection;
@@ -326,35 +325,6 @@ impl AppSqliteStore {
     ) -> Result<ReminderLogProjection, AppSqliteError> {
         self.reminders_repository()
             .load_reminder_log(account_id, farm_id, limit)
-    }
-
-    pub fn load_recovery_queue(
-        &self,
-        account_id: &str,
-        farm_id: FarmId,
-    ) -> Result<RecoveryQueueProjection, AppSqliteError> {
-        self.reminders_repository()
-            .load_recovery_queue(account_id, farm_id)
-    }
-
-    pub fn load_recovery_record(
-        &self,
-        account_id: &str,
-        order_id: OrderId,
-        kind: RecoveryKind,
-    ) -> Result<Option<OrderRecoveryProjection>, AppSqliteError> {
-        self.reminders_repository()
-            .load_recovery_record(account_id, order_id, kind)
-    }
-
-    pub fn save_recovery_record(
-        &self,
-        account_id: &str,
-        farm_id: FarmId,
-        record: &OrderRecoveryProjection,
-    ) -> Result<(), AppSqliteError> {
-        self.reminders_repository()
-            .save_recovery_record(account_id, farm_id, record)
     }
 
     pub fn save_product_editor_draft(
@@ -865,7 +835,6 @@ mod tests {
         assert!(table_exists(connection, "buyer_cart_lines"));
         assert!(table_exists(connection, "reminder_schedules"));
         assert!(table_exists(connection, "reminder_log_entries"));
-        assert!(table_exists(connection, "order_recovery_records"));
         assert!(table_exists(connection, "buyer_order_coordination_records"));
         assert!(table_exists(connection, "order_validation_receipts"));
         assert!(table_exists(connection, "app_sdk_migration_receipts"));
@@ -986,11 +955,6 @@ mod tests {
         ));
         assert!(column_exists(
             connection,
-            "order_recovery_records",
-            "recovery_kind"
-        ));
-        assert!(column_exists(
-            connection,
             "buyer_order_coordination_records",
             "state"
         ));
@@ -1038,11 +1002,6 @@ mod tests {
             connection,
             "order_validation_receipts",
             "proof_system"
-        ));
-        assert!(column_exists(
-            connection,
-            "order_recovery_records",
-            "recovery_state"
         ));
         assert!(column_exists(
             connection,

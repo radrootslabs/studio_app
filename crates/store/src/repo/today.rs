@@ -137,7 +137,6 @@ impl<'a> AppTodayAgendaRepository<'a> {
                 params![farm_id.to_string()],
             )?,
             reminders_due_soon: 0,
-            recovery_actions_open: 0,
         })
     }
 
