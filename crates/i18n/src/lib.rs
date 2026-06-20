@@ -487,7 +487,9 @@ mod tests {
             "Needs action"
         );
         assert_eq!(app_text(AppTextKey::OrdersStatusDeclined), "Declined");
-        assert_eq!(app_text(AppTextKey::OrdersStatusInHandoff), "In handoff");
+        assert_eq!(app_text(AppTextKey::OrdersStatusScheduled), "Agreed");
+        assert_eq!(app_text(AppTextKey::OrdersStatusInHandoff), "Agreed");
+        assert_eq!(app_text(AppTextKey::OrdersStatusCompleted), "Agreed");
         assert_eq!(
             app_text(AppTextKey::OrdersStatusNeedsReview),
             "Needs review"
@@ -677,6 +679,7 @@ mod tests {
         );
     }
 
+    #[test]
     fn validation_receipt_copy_covers_passive_evidence() {
         for (key, expected) in [
             (AppTextKey::TradeValidationReceiptSectionLabel, "Validation"),
@@ -757,15 +760,18 @@ mod tests {
             app_text(AppTextKey::PersonalOrdersListTitle),
             "Order history"
         );
-        assert_eq!(app_text(AppTextKey::PersonalOrdersStatusPlaced), "Placed");
+        assert_eq!(
+            app_text(AppTextKey::PersonalOrdersStatusPlaced),
+            "Requested"
+        );
         assert_eq!(
             app_text(AppTextKey::PersonalOrdersStatusScheduled),
-            "Scheduled"
+            "Agreed"
         );
-        assert_eq!(app_text(AppTextKey::PersonalOrdersStatusReady), "Ready");
+        assert_eq!(app_text(AppTextKey::PersonalOrdersStatusReady), "Agreed");
         assert_eq!(
             app_text(AppTextKey::PersonalOrdersStatusCompleted),
-            "Completed"
+            "Agreed"
         );
         assert_eq!(
             app_text(AppTextKey::PersonalOrdersStatusDeclined),
@@ -785,7 +791,7 @@ mod tests {
         );
         assert_eq!(
             app_text(AppTextKey::PersonalOrdersDetailFulfillmentLabel),
-            "Fulfillment"
+            "Pickup/delivery"
         );
         assert_eq!(
             app_text(AppTextKey::PersonalOrdersDetailNoteLabel),

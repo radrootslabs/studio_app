@@ -409,7 +409,6 @@ define_app_text_keys! {
     OrdersDetailWindowLabel => "orders.detail.window.label",
     OrdersDetailPickupLabel => "orders.detail.pickup.label",
     OrdersDetailTotalLabel => "orders.detail.total.label",
-    OrdersDetailPaymentLabel => "orders.detail.payment.label",
     TradeValidationReceiptSectionLabel => "trade.validation.section.label",
     TradeValidationReceiptEventLabel => "trade.validation.event.label",
     TradeValidationReceiptTargetLabel => "trade.validation.target.label",
