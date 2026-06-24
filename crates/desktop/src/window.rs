@@ -12562,6 +12562,7 @@ async fn run_startup_signer_connect(
     source_input: String,
 ) -> Result<RadrootsAppRemoteSignerPendingSession, String> {
     radroots_studio_app_remote_signer_connect_pending(source_input.as_str())
+        .await
         .map_err(|error| error.to_string())
 }
 
@@ -12595,6 +12596,7 @@ async fn run_startup_signer_pending_poll(
             } => auth_challenge_url = Some(url),
         },
     )
+    .await
     .map_err(|error| error.to_string());
 
     StartupSignerPollCycleResult {

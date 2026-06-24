@@ -1384,7 +1384,10 @@ fn enqueue_farm_publish_with_sdk(
             .map_err(|error| AppSdkRuntimeIssue::from_sdk_error(&error))?;
     }
     let receipt = runtime
-        .block_on(sdk.farms().enqueue_publish(enqueue, &signer))
+        .block_on(
+            sdk.farms()
+                .enqueue_publish_with_explicit_signer(enqueue, &signer),
+        )
         .map_err(|error| AppSdkRuntimeIssue::from_sdk_error(&error))?;
     Ok(app_sdk_farm_receipt(receipt, request.actor_pubkey))
 }
@@ -1408,7 +1411,10 @@ fn enqueue_listing_publish_with_sdk(
             .map_err(|error| AppSdkRuntimeIssue::from_sdk_error(&error))?;
     }
     let receipt = runtime
-        .block_on(sdk.listings().enqueue_publish(enqueue, &signer))
+        .block_on(
+            sdk.listings()
+                .enqueue_publish_with_explicit_signer(enqueue, &signer),
+        )
         .map_err(|error| AppSdkRuntimeIssue::from_sdk_error(&error))?;
     Ok(app_sdk_listing_receipt(receipt, request.actor_pubkey))
 }
@@ -1433,7 +1439,10 @@ fn enqueue_order_submit_with_sdk(
             .map_err(|error| AppSdkRuntimeIssue::from_sdk_error(&error))?;
     }
     let receipt = runtime
-        .block_on(sdk.orders().enqueue_submit(enqueue, &signer))
+        .block_on(
+            sdk.orders()
+                .enqueue_submit_with_explicit_signer(enqueue, &signer),
+        )
         .map_err(|error| AppSdkRuntimeIssue::from_sdk_error(&error))?;
     Ok(app_sdk_order_submit_ack(receipt, request.actor_pubkey))
 }
@@ -1470,7 +1479,10 @@ fn enqueue_order_decision_with_sdk(
             .map_err(|error| AppSdkRuntimeIssue::from_sdk_error(&error))?;
     }
     let receipt = runtime
-        .block_on(sdk.orders().enqueue_decision(enqueue, &signer))
+        .block_on(
+            sdk.orders()
+                .enqueue_decision_with_explicit_signer(enqueue, &signer),
+        )
         .map_err(|error| AppSdkRuntimeIssue::from_sdk_error(&error))?;
     Ok(app_sdk_order_decision_receipt(
         receipt,
@@ -1504,7 +1516,10 @@ fn enqueue_order_revision_proposal_with_sdk(
             .map_err(|error| AppSdkRuntimeIssue::from_sdk_error(&error))?;
     }
     let receipt = runtime
-        .block_on(sdk.orders().enqueue_revision_proposal(enqueue, &signer))
+        .block_on(
+            sdk.orders()
+                .enqueue_revision_proposal_with_explicit_signer(enqueue, &signer),
+        )
         .map_err(|error| AppSdkRuntimeIssue::from_sdk_error(&error))?;
     Ok(app_sdk_order_revision_proposal_receipt(
         receipt,
@@ -1538,7 +1553,10 @@ fn enqueue_order_revision_decision_with_sdk(
             .map_err(|error| AppSdkRuntimeIssue::from_sdk_error(&error))?;
     }
     let receipt = runtime
-        .block_on(sdk.orders().enqueue_revision_decision(enqueue, &signer))
+        .block_on(
+            sdk.orders()
+                .enqueue_revision_decision_with_explicit_signer(enqueue, &signer),
+        )
         .map_err(|error| AppSdkRuntimeIssue::from_sdk_error(&error))?;
     Ok(app_sdk_order_revision_decision_receipt(
         receipt,
@@ -1572,7 +1590,10 @@ fn enqueue_order_cancellation_with_sdk(
             .map_err(|error| AppSdkRuntimeIssue::from_sdk_error(&error))?;
     }
     let receipt = runtime
-        .block_on(sdk.orders().enqueue_cancellation(enqueue, &signer))
+        .block_on(
+            sdk.orders()
+                .enqueue_cancellation_with_explicit_signer(enqueue, &signer),
+        )
         .map_err(|error| AppSdkRuntimeIssue::from_sdk_error(&error))?;
     Ok(app_sdk_order_cancellation_receipt(
         receipt,

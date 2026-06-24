@@ -1258,9 +1258,9 @@ const LEGACY_SDK_BOUNDARY_ALLOWLIST: &[LegacySdkBoundaryAllowlistEntry] = &[
     LegacySdkBoundaryAllowlistEntry {
         path: "crates/signer/src/protocol.rs",
         pattern: "RadrootsIdentity::from_secret_key_str",
-        owner: "rpv1-app-sdk-hardening.04",
-        reason: "remote signer protocol connection still materializes client identity from local pending-session custody",
-        removal_condition: "remove when remote signer protocol sessions are mediated by SDK signer adapters and protected store APIs",
+        owner: "rpv1-sdksign.5",
+        reason: "remote signer startup custody still reloads the NIP-46 client identity before shared protocol transport execution",
+        removal_condition: "remove when startup remote signer custody stores client identities through protected signer-session APIs",
     },
     LegacySdkBoundaryAllowlistEntry {
         path: "crates/store/src/lib.rs",
