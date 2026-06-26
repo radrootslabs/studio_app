@@ -15,6 +15,8 @@ use radroots_events::{
     RadrootsNostrEvent, RadrootsNostrEventPtr,
     contract::RadrootsActorRole,
     farm::RadrootsFarm,
+    ids::RadrootsAddressableCoordinate,
+    kinds::KIND_FARM,
     listing::RadrootsListing,
     order::{
         RadrootsOrderCancellation, RadrootsOrderDecision, RadrootsOrderRequest,
@@ -33,8 +35,8 @@ use radroots_sdk::{
     OrderRevisionDecisionReceipt, OrderRevisionProposalEnqueueRequest,
     OrderRevisionProposalReceipt, OrderSubmitEnqueueRequest, OrderSubmitReceipt, RadrootsClient,
     RadrootsSdkError, RadrootsSdkStoragePaths, RestoreReceipt, RestoreRequest,
-    SdkBackupVerification, SdkRelayUrlPolicy as SdkRuntimeRelayUrlPolicy, StorageStatusReceipt,
-    StorageStatusRequest, SyncStatusReceipt, SyncStatusRequest,
+    SdkBackupVerification, SdkPublicLocality, SdkRelayUrlPolicy as SdkRuntimeRelayUrlPolicy,
+    StorageStatusReceipt, StorageStatusRequest, SyncStatusReceipt, SyncStatusRequest,
 };
 use radroots_sdk::{SdkMutationState, SdkRelayTargetPolicy};
 use serde::Serialize;
@@ -201,6 +203,21 @@ pub struct AppSdkSyncRelayTargetDiagnostics {
 pub struct AppSdkRestorePreflightRequest {
     pub source: PathBuf,
     pub overwrite_existing_sdk_storage: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct AppSdkFarmPublicLocationRequest {
+    pub actor_pubkey: String,
+    pub farm_d_tag: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct AppSdkPublicFarmLocation {
+    pub primary: String,
+    pub city: Option<String>,
+    pub region: Option<String>,
+    pub country: Option<String>,
+    pub geohash5: String,
 }
 
 pub struct AppSdkFarmPublishRequest {
@@ -377,6 +394,10 @@ enum AppSdkWorkerCommand {
         AppSdkRestorePreflightRequest,
         mpsc::Sender<Result<AppSdkRestorePreflightReceipt, AppSdkRuntimeIssue>>,
     ),
+    FarmPublicLocation(
+        AppSdkFarmPublicLocationRequest,
+        mpsc::Sender<Result<Option<AppSdkPublicFarmLocation>, AppSdkRuntimeIssue>>,
+    ),
     EnqueueFarmPublish(
         AppSdkFarmPublishRequest,
         mpsc::Sender<Result<AppSdkWorkflowReceipt, AppSdkRuntimeIssue>>,
@@ -421,6 +442,7 @@ impl fmt::Debug for AppSdkWorkerCommand {
             Self::SyncStatus(_) => formatter.write_str("SyncStatus"),
             Self::Diagnostics(_) => formatter.write_str("Diagnostics"),
             Self::RestorePreflight(_, _) => formatter.write_str("RestorePreflight"),
+            Self::FarmPublicLocation(_, _) => formatter.write_str("FarmPublicLocation"),
             Self::EnqueueFarmPublish(_, _) => formatter.write_str("EnqueueFarmPublish"),
             Self::EnqueueListingPublish(_, _) => formatter.write_str("EnqueueListingPublish"),
             Self::EnqueueOrderSubmit(_, _) => formatter.write_str("EnqueueOrderSubmit"),
@@ -550,6 +572,15 @@ impl AppSdkRuntime {
     ) -> Result<AppSdkRestorePreflightReceipt, AppSdkRuntimeError> {
         self.run_command(|response_sender| {
             AppSdkWorkerCommand::RestorePreflight(request, response_sender)
+        })
+    }
+
+    pub fn farm_public_location(
+        &self,
+        request: AppSdkFarmPublicLocationRequest,
+    ) -> Result<Option<AppSdkPublicFarmLocation>, AppSdkRuntimeError> {
+        self.run_command(|response_sender| {
+            AppSdkWorkerCommand::FarmPublicLocation(request, response_sender)
         })
     }
 
@@ -786,6 +817,18 @@ impl AppSdkRuntimeIssue {
                 "state": format!("{state:?}"),
                 "recovery_actions": ["wait_for_sdk_lifecycle"]
             }),
+        }
+    }
+}
+
+impl From<SdkPublicLocality> for AppSdkPublicFarmLocation {
+    fn from(value: SdkPublicLocality) -> Self {
+        Self {
+            primary: value.primary,
+            city: value.city,
+            region: value.region,
+            country: value.country,
+            geohash5: value.geohash5,
         }
     }
 }
@@ -1081,6 +1124,17 @@ fn run_app_sdk_worker(
                 };
                 send_worker_result(&shared, response_sender, result);
             }
+            AppSdkWorkerCommand::FarmPublicLocation(request, response_sender) => {
+                let result = if let Some(issue) = lifecycle_busy_issue(&shared) {
+                    Err(issue)
+                } else {
+                    match sdk.as_ref() {
+                        Some(sdk) => farm_public_location_with_sdk(&runtime, sdk, request),
+                        None => Err(runtime_unavailable_issue(&shared)),
+                    }
+                };
+                send_worker_result(&shared, response_sender, result);
+            }
             AppSdkWorkerCommand::EnqueueFarmPublish(request, response_sender) => {
                 let result = if let Some(issue) = lifecycle_busy_issue(&shared) {
                     Err(issue)
@@ -1229,6 +1283,13 @@ fn run_degraded_worker(
                     Err(runtime_unavailable_issue(&shared)),
                 );
             }
+            AppSdkWorkerCommand::FarmPublicLocation(_, response_sender) => {
+                send_worker_result(
+                    &shared,
+                    response_sender,
+                    Err(runtime_unavailable_issue(&shared)),
+                );
+            }
             AppSdkWorkerCommand::EnqueueFarmPublish(_, response_sender) => {
                 send_worker_result(
                     &shared,
@@ -1363,6 +1424,26 @@ async fn collect_sdk_diagnostics(
         integrity: integrity.into(),
         sync: sync.into(),
     })
+}
+
+fn farm_public_location_with_sdk(
+    runtime: &tokio::runtime::Runtime,
+    sdk: &RadrootsClient,
+    request: AppSdkFarmPublicLocationRequest,
+) -> Result<Option<AppSdkPublicFarmLocation>, AppSdkRuntimeIssue> {
+    let farm_addr = RadrootsAddressableCoordinate::parse(format!(
+        "{KIND_FARM}:{}:{}",
+        request.actor_pubkey, request.farm_d_tag
+    ))
+    .map_err(|error| {
+        AppSdkRuntimeIssue::from_sdk_error(&RadrootsSdkError::InvalidRequest {
+            message: format!("farm public location address is invalid: {error}"),
+        })
+    })?;
+    runtime
+        .block_on(sdk.farms().private_location(&farm_addr))
+        .map(|location| location.map(|receipt| receipt.public_locality.into()))
+        .map_err(|error| AppSdkRuntimeIssue::from_sdk_error(&error))
 }
 
 fn enqueue_farm_publish_with_sdk(

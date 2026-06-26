@@ -1144,13 +1144,13 @@ mod tests {
                     workflow_agreement,
                     workflow_inventory
                  ) VALUES (
-                    'order_needs_review',
+                    'order_invalid',
                     'farm_schema',
                     'needs review',
                     'Buyer',
                     'needs_review',
                     '2026-01-01T00:00:00Z',
-                    'needs_review',
+                    'invalid',
                     'needs_review'
                  )",
                 [],
@@ -1168,13 +1168,13 @@ mod tests {
                     workflow_agreement,
                     workflow_inventory
                  ) VALUES (
-                    'order_pending_rhi',
+                    'order_agreed_pending_rhi',
                     'farm_schema',
-                    'pending rhi',
+                    'agreed pending rhi',
                     'Buyer',
                     'needs_action',
                     '2026-01-01T00:00:00Z',
-                    'pending_rhi',
+                    'agreed_pending_rhi',
                     'reserved'
                  )",
                 [],
@@ -1373,10 +1373,10 @@ mod tests {
         assert_eq!(status, "needs_review");
         connection
             .execute(
-                "UPDATE orders SET workflow_agreement = 'pending_rhi' WHERE id = 'order_legacy'",
+                "UPDATE orders SET workflow_agreement = 'agreed_pending_rhi' WHERE id = 'order_legacy'",
                 [],
             )
-            .expect("pending rhi agreement should satisfy migrated check");
+            .expect("agreed pending rhi agreement should satisfy migrated check");
 
         drop(store);
         remove_database_artifacts(&path);

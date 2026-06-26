@@ -1,6 +1,6 @@
 ALTER TABLE orders
-    ADD COLUMN workflow_agreement TEXT NOT NULL DEFAULT 'ordered' CHECK (
-        workflow_agreement IN ('ordered', 'pending_rhi', 'confirmed', 'declined', 'cancelled', 'needs_review')
+    ADD COLUMN workflow_agreement TEXT NOT NULL DEFAULT 'requested' CHECK (
+        workflow_agreement IN ('requested', 'revision_proposed', 'agreed_pending_rhi', 'committed', 'declined', 'cancelled', 'invalid')
     );
 
 ALTER TABLE orders
@@ -19,11 +19,12 @@ ALTER TABLE orders
 UPDATE orders
 SET
     workflow_agreement = CASE status
-        WHEN 'scheduled' THEN 'confirmed'
-        WHEN 'packed' THEN 'confirmed'
-        WHEN 'completed' THEN 'confirmed'
+        WHEN 'scheduled' THEN 'committed'
+        WHEN 'packed' THEN 'committed'
+        WHEN 'completed' THEN 'committed'
         WHEN 'declined' THEN 'declined'
-        ELSE 'ordered'
+        WHEN 'needs_review' THEN 'invalid'
+        ELSE 'requested'
     END,
     workflow_inventory = CASE status
         WHEN 'scheduled' THEN 'reserved'

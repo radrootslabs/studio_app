@@ -635,20 +635,24 @@ mod tests {
         );
         assert_eq!(app_text(AppTextKey::TradeWorkflowAxisSource), "Source");
         assert_eq!(
-            app_text(AppTextKey::TradeWorkflowAgreementOrdered),
-            "Ordered"
+            app_text(AppTextKey::TradeWorkflowAgreementRequested),
+            "Requested"
         );
         assert_eq!(
-            app_text(AppTextKey::TradeWorkflowAgreementPendingRhi),
+            app_text(AppTextKey::TradeWorkflowAgreementRevisionProposed),
+            "Revision proposed"
+        );
+        assert_eq!(
+            app_text(AppTextKey::TradeWorkflowAgreementAgreedPendingRhi),
             "Pending validation"
         );
         assert_eq!(
-            app_text(AppTextKey::TradeWorkflowAgreementConfirmed),
-            "Confirmed"
+            app_text(AppTextKey::TradeWorkflowAgreementCommitted),
+            "Committed"
         );
         assert_eq!(
-            app_text(AppTextKey::TradeWorkflowAgreementNeedsReview),
-            "Needs review"
+            app_text(AppTextKey::TradeWorkflowAgreementInvalid),
+            "Invalid"
         );
         assert_eq!(
             app_text(AppTextKey::TradeWorkflowRevisionChangeProposed),

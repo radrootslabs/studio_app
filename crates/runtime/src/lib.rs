@@ -37,11 +37,12 @@ pub use runtime::{
 };
 pub use sdk::{
     APP_SDK_DEFAULT_COMMAND_QUEUE_CAPACITY, APP_SDK_STORAGE_DIR_NAME, AppSdkConfig,
-    AppSdkDiagnostics, AppSdkEventStoreDiagnostics, AppSdkFarmPublishRequest,
-    AppSdkIntegrityDiagnostics, AppSdkLifecycleState, AppSdkListingPublishRequest,
-    AppSdkOrderCancellationRequest, AppSdkOrderDecisionRequest, AppSdkOrderRevisionDecisionRequest,
-    AppSdkOrderRevisionProposalRequest, AppSdkOrderSubmitRequest, AppSdkOutboxDiagnostics,
-    AppSdkProjectionLifecycleState, AppSdkProjectionLifecycleStatus, AppSdkRelayUrlPolicy,
+    AppSdkDiagnostics, AppSdkEventStoreDiagnostics, AppSdkFarmPublicLocationRequest,
+    AppSdkFarmPublishRequest, AppSdkIntegrityDiagnostics, AppSdkLifecycleState,
+    AppSdkListingPublishRequest, AppSdkOrderCancellationRequest, AppSdkOrderDecisionRequest,
+    AppSdkOrderRevisionDecisionRequest, AppSdkOrderRevisionProposalRequest,
+    AppSdkOrderSubmitRequest, AppSdkOutboxDiagnostics, AppSdkProjectionLifecycleState,
+    AppSdkProjectionLifecycleStatus, AppSdkPublicFarmLocation, AppSdkRelayUrlPolicy,
     AppSdkRestorePreflightReceipt, AppSdkRestorePreflightRequest, AppSdkRuntime,
     AppSdkRuntimeError, AppSdkRuntimeIssue, AppSdkRuntimeStatus, AppSdkSqliteStoreDiagnostics,
     AppSdkStorageDiagnostics, AppSdkStoragePaths, AppSdkSyncDiagnostics,

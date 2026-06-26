@@ -11615,12 +11615,17 @@ fn trade_workflow_value_badge(value_key: AppTextKey) -> AnyElement {
 
 fn trade_agreement_status_key(status: TradeAgreementStatus) -> AppTextKey {
     match status {
-        TradeAgreementStatus::Ordered => AppTextKey::TradeWorkflowAgreementOrdered,
-        TradeAgreementStatus::PendingRhi => AppTextKey::TradeWorkflowAgreementPendingRhi,
-        TradeAgreementStatus::Confirmed => AppTextKey::TradeWorkflowAgreementConfirmed,
+        TradeAgreementStatus::Requested => AppTextKey::TradeWorkflowAgreementRequested,
+        TradeAgreementStatus::RevisionProposed => {
+            AppTextKey::TradeWorkflowAgreementRevisionProposed
+        }
+        TradeAgreementStatus::AgreedPendingRhi => {
+            AppTextKey::TradeWorkflowAgreementAgreedPendingRhi
+        }
+        TradeAgreementStatus::Committed => AppTextKey::TradeWorkflowAgreementCommitted,
         TradeAgreementStatus::Declined => AppTextKey::TradeWorkflowAgreementDeclined,
         TradeAgreementStatus::Cancelled => AppTextKey::TradeWorkflowAgreementCancelled,
-        TradeAgreementStatus::NeedsReview => AppTextKey::TradeWorkflowAgreementNeedsReview,
+        TradeAgreementStatus::Invalid => AppTextKey::TradeWorkflowAgreementInvalid,
     }
 }
 
@@ -16723,16 +16728,20 @@ mod tests {
     fn trade_workflow_badge_keys_cover_refactored_status_axes() {
         for (status, key) in [
             (
-                TradeAgreementStatus::Ordered,
-                AppTextKey::TradeWorkflowAgreementOrdered,
+                TradeAgreementStatus::Requested,
+                AppTextKey::TradeWorkflowAgreementRequested,
             ),
             (
-                TradeAgreementStatus::PendingRhi,
-                AppTextKey::TradeWorkflowAgreementPendingRhi,
+                TradeAgreementStatus::RevisionProposed,
+                AppTextKey::TradeWorkflowAgreementRevisionProposed,
             ),
             (
-                TradeAgreementStatus::Confirmed,
-                AppTextKey::TradeWorkflowAgreementConfirmed,
+                TradeAgreementStatus::AgreedPendingRhi,
+                AppTextKey::TradeWorkflowAgreementAgreedPendingRhi,
+            ),
+            (
+                TradeAgreementStatus::Committed,
+                AppTextKey::TradeWorkflowAgreementCommitted,
             ),
             (
                 TradeAgreementStatus::Declined,
@@ -16743,8 +16752,8 @@ mod tests {
                 AppTextKey::TradeWorkflowAgreementCancelled,
             ),
             (
-                TradeAgreementStatus::NeedsReview,
-                AppTextKey::TradeWorkflowAgreementNeedsReview,
+                TradeAgreementStatus::Invalid,
+                AppTextKey::TradeWorkflowAgreementInvalid,
             ),
         ] {
             assert_eq!(trade_agreement_status_key(status), key);

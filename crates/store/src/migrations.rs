@@ -120,7 +120,7 @@ const MIGRATIONS: &[Migration] = &[
     },
     Migration {
         version: 29,
-        sql: include_str!("../migrations/0029_order_workflow_pending_rhi_agreement.sql"),
+        sql: include_str!("../migrations/0029_order_workflow_validation_receipt_agreement.sql"),
     },
 ];
 

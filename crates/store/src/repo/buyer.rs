@@ -3823,7 +3823,7 @@ mod tests {
         set_order_workflow_display_projection(
             connection,
             order_id,
-            "confirmed",
+            "committed",
             "reserved",
             "local_events",
             Some("agreement-event-1"),
@@ -3839,7 +3839,7 @@ mod tests {
         let row = &list.rows[0];
 
         assert_eq!(list.rows.len(), 1);
-        assert_eq!(row.workflow.agreement, TradeAgreementStatus::Confirmed);
+        assert_eq!(row.workflow.agreement, TradeAgreementStatus::Committed);
         assert_eq!(row.workflow.inventory, TradeInventoryStatus::Reserved);
         assert_eq!(
             row.workflow.provenance.primary_source,
@@ -3877,7 +3877,7 @@ mod tests {
         set_order_workflow_display_projection(
             connection,
             order_id,
-            "confirmed",
+            "committed",
             "reserved",
             "local_events",
             Some("buyer-workflow-event"),
@@ -3894,7 +3894,7 @@ mod tests {
             set_order_workflow_display_projection(
                 connection,
                 order_id,
-                "confirmed",
+                "committed",
                 "reserved",
                 "local_events",
                 Some("buyer-workflow-event"),

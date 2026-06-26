@@ -1072,47 +1072,50 @@ pub struct BuyerOrderReviewProjection {
 #[serde(rename_all = "snake_case")]
 pub enum TradeAgreementStatus {
     #[default]
-    Ordered,
-    PendingRhi,
-    Confirmed,
+    Requested,
+    RevisionProposed,
+    AgreedPendingRhi,
+    Committed,
     Declined,
     Cancelled,
-    NeedsReview,
+    Invalid,
 }
 
 impl TradeAgreementStatus {
     pub const fn storage_key(self) -> &'static str {
         match self {
-            Self::Ordered => "ordered",
-            Self::PendingRhi => "pending_rhi",
-            Self::Confirmed => "confirmed",
+            Self::Requested => "requested",
+            Self::RevisionProposed => "revision_proposed",
+            Self::AgreedPendingRhi => "agreed_pending_rhi",
+            Self::Committed => "committed",
             Self::Declined => "declined",
             Self::Cancelled => "cancelled",
-            Self::NeedsReview => "needs_review",
+            Self::Invalid => "invalid",
         }
     }
 
     pub const fn label_key_id(self) -> &'static str {
         match self {
-            Self::Ordered => "messages.trade.workflow.agreement.ordered",
-            Self::PendingRhi => "messages.trade.workflow.agreement.pending_rhi",
-            Self::Confirmed => "messages.trade.workflow.agreement.confirmed",
+            Self::Requested => "messages.trade.workflow.agreement.requested",
+            Self::RevisionProposed => "messages.trade.workflow.agreement.revision_proposed",
+            Self::AgreedPendingRhi => "messages.trade.workflow.agreement.agreed_pending_rhi",
+            Self::Committed => "messages.trade.workflow.agreement.committed",
             Self::Declined => "messages.trade.workflow.agreement.declined",
             Self::Cancelled => "messages.trade.workflow.agreement.cancelled",
-            Self::NeedsReview => "messages.trade.workflow.agreement.needs_review",
+            Self::Invalid => "messages.trade.workflow.agreement.invalid",
         }
     }
 
     pub const fn from_active_order_status(status: &RadrootsTradeWorkflowState) -> Self {
         match status {
-            RadrootsTradeWorkflowState::Missing => Self::NeedsReview,
-            RadrootsTradeWorkflowState::Requested
-            | RadrootsTradeWorkflowState::RevisionProposed => Self::Ordered,
-            RadrootsTradeWorkflowState::AgreedPendingRhi => Self::PendingRhi,
-            RadrootsTradeWorkflowState::Committed => Self::Confirmed,
+            RadrootsTradeWorkflowState::Missing => Self::Invalid,
+            RadrootsTradeWorkflowState::Requested => Self::Requested,
+            RadrootsTradeWorkflowState::RevisionProposed => Self::RevisionProposed,
+            RadrootsTradeWorkflowState::AgreedPendingRhi => Self::AgreedPendingRhi,
+            RadrootsTradeWorkflowState::Committed => Self::Committed,
             RadrootsTradeWorkflowState::Declined => Self::Declined,
             RadrootsTradeWorkflowState::Cancelled => Self::Cancelled,
-            RadrootsTradeWorkflowState::Invalid => Self::NeedsReview,
+            RadrootsTradeWorkflowState::Invalid => Self::Invalid,
         }
     }
 }
@@ -1504,12 +1507,12 @@ impl TradeWorkflowProjection {
 
     pub fn from_order_status(order_id: OrderId, status: OrderStatus) -> Self {
         let mut projection = match status {
-            OrderStatus::NeedsAction => Self::new(order_id, TradeAgreementStatus::Ordered),
-            OrderStatus::Scheduled => Self::new(order_id, TradeAgreementStatus::Confirmed),
-            OrderStatus::Packed => Self::new(order_id, TradeAgreementStatus::Confirmed),
-            OrderStatus::Completed => Self::new(order_id, TradeAgreementStatus::Confirmed),
+            OrderStatus::NeedsAction => Self::new(order_id, TradeAgreementStatus::Requested),
+            OrderStatus::Scheduled => Self::new(order_id, TradeAgreementStatus::Committed),
+            OrderStatus::Packed => Self::new(order_id, TradeAgreementStatus::Committed),
+            OrderStatus::Completed => Self::new(order_id, TradeAgreementStatus::Committed),
             OrderStatus::Declined => Self::new(order_id, TradeAgreementStatus::Declined),
-            OrderStatus::NeedsReview => Self::new(order_id, TradeAgreementStatus::NeedsReview),
+            OrderStatus::NeedsReview => Self::new(order_id, TradeAgreementStatus::Invalid),
         };
 
         match status {
@@ -1534,12 +1537,12 @@ impl TradeWorkflowProjection {
 
     pub fn from_buyer_order_status(order_id: OrderId, status: BuyerOrderStatus) -> Self {
         let mut projection = match status {
-            BuyerOrderStatus::Placed => Self::new(order_id, TradeAgreementStatus::Ordered),
-            BuyerOrderStatus::Scheduled => Self::new(order_id, TradeAgreementStatus::Confirmed),
-            BuyerOrderStatus::Ready => Self::new(order_id, TradeAgreementStatus::Confirmed),
-            BuyerOrderStatus::Completed => Self::new(order_id, TradeAgreementStatus::Confirmed),
+            BuyerOrderStatus::Placed => Self::new(order_id, TradeAgreementStatus::Requested),
+            BuyerOrderStatus::Scheduled => Self::new(order_id, TradeAgreementStatus::Committed),
+            BuyerOrderStatus::Ready => Self::new(order_id, TradeAgreementStatus::Committed),
+            BuyerOrderStatus::Completed => Self::new(order_id, TradeAgreementStatus::Committed),
             BuyerOrderStatus::Declined => Self::new(order_id, TradeAgreementStatus::Declined),
-            BuyerOrderStatus::NeedsReview => Self::new(order_id, TradeAgreementStatus::NeedsReview),
+            BuyerOrderStatus::NeedsReview => Self::new(order_id, TradeAgreementStatus::Invalid),
         };
 
         match status {
@@ -2875,21 +2878,27 @@ mod tests {
     fn trade_workflow_projection_maps_shared_active_order_projection_to_product_axes() {
         assert_eq!(
             TradeAgreementStatus::from_active_order_status(&RadrootsTradeWorkflowState::Requested),
-            TradeAgreementStatus::Ordered
+            TradeAgreementStatus::Requested
+        );
+        assert_eq!(
+            TradeAgreementStatus::from_active_order_status(
+                &RadrootsTradeWorkflowState::RevisionProposed
+            ),
+            TradeAgreementStatus::RevisionProposed
         );
         assert_eq!(
             TradeAgreementStatus::from_active_order_status(
                 &RadrootsTradeWorkflowState::AgreedPendingRhi
             ),
-            TradeAgreementStatus::PendingRhi
+            TradeAgreementStatus::AgreedPendingRhi
         );
         assert_eq!(
             TradeAgreementStatus::from_active_order_status(&RadrootsTradeWorkflowState::Committed),
-            TradeAgreementStatus::Confirmed
+            TradeAgreementStatus::Committed
         );
         assert_eq!(
             TradeAgreementStatus::from_active_order_status(&RadrootsTradeWorkflowState::Invalid),
-            TradeAgreementStatus::NeedsReview
+            TradeAgreementStatus::Invalid
         );
         assert_eq!(
             TradeRevisionStatus::try_from_storage_key("none"),
@@ -2927,7 +2936,7 @@ mod tests {
             TradeProvenanceProjection::from_primary_source(TradeWorkflowSource::LocalEvents),
         );
         assert_eq!(projection.order_id, order_id);
-        assert_eq!(projection.agreement, TradeAgreementStatus::Confirmed);
+        assert_eq!(projection.agreement, TradeAgreementStatus::Committed);
         assert_eq!(projection.revision, TradeRevisionStatus::Updated);
         assert_eq!(projection.inventory, TradeInventoryStatus::Reserved);
         assert_eq!(projection.economics.total_minor_units, Some(1234));
@@ -2954,7 +2963,7 @@ mod tests {
         );
         assert_eq!(
             pending_rhi_projection.agreement,
-            TradeAgreementStatus::PendingRhi
+            TradeAgreementStatus::AgreedPendingRhi
         );
         assert_eq!(
             pending_rhi_projection.inventory,
@@ -2974,7 +2983,7 @@ mod tests {
         );
         assert_eq!(
             requested_projection.agreement,
-            TradeAgreementStatus::Ordered
+            TradeAgreementStatus::Requested
         );
         assert_eq!(
             requested_projection.inventory,
@@ -3040,13 +3049,19 @@ mod tests {
         assert_eq!(
             TradeAgreementStatus::from_active_order_status(&RadrootsTradeWorkflowState::Requested)
                 .storage_key(),
-            "ordered"
+            "requested"
         );
-        assert_eq!(TradeAgreementStatus::Ordered.storage_key(), "ordered");
+        assert_eq!(TradeAgreementStatus::Requested.storage_key(), "requested");
         assert_eq!(
-            TradeAgreementStatus::PendingRhi.storage_key(),
-            "pending_rhi"
+            TradeAgreementStatus::RevisionProposed.storage_key(),
+            "revision_proposed"
         );
+        assert_eq!(
+            TradeAgreementStatus::AgreedPendingRhi.storage_key(),
+            "agreed_pending_rhi"
+        );
+        assert_eq!(TradeAgreementStatus::Committed.storage_key(), "committed");
+        assert_eq!(TradeAgreementStatus::Invalid.storage_key(), "invalid");
         assert_eq!(
             TradeRevisionStatus::KeptAsPlaced.storage_key(),
             "kept_as_placed"
@@ -3058,16 +3073,20 @@ mod tests {
         );
 
         assert_eq!(
-            TradeAgreementStatus::Ordered.label_key_id(),
-            "messages.trade.workflow.agreement.ordered"
+            TradeAgreementStatus::Requested.label_key_id(),
+            "messages.trade.workflow.agreement.requested"
         );
         assert_eq!(
-            TradeAgreementStatus::PendingRhi.label_key_id(),
-            "messages.trade.workflow.agreement.pending_rhi"
+            TradeAgreementStatus::RevisionProposed.label_key_id(),
+            "messages.trade.workflow.agreement.revision_proposed"
         );
         assert_eq!(
-            TradeAgreementStatus::NeedsReview.label_key_id(),
-            "messages.trade.workflow.agreement.needs_review"
+            TradeAgreementStatus::AgreedPendingRhi.label_key_id(),
+            "messages.trade.workflow.agreement.agreed_pending_rhi"
+        );
+        assert_eq!(
+            TradeAgreementStatus::Invalid.label_key_id(),
+            "messages.trade.workflow.agreement.invalid"
         );
         assert_eq!(
             TradeRevisionStatus::ChangeProposed.label_key_id(),
@@ -3491,7 +3510,7 @@ mod tests {
         assert_eq!(orders_list.rows[0].primary_action, None);
         assert_eq!(
             orders_list.rows[0].workflow.agreement,
-            TradeAgreementStatus::Confirmed
+            TradeAgreementStatus::Committed
         );
         assert_eq!(order_detail.items[0].quantity_display, "2 bags");
         assert_eq!(
@@ -3629,7 +3648,7 @@ mod tests {
         assert_eq!(order_detail.status, BuyerOrderStatus::Scheduled);
         assert_eq!(
             order_detail.workflow.agreement,
-            TradeAgreementStatus::Confirmed
+            TradeAgreementStatus::Committed
         );
     }
 

@@ -39,10 +39,11 @@ use radroots_nostr_accounts::prelude::RadrootsNostrAccountsManager;
 use radroots_sdk::protocol::events::{
     RadrootsNostrEvent as SdkRadrootsNostrEvent, RadrootsNostrEventPtr,
 };
-use radroots_sdk::protocol::farm::{RadrootsFarm, RadrootsFarmRef};
+use radroots_sdk::protocol::farm::{RadrootsFarm, RadrootsFarmPublicLocation, RadrootsFarmRef};
 use radroots_sdk::protocol::listing::{
     RadrootsListing, RadrootsListingAvailability, RadrootsListingBin,
-    RadrootsListingDeliveryMethod, RadrootsListingProduct, RadrootsListingStatus,
+    RadrootsListingDeliveryMethod, RadrootsListingProduct, RadrootsListingPublicLocation,
+    RadrootsListingStatus,
 };
 use radroots_sdk::protocol::order::{
     RadrootsOrderCancellation, RadrootsOrderDecision, RadrootsOrderDecisionOutcome,
@@ -59,9 +60,10 @@ use radroots_sql_core::SqliteExecutor;
 use radroots_studio_app_core::{
     AppBuildIdentity, AppDesktopRuntimePaths, AppRuntimeCapture, AppRuntimeMode,
     AppRuntimePathsError, AppRuntimeSnapshot, AppSdkConfig, AppSdkDiagnostics,
-    AppSdkFarmPublishRequest, AppSdkLifecycleState, AppSdkListingPublishRequest,
-    AppSdkOrderCancellationRequest, AppSdkOrderDecisionRequest, AppSdkOrderRevisionDecisionRequest,
-    AppSdkOrderRevisionProposalRequest, AppSdkOrderSubmitRequest, AppSdkProjectionLifecycleState,
+    AppSdkFarmPublicLocationRequest, AppSdkFarmPublishRequest, AppSdkLifecycleState,
+    AppSdkListingPublishRequest, AppSdkOrderCancellationRequest, AppSdkOrderDecisionRequest,
+    AppSdkOrderRevisionDecisionRequest, AppSdkOrderRevisionProposalRequest,
+    AppSdkOrderSubmitRequest, AppSdkProjectionLifecycleState, AppSdkPublicFarmLocation,
     AppSdkRelayUrlPolicy, AppSdkRuntime, AppSdkRuntimeError, AppSdkRuntimeIssue,
     AppSdkRuntimeStatus, AppSdkStoragePaths, AppSdkWorkflowReceipt, AppSharedAccountsPaths,
     PackDayExportWriteError, prepare_pack_day_export_bundle_at_data_root,
@@ -4688,11 +4690,16 @@ impl DesktopAppRuntimeState {
             ))
             .and_then(|identity| {
                 let actor_pubkey = identity.public_key_hex();
+                let public_location =
+                    self.sdk_public_farm_location(actor_pubkey.as_str(), payload.farm_id)?;
                 let request = AppSdkFarmPublishRequest {
                     actor_account_id: payload.context.account_id.clone(),
                     actor_pubkey: actor_pubkey.clone(),
                     signer_keys: identity.into_keys(),
-                    farm: farm_profile_publish_payload_to_sdk_farm(payload),
+                    farm: farm_profile_publish_payload_to_sdk_farm(
+                        payload,
+                        public_location.as_ref(),
+                    ),
                     target_relays: normalized_app_sync_relay_urls(&self.nostr_relay_urls)?,
                     relay_url_policy: sdk_relay_url_policy_for_targets(&self.nostr_relay_urls),
                     idempotency_key: Some(sdk_idempotency_key(source_record_id)),
@@ -4732,11 +4739,20 @@ impl DesktopAppRuntimeState {
             ))
             .and_then(|identity| {
                 let actor_pubkey = identity.public_key_hex();
+                let public_location = match payload.farm_id {
+                    Some(farm_id) => {
+                        self.sdk_public_farm_location(actor_pubkey.as_str(), farm_id)?
+                    }
+                    None => None,
+                };
                 let request = AppSdkListingPublishRequest {
                     actor_account_id: payload.context.account_id.clone(),
                     actor_pubkey: actor_pubkey.clone(),
                     signer_keys: identity.into_keys(),
-                    listing: listing_publish_payload_to_sdk_listing(payload)?,
+                    listing: listing_publish_payload_to_sdk_listing(
+                        payload,
+                        public_location.as_ref(),
+                    )?,
                     target_relays: normalized_app_sync_relay_urls(&self.nostr_relay_urls)?,
                     relay_url_policy: sdk_relay_url_policy_for_targets(&self.nostr_relay_urls),
                     idempotency_key: Some(sdk_idempotency_key(source_record_id)),
@@ -5050,6 +5066,19 @@ impl DesktopAppRuntimeState {
             AppSyncTransportError::unavailable("app account manager is not configured")
         })?;
         signing_identity_for_publish_payload(accounts_manager, payload)
+    }
+
+    fn sdk_public_farm_location(
+        &self,
+        actor_pubkey: &str,
+        farm_id: FarmId,
+    ) -> Result<Option<AppSdkPublicFarmLocation>, AppSyncTransportError> {
+        let request = AppSdkFarmPublicLocationRequest {
+            actor_pubkey: actor_pubkey.to_owned(),
+            farm_d_tag: d_tag_from_uuid(farm_id.as_uuid()),
+        };
+        self.with_app_sdk_runtime(|runtime| runtime.farm_public_location(request))
+            .map_err(sync_transport_error_from_sdk_runtime_error)
     }
 
     fn enqueue_app_sdk_farm_publish(
@@ -7314,6 +7343,7 @@ fn listing_fulfillment_location(
 
 fn farm_profile_publish_payload_to_sdk_farm(
     payload: &AppFarmProfilePublishPayload,
+    public_location: Option<&AppSdkPublicFarmLocation>,
 ) -> RadrootsFarm {
     RadrootsFarm {
         d_tag: d_tag_from_uuid(payload.farm_id.as_uuid()),
@@ -7322,7 +7352,7 @@ fn farm_profile_publish_payload_to_sdk_farm(
         website: None,
         picture: None,
         banner: None,
-        location: None,
+        location: public_location.map(public_farm_location_to_protocol),
         tags: payload.readiness.map(|readiness| match readiness {
             FarmReadiness::Incomplete => vec!["radroots:readiness:incomplete".to_owned()],
             FarmReadiness::Ready => vec!["radroots:readiness:ready".to_owned()],
@@ -7513,6 +7543,7 @@ fn sync_transport_error_detail_json(error: &AppSyncTransportError) -> serde_json
 
 fn listing_publish_payload_to_sdk_listing(
     payload: &AppListingPublishPayload,
+    public_location: Option<&AppSdkPublicFarmLocation>,
 ) -> Result<RadrootsListing, AppSyncTransportError> {
     let currency = payload
         .price_currency
@@ -7598,10 +7629,34 @@ fn listing_publish_payload_to_sdk_listing(
         delivery_method: Some(parse_app_listing_delivery_method(
             payload.fulfillment_method.as_deref().unwrap_or_default(),
         )?),
-        location: None,
+        location: public_location.map(public_listing_location_to_protocol),
         published_at: None,
         images: None,
     })
+}
+
+fn public_farm_location_to_protocol(
+    location: &AppSdkPublicFarmLocation,
+) -> RadrootsFarmPublicLocation {
+    RadrootsFarmPublicLocation {
+        primary: location.primary.clone(),
+        city: location.city.clone(),
+        region: location.region.clone(),
+        country: location.country.clone(),
+        geohash: location.geohash5.clone(),
+    }
+}
+
+fn public_listing_location_to_protocol(
+    location: &AppSdkPublicFarmLocation,
+) -> RadrootsListingPublicLocation {
+    RadrootsListingPublicLocation {
+        primary: location.primary.clone(),
+        city: location.city.clone(),
+        region: location.region.clone(),
+        country: location.country.clone(),
+        geohash: location.geohash5.clone(),
+    }
 }
 
 fn listing_publish_payload_availability(
@@ -9796,8 +9851,8 @@ mod tests {
     use radroots_sql_core::{SqlExecutor, SqliteExecutor};
     use radroots_studio_app_core::{
         AppDesktopRuntimePaths, AppRuntimeHostEnvironment, AppRuntimePlatform,
-        AppSdkLifecycleState, AppSdkProjectionLifecycleState, AppSharedAccountsPaths,
-        SHARED_ACCOUNTS_STORE_FILE_NAME, SHARED_IDENTITY_FILE_NAME,
+        AppSdkLifecycleState, AppSdkProjectionLifecycleState, AppSdkPublicFarmLocation,
+        AppSharedAccountsPaths, SHARED_ACCOUNTS_STORE_FILE_NAME, SHARED_IDENTITY_FILE_NAME,
     };
     use radroots_studio_app_remote_signer::{
         RadrootsAppRemoteSignerPendingSession, RadrootsAppRemoteSignerSessionRecord,
@@ -10772,17 +10827,16 @@ mod tests {
             fulfillment_location: Some("Relay barn".to_owned()),
             status: ProductStatus::Published,
         };
-        let mut listing = super::listing_publish_payload_to_sdk_listing(&listing_payload)
-            .expect("listing payload should convert to SDK listing");
-        listing.location = Some(
-            radroots_sdk::protocol::listing::RadrootsListingPublicLocation {
-                primary: "Relay barn".to_owned(),
-                city: Some("San Francisco".to_owned()),
-                region: Some("CA".to_owned()),
-                country: Some("US".to_owned()),
-                geohash: "9q8yy".to_owned(),
-            },
-        );
+        let public_location = AppSdkPublicFarmLocation {
+            primary: "Relay barn".to_owned(),
+            city: Some("San Francisco".to_owned()),
+            region: Some("CA".to_owned()),
+            country: Some("US".to_owned()),
+            geohash5: "9q8yy".to_owned(),
+        };
+        let listing =
+            super::listing_publish_payload_to_sdk_listing(&listing_payload, Some(&public_location))
+                .expect("listing payload should convert to SDK listing");
         let parts = radroots_sdk::protocol::listing::build_draft(&listing)
             .expect("listing draft should build")
             .into_wire_parts();
@@ -15406,7 +15460,7 @@ mod tests {
         assert_eq!(persisted_order_status(&runtime, order_id), "needs_action");
         assert_eq!(
             persisted_order_workflow_agreement(&runtime, order_id),
-            "pending_rhi"
+            "agreed_pending_rhi"
         );
         assert_eq!(relay.event_count(), 1);
 
@@ -16136,7 +16190,10 @@ mod tests {
         assert_eq!(row.status, BuyerOrderStatus::Placed);
         assert_eq!(detail.order_id, fixture.order_id);
         assert_eq!(detail.status, BuyerOrderStatus::Placed);
-        assert_eq!(detail.workflow.agreement, TradeAgreementStatus::PendingRhi);
+        assert_eq!(
+            detail.workflow.agreement,
+            TradeAgreementStatus::AgreedPendingRhi
+        );
         assert_eq!(
             detail.workflow.provenance.last_event_id.as_deref(),
             Some(fixture.decision_event_id.as_str())

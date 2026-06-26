@@ -7,10 +7,10 @@ DROP INDEX IF EXISTS idx_orders_farm_status;
 DROP INDEX IF EXISTS idx_orders_farm_window_status_updated_at;
 DROP INDEX IF EXISTS idx_orders_buyer_context_updated_at;
 
-ALTER TABLE order_validation_receipts RENAME TO order_validation_receipts_pending_rhi_legacy;
-ALTER TABLE order_lines RENAME TO order_lines_pending_rhi_legacy;
-ALTER TABLE buyer_order_coordination_records RENAME TO buyer_order_coordination_records_pending_rhi_legacy;
-ALTER TABLE orders RENAME TO orders_pending_rhi_legacy;
+ALTER TABLE order_validation_receipts RENAME TO order_validation_receipts_workflow_previous;
+ALTER TABLE order_lines RENAME TO order_lines_workflow_previous;
+ALTER TABLE buyer_order_coordination_records RENAME TO buyer_order_coordination_records_workflow_previous;
+ALTER TABLE orders RENAME TO orders_workflow_previous;
 
 CREATE TABLE orders (
     id TEXT PRIMARY KEY NOT NULL,
@@ -29,8 +29,8 @@ CREATE TABLE orders (
     workflow_revision TEXT NOT NULL DEFAULT 'none' CHECK (
         workflow_revision IN ('none', 'change_proposed', 'updated', 'kept_as_placed')
     ),
-    workflow_agreement TEXT NOT NULL DEFAULT 'ordered' CHECK (
-        workflow_agreement IN ('ordered', 'pending_rhi', 'confirmed', 'declined', 'cancelled', 'needs_review')
+    workflow_agreement TEXT NOT NULL DEFAULT 'requested' CHECK (
+        workflow_agreement IN ('requested', 'revision_proposed', 'agreed_pending_rhi', 'committed', 'declined', 'cancelled', 'invalid')
     ),
     workflow_inventory TEXT NOT NULL DEFAULT 'needs_review' CHECK (
         workflow_inventory IN ('available', 'reserved', 'sold_out', 'needs_review')
@@ -72,11 +72,17 @@ SELECT
     buyer_phone,
     buyer_order_note,
     workflow_revision,
-    workflow_agreement,
+    CASE workflow_agreement
+        WHEN 'ordered' THEN 'requested'
+        WHEN 'pending_rhi' THEN 'agreed_pending_rhi'
+        WHEN 'confirmed' THEN 'committed'
+        WHEN 'needs_review' THEN 'invalid'
+        ELSE workflow_agreement
+    END,
     workflow_inventory,
     workflow_provenance_source,
     workflow_provenance_last_event_id
-FROM orders_pending_rhi_legacy;
+FROM orders_workflow_previous;
 
 CREATE TABLE order_lines (
     id TEXT PRIMARY KEY NOT NULL,
@@ -131,7 +137,7 @@ SELECT
     listing_event_id,
     seller_pubkey,
     listing_relays_json
-FROM order_lines_pending_rhi_legacy;
+FROM order_lines_workflow_previous;
 
 CREATE TABLE buyer_order_coordination_records (
     order_id TEXT PRIMARY KEY NOT NULL REFERENCES orders(id) ON DELETE CASCADE,
@@ -169,7 +175,7 @@ SELECT
     created_at,
     updated_at,
     synced_at
-FROM buyer_order_coordination_records_pending_rhi_legacy;
+FROM buyer_order_coordination_records_workflow_previous;
 
 CREATE TABLE order_validation_receipts (
     event_id TEXT PRIMARY KEY NOT NULL,
@@ -222,7 +228,7 @@ SELECT
     reducer_output_root,
     public_values_hash,
     event_created_at
-FROM order_validation_receipts_pending_rhi_legacy;
+FROM order_validation_receipts_workflow_previous;
 
 CREATE INDEX idx_orders_farm_status ON orders(farm_id, status);
 CREATE INDEX idx_orders_farm_window_status_updated_at
@@ -242,7 +248,7 @@ CREATE INDEX idx_order_validation_receipts_order_time
 CREATE INDEX idx_order_validation_receipts_root_order
     ON order_validation_receipts(root_event_id, raw_order_id);
 
-DROP TABLE order_validation_receipts_pending_rhi_legacy;
-DROP TABLE order_lines_pending_rhi_legacy;
-DROP TABLE buyer_order_coordination_records_pending_rhi_legacy;
-DROP TABLE orders_pending_rhi_legacy;
+DROP TABLE order_validation_receipts_workflow_previous;
+DROP TABLE order_lines_workflow_previous;
+DROP TABLE buyer_order_coordination_records_workflow_previous;
+DROP TABLE orders_workflow_previous;

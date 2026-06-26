@@ -38,12 +38,13 @@ fn parse_trade_agreement_status(
     value: String,
 ) -> Result<TradeAgreementStatus, AppSqliteError> {
     match value.as_str() {
-        "ordered" => Ok(TradeAgreementStatus::Ordered),
-        "pending_rhi" => Ok(TradeAgreementStatus::PendingRhi),
-        "confirmed" => Ok(TradeAgreementStatus::Confirmed),
+        "requested" => Ok(TradeAgreementStatus::Requested),
+        "revision_proposed" => Ok(TradeAgreementStatus::RevisionProposed),
+        "agreed_pending_rhi" => Ok(TradeAgreementStatus::AgreedPendingRhi),
+        "committed" => Ok(TradeAgreementStatus::Committed),
         "declined" => Ok(TradeAgreementStatus::Declined),
         "cancelled" => Ok(TradeAgreementStatus::Cancelled),
-        "needs_review" => Ok(TradeAgreementStatus::NeedsReview),
+        "invalid" => Ok(TradeAgreementStatus::Invalid),
         _ => Err(AppSqliteError::DecodeEnum { field, value }),
     }
 }

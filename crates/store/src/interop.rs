@@ -30,10 +30,10 @@ use radroots_local_events::{
 use radroots_sql_core::{SqlExecutor, SqliteExecutor};
 use radroots_studio_app_view::{
     FarmId, FarmOrderMethod, FarmReadiness, FarmSetupDraft, FarmSetupProjection, FarmSummary,
-    FulfillmentWindowId, OrderId, PickupLocationId, ProductId, ProductStatus,
-    TradeProvenanceProjection, TradeRevisionStatus, TradeValidationReceiptProofSystem,
-    TradeValidationReceiptResult, TradeValidationReceiptType, TradeWorkflowProjection,
-    TradeWorkflowSource, order_status_from_active_order_projection,
+    FulfillmentWindowId, OrderId, OrderStatus, PickupLocationId, ProductId, ProductStatus,
+    TradeAgreementStatus, TradeInventoryStatus, TradeProvenanceProjection, TradeRevisionStatus,
+    TradeValidationReceiptProofSystem, TradeValidationReceiptResult, TradeValidationReceiptType,
+    TradeWorkflowProjection, TradeWorkflowSource, order_status_from_active_order_projection,
 };
 use radroots_trade::order::{
     RadrootsOrderCancellationRecord, RadrootsOrderDecisionRecord, RadrootsOrderProjection,
@@ -1318,6 +1318,7 @@ impl<'a> AppLocalInteropRepository<'a> {
         {
             self.replace_active_order_agreement_lines(workflow.order_id, agreement_source)?;
         }
+        self.apply_validation_receipt_workflow_projection(workflow.order_id)?;
         Ok(())
     }
 
@@ -1389,6 +1390,9 @@ impl<'a> AppLocalInteropRepository<'a> {
                 operation: "upsert local interop validation receipt projection",
                 source,
             })?;
+        if let Some(order_id) = order_id {
+            self.apply_validation_receipt_workflow_projection(order_id)?;
+        }
         Ok(())
     }
 
@@ -1432,6 +1436,109 @@ impl<'a> AppLocalInteropRepository<'a> {
             )
             .map_err(|source| AppSqliteError::Query {
                 operation: "attach local interop validation receipts to request",
+                source,
+            })?;
+        self.apply_validation_receipt_workflow_projection(order_id)?;
+        Ok(())
+    }
+
+    fn apply_validation_receipt_workflow_projection(
+        &self,
+        order_id: OrderId,
+    ) -> Result<(), AppSqliteError> {
+        let current: Option<(String, String, Option<String>)> = self
+            .connection
+            .query_row(
+                "SELECT status, workflow_agreement, workflow_provenance_last_event_id
+                 FROM orders
+                 WHERE id = ?1",
+                params![order_id.to_string()],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .optional()
+            .map_err(|source| AppSqliteError::Query {
+                operation: "load order workflow before validation receipt projection",
+                source,
+            })?;
+        let Some((status, agreement, Some(target_event_id))) = current else {
+            return Ok(());
+        };
+        if !matches!(
+            agreement.as_str(),
+            value if value == TradeAgreementStatus::AgreedPendingRhi.storage_key()
+                || value == TradeAgreementStatus::Committed.storage_key()
+                || value == TradeAgreementStatus::Invalid.storage_key()
+        ) {
+            return Ok(());
+        }
+        if !matches!(
+            status.as_str(),
+            value if value == OrderStatus::NeedsAction.storage_key()
+                || value == OrderStatus::Scheduled.storage_key()
+                || value == OrderStatus::NeedsReview.storage_key()
+        ) {
+            return Ok(());
+        }
+        let latest_receipt: Option<String> = self
+            .connection
+            .query_row(
+                "SELECT result
+                 FROM order_validation_receipts
+                 WHERE order_id = ?1
+                    AND receipt_type = 'trade_transition'
+                    AND target_event_id = ?2
+                 ORDER BY event_created_at DESC, event_id DESC
+                 LIMIT 1",
+                params![order_id.to_string(), target_event_id.as_str()],
+                |row| row.get(0),
+            )
+            .optional()
+            .map_err(|source| AppSqliteError::Query {
+                operation: "load latest validation receipt workflow projection",
+                source,
+            })?;
+        let Some(result) = latest_receipt else {
+            return Ok(());
+        };
+        let (status, agreement, inventory) = match result.as_str() {
+            "valid" => (
+                OrderStatus::Scheduled.storage_key(),
+                TradeAgreementStatus::Committed.storage_key(),
+                TradeInventoryStatus::Reserved.storage_key(),
+            ),
+            "needs_review" => (
+                OrderStatus::NeedsReview.storage_key(),
+                TradeAgreementStatus::Invalid.storage_key(),
+                TradeInventoryStatus::NeedsReview.storage_key(),
+            ),
+            _ => {
+                return Err(AppSqliteError::DecodeEnum {
+                    field: "order_validation_receipts.result",
+                    value: result,
+                });
+            }
+        };
+        self.connection
+            .execute(
+                "UPDATE orders
+                 SET status = ?2,
+                     workflow_agreement = ?3,
+                     workflow_inventory = ?4,
+                     workflow_provenance_source = ?5,
+                     workflow_provenance_last_event_id = ?6,
+                     updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now')
+                 WHERE id = ?1",
+                params![
+                    order_id.to_string(),
+                    status,
+                    agreement,
+                    inventory,
+                    TradeWorkflowSource::LocalEvents.storage_key(),
+                    target_event_id,
+                ],
+            )
+            .map_err(|source| AppSqliteError::Query {
+                operation: "apply validation receipt workflow projection",
                 source,
             })?;
         Ok(())
@@ -5076,7 +5183,7 @@ mod tests {
         );
         assert_eq!(
             buyer_orders.rows[0].workflow.agreement,
-            TradeAgreementStatus::PendingRhi
+            TradeAgreementStatus::AgreedPendingRhi
         );
         assert_eq!(
             buyer_orders.rows[0].workflow.inventory,
@@ -5336,7 +5443,7 @@ mod tests {
         assert_eq!(seller_orders.rows[0].status, OrderStatus::NeedsAction);
         assert_eq!(
             seller_orders.rows[0].workflow.agreement,
-            TradeAgreementStatus::PendingRhi
+            TradeAgreementStatus::AgreedPendingRhi
         );
         assert_eq!(
             seller_orders.rows[0].workflow.inventory,
@@ -5346,8 +5453,72 @@ mod tests {
     }
 
     #[test]
-    fn validation_receipts_project_passively_on_buyer_and_seller_order_details() {
-        let fixture = validation_receipt_order_fixture("validation-receipt-passive");
+    fn valid_validation_receipt_commits_buyer_and_seller_order_details() {
+        let fixture = validation_receipt_order_fixture("validation-receipt-valid-commit");
+        let valid_event = validation_receipt_event(
+            hex_event_id(29).as_str(),
+            fixture.seller_pubkey.as_str(),
+            fixture.order_id_raw.as_str(),
+            fixture.listing_event_id.as_str(),
+            fixture.request_event_id.as_str(),
+            fixture.decision_event_id.as_str(),
+            RadrootsValidationReceiptResult::Valid,
+            1_777_665_603,
+        );
+        fixture
+            .events
+            .append_record(&signed_order_event_record(
+                "cli:signed_event:validation-receipt:valid-commit",
+                &valid_event,
+                fixture.listing_addr.as_str(),
+                SourceRuntime::Cli,
+                None,
+            ))
+            .expect("append valid validation receipt");
+        fixture
+            .app_store
+            .import_shared_local_events_from_store(&fixture.events)
+            .expect("import valid validation receipt");
+
+        let buyer_detail = fixture
+            .app_store
+            .load_buyer_order_detail(&fixture.buyer_context, fixture.order_id)
+            .expect("load buyer committed validation receipt detail")
+            .expect("buyer committed validation receipt detail");
+        let seller_detail = fixture
+            .app_store
+            .load_order_detail(fixture.seller_farm_id, fixture.order_id)
+            .expect("load seller committed validation receipt detail")
+            .expect("seller committed validation receipt detail");
+
+        assert_eq!(buyer_detail.status, BuyerOrderStatus::Scheduled);
+        assert_eq!(seller_detail.status, OrderStatus::Scheduled);
+        assert_eq!(
+            buyer_detail.workflow.agreement,
+            TradeAgreementStatus::Committed
+        );
+        assert_eq!(
+            seller_detail.workflow.agreement,
+            TradeAgreementStatus::Committed
+        );
+        assert_eq!(
+            buyer_detail.workflow.inventory,
+            TradeInventoryStatus::Reserved
+        );
+        assert_eq!(
+            buyer_detail.workflow.provenance.last_event_id.as_deref(),
+            Some(fixture.decision_event_id.as_str())
+        );
+        assert_eq!(buyer_detail.validation_receipts.len(), 1);
+        assert_eq!(
+            buyer_detail.validation_receipts[0].result,
+            TradeValidationReceiptResult::Valid
+        );
+    }
+
+    #[test]
+    fn validation_receipts_drive_buyer_and_seller_order_details() {
+        let fixture = validation_receipt_order_fixture("validation-receipt-driven");
         let valid_event = validation_receipt_event(
             hex_event_id(31).as_str(),
             fixture.seller_pubkey.as_str(),
@@ -5419,11 +5590,23 @@ mod tests {
             .load_local_interop_records()
             .expect("load validation receipt imports");
 
-        assert_eq!(buyer_detail.status, BuyerOrderStatus::Placed);
-        assert_eq!(seller_detail.status, OrderStatus::NeedsAction);
+        assert_eq!(buyer_detail.status, BuyerOrderStatus::NeedsReview);
+        assert_eq!(seller_detail.status, OrderStatus::NeedsReview);
         assert_eq!(
             buyer_detail.workflow.agreement,
-            TradeAgreementStatus::PendingRhi
+            TradeAgreementStatus::Invalid
+        );
+        assert_eq!(
+            seller_detail.workflow.agreement,
+            TradeAgreementStatus::Invalid
+        );
+        assert_eq!(
+            buyer_detail.workflow.inventory,
+            TradeInventoryStatus::NeedsReview
+        );
+        assert_eq!(
+            buyer_detail.workflow.provenance.last_event_id.as_deref(),
+            Some(fixture.decision_event_id.as_str())
         );
         assert_eq!(seller_detail.primary_action, None);
         assert_eq!(buyer_detail.validation_receipts.len(), 2);
@@ -5697,7 +5880,7 @@ mod tests {
         assert_eq!(seller_detail.status, OrderStatus::NeedsAction);
         assert_eq!(
             buyer_detail.workflow.agreement,
-            TradeAgreementStatus::PendingRhi
+            TradeAgreementStatus::AgreedPendingRhi
         );
         assert_eq!(seller_detail.primary_action, None);
     }
@@ -5867,7 +6050,7 @@ mod tests {
         assert_eq!(seller_orders.rows[0].status, OrderStatus::NeedsAction);
         assert_eq!(
             seller_orders.rows[0].workflow.agreement,
-            TradeAgreementStatus::PendingRhi
+            TradeAgreementStatus::AgreedPendingRhi
         );
         assert_eq!(
             seller_orders.rows[0].workflow.revision,

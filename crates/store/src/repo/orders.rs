@@ -1177,7 +1177,11 @@ fn primary_action_for_order(
     workflow: &TradeWorkflowProjection,
 ) -> Option<OrderPrimaryAction> {
     match status {
-        OrderStatus::NeedsAction if workflow.agreement == TradeAgreementStatus::PendingRhi => None,
+        OrderStatus::NeedsAction
+            if workflow.agreement == TradeAgreementStatus::AgreedPendingRhi =>
+        {
+            None
+        }
         OrderStatus::NeedsAction => Some(OrderPrimaryAction::Review),
         OrderStatus::Scheduled
         | OrderStatus::Packed
@@ -1602,7 +1606,7 @@ mod tests {
         set_order_workflow_display_projection(
             connection,
             order_id,
-            "confirmed",
+            "committed",
             "reserved",
             "local_events",
             Some("seller-workflow-event"),
@@ -1623,7 +1627,7 @@ mod tests {
             .expect("seller detail should exist");
         let workflow = &list.rows[0].workflow;
 
-        assert_eq!(workflow.agreement, TradeAgreementStatus::Confirmed);
+        assert_eq!(workflow.agreement, TradeAgreementStatus::Committed);
         assert_eq!(workflow.revision, TradeRevisionStatus::Updated);
         assert_eq!(workflow.inventory, TradeInventoryStatus::Reserved);
         assert_eq!(
@@ -1668,7 +1672,7 @@ mod tests {
         set_order_workflow_display_projection(
             connection,
             order_id,
-            "confirmed",
+            "committed",
             "reserved",
             "local_events",
             Some("seller-workflow-event"),
@@ -1685,7 +1689,7 @@ mod tests {
             set_order_workflow_display_projection(
                 connection,
                 order_id,
-                "confirmed",
+                "committed",
                 "reserved",
                 "local_events",
                 Some("seller-workflow-event"),
