@@ -31,7 +31,7 @@ use radroots_sdk::{
     OrderDecisionEnqueueRequest, OrderDecisionReceipt, OrderEvidenceIngestRequest,
     OrderRequestEvidenceIngestRequest, OrderRevisionDecisionEnqueueRequest,
     OrderRevisionDecisionReceipt, OrderRevisionProposalEnqueueRequest,
-    OrderRevisionProposalReceipt, OrderSubmitEnqueueRequest, OrderSubmitReceipt, RadrootsSdk,
+    OrderRevisionProposalReceipt, OrderSubmitEnqueueRequest, OrderSubmitReceipt, RadrootsClient,
     RadrootsSdkError, RadrootsSdkStoragePaths, RestoreReceipt, RestoreRequest,
     SdkBackupVerification, SdkRelayUrlPolicy as SdkRuntimeRelayUrlPolicy, StorageStatusReceipt,
     StorageStatusRequest, SyncStatusReceipt, SyncStatusRequest,
@@ -1302,8 +1302,8 @@ fn run_degraded_worker(
     );
 }
 
-async fn build_sdk_runtime(config: &AppSdkConfig) -> Result<RadrootsSdk, RadrootsSdkError> {
-    let mut builder = RadrootsSdk::builder()
+async fn build_sdk_runtime(config: &AppSdkConfig) -> Result<RadrootsClient, RadrootsSdkError> {
+    let mut builder = RadrootsClient::builder()
         .directory_storage(config.storage_root.clone())
         .relay_url_policy(config.relay_url_policy.into());
     for relay_url in &config.relay_urls {
@@ -1330,7 +1330,7 @@ fn run_restore_preflight(
         .with_overwrite(request.overwrite_existing_sdk_storage)
         .dry_run();
     let result = runtime
-        .block_on(RadrootsSdk::restore(restore_request))
+        .block_on(RadrootsClient::restore(restore_request))
         .map_err(|error| AppSdkRuntimeIssue::from_sdk_error(&error))
         .map(|receipt| {
             let projection_lifecycle = mark_projections_stale(
@@ -1351,7 +1351,7 @@ fn run_restore_preflight(
 }
 
 async fn collect_sdk_diagnostics(
-    sdk: &RadrootsSdk,
+    sdk: &RadrootsClient,
     runtime: AppSdkRuntimeStatus,
 ) -> Result<AppSdkDiagnostics, RadrootsSdkError> {
     let storage = sdk.storage_status(StorageStatusRequest::new()).await?;
@@ -1367,7 +1367,7 @@ async fn collect_sdk_diagnostics(
 
 fn enqueue_farm_publish_with_sdk(
     runtime: &tokio::runtime::Runtime,
-    sdk: &RadrootsSdk,
+    sdk: &RadrootsClient,
     request: AppSdkFarmPublishRequest,
 ) -> Result<AppSdkWorkflowReceipt, AppSdkRuntimeIssue> {
     let actor = sdk_actor_context(
@@ -1394,7 +1394,7 @@ fn enqueue_farm_publish_with_sdk(
 
 fn enqueue_listing_publish_with_sdk(
     runtime: &tokio::runtime::Runtime,
-    sdk: &RadrootsSdk,
+    sdk: &RadrootsClient,
     request: AppSdkListingPublishRequest,
 ) -> Result<AppSdkWorkflowReceipt, AppSdkRuntimeIssue> {
     let actor = sdk_actor_context(
@@ -1421,7 +1421,7 @@ fn enqueue_listing_publish_with_sdk(
 
 fn enqueue_order_submit_with_sdk(
     runtime: &tokio::runtime::Runtime,
-    sdk: &RadrootsSdk,
+    sdk: &RadrootsClient,
     request: AppSdkOrderSubmitRequest,
 ) -> Result<AppSdkWorkflowReceipt, AppSdkRuntimeIssue> {
     let actor = sdk_actor_context(
@@ -1440,7 +1440,7 @@ fn enqueue_order_submit_with_sdk(
     }
     let receipt = runtime
         .block_on(
-            sdk.orders()
+            sdk.trades()
                 .enqueue_submit_with_explicit_signer(enqueue, &signer),
         )
         .map_err(|error| AppSdkRuntimeIssue::from_sdk_error(&error))?;
@@ -1449,7 +1449,7 @@ fn enqueue_order_submit_with_sdk(
 
 fn enqueue_order_decision_with_sdk(
     runtime: &tokio::runtime::Runtime,
-    sdk: &RadrootsSdk,
+    sdk: &RadrootsClient,
     request: AppSdkOrderDecisionRequest,
 ) -> Result<AppSdkWorkflowReceipt, AppSdkRuntimeIssue> {
     let actor = sdk_actor_context(
@@ -1461,7 +1461,7 @@ fn enqueue_order_decision_with_sdk(
     let target_relays = sdk_relay_targets(request.target_relays, request.relay_url_policy)?;
     runtime
         .block_on(
-            sdk.orders()
+            sdk.trades()
                 .ingest_request_evidence(OrderRequestEvidenceIngestRequest::new(
                     request.request_event,
                 )),
@@ -1480,7 +1480,7 @@ fn enqueue_order_decision_with_sdk(
     }
     let receipt = runtime
         .block_on(
-            sdk.orders()
+            sdk.trades()
                 .enqueue_decision_with_explicit_signer(enqueue, &signer),
         )
         .map_err(|error| AppSdkRuntimeIssue::from_sdk_error(&error))?;
@@ -1492,7 +1492,7 @@ fn enqueue_order_decision_with_sdk(
 
 fn enqueue_order_revision_proposal_with_sdk(
     runtime: &tokio::runtime::Runtime,
-    sdk: &RadrootsSdk,
+    sdk: &RadrootsClient,
     request: AppSdkOrderRevisionProposalRequest,
 ) -> Result<AppSdkWorkflowReceipt, AppSdkRuntimeIssue> {
     let actor = sdk_actor_context(
@@ -1517,7 +1517,7 @@ fn enqueue_order_revision_proposal_with_sdk(
     }
     let receipt = runtime
         .block_on(
-            sdk.orders()
+            sdk.trades()
                 .enqueue_revision_proposal_with_explicit_signer(enqueue, &signer),
         )
         .map_err(|error| AppSdkRuntimeIssue::from_sdk_error(&error))?;
@@ -1529,7 +1529,7 @@ fn enqueue_order_revision_proposal_with_sdk(
 
 fn enqueue_order_revision_decision_with_sdk(
     runtime: &tokio::runtime::Runtime,
-    sdk: &RadrootsSdk,
+    sdk: &RadrootsClient,
     request: AppSdkOrderRevisionDecisionRequest,
 ) -> Result<AppSdkWorkflowReceipt, AppSdkRuntimeIssue> {
     let actor = sdk_actor_context(
@@ -1554,7 +1554,7 @@ fn enqueue_order_revision_decision_with_sdk(
     }
     let receipt = runtime
         .block_on(
-            sdk.orders()
+            sdk.trades()
                 .enqueue_revision_decision_with_explicit_signer(enqueue, &signer),
         )
         .map_err(|error| AppSdkRuntimeIssue::from_sdk_error(&error))?;
@@ -1566,7 +1566,7 @@ fn enqueue_order_revision_decision_with_sdk(
 
 fn enqueue_order_cancellation_with_sdk(
     runtime: &tokio::runtime::Runtime,
-    sdk: &RadrootsSdk,
+    sdk: &RadrootsClient,
     request: AppSdkOrderCancellationRequest,
 ) -> Result<AppSdkWorkflowReceipt, AppSdkRuntimeIssue> {
     let actor = sdk_actor_context(
@@ -1591,7 +1591,7 @@ fn enqueue_order_cancellation_with_sdk(
     }
     let receipt = runtime
         .block_on(
-            sdk.orders()
+            sdk.trades()
                 .enqueue_cancellation_with_explicit_signer(enqueue, &signer),
         )
         .map_err(|error| AppSdkRuntimeIssue::from_sdk_error(&error))?;
@@ -1603,13 +1603,13 @@ fn enqueue_order_cancellation_with_sdk(
 
 fn ingest_order_evidence_with_sdk(
     runtime: &tokio::runtime::Runtime,
-    sdk: &RadrootsSdk,
+    sdk: &RadrootsClient,
     evidence_events: Vec<RadrootsNostrEvent>,
 ) -> Result<(), AppSdkRuntimeIssue> {
     for event in evidence_events {
         runtime
             .block_on(
-                sdk.orders()
+                sdk.trades()
                     .ingest_evidence(OrderEvidenceIngestRequest::new(event)),
             )
             .map_err(|error| AppSdkRuntimeIssue::from_sdk_error(&error))?;
@@ -1911,7 +1911,7 @@ mod tests {
     };
     use radroots_nostr::prelude::{RadrootsNostrKeys, RadrootsNostrSecretKey};
     use radroots_sdk::{
-        BackupRequest, LISTING_PUBLISH_OPERATION_KIND, RadrootsSdk,
+        BackupRequest, LISTING_PUBLISH_OPERATION_KIND, RadrootsClient,
         SdkRelayUrlPolicy as SdkRuntimeRelayUrlPolicy,
     };
 
@@ -2172,7 +2172,7 @@ mod tests {
             .expect("tokio runtime");
         let sdk = tokio
             .block_on(
-                RadrootsSdk::builder()
+                RadrootsClient::builder()
                     .directory_storage(backup_source_root.clone())
                     .relay_url_policy(SdkRuntimeRelayUrlPolicy::Localhost)
                     .relay_url("ws://127.0.0.1:8080")

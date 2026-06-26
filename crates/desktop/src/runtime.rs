@@ -2585,6 +2585,16 @@ impl DesktopAppRuntimeState {
                 reason: "seller order decision listing address is outside seller authority",
             });
         }
+        let lifecycle = self.resolve_order_lifecycle_evidence(&request)?;
+        if lifecycle.decision.is_some()
+            || lifecycle.status != RadrootsTradeWorkflowState::Requested
+            || lifecycle.cancellation_event_id.is_some()
+            || active_order_pending_revision_proposal(&lifecycle).is_some()
+        {
+            return Err(AppSqliteError::InvalidProjection {
+                reason: "seller order decision requires an undecided order",
+            });
+        }
         let Some(order_export) =
             sqlite_store.load_seller_order_decision_export(farm_id, order_id)?
         else {
@@ -2869,7 +2879,12 @@ impl DesktopAppRuntimeState {
             });
         }
         let lifecycle = self.resolve_order_lifecycle_evidence(&request)?;
-        if lifecycle.decision.is_some() || lifecycle.status != RadrootsTradeWorkflowState::Requested
+        if lifecycle.decision.is_some()
+            || !matches!(
+                lifecycle.status,
+                RadrootsTradeWorkflowState::Requested
+                    | RadrootsTradeWorkflowState::RevisionProposed
+            )
         {
             return Err(AppSqliteError::InvalidProjection {
                 reason: "buyer order revision requires active pre-agreement negotiation",
@@ -3003,15 +3018,13 @@ impl DesktopAppRuntimeState {
                 reason: "buyer order cancellation requires an open pre-agreement order",
             });
         }
+        if active_order_pending_revision_proposal(&lifecycle).is_some() {
+            return Err(AppSqliteError::InvalidProjection {
+                reason: "buyer order cancellation requires no pending seller proposal",
+            });
+        }
         let prev_event_id = match lifecycle.status {
-            RadrootsTradeWorkflowState::Requested => {
-                if active_order_pending_revision_proposal(&lifecycle).is_some() {
-                    return Err(AppSqliteError::InvalidProjection {
-                        reason: "buyer order cancellation requires no pending seller proposal",
-                    });
-                }
-                request.request_event_id.clone()
-            }
+            RadrootsTradeWorkflowState::Requested => request.request_event_id.clone(),
             RadrootsTradeWorkflowState::RevisionProposed
             | RadrootsTradeWorkflowState::AgreedPendingRhi
             | RadrootsTradeWorkflowState::Committed => {
@@ -9828,6 +9841,7 @@ mod tests {
         ProductsFilter, ProductsSort, ReminderDeliveryState, ReminderFeedProjection, ReminderKind,
         SelectedAccountProjection, SelectedSurfaceProjection, SettingsPreference, SettingsSection,
         ShellSection, TodayAgendaProjection, TodaySetupTask, TodaySetupTaskKind, TodaySummary,
+        TradeAgreementStatus,
     };
     use serde_json::json;
     use tokio::net::TcpListener;
@@ -10758,8 +10772,17 @@ mod tests {
             fulfillment_location: Some("Relay barn".to_owned()),
             status: ProductStatus::Published,
         };
-        let listing = super::listing_publish_payload_to_sdk_listing(&listing_payload)
+        let mut listing = super::listing_publish_payload_to_sdk_listing(&listing_payload)
             .expect("listing payload should convert to SDK listing");
+        listing.location = Some(
+            radroots_sdk::protocol::listing::RadrootsListingPublicLocation {
+                primary: "Relay barn".to_owned(),
+                city: Some("San Francisco".to_owned()),
+                region: Some("CA".to_owned()),
+                country: Some("US".to_owned()),
+                geohash: "9q8yy".to_owned(),
+            },
+        );
         let parts = radroots_sdk::protocol::listing::build_draft(&listing)
             .expect("listing draft should build")
             .into_wire_parts();
@@ -15380,7 +15403,11 @@ mod tests {
                 reason: "seller order decision requires an undecided order"
             }
         ));
-        assert_eq!(persisted_order_status(&runtime, order_id), "scheduled");
+        assert_eq!(persisted_order_status(&runtime, order_id), "needs_action");
+        assert_eq!(
+            persisted_order_workflow_agreement(&runtime, order_id),
+            "pending_rhi"
+        );
         assert_eq!(relay.event_count(), 1);
 
         cleanup_bootstrapped_runtime_paths(&paths);
@@ -16106,9 +16133,10 @@ mod tests {
             .detail
             .as_ref()
             .expect("linked buyer order detail should exist");
-        assert_eq!(row.status, BuyerOrderStatus::Scheduled);
+        assert_eq!(row.status, BuyerOrderStatus::Placed);
         assert_eq!(detail.order_id, fixture.order_id);
-        assert_eq!(detail.status, BuyerOrderStatus::Scheduled);
+        assert_eq!(detail.status, BuyerOrderStatus::Placed);
+        assert_eq!(detail.workflow.agreement, TradeAgreementStatus::PendingRhi);
         assert_eq!(
             detail.workflow.provenance.last_event_id.as_deref(),
             Some(fixture.decision_event_id.as_str())
@@ -20742,6 +20770,24 @@ mod tests {
                 |row| row.get::<_, String>(0),
             )
             .expect("order status should load")
+    }
+
+    fn persisted_order_workflow_agreement(
+        runtime: &DesktopAppRuntime,
+        order_id: OrderId,
+    ) -> String {
+        runtime
+            .lock_state()
+            .sqlite_store
+            .as_ref()
+            .expect("sqlite store")
+            .connection()
+            .query_row(
+                "select workflow_agreement from orders where id = ?1 limit 1",
+                [order_id.to_string()],
+                |row| row.get::<_, String>(0),
+            )
+            .expect("order workflow agreement should load")
     }
 
     fn pending_order_sync_payloads(

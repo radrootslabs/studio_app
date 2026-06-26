@@ -1126,7 +1126,7 @@ const STRICT_SDK_BOUNDARY_FORBIDDEN_PATTERNS: &[SdkBoundaryForbiddenPattern] = &
     },
     SdkBoundaryForbiddenPattern {
         pattern: "RadrootsSdkClient",
-        reason: "app production sources must use the long-lived RadrootsSdk runtime boundary",
+        reason: "app production sources must use the long-lived RadrootsClient runtime boundary",
     },
     SdkBoundaryForbiddenPattern {
         pattern: "RadrootsSdkConfig",
